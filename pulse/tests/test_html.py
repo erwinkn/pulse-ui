@@ -138,11 +138,56 @@ def test_mixed_content():
     assert doc.render() == expected
 
 
+def test_indexing_syntax():
+    """Test new indexing syntax for passing children"""
+    # Basic indexing with single child
+    element = div(id='container', class_='wrapper')[p("Hello!")]
+    expected = "\n".join([
+        '<div id="container" class="wrapper">',
+        indent("<p>", 2),
+        indent("Hello!", 4),
+        indent("</p>", 2),
+        "</div>",
+    ])
+    assert element.render() == expected
+
+    # Indexing with multiple children using tuple
+    element = div(id='container')[p("First"), p("Second")]
+    expected = "\n".join([
+        '<div id="container">',
+        indent("<p>", 2),
+        indent("First", 4),
+        indent("</p>", 2),
+        indent("<p>", 2),
+        indent("Second", 4),
+        indent("</p>", 2),
+        "</div>",
+    ])
+    assert element.render() == expected
+
+    # Mixed content with indexing
+    element = div(class_='content')["Text ", strong("bold"), " more text"]
+    expected = "\n".join([
+        '<div class="content">',
+        indent("Text ", 2),
+        indent("<strong>", 2),
+        indent("bold", 4),
+        indent("</strong>", 2),
+        indent(" more text", 2),
+        "</div>",
+    ])
+    assert element.render() == expected
+
+
 def test_invalid_usage():
     """Test error cases"""
     # Self-closing tags cannot have children
     with pytest.raises(ValueError):
         img()(p("Invalid"))
+
+    # Self-closing tags cannot have children with indexing
+    with pytest.raises(ValueError):
+        img()[p("Invalid")]
 
     # Cannot pass both children and attributes at once
     with pytest.raises(ValueError):
@@ -151,6 +196,14 @@ def test_invalid_usage():
     # Cannot pass children twice
     with pytest.raises(ValueError):
         div(p())(p())
+
+    # Cannot use indexing after already having children
+    with pytest.raises(TypeError):
+        div(p())[p()]
+
+    # Cannot use call after indexing
+    with pytest.raises(ValueError):
+        div()[p()](p())
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
-from typing import Callable, Mapping, NamedTuple, Self
+from __future__ import annotations
+from typing import Callable, Mapping, Self, overload, Union, NoReturn, Protocol
 
 __all__ = [
     # Core types and functions
@@ -121,7 +122,7 @@ __all__ = [
 ]
 
 
-class HTMLElement(NamedTuple):
+class HTMLElement:
     """
     A lightweight representation of an HTML node:
       - tag: the element's tag name (e.g. "div", "span", "html")
@@ -130,19 +131,58 @@ class HTMLElement(NamedTuple):
       - render: the function responsible for converting the node to HTML
     """
 
-    tag: str
-    attributes: Mapping[str, str]
-    # Other HTMLElements or raw text (str) in a tuple
-    children: tuple[Self | str, ...]
-    whitespace_sensitive: bool = False
-    self_closing: bool = False
+    def __init__(
+        self, 
+        tag: str, 
+        attributes: Mapping[str, str], 
+        children: tuple[HTMLElement | str, ...], 
+        whitespace_sensitive: bool = False, 
+        self_closing: bool = False
+    ):
+        self.tag = tag
+        self.attributes = attributes
+        self.children = children
+        self.whitespace_sensitive = whitespace_sensitive
+        self.self_closing = self_closing
 
-    def __call__(self, *children: Self | str):
+    def __call__(self, *children: HTMLElement | str):
         if self.self_closing:
             raise ValueError("Self-closing tags cannot have children")
         if len(self.children) > 0:
             raise ValueError(f"Multiple calls with children for <{self.tag}>")
-        return self._replace(children=children)
+        return HTMLElement(
+            self.tag, self.attributes, children, self.whitespace_sensitive, self.self_closing
+        )
+
+    def __getitem__(self, children: HTMLElement | str | tuple[HTMLElement | str, ...]):
+        if self.self_closing:
+            raise ValueError("Self-closing tags cannot have children")
+        if len(self.children) > 0:
+            raise ValueError(f"Multiple calls with children for <{self.tag}>")
+        
+        # Handle single child or tuple of children
+        if isinstance(children, (tuple, list)) and not isinstance(children, HTMLElement):
+            child_tuple = tuple(children)
+        else:
+            child_tuple = (children,)
+        
+        return HTMLElement(
+            self.tag, self.attributes, child_tuple, self.whitespace_sensitive, self.self_closing
+        )
+
+    def __eq__(self, other):
+        if not isinstance(other, HTMLElement):
+            return False
+        return (
+            self.tag == other.tag and
+            self.attributes == other.attributes and
+            self.children == other.children and
+            self.whitespace_sensitive == other.whitespace_sensitive and
+            self.self_closing == other.self_closing
+        )
+
+    def __repr__(self):
+        return f"HTMLElement(tag={self.tag!r}, attributes={dict(self.attributes)!r}, children={self.children!r}, whitespace_sensitive={self.whitespace_sensitive}, self_closing={self.self_closing})"
 
     def render(
         self,
@@ -217,7 +257,7 @@ class HTMLElement(NamedTuple):
 
 
 # If you want to map special attribute names (like 'classname' -> 'class')
-attrs_map = {"classname": "class"}
+attrs_map = {"classname": "class", "class_": "class"}
 
 
 # A small utility for escaping special HTML characters.
@@ -232,35 +272,100 @@ def _escape(text: str) -> str:
     )
 
 
+class HTMLElementEmpty(HTMLElement):
+    """HTMLElement without children - supports indexing and calling with children"""
+    
+    def __init__(
+        self, 
+        tag: str, 
+        attributes: Mapping[str, str], 
+        whitespace_sensitive: bool = False, 
+        self_closing: bool = False
+    ):
+        super().__init__(tag, attributes, (), whitespace_sensitive, self_closing)
+    
+    @overload
+    def __call__(self) -> HTMLElementEmpty: ...
+    
+    @overload 
+    def __call__(self, *children: HTMLElement | str) -> HTMLElementWithChildren: ...
+    
+    def __call__(self, *children: HTMLElement | str) -> Union[HTMLElementEmpty, HTMLElementWithChildren]:
+        if self.self_closing:
+            raise ValueError("Self-closing tags cannot have children")
+        if len(children) == 0:
+            return self
+        return HTMLElementWithChildren(
+            self.tag, self.attributes, children, self.whitespace_sensitive, self.self_closing
+        )
+
+    def __getitem__(self, children: HTMLElement | str | tuple[HTMLElement | str, ...]) -> HTMLElementWithChildren:
+        if self.self_closing:
+            raise ValueError("Self-closing tags cannot have children")
+        
+        # Handle single child or tuple of children
+        if isinstance(children, (tuple, list)) and not isinstance(children, HTMLElement):
+            child_tuple = tuple(children)
+        else:
+            child_tuple = (children,)
+        
+        return HTMLElementWithChildren(
+            self.tag, self.attributes, child_tuple, self.whitespace_sensitive, self.self_closing
+        )
+
+
+class HTMLElementWithChildren(HTMLElement):
+    """HTMLElement with children - indexing not allowed"""
+    
+    def __getitem__(self, children: HTMLElement | str | tuple[HTMLElement | str, ...]) -> NoReturn:
+        if self.self_closing:
+            raise ValueError("Self-closing tags cannot have children")
+        raise TypeError("Cannot use indexing syntax on element that already has children")
+
+
 def define_tag(
-    name: str, default_attrs: dict[str, str] | None = None, whitespace_sensitive=False
+    name: str, default_attrs: dict[str, str] | None = None, whitespace_sensitive: bool = False
 ):
     """
     Defines a standard tag (non-self-closing) with optional default attributes.
     If whitespace_sensitive=True, uses render_whitespace_sensitive_element;
     otherwise uses render_element.
 
-    The old library let you either pass (children) or (attributes + children).
-    Below, we preserve the simpler restriction: you either pass children OR attributes,
-    not both at once.
+    The returned function can be called in these ways:
+    1. tag() -> HTMLElementEmpty (can use indexing syntax)
+    2. tag(**attrs) -> HTMLElementEmpty (can use indexing syntax) 
+    3. tag(*children) -> HTMLElementWithChildren (indexing not allowed)
+    4. tag(**attrs)[children] -> HTMLElementWithChildren (indexing not allowed)
     """
 
     default_attrs = default_attrs or {}
 
-    def create_element(*children: HTMLElement | str, **attrs: str) -> HTMLElement:
+    @overload
+    def create_element() -> HTMLElementEmpty: ...
+    
+    @overload
+    def create_element(**attrs: str) -> HTMLElementEmpty: ...
+    
+    @overload 
+    def create_element(*children: HTMLElement | str) -> HTMLElementWithChildren: ...
+
+    def create_element(*children: HTMLElement | str, **attrs: str) -> Union[HTMLElementEmpty, HTMLElementWithChildren]:
         if children and attrs:
             raise ValueError("Can't pass both children and named attributes at once.")
 
-        # print(f"Creating element <{name}> with:")
-        # print(f"  - children = {children}")
-        # print(f"  - attrs = {attrs}")
-
-        return HTMLElement(
-            tag=name,
-            attributes=default_attrs | attrs,
-            children=children,
-            whitespace_sensitive=whitespace_sensitive,
-        )
+        if children:
+            return HTMLElementWithChildren(
+                tag=name,
+                attributes=default_attrs | attrs,
+                children=children,
+                whitespace_sensitive=whitespace_sensitive,
+            )
+        else:
+            return HTMLElementEmpty(
+                tag=name,
+                attributes=default_attrs | attrs,
+                whitespace_sensitive=whitespace_sensitive,
+            )
 
     return create_element
 
@@ -268,13 +373,18 @@ def define_tag(
 def define_self_closing_tag(name: str, default_attrs: dict[str, str] | None = None):
     """
     Defines a self-closing tag (e.g. <br />, <img />, <meta />, etc.)
+    Self-closing tags cannot have children and do not support indexing.
     """
     default_attrs = default_attrs or {}
 
     # Self-closing tags cannot have children
-    def create_element(**attrs: str) -> HTMLElement:
-        return HTMLElement(
-            name, attributes=default_attrs | attrs, children=(), self_closing=True
+    def create_element(**attrs: str) -> HTMLElementWithChildren:
+        return HTMLElementWithChildren(
+            tag=name, 
+            attributes=default_attrs | attrs, 
+            children=(), 
+            self_closing=True,
+            whitespace_sensitive=False
         )
 
     return create_element

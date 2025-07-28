@@ -45,7 +45,7 @@ def test_attributes():
     """Test tags with attributes"""
     assert div(classname="container").render() == '<div class="container"></div>'
     assert (
-        a(href="https://example.com")().render() == '<a href="https://example.com"></a>'
+        a(href="https://example.com").render() == '<a href="https://example.com"></a>'
     )
     assert (
         img(src="/img.jpg", alt="An image").render()
@@ -56,7 +56,7 @@ def test_attributes():
 def test_nested_elements():
     """Test nested element structures"""
     doc = html(
-        head(title("My Page")), body(div(classname="container")(p("Hello, world!")))
+        head(title("My Page")), body(div(classname="container")[p("Hello, world!")])
     )
     expected = "\n".join(
         [
@@ -181,10 +181,6 @@ def test_indexing_syntax():
 
 def test_invalid_usage():
     """Test error cases"""
-    # Self-closing tags cannot have children
-    with pytest.raises(ValueError):
-        img()(p("Invalid"))
-
     # Self-closing tags cannot have children with indexing
     with pytest.raises(ValueError):
         img()[p("Invalid")]
@@ -201,9 +197,20 @@ def test_invalid_usage():
     with pytest.raises(TypeError):
         div(p())[p()]
 
-    # Cannot use call after indexing
-    with pytest.raises(ValueError):
-        div()[p()](p())
+    # Cannot use chained calls with children
+    with pytest.raises(ValueError) as exc_info:
+        div()(p())
+    assert "Cannot pass children in chained calls" in str(exc_info.value)
+
+    # Cannot use empty chained calls
+    with pytest.raises(ValueError) as exc_info:
+        div()()
+    assert "Empty elements cannot be called without arguments" in str(exc_info.value)
+
+    # Self-closing tags also cannot use chained calls
+    with pytest.raises(ValueError) as exc_info:
+        img()()
+    assert "Self-closing tags cannot have children" in str(exc_info.value)
 
 
 if __name__ == "__main__":

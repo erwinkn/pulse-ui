@@ -284,10 +284,20 @@ class HTMLElementEmpty(HTMLElement):
     ):
         super().__init__(tag, attributes, (), whitespace_sensitive, self_closing)
     
-    def __call__(self, *children: HTMLElement | str) -> NoReturn:
-        if children:
-            raise ValueError("Cannot pass children in chained calls. Use indexing syntax [...] or pass children directly in the initial call")
-        raise ValueError("Empty elements cannot be called without arguments. Use indexing syntax [...] to add children")
+    @overload
+    def __call__(self) -> HTMLElementEmpty: ...
+    
+    @overload 
+    def __call__(self, *children: HTMLElement | str) -> HTMLElementWithChildren: ...
+    
+    def __call__(self, *children: HTMLElement | str) -> Union[HTMLElementEmpty, HTMLElementWithChildren]:
+        if self.self_closing:
+            raise ValueError("Self-closing tags cannot have children")
+        if len(children) == 0:
+            return self
+        return HTMLElementWithChildren(
+            self.tag, self.attributes, children, self.whitespace_sensitive, self.self_closing
+        )
 
     def __getitem__(self, children: HTMLElement | str | tuple[HTMLElement | str, ...]) -> HTMLElementWithChildren:
         if self.self_closing:

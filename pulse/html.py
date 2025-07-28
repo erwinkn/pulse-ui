@@ -145,14 +145,14 @@ class HTMLElement:
         self.whitespace_sensitive = whitespace_sensitive
         self.self_closing = self_closing
 
-    def __call__(self, *children: HTMLElement | str):
-        if self.self_closing:
-            raise ValueError("Self-closing tags cannot have children")
-        if len(self.children) > 0:
-            raise ValueError(f"Multiple calls with children for <{self.tag}>")
-        return HTMLElement(
-            self.tag, self.attributes, children, self.whitespace_sensitive, self.self_closing
-        )
+    # def __call__(self, *children: BaseHTML | str):
+    #     if self.self_closing:
+    #         raise ValueError("Self-closing tags cannot have children")
+    #     if len(self.children) > 0:
+    #         raise ValueError(f"Multiple calls with children for <{self.tag}>")
+    #     return BaseHTML(
+    #         self.tag, self.attributes, children, self.whitespace_sensitive, self.self_closing
+    #     )
 
     def __getitem__(self, children: HTMLElement | str | tuple[HTMLElement | str, ...]):
         if self.self_closing:
@@ -284,20 +284,20 @@ class HTMLElementEmpty(HTMLElement):
     ):
         super().__init__(tag, attributes, (), whitespace_sensitive, self_closing)
     
-    @overload
-    def __call__(self) -> HTMLElementEmpty: ...
+    # @overload
+    # def __call__(self) -> HTMLElementEmpty: ...
     
-    @overload 
-    def __call__(self, *children: HTMLElement | str) -> HTMLElementWithChildren: ...
+    # @overload 
+    # def __call__(self, *children: BaseHTML | str) -> HTMLElementWithChildren: ...
     
-    def __call__(self, *children: HTMLElement | str) -> Union[HTMLElementEmpty, HTMLElementWithChildren]:
-        if self.self_closing:
-            raise ValueError("Self-closing tags cannot have children")
-        if len(children) == 0:
-            return self
-        return HTMLElementWithChildren(
-            self.tag, self.attributes, children, self.whitespace_sensitive, self.self_closing
-        )
+    # def __call__(self, *children: BaseHTML | str) -> Union[HTMLElementEmpty, HTMLElementWithChildren]:
+    #     if self.self_closing:
+    #         raise ValueError("Self-closing tags cannot have children")
+    #     if len(children) == 0:
+    #         return self
+    #     return HTMLElementWithChildren(
+    #         self.tag, self.attributes, children, self.whitespace_sensitive, self.self_closing
+    #     )
 
     def __getitem__(self, children: HTMLElement | str | tuple[HTMLElement | str, ...]) -> HTMLElementWithChildren:
         if self.self_closing:
@@ -317,10 +317,11 @@ class HTMLElementEmpty(HTMLElement):
 class HTMLElementWithChildren(HTMLElement):
     """HTMLElement with children - indexing not allowed"""
     
-    def __getitem__(self, children: HTMLElement | str | tuple[HTMLElement | str, ...]) -> NoReturn:
-        if self.self_closing:
-            raise ValueError("Self-closing tags cannot have children")
-        raise TypeError("Cannot use indexing syntax on element that already has children")
+    ...
+    # def __getitem__(self, children: BaseHTML | str | tuple[BaseHTML | str, ...]) -> NoReturn:
+    #     if self.self_closing:
+    #         raise ValueError("Self-closing tags cannot have children")
+    #     raise TypeError("Cannot use indexing syntax on element that already has children")
 
 
 def define_tag(
@@ -347,11 +348,9 @@ def define_tag(
     def create_element(**attrs: str) -> HTMLElementEmpty: ...
     
     @overload 
-    def create_element(*children: HTMLElement | str) -> HTMLElementWithChildren: ...
+    def create_element(*children: HTMLElement | str, **attrs) -> HTMLElementWithChildren: ...
 
     def create_element(*children: HTMLElement | str, **attrs: str) -> Union[HTMLElementEmpty, HTMLElementWithChildren]:
-        if children and attrs:
-            raise ValueError("Can't pass both children and named attributes at once.")
 
         if children:
             return HTMLElementWithChildren(

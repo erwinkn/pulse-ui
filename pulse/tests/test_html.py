@@ -45,7 +45,7 @@ def test_attributes():
     """Test tags with attributes"""
     assert div(classname="container").render() == '<div class="container"></div>'
     assert (
-        a(href="https://example.com")().render() == '<a href="https://example.com"></a>'
+        a(href="https://example.com").render() == '<a href="https://example.com"></a>'
     )
     assert (
         img(src="/img.jpg", alt="An image").render()
@@ -56,7 +56,7 @@ def test_attributes():
 def test_nested_elements():
     """Test nested element structures"""
     doc = html(
-        head(title("My Page")), body(div(classname="container")(p("Hello, world!")))
+        head(title("My Page")), body(div(classname="container")[p("Hello, world!")])
     )
     expected = "\n".join(
         [
@@ -182,29 +182,24 @@ def test_indexing_syntax():
 def test_invalid_usage():
     """Test error cases"""
     # Self-closing tags cannot have children
-    with pytest.raises(ValueError):
-        img()(p("Invalid"))
+    with pytest.raises(TypeError):
+        img()(p("Invalid")) # type: ignore
 
     # Self-closing tags cannot have children with indexing
     with pytest.raises(ValueError):
         img()[p("Invalid")]
 
-    # Cannot pass both children and attributes at once
-    with pytest.raises(ValueError):
-        div(p("Invalid"), classname="container")
-
     # Cannot pass children twice
-    with pytest.raises(ValueError):
-        div(p())(p())
+    with pytest.raises(TypeError):
+        div(p())(p()) # type: ignore
 
     # Cannot use indexing after already having children
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         div(p())[p()]
 
     # Cannot use call after indexing
-    with pytest.raises(ValueError):
-        div()[p()](p())
-
+    with pytest.raises(TypeError):
+        div()[p()](p()) # type: ignore
 
 if __name__ == "__main__":
     pytest.main([__file__])

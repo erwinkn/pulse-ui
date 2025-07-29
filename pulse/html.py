@@ -1,4 +1,10 @@
-from typing import Callable, Mapping, NamedTuple, Self
+from typing import (
+    Mapping,
+    NamedTuple,
+    Self,
+    overload,
+    Union,
+)
 
 __all__ = [
     # Core types and functions
@@ -132,92 +138,222 @@ class HTMLElement(NamedTuple):
 
     tag: str
     attributes: Mapping[str, str]
-    # Other HTMLElements or raw text (str) in a tuple
     children: tuple[Self | str, ...]
     whitespace_sensitive: bool = False
     self_closing: bool = False
 
-    def __call__(self, *children: Self | str):
+    def __getitem__(self, children: Self | str | tuple[Self | str, ...]):
         if self.self_closing:
             raise ValueError("Self-closing tags cannot have children")
         if len(self.children) > 0:
             raise ValueError(f"Multiple calls with children for <{self.tag}>")
-        return self._replace(children=children)
 
-    def render(
-        self,
-        indent: int = 2,
-        level: int = 0,
-    ) -> str:
-        """Render the element with optional indentation."""
-        lines: list[str] = []
-        self.render_into(lines, " " * indent, level)
-        separator = "\n" if indent > 0 else ""
-        return separator.join(lines)
-
-    def render_into(self, lines: list[str], indent: str = " ", level: int = 0):
-        offset = indent * level
-
-        # Add doctype for html tag
-        if self.tag == "html":
-            lines.append(offset + "<!DOCTYPE html>")
-
-        open_tag = self._build_open_tag()
-
-        # Handle self-closing tags
-        if self.self_closing:
-            lines.append(offset + open_tag)
-            return
-
-        closing_tag = f"</{self.tag}>"
-        # If no children, render everything onto a single line
-        if len(self.children) == 0:
-            lines.append(offset + open_tag + closing_tag)
-            return
-
-        # For whitespace-sensitive tags, render everything onto a single "line"
-        # (may contain newline symbols, but won't get indented etc...)
-        if self.whitespace_sensitive:
-            content = self._render_children_inline(lines)
-            lines.append(offset + open_tag + content + closing_tag)
-        # Regular case: render with indentation
+        # Handle single child or tuple of children
+        if isinstance(children, (tuple, list)) and not isinstance(
+            children, HTMLElement
+        ):
+            child_tuple = tuple(children)
         else:
-            # Handle multiline cases
-            lines.append(offset + open_tag)
-            self._render_children_multiline(lines, indent, level + 1)
-            lines.append(offset + closing_tag)
+            child_tuple = (children,)
 
-    def _build_open_tag(self) -> str:
-        """Build the opening tag with attributes."""
-        tag = f"<{self.tag}"
-        for key, val in self.attributes.items():
-            key = attrs_map.get(key, key)
-            key = key.replace("_", "-")
-            tag += f' {key}="{_escape(val)}"'
-        tag += " />" if self.self_closing else ">"
-        return tag
+        return HTMLElement(
+            self.tag,
+            self.attributes,
+            child_tuple,
+            self.whitespace_sensitive,
+            self.self_closing,
+        )
 
-    def _render_children_inline(self, lines: list[str]) -> str:
-        """Render children without newlines for whitespace sensitive elements."""
-        parts = []
-        for child in self.children:
-            if isinstance(child, str):
-                parts.append(_escape(child))
-            else:
-                child.render_into(parts, "", 0)
-        return "".join(parts)
+    def __eq__(self, other):
+        if not isinstance(other, HTMLElement):
+            return False
+        return (
+            self.tag == other.tag
+            and self.attributes == other.attributes
+            and self.children == other.children
+            and self.whitespace_sensitive == other.whitespace_sensitive
+            and self.self_closing == other.self_closing
+        )
 
-    def _render_children_multiline(self, lines: list[str], indent: str, level: int):
-        """Render children with proper indentation."""
-        for child in self.children:
-            if isinstance(child, str):
-                lines.append((indent * level) + _escape(child))
-            else:
-                child.render_into(lines, indent, level)
+    def __repr__(self):
+        return f"HTMLElement(tag={self.tag!r}, attributes={dict(self.attributes)!r}, children={self.children!r}, whitespace_sensitive={self.whitespace_sensitive}, self_closing={self.self_closing})"
+
+
+class HTMLElementEmpty(HTMLElement):
+    """HTMLElement without children - supports indexing and calling with children"""
+
+    def __getitem__(
+        self, children: HTMLElement | str | tuple[HTMLElement | str, ...]
+    ) -> HTMLElement:
+        if self.self_closing:
+            raise ValueError("Self-closing tags cannot have children")
+        if len(self.children) > 0:
+            raise ValueError("Misconstructed HTMLEmptyElement contains children:", self)
+
+        # Handle single child or tuple of children
+        if isinstance(children, (tuple, list)) and not isinstance(
+            children, HTMLElement
+        ):
+            child_tuple = tuple(children)
+        else:
+            child_tuple = (children,)
+
+        return HTMLElement(
+            self.tag,
+            self.attributes,
+            child_tuple,
+            self.whitespace_sensitive,
+            self.self_closing,
+        )
+
+
+def define_tag(
+    name: str,
+    default_attrs: dict[str, str] | None = None,
+    whitespace_sensitive: bool = False,
+):
+    """
+    Defines a standard tag (non-self-closing) with optional default attributes.
+    If whitespace_sensitive=True, uses render_whitespace_sensitive_element;
+    otherwise uses render_element.
+
+    The returned function can be called in these ways:
+    1. tag() -> HTMLElementEmpty (can use indexing syntax)
+    2. tag(**attrs) -> HTMLElementEmpty (can use indexing syntax)
+    3. tag(*children) -> HTMLElementWithChildren (indexing not allowed)
+    4. tag(**attrs)[children] -> HTMLElementWithChildren (indexing not allowed)
+    """
+
+    default_attrs = default_attrs or {}
+
+    @overload
+    def create_element() -> HTMLElementEmpty: ...
+
+    @overload
+    def create_element(**attrs: str) -> HTMLElementEmpty: ...
+
+    @overload
+    def create_element(*children: HTMLElement | str, **attrs) -> HTMLElement: ...
+
+    def create_element(
+        *children: HTMLElement | str, **attrs: str
+    ) -> Union[HTMLElementEmpty, HTMLElement]:
+        if children:
+            return HTMLElement(
+                tag=name,
+                attributes=default_attrs | attrs,
+                children=children,
+                whitespace_sensitive=whitespace_sensitive,
+            )
+        else:
+            return HTMLElementEmpty(
+                tag=name,
+                children=(),
+                attributes=default_attrs | attrs,
+                whitespace_sensitive=whitespace_sensitive,
+            )
+
+    return create_element
+
+
+def define_self_closing_tag(name: str, default_attrs: dict[str, str] | None = None):
+    """
+    Defines a self-closing tag (e.g. <br />, <img />, <meta />, etc.)
+    Self-closing tags cannot have children and do not support indexing.
+    """
+    default_attrs = default_attrs or {}
+
+    # Self-closing tags cannot have children
+    def create_element(**attrs: str) -> HTMLElement:
+        return HTMLElement(
+            tag=name,
+            attributes=default_attrs | attrs,
+            children=(),
+            self_closing=True,
+            whitespace_sensitive=False,
+        )
+
+    return create_element
+
+
+def render(
+    elt: HTMLElement,
+    indent: int = 2,
+    level: int = 0,
+) -> str:
+    """Render the element with optional indentation."""
+    lines: list[str] = []
+    _render_into(elt, lines, " " * indent, level)
+    separator = "\n" if indent > 0 else ""
+    return separator.join(lines)
+
+
+def _render_into(elt: HTMLElement, lines: list[str], indent: str = " ", level: int = 0):
+    offset = indent * level
+
+    # Add doctype for html tag
+    if elt.tag == "html":
+        lines.append(offset + "<!DOCTYPE html>")
+
+    open_tag = _build_open_tag(elt)
+
+    # Handle self-closing tags
+    if elt.self_closing:
+        lines.append(offset + open_tag)
+        return
+
+    closing_tag = f"</{elt.tag}>"
+    # If no children, render everything onto a single line
+    if len(elt.children) == 0:
+        lines.append(offset + open_tag + closing_tag)
+        return
+
+    # For whitespace-sensitive tags, render everything onto a single "line"
+    # (may contain newline symbols, but won't get indented etc...)
+    if elt.whitespace_sensitive:
+        content = _render_children_inline(elt)
+        lines.append(offset + open_tag + content + closing_tag)
+    # Regular case: render with indentation
+    else:
+        # Handle multiline cases
+        lines.append(offset + open_tag)
+        _render_children_into(elt, lines, indent, level + 1)
+        lines.append(offset + closing_tag)
+
+
+def _build_open_tag(elt: HTMLElement) -> str:
+    """Build the opening tag with attributes."""
+    tag = f"<{elt.tag}"
+    for key, val in elt.attributes.items():
+        key = attrs_map.get(key, key)
+        key = key.replace("_", "-")
+        tag += f' {key}="{_escape(val)}"'
+    tag += " />" if elt.self_closing else ">"
+    return tag
+
+
+def _render_children_inline(elt: HTMLElement) -> str:
+    """Render children without newlines for whitespace sensitive elements."""
+    parts = []
+    for child in elt.children:
+        if isinstance(child, str):
+            parts.append(_escape(child))
+        else:
+            _render_into(child, parts, "", 0)
+    return "".join(parts)
+
+
+def _render_children_into(elt: HTMLElement, lines: list[str], indent: str, level: int):
+    """Render children with proper indentation."""
+    for child in elt.children:
+        if isinstance(child, str):
+            lines.append((indent * level) + _escape(child))
+        else:
+            _render_into(child, lines, indent, level)
 
 
 # If you want to map special attribute names (like 'classname' -> 'class')
-attrs_map = {"classname": "class"}
+attrs_map = {"classname": "class", "class_": "class"}
 
 
 # A small utility for escaping special HTML characters.
@@ -230,54 +366,6 @@ def _escape(text: str) -> str:
         .replace('"', "&quot;")
         .replace("'", "&#x27;")
     )
-
-
-def define_tag(
-    name: str, default_attrs: dict[str, str] | None = None, whitespace_sensitive=False
-):
-    """
-    Defines a standard tag (non-self-closing) with optional default attributes.
-    If whitespace_sensitive=True, uses render_whitespace_sensitive_element;
-    otherwise uses render_element.
-
-    The old library let you either pass (children) or (attributes + children).
-    Below, we preserve the simpler restriction: you either pass children OR attributes,
-    not both at once.
-    """
-
-    default_attrs = default_attrs or {}
-
-    def create_element(*children: HTMLElement | str, **attrs: str) -> HTMLElement:
-        if children and attrs:
-            raise ValueError("Can't pass both children and named attributes at once.")
-
-        # print(f"Creating element <{name}> with:")
-        # print(f"  - children = {children}")
-        # print(f"  - attrs = {attrs}")
-
-        return HTMLElement(
-            tag=name,
-            attributes=default_attrs | attrs,
-            children=children,
-            whitespace_sensitive=whitespace_sensitive,
-        )
-
-    return create_element
-
-
-def define_self_closing_tag(name: str, default_attrs: dict[str, str] | None = None):
-    """
-    Defines a self-closing tag (e.g. <br />, <img />, <meta />, etc.)
-    """
-    default_attrs = default_attrs or {}
-
-    # Self-closing tags cannot have children
-    def create_element(**attrs: str) -> HTMLElement:
-        return HTMLElement(
-            name, attributes=default_attrs | attrs, children=(), self_closing=True
-        )
-
-    return create_element
 
 
 # Example usage: define an <html> tag that automatically prepends a <!DOCTYPE html>.
@@ -400,7 +488,7 @@ wbr = define_self_closing_tag("wbr")
 
 
 if __name__ == "__main__":
-    print(div().render())
+    print(render(div()))
     # code_block = pre(
     #     code("""def hello():
     # print("Hello, world!")

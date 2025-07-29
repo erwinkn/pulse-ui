@@ -1,0 +1,185 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { ReactiveUIContainer } from '../ReactiveUIContainer';
+import type { UIElementNode, UITextNode, UIUpdatePayload } from '../types';
+
+// Mock WebSocket
+const mockWebSocket = {
+  close: vi.fn(),
+  send: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  onopen: null as any,
+  onmessage: null as any,
+  onerror: null as any,
+  onclose: null as any,
+};
+
+const createElementNode = (tag: string, props = {}, children: any[] = []): UIElementNode => ({
+  id: Math.random().toString(36),
+  type: 'element',
+  tag,
+  props,
+  children,
+});
+
+const createTextNode = (content: string): UITextNode => ({
+  id: Math.random().toString(36),
+  type: 'text',
+  content,
+});
+
+describe('ReactiveUIContainer', () => {
+  beforeEach(() => {
+    vi.stubGlobal('WebSocket', vi.fn(() => mockWebSocket));
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should render initial tree', () => {
+    const initialTree = createElementNode('div', { 'data-testid': 'initial' }, [
+      createTextNode('Initial content')
+    ]);
+
+    render(<ReactiveUIContainer initialTree={initialTree} />);
+    
+    expect(screen.getByTestId('initial')).toBeInTheDocument();
+    expect(screen.getByText('Initial content')).toBeInTheDocument();
+  });
+
+  it('should not create WebSocket without URL', () => {
+    const initialTree = createElementNode('div', {}, []);
+    render(<ReactiveUIContainer initialTree={initialTree} />);
+    
+    expect(WebSocket).not.toHaveBeenCalled();
+  });
+
+  it('should create WebSocket with provided URL', () => {
+    const initialTree = createElementNode('div', {}, []);
+    const websocketUrl = 'ws://localhost:8080';
+    
+    render(<ReactiveUIContainer initialTree={initialTree} websocketUrl={websocketUrl} />);
+    
+    expect(WebSocket).toHaveBeenCalledWith(websocketUrl);
+  });
+
+  it('should handle UI updates from WebSocket', async () => {
+    const initialTree = createElementNode('div', { 'data-testid': 'container' }, []);
+    const websocketUrl = 'ws://localhost:8080';
+    
+    render(<ReactiveUIContainer initialTree={initialTree} websocketUrl={websocketUrl} />);
+    
+    // Simulate WebSocket message with updates
+    const updates: UIUpdatePayload[] = [
+      {
+        id: 'update-1',
+        type: 'insert',
+        path: [],
+        data: {
+          node: createTextNode('Added via WebSocket'),
+          index: 0
+        }
+      }
+    ];
+
+    const messageEvent = {
+      data: JSON.stringify({
+        type: 'ui_updates',
+        updates
+      })
+    };
+
+    // Trigger WebSocket message
+    mockWebSocket.onmessage(messageEvent);
+
+    await waitFor(() => {
+      expect(screen.getByText('Added via WebSocket')).toBeInTheDocument();
+    });
+  });
+
+  it('should handle full tree replacement from WebSocket', async () => {
+    const initialTree = createElementNode('div', { 'data-testid': 'initial' }, [
+      createTextNode('Initial')
+    ]);
+    const websocketUrl = 'ws://localhost:8080';
+    
+    render(<ReactiveUIContainer initialTree={initialTree} websocketUrl={websocketUrl} />);
+    
+    const newTree = createElementNode('span', { 'data-testid': 'replaced' }, [
+      createTextNode('Replaced')
+    ]);
+
+    const messageEvent = {
+      data: JSON.stringify({
+        type: 'ui_tree',
+        tree: newTree
+      })
+    };
+
+    // Trigger WebSocket message
+    mockWebSocket.onmessage(messageEvent);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('replaced')).toBeInTheDocument();
+      expect(screen.getByText('Replaced')).toBeInTheDocument();
+      expect(screen.queryByTestId('initial')).not.toBeInTheDocument();
+    });
+  });
+
+  it('should call onWebSocketMessage callback', () => {
+    const initialTree = createElementNode('div', {}, []);
+    const websocketUrl = 'ws://localhost:8080';
+    const onWebSocketMessage = vi.fn();
+    
+    render(
+      <ReactiveUIContainer 
+        initialTree={initialTree} 
+        websocketUrl={websocketUrl}
+        onWebSocketMessage={onWebSocketMessage}
+      />
+    );
+    
+    const messageData = { type: 'custom', data: 'test' };
+    const messageEvent = {
+      data: JSON.stringify(messageData)
+    };
+
+    mockWebSocket.onmessage(messageEvent);
+
+    expect(onWebSocketMessage).toHaveBeenCalledWith(messageData);
+  });
+
+  it('should handle malformed JSON messages gracefully', () => {
+    const initialTree = createElementNode('div', { 'data-testid': 'container' }, []);
+    const websocketUrl = 'ws://localhost:8080';
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    
+    render(<ReactiveUIContainer initialTree={initialTree} websocketUrl={websocketUrl} />);
+    
+    const messageEvent = {
+      data: 'invalid json'
+    };
+
+    mockWebSocket.onmessage(messageEvent);
+
+    expect(consoleSpy).toHaveBeenCalledWith('Error parsing WebSocket message:', expect.any(Error));
+    
+    consoleSpy.mockRestore();
+  });
+
+  it('should close WebSocket on unmount', () => {
+    const initialTree = createElementNode('div', {}, []);
+    const websocketUrl = 'ws://localhost:8080';
+    
+    const { unmount } = render(
+      <ReactiveUIContainer initialTree={initialTree} websocketUrl={websocketUrl} />
+    );
+    
+    unmount();
+    
+    expect(mockWebSocket.close).toHaveBeenCalled();
+  });
+});

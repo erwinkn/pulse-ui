@@ -5,7 +5,9 @@ This module provides the CLI commands for running the server and generating rout
 """
 
 import os
+import sys
 import subprocess
+import importlib.util
 from pathlib import Path
 
 import typer
@@ -19,79 +21,137 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-# Create a sub-app for run commands
-run_app = typer.Typer(name="run", help="Start services (server or web)")
-app.add_typer(run_app, name="run")
 
+def load_routes_from_file(file_path: str | Path):
+    """Load routes from a Python file (supports both App instances and global @ps.route decorators)."""
+    file_path = Path(file_path)
 
-@run_app.command("server")
-def run_server(
-    address: str = typer.Option(
-        "localhost", "--address", help="Address to bind the server to"
-    ),
-    port: int = typer.Option(8000, "--port", help="Port to bind the server to"),
-):
-    """Start the backend server with automatic route generation."""
-    typer.echo(f"🚀 Starting Pulse UI server on {address}:{port}")
-    start_server(host=address, port=port, auto_generate=True)
-
-
-@run_app.command("web")
-def run_web():
-    """Start the web development server (bun dev)."""
-    web_dir = Path("pulse-web")
-
-    if not web_dir.exists():
-        typer.echo("❌ pulse-web directory not found")
-        typer.echo("Make sure you're running this from the project root directory")
+    if not file_path.exists():
+        typer.echo(f"❌ File not found: {file_path}")
         raise typer.Exit(1)
 
-    typer.echo("🌐 Starting web development server...")
-    typer.echo(f"📁 Working directory: {web_dir.absolute()}")
+    if not file_path.suffix == ".py":
+        typer.echo(f"❌ File must be a Python file (.py): {file_path}")
+        raise typer.Exit(1)
+
+    # Clear any existing global routes before loading
+    from pulse.route import clear_routes
+
+    clear_routes()
+
+    # Add the file's directory to Python path so imports work
+    sys.path.insert(0, str(file_path.parent.absolute()))
 
     try:
-        # Change to the web directory and run bun dev
-        os.chdir(web_dir)
-        subprocess.run(["bun", "dev"], check=True)
-    except subprocess.CalledProcessError as e:
-        typer.echo(f"❌ Failed to start web server: {e}")
+        # Load the module dynamically
+        spec = importlib.util.spec_from_file_location("user_app", file_path)
+        if spec is None or spec.loader is None:
+            typer.echo(f"❌ Could not load module from: {file_path}")
+            raise typer.Exit(1)
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # Try to get routes from an App instance first
+        if hasattr(module, "app"):
+            from pulse.app import App
+
+            if isinstance(module.app, App):
+                routes = module.app.get_routes()
+                if routes:
+                    return routes
+
+        # Fall back to global routes
+        from pulse.route import decorated_routes
+
+        routes = decorated_routes()
+
+        if not routes:
+            typer.echo(f"⚠️  No routes found in {file_path}")
+            typer.echo("Make sure your file defines routes using:")
+            typer.echo("  1. app = pulse.App() with @app.route() decorators, or")
+            typer.echo("  2. @pulse.route() decorators")
+
+        return routes
+
+    except Exception as e:
+        typer.echo(f"❌ Error loading {file_path}: {e}")
         raise typer.Exit(1)
-    except FileNotFoundError:
-        typer.echo("❌ 'bun' command not found")
-        typer.echo("Please install bun: https://bun.sh/")
-        raise typer.Exit(1)
-    except KeyboardInterrupt:
-        typer.echo("\n👋 Web server stopped")
+    finally:
+        # Clean up sys.path
+        if str(file_path.parent.absolute()) in sys.path:
+            sys.path.remove(str(file_path.parent.absolute()))
 
 
-# For backward compatibility: `pulse run` defaults to server
-@run_app.callback(invoke_without_command=True)
-def run_default(
-    ctx: typer.Context,
-    address: str = typer.Option(
-        "localhost", "--address", help="Address to bind the server to"
+@app.command("run")
+def run(
+    target: str = typer.Argument(
+        ..., help="Python file to run (e.g., main.py) or 'web' to start the web app"
     ),
-    port: int = typer.Option(8000, "--port", help="Port to bind the server to"),
+    address: str = typer.Option(
+        "localhost",
+        "--address",
+        help="Address to bind the server to (only for Python files)",
+    ),
+    port: int = typer.Option(
+        8000, "--port", help="Port to bind the server to (only for Python files)"
+    ),
 ):
-    """Start the backend server (default behavior for 'pulse run')."""
-    if ctx.invoked_subcommand is None:
-        # No subcommand provided, default to running the server
+    """Run a Python file with the Pulse server or start the web app."""
+
+    if target == "web":
+        # Start the web development server
+        web_dir = Path("pulse-web")
+
+        if not web_dir.exists():
+            typer.echo("❌ pulse-web directory not found")
+            typer.echo("Make sure you're running this from the project root directory")
+            raise typer.Exit(1)
+
+        typer.echo("🌐 Starting web development server...")
+        typer.echo(f"📁 Working directory: {web_dir.absolute()}")
+
+        try:
+            # Change to the web directory and run bun dev
+            os.chdir(web_dir)
+            subprocess.run(["bun", "dev"], check=True)
+        except subprocess.CalledProcessError as e:
+            typer.echo(f"❌ Failed to start web server: {e}")
+            raise typer.Exit(1)
+        except FileNotFoundError:
+            typer.echo("❌ 'bun' command not found")
+            typer.echo("Please install bun: https://bun.sh/")
+            raise typer.Exit(1)
+        except KeyboardInterrupt:
+            typer.echo("\n👋 Web server stopped")
+    else:
+        # Treat it as a Python file to run with the server
+        typer.echo(f"📁 Loading routes from: {target}")
+        routes = load_routes_from_file(target)
+        typer.echo(f"📋 Found {len(routes)} routes")
+
         typer.echo(f"🚀 Starting Pulse UI server on {address}:{port}")
-        start_server(host=address, port=port, auto_generate=True)
+        start_server(host=address, port=port, auto_generate=True, app_routes=routes)
 
 
 @app.command("generate")
-def generate():
+def generate(
+    app_file: str = typer.Argument(..., help="Path to your Python file with routes"),
+):
     """Generate TypeScript routes without starting the server."""
     typer.echo("🔄 Generating TypeScript routes...")
-    num_routes = generate_all_routes()
+
+    typer.echo(f"📁 Loading routes from: {app_file}")
+    routes = load_routes_from_file(app_file)
+    typer.echo(f"📋 Found {len(routes)} routes")
+
+    num_routes = generate_all_routes(app_routes=routes)
 
     if num_routes > 0:
         typer.echo(f"✅ Generated {num_routes} routes successfully!")
     else:
         typer.echo("✅ Cleaned up old route files")
         typer.echo("⚠️  No routes found to generate")
-        typer.echo("Make sure you have defined routes using @define_route decorator")
 
 
 def main():

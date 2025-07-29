@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import type { UINode, UIUpdatePayload } from "./types";
+import type { UINode, UIUpdatePayload } from "./tree";
 import { applyUpdates } from "./update-utils";
 
 export interface UseReactiveUITreeOptions {

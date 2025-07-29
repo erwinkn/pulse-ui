@@ -1,5 +1,5 @@
-import type { UINode, UIElementNode, UIUpdatePayload } from './types';
-import { isElementNode, isTextNode } from './types';
+import type { UINode, UIElementNode, UIUpdatePayload } from "./tree";
+import { isElementNode, isTextNode } from "./tree";
 
 function cloneUINode(node: UINode): UINode {
   if (isTextNode(node)) {
@@ -10,7 +10,7 @@ function cloneUINode(node: UINode): UINode {
     return {
       ...node,
       props: { ...node.props },
-      children: node.children.map(cloneUINode)
+      children: node.children.map(cloneUINode),
     };
   }
 
@@ -19,7 +19,7 @@ function cloneUINode(node: UINode): UINode {
 
 export function findNodeByPath(tree: UINode, path: number[]): UINode | null {
   let current = tree;
-  
+
   for (const index of path) {
     // Only element nodes can have children
     if (isElementNode(current)) {
@@ -32,46 +32,50 @@ export function findNodeByPath(tree: UINode, path: number[]): UINode | null {
       return null;
     }
   }
-  
+
   return current;
 }
 
-export function findParentByPath(tree: UINode, path: number[]): { parent: UIElementNode; index: number } | null {
+export function findParentByPath(
+  tree: UINode,
+  path: number[]
+): { parent: UIElementNode; index: number } | null {
   if (path.length === 0) return null;
-  
+
   const parentPath = path.slice(0, -1);
   const index = path[path.length - 1];
-  
-  const parent = parentPath.length === 0 ? tree : findNodeByPath(tree, parentPath);
-  
+
+  const parent =
+    parentPath.length === 0 ? tree : findNodeByPath(tree, parentPath);
+
   if (!parent || !isElementNode(parent)) {
     return null;
   }
-  
+
   return { parent, index };
 }
 
 export function applyUpdate(tree: UINode, update: UIUpdatePayload): UINode {
   const clonedTree = cloneUINode(tree);
-  
+
   switch (update.type) {
-    case 'insert': {
+    case "insert": {
       const parent = findNodeByPath(clonedTree, update.path);
       if (parent && isElementNode(parent)) {
         parent.children.splice(update.data.index, 0, update.data.node);
       }
       break;
     }
-    
-    case 'remove': {
+
+    case "remove": {
       const parent = findNodeByPath(clonedTree, update.path);
       if (parent && isElementNode(parent)) {
         parent.children.splice(update.data.index, 1);
       }
       break;
     }
-    
-    case 'replace': {
+
+    case "replace": {
       const parentInfo = findParentByPath(clonedTree, update.path);
       if (parentInfo) {
         parentInfo.parent.children[parentInfo.index] = update.data.node;
@@ -80,8 +84,8 @@ export function applyUpdate(tree: UINode, update: UIUpdatePayload): UINode {
       }
       break;
     }
-    
-    case 'update_props': {
+
+    case "update_props": {
       const node = findNodeByPath(clonedTree, update.path);
       if (node && isElementNode(node)) {
         node.props = { ...node.props, ...update.data.props };
@@ -89,10 +93,13 @@ export function applyUpdate(tree: UINode, update: UIUpdatePayload): UINode {
       break;
     }
   }
-  
+
   return clonedTree;
 }
 
 export function applyUpdates(tree: UINode, updates: UIUpdatePayload[]): UINode {
-  return updates.reduce((currentTree, update) => applyUpdate(currentTree, update), tree);
+  return updates.reduce(
+    (currentTree, update) => applyUpdate(currentTree, update),
+    tree
+  );
 }

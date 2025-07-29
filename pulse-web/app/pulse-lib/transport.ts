@@ -1,7 +1,17 @@
-import type { UINode, UIUpdatePayload } from "./types";
+import type { UINode, UIUpdatePayload } from "./tree";
 
 export interface TransportMessage {
-  type: "ui_updates" | "ui_tree" | "custom" | "callback_invoke" | "callback_response" | "ping" | "pong" | "get_callbacks" | "callbacks_list" | "error";
+  type:
+    | "ui_updates"
+    | "ui_tree"
+    | "custom"
+    | "callback_invoke"
+    | "callback_response"
+    | "ping"
+    | "pong"
+    | "get_callbacks"
+    | "callbacks_list"
+    | "error";
   updates?: UIUpdatePayload[];
   tree?: UINode;
   data?: any;

@@ -17,9 +17,9 @@ from .route import Route
 
 
 # Mako template for route component with inline registry
-ROUTE_TEMPLATE = Template("""import { ReactiveUIContainer } from "../ui-tree";
-import { ComponentRegistryProvider } from "../ui-tree/component-registry";
-import { WebSocketTransport } from "../ui-tree/transport";
+ROUTE_TEMPLATE = Template("""import { ReactiveUIContainer } from "~/pulse-lib/ReactiveUIContainer";
+import { ComponentRegistryProvider } from "~/pulse-lib/component-registry";
+import { WebSocketTransport } from "~/pulse-lib/transport";
 import type { ComponentType } from "react";
 
 % if components:
@@ -140,6 +140,7 @@ def generate_all_routes(
     port: int = 8000,
     output_dir: str = "pulse-web/app/pulse",
     clear_existing_callbacks: bool = False,
+    app_routes: Optional[List[Route]] = None,
 ):
     """
     Complete route generation workflow: get routes, clear callbacks if needed, and write files.
@@ -149,6 +150,7 @@ def generate_all_routes(
         port: Backend server port for WebSocket connection
         output_dir: Base directory to write files to
         clear_existing_callbacks: Whether to clear existing callbacks before generation
+        app_routes: Optional list of routes from a Pulse App instance. If provided, uses these instead of global decorated routes.
 
     Returns:
         int: Number of routes generated
@@ -162,7 +164,12 @@ def generate_all_routes(
     if clear_existing_callbacks:
         clear_callbacks()
 
-    routes = decorated_routes()
+    # Use provided app routes or fall back to global decorated routes
+    if app_routes is not None:
+        routes = app_routes
+    else:
+        routes = decorated_routes()
+        
     write_generated_files(routes, output_dir, host, port)
 
     if routes:

@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import socket
-from typing import Dict, Any, Set
+from typing import Dict, Any, Set, Optional, List
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -37,10 +37,11 @@ def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:
 class PulseServer:
     """FastAPI server with WebSocket support for Pulse UI."""
 
-    def __init__(self, host: str = "localhost", port: int = 8000):
+    def __init__(self, host: str = "localhost", port: int = 8000, app_routes: Optional[List] = None):
         self.app = FastAPI(title="Pulse UI Server")
         self.host = host
         self.port = port
+        self.app_routes = app_routes
         self.connected_clients: Set[WebSocket] = set()
 
         # Add CORS middleware
@@ -166,7 +167,7 @@ class PulseServer:
         """Generate TypeScript files from Python routes."""
         logger.info("Generating TypeScript routes...")
         generate_all_routes(
-            host=self.host, port=self.port, clear_existing_callbacks=True
+            host=self.host, port=self.port, clear_existing_callbacks=True, app_routes=self.app_routes
         )
 
     def run(self, auto_generate: bool = True):
@@ -185,6 +186,7 @@ def start_server(
     port: int = 8000,
     auto_generate: bool = True,
     find_port: bool = True,
+    app_routes: Optional[List] = None,
 ):
     """Start the Pulse UI FastAPI server."""
     if find_port:
@@ -197,5 +199,5 @@ def start_server(
             logger.error(f"Failed to find available port: {e}")
             raise
 
-    server = PulseServer(host, port)
+    server = PulseServer(host, port, app_routes=app_routes)
     server.run(auto_generate=auto_generate)

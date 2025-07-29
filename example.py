@@ -71,10 +71,23 @@ ProgressBar = define_react_component(
 @define_route("/", components=[])
 def home_route():
     """Home page with navigation to all demo routes."""
+    
+    def handle_click():
+        print("🎉 Button clicked from server-side!")
+        print("This Python function was executed on the server!")
+    
     return div()[
         div(className="max-w-4xl mx-auto py-8 px-4")[
             h1(className="text-4xl font-bold text-gray-900 mb-2")["🚀 Pulse UI Demo"],
             p(className="text-xl text-gray-600 mb-8")["Server-rendered React components with Python integration"],
+            
+            div(className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg")[
+                p(className="text-sm text-blue-800 mb-2")["🔗 Test Server-Client Interaction:"],
+                button(
+                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors",
+                    onClick=handle_click
+                )["Click me! (Server callback)"]
+            ],
             
             div(className="grid grid-cols-1 md:grid-cols-2 gap-6")[
                 # Server Demo Card
@@ -332,52 +345,19 @@ def generate_files():
 
 
 # ============================================================================
-# Step 4: Start WebSocket Server (optional)
-# ============================================================================
-
-def start_websocket_server():
-    """Start the WebSocket server for real-time updates."""
-    try:
-        from pulse.server import start_server
-        routes = [home_route, server_demo_route, api_example_route, simple_route, stateful_demo_route]
-        print("🚀 Starting WebSocket server on ws://localhost:8080")
-        print("🔗 Connect your React app to this WebSocket for real-time updates")
-        start_server(routes)
-    except ImportError:
-        print("❌ WebSocket server requires 'websockets' package.")
-        print("Install with: pip install websockets")
-        sys.exit(1)
-
-
-# ============================================================================
 # Main Execution
 # ============================================================================
 
 if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) > 1:
-        command = sys.argv[1]
-        
-        if command == "generate":
-            generate_files()
-        elif command == "server":
-            start_websocket_server()
-        elif command == "both":
-            generate_files()
-            print("\n" + "="*50)
-            start_websocket_server()
-        else:
-            print(f"Unknown command: {command}")
-            print("Usage: python example.py [generate|server|both]")
-    else:
-        print("🎯 Pulse UI Server Integration Example")
-        print("\nAvailable commands:")
-        print("  python example.py generate  - Generate TypeScript files")
-        print("  python example.py server    - Start WebSocket server") 
-        print("  python example.py both      - Generate files and start server")
-        print("\nTo get started:")
-        print("1. Run 'python example.py generate' to create the TypeScript files")
-        print("2. Start your React development server (npm run dev)")
-        print("3. Visit http://localhost:5173/ to see the home page")
-        print("4. Optionally run 'python example.py server' for WebSocket updates")
+    print("🎯 Pulse UI Server Integration Example")
+    print("\nThis file defines example routes for Pulse UI.")
+    print("The routes are automatically registered when imported.")
+    print("\nTo use the new CLI:")
+    print("  uv run pulse generate  - Generate TypeScript files")
+    print("  uv run pulse run       - Start server with auto-generation")
+    print("  uv run pulse run --port 8001  - Start server on custom port")
+    print("\nTo get started:")
+    print("1. Import this file to register routes: python -c 'import example'")
+    print("2. Run 'uv run pulse run' to start the server")
+    print("3. Start your React development server: bun dev")
+    print("4. Visit http://localhost:5173/ to see the application")

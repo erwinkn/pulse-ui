@@ -1,10 +1,16 @@
-import type { UINode, UIUpdatePayload } from './types';
+import type { UINode, UIUpdatePayload } from "./types";
 
 export interface TransportMessage {
-  type: 'ui_updates' | 'ui_tree' | 'custom';
+  type: "ui_updates" | "ui_tree" | "custom" | "callback_invoke" | "callback_response" | "ping" | "pong" | "get_callbacks" | "callbacks_list" | "error";
   updates?: UIUpdatePayload[];
   tree?: UINode;
   data?: any;
+  // Callback-specific fields
+  callback_key?: string;
+  request_id?: string;
+  success?: boolean;
+  callbacks?: string[];
+  message?: string;
 }
 
 export interface Transport {
@@ -23,11 +29,11 @@ export class WebSocketTransport implements Transport {
 
   private connect() {
     this.ws = new WebSocket(this.url);
-    
+
     this.ws.onopen = () => {
-      console.log('WebSocket connected');
+      console.log(`WebSocket connected to ${this.url}`);
     };
-    
+
     this.ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data) as TransportMessage;
@@ -35,22 +41,25 @@ export class WebSocketTransport implements Transport {
           this.messageCallback(message);
         }
       } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
+        console.error("Error parsing WebSocket message:", error);
       }
     };
-    
+
     this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error("WebSocket error:", error);
     };
-    
+
     this.ws.onclose = () => {
-      console.log('WebSocket disconnected');
+      console.log("WebSocket disconnected");
     };
   }
 
   send(message: TransportMessage): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
+      console.log("Sending websocket message:", message);
       this.ws.send(JSON.stringify(message));
+    } else {
+      console.log("WebSocket not open");
     }
   }
 
@@ -66,13 +75,12 @@ export class WebSocketTransport implements Transport {
   }
 }
 
-
 export class EventEmitterTransport implements Transport {
   private messageCallback: ((message: TransportMessage) => void) | null = null;
   private eventTarget = new EventTarget();
 
   constructor() {
-    this.eventTarget.addEventListener('message', (event) => {
+    this.eventTarget.addEventListener("message", (event) => {
       if (this.messageCallback) {
         this.messageCallback((event as CustomEvent).detail);
       }
@@ -81,7 +89,7 @@ export class EventEmitterTransport implements Transport {
 
   send(message: TransportMessage): void {
     // In a real app, this might send to a different EventEmitterTransport instance
-    console.log('EventEmitterTransport send:', message);
+    console.log("EventEmitterTransport send:", message);
   }
 
   onMessage(callback: (message: TransportMessage) => void): void {
@@ -90,7 +98,9 @@ export class EventEmitterTransport implements Transport {
 
   // Method to dispatch messages to this transport
   dispatchMessage(message: TransportMessage): void {
-    this.eventTarget.dispatchEvent(new CustomEvent('message', { detail: message }));
+    this.eventTarget.dispatchEvent(
+      new CustomEvent("message", { detail: message })
+    );
   }
 
   close(): void {

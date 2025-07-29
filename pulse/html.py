@@ -13,14 +13,24 @@ from typing import (
     Callable,
     Sequence,
     Union,
+    Tuple,
 )
 import random
+import uuid
 
 __all__ = [
     # Core types and functions
     "UITreeNode",
+    "Callback",
     "define_tag",
     "define_self_closing_tag",
+    # Callback system
+    "register_callback",
+    "get_callback",
+    "clear_callbacks",
+    "get_all_callbacks",
+    "execute_callback",
+    "prepare_ui_response",
     # UI Tree integration
     "ReactComponent",
     "define_react_component",
@@ -143,6 +153,77 @@ __all__ = [
 
 
 # ============================================================================
+# Callback System
+# ============================================================================
+
+
+class Callback:
+    """
+    Wrapper for callback functions that can be passed as props.
+    This allows the system to detect and register callbacks efficiently.
+    """
+
+    def __init__(self, func: Callable[[], None]):
+        if not callable(func):
+            raise ValueError("Callback must be a callable function")
+        self.func = func
+        self.id = str(uuid.uuid4())
+
+    def __call__(self):
+        """Make Callback instances callable."""
+        return self.func()
+
+
+# Global callback registry: callback_key -> function
+_callback_registry: Dict[str, Callable[[], None]] = {}
+
+
+def register_callback(callback_key: str, func: Callable[[], None]) -> None:
+    """Register a callback function with a unique key."""
+    _callback_registry[callback_key] = func
+
+
+def get_callback(callback_key: str) -> Optional[Callable[[], None]]:
+    """Get a registered callback function by key."""
+    return _callback_registry.get(callback_key)
+
+
+def clear_callbacks() -> None:
+    """Clear all registered callbacks."""
+    _callback_registry.clear()
+
+
+def get_all_callbacks() -> Dict[str, Callable[[], None]]:
+    """Get all registered callbacks."""
+    return _callback_registry.copy()
+
+
+def execute_callback(callback_key: str) -> bool:
+    """Execute a registered callback by its key. Returns True if successful."""
+    callback_func = get_callback(callback_key)
+    if callback_func:
+        try:
+            callback_func()
+            return True
+        except Exception as e:
+            print(f"Error executing callback {callback_key}: {e}")
+            return False
+    return False
+
+
+def prepare_ui_response(root_node: "UITreeNode") -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Prepare a complete UI response with the tree and callback information.
+    
+    Returns:
+        Tuple of (ui_tree_dict, callback_info_dict)
+    """
+    ui_tree = root_node.to_dict()
+    callback_info = root_node.get_callback_info()
+    return ui_tree, callback_info
+
+
+# ============================================================================
 # Core UI Tree Node
 # ============================================================================
 
@@ -164,6 +245,27 @@ class UITreeNode:
         self.tag = tag
         self.props = props or {}
         self.children = children or []
+        
+        # Process callbacks in props
+        self._callback_keys: Dict[str, str] = {}
+        self._process_callbacks()
+
+    def _process_callbacks(self) -> None:
+        """Process props to detect and register callbacks."""
+        for prop_name, prop_value in list(self.props.items()):
+            # Check if the prop value is a callable (lambda/function)
+            if callable(prop_value) and not isinstance(prop_value, type):
+                # Generate unique callback key based on node ID + prop name
+                callback_key = f"{self.id}:{prop_name}"
+                
+                # Register the callback
+                register_callback(callback_key, prop_value)
+                
+                # Store the callback key for this prop
+                self._callback_keys[prop_name] = callback_key
+                
+                # Replace the callable with the callback key in props
+                self.props[prop_name] = f"__callback:{callback_key}"
 
     def __getitem__(
         self,
@@ -178,12 +280,15 @@ class UITreeNode:
         else:
             new_children = [children_arg]
 
-        return UITreeNode(
+        new_node = UITreeNode(
             tag=self.tag,
             props=self.props.copy(),
             children=new_children,
             node_id=self.id,
         )
+        # Copy callback keys from the original node
+        new_node._callback_keys = self._callback_keys.copy()
+        return new_node
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format for JSON serialization."""
@@ -196,6 +301,24 @@ class UITreeNode:
                 for child in self.children
             ],
         }
+
+    def get_callback_info(self) -> Dict[str, Any]:
+        """Get callback information for this node and its children."""
+        callback_info = {}
+        
+        # Add this node's callbacks if any
+        if self._callback_keys:
+            callback_info[self.id] = {
+                "callbacks": self._callback_keys
+            }
+        
+        # Recursively collect callback info from children
+        for child in self.children:
+            if isinstance(child, UITreeNode):
+                child_callbacks = child.get_callback_info()
+                callback_info.update(child_callbacks)
+        
+        return callback_info
 
 
 # ============================================================================
@@ -371,7 +494,13 @@ def define_route(
                         f"Component '{component_key}' not found. Make sure to define it before using in routes."
                     )
 
-        return Route(path, render_func, route_components)
+        route = Route(path, render_func, route_components)
+        
+        # Auto-register the route
+        from .routes import register_route
+        register_route(route)
+        
+        return route
 
     return decorator
 

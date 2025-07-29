@@ -1,214 +1,201 @@
 """
-WebSocket server for real-time UI updates.
+FastAPI server with WebSocket support for Pulse UI.
 
-This module provides the WebSocket server that maintains persistent connections
-and handles UI tree updates from the Python backend to the React frontend.
+This module provides the main server that handles both HTTP and WebSocket connections
+for the Pulse UI system, including automatic route generation and callback handling.
 """
 
 import asyncio
 import json
 import logging
-from typing import Dict, List, Optional, Set
-import websockets
-from websockets.server import WebSocketServerProtocol
+import socket
+from typing import Dict, Any, Set
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 
-from .html import Route
+from .html import execute_callback, get_all_callbacks
+from .codegen import generate_all_routes
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class UITreeServer:
-    """
-    WebSocket server for managing UI tree updates.
-    
-    Maintains persistent connections across routes and handles real-time updates.
-    """
-    
-    def __init__(self, host: str = "localhost", port: int = 8080):
+def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:
+    """Find an available port starting from start_port."""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("localhost", port))
+                return port
+        except OSError:
+            continue
+    raise RuntimeError(
+        f"Could not find available port after {max_attempts} attempts starting from {start_port}"
+    )
+
+
+class PulseServer:
+    """FastAPI server with WebSocket support for Pulse UI."""
+
+    def __init__(self, host: str = "localhost", port: int = 8000):
+        self.app = FastAPI(title="Pulse UI Server")
         self.host = host
         self.port = port
-        self.clients: Set[WebSocketServerProtocol] = set()
-        self.routes: Dict[str, Route] = {}
-        
-    def register_route(self, route: Route):
-        """Register a route with the server."""
-        self.routes[route.path] = route
-        logger.info(f"Registered route: {route.path}")
-    
-    def register_routes(self, routes: List[Route]):
-        """Register multiple routes with the server."""
-        for route in routes:
-            self.register_route(route)
-    
-    async def register_client(self, websocket: WebSocketServerProtocol):
-        """Register a new WebSocket client."""
-        self.clients.add(websocket)
-        logger.info(f"Client connected. Total clients: {len(self.clients)}")
-    
-    async def unregister_client(self, websocket: WebSocketServerProtocol):
-        """Unregister a WebSocket client."""
-        self.clients.discard(websocket)
-        logger.info(f"Client disconnected. Total clients: {len(self.clients)}")
-    
-    async def send_to_client(self, websocket: WebSocketServerProtocol, message: Dict):
-        """Send a message to a specific client."""
+        self.connected_clients: Set[WebSocket] = set()
+
+        # Add CORS middleware
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        # Setup routes
+        self.setup_routes()
+
+    def setup_routes(self):
+        """Setup HTTP and WebSocket routes."""
+
+        @self.app.get("/")
+        async def health_check():
+            return {"status": "ok", "message": "Pulse UI Server is running"}
+
+        @self.app.get("/callbacks")
+        async def list_callbacks():
+            return {"callbacks": list(get_all_callbacks().keys())}
+
+        @self.app.websocket("/ws")
+        async def websocket_endpoint(websocket: WebSocket):
+            await self.handle_websocket(websocket)
+
+    async def handle_websocket(self, websocket: WebSocket):
+        """Handle WebSocket connections."""
+        await websocket.accept()
+        self.connected_clients.add(websocket)
+        logger.info(f"Client connected. Total clients: {len(self.connected_clients)}")
+
         try:
-            await websocket.send(json.dumps(message))
-        except websockets.exceptions.ConnectionClosed:
-            await self.unregister_client(websocket)
-    
-    async def broadcast(self, message: Dict):
-        """Broadcast a message to all connected clients."""
-        if not self.clients:
-            return
-        
-        # Send to all clients, removing any that are disconnected
-        disconnected = set()
-        for client in self.clients:
-            try:
-                await client.send(json.dumps(message))
-            except websockets.exceptions.ConnectionClosed:
-                disconnected.add(client)
-        
-        # Clean up disconnected clients
-        for client in disconnected:
-            await self.unregister_client(client)
-    
-    async def send_ui_update(self, updates: List[Dict]):
-        """Send UI tree updates to all clients."""
-        message = {
-            "type": "ui_updates",
-            "updates": updates
-        }
-        await self.broadcast(message)
-    
-    async def send_full_tree(self, tree: Dict, route_path: Optional[str] = None):
-        """Send a complete UI tree to clients."""
-        message = {
-            "type": "ui_tree",
-            "tree": tree,
-            "route": route_path
-        }
-        await self.broadcast(message)
-    
-    async def handle_client_message(self, websocket: WebSocketServerProtocol, message: str):
-        """Handle incoming messages from clients."""
+            while True:
+                data = await websocket.receive_text()
+                await self.process_message(websocket, data)
+        except WebSocketDisconnect:
+            self.connected_clients.discard(websocket)
+            logger.info(
+                f"Client disconnected. Total clients: {len(self.connected_clients)}"
+            )
+        except Exception as e:
+            logger.error(f"WebSocket error: {e}")
+            self.connected_clients.discard(websocket)
+
+    async def process_message(self, websocket: WebSocket, message: str):
+        """Process incoming WebSocket messages."""
+        logger.info(f"📥 Received WebSocket message: {message}")
         try:
             data = json.loads(message)
             message_type = data.get("type")
-            
-            if message_type == "route_change":
-                # Handle route change requests
-                route_path = data.get("path")
-                if route_path in self.routes:
-                    route = self.routes[route_path]
-                    # Re-render the route with current state
-                    from .html import to_ui_tree
-                    initial_element = route.render_func()
-                    ui_tree = to_ui_tree(initial_element)
-                    await self.send_to_client(websocket, {
-                        "type": "ui_tree",
-                        "tree": ui_tree,
-                        "route": route_path
-                    })
+            request_id = data.get("request_id")
+            logger.info(
+                f"📋 Parsed message type: {message_type}, request_id: {request_id}"
+            )
+
+            if message_type == "callback_invoke":
+                callback_key = data.get("callback_key")
+                if callback_key:
+                    logger.info(f"Executing callback: {callback_key}")
+                    success = execute_callback(callback_key)
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "callback_response",
+                                "request_id": request_id,
+                                "success": success,
+                                "callback_key": callback_key,
+                            }
+                        )
+                    )
                 else:
-                    await self.send_to_client(websocket, {
-                        "type": "error",
-                        "message": f"Route not found: {route_path}"
-                    })
-            
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "request_id": request_id,
+                                "message": "Missing callback_key",
+                            }
+                        )
+                    )
             elif message_type == "ping":
-                # Handle ping/pong for connection keep-alive
-                await self.send_to_client(websocket, {"type": "pong"})
-            
+                await websocket.send_text(
+                    json.dumps({"type": "pong", "request_id": request_id})
+                )
+            elif message_type == "get_callbacks":
+                callbacks_list = list(get_all_callbacks().keys())
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "callbacks_list",
+                            "request_id": request_id,
+                            "callbacks": callbacks_list,
+                        }
+                    )
+                )
             else:
-                logger.warning(f"Unknown message type: {message_type}")
-                
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "request_id": request_id,
+                            "message": f"Unknown message type: {message_type}",
+                        }
+                    )
+                )
         except json.JSONDecodeError:
-            logger.error(f"Invalid JSON received: {message}")
+            await websocket.send_text(
+                json.dumps({"type": "error", "message": "Invalid JSON format"})
+            )
         except Exception as e:
-            logger.error(f"Error handling client message: {e}")
-    
-    async def handle_client(self, websocket: WebSocketServerProtocol, path: str):
-        """Handle a WebSocket client connection."""
-        await self.register_client(websocket)
-        
-        try:
-            async for message in websocket:
-                await self.handle_client_message(websocket, message)
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        finally:
-            await self.unregister_client(websocket)
-    
-    async def start_server(self):
-        """Start the WebSocket server."""
-        logger.info(f"Starting WebSocket server on {self.host}:{self.port}")
-        
-        server = await websockets.serve(
-            self.handle_client,
-            self.host,
-            self.port,
-            ping_interval=20,
-            ping_timeout=10
+            logger.error(f"Error processing message: {e}")
+            await websocket.send_text(
+                json.dumps(
+                    {"type": "error", "request_id": request_id, "message": str(e)}
+                )
+            )
+
+    def generate_routes(self):
+        """Generate TypeScript files from Python routes."""
+        logger.info("Generating TypeScript routes...")
+        generate_all_routes(
+            host=self.host, port=self.port, clear_existing_callbacks=True
         )
-        
-        logger.info(f"WebSocket server running on ws://{self.host}:{self.port}")
-        return server
-    
-    def run(self):
-        """Run the server (blocking)."""
-        asyncio.run(self._run_forever())
-    
-    async def _run_forever(self):
-        """Internal method to run the server forever."""
-        server = await self.start_server()
-        await server.wait_closed()
+
+    def run(self, auto_generate: bool = True):
+        """Start the FastAPI server."""
+        if auto_generate:
+            self.generate_routes()
+
+        logger.info(f"🚀 Starting Pulse UI Server on http://{self.host}:{self.port}")
+        logger.info(f"🔌 WebSocket endpoint: ws://{self.host}:{self.port}/ws")
+
+        uvicorn.run(self.app, host=self.host, port=self.port, log_level="info")
 
 
-# Global server instance
-_server_instance: Optional[UITreeServer] = None
+def start_server(
+    host: str = "localhost",
+    port: int = 8000,
+    auto_generate: bool = True,
+    find_port: bool = True,
+):
+    """Start the Pulse UI FastAPI server."""
+    if find_port:
+        try:
+            available_port = find_available_port(port)
+            if available_port != port:
+                logger.info(f"Port {port} not available, using port {available_port}")
+            port = available_port
+        except RuntimeError as e:
+            logger.error(f"Failed to find available port: {e}")
+            raise
 
-
-def get_server() -> UITreeServer:
-    """Get the global server instance."""
-    global _server_instance
-    if _server_instance is None:
-        _server_instance = UITreeServer()
-    return _server_instance
-
-
-def start_server(routes: List[Route], host: str = "localhost", port: int = 8080):
-    """
-    Start the WebSocket server with the given routes.
-    
-    Args:
-        routes: List of Route objects to register
-        host: Host to bind to
-        port: Port to bind to
-    """
-    server = UITreeServer(host, port)
-    server.register_routes(routes)
-    server.run()
-
-
-if __name__ == "__main__":
-    # Example usage
-    from .html import define_react_component, define_route, div, h1, p
-    
-    # Define some React components
-    Counter = define_react_component("counter", "../ui-tree/demo-components", "Counter")
-    
-    # Define a route
-    @define_route("/ws-example", components=["counter"])
-    def ws_example_route():
-        return div()[
-            h1["WebSocket Example"],
-            p["This route demonstrates WebSocket connectivity"],
-            Counter(count=0, label="WebSocket Counter")
-        ]
-    
-    # Start server
-    start_server([ws_example_route])
+    server = PulseServer(host, port)
+    server.run(auto_generate=auto_generate)

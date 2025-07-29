@@ -1,4 +1,4 @@
-import React, { type ReactNode } from 'react';
+import React, { type ReactNode, useState } from 'react';
 
 export interface CounterProps {
   count?: number;
@@ -301,5 +301,66 @@ export function Button({
       {text}
       {children && <span className="ml-2">{children}</span>}
     </button>
+  );
+}
+
+export interface ColorBoxProps {
+  title?: string;
+  initialColor?: 'red' | 'blue' | 'green' | 'purple' | 'yellow';
+  children?: ReactNode;
+}
+
+export function ColorBox({ 
+  title = 'Stateful Color Box', 
+  initialColor = 'blue',
+  children 
+}: ColorBoxProps) {
+  const [currentColor, setCurrentColor] = useState(initialColor);
+
+  const colors = {
+    red: 'bg-red-100 border-red-300',
+    blue: 'bg-blue-100 border-blue-300', 
+    green: 'bg-green-100 border-green-300',
+    purple: 'bg-purple-100 border-purple-300',
+    yellow: 'bg-yellow-100 border-yellow-300'
+  };
+
+  const colorButtons = {
+    red: 'bg-red-500 hover:bg-red-600',
+    blue: 'bg-blue-500 hover:bg-blue-600',
+    green: 'bg-green-500 hover:bg-green-600', 
+    purple: 'bg-purple-500 hover:bg-purple-600',
+    yellow: 'bg-yellow-500 hover:bg-yellow-600'
+  };
+
+  return (
+    <div className={`border-2 rounded-lg p-4 transition-all duration-300 ${colors[currentColor]}`}>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
+        <div className="flex space-x-2">
+          {Object.keys(colors).map((color) => (
+            <button
+              key={color}
+              onClick={() => setCurrentColor(color as keyof typeof colors)}
+              className={`w-6 h-6 rounded-full transition-all ${colorButtons[color as keyof typeof colors]} ${
+                currentColor === color ? 'ring-2 ring-gray-800 ring-offset-2' : ''
+              }`}
+              title={`Switch to ${color}`}
+            />
+          ))}
+        </div>
+      </div>
+      
+      <div className="text-sm text-gray-700 mb-3">
+        Current color: <span className="font-medium capitalize">{currentColor}</span>
+      </div>
+      
+      {children && (
+        <div className="bg-white bg-opacity-50 rounded p-3 space-y-2">
+          <div className="text-sm font-medium text-gray-600">Server-rendered content:</div>
+          {children}
+        </div>
+      )}
+    </div>
   );
 }

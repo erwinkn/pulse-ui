@@ -1,16 +1,31 @@
+"""
+HTML library that generates UI tree nodes directly.
+
+This library provides a Python API for building UI trees that match
+the TypeScript UINode format exactly, eliminating the need for translation.
+"""
+
 from typing import (
-    Mapping,
-    NamedTuple,
-    Self,
-    overload,
+    Any,
+    Dict,
+    List,
+    Optional,
+    Callable,
+    Sequence,
     Union,
 )
+import random
 
 __all__ = [
     # Core types and functions
-    "HTMLElement",
+    "UITreeNode",
     "define_tag",
     "define_self_closing_tag",
+    # UI Tree integration
+    "ReactComponent",
+    "define_react_component",
+    "Route",
+    "define_route",
     # Standard tags
     "a",
     "abbr",
@@ -127,252 +142,245 @@ __all__ = [
 ]
 
 
-class HTMLElement(NamedTuple):
+# ============================================================================
+# Core UI Tree Node
+# ============================================================================
+
+
+class UITreeNode:
     """
-    A lightweight representation of an HTML node:
-      - tag: the element's tag name (e.g. "div", "span", "html")
-      - attributes: mapping of attribute name to its value
-      - children: other HTMLElements or string content
-      - render: the function responsible for converting the node to HTML
+    A UI tree node that matches the TypeScript UIElementNode format.
+    This directly generates the structure expected by the React frontend.
     """
 
-    tag: str
-    attributes: Mapping[str, str]
-    children: tuple[Self | str, ...]
-    whitespace_sensitive: bool = False
-    self_closing: bool = False
-
-    def __getitem__(self, children: Self | str | tuple[Self | str, ...]):
-        if self.self_closing:
-            raise ValueError("Self-closing tags cannot have children")
-        if len(self.children) > 0:
-            raise ValueError(f"Multiple calls with children for <{self.tag}>")
-
-        # Handle single child or tuple of children
-        if isinstance(children, (tuple, list)) and not isinstance(
-            children, HTMLElement
-        ):
-            child_tuple = tuple(children)
-        else:
-            child_tuple = (children,)
-
-        return HTMLElement(
-            self.tag,
-            self.attributes,
-            child_tuple,
-            self.whitespace_sensitive,
-            self.self_closing,
-        )
-
-    def __eq__(self, other):
-        if not isinstance(other, HTMLElement):
-            return False
-        return (
-            self.tag == other.tag
-            and self.attributes == other.attributes
-            and self.children == other.children
-            and self.whitespace_sensitive == other.whitespace_sensitive
-            and self.self_closing == other.self_closing
-        )
-
-    def __repr__(self):
-        return f"HTMLElement(tag={self.tag!r}, attributes={dict(self.attributes)!r}, children={self.children!r}, whitespace_sensitive={self.whitespace_sensitive}, self_closing={self.self_closing})"
-
-
-class HTMLElementEmpty(HTMLElement):
-    """HTMLElement without children - supports indexing and calling with children"""
+    def __init__(
+        self,
+        tag: str,
+        props: Dict[str, Any] | None = None,
+        children: Sequence["UITreeNode | str"] | None = None,
+        node_id: str | None = None,
+    ):
+        self.id = node_id or f"py_{random.randint(100000, 999999)}"
+        self.tag = tag
+        self.props = props or {}
+        self.children = children or []
 
     def __getitem__(
-        self, children: HTMLElement | str | tuple[HTMLElement | str, ...]
-    ) -> HTMLElement:
-        if self.self_closing:
-            raise ValueError("Self-closing tags cannot have children")
-        if len(self.children) > 0:
-            raise ValueError("Misconstructed HTMLEmptyElement contains children:", self)
+        self,
+        children_arg: Union["UITreeNode", str, tuple[Union["UITreeNode", str], ...]],
+    ):
+        """Support indexing syntax: div()[children] or div()["text"]"""
+        if self.children:
+            raise ValueError(f"Node already has children: {self.children}")
 
-        # Handle single child or tuple of children
-        if isinstance(children, (tuple, list)) and not isinstance(
-            children, HTMLElement
-        ):
-            child_tuple = tuple(children)
+        if isinstance(children_arg, (list, tuple)):
+            new_children = list(children_arg)
         else:
-            child_tuple = (children,)
+            new_children = [children_arg]
 
-        return HTMLElement(
-            self.tag,
-            self.attributes,
-            child_tuple,
-            self.whitespace_sensitive,
-            self.self_closing,
+        return UITreeNode(
+            tag=self.tag,
+            props=self.props.copy(),
+            children=new_children,
+            node_id=self.id,
         )
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary format for JSON serialization."""
+        return {
+            "id": self.id,
+            "tag": self.tag,
+            "props": self.props,
+            "children": [
+                child.to_dict() if isinstance(child, UITreeNode) else child
+                for child in self.children
+            ],
+        }
 
-def define_tag(
-    name: str,
-    default_attrs: dict[str, str] | None = None,
-    whitespace_sensitive: bool = False,
-):
+
+# ============================================================================
+# Tag Definition Functions
+# ============================================================================
+
+
+def define_tag(name: str, default_props: Dict[str, Any] | None = None):
     """
-    Defines a standard tag (non-self-closing) with optional default attributes.
-    If whitespace_sensitive=True, uses render_whitespace_sensitive_element;
-    otherwise uses render_element.
+    Define a standard HTML tag that creates UITreeNode instances.
 
-    The returned function can be called in these ways:
-    1. tag() -> HTMLElementEmpty (can use indexing syntax)
-    2. tag(**attrs) -> HTMLElementEmpty (can use indexing syntax)
-    3. tag(*children) -> HTMLElementWithChildren (indexing not allowed)
-    4. tag(**attrs)[children] -> HTMLElementWithChildren (indexing not allowed)
+    Args:
+        name: The tag name (e.g., "div", "span")
+        default_props: Default props to apply to all instances
+
+    Returns:
+        A function that creates UITreeNode instances
     """
+    default_props = default_props or {}
 
-    default_attrs = default_attrs or {}
-
-    @overload
-    def create_element() -> HTMLElementEmpty: ...
-
-    @overload
-    def create_element(**attrs: str) -> HTMLElementEmpty: ...
-
-    @overload
-    def create_element(*children: HTMLElement | str, **attrs) -> HTMLElement: ...
-
-    def create_element(
-        *children: HTMLElement | str, **attrs: str
-    ) -> Union[HTMLElementEmpty, HTMLElement]:
-        if children:
-            return HTMLElement(
-                tag=name,
-                attributes=default_attrs | attrs,
-                children=children,
-                whitespace_sensitive=whitespace_sensitive,
-            )
-        else:
-            return HTMLElementEmpty(
-                tag=name,
-                children=(),
-                attributes=default_attrs | attrs,
-                whitespace_sensitive=whitespace_sensitive,
-            )
+    def create_element(*children: Union[UITreeNode, str], **props: Any) -> UITreeNode:
+        """Create a UITreeNode for this tag."""
+        merged_props = {**default_props, **props}
+        return UITreeNode(
+            tag=name, props=merged_props, children=list(children) if children else []
+        )
 
     return create_element
 
 
-def define_self_closing_tag(name: str, default_attrs: dict[str, str] | None = None):
+def define_self_closing_tag(name: str, default_props: Dict[str, Any] | None = None):
     """
-    Defines a self-closing tag (e.g. <br />, <img />, <meta />, etc.)
-    Self-closing tags cannot have children and do not support indexing.
-    """
-    default_attrs = default_attrs or {}
+    Define a self-closing HTML tag that creates UITreeNode instances.
 
-    # Self-closing tags cannot have children
-    def create_element(**attrs: str) -> HTMLElement:
-        return HTMLElement(
+    Args:
+        name: The tag name (e.g., "br", "img")
+        default_props: Default props to apply to all instances
+
+    Returns:
+        A function that creates UITreeNode instances (no children allowed)
+    """
+    default_props = default_props or {}
+
+    def create_element(**props: Any) -> UITreeNode:
+        """Create a self-closing UITreeNode for this tag."""
+        merged_props = {**default_props, **props}
+        return UITreeNode(
             tag=name,
-            attributes=default_attrs | attrs,
-            children=(),
-            self_closing=True,
-            whitespace_sensitive=False,
+            props=merged_props,
+            children=[],  # Self-closing tags never have children
         )
 
     return create_element
 
 
-def render(
-    elt: HTMLElement,
-    indent: int = 2,
-    level: int = 0,
-) -> str:
-    """Render the element with optional indentation."""
-    lines: list[str] = []
-    _render_into(elt, lines, " " * indent, level)
-    separator = "\n" if indent > 0 else ""
-    return separator.join(lines)
+# ============================================================================
+# React Component Integration
+# ============================================================================
 
 
-def _render_into(elt: HTMLElement, lines: list[str], indent: str = " ", level: int = 0):
-    offset = indent * level
+class ReactComponent:
+    """
+    Represents a React component that can be imported and used in the UI tree.
+    """
 
-    # Add doctype for html tag
-    if elt.tag == "html":
-        lines.append(offset + "<!DOCTYPE html>")
-
-    open_tag = _build_open_tag(elt)
-
-    # Handle self-closing tags
-    if elt.self_closing:
-        lines.append(offset + open_tag)
-        return
-
-    closing_tag = f"</{elt.tag}>"
-    # If no children, render everything onto a single line
-    if len(elt.children) == 0:
-        lines.append(offset + open_tag + closing_tag)
-        return
-
-    # For whitespace-sensitive tags, render everything onto a single "line"
-    # (may contain newline symbols, but won't get indented etc...)
-    if elt.whitespace_sensitive:
-        content = _render_children_inline(elt)
-        lines.append(offset + open_tag + content + closing_tag)
-    # Regular case: render with indentation
-    else:
-        # Handle multiline cases
-        lines.append(offset + open_tag)
-        _render_children_into(elt, lines, indent, level + 1)
-        lines.append(offset + closing_tag)
+    def __init__(
+        self,
+        component_key: str,
+        import_path: str,
+        export_name: str = "default",
+        is_default_export: bool = True,
+    ):
+        self.component_key = component_key
+        self.import_path = import_path
+        self.export_name = export_name
+        self.is_default_export = is_default_export
 
 
-def _build_open_tag(elt: HTMLElement) -> str:
-    """Build the opening tag with attributes."""
-    tag = f"<{elt.tag}"
-    for key, val in elt.attributes.items():
-        key = attrs_map.get(key, key)
-        key = key.replace("_", "-")
-        tag += f' {key}="{_escape(val)}"'
-    tag += " />" if elt.self_closing else ">"
-    return tag
+def define_react_component(
+    component_key: str,
+    import_path: str,
+    export_name: str = "default",
+    is_default_export: bool = True,
+) -> Callable[..., UITreeNode]:
+    """
+    Define a React component that can be used within the UI tree.
+    Returns a function that creates mount point UITreeNode instances.
 
+    Args:
+        component_key: Unique key for the component registry
+        import_path: Path to import the component from
+        export_name: Name of the export (use "default" for default exports)
+        is_default_export: Whether this is a default export
 
-def _render_children_inline(elt: HTMLElement) -> str:
-    """Render children without newlines for whitespace sensitive elements."""
-    parts = []
-    for child in elt.children:
-        if isinstance(child, str):
-            parts.append(_escape(child))
-        else:
-            _render_into(child, parts, "", 0)
-    return "".join(parts)
-
-
-def _render_children_into(elt: HTMLElement, lines: list[str], indent: str, level: int):
-    """Render children with proper indentation."""
-    for child in elt.children:
-        if isinstance(child, str):
-            lines.append((indent * level) + _escape(child))
-        else:
-            _render_into(child, lines, indent, level)
-
-
-# If you want to map special attribute names (like 'classname' -> 'class')
-attrs_map = {"classname": "class", "class_": "class"}
-
-
-# A small utility for escaping special HTML characters.
-# If you need to allow "safe" content, you can skip escaping for those strings.
-def _escape(text: str) -> str:
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#x27;")
+    Returns:
+        A function that creates UITreeNode instances with mount point tags
+    """
+    component = ReactComponent(
+        component_key, import_path, export_name, is_default_export
     )
 
+    # Store the component definition globally for later retrieval
+    if not hasattr(define_react_component, "_components"):
+        define_react_component._components = {}
+    define_react_component._components[component_key] = component
 
-# Example usage: define an <html> tag that automatically prepends a <!DOCTYPE html>.
-# (As in the old library, this is a normal tag, not self-closing.)
-html = define_tag("html")
+    def create_mount_point(
+        *children: Union[UITreeNode, str], **props: Any
+    ) -> UITreeNode:
+        """Create a mount point UITreeNode for this React component."""
+        return UITreeNode(
+            tag=f"$${component_key}",
+            props=props,
+            children=list(children) if children else [],
+        )
 
-# Standard HTML tags
+    return create_mount_point
+
+
+def get_registered_components() -> Dict[str, ReactComponent]:
+    """Get all registered React components."""
+    if not hasattr(define_react_component, "_components"):
+        return {}
+    return define_react_component._components.copy()
+
+
+# ============================================================================
+# Route Definition
+# ============================================================================
+
+
+class Route:
+    """
+    Represents a route definition with its component dependencies.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        render_func: Callable[[], UITreeNode],
+        components: List[ReactComponent],
+    ):
+        self.path = path
+        self.render_func = render_func
+        self.components = components
+
+
+def define_route(
+    path: str, components: List[str] | None = None
+) -> Callable[[Callable[[], UITreeNode]], Route]:
+    """
+    Decorator to define a route with its component dependencies.
+
+    Args:
+        path: URL path for the route
+        components: List of component keys used by this route
+
+    Returns:
+        Decorator function
+    """
+
+    def decorator(render_func: Callable[[], UITreeNode]) -> Route:
+        # Get the actual ReactComponent objects for the component keys
+        all_components = get_registered_components()
+        route_components = []
+
+        if components:
+            for component_key in components:
+                if component_key in all_components:
+                    route_components.append(all_components[component_key])
+                else:
+                    raise ValueError(
+                        f"Component '{component_key}' not found. Make sure to define it before using in routes."
+                    )
+
+        return Route(path, render_func, route_components)
+
+    return decorator
+
+
+# ============================================================================
+# Standard HTML Tags
+# ============================================================================
+
+# Regular tags
 a = define_tag("a")
 abbr = define_tag("abbr")
 address = define_tag("address")
@@ -388,7 +396,7 @@ button = define_tag("button")
 canvas = define_tag("canvas")
 caption = define_tag("caption")
 cite = define_tag("cite")
-code = define_tag("code", whitespace_sensitive=True)
+code = define_tag("code")
 colgroup = define_tag("colgroup")
 data = define_tag("data")
 datalist = define_tag("datalist")
@@ -405,7 +413,7 @@ fieldset = define_tag("fieldset")
 figcaption = define_tag("figcaption")
 figure = define_tag("figure")
 footer = define_tag("footer")
-form = define_tag("form", default_attrs={"method": "POST"})
+form = define_tag("form", {"method": "POST"})
 h1 = define_tag("h1")
 h2 = define_tag("h2")
 h3 = define_tag("h3")
@@ -415,6 +423,7 @@ h6 = define_tag("h6")
 head = define_tag("head")
 header = define_tag("header")
 hgroup = define_tag("hgroup")
+html = define_tag("html")
 i = define_tag("i")
 iframe = define_tag("iframe")
 ins = define_tag("ins")
@@ -436,7 +445,7 @@ option = define_tag("option")
 output = define_tag("output")
 p = define_tag("p")
 picture = define_tag("picture")
-pre = define_tag("pre", whitespace_sensitive=True)
+pre = define_tag("pre")
 progress = define_tag("progress")
 q = define_tag("q")
 rp = define_tag("rp")
@@ -444,13 +453,13 @@ rt = define_tag("rt")
 ruby = define_tag("ruby")
 s = define_tag("s")
 samp = define_tag("samp")
-script = define_tag("script", default_attrs={"type": "text/javascript"})
+script = define_tag("script", {"type": "text/javascript"})
 section = define_tag("section")
 select = define_tag("select")
 small = define_tag("small")
 span = define_tag("span")
 strong = define_tag("strong")
-style = define_tag("style", default_attrs={"type": "text/css"})
+style = define_tag("style", {"type": "text/css"})
 sub = define_tag("sub")
 summary = define_tag("summary")
 sup = define_tag("sup")
@@ -458,7 +467,7 @@ table = define_tag("table")
 tbody = define_tag("tbody")
 td = define_tag("td")
 template = define_tag("template")
-textarea = define_tag("textarea", whitespace_sensitive=True)
+textarea = define_tag("textarea")
 tfoot = define_tag("tfoot")
 th = define_tag("th")
 thead = define_tag("thead")
@@ -487,17 +496,18 @@ track = define_self_closing_tag("track")
 wbr = define_self_closing_tag("wbr")
 
 
+# ============================================================================
+# Testing
+# ============================================================================
+
 if __name__ == "__main__":
-    print(render(div()))
-    # code_block = pre(
-    #     code("""def hello():
-    # print("Hello, world!")
-    # return 42""")
-    # )
-    # expected = (
-    #     "<pre><code>def hello():\n"
-    #     '    print(&quot;Hello, world!&quot;)\n'
-    #     "    return 42</code></pre>"
-    # )
-    # print(code_block.render())
-    # assert code_block.render(indent=2) == expected
+    # Test the direct UI tree generation
+    test_node = div(className="container")[
+        h1()["Test Title"],
+        p()["This is a test paragraph."],
+        button(onClick="alert('clicked!')")["Click Me"],
+    ]
+
+    import json
+
+    print(json.dumps(test_node.to_dict(), indent=2))

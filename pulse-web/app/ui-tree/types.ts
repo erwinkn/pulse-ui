@@ -9,8 +9,15 @@ export interface UIElementNode {
   key?: string;
 }
 
-// UINode is either a string (for text) or an element/fragment node
-export type UINode = string | UIElementNode;
+export interface UIMountPointNode {
+  id: string;
+  componentKey: string;
+  props: Record<string, any>;
+  key?: string;
+}
+
+// UINode is either a string (for text), an element/fragment node, or a mount point
+export type UINode = string | UIElementNode | UIMountPointNode;
 
 export type UITree = UINode;
 
@@ -55,9 +62,13 @@ export interface UpdatePropsUpdate extends UIUpdate {
 
 export type UIUpdatePayload = InsertUpdate | RemoveUpdate | ReplaceUpdate | UpdatePropsUpdate;
 
-// Utility functions for working with the simplified structure
+// Utility functions for working with the UI tree structure
 export function isElementNode(node: UINode): node is UIElementNode {
-  return typeof node === 'object' && node !== null;
+  return typeof node === 'object' && node !== null && 'tag' in node;
+}
+
+export function isMountPointNode(node: UINode): node is UIMountPointNode {
+  return typeof node === 'object' && node !== null && 'componentKey' in node;
 }
 
 export function isTextNode(node: UINode): node is string {
@@ -92,5 +103,16 @@ export function createFragment(children: UINode[] = []): UIElementNode {
     tag: FRAGMENT_TAG,
     props: {},
     children,
+  };
+}
+
+export function createMountPoint(
+  componentKey: string,
+  props: Record<string, any> = {}
+): UIMountPointNode {
+  return {
+    id: Math.random().toString(36),
+    componentKey,
+    props,
   };
 }

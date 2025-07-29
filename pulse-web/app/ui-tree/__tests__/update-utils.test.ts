@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { findNodeByPath, findParentByPath, applyUpdate, applyUpdates } from '../update-utils';
-import type { UINode, UIElementNode, UIUpdatePayload } from '../types';
-import { createElementNode, createFragment, isElementNode, isTextNode } from '../types';
+import type { UINode, UIElementNode, UIMountPointNode, UIUpdatePayload } from '../types';
+import { createElementNode, createFragment, createMountPoint, isElementNode, isTextNode, isMountPointNode } from '../types';
 
 describe('update-utils', () => {
   describe('findNodeByPath', () => {
@@ -41,6 +41,22 @@ describe('update-utils', () => {
       const result = findNodeByPath(root, [0, 0]);
       expect(result).toBeNull();
     });
+
+    it('should find mount point node by path', () => {
+      const mountPoint = createMountPoint('counter', { count: 5 });
+      const root = createElementNode('div', {}, [mountPoint]);
+      
+      const result = findNodeByPath(root, [0]);
+      expect(result).toBe(mountPoint);
+      expect(isMountPointNode(result!)).toBe(true);
+    });
+
+    it('should return null when trying to traverse into mount point node', () => {
+      const mountPoint = createMountPoint('counter', { count: 5 });
+      const root = createElementNode('div', {}, [mountPoint]);
+      const result = findNodeByPath(root, [0, 0]);
+      expect(result).toBeNull();
+    });
   });
 
   describe('findParentByPath', () => {
@@ -62,6 +78,15 @@ describe('update-utils', () => {
     it('should work with fragment nodes', () => {
       const fragment = createFragment(['Hello', 'World']);
       const root = createElementNode('div', {}, [fragment]);
+      
+      const result = findParentByPath(root, [0]);
+      expect(result?.parent).toBe(root);
+      expect(result?.index).toBe(0);
+    });
+
+    it('should work with mount point nodes', () => {
+      const mountPoint = createMountPoint('counter', { count: 5 });
+      const root = createElementNode('div', {}, [mountPoint]);
       
       const result = findParentByPath(root, [0]);
       expect(result?.parent).toBe(root);
@@ -167,6 +192,57 @@ describe('update-utils', () => {
 
       const result = applyUpdate(root, update);
       expect((result as UIElementNode).props).toEqual({ className: 'new', id: 'test' });
+    });
+
+    it('should insert mount point node at specified index', () => {
+      const existingChild = 'Existing';
+      const root = createElementNode('div', {}, [existingChild]);
+      const mountPoint = createMountPoint('counter', { count: 5 });
+
+      const update: UIUpdatePayload = {
+        id: 'test-update',
+        type: 'insert',
+        path: [],
+        data: { node: mountPoint, index: 0 }
+      };
+
+      const result = applyUpdate(root, update);
+      expect((result as UIElementNode).children).toHaveLength(2);
+      expect((result as UIElementNode).children[0]).toEqual(mountPoint);
+      expect((result as UIElementNode).children[1]).toBe('Existing');
+    });
+
+    it('should replace text node with mount point node', () => {
+      const oldChild = 'Old';
+      const root = createElementNode('div', {}, [oldChild]);
+      const mountPoint = createMountPoint('counter', { count: 5 });
+
+      const update: UIUpdatePayload = {
+        id: 'test-update',
+        type: 'replace',
+        path: [0],
+        data: { node: mountPoint }
+      };
+
+      const result = applyUpdate(root, update);
+      expect((result as UIElementNode).children[0]).toEqual(mountPoint);
+    });
+
+    it('should update mount point props', () => {
+      const mountPoint = createMountPoint('counter', { count: 5, color: 'blue' });
+      const root = createElementNode('div', {}, [mountPoint]);
+
+      const update: UIUpdatePayload = {
+        id: 'test-update',
+        type: 'update_props',
+        path: [0],
+        data: { props: { count: 10, color: 'red', size: 'large' } }
+      };
+
+      const result = applyUpdate(root, update);
+      const updatedMountPoint = (result as UIElementNode).children[0] as UIMountPointNode;
+      expect(updatedMountPoint.props).toEqual({ count: 10, color: 'red', size: 'large' });
+      expect(updatedMountPoint.componentKey).toBe('counter');
     });
 
     it('should work with fragments', () => {

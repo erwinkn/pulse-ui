@@ -1,5 +1,28 @@
-import type { UINode, UIElementNode, UIUpdatePayload } from './types';
-import { isElementNode, isTextNode } from './types';
+import type { UINode, UIElementNode, UIMountPointNode, UIUpdatePayload } from './types';
+import { isElementNode, isTextNode, isMountPointNode } from './types';
+
+function cloneUINode(node: UINode): UINode {
+  if (isTextNode(node)) {
+    return node; // strings are immutable, no need to clone
+  }
+
+  if (isElementNode(node)) {
+    return {
+      ...node,
+      props: { ...node.props },
+      children: node.children.map(cloneUINode)
+    };
+  }
+
+  if (isMountPointNode(node)) {
+    return {
+      ...node,
+      props: { ...node.props }
+    };
+  }
+
+  return node;
+}
 
 export function findNodeByPath(tree: UINode, path: number[]): UINode | null {
   let current = tree;
@@ -12,7 +35,7 @@ export function findNodeByPath(tree: UINode, path: number[]): UINode | null {
       }
       current = current.children[index];
     } else {
-      // Text nodes don't have children, so path is invalid
+      // Text nodes and mount points don't have children, so path is invalid
       return null;
     }
   }
@@ -36,7 +59,7 @@ export function findParentByPath(tree: UINode, path: number[]): { parent: UIElem
 }
 
 export function applyUpdate(tree: UINode, update: UIUpdatePayload): UINode {
-  const clonedTree = structuredClone(tree);
+  const clonedTree = cloneUINode(tree);
   
   switch (update.type) {
     case 'insert': {
@@ -67,7 +90,7 @@ export function applyUpdate(tree: UINode, update: UIUpdatePayload): UINode {
     
     case 'update_props': {
       const node = findNodeByPath(clonedTree, update.path);
-      if (node && isElementNode(node)) {
+      if (node && (isElementNode(node) || isMountPointNode(node))) {
         node.props = { ...node.props, ...update.data.props };
       }
       break;

@@ -2,6 +2,7 @@ import pytest
 from pulse.html import (
     html,
     head,
+    render,
     title,
     body,
     div,
@@ -15,9 +16,6 @@ from pulse.html import (
     code,
     style,
     form,
-    input,
-    textarea,
-    link,
     meta,
     strong,
 )
@@ -29,26 +27,26 @@ def indent(text: str, spaces: int):
 
 def test_basic_tags():
     """Test basic tag rendering without attributes"""
-    assert div().render() == "<div></div>"
-    assert p().render() == "<p></p>"
-    assert span().render() == "<span></span>"
+    assert render(div()) == "<div></div>"
+    assert render(p()) == "<p></p>"
+    assert render(span()) == "<span></span>"
 
 
 def test_self_closing_tags():
     """Test self-closing tags render correctly"""
-    assert br().render() == "<br />"
-    assert img().render() == "<img />"
-    assert meta().render() == "<meta />"
+    assert render(br()) == "<br />"
+    assert render(img()) == "<img />"
+    assert render(meta()) == "<meta />"
 
 
 def test_attributes():
     """Test tags with attributes"""
-    assert div(classname="container").render() == '<div class="container"></div>'
+    assert render(div(classname="container")) == '<div class="container"></div>'
     assert (
-        a(href="https://example.com").render() == '<a href="https://example.com"></a>'
+        render(a(href="https://example.com")) == '<a href="https://example.com"></a>'
     )
     assert (
-        img(src="/img.jpg", alt="An image").render()
+        render(img(src="/img.jpg", alt="An image"))
         == '<img src="/img.jpg" alt="An image" />'
     )
 
@@ -77,7 +75,7 @@ def test_nested_elements():
             "</html>",
         ]
     )
-    assert doc.render() == expected
+    assert render(doc) == expected
 
 
 def test_whitespace_sensitive():
@@ -92,27 +90,27 @@ def test_whitespace_sensitive():
         "    print(&quot;Hello, world!&quot;)\n"
         "    return 42</code></pre>"
     )
-    assert code_block.render(indent=2) == expected
+    assert render(code_block, indent=2) == expected
 
 
 def test_default_attributes():
     """Test tags with default attributes"""
-    assert script().render() == '<script type="text/javascript"></script>'
-    assert style().render() == '<style type="text/css"></style>'
-    assert form().render() == '<form method="POST"></form>'
+    assert render(script()) == '<script type="text/javascript"></script>'
+    assert render(style()) == '<style type="text/css"></style>'
+    assert render(form()) == '<form method="POST"></form>'
 
 
 def test_attribute_escaping():
     """Test proper escaping of attribute values"""
     assert (
-        div(data_value="<>\"'&").render()
+        render(div(data_value="<>\"'&"))
         == '<div data-value="&lt;&gt;&quot;&#x27;&amp;"></div>'
     )
 
 
 def test_content_escaping():
     """Test proper escaping of content"""
-    assert p('<script>alert("xss")</script>').render() == "\n".join(
+    assert render(p('<script>alert("xss")</script>')) == "\n".join(
         [
             "<p>",
             indent("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;", 2),
@@ -135,7 +133,7 @@ def test_mixed_content():
             "</p>",
         ]
     )
-    assert doc.render() == expected
+    assert render(doc) == expected
 
 
 def test_indexing_syntax():
@@ -149,7 +147,7 @@ def test_indexing_syntax():
         indent("</p>", 2),
         "</div>",
     ])
-    assert element.render() == expected
+    assert render(element) == expected
 
     # Indexing with multiple children using tuple
     element = div(id='container')[p("First"), p("Second")]
@@ -163,7 +161,7 @@ def test_indexing_syntax():
         indent("</p>", 2),
         "</div>",
     ])
-    assert element.render() == expected
+    assert render(element) == expected
 
     # Mixed content with indexing
     element = div(class_='content')["Text ", strong("bold"), " more text"]
@@ -176,7 +174,7 @@ def test_indexing_syntax():
         indent(" more text", 2),
         "</div>",
     ])
-    assert element.render() == expected
+    assert render(element) == expected
 
 
 def test_invalid_usage():

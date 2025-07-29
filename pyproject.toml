@@ -8,5 +8,10 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "mypy>=1.17.0",
     "pytest>=8.3.4",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

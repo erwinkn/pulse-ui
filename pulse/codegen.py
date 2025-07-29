@@ -154,7 +154,7 @@ def generate_all_routes(
         int: Number of routes generated
     """
     import logging
-    from .route import get_all_routes
+    from .route import decorated_routes
     from .nodes import clear_callbacks
 
     logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ def generate_all_routes(
     if clear_existing_callbacks:
         clear_callbacks()
 
-    routes = get_all_routes()
+    routes = decorated_routes()
     write_generated_files(routes, output_dir, host, port)
 
     if routes:

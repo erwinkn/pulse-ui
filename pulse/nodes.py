@@ -30,10 +30,7 @@ __all__ = [
     "prepare_ui_response",
     # UI Tree integration
     "ReactComponent",
-    "define_react_component",
-    # Route system
-    "Route",
-    "define_route",
+    "ReactComponent",
     # Standard tags
     "a",
     "abbr",
@@ -379,32 +376,12 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
 # ============================================================================
 
 
+COMPONENT_REGISTRY: "dict[str, ReactComponent]" = {}
+
+
 class ReactComponent:
     """
-    Represents a React component that can be imported and used in the UI tree.
-    """
-
-    def __init__(
-        self,
-        component_key: str,
-        import_path: str,
-        export_name: str = "default",
-        is_default_export: bool = True,
-    ):
-        self.component_key = component_key
-        self.import_path = import_path
-        self.export_name = export_name
-        self.is_default_export = is_default_export
-
-
-def define_react_component(
-    component_key: str,
-    import_path: str,
-    export_name: str = "default",
-    is_default_export: bool = True,
-) -> Callable[..., UITreeNode]:
-    """
-    Define a React component that can be used within the UI tree.
+    A React component that can be used within the UI tree.
     Returns a function that creates mount point UITreeNode instances.
 
     Args:
@@ -416,31 +393,33 @@ def define_react_component(
     Returns:
         A function that creates UITreeNode instances with mount point tags
     """
-    component = ReactComponent(
-        component_key, import_path, export_name, is_default_export
-    )
 
-    # Store the component definition globally for later retrieval
-    if not hasattr(define_react_component, "_components"):
-        define_react_component._components = {}
-    define_react_component._components[component_key] = component
+    def __init__(
+        self,
+        component_key: str,
+        import_path: str,
+        export_name: str = "default",
+        is_default_export: bool = True,
+    ):
+        if component_key in COMPONENT_REGISTRY:
+            raise ValueError(f"Duplicate component key {component_key}")
+        self.component_key = component_key
+        self.import_path = import_path
+        self.export_name = export_name
+        self.is_default_export = is_default_export
+        COMPONENT_REGISTRY[component_key] = self
 
-    def create_mount_point(*children: NodeChild, **props: Any) -> UITreeNode:
-        """Create a mount point UITreeNode for this React component."""
+    def __call__(self, *children: NodeChild, **props) -> UITreeNode:
         return UITreeNode(
-            tag=f"$${component_key}",
+            tag=f"$${self.component_key}",
             props=props,
             children=list(children) if children else [],
         )
 
-    return create_mount_point
 
-
-def get_registered_components() -> dict[str, ReactComponent]:
+def react_component_registry() -> dict[str, ReactComponent]:
     """Get all registered React components."""
-    if not hasattr(define_react_component, "_components"):
-        return {}
-    return define_react_component._components.copy()
+    return COMPONENT_REGISTRY.copy()
 
 
 # ============================================================================
@@ -561,23 +540,3 @@ param = define_self_closing_tag("param")
 source = define_self_closing_tag("source")
 track = define_self_closing_tag("track")
 wbr = define_self_closing_tag("wbr")
-
-
-# ============================================================================
-# Testing
-# ============================================================================
-
-# Import route-related functionality to make it available from this module
-from .route import Route, define_route
-
-if __name__ == "__main__":
-    # Test the direct UI tree generation
-    test_node = div(className="container")[
-        h1()["Test Title"],
-        p()["This is a test paragraph."],
-        button(onClick="alert('clicked!')")["Click Me"],
-    ]
-
-    import json
-
-    print(json.dumps(test_node.to_dict(), indent=2))

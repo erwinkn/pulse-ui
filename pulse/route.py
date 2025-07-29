@@ -1,5 +1,5 @@
 from typing import Callable
-from .nodes import ReactComponent, UITreeNode, get_registered_components
+from .nodes import ReactComponent, UITreeNode
 
 
 class Route:
@@ -18,8 +18,8 @@ class Route:
         self.components = components
 
 
-def define_route(
-    path: str, components: list[str] | None = None
+def route(
+    path: str, components: list[ReactComponent] | None = None
 ) -> Callable[[Callable[[], UITreeNode]], Route]:
     """
     Decorator to define a route with its component dependencies.
@@ -33,40 +33,28 @@ def define_route(
     """
 
     def decorator(render_func: Callable[[], UITreeNode]) -> Route:
-        # Get the actual ReactComponent objects for the component keys
-        all_components = get_registered_components()
-        route_components = []
-
-        if components:
-            for component_key in components:
-                if component_key in all_components:
-                    route_components.append(all_components[component_key])
-                else:
-                    raise ValueError(
-                        f"Component '{component_key}' not found. Make sure to define it before using in routes."
-                    )
-
-        route = Route(path, render_func, route_components)
-        
-        register_route(route)
-        
+        route = Route(path, render_func, components=components or [])
+        add_route(route)
         return route
 
     return decorator
 
 
 # Global registry for routes
-_routes: list[Route] = []
+ROUTES: list[Route] = []
 
-def register_route(route: Route):
+
+def add_route(route: Route):
     """Register a route in the global registry"""
-    _routes.append(route)
+    ROUTES.append(route)
 
-def get_all_routes() -> list[Route]:
+
+def decorated_routes() -> list[Route]:
     """Get all registered routes"""
-    return _routes.copy()
+    return ROUTES.copy()
+
 
 def clear_routes():
     """Clear all registered routes"""
-    global _routes
-    _routes = []
+    global ROUTES
+    ROUTES = []

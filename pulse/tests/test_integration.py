@@ -6,26 +6,25 @@ through TypeScript code generation and React component integration.
 """
 
 import pytest
-import json
 import tempfile
 import os
 from pathlib import Path
 from pulse.nodes import (
-    define_react_component,
-    get_registered_components,
+    COMPONENT_REGISTRY,
+    ReactComponent,
+    react_component_registry,
     div,
     h1,
     h2,
     h3,
     p,
-    button,
     ul,
     li,
     span,
     strong,
     article,
 )
-from pulse.route import define_route
+from pulse.route import route
 from pulse.codegen import write_generated_files
 
 
@@ -34,26 +33,19 @@ class TestFullPipeline:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(define_react_component, "_components"):
-            define_react_component._components.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_simple_app_generation(self):
         """Test generating a simple app with multiple routes."""
         self.setUp()
 
         # Define React components
-        Header = define_react_component(
-            "header", "./components/Header", "Header", False
-        )
-        Footer = define_react_component(
-            "footer", "./components/Footer", "Footer", False
-        )
-        Button = define_react_component(
-            "button", "./components/Button", "Button", False
-        )
+        Header = ReactComponent("header", "./components/Header", "Header", False)
+        Footer = ReactComponent("footer", "./components/Footer", "Footer", False)
+        Button = ReactComponent("button", "./components/Button", "Button", False)
 
         # Define routes
-        @define_route("/", components=[])
+        @route("/", components=[])
         def home_route():
             return div(className="home")[
                 h1()["Welcome to Pulse UI"],
@@ -61,7 +53,7 @@ class TestFullPipeline:
                 p()["Navigate to other pages to see React components in action."],
             ]
 
-        @define_route("/about", components=["header", "footer"])
+        @route("/about", components=[Header, Footer])
         def about_route():
             return div(className="page")[
                 Header(title="About Page"),
@@ -75,7 +67,7 @@ class TestFullPipeline:
                 Footer(year=2024, company="Pulse UI"),
             ]
 
-        @define_route("/interactive", components=["button"])
+        @route("/interactive", components=[Button])
         def interactive_route():
             return div(className="interactive")[
                 h1()["Interactive Demo"],
@@ -141,16 +133,14 @@ class TestFullPipeline:
         self.setUp()
 
         # Define React components
-        Layout = define_react_component("layout", "./Layout", "Layout", False)
-        Card = define_react_component("card", "./Card", "Card", False)
-        Counter = define_react_component("counter", "./Counter", "Counter", False)
-        UserProfile = define_react_component(
+        Layout = ReactComponent("layout", "./Layout", "Layout", False)
+        Card = ReactComponent("card", "./Card", "Card", False)
+        Counter = ReactComponent("counter", "./Counter", "Counter", False)
+        UserProfile = ReactComponent(
             "user-profile", "./UserProfile", "UserProfile", False
         )
 
-        @define_route(
-            "/dashboard", components=["layout", "card", "counter", "user-profile"]
-        )
+        @route("/dashboard", components=[Layout, Card, Counter, UserProfile])
         def dashboard_route():
             return Layout(title="Dashboard", sidebar=True)[
                 div(className="dashboard-grid")[
@@ -218,12 +208,12 @@ class TestFullPipeline:
         """Test generating routes with dynamic Python content."""
         self.setUp()
 
-        ListItem = define_react_component("list-item", "./ListItem", "ListItem", False)
-        ProductCard = define_react_component(
+        ListItem = ReactComponent("list-item", "./ListItem", "ListItem", False)
+        ProductCard = ReactComponent(
             "product-card", "./ProductCard", "ProductCard", False
         )
 
-        @define_route("/products", components=["list-item", "product-card"])
+        @route("/products", components=[ListItem, ProductCard])
         def products_route():
             # Simulate fetching data
             categories = ["Electronics", "Clothing", "Books", "Home & Garden"]
@@ -290,30 +280,30 @@ class TestComponentRegistryIntegration:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(define_react_component, "_components"):
-            define_react_component._components.clear()
+        if hasattr(ReactComponent, "_components"):
+            COMPONENT_REGISTRY.clear()
 
     def test_component_registry_consistency(self):
         """Test that component registry is consistent across routes."""
         self.setUp()
 
         # Define components
-        Header = define_react_component("header", "./Header", "Header", False)
-        Button = define_react_component("button", "./Button", "Button", False)
-        Card = define_react_component("card", "./Card", "Card", False)
+        Header = ReactComponent("header", "./Header", "Header", False)
+        Button = ReactComponent("button", "./Button", "Button", False)
+        Card = ReactComponent("card", "./Card", "Card", False)
 
         # Verify components are registered
-        registry = get_registered_components()
+        registry = react_component_registry()
         assert len(registry) == 3
         assert "header" in registry
         assert "button" in registry
         assert "card" in registry
 
-        @define_route("/page1", components=["header", "button"])
+        @route("/page1", components=[Header, Button])
         def page1():
             return div()[Header(), Button()]
 
-        @define_route("/page2", components=["card", "button"])
+        @route("/page2", components=[Card, Button])
         def page2():
             return div()[Card(), Button()]
 
@@ -345,9 +335,9 @@ class TestComponentRegistryIntegration:
         """Test that component props are properly serialized."""
         self.setUp()
 
-        DataComponent = define_react_component("data", "./Data", "Data", False)
+        DataComponent = ReactComponent("data", "./Data", "Data", False)
 
-        @define_route("/data-test", components=["data"])
+        @route("/data-test", components=[DataComponent])
         def data_route():
             return div()[
                 DataComponent(
@@ -388,28 +378,18 @@ class TestErrorHandling:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(define_react_component, "_components"):
-            define_react_component._components.clear()
-
-    def test_missing_component_error(self):
-        """Test error when route references non-existent component."""
-        self.setUp()
-
-        with pytest.raises(ValueError, match="Component 'nonexistent' not found"):
-
-            @define_route("/bad-route", components=["nonexistent"])
-            def bad_route():
-                return div()["This should fail"]
+        if hasattr(ReactComponent, "_components"):
+            COMPONENT_REGISTRY.clear()
 
     def test_partial_component_usage(self):
         """Test route that defines components but doesn't use all of them."""
         self.setUp()
 
         # This is actually allowed - route can define more components than it uses
-        Button = define_react_component("button", "./Button", "Button", False)
-        Modal = define_react_component("modal", "./Modal", "Modal", False)
+        Button = ReactComponent("button", "./Button", "Button", False)
+        Modal = ReactComponent("modal", "./Modal", "Modal", False)
 
-        @define_route("/partial", components=["button", "modal"])
+        @route("/partial", components=[Button, Modal])
         def partial_route():
             return div()[
                 h1()["Partial Usage"],
@@ -441,28 +421,28 @@ class TestRealWorldScenarios:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(define_react_component, "_components"):
-            define_react_component._components.clear()
+        if hasattr(ReactComponent, "_components"):
+            COMPONENT_REGISTRY.clear()
 
     def test_blog_app_scenario(self):
         """Test a realistic blog application scenario."""
         self.setUp()
 
         # Define blog-specific components
-        BlogLayout = define_react_component(
+        BlogLayout = ReactComponent(
             "blog-layout", "./components/BlogLayout", "BlogLayout", False
         )
-        ArticleCard = define_react_component(
+        ArticleCard = ReactComponent(
             "article-card", "./components/ArticleCard", "ArticleCard", False
         )
-        CommentForm = define_react_component(
+        CommentForm = ReactComponent(
             "comment-form", "./components/CommentForm", "CommentForm", False
         )
-        ShareButton = define_react_component(
+        ShareButton = ReactComponent(
             "share-button", "./components/ShareButton", "ShareButton", False
         )
 
-        @define_route("/blog", components=["blog-layout", "article-card"])
+        @route("/blog", components=[BlogLayout, ArticleCard])
         def blog_list():
             articles = [
                 {
@@ -494,9 +474,7 @@ class TestRealWorldScenarios:
                 ],
             ]
 
-        @define_route(
-            "/blog/:id", components=["blog-layout", "comment-form", "share-button"]
-        )
+        @route("/blog/:id", components=[BlogLayout, CommentForm, ShareButton])
         def blog_article():
             # Simulate article data
             return BlogLayout(title="Article Title", showSidebar=False)[

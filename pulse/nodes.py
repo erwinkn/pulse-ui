@@ -7,13 +7,10 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 
 from typing import (
     Any,
-    Dict,
-    List,
     Optional,
     Callable,
     Sequence,
     Union,
-    Tuple,
 )
 import random
 import uuid
@@ -34,6 +31,7 @@ __all__ = [
     # UI Tree integration
     "ReactComponent",
     "define_react_component",
+    # Route system
     "Route",
     "define_route",
     # Standard tags
@@ -175,7 +173,7 @@ class Callback:
 
 
 # Global callback registry: callback_key -> function
-_callback_registry: Dict[str, Callable[[], None]] = {}
+_callback_registry: dict[str, Callable[[], None]] = {}
 
 
 def register_callback(callback_key: str, func: Callable[[], None]) -> None:
@@ -193,7 +191,7 @@ def clear_callbacks() -> None:
     _callback_registry.clear()
 
 
-def get_all_callbacks() -> Dict[str, Callable[[], None]]:
+def get_all_callbacks() -> dict[str, Callable[[], None]]:
     """Get all registered callbacks."""
     return _callback_registry.copy()
 
@@ -211,10 +209,12 @@ def execute_callback(callback_key: str) -> bool:
     return False
 
 
-def prepare_ui_response(root_node: "UITreeNode") -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def prepare_ui_response(
+    root_node: "UITreeNode",
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     Prepare a complete UI response with the tree and callback information.
-    
+
     Returns:
         Tuple of (ui_tree_dict, callback_info_dict)
     """
@@ -227,6 +227,8 @@ def prepare_ui_response(root_node: "UITreeNode") -> Tuple[Dict[str, Any], Dict[s
 # Core UI Tree Node
 # ============================================================================
 
+NodeChild = Union["UITreeNode", str, int, bool, float]
+
 
 class UITreeNode:
     """
@@ -237,17 +239,17 @@ class UITreeNode:
     def __init__(
         self,
         tag: str,
-        props: Dict[str, Any] | None = None,
-        children: Sequence["UITreeNode | str"] | None = None,
+        props: dict[str, Any] | None = None,
+        children: Sequence[NodeChild] | None = None,
         node_id: str | None = None,
     ):
         self.id = node_id or f"py_{random.randint(100000, 999999)}"
         self.tag = tag
         self.props = props or {}
         self.children = children or []
-        
+
         # Process callbacks in props
-        self._callback_keys: Dict[str, str] = {}
+        self._callback_keys: dict[str, str] = {}
         self._process_callbacks()
 
     def _process_callbacks(self) -> None:
@@ -257,19 +259,19 @@ class UITreeNode:
             if callable(prop_value) and not isinstance(prop_value, type):
                 # Generate unique callback key based on node ID + prop name
                 callback_key = f"{self.id}:{prop_name}"
-                
+
                 # Register the callback
                 register_callback(callback_key, prop_value)
-                
+
                 # Store the callback key for this prop
                 self._callback_keys[prop_name] = callback_key
-                
+
                 # Replace the callable with the callback key in props
                 self.props[prop_name] = f"__callback:{callback_key}"
 
     def __getitem__(
         self,
-        children_arg: Union["UITreeNode", str, tuple[Union["UITreeNode", str], ...]],
+        children_arg: Union[NodeChild, tuple[NodeChild, ...]],
     ):
         """Support indexing syntax: div()[children] or div()["text"]"""
         if self.children:
@@ -290,7 +292,7 @@ class UITreeNode:
         new_node._callback_keys = self._callback_keys.copy()
         return new_node
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format for JSON serialization."""
         return {
             "id": self.id,
@@ -302,22 +304,20 @@ class UITreeNode:
             ],
         }
 
-    def get_callback_info(self) -> Dict[str, Any]:
+    def get_callback_info(self) -> dict[str, Any]:
         """Get callback information for this node and its children."""
         callback_info = {}
-        
+
         # Add this node's callbacks if any
         if self._callback_keys:
-            callback_info[self.id] = {
-                "callbacks": self._callback_keys
-            }
-        
+            callback_info[self.id] = {"callbacks": self._callback_keys}
+
         # Recursively collect callback info from children
         for child in self.children:
             if isinstance(child, UITreeNode):
                 child_callbacks = child.get_callback_info()
                 callback_info.update(child_callbacks)
-        
+
         return callback_info
 
 
@@ -326,7 +326,7 @@ class UITreeNode:
 # ============================================================================
 
 
-def define_tag(name: str, default_props: Dict[str, Any] | None = None):
+def define_tag(name: str, default_props: dict[str, Any] | None = None):
     """
     Define a standard HTML tag that creates UITreeNode instances.
 
@@ -339,7 +339,7 @@ def define_tag(name: str, default_props: Dict[str, Any] | None = None):
     """
     default_props = default_props or {}
 
-    def create_element(*children: Union[UITreeNode, str], **props: Any) -> UITreeNode:
+    def create_element(*children: NodeChild, **props: Any) -> UITreeNode:
         """Create a UITreeNode for this tag."""
         merged_props = {**default_props, **props}
         return UITreeNode(
@@ -349,7 +349,7 @@ def define_tag(name: str, default_props: Dict[str, Any] | None = None):
     return create_element
 
 
-def define_self_closing_tag(name: str, default_props: Dict[str, Any] | None = None):
+def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = None):
     """
     Define a self-closing HTML tag that creates UITreeNode instances.
 
@@ -425,9 +425,7 @@ def define_react_component(
         define_react_component._components = {}
     define_react_component._components[component_key] = component
 
-    def create_mount_point(
-        *children: Union[UITreeNode, str], **props: Any
-    ) -> UITreeNode:
+    def create_mount_point(*children: NodeChild, **props: Any) -> UITreeNode:
         """Create a mount point UITreeNode for this React component."""
         return UITreeNode(
             tag=f"$${component_key}",
@@ -438,71 +436,11 @@ def define_react_component(
     return create_mount_point
 
 
-def get_registered_components() -> Dict[str, ReactComponent]:
+def get_registered_components() -> dict[str, ReactComponent]:
     """Get all registered React components."""
     if not hasattr(define_react_component, "_components"):
         return {}
     return define_react_component._components.copy()
-
-
-# ============================================================================
-# Route Definition
-# ============================================================================
-
-
-class Route:
-    """
-    Represents a route definition with its component dependencies.
-    """
-
-    def __init__(
-        self,
-        path: str,
-        render_func: Callable[[], UITreeNode],
-        components: List[ReactComponent],
-    ):
-        self.path = path
-        self.render_func = render_func
-        self.components = components
-
-
-def define_route(
-    path: str, components: List[str] | None = None
-) -> Callable[[Callable[[], UITreeNode]], Route]:
-    """
-    Decorator to define a route with its component dependencies.
-
-    Args:
-        path: URL path for the route
-        components: List of component keys used by this route
-
-    Returns:
-        Decorator function
-    """
-
-    def decorator(render_func: Callable[[], UITreeNode]) -> Route:
-        # Get the actual ReactComponent objects for the component keys
-        all_components = get_registered_components()
-        route_components = []
-
-        if components:
-            for component_key in components:
-                if component_key in all_components:
-                    route_components.append(all_components[component_key])
-                else:
-                    raise ValueError(
-                        f"Component '{component_key}' not found. Make sure to define it before using in routes."
-                    )
-
-        route = Route(path, render_func, route_components)
-        
-        # Auto-register the route
-        from .routes import register_route
-        register_route(route)
-        
-        return route
-
-    return decorator
 
 
 # ============================================================================
@@ -628,6 +566,9 @@ wbr = define_self_closing_tag("wbr")
 # ============================================================================
 # Testing
 # ============================================================================
+
+# Import route-related functionality to make it available from this module
+from .route import Route, define_route
 
 if __name__ == "__main__":
     # Test the direct UI tree generation

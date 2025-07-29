@@ -7,13 +7,13 @@ This module handles generating TypeScript files for:
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from mako.template import Template
 
-from .html import ReactComponent, Route, UITreeNode, prepare_ui_response
+from .nodes import prepare_ui_response
+from .route import Route
 
 
 # Mako template for route component with inline registry
@@ -154,8 +154,8 @@ def generate_all_routes(
         int: Number of routes generated
     """
     import logging
-    from .routes import get_all_routes
-    from .html import clear_callbacks
+    from .route import get_all_routes
+    from .nodes import clear_callbacks
 
     logger = logging.getLogger(__name__)
 
@@ -248,29 +248,3 @@ def write_generated_files(
 
     print(f"Generated {len(routes)} route files in {routes_path}")
     print(f"Updated routes configuration at {routes_config_file}")
-
-
-if __name__ == "__main__":
-    # Example usage
-    from .html import define_react_component, define_route, div, h1, p
-
-    # Define some React components
-    Counter = define_react_component(
-        "counter", "../ui-tree/demo-components", "Counter", False
-    )
-    UserCard = define_react_component(
-        "user-card", "../ui-tree/demo-components", "UserCard", False
-    )
-
-    # Define a route
-    @define_route("/example", components=["counter", "user-card"])
-    def example_route():
-        return div()[
-            h1()["Example Route"],
-            p()["This is a server-generated route with React components:"],
-            Counter(count=5, label="Example Counter")["This counter starts at 5"],
-            UserCard(name="John Doe", email="john@example.com"),
-        ]
-
-    # Generate files
-    write_generated_files([example_route])

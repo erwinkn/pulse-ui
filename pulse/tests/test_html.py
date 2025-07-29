@@ -6,7 +6,7 @@ the TypeScript UIElementNode format.
 """
 
 import pytest
-from pulse.html import (
+from pulse.nodes import (
     UITreeNode,
     div, p, span, h1, h2, h3, button, a, img, br, hr, meta,
     strong, em, ul, li, script, style, form, input, label,
@@ -299,13 +299,13 @@ class TestComplexStructures:
         
     def test_mixed_content_types(self):
         """Test mixing different content types."""
-        mixed_content = div()[
+        mixed_content = div(
             "Plain text",
-            p()["Paragraph text"],
+            p("Paragraph text"),
             123,  # Number
             True,  # Boolean 
             span()["More text"]
-        ]
+        )
         
         result = mixed_content.to_dict()
         

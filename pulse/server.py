@@ -14,7 +14,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from .html import execute_callback, get_all_callbacks
+from .nodes import execute_callback, get_all_callbacks
 from .codegen import generate_all_routes
 
 logger = logging.getLogger(__name__)

@@ -10,7 +10,7 @@ import json
 import tempfile
 import os
 from pathlib import Path
-from pulse.html import (
+from pulse.nodes import (
     define_react_component,
     define_route,
     ReactComponent,

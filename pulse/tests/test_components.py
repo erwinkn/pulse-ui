@@ -6,7 +6,7 @@ within the UI tree generation system.
 """
 
 import pytest
-from pulse.html import (
+from pulse.nodes import (
     define_react_component,
     get_registered_components,
     ReactComponent,

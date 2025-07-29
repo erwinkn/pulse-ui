@@ -1,21 +1,35 @@
 import React, { memo } from 'react';
-import type { UINode, UIElementNode, UIMountPointNode } from './types';
-import { isElementNode, isTextNode, isMountPointNode, isFragment, FRAGMENT_TAG } from './types';
+import type { UINode, UIElementNode } from './types';
+import { isElementNode, isTextNode, isMountPointNode, isFragment, FRAGMENT_TAG, getMountPointComponentKey } from './types';
 import { useComponent } from './component-registry';
 
 interface UIRendererProps {
   node: UINode;
 }
 
-const UIMountPointRenderer = memo<{ node: UIMountPointNode }>(({ node }) => {
-  const { componentKey, props } = node;
+const UIMountPointRenderer = memo<{ node: UIElementNode }>(({ node }) => {
+  const { props, children } = node;
+  const componentKey = getMountPointComponentKey(node);
   const Component = useComponent(componentKey);
   
-  return <Component {...props} />;
+  // Render children and pass them to the component
+  const renderedChildren = children.map((child, index) => (
+    <UIRenderer 
+      key={getNodeKey(child, index)} 
+      node={child} 
+    />
+  ));
+  
+  return <Component {...props}>{renderedChildren}</Component>;
 });
 
 const UIElementRenderer = memo<{ node: UIElementNode }>(({ node }) => {
   const { tag, props, children } = node;
+  
+  // If this is a mount point, render the mounted component
+  if (isMountPointNode(node)) {
+    return <UIMountPointRenderer node={node} />;
+  }
   
   // If this is a fragment, render as React Fragment
   if (tag === FRAGMENT_TAG) {
@@ -44,7 +58,7 @@ const UIElementRenderer = memo<{ node: UIElementNode }>(({ node }) => {
 
 // Helper function to generate keys for React reconciliation
 function getNodeKey(node: UINode, index: number): string | number {
-  if (isElementNode(node) || isMountPointNode(node)) {
+  if (isElementNode(node)) {
     return node.key || node.id;
   }
   return index;
@@ -56,12 +70,7 @@ export const UIRenderer = memo<UIRendererProps>(({ node }) => {
     return <>{node}</>;
   }
   
-  // Handle mount point nodes
-  if (isMountPointNode(node)) {
-    return <UIMountPointRenderer node={node} />;
-  }
-  
-  // Handle element nodes (including fragments)
+  // Handle element nodes (including fragments and mount points)
   if (isElementNode(node)) {
     return <UIElementRenderer node={node} />;
   }

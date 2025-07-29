@@ -1,11 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { createElementNode, FRAGMENT_TAG } from '../types';
+import { createElementNode, FRAGMENT_TAG, MOUNT_POINT_PREFIX } from '../types';
 
 describe('UI Tree Validation', () => {
   it('should throw error when user tries to use reserved fragment tag', () => {
     expect(() => {
       createElementNode(FRAGMENT_TAG, {}, ['Should not work']);
-    }).toThrow(`The tag '${FRAGMENT_TAG}' is reserved for internal fragment nodes. Please use a different tag name.`);
+    }).toThrow(`Tags starting with '${MOUNT_POINT_PREFIX}' are reserved for internal use. Please use a different tag name.`);
+  });
+
+  it('should throw error when user tries to use reserved mount point prefix', () => {
+    expect(() => {
+      createElementNode('$$custom-component', {}, ['Should not work']);
+    }).toThrow(`Tags starting with '${MOUNT_POINT_PREFIX}' are reserved for internal use. Please use a different tag name.`);
   });
 
   it('should allow creating elements with regular tags', () => {
@@ -14,11 +20,11 @@ describe('UI Tree Validation', () => {
     }).not.toThrow();
   });
 
-  it('should show the actual reserved tag name in error message', () => {
+  it('should show the actual reserved prefix in error message', () => {
     try {
       createElementNode(FRAGMENT_TAG, {}, []);
     } catch (error) {
-      expect((error as Error).message).toContain('$$fragment');
+      expect((error as Error).message).toContain('$$');
     }
   });
 });

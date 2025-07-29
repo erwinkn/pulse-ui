@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { findNodeByPath, findParentByPath, applyUpdate, applyUpdates } from '../update-utils';
-import type { UINode, UIElementNode, UIMountPointNode, UIUpdatePayload } from '../types';
-import { createElementNode, createFragment, createMountPoint, isElementNode, isTextNode, isMountPointNode } from '../types';
+import type { UINode, UIElementNode, UIUpdatePayload } from '../types';
+import { createElementNode, createFragment, createMountPoint, isElementNode, isTextNode, isMountPointNode, getMountPointComponentKey } from '../types';
 
 describe('update-utils', () => {
   describe('findNodeByPath', () => {
@@ -240,9 +240,10 @@ describe('update-utils', () => {
       };
 
       const result = applyUpdate(root, update);
-      const updatedMountPoint = (result as UIElementNode).children[0] as UIMountPointNode;
+      const updatedMountPoint = (result as UIElementNode).children[0] as UIElementNode;
       expect(updatedMountPoint.props).toEqual({ count: 10, color: 'red', size: 'large' });
-      expect(updatedMountPoint.componentKey).toBe('counter');
+      expect(getMountPointComponentKey(updatedMountPoint)).toBe('counter');
+      expect(isMountPointNode(updatedMountPoint)).toBe(true);
     });
 
     it('should work with fragments', () => {

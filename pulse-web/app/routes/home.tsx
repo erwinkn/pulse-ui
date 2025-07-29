@@ -3,7 +3,7 @@ import { ReactiveUIContainer, EventEmitterTransport } from '~/ui-tree';
 import { ComponentRegistryProvider, type ComponentRegistry } from '~/ui-tree/component-registry';
 import type { UIElementNode, UIUpdatePayload } from '~/ui-tree/types';
 import { createElementNode, createFragment, createMountPoint } from '~/ui-tree/types';
-import { Counter, UserCard, ProgressBar, StatusBadge, MetricCard } from '~/ui-tree/demo-components';
+import { Counter, UserCard, ProgressBar, StatusBadge, MetricCard, Card, Button } from '~/ui-tree/demo-components';
 
 export default function Demo() {
   const transportRef = useRef(new EventEmitterTransport());
@@ -20,6 +20,8 @@ export default function Demo() {
     'progress-bar': ProgressBar,
     'status-badge': StatusBadge,
     'metric-card': MetricCard,
+    'card': Card,
+    'button': Button,
   };
 
   const [initialTree] = useState(() => 
@@ -47,45 +49,90 @@ export default function Demo() {
         
         // Grid of mount point components
         createElementNode('div', {
-          className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6'
+          className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mb-6'
         }, [
           createMountPoint('counter', {
             count: 0,
             label: 'Server Counter',
             color: 'blue',
             size: 'md'
-          }),
-          createMountPoint('user-card', {
-            name: 'Alice Johnson',
-            email: 'alice@example.com',
-            role: 'Frontend Developer',
-            status: 'offline'
-          }),
-          createMountPoint('progress-bar', {
-            value: 0,
-            max: 100,
-            label: 'Project Progress',
-            color: 'green',
-            showPercentage: true
-          })
+          }, [
+            'This counter has children!',
+            createMountPoint('button', {
+              text: 'Child Button',
+              variant: 'secondary',
+              size: 'sm'
+            }),
+          ]),
+          createMountPoint('card', {
+            title: 'Mount Point with Children',
+            subtitle: 'This card demonstrates children support',
+            variant: 'primary'
+          }, [
+            'Here is some text content inside the card.',
+            createMountPoint('progress-bar', {
+              value: 0,
+              max: 100,
+              label: 'Nested Progress',
+              color: 'green',
+              showPercentage: true
+            }),
+            createMountPoint('button', {
+              text: 'Action Button',
+              variant: 'success',
+              size: 'md'
+            }),
+          ]),
         ]),
         
         createElementNode('div', {
-          className: 'flex flex-wrap gap-4 justify-center'
+          className: 'space-y-4'
         }, [
-          createMountPoint('status-badge', {
-            status: 'info',
-            text: 'System Status',
-            size: 'md',
-            pulse: false
-          }),
           createMountPoint('metric-card', {
             title: 'Active Users',
             value: 1250,
             change: 12.5,
             trend: 'up',
             icon: '👥'
-          })
+          }, [
+            'Detailed metrics with children:',
+            createMountPoint('status-badge', {
+              status: 'info',
+              text: 'System Status',
+              size: 'md',
+              pulse: false
+            }),
+            createElementNode('div', { className: 'mt-2 text-sm text-gray-600' }, [
+              'Last updated: Just now'
+            ])
+          ]),
+          createMountPoint('card', {
+            title: 'Nested Components Demo',
+            subtitle: 'Shows complex component composition',
+            variant: 'success'
+          }, [
+            createElementNode('p', { className: 'mb-2' }, [
+              'This card contains multiple nested mount points:'
+            ]),
+            createMountPoint('user-card', {
+              name: 'Alice Johnson',
+              email: 'alice@example.com',
+              role: 'Frontend Developer',
+              status: 'offline'
+            }),
+            createElementNode('div', { className: 'mt-3 flex gap-2' }, [
+              createMountPoint('button', {
+                text: 'Primary',
+                variant: 'primary',
+                size: 'sm'
+              }),
+              createMountPoint('button', {
+                text: 'Secondary',
+                variant: 'secondary',
+                size: 'sm'
+              })
+            ])
+          ])
         ])
       ]),
 
@@ -123,10 +170,10 @@ export default function Demo() {
           className: 'list-disc list-inside space-y-1 text-gray-700 text-sm'
         }, [
           createElementNode('li', {}, ['Mount points for external React components']),
+          createElementNode('li', {}, ['Mount points with children support']),
+          createElementNode('li', {}, ['Nested component composition']),
           createElementNode('li', {}, ['Component prop updates via server']),
-          createElementNode('li', {}, ['Text content updates']),
-          createElementNode('li', {}, ['Dynamic element insertion']),
-          createElementNode('li', {}, ['Props updates with styling changes']),
+          createElementNode('li', {}, ['Dynamic element insertion and removal']),
           createElementNode('li', {}, ['Efficient re-rendering with React.memo'])
         ])
       ])
@@ -160,6 +207,63 @@ export default function Demo() {
     });
   };
 
+  const updateCounterChildren = () => {
+    const timestamp = new Date().toLocaleTimeString();
+    
+    sendUpdate({
+      id: `counter-children-update-${Date.now()}`,
+      type: 'replace',
+      path: [1, 1, 0, 0], // counter > first child (text)
+      data: { 
+        node: `Updated at ${timestamp}!`
+      }
+    });
+  };
+
+  const updateCardTitle = () => {
+    const titles = [
+      'Mount Point with Children',
+      '🎉 Updated Title!',
+      '⚡ Dynamic Updates',
+      '🚀 Children Support',
+      '✨ Reactive Components'
+    ];
+    const randomTitle = titles[Math.floor(Math.random() * titles.length)];
+    
+    sendUpdate({
+      id: `card-title-update-${Date.now()}`,
+      type: 'update_props',
+      path: [1, 1, 1], // mount-points-section > grid > card mount point
+      data: { 
+        props: { 
+          title: randomTitle,
+          subtitle: 'This card demonstrates children support',
+          variant: 'primary'
+        } 
+      }
+    });
+  };
+
+  const updateNestedProgress = () => {
+    const newProgress = (progress + 25) % 125; // Cycle 0, 25, 50, 75, 100, 0...
+    setProgress(newProgress);
+    
+    sendUpdate({
+      id: `nested-progress-update-${Date.now()}`,
+      type: 'update_props',
+      path: [1, 1, 1, 1], // card > nested progress-bar mount point
+      data: { 
+        props: { 
+          value: newProgress,
+          max: 100,
+          label: 'Nested Progress',
+          color: newProgress > 75 ? 'green' : newProgress > 50 ? 'blue' : 'red',
+          showPercentage: true
+        } 
+      }
+    });
+  };
+
   const toggleUserStatus = () => {
     const newStatus = userOnline ? 'offline' : 'online';
     setUserOnline(!userOnline);
@@ -167,33 +271,13 @@ export default function Demo() {
     sendUpdate({
       id: `user-status-update-${Date.now()}`,
       type: 'update_props',
-      path: [1, 1, 1], // mount-points-section > grid > user-card mount point
+      path: [1, 2, 1, 1], // mount-points-section > bottom-section > nested-card > user-card
       data: { 
         props: { 
           name: 'Alice Johnson',
           email: 'alice@example.com',
           role: 'Frontend Developer',
           status: newStatus
-        } 
-      }
-    });
-  };
-
-  const updateProgress = () => {
-    const newProgress = (progress + 25) % 125; // Cycle 0, 25, 50, 75, 100, 0...
-    setProgress(newProgress);
-    
-    sendUpdate({
-      id: `progress-update-${Date.now()}`,
-      type: 'update_props',
-      path: [1, 1, 2], // mount-points-section > grid > progress-bar mount point
-      data: { 
-        props: { 
-          value: newProgress,
-          max: 100,
-          label: 'Project Progress',
-          color: newProgress > 75 ? 'green' : newProgress > 50 ? 'blue' : 'red',
-          showPercentage: true
         } 
       }
     });
@@ -215,7 +299,7 @@ export default function Demo() {
     sendUpdate({
       id: `status-update-${Date.now()}`,
       type: 'update_props',
-      path: [1, 2, 0], // mount-points-section > bottom-row > status-badge mount point
+      path: [1, 2, 0, 1], // mount-points-section > bottom-section > metric-card > status-badge
       data: { 
         props: { 
           status: nextStatus,
@@ -235,7 +319,7 @@ export default function Demo() {
     sendUpdate({
       id: `metrics-update-${Date.now()}`,
       type: 'update_props',
-      path: [1, 2, 1], // mount-points-section > bottom-row > metric-card mount point
+      path: [1, 2, 0], // mount-points-section > bottom-section > metric-card
       data: { 
         props: { 
           title: 'Active Users',
@@ -244,6 +328,24 @@ export default function Demo() {
           trend: trend,
           icon: '👥'
         } 
+      }
+    });
+  };
+
+  const addChildToCard = () => {
+    const newChild = createMountPoint('button', {
+      text: `Added ${Date.now()}`,
+      variant: 'danger',
+      size: 'sm'
+    });
+    
+    sendUpdate({
+      id: `add-child-${Date.now()}`,
+      type: 'insert',
+      path: [1, 1, 1], // card mount point children
+      data: { 
+        node: newChild,
+        index: 3 // Add after existing children
       }
     });
   };
@@ -341,23 +443,35 @@ export default function Demo() {
                 onClick={updateMountPointCounter}
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
               >
-                Update Counter Component
+                Update Counter Props
+              </button>
+              <button
+                onClick={updateCounterChildren}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+              >
+                Update Counter Children
+              </button>
+              <button
+                onClick={updateCardTitle}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+              >
+                Update Card Title
+              </button>
+              <button
+                onClick={updateNestedProgress}
+                className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+              >
+                Update Nested Progress
               </button>
               <button
                 onClick={toggleUserStatus}
-                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition-colors"
               >
                 Toggle User Status
               </button>
               <button
-                onClick={updateProgress}
-                className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
-              >
-                Update Progress
-              </button>
-              <button
                 onClick={cycleStatus}
-                className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition-colors"
+                className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
               >
                 Cycle Status Badge
               </button>
@@ -366,6 +480,12 @@ export default function Demo() {
                 className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
               >
                 Update Metrics
+              </button>
+              <button
+                onClick={addChildToCard}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+              >
+                Add Child to Card
               </button>
             </div>
           </div>
@@ -402,8 +522,9 @@ export default function Demo() {
           </div>
 
           <p className="text-sm text-gray-600 mt-4">
-            The mount point buttons update React component props via server-side UI tree updates, 
-            demonstrating seamless integration of external components with server-rendered UI.
+            The mount point buttons demonstrate: updating component props, modifying children content, 
+            nested component updates, and dynamic child insertion - all via server-side UI tree updates 
+            with seamless React component integration and children composition support.
           </p>
         </div>
 

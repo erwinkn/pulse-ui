@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import React from 'react';
 import { UIRenderer } from '../UIRenderer';
-import { createElementNode, createFragment, createMountPoint, FRAGMENT_TAG, isElementNode, isTextNode, isMountPointNode } from '../types';
+import { createElementNode, createFragment, createMountPoint, FRAGMENT_TAG, isElementNode, isTextNode, isMountPointNode, getMountPointComponentKey } from '../types';
 import type { UINode } from '../types';
 
 // Lightweight tests that verify component logic without DOM rendering
@@ -49,23 +49,43 @@ describe('UIRenderer Component Logic', () => {
     });
     
     expect(isMountPointNode(mountPointNode)).toBe(true);
-    expect(isElementNode(mountPointNode)).toBe(false);
+    expect(isElementNode(mountPointNode)).toBe(true); // Mount points are now element nodes
     expect(isTextNode(mountPointNode)).toBe(false);
-    expect(mountPointNode.componentKey).toBe('counter');
+    expect(getMountPointComponentKey(mountPointNode)).toBe('counter');
+    expect(mountPointNode.tag).toBe('$$counter'); // Tag contains the component key
     expect(mountPointNode.props).toEqual({
       count: 5,
       color: 'blue',
       size: 'large'
     });
     expect(mountPointNode.id).toBeDefined();
+    expect(mountPointNode.children).toEqual([]); // Default empty children
   });
 
   it('should create mount point nodes with empty props by default', () => {
     const mountPointNode = createMountPoint('user-card');
     
     expect(isMountPointNode(mountPointNode)).toBe(true);
-    expect(mountPointNode.componentKey).toBe('user-card');
+    expect(isElementNode(mountPointNode)).toBe(true);
+    expect(getMountPointComponentKey(mountPointNode)).toBe('user-card');
+    expect(mountPointNode.tag).toBe('$$user-card');
     expect(mountPointNode.props).toEqual({});
+    expect(mountPointNode.children).toEqual([]);
+  });
+
+  it('should create mount point nodes with children', () => {
+    const mountPointNode = createMountPoint('card', {
+      title: 'Test Card'
+    }, [
+      'Text child',
+      createElementNode('span', {}, ['Element child'])
+    ]);
+    
+    expect(isMountPointNode(mountPointNode)).toBe(true);
+    expect(getMountPointComponentKey(mountPointNode)).toBe('card');
+    expect(mountPointNode.children).toHaveLength(2);
+    expect(mountPointNode.children[0]).toBe('Text child');
+    expect(isElementNode(mountPointNode.children[1])).toBe(true);
   });
 
   it('should handle nested structures correctly', () => {
@@ -177,7 +197,7 @@ describe('UIRenderer Component Logic', () => {
   it('should validate reserved fragment tag usage', () => {
     expect(() => {
       createElementNode(FRAGMENT_TAG, {}, ['Should fail']);
-    }).toThrow(`The tag '${FRAGMENT_TAG}' is reserved for internal fragment nodes. Please use a different tag name.`);
+    }).toThrow(`Tags starting with '$$' are reserved for internal use. Please use a different tag name.`);
   });
 
   it('should handle mixed content with mount points', () => {
@@ -205,10 +225,10 @@ describe('UIRenderer Component Logic', () => {
     
     // Check mount points
     expect(isMountPointNode(mixedContent.children[3])).toBe(true);
-    expect((mixedContent.children[3] as any).componentKey).toBe('counter');
+    expect(getMountPointComponentKey(mixedContent.children[3] as any)).toBe('counter');
     
     expect(isMountPointNode(mixedContent.children[4])).toBe(true);
-    expect((mixedContent.children[4] as any).componentKey).toBe('user-card');
+    expect(getMountPointComponentKey(mixedContent.children[4] as any)).toBe('user-card');
   });
 
   it('should handle various node types correctly', () => {
@@ -234,7 +254,7 @@ describe('UIRenderer Component Logic', () => {
     expect((nodes[3] as any).tag).toBe('span');
     
     // Check mount point identification
-    expect((nodes[4] as any).componentKey).toBe('counter');
-    expect((nodes[5] as any).componentKey).toBe('user-card');
+    expect(getMountPointComponentKey(nodes[4] as any)).toBe('counter');
+    expect(getMountPointComponentKey(nodes[5] as any)).toBe('user-card');
   });
 });

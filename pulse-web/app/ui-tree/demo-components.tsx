@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { type ReactNode } from 'react';
 
 export interface CounterProps {
   count?: number;
   label?: string;
   color?: 'blue' | 'green' | 'red' | 'purple';
   size?: 'sm' | 'md' | 'lg';
+  children?: ReactNode;
 }
 
-export function Counter({ count = 0, label = 'Count', color = 'blue', size = 'md' }: CounterProps) {
+export function Counter({ count = 0, label = 'Count', color = 'blue', size = 'md', children }: CounterProps) {
   const sizeClasses = {
     sm: 'text-sm p-2',
     md: 'text-base p-4',
@@ -25,6 +26,11 @@ export function Counter({ count = 0, label = 'Count', color = 'blue', size = 'md
     <div className={`border rounded-lg ${sizeClasses[size]} ${colorClasses[color]}`}>
       <div className="font-semibold">{label}</div>
       <div className="text-2xl font-bold mt-2">{count}</div>
+      {children && (
+        <div className="mt-3 pt-3 border-t border-current border-opacity-20">
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -170,6 +176,7 @@ export interface MetricCardProps {
   change?: number;
   trend?: 'up' | 'down' | 'neutral';
   icon?: string;
+  children?: ReactNode;
 }
 
 export function MetricCard({ 
@@ -177,7 +184,8 @@ export function MetricCard({
   value = '0', 
   change = 0, 
   trend = 'neutral',
-  icon = '📊'
+  icon = '📊',
+  children
 }: MetricCardProps) {
   const trendColors = {
     up: 'text-green-600',
@@ -208,6 +216,90 @@ export function MetricCard({
           </div>
         )}
       </div>
+      {children && (
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          {children}
+        </div>
+      )}
     </div>
+  );
+}
+
+export interface CardProps {
+  title?: string;
+  subtitle?: string;
+  variant?: 'default' | 'primary' | 'success' | 'warning';
+  children?: ReactNode;
+}
+
+export function Card({ 
+  title = 'Card Title', 
+  subtitle,
+  variant = 'default',
+  children 
+}: CardProps) {
+  const variantClasses = {
+    default: 'bg-white border-gray-200',
+    primary: 'bg-blue-50 border-blue-200',
+    success: 'bg-green-50 border-green-200',
+    warning: 'bg-yellow-50 border-yellow-200'
+  };
+
+  return (
+    <div className={`border rounded-lg p-4 shadow-sm ${variantClasses[variant]}`}>
+      <div className="mb-3">
+        <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+        {subtitle && (
+          <p className="text-sm text-gray-600 mt-1">{subtitle}</p>
+        )}
+      </div>
+      <div className="space-y-2">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export interface ButtonProps {
+  text?: string;
+  variant?: 'primary' | 'secondary' | 'success' | 'danger';
+  size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  children?: ReactNode;
+}
+
+export function Button({ 
+  text = 'Button',
+  variant = 'primary',
+  size = 'md',
+  disabled = false,
+  children
+}: ButtonProps) {
+  const variantClasses = {
+    primary: 'bg-blue-600 hover:bg-blue-700 text-white',
+    secondary: 'bg-gray-600 hover:bg-gray-700 text-white',
+    success: 'bg-green-600 hover:bg-green-700 text-white',
+    danger: 'bg-red-600 hover:bg-red-700 text-white'
+  };
+
+  const sizeClasses = {
+    sm: 'px-3 py-1 text-sm',
+    md: 'px-4 py-2 text-base',
+    lg: 'px-6 py-3 text-lg'
+  };
+
+  return (
+    <button 
+      className={`
+        rounded font-medium transition-colors
+        ${variantClasses[variant]} 
+        ${sizeClasses[size]}
+        ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'}
+      `}
+      disabled={disabled}
+    >
+      {text}
+      {children && <span className="ml-2">{children}</span>}
+    </button>
   );
 }

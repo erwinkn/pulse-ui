@@ -66,34 +66,6 @@ export class WebSocketTransport implements Transport {
   }
 }
 
-export class MockTransport implements Transport {
-  private messageCallback: ((message: TransportMessage) => void) | null = null;
-  private messageQueue: TransportMessage[] = [];
-
-  send(message: TransportMessage): void {
-    console.log('MockTransport send:', message);
-  }
-
-  onMessage(callback: (message: TransportMessage) => void): void {
-    this.messageCallback = callback;
-    // Process any queued messages
-    this.messageQueue.forEach(message => callback(message));
-    this.messageQueue = [];
-  }
-
-  // Method to simulate receiving messages (for testing/demo purposes)
-  simulateMessage(message: TransportMessage): void {
-    if (this.messageCallback) {
-      this.messageCallback(message);
-    } else {
-      this.messageQueue.push(message);
-    }
-  }
-
-  close(): void {
-    this.messageCallback = null;
-  }
-}
 
 export class EventEmitterTransport implements Transport {
   private messageCallback: ((message: TransportMessage) => void) | null = null;

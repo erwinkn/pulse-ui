@@ -1,5 +1,5 @@
-import type { UINode, UIElementNode, UIMountPointNode, UIUpdatePayload } from './types';
-import { isElementNode, isTextNode, isMountPointNode } from './types';
+import type { UINode, UIElementNode, UIUpdatePayload } from './types';
+import { isElementNode, isTextNode } from './types';
 
 function cloneUINode(node: UINode): UINode {
   if (isTextNode(node)) {
@@ -11,13 +11,6 @@ function cloneUINode(node: UINode): UINode {
       ...node,
       props: { ...node.props },
       children: node.children.map(cloneUINode)
-    };
-  }
-
-  if (isMountPointNode(node)) {
-    return {
-      ...node,
-      props: { ...node.props }
     };
   }
 
@@ -35,7 +28,7 @@ export function findNodeByPath(tree: UINode, path: number[]): UINode | null {
       }
       current = current.children[index];
     } else {
-      // Text nodes and mount points don't have children, so path is invalid
+      // Text nodes don't have children, so path is invalid
       return null;
     }
   }
@@ -90,7 +83,7 @@ export function applyUpdate(tree: UINode, update: UIUpdatePayload): UINode {
     
     case 'update_props': {
       const node = findNodeByPath(clonedTree, update.path);
-      if (node && (isElementNode(node) || isMountPointNode(node))) {
+      if (node && isElementNode(node)) {
         node.props = { ...node.props, ...update.data.props };
       }
       break;

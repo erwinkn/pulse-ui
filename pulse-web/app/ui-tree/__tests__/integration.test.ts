@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { UIElementNode, UIMountPointNode, UIUpdatePayload } from '../types';
-import { createElementNode, createFragment, createMountPoint } from '../types';
+import type { UIElementNode, UIUpdatePayload } from '../types';
+import { createElementNode, createFragment, createMountPoint, getMountPointComponentKey } from '../types';
 import { applyUpdates } from '../update-utils';
 
 describe('UI Tree Integration', () => {
@@ -145,8 +145,8 @@ describe('UI Tree Integration', () => {
     expect((updatedTree as UIElementNode).children).toHaveLength(4);
     
     // Check counter props were updated
-    const counter = (updatedTree as UIElementNode).children[1] as UIMountPointNode;
-    expect(counter.componentKey).toBe('counter');
+    const counter = (updatedTree as UIElementNode).children[1] as UIElementNode;
+    expect(getMountPointComponentKey(counter)).toBe('counter');
     expect(counter.props).toEqual({
       count: 5,
       color: 'green',
@@ -154,16 +154,16 @@ describe('UI Tree Integration', () => {
     });
     
     // Check user card was replaced with status badge
-    const statusBadge = (updatedTree as UIElementNode).children[2] as UIMountPointNode;
-    expect(statusBadge.componentKey).toBe('status-badge');
+    const statusBadge = (updatedTree as UIElementNode).children[2] as UIElementNode;
+    expect(getMountPointComponentKey(statusBadge)).toBe('status-badge');
     expect(statusBadge.props).toEqual({
       status: 'success',
       text: 'Online'
     });
     
     // Check progress bar was inserted
-    const progressBar = (updatedTree as UIElementNode).children[3] as UIMountPointNode;
-    expect(progressBar.componentKey).toBe('progress-bar');
+    const progressBar = (updatedTree as UIElementNode).children[3] as UIElementNode;
+    expect(getMountPointComponentKey(progressBar)).toBe('progress-bar');
     expect(progressBar.props).toEqual({
       value: 75,
       max: 100,
@@ -224,10 +224,10 @@ describe('UI Tree Integration', () => {
     expect(metricsContainer.children).toHaveLength(3);
     
     // Check all metrics are mount points
-    const metrics = metricsContainer.children as UIMountPointNode[];
-    expect(metrics[0].componentKey).toBe('metric-card');
-    expect(metrics[1].componentKey).toBe('metric-card');
-    expect(metrics[2].componentKey).toBe('metric-card');
+    const metrics = metricsContainer.children as UIElementNode[];
+    expect(getMountPointComponentKey(metrics[0])).toBe('metric-card');
+    expect(getMountPointComponentKey(metrics[1])).toBe('metric-card');
+    expect(getMountPointComponentKey(metrics[2])).toBe('metric-card');
     
     expect(metrics[0].props.title).toBe('Users');
     expect(metrics[1].props.title).toBe('Sales');

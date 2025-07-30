@@ -71,7 +71,7 @@ describe("UIRenderer Component Logic", () => {
       color: "blue",
       size: "large",
     });
-    expect(mountPointNode.id).toBeDefined();
+    expect(mountPointNode.key).toBeUndefined();
     expect(mountPointNode.children).toEqual([]); // Default empty children
   });
 

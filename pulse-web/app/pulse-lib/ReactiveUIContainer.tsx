@@ -3,26 +3,17 @@ import { UIRenderer } from "./UIRenderer";
 import { useReactiveUITree } from "./useReactiveUITree";
 import type { UINode } from "./tree";
 import type { Transport, TransportMessage } from "./transport";
-import { WebSocketTransport } from "./transport";
 
 export interface ReactiveUIContainerProps {
   initialTree: UINode;
   callbackInfo?: Record<string, any>;
   transport?: Transport;
-  onMessage?: (message: TransportMessage) => void;
-  // Legacy props for backward compatibility
-  websocketUrl?: string;
-  onWebSocketMessage?: (data: any) => void;
 }
 
 export function ReactiveUIContainer({
   initialTree,
   callbackInfo,
   transport,
-  onMessage,
-  // Legacy props
-  websocketUrl,
-  onWebSocketMessage,
 }: ReactiveUIContainerProps) {
   const transportRef = useRef<Transport | null>(null);
 
@@ -42,7 +33,7 @@ export function ReactiveUIContainer({
           propValue.startsWith("__callback:")
         ) {
           const callbackKey = propValue.replace("__callback:", "");
-          // Create a function that sends a WebSocket message when called
+          // Create a function that sends a callback message when called
           processedProps[propName] = () => {
             if (transportRef.current) {
               transportRef.current.send({
@@ -51,10 +42,7 @@ export function ReactiveUIContainer({
                 request_id: Math.random().toString(36).substr(2, 9),
               });
             } else {
-              console.warn(
-                "Transport not available for callback:",
-                callbackKey
-              );
+              console.warn("Transport not available for callback:", callbackKey);
             }
           };
         } else {
@@ -81,46 +69,26 @@ export function ReactiveUIContainer({
   });
 
   useEffect(() => {
-    // Use provided transport or create WebSocket transport
-    const activeTransport =
-      transport || (websocketUrl ? new WebSocketTransport(websocketUrl) : null);
+    if (!transport) return;
 
-    if (!activeTransport) return;
+    transportRef.current = transport;
 
-    transportRef.current = activeTransport;
-
-    activeTransport.onMessage((message) => {
-      if (onMessage) {
-        onMessage(message);
-      }
-
-      // Legacy callback support
-      if (onWebSocketMessage) {
-        onWebSocketMessage(message);
-      }
-
+    transport.onMessage((message) => {
+      console.log("ReactiveUIContainer received message:", message);
+      
       if (message.type === "ui_updates" && Array.isArray(message.updates)) {
+        console.log("Applying batch updates:", message.updates);
         applyBatchUpdates(message.updates);
       } else if (message.type === "ui_tree" && message.tree) {
+        console.log("Setting new tree:", message.tree);
         setTree(message.tree);
       }
     });
 
     return () => {
-      if (transportRef.current && !transport) {
-        // Only close if we created the transport ourselves
-        transportRef.current.close();
-      }
       transportRef.current = null;
     };
-  }, [
-    transport,
-    websocketUrl,
-    applyBatchUpdates,
-    setTree,
-    onMessage,
-    onWebSocketMessage,
-  ]);
+  }, [transport, applyBatchUpdates, setTree]);
 
   return <UIRenderer node={tree} />;
 }

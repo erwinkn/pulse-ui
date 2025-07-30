@@ -24,10 +24,10 @@ def about():
         ps.h1("About Pulse UI"),
         ps.p("Pulse UI bridges Python and React, allowing you to:"),
         ps.ul(
-            ps.li("Define UI components in Python"),
-            ps.li("Handle events with Python functions"),
-            ps.li("Generate TypeScript automatically"),
-            ps.li("Build reactive web applications"),
+            ps.li("Define UI components in Python", key="feature-1"),
+            ps.li("Handle events with Python functions", key="feature-2"),
+            ps.li("Generate TypeScript automatically", key="feature-3"),
+            ps.li("Build reactive web applications", key="feature-4"),
         ),
         ps.p(ps.a("← Back to Home", href="/")),
     )

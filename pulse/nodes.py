@@ -238,12 +238,12 @@ class UITreeNode:
         tag: str,
         props: dict[str, Any] | None = None,
         children: Sequence[NodeChild] | None = None,
-        node_id: str | None = None,
+        key: str | None = None,
     ):
-        self.id = node_id or f"py_{random.randint(100000, 999999)}"
         self.tag = tag
         self.props = props or {}
         self.children = children or []
+        self.key = key
 
         # Process callbacks in props
         self._callback_keys: dict[str, str] = {}
@@ -254,8 +254,8 @@ class UITreeNode:
         for prop_name, prop_value in list(self.props.items()):
             # Check if the prop value is a callable (lambda/function)
             if callable(prop_value) and not isinstance(prop_value, type):
-                # Generate unique callback key based on node ID + prop name
-                callback_key = f"{self.id}:{prop_name}"
+                # Generate unique callback key using UUID
+                callback_key = str(uuid.uuid4())
 
                 # Register the callback
                 register_callback(callback_key, prop_value)
@@ -283,7 +283,7 @@ class UITreeNode:
             tag=self.tag,
             props=self.props.copy(),
             children=new_children,
-            node_id=self.id,
+            key=self.key,
         )
         # Copy callback keys from the original node
         new_node._callback_keys = self._callback_keys.copy()
@@ -291,8 +291,7 @@ class UITreeNode:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format for JSON serialization."""
-        return {
-            "id": self.id,
+        result = {
             "tag": self.tag,
             "props": self.props,
             "children": [
@@ -300,14 +299,19 @@ class UITreeNode:
                 for child in self.children
             ],
         }
+        if self.key is not None:
+            result["key"] = self.key
+        return result
 
     def get_callback_info(self) -> dict[str, Any]:
         """Get callback information for this node and its children."""
         callback_info = {}
 
-        # Add this node's callbacks if any
+        # Add this node's callbacks if any - use callback keys directly since nodes don't have IDs anymore
         if self._callback_keys:
-            callback_info[self.id] = {"callbacks": self._callback_keys}
+            # Use a temporary unique identifier for callback grouping
+            node_key = str(uuid.uuid4())
+            callback_info[node_key] = {"callbacks": self._callback_keys}
 
         # Recursively collect callback info from children
         for child in self.children:

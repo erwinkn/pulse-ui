@@ -3,7 +3,6 @@ export const FRAGMENT_TAG = "$$fragment";
 export const MOUNT_POINT_PREFIX = "$$";
 
 export interface UIElementNode {
-  id: string;
   tag: string;
   props: Record<string, any>;
   children: UINode[];
@@ -19,7 +18,6 @@ export type UITree = UINode;
 export type UpdateType = "insert" | "remove" | "replace" | "update_props";
 
 export interface UIUpdate {
-  id: string;
   type: UpdateType;
   path: number[];
   data?: any;
@@ -92,7 +90,8 @@ export function getMountPointComponentKey(node: UIElementNode): string {
 export function createElementNode(
   tag: string,
   props: Record<string, any> = {},
-  children: UINode[] = []
+  children: UINode[] = [],
+  key?: string
 ): UIElementNode {
   // Validate that user isn't trying to use reserved prefixes
   if (tag.startsWith(MOUNT_POINT_PREFIX)) {
@@ -101,32 +100,48 @@ export function createElementNode(
     );
   }
 
-  return {
-    id: Math.random().toString(36),
+  const node: UIElementNode = {
     tag,
     props,
     children,
   };
+  
+  if (key !== undefined) {
+    node.key = key;
+  }
+  
+  return node;
 }
 
-export function createFragment(children: UINode[] = []): UIElementNode {
-  return {
-    id: Math.random().toString(36),
+export function createFragment(children: UINode[] = [], key?: string): UIElementNode {
+  const node: UIElementNode = {
     tag: FRAGMENT_TAG,
     props: {},
     children,
   };
+  
+  if (key !== undefined) {
+    node.key = key;
+  }
+  
+  return node;
 }
 
 export function createMountPoint(
   componentKey: string,
   props: Record<string, any> = {},
-  children: UINode[] = []
+  children: UINode[] = [],
+  key?: string
 ): UIElementNode {
-  return {
-    id: Math.random().toString(36),
+  const node: UIElementNode = {
     tag: MOUNT_POINT_PREFIX + componentKey,
     props,
     children,
   };
+  
+  if (key !== undefined) {
+    node.key = key;
+  }
+  
+  return node;
 }

@@ -114,7 +114,6 @@ describe("update-utils", () => {
       const newChild = "New";
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "insert",
         path: [],
         data: { node: newChild, index: 0 },
@@ -132,7 +131,6 @@ describe("update-utils", () => {
       const newChild = createElementNode("span", {}, ["New"]);
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "insert",
         path: [],
         data: { node: newChild, index: 0 },
@@ -150,7 +148,6 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [child1, child2]);
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "remove",
         path: [],
         data: { index: 0 },
@@ -167,7 +164,6 @@ describe("update-utils", () => {
       const newChild = "New";
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "replace",
         path: [0],
         data: { node: newChild },
@@ -183,7 +179,6 @@ describe("update-utils", () => {
       const newChild = createElementNode("span", {}, ["New"]);
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "replace",
         path: [0],
         data: { node: newChild },
@@ -197,7 +192,6 @@ describe("update-utils", () => {
       const root = createElementNode("div", { className: "old" });
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "update_props",
         path: [],
         data: { props: { className: "new", id: "test" } },
@@ -216,7 +210,6 @@ describe("update-utils", () => {
       const mountPoint = createMountPoint("counter", { count: 5 });
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "insert",
         path: [],
         data: { node: mountPoint, index: 0 },
@@ -234,7 +227,6 @@ describe("update-utils", () => {
       const mountPoint = createMountPoint("counter", { count: 5 });
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "replace",
         path: [0],
         data: { node: mountPoint },
@@ -252,7 +244,6 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [mountPoint]);
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "update_props",
         path: [0],
         data: { props: { count: 10, color: "red", size: "large" } },
@@ -275,7 +266,6 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [fragment]);
 
       const update: UIUpdatePayload = {
-        id: "test-update",
         type: "insert",
         path: [0],
         data: { node: "World", index: 1 },
@@ -296,13 +286,11 @@ describe("update-utils", () => {
 
       const updates: UIUpdatePayload[] = [
         {
-          id: "update-1",
           type: "update_props",
           path: [],
           data: { props: { className: "new" } },
         },
         {
-          id: "update-2",
           type: "insert",
           path: [],
           data: { node: "Hello", index: 0 },

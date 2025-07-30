@@ -23,7 +23,7 @@ class TestUITreeNode:
         assert node.tag == "div"
         assert node.props == {}
         assert node.children == []
-        assert node.id.startswith("py_")
+        assert node.key is None
         
     def test_node_with_props(self):
         """Test creating nodes with props."""
@@ -50,12 +50,10 @@ class TestUITreeNode:
         
         result = node.to_dict()
         expected = {
-            "id": node.id,
             "tag": "div", 
             "props": {"id": "container"},
             "children": [
                 {
-                    "id": child.id,
                     "tag": "p",
                     "props": {"className": "text"},
                     "children": ["Hello"]
@@ -64,6 +62,20 @@ class TestUITreeNode:
             ]
         }
         
+        assert result == expected
+        
+    def test_node_with_key(self):
+        """Test creating nodes with keys."""
+        node = UITreeNode("div", key="my-key")
+        assert node.key == "my-key"
+        
+        result = node.to_dict()
+        expected = {
+            "tag": "div",
+            "props": {},
+            "children": [],
+            "key": "my-key"
+        }
         assert result == expected
         
     def test_indexing_syntax(self):

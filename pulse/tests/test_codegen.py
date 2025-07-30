@@ -46,9 +46,12 @@ class TestGenerateRouteWithRegistry:
         result = generate_route_with_registry(route, initial_tree)
 
         # Check basic structure
-        assert 'import { ReactiveUIContainer } from "../ui-tree";' in result
         assert (
-            'import { ComponentRegistryProvider } from "../ui-tree/component-registry";'
+            'import { ReactiveUIContainer } from "~/pulse-lib/ReactiveUIContainer";'
+            in result
+        )
+        assert (
+            'import { ComponentRegistryProvider } from "~/pulse-lib/component-registry";'
             in result
         )
         assert 'import type { ComponentType } from "react";' in result
@@ -171,18 +174,11 @@ class TestGenerateRoutesConfig:
         """Test generating config with empty routes list."""
         result = generate_routes_config([])
 
-        assert (
-            'import { type RouteConfig, index, route } from "@react-router/dev/routes";'
-            in result
-        )
-        assert "export default [" in result
-        assert "] satisfies RouteConfig;" in result
-
         # Should have empty array - check that there are no route entries between [ and ]
         import_line = (
             'import { type RouteConfig, index, route } from "@react-router/dev/routes";'
         )
-        export_line = "export default ["
+        export_line = "export const routes = ["
         satisfies_line = "] satisfies RouteConfig;"
 
         expected = f"""{import_line}
@@ -202,7 +198,7 @@ class TestGenerateRoutesConfig:
         home_route = Route("/", render_func, [])
         result = generate_routes_config([home_route])
 
-        assert 'index("routes/index.tsx"),' in result
+        assert 'index("pulse/routes/index.tsx"),' in result
 
     def test_multiple_routes(self):
         """Test generating config with multiple routes."""
@@ -219,10 +215,10 @@ class TestGenerateRoutesConfig:
 
         result = generate_routes_config(routes)
 
-        assert 'index("routes/index.tsx"),' in result
-        assert 'route("/about", "routes/about.tsx"),' in result
-        assert 'route("/contact", "routes/contact.tsx"),' in result
-        assert 'route("/admin/users", "routes/admin_users.tsx"),' in result
+        assert 'index("pulse/routes/index.tsx"),' in result
+        assert 'route("/about", "pulse/routes/about.tsx"),' in result
+        assert 'route("/contact", "pulse/routes/contact.tsx"),' in result
+        assert 'route("/admin/users", "pulse/routes/admin_users.tsx"),' in result
 
     def test_route_path_to_filename_conversion(self):
         """Test conversion of route paths to safe filenames."""
@@ -238,10 +234,10 @@ class TestGenerateRoutesConfig:
 
         result = generate_routes_config(routes)
 
-        assert 'route("/api/v1/users", "routes/api_v1_users.tsx"),' in result
-        assert 'route("/user-profile", "routes/user_profile.tsx"),' in result
+        assert 'route("/api/v1/users", "pulse/routes/api_v1_users.tsx"),' in result
+        assert 'route("/user-profile", "pulse/routes/user_profile.tsx"),' in result
         assert (
-            'route("/admin/user-management", "routes/admin_user_management.tsx"),'
+            'route("/admin/user-management", "pulse/routes/admin_user_management.tsx"),'
             in result
         )
 
@@ -251,8 +247,7 @@ class TestWriteGeneratedFiles:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(ReactComponent, "_components"):
-            COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_write_files_to_temp_directory(self):
         """Test writing generated files to a temporary directory."""
@@ -269,7 +264,7 @@ class TestWriteGeneratedFiles:
 
         # Use temporary directory
         with tempfile.TemporaryDirectory() as temp_dir:
-            app_dir = os.path.join(temp_dir, "app")
+            app_dir = os.path.join(temp_dir, "app", "pulse")
             write_generated_files(routes, app_dir)
 
             # Check that files were created
@@ -287,7 +282,7 @@ class TestWriteGeneratedFiles:
 
             # Check routes config
             config_content = (Path(app_dir) / "routes.ts").read_text()
-            assert 'route("/test", "routes/test.tsx"),' in config_content
+            assert 'route("/test", "pulse/routes/test.tsx"),' in config_content
 
     def test_multiple_routes_file_generation(self):
         """Test generating files for multiple routes."""
@@ -316,8 +311,8 @@ class TestWriteGeneratedFiles:
 
             # Check routes config has both
             config_content = (Path(app_dir) / "routes.ts").read_text()
-            assert 'index("routes/index.tsx"),' in config_content
-            assert 'route("/about", "routes/about.tsx"),' in config_content
+            assert 'index("pulse/routes/index.tsx"),' in config_content
+            assert 'route("/about", "pulse/routes/about.tsx"),' in config_content
 
     def test_route_with_complex_ui_tree(self):
         """Test generating files for route with complex UI structure."""

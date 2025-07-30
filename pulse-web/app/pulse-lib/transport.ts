@@ -1,26 +1,11 @@
 import type { UINode, UIUpdatePayload } from "./tree";
 
 export interface TransportMessage {
-  type:
-    | "ui_updates"
-    | "ui_tree"
-    | "custom"
-    | "callback_invoke"
-    | "callback_response"
-    | "ping"
-    | "pong"
-    | "get_callbacks"
-    | "callbacks_list"
-    | "error";
+  type: "ui_updates" | "ui_tree" | "callback_invoke" | "ping" | "pong";
   updates?: UIUpdatePayload[];
   tree?: UINode;
-  data?: any;
-  // Callback-specific fields
   callback_key?: string;
   request_id?: string;
-  success?: boolean;
-  callbacks?: string[];
-  message?: string;
 }
 
 export interface Transport {
@@ -87,30 +72,35 @@ export class WebSocketTransport implements Transport {
 
 export class EventEmitterTransport implements Transport {
   private messageCallback: ((message: TransportMessage) => void) | null = null;
-  private eventTarget = new EventTarget();
-
-  constructor() {
-    this.eventTarget.addEventListener("message", (event) => {
-      if (this.messageCallback) {
-        this.messageCallback((event as CustomEvent).detail);
-      }
-    });
-  }
 
   send(message: TransportMessage): void {
-    // In a real app, this might send to a different EventEmitterTransport instance
     console.log("EventEmitterTransport send:", message);
+    // For local testing, immediately dispatch the message back to the handler
+    if (this.messageCallback) {
+      // Use setTimeout to make this async like a real transport
+      setTimeout(() => {
+        if (this.messageCallback) {
+          this.messageCallback(message);
+        }
+      }, 0);
+    }
   }
 
   onMessage(callback: (message: TransportMessage) => void): void {
     this.messageCallback = callback;
   }
 
-  // Method to dispatch messages to this transport
+  // Method to dispatch messages directly to this transport (for testing)
   dispatchMessage(message: TransportMessage): void {
-    this.eventTarget.dispatchEvent(
-      new CustomEvent("message", { detail: message })
-    );
+    console.log("EventEmitterTransport dispatchMessage:", message);
+    if (this.messageCallback) {
+      // Use setTimeout to make this async like a real transport
+      setTimeout(() => {
+        if (this.messageCallback) {
+          this.messageCallback(message);
+        }
+      }, 0);
+    }
   }
 
   close(): void {

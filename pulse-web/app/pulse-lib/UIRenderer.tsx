@@ -57,7 +57,7 @@ const UIElementRenderer = memo<{ node: UIElementNode }>(({ node }) => {
 // Helper function to generate keys for React reconciliation
 function getNodeKey(node: UINode, index: number): string | number {
   if (isElementNode(node)) {
-    return node.key || node.id;
+    return node.key || index;
   }
   return index;
 }

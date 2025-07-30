@@ -23,6 +23,7 @@ export function useReactiveUITree({
   }, []);
 
   const applyBatchUpdates = useCallback((updates: UIUpdatePayload[]) => {
+    console.log("Applying updates", updates)
     setTree((currentTree) => applyUpdates(currentTree, updates));
   }, []);
 

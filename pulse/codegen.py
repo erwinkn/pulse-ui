@@ -67,7 +67,7 @@ export default function RouteComponent() {
 # Mako template for routes configuration
 ROUTES_CONFIG_TEMPLATE = Template("""import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
-export default [
+export const routes = [
 % if not routes:
 
 % else:
@@ -81,9 +81,9 @@ export default [
         safe_path = "index"
 %>
 % if route_obj.path == "/":
-  index("routes/${safe_path}.tsx"),
+  index("pulse/routes/${safe_path}.tsx"),
 % else:
-  route("${route_obj.path}", "routes/${safe_path}.tsx"),
+  route("${route_obj.path}", "pulse/routes/${safe_path}.tsx"),
 % endif
 % endfor
 % endif
@@ -169,7 +169,7 @@ def generate_all_routes(
         routes = app_routes
     else:
         routes = decorated_routes()
-        
+
     write_generated_files(routes, output_dir, host, port)
 
     if routes:

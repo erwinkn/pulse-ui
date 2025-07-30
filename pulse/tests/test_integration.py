@@ -124,9 +124,9 @@ class TestFullPipeline:
 
             # Test routes configuration
             config_content = (Path(app_dir) / "routes.ts").read_text()
-            assert 'index("routes/index.tsx"),' in config_content
-            assert 'route("/about", "routes/about.tsx"),' in config_content
-            assert 'route("/interactive", "routes/interactive.tsx"),' in config_content
+            assert 'index("pulse/routes/index.tsx"),' in config_content
+            assert 'route("/about", "pulse/routes/about.tsx"),' in config_content
+            assert 'route("/interactive", "pulse/routes/interactive.tsx"),' in config_content
 
     def test_complex_nested_app(self):
         """Test generating an app with complex nested component structures."""
@@ -280,8 +280,7 @@ class TestComponentRegistryIntegration:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(ReactComponent, "_components"):
-            COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_component_registry_consistency(self):
         """Test that component registry is consistent across routes."""
@@ -378,8 +377,7 @@ class TestErrorHandling:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(ReactComponent, "_components"):
-            COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_partial_component_usage(self):
         """Test route that defines components but doesn't use all of them."""
@@ -421,8 +419,7 @@ class TestRealWorldScenarios:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(ReactComponent, "_components"):
-            COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_blog_app_scenario(self):
         """Test a realistic blog application scenario."""
@@ -522,8 +519,8 @@ class TestRealWorldScenarios:
 
             # Verify routes config
             config_content = (Path(app_dir) / "routes.ts").read_text()
-            assert 'route("/blog", "routes/blog.tsx"),' in config_content
-            assert 'route("/blog/:id", "routes/blog_:id.tsx"),' in config_content
+            assert 'route("/blog", "pulse/routes/blog.tsx"),' in config_content
+            assert 'route("/blog/:id", "pulse/routes/blog_:id.tsx"),' in config_content
 
 
 if __name__ == "__main__":

@@ -52,8 +52,7 @@ class TestDefineReactComponent:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(ReactComponent, "_components"):
-            COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_define_component_basic(self):
         """Test defining a basic React component."""
@@ -177,12 +176,8 @@ class TestDefineReactComponent:
         ReactComponent("test", "./First", "First", False)
 
         # Define second component with same key
-        ReactComponent("test", "./Second", "Second", False)
-
-        components = react_component_registry()
-        assert len(components) == 1
-        assert components["test"].import_path == "./Second"
-        assert components["test"].export_name == "Second"
+        with pytest.raises(ValueError):
+            ReactComponent("test", "./Second", "Second", False)
 
 
 class TestComponentRegistry:
@@ -190,8 +185,7 @@ class TestComponentRegistry:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(ReactComponent, "_components"):
-            COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_empty_registry(self):
         """Test empty component registry."""
@@ -223,8 +217,7 @@ class TestMountPointGeneration:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(ReactComponent, "_components"):
-            COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_mount_point_tag_format(self):
         """Test that mount points have correct tag format."""
@@ -248,12 +241,10 @@ class TestMountPointGeneration:
         result = mount_point.to_dict()
 
         expected = {
-            "id": mount_point.id,
             "tag": "$$counter",
             "props": {"count": 5, "label": "Test Counter"},
             "children": [
                 {
-                    "id": cast(Node, mount_point.children[0]).id,
                     "tag": "p",
                     "props": {},
                     "children": ["Counter description"],
@@ -295,8 +286,7 @@ class TestComponentIntegrationWithHTML:
 
     def setUp(self):
         """Clear the component registry before each test."""
-        if hasattr(ReactComponent, "_components"):
-            COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.clear()
 
     def test_mixed_html_and_components(self):
         """Test mixing HTML elements and React components."""

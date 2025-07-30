@@ -16,7 +16,7 @@ from pulse.codegen import (
     generate_routes_config,
     write_generated_files,
 )
-from pulse.nodes import (
+from pulse.vdom import (
     COMPONENT_REGISTRY,
     ReactComponent,
     div,

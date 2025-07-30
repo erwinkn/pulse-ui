@@ -9,7 +9,7 @@ import pytest
 import tempfile
 import os
 from pathlib import Path
-from pulse.nodes import (
+from pulse.vdom import (
     COMPONENT_REGISTRY,
     ReactComponent,
     react_component_registry,

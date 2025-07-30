@@ -6,7 +6,7 @@ React components and render functions.
 """
 
 import pytest
-from pulse.nodes import (
+from pulse.vdom import (
     ReactComponent,
     COMPONENT_REGISTRY,
     div,
@@ -39,7 +39,7 @@ class TestRoute:
             return div()["Test content"]
 
         # Create some mock components
-        from pulse.nodes import ReactComponent
+        from pulse.vdom import ReactComponent
 
         comp1 = ReactComponent("comp1", "./Comp1", "Comp1", False)
         comp2 = ReactComponent("comp2", "./Comp2", "Comp2", False)

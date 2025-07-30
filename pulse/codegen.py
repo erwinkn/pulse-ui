@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 from mako.template import Template
 
-from .nodes import prepare_ui_response
+from .vdom import prepare_ui_response
 from .route import Route
 
 
@@ -157,7 +157,7 @@ def generate_all_routes(
     """
     import logging
     from .route import decorated_routes
-    from .nodes import clear_callbacks
+    from .vdom import clear_callbacks
 
     logger = logging.getLogger(__name__)
 

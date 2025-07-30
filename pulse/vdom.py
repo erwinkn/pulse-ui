@@ -17,7 +17,7 @@ import uuid
 
 __all__ = [
     # Core types and functions
-    "UITreeNode",
+    "Node",
     "Callback",
     "define_tag",
     "define_self_closing_tag",
@@ -207,7 +207,7 @@ def execute_callback(callback_key: str) -> bool:
 
 
 def prepare_ui_response(
-    root_node: "UITreeNode",
+    root_node: "Node",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     Prepare a complete UI response with the tree and callback information.
@@ -224,10 +224,10 @@ def prepare_ui_response(
 # Core UI Tree Node
 # ============================================================================
 
-NodeChild = Union["UITreeNode", str, int, bool, float]
+NodeChild = Union["Node", str, int, bool, float]
 
 
-class UITreeNode:
+class Node:
     """
     A UI tree node that matches the TypeScript UIElementNode format.
     This directly generates the structure expected by the React frontend.
@@ -279,7 +279,7 @@ class UITreeNode:
         else:
             new_children = [children_arg]
 
-        new_node = UITreeNode(
+        new_node = Node(
             tag=self.tag,
             props=self.props.copy(),
             children=new_children,
@@ -295,7 +295,7 @@ class UITreeNode:
             "tag": self.tag,
             "props": self.props,
             "children": [
-                child.to_dict() if isinstance(child, UITreeNode) else child
+                child.to_dict() if isinstance(child, Node) else child
                 for child in self.children
             ],
         }
@@ -315,7 +315,7 @@ class UITreeNode:
 
         # Recursively collect callback info from children
         for child in self.children:
-            if isinstance(child, UITreeNode):
+            if isinstance(child, Node):
                 child_callbacks = child.get_callback_info()
                 callback_info.update(child_callbacks)
 
@@ -340,10 +340,10 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
     """
     default_props = default_props or {}
 
-    def create_element(*children: NodeChild, **props: Any) -> UITreeNode:
+    def create_element(*children: NodeChild, **props: Any) -> Node:
         """Create a UITreeNode for this tag."""
         merged_props = {**default_props, **props}
-        return UITreeNode(
+        return Node(
             tag=name, props=merged_props, children=list(children) if children else []
         )
 
@@ -363,10 +363,10 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
     """
     default_props = default_props or {}
 
-    def create_element(**props: Any) -> UITreeNode:
+    def create_element(**props: Any) -> Node:
         """Create a self-closing UITreeNode for this tag."""
         merged_props = {**default_props, **props}
-        return UITreeNode(
+        return Node(
             tag=name,
             props=merged_props,
             children=[],  # Self-closing tags never have children
@@ -413,8 +413,8 @@ class ReactComponent:
         self.is_default_export = is_default_export
         COMPONENT_REGISTRY[component_key] = self
 
-    def __call__(self, *children: NodeChild, **props) -> UITreeNode:
-        return UITreeNode(
+    def __call__(self, *children: NodeChild, **props) -> Node:
+        return Node(
             tag=f"$${self.component_key}",
             props=props,
             children=list(children) if children else [],

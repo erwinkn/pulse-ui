@@ -1,5 +1,5 @@
 from typing import Callable
-from .nodes import ReactComponent, UITreeNode
+from .vdom import ReactComponent, Node
 
 
 class Route:
@@ -10,7 +10,7 @@ class Route:
     def __init__(
         self,
         path: str,
-        render_func: Callable[[], UITreeNode],
+        render_func: Callable[[], Node],
         components: list[ReactComponent],
     ):
         self.path = path
@@ -20,7 +20,7 @@ class Route:
 
 def route(
     path: str, components: list[ReactComponent] | None = None
-) -> Callable[[Callable[[], UITreeNode]], Route]:
+) -> Callable[[Callable[[], Node]], Route]:
     """
     Decorator to define a route with its component dependencies.
 
@@ -32,7 +32,7 @@ def route(
         Decorator function
     """
 
-    def decorator(render_func: Callable[[], UITreeNode]) -> Route:
+    def decorator(render_func: Callable[[], Node]) -> Route:
         route = Route(path, render_func, components=components or [])
         add_route(route)
         return route

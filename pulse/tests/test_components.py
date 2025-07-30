@@ -7,10 +7,10 @@ within the UI tree generation system.
 
 from typing import cast
 import pytest
-from pulse.nodes import (
+from pulse.vdom import (
     COMPONENT_REGISTRY,
     ReactComponent,
-    UITreeNode,
+    Node,
     react_component_registry,
     div,
     p,
@@ -127,7 +127,7 @@ class TestDefineReactComponent:
         assert len(mount_point.children) == 2
         assert mount_point.children[0] == "Text child"
         assert (
-            isinstance(mount_point.children[1], UITreeNode)
+            isinstance(mount_point.children[1], Node)
             and mount_point.children[1].tag == "p"
         )
 
@@ -149,7 +149,7 @@ class TestDefineReactComponent:
         assert mount_point.props == {"title": "Test Card"}
         assert len(mount_point.children) == 2
         assert (
-            isinstance(mount_point.children[0], UITreeNode)
+            isinstance(mount_point.children[0], Node)
             and mount_point.children[0].tag == "p"
         )
         assert mount_point.children[1] == "Additional text"
@@ -253,7 +253,7 @@ class TestMountPointGeneration:
             "props": {"count": 5, "label": "Test Counter"},
             "children": [
                 {
-                    "id": cast(UITreeNode, mount_point.children[0]).id,
+                    "id": cast(Node, mount_point.children[0]).id,
                     "tag": "p",
                     "props": {},
                     "children": ["Counter description"],

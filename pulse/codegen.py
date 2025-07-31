@@ -237,7 +237,7 @@ def write_generated_files(
             safe_path = "index"
 
         # Generate initial UI tree and callback info by calling the route function
-        initial_node = route_obj.render_func()
+        initial_node = route_obj.render_fn()
         initial_ui_tree, callback_info = prepare_ui_response(initial_node)
 
         # Generate route entrypoint with inline component registry

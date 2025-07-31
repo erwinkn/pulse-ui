@@ -6,120 +6,10 @@ to define routes and configure their Pulse application.
 """
 
 from typing import List, Optional, Callable, Any, Dict, TypeVar
+
 from .route import Route
-from .state import State, RenderContext, set_render_context
-from .vdom import Node, prepare_ui_response
-from .diff import diff_vdom
-import copy
 
 T = TypeVar("T")
-
-# Global registry for init functions per route
-_route_init_registry: Dict[str, Dict[str, Any]] = {}
-
-# Global context for the current route being rendered
-_current_active_route: Optional["ActiveRoute"] = None
-
-
-def init(init_func: Callable[[], T]) -> T:
-    """
-    Initialize state or other objects that should persist across re-renders.
-
-    The init function is only called once per route. Subsequent calls return
-    the same cached result.
-
-    Args:
-        init_func: Function that returns the object to initialize
-
-    Returns:
-        The initialized object (same instance across re-renders)
-    """
-    if _current_active_route is None:
-        raise RuntimeError("pulse.init() can only be called during route rendering")
-
-    route_path = _current_active_route.path
-
-    # Initialize route registry if needed
-    if route_path not in _route_init_registry:
-        _route_init_registry[route_path] = {}
-
-    # Use the function's id as the key (only one init call per route allowed)
-    init_key = "single_init"
-
-    if init_key in _route_init_registry[route_path]:
-        # Return cached result
-        return _route_init_registry[route_path][init_key]
-    else:
-        # Call init function and cache result
-        result = init_func()
-        _route_init_registry[route_path][init_key] = result
-
-        # If it's a state, track it
-        if isinstance(result, State):
-            _current_active_route.state = result
-
-        return result
-
-
-class ActiveRoute:
-    """
-    Represents an active route instance with its current state and VDOM.
-    """
-
-    def __init__(self, route: Route, path: str, on_update: Optional[Callable] = None):
-        self.route = route
-        self.path = path
-        self.on_update = on_update
-
-        # Current VDOM tree
-        self.vdom: Optional[Node] = None
-
-        # State instance (if any)
-        self.state: Optional[State] = None
-
-        # Track which states this route depends on
-        self.dependent_states: Dict[State, set[str]] = {}
-
-        # Render the route initially
-        self._render()
-
-    def _render(self):
-        """Render the route with state tracking."""
-        global _current_active_route
-
-        # Set this as the current active route
-        old_active_route = _current_active_route
-        _current_active_route = self
-
-        try:
-            # Create render context to track state access
-            context = RenderContext(active_route=self)
-            set_render_context(context)
-
-            try:
-                # Call the route function to get VDOM
-                new_vdom = self.route.render_func()
-
-                # Store the accessed states
-                self.dependent_states = copy.deepcopy(context.accessed_states)
-
-                # Store the new VDOM
-                old_vdom = self.vdom
-                self.vdom = new_vdom
-
-                # If this is not the first render, diff and send updates
-                if old_vdom is not None and self.on_update:
-                    updates = diff_vdom(old_vdom, new_vdom)
-                    if updates:
-                        self.on_update(updates)
-
-            finally:
-                # Clear render context
-                set_render_context(None)
-
-        finally:
-            # Restore previous active route
-            _current_active_route = old_active_route
 
 
 class App:
@@ -182,33 +72,9 @@ class App:
         self.routes.clear()
         self._route_registry.clear()
 
-    def render_route(
-        self,
-        path: str,
-        on_update: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
-    ) -> "ActiveRoute":
-        """
-        Render a route and return an ActiveRoute instance for managing state and updates.
-
-        Args:
-            path: The route path to render
-            on_update: Optional callback to receive VDOM updates when state changes
-
-        Returns:
-            ActiveRoute instance managing the rendered route
-
-        Raises:
-            ValueError: If no route matches the given path
-        """
-        # Find the route that matches this path
-        matching_route = None
+    def get_route(self, path: str):
         for route in self.get_routes():
             if route.path == path:
-                matching_route = route
-                break
+                return route
+        raise ValueError(f"No route found for path '{path}'")
 
-        if matching_route is None:
-            raise ValueError(f"No route found for path: {path}")
-
-        # Create and return an ActiveRoute instance
-        return ActiveRoute(matching_route, path, on_update)

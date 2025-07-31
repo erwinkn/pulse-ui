@@ -170,27 +170,27 @@ class Callback:
 
 
 # Global callback registry: callback_key -> function
-_callback_registry: dict[str, Callable[[], None]] = {}
+CALLBACK_REGISTRY: dict[str, Callable[[], None]] = {}
 
 
 def register_callback(callback_key: str, func: Callable[[], None]) -> None:
     """Register a callback function with a unique key."""
-    _callback_registry[callback_key] = func
+    CALLBACK_REGISTRY[callback_key] = func
 
 
 def get_callback(callback_key: str) -> Optional[Callable[[], None]]:
     """Get a registered callback function by key."""
-    return _callback_registry.get(callback_key)
+    return CALLBACK_REGISTRY.get(callback_key)
 
 
 def clear_callbacks() -> None:
     """Clear all registered callbacks."""
-    _callback_registry.clear()
+    CALLBACK_REGISTRY.clear()
 
 
 def get_all_callbacks() -> dict[str, Callable[[], None]]:
     """Get all registered callbacks."""
-    return _callback_registry.copy()
+    return CALLBACK_REGISTRY.copy()
 
 
 def execute_callback(callback_key: str) -> bool:

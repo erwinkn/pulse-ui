@@ -5,11 +5,10 @@ This module provides the main server that handles both HTTP and WebSocket connec
 for the Pulse UI system, including automatic route generation and callback handling.
 """
 
-import asyncio
 import json
 import logging
 import socket
-from typing import Dict, Any, Set, Optional, List
+from typing import Set, Optional, List
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -37,11 +36,18 @@ def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:
 class PulseServer:
     """FastAPI server with WebSocket support for Pulse UI."""
 
-    def __init__(self, host: str = "localhost", port: int = 8000, app_routes: Optional[List] = None):
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 8000,
+        app_routes: Optional[List] = None,
+        all_routes: Optional[List] = None,
+    ):
         self.app = FastAPI(title="Pulse UI Server")
         self.host = host
         self.port = port
         self.app_routes = app_routes
+        self.all_routes = all_routes
         self.connected_clients: Set[WebSocket] = set()
 
         # Add CORS middleware
@@ -77,12 +83,28 @@ class PulseServer:
         self.connected_clients.add(websocket)
         logger.info(f"Client connected. Total clients: {len(self.connected_clients)}")
 
+        async def send_updates(updates):
+            await websocket.send_text(
+                json.dumps(
+                    {"type": "vdom_update", "updates": [u.to_dict() for u in updates]}
+                )
+            )
+
+        # When a client connects, start listening to route updates
+        if self.all_routes:
+            for route in self.all_routes:
+                route.add_update_listener(send_updates)
+
         try:
             while True:
                 data = await websocket.receive_text()
                 await self.process_message(websocket, data)
         except WebSocketDisconnect:
             self.connected_clients.discard(websocket)
+            # When a client disconnects, stop listening to route updates
+            if self.all_routes:
+                for route in self.all_routes:
+                    route.remove_update_listener(send_updates)
             logger.info(
                 f"Client disconnected. Total clients: {len(self.connected_clients)}"
             )
@@ -167,13 +189,18 @@ class PulseServer:
         """Generate TypeScript files from Python routes."""
         logger.info("Generating TypeScript routes...")
         generate_all_routes(
-            host=self.host, port=self.port, clear_existing_callbacks=True, app_routes=self.app_routes
+            host=self.host,
+            port=self.port,
+            clear_existing_callbacks=True,
+            app_routes=self.app_routes,
         )
 
-    def run(self, auto_generate: bool = True):
+    def run(self, auto_generate: bool = True, all_routes: Optional[List] = None):
         """Start the FastAPI server."""
         if auto_generate:
             self.generate_routes()
+
+        self.all_routes = all_routes
 
         logger.info(f"🚀 Starting Pulse UI Server on http://{self.host}:{self.port}")
         logger.info(f"🔌 WebSocket endpoint: ws://{self.host}:{self.port}/ws")
@@ -187,6 +214,7 @@ def start_server(
     auto_generate: bool = True,
     find_port: bool = True,
     app_routes: Optional[List] = None,
+    all_routes: Optional[List] = None,
 ):
     """Start the Pulse UI FastAPI server."""
     if find_port:
@@ -199,5 +227,5 @@ def start_server(
             logger.error(f"Failed to find available port: {e}")
             raise
 
-    server = PulseServer(host, port, app_routes=app_routes)
-    server.run(auto_generate=auto_generate)
+    server = PulseServer(host, port, app_routes=app_routes, all_routes=all_routes)
+    server.run(auto_generate=auto_generate, all_routes=all_routes)

@@ -131,7 +131,13 @@ def run(
         typer.echo(f"📋 Found {len(routes)} routes")
 
         typer.echo(f"🚀 Starting Pulse UI server on {address}:{port}")
-        start_server(host=address, port=port, auto_generate=True, app_routes=routes)
+        start_server(
+            host=address,
+            port=port,
+            auto_generate=True,
+            app_routes=routes,
+            all_routes=routes,
+        )
 
 
 @app.command("generate")

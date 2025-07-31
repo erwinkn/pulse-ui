@@ -1,7 +1,8 @@
 from .route import route, decorated_routes, Route
 from .server import PulseServer as Server
 from .vdom import ReactComponent
-from .app import App, ActiveRoute, init
+from .app import App 
+from .reactive import init
 from .state import State
 
 # Import HTML tags and other UI components
@@ -125,3 +126,5 @@ from .vdom import (
     track,
     wbr,
 )
+
+

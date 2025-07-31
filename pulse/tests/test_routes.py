@@ -29,7 +29,7 @@ class TestRoute:
         route = Route("/test", render_func, components)
 
         assert route.path == "/test"
-        assert route.render_func == render_func
+        assert route.render_fn == render_func
         assert route.components == components
 
     def test_route_with_components(self):
@@ -69,11 +69,11 @@ class TestDefineRoute:
 
         assert isinstance(test_route, Route)
         assert test_route.path == "/test"
-        assert callable(test_route.render_func)
+        assert callable(test_route.render_fn)
         assert test_route.components == []
 
         # Test calling the render function
-        result = test_route.render_func()
+        result = test_route.render_fn()
         assert result.tag == "div"
         assert result.children == ["Test route content"]
 
@@ -143,7 +143,7 @@ class TestRouteRendering:
                 p()["This is a simple page with no React components."],
             ]
 
-        result = simple_route.render_func()
+        result = simple_route.render_fn()
         result_dict = result.to_dict()
 
         assert result_dict["tag"] == "div"
@@ -167,7 +167,7 @@ class TestRouteRendering:
                 UserCard(name="John Doe", email="john@example.com"),
             ]
 
-        result = react_route.render_func()
+        result = react_route.render_fn()
         result_dict = result.to_dict()
 
         assert result_dict["tag"] == "div"
@@ -199,7 +199,7 @@ class TestRouteRendering:
                 h1()["Dynamic List"], *[ListItem(key=item, text=item) for item in items]
             ]
 
-        result = dynamic_route.render_func()
+        result = dynamic_route.render_fn()
         result_dict = result.to_dict()
 
         assert result_dict["tag"] == "div"
@@ -312,7 +312,7 @@ class TestRouteComponentIntegration:
         assert len(partial_use_route.components) == 2
 
         # But rendering should only create button mount point
-        result = partial_use_route.render_func()
+        result = partial_use_route.render_fn()
         result_dict = result.to_dict()
 
         # Find mount points in result

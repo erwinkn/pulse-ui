@@ -35,7 +35,7 @@ def load_routes_from_file(file_path: str | Path):
         raise typer.Exit(1)
 
     # Clear any existing global routes before loading
-    from pulse.route import clear_routes
+    from pulse.app import clear_routes
 
     clear_routes()
 
@@ -57,12 +57,12 @@ def load_routes_from_file(file_path: str | Path):
             from pulse.app import App
 
             if isinstance(module.app, App):
-                routes = module.app.get_routes()
+                routes = module.app.list_routes()
                 if routes:
                     return routes
 
         # Fall back to global routes
-        from pulse.route import decorated_routes
+        from pulse.app import decorated_routes
 
         routes = decorated_routes()
 

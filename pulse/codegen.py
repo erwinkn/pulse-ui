@@ -12,8 +12,8 @@ from typing import Dict, List, Optional
 
 from mako.template import Template
 
-from .vdom import prepare_ui_response
-from .route import Route
+from .app import Route
+from .vdom import VDOMNode
 
 
 # Mako template for route component with inline registry
@@ -93,7 +93,7 @@ export const routes = [
 
 def generate_route_with_registry(
     route: Route,
-    initial_ui_tree: Dict,
+    initial_ui_tree: VDOMNode,
     callback_info: Optional[Dict] = None,
     host: str = "localhost",
     port: int = 8000,
@@ -103,7 +103,7 @@ def generate_route_with_registry(
 
     Args:
         route: Route object containing the route definition
-        initial_ui_tree: The initial UI tree data structure
+        initial_ui_tree: The initial UI tree VDOM structure
         callback_info: Callback information for client-side handling
         host: Backend server host for WebSocket connection
         port: Backend server port for WebSocket connection
@@ -156,7 +156,7 @@ def generate_all_routes(
         int: Number of routes generated
     """
     import logging
-    from .route import decorated_routes
+    from .app import decorated_routes
     from .vdom import clear_callbacks
 
     logger = logging.getLogger(__name__)
@@ -238,7 +238,7 @@ def write_generated_files(
 
         # Generate initial UI tree and callback info by calling the route function
         initial_node = route_obj.render_fn()
-        initial_ui_tree, callback_info = prepare_ui_response(initial_node)
+        initial_ui_tree, callback_info = initial_node.render()
 
         # Generate route entrypoint with inline component registry
         route_code = generate_route_with_registry(

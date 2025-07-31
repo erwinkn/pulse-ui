@@ -9,6 +9,7 @@ This example shows how to:
 4. Trigger re-renders when state changes
 """
 
+import json
 import pulse as ps
 
 
@@ -28,17 +29,22 @@ class TodoState(ps.State):
 app = ps.App()
 
 
+RENDER_CALLBACKS = True
 @app.route("/")
 def home():
     # Initialize state - only called once per route
     state = ps.init(lambda: CounterState())
+    if RENDER_CALLBACKS:
+        print("Rendering callbacks")
+    else:
+        print("Not rendering callbacks")
 
     return ps.div(
         ps.h1(f"Welcome to {state.name}!"),
         ps.p(f"Current count: {state.count}"),
         ps.button(
             "Increment",
-            onclick=lambda: setattr(state, "count", state.count + 1),
+            onclick=lambda: setattr(state, "count", state.count + 1) if RENDER_CALLBACKS else None,
             disabled=not state.enabled,
         ),
         ps.button("Reset", onclick=lambda: setattr(state, "count", 0)),
@@ -46,7 +52,7 @@ def home():
             ps.input(
                 type="checkbox",
                 checked=state.enabled,
-                onchange=lambda: setattr(state, "enabled", not state.enabled),
+                onchange=lambda: setattr(state, "enabled", not state.enabled) if RENDER_CALLBACKS else None,
             ),
             "Enable counter",
         ),
@@ -145,9 +151,7 @@ def demo_reactive_system():
         """Callback to receive VDOM updates."""
         print(f"Received {len(updates)} VDOM updates:")
         for update in updates:
-            print(f"  - {update['type']}: {update.get('path', 'root')}")
-            print("  --- Payload ---")
-            print(update["data"])
+            print(f"  - {update['type']}: {json.dumps(update, indent=2)}")
         update_batches.append(updates)
 
     # Render the home route
@@ -164,6 +168,8 @@ def demo_reactive_system():
         print(f"Initial name: {active_route.state.name}")
 
         # Modify state - this should trigger a re-render
+        global RENDER_CALLBACKS
+        RENDER_CALLBACKS = False
         active_route.state.count = 5
         print(f"Updated count to: {active_route.state.count}")
 

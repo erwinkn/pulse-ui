@@ -5,12 +5,18 @@ This library provides a Python API for building UI trees that match
 the TypeScript UINode format exactly, eliminating the need for translation.
 """
 
+from ast import Call
 from typing import (
     Any,
+    NamedTuple,
+    NotRequired,
     Optional,
     Callable,
+    Self,
     Sequence,
+    TypedDict,
     Union,
+    cast,
 )
 import random
 import uuid
@@ -27,7 +33,6 @@ __all__ = [
     "clear_callbacks",
     "get_all_callbacks",
     "execute_callback",
-    "prepare_ui_response",
     # UI Tree integration
     "ReactComponent",
     "ReactComponent",
@@ -193,38 +198,45 @@ def get_all_callbacks() -> dict[str, Callable[[], None]]:
     return CALLBACK_REGISTRY.copy()
 
 
-def execute_callback(callback_key: str) -> bool:
+def execute_callback(key: str) -> bool:
     """Execute a registered callback by its key. Returns True if successful."""
-    callback_func = get_callback(callback_key)
+    callback_func = get_callback(key)
     if callback_func:
         try:
             callback_func()
             return True
         except Exception as e:
-            print(f"Error executing callback {callback_key}: {e}")
+            print(f"Error executing callback {key}: {e}")
             return False
     return False
 
 
-def prepare_ui_response(
-    root_node: "Node",
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """
-    Prepare a complete UI response with the tree and callback information.
-
-    Returns:
-        Tuple of (ui_tree_dict, callback_info_dict)
-    """
-    ui_tree = root_node.to_dict()
-    callback_info = root_node.get_callback_info()
-    return ui_tree, callback_info
-
-
 # ============================================================================
-# Core UI Tree Node
+# Core VDOM
 # ============================================================================
 
-NodeChild = Union["Node", str, int, bool, float]
+PrimitiveNode = Union[bool, str, int, float]
+NodeChild = Union["Node", PrimitiveNode]
+Callbacks = dict[str, Callable]
+
+
+class VDOMNode(TypedDict):
+    tag: str
+    key: NotRequired[str]
+    props: NotRequired[dict[str, Any]]  # does not include callbacks
+    children: "NotRequired[Sequence[VDOMNode | PrimitiveNode] | None]"
+
+
+# Payload produced on initial render of a tree
+class ServerVDOM(TypedDict):
+    tree: VDOMNode
+    callbacks: dict[str, Callable]
+
+
+# Payload sent to the client
+class ClientVDOM(TypedDict):
+    tree: VDOMNode
+    callbacks: list[str]
 
 
 class Node:
@@ -236,35 +248,16 @@ class Node:
     def __init__(
         self,
         tag: str,
-        props: dict[str, Any] | None = None,
-        children: Sequence[NodeChild] | None = None,
-        key: str | None = None,
+        props: Optional[dict[str, Any] | None] = None,
+        children: Optional[Sequence["NodeChild"]] = None,
+        key: Optional[str] = None,
+        callbacks: Optional[dict[str, Callable]] = None,
     ):
         self.tag = tag
-        self.props = props or {}
-        self.children = children or []
+        self.props = props
+        self.children = children
         self.key = key
-
-        # Process callbacks in props
-        self._callback_keys: dict[str, str] = {}
-        self._process_callbacks()
-
-    def _process_callbacks(self) -> None:
-        """Process props to detect and register callbacks."""
-        for prop_name, prop_value in list(self.props.items()):
-            # Check if the prop value is a callable (lambda/function)
-            if callable(prop_value) and not isinstance(prop_value, type):
-                # Generate unique callback key using UUID
-                callback_key = str(uuid.uuid4())
-
-                # Register the callback
-                register_callback(callback_key, prop_value)
-
-                # Store the callback key for this prop
-                self._callback_keys[prop_name] = callback_key
-
-                # Replace the callable with the callback key in props
-                self.props[prop_name] = f"__callback:{callback_key}"
+        self.callbacks = callbacks
 
     def __getitem__(
         self,
@@ -274,52 +267,49 @@ class Node:
         if self.children:
             raise ValueError(f"Node already has children: {self.children}")
 
-        if isinstance(children_arg, (list, tuple)):
-            new_children = list(children_arg)
+        if isinstance(children_arg, tuple):
+            new_children = cast(list[NodeChild], list(children_arg))
         else:
             new_children = [children_arg]
 
-        new_node = Node(
+        return Node(
             tag=self.tag,
-            props=self.props.copy(),
+            props=self.props,
+            callbacks=self.callbacks,
             children=new_children,
             key=self.key,
         )
-        # Copy callback keys from the original node
-        new_node._callback_keys = self._callback_keys.copy()
-        return new_node
 
-    def to_dict(self) -> dict[str, Any]:
+    def _render_node(self, path: str, callbacks: dict[str, Callable]) -> VDOMNode:
         """Convert to dictionary format for JSON serialization."""
-        result = {
+        path_prefix = (path + ".") if path else ""
+
+        vdom: VDOMNode = {
             "tag": self.tag,
-            "props": self.props,
-            "children": [
-                child.to_dict() if isinstance(child, Node) else child
-                for child in self.children
-            ],
         }
-        if self.key is not None:
-            result["key"] = self.key
-        return result
+        if self.key:
+            vdom["key"] = self.key
+        if self.props:
+            vdom["props"] = self.props
+        if self.children:
+            vdom["children"] = [
+                child._render_node(f"{path_prefix}{i}", callbacks)
+                if isinstance(child, Node)
+                else child
+                for i, child in enumerate(self.children or [])
+            ]
+        if self.callbacks:
+            callback_props = []
+            for callback_name, callback_fn in self.callbacks.items():
+                callback_props.append(callback_name)
+                callbacks[path_prefix + callback_name] = callback_fn
 
-    def get_callback_info(self) -> dict[str, Any]:
-        """Get callback information for this node and its children."""
-        callback_info = {}
+        return vdom
 
-        # Add this node's callbacks if any - use callback keys directly since nodes don't have IDs anymore
-        if self._callback_keys:
-            # Use a temporary unique identifier for callback grouping
-            node_key = str(uuid.uuid4())
-            callback_info[node_key] = {"callbacks": self._callback_keys}
-
-        # Recursively collect callback info from children
-        for child in self.children:
-            if isinstance(child, Node):
-                child_callbacks = child.get_callback_info()
-                callback_info.update(child_callbacks)
-
-        return callback_info
+    def render(self, path="") -> tuple[VDOMNode, Callbacks]:
+        callbacks: dict[str, Callable] = {}
+        tree = self._render_node(path, callbacks)
+        return tree, callbacks
 
 
 # ============================================================================

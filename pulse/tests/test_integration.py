@@ -24,7 +24,7 @@ from pulse.vdom import (
     strong,
     article,
 )
-from pulse.route import route
+from pulse.app import route
 from pulse.codegen import write_generated_files
 
 

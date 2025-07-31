@@ -238,7 +238,7 @@ class TestMountPointGeneration:
             p()["Counter description"], "Additional text"
         ]
 
-        result = mount_point.to_dict()
+        result = mount_point.render()
 
         expected = {
             "tag": "$$counter",
@@ -268,7 +268,7 @@ class TestMountPointGeneration:
             "And some additional text.",
         ]
 
-        result = nested_structure.to_dict()
+        result = nested_structure.render()
 
         assert result["tag"] == "$$card"
         assert result["props"] == {"title": "Nested Example"}
@@ -303,7 +303,7 @@ class TestComponentIntegrationWithHTML:
             div()["More HTML content"],
         ]
 
-        result = mixed_structure.to_dict()
+        result = mixed_structure.render()
 
         assert result["tag"] == "div"
         assert result["props"] == {"className": "app"}

@@ -6,13 +6,13 @@ that enables automatic re-rendering when state changes.
 """
 
 from collections import defaultdict
-from typing import Any, Set, Optional, Callable, TypeVar
-from dataclasses import field
+from typing import Any, Iterable, Callable, TypeVar
 from abc import ABC, ABCMeta
+
+from pulse.reactive import RENDER_CONTEXT, UPDATE_SCHEDULER
 
 
 # Global context for tracking state access during rendering
-RENDER_CONTEXT: Optional["ReactiveContext"] = None
 
 T = TypeVar("T")
 
@@ -33,8 +33,9 @@ class StateProperty:
             return self
 
         # Track that this property was accessed during rendering
-        if RENDER_CONTEXT is not None:
-            RENDER_CONTEXT.track_state_access(obj, self.name)
+        ctx = RENDER_CONTEXT.get()
+        if ctx is not None:
+            ctx.track_state_access(obj, self.name)
 
         # Return the current value or default
         return getattr(obj, self.private_name, self.default_value)
@@ -89,62 +90,25 @@ class State(ABC, metaclass=StateMeta):
         # Track listeners for this state instance
         self._listeners: dict[str, set[Callable[[], None]]] = defaultdict(set)
 
-    def add_listener(self, field: str, fn: Callable[[], Any]):
-        self._listeners[field].add(fn)
+    def add_listener(self, fields: Iterable[str], fn: Callable[[], Any]):
+        for field in fields:
+            self._listeners[field].add(fn)
 
-    def remove_listener(self, field: str, fn: Callable[[], Any]):
-        self._listeners[field].remove(fn)
+    def remove_listener(self, fields: Iterable[str], fn: Callable[[], Any]):
+        for field in fields:
+            self._listeners[field].remove(fn)
 
     def notify_listeners(self, field: str):
         """Notify all listeners that a property has changed."""
 
         # Notify property-specific listeners
+        scheduler = UPDATE_SCHEDULER.get()
         if field in self._listeners:
             for listener in self._listeners[field].copy():
-                try:
-                    listener()
-                except Exception as e:
-                    print(f"Error in state listener: {e}")
-
-
-class ReactiveContext:
-    """
-    Context object that tracks state access during rendering.
-    """
-
-    # Map of state instances to the properties accessed
-    accessed_states: dict[State, Set[str]] = field(default_factory=dict)
-
-    def __init__(self) -> None:
-        self.accessed_states = {}
-
-    def track_state_access(self, state: State, property_name: str):
-        """Track that a state property was accessed during rendering."""
-        if state not in self.accessed_states:
-            self.accessed_states[state] = set()
-
-        self.accessed_states[state].add(property_name)
-
-    def __enter__(self):
-        """Enter the context manager - set this as the global render context."""
-        global RENDER_CONTEXT
-        self._previous_context = RENDER_CONTEXT
-        RENDER_CONTEXT = self
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Exit the context manager - restore the previous render context."""
-        global RENDER_CONTEXT
-        RENDER_CONTEXT = self._previous_context
-        return False
-
-
-def set_render_context(context: Optional[ReactiveContext]):
-    """Set the global render context for tracking state access."""
-    global RENDER_CONTEXT
-    RENDER_CONTEXT = context
-
-
-def get_render_context() -> Optional[ReactiveContext]:
-    """Get the current render context."""
-    return RENDER_CONTEXT
+                if scheduler:
+                    scheduler.schedule(listener)
+                else:
+                    try:
+                        listener()
+                    except Exception as e:
+                        print(f"Error in state listener: {e}")

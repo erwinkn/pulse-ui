@@ -19,11 +19,12 @@ from pulse.codegen import (
 from pulse.vdom import (
     COMPONENT_REGISTRY,
     ReactComponent,
+    VDOMNode,
     div,
     h1,
     p,
 )
-from pulse.route import Route, route
+from pulse.app import Route, route
 
 
 class TestGenerateRouteWithRegistry:
@@ -36,8 +37,7 @@ class TestGenerateRouteWithRegistry:
             return div()["Simple route"]
 
         route = Route("/simple", render_func, [])
-        initial_tree = {
-            "id": "test",
+        initial_tree: VDOMNode = {
             "tag": "div",
             "props": {},
             "children": ["Simple route"],
@@ -64,7 +64,6 @@ class TestGenerateRouteWithRegistry:
         )
 
         # Check UI tree inclusion
-        assert '"id": "test"' in result
         assert '"tag": "div"' in result
         assert '"Simple route"' in result
 
@@ -84,8 +83,7 @@ class TestGenerateRouteWithRegistry:
             return div()["Route with components"]
 
         route = Route("/with-components", render_func, [button_comp, card_comp])
-        initial_tree = {
-            "id": "test",
+        initial_tree: VDOMNode = {
             "tag": "div",
             "props": {},
             "children": ["Route with components"],
@@ -112,7 +110,7 @@ class TestGenerateRouteWithRegistry:
             return div()["Route with default export"]
 
         route = Route("/default-export", render_func, [default_comp])
-        initial_tree = {"id": "test", "tag": "div", "props": {}, "children": []}
+        initial_tree: VDOMNode = {"tag": "div", "props": {}, "children": []}
 
         result = generate_route_with_registry(route, initial_tree)
 
@@ -129,25 +127,21 @@ class TestGenerateRouteWithRegistry:
         route = Route("/complex", render_func, [])
 
         # Complex nested structure
-        initial_tree = {
-            "id": "root",
+        initial_tree: VDOMNode = {
             "tag": "div",
             "props": {"className": "container"},
             "children": [
                 {
-                    "id": "header",
                     "tag": "h1",
                     "props": {"className": "title"},
                     "children": ["Page Title"],
                 },
                 {
-                    "id": "content",
                     "tag": "div",
                     "props": {"className": "content"},
                     "children": [
                         "Text content",
                         {
-                            "id": "button",
                             "tag": "button",
                             "props": {"onClick": "handleClick()"},
                             "children": ["Click me"],
@@ -369,7 +363,7 @@ class TestCodegenEdgeCases:
             return div()["Special component route"]
 
         route = Route("/special", render_func, [special_comp])
-        initial_tree = {"id": "test", "tag": "div", "props": {}, "children": []}
+        initial_tree: VDOMNode = {"tag": "div", "props": {}, "children": []}
 
         result = generate_route_with_registry(route, initial_tree)
 
@@ -387,7 +381,7 @@ class TestCodegenEdgeCases:
             return div()
 
         route = Route("/empty", render_func, [])
-        initial_tree = {"id": "empty", "tag": "div", "props": {}, "children": []}
+        initial_tree: VDOMNode = {"tag": "div", "props": {}, "children": []}
 
         result = generate_route_with_registry(route, initial_tree)
 
@@ -404,8 +398,7 @@ class TestCodegenEdgeCases:
         route = Route("/json-test", render_func, [])
 
         # UI tree with various data types
-        initial_tree = {
-            "id": "test",
+        initial_tree: VDOMNode = {
             "tag": "div",
             "props": {
                 "stringProp": "text",
@@ -415,7 +408,7 @@ class TestCodegenEdgeCases:
                 "arrayProp": [1, 2, 3],
                 "objectProp": {"nested": "value"},
             },
-            "children": ["text", 123, True, None],
+            "children": ["text", 123, True, ""],
         }
 
         result = generate_route_with_registry(route, initial_tree)

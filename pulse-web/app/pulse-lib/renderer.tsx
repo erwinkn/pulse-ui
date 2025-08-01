@@ -8,10 +8,10 @@ import {
   MOUNT_POINT_PREFIX,
   FRAGMENT_TAG,
 } from "./vdom";
-import { usePulse } from "./pulse";
+import { usePulseRenderHelpers } from "./pulse";
 
 interface VDOMRendererProps {
-  node: VDOM;
+  node: VDOMNode;
 }
 
 // Helper function to generate keys for React reconciliation
@@ -23,7 +23,7 @@ function getNodeKey(node: VDOMNode, index: number): string | number {
 }
 
 export const VDOMRenderer = memo<VDOMRendererProps>(({ node }) => {
-  const { getCallback, getComponent } = usePulse();
+  const { getCallback, getComponent } = usePulseRenderHelpers();
 
   // 1. Handle non-renderable cases first
   if (node === null || typeof node === "boolean" || node === undefined) {
@@ -197,7 +197,7 @@ function cloneNode<T extends VDOMNode>(node: T): T {
   return JSON.parse(JSON.stringify(node));
 }
 
-export function applyUpdates(
+export function applyVDOMUpdates(
   initialTree: VDOMNode,
   updates: VDOMUpdate[]
 ): VDOMNode {

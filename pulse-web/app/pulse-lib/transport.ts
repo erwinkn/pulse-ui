@@ -51,6 +51,7 @@ export interface Transport {
 export class SocketIOTransport implements Transport {
   private socket: Socket | null = null;
   private listener: MessageListener | null = null;
+  private messageQueue: ClientMessage[] = [];
 
   constructor(private url: string) {}
 
@@ -63,6 +64,13 @@ export class SocketIOTransport implements Transport {
 
       this.socket.on("connect", () => {
         console.log("[SocketIOTransport] Connected:", this.socket?.id);
+
+        for (const payload of this.messageQueue) {
+          console.log("[SocketIOTransport] Sending queued message:", payload);
+          this.socket?.emit("message", payload);
+        }
+        this.messageQueue = [];
+
         resolve();
       });
 
@@ -86,14 +94,17 @@ export class SocketIOTransport implements Transport {
     this.socket?.disconnect();
     this.socket = null;
     this.listener = null;
+    this.messageQueue = [];
   }
 
   async sendMessage(payload: ClientMessage): Promise<void> {
-    if (!this.socket || !this.socket.connected) {
-      throw new Error("[SocketIOTransport] Not connected.");
+    if (this.isConnected()) {
+      console.log("[SocketIOTransport] Sending:", payload);
+      this.socket!.emit("message", payload);
+    } else {
+      console.log("[SocketIOTransport] Queuing message:", payload);
+      this.messageQueue.push(payload);
     }
-    console.log("[SocketIOTransport] Sending:", payload);
-    this.socket.emit("message", payload);
   }
 
   isConnected(): boolean {

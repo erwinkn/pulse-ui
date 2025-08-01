@@ -4,107 +4,135 @@ import React, {
   useMemo,
   createContext,
   useContext,
-  useCallback,
   type ComponentType,
 } from "react";
+import { useLocation } from "react-router";
 import { VDOMRenderer } from "./renderer";
 import { PulseClient } from "./client";
-import type { Transport } from "./transport";
-import type { VDOM, VDOMNode } from "./vdom";
-export interface ComponentRegistry {
-  [key: string]: ComponentType<any>;
-}
+import { SocketIOTransport } from "./transport";
+import type { VDOM, ComponentRegistry } from "./vdom";
+
+// =================================================================
+// Types
+// =================================================================
 
 export interface PulseConfig {
   serverAddress: string;
   serverPort: number;
 }
 
-export interface PulseInit {
-  route: string;
-  initialVDOM: VDOM;
-  externalComponents: ComponentRegistry;
-  transport: Transport;
-}
+// =================================================================
+// Context and Hooks
+// =================================================================
 
-export interface PulseRendererProps extends PulseInit {
-  config: PulseConfig;
-}
+// Context for the client, provided by PulseProvider
+const PulseClientContext = createContext<PulseClient | null>(null);
 
-interface PulseContextValue {
+export const usePulseClient = () => {
+  const client = useContext(PulseClientContext);
+  if (!client) {
+    throw new Error("usePulseClient must be used within a PulseProvider");
+  }
+  return client;
+};
+
+// Context for rendering helpers, provided by PulseView
+interface PulseRenderHelpers {
   getCallback: (key: string) => (...args: any[]) => void;
   getComponent: (key: string) => ComponentType<any>;
 }
 
-const PulseContext = createContext<PulseContextValue | undefined>(undefined);
+const PulseRenderContext = createContext<PulseRenderHelpers | null>(null);
 
-export const usePulse = () => {
-  const context = useContext(PulseContext);
+export const usePulseRenderHelpers = () => {
+  const context = useContext(PulseRenderContext);
   if (!context) {
-    throw new Error("usePulse must be used within a Pulse provider");
+    throw new Error(
+      "usePulseRenderHelpers must be used within a PulseRenderContext (provided by <PulseView>)"
+    );
   }
   return context;
 };
 
-export function Pulse({
-  transport,
-  initialVDOM,
-  externalComponents,
-  route = "/",
-}: PulseRendererProps) {
-  const client = useMemo(
-    () => new PulseClient(transport, initialVDOM),
-    [transport, initialVDOM]
-  );
-  const [vdom, setVdom] = useState(client.getVDOM());
+// =================================================================
+// Provider
+// =================================================================
 
-  const callbackCache = useMemo(
-    () => new Map<string, (...args: any[]) => void>(),
-    []
-  );
+export interface PulseProviderProps {
+  children: React.ReactNode;
+  config: PulseConfig;
+}
 
-  // only callbacks without args for now
-  const getCallback = useCallback(
-    (key: string) => {
+export function PulseProvider({ children, config }: PulseProviderProps) {
+  const client = useMemo(() => {
+    const transport = new SocketIOTransport(
+      `${config.serverAddress}:${config.serverPort}`
+    );
+    return new PulseClient(transport);
+  }, [config.serverAddress, config.serverPort]);
+
+  useEffect(() => {
+    void client.connect();
+    return () => client.disconnect();
+  }, [client]);
+
+  return (
+    <PulseClientContext.Provider value={client}>
+      {children}
+    </PulseClientContext.Provider>
+  );
+}
+
+// =================================================================
+// View
+// =================================================================
+
+export interface PulseViewProps {
+  initialVDOM: VDOM;
+  externalComponents: ComponentRegistry;
+}
+
+export function PulseView({ initialVDOM, externalComponents }: PulseViewProps) {
+  const client = usePulseClient();
+  const [vdom, setVdom] = useState(initialVDOM);
+  const location = useLocation();
+
+  useEffect(() => {
+    const unsubscribe = client.subscribe(setVdom);
+    const route = location.pathname + location.search;
+    client.navigate(route);
+    return () => {
+      unsubscribe();
+    };
+  }, [client, location, initialVDOM]);
+
+  const renderHelpers = useMemo(() => {
+    const callbackCache = new Map<string, (...args: any[]) => void>();
+
+    const getCallback = (key: string) => {
       let fn = callbackCache.get(key);
       if (!fn) {
-        fn = () => client.invokeCallback(key);
+        // IMPORTANT: no arguments for now
+        fn = () => client.invokeCallback(key, []);
         callbackCache.set(key, fn);
       }
       return fn;
-    },
-    [client, callbackCache]
-  );
+    };
 
-  const getComponent = useCallback(
-    (key: string) => {
+    const getComponent = (key: string) => {
       const component = externalComponents[key];
       if (!component) {
         throw new Error(`Component with key "${key}" not found.`);
       }
       return component;
-    },
-    [externalComponents]
-  );
-
-  useEffect(() => {
-    // Subscribe to VDOM updates from the client
-    const unsubscribe = client.subscribe(setVdom);
-    client.connect(route);
-    return () => {
-      unsubscribe();
-      client.disconnect();
     };
-  }, [client, route]);
 
-  const contextValue = useMemo(
-    () => ({ getCallback, getComponent }),
-    [getCallback, getComponent]
-  );
+    return { getCallback, getComponent };
+  }, [client, externalComponents]);
 
   return (
-    <PulseContext.Provider value={contextValue}>
+    <PulseRenderContext.Provider value={renderHelpers}>
       <VDOMRenderer node={vdom} />
-    </PulseContext.Provider>
+    </PulseRenderContext.Provider>
   );
 }

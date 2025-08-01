@@ -4,6 +4,8 @@ import type { ComponentType } from "react";
 export const FRAGMENT_TAG = "$$fragment";
 export const MOUNT_POINT_PREFIX = "$$";
 
+export type ComponentRegistry = Record<string, ComponentType<any>>;
+
 export interface VDOMElement {
   tag: string;
   props?: Record<string, any>;

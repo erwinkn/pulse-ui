@@ -14,6 +14,8 @@ import logging
 
 from mako.template import Template
 
+from pulse.reactive import ReactiveContext
+
 from .vdom import VDOMNode
 
 if TYPE_CHECKING:
@@ -33,65 +35,80 @@ class CodegenConfig:
         self.pulse_app_dir = Path(web_dir) / "app" / pulse_app_name
 
 
-# Mako template for config.ts
-CONFIG_TEMPLATE = Template(
-    """import type { PulseConfig } from "${pulse_lib_path}/pulse";
+# Mako template for the main layout
+LAYOUT_TEMPLATE = Template(
+    """import { PulseProvider, type PulseConfig } from "${pulse_lib_path}/pulse";
+import { Outlet } from "react-router";
 
+// This config is imported by the layout and used to initialize the client
 export const config: PulseConfig = {
   serverAddress: "${host}",
   serverPort: ${port},
 };
+
+export default function PulseLayout() {
+  return (
+    <PulseProvider config={config}>
+      <Outlet />
+    </PulseProvider>
+  );
+}
 """
 )
 
 # Mako template for routes configuration
 ROUTES_CONFIG_TEMPLATE = Template(
-    """import { type RouteConfig, index, route } from "@react-router/dev/routes";
+    """import {
+  type RouteConfig,
+  route,
+  layout,
+  index,
+} from "@react-router/dev/routes";
 
 export const routes = [
-% if not routes:
-
-% else:
+  layout("${pulse_app_name}/layout.tsx", [
 % for route_obj in routes:
 <%
-    # Convert path to safe filename
     safe_path = route_obj.path.replace("/", "_").replace("-", "_")
     if safe_path.startswith("_"):
         safe_path = safe_path[1:]
     if not safe_path:
         safe_path = "index"
 %>
-% if route_obj.path == "/":
-  index("${pulse_app_name}/routes/${safe_path}.tsx"),
+% if not route_obj.path or route_obj.path == "/":
+    index("${pulse_app_name}/routes/${safe_path}.tsx"),
 % else:
-  route("${route_obj.path}", "${pulse_app_name}/routes/${safe_path}.tsx"),
+    route("${route_obj.path.lstrip('/')}", "${pulse_app_name}/routes/${safe_path}.tsx"),
 % endif
 % endfor
-% endif
+  ]),
 ] satisfies RouteConfig;
 """
 )
 
 # Mako template for route pages
 ROUTE_PAGE_TEMPLATE = Template(
-    """import { Pulse, type PulseInit, type ComponentRegistry } from "${pulse_lib_path}/pulse";
-import { SocketIOTransport } from "${pulse_lib_path}/transport";
-import { config } from "../config";
+    """import { PulseView } from "${pulse_lib_path}/pulse";
+import type { VDOM, ComponentRegistry } from "${pulse_lib_path}/vdom";
 
 % if components:
 // Component imports
 % for component in components:
-% if component.is_default_export:
-import ${component.export_name} from "${component.import_path}";
+% if component.is_default:
+import ${component.tag} from "${component.import_path}";
 % else:
-import { ${component.export_name} } from "${component.import_path}";
+% if component.alias:
+import { ${component.tag} as ${component.alias} } from "${component.import_path}";
+% else:
+import { ${component.tag} } from "${component.import_path}";
+% endif
 % endif
 % endfor
 
 // Component registry
 const externalComponents: ComponentRegistry = {
 % for component in components:
-  "${component.component_key}": ${component.export_name},
+  "${component.key}": ${component.alias or component.tag},
 % endfor
 };
 % else:
@@ -99,29 +116,25 @@ const externalComponents: ComponentRegistry = {
 const externalComponents: ComponentRegistry = {};
 % endif
 
-// Create WebSocket transport for server communication
-const transport = new SocketIOTransport(`ws://<%text>${config.serverAddress}</%text>:<%text>${config.serverPort}</%text>`);
-
-const pulseInit: PulseInit = {
-    route: "${route.path}",
-    initialVDOM: ${initial_vdom_json},
-    externalComponents: externalComponents,
-    transport: transport,
-};
+// The initial VDOM is bootstrapped from the server
+const initialVDOM: VDOM = ${initial_vdom_json};
 
 export default function RouteComponent() {
   return (
-    <Pulse {...pulseInit} config={config} />
+    <PulseView
+      initialVDOM={initialVDOM}
+      externalComponents={externalComponents}
+    />
   );
 }
 """
 )
 
 
-def generate_config_file(host: str, port: int, pulse_lib_path: str) -> str:
-    """Generates the content of config.ts"""
+def generate_layout_file(host: str, port: int, pulse_lib_path: str) -> str:
+    """Generates the content of _layout.tsx"""
     return str(
-        CONFIG_TEMPLATE.render_unicode(
+        LAYOUT_TEMPLATE.render_unicode(
             host=host, port=port, pulse_lib_path=pulse_lib_path
         )
     )
@@ -213,13 +226,13 @@ def generate_all_routes(
     output_path.mkdir(parents=True, exist_ok=True)
     routes_path.mkdir(parents=True, exist_ok=True)
 
-    # Generate config.ts
-    config_code = generate_config_file(
+    # Generate _layout.tsx
+    layout_code = generate_layout_file(
         host=host, port=port, pulse_lib_path=codegen_config.pulse_lib_path
     )
-    config_file = output_path / "config.ts"
-    config_file.write_text(config_code)
-    logger.info(f"Generated server config at {config_file}")
+    layout_file = output_path / "layout.tsx"
+    layout_file.write_text(layout_code)
+    logger.info(f"Generated layout file at {layout_file}")
 
     # Generate files for each route
     for route in routes:
@@ -231,7 +244,8 @@ def generate_all_routes(
             safe_path = "index"
 
         # Generate initial UI tree by calling the route function
-        initial_node = route.render_fn()
+        with ReactiveContext():
+            initial_node = route.render_fn()
         vdom, _ = initial_node.render()
 
         # Generate route entrypoint with inline component registry

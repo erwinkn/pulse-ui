@@ -26,7 +26,7 @@ class TestReactComponent:
     def test_component_creation(self):
         """Test creating ReactComponent instances."""
         component = ReactComponent(
-            component_key="test-component",
+            tag="test-component",
             import_path="./TestComponent",
             export_name="TestComponent",
             is_default_export=False,
@@ -40,7 +40,7 @@ class TestReactComponent:
     def test_component_with_default_export(self):
         """Test ReactComponent with default export."""
         component = ReactComponent(
-            component_key="default-component", import_path="./DefaultComponent"
+            tag="default-component", import_path="./DefaultComponent"
         )
 
         assert component.component_key == "default-component"
@@ -59,7 +59,7 @@ class TestDefineReactComponent:
     def test_define_component_basic(self):
         """Test defining a basic React component."""
         TestComponent = ReactComponent(
-            component_key="test",
+            tag="test",
             import_path="./TestComponent",
             export_name="TestComponent",
             is_default_export=False,
@@ -71,14 +71,14 @@ class TestDefineReactComponent:
         # Component should be registered
         components = react_component_registry()
         assert "test" in components
-        assert components["test"].component_key == "test"
+        assert components["test"].tag == "test"
         assert components["test"].import_path == "./TestComponent"
         assert components["test"].export_name == "TestComponent"
         assert not components["test"].is_default_export
 
     def test_define_component_default_export(self):
         """Test defining a component with default export."""
-        ReactComponent(component_key="default-comp", import_path="./DefaultComponent")
+        ReactComponent(tag="default-comp", import_path="./DefaultComponent")
 
         components = react_component_registry()
         assert "default-comp" in components
@@ -88,7 +88,7 @@ class TestDefineReactComponent:
     def test_component_mount_point_creation(self):
         """Test that defined components create mount points."""
         TestComponent = ReactComponent(
-            component_key="test-component",
+            tag="test-component",
             import_path="./TestComponent",
             export_name="TestComponent",
             is_default_export=False,
@@ -104,7 +104,7 @@ class TestDefineReactComponent:
     def test_component_with_children(self):
         """Test creating mount points with children."""
         Container = ReactComponent(
-            component_key="container",
+            tag="container",
             import_path="./Container",
             export_name="Container",
             is_default_export=False,
@@ -126,7 +126,7 @@ class TestDefineReactComponent:
     def test_component_with_indexing_syntax(self):
         """Test using indexing syntax with React components."""
         Card = ReactComponent(
-            component_key="card",
+            tag="card",
             import_path="./Card",
             export_name="Card",
             is_default_export=False,

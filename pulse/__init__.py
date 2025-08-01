@@ -1,4 +1,3 @@
-from .vdom import ReactComponent
 from .app import App, route, decorated_routes, Route, Session
 from .reactive import init
 from .state import State
@@ -123,3 +122,5 @@ from .vdom import (
     track,
     wbr,
 )
+
+from .components import Link, ComponentRegistry, COMPONENT_REGISTRY, ReactComponent

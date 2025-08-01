@@ -7,6 +7,7 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 
 from typing import (
     Any,
+    Literal,
     NotRequired,
     Optional,
     Callable,
@@ -305,56 +306,6 @@ def extract_callbacks_from_props(
             clean_props[k] = v
     return clean_props, callbacks
 
-
-# ============================================================================
-# React Component Integration
-# ============================================================================
-
-
-COMPONENT_REGISTRY: "dict[str, ReactComponent]" = {}
-
-
-class ReactComponent:
-    """
-    A React component that can be used within the UI tree.
-    Returns a function that creates mount point UITreeNode instances.
-
-    Args:
-        component_key: Unique key for the component registry
-        import_path: Path to import the component from
-        export_name: Name of the export (use "default" for default exports)
-        is_default_export: Whether this is a default export
-
-    Returns:
-        A function that creates UITreeNode instances with mount point tags
-    """
-
-    def __init__(
-        self,
-        component_key: str,
-        import_path: str,
-        export_name: str = "default",
-        is_default_export: bool = True,
-    ):
-        if component_key in COMPONENT_REGISTRY:
-            raise ValueError(f"Duplicate component key {component_key}")
-        self.component_key = component_key
-        self.import_path = import_path
-        self.export_name = export_name
-        self.is_default_export = is_default_export
-        COMPONENT_REGISTRY[component_key] = self
-
-    def __call__(self, *children: NodeChild, **props) -> Node:
-        return Node(
-            tag=f"$${self.component_key}",
-            props=props,
-            children=list(children) if children else [],
-        )
-
-
-def react_component_registry() -> dict[str, ReactComponent]:
-    """Get all registered React components."""
-    return COMPONENT_REGISTRY.copy()
 
 
 # ============================================================================

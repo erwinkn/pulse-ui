@@ -5,9 +5,7 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
-import asyncio
 import logging
-import os
 import socket
 from enum import IntEnum
 from typing import Any, Awaitable, Callable, List, Optional, TypeVar
@@ -25,7 +23,8 @@ from pulse.messages import (
     ServerUpdateMessage,
 )
 from pulse.reactive import ReactiveContext, UpdateScheduler
-from pulse.vdom import Node, ReactComponent, VDOMNode
+from pulse.components.registry import ReactComponent, registered_react_components
+from pulse.vdom import Node, VDOMNode
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +60,11 @@ def route(
     Returns:
         Decorator function
     """
+    if components is None:
+        components = registered_react_components()
 
     def decorator(render_func: Callable[[], Node]) -> Route:
-        route = Route(path, render_func, components=components or [])
+        route = Route(path, render_func, components=components)
         add_route(route)
         return route
 
@@ -144,7 +145,7 @@ class App:
 
     def setup(self):
         if self.status >= AppStatus.initialized:
-            logger.warn("Called App.setup() on an already initialized application")
+            logger.warning("Called App.setup() on an already initialized application")
             return
 
         # Add CORS middleware
@@ -225,8 +226,11 @@ class App:
             Decorator function
         """
 
+        if components is None:
+            components = registered_react_components()
+
         def decorator(render_func):
-            route_obj = Route(path, render_func, components=components or [])
+            route_obj = Route(path, render_func, components=components)
             self.add_route(route_obj)
             return route_obj
 
@@ -298,7 +302,6 @@ class Session:
             await listener(message)
 
     def close(self):
-        print(f"Closing session {self.id}")
         self.message_listeners.clear()
         self.vdom = None
         self.callback_registry.clear()
@@ -306,19 +309,14 @@ class Session:
             state.remove_listener(fields, self.rerender)
 
     def execute_callback(self, key: str, args: list | tuple):
-        print("-> Execute callback")
-        print(f"Callbacks = {list(self.callback_registry.keys())}")
         self.callback_registry[key](*args)
 
     def rerender(self):
-        print("-> Rerender, context state =", self.ctx.init.state)
-        print(f"Callbacks = {list(self.callback_registry.keys())}")
         if self.current_route is None:
             raise RuntimeError("Failed to rerender: no route set for the session!")
         self.app.sio.start_background_task(self.update_render)
 
     async def hydrate(self, path: str):
-        print("-> Hydrate")
         route = self.app.get_route(path)
 
         # Clear old state listeners from previous route
@@ -335,12 +333,10 @@ class Session:
             node_tree = route.render_fn()
             vdom_tree, callbacks = node_tree.render()
             self.vdom = vdom_tree
-            print("Initial callbacks:", list(callbacks.keys()))
             self.callback_registry = callbacks
             self.ctx = new_ctx
 
             # Set up new state subscriptions
-            print("Subscribing to states:", self.ctx.client_states)
             for state, fields in self.ctx.client_states.items():
                 state.add_listener(fields, self.rerender)
 
@@ -353,38 +349,19 @@ class Session:
 
         route = self.app.get_route(self.current_route)
 
-        print("-> update_render, context state =", self.ctx.init.state)
-        print(f"Callbacks = {list(self.callback_registry.keys())}")
         with self.ctx.next_render() as new_ctx:
             new_node_tree = route.render_fn()
-            new_vdom_tree, callbacks = new_node_tree.render()
+            new_vdom_tree, new_callbacks = new_node_tree.render()
 
-            # Diff with the old tree
-            print("--- Diffing ---")
-            print("Current VDOM:", self.vdom)
             operations = diff_vdom(self.vdom, new_vdom_tree)
 
-            # Unsubscribe old state listeners
+            # Update state listeners
             for state, fields in self.ctx.client_states.items():
                 state.remove_listener(fields, self.rerender)
-
-            # Subscribe new state listeners
             for state, fields in new_ctx.client_states.items():
                 state.add_listener(fields, self.rerender)
 
-            # Update callbacks
-            remove_callbacks = self.callback_registry.keys() - callbacks.keys()
-            add_callbacks = callbacks.keys() - self.callback_registry.keys()
-            if remove_callbacks:
-                print(f"Removing callbacks: {list(remove_callbacks)}")
-            if add_callbacks:
-                print(f"Adding callbacks: {list(add_callbacks)}")
-            for key in remove_callbacks:
-                del self.callback_registry[key]
-            for key in add_callbacks:
-                self.callback_registry[key] = callbacks[key]
-
-            # Update stored state
+            self.callback_registry = new_callbacks
             self.vdom = new_vdom_tree
             self.ctx = new_ctx
 

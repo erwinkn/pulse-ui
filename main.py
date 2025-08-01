@@ -1,4 +1,5 @@
 import pulse as ps
+from pulse.components.link import Link
 
 
 @ps.route("/")
@@ -66,7 +67,7 @@ def counter():
         ps.p(
             "Note: This is a simple demo. State management would require additional implementation."
         ),
-        ps.p(ps.a("← Back to Home", href="/")),
+        ps.p(ps.Link("← Back to Home", to="/")),
     )
 
 

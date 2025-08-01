@@ -2,7 +2,7 @@
 Test utilities for comparing VDOM trees and Node structures.
 """
 
-from typing import Any, Union 
+from typing import Any, Union
 from pulse.vdom import Node, VDOMNode, PrimitiveNode
 
 

@@ -28,7 +28,7 @@ export interface PulseInit {
 }
 
 export interface PulseRendererProps extends PulseInit {
-  config: PulseConfig
+  config: PulseConfig;
 }
 
 interface PulseContextValue {

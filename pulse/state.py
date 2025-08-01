@@ -90,6 +90,19 @@ class State(ABC, metaclass=StateMeta):
         # Track listeners for this state instance
         self._listeners: dict[str, set[Callable[[], None]]] = defaultdict(set)
 
+    def __repr__(self) -> str:
+        """Return a developer-friendly representation of the state."""
+        props = []
+        for name in self.__class__.__annotations__:
+            if not name.startswith("_"):
+                prop_value = getattr(self, name)
+                props.append(f"{name}={prop_value!r}")
+        return f"<{self.__class__.__name__} {' '.join(props)}>"
+
+    def __str__(self) -> str:
+        """Return a user-friendly representation of the state."""
+        return self.__repr__()
+
     def add_listener(self, fields: Iterable[str], fn: Callable[[], Any]):
         for field in fields:
             self._listeners[field].add(fn)

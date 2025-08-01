@@ -5,11 +5,12 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import asyncio
 import logging
 import os
 import socket
 from enum import IntEnum
-from typing import Any, Callable, List, Optional, TypeVar
+from typing import Any, Awaitable, Callable, List, Optional, TypeVar
 
 import socketio
 import uvicorn
@@ -24,7 +25,7 @@ from pulse.messages import (
     ServerUpdateMessage,
 )
 from pulse.reactive import ReactiveContext, UpdateScheduler
-from pulse.vdom import Node, ReactComponent
+from pulse.vdom import Node, ReactComponent, VDOMNode
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ class App:
         self.codegen = codegen or CodegenConfig()
 
         self.fastapi = FastAPI(title="Pulse UI Server")
-        self.sio = socketio.AsyncServer(async_mode="asgi")
+        self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
         self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
         self.status = AppStatus.created
 
@@ -159,40 +160,54 @@ class App:
         def healthcheck():
             return {"health": "ok", "message": "Pulse server is running"}
 
-    def run(self, host: str = "127.0.0.1", port=8000, find_port=True):
+    def run(
+        self,
+        host: str = "127.0.0.1",
+        port=8000,
+        find_port=True,
+        log_level: str = "info",
+    ):
         if self.status == AppStatus.running:
             raise RuntimeError("Server already running")
         if self.status == AppStatus.created:
             self.setup()
+            self._setup_socketio_endpoints()
 
-        self.setup()
+        logging.basicConfig(
+            level=log_level.upper(),
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
         if find_port:
             port = find_available_port(port)
 
         logger.info(f"🚀 Starting Pulse UI Server on http://{host}:{port}")
         logger.info(f"🔌 WebSocket endpoint: ws://{host}:{port}/ws")
 
-        uvicorn.run(self.asgi, host=host, port=port, log_level="info")
+        uvicorn.run(self.asgi, host=host, port=port, log_level=log_level)
 
     def _setup_socketio_endpoints(self):
         @self.sio.event
-        def connect(sid: str, data):
+        async def connect(sid: str, environ, auth=None):
+            logger.info(f"-> Creating session: {sid}")
             session = self.create_session(sid)
             session.connect(
                 lambda message: self.sio.emit("message", message, to=sid),
             )
 
         @self.sio.event
-        def disconnect(sid: str, data):
+        def disconnect(sid: str):
             # TODO: keep the session open for some time in case the client reconnects?
+            logger.info(f"-> Disconnecting session: {sid}")
             self.close_session(sid)
 
         @self.sio.event
-        def message(sid: str, data: ClientMessage):
+        async def message(sid: str, data: ClientMessage):
             session = self.get_session(sid)
+            logger.info(f"-> Received message: {data}")
 
             if data["type"] == "navigate":
-                session.hydrate(data["route"])
+                await session.hydrate(data["route"])
             elif data["type"] == "callback":
                 session.execute_callback(data["callback"], data["args"])
             else:
@@ -259,28 +274,31 @@ class Session:
         self.id = id
         self.app = app
         self.message_listeners: set[
-            Callable[[ServerUpdateMessage | ServerInitMessage], Any]
+            Callable[[ServerUpdateMessage | ServerInitMessage], Awaitable[Any]]
         ] = set()
 
         self.current_route: str | None = None
         self.ctx = ReactiveContext()
         self.scheduler = UpdateScheduler()
         self.callback_registry: dict[str, Callable] = {}
-        self.vdom: Node | None = None
+        self.vdom: VDOMNode | None = None
 
     def connect(
         self,
-        message_listener: Callable[[ServerUpdateMessage | ServerInitMessage], Any],
+        message_listener: Callable[
+            [ServerUpdateMessage | ServerInitMessage], Awaitable[Any]
+        ],
     ):
         self.message_listeners.add(message_listener)
         # Return a disconnect function
         return lambda: (self.message_listeners.remove(message_listener),)
 
-    def notify(self, message: ServerUpdateMessage | ServerInitMessage):
+    async def notify(self, message: ServerUpdateMessage | ServerInitMessage):
         for listener in self.message_listeners:
-            listener(message)
+            await listener(message)
 
     def close(self):
+        print(f"Closing session {self.id}")
         self.message_listeners.clear()
         self.vdom = None
         self.callback_registry.clear()
@@ -288,14 +306,19 @@ class Session:
             state.remove_listener(fields, self.rerender)
 
     def execute_callback(self, key: str, args: list | tuple):
+        print("-> Execute callback")
+        print(f"Callbacks = {list(self.callback_registry.keys())}")
         self.callback_registry[key](*args)
 
     def rerender(self):
+        print("-> Rerender, context state =", self.ctx.init.state)
+        print(f"Callbacks = {list(self.callback_registry.keys())}")
         if self.current_route is None:
             raise RuntimeError("Failed to rerender: no route set for the session!")
-        self.update_render()
+        self.app.sio.start_background_task(self.update_render)
 
-    def hydrate(self, path: str):
+    async def hydrate(self, path: str):
+        print("-> Hydrate")
         route = self.app.get_route(path)
 
         # Clear old state listeners from previous route
@@ -309,36 +332,37 @@ class Session:
         self.vdom = None
 
         with self.ctx.next_render() as new_ctx:
-            # Render the component tree
             node_tree = route.render_fn()
-
-            # Convert to VDOM and collect callbacks
             vdom_tree, callbacks = node_tree.render()
-
-            # Store the state
-            self.vdom = node_tree
+            self.vdom = vdom_tree
+            print("Initial callbacks:", list(callbacks.keys()))
             self.callback_registry = callbacks
             self.ctx = new_ctx
 
             # Set up new state subscriptions
+            print("Subscribing to states:", self.ctx.client_states)
             for state, fields in self.ctx.client_states.items():
                 state.add_listener(fields, self.rerender)
 
             # Send the full VDOM to the client for initial hydration
-            self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
+            await self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
 
-    def update_render(self):
+    async def update_render(self):
         if self.current_route is None:
             return  # Should not happen if called from rerender
 
         route = self.app.get_route(self.current_route)
 
+        print("-> update_render, context state =", self.ctx.init.state)
+        print(f"Callbacks = {list(self.callback_registry.keys())}")
         with self.ctx.next_render() as new_ctx:
-            # Render new tree
             new_node_tree = route.render_fn()
+            new_vdom_tree, callbacks = new_node_tree.render()
 
             # Diff with the old tree
-            diff = diff_vdom(self.vdom, new_node_tree)
+            print("--- Diffing ---")
+            print("Current VDOM:", self.vdom)
+            operations = diff_vdom(self.vdom, new_vdom_tree)
 
             # Unsubscribe old state listeners
             for state, fields in self.ctx.client_states.items():
@@ -349,21 +373,25 @@ class Session:
                 state.add_listener(fields, self.rerender)
 
             # Update callbacks
-            remove_callbacks = self.callback_registry.keys() - diff.callbacks.keys()
-            add_callbacks = diff.callbacks.keys() - self.callback_registry.keys()
+            remove_callbacks = self.callback_registry.keys() - callbacks.keys()
+            add_callbacks = callbacks.keys() - self.callback_registry.keys()
+            if remove_callbacks:
+                print(f"Removing callbacks: {list(remove_callbacks)}")
+            if add_callbacks:
+                print(f"Adding callbacks: {list(add_callbacks)}")
             for key in remove_callbacks:
                 del self.callback_registry[key]
             for key in add_callbacks:
-                self.callback_registry[key] = diff.callbacks[key]
+                self.callback_registry[key] = callbacks[key]
 
             # Update stored state
-            self.vdom = new_node_tree
+            self.vdom = new_vdom_tree
             self.ctx = new_ctx
 
             # Send diff to client if there are any changes
-            if diff.operations:
-                self.notify(
-                    ServerUpdateMessage(type="vdom_update", ops=diff.operations)
+            if operations:
+                await self.notify(
+                    ServerUpdateMessage(type="vdom_update", ops=operations)
                 )
 
 

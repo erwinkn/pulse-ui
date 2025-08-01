@@ -226,6 +226,12 @@ class Node:
 
         return vdom
 
+    def list_callbacks(self, path=""):
+        if not self.callbacks:
+            return {}
+        path_prefix = (path + ".") if path else ""
+        return {path_prefix + key: callback for key, callback in self.callbacks.items()}
+
     def render(self, path="") -> tuple[VDOMNode, Callbacks]:
         callbacks: dict[str, Callable] = {}
         tree = self._render_node(path, callbacks)

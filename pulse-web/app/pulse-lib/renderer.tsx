@@ -39,15 +39,13 @@ export const VDOMRenderer = memo<VDOMRendererProps>(({ node }) => {
   if (isElementNode(node)) {
     if (process.env.NODE_ENV !== "production") {
       const hasTag = "tag" in node && typeof node.tag === "string";
-      const hasProps = "props" in node && typeof node.props === "object";
-      const hasChildren = "children" in node && Array.isArray(node.children);
-      if (!hasTag || !hasProps || !hasChildren) {
+      if (!hasTag) {
         console.error("Invalid VDOM element node received:", node);
         return null;
       }
     }
 
-    const { tag, props, children } = node;
+    const { tag, props = {}, children = [] } = node;
 
     // Process props for callbacks
     const processedProps: Record<string, any> = {};
@@ -179,7 +177,7 @@ function findNodeByPath(root: VDOMNode, path: string): VDOMElement | null {
       );
       return null;
     }
-    if (index >= current.children.length) {
+    if (!current.children || index >= current.children.length) {
       console.error(
         `[findNodeByPath] Invalid path: index ${index} out of bounds.`
       );
@@ -216,7 +214,7 @@ export function applyUpdates(
           break;
         case "update_props":
           if (isElementNode(newTree)) {
-            newTree.props = { ...newTree.props, ...data };
+            newTree.props = { ...(newTree.props ?? {}), ...data };
           }
           break;
         default:
@@ -235,6 +233,10 @@ export function applyUpdates(
       continue;
     }
 
+    if (!targetParent.children) {
+      targetParent.children = [];
+    }
+
     switch (type) {
       case "replace":
         targetParent.children[childIndex] = data;
@@ -243,7 +245,7 @@ export function applyUpdates(
       case "update_props":
         const nodeToUpdate = targetParent.children[childIndex];
         if (isElementNode(nodeToUpdate)) {
-          nodeToUpdate.props = { ...nodeToUpdate.props, ...data };
+          nodeToUpdate.props = { ...(nodeToUpdate.props ?? {}), ...data };
         }
         break;
 

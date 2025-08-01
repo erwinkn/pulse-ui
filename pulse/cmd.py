@@ -77,7 +77,7 @@ def load_app_from_file(file_path: str | Path) -> App:
             sys.path.remove(str(file_path.parent.absolute()))
 
 
-@cli.command("serve")
+@cli.command("run")
 def serve(
     app_file: str = typer.Argument(..., help="Python file with a pulse.App instance"),
     address: str = typer.Option(
@@ -86,6 +86,12 @@ def serve(
         help="Address to bind the server to",
     ),
     port: int = typer.Option(8000, "--port", help="Port to bind the server to"),
+    log_level: str = typer.Option(
+        "info",
+        "--log-level",
+        case_sensitive=False,
+        help="Set the logging level (e.g., debug, info, warning)",
+    ),
 ):
     """Run a Python file with the Pulse server."""
     typer.echo(f"📁 Loading app from: {app_file}")
@@ -93,7 +99,7 @@ def serve(
     typer.echo(f"📋 Found {len(app_instance.routes)} routes")
 
     typer.echo(f"🚀 Starting Pulse UI server on {address}:{port}")
-    app_instance.run(host=address, port=port)
+    app_instance.run(host=address, port=port, log_level=log_level.lower())
 
 
 @cli.command("web")

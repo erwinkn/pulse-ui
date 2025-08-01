@@ -33,6 +33,10 @@ def about():
     )
 
 
+class CounterState(ps.State):
+    count: int = 0
+
+
 @ps.route("/counter")
 def counter():
     """Interactive counter page."""
@@ -41,15 +45,22 @@ def counter():
 
     def increment():
         print("Counter incremented!")
+        state.count += 1
 
     def decrement():
         print("Counter decremented!")
+        state.count -= 1
+
+    state = ps.init(lambda: CounterState())
 
     return ps.div(
         ps.h1("Counter Example"),
         ps.div(
             ps.button("-", onClick=decrement),
-            ps.span(" Counter: 0 ", style={"margin": "0 20px", "fontSize": "18px"}),
+            ps.span(
+                f" Counter: {state.count} ",
+                style={"margin": "0 20px", "fontSize": "18px"},
+            ),
             ps.button("+", onClick=increment),
         ),
         ps.p(

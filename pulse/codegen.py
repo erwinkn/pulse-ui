@@ -77,7 +77,6 @@ ROUTE_PAGE_TEMPLATE = Template(
     """import { Pulse, type PulseInit, type ComponentRegistry } from "${pulse_lib_path}/pulse";
 import { SocketIOTransport } from "${pulse_lib_path}/transport";
 import { config } from "../config";
-import type { ComponentType } from "react";
 
 % if components:
 // Component imports

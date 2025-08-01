@@ -58,15 +58,22 @@ export function Pulse({
   );
   const [vdom, setVdom] = useState(client.getVDOM());
 
+  const callbackCache = useMemo(
+    () => new Map<string, (...args: any[]) => void>(),
+    []
+  );
+
+  // only callbacks without args for now
   const getCallback = useCallback(
     (key: string) => {
-      const cache = new Map<string, (...args: any[]) => void>();
-      if (!cache.has(key)) {
-        cache.set(key, (...args: any[]) => client.invokeCallback(key, ...args));
+      let fn = callbackCache.get(key);
+      if (!fn) {
+        fn = () => client.invokeCallback(key);
+        callbackCache.set(key, fn);
       }
-      return cache.get(key)!;
+      return fn;
     },
-    [client]
+    [client, callbackCache]
   );
 
   const getComponent = useCallback(

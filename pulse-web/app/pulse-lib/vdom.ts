@@ -6,8 +6,8 @@ export const MOUNT_POINT_PREFIX = "$$";
 
 export interface VDOMElement {
   tag: string;
-  props: Record<string, any>;
-  children: VDOMNode[];
+  props?: Record<string, any>;
+  children?: VDOMNode[];
   key?: string;
 }
 

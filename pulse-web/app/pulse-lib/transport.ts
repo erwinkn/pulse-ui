@@ -38,7 +38,7 @@ export type ClientMessage = ClientCallbackMessage | ClientNavigateMessage;
 export type MessageListener = (message: ServerMessage) => void;
 
 export interface Transport {
-  connect(listener: MessageListener): void;
+  connect(listener: MessageListener): Promise<void>;
   disconnect(): void;
   sendMessage(payload: ClientMessage): Promise<void>;
   isConnected(): boolean;
@@ -54,23 +54,31 @@ export class SocketIOTransport implements Transport {
 
   constructor(private url: string) {}
 
-  connect(listener: MessageListener): void {
+  connect(listener: MessageListener): Promise<void> {
     this.listener = listener;
-    this.socket = io(this.url, {
-      transports: ["websocket"],
-    });
+    return new Promise((resolve, reject) => {
+      this.socket = io(this.url, {
+        transports: ["websocket"],
+      });
 
-    this.socket.on("connect", () => {
-      console.log("[SocketIOTransport] Connected:", this.socket?.id);
-    });
+      this.socket.on("connect", () => {
+        console.log("[SocketIOTransport] Connected:", this.socket?.id);
+        resolve();
+      });
 
-    this.socket.on("disconnect", () => {
-      console.log("[SocketIOTransport] Disconnected");
-    });
+      this.socket.on("connect_error", (err) => {
+        console.error("[SocketIOTransport] Connection failed:", err);
+        reject(err);
+      });
 
-    this.socket.on("message", (data: ServerMessage) => {
-      console.log("[SocketIOTransport] Received message:", data);
-      this.listener?.(data);
+      this.socket.on("disconnect", () => {
+        console.log("[SocketIOTransport] Disconnected");
+      });
+
+      this.socket.on("message", (data: ServerMessage) => {
+        console.log("[SocketIOTransport] Received message:", data);
+        this.listener?.(data);
+      });
     });
   }
 
@@ -84,6 +92,7 @@ export class SocketIOTransport implements Transport {
     if (!this.socket || !this.socket.connected) {
       throw new Error("[SocketIOTransport] Not connected.");
     }
+    console.log("[SocketIOTransport] Sending:", payload);
     this.socket.emit("message", payload);
   }
 
@@ -108,7 +117,7 @@ export class InMemoryTransport implements Transport {
     }
   }
 
-  connect(listener: MessageListener): void {
+  async connect(listener: MessageListener): Promise<void> {
     this.listener = listener;
     this.connected = true;
     console.log("[InMemoryTransport] Connected.");

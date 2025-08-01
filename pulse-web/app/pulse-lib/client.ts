@@ -19,8 +19,8 @@ export class PulseClient {
     this.vdom = initialVDOM;
   }
 
-  public connect(initialRoute: string) {
-    this.transport.connect(this.handleMessage);
+  public async connect(initialRoute: string) {
+    await this.transport.connect(this.handleMessage);
     this.navigate(initialRoute);
   }
 
@@ -54,6 +54,7 @@ export class PulseClient {
   };
 
   public navigate(route: string): void {
+    console.log("Navigating to ", route);
     const payload: ClientNavigateMessage = { type: "navigate", route };
     this.transport.sendMessage(payload);
   }

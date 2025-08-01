@@ -18,8 +18,7 @@ from typing import (
     Callable,
     Sequence,
 )
-from .vdom import VDOMNode, PrimitiveNode, Node, NodeChild
-
+from .vdom import VDOMNode, PrimitiveNode
 
 # Type aliases
 Path = str
@@ -72,78 +71,46 @@ VDOMOperation = Union[
 ]
 
 
-# Payload sent to the client on updates
-class Diff(NamedTuple):
-    operations: list[VDOMOperation]
-    callbacks: dict[str, Callable]
-
-
-def _render_node_or_primitive(
-    node: NodeChild, path: Path
-) -> tuple[VDOM, dict[str, Callable]]:
-    """
-    Helper to render a Node to VDOM or return a primitive value directly.
-
-    Args:
-        node: Node or primitive value
-        path: Path for callback registration
-
-    Returns:
-        Tuple of (VDOM, callbacks dict)
-    """
-    if isinstance(node, Node):
-        vdom, callbacks = node.render(path)
-        return vdom, callbacks
-    else:
-        return node, {}
-
-
 def diff_vdom(
-    old_node: Optional[NodeChild], new_node: Optional[NodeChild], path: Path = ""
-) -> Diff:
+    old_node: Optional[VDOM], new_node: Optional[VDOM], path: Path = ""
+) -> list[VDOMOperation]:
     """
-    Main VDOM diffing function that compares two Node trees and produces update operations.
+    Main VDOM diffing function that compares two VDOM trees and produces update operations.
 
     Args:
-        old_node: The previous Node or primitive (or None for initial render)
-        new_node: The new Node or primitive (or None for removal)
+        old_node: The previous VDOM or primitive (or None for initial render)
+        new_node: The new VDOM or primitive (or None for removal)
         path: Current path in the tree (dot-separated string)
 
     Returns:
-        Diff with update operations and callback mapping
+        A list of VDOM operations.
     """
     operations: list[VDOMOperation] = []
-    callbacks: dict[str, Callable] = {}
 
     # Handle null cases
     if old_node is None and new_node is None:
-        return Diff(operations, callbacks)
+        return operations
     elif old_node is None:
-        # Insert new value
         assert new_node is not None  # Type guard
-        vdom, callbacks = _render_node_or_primitive(new_node, path)
-        insert_op: InsertOperation = {"type": "insert", "path": path, "data": vdom}
-        operations = [insert_op]
-        return Diff(operations, callbacks)
+        operations.append({"type": "insert", "path": path, "data": new_node})
+        return operations
     elif new_node is None:
-        # Remove old value
-        remove_op: RemoveOperation = {"type": "remove", "path": path, "data": None}
-        operations = [remove_op]
-        return Diff(operations, {})
+        operations.append({"type": "remove", "path": path, "data": None})
+        return operations
 
     # Both exist - check if they're the same
     if old_node == new_node:
-        return Diff(operations, callbacks)
+        return operations
 
     # Same Node - diff recursively
     if (
-        isinstance(old_node, Node)
-        and isinstance(new_node, Node)
-        and old_node.tag == new_node.tag
+        isinstance(old_node, dict)
+        and isinstance(new_node, dict)
+        and old_node.get("tag") == new_node.get("tag")
     ):
         # Same tag - check props and children directly
-        old_props = old_node.props or {}
-        new_props = new_node.props or {}
+        old_props = old_node.get("props", {})
+        new_props = new_node.get("props", {})
         if old_props != new_props:
             update_op: UpdatePropsOperation = {
                 "type": "update_props",
@@ -153,74 +120,63 @@ def diff_vdom(
             operations.append(update_op)
 
         # Diff children recursively
-        old_children = old_node.children or []
-        new_children = new_node.children or []
-        child_ops, child_callbacks = _diff_node_children(
-            old_children, new_children, path
-        )
+        old_children = old_node.get("children", []) or []
+        new_children = new_node.get("children", []) or []
+        child_ops = _diff_node_children(old_children, new_children, path)
         operations.extend(child_ops)
-        callbacks.update(child_callbacks)
 
-        return Diff(operations, callbacks)
+        return operations
     else:
         # At least one is primitive or tags/types differ - replace
-        assert new_node is not None  # Type guard
-        vdom, node_callbacks = _render_node_or_primitive(new_node, path)
-        callbacks.update(node_callbacks)
-        replace_op: ReplaceOperation = {"type": "replace", "path": path, "data": vdom}
-        operations = [replace_op]
-        return Diff(operations, callbacks)
+        replace_op: ReplaceOperation = {
+            "type": "replace",
+            "path": path,
+            "data": new_node,
+        }
+        return [replace_op]
 
 
 def _diff_node_children(
-    old_children: Sequence[NodeChild], new_children: Sequence[NodeChild], path: Path
-) -> tuple[list[VDOMOperation], dict[str, Callable]]:
+    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: Path
+) -> list[VDOMOperation]:
     """
-    Diff Node children directly, avoiding double traversal.
+    Diff VDOM children directly, avoiding double traversal.
 
     Args:
-        old_children: Previous children (list of Node or primitives)
-        new_children: New children (list of Node or primitives)
+        old_children: Previous children (list of VDOM or primitives)
+        new_children: New children (list of VDOM or primitives)
         path: Current path
 
     Returns:
-        Tuple of (operations, callbacks)
+        A list of VDOM operations.
     """
     operations = []
-    callbacks = {}
 
     # Check if we have any keyed nodes to determine strategy
     has_keyed_old = any(
-        isinstance(child, Node) and child.key is not None for child in old_children
+        isinstance(child, dict) and "key" in child for child in old_children
     )
     has_keyed_new = any(
-        isinstance(child, Node) and child.key is not None for child in new_children
+        isinstance(child, dict) and "key" in child for child in new_children
     )
 
     if has_keyed_old or has_keyed_new:
         # Use keyed reconciliation
-        child_ops, child_callbacks = _diff_keyed_node_children(
-            old_children, new_children, path
-        )
+        child_ops = _diff_keyed_node_children(old_children, new_children, path)
         operations.extend(child_ops)
-        callbacks.update(child_callbacks)
     else:
         # Use positional reconciliation
-        child_ops, child_callbacks = _diff_positional_node_children(
-            old_children, new_children, path
-        )
+        child_ops = _diff_positional_node_children(old_children, new_children, path)
         operations.extend(child_ops)
-        callbacks.update(child_callbacks)
 
-    return operations, callbacks
+    return operations
 
 
 def _diff_keyed_node_children(
-    old_children: Sequence[NodeChild], new_children: Sequence[NodeChild], path: Path
-) -> tuple[list[VDOMOperation], dict[str, Callable]]:
-    """Handle keyed Node children reconciliation."""
+    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: Path
+) -> list[VDOMOperation]:
+    """Handle keyed VDOM children reconciliation."""
     operations = []
-    callbacks = {}
 
     # Build maps of keyed elements
     old_keyed = {}
@@ -228,13 +184,13 @@ def _diff_keyed_node_children(
     new_keyed = {}
 
     for i, child in enumerate(old_children):
-        if isinstance(child, Node) and child.key is not None:
-            old_keyed[child.key] = child
-            old_positions[child.key] = i
+        if isinstance(child, dict) and "key" in child:
+            old_keyed[child["key"]] = child
+            old_positions[child["key"]] = i
 
     for i, child in enumerate(new_children):
-        if isinstance(child, Node) and child.key is not None:
-            new_keyed[child.key] = child
+        if isinstance(child, dict) and "key" in child:
+            new_keyed[child["key"]] = child
 
     # Track which old positions are still used
     used_old_positions = set()
@@ -243,8 +199,8 @@ def _diff_keyed_node_children(
     for new_index, new_child in enumerate(new_children):
         child_path = f"{path}.{new_index}" if path else str(new_index)
 
-        if isinstance(new_child, Node) and new_child.key is not None:
-            key = new_child.key
+        if isinstance(new_child, dict) and "key" in new_child:
+            key = new_child["key"]
 
             if key in old_keyed:
                 # Key exists in old children
@@ -267,19 +223,12 @@ def _diff_keyed_node_children(
                     )
 
                 # Diff the moved/stayed element recursively
-                child_diff = diff_vdom(old_child, new_child, child_path)
-                operations.extend(child_diff.operations)
-                callbacks.update(child_diff.callbacks)
+                child_ops = diff_vdom(old_child, new_child, child_path)
+                operations.extend(child_ops)
             else:
-                # New keyed element - insert and render
-                vdom, child_callbacks = _render_node_or_primitive(new_child, child_path)
-                callbacks.update(child_callbacks)
+                # New keyed element - insert
                 operations.append(
-                    {
-                        "type": "insert",
-                        "path": child_path,
-                        "data": vdom,
-                    }
+                    {"type": "insert", "path": child_path, "data": new_child}
                 )
         else:
             # Unkeyed new element - try to match positionally
@@ -290,27 +239,19 @@ def _diff_keyed_node_children(
                 new_index < len(old_children)
                 and new_index not in used_old_positions
                 and not (
-                    isinstance(old_child_at_pos, Node)
-                    and old_child_at_pos.key is not None
+                    isinstance(old_child_at_pos, dict) and "key" in old_child_at_pos
                 )
             ):
                 # Both unkeyed at same position - diff them
                 old_child = old_children[new_index]
                 used_old_positions.add(new_index)
 
-                child_diff = diff_vdom(old_child, new_child, child_path)
-                operations.extend(child_diff.operations)
-                callbacks.update(child_diff.callbacks)
+                child_ops = diff_vdom(old_child, new_child, child_path)
+                operations.extend(child_ops)
             else:
                 # No matching element - insert
-                vdom, child_callbacks = _render_node_or_primitive(new_child, child_path)
-                callbacks.update(child_callbacks)
                 operations.append(
-                    {
-                        "type": "insert",
-                        "path": child_path,
-                        "data": vdom,
-                    }
+                    {"type": "insert", "path": child_path, "data": new_child}
                 )
 
     # Remove old keyed elements that are no longer present
@@ -318,74 +259,44 @@ def _diff_keyed_node_children(
         if key not in new_keyed:
             old_index = old_positions[key]
             old_child_path = f"{path}.{old_index}" if path else str(old_index)
-            operations.append(
-                {
-                    "type": "remove",
-                    "path": old_child_path,
-                    "data": key,
-                }
-            )
+            operations.append({"type": "remove", "path": old_child_path, "data": key})
 
     # Handle unkeyed old elements that weren't replaced
     for old_index, old_child in enumerate(old_children):
         if old_index not in used_old_positions and not (
-            isinstance(old_child, Node) and old_child.key is not None
+            isinstance(old_child, dict) and "key" in old_child
         ):
             old_child_path = f"{path}.{old_index}" if path else str(old_index)
-            operations.append(
-                {
-                    "type": "remove",
-                    "path": old_child_path,
-                    "data": None,
-                }
-            )
+            operations.append({"type": "remove", "path": old_child_path, "data": None})
 
-    return operations, callbacks
+    return operations
 
 
 def _diff_positional_node_children(
-    old_children: Sequence[NodeChild], new_children: Sequence[NodeChild], path: Path
-) -> tuple[list[VDOMOperation], dict[str, Callable]]:
-    """Handle unkeyed Node children using positional diffing."""
+    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: Path
+) -> list[VDOMOperation]:
+    """Handle unkeyed VDOM children using positional diffing."""
     operations = []
-    callbacks = {}
     max_len = max(len(old_children), len(new_children))
 
     for i in range(max_len):
         child_path = f"{path}.{i}" if path else str(i)
 
-        if i < len(old_children) and i < len(new_children):
+        old_child = old_children[i] if i < len(old_children) else None
+        new_child = new_children[i] if i < len(new_children) else None
+
+        if old_child and new_child:
             # Both exist - diff them
-            old_child = old_children[i]
-            new_child = new_children[i]
-            child_diff = diff_vdom(old_child, new_child, child_path)
-            operations.extend(child_diff.operations)
-            callbacks.update(child_diff.callbacks)
-
-        elif i < len(new_children):
+            child_ops = diff_vdom(old_child, new_child, child_path)
+            operations.extend(child_ops)
+        elif new_child:
             # New child - insert
-            new_child = new_children[i]
-            vdom, child_callbacks = _render_node_or_primitive(new_child, child_path)
-            callbacks.update(child_callbacks)
-            operations.append(
-                {
-                    "type": "insert",
-                    "path": child_path,
-                    "data": vdom,
-                }
-            )
-
+            operations.append({"type": "insert", "path": child_path, "data": new_child})
         else:
             # Old child that's no longer present - remove
-            operations.append(
-                {
-                    "type": "remove",
-                    "path": child_path,
-                    "data": None,
-                }
-            )
+            operations.append({"type": "remove", "path": child_path, "data": None})
 
-    return operations, callbacks
+    return operations
 
 
 def optimize_operations(operations: List[VDOMOperation]) -> List[VDOMOperation]:

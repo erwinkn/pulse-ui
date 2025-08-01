@@ -1,15 +1,26 @@
 [project]
 name = "pulse"
 version = "0.1.0"
-description = "Add your description here"
+description = "Pulse UI Server Integration - Python to TypeScript bridge"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "websockets>=12.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "mako>=1.3.10",
+    "typer>=0.16.0",
+    "python-socketio>=5.13.0",
+]
+
+[project.scripts]
+pulse = "pulse.cmd:main"
 
 [dependency-groups]
 dev = [
     "mypy>=1.17.0",
     "pytest>=8.3.4",
+    "pytest-asyncio>=1.1.0",
 ]
 
 [build-system]

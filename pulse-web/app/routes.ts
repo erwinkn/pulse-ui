@@ -1,3 +1,9 @@
-import { type RouteConfig, index } from "@react-router/dev/routes";
+import { type RouteConfig, index, route } from "@react-router/dev/routes";
+import { routes } from "./pulse/routes";
 
-export default [index("routes/home.tsx")] satisfies RouteConfig;
+export default [
+  ...routes,
+  
+  // Manual test routes (not auto-generated)
+  route("/test-updates", "routes/test-updates.tsx"),
+] satisfies RouteConfig;

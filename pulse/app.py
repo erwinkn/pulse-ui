@@ -16,6 +16,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from pulse.codegen import CodegenConfig
 from pulse.diff import diff_vdom
 from pulse.messages import (
     ClientMessage,
@@ -116,29 +117,24 @@ class App:
     def __init__(
         self,
         routes: Optional[List[Route]] = None,
-        web_dir: str = "pulse-web",
-        pulse_app_name: str = "pulse",
+        codegen: Optional[CodegenConfig] = None,
     ):
         """
         Initialize a new Pulse App.
 
         Args:
             routes: Optional list of Route objects to register.
-            web_dir: The root directory of the web project.
-            pulse_app_name: The name of the directory within the web project's app
-                            where generated Pulse files will be stored.
+            codegen: Optional codegen configuration.
         """
         routes = routes or []
         self.routes: dict[str, Route] = {}
-        for route in routes:
-            if route.path in self.routes:
-                raise ValueError(f"Duplicate routes on path '{route.path}'")
-            self.routes[route.path] = route
+        for route_obj in routes:
+            if route_obj.path in self.routes:
+                raise ValueError(f"Duplicate routes on path '{route_obj.path}'")
+            self.routes[route_obj.path] = route_obj
         self.sessions: dict[str, Session] = {}
 
-        self.web_dir = web_dir
-        self.pulse_app_name = pulse_app_name
-        self.pulse_app_dir = os.path.join(self.web_dir, "app", self.pulse_app_name)
+        self.codegen = codegen or CodegenConfig()
 
         self.fastapi = FastAPI(title="Pulse UI Server")
         self.sio = socketio.AsyncServer(async_mode="asgi")
@@ -215,9 +211,9 @@ class App:
         """
 
         def decorator(render_func):
-            route = Route(path, render_func, components=components or [])
-            self.add_route(route)
-            return route
+            route_obj = Route(path, render_func, components=components or [])
+            self.add_route(route_obj)
+            return route_obj
 
         return decorator
 

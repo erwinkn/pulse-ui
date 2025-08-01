@@ -1,6 +1,5 @@
-from .server import PulseServer as Server
 from .vdom import ReactComponent
-from .app import App , route, decorated_routes, Route, Session
+from .app import App, route, decorated_routes, Route, Session
 from .reactive import init
 from .state import State
 
@@ -8,7 +7,6 @@ from .state import State
 from .vdom import (
     # Core types and functions
     Node,
-    Callback,
     define_tag,
     define_self_closing_tag,
     # Standard HTML tags
@@ -125,5 +123,3 @@ from .vdom import (
     track,
     wbr,
 )
-
-

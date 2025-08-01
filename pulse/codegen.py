@@ -9,17 +9,33 @@ This module handles generating TypeScript files for:
 
 import json
 from pathlib import Path
-from typing import List
+from typing import List, TYPE_CHECKING
 import logging
 
 from mako.template import Template
 
-from .app import App, Route
 from .vdom import VDOMNode
+
+if TYPE_CHECKING:
+    from .app import App, Route
+
+
+class CodegenConfig:
+    def __init__(
+        self,
+        web_dir: str = "pulse-web",
+        pulse_app_name: str = "pulse",
+        pulse_lib_path: str = "~/pulse-lib",
+    ):
+        self.web_dir = web_dir
+        self.pulse_app_name = pulse_app_name
+        self.pulse_lib_path = pulse_lib_path
+        self.pulse_app_dir = Path(web_dir) / "app" / pulse_app_name
+
 
 # Mako template for config.ts
 CONFIG_TEMPLATE = Template(
-    """import type { PulseConfig } from "~/pulse-lib/pulse";
+    """import type { PulseConfig } from "${pulse_lib_path}/pulse";
 
 export const config: PulseConfig = {
   serverAddress: "${host}",
@@ -58,8 +74,8 @@ export const routes = [
 
 # Mako template for route pages
 ROUTE_PAGE_TEMPLATE = Template(
-    """import { Pulse, type PulseInit, type ComponentRegistry } from "~/pulse-lib/pulse";
-import { SocketIOTransport } from "~/pulse-lib/transport";
+    """import { Pulse, type PulseInit, type ComponentRegistry } from "${pulse_lib_path}/pulse";
+import { SocketIOTransport } from "${pulse_lib_path}/transport";
 import { config } from "../config";
 import type { ComponentType } from "react";
 
@@ -85,7 +101,7 @@ const externalComponents: ComponentRegistry = {};
 % endif
 
 // Create WebSocket transport for server communication
-const transport = new SocketIOTransport(`ws://${config.serverAddress}:${config.serverPort}`);
+const transport = new SocketIOTransport(`ws://<%text>${config.serverAddress}</%text>:<%text>${config.serverPort}</%text>`);
 
 const pulseInit: PulseInit = {
     route: "${route.path}",
@@ -103,23 +119,30 @@ export default function RouteComponent() {
 )
 
 
-def generate_config_file(host: str, port: int) -> str:
+def generate_config_file(host: str, port: int, pulse_lib_path: str) -> str:
     """Generates the content of config.ts"""
-    return str(CONFIG_TEMPLATE.render_unicode(host=host, port=port))
+    return str(
+        CONFIG_TEMPLATE.render_unicode(
+            host=host, port=port, pulse_lib_path=pulse_lib_path
+        )
+    )
 
 
-def generate_route_page(route: Route, initial_vdom: VDOMNode) -> str:
+def generate_route_page(
+    route: "Route", initial_vdom: VDOMNode, pulse_lib_path: str
+) -> str:
     """Generates TypeScript code for a route page."""
     return str(
         ROUTE_PAGE_TEMPLATE.render_unicode(
             route=route,
             components=route.components or [],
             initial_vdom_json=json.dumps(initial_vdom, indent=2),
+            pulse_lib_path=pulse_lib_path,
         )
     )
 
 
-def generate_routes_config(routes: List[Route], pulse_app_name: str) -> str:
+def generate_routes_config(routes: List["Route"], pulse_app_name: str) -> str:
     """
     Generate TypeScript code for the routes configuration.
 
@@ -162,7 +185,7 @@ def clean_directory(path: Path):
 
 
 def generate_all_routes(
-    app: App,
+    app: "App",
     host: str = "localhost",
     port: int = 8000,
 ):
@@ -177,8 +200,9 @@ def generate_all_routes(
 
     logger = logging.getLogger(__name__)
 
+    codegen_config = app.codegen
     routes = list(app.routes.values())
-    output_path = Path(app.pulse_app_dir)
+    output_path = codegen_config.pulse_app_dir
     routes_path = output_path / "routes"
     clean_directory(output_path)
 
@@ -191,7 +215,9 @@ def generate_all_routes(
     routes_path.mkdir(parents=True, exist_ok=True)
 
     # Generate config.ts
-    config_code = generate_config_file(host=host, port=port)
+    config_code = generate_config_file(
+        host=host, port=port, pulse_lib_path=codegen_config.pulse_lib_path
+    )
     config_file = output_path / "config.ts"
     config_file.write_text(config_code)
     logger.info(f"Generated server config at {config_file}")
@@ -213,13 +239,14 @@ def generate_all_routes(
         route_code = generate_route_page(
             route,
             initial_vdom=vdom,
+            pulse_lib_path=codegen_config.pulse_lib_path,
         )
 
         route_file = routes_path / f"{safe_path}.tsx"
         route_file.write_text(route_code)
 
     # Generate routes configuration
-    routes_config_code = generate_routes_config(routes, app.pulse_app_name)
+    routes_config_code = generate_routes_config(routes, codegen_config.pulse_app_name)
     routes_config_file = output_path / "routes.ts"
     routes_config_file.write_text(routes_config_code)
 

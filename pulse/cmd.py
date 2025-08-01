@@ -12,16 +12,17 @@ from pathlib import Path
 
 import typer
 
+from pulse.app import App
 from pulse.codegen import generate_all_routes
 
-app = typer.Typer(
+cli = typer.Typer(
     name="pulse",
     help="Pulse UI - Python to TypeScript bridge with server-side callbacks",
     no_args_is_help=True,
 )
 
 
-def load_app_from_file(file_path: str | Path):
+def load_app_from_file(file_path: str | Path) -> App:
     """Load routes from a Python file (supports both App instances and global @ps.route decorators)."""
     file_path = Path(file_path)
 
@@ -52,18 +53,16 @@ def load_app_from_file(file_path: str | Path):
         spec.loader.exec_module(module)
 
         if hasattr(module, "app"):
-            from pulse.app import App
-
             if isinstance(module.app, App):
-                app = module.app
-                if len(app.routes) == 0:
+                app_instance = module.app
+                if len(app_instance.routes) == 0:
                     typer.echo(f"⚠️  No routes found in {file_path}")
                     typer.echo("Make sure to define routes using either:")
                     typer.echo(
                         "  1. app = pulse.App() with @app.route() decorators, or"
                     )
                     typer.echo("  2. @pulse.route() decorators + the right imports")
-                return app
+                return app_instance
 
         typer.echo(f"⚠️  No app found in {file_path}")
         typer.echo("Make sure your file defines an app using app = pulse.App()")
@@ -78,58 +77,59 @@ def load_app_from_file(file_path: str | Path):
             sys.path.remove(str(file_path.parent.absolute()))
 
 
-@app.command("run")
-def run(
-    target: str = typer.Argument(
-        ..., help="Python file to run (e.g., main.py) or 'web' to start the web app"
-    ),
+@cli.command("serve")
+def serve(
+    app_file: str = typer.Argument(..., help="Python file with a pulse.App instance"),
     address: str = typer.Option(
         "localhost",
         "--address",
-        help="Address to bind the server to (only for Python files)",
+        help="Address to bind the server to",
     ),
-    port: int = typer.Option(
-        8000, "--port", help="Port to bind the server to (only for Python files)"
+    port: int = typer.Option(8000, "--port", help="Port to bind the server to"),
+):
+    """Run a Python file with the Pulse server."""
+    typer.echo(f"📁 Loading app from: {app_file}")
+    app_instance = load_app_from_file(app_file)
+    typer.echo(f"📋 Found {len(app_instance.routes)} routes")
+
+    typer.echo(f"🚀 Starting Pulse UI server on {address}:{port}")
+    app_instance.run(host=address, port=port)
+
+
+@cli.command("web")
+def web(
+    app_file: str = typer.Argument(
+        ..., help="Python file with a pulse.App instance to get web_dir from"
     ),
 ):
-    """Run a Python file with the Pulse server or start the web app."""
+    """Start the web development server."""
+    app_instance = load_app_from_file(app_file)
+    web_dir = Path(app_instance.codegen.web_dir)
 
-    if target == "web":
-        # Start the web development server
-        web_dir = Path("pulse-web")
+    if not web_dir.exists():
+        typer.echo(f"❌ Directory not found: {web_dir}")
+        typer.echo("Make sure you're running this from the project root directory")
+        raise typer.Exit(1)
 
-        if not web_dir.exists():
-            typer.echo("❌ pulse-web directory not found")
-            typer.echo("Make sure you're running this from the project root directory")
-            raise typer.Exit(1)
+    typer.echo("🌐 Starting web development server...")
+    typer.echo(f"📁 Working directory: {web_dir.absolute()}")
 
-        typer.echo("🌐 Starting web development server...")
-        typer.echo(f"📁 Working directory: {web_dir.absolute()}")
-
-        try:
-            # Change to the web directory and run bun dev
-            os.chdir(web_dir)
-            subprocess.run(["bun", "dev"], check=True)
-        except subprocess.CalledProcessError as e:
-            typer.echo(f"❌ Failed to start web server: {e}")
-            raise typer.Exit(1)
-        except FileNotFoundError:
-            typer.echo("❌ 'bun' command not found")
-            typer.echo("Please install bun: https://bun.sh/")
-            raise typer.Exit(1)
-        except KeyboardInterrupt:
-            typer.echo("\n👋 Web server stopped")
-    else:
-        # Treat it as a Python file to run with the server
-        typer.echo(f"📁 Loading app from: {target}")
-        app = load_app_from_file(target)
-        typer.echo(f"📋 Found {len(app.routes)} routes")
-
-        typer.echo(f"🚀 Starting Pulse UI server on {address}:{port}")
-        app.run(host=address, port=port)
+    try:
+        # Change to the web directory and run bun dev
+        os.chdir(web_dir)
+        subprocess.run(["bun", "dev"], check=True)
+    except subprocess.CalledProcessError as e:
+        typer.echo(f"❌ Failed to start web server: {e}")
+        raise typer.Exit(1)
+    except FileNotFoundError:
+        typer.echo("❌ 'bun' command not found")
+        typer.echo("Please install bun: https://bun.sh/")
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        typer.echo("\n👋 Web server stopped")
 
 
-@app.command("generate")
+@cli.command("generate")
 def generate(
     app_file: str = typer.Argument(..., help="Path to your Python file with routes"),
 ):
@@ -137,13 +137,13 @@ def generate(
     typer.echo("🔄 Generating TypeScript routes...")
 
     typer.echo(f"📁 Loading routes from: {app_file}")
-    app = load_app_from_file(app_file)
-    typer.echo(f"📋 Found {len(app.routes)} routes")
+    app_instance = load_app_from_file(app_file)
+    typer.echo(f"📋 Found {len(app_instance.routes)} routes")
 
-    generate_all_routes(app)
+    generate_all_routes(app_instance)
 
-    if len(app.routes) > 0:
-        typer.echo(f"✅ Generated {len(app.routes)} routes successfully!")
+    if len(app_instance.routes) > 0:
+        typer.echo(f"✅ Generated {len(app_instance.routes)} routes successfully!")
     else:
         typer.echo("✅ Cleaned up old route files")
         typer.echo("⚠️  No routes found to generate")
@@ -152,7 +152,7 @@ def generate(
 def main():
     """Main CLI entry point."""
     try:
-        app()
+        cli()
     except KeyboardInterrupt:
         typer.echo("\n👋 Shutting down...")
         raise typer.Exit(0)

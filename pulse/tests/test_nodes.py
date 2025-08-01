@@ -119,7 +119,7 @@ class TestHTMLTags:
         node = div()
         assert node.tag == "div"
         assert node.props == {}
-        assert node.children == []
+        assert node.children == ()
 
         node = p()
         assert node.tag == "p"
@@ -208,16 +208,16 @@ class TestHTMLTags:
         """Test self-closing tags."""
         node = br()
         assert node.tag == "br"
-        assert node.children == []
+        assert node.children == ()
 
         node = hr()
         assert node.tag == "hr"
-        assert node.children == []
+        assert node.children == ()
 
         node = img(src="/image.jpg", alt="Description")
         assert node.tag == "img"
         assert node.props == {"src": "/image.jpg", "alt": "Description"}
-        assert node.children == []
+        assert node.children == ()
 
     def test_default_props(self):
         """Test tags with default props."""
@@ -253,7 +253,7 @@ class TestTagDefinition:
         node = custom_tag()
         assert node.tag == "custom"
         assert node.props == {}
-        assert node.children == []
+        assert node.children == ()
 
         node = custom_tag(prop1="value1")["Child content"]
         assert node.tag == "custom"
@@ -279,12 +279,12 @@ class TestTagDefinition:
         node = self_closing()
         assert node.tag == "void-element"
         assert node.props == {}
-        assert node.children == []
+        assert node.children == ()
 
         node = self_closing(prop="value")
         assert node.tag == "void-element"
         assert node.props == {"prop": "value"}
-        assert node.children == []
+        assert node.children == ()
 
 
 class TestComplexStructures:

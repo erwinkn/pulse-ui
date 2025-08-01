@@ -5,12 +5,27 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
-from typing import List, Optional, Callable, Any, TypeVar
+import logging
+import os
+import socket
+from enum import IntEnum
+from typing import Any, Callable, List, Optional, TypeVar
 
-from pulse.diff import VDOMUpdate, diff_vdom
-from pulse.reactive import ReactiveContext
+import socketio
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from pulse.diff import diff_vdom
+from pulse.messages import (
+    ClientMessage,
+    ServerInitMessage,
+    ServerUpdateMessage,
+)
+from pulse.reactive import ReactiveContext, UpdateScheduler
 from pulse.vdom import Node, ReactComponent
 
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -29,7 +44,6 @@ class Route:
         self.path = path
         self.render_fn = render_fn
         self.components = components
-
 
 
 def route(
@@ -74,6 +88,13 @@ def clear_routes():
     ROUTES = []
 
 
+class AppStatus(IntEnum):
+    created = 0
+    initialized = 1
+    running = 2
+    stopped = 3
+
+
 class App:
     """
     Pulse UI Application - the main entry point for defining your app.
@@ -92,12 +113,20 @@ class App:
         ```
     """
 
-    def __init__(self, routes: Optional[List[Route]] = None):
+    def __init__(
+        self,
+        routes: Optional[List[Route]] = None,
+        web_dir: str = "pulse-web",
+        pulse_app_name: str = "pulse",
+    ):
         """
         Initialize a new Pulse App.
 
         Args:
-            routes: Optional list of Route objects to register
+            routes: Optional list of Route objects to register.
+            web_dir: The root directory of the web project.
+            pulse_app_name: The name of the directory within the web project's app
+                            where generated Pulse files will be stored.
         """
         routes = routes or []
         self.routes: dict[str, Route] = {}
@@ -106,6 +135,72 @@ class App:
                 raise ValueError(f"Duplicate routes on path '{route.path}'")
             self.routes[route.path] = route
         self.sessions: dict[str, Session] = {}
+
+        self.web_dir = web_dir
+        self.pulse_app_name = pulse_app_name
+        self.pulse_app_dir = os.path.join(self.web_dir, "app", self.pulse_app_name)
+
+        self.fastapi = FastAPI(title="Pulse UI Server")
+        self.sio = socketio.AsyncServer(async_mode="asgi")
+        self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
+        self.status = AppStatus.created
+
+    def setup(self):
+        if self.status >= AppStatus.initialized:
+            logger.warn("Called App.setup() on an already initialized application")
+            return
+
+        # Add CORS middleware
+        self.fastapi.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        @self.fastapi.get("/health")
+        def healthcheck():
+            return {"health": "ok", "message": "Pulse server is running"}
+
+    def run(self, host: str = "127.0.0.1", port=8000, find_port=True):
+        if self.status == AppStatus.running:
+            raise RuntimeError("Server already running")
+        if self.status == AppStatus.created:
+            self.setup()
+
+        self.setup()
+        if find_port:
+            port = find_available_port(port)
+
+        logger.info(f"🚀 Starting Pulse UI Server on http://{host}:{port}")
+        logger.info(f"🔌 WebSocket endpoint: ws://{host}:{port}/ws")
+
+        uvicorn.run(self.asgi, host=host, port=port, log_level="info")
+
+    def _setup_socketio_endpoints(self):
+        @self.sio.event
+        def connect(sid: str, data):
+            session = self.create_session(sid)
+            session.connect(
+                lambda message: self.sio.emit("message", message, to=sid),
+            )
+
+        @self.sio.event
+        def disconnect(sid: str, data):
+            # TODO: keep the session open for some time in case the client reconnects?
+            self.close_session(sid)
+
+        @self.sio.event
+        def message(sid: str, data: ClientMessage):
+            session = self.get_session(sid)
+
+            if data["type"] == "navigate":
+                session.hydrate(data["route"])
+            elif data["type"] == "callback":
+                session.execute_callback(data["callback"], data["args"])
+            else:
+                logger.warning(f"Unknown message type received: {data}")
 
     def route(self, path: str, components: Optional[List] = None):
         """
@@ -162,56 +257,100 @@ class App:
         self.sessions[id].close()
         del self.sessions[id]
 
-PulseListener = Callable[[list[VDOMUpdate]], Any]
 
 class Session:
     def __init__(self, id: str, app: App) -> None:
         self.id = id
         self.app = app
-        self.listeners: set[PulseListener] = set()
+        self.message_listeners: set[
+            Callable[[ServerUpdateMessage | ServerInitMessage], Any]
+        ] = set()
 
         self.current_route: str | None = None
         self.ctx = ReactiveContext()
+        self.scheduler = UpdateScheduler()
         self.callback_registry: dict[str, Callable] = {}
         self.vdom: Node | None = None
 
-    def connect(self, listener: PulseListener):
-        self.listeners.add(listener)
+    def connect(
+        self,
+        message_listener: Callable[[ServerUpdateMessage | ServerInitMessage], Any],
+    ):
+        self.message_listeners.add(message_listener)
         # Return a disconnect function
-        return lambda: self.listeners.remove(listener)
+        return lambda: (self.message_listeners.remove(message_listener),)
 
-    def notify(self, updates: list[VDOMUpdate]):
-        for listener in self.listeners:
-            listener(updates)
+    def notify(self, message: ServerUpdateMessage | ServerInitMessage):
+        for listener in self.message_listeners:
+            listener(message)
 
     def close(self):
-        self.listeners.clear()
+        self.message_listeners.clear()
         self.vdom = None
         self.callback_registry.clear()
         for state, fields in self.ctx.client_states.items():
             state.remove_listener(fields, self.rerender)
 
-    def execute_callback(self, key: str):
-        self.callback_registry[key]()
+    def execute_callback(self, key: str, args: list | tuple):
+        self.callback_registry[key](*args)
 
     def rerender(self):
         if self.current_route is None:
             raise RuntimeError("Failed to rerender: no route set for the session!")
-        return self.render(self.current_route)
+        self.update_render()
 
-    def render(self, path: str):
+    def hydrate(self, path: str):
         route = self.app.get_route(path)
-        # Reinitialize render state
-        if self.current_route != path:
-            self.current_route = path
-            self.ctx = ReactiveContext.empty()
-            self.callback_registry.clear()
-            # don't reset VDOM, it represents what exists on the client
 
+        # Clear old state listeners from previous route
+        for state, fields in self.ctx.client_states.items():
+            state.remove_listener(fields, self.rerender)
+
+        # Reinitialize render state for the new route
+        self.current_route = path
+        self.ctx = ReactiveContext.empty()
+        self.callback_registry.clear()
+        self.vdom = None
 
         with self.ctx.next_render() as new_ctx:
-            vdom = route.render_fn()
-            diff = diff_vdom(self.vdom, vdom)
+            # Render the component tree
+            node_tree = route.render_fn()
+
+            # Convert to VDOM and collect callbacks
+            vdom_tree, callbacks = node_tree.render()
+
+            # Store the state
+            self.vdom = node_tree
+            self.callback_registry = callbacks
+            self.ctx = new_ctx
+
+            # Set up new state subscriptions
+            for state, fields in self.ctx.client_states.items():
+                state.add_listener(fields, self.rerender)
+
+            # Send the full VDOM to the client for initial hydration
+            self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
+
+    def update_render(self):
+        if self.current_route is None:
+            return  # Should not happen if called from rerender
+
+        route = self.app.get_route(self.current_route)
+
+        with self.ctx.next_render() as new_ctx:
+            # Render new tree
+            new_node_tree = route.render_fn()
+
+            # Diff with the old tree
+            diff = diff_vdom(self.vdom, new_node_tree)
+
+            # Unsubscribe old state listeners
+            for state, fields in self.ctx.client_states.items():
+                state.remove_listener(fields, self.rerender)
+
+            # Subscribe new state listeners
+            for state, fields in new_ctx.client_states.items():
+                state.add_listener(fields, self.rerender)
 
             # Update callbacks
             remove_callbacks = self.callback_registry.keys() - diff.callbacks.keys()
@@ -221,11 +360,26 @@ class Session:
             for key in add_callbacks:
                 self.callback_registry[key] = diff.callbacks[key]
 
-            # Update state subscriptions
-            # TODO: this is the lazy way, can probably be optimized
-            for state, fields in self.ctx.client_states.items():
-                state.remove_listener(fields, self.rerender)
-            for state, fields in new_ctx.client_states.items():
-                state.add_listener(fields, self.rerender)
-
+            # Update stored state
+            self.vdom = new_node_tree
             self.ctx = new_ctx
+
+            # Send diff to client if there are any changes
+            if diff.operations:
+                self.notify(
+                    ServerUpdateMessage(type="vdom_update", ops=diff.operations)
+                )
+
+
+def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:
+    """Find an available port starting from start_port."""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("localhost", port))
+                return port
+        except OSError:
+            continue
+    raise RuntimeError(
+        f"Could not find available port after {max_attempts} attempts starting from {start_port}"
+    )

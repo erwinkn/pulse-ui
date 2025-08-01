@@ -5,7 +5,7 @@ import {
   applyUpdate,
   applyUpdates,
 } from "../update-utils";
-import type { UINode, UIElementNode, UIUpdatePayload } from "../tree";
+import type { VDOMNode, VDOMElement, VDOMUpdate } from "../vdom";
 import {
   createElementNode,
   createFragment,
@@ -14,7 +14,7 @@ import {
   isTextNode,
   isMountPointNode,
   getMountPointComponentKey,
-} from "../tree";
+} from "../vdom";
 
 describe("update-utils", () => {
   describe("findNodeByPath", () => {
@@ -113,16 +113,16 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [existingChild]);
       const newChild = "New";
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "insert",
         path: [],
         data: { node: newChild, index: 0 },
       };
 
       const result = applyUpdate(root, update);
-      expect((result as UIElementNode).children).toHaveLength(2);
-      expect((result as UIElementNode).children[0]).toBe("New");
-      expect((result as UIElementNode).children[1]).toBe("Existing");
+      expect((result as VDOMElement).children).toHaveLength(2);
+      expect((result as VDOMElement).children[0]).toBe("New");
+      expect((result as VDOMElement).children[1]).toBe("Existing");
     });
 
     it("should insert element node at specified index", () => {
@@ -130,16 +130,16 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [existingChild]);
       const newChild = createElementNode("span", {}, ["New"]);
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "insert",
         path: [],
         data: { node: newChild, index: 0 },
       };
 
       const result = applyUpdate(root, update);
-      expect((result as UIElementNode).children).toHaveLength(2);
-      expect((result as UIElementNode).children[0]).toEqual(newChild);
-      expect((result as UIElementNode).children[1]).toBe("Existing");
+      expect((result as VDOMElement).children).toHaveLength(2);
+      expect((result as VDOMElement).children[0]).toEqual(newChild);
+      expect((result as VDOMElement).children[1]).toBe("Existing");
     });
 
     it("should remove node at specified index", () => {
@@ -147,15 +147,15 @@ describe("update-utils", () => {
       const child2 = "Child 2";
       const root = createElementNode("div", {}, [child1, child2]);
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "remove",
         path: [],
         data: { index: 0 },
       };
 
       const result = applyUpdate(root, update);
-      expect((result as UIElementNode).children).toHaveLength(1);
-      expect((result as UIElementNode).children[0]).toBe("Child 2");
+      expect((result as VDOMElement).children).toHaveLength(1);
+      expect((result as VDOMElement).children[0]).toBe("Child 2");
     });
 
     it("should replace text node with another text node", () => {
@@ -163,14 +163,14 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [oldChild]);
       const newChild = "New";
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "replace",
         path: [0],
         data: { node: newChild },
       };
 
       const result = applyUpdate(root, update);
-      expect((result as UIElementNode).children[0]).toBe("New");
+      expect((result as VDOMElement).children[0]).toBe("New");
     });
 
     it("should replace text node with element node", () => {
@@ -178,27 +178,27 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [oldChild]);
       const newChild = createElementNode("span", {}, ["New"]);
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "replace",
         path: [0],
         data: { node: newChild },
       };
 
       const result = applyUpdate(root, update);
-      expect((result as UIElementNode).children[0]).toEqual(newChild);
+      expect((result as VDOMElement).children[0]).toEqual(newChild);
     });
 
     it("should update props", () => {
       const root = createElementNode("div", { className: "old" });
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "update_props",
         path: [],
         data: { props: { className: "new", id: "test" } },
       };
 
       const result = applyUpdate(root, update);
-      expect((result as UIElementNode).props).toEqual({
+      expect((result as VDOMElement).props).toEqual({
         className: "new",
         id: "test",
       });
@@ -209,16 +209,16 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [existingChild]);
       const mountPoint = createMountPoint("counter", { count: 5 });
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "insert",
         path: [],
         data: { node: mountPoint, index: 0 },
       };
 
       const result = applyUpdate(root, update);
-      expect((result as UIElementNode).children).toHaveLength(2);
-      expect((result as UIElementNode).children[0]).toEqual(mountPoint);
-      expect((result as UIElementNode).children[1]).toBe("Existing");
+      expect((result as VDOMElement).children).toHaveLength(2);
+      expect((result as VDOMElement).children[0]).toEqual(mountPoint);
+      expect((result as VDOMElement).children[1]).toBe("Existing");
     });
 
     it("should replace text node with mount point node", () => {
@@ -226,14 +226,14 @@ describe("update-utils", () => {
       const root = createElementNode("div", {}, [oldChild]);
       const mountPoint = createMountPoint("counter", { count: 5 });
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "replace",
         path: [0],
         data: { node: mountPoint },
       };
 
       const result = applyUpdate(root, update);
-      expect((result as UIElementNode).children[0]).toEqual(mountPoint);
+      expect((result as VDOMElement).children[0]).toEqual(mountPoint);
     });
 
     it("should update mount point props", () => {
@@ -243,15 +243,15 @@ describe("update-utils", () => {
       });
       const root = createElementNode("div", {}, [mountPoint]);
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "update_props",
         path: [0],
         data: { props: { count: 10, color: "red", size: "large" } },
       };
 
       const result = applyUpdate(root, update);
-      const updatedMountPoint = (result as UIElementNode)
-        .children[0] as UIElementNode;
+      const updatedMountPoint = (result as VDOMElement)
+        .children[0] as VDOMElement;
       expect(updatedMountPoint.props).toEqual({
         count: 10,
         color: "red",
@@ -265,15 +265,15 @@ describe("update-utils", () => {
       const fragment = createFragment(["Hello"]);
       const root = createElementNode("div", {}, [fragment]);
 
-      const update: UIUpdatePayload = {
+      const update: VDOMUpdate = {
         type: "insert",
         path: [0],
         data: { node: "World", index: 1 },
       };
 
       const result = applyUpdate(root, update);
-      const updatedFragment = (result as UIElementNode)
-        .children[0] as UIElementNode;
+      const updatedFragment = (result as VDOMElement)
+        .children[0] as VDOMElement;
       expect(updatedFragment.children).toHaveLength(2);
       expect(updatedFragment.children[0]).toBe("Hello");
       expect(updatedFragment.children[1]).toBe("World");
@@ -284,7 +284,7 @@ describe("update-utils", () => {
     it("should apply multiple updates in sequence", () => {
       const root = createElementNode("div", { className: "old" }, []);
 
-      const updates: UIUpdatePayload[] = [
+      const updates: VDOMUpdate[] = [
         {
           type: "update_props",
           path: [],
@@ -298,9 +298,9 @@ describe("update-utils", () => {
       ];
 
       const result = applyUpdates(root, updates);
-      expect((result as UIElementNode).props.className).toBe("new");
-      expect((result as UIElementNode).children).toHaveLength(1);
-      expect((result as UIElementNode).children[0]).toBe("Hello");
+      expect((result as VDOMElement).props.className).toBe("new");
+      expect((result as VDOMElement).children).toHaveLength(1);
+      expect((result as VDOMElement).children[0]).toBe("Hello");
     });
   });
 });

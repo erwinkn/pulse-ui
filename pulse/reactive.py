@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 class InitState:
     def __init__(self, value: Any, initialized: bool, last_call: int):
-        self.value = value
+        self.state = value
         self.initialized = initialized
         self.last_call = last_call
 
@@ -132,9 +132,9 @@ def init(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
         raise RuntimeError("pulse.init() can only be called during rendering")
 
     if not ctx.init.initialized:
-        ctx.init.value = init_func(*args, **kwargs)
+        ctx.init.state = init_func(*args, **kwargs)
         ctx.init.initialized = True
     if ctx.init.last_call == ctx.counter:
         raise RuntimeError("pulse.init() can only be called once per component")
     ctx.init.last_call = ctx.counter
-    return ctx.init.value
+    return ctx.init.state

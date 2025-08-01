@@ -5,34 +5,22 @@ This library provides a Python API for building UI trees that match
 the TypeScript UINode format exactly, eliminating the need for translation.
 """
 
-from ast import Call
 from typing import (
     Any,
-    NamedTuple,
     NotRequired,
     Optional,
     Callable,
-    Self,
     Sequence,
     TypedDict,
     Union,
     cast,
 )
-import random
-import uuid
 
 __all__ = [
     # Core types and functions
     "Node",
-    "Callback",
     "define_tag",
     "define_self_closing_tag",
-    # Callback system
-    "register_callback",
-    "get_callback",
-    "clear_callbacks",
-    "get_all_callbacks",
-    "execute_callback",
     # UI Tree integration
     "ReactComponent",
     "ReactComponent",
@@ -153,69 +141,10 @@ __all__ = [
 
 
 # ============================================================================
-# Callback System
-# ============================================================================
-
-
-class Callback:
-    """
-    Wrapper for callback functions that can be passed as props.
-    This allows the system to detect and register callbacks efficiently.
-    """
-
-    def __init__(self, func: Callable[[], None]):
-        if not callable(func):
-            raise ValueError("Callback must be a callable function")
-        self.func = func
-        self.id = str(uuid.uuid4())
-
-    def __call__(self):
-        """Make Callback instances callable."""
-        return self.func()
-
-
-# Global callback registry: callback_key -> function
-CALLBACK_REGISTRY: dict[str, Callable[[], None]] = {}
-
-
-def register_callback(callback_key: str, func: Callable[[], None]) -> None:
-    """Register a callback function with a unique key."""
-    CALLBACK_REGISTRY[callback_key] = func
-
-
-def get_callback(callback_key: str) -> Optional[Callable[[], None]]:
-    """Get a registered callback function by key."""
-    return CALLBACK_REGISTRY.get(callback_key)
-
-
-def clear_callbacks() -> None:
-    """Clear all registered callbacks."""
-    CALLBACK_REGISTRY.clear()
-
-
-def get_all_callbacks() -> dict[str, Callable[[], None]]:
-    """Get all registered callbacks."""
-    return CALLBACK_REGISTRY.copy()
-
-
-def execute_callback(key: str) -> bool:
-    """Execute a registered callback by its key. Returns True if successful."""
-    callback_func = get_callback(key)
-    if callback_func:
-        try:
-            callback_func()
-            return True
-        except Exception as e:
-            print(f"Error executing callback {key}: {e}")
-            return False
-    return False
-
-
-# ============================================================================
 # Core VDOM
 # ============================================================================
 
-PrimitiveNode = Union[bool, str, int, float]
+PrimitiveNode = Union[str, int, float]
 NodeChild = Union["Node", PrimitiveNode]
 Callbacks = dict[str, Callable]
 
@@ -225,18 +154,6 @@ class VDOMNode(TypedDict):
     key: NotRequired[str]
     props: NotRequired[dict[str, Any]]  # does not include callbacks
     children: "NotRequired[Sequence[VDOMNode | PrimitiveNode] | None]"
-
-
-# Payload produced on initial render of a tree
-class ServerVDOM(TypedDict):
-    tree: VDOMNode
-    callbacks: dict[str, Callable]
-
-
-# Payload sent to the client
-class ClientVDOM(TypedDict):
-    tree: VDOMNode
-    callbacks: list[str]
 
 
 class Node:
@@ -299,10 +216,13 @@ class Node:
                 for i, child in enumerate(self.children or [])
             ]
         if self.callbacks:
-            callback_props = []
+            if "props" not in vdom:
+                vdom["props"] = {}
             for callback_name, callback_fn in self.callbacks.items():
-                callback_props.append(callback_name)
-                callbacks[path_prefix + callback_name] = callback_fn
+                callback_key = f"{path_prefix}{callback_name}"
+                # Props are guaranteed to exist here
+                vdom["props"][callback_name] = f"$$callback:{callback_key}"
+                callbacks[callback_key] = callback_fn
 
         return vdom
 
@@ -332,10 +252,9 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
 
     def create_element(*children: NodeChild, **props: Any) -> Node:
         """Create a UITreeNode for this tag."""
-        merged_props = {**default_props, **props}
-        return Node(
-            tag=name, props=merged_props, children=list(children) if children else []
-        )
+        props = {**default_props, **props}
+        props, callbacks = extract_callbacks_from_props(props)
+        return Node(tag=name, props=props, callbacks=callbacks, children=children)
 
     return create_element
 
@@ -355,14 +274,30 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
 
     def create_element(**props: Any) -> Node:
         """Create a self-closing UITreeNode for this tag."""
-        merged_props = {**default_props, **props}
+        props = {**default_props, **props}
+        props, callbacks = extract_callbacks_from_props(props)
+
         return Node(
             tag=name,
-            props=merged_props,
-            children=[],  # Self-closing tags never have children
+            props=props,
+            callbacks=callbacks,
+            children=(),  # Self-closing tags never have children
         )
 
     return create_element
+
+
+def extract_callbacks_from_props(
+    props: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Callable]]:
+    clean_props = {}
+    callbacks = {}
+    for k, v in props.items():
+        if callable(v):
+            callbacks[k] = v
+        else:
+            clean_props[k] = v
+    return clean_props, callbacks
 
 
 # ============================================================================

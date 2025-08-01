@@ -1,109 +1,135 @@
-import type { UINode, UIUpdatePayload } from "./tree";
+import { io, Socket } from "socket.io-client";
+import type { VDOMNode, VDOMUpdate } from "./vdom";
 
-export interface TransportMessage {
-  type: "ui_updates" | "ui_tree" | "callback_invoke" | "ping" | "pong";
-  updates?: UIUpdatePayload[];
-  tree?: UINode;
-  callback_key?: string;
-  request_id?: string;
+// =================================================================
+// Message Types
+// =================================================================
+
+// Based on pulse/messages.py
+export interface ServerInitMessage {
+  type: "vdom_init";
+  vdom: VDOMNode;
 }
+
+export interface ServerUpdateMessage {
+  type: "vdom_update";
+  ops: VDOMUpdate[];
+}
+
+export type ServerMessage = ServerInitMessage | ServerUpdateMessage;
+
+export interface ClientCallbackMessage {
+  type: "callback";
+  callback: string;
+  args: any[];
+}
+
+export interface ClientNavigateMessage {
+  type: "navigate";
+  route: string;
+}
+
+export type ClientMessage = ClientCallbackMessage | ClientNavigateMessage;
+
+// =================================================================
+// Transport Abstraction
+// =================================================================
+
+export type MessageListener = (message: ServerMessage) => void;
 
 export interface Transport {
-  send(message: TransportMessage): void;
-  onMessage(callback: (message: TransportMessage) => void): void;
-  close(): void;
+  connect(listener: MessageListener): void;
+  disconnect(): void;
+  sendMessage(payload: ClientMessage): Promise<void>;
+  isConnected(): boolean;
 }
 
-export class WebSocketTransport implements Transport {
-  private ws: WebSocket | null = null;
-  private messageCallback: ((message: TransportMessage) => void) | null = null;
+// =================================================================
+// Socket.IO Transport
+// =================================================================
 
-  constructor(private url: string) {
-    this.connect();
+export class SocketIOTransport implements Transport {
+  private socket: Socket | null = null;
+  private listener: MessageListener | null = null;
+
+  constructor(private url: string) {}
+
+  connect(listener: MessageListener): void {
+    this.listener = listener;
+    this.socket = io(this.url, {
+      transports: ["websocket"],
+    });
+
+    this.socket.on("connect", () => {
+      console.log("[SocketIOTransport] Connected:", this.socket?.id);
+    });
+
+    this.socket.on("disconnect", () => {
+      console.log("[SocketIOTransport] Disconnected");
+    });
+
+    this.socket.on("message", (data: ServerMessage) => {
+      console.log("[SocketIOTransport] Received message:", data);
+      this.listener?.(data);
+    });
   }
 
-  private connect() {
-    this.ws = new WebSocket(this.url);
-
-    this.ws.onopen = () => {
-      console.log(`WebSocket connected to ${this.url}`);
-    };
-
-    this.ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data) as TransportMessage;
-        if (this.messageCallback) {
-          this.messageCallback(message);
-        }
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
-      }
-    };
-
-    this.ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-    };
-
-    this.ws.onclose = () => {
-      console.log("WebSocket disconnected");
-    };
+  disconnect(): void {
+    this.socket?.disconnect();
+    this.socket = null;
+    this.listener = null;
   }
 
-  send(message: TransportMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      console.log("Sending websocket message:", message);
-      this.ws.send(JSON.stringify(message));
-    } else {
-      console.log("WebSocket not open");
+  async sendMessage(payload: ClientMessage): Promise<void> {
+    if (!this.socket || !this.socket.connected) {
+      throw new Error("[SocketIOTransport] Not connected.");
     }
+    this.socket.emit("message", payload);
   }
 
-  onMessage(callback: (message: TransportMessage) => void): void {
-    this.messageCallback = callback;
-  }
-
-  close(): void {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
+  isConnected(): boolean {
+    return this.socket?.connected || false;
   }
 }
 
-export class EventEmitterTransport implements Transport {
-  private messageCallback: ((message: TransportMessage) => void) | null = null;
+// =================================================================
+// In-Memory Transport (for testing)
+// =================================================================
 
-  send(message: TransportMessage): void {
-    console.log("EventEmitterTransport send:", message);
-    // For local testing, immediately dispatch the message back to the handler
-    if (this.messageCallback) {
-      // Use setTimeout to make this async like a real transport
-      setTimeout(() => {
-        if (this.messageCallback) {
-          this.messageCallback(message);
-        }
-      }, 0);
+export class InMemoryTransport implements Transport {
+  private listener: MessageListener | null = null;
+  private connected = false;
+
+  // Simulate server-side message dispatching
+  public dispatchMessage(message: ServerMessage) {
+    if (this.listener) {
+      // Simulate async behavior
+      setTimeout(() => this.listener?.(message), 0);
     }
   }
 
-  onMessage(callback: (message: TransportMessage) => void): void {
-    this.messageCallback = callback;
+  connect(listener: MessageListener): void {
+    this.listener = listener;
+    this.connected = true;
+    console.log("[InMemoryTransport] Connected.");
   }
 
-  // Method to dispatch messages directly to this transport (for testing)
-  dispatchMessage(message: TransportMessage): void {
-    console.log("EventEmitterTransport dispatchMessage:", message);
-    if (this.messageCallback) {
-      // Use setTimeout to make this async like a real transport
-      setTimeout(() => {
-        if (this.messageCallback) {
-          this.messageCallback(message);
-        }
-      }, 0);
+  disconnect(): void {
+    this.listener = null;
+    this.connected = false;
+    console.log("[InMemoryTransport] Disconnected.");
+  }
+
+  async sendMessage(payload: ClientMessage): Promise<void> {
+    if (!this.connected) {
+      throw new Error("[InMemoryTransport] Not connected.");
     }
+    console.log(`[InMemoryTransport] Sent message:`, payload);
+    // In a real test setup, this might trigger a simulated server response
+    // via `dispatchMessage`.
   }
 
-  close(): void {
-    this.messageCallback = null;
+  isConnected(): boolean {
+    return this.connected;
   }
 }

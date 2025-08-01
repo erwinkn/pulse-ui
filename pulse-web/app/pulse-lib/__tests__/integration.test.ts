@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import type { UIElementNode, UIUpdatePayload } from "../tree";
+import type { VDOMElement, VDOMUpdate } from "../vdom";
 import {
   createElementNode,
   createFragment,
   createMountPoint,
   getMountPointComponentKey,
-} from "../tree";
+} from "../vdom";
 import { applyUpdates } from "../update-utils";
 
 describe("UI Tree Integration", () => {
@@ -17,7 +17,7 @@ describe("UI Tree Integration", () => {
     ]);
 
     // Apply a series of updates like a real application would
-    const updates: UIUpdatePayload[] = [
+    const updates: VDOMUpdate[] = [
       // Replace the title text (since we no longer have update_text)
       {
         id: "update-1",
@@ -51,21 +51,20 @@ describe("UI Tree Integration", () => {
     const updatedTree = applyUpdates(initialTree, updates);
 
     // Verify the updates were applied correctly
-    expect((updatedTree as UIElementNode).props.className).toBe(
+    expect((updatedTree as VDOMElement).props.className).toBe(
       "container updated"
     );
-    expect((updatedTree as UIElementNode).props.id).toBe("main-container");
-    expect((updatedTree as UIElementNode).children).toHaveLength(3);
+    expect((updatedTree as VDOMElement).props.id).toBe("main-container");
+    expect((updatedTree as VDOMElement).children).toHaveLength(3);
 
     // Check title was updated (text is now a string)
-    const titleText = (
-      (updatedTree as UIElementNode).children[0] as UIElementNode
-    ).children[0];
+    const titleText = ((updatedTree as VDOMElement).children[0] as VDOMElement)
+      .children[0];
     expect(titleText).toBe("Updated Title");
 
     // Check new paragraph was added
-    const newParagraph = (updatedTree as UIElementNode)
-      .children[2] as UIElementNode;
+    const newParagraph = (updatedTree as VDOMElement)
+      .children[2] as VDOMElement;
     expect(newParagraph.tag).toBe("p");
     expect(newParagraph.props.className).toBe("new-paragraph");
 
@@ -79,7 +78,7 @@ describe("UI Tree Integration", () => {
       createFragment(["Hello", " ", "World"]),
     ]);
 
-    const updates: UIUpdatePayload[] = [
+    const updates: VDOMUpdate[] = [
       // Insert a new text node into the fragment
       {
         id: "update-1",
@@ -90,8 +89,7 @@ describe("UI Tree Integration", () => {
     ];
 
     const updatedTree = applyUpdates(initialTree, updates);
-    const fragment = (updatedTree as UIElementNode)
-      .children[0] as UIElementNode;
+    const fragment = (updatedTree as VDOMElement).children[0] as VDOMElement;
 
     expect(fragment.children).toHaveLength(4);
     expect(fragment.children[0]).toBe("Hello");
@@ -108,7 +106,7 @@ describe("UI Tree Integration", () => {
       createMountPoint("user-card", { name: "John Doe", status: "offline" }),
     ]);
 
-    const updates: UIUpdatePayload[] = [
+    const updates: VDOMUpdate[] = [
       // Update counter props
       {
         id: "update-1",
@@ -153,10 +151,10 @@ describe("UI Tree Integration", () => {
     const updatedTree = applyUpdates(initialTree, updates);
 
     // Verify the updates were applied correctly
-    expect((updatedTree as UIElementNode).children).toHaveLength(4);
+    expect((updatedTree as VDOMElement).children).toHaveLength(4);
 
     // Check counter props were updated
-    const counter = (updatedTree as UIElementNode).children[1] as UIElementNode;
+    const counter = (updatedTree as VDOMElement).children[1] as VDOMElement;
     expect(getMountPointComponentKey(counter)).toBe("counter");
     expect(counter.props).toEqual({
       count: 5,
@@ -165,8 +163,7 @@ describe("UI Tree Integration", () => {
     });
 
     // Check user card was replaced with status badge
-    const statusBadge = (updatedTree as UIElementNode)
-      .children[2] as UIElementNode;
+    const statusBadge = (updatedTree as VDOMElement).children[2] as VDOMElement;
     expect(getMountPointComponentKey(statusBadge)).toBe("status-badge");
     expect(statusBadge.props).toEqual({
       status: "success",
@@ -174,8 +171,7 @@ describe("UI Tree Integration", () => {
     });
 
     // Check progress bar was inserted
-    const progressBar = (updatedTree as UIElementNode)
-      .children[3] as UIElementNode;
+    const progressBar = (updatedTree as VDOMElement).children[3] as VDOMElement;
     expect(getMountPointComponentKey(progressBar)).toBe("progress-bar");
     expect(progressBar.props).toEqual({
       value: 75,
@@ -195,7 +191,7 @@ describe("UI Tree Integration", () => {
       ]),
     ]);
 
-    const updates: UIUpdatePayload[] = [
+    const updates: VDOMUpdate[] = [
       // Update first metric in fragment
       {
         id: "update-1",
@@ -231,17 +227,17 @@ describe("UI Tree Integration", () => {
     const updatedTree = applyUpdates(initialTree, updates);
 
     // Verify structure
-    expect((updatedTree as UIElementNode).children).toHaveLength(3);
-    expect((updatedTree as UIElementNode).children[0]).toBe("Welcome");
+    expect((updatedTree as VDOMElement).children).toHaveLength(3);
+    expect((updatedTree as VDOMElement).children[0]).toBe("Welcome");
 
-    const metricsContainer = (updatedTree as UIElementNode)
-      .children[2] as UIElementNode;
+    const metricsContainer = (updatedTree as VDOMElement)
+      .children[2] as VDOMElement;
     expect(metricsContainer.tag).toBe("div");
     expect(metricsContainer.props.className).toBe("metrics-grid");
     expect(metricsContainer.children).toHaveLength(3);
 
     // Check all metrics are mount points
-    const metrics = metricsContainer.children as UIElementNode[];
+    const metrics = metricsContainer.children as VDOMElement[];
     expect(getMountPointComponentKey(metrics[0])).toBe("metric-card");
     expect(getMountPointComponentKey(metrics[1])).toBe("metric-card");
     expect(getMountPointComponentKey(metrics[2])).toBe("metric-card");

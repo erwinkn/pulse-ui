@@ -21,71 +21,71 @@ class TestBasicDiffing:
         """Test diffing with None values."""
         # Both None
         diff = diff_vdom(None, None)
-        assert diff.updates == []
+        assert diff.operations == []
 
         # Insert from None
         new_node = Node("div", {"class": "test"}, ["Hello"])
         diff = diff_vdom(None, new_node)
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "insert"
-        assert diff.updates[0]["path"] == ""
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "insert"
+        assert diff.operations[0]["path"] == ""
 
         expected_vdom: VDOMNode = {
             "tag": "div",
             "props": {"class": "test"},
             "children": ["Hello"],
         }
-        assert_vdom_equal(diff.updates[0]["data"], expected_vdom)
+        assert_vdom_equal(diff.operations[0]["data"], expected_vdom)
 
         # Remove to None
         old_node = Node("div", {"class": "test"}, ["Hello"])
         diff = diff_vdom(old_node, None)
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "remove"
-        assert diff.updates[0]["path"] == ""
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "remove"
+        assert diff.operations[0]["path"] == ""
 
     def test_identical_nodes(self):
         """Test that identical nodes produce no operations."""
         node1 = Node("div", {"class": "test"}, ["Hello"])
         node2 = Node("div", {"class": "test"}, ["Hello"])
         diff = diff_vdom(node1, node2)
-        assert diff.updates == []
+        assert diff.operations == []
 
     def test_text_node_changes(self):
         """Test diffing text nodes."""
         # Same text
         diff = diff_vdom("hello", "hello")
-        assert diff.updates == []
+        assert diff.operations == []
 
         # Changed text
         diff = diff_vdom("hello", "world")
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "replace"
-        assert diff.updates[0]["data"] == "world"
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "replace"
+        assert diff.operations[0]["data"] == "world"
 
         # Text to element
         new_node = Node("span", {}, ["world"])
         diff = diff_vdom("hello", new_node)
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "replace"
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "replace"
 
         expected_vdom: VDOMNode = {"tag": "span", "children": ["world"]}
-        assert_vdom_equal(diff.updates[0]["data"], expected_vdom)
+        assert_vdom_equal(diff.operations[0]["data"], expected_vdom)
 
     def test_tag_changes(self):
         """Test nodes with different tags get replaced."""
         old_node = Node("div", {"class": "test"}, ["Hello"])
         new_node = Node("span", {"class": "test"}, ["Hello"])
         diff = diff_vdom(old_node, new_node)
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "replace"
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "replace"
 
         expected_vdom: VDOMNode = {
             "tag": "span",
             "props": {"class": "test"},
             "children": ["Hello"],
         }
-        assert_vdom_equal(diff.updates[0]["data"], expected_vdom)
+        assert_vdom_equal(diff.operations[0]["data"], expected_vdom)
 
 
 class TestPropertyDiffing:
@@ -96,17 +96,17 @@ class TestPropertyDiffing:
         old_node = Node("div", {"class": "test", "id": "main"})
         new_node = Node("div", {"class": "test", "id": "main"})
         diff = diff_vdom(old_node, new_node)
-        assert diff.updates == []
+        assert diff.operations == []
 
     def test_prop_changes(self):
         """Test when properties change."""
         old_node = Node("div", {"class": "old", "id": "main"})
         new_node = Node("div", {"class": "new", "data-value": "123"})
         diff = diff_vdom(old_node, new_node)
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "update_props"
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "update_props"
         # New algorithm just passes the new props directly
-        assert diff.updates[0]["data"] == {"class": "new", "data-value": "123"}
+        assert diff.operations[0]["data"] == {"class": "new", "data-value": "123"}
 
 
 class TestChildrenDiffing:
@@ -117,17 +117,17 @@ class TestChildrenDiffing:
         old_node = Node("div", children=["Hello", "World"])
         new_node = Node("div", children=["Hello", "World"])
         diff = diff_vdom(old_node, new_node)
-        assert diff.updates == []
+        assert diff.operations == []
 
     def test_append_children(self):
         """Test appending new children."""
         old_node = Node("div", children=["Hello"])
         new_node = Node("div", children=["Hello", "World"])
         diff = diff_vdom(old_node, new_node)
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "insert"
-        assert diff.updates[0]["path"] == "1"
-        assert diff.updates[0]["data"] == "World"
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "insert"
+        assert diff.operations[0]["path"] == "1"
+        assert diff.operations[0]["data"] == "World"
 
     def test_remove_children(self):
         """Test removing children."""
@@ -135,7 +135,7 @@ class TestChildrenDiffing:
         new_node = Node("div", children=["Hello"])
         diff = diff_vdom(old_node, new_node)
         # Should generate remove operation for "World"
-        remove_ops = [op for op in diff.updates if op["type"] == "remove"]
+        remove_ops = [op for op in diff.operations if op["type"] == "remove"]
         assert len(remove_ops) >= 1
 
     def test_replace_children(self):
@@ -143,7 +143,7 @@ class TestChildrenDiffing:
         old_node = Node("div", children=["Hello", "Old"])
         new_node = Node("div", children=["Hello", "New"])
         diff = diff_vdom(old_node, new_node)
-        replace_ops = [op for op in diff.updates if op["type"] == "replace"]
+        replace_ops = [op for op in diff.operations if op["type"] == "replace"]
         assert len(replace_ops) == 1
         assert replace_ops[0]["path"] == "1"
         assert replace_ops[0]["data"] == "New"
@@ -172,7 +172,7 @@ class TestKeyedDiffing:
         )
 
         diff = diff_vdom(old_node, new_node)
-        move_ops = [op for op in diff.updates if op["type"] == "move"]
+        move_ops = [op for op in diff.operations if op["type"] == "move"]
         # Should have move operations to reorder
         assert len(move_ops) > 0
 
@@ -196,11 +196,11 @@ class TestKeyedDiffing:
         diff = diff_vdom(old_node, new_node)
 
         # Should have insert for new keyed element
-        insert_ops = [op for op in diff.updates if op["type"] == "insert"]
+        insert_ops = [op for op in diff.operations if op["type"] == "insert"]
         assert len(insert_ops) >= 1
 
         # Should have remove for old keyed element
-        remove_ops = [op for op in diff.updates if op["type"] == "remove"]
+        remove_ops = [op for op in diff.operations if op["type"] == "remove"]
         assert len(remove_ops) >= 1
 
     def test_mixed_keyed_unkeyed(self):
@@ -221,10 +221,10 @@ class TestKeyedDiffing:
         diff = diff_vdom(old_node, new_node)
 
         # Should handle both keyed and unkeyed changes
-        assert len(diff.updates) > 0
+        assert len(diff.operations) > 0
 
         # Text replacement
-        replace_ops = [op for op in diff.updates if op["type"] == "replace"]
+        replace_ops = [op for op in diff.operations if op["type"] == "replace"]
         assert any(op["data"] == "newtext1" for op in replace_ops)
 
 
@@ -261,10 +261,10 @@ class TestComplexScenarios:
         diff = diff_vdom(old_node, new_node)
 
         # Should have operations for nested changes
-        assert len(diff.updates) > 0
+        assert len(diff.operations) > 0
 
         # Check that deep paths are used (string paths with dots)
-        deep_ops = [op for op in diff.updates if "." in op["path"]]
+        deep_ops = [op for op in diff.operations if "." in op["path"]]
         assert len(deep_ops) > 0
 
     def test_large_list_changes(self):
@@ -287,10 +287,10 @@ class TestComplexScenarios:
         diff = diff_vdom(old_node, new_node)
 
         # Should handle large lists efficiently
-        assert len(diff.updates) > 0
+        assert len(diff.operations) > 0
 
         # Check for expected operation types
-        op_types = {op["type"] for op in diff.updates}
+        op_types = {op["type"] for op in diff.operations}
         assert "remove" in op_types  # Remove items 0-49
         assert "insert" in op_types  # Insert items 100-149
 
@@ -314,9 +314,9 @@ class TestComplexScenarios:
         )
 
         diff = diff_vdom(old_node, new_node)
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "insert"
-        assert diff.updates[0]["path"] == ""
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "insert"
+        assert diff.operations[0]["path"] == ""
 
     def test_full_to_empty(self):
         """Test removing a full tree."""
@@ -338,9 +338,9 @@ class TestComplexScenarios:
         new_node = None
 
         diff = diff_vdom(old_node, new_node)
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "remove"
-        assert diff.updates[0]["path"] == ""
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "remove"
+        assert diff.operations[0]["path"] == ""
 
 
 class TestEdgeCases:
@@ -350,14 +350,14 @@ class TestEdgeCases:
         """Test nodes of completely different types."""
         # Number to node
         diff = diff_vdom(42, Node("div", {}, ["text"]))
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "replace"
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "replace"
 
         # Boolean to string
         diff = diff_vdom(True, "false")
-        assert len(diff.updates) == 1
-        assert diff.updates[0]["type"] == "replace"
-        assert diff.updates[0]["data"] == "false"
+        assert len(diff.operations) == 1
+        assert diff.operations[0]["type"] == "replace"
+        assert diff.operations[0]["data"] == "false"
 
     def test_deeply_nested_keys(self):
         """Test keys in deeply nested structures."""
@@ -392,7 +392,7 @@ class TestEdgeCases:
         )
 
         diff = diff_vdom(old_node, new_node)
-        assert len(diff.updates) > 0
+        assert len(diff.operations) > 0
 
     def test_callback_props(self):
         """Test that callback props are handled correctly."""
@@ -407,7 +407,7 @@ class TestEdgeCases:
         diff = diff_vdom(old_node, new_node)
         # Note: Since callbacks get processed and replaced with strings,
         # the actual behavior depends on how callbacks are handled
-        assert isinstance(diff.updates, list)
+        assert isinstance(diff.operations, list)
 
 
 class TestSerialization:
@@ -429,7 +429,12 @@ class TestSerialization:
         serialized, _ = node.render()
         assert_vdom_equal(
             serialized,
-            {"tag": "div", "props": {"class": "test"}, "children": ["content"], "key": "my-key"},
+            {
+                "tag": "div",
+                "props": {"class": "test"},
+                "children": ["content"],
+                "key": "my-key",
+            },
         )
 
         node_no_key = Node("div", {"class": "test"}, ["content"])

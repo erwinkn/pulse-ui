@@ -2,70 +2,35 @@
 TypeScript code generation for React components and routes.
 
 This module handles generating TypeScript files for:
-- Combined route entrypoints with inline component registries
-- Routes configuration updates
+- A single server config file
+- A routes configuration file for the client-side router
+- A page for each route that renders the Pulse component
 """
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List
+import logging
 
 from mako.template import Template
 
-from .app import Route
+from .app import App, Route
 from .vdom import VDOMNode
 
+# Mako template for config.ts
+CONFIG_TEMPLATE = Template(
+    """import type { PulseConfig } from "~/pulse-lib/pulse";
 
-# Mako template for route component with inline registry
-ROUTE_TEMPLATE = Template("""import { ReactiveUIContainer } from "~/pulse-lib/ReactiveUIContainer";
-import { ComponentRegistryProvider } from "~/pulse-lib/component-registry";
-import { WebSocketTransport } from "~/pulse-lib/transport";
-import type { ComponentType } from "react";
-
-% if components:
-// Component imports
-% for component in components:
-% if component.is_default_export:
-import ${component.export_name} from "${component.import_path}";
-% else:
-import { ${component.export_name} } from "${component.import_path}";
-% endif
-% endfor
-
-// Component registry
-const componentRegistry: Record<string, ComponentType<any>> = {
-% for component in components:
-  "${component.component_key}": ${component.export_name},
-% endfor
+export const config: PulseConfig = {
+  serverAddress: "${host}",
+  serverPort: ${port},
 };
-% else:
-// No components needed for this route
-const componentRegistry: Record<string, ComponentType<any>> = {};
-% endif
-
-const initialTree = ${ui_tree_json};
-
-const callbackInfo = ${callback_info_json};
-
-// Create WebSocket transport for server communication
-const transport = new WebSocketTransport("ws://${host}:${port}/ws");
-
-export default function RouteComponent() {
-  return (
-    <ComponentRegistryProvider registry={componentRegistry}>
-      <ReactiveUIContainer
-        initialTree={initialTree}
-        callbackInfo={callbackInfo}
-        transport={transport}
-      />
-    </ComponentRegistryProvider>
-  );
-}
-""")
-
+"""
+)
 
 # Mako template for routes configuration
-ROUTES_CONFIG_TEMPLATE = Template("""import { type RouteConfig, index, route } from "@react-router/dev/routes";
+ROUTES_CONFIG_TEMPLATE = Template(
+    """import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export const routes = [
 % if not routes:
@@ -81,177 +46,182 @@ export const routes = [
         safe_path = "index"
 %>
 % if route_obj.path == "/":
-  index("pulse/routes/${safe_path}.tsx"),
+  index("${pulse_app_name}/routes/${safe_path}.tsx"),
 % else:
-  route("${route_obj.path}", "pulse/routes/${safe_path}.tsx"),
+  route("${route_obj.path}", "${pulse_app_name}/routes/${safe_path}.tsx"),
 % endif
 % endfor
 % endif
 ] satisfies RouteConfig;
-""")
+"""
+)
+
+# Mako template for route pages
+ROUTE_PAGE_TEMPLATE = Template(
+    """import { Pulse, type PulseInit, type ComponentRegistry } from "~/pulse-lib/pulse";
+import { SocketIOTransport } from "~/pulse-lib/transport";
+import { config } from "../config";
+import type { ComponentType } from "react";
+
+% if components:
+// Component imports
+% for component in components:
+% if component.is_default_export:
+import ${component.export_name} from "${component.import_path}";
+% else:
+import { ${component.export_name} } from "${component.import_path}";
+% endif
+% endfor
+
+// Component registry
+const externalComponents: ComponentRegistry = {
+% for component in components:
+  "${component.component_key}": ${component.export_name},
+% endfor
+};
+% else:
+// No components needed for this route
+const externalComponents: ComponentRegistry = {};
+% endif
+
+// Create WebSocket transport for server communication
+const transport = new SocketIOTransport(`ws://${config.serverAddress}:${config.serverPort}`);
+
+const pulseInit: PulseInit = {
+    route: "${route.path}",
+    initialVDOM: ${initial_vdom_json},
+    externalComponents: externalComponents,
+    transport: transport,
+};
+
+export default function RouteComponent() {
+  return (
+    <Pulse {...pulseInit} config={config} />
+  );
+}
+"""
+)
 
 
-def generate_route_with_registry(
-    route: Route,
-    initial_ui_tree: VDOMNode,
-    callback_info: Optional[Dict] = None,
-    host: str = "localhost",
-    port: int = 8000,
-) -> str:
-    """
-    Generate TypeScript code for a route entrypoint with inline component registry.
+def generate_config_file(host: str, port: int) -> str:
+    """Generates the content of config.ts"""
+    return str(CONFIG_TEMPLATE.render_unicode(host=host, port=port))
 
-    Args:
-        route: Route object containing the route definition
-        initial_ui_tree: The initial UI tree VDOM structure
-        callback_info: Callback information for client-side handling
-        host: Backend server host for WebSocket connection
-        port: Backend server port for WebSocket connection
 
-    Returns:
-        TypeScript code as a string
-    """
+def generate_route_page(route: Route, initial_vdom: VDOMNode) -> str:
+    """Generates TypeScript code for a route page."""
     return str(
-        ROUTE_TEMPLATE.render_unicode(
+        ROUTE_PAGE_TEMPLATE.render_unicode(
+            route=route,
             components=route.components or [],
-            ui_tree_json=json.dumps(initial_ui_tree, indent=2),
-            callback_info_json=json.dumps(callback_info or {}, indent=2),
-            host=host,
-            port=port,
+            initial_vdom_json=json.dumps(initial_vdom, indent=2),
         )
     )
 
 
-def generate_routes_config(routes: List[Route]) -> str:
+def generate_routes_config(routes: List[Route], pulse_app_name: str) -> str:
     """
     Generate TypeScript code for the routes configuration.
 
     Args:
         routes: List of Route objects
+        pulse_app_name: The name of the pulse app directory.
 
     Returns:
         TypeScript code as a string
     """
-    return str(ROUTES_CONFIG_TEMPLATE.render_unicode(routes=routes))
+    return str(
+        ROUTES_CONFIG_TEMPLATE.render_unicode(
+            routes=routes, pulse_app_name=pulse_app_name
+        )
+    )
+
+
+def clean_directory(path: Path):
+    # Delete everything under output_path
+    if path.exists() and path.is_dir():
+        for item in path.iterdir():
+            if item.is_dir():
+                for subitem in item.rglob("*"):
+                    try:
+                        if subitem.is_file() or subitem.is_symlink():
+                            subitem.unlink()
+                        elif subitem.is_dir():
+                            subitem.rmdir()
+                    except Exception as e:
+                        print(f"   Warning: Could not remove {subitem}: {e}")
+                try:
+                    item.rmdir()
+                except Exception as e:
+                    print(f"   Warning: Could not remove directory {item}: {e}")
+            else:
+                try:
+                    item.unlink()
+                except Exception as e:
+                    print(f"   Warning: Could not remove file {item}: {e}")
 
 
 def generate_all_routes(
+    app: App,
     host: str = "localhost",
     port: int = 8000,
-    output_dir: str = "pulse-web/app/pulse",
-    clear_existing_callbacks: bool = False,
-    app_routes: Optional[List[Route]] = None,
 ):
     """
     Complete route generation workflow: get routes, clear callbacks if needed, and write files.
 
     Args:
-        host: Backend server host for WebSocket connection
-        port: Backend server port for WebSocket connection
-        output_dir: Base directory to write files to
-        clear_existing_callbacks: Whether to clear existing callbacks before generation
-        app_routes: Optional list of routes from a Pulse App instance. If provided, uses these instead of global decorated routes.
-
-    Returns:
-        int: Number of routes generated
+        app: The Pulse application instance.
+        host: Backend server host for WebSocket connection.
+        port: Backend server port for WebSocket connection.
     """
-    import logging
-    from .app import decorated_routes
-    from .vdom import clear_callbacks
 
     logger = logging.getLogger(__name__)
 
-    if clear_existing_callbacks:
-        clear_callbacks()
-
-    # Use provided app routes or fall back to global decorated routes
-    if app_routes is not None:
-        routes = app_routes
-    else:
-        routes = decorated_routes()
-
-    write_generated_files(routes, output_dir, host, port)
-
-    if routes:
-        logger.info(
-            f"Generated {len(routes)} routes with WebSocket endpoint ws://{host}:{port}/ws"
-        )
-    else:
-        logger.warning("No routes found to generate")
-
-    return len(routes)
-
-
-def write_generated_files(
-    routes: List[Route],
-    output_dir: str = "pulse-web/app/pulse",
-    host: str = "localhost",
-    port: int = 8000,
-):
-    """
-    Generate and write all TypeScript files for the given routes.
-
-    Args:
-        routes: List of Route objects to process
-        output_dir: Base directory to write files to
-        host: Backend server host for WebSocket connection
-        port: Backend server port for WebSocket connection
-    """
-    output_path = Path(output_dir)
+    routes = list(app.routes.values())
+    output_path = Path(app.pulse_app_dir)
     routes_path = output_path / "routes"
+    clean_directory(output_path)
+
+    if not routes:
+        logger.warning("No routes found to generate")
+        return
 
     # Ensure directories exist
     output_path.mkdir(parents=True, exist_ok=True)
     routes_path.mkdir(parents=True, exist_ok=True)
 
-    # Clean up old generated route files
-    # Only remove .tsx files that look like generated routes, preserve any manual files
-    existing_files = list(routes_path.glob("*.tsx"))
-    if existing_files:
-        print(f"🧹 Cleaning up {len(existing_files)} existing route files...")
-        for file_path in existing_files:
-            try:
-                file_path.unlink()
-                print(f"   Removed: {file_path.name}")
-            except Exception as e:
-                print(f"   Warning: Could not remove {file_path.name}: {e}")
-
-    # Also clean up old component registry files (legacy)
-    legacy_files = list(routes_path.glob("*_component-registry.ts"))
-    if legacy_files:
-        print(f"🧹 Cleaning up {len(legacy_files)} legacy component registry files...")
-        for file_path in legacy_files:
-            try:
-                file_path.unlink()
-                print(f"   Removed: {file_path.name}")
-            except Exception as e:
-                print(f"   Warning: Could not remove {file_path.name}: {e}")
+    # Generate config.ts
+    config_code = generate_config_file(host=host, port=port)
+    config_file = output_path / "config.ts"
+    config_file.write_text(config_code)
+    logger.info(f"Generated server config at {config_file}")
 
     # Generate files for each route
-    for route_obj in routes:
+    for route in routes:
         # Convert path to safe filename
-        safe_path = route_obj.path.replace("/", "_").replace("-", "_")
+        safe_path = route.path.replace("/", "_").replace("-", "_")
         if safe_path.startswith("_"):
             safe_path = safe_path[1:]
         if not safe_path:
             safe_path = "index"
 
-        # Generate initial UI tree and callback info by calling the route function
-        initial_node = route_obj.render_fn()
-        initial_ui_tree, callback_info = initial_node.render()
+        # Generate initial UI tree by calling the route function
+        initial_node = route.render_fn()
+        vdom, _ = initial_node.render()
 
         # Generate route entrypoint with inline component registry
-        route_code = generate_route_with_registry(
-            route_obj, initial_ui_tree, callback_info, host, port
+        route_code = generate_route_page(
+            route,
+            initial_vdom=vdom,
         )
 
         route_file = routes_path / f"{safe_path}.tsx"
         route_file.write_text(route_code)
 
     # Generate routes configuration
-    routes_config_code = generate_routes_config(routes)
+    routes_config_code = generate_routes_config(routes, app.pulse_app_name)
     routes_config_file = output_path / "routes.ts"
     routes_config_file.write_text(routes_config_code)
 
-    print(f"Generated {len(routes)} route files in {routes_path}")
-    print(f"Updated routes configuration at {routes_config_file}")
+    logger.info(f"Generated {len(routes)} routes in {routes_path}")
+    logger.info(f"Updated routes configuration at {routes_config_file}")

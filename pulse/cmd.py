@@ -12,7 +12,6 @@ from pathlib import Path
 
 import typer
 
-from pulse.server import start_server
 from pulse.codegen import generate_all_routes
 
 app = typer.Typer(
@@ -22,7 +21,7 @@ app = typer.Typer(
 )
 
 
-def load_routes_from_file(file_path: str | Path):
+def load_app_from_file(file_path: str | Path):
     """Load routes from a Python file (supports both App instances and global @ps.route decorators)."""
     file_path = Path(file_path)
 
@@ -52,27 +51,23 @@ def load_routes_from_file(file_path: str | Path):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
-        # Try to get routes from an App instance first
         if hasattr(module, "app"):
             from pulse.app import App
 
             if isinstance(module.app, App):
-                routes = module.app.list_routes()
-                if routes:
-                    return routes
+                app = module.app
+                if len(app.routes) == 0:
+                    typer.echo(f"⚠️  No routes found in {file_path}")
+                    typer.echo("Make sure to define routes using either:")
+                    typer.echo(
+                        "  1. app = pulse.App() with @app.route() decorators, or"
+                    )
+                    typer.echo("  2. @pulse.route() decorators + the right imports")
+                return app
 
-        # Fall back to global routes
-        from pulse.app import decorated_routes
-
-        routes = decorated_routes()
-
-        if not routes:
-            typer.echo(f"⚠️  No routes found in {file_path}")
-            typer.echo("Make sure your file defines routes using:")
-            typer.echo("  1. app = pulse.App() with @app.route() decorators, or")
-            typer.echo("  2. @pulse.route() decorators")
-
-        return routes
+        typer.echo(f"⚠️  No app found in {file_path}")
+        typer.echo("Make sure your file defines an app using app = pulse.App()")
+        raise typer.Exit(1)
 
     except Exception as e:
         typer.echo(f"❌ Error loading {file_path}: {e}")
@@ -126,18 +121,12 @@ def run(
             typer.echo("\n👋 Web server stopped")
     else:
         # Treat it as a Python file to run with the server
-        typer.echo(f"📁 Loading routes from: {target}")
-        routes = load_routes_from_file(target)
-        typer.echo(f"📋 Found {len(routes)} routes")
+        typer.echo(f"📁 Loading app from: {target}")
+        app = load_app_from_file(target)
+        typer.echo(f"📋 Found {len(app.routes)} routes")
 
         typer.echo(f"🚀 Starting Pulse UI server on {address}:{port}")
-        start_server(
-            host=address,
-            port=port,
-            auto_generate=True,
-            app_routes=routes,
-            all_routes=routes,
-        )
+        app.run(host=address, port=port)
 
 
 @app.command("generate")
@@ -148,13 +137,13 @@ def generate(
     typer.echo("🔄 Generating TypeScript routes...")
 
     typer.echo(f"📁 Loading routes from: {app_file}")
-    routes = load_routes_from_file(app_file)
-    typer.echo(f"📋 Found {len(routes)} routes")
+    app = load_app_from_file(app_file)
+    typer.echo(f"📋 Found {len(app.routes)} routes")
 
-    num_routes = generate_all_routes(app_routes=routes)
+    generate_all_routes(app)
 
-    if num_routes > 0:
-        typer.echo(f"✅ Generated {num_routes} routes successfully!")
+    if len(app.routes) > 0:
+        typer.echo(f"✅ Generated {len(app.routes)} routes successfully!")
     else:
         typer.echo("✅ Cleaned up old route files")
         typer.echo("⚠️  No routes found to generate")

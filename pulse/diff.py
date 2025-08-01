@@ -63,7 +63,7 @@ class MoveOperation(TypedDict):
     data: MoveOperationData
 
 
-VDOMUpdate = Union[
+VDOMOperation = Union[
     InsertOperation,
     RemoveOperation,
     ReplaceOperation,
@@ -74,7 +74,7 @@ VDOMUpdate = Union[
 
 # Payload sent to the client on updates
 class Diff(NamedTuple):
-    updates: list[VDOMUpdate]
+    operations: list[VDOMOperation]
     callbacks: dict[str, Callable]
 
 
@@ -112,7 +112,7 @@ def diff_vdom(
     Returns:
         Diff with update operations and callback mapping
     """
-    operations: list[VDOMUpdate] = []
+    operations: list[VDOMOperation] = []
     callbacks: dict[str, Callable] = {}
 
     # Handle null cases
@@ -174,7 +174,7 @@ def diff_vdom(
 
 def _diff_node_children(
     old_children: Sequence[NodeChild], new_children: Sequence[NodeChild], path: Path
-) -> tuple[list[VDOMUpdate], dict[str, Callable]]:
+) -> tuple[list[VDOMOperation], dict[str, Callable]]:
     """
     Diff Node children directly, avoiding double traversal.
 
@@ -217,7 +217,7 @@ def _diff_node_children(
 
 def _diff_keyed_node_children(
     old_children: Sequence[NodeChild], new_children: Sequence[NodeChild], path: Path
-) -> tuple[list[VDOMUpdate], dict[str, Callable]]:
+) -> tuple[list[VDOMOperation], dict[str, Callable]]:
     """Handle keyed Node children reconciliation."""
     operations = []
     callbacks = {}
@@ -268,7 +268,7 @@ def _diff_keyed_node_children(
 
                 # Diff the moved/stayed element recursively
                 child_diff = diff_vdom(old_child, new_child, child_path)
-                operations.extend(child_diff.updates)
+                operations.extend(child_diff.operations)
                 callbacks.update(child_diff.callbacks)
             else:
                 # New keyed element - insert and render
@@ -299,7 +299,7 @@ def _diff_keyed_node_children(
                 used_old_positions.add(new_index)
 
                 child_diff = diff_vdom(old_child, new_child, child_path)
-                operations.extend(child_diff.updates)
+                operations.extend(child_diff.operations)
                 callbacks.update(child_diff.callbacks)
             else:
                 # No matching element - insert
@@ -345,7 +345,7 @@ def _diff_keyed_node_children(
 
 def _diff_positional_node_children(
     old_children: Sequence[NodeChild], new_children: Sequence[NodeChild], path: Path
-) -> tuple[list[VDOMUpdate], dict[str, Callable]]:
+) -> tuple[list[VDOMOperation], dict[str, Callable]]:
     """Handle unkeyed Node children using positional diffing."""
     operations = []
     callbacks = {}
@@ -359,7 +359,7 @@ def _diff_positional_node_children(
             old_child = old_children[i]
             new_child = new_children[i]
             child_diff = diff_vdom(old_child, new_child, child_path)
-            operations.extend(child_diff.updates)
+            operations.extend(child_diff.operations)
             callbacks.update(child_diff.callbacks)
 
         elif i < len(new_children):
@@ -388,7 +388,7 @@ def _diff_positional_node_children(
     return operations, callbacks
 
 
-def optimize_operations(operations: List[VDOMUpdate]) -> List[VDOMUpdate]:
+def optimize_operations(operations: List[VDOMOperation]) -> List[VDOMOperation]:
     """
     Optimize a list of operations by removing redundant operations and merging where possible.
 

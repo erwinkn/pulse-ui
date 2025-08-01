@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { UIRenderer } from "../UIRenderer";
+import { UIRenderer } from "../renderer";
 import {
   createElementNode,
   createFragment,
@@ -10,8 +10,8 @@ import {
   isTextNode,
   isMountPointNode,
   getMountPointComponentKey,
-} from "../tree";
-import type { UINode } from "../tree";
+} from "../vdom";
+import type { VDOMNode } from "../vdom";
 
 // Lightweight tests that verify component logic without DOM rendering
 describe("UIRenderer Component Logic", () => {
@@ -262,7 +262,7 @@ describe("UIRenderer Component Logic", () => {
   });
 
   it("should handle various node types correctly", () => {
-    const nodes: UINode[] = [
+    const nodes: VDOMNode[] = [
       "Simple text",
       createElementNode("div", {}, []),
       createFragment(["Fragment content"]),

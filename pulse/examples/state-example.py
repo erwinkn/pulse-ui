@@ -11,6 +11,7 @@ This example shows how to:
 
 import json
 import pulse as ps
+from pulse.app import VDOMUpdate
 
 
 # Define reactive state classes using dataclass-style syntax
@@ -30,6 +31,8 @@ app = ps.App()
 
 
 RENDER_CALLBACKS = True
+
+
 @app.route("/")
 def home():
     # Initialize state - only called once per route
@@ -44,7 +47,9 @@ def home():
         ps.p(f"Current count: {state.count}"),
         ps.button(
             "Increment",
-            onclick=lambda: setattr(state, "count", state.count + 1) if RENDER_CALLBACKS else None,
+            onclick=lambda: setattr(state, "count", state.count + 1)
+            if RENDER_CALLBACKS
+            else None,
             disabled=not state.enabled,
         ),
         ps.button("Reset", onclick=lambda: setattr(state, "count", 0)),
@@ -52,7 +57,9 @@ def home():
             ps.input(
                 type="checkbox",
                 checked=state.enabled,
-                onchange=lambda: setattr(state, "enabled", not state.enabled) if RENDER_CALLBACKS else None,
+                onchange=lambda: setattr(state, "enabled", not state.enabled)
+                if RENDER_CALLBACKS
+                else None,
             ),
             "Enable counter",
         ),
@@ -146,59 +153,65 @@ def demo_reactive_system():
 
     # Track updates received
     update_batches = []
-    
-    def index_update(updates):
+
+    def index_update(update: VDOMUpdate):
         """Callback to receive VDOM updates."""
-        print(f"Received {len(updates)} VDOM updates:")
-        for update in updates:
-            print(f"  - {update['type']}: {json.dumps(update, indent=2)}")
-        update_batches.append(updates)
+        print(f"Received {len(update.operations)} VDOM operations:")
+        for op in update.operations:
+            print(f"  - {op['type']}: {json.dumps(op, indent=2)}")
+        print(
+            f"  - Callbacks: add({', '.join(update.add_callbacks)}); remove({', '.join(update.remove_callbacks)})"
+        )
+        update_batches.append(update)
 
     # Render the home route
+    session = app.create_session("test")
     print("\n1. Rendering home route...")
-    active_route = app.get_route("/")
-    active_route.mount(index_update)
-    print(f"Initial VDOM: {active_route.vdom.tag if active_route.vdom else 'None'}")
+    disconnect_index_update = session.connect(index_update)
+    vdom = session.render("/")
+    assert session.current_route == "/"
+    print(f"Initial VDOM: {vdom.tag if vdom else 'None'}")
 
     # Access the state and modify it
     print("\n2. Accessing and modifying state...")
-    if active_route.state:
-        print("Route state:", active_route.state)
-        print(f"Initial count: {active_route.state.count}")
-        print(f"Initial name: {active_route.state.name}")
+    if state := session.ctx.init.state:
+        print("Route state:", state)
+        print(f"Initial count: {state.count}")
+        print(f"Initial name: {state.name}")
 
         # Modify state - this should trigger a re-render
         global RENDER_CALLBACKS
         RENDER_CALLBACKS = False
-        active_route.state.count = 5
-        print(f"Updated count to: {active_route.state.count}")
+        state.count = 5
+        print(f"Updated count to: {state.count}")
 
         # Modify name - this should also trigger a re-render
-        active_route.state.name = "Updated Counter"
-        print(f"Updated name to: {active_route.state.name}")
+        state.name = "Updated Counter"
+        print(f"Updated name to: {state.name}")
 
     print(f"\n3. Total updates received: {len(update_batches)}")
-    active_route.unmount()
+    disconnect_index_update()
 
     # Test todo route
     print("\n4. Testing todo route...")
 
-    def todo_update(updates):
-        return print(f"Todo update batch: {len(updates)} updates")
+    def todo_update(update: VDOMUpdate):
+        return print(f"Todo update batch: {len(update.operations)} ops")
 
-    todo_route = app.get_route("/todos")
-    todo_route.mount(todo_update)
+    disconnect_todo_update = session.connect(todo_update)
+    session.render("/todos")
 
-    if todo_route.state:
+    assert session.current_route == "/todos"
+    if state := session.ctx.init.state:
         print("Adding some todo items...")
-        add_todo(todo_route.state, "Learn Pulse")
-        add_todo(todo_route.state, "Build awesome apps")
-        print(f"Todo items: {len(todo_route.state.items)}")
+        add_todo(state, "Learn Pulse")
+        add_todo(state, "Build awesome apps")
+        print(f"Todo items: {len(state.items)}")
 
         # Toggle filter
-        todo_route.state.filter_completed = True
-        print(f"Filter completed: {todo_route.state.filter_completed}")
-    todo_route.unmount()
+        state.filter_completed = True
+        print(f"Filter completed: {state.filter_completed}")
+    disconnect_todo_update()
 
     print("\n=== Demo Complete ===")
 

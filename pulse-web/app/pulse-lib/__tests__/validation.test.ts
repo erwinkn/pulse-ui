@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createElementNode, FRAGMENT_TAG, MOUNT_POINT_PREFIX } from "../tree";
+import { createElementNode, FRAGMENT_TAG, MOUNT_POINT_PREFIX } from "../vdom";
 
 describe("UI Tree Validation", () => {
   it("should throw error when user tries to use reserved fragment tag", () => {

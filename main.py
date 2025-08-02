@@ -37,16 +37,15 @@ def about():
 class CounterState(ps.State):
     count: int = 0
 
+    def increment(self):
+        print("Counter incremented!")
+        self.count += 1
+
 
 @ps.route("/counter")
 def counter():
     """Interactive counter page."""
-    # Note: This is a simple example. For state management,
-    # you'd typically use a more sophisticated approach.
-
-    def increment():
-        print("Counter incremented!")
-        state.count += 1
+    # Both state methods and arbitrary functions work as event handlers
 
     def decrement():
         print("Counter decremented!")
@@ -62,7 +61,7 @@ def counter():
                 f" Counter: {state.count} ",
                 style={"margin": "0 20px", "fontSize": "18px"},
             ),
-            ps.button("+", onClick=increment),
+            ps.button("+", onClick=state.increment),
         ),
         ps.p(
             "Note: This is a simple demo. State management would require additional implementation."

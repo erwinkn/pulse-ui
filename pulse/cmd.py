@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 
 from pulse.app import App
+from pulse.routing import clear_routes
 from pulse.codegen import generate_all_routes
 
 cli = typer.Typer(
@@ -35,8 +36,6 @@ def load_app_from_file(file_path: str | Path) -> App:
         raise typer.Exit(1)
 
     # Clear any existing global routes before loading
-    from pulse.app import clear_routes
-
     clear_routes()
 
     # Add the file's directory to Python path so imports work
@@ -78,7 +77,7 @@ def load_app_from_file(file_path: str | Path) -> App:
 
 
 @cli.command("run")
-def serve(
+def run(
     app_file: str = typer.Argument(..., help="Python file with a pulse.App instance"),
     address: str = typer.Option(
         "localhost",

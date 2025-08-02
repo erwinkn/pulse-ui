@@ -9,7 +9,7 @@ from collections import defaultdict
 from typing import Any, Iterable, Callable, TypeVar
 from abc import ABC, ABCMeta
 
-from pulse.reactive import RENDER_CONTEXT, UPDATE_SCHEDULER
+from pulse.reactive import REACTIVE_CONTEXT, UPDATE_BATCH
 
 
 # Global context for tracking state access during rendering
@@ -33,7 +33,7 @@ class StateProperty:
             return self
 
         # Track that this property was accessed during rendering
-        ctx = RENDER_CONTEXT.get()
+        ctx = REACTIVE_CONTEXT.get()
         if ctx is not None:
             ctx.track_state_access(obj, self.name)
 
@@ -115,7 +115,7 @@ class State(ABC, metaclass=StateMeta):
         """Notify all listeners that a property has changed."""
 
         # Notify property-specific listeners
-        scheduler = UPDATE_SCHEDULER.get()
+        scheduler = UPDATE_BATCH.get()
         if field in self._listeners:
             for listener in self._listeners[field].copy():
                 if scheduler:

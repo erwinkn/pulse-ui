@@ -1,6 +1,7 @@
-from .app import App, route, decorated_routes, Route, Session
-from .reactive import init
+from .app import App, Session
 from .state import State
+from .routing import Route, route, decorated_routes
+from .hooks import init
 
 # Import HTML tags and other UI components
 from .vdom import (
@@ -123,4 +124,10 @@ from .vdom import (
     wbr,
 )
 
-from .components import Link, ComponentRegistry, COMPONENT_REGISTRY, ReactComponent
+from .components import (
+    ComponentRegistry,
+    COMPONENT_REGISTRY,
+    ReactComponent,
+    Link,
+    Outlet,
+)

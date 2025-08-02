@@ -15,80 +15,21 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from pulse.codegen import CodegenConfig
+from pulse.codegen import CodegenConfig, generate_all_routes
 from pulse.diff import diff_vdom
 from pulse.messages import (
     ClientMessage,
     ServerInitMessage,
     ServerUpdateMessage,
 )
-from pulse.reactive import ReactiveContext, UpdateScheduler
+from pulse.reactive import ReactiveContext, UpdateBatch
 from pulse.components.registry import ReactComponent, registered_react_components
 from pulse.vdom import Node, VDOMNode
+from pulse.routing import Route
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-class Route:
-    """
-    Represents a route definition with its component dependencies.
-    """
-
-    def __init__(
-        self,
-        path: str,
-        render_fn: Callable[[], Node],
-        components: list[ReactComponent],
-    ):
-        self.path = path
-        self.render_fn = render_fn
-        self.components = components
-
-
-def route(
-    path: str, components: list[ReactComponent] | None = None
-) -> Callable[[Callable[[], Node]], Route]:
-    """
-    Decorator to define a route with its component dependencies.
-
-    Args:
-        path: URL path for the route
-        components: List of component keys used by this route
-
-    Returns:
-        Decorator function
-    """
-    if components is None:
-        components = registered_react_components()
-
-    def decorator(render_func: Callable[[], Node]) -> Route:
-        route = Route(path, render_func, components=components)
-        add_route(route)
-        return route
-
-    return decorator
-
-
-# Global registry for routes
-ROUTES: list[Route] = []
-
-
-def add_route(route: Route):
-    """Register a route in the global registry"""
-    ROUTES.append(route)
-
-
-def decorated_routes() -> list[Route]:
-    """Get all registered routes"""
-    return ROUTES.copy()
-
-
-def clear_routes():
-    """Clear all registered routes"""
-    global ROUTES
-    ROUTES = []
 
 
 class AppStatus(IntEnum):
@@ -161,15 +102,25 @@ class App:
         def healthcheck():
             return {"health": "ok", "message": "Pulse server is running"}
 
+    def generate_routes(
+        self,
+        host: str = "127.0.0.1",
+        port=8000,
+    ):
+        generate_all_routes(self, host, port)
+
     def run(
         self,
         host: str = "127.0.0.1",
         port=8000,
         find_port=True,
         log_level: str = "info",
+        codegen=True,
     ):
         if self.status == AppStatus.running:
             raise RuntimeError("Server already running")
+        if codegen:
+            self.generate_routes(host=host, port=port)
         if self.status == AppStatus.created:
             self.setup()
             self._setup_socketio_endpoints()
@@ -283,7 +234,7 @@ class Session:
 
         self.current_route: str | None = None
         self.ctx = ReactiveContext()
-        self.scheduler = UpdateScheduler()
+        self.scheduler = UpdateBatch()
         self.callback_registry: dict[str, Callable] = {}
         self.vdom: VDOMNode | None = None
 
@@ -309,7 +260,8 @@ class Session:
             state.remove_listener(fields, self.rerender)
 
     def execute_callback(self, key: str, args: list | tuple):
-        self.callback_registry[key](*args)
+        with UpdateBatch():
+            self.callback_registry[key](*args)
 
     def rerender(self):
         if self.current_route is None:

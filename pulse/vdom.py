@@ -22,9 +22,6 @@ __all__ = [
     "Node",
     "define_tag",
     "define_self_closing_tag",
-    # UI Tree integration
-    "ReactComponent",
-    "ReactComponent",
     # Standard tags
     "a",
     "abbr",
@@ -305,7 +302,6 @@ def extract_callbacks_from_props(
         else:
             clean_props[k] = v
     return clean_props, callbacks
-
 
 
 # ============================================================================

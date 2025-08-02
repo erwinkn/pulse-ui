@@ -1,6 +1,6 @@
 from contextvars import ContextVar
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Optional, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 # Avoid circular import -> we can only reference State in a quoted type hint
 if TYPE_CHECKING:
@@ -18,9 +18,10 @@ class InitState:
         return InitState(value=None, initialized=False, last_call=-1)
 
 
-class UpdateScheduler:
-    def __init__(self) -> None:
+class UpdateBatch:
+    def __init__(self, flush_on_release=True) -> None:
         self.updates: set[Callable] = set()
+        self.flush_on_release = flush_on_release
 
     def schedule(self, update: Callable):
         self.updates.add(update)
@@ -34,14 +35,16 @@ class UpdateScheduler:
         self.updates.clear()
 
     def __enter__(self):
-        self._token = UPDATE_SCHEDULER.set(self)
+        self._token = UPDATE_BATCH.set(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        UPDATE_SCHEDULER.reset(self._token)
+        UPDATE_BATCH.reset(self._token)
+        if self.flush_on_release:
+            self.flush()
 
 
-UPDATE_SCHEDULER: ContextVar[UpdateScheduler | None] = ContextVar(
+UPDATE_BATCH: ContextVar[UpdateBatch | None] = ContextVar(
     "pulse-update-scheduler", default=None
 )
 
@@ -96,45 +99,15 @@ class ReactiveContext:
 
     def __enter__(self):
         """Enter the context manager - set this as the global render context."""
-        self._reset_token = RENDER_CONTEXT.set(self)
+        self._reset_token = REACTIVE_CONTEXT.set(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Exit the context manager - restore the previous render context."""
-        RENDER_CONTEXT.reset(self._reset_token)
+        REACTIVE_CONTEXT.reset(self._reset_token)
         return False
 
 
-RENDER_CONTEXT: ContextVar[Optional[ReactiveContext]] = ContextVar(
+REACTIVE_CONTEXT: ContextVar[Optional[ReactiveContext]] = ContextVar(
     "pulse-render-context", default=None
 )
-
-
-P = ParamSpec("P")
-T = TypeVar("T")
-
-
-def init(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    """
-    Initialize state or other objects that should persist across re-renders.
-
-    The init function is only called once per route. Subsequent calls return
-    the same cached result.
-
-    Args:
-        init_func: Function that returns the object to initialize
-
-    Returns:
-        The initialized object (same instance across re-renders)
-    """
-    ctx = RENDER_CONTEXT.get()
-    if ctx is None:
-        raise RuntimeError("pulse.init() can only be called during rendering")
-
-    if not ctx.init.initialized:
-        ctx.init.state = init_func(*args, **kwargs)
-        ctx.init.initialized = True
-    if ctx.init.last_call == ctx.counter:
-        raise RuntimeError("pulse.init() can only be called once per component")
-    ctx.init.last_call = ctx.counter
-    return ctx.init.state

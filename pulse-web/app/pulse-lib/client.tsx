@@ -3,6 +3,7 @@ import type {
   ServerMessage,
   ClientCallbackMessage,
   ClientNavigateMessage,
+  ConnectionStatusListener,
 } from "./transport";
 import type { VDOM, VDOMNode } from "./vdom";
 import { applyVDOMUpdates } from "./renderer";
@@ -15,15 +16,23 @@ export class PulseClient {
   private transport: Transport;
 
   constructor(transport: Transport) {
-    console.warn("Creating new PulseClient");
     this.transport = transport;
     this.vdom = null;
   }
 
-  public async connect() {
-    if (!this.transport.isConnected()) {
-      await this.transport.connect(this.handleServerMessage);
-    }
+  public connect() {
+    return new Promise<void>(async (resolve, reject) => {
+      if (!this.transport.isConnected()) {
+        try {
+          await this.transport.connect(this.handleServerMessage);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      } else {
+        resolve();
+      }
+    });
   }
 
   public async navigate(route: string) {
@@ -34,6 +43,14 @@ export class PulseClient {
 
   public disconnect() {
     this.transport.disconnect();
+  }
+
+  public isConnected(): boolean {
+    return this.transport.isConnected();
+  }
+
+  public onConnectionChange(listener: ConnectionStatusListener): () => void {
+    return this.transport.onConnectionChange(listener);
   }
 
   private handleServerMessage = (message: ServerMessage) => {

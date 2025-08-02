@@ -1,5 +1,4 @@
 import pulse as ps
-from pulse.components.link import Link
 
 
 @ps.route("/")

@@ -64,20 +64,52 @@ export interface PulseProviderProps {
 }
 
 export function PulseProvider({ children, config }: PulseProviderProps) {
+  const [connectionError, setConnectionError] = useState(false);
+
   const client = useMemo(() => {
     const transport = new SocketIOTransport(
       `${config.serverAddress}:${config.serverPort}`
     );
+    console.log("Recreating client")
     return new PulseClient(transport);
   }, [config.serverAddress, config.serverPort]);
 
   useEffect(() => {
-    void client.connect();
-    return () => client.disconnect();
+    const inBrowser = typeof window !== "undefined";
+    if (inBrowser) {
+      // Listen for connection state changes
+      client.onConnectionChange((connected) => {
+        setConnectionError(!connected);
+      });
+      client.connect().catch(() => {
+        setConnectionError(true);
+      });
+
+      return () => {
+        // Also clears the onConnectionChange subscription
+        client.disconnect();
+      };
+    }
   }, [client]);
 
   return (
     <PulseClientContext.Provider value={client}>
+      {connectionError && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            right: "20px",
+            backgroundColor: "red",
+            color: "white",
+            padding: "10px",
+            borderRadius: "5px",
+            zIndex: 1000,
+          }}
+        >
+          Failed to connect to the server.
+        </div>
+      )}
       {children}
     </PulseClientContext.Provider>
   );

@@ -33,6 +33,7 @@
     "tailwindcss": "^4.1.11",
     "typescript": "^5.8.3",
     "vite": "^6.3.3",
+    "vite-plugin-devtools-json": "^0.4.1",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^2.1.8"
   }

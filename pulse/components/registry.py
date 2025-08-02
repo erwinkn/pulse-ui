@@ -64,6 +64,9 @@ class ComponentRegistry:
             raise ValueError(f"Duplicate component key {component.key}")
         self._components[component.key] = component
 
+    def clear(self):
+        self._components.clear()
+
     def remove(self, key: str):
         """Removes a component from the registry by its key."""
         if key in self._components:

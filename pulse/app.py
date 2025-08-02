@@ -5,6 +5,7 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import asyncio
 import logging
 import socket
 from enum import IntEnum
@@ -154,18 +155,23 @@ class App:
             self.close_session(sid)
 
         @self.sio.event
-        async def message(sid: str, data: ClientMessage):
+        def message(sid: str, data: ClientMessage):
             session = self.get_session(sid)
             logger.info(f"-> Received message: {data}")
 
             if data["type"] == "navigate":
-                await session.hydrate(data["route"])
+                session.hydrate(data["route"])
             elif data["type"] == "callback":
                 session.execute_callback(data["callback"], data["args"])
             else:
                 logger.warning(f"Unknown message type received: {data}")
 
-    def route(self, path: str, components: Optional[List] = None):
+    def route(
+        self,
+        path: str,
+        components: Optional[List] = None,
+        parent: Optional[Route] = None,
+    ):
         """
         Decorator to define a route on this app instance.
 
@@ -181,7 +187,7 @@ class App:
             components = registered_react_components()
 
         def decorator(render_func):
-            route_obj = Route(path, render_func, components=components)
+            route_obj = Route(path, render_func, components=components, parent=parent)
             self.add_route(route_obj)
             return route_obj
 
@@ -248,9 +254,13 @@ class Session:
         # Return a disconnect function
         return lambda: (self.message_listeners.remove(message_listener),)
 
-    async def notify(self, message: ServerUpdateMessage | ServerInitMessage):
-        for listener in self.message_listeners:
-            await listener(message)
+    async def _notify(self, message: ServerUpdateMessage | ServerInitMessage):
+        await asyncio.gather(
+            *(listener(message) for listener in self.message_listeners)
+        )
+
+    def notify(self, message: ServerUpdateMessage | ServerInitMessage):
+        asyncio.create_task(self._notify(message))
 
     def close(self):
         self.message_listeners.clear()
@@ -263,12 +273,7 @@ class Session:
         with UpdateBatch():
             self.callback_registry[key](*args)
 
-    def rerender(self):
-        if self.current_route is None:
-            raise RuntimeError("Failed to rerender: no route set for the session!")
-        self.app.sio.start_background_task(self.update_render)
-
-    async def hydrate(self, path: str):
+    def hydrate(self, path: str):
         route = self.app.get_route(path)
 
         # Clear old state listeners from previous route
@@ -293,11 +298,11 @@ class Session:
                 state.add_listener(fields, self.rerender)
 
             # Send the full VDOM to the client for initial hydration
-            await self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
+            self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
 
-    async def update_render(self):
+    def rerender(self):
         if self.current_route is None:
-            return  # Should not happen if called from rerender
+            raise RuntimeError("Failed to rerender: no route set for the session!")
 
         route = self.app.get_route(self.current_route)
 
@@ -319,9 +324,7 @@ class Session:
 
             # Send diff to client if there are any changes
             if operations:
-                await self.notify(
-                    ServerUpdateMessage(type="vdom_update", ops=operations)
-                )
+                self.notify(ServerUpdateMessage(type="vdom_update", ops=operations))
 
 
 def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:

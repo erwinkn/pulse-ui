@@ -86,6 +86,30 @@ class Route:
 
         self.segments = parse_route_path(path)
 
+    def get_full_path(self) -> str:
+        if self.parent:
+            parent_path = self.parent.get_full_path()
+            if parent_path.endswith("/"):
+                return f"{parent_path}{self.path}"
+            return f"{parent_path}/{self.path}"
+        return self.path
+
+    def get_safe_path(self) -> str:
+        full_path = self.get_full_path()
+        # path can contain characters that are not valid in filenames.
+        safe_path = (
+            full_path.replace("/", "_")
+            .replace("-", "_")
+            .replace(":", "param_")
+            .replace("?", "opt_")
+            .replace("*", "splat")
+        )
+        if safe_path.startswith("_"):
+            safe_path = safe_path[1:]
+        if not safe_path:
+            safe_path = "index"
+        return safe_path
+
     def __call__(self):
         return self.render_fn()
 
@@ -209,18 +233,23 @@ class RouteInfo:
     Represents all the parts of a URL.
     """
 
-    scheme: str  # URL scheme specifier (e.g., 'http', 'https')
-    netloc: str  # Network location part (e.g., 'example.com:80')
-    path: str  # Hierarchical path (e.g., '/foo/bar')
-    params: str  # Parameters for last path element
-    query: str  # Query component (e.g., 'a=1&b=2')
-    fragment: str  # Fragment identifier (e.g., 'section1')
-    query_params: dict  # Parsed query parameters as a dict
-    url: str  # The original URL string
-    hostname: Optional[str]  # The hostname from the netloc
-    port: Optional[int]  # The port number from the netloc
+    fragment: str
+    """Fragment identifier (e.g., 'section1')"""
+    query_params: dict
+    """Parsed query parameters as a dict"""
+    url: str
+    """The original URL string"""
+    hostname: Optional[str]
+    """The hostname from the netloc"""
+    port: Optional[int]
+    """The port number from the netloc"""
 
-    def __init__(self, url: str):
+    path_parameters: dict[str, str]
+    "Dynamic and optional path parameters"
+    catch_all: list[str]
+    "Catch-all path parameters"
+
+    def __init__(self, url: str, path_params: PathParameters):
         self.url = url
         parsed_url = urlparse(url)
         self.scheme = parsed_url.scheme
@@ -232,3 +261,5 @@ class RouteInfo:
         self.query_params = parse_qs(self.query)
         self.hostname = parsed_url.hostname
         self.port = parsed_url.port
+        self.path_parameters = path_params.params
+        self.catch_all = path_params.splat

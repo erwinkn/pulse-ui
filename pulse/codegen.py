@@ -9,17 +9,27 @@ This module handles generating TypeScript files for:
 
 import json
 from pathlib import Path
-from typing import List, TYPE_CHECKING
 import logging
+from typing import List, TYPE_CHECKING, Dict
 
 from mako.template import Template
 
 from pulse.reactive import ReactiveContext
 
+if TYPE_CHECKING:
+    from .app import App
+    from .routing import Route
+
 from .vdom import VDOMNode
 
-if TYPE_CHECKING:
-    from .app import App, Route
+
+class RouteTreeNode:
+    def __init__(self, route: "Route"):
+        self.route = route
+        self.children: list["RouteTreeNode"] = []
+
+    def add_child(self, node: "RouteTreeNode"):
+        self.children.append(node)
 
 
 class CodegenConfig:
@@ -58,7 +68,24 @@ export default function PulseLayout() {
 
 # Mako template for routes configuration
 ROUTES_CONFIG_TEMPLATE = Template(
-    """import {
+    """
+<%def name="render_routes(routes)">
+% for node in routes:
+  % if node.children:
+    route("${node.route.path.lstrip('/')}", "${pulse_app_name}/routes/${node.route.get_safe_path()}.tsx", [
+      ${render_routes(node.children)}
+    ]),
+  % else:
+    % if node.route.is_index:
+      index("${pulse_app_name}/routes/${node.route.get_safe_path()}.tsx"),
+    % else:
+      route("${node.route.path.lstrip('/')}", "${pulse_app_name}/routes/${node.route.get_safe_path()}.tsx"),
+    % endif
+  % endif
+% endfor
+</%def>
+
+import {
   type RouteConfig,
   route,
   layout,
@@ -67,20 +94,7 @@ ROUTES_CONFIG_TEMPLATE = Template(
 
 export const routes = [
   layout("${pulse_app_name}/layout.tsx", [
-% for route_obj in routes:
-<%
-    safe_path = route_obj.path.replace("/", "_").replace("-", "_")
-    if safe_path.startswith("_"):
-        safe_path = safe_path[1:]
-    if not safe_path:
-        safe_path = "index"
-%>
-% if not route_obj.path or route_obj.path == "/":
-    index("${pulse_app_name}/routes/${safe_path}.tsx"),
-% else:
-    route("${route_obj.path.lstrip('/')}", "${pulse_app_name}/routes/${safe_path}.tsx"),
-% endif
-% endfor
+    ${render_routes(route_tree)}
   ]),
 ] satisfies RouteConfig;
 """
@@ -165,35 +179,49 @@ def generate_routes_config(routes: List["Route"], pulse_app_name: str) -> str:
     Returns:
         TypeScript code as a string
     """
+    # Build a tree from the flat list of routes
+    route_nodes: Dict[str, RouteTreeNode] = {
+        route.get_full_path(): RouteTreeNode(route) for route in routes
+    }
+    route_tree: list[RouteTreeNode] = []
+
+    for route in routes:
+        node = route_nodes[route.get_full_path()]
+        if route.parent:
+            parent_node = route_nodes[route.parent.get_full_path()]
+            parent_node.add_child(node)
+        else:
+            route_tree.append(node)
+
     return str(
         ROUTES_CONFIG_TEMPLATE.render_unicode(
-            routes=routes, pulse_app_name=pulse_app_name
+            route_tree=route_tree, pulse_app_name=pulse_app_name
         )
     )
 
 
-def clean_directory(path: Path):
-    # Delete everything under output_path
-    if path.exists() and path.is_dir():
-        for item in path.iterdir():
-            if item.is_dir():
-                for subitem in item.rglob("*"):
-                    try:
-                        if subitem.is_file() or subitem.is_symlink():
-                            subitem.unlink()
-                        elif subitem.is_dir():
-                            subitem.rmdir()
-                    except Exception as e:
-                        print(f"   Warning: Could not remove {subitem}: {e}")
-                try:
-                    item.rmdir()
-                except Exception as e:
-                    print(f"   Warning: Could not remove directory {item}: {e}")
-            else:
-                try:
-                    item.unlink()
-                except Exception as e:
-                    print(f"   Warning: Could not remove file {item}: {e}")
+def write_file_if_changed(file_path: Path, content: str) -> bool:
+    """
+    Write content to file only if it has changed.
+
+    Args:
+        file_path: Path to the file
+        content: Content to write
+
+    Returns:
+        True if file was written, False if skipped (content unchanged)
+    """
+    if file_path.exists():
+        try:
+            current_content = file_path.read_text()
+            if current_content == content:
+                return False  # Skip writing, content is the same
+        except Exception:
+            # If we can't read the file for any reason, just write it
+            pass
+
+    file_path.write_text(content)
+    return True
 
 
 def generate_all_routes(
@@ -216,11 +244,8 @@ def generate_all_routes(
     routes = list(app.routes.values())
     output_path = codegen_config.pulse_app_dir
     routes_path = output_path / "routes"
-    clean_directory(output_path)
-
-    if not routes:
-        logger.warning("No routes found to generate")
-        return
+    # Keep track of all generated files
+    generated_files = set()
 
     # Ensure directories exist
     output_path.mkdir(parents=True, exist_ok=True)
@@ -231,17 +256,17 @@ def generate_all_routes(
         host=host, port=port, pulse_lib_path=codegen_config.pulse_lib_path
     )
     layout_file = output_path / "layout.tsx"
-    layout_file.write_text(layout_code)
-    logger.info(f"Generated layout file at {layout_file}")
+    generated_files.add(layout_file)
+    written = write_file_if_changed(layout_file, layout_code)
+    if written:
+        logger.info(f"Generated layout file at {layout_file}")
+    else:
+        logger.debug(f"Skipped layout file (unchanged): {layout_file}")
 
     # Generate files for each route
+    routes_written_count = 0
     for route in routes:
-        # Convert path to safe filename
-        safe_path = route.path.replace("/", "_").replace("-", "_")
-        if safe_path.startswith("_"):
-            safe_path = safe_path[1:]
-        if not safe_path:
-            safe_path = "index"
+        safe_path = route.get_safe_path()
 
         # Generate initial UI tree by calling the route function
         with ReactiveContext():
@@ -256,12 +281,34 @@ def generate_all_routes(
         )
 
         route_file = routes_path / f"{safe_path}.tsx"
-        route_file.write_text(route_code)
+        generated_files.add(route_file)
+        written = write_file_if_changed(route_file, route_code)
+        if written:
+            routes_written_count += 1
+        else:
+            logger.debug(f"Skipped route file (unchanged): {route_file}")
 
     # Generate routes configuration
     routes_config_code = generate_routes_config(routes, codegen_config.pulse_app_name)
     routes_config_file = output_path / "routes.ts"
-    routes_config_file.write_text(routes_config_code)
+    generated_files.add(routes_config_file)
+    routes_config_written = write_file_if_changed(
+        routes_config_file, routes_config_code
+    )
 
-    logger.info(f"Generated {len(routes)} routes in {routes_path}")
-    logger.info(f"Updated routes configuration at {routes_config_file}")
+    # Clean up old files
+    for path in output_path.rglob("*"):
+        if path.is_file() and path not in generated_files:
+            try:
+                path.unlink()
+                logger.debug(f"Removed stale file: {path}")
+            except Exception as e:
+                logger.warning(f"Could not remove stale file {path}: {e}")
+
+    logger.info(
+        f"Generated {len(routes)} routes in {routes_path} ({routes_written_count} files written)"
+    )
+    if routes_config_written:
+        logger.info(f"Updated routes configuration at {routes_config_file}")
+    else:
+        logger.debug(f"Skipped routes configuration (unchanged): {routes_config_file}")

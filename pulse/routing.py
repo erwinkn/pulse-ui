@@ -63,6 +63,16 @@ def parse_route_path(path: str) -> list[PathSegment]:
     return segments
 
 
+# Normalize to react-router's convention: no leading and trailing slashes. Empty
+# string interpreted as the root.
+def normalize_path(path: str):
+    if path.startswith("/"):
+        path = path[1:]
+    if path.endswith("/"):
+        path = path[:-1]
+    return path
+
+
 class Route:
     """
     Represents a route definition with its component dependencies.
@@ -72,27 +82,35 @@ class Route:
         self,
         path: str,
         render_fn: Callable[[], Node],
-        components: list[ReactComponent],
+        children: "Optional[list[Route]]" = None,
+        components: Optional[list[ReactComponent]] = None,
         parent: "Optional[Route]" = None,
     ):
-        self.path = path
+        self.path = normalize_path(path)
         self.render_fn = render_fn
+        self.children = children or []
         self.components = components
         self.parent = parent
-        self.is_index = self.path in ["", "/"]
+        self.is_index = self.path == ""
 
-        if self.parent and self.parent.is_index:
-            raise ValueError("Index routes cannot have children.")
+        if self.parent:
+            if self.parent.is_index:
+                raise ValueError("Index routes cannot have children.")
+            self.parent.children.append(self)
 
         self.segments = parse_route_path(path)
 
     def get_full_path(self) -> str:
         if self.parent:
-            parent_path = self.parent.get_full_path()
-            if parent_path.endswith("/"):
-                return f"{parent_path}{self.path}"
-            return f"{parent_path}/{self.path}"
+            return f"{self.parent.get_full_path()}/{self.path}"
         return self.path
+
+    def get_file_path(self) -> str:
+        path = self.get_full_path()
+        if self.is_index:
+            path += "index"
+        path += ".tsx"
+        return path
 
     def get_safe_path(self) -> str:
         full_path = self.get_full_path()
@@ -120,7 +138,7 @@ class Route:
         return self.segments
 
     def match(self, request_path: str) -> Optional[PathParameters]:
-        full_segments = self.get_full_segments()
+        segments = self.get_full_segments()
 
         if request_path.startswith("/"):
             request_path = request_path[1:]
@@ -132,12 +150,12 @@ class Route:
         def _match_recursive(seg_idx: int, url_idx: int) -> Optional[PathParameters]:
             # If we've consumed all route segments, we have a match only if
             # we've also consumed all URL parts.
-            if seg_idx == len(full_segments):
+            if seg_idx == len(segments):
                 if url_idx == len(url_parts):
                     return PathParameters()
                 return None
 
-            segment = full_segments[seg_idx]
+            segment = segments[seg_idx]
 
             # A splat segment matches everything that remains.
             if segment.is_splat:
@@ -153,7 +171,7 @@ class Route:
             # If we've run out of URL parts, the rest of the route segments
             # must be optional to be a match.
             if url_idx >= len(url_parts):
-                if all(s.is_optional for s in full_segments[seg_idx:]):
+                if all(s.is_optional for s in segments[seg_idx:]):
                     return PathParameters()
                 return None
 
@@ -263,3 +281,46 @@ class RouteInfo:
         self.port = parsed_url.port
         self.path_parameters = path_params.params
         self.catch_all = path_params.splat
+
+
+class RouteTree:
+    routes: list[Route]
+
+    def __init__(self, routes: list[Route]) -> None:
+        seen: set[str] = set()
+        self.routes = []
+        for route in routes:
+            if route.path in seen:
+                raise ValueError(f"Duplicate routes on path '{route.path}'")
+            seen.add(route.path)
+            # Children will be accessible through their parent
+            if route.parent:
+                continue
+            self.routes.append(route)
+
+    def add(self, route: Route):
+        """Add a route to the tree, checking for duplicates."""
+        if route.parent:
+            return  # automatically added by the constructor
+        if any(r.path == route.path for r in self.routes):
+            raise ValueError(f"Duplicate routes on path '{route.path}'")
+        self.routes.append(route)
+
+    def find(self, path: str):
+        path = normalize_path(path)
+        for route in self.routes:
+            if route.path == path:
+                return route
+
+        raise ValueError(
+            f"No route found for path '{path}' (hierarchical routes are not yet implemented!)"
+        )
+
+    def __iter__(self):
+        return iter(self.routes)
+
+    def __getitem__(self, idx):
+        return self.routes[idx]
+
+    def __len__(self):
+        return len(self.routes)

@@ -1,53 +1,48 @@
-"""
-TypeScript code generation for React components and routes.
-
-This module handles generating TypeScript files for:
-- A single server config file
-- A routes configuration file for the client-side router
-- A page for each route that renders the Pulse component
-"""
-
 import json
-from pathlib import Path
 import logging
-from typing import List, TYPE_CHECKING, Dict
+from dataclasses import dataclass
+from pathlib import Path
 
 from mako.template import Template
 
 from pulse.reactive import ReactiveContext
 
-if TYPE_CHECKING:
-    from .app import App
-    from .routing import Route
-
+from .routing import Route, RouteTree
 from .vdom import VDOMNode
 
-
-class RouteTreeNode:
-    def __init__(self, route: "Route"):
-        self.route = route
-        self.children: list["RouteTreeNode"] = []
-
-    def add_child(self, node: "RouteTreeNode"):
-        self.children.append(node)
+logger = logging.getLogger(__file__)
 
 
+@dataclass
 class CodegenConfig:
-    def __init__(
-        self,
-        web_dir: str = "pulse-web",
-        pulse_app_name: str = "pulse",
-        pulse_lib_path: str = "~/pulse-lib",
-    ):
-        self.web_dir = web_dir
-        self.pulse_app_name = pulse_app_name
-        self.pulse_lib_path = pulse_lib_path
-        self.pulse_app_dir = Path(web_dir) / "app" / pulse_app_name
+    """
+    Configuration for code generation.
+
+    Attributes:
+        web_dir (str): Root directory for the web output.
+        pulse_app_name (str): Name of the Pulse app directory.
+        pulse_lib_path (str): Path to the Pulse library.
+        pulse_app_dir (Path): Full path to the generated app directory.
+    """
+
+    web_dir: str = "pulse-web"
+    """Root directory for the web output."""
+
+    pulse_dir: str = "pulse"
+    """Name of the Pulse app directory."""
+
+    lib_path: str = "~/pulse-lib"
+    """Path to the Pulse library."""
+
+    @property
+    def pulse_path(self) -> Path:
+        """Full path to the generated app directory."""
+        return Path(self.web_dir) / "app" / self.pulse_dir
 
 
 # Mako template for the main layout
 LAYOUT_TEMPLATE = Template(
-    """import { PulseProvider, type PulseConfig } from "${pulse_lib_path}/pulse";
+    """import { PulseProvider, type PulseConfig } from "${lib_path}/pulse";
 import { Outlet } from "react-router";
 
 // This config is imported by the layout and used to initialize the client
@@ -70,16 +65,16 @@ export default function PulseLayout() {
 ROUTES_CONFIG_TEMPLATE = Template(
     """
 <%def name="render_routes(routes)">
-% for node in routes:
-  % if node.children:
-    route("${node.route.path.lstrip('/')}", "${pulse_app_name}/routes/${node.route.get_safe_path()}.tsx", [
-      ${render_routes(node.children)}
+% for route in routes:
+  % if route.children:
+    route("${route.path}", "${pulse_dir}/routes/${route.get_file_path()}", [
+      ${render_routes(route.children)}
     ]),
   % else:
-    % if node.route.is_index:
-      index("${pulse_app_name}/routes/${node.route.get_safe_path()}.tsx"),
+    % if route.is_index:
+      index("${pulse_dir}/routes/${route.get_file_path()}"),
     % else:
-      route("${node.route.path.lstrip('/')}", "${pulse_app_name}/routes/${node.route.get_safe_path()}.tsx"),
+      route("${route.path}", "${pulse_dir}/routes/${route.get_file_path()}"),
     % endif
   % endif
 % endfor
@@ -93,7 +88,7 @@ import {
 } from "@react-router/dev/routes";
 
 export const routes = [
-  layout("${pulse_app_name}/layout.tsx", [
+  layout("${pulse_dir}/_layout.tsx", [
     ${render_routes(route_tree)}
   ]),
 ] satisfies RouteConfig;
@@ -102,8 +97,8 @@ export const routes = [
 
 # Mako template for route pages
 ROUTE_PAGE_TEMPLATE = Template(
-    """import { PulseView } from "${pulse_lib_path}/pulse";
-import type { VDOM, ComponentRegistry } from "${pulse_lib_path}/vdom";
+    """import { PulseView } from "${lib_path}/pulse";
+import type { VDOM, ComponentRegistry } from "${lib_path}/vdom";
 
 % if components:
 // Component imports
@@ -131,7 +126,7 @@ const externalComponents: ComponentRegistry = {};
 % endif
 
 // The initial VDOM is bootstrapped from the server
-const initialVDOM: VDOM = ${initial_vdom_json};
+const initialVDOM: VDOM = ${vdom};
 
 export default function RouteComponent() {
   return (
@@ -145,170 +140,93 @@ export default function RouteComponent() {
 )
 
 
-def generate_layout_file(host: str, port: int, pulse_lib_path: str) -> str:
-    """Generates the content of _layout.tsx"""
-    return str(
-        LAYOUT_TEMPLATE.render_unicode(
-            host=host, port=port, pulse_lib_path=pulse_lib_path
-        )
-    )
-
-
-def generate_route_page(
-    route: "Route", initial_vdom: VDOMNode, pulse_lib_path: str
-) -> str:
-    """Generates TypeScript code for a route page."""
-    return str(
-        ROUTE_PAGE_TEMPLATE.render_unicode(
-            route=route,
-            components=route.components or [],
-            initial_vdom_json=json.dumps(initial_vdom, indent=2),
-            pulse_lib_path=pulse_lib_path,
-        )
-    )
-
-
-def generate_routes_config(routes: List["Route"], pulse_app_name: str) -> str:
-    """
-    Generate TypeScript code for the routes configuration.
-
-    Args:
-        routes: List of Route objects
-        pulse_app_name: The name of the pulse app directory.
-
-    Returns:
-        TypeScript code as a string
-    """
-    # Build a tree from the flat list of routes
-    route_nodes: Dict[str, RouteTreeNode] = {
-        route.get_full_path(): RouteTreeNode(route) for route in routes
-    }
-    route_tree: list[RouteTreeNode] = []
-
-    for route in routes:
-        node = route_nodes[route.get_full_path()]
-        if route.parent:
-            parent_node = route_nodes[route.parent.get_full_path()]
-            parent_node.add_child(node)
-        else:
-            route_tree.append(node)
-
-    return str(
-        ROUTES_CONFIG_TEMPLATE.render_unicode(
-            route_tree=route_tree, pulse_app_name=pulse_app_name
-        )
-    )
-
-
-def write_file_if_changed(file_path: Path, content: str) -> bool:
-    """
-    Write content to file only if it has changed.
-
-    Args:
-        file_path: Path to the file
-        content: Content to write
-
-    Returns:
-        True if file was written, False if skipped (content unchanged)
-    """
-    if file_path.exists():
+def write_file_if_changed(path: Path, content: str) -> Path:
+    """Write content to file only if it has changed."""
+    if path.exists():
         try:
-            current_content = file_path.read_text()
+            current_content = path.read_text()
             if current_content == content:
-                return False  # Skip writing, content is the same
+                return path  # Skip writing, content is the same
         except Exception:
             # If we can't read the file for any reason, just write it
             pass
 
-    file_path.write_text(content)
-    return True
+    path.parent.mkdir(exist_ok=True, parents=True)
+    path.write_text(content)
+    return path
 
 
-def generate_all_routes(
-    app: "App",
-    host: str = "localhost",
-    port: int = 8000,
-):
-    """
-    Complete route generation workflow: get routes, clear callbacks if needed, and write files.
+class Codegen:
+    def __init__(
+        self, routes: RouteTree, config: CodegenConfig, host="127.0.0.1", port=8000
+    ) -> None:
+        self.cfg = config
+        self.routes = routes
+        self.host = host
+        self.port = port
 
-    Args:
-        app: The Pulse application instance.
-        host: Backend server host for WebSocket connection.
-        port: Backend server port for WebSocket connection.
-    """
+    @property
+    def output_folder(self):
+        return self.cfg.pulse_path
 
-    logger = logging.getLogger(__name__)
+    def generate_all(
+        self,
+    ):
+        # Keep track of all generated files
+        generated_files = [
+            self.generate_layout_tsx(),
+            self.generate_routes_ts(),
+        ]
+        for route in self.routes:
+            generated_files.extend(self.generate_route(route))
+        generated_files = set(generated_files)
 
-    codegen_config = app.codegen
-    routes = list(app.routes.values())
-    output_path = codegen_config.pulse_app_dir
-    routes_path = output_path / "routes"
-    # Keep track of all generated files
-    generated_files = set()
+        # Clean up any remaining files that are not part of the generated files
+        for path in self.output_folder.rglob("*"):
+            if path.is_file() and path not in generated_files:
+                try:
+                    path.unlink()
+                    logger.debug(f"Removed stale file: {path}")
+                except Exception as e:
+                    logger.warning(f"Could not remove stale file {path}: {e}")
 
-    # Ensure directories exist
-    output_path.mkdir(parents=True, exist_ok=True)
-    routes_path.mkdir(parents=True, exist_ok=True)
+    def generate_layout_tsx(self):
+        """Generates the content of _layout.tsx"""
+        content = str(
+            LAYOUT_TEMPLATE.render_unicode(
+                host=self.host, port=self.port, lib_path=self.cfg.lib_path
+            )
+        )
+        # The underscore avoids an eventual naming conflict with a generated
+        # /layout route.
+        return write_file_if_changed(self.output_folder / "_layout.tsx", content)
 
-    # Generate _layout.tsx
-    layout_code = generate_layout_file(
-        host=host, port=port, pulse_lib_path=codegen_config.pulse_lib_path
-    )
-    layout_file = output_path / "layout.tsx"
-    generated_files.add(layout_file)
-    written = write_file_if_changed(layout_file, layout_code)
-    if written:
-        logger.info(f"Generated layout file at {layout_file}")
-    else:
-        logger.debug(f"Skipped layout file (unchanged): {layout_file}")
+    def generate_routes_ts(self):
+        """Generate TypeScript code for the routes configuration."""
+        content = str(
+            ROUTES_CONFIG_TEMPLATE.render_unicode(
+                route_tree=self.routes, pulse_dir=self.cfg.pulse_dir
+            )
+        )
+        return write_file_if_changed(self.output_folder / "routes.ts", content)
 
-    # Generate files for each route
-    routes_written_count = 0
-    for route in routes:
-        safe_path = route.get_safe_path()
-
+    def generate_route(self, route: Route):
+        output_path = self.output_folder / "routes" / route.get_file_path()
+        print(f"Writing {route.get_full_path()} to {route.get_file_path()}")
         # Generate initial UI tree by calling the route function
         with ReactiveContext():
             initial_node = route.render_fn()
         vdom, _ = initial_node.render()
-
-        # Generate route entrypoint with inline component registry
-        route_code = generate_route_page(
-            route,
-            initial_vdom=vdom,
-            pulse_lib_path=codegen_config.pulse_lib_path,
+        content = str(
+            ROUTE_PAGE_TEMPLATE.render_unicode(
+                route=route,
+                components=route.components or [],
+                vdom=json.dumps(vdom, indent=2),
+                lib_path=self.cfg.lib_path,
+            )
         )
-
-        route_file = routes_path / f"{safe_path}.tsx"
-        generated_files.add(route_file)
-        written = write_file_if_changed(route_file, route_code)
-        if written:
-            routes_written_count += 1
-        else:
-            logger.debug(f"Skipped route file (unchanged): {route_file}")
-
-    # Generate routes configuration
-    routes_config_code = generate_routes_config(routes, codegen_config.pulse_app_name)
-    routes_config_file = output_path / "routes.ts"
-    generated_files.add(routes_config_file)
-    routes_config_written = write_file_if_changed(
-        routes_config_file, routes_config_code
-    )
-
-    # Clean up old files
-    for path in output_path.rglob("*"):
-        if path.is_file() and path not in generated_files:
-            try:
-                path.unlink()
-                logger.debug(f"Removed stale file: {path}")
-            except Exception as e:
-                logger.warning(f"Could not remove stale file {path}: {e}")
-
-    logger.info(
-        f"Generated {len(routes)} routes in {routes_path} ({routes_written_count} files written)"
-    )
-    if routes_config_written:
-        logger.info(f"Updated routes configuration at {routes_config_file}")
-    else:
-        logger.debug(f"Skipped routes configuration (unchanged): {routes_config_file}")
+        generated_files = [write_file_if_changed(output_path, content)]
+        if route.children:
+            for child_route in route.children:
+                generated_files.extend(self.generate_route(child_route))
+        return generated_files

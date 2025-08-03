@@ -16,7 +16,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from pulse.codegen import CodegenConfig, generate_all_routes
+from pulse.codegen import Codegen, CodegenConfig
 from pulse.diff import diff_vdom
 from pulse.messages import (
     ClientMessage,
@@ -24,9 +24,8 @@ from pulse.messages import (
     ServerUpdateMessage,
 )
 from pulse.reactive import ReactiveContext, UpdateBatch
-from pulse.components.registry import ReactComponent, registered_react_components
-from pulse.vdom import Node, VDOMNode
-from pulse.routing import Route
+from pulse.routing import Route, RouteTree
+from pulse.vdom import VDOMNode
 
 logger = logging.getLogger(__name__)
 
@@ -71,14 +70,13 @@ class App:
             codegen: Optional codegen configuration.
         """
         routes = routes or []
-        self.routes: dict[str, Route] = {}
-        for route_obj in routes:
-            if route_obj.path in self.routes:
-                raise ValueError(f"Duplicate routes on path '{route_obj.path}'")
-            self.routes[route_obj.path] = route_obj
+        self.routes = RouteTree(routes)
         self.sessions: dict[str, Session] = {}
 
-        self.codegen = codegen or CodegenConfig()
+        self.codegen = Codegen(
+            self.routes,
+            config=codegen or CodegenConfig(),
+        )
 
         self.fastapi = FastAPI(title="Pulse UI Server")
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
@@ -103,43 +101,6 @@ class App:
         def healthcheck():
             return {"health": "ok", "message": "Pulse server is running"}
 
-    def generate_routes(
-        self,
-        host: str = "127.0.0.1",
-        port=8000,
-    ):
-        generate_all_routes(self, host, port)
-
-    def run(
-        self,
-        host: str = "127.0.0.1",
-        port=8000,
-        find_port=True,
-        log_level: str = "info",
-        codegen=True,
-    ):
-        if self.status == AppStatus.running:
-            raise RuntimeError("Server already running")
-        if codegen:
-            self.generate_routes(host=host, port=port)
-        if self.status == AppStatus.created:
-            self.setup()
-            self._setup_socketio_endpoints()
-
-        logging.basicConfig(
-            level=log_level.upper(),
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
-
-        if find_port:
-            port = find_available_port(port)
-
-        logger.info(f"🚀 Starting Pulse UI Server on http://{host}:{port}")
-        logger.info(f"🔌 WebSocket endpoint: ws://{host}:{port}/ws")
-
-        uvicorn.run(self.asgi, host=host, port=port, log_level=log_level)
-
-    def _setup_socketio_endpoints(self):
         @self.sio.event
         async def connect(sid: str, environ, auth=None):
             logger.info(f"-> Creating session: {sid}")
@@ -166,6 +127,43 @@ class App:
             else:
                 logger.warning(f"Unknown message type received: {data}")
 
+    def run_codegen(
+        self,
+        host: str = "127.0.0.1",
+        port=8000,
+    ):
+        self.codegen.host = host
+        self.codegen.port = port
+        self.codegen.generate_all()
+
+    def run(
+        self,
+        host: str = "127.0.0.1",
+        port=8000,
+        find_port=True,
+        log_level: str = "info",
+        codegen=True,
+    ):
+        if self.status == AppStatus.running:
+            raise RuntimeError("Server already running")
+        if codegen:
+            self.run_codegen(host=host, port=port)
+        if self.status == AppStatus.created:
+            self.setup()
+
+        logging.basicConfig(
+            level=log_level.upper(),
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
+        if find_port:
+            port = find_available_port(port)
+
+        logger.info(f"🚀 Starting Pulse UI Server on http://{host}:{port}")
+        logger.info(f"🔌 WebSocket endpoint: ws://{host}:{port}/ws")
+
+        uvicorn.run(self.asgi, host=host, port=port, log_level=log_level)
+
     def route(
         self,
         path: str,
@@ -183,9 +181,6 @@ class App:
             Decorator function
         """
 
-        if components is None:
-            components = registered_react_components()
-
         def decorator(render_func):
             route_obj = Route(path, render_func, components=components, parent=parent)
             self.add_route(route_obj)
@@ -195,22 +190,10 @@ class App:
 
     def add_route(self, route: Route):
         """Add a route to this app instance."""
-        if route.path in self.routes:
-            raise ValueError(f"Duplicate routes on path '{route.path}'")
-        self.routes[route.path] = route
-
-    def list_routes(self) -> List[Route]:
-        """Get all routes registered on this app (both via constructor and decorator)."""
-        return list(self.routes.values())
-
-    def clear_routes(self):
-        """Clear all routes from this app instance."""
-        self.routes.clear()
+        self.routes.add(route)
 
     def get_route(self, path: str):
-        if path not in self.routes:
-            raise ValueError(f"No route found for path '{path}'")
-        return self.routes[path]
+        self.routes.find(path)
 
     def create_session(self, id: str):
         if id in self.sessions:
@@ -274,7 +257,7 @@ class Session:
             self.callback_registry[key](*args)
 
     def hydrate(self, path: str):
-        route = self.app.get_route(path)
+        route = self.app.routes.find(path)
 
         # Clear old state listeners from previous route
         for state, fields in self.ctx.client_states.items():
@@ -304,7 +287,7 @@ class Session:
         if self.current_route is None:
             raise RuntimeError("Failed to rerender: no route set for the session!")
 
-        route = self.app.get_route(self.current_route)
+        route = self.app.routes.find(self.current_route)
 
         with self.ctx.next_render() as new_ctx:
             new_node_tree = route.render_fn()

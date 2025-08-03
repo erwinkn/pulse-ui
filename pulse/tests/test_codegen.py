@@ -5,45 +5,35 @@ This module tests the full pipeline from Python UI tree definition
 through TypeScript code generation and React component integration.
 """
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from pulse.app import App, Route
-from pulse.codegen import (
-    CodegenConfig,
-    generate_all_routes,
-    generate_route_page,
-    generate_routes_config,
-)
-from pulse.components.registry import ReactComponent, COMPONENT_REGISTRY
-from pulse.vdom import (
-    VDOMNode,
-    div,
-    h1,
-    p,
-)
+from pulse.codegen import Codegen, CodegenConfig
 from pulse.components import Outlet
+from pulse.components.registry import COMPONENT_REGISTRY, ReactComponent
+from pulse.routing import RouteTree
+from pulse.vdom import div
 
 
-class TestGenerateRoutePage:
-    """Test the generate_route_page function."""
+class TestCodegen:
+    """Test the Codegen class."""
 
-    def test_route_with_no_components(self):
-        """Test generating route with no components."""
+    def setup_method(self):
+        """Clear the component registry before each test."""
+        COMPONENT_REGISTRY.get().clear()
 
-        def render_func():
-            return div()["Simple route"]
+    def test_generate_route_page_no_components(self, tmp_path):
+        """Test generating a single route page with no components."""
+        route = Route("/simple", lambda: div()["Simple route"], components=[])
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree([route]), codegen_config)
+        codegen.generate_route(route)
 
-        route = Route("/simple", render_func, [])
-        initial_tree: VDOMNode = {
-            "tag": "div",
-            "props": {},
-            "children": ["Simple route"],
-        }
-
-        result = generate_route_page(route, initial_tree, "~/pulse-lib")
+        route_page_path = codegen.output_folder / "routes" / "simple.tsx"
+        assert route_page_path.exists()
+        result = route_page_path.read_text()
 
         assert 'import { PulseView } from "~/pulse-lib/pulse";' in result
         assert (
@@ -56,22 +46,22 @@ class TestGenerateRoutePage:
         assert "export default function RouteComponent()" in result
         assert "<PulseView" in result
 
-    def test_route_with_components(self):
+    def test_generate_route_page_with_components(self, tmp_path):
         """Test generating route with React components."""
         button_comp = ReactComponent("button", "./Button", "Button", False)
         card_comp = ReactComponent("card", "./Card", "Card", False)
+        route = Route(
+            "/with-components",
+            lambda: div()["Route with components"],
+            components=[button_comp, card_comp],
+        )
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree([route]), codegen_config)
+        codegen.generate_route(route)
 
-        def render_func():
-            return div()["Route with components"]
-
-        route = Route("/with-components", render_func, [button_comp, card_comp])
-        initial_tree: VDOMNode = {
-            "tag": "div",
-            "props": {},
-            "children": ["Route with components"],
-        }
-
-        result = generate_route_page(route, initial_tree, "~/pulse-lib")
+        route_page_path = codegen.output_folder / "routes" / "with-components.tsx"
+        assert route_page_path.exists()
+        result = route_page_path.read_text()
 
         assert 'import { button as Button } from "./Button";' in result
         assert 'import { card as Card } from "./Card";' in result
@@ -79,56 +69,67 @@ class TestGenerateRoutePage:
         assert '"Card": Card,' in result
         assert "No components needed for this route" not in result
 
-    def test_route_with_default_export_components(self):
+    def test_generate_route_page_with_default_export_components(self, tmp_path):
         """Test generating route with default export components."""
         default_comp = ReactComponent("DefaultComp", "./DefaultComp", is_default=True)
+        route = Route(
+            "/default-export",
+            lambda: div()["Route with default export"],
+            components=[default_comp],
+        )
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree([route]), codegen_config)
+        codegen.generate_route(route)
 
-        def render_func():
-            return div()["Route with default export"]
-
-        route = Route("/default-export", render_func, [default_comp])
-        initial_tree: VDOMNode = {"tag": "div", "props": {}, "children": []}
-
-        result = generate_route_page(route, initial_tree, "~/pulse-lib")
+        route_page_path = codegen.output_folder / "routes" / "default-export.tsx"
+        assert route_page_path.exists()
+        result = route_page_path.read_text()
 
         assert 'import DefaultComp from "./DefaultComp";' in result
         assert '"DefaultComp": DefaultComp,' in result
 
-
-class TestGenerateRoutesConfig:
-    """Test the generate_routes_config function."""
-
-    def test_empty_routes_list(self):
+    def test_generate_routes_ts_empty(self, tmp_path):
         """Test generating config with empty routes list."""
-        result = generate_routes_config([], "pulse")
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree([]), codegen_config)
+        codegen.generate_routes_ts()
+
+        routes_ts_path = Path(codegen_config.pulse_path) / "routes.ts"
+        assert routes_ts_path.exists()
+        result = routes_ts_path.read_text()
+
         assert "export const routes = [" in result
         assert "] satisfies RouteConfig;" in result
+        assert 'layout("pulse/_layout.tsx"' in result
 
-    def test_single_root_route(self):
+    def test_generate_routes_ts_single_root_route(self, tmp_path):
         """Test generating config with single root route."""
-        home_route = Route("/", lambda: div(), [])
-        result = generate_routes_config([home_route], "pulse")
-        assert 'index("pulse/routes/index.tsx"),' in result
+        home_route = Route("/", lambda: div(), components=[])
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree([home_route]), codegen_config)
+        codegen.generate_routes_ts()
 
-    def test_multiple_routes(self):
+        routes_ts_path = Path(codegen_config.pulse_path) / "routes.ts"
+        result = routes_ts_path.read_text()
+        print(result)
+        assert 'index("pulse/routes/index.tsx")' in result
+
+    def test_generate_routes_ts_multiple_routes(self, tmp_path):
         """Test generating config with multiple routes."""
         routes = [
-            Route("/", lambda: div(), []),
-            Route("/about", lambda: div(), []),
+            Route("/", lambda: div(), components=[]),
+            Route("/about", lambda: div(), components=[]),
         ]
-        result = generate_routes_config(routes, "pulse")
-        assert 'index("pulse/routes/index.tsx"),' in result
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree(routes), codegen_config)
+        codegen.generate_routes_ts()
+
+        routes_ts_path = Path(codegen_config.pulse_path) / "routes.ts"
+        result = routes_ts_path.read_text()
+        assert 'index("pulse/routes/index.tsx")' in result
         assert 'route("about", "pulse/routes/about.tsx")' in result
 
-
-class TestGenerateAllRoutes:
-    """Test the generate_all_routes function."""
-
-    def setup_method(self):
-        """Clear the component registry before each test."""
-        COMPONENT_REGISTRY.get().clear()
-
-    def test_full_app_generation(self):
+    def test_full_app_generation(self, tmp_path):
         """Test generating all files for a simple app."""
         Header = ReactComponent("Header", "./components/Header")
         Footer = ReactComponent("Footer", "./components/Footer")
@@ -152,61 +153,56 @@ class TestGenerateAllRoutes:
         def interactive_route():
             return div()[Button(variant="primary")]
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            codegen_config = CodegenConfig(
-                web_dir=temp_dir,
-                pulse_app_name="test_pulse_app",
-                pulse_lib_path="~/test-lib",
-            )
-            app.codegen = codegen_config
+        codegen_config = CodegenConfig(
+            web_dir=str(tmp_path),
+            pulse_dir="test_pulse_app",
+            lib_path="~/test-lib",
+        )
+        codegen = Codegen(app.routes, codegen_config, "testhost", 1234)
+        codegen.generate_all()
 
-            generate_all_routes(app, host="testhost", port=1234)
+        pulse_app_dir = Path(codegen.output_folder)
+        routes_dir = pulse_app_dir / "routes"
 
-            pulse_app_dir = Path(codegen_config.pulse_app_dir)
-            routes_dir = pulse_app_dir / "routes"
+        assert (pulse_app_dir / "_layout.tsx").exists()
+        assert (pulse_app_dir / "routes.ts").exists()
+        assert (routes_dir / "index.tsx").exists()
+        assert (routes_dir / "interactive.tsx").exists()
+        assert (routes_dir / "users.tsx").exists()
+        assert (routes_dir / "users" / ":id.tsx").exists()
 
-            assert (pulse_app_dir / "layout.tsx").exists()
-            assert (pulse_app_dir / "routes.ts").exists()
-            assert (routes_dir / "index.tsx").exists()
-            assert (routes_dir / "interactive.tsx").exists()
-            assert (routes_dir / "users.tsx").exists()
-            assert (routes_dir / "users_param_id.tsx").exists()
+        layout_content = (pulse_app_dir / "_layout.tsx").read_text()
+        assert (
+            'import { PulseProvider, type PulseConfig } from "~/test-lib/pulse";'
+            in layout_content
+        )
+        assert 'serverAddress: "testhost",' in layout_content
+        assert "serverPort: 1234," in layout_content
 
-            layout_content = (pulse_app_dir / "layout.tsx").read_text()
-            assert (
-                'import { PulseProvider, type PulseConfig } from "~/test-lib/pulse";'
-                in layout_content
-            )
-            assert 'serverAddress: "testhost",' in layout_content
-            assert "serverPort: 1234," in layout_content
+        routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
+        assert (
+            'route("interactive", "test_pulse_app/routes/interactive.tsx")'
+            in routes_ts_content
+        )
+        assert (
+            'route("users", "test_pulse_app/routes/users.tsx", [' in routes_ts_content
+        )
+        assert (
+            'route(":id", "test_pulse_app/routes/users/:id.tsx")'
+            in routes_ts_content
+        )
 
-            routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
-            assert (
-                'route("interactive", "test_pulse_app/routes/interactive.tsx")'
-                in routes_ts_content
-            )
-            assert (
-                'route("users", "test_pulse_app/routes/users.tsx", ['
-                in routes_ts_content
-            )
-            assert (
-                'route(":id", "test_pulse_app/routes/users_param_id.tsx")'
-                in routes_ts_content
-            )
+        home_content = (routes_dir / "index.tsx").read_text()
+        assert 'import { PulseView } from "~/test-lib/pulse";' in home_content
+        assert 'import { Header } from "./components/Header";' in home_content
+        assert '"Header": Header,' in home_content
+        assert '"tag": "$$Header"' in home_content
 
-            home_content = (routes_dir / "index.tsx").read_text()
-            assert 'import { PulseView } from "~/test-lib/pulse";' in home_content
-            assert 'import { Header } from "./components/Header";' in home_content
-            assert '"Header": Header,' in home_content
-            assert '"tag": "$$Header"' in home_content
-
-            interactive_content = (routes_dir / "interactive.tsx").read_text()
-            assert (
-                'import { Button } from "./components/Button";' in interactive_content
-            )
-            assert '"Header": Header,' not in interactive_content
-            assert '"Button": Button,' in interactive_content
-            assert '"tag": "$$Button"' in interactive_content
+        interactive_content = (routes_dir / "interactive.tsx").read_text()
+        assert 'import { Button } from "./components/Button";' in interactive_content
+        assert '"Header": Header,' not in interactive_content
+        assert '"Button": Button,' in interactive_content
+        assert '"tag": "$$Button"' in interactive_content
 
 
 if __name__ == "__main__":

@@ -88,7 +88,7 @@ class Terminal(RichLog):
     """A widget that runs a command in a pseudo-terminal."""
 
     def __init__(self, command, cwd, env=None, **kwargs):
-        super().__init__(highlight=True, markup=True, **kwargs)
+        super().__init__(highlight=True, markup=True, wrap=False, **kwargs)
         self.command = command
         self.cwd = cwd
         self.env = env
@@ -161,10 +161,16 @@ class PulseTerminalViewer(TextualApp):
         width: 1fr;
         height: 100%;
         margin: 0 1;
-        border: round grey;
+        scrollbar-size: 1 1;
     }
     Terminal:focus {
         border: round white;
+    }
+    #server_term {
+        border: round cyan;
+    }
+    #web_term {
+        border: round orange;
     }
     """
 

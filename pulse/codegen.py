@@ -1,5 +1,6 @@
 import json
 import logging
+import difflib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -152,7 +153,6 @@ def write_file_if_changed(path: Path, content: str) -> Path:
             pass
 
     path.parent.mkdir(exist_ok=True, parents=True)
-    print(f"Writing to {path}")
     path.write_text(content)
     return path
 
@@ -213,7 +213,6 @@ class Codegen:
 
     def generate_route(self, route: Route):
         output_path = self.output_folder / "routes" / route.get_file_path()
-        print(f"Writing {route.get_full_path()} to {route.get_file_path()}")
         # Generate initial UI tree by calling the route function
         with ReactiveContext():
             initial_node = route.render_fn()

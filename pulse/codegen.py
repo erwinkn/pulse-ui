@@ -152,6 +152,7 @@ def write_file_if_changed(path: Path, content: str) -> Path:
             pass
 
     path.parent.mkdir(exist_ok=True, parents=True)
+    print(f"Writing to {path}")
     path.write_text(content)
     return path
 

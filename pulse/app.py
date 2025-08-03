@@ -11,10 +11,10 @@ import socket
 from typing import List, Optional, TypeVar
 
 import socketio
-import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import os
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.messages import ClientMessage
 from pulse.routing import Route, RouteTree
@@ -129,33 +129,17 @@ class App:
         self.codegen.port = port
         self.codegen.generate_all()
 
-    def run(
-        self,
-        host: str = "127.0.0.1",
-        port=8000,
-        find_port=True,
-        log_level: str = "info",
-        codegen=True,
-    ):
-        if self.status == AppStatus.running:
-            raise RuntimeError("Server already running")
-        if codegen:
-            self.run_codegen(host=host, port=port)
-        if self.status == AppStatus.created:
-            self.setup()
+    def asgi_factory(self):
+        """
+        ASGI factory for uvicorn. This is called on every reload.
+        """
 
-        logging.basicConfig(
-            level=log_level.upper(),
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
+        host = os.environ.get("PULSE_HOST", "127.0.0.1")
+        port = int(os.environ.get("PULSE_PORT", 8000))
 
-        if find_port:
-            port = find_available_port(port)
-
-        logger.info(f"🚀 Starting Pulse UI Server on http://{host}:{port}")
-        logger.info(f"🔌 WebSocket endpoint: ws://{host}:{port}/ws")
-
-        uvicorn.run(self.asgi, host=host, port=port, log_level=log_level)
+        self.run_codegen(host=host, port=port)
+        self.setup()
+        return self.asgi
 
     def route(
         self,
@@ -204,17 +188,3 @@ class App:
             raise KeyError(f"Session {id} does not exist")
         self.sessions[id].close()
         del self.sessions[id]
-
-
-def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:
-    """Find an available port starting from start_port."""
-    for port in range(start_port, start_port + max_attempts):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("localhost", port))
-                return port
-        except OSError:
-            continue
-    raise RuntimeError(
-        f"Could not find available port after {max_attempts} attempts starting from {start_port}"
-    )

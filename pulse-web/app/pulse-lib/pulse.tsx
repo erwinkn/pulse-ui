@@ -70,7 +70,6 @@ export function PulseProvider({ children, config }: PulseProviderProps) {
     const transport = new SocketIOTransport(
       `${config.serverAddress}:${config.serverPort}`
     );
-    console.log("Recreating client")
     return new PulseClient(transport);
   }, [config.serverAddress, config.serverPort]);
 

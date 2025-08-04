@@ -17,6 +17,27 @@
 # PERFORMANCE OF THIS SOFTWARE.
 
 import json as _json
+import datetime
+
+
+def _from_json(value):
+    if isinstance(value, list):
+        return [_from_json(item) for item in value]
+    if isinstance(value, dict):
+        if value.get("__type__") == "datetime":
+            try:
+                return datetime.datetime.fromisoformat(value["iso"])
+            except (KeyError, TypeError, ValueError):
+                pass
+        return {key: _from_json(value[key]) for key in value}
+    return value
+
+
+class FlattedJSONEncoder(_json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime.datetime):
+            return {"__type__": "datetime", "iso": obj.isoformat()}
+        return super().default(obj)
 
 
 class _Known:
@@ -130,6 +151,8 @@ def _wrap(value):
 
 
 def parse(value, *args, **kwargs):
+    if "object_hook" not in kwargs:
+        kwargs["object_hook"] = _from_json
     json = _json.loads(value, *args, **kwargs)
     wrapped = []
     for value in json:
@@ -154,6 +177,8 @@ def parse(value, *args, **kwargs):
 
 
 def stringify(value, *args, **kwargs):
+    if "cls" not in kwargs:
+        kwargs["cls"] = FlattedJSONEncoder
     known = _Known()
     input = []
     output = []

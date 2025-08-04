@@ -6,6 +6,7 @@ import type {
 } from "./transport";
 import type { VDOM, VDOMNode } from "./vdom";
 import { applyVDOMUpdates } from "./renderer";
+import { extractEvent } from "./serialize";
 
 type VDOMNodeListener = (node: VDOMNode) => void;
 
@@ -14,11 +15,15 @@ export class PulseClient {
   private vdomListeners: Map<string, Set<VDOMNodeListener>>;
   private transport: Transport;
   private activeViews = 0;
+  private connected = false;
+  private disposeConnectionListener: (() => void) | null;
 
   constructor(transport: Transport) {
     this.transport = transport;
     this.vdoms = new Map();
     this.vdomListeners = new Map();
+    this.connected = false;
+    this.disposeConnectionListener = null;
   }
 
   public connect() {
@@ -26,6 +31,17 @@ export class PulseClient {
       if (!this.transport.isConnected()) {
         try {
           await this.transport.connect(this.handleServerMessage);
+
+          this.disposeConnectionListener = this.transport.onConnectionChange(
+            (connected) => {
+              if (connected && !this.connected) {
+                for (const path of this.vdoms.keys()) {
+                  this.navigate(path);
+                }
+              }
+              this.connected = connected;
+            }
+          );
           resolve();
         } catch (error) {
           reject(error);
@@ -48,13 +64,14 @@ export class PulseClient {
   public async leave(path: string) {
     this.activeViews -= 1;
     if (this.activeViews == 0) {
-      await this.disconnect();
+      this.disconnect();
     }
     // console.log("[PulseClient] Leaving ", path);
     await this.transport.sendMessage({ type: "leave", path });
   }
 
   public disconnect() {
+    this.disposeConnectionListener?.();
     this.transport.disconnect();
   }
 
@@ -95,7 +112,7 @@ export class PulseClient {
       type: "callback",
       path,
       callback,
-      args: ,
+      args: args.map(extractEvent),
     };
     this.transport.sendMessage(payload);
   };

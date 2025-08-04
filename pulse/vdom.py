@@ -5,9 +5,11 @@ This library provides a Python API for building UI trees that match
 the TypeScript UINode format exactly, eliminating the need for translation.
 """
 
+import inspect
 from typing import (
     Any,
     Literal,
+    NamedTuple,
     NotRequired,
     Optional,
     Callable,
@@ -144,7 +146,6 @@ __all__ = [
 
 PrimitiveNode = Union[str, int, float]
 NodeChild = Union["Node", PrimitiveNode]
-Callbacks = dict[str, Callable]
 
 
 class VDOMNode(TypedDict):
@@ -152,6 +153,14 @@ class VDOMNode(TypedDict):
     key: NotRequired[str]
     props: NotRequired[dict[str, Any]]  # does not include callbacks
     children: "NotRequired[Sequence[VDOMNode | PrimitiveNode] | None]"
+
+
+class Callback(NamedTuple):
+    fn: Callable
+    n_args: int
+
+
+Callbacks = dict[str, Callback]
 
 
 class Node:
@@ -166,7 +175,7 @@ class Node:
         props: Optional[dict[str, Any] | None] = None,
         children: Optional[Sequence["NodeChild"]] = None,
         key: Optional[str] = None,
-        callbacks: Optional[dict[str, Callable]] = None,
+        callbacks: Optional[dict[str, Callback]] = None,
     ):
         self.tag = tag
         self.props = props
@@ -195,7 +204,7 @@ class Node:
             key=self.key,
         )
 
-    def _render_node(self, path: str, callbacks: dict[str, Callable]) -> VDOMNode:
+    def _render_node(self, path: str, callbacks: dict[str, Callback]) -> VDOMNode:
         """Convert to dictionary format for JSON serialization."""
         path_prefix = (path + ".") if path else ""
 
@@ -224,14 +233,14 @@ class Node:
 
         return vdom
 
-    def list_callbacks(self, path=""):
+    def list_callbacks(self, path="") -> dict[str, Callback]:
         if not self.callbacks:
             return {}
         path_prefix = (path + ".") if path else ""
         return {path_prefix + key: callback for key, callback in self.callbacks.items()}
 
     def render(self, path="") -> tuple[VDOMNode, Callbacks]:
-        callbacks: dict[str, Callable] = {}
+        callbacks: dict[str, Callback] = {}
         tree = self._render_node(path, callbacks)
         return tree, callbacks
 
@@ -293,12 +302,12 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
 
 def extract_callbacks_from_props(
     props: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Callable]]:
+) -> tuple[dict[str, Any], Callbacks]:
     clean_props = {}
-    callbacks = {}
+    callbacks: Callbacks = {}
     for k, v in props.items():
         if callable(v):
-            callbacks[k] = v
+            callbacks[k] = Callback(v, len(inspect.signature(v).parameters))
         else:
             clean_props[k] = v
     return clean_props, callbacks

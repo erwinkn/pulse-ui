@@ -149,6 +149,7 @@ class Effect:
 
     def dispose(self):
         with EnsureBatch():
+            # Run children cleanups first
             for child in self.children:
                 child.dispose()
             if self.cleanup:
@@ -177,7 +178,6 @@ class Effect:
         current_deps = set(self.deps)
 
         with Scope(parent=SCOPE.get()) as scope, EnsureBatch():
-            # Run children cleanups first
             self.dispose()
             self.cleanup = self.fn()
             self.children = list(scope.effects)
@@ -276,16 +276,16 @@ class EnsureBatch:
     def __exit__(self, exc_type, exc_value, exc_traceback):
         if self._token is not None:
             batch = BATCH.get()
-            batch.flush() # type: ignore
+            batch.flush()  # type: ignore
             BATCH.reset(self._token)
-            
+
 
 def batch():
     return Batch()
 
+
 def untrack():
     return Scope()
-
 
 
 class InvariantError(Exception): ...

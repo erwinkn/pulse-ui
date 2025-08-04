@@ -114,7 +114,6 @@ class TestCodegen:
 
         routes_ts_path = Path(codegen_config.pulse_path) / "routes.ts"
         result = routes_ts_path.read_text()
-        print(result)
         assert 'index("pulse/routes/index.tsx")' in result
 
     def test_generate_routes_ts_multiple_routes(self, tmp_path):

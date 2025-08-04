@@ -1,4 +1,5 @@
-// https://github.com/WebReflection/flatted/blob/main/esm/index.js
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// Adapted from: https://github.com/WebReflection/flatted/blob/main/esm/index.js
 // (c) 2020-present Andrea Giammarchi
 
 const { parse: $parse, stringify: $stringify } = JSON;
@@ -10,21 +11,40 @@ const primitive = "string"; // it could be 'number'
 const ignore = {};
 const object = "object";
 
-const noop = (_, value) => value;
+const noop = (_: any, value: any): any => value;
 
-const primitives = (value) =>
+const primitives = (value: any): any =>
   value instanceof Primitive ? Primitive(value) : value;
 
-const Primitives = (_, value) =>
-  typeof value === primitive ? new Primitive(value) : value;
+const Primitives = (_: any, value: any): any => {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    value.__type__ === "Date" &&
+    typeof value.value === "string"
+  ) {
+    return new Date(value.value);
+  }
+  return typeof value === primitive ? new Primitive(value) : value;
+};
 
-const revive = (input, parsed, output, $) => {
-  const lazy = [];
+type Reviver = (this: any, key: string, value: any) => any;
+
+const revive = (
+  input: any[],
+  parsed: Set<any>,
+  output: { [key: string]: any },
+  $: Reviver
+): any => {
+  const lazy: {
+    k: string;
+    a: [any[], Set<any>, any, Reviver];
+  }[] = [];
   for (let ke = keys(output), { length } = ke, y = 0; y < length; y++) {
     const k = ke[y];
     const value = output[k];
     if (value instanceof Primitive) {
-      const tmp = input[value];
+      const tmp = input[value as any]; // Q: is value a string or a number here?
       if (typeof tmp === object && !parsed.has(tmp)) {
         parsed.add(tmp);
         output[k] = ignore;
@@ -39,7 +59,7 @@ const revive = (input, parsed, output, $) => {
   return output;
 };
 
-const set = (known, input, value) => {
+const set = (known: Map<any, string>, input: any[], value: any): string => {
   const index = Primitive(input.push(value) - 1);
   known.set(value, index);
   return index;
@@ -51,7 +71,7 @@ const set = (known, input, value) => {
  * @param {(this: any, key: string, value: any) => any} [reviver]
  * @returns {any}
  */
-export const parse = (text, reviver) => {
+export const parse = (text: string, reviver?: Reviver): any => {
   const input = $parse(text, Primitives).map(primitives);
   const value = input[0];
   const $ = reviver || noop;
@@ -62,6 +82,10 @@ export const parse = (text, reviver) => {
   return $.call({ "": tmp }, "", tmp);
 };
 
+type Replacer =
+  | ((this: any, key: string, value: any) => any)
+  | (string | number)[];
+
 /**
  * Converts a JS value into a specialized flatted string.
  * @param {any} value
@@ -69,14 +93,19 @@ export const parse = (text, reviver) => {
  * @param {string | number | undefined} [space]
  * @returns {string}
  */
-export const stringify = (value, replacer, space) => {
+export const stringify = (
+  value: any,
+  replacer?: Replacer | null,
+  space?: string | number
+): string => {
   const $ =
-    replacer && typeof replacer === object
-      ? (k, v) => (k === "" || -1 < replacer.indexOf(k) ? v : void 0)
+    replacer && Array.isArray(replacer)
+      ? (k: string, v: any) =>
+          k === "" || -1 < replacer.indexOf(k) ? v : void 0
       : replacer || noop;
   const known = new Map();
-  const input = [];
-  const output = [];
+  const input: any[] = [];
+  const output: string[] = [];
   let i = +set(known, input, $.call({ "": value }, "", value));
   let firstRun = !i;
   while (i < input.length) {
@@ -84,15 +113,20 @@ export const stringify = (value, replacer, space) => {
     output[i] = $stringify(input[i++], replace, space);
   }
   return "[" + output.join(",") + "]";
-  function replace(key, value) {
+  function replace(this: any, key: string, value: any) {
     if (firstRun) {
       firstRun = !firstRun;
       return value;
     }
     const after = $.call(this, key, value);
+    // console.log(`After. ${key}=`)
+    // if (after instanceof Date) {
+    //   return { __type__: "Date", value: after.toISOString() };
+    // }
     switch (typeof after) {
       case object:
         if (after === null) return after;
+      // eslint-disable-next-line no-fallthrough
       case primitive:
         return known.get(after) || set(known, input, after);
     }
@@ -105,11 +139,11 @@ export const stringify = (value, replacer, space) => {
  * @param {any} value
  * @returns {any}
  */
-export const toJSON = (value) => $parse(stringify(value));
+export const toJSON = (value: any): any => $parse(stringify(value));
 
 /**
  * Converts a previously serialized object with recursion into a recursive one.
  * @param {any} value
  * @returns {any}
  */
-export const fromJSON = (value) => parse($stringify(value));
+export const fromJSON = (value: any): any => parse($stringify(value));

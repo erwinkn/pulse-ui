@@ -74,3 +74,24 @@ class TestState:
         state_a.count = 10
         assert state_a.count == 10
         assert state_b.count == 0, "state_b.count should not have changed"
+
+    def test_state_effect(self):
+        effect_runs = 0
+
+        class MyState(ps.State):
+            count: int = 0
+
+            @ps.effect
+            def my_effect(self):
+                nonlocal effect_runs
+                _ = self.count
+                effect_runs += 1
+
+        state = MyState()
+        assert effect_runs == 1, "Effect should run once on initialization"
+
+        state.count = 5
+        assert effect_runs == 2, "Effect should re-run when dependency changes"
+
+        state.count = 10
+        assert effect_runs == 3, "Effect should re-run on subsequent changes"

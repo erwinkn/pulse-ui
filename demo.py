@@ -88,21 +88,31 @@ class EffectsState(ps.State):
     notifications: List[str] = []
     auto_save_enabled: bool = True
     form_data: str = ""
+    _initialized: bool = False
+
+    def __init__(self):
+        super().__init__()
+        self._initialized = True
+
+    @ps.effect
+    def _timer_effect(self):
+        """Effect that logs timer ticks."""
+        if self.is_timer_running and self.timer_count < 10:
+            print(f"⏱️ Timer tick: {self.timer_count}")
+
+    @ps.effect
+    def _auto_save_effect(self):
+        """Effect that auto-saves form data."""
+        # This will run on init, and when self.form_data or self.auto_save_enabled changes
+        print("Running _auto_save_effect")
+        if self._initialized and self.auto_save_enabled and self.form_data:
+            self.add_notification(f"Auto-saved: '{self.form_data[:20]}...'")
 
     def start_timer(self):
         """Start a timer effect"""
         if not self.is_timer_running:
             self.is_timer_running = True
             print("⏰ Timer started!")
-
-            # Create an effect that runs when timer_count changes
-            def timer_effect():
-                if self.is_timer_running and self.timer_count < 10:
-                    # Simulate timer increment (in real app, this would be a setInterval)
-                    print(f"⏱️ Timer tick: {self.timer_count}")
-                return None
-
-            ps.Effect(timer_effect, name="timer_effect")
 
     def stop_timer(self):
         """Stop the timer"""
@@ -127,10 +137,10 @@ class EffectsState(ps.State):
     def add_notification(self, message: str):
         """Add a notification"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.notifications.append(f"[{timestamp}] {message}")
-        # Keep only last 5 notifications
-        if len(self.notifications) > 5:
-            self.notifications = self.notifications[-5:]
+        with ps.untrack():
+            new_notifications = self.notifications + [f"[{timestamp}] {message}"]
+            # Keep only last 5 notifications
+            self.notifications = new_notifications[-5:]
 
     def clear_notifications(self):
         """Clear all notifications"""
@@ -140,13 +150,6 @@ class EffectsState(ps.State):
     def update_form_data(self, data: str):
         """Update form data and trigger auto-save effect"""
         self.form_data = data
-        if self.auto_save_enabled:
-            # Create auto-save effect
-            def auto_save_effect():
-                self.add_notification(f"Auto-saved: '{data[:20]}...'")
-                return None
-
-            ps.Effect(auto_save_effect, name="auto_save_effect")
 
 
 class ThemeState(ps.State):
@@ -205,116 +208,121 @@ def counter_showcase(state: CounterState):
         ps.div(
             ps.div(
                 ps.div(
-                    ps.span(
-                        str(state.count), className="text-6xl font-bold text-blue-600"
-                    ),
-                    ps.div("Current Count", className="text-sm text-gray-500 mt-2"),
-                    className="text-center",
-                ),
-                ps.div(
-                    ps.span(
-                        str(state.doubled_count),
-                        className="text-4xl font-bold text-green-600",
+                    ps.div(
+                        ps.span(
+                            str(state.count),
+                            className="text-6xl font-bold text-blue-600",
+                        ),
+                        ps.div("Current Count", className="text-sm text-gray-500 mt-2"),
+                        className="text-center",
                     ),
                     ps.div(
-                        f"× {state.multiplier} (computed)",
-                        className="text-sm text-gray-500 mt-2",
+                        ps.span(
+                            str(state.doubled_count),
+                            className="text-4xl font-bold text-green-600",
+                        ),
+                        ps.div(
+                            f"× {state.multiplier} (computed)",
+                            className="text-sm text-gray-500 mt-2",
+                        ),
+                        className="text-center",
                     ),
-                    className="text-center",
-                ),
-                ps.div(
-                    ps.span("✅" if state.is_even else "❌", className="text-4xl"),
                     ps.div(
-                        "Is Even (computed)", className="text-sm text-gray-500 mt-2"
+                        ps.span("✅" if state.is_even else "❌", className="text-4xl"),
+                        ps.div(
+                            "Is Even (computed)", className="text-sm text-gray-500 mt-2"
+                        ),
+                        className="text-center",
                     ),
-                    className="text-center",
+                    className="grid grid-cols-3 gap-8 mb-8",
                 ),
-                className="grid grid-cols-3 gap-8 mb-8",
+                # Progress bar (computed)
+                ps.div(
+                    ps.div(
+                        "Progress to 50",
+                        className="text-sm font-medium text-gray-700 mb-2",
+                    ),
+                    ps.div(
+                        ps.div(
+                            style={
+                                "width": f"{state.progress_percentage}%",
+                                "transition": "width 0.3s ease",
+                            },
+                            className="h-4 bg-blue-600 rounded-full",
+                        ),
+                        className="w-full bg-gray-200 rounded-full",
+                    ),
+                    ps.div(
+                        f"{state.progress_percentage:.1f}%",
+                        className="text-sm text-gray-600 mt-1",
+                    ),
+                    className="mb-8",
+                ),
+                # Controls
+                ps.div(
+                    ps.button(
+                        "➖ Decrement",
+                        onClick=state.decrement,
+                        className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors",
+                    ),
+                    ps.button(
+                        "🔄 Reset",
+                        onClick=state.reset,
+                        className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors",
+                    ),
+                    ps.button(
+                        "➕ Increment",
+                        onClick=state.increment,
+                        className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors",
+                    ),
+                    className="flex gap-4 justify-center mb-8",
+                ),
+                # Multiplier controls
+                ps.div(
+                    ps.div(
+                        "Multiplier for computed property:",
+                        className="text-sm font-medium text-gray-700 mb-2",
+                    ),
+                    ps.div(
+                        *[
+                            ps.button(
+                                str(mult),
+                                onClick=lambda m=mult: state.set_multiplier(m),
+                                className=f"px-4 py-2 rounded-lg transition-colors {'bg-blue-600 text-white' if state.multiplier == mult else 'bg-gray-200 text-gray-700 hover:bg-gray-300'}",
+                            )
+                            for mult in [1, 2, 3, 5, 10]
+                        ],
+                        className="flex gap-2 justify-center",
+                    ),
+                    className="text-center mb-8",
+                ),
+                # History and info
+                ps.div(
+                    ps.div(
+                        ps.h4(
+                            "📊 State Info",
+                            className="font-semibold text-gray-800 mb-2",
+                        ),
+                        ps.div(
+                            f"Last updated: {state.last_updated.strftime('%H:%M:%S') if state.last_updated else 'Never'}",
+                            className="text-sm text-gray-600",
+                        ),
+                        ps.div(
+                            f"History length: {len(state.history)}",
+                            className="text-sm text-gray-600",
+                        ),
+                        ps.div(
+                            f"Recent values: {', '.join(map(str, state.history[-5:]))}",
+                            className="text-sm text-gray-600",
+                        ),
+                        className="bg-gray-50 p-4 rounded-lg",
+                    ),
+                    className="max-w-md mx-auto",
+                ),
+                className="bg-white p-8 rounded-xl shadow-lg",
             ),
-            # Progress bar (computed)
-            ps.div(
-                ps.div(
-                    "Progress to 50", className="text-sm font-medium text-gray-700 mb-2"
-                ),
-                ps.div(
-                    ps.div(
-                        style={
-                            "width": f"{state.progress_percentage}%",
-                            "transition": "width 0.3s ease",
-                        },
-                        className="h-4 bg-blue-600 rounded-full",
-                    ),
-                    className="w-full bg-gray-200 rounded-full",
-                ),
-                ps.div(
-                    f"{state.progress_percentage:.1f}%",
-                    className="text-sm text-gray-600 mt-1",
-                ),
-                className="mb-8",
-            ),
-            # Controls
-            ps.div(
-                ps.button(
-                    "➖ Decrement",
-                    onClick=state.decrement,
-                    className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors",
-                ),
-                ps.button(
-                    "🔄 Reset",
-                    onClick=state.reset,
-                    className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors",
-                ),
-                ps.button(
-                    "➕ Increment",
-                    onClick=state.increment,
-                    className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors",
-                ),
-                className="flex gap-4 justify-center mb-8",
-            ),
-            # Multiplier controls
-            ps.div(
-                ps.div(
-                    "Multiplier for computed property:",
-                    className="text-sm font-medium text-gray-700 mb-2",
-                ),
-                ps.div(
-                    *[
-                        ps.button(
-                            str(mult),
-                            onClick=lambda m=mult: state.set_multiplier(m),
-                            className=f"px-4 py-2 rounded-lg transition-colors {'bg-blue-600 text-white' if state.multiplier == mult else 'bg-gray-200 text-gray-700 hover:bg-gray-300'}",
-                        )
-                        for mult in [1, 2, 3, 5, 10]
-                    ],
-                    className="flex gap-2 justify-center",
-                ),
-                className="text-center mb-8",
-            ),
-            # History and info
-            ps.div(
-                ps.div(
-                    ps.h4(
-                        "📊 State Info", className="font-semibold text-gray-800 mb-2"
-                    ),
-                    ps.div(
-                        f"Last updated: {state.last_updated.strftime('%H:%M:%S') if state.last_updated else 'Never'}",
-                        className="text-sm text-gray-600",
-                    ),
-                    ps.div(
-                        f"History length: {len(state.history)}",
-                        className="text-sm text-gray-600",
-                    ),
-                    ps.div(
-                        f"Recent values: {', '.join(map(str, state.history[-5:]))}",
-                        className="text-sm text-gray-600",
-                    ),
-                    className="bg-gray-50 p-4 rounded-lg",
-                ),
-                className="max-w-md mx-auto",
-            ),
-            className="bg-white p-8 rounded-xl shadow-lg",
+            className="mb-12",
         ),
-        className="mb-12",
     )
 
 
@@ -401,7 +409,7 @@ def effects_showcase(state: EffectsState):
                     ),
                     ps.textarea(
                         value=state.form_data,
-                        onChange=lambda e: state.update_form_data(e.target.value),
+                        onChange=lambda e: state.update_form_data(e["target"]["value"]),
                         placeholder="Start typing to see auto-save effects...",
                         rows=4,
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
@@ -466,12 +474,12 @@ def react_components_showcase():
         print(f"📅 Custom DatePicker selected: {date_string}")
 
     def handle_native_date_change(event):
-        print(f"📅 Native date input selected: {event.target.value}")
+        print(f"📅 Native date input selected: {event['target']['value']}")
 
     def handle_file_change(event):
-        files = event.target.files
+        files = event["target"]["files"]
         if files and len(files) > 0:
-            print(f"📁 File selected: {files[0].name}")
+            print(f"📁 File selected: {files[0]['name']}")
 
     return ps.div(
         # Header
@@ -563,7 +571,7 @@ def react_components_showcase():
                         ps.input(
                             type="time",
                             onChange=lambda e: print(
-                                f"🕐 Time selected: {e.target.value}"
+                                f"🕐 Time selected: {e['target']['value']}"
                             ),
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
                         ),
@@ -578,7 +586,7 @@ def react_components_showcase():
                         ps.input(
                             type="color",
                             onChange=lambda e: print(
-                                f"🎨 Color selected: {e.target.value}"
+                                f"🎨 Color selected: {e['target']['value']}"
                             ),
                             className="w-full h-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
                         ),
@@ -595,7 +603,7 @@ def react_components_showcase():
                             min="0",
                             max="100",
                             onChange=lambda e: print(
-                                f"🎚️ Range value: {e.target.value}"
+                                f"🎚️ Range value: {e['target']['value']}"
                             ),
                             className="w-full",
                         ),
@@ -704,8 +712,8 @@ def callbacks_showcase(state: CallbacksState):
 
     def handle_form_change(field: str):
         def handler(event):
-            setattr(state, f"form_{field}", event.target.value)
-            print(f"📝 Form field '{field}' changed to: {event.target.value}")
+            setattr(state, f"form_{field}", event["target"]["value"])
+            print(f"📝 Form field '{field}' changed to: {event['target']['value']}")
 
         return handler
 
@@ -719,12 +727,12 @@ def callbacks_showcase(state: CallbacksState):
         state.form_message = ""
 
     def handle_key_press(event):
-        print(f"⌨️ Key pressed: {event.key}")
+        print(f"⌨️ Key pressed: {event['key']}")
 
     def handle_mouse_move(event):
         # Only log occasionally to avoid spam
         if random.random() < 0.01:  # 1% chance
-            print(f"🖱️ Mouse position: ({event.clientX}, {event.clientY})")
+            print(f"🖱️ Mouse position: ({event['clientX']}, {event['clientY']})")
 
     return ps.div(
         # Header

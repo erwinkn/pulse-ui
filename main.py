@@ -40,6 +40,10 @@ class CounterState(ps.State):
         print("Counter incremented!")
         self.count += 1
 
+    @ps.effect
+    def log_count(self):
+        print(f"Count is {self.count}")
+
 
 @ps.component
 def counter():
@@ -76,7 +80,9 @@ def counter_child():
         print("Child counter decremented!")
         state.count -= 1
 
+    print("Rendering counter")
     state = ps.init(lambda: CounterState())
+
 
     return ps.div(
         ps.h2("Child Counter"),
@@ -125,15 +131,16 @@ def main_layout():
 # Create the Pulse app
 app = ps.App(
     routes=[
-        ps.Layout(
-            main_layout,
-            children=[
-                ps.Route("/", home),
-                ps.Route("/about", about),
-                ps.Route(
-                    "/counter", counter, children=[ps.Route("child", counter_child)]
-                ),
-            ],
-        )
+        ps.Route("/counter", counter, children=[ps.Route("child", counter_child)]),
+        # ps.Layout(
+        #     main_layout,
+        #     children=[
+        #         ps.Route("/", home),
+        #         ps.Route("/about", about),
+        #         ps.Route(
+        #             "/counter", counter, children=[ps.Route("child", counter_child)]
+        #         ),
+        #     ],
+        # )
     ]
 )

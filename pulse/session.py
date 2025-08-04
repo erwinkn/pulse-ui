@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+import inspect
 from pulse.diff import VDOM, diff_vdom
 from pulse.hooks import ReactiveState
 from pulse.messages import (
@@ -10,14 +11,14 @@ from pulse.messages import (
 )
 from pulse.reactive import Effect, batch
 from pulse.routing import RouteTree
-from pulse.vdom import VDOMNode, Node
+from pulse.vdom import Callbacks, VDOMNode, Node
 
 
 @dataclass
 class ActiveRoute:
-    callback_registry: dict[str, Callable]
+    callbacks: Callbacks
     reactive_state: ReactiveState
-    vdom: VDOM | None
+    vdom: VDOMNode | None
     effect: Effect | None
 
 
@@ -56,15 +57,23 @@ class Session:
 
     def execute_callback(self, route: str, key: str, args: list | tuple):
         with batch():
-            self.active_routes[route].callback_registry[key](*args)
+            fn, n_params = self.active_routes[route].callbacks[key]
+            fn(*args[:n_params])
 
     def navigate(self, path: str):
-        if path in self.active_routes:
-            raise RuntimeError(f"Cannot navigate to already active route '{path}'")
+        # Erwin: I don't think we want this. If the server restarts, it
+        # disconnects and reconnects & the active clients should reload to make
+        #     sure they get the latest version. 
+        if active_route := self.active_routes.get(path):
+            if active_route.vdom:
+                self.notify(ServerInitMessage(type="vdom_init", path=path, vdom=active_route.vdom))
+                return
+        #     raise RuntimeError(f"Cannot navigate to already active route
+        #     '{path}'")
 
         route = self.routes.find(path)
         active_route = ActiveRoute(
-            callback_registry={},
+            callbacks={},
             reactive_state=ReactiveState.create(),
             vdom=None,
             effect=None,
@@ -78,8 +87,9 @@ class Session:
                 new_vdom, new_callbacks = new_node.render()
 
                 active_route.reactive_state = new_reactive_state
-                active_route.callback_registry = new_callbacks
+                active_route.callbacks = new_callbacks
                 active_route.vdom = new_vdom
+
                 if new_reactive_state.render_count == 1:
                     self.notify(
                         ServerInitMessage(type="vdom_init", path=path, vdom=new_vdom)

@@ -9,7 +9,7 @@ from abc import ABC, ABCMeta
 from typing import Any, Callable, Never, TypeVar
 import functools
 
-from pulse.reactive import Signal, Computed
+from pulse.reactive import Signal, Computed, Effect
 
 
 T = TypeVar("T")
@@ -21,6 +21,17 @@ def computed(fn: Callable[[TState], T]) -> T:
     "Define a computed State variable"
     fn._is_computed = True
     return fn  # type: ignore
+
+
+def effect(fn: Callable[[TState], None]) -> Callable[[TState], None]:
+    """
+    Define an effect on a State class.
+
+    The decorated method will be automatically run as an effect when the
+    state object is initialized.
+    """
+    fn._is_effect = True
+    return fn
 
 
 class StateProperty:
@@ -38,7 +49,7 @@ class StateProperty:
         if not hasattr(obj, self.private_name):
             # Create the signal on first access
             signal = Signal(
-                self.default_value, name=f"{obj.__class__.__name__}.{self.name}"
+                self.default_value, name=f"{obj.__class__.__name__}.{self.name}_{id}"
             )
             setattr(obj, self.private_name, signal)
             return signal
@@ -52,7 +63,10 @@ class StateProperty:
         return self.get_signal(obj).read()
 
     def __set__(self, obj: Any, value: Any) -> None:
-        self.get_signal(obj).write(value)
+        signal = self.get_signal(obj)
+        print(f"Writing {value} to {signal.name}") 
+        print(f"Observers: {[x.name for x in signal.obs]}")
+        signal.write(value)
 
 
 class ComputedProperty:
@@ -121,10 +135,24 @@ class State(ABC, metaclass=StateMeta):
         @ps.computed
         def double_count(self):
             return self.count * 2
+
+        @ps.state_effect
+        def print_count(self):
+            print(f"Count is now: {self.count}")
     ```
 
     Properties will automatically trigger re-renders when changed.
     """
+
+    def __init__(self):
+        """Initializes the state and registers effects."""
+        # Effects are stored to keep them from being garbage collected.
+        self._effects: list[Effect] = []
+        for name, attr in self.__class__.__dict__.items():
+            if callable(attr) and getattr(attr, "_is_effect", False):
+                bound_method = getattr(self, name)
+                effect = Effect(bound_method, name=f"{self.__class__.__name__}.{name}")
+                self._effects.append(effect)
 
     def __repr__(self) -> str:
         """Return a developer-friendly representation of the state."""
@@ -147,4 +175,3 @@ class State(ABC, metaclass=StateMeta):
     def __str__(self) -> str:
         """Return a user-friendly representation of the state."""
         return self.__repr__()
-

@@ -130,7 +130,7 @@ export class SocketIOTransport implements Transport {
 
   onConnectionChange(listener: ConnectionStatusListener): () => void {
     this.connectionListeners.add(listener);
-    listener(this.isConnected())
+    listener(this.isConnected());
     return () => {
       this.connectionListeners.delete(listener);
     };

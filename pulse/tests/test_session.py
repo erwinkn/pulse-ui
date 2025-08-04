@@ -3,6 +3,7 @@ Tests for the Session class.
 """
 
 from unittest.mock import MagicMock, call
+import inspect
 import pytest
 import pulse as ps
 from pulse.session import Session, ActiveRoute
@@ -17,7 +18,11 @@ class MockVDOMNode(Node):
         clean_props = {}
         for k, v in (self.props or {}).items():
             if callable(v):
-                callbacks[k] = v
+                try:
+                    n_params = len(inspect.signature(v).parameters)
+                except ValueError:
+                    n_params = 100  # Assume mock object can take many args
+                callbacks[k] = (v, n_params)
             else:
                 clean_props[k] = v
 
@@ -156,11 +161,13 @@ class TestSession:
 
         self.session.navigate(path)
         active_route = self.session.active_routes[path]
-        active_route.effect.dispose = MagicMock()
+        assert active_route.effect
+        dispose_mock = MagicMock()
+        active_route.effect.dispose = dispose_mock
 
         self.session.leave(path)
 
-        active_route.effect.dispose.assert_called_once()
+        dispose_mock.assert_called_once()
 
     def test_session_close(self):
         paths = ["/a", "/b"]
@@ -172,10 +179,13 @@ class TestSession:
 
         # Mock dispose on each effect
         for route in self.session.active_routes.values():
+            assert route.effect
             route.effect.dispose = MagicMock()
 
         dispose_mocks = [
-            route.effect.dispose for route in self.session.active_routes.values()
+            route.effect.dispose
+            for route in self.session.active_routes.values()
+            if route.effect
         ]
 
         self.session.close()

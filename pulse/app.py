@@ -20,6 +20,7 @@ from pulse.components.registry import registered_react_components
 from pulse.messages import ClientMessage
 from pulse.routing import Layout, Route, RouteTree, add_react_components
 from pulse.session import Session
+from pulse.vendor.flatted import parse
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +117,7 @@ class App:
         @self.sio.event
         def message(sid: str, data: ClientMessage):
             session = self.get_session(sid)
-            logger.info(f"-> Received message: {data}")
-
+            print(f"-> Received message: {data}")
             if data["type"] == "navigate":
                 session.navigate(data["path"])
             elif data["type"] == "callback":
@@ -154,6 +154,7 @@ class App:
     def create_session(self, id: str):
         if id in self.sessions:
             raise ValueError(f"Session {id} already exists")
+        print(f"--> Creating session {id}")
         self.sessions[id] = Session(id, self.routes)
         return self.sessions[id]
 

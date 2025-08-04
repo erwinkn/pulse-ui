@@ -1,92 +1,105 @@
 import asyncio
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from pulse.diff import diff_vdom
+from pulse.diff import VDOM, diff_vdom
+from pulse.hooks import ReactiveState
 from pulse.messages import (
     ServerInitMessage,
+    ServerMessage,
     ServerUpdateMessage,
 )
 from pulse.reactive import Effect, batch
 from pulse.routing import RouteTree
-from pulse.vdom import VDOMNode
+from pulse.vdom import VDOMNode, Node
+
+
+@dataclass
+class ActiveRoute:
+    callback_registry: dict[str, Callable]
+    reactive_state: ReactiveState
+    vdom: VDOM | None
+    effect: Effect | None
 
 
 class Session:
     def __init__(self, id: str, routes: RouteTree) -> None:
         self.id = id
         self.routes = routes
-        self.message_listeners: set[
-            Callable[[ServerUpdateMessage | ServerInitMessage], Awaitable[Any]]
-        ] = set()
+        self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
 
-        self.current_route: str | None = None
-        self.callback_registry: dict[str, Callable] = {}
+        self.active_routes: dict[str, ActiveRoute] = {}
         self.vdom: VDOMNode | None = None
-        self._effect = None
 
     def connect(
         self,
-        message_listener: Callable[
-            [ServerUpdateMessage | ServerInitMessage], Awaitable[Any]
-        ],
+        message_listener: Callable[[ServerMessage], Awaitable[Any]],
     ):
         self.message_listeners.add(message_listener)
-        # Return a disconnect function
-        return lambda: (self.message_listeners.remove(message_listener),)
+        # Return a disconnect function. Use `discard` since there are two ways
+        # of disconnecting a message listener
+        return lambda: (self.message_listeners.discard(message_listener),)
 
-    async def _notify(self, message: ServerUpdateMessage | ServerInitMessage):
-        await asyncio.gather(
-            *(listener(message) for listener in self.message_listeners)
-        )
+    # Use `discard` since there are two ways of disconnecting a message listener
+    def disconnect(self, message_listener: Callable[[ServerMessage], Awaitable[Any]]):
+        self.message_listeners.discard(message_listener)
 
-    def notify(self, message: ServerUpdateMessage | ServerInitMessage):
-        asyncio.create_task(self._notify(message))
+    def notify(self, message: ServerMessage):
+        for listener in self.message_listeners:
+            listener(message)
 
     def close(self):
         # The effect will be garbage collected, and with it the dependencies
         self.message_listeners.clear()
-        self.vdom = None
-        self.callback_registry.clear()
+        for path in list(self.active_routes.keys()):
+            self.leave(path)
+        self.active_routes.clear()
 
-    def execute_callback(self, key: str, args: list | tuple):
-        batch(lambda: self.callback_registry[key](*args))
+    def execute_callback(self, route: str, key: str, args: list | tuple):
+        with batch():
+            self.active_routes[route].callback_registry[key](*args)
 
-    def hydrate(self, path: str):
-        self.current_route = path
-        self.callback_registry.clear()
-        self.vdom = None
+    def navigate(self, path: str):
+        if path in self.active_routes:
+            raise RuntimeError(f"Cannot navigate to already active route '{path}'")
 
         route = self.routes.find(path)
+        active_route = ActiveRoute(
+            callback_registry={},
+            reactive_state=ReactiveState.create(),
+            vdom=None,
+            effect=None,
+        )
 
-        # Initial render
-        node_tree = route.render_fn()
-        vdom_tree, callbacks = node_tree.render()
-        self.vdom = vdom_tree
-        self.callback_registry = callbacks
+        def render():
+            with active_route.reactive_state.start_render() as new_reactive_state:
+                # The render_fn is expected to return a single VDOMNode
+                previous_vdom = active_route.vdom
+                new_node = route.render_fn()
+                new_vdom, new_callbacks = new_node.render()
 
-        # Send the full VDOM to the client for initial hydration
-        self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
+                active_route.reactive_state = new_reactive_state
+                active_route.callback_registry = new_callbacks
+                active_route.vdom = new_vdom
+                if new_reactive_state.render_count == 1:
+                    self.notify(
+                        ServerInitMessage(
+                            type="vdom_init", route=path, vdom=new_vdom
+                        )
+                    )
+                else:
+                    operations = diff_vdom(previous_vdom, new_vdom)
+                    if operations:
+                        self.notify(
+                            ServerUpdateMessage(
+                                type="vdom_update", route=path, ops=operations
+                            )
+                        )
 
-        # Create the effect that will handle re-renders
-        self._effect = create_effect(self.rerender)
+        active_route.effect = Effect(render)
+        self.active_routes[path] = active_route
 
-    def rerender(self):
-        if self.current_route is None:
-            raise RuntimeError("Failed to rerender: no route set for the session!")
-
-        route = self.routes.find(self.current_route)
-
-        new_node_tree = route.render_fn()
-        new_vdom_tree, new_callbacks = new_node_tree.render()
-
-        if self.vdom:
-            operations = diff_vdom(self.vdom, new_vdom_tree)
-        else:
-            operations = []  # Should not happen if hydrate is called first
-
-        self.callback_registry = new_callbacks
-        self.vdom = new_vdom_tree
-
-        # Send diff to client if there are any changes
-        if operations:
-            self.notify(ServerUpdateMessage(type="vdom_update", ops=operations))
+    def leave(self, path: str):
+        active_route = self.active_routes.pop(path)
+        if active_route.effect:
+            active_route.effect.dispose()

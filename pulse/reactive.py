@@ -11,6 +11,7 @@ P = ParamSpec("P")
 EPOCH = ContextVar("EPOCH", default=1)
 SCOPE: ContextVar[Optional[Scope]] = ContextVar("pulse_scope", default=None)
 BATCH: ContextVar[Optional[Batch]] = ContextVar("pulse_batch", default=None)
+IS_PRERENDERING: ContextVar[bool] = ContextVar('pulse_is_prerendering', default=False)
 
 
 class Signal(Generic[T]):
@@ -134,7 +135,6 @@ EffectFn = EffectFnWithCleanup | EffectFnWithoutCleanup
 
 class Effect:
     def __init__(self, fn: EffectFn, name: Optional[str] = None):
-        print("Creating effect", name)
         self.fn = fn
         self.name = name
         self.deps: list[Signal | Computed] = []
@@ -176,6 +176,9 @@ class Effect:
         return False
 
     def _run(self):
+        # Skip effects during prerendering
+        if IS_PRERENDERING.get():
+            return
         current_deps = set(self.deps)
 
         with Scope(parent=SCOPE.get()) as scope, EnsureBatch():

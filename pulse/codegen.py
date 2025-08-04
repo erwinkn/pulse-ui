@@ -1,6 +1,5 @@
 import json
 import logging
-import difflib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,7 +8,7 @@ from mako.template import Template
 from pulse.hooks import ReactiveState
 
 from .routing import Layout, Route, RouteTree
-from .vdom import VDOMNode
+from .reactive import IS_PRERENDERING
 
 logger = logging.getLogger(__file__)
 
@@ -230,7 +229,9 @@ class Codegen:
             output_path = self.output_folder / "routes" / route.file_path()
         # Generate initial UI tree by calling the route function
         with ReactiveState.create().start_render():
+            token = IS_PRERENDERING.set(True)
             initial_node = route.render.fn()  # type: ignore
+            IS_PRERENDERING.reset(token)
         vdom, _ = initial_node.render()
         content = str(
             ROUTE_PAGE_TEMPLATE.render_unicode(

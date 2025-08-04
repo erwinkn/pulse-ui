@@ -1,146 +1,183 @@
 import pulse as ps
 
 
+# State Management
+# ----------------
+# A state class for the counter, demonstrating state variables, methods,
+# computed properties, and effects.
+class CounterState(ps.State):
+    count: int = 0
+
+    def increment(self):
+        self.count += 1
+
+    def decrement(self):
+        self.count -= 1
+
+    @ps.computed
+    def double_count(self) -> int:
+        """A computed property that doubles the count."""
+        return self.count * 2
+
+    @ps.effect
+    def on_count_change(self):
+        """An effect that runs whenever the count changes."""
+        print(f"Effect: Count is now {self.count}. Double is {self.double_count}.")
+
+
+# A state class for the layout, demonstrating persistent state across routes.
+class LayoutState(ps.State):
+    """A state class for the layout, demonstrating persistent state across routes."""
+
+    shared_count: int = 0
+
+    def increment(self):
+        self.shared_count += 1
+
+
+# Components & Pages
+# ------------------
+# Components are the building blocks of a Pulse UI. They can have their own
+# state and render other components.
+
+
 @ps.component
 def home():
-    """Home page with a greeting and interactive button."""
-
-    def handle_click():
-        print("🎉 Button clicked from Python!")
-
+    """A simple and welcoming home page."""
     return ps.div(
-        ps.h1("Welcome to Pulse UI!"),
-        ps.p("This is a Python-powered web application."),
-        ps.button("Click me!", onClick=handle_click),
-        ps.hr(),
-        ps.p("Check the server logs to see the button click messages."),
+        ps.h1("Welcome to Pulse UI!", className="text-4xl font-bold mb-4"),
+        ps.p(
+            "This is a demonstration of a web application built with Python and Pulse.",
+            className="text-lg text-gray-700",
+        ),
+        className="text-center",
     )
 
 
 @ps.component
 def about():
-    """About page with information."""
+    """An about page highlighting key features of Pulse."""
+    features = [
+        "Define UI components entirely in Python.",
+        "Handle frontend events with Python functions.",
+        "Manage state with reactive classes.",
+        "Create layouts and nested routes effortlessly.",
+    ]
     return ps.div(
-        ps.h1("About Pulse UI"),
-        ps.p("Pulse UI bridges Python and React, allowing you to:"),
-        ps.ul(
-            ps.li("Define UI components in Python", key="feature-1"),
-            ps.li("Handle events with Python functions", key="feature-2"),
-            ps.li("Generate TypeScript automatically", key="feature-3"),
-            ps.li("Build reactive web applications", key="feature-4"),
+        ps.h1("About Pulse", className="text-3xl font-bold mb-6"),
+        ps.p(
+            "Pulse bridges the gap between Python and modern web development, enabling you to build interactive UIs with ease.",
+            className="mb-6",
         ),
-        ps.p(ps.a("← Back to Home", href="/")),
+        ps.ul(
+            *[
+                ps.li(feature, className="mb-2 p-2 bg-gray-100 rounded")
+                for feature in features
+            ],
+            className="list-disc list-inside",
+        ),
     )
-
-
-class CounterState(ps.State):
-    count: int = 0
-
-    def increment(self):
-        print("Counter incremented!")
-        self.count += 1
-
-    @ps.effect
-    def log_count(self):
-        print(f"Count is {self.count}")
 
 
 @ps.component
 def counter():
-    """Interactive counter page."""
-    # Both state methods and arbitrary functions work as event handlers
+    """An interactive counter page demonstrating state management."""
+    state = ps.init(CounterState)
 
     def decrement():
-        print("Counter decremented!")
-        state.count -= 1
-
-    state = ps.init(lambda: CounterState())
+        state.count -=1
 
     return ps.div(
-        ps.h1("Counter Example"),
+        ps.h1("Interactive Counter", className="text-3xl font-bold mb-4"),
         ps.div(
-            ps.button("-", onClick=decrement),
-            ps.span(
-                f" Counter: {state.count} ",
-                style={"margin": "0 20px", "fontSize": "18px"},
-            ),
-            ps.button("+", onClick=state.increment),
+            ps.button("Decrement", onClick=decrement, className="btn-primary"),
+            ps.span(f"{state.count}", className="mx-4 text-2xl font-mono"),
+            ps.button("Increment", onClick=state.increment, className="btn-primary"),
+            className="flex items-center justify-center mb-4",
         ),
-        ps.p(ps.Link("← Back to Home", to="/")),
-        ps.p(ps.Link("→ To Child", to="/counter/child")),
-        ps.section(ps.h2("Child section"), ps.Outlet()),
+        ps.p(f"The doubled count is: {state.double_count}", className="text-lg mb-4"),
+        ps.p(
+            "Check your server logs for messages from the @ps.effect.",
+            className="text-sm text-gray-500 mb-6",
+        ),
+        ps.div(
+            ps.Link("Show Nested Route", to="/counter/details", className="link"),
+            className="text-center",
+        ),
+        ps.div(
+            ps.Outlet(),
+            className="mt-6 p-4 border-t border-gray-200",
+        ),
     )
 
 
 @ps.component
-def counter_child():
-    """A second, independent counter."""
-
-    def decrement():
-        print("Child counter decremented!")
-        state.count -= 1
-
-    print("Rendering counter")
-    state = ps.init(lambda: CounterState())
-
-
+def counter_details():
+    """A nested child component for the counter page."""
     return ps.div(
-        ps.h2("Child Counter"),
-        ps.div(
-            ps.button("-", onClick=decrement),
-            ps.span(f" Child Counter: {state.count} ", style={"margin": "0 1rem"}),
-            ps.button("+", onClick=state.increment),
+        ps.h2("Counter Details", className="text-2xl font-bold mb-2"),
+        ps.p(
+            "This is a nested route. It has its own view but can share state if needed."
         ),
-        ps.p(ps.Link("← Back to Counter", to="/counter")),
+        ps.p(
+            ps.Link("Hide Details", to="/counter", className="link mt-2 inline-block")
+        ),
+        className="bg-blue-50 p-4 rounded-lg",
     )
 
 
-class LayoutState(ps.State):
-    theme: str = "light"
-
-    def toggle_theme(self):
-        self.theme = "dark" if self.theme == "light" else "light"
-
-
 @ps.component
-def main_layout():
-    """A layout with persistent state."""
-    state = ps.init(lambda: LayoutState())
+def app_layout():
+    """The main layout for the application, including navigation and a persistent counter."""
+    state = ps.init(LayoutState)
 
     return ps.div(
         ps.header(
-            ps.h2("Pulse App"),
-            ps.p(f"Current theme: {state.theme}"),
-            ps.button("Toggle Theme", onClick=state.toggle_theme),
-            ps.nav(
-                ps.Link("Home", to="/"),
-                " | ",
-                ps.Link("About", to="/about"),
-                " | ",
-                ps.Link("Counter", to="/counter"),
-                style={"padding": "1rem 0"},
+            ps.div(
+                ps.h1("Pulse Demo", className="text-2xl font-bold"),
+                ps.div(
+                    ps.span(f"Shared Counter: {state.shared_count}", className="mr-4"),
+                    ps.button(
+                        "Increment Shared",
+                        onClick=state.increment,
+                        className="btn-secondary",
+                    ),
+                    className="flex items-center",
+                ),
+                className="flex justify-between items-center p-4 bg-gray-800 text-white",
             ),
+            ps.nav(
+                ps.Link("Home", to="/", className="nav-link"),
+                ps.Link("Counter", to="/counter", className="nav-link"),
+                ps.Link("About", to="/about", className="nav-link"),
+                className="flex justify-center space-x-4 p-4 bg-gray-700 text-white rounded-b-lg",
+            ),
+            className="mb-8",
         ),
-        ps.hr(),
-        ps.main(
-            ps.Outlet(),
-        ),
+        ps.main(ps.Outlet(), className="container mx-auto px-4"),
+        className="min-h-screen bg-gray-100 text-gray-800",
     )
 
 
-# Create the Pulse app
+# Routing
+# -------
+# Define the application's routes. A layout route wraps all other routes
+# to provide a consistent navigation experience.
 app = ps.App(
     routes=[
-        ps.Route("/counter", counter, children=[ps.Route("child", counter_child)]),
-        # ps.Layout(
-        #     main_layout,
-        #     children=[
-        #         ps.Route("/", home),
-        #         ps.Route("/about", about),
-        #         ps.Route(
-        #             "/counter", counter, children=[ps.Route("child", counter_child)]
-        #         ),
-        #     ],
-        # )
+        ps.Layout(
+            app_layout,
+            children=[
+                ps.Route("/", home),
+                ps.Route("/about", about),
+                ps.Route(
+                    "/counter",
+                    counter,
+                    children=[
+                        ps.Route("details", counter_details),
+                    ],
+                ),
+            ],
+        )
     ]
 )

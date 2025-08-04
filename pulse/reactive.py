@@ -7,6 +7,7 @@ This module implements a push-pull reactive system inspired by Solid.js.
 from __future__ import annotations
 from collections import deque
 from contextvars import ContextVar, Token
+from turtle import st
 from typing import Any, Callable, Generic, ParamSpec, TypeVar, List, Set, Optional
 
 T = TypeVar("T")
@@ -14,7 +15,7 @@ P = ParamSpec("P")
 
 # --- Globals ---
 
-EPOCH = ContextVar("EPOCH", default=0)
+EPOCH = ContextVar("EPOCH", default=1)
 SCOPE: ContextVar[Optional[Scope]] = ContextVar("pulse_scope", default=None)
 BATCH: ContextVar[Optional[UpdateBatch]] = ContextVar("pulse_batch", default=None)
 PENDING: deque[Signal] = deque()
@@ -77,9 +78,9 @@ class Signal(Generic[T]):
 
     def _do_write(self, value: T):
         if value == self.value:
-            return False
+            return
         self.value = value
-        return True
+        self.last_change = EPOCH.get()
 
     def _push_change(self):
         for obs in self.obs:
@@ -93,6 +94,7 @@ class Signal(Generic[T]):
         else:
             # This update may trigger multiple update iterations, this keeps the logic self-contained within a batch
             with UpdateBatch() as batch:
+                print("Immediate update path")
                 batch.schedule_signal(self, value)
 
 
@@ -117,7 +119,6 @@ class Computed(Generic[T]):
         self.dirty = False
         self.on_stack = False
         self.last_change = -1
-        self.last_verified = -1
         self.deps: list[Signal | Computed] = []
         self.obs: list[Computed | Effect] = []
 
@@ -127,6 +128,8 @@ class Computed(Generic[T]):
 
         if scope := SCOPE.get():
             scope.accessed.add(self)
+
+        print("Reading computed")
         self._recompute_if_necessary()
         return self.value
 
@@ -143,6 +146,7 @@ class Computed(Generic[T]):
             obs._push_change()
 
     def _recompute(self):
+        print("Computed._recompute")
         epoch = EPOCH.get()
         current_deps = set(self.deps)
 
@@ -167,7 +171,11 @@ class Computed(Generic[T]):
 
     def _recompute_if_necessary(self):
         "Recompute if necessary and return whether the value changed"
+        if self.last_change < 0:
+            self._recompute()
+            return
         if not self.dirty:
+            print("Skipping")
             return
 
         # Check dependencies to see if we need to recompute
@@ -177,6 +185,10 @@ class Computed(Generic[T]):
             if dep.last_change > self.last_change:
                 self._recompute()
                 return
+            else:
+                print("Skipping  due to no update deps")
+                print("self.last_change =", self.last_change)
+                print(f"dep.last_change = ", dep.last_change)
 
 
 EffectFnWithoutCleanup = Callable[[], None]
@@ -271,31 +283,36 @@ class UpdateBatch:
         token = None
         if global_batch != self:
             token = BATCH.set(self)
-        with self:
-            n_iters = 0
-            MAX_ITERS = 10000
+        # print("Flushing batch with:")
+        # print(f'- Signals: {self.signals}')
+        # print(f'- Effects: {self.effects}')
+        MAX_ITERS = 10000
+        epoch = start_epoch = EPOCH.get()
+        print(f"Flush with start_epoch = {start_epoch}")
 
-            # NOTE: is there a reason an effect may schedule an effect without a write?
-            while len(self.signals) > 0:
-                for signal, value in self.signals:
-                    signal._do_write(value)
-                    # This will flag dirty all upstream nodes and add the dirty effects to self.effects
-                    signal._push_change()
-                # Reset signals before running effects, so that new writes may accumulate there
-                self.signals = []
+        # NOTE: is there a reason an effect may schedule an effect without a write?
+        while len(self.signals) > 0:
+            epoch += 1
+            EPOCH.set(epoch)
+            if epoch - start_epoch > MAX_ITERS:
+                raise RuntimeError(
+                    f"Pulse's reactive system registered more than {MAX_ITERS} iterations. There is likely an update cycle in your application.\n"
+                    "This is most often caused through a state update during rerender or in an effect that ends up triggering the same rerender or effect."
+                )
 
-                for effect in self.effects:
-                    if effect._should_run():
-                        effect._run()
-                # Reset effects before the next batch of updates
-                self.effects = []
+            for signal, value in self.signals:
+                signal._do_write(value)
+                # This will flag dirty all upstream nodes and add the dirty effects to self.effects
+                signal._push_change()
+            # Reset signals before running effects, so that new writes may accumulate there
+            self.signals = []
 
-                n_iters += 1
-                if n_iters > MAX_ITERS:
-                    raise RuntimeError(
-                        f"Pulse's reactive system registered more than {MAX_ITERS} iterations. There is likely an update cycle in your application.\n"
-                        "This is most often caused through a state update during rerender or in an effect that ends up triggering the same rerender or effect."
-                    )
+            for effect in self.effects:
+                if effect._should_run():
+                    effect._run()
+            # Reset effects before the next batch of updates
+            self.effects = []
+
         if token:
             BATCH.reset(token)
 

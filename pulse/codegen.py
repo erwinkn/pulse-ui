@@ -228,6 +228,8 @@ class Codegen:
             output_path = self.output_folder / "layouts" / route.file_path()
         else:
             output_path = self.output_folder / "routes" / route.file_path()
+        print(f"Generating {route}")
+        print("Output path:", output_path)
         # Generate initial UI tree by calling the route function
         with ReactiveState.create().start_render():
             initial_node = route.render.fn()  # type: ignore

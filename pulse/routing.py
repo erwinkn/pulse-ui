@@ -113,11 +113,18 @@ class Route:
     def file_path(self) -> str:
         path_list = self.path_list()
         path_list = [p for p in path_list if p != LAYOUT_INDICATOR]
-        path = "/".join(self.path_list())
+        path = "/".join(path_list)
         if self.is_index:
             path += "index"
         path += ".tsx"
         return path
+
+    def __repr__(self) -> str:
+        return (
+            f"Route(path='{self.path or '/'}'"
+            + (f", children={len(self.children)}" if self.children else "")
+            + ")"
+        )
 
 
 class Layout:
@@ -143,7 +150,15 @@ class Layout:
         return ROUTE_PATH_SEPARATOR.join(self.path_list())
 
     def file_path(self) -> str:
-        return "/".join(self.path_list()) + ".tsx"
+        path_list = self.path_list()
+        # Convert all parent layout indicators to simply `layout`
+        path_list = [
+            p if p != LAYOUT_INDICATOR else "layout" for p in path_list[:-1]
+        ] + ["_layout.tsx"]
+        return "/".join(path_list)
+
+    def __repr__(self) -> str:
+        return f"Layout(children={len(self.children)})"
 
 
 route = Route
@@ -247,3 +262,13 @@ class RouteTree:
 
     def __len__(self):
         return len(self.routes)
+
+
+def add_react_components(
+    routes: Sequence[Route | Layout], components: list[ReactComponent]
+):
+    for route in routes:
+        if route.components is None:
+            route.components = components
+        if route.children:
+            add_react_components(route.children, components)

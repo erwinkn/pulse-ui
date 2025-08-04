@@ -79,7 +79,7 @@ export class SocketIOTransport implements Transport {
         console.log("[SocketIOTransport] Connected:", this.socket?.id);
 
         for (const payload of this.messageQueue) {
-          console.log("[SocketIOTransport] Sending queued message:", payload);
+          // console.log("[SocketIOTransport] Sending queued message:", payload);
           this.socket?.emit("message", payload);
         }
         this.messageQueue = [];
@@ -100,7 +100,7 @@ export class SocketIOTransport implements Transport {
       });
 
       this.socket.on("message", (data: ServerMessage) => {
-        console.log("[SocketIOTransport] Received message:", data);
+        // console.log("[SocketIOTransport] Received message:", data);
         this.listener?.(data);
       });
     });
@@ -116,10 +116,10 @@ export class SocketIOTransport implements Transport {
 
   async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
-      console.log("[SocketIOTransport] Sending:", payload);
+      // console.log("[SocketIOTransport] Sending:", payload);
       this.socket!.emit("message", payload);
     } else {
-      console.log("[SocketIOTransport] Queuing message:", payload);
+      // console.log("[SocketIOTransport] Queuing message:", payload);
       this.messageQueue.push(payload);
     }
   }
@@ -130,6 +130,7 @@ export class SocketIOTransport implements Transport {
 
   onConnectionChange(listener: ConnectionStatusListener): () => void {
     this.connectionListeners.add(listener);
+    listener(this.isConnected())
     return () => {
       this.connectionListeners.delete(listener);
     };

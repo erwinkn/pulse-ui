@@ -6,7 +6,6 @@ import React, {
   useContext,
   type ComponentType,
 } from "react";
-import { useLocation } from "react-router";
 import { VDOMRenderer } from "./renderer";
 import { PulseClient } from "./client";
 import { SocketIOTransport } from "./transport";
@@ -77,17 +76,10 @@ export function PulseProvider({ children, config }: PulseProviderProps) {
     const inBrowser = typeof window !== "undefined";
     if (inBrowser) {
       // Listen for connection state changes
-      client.onConnectionChange((connected) => {
+      const unsubscribe = client.onConnectionChange((connected) => {
         setConnectionError(!connected);
       });
-      client.connect().catch(() => {
-        setConnectionError(true);
-      });
-
-      return () => {
-        // Also clears the onConnectionChange subscription
-        client.disconnect();
-      };
+      return () => unsubscribe();
     }
   }, [client]);
 
@@ -133,13 +125,16 @@ export function PulseView({
   const [vdom, setVdom] = useState(client.getVDOM(path) ?? initialVDOM);
 
   useEffect(() => {
-    const unsubscribe = client.subscribe(path, setVdom);
-    client.navigate(path);
+    const inBrowser = typeof window !== "undefined";
+    if (inBrowser) {
+      const unsubscribe = client.subscribe(path, setVdom);
+      client.navigate(path);
 
-    return () => {
-      unsubscribe();
-      client.leave(path);
-    };
+      return () => {
+        unsubscribe();
+        client.leave(path);
+      };
+    }
   }, [client, path]);
 
   const renderHelpers = useMemo(() => {

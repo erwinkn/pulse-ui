@@ -63,6 +63,7 @@ def counter():
             ps.button("+", onClick=state.increment),
         ),
         ps.p(ps.Link("← Back to Home", to="/")),
+        ps.p(ps.Link("→ To Child", to="/counter/child")),
         ps.section(ps.h2("Child section"), ps.Outlet()),
     )
 
@@ -88,11 +89,51 @@ def counter_child():
     )
 
 
+class LayoutState(ps.State):
+    theme: str = "light"
+
+    def toggle_theme(self):
+        self.theme = "dark" if self.theme == "light" else "light"
+
+
+@ps.component
+def main_layout():
+    """A layout with persistent state."""
+    state = ps.init(lambda: LayoutState())
+
+    return ps.div(
+        ps.header(
+            ps.h2("Pulse App"),
+            ps.p(f"Current theme: {state.theme}"),
+            ps.button("Toggle Theme", onClick=state.toggle_theme),
+            ps.nav(
+                ps.Link("Home", to="/"),
+                " | ",
+                ps.Link("About", to="/about"),
+                " | ",
+                ps.Link("Counter", to="/counter"),
+                style={"padding": "1rem 0"},
+            ),
+        ),
+        ps.hr(),
+        ps.main(
+            ps.Outlet(),
+        ),
+    )
+
+
 # Create the Pulse app
 app = ps.App(
     routes=[
-        ps.Route("/about", about),
-        ps.Route("/", home),
-        ps.Route("/counter", counter, [ps.Route("/child", counter_child)]),
+        ps.Layout(
+            main_layout,
+            children=[
+                ps.Route("/", home),
+                ps.Route("/about", about),
+                ps.Route(
+                    "/counter", counter, children=[ps.Route("child", counter_child)]
+                ),
+            ],
+        )
     ]
 )

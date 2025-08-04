@@ -2,7 +2,6 @@ import type {
   Transport,
   ServerMessage,
   ClientCallbackMessage,
-  ClientNavigateMessage,
   ConnectionStatusListener,
 } from "./transport";
 import type { VDOM, VDOMNode } from "./vdom";
@@ -14,6 +13,7 @@ export class PulseClient {
   private vdoms: Map<string, VDOM | null>;
   private vdomListeners: Map<string, Set<VDOMNodeListener>>;
   private transport: Transport;
+  private activeViews = 0;
 
   constructor(transport: Transport) {
     this.transport = transport;
@@ -37,14 +37,20 @@ export class PulseClient {
   }
 
   public async navigate(path: string) {
-    await this.connect();
-    console.log("[PulseClient] Navigating to ", path);
+    this.activeViews += 1;
+    if (this.activeViews == 1) {
+      await this.connect();
+    }
+    // console.log("[PulseClient] Navigating to ", path);
     await this.transport.sendMessage({ type: "navigate", path });
   }
 
   public async leave(path: string) {
-    await this.connect();
-    console.log("[PulseClient] Leaving ", path);
+    this.activeViews -= 1;
+    if (this.activeViews == 0) {
+      await this.disconnect();
+    }
+    // console.log("[PulseClient] Leaving ", path);
     await this.transport.sendMessage({ type: "leave", path });
   }
 
@@ -61,7 +67,7 @@ export class PulseClient {
   }
 
   private handleServerMessage = (message: ServerMessage) => {
-    console.log("[PulseClient] Received message:", message);
+    // console.log("[PulseClient] Received message:", message);
     switch (message.type) {
       case "vdom_init":
         this.vdoms.set(message.path, message.vdom);

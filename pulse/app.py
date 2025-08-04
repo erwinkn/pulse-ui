@@ -16,8 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import os
 from pulse.codegen import Codegen, CodegenConfig
+from pulse.components.registry import registered_react_components
 from pulse.messages import ClientMessage
-from pulse.routing import Layout, Route, RouteTree
+from pulse.routing import Layout, Route, RouteTree, add_react_components
 from pulse.session import Session
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,8 @@ class App:
             codegen: Optional codegen configuration.
         """
         routes = routes or []
+        # Auto-add React components to all routes
+        add_react_components(routes, registered_react_components())
         self.routes = RouteTree(routes)
         self.sessions: dict[str, Session] = {}
 

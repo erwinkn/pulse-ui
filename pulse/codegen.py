@@ -6,6 +6,8 @@ from pathlib import Path
 
 from mako.template import Template
 
+from pulse.hooks import ReactiveState
+
 from .routing import Route, RouteTree
 from .vdom import VDOMNode
 
@@ -127,11 +129,14 @@ const externalComponents: ComponentRegistry = {};
 // The initial VDOM is bootstrapped from the server
 const initialVDOM: VDOM = ${vdom};
 
+const path = "${route.get_full_path()}";
+
 export default function RouteComponent() {
   return (
     <PulseView
       initialVDOM={initialVDOM}
       externalComponents={externalComponents}
+      path={path}
     />
   );
 }
@@ -212,7 +217,8 @@ class Codegen:
     def generate_route(self, route: Route):
         output_path = self.output_folder / "routes" / route.get_file_path()
         # Generate initial UI tree by calling the route function
-        initial_node = route.render_fn()
+        with ReactiveState.create().start_render():
+          initial_node = route.render_fn()
         vdom, _ = initial_node.render()
         content = str(
             ROUTE_PAGE_TEMPLATE.render_unicode(

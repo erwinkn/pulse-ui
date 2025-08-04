@@ -8,11 +8,13 @@ import type { VDOMNode, VDOMUpdate } from "./vdom";
 // Based on pulse/messages.py
 export interface ServerInitMessage {
   type: "vdom_init";
+  path: string;
   vdom: VDOMNode;
 }
 
 export interface ServerUpdateMessage {
   type: "vdom_update";
+  path: string;
   ops: VDOMUpdate[];
 }
 
@@ -20,16 +22,24 @@ export type ServerMessage = ServerInitMessage | ServerUpdateMessage;
 
 export interface ClientCallbackMessage {
   type: "callback";
+  path: string;
   callback: string;
   args: any[];
 }
 
 export interface ClientNavigateMessage {
   type: "navigate";
-  route: string;
+  path: string;
+}
+export interface ClientLeaveMessage {
+  type: "leave";
+  path: string;
 }
 
-export type ClientMessage = ClientCallbackMessage | ClientNavigateMessage;
+export type ClientMessage =
+  | ClientCallbackMessage
+  | ClientNavigateMessage
+  | ClientLeaveMessage;
 
 // =================================================================
 // Transport Abstraction

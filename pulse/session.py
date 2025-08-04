@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -84,7 +83,7 @@ class Session:
                 if new_reactive_state.render_count == 1:
                     self.notify(
                         ServerInitMessage(
-                            type="vdom_init", route=path, vdom=new_vdom
+                            type="vdom_init", path=path, vdom=new_vdom
                         )
                     )
                 else:
@@ -92,7 +91,7 @@ class Session:
                     if operations:
                         self.notify(
                             ServerUpdateMessage(
-                                type="vdom_update", route=path, ops=operations
+                                type="vdom_update", path=path, ops=operations
                             )
                         )
 

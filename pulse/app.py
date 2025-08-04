@@ -5,9 +5,9 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import asyncio
 import logging
 from enum import IntEnum
-import socket
 from typing import List, Optional, TypeVar
 
 import socketio
@@ -99,7 +99,9 @@ class App:
             logger.info(f"-> Creating session: {sid}")
             session = self.create_session(sid)
             session.connect(
-                lambda message: self.sio.emit("message", message, to=sid),
+                lambda message: asyncio.create_task(
+                    self.sio.emit("message", message, to=sid)
+                ),
             )
 
         @self.sio.event
@@ -114,9 +116,11 @@ class App:
             logger.info(f"-> Received message: {data}")
 
             if data["type"] == "navigate":
-                session.hydrate(data["route"])
+                session.navigate(data["path"])
             elif data["type"] == "callback":
-                session.execute_callback(data["callback"], data["args"])
+                session.execute_callback(data["path"], data["callback"], data["args"])
+            elif data["type"] == "leave":
+                session.leave(data["path"])
             else:
                 logger.warning(f"Unknown message type received: {data}")
 

@@ -17,7 +17,6 @@ def home():
     )
 
 
-
 @ps.route("/about")
 def about():
     """About page with information."""
@@ -35,7 +34,7 @@ def about():
 
 
 class CounterState(ps.State):
-    count: int = 4
+    count: int = 0
 
     def increment(self):
         print("Counter incremented!")
@@ -63,10 +62,29 @@ def counter():
             ),
             ps.button("+", onClick=state.increment),
         ),
-        ps.p(
-            "Note: This is a simple demo. State management would require additional implementation."
-        ),
         ps.p(ps.Link("← Back to Home", to="/")),
+        ps.section(ps.h2("Child section"), ps.Outlet()),
+    )
+
+
+@ps.route("/child", parent=counter)
+def child_route():
+    """A second, independent counter."""
+
+    def decrement():
+        print("Child counter decremented!")
+        state.count -= 1
+
+    state = ps.init(lambda: CounterState())
+
+    return ps.div(
+        ps.h2("Child Counter"),
+        ps.div(
+            ps.button("-", onClick=decrement),
+            ps.span(f" Child Counter: {state.count} ", style={"margin": "0 1rem"}),
+            ps.button("+", onClick=state.increment),
+        ),
+        ps.p(ps.Link("← Back to Counter", to="/counter")),
     )
 
 

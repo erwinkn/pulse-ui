@@ -1,11 +1,12 @@
 import re
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 
 from pulse.components.registry import ReactComponent, registered_react_components
 from pulse.vdom import Node
 
+ROUTE_PATH_SEPARATOR = '|'
 
 @dataclass
 class PathParameters:
@@ -100,33 +101,21 @@ class Route:
 
         self.segments = parse_route_path(path)
 
-    def get_full_path(self) -> str:
+    def get_path_parts(self) -> Sequence[str]:
         if self.parent:
-            return f"{self.parent.get_full_path()}/{self.path}"
-        return self.path
+            return [*self.parent.get_path_parts(), self.path]
+        return [self.path]
+    
+    def get_full_path(self):
+        return ROUTE_PATH_SEPARATOR.join(self.get_path_parts())
 
     def get_file_path(self) -> str:
-        path = self.get_full_path()
+        path = self.get_path_parts()
+        path = "/".join(path)
         if self.is_index:
             path += "index"
         path += ".tsx"
         return path
-
-    def get_safe_path(self) -> str:
-        full_path = self.get_full_path()
-        # path can contain characters that are not valid in filenames.
-        safe_path = (
-            full_path.replace("/", "_")
-            .replace("-", "_")
-            .replace(":", "param_")
-            .replace("?", "opt_")
-            .replace("*", "splat")
-        )
-        if safe_path.startswith("_"):
-            safe_path = safe_path[1:]
-        if not safe_path:
-            safe_path = "index"
-        return safe_path
 
     def __call__(self):
         return self.render_fn()
@@ -192,7 +181,7 @@ class Route:
 
 
 def route(
-    path: str, components: list[ReactComponent] | None = None
+    path: str, components: list[ReactComponent] | None = None, parent: Optional[Route] = None
 ) -> Callable[[Callable[[], Node]], Route]:
     """
     Decorator to define a route with its component dependencies.
@@ -208,7 +197,7 @@ def route(
         components = registered_react_components()
 
     def decorator(render_func: Callable[[], Node]) -> Route:
-        route = Route(path, render_func, components=components)
+        route = Route(path, render_func, components=components, parent=parent)
         add_route(route)
         return route
 
@@ -307,14 +296,19 @@ class RouteTree:
         self.routes.append(route)
 
     def find(self, path: str):
-        path = normalize_path(path)
-        for route in self.routes:
-            if route.path == path:
-                return route
-
-        raise ValueError(
-            f"No route found for path '{path}' (hierarchical routes are not yet implemented!)"
-        )
+        parts = path.split(ROUTE_PATH_SEPARATOR)
+        result: Route | None = None
+        routes = self.routes
+        for path_fragment in parts:
+            path_fragment = normalize_path(path_fragment)
+            for route in routes:
+                if route.path == path_fragment:
+                    result = route
+                    routes = route.children
+                    break
+        if result is None:
+            raise ValueError(f"No route found for path '{'/'.join(path)}'")
+        return result
 
     def __iter__(self):
         return iter(self.routes)

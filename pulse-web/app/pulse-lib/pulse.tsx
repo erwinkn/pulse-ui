@@ -121,21 +121,26 @@ export function PulseProvider({ children, config }: PulseProviderProps) {
 export interface PulseViewProps {
   initialVDOM: VDOM;
   externalComponents: ComponentRegistry;
+  path: string;
 }
 
-export function PulseView({ initialVDOM, externalComponents }: PulseViewProps) {
+export function PulseView({
+  initialVDOM,
+  externalComponents,
+  path,
+}: PulseViewProps) {
   const client = usePulseClient();
-  const [vdom, setVdom] = useState(initialVDOM);
-  const location = useLocation();
+  const [vdom, setVdom] = useState(client.getVDOM(path) ?? initialVDOM);
 
   useEffect(() => {
-    const unsubscribe = client.subscribe(setVdom);
-    const route = location.pathname + location.search;
-    client.navigate(route);
+    const unsubscribe = client.subscribe(path, setVdom);
+    client.navigate(path);
+
     return () => {
       unsubscribe();
+      client.leave(path);
     };
-  }, [client, location, initialVDOM]);
+  }, [client, path]);
 
   const renderHelpers = useMemo(() => {
     const callbackCache = new Map<string, (...args: any[]) => void>();
@@ -144,7 +149,7 @@ export function PulseView({ initialVDOM, externalComponents }: PulseViewProps) {
       let fn = callbackCache.get(key);
       if (!fn) {
         // IMPORTANT: no arguments for now
-        fn = () => client.invokeCallback(key, []);
+        fn = () => client.invokeCallback(path, key, []);
         callbackCache.set(key, fn);
       }
       return fn;
@@ -159,7 +164,7 @@ export function PulseView({ initialVDOM, externalComponents }: PulseViewProps) {
     };
 
     return { getCallback, getComponent };
-  }, [client, externalComponents]);
+  }, [client, externalComponents, path]);
 
   return (
     <PulseRenderContext.Provider value={renderHelpers}>

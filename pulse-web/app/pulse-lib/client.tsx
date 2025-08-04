@@ -11,13 +11,14 @@ import { applyVDOMUpdates } from "./renderer";
 type VDOMNodeListener = (node: VDOMNode) => void;
 
 export class PulseClient {
-  private vdom: VDOM | null;
-  private vdomListeners: Set<VDOMNodeListener> = new Set();
+  private vdoms: Map<string, VDOM | null>;
+  private vdomListeners: Map<string, Set<VDOMNodeListener>>;
   private transport: Transport;
 
   constructor(transport: Transport) {
     this.transport = transport;
-    this.vdom = null;
+    this.vdoms = new Map();
+    this.vdomListeners = new Map();
   }
 
   public connect() {
@@ -35,10 +36,16 @@ export class PulseClient {
     });
   }
 
-  public async navigate(route: string) {
+  public async navigate(path: string) {
     await this.connect();
-    console.log("[PulseClient] Navigating to ", route);
-    await this.transport.sendMessage({ type: "navigate", route });
+    console.log("[PulseClient] Navigating to ", path);
+    await this.transport.sendMessage({ type: "navigate", path });
+  }
+
+  public async leave(path: string) {
+    await this.connect();
+    console.log("[PulseClient] Leaving ", path);
+    await this.transport.sendMessage({ type: "leave", path });
   }
 
   public disconnect() {
@@ -57,42 +64,71 @@ export class PulseClient {
     console.log("[PulseClient] Received message:", message);
     switch (message.type) {
       case "vdom_init":
-        this.vdom = message.vdom;
-        this.notifyVDOMListeners(this.vdom);
+        this.vdoms.set(message.path, message.vdom);
+        this.notifyVDOMListeners(message.path, this.vdoms.get(message.path)!);
         break;
       case "vdom_update":
-        if (!this.vdom) {
+        const currentVDOM = this.vdoms.get(message.path);
+        if (!currentVDOM) {
           console.error(
-            "[PulseClient] Received VDOM update before initial tree was set."
+            `[PulseClient] Received VDOM update for path ${message.path} before initial tree was set.`
           );
           return;
         }
-        this.vdom = applyVDOMUpdates(this.vdom, message.ops);
-        this.notifyVDOMListeners(this.vdom);
+        this.vdoms.set(
+          message.path,
+          applyVDOMUpdates(currentVDOM, message.ops)
+        );
+        this.notifyVDOMListeners(message.path, this.vdoms.get(message.path)!);
         break;
     }
   };
 
-  public invokeCallback = (callback: string, args: any[]) => {
+  public invokeCallback = (path: string, callback: string, args: any[]) => {
     const payload: ClientCallbackMessage = {
       type: "callback",
+      path,
       callback,
       args,
     };
     this.transport.sendMessage(payload);
   };
 
-  public subscribe(listener: VDOMNodeListener): () => void {
-    this.vdomListeners.add(listener);
+  public getVDOM(path: string): VDOM | null {
+    return this.vdoms.get(path) ?? null;
+  }
+
+  public subscribe(path: string, listener: VDOMNodeListener): () => void {
+    if (!this.vdomListeners.has(path)) {
+      this.vdomListeners.set(path, new Set());
+    }
+    this.vdomListeners.get(path)!.add(listener);
+
+    // Also immediately notify the new listener with the current VDOM if it exists
+    const currentVDOM = this.vdoms.get(path);
+    if (currentVDOM) {
+      listener(currentVDOM);
+    }
+
     return () => {
-      this.vdomListeners.delete(listener);
+      const listeners = this.vdomListeners.get(path);
+      if (listeners) {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          this.vdomListeners.delete(path);
+          this.vdoms.delete(path); // Clean up VDOM when no more listeners
+        }
+      }
     };
   }
 
-  private notifyVDOMListeners(vdom: VDOM) {
-    const listeners = Array.from(this.vdomListeners);
-    for (const listener of listeners) {
-      listener(vdom);
+  private notifyVDOMListeners(path: string, vdom: VDOM) {
+    const listeners = this.vdomListeners.get(path);
+    if (listeners) {
+      const listenersArray = Array.from(listeners);
+      for (const listener of listenersArray) {
+        listener(vdom);
+      }
     }
   }
 }

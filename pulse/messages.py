@@ -6,12 +6,13 @@ from pulse.vdom import VDOMNode
 
 class ServerInitMessage(TypedDict):
     type: Literal["vdom_init"]
-    route: str
+    path: str
     vdom: VDOMNode
+
 
 class ServerUpdateMessage(TypedDict):
     type: Literal["vdom_update"]
-    route: str
+    path: str
     ops: list[VDOMOperation]
 
 
@@ -20,18 +21,19 @@ ServerMessage = ServerInitMessage | ServerUpdateMessage
 
 class ClientCallbackMessage(TypedDict):
     type: Literal["callback"]
-    route: str
+    path: str
     callback: str
     args: list[Any]
 
 
 class ClientNavigateMessage(TypedDict):
     type: Literal["navigate"]
-    route: str
-
-class ClientLeaveMesasge(TypedDict):
-    type: Literal['leave']
-    route: str
+    path: str
 
 
-ClientMessage = ClientCallbackMessage | ClientNavigateMessage
+class ClientLeaveMessage(TypedDict):
+    type: Literal["leave"]
+    path: str
+
+
+ClientMessage = ClientCallbackMessage | ClientNavigateMessage | ClientLeaveMessage

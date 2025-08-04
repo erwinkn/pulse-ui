@@ -1,113 +1,325 @@
-from contextvars import ContextVar
-import logging
-from typing import TYPE_CHECKING, Any, Callable, Optional
+"""
+The reactive core of Pulse UI.
 
-# Avoid circular import -> we can only reference State in a quoted type hint
-if TYPE_CHECKING:
-    from pulse.state import State
+This module implements a push-pull reactive system inspired by Solid.js.
+"""
+
+from __future__ import annotations
+from collections import deque
+from contextvars import ContextVar, Token
+from typing import Any, Callable, Generic, ParamSpec, TypeVar, List, Set, Optional
+
+T = TypeVar("T")
+P = ParamSpec("P")
+
+# --- Globals ---
+
+EPOCH = ContextVar("EPOCH", default=0)
+SCOPE: ContextVar[Optional[Scope]] = ContextVar("pulse_scope", default=None)
+BATCH: ContextVar[Optional[UpdateBatch]] = ContextVar("pulse_batch", default=None)
+PENDING: deque[Signal] = deque()
+EFFECTS: deque[Effect] = deque()
 
 
-class InitState:
-    def __init__(self, value: Any, initialized: bool, last_call: int):
-        self.state = value
-        self.initialized = initialized
-        self.last_call = last_call
+# --- Reactive Nodes ---
 
-    @staticmethod
-    def empty():
-        return InitState(value=None, initialized=False, last_call=-1)
+
+# class Node(Generic[T]):
+#     def __init__(self, value: T, name: Optional[str] = None):
+#         self.value = value
+#         self.name = name
+#         self.last_change = -1
+#         self.last_verified = -1
+#         self.deps: List[Node] = []
+#         self.obs: List[Node] = []
+#         self.dirty = False
+#         self.inactive = False
+#         self.on_stack = False
+
+#     def __call__(self) -> T:
+#         return self.read()
+
+#     def read(self) -> T:
+#         raise NotImplementedError
+
+#     def write(self, value: T):
+#         raise NotImplementedError
+
+#     def watch_dep(self, node: Node):
+#         # NOTE: in the past I ran into bugs where this caused multiple instances of the
+#         # dependency link to be registered, so let's be careful about this
+#         node.obs.append(self)
+
+#     def stop_watching_deps(self):
+#         for dep in self.deps:
+#             if self in dep.obs:
+#                 dep.obs.remove(self)
+#         self.deps = []
+
+
+class Signal(Generic[T]):
+    def __init__(self, value: T, name: Optional[str] = None):
+        self.value = value
+        self.name = name
+        self.obs: list[Computed | Effect] = []
+        self.last_change = -1
+
+    def read(self) -> T:
+        if scope := SCOPE.get():
+            scope.accessed.add(self)
+        return self.value
+
+    def __call__(self) -> T:
+        return self.read()
+
+    def _add_obs(self, obs: Computed | Effect):
+        self.obs.append(obs)
+
+    def _do_write(self, value: T):
+        if value == self.value:
+            return False
+        self.value = value
+        return True
+
+    def _push_change(self):
+        for obs in self.obs:
+            obs._push_change()
+
+    def write(self, value: T):
+        # Do not perform the equality check immediately, in case it's costly or
+        # has side effects (you never know in Python).
+        if batch := BATCH.get():
+            batch.schedule_signal(self, value)
+        else:
+            # This update may trigger multiple update iterations, this keeps the logic self-contained within a batch
+            with UpdateBatch() as batch:
+                batch.schedule_signal(self, value)
+
+
+# -- NOTE about dirty status
+# "Dirty" means "may have changed". It's part of the push phase when a signal is
+# written. During the pull phase, where we rerun effects and recompute their
+# dependencies, we verify whether the change is real or not.
+
+# -- NOTE about skipping inactive compute nodes
+# If a computed was used in an effect, that effect reran, and the computed is
+# not used anymore, it will have been marked as dirty and not have been updated.
+# This will automatically opt it out of graph propagation, until it's read
+# again.
+
+
+class Computed(Generic[T]):
+    def __init__(self, fn: Callable[[], T], name: Optional[str] = None):
+        self.fn = fn
+        self.value: T = None  # type: ignore
+        self.name = name
+        # self.active = False
+        self.dirty = False
+        self.on_stack = False
+        self.last_change = -1
+        self.last_verified = -1
+        self.deps: list[Signal | Computed] = []
+        self.obs: list[Computed | Effect] = []
+
+    def read(self) -> T:
+        if self.on_stack:
+            raise RuntimeError("Circular dependency detected")
+
+        if scope := SCOPE.get():
+            scope.accessed.add(self)
+        self._recompute_if_necessary()
+        return self.value
+
+    def __call__(self) -> T:
+        return self.read()
+
+    def _push_change(self):
+        # Skip inactive nodes.
+        if self.dirty:
+            return
+
+        self.dirty = True
+        for obs in self.obs:
+            obs._push_change()
+
+    def _recompute(self):
+        epoch = EPOCH.get()
+        current_deps = set(self.deps)
+
+        prev_value = self.value
+        with Scope(parent=SCOPE.get()) as scope:
+            self.on_stack = True
+            self.value = self.fn()
+            self.on_stack = False
+            self.dirty = False
+            if prev_value != self.value:
+                self.last_change = epoch
+
+        new_deps = scope.accessed
+        add_deps = new_deps - current_deps
+        remove_deps = current_deps - new_deps
+        for dep in add_deps:
+            dep.obs.append(self)
+        for dep in remove_deps:
+            dep.obs.remove(self)
+
+        self.deps = list(new_deps)
+
+    def _recompute_if_necessary(self):
+        "Recompute if necessary and return whether the value changed"
+        if not self.dirty:
+            return
+
+        # Check dependencies to see if we need to recompute
+        for dep in self.deps:
+            if isinstance(dep, Computed):
+                dep._recompute_if_necessary()
+            if dep.last_change > self.last_change:
+                self._recompute()
+                return
+
+
+EffectFnWithoutCleanup = Callable[[], None]
+EffectCleanup = Callable[[], None]
+EffectFnWithCleanup = Callable[[], EffectCleanup]
+EffectFn = EffectFnWithCleanup | EffectFnWithoutCleanup
+
+
+class Effect:
+    def __init__(self, fn: EffectFn, name: Optional[str] = None):
+        self.fn = fn
+        self.name = name
+        self.deps: list[Signal | Computed] = []
+        self.cleanup: Optional[EffectCleanup] = None
+
+        self.on_stack = True
+        self._run()
+        self.on_stack = False
+
+    def _push_change(self):
+        batch = BATCH.get()
+        # Use assert as this case should be impossible
+        assert batch is not None, (
+            "Effect._push_change() should never be called without a BATCH ContextVar"
+        )
+        batch.effects.append(self)
+
+    def _should_run(self):
+        epoch = EPOCH.get()
+        # Check dependencies in the order they were registered. That way, if
+        # there is a conditional dependency that changed, we'll determine that
+        # we need to run just by looking at the condition and we'll skip the
+        # dependencies under the condition (that may not need to run).
+        for dep in self.deps:
+            # True for both signals and computeds
+            if dep.last_change == epoch:
+                return True
+            if isinstance(dep, Computed) and dep._recompute_if_necessary():
+                return True
+        return False
+
+    def _run(self):
+        # TODO: cleanup -> run -> update deps
+        current_deps = set(self.deps)
+
+        with Scope(parent=SCOPE.get()) as scope:
+            if self.cleanup:
+                self.cleanup()
+            self.cleanup = self.fn()
+
+        new_deps = scope.accessed
+        add_deps = new_deps - current_deps
+        remove_deps = current_deps - new_deps
+        for dep in add_deps:
+            dep.obs.append(self)
+        for dep in remove_deps:
+            dep.obs.remove(self)
+
+        self.deps = list(new_deps)
+
+
+# --- Scope & Dependency Management ---
+
+
+class Scope:
+    def __init__(self, parent: Optional[Scope] = None):
+        self.parent = parent
+        self.accessed: Set[Signal | Computed] = set()
+
+    def __enter__(self):
+        self._token = SCOPE.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        SCOPE.reset(self._token)
 
 
 class UpdateBatch:
-    def __init__(self, flush_on_release=True) -> None:
-        self.updates: set[Callable] = set()
-        self.flush_on_release = flush_on_release
+    def __init__(self) -> None:
+        self.signals: list[tuple[Signal, Any]] = []
+        self.effects: list[Effect] = []
 
-    def schedule(self, update: Callable):
-        self.updates.add(update)
+    def schedule_signal(self, signal: Signal[T], value: T):
+        self.signals.append((signal, value))
+
+    def schedule_effect(self, effect: Effect):
+        self.effects.append(effect)
 
     def flush(self):
-        for fn in self.updates:
-            try:
-                fn()
-            except Exception as e:
-                logging.error(f"Error: {e}")
-        self.updates.clear()
+        # Make sure this batch accumulates any writes that may happen during the update cycle
+        global_batch = BATCH.get()
+        token = None
+        if global_batch != self:
+            token = BATCH.set(self)
+        with self:
+            n_iters = 0
+            MAX_ITERS = 10000
+
+            # NOTE: is there a reason an effect may schedule an effect without a write?
+            while len(self.signals) > 0:
+                for signal, value in self.signals:
+                    signal._do_write(value)
+                    # This will flag dirty all upstream nodes and add the dirty effects to self.effects
+                    signal._push_change()
+                # Reset signals before running effects, so that new writes may accumulate there
+                self.signals = []
+
+                for effect in self.effects:
+                    if effect._should_run():
+                        effect._run()
+                # Reset effects before the next batch of updates
+                self.effects = []
+
+                n_iters += 1
+                if n_iters > MAX_ITERS:
+                    raise RuntimeError(
+                        f"Pulse's reactive system registered more than {MAX_ITERS} iterations. There is likely an update cycle in your application.\n"
+                        "This is most often caused through a state update during rerender or in an effect that ends up triggering the same rerender or effect."
+                    )
+        if token:
+            BATCH.reset(token)
 
     def __enter__(self):
-        self._token = UPDATE_BATCH.set(self)
+        self._token = BATCH.set(self)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        UPDATE_BATCH.reset(self._token)
-        if self.flush_on_release:
-            self.flush()
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        # Flush while this batch is still global, as .flush() will check for it anyways
+        self.flush()
+        BATCH.reset(self._token)
 
 
-UPDATE_BATCH: ContextVar[UpdateBatch | None] = ContextVar(
-    "pulse-update-scheduler", default=None
-)
+# --- Utilities ---
 
 
-class ReactiveContext:
-    """
-    Context object that tracks state access during rendering.
-    """
-
-    # Map of state instances to the properties accessed
-    initialized: bool
-    init: InitState
-    client_states: "dict[State, set[str]]"
-    # Tracks the number of rerenders
-    counter: int
-
-    def __init__(
-        self,
-        initialized: bool = False,
-        init: Optional[InitState] = None,
-        client_states: Optional[dict] = None,
-        counter: int = 0,
-    ) -> None:
-        self.initialized = initialized
-        self.init = init if init is not None else InitState.empty()
-        self.client_states = client_states if client_states is not None else {}
-        self.counter = counter
-
-    @staticmethod
-    def empty():
-        return ReactiveContext(
-            initialized=False,
-            init=InitState.empty(),
-            client_states={},
-            counter=0,
-        )
-
-    def next_render(self):
-        return ReactiveContext(
-            initialized=self.initialized,
-            init=self.init,
-            client_states={},
-            counter=self.counter + 1,
-        )
-
-    def track_state_access(self, state: "State", property_name: str):
-        """Track that a state property was accessed during rendering."""
-        if state not in self.client_states:
-            self.client_states[state] = set()
-
-        self.client_states[state].add(property_name)
-
-    def __enter__(self):
-        """Enter the context manager - set this as the global render context."""
-        self._reset_token = REACTIVE_CONTEXT.set(self)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Exit the context manager - restore the previous render context."""
-        REACTIVE_CONTEXT.reset(self._reset_token)
-        return False
+def untrack(fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    with Scope():
+        return fn(*args, **kwargs)
 
 
-REACTIVE_CONTEXT: ContextVar[Optional[ReactiveContext]] = ContextVar(
-    "pulse-render-context", default=None
-)
+def batch(fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    with UpdateBatch():
+        return fn(*args, **kwargs)
+
+
+class InvariantError(Exception): ...

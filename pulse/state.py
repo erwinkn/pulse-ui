@@ -5,14 +5,11 @@ This module provides the base State class and reactive property system
 that enables automatic re-rendering when state changes.
 """
 
-from collections import defaultdict
-from typing import Any, Iterable, Callable, TypeVar
 from abc import ABC, ABCMeta
+from typing import Any, TypeVar
 
-from pulse.reactive import REACTIVE_CONTEXT, UPDATE_BATCH
+from pulse.reactive import Signal
 
-
-# Global context for tracking state access during rendering
 
 T = TypeVar("T")
 
@@ -26,28 +23,33 @@ class StateProperty:
     def __init__(self, name: str, default_value: Any = None):
         self.name = name
         self.default_value = default_value
-        self.private_name = f"_state_{name}"
+        self.private_name = f"__signal_{name}"
 
     def __get__(self, obj: Any, objtype: Any = None) -> Any:
         if obj is None:
             return self
 
-        # Track that this property was accessed during rendering
-        ctx = REACTIVE_CONTEXT.get()
-        if ctx is not None:
-            ctx.track_state_access(obj, self.name)
+        if not hasattr(obj, self.private_name):
+            # Create the signal on first access
+            signal = Signal(
+                self.default_value, name=f"{obj.__class__.__name__}.{self.name}"
+            )
+            setattr(obj, self.private_name, signal)
+            return signal()
 
-        # Return the current value or default
-        return getattr(obj, self.private_name, self.default_value)
+        signal: Signal = getattr(obj, self.private_name)
+        return signal()
 
     def __set__(self, obj: Any, value: Any) -> None:
-        if not isinstance(obj, State):
-            raise TypeError("StateProperty can only be defined on a State object")
-        # Get the old value
-        old_value = getattr(obj, self.private_name, self.default_value)
-        if old_value != value:
-            setattr(obj, self.private_name, value)
-            obj.notify_listeners(self.name)
+        if not hasattr(obj, self.private_name):
+            # Create the signal on first set if not already accessed
+            signal = Signal(
+                self.default_value, name=f"{obj.__class__.__name__}.{self.name}"
+            )
+            setattr(obj, self.private_name, signal)
+
+        signal: Signal = getattr(obj, self.private_name)
+        signal.write(value)
 
 
 class StateMeta(ABCMeta):
@@ -56,16 +58,11 @@ class StateMeta(ABCMeta):
     """
 
     def __new__(mcs, name: str, bases: tuple, namespace: dict, **kwargs):
-        # Get type annotations
         annotations = namespace.get("__annotations__", {})
 
-        # Convert annotated attributes to reactive properties
-        for attr_name, attr_type in annotations.items():
+        for attr_name in annotations:
             if not attr_name.startswith("_"):
-                # Check if there's a default value
-                default_value = namespace.get(attr_name, None)
-
-                # Create a StateProperty descriptor
+                default_value = namespace.get(attr_name)
                 namespace[attr_name] = StateProperty(attr_name, default_value)
 
         return super().__new__(mcs, name, bases, namespace)
@@ -86,10 +83,6 @@ class State(ABC, metaclass=StateMeta):
     Properties will automatically trigger re-renders when changed.
     """
 
-    def __init__(self):
-        # Track listeners for this state instance
-        self._listeners: dict[str, set[Callable[[], None]]] = defaultdict(set)
-
     def __repr__(self) -> str:
         """Return a developer-friendly representation of the state."""
         props = []
@@ -102,26 +95,3 @@ class State(ABC, metaclass=StateMeta):
     def __str__(self) -> str:
         """Return a user-friendly representation of the state."""
         return self.__repr__()
-
-    def add_listener(self, fields: Iterable[str], fn: Callable[[], Any]):
-        for field in fields:
-            self._listeners[field].add(fn)
-
-    def remove_listener(self, fields: Iterable[str], fn: Callable[[], Any]):
-        for field in fields:
-            self._listeners[field].remove(fn)
-
-    def notify_listeners(self, field: str):
-        """Notify all listeners that a property has changed."""
-
-        # Notify property-specific listeners
-        scheduler = UPDATE_BATCH.get()
-        if field in self._listeners:
-            for listener in self._listeners[field].copy():
-                if scheduler:
-                    scheduler.schedule(listener)
-                else:
-                    try:
-                        listener()
-                    except Exception as e:
-                        print(f"Error in state listener: {e}")

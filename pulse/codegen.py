@@ -6,8 +6,6 @@ from pathlib import Path
 
 from mako.template import Template
 
-from pulse.reactive import ReactiveContext
-
 from .routing import Route, RouteTree
 from .vdom import VDOMNode
 
@@ -214,8 +212,7 @@ class Codegen:
     def generate_route(self, route: Route):
         output_path = self.output_folder / "routes" / route.get_file_path()
         # Generate initial UI tree by calling the route function
-        with ReactiveContext():
-            initial_node = route.render_fn()
+        initial_node = route.render_fn()
         vdom, _ = initial_node.render()
         content = str(
             ROUTE_PAGE_TEMPLATE.render_unicode(

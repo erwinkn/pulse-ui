@@ -1,7 +1,6 @@
 from .app import App, Session
 from .state import State
 from .routing import Route, route, decorated_routes
-from .hooks import init
 
 # Import HTML tags and other UI components
 from .vdom import (

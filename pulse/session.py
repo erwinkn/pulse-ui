@@ -6,7 +6,7 @@ from pulse.messages import (
     ServerInitMessage,
     ServerUpdateMessage,
 )
-from pulse.reactive import ReactiveContext, UpdateBatch
+from pulse.reactive import Effect, batch
 from pulse.routing import RouteTree
 from pulse.vdom import VDOMNode
 
@@ -20,10 +20,9 @@ class Session:
         ] = set()
 
         self.current_route: str | None = None
-        self.ctx = ReactiveContext()
-        self.scheduler = UpdateBatch()
         self.callback_registry: dict[str, Callable] = {}
         self.vdom: VDOMNode | None = None
+        self._effect = None
 
     def connect(
         self,
@@ -44,42 +43,32 @@ class Session:
         asyncio.create_task(self._notify(message))
 
     def close(self):
+        # The effect will be garbage collected, and with it the dependencies
         self.message_listeners.clear()
         self.vdom = None
         self.callback_registry.clear()
-        for state, fields in self.ctx.client_states.items():
-            state.remove_listener(fields, self.rerender)
 
     def execute_callback(self, key: str, args: list | tuple):
-        with UpdateBatch():
-            self.callback_registry[key](*args)
+        batch(lambda: self.callback_registry[key](*args))
 
     def hydrate(self, path: str):
-        route = self.routes.find(path)
-
-        # Clear old state listeners from previous route
-        for state, fields in self.ctx.client_states.items():
-            state.remove_listener(fields, self.rerender)
-
-        # Reinitialize render state for the new route
         self.current_route = path
-        self.ctx = ReactiveContext.empty()
         self.callback_registry.clear()
         self.vdom = None
 
-        with self.ctx.next_render() as new_ctx:
-            node_tree = route.render_fn()
-            vdom_tree, callbacks = node_tree.render()
-            self.vdom = vdom_tree
-            self.callback_registry = callbacks
-            self.ctx = new_ctx
+        route = self.routes.find(path)
 
-            # Set up new state subscriptions
-            for state, fields in self.ctx.client_states.items():
-                state.add_listener(fields, self.rerender)
+        # Initial render
+        node_tree = route.render_fn()
+        vdom_tree, callbacks = node_tree.render()
+        self.vdom = vdom_tree
+        self.callback_registry = callbacks
 
-            # Send the full VDOM to the client for initial hydration
-            self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
+        # Send the full VDOM to the client for initial hydration
+        self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
+
+        # Create the effect that will handle re-renders
+        self._effect = create_effect(self.rerender)
 
     def rerender(self):
         if self.current_route is None:
@@ -87,23 +76,17 @@ class Session:
 
         route = self.routes.find(self.current_route)
 
-        with self.ctx.next_render() as new_ctx:
-            new_node_tree = route.render_fn()
-            new_vdom_tree, new_callbacks = new_node_tree.render()
+        new_node_tree = route.render_fn()
+        new_vdom_tree, new_callbacks = new_node_tree.render()
 
+        if self.vdom:
             operations = diff_vdom(self.vdom, new_vdom_tree)
+        else:
+            operations = []  # Should not happen if hydrate is called first
 
-            # Update state listeners
-            for state, fields in self.ctx.client_states.items():
-                state.remove_listener(fields, self.rerender)
-            for state, fields in new_ctx.client_states.items():
-                state.add_listener(fields, self.rerender)
+        self.callback_registry = new_callbacks
+        self.vdom = new_vdom_tree
 
-            self.callback_registry = new_callbacks
-            self.vdom = new_vdom_tree
-            self.ctx = new_ctx
-
-            # Send diff to client if there are any changes
-            if operations:
-                self.notify(ServerUpdateMessage(type="vdom_update", ops=operations))
-
+        # Send diff to client if there are any changes
+        if operations:
+            self.notify(ServerUpdateMessage(type="vdom_update", ops=operations))

@@ -1,5 +1,5 @@
 import re
-from typing import Callable, Optional, Sequence, Union
+from typing import Callable, Literal, Optional, Sequence, Union
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 
@@ -45,6 +45,14 @@ class PathSegment:
 
     def __repr__(self) -> str:
         return f"PathSegment('{self.name}', dynamic={self.is_dynamic}, optional={self.is_optional}, splat={self.is_splat})"
+
+
+# According to RFC 3986, a path segment can contain "pchar" characters, which includes:
+# - Unreserved characters: A-Z a-z 0-9 - . _ ~
+# - Sub-delimiters: ! $ & ' ( ) * + , ; =
+# - And ':' and '@'
+# - Percent-encoded characters like %20 are also allowed.
+PATH_SEGMENT_REGEX = re.compile(r"^([a-zA-Z0-9\-._~!$&'()*+,;=:@]|%[0-9a-fA-F]{2})*$")
 
 
 def parse_route_path(path: str) -> list[PathSegment]:
@@ -101,13 +109,16 @@ class Route:
         self.parent: Optional[Route | Layout] = None
 
         self.is_index = self.path == ""
+        self.is_dynamic = any(
+            seg.is_dynamic or seg.is_optional for seg in self.segments
+        )
 
-    def path_list(self) -> Sequence[str]:
+    def path_list(self, include_layouts=False) -> list[str]:
         if self.parent:
-            return [*self.parent.path_list(), self.path]
+            return [*self.parent.path_list(include_layouts=include_layouts), self.path]
         return [self.path]
 
-    def full_path(self):
+    def unique_path(self):
         return ROUTE_PATH_SEPARATOR.join(self.path_list())
 
     def file_path(self) -> str:
@@ -121,56 +132,56 @@ class Route:
 
     def __repr__(self) -> str:
         return (
-            f"Route(path='{self.path or '/'}'"
+            f"Route(path='{self.path or ''}'"
             + (f", children={len(self.children)}" if self.children else "")
             + ")"
         )
 
 
+def filter_layouts(path_list: list[str]):
+    return [p for p in path_list if p != LAYOUT_INDICATOR]
+
+
+def replace_layout_indicator(path_list: list[str], value: str):
+    return [value if p == LAYOUT_INDICATOR else p for p in path_list]
+
+
 class Layout:
     def __init__(
         self,
-        render: Component,
+        render: Component | Callable[[], Node],
         children: "Optional[list[Route | Layout]]" = None,
         components: Optional[list[ReactComponent]] = None,
     ):
+        if not isinstance(render, Component):
+            render = Component(render)
         self.render = render
         self.children = children or []
         self.components = components
         self.parent: Optional[Route | Layout] = None
 
-    def path_list(self) -> Sequence[str]:
-        # Layouts don't contribute to the path
-        if self.parent:
-            return [*self.parent.path_list(), LAYOUT_INDICATOR]
-        else:
-            return [LAYOUT_INDICATOR]
+    def path_list(self, include_layouts=False) -> list[str]:
+        path_list = (
+            self.parent.path_list(include_layouts=include_layouts)
+            if self.parent
+            else []
+        )
+        if include_layouts:
+            path_list.append(LAYOUT_INDICATOR)
+        return path_list
 
-    def full_path(self):
-        return ROUTE_PATH_SEPARATOR.join(self.path_list())
+    def unique_path(self):
+        return ROUTE_PATH_SEPARATOR.join(self.path_list(include_layouts=True))
 
     def file_path(self) -> str:
-        path_list = self.path_list()
+        path_list = self.path_list(include_layouts=True)
+        path_list = ["layout" if p == LAYOUT_INDICATOR else p for p in path_list]
         # Convert all parent layout indicators to simply `layout`
-        path_list = [
-            p if p != LAYOUT_INDICATOR else "layout" for p in path_list[:-1]
-        ] + ["_layout.tsx"]
+        path_list = path_list[:-1] + ["_layout.tsx"]
         return "/".join(path_list)
 
     def __repr__(self) -> str:
         return f"Layout(children={len(self.children)})"
-
-
-route = Route
-layout = Layout
-
-
-# According to RFC 3986, a path segment can contain "pchar" characters, which includes:
-# - Unreserved characters: A-Z a-z 0-9 - . _ ~
-# - Sub-delimiters: ! $ & ' ( ) * + , ; =
-# - And ':' and '@'
-# - Percent-encoded characters like %20 are also allowed.
-PATH_SEGMENT_REGEX = re.compile(r"^([a-zA-Z0-9\-._~!$&'()*+,;=:@]|%[0-9a-fA-F]{2})*$")
 
 
 class InvalidRouteError(Exception): ...
@@ -213,62 +224,31 @@ class RouteInfo:
         self.catch_all = path_params.splat
 
 
-def add_parental_links(route: Route | Layout):
+def link_parental_tree(route: Route | Layout):
     if route.children:
         for child in route.children:
             child.parent = route
-            add_parental_links(child)
+            link_parental_tree(child)
 
 
 class RouteTree:
-    routes: list[Route | Layout]
+    flat_tree: dict[str, Route | Layout]
 
     def __init__(self, routes: Sequence[Route | Layout]) -> None:
-        self.routes = list(routes)
-        for route in self.routes:
-            add_parental_links(route)
+        self.tree = list(routes)
+        self.flat_tree = {}
 
-    def find(self, path: str) -> Union[Route, Layout]:
-        parts = path.split(ROUTE_PATH_SEPARATOR)
-        current_nodes: list[Route | Layout] = self.routes
-        found_node: Route | Layout | None = None
+        def _flatten_route_tree(route: Route | Layout):
+            self.flat_tree[route.unique_path()] = route
+            for child in route.children:
+                child.parent = route
+                _flatten_route_tree(child)
 
-        for i, path_fragment in enumerate(parts):
-            path_fragment = normalize_path(path_fragment)
+        for route in routes:
+            _flatten_route_tree(route)
 
-            node_for_fragment = None
-            for node in current_nodes:
-                if path_fragment == LAYOUT_INDICATOR and isinstance(node, Layout):
-                    node_for_fragment = node
-                    break
-                elif isinstance(node, Route) and node.path == path_fragment:
-                    node_for_fragment = node
-                    break
-
-            if node_for_fragment:
-                if i == len(parts) - 1:
-                    found_node = node_for_fragment
-                current_nodes = node_for_fragment.children
-            else:
-                raise ValueError(f"No route found for path '{path}'")
-
-        if found_node:
-            return found_node
-
-        raise ValueError(f"No route found for path '{path}'")
-
-    def __iter__(self):
-        return iter(self.routes)
-
-    def __len__(self):
-        return len(self.routes)
-
-
-def add_react_components(
-    routes: Sequence[Route | Layout], components: list[ReactComponent]
-):
-    for route in routes:
-        if route.components is None:
-            route.components = components
-        if route.children:
-            add_react_components(route.children, components)
+    def find(self, path: str):
+        route = self.flat_tree.get(path)
+        if not route:
+            raise ValueError(f"No route found for path '{path}'")
+        return route

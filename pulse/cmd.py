@@ -235,7 +235,6 @@ def run(
     console = Console()
     console.log(f"📁 Loading app from: {app_file}")
     app_instance = load_app_from_file(app_file)
-    console.log(f"📋 Found {len(app_instance.routes)} routes")
 
     web_dir = Path(app_instance.codegen.cfg.web_dir)
     if not web_dir.exists() and not server_only:
@@ -301,12 +300,12 @@ def generate(
 
     console.log(f"📁 Loading routes from: {app_file}")
     app = load_app_from_file(app_file)
-    console.log(f"📋 Found {len(app.routes)} routes")
+    console.log(f"📋 Found {len(app.routes.flat_tree)} routes")
 
     app.run_codegen()
 
-    if len(app.routes) > 0:
-        console.log(f"✅ Generated {len(app.routes)} routes successfully!")
+    if len(app.routes.flat_tree) > 0:
+        console.log(f"✅ Generated {len(app.routes.flat_tree)} routes successfully!")
     else:
         console.log("⚠️  No routes found to generate")
 

@@ -69,13 +69,12 @@ def about():
             "Pulse bridges the gap between Python and modern web development, enabling you to build interactive UIs with ease.",
             className="mb-6",
         ),
-        ps.ul(
+        ps.ul(className="list-disc list-inside")[
             *[
                 ps.li(feature, className="mb-2 p-2 bg-gray-100 rounded")
                 for feature in features
             ],
-            className="list-disc list-inside",
-        ),
+        ],
     )
 
 
@@ -85,7 +84,7 @@ def counter():
     state = ps.init(CounterState)
 
     def decrement():
-        state.count -=1
+        state.count -= 1
 
     return ps.div(
         ps.h1("Interactive Counter", className="text-3xl font-bold mb-4"),

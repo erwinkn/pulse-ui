@@ -9,6 +9,7 @@ from pulse.routing import (
     Layout,
     RouteTree,
 )
+import pulse as ps
 from pulse.vdom import Node
 
 
@@ -111,7 +112,7 @@ def test_route_tree_find_layout(route_tree):
 
 
 def test_route_tree_find_route_in_layout(route_tree):
-    route = route_tree.find("<layout>|dashboard")
+    route = route_tree.find("dashboard")
     assert isinstance(route, Route)
     assert route.path == "dashboard"
     assert isinstance(route.parent, Layout)
@@ -133,3 +134,30 @@ def test_route_tree_find_non_existent_in_layout(route_tree):
         ValueError, match="No route found for path '<layout>|nonexistent'"
     ):
         route_tree.find("<layout>|nonexistent")
+
+
+def test_route_tree_consecutive_layouts():
+    def render():
+        return ps.div()
+
+    route_tree = RouteTree(
+        [
+            Layout(render, [Route("counter", render)]),
+            Layout(render, [Route("/counter-2", render)]),
+        ]
+    )
+    route = route_tree.find("counter-2")
+    assert isinstance(route, Route) and route.path == "counter-2"
+
+def test_route_tree_nested_layouts():
+    def render():
+        return ps.div()
+
+    route_tree = RouteTree(
+        [
+            Layout(render, [Route("/counter-2", render)]),
+            Layout(render, [Layout(render, [Route("/counter", render)])]),
+        ]
+    )
+    route = route_tree.find("counter")
+    assert isinstance(route, Route) and route.path == "counter"

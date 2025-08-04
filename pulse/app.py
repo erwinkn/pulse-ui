@@ -16,9 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import os
 from pulse.codegen import Codegen, CodegenConfig
-from pulse.components.registry import registered_react_components
+from pulse.components.registry import ReactComponent, registered_react_components
 from pulse.messages import ClientMessage
-from pulse.routing import Layout, Route, RouteTree, add_react_components
+from pulse.routing import Layout, Route, RouteTree 
 from pulse.session import Session
 from pulse.vendor.flatted import parse
 
@@ -165,3 +165,12 @@ class App:
             raise KeyError(f"Session {id} does not exist")
         self.sessions[id].close()
         del self.sessions[id]
+
+def add_react_components(
+    routes: Sequence[Route | Layout], components: list[ReactComponent]
+):
+    for route in routes:
+        if route.components is None:
+            route.components = components
+        if route.children:
+            add_react_components(route.children, components)

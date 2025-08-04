@@ -63,30 +63,7 @@ export default function PulseLayout() {
 
 # Mako template for routes configuration
 ROUTES_CONFIG_TEMPLATE = Template(
-    """
-<%def name="render_routes(routes)">
-% for route in routes:
-  % if isinstance(route, Layout):
-    layout("${pulse_dir}/layouts/${route.file_path()}", [
-      ${render_routes(route.children)}
-    ]),
-  % else:
-    % if route.children:
-      route("${route.path}", "${pulse_dir}/routes/${route.file_path()}", [
-        ${render_routes(route.children)}
-      ]),
-    % else:
-      % if route.is_index:
-        index("${pulse_dir}/routes/${route.file_path()}"),
-      % else:
-        route("${route.path}", "${pulse_dir}/routes/${route.file_path()}"),
-      % endif
-    % endif
-  % endif
-% endfor
-</%def>
-
-import {
+    """import {
   type RouteConfig,
   route,
   layout,
@@ -95,7 +72,7 @@ import {
 
 export const routes = [
   layout("${pulse_dir}/_layout.tsx", [
-    ${render_routes(route_tree)}
+${routes_str}
   ]),
 ] satisfies RouteConfig;
 """
@@ -134,7 +111,7 @@ const externalComponents: ComponentRegistry = {};
 // The initial VDOM is bootstrapped from the server
 const initialVDOM: VDOM = ${vdom};
 
-const path = "${route.full_path()}";
+const path = "${route.unique_path()}";
 
 export default function RouteComponent() {
   return (
@@ -178,6 +155,7 @@ class Codegen:
     def output_folder(self):
         return self.cfg.pulse_path
 
+
     def generate_all(
         self,
     ):
@@ -185,9 +163,8 @@ class Codegen:
         generated_files = [
             self.generate_layout_tsx(),
             self.generate_routes_ts(),
+            *(self.generate_route(route) for route in self.routes.flat_tree.values()),
         ]
-        for route in self.routes:
-            generated_files.extend(self.generate_route(route))
         generated_files = set(generated_files)
 
         # Clean up any remaining files that are not part of the generated files
@@ -212,15 +189,41 @@ class Codegen:
 
     def generate_routes_ts(self):
         """Generate TypeScript code for the routes configuration."""
+        routes_str = self._render_routes_ts(self.routes.tree, 2)
         content = str(
             ROUTES_CONFIG_TEMPLATE.render_unicode(
-                route_tree=self.routes,
+                routes_str=routes_str,
                 pulse_dir=self.cfg.pulse_dir,
-                isinstance=isinstance,
-                Layout=Layout,
             )
         )
         return write_file_if_changed(self.output_folder / "routes.ts", content)
+
+    def _render_routes_ts(self, routes: list[Route | Layout], indent_level: int) -> str:
+        lines = []
+        indent_str = "  " * indent_level
+        for route in routes:
+            if isinstance(route, Layout):
+                children_str = ""
+                if route.children:
+                    children_str = f"\n{self._render_routes_ts(route.children, indent_level + 1)}\n{indent_str}"
+                lines.append(
+                    f'{indent_str}layout("{self.cfg.pulse_dir}/layouts/{route.file_path()}", [{children_str}]),'
+                )
+            else:
+                if route.children:
+                    children_str = f"\n{self._render_routes_ts(route.children, indent_level + 1)}\n{indent_str}"
+                    lines.append(
+                        f'{indent_str}route("{route.path}", "{self.cfg.pulse_dir}/routes/{route.file_path()}", [{children_str}]),'
+                    )
+                elif route.is_index:
+                    lines.append(
+                        f'{indent_str}index("{self.cfg.pulse_dir}/routes/{route.file_path()}"),'
+                    )
+                else:
+                    lines.append(
+                        f'{indent_str}route("{route.path}", "{self.cfg.pulse_dir}/routes/{route.file_path()}"),'
+                    )
+        return "\n".join(lines)
 
     def generate_route(self, route: Route | Layout):
         if isinstance(route, Layout):
@@ -241,8 +244,4 @@ class Codegen:
                 lib_path=self.cfg.lib_path,
             )
         )
-        generated_files = [write_file_if_changed(output_path, content)]
-        if route.children:
-            for child_route in route.children:
-                generated_files.extend(self.generate_route(child_route))
-        return generated_files
+        return write_file_if_changed(output_path, content)

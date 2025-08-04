@@ -1,11 +1,5 @@
 import pytest
-from pulse.reactive import (
-    Signal,
-    Computed,
-    Effect,
-    untrack,
-    batch,
-)
+from pulse.reactive import Signal, Computed, Effect, batch, untrack
 
 
 class TestReactiveSystem:
@@ -104,7 +98,8 @@ class TestReactiveSystem:
             nonlocal runs
             runs += 1
             s1()  # dependency
-            untrack(lambda: s2())  # no dependency
+            with untrack():
+                s2()  # no dependency
 
         Effect(my_effect, name="untrack_effect")
 
@@ -134,7 +129,9 @@ class TestReactiveSystem:
         assert runs == 1
         assert c() == 11
 
-        batch(lambda: (s1.write(2), s2.write(20)))
+        with batch():
+            s1.write(2)
+            s2.write(20)
 
         assert c() == 22
         assert runs == 2
@@ -276,7 +273,88 @@ class TestReactiveSystem:
         assert effect_runs == 1
         assert c_values == [11]
 
-        batch(lambda: (a.write(2), b.write(20)))
+        with batch():
+            a.write(2)
+            b.write(20)
 
         assert effect_runs == 2, "Effect should only run once for a batched update"
         assert c_values == [11, 22]
+
+    def test_effect_cleanup_on_rerun(self):
+        s = Signal(0, name="s")
+        cleanup_runs = 0
+
+        def my_effect():
+            s()  # depend on s
+
+            def cleanup():
+                nonlocal cleanup_runs
+                cleanup_runs += 1
+
+            return cleanup
+
+        Effect(my_effect, name="cleanup_effect")
+
+        assert cleanup_runs == 0
+        s.write(1)
+        assert cleanup_runs == 1
+        s.write(2)
+        assert cleanup_runs == 2
+
+    def test_effect_manual_dispose(self):
+        cleanup_runs = 0
+
+        def my_effect():
+            def cleanup():
+                nonlocal cleanup_runs
+                cleanup_runs += 1
+
+            return cleanup
+
+        effect = Effect(my_effect, name="disposable_effect")
+
+        assert cleanup_runs == 0
+        effect.dispose()
+        assert cleanup_runs == 1
+
+    def test_nested_effect_cleanup_on_rerun(self):
+        s = Signal(0, name="s")
+        child_cleanup_runs = 0
+
+        def child_effect():
+            def cleanup():
+                nonlocal child_cleanup_runs
+                child_cleanup_runs += 1
+
+            return cleanup
+
+        def parent_effect():
+            s()  # depend on s
+            Effect(child_effect, name="child")
+
+        Effect(parent_effect, name="parent")
+
+        assert child_cleanup_runs == 0
+        s.write(1)
+        assert child_cleanup_runs == 1
+        s.write(2)
+        assert child_cleanup_runs == 2
+
+    def test_nested_effect_cleanup_on_dispose(self):
+        child_cleanup_runs = 0
+
+        def child_effect():
+            def cleanup():
+                nonlocal child_cleanup_runs
+                child_cleanup_runs += 1
+
+            return cleanup
+
+        def parent_effect():
+            Effect(child_effect, name="child")
+
+        parent = Effect(parent_effect, name="parent")
+
+        assert child_cleanup_runs == 0
+        parent.dispose()
+        assert child_cleanup_runs == 1

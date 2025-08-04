@@ -10,7 +10,7 @@ P = ParamSpec("P")
 
 EPOCH = ContextVar("EPOCH", default=1)
 SCOPE: ContextVar[Optional[Scope]] = ContextVar("pulse_scope", default=None)
-BATCH: ContextVar[Optional[UpdateBatch]] = ContextVar("pulse_batch", default=None)
+BATCH: ContextVar[Optional[Batch]] = ContextVar("pulse_batch", default=None)
 
 
 class Signal(Generic[T]):
@@ -42,11 +42,8 @@ class Signal(Generic[T]):
             obs._push_change()
 
     def write(self, value: T):
-        if batch := BATCH.get():
+        with EnsureBatch() as batch:
             batch.schedule_signal(self, value)
-        else:
-            with UpdateBatch() as batch:
-                batch.schedule_signal(self, value)
 
 
 class Computed(Generic[T]):
@@ -96,6 +93,12 @@ class Computed(Generic[T]):
             if prev_value != self.value:
                 self.last_change = epoch
 
+            if len(scope.effects) > 0:
+                raise RuntimeError(
+                    "An effect was created within a computed variable's function. "
+                    "This behavior is not allowed, computed variables should be pure calculations."
+                )
+
         new_deps = scope.accessed
         add_deps = new_deps - current_deps
         remove_deps = current_deps - new_deps
@@ -135,10 +138,21 @@ class Effect:
         self.name = name
         self.deps: list[Signal | Computed] = []
         self.cleanup: Optional[EffectCleanup] = None
+        self.children: list[Effect] = []
+
+        if scope := SCOPE.get():
+            scope.effects.add(self)
 
         self.on_stack = True
         self._run()
         self.on_stack = False
+
+    def dispose(self):
+        with EnsureBatch():
+            for child in self.children:
+                child.dispose()
+            if self.cleanup:
+                self.cleanup()
 
     def _push_change(self):
         batch = BATCH.get()
@@ -162,10 +176,11 @@ class Effect:
     def _run(self):
         current_deps = set(self.deps)
 
-        with Scope(parent=SCOPE.get()) as scope:
-            if self.cleanup:
-                self.cleanup()
+        with Scope(parent=SCOPE.get()) as scope, EnsureBatch():
+            # Run children cleanups first
+            self.dispose()
             self.cleanup = self.fn()
+            self.children = list(scope.effects)
 
         new_deps = scope.accessed
         add_deps = new_deps - current_deps
@@ -182,6 +197,7 @@ class Scope:
     def __init__(self, parent: Optional[Scope] = None):
         self.parent = parent
         self.accessed: Set[Signal | Computed] = set()
+        self.effects: set[Effect] = set()
 
     def __enter__(self):
         self._token = SCOPE.set(self)
@@ -191,7 +207,7 @@ class Scope:
         SCOPE.reset(self._token)
 
 
-class UpdateBatch:
+class Batch:
     def __init__(self) -> None:
         self.signals: list[tuple[Signal, Any]] = []
         self.effects: list[Effect] = []
@@ -246,14 +262,30 @@ class UpdateBatch:
         BATCH.reset(self._token)
 
 
-def untrack(fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    with Scope():
-        return fn(*args, **kwargs)
+class EnsureBatch:
+    def __init__(self) -> None:
+        self._token = None
 
+    def __enter__(self):
+        batch = BATCH.get()
+        if batch is None:
+            batch = Batch()
+            self._token = BATCH.set(batch)
+        return batch
 
-def batch(fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    with UpdateBatch():
-        return fn(*args, **kwargs)
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        if self._token is not None:
+            batch = BATCH.get()
+            batch.flush() # type: ignore
+            BATCH.reset(self._token)
+            
+
+def batch():
+    return Batch()
+
+def untrack():
+    return Scope()
+
 
 
 class InvariantError(Exception): ...

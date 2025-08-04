@@ -143,8 +143,7 @@ export function PulseView({
     const getCallback = (key: string) => {
       let fn = callbackCache.get(key);
       if (!fn) {
-        // IMPORTANT: no arguments for now
-        fn = () => client.invokeCallback(path, key, []);
+        fn = (...args) => client.invokeCallback(path, key, args);
         callbackCache.set(key, fn);
       }
       return fn;

@@ -95,7 +95,7 @@ export class PulseClient {
       type: "callback",
       path,
       callback,
-      args,
+      args: ,
     };
     this.transport.sendMessage(payload);
   };

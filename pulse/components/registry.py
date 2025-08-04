@@ -6,7 +6,7 @@
 from contextvars import ContextVar
 from typing import Literal
 
-from pulse.vdom import Node, NodeChild
+from pulse.vdom import Node, NodeChild, extract_callbacks_from_props
 
 
 class ReactComponent:
@@ -44,9 +44,11 @@ class ReactComponent:
         COMPONENT_REGISTRY.get().add(self)
 
     def __call__(self, *children: NodeChild, **props) -> Node:
+        props, callbacks = extract_callbacks_from_props(props)
         return Node(
             tag=f"$${self.key}",
             props=props,
+            callbacks=callbacks,
             children=list(children) if children else [],
         )
 

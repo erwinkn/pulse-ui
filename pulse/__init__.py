@@ -1,5 +1,5 @@
 from .app import App, Session
-from .state import State
+from .state import State, computed
 from .routing import Route, route, decorated_routes
 
 # Import HTML tags and other UI components

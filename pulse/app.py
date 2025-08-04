@@ -100,7 +100,6 @@ class App:
 
         @self.sio.event
         async def connect(sid: str, environ, auth=None):
-            logger.info(f"-> Creating session: {sid}")
             session = self.create_session(sid)
             session.connect(
                 lambda message: asyncio.create_task(
@@ -111,13 +110,11 @@ class App:
         @self.sio.event
         def disconnect(sid: str):
             # TODO: keep the session open for some time in case the client reconnects?
-            logger.info(f"-> Disconnecting session: {sid}")
             self.close_session(sid)
 
         @self.sio.event
         def message(sid: str, data: ClientMessage):
             session = self.get_session(sid)
-            print(f"-> Received message: {data}")
             if data["type"] == "navigate":
                 session.navigate(data["path"])
             elif data["type"] == "callback":

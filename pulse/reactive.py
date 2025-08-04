@@ -134,6 +134,7 @@ EffectFn = EffectFnWithCleanup | EffectFnWithoutCleanup
 
 class Effect:
     def __init__(self, fn: EffectFn, name: Optional[str] = None):
+        print("Creating effect", name)
         self.fn = fn
         self.name = name
         self.deps: list[Signal | Computed] = []

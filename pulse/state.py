@@ -64,8 +64,6 @@ class StateProperty:
 
     def __set__(self, obj: Any, value: Any) -> None:
         signal = self.get_signal(obj)
-        print(f"Writing {value} to {signal.name}") 
-        print(f"Observers: {[x.name for x in signal.obs]}")
         signal.write(value)
 
 

@@ -1,7 +1,3 @@
-"""
-Tests for the reactive system in pulse.reactive.
-"""
-
 import pytest
 from pulse.reactive import (
     Signal,
@@ -14,23 +10,23 @@ from pulse.reactive import (
 
 class TestReactiveSystem:
     def test_signal_creation_and_access(self):
-        s = Signal(10)
+        s = Signal(10, name="s")
         assert s() == 10
 
     def test_signal_update(self):
-        s = Signal(10)
+        s = Signal(10, name="s")
         s.write(20)
         assert s() == 20
 
     def test_simple_computed(self):
-        s = Signal(10)
-        c = Computed(lambda: s() * 2)
+        s = Signal(10, name="s")
+        c = Computed(lambda: s() * 2, name="c")
         assert c() == 20
         s.write(20)
         assert c() == 40
 
     def test_simple_effect(self):
-        s = Signal(10)
+        s = Signal(10, name="s")
         runs = 0
         effect_value = 0
 
@@ -39,7 +35,7 @@ class TestReactiveSystem:
             runs += 1
             effect_value = s()
 
-        Effect(my_effect)
+        Effect(my_effect, name="effect")
 
         assert runs == 1
         assert effect_value == 10
@@ -53,9 +49,9 @@ class TestReactiveSystem:
         assert runs == 2
 
     def test_computed_chain(self):
-        s = Signal(2)
-        c1 = Computed(lambda: s() * 2)
-        c2 = Computed(lambda: c1() * 2)
+        s = Signal(2, name="s")
+        c1 = Computed(lambda: s() * 2, name="c1")
+        c2 = Computed(lambda: c1() * 2, name="c2")
 
         assert c2() == 8
 
@@ -65,11 +61,11 @@ class TestReactiveSystem:
         assert c2() == 12
 
     def test_dynamic_dependencies(self):
-        s1 = Signal(10)
-        s2 = Signal(20)
-        toggle = Signal(True)
+        s1 = Signal(10, name="s1")
+        s2 = Signal(20, name="s2")
+        toggle = Signal(True, name="toggle")
 
-        c = Computed(lambda: s1() if toggle() else s2())
+        c = Computed(lambda: s1() if toggle() else s2(), name="c")
 
         assert c() == 10
 
@@ -84,7 +80,7 @@ class TestReactiveSystem:
             c_val = c()
             runs += 1
 
-        Effect(effect_on_c)
+        Effect(effect_on_c, name="effect_on_c")
         assert runs == 1
         assert c_val == 20
 
@@ -99,8 +95,8 @@ class TestReactiveSystem:
         assert runs == 2
 
     def test_untrack(self):
-        s1 = Signal(1)
-        s2 = Signal(10)
+        s1 = Signal(1, name="s1")
+        s2 = Signal(10, name="s2")
 
         runs = 0
 
@@ -110,7 +106,7 @@ class TestReactiveSystem:
             s1()  # dependency
             untrack(lambda: s2())  # no dependency
 
-        Effect(my_effect)
+        Effect(my_effect, name="untrack_effect")
 
         assert runs == 1
 
@@ -121,19 +117,19 @@ class TestReactiveSystem:
         assert runs == 2
 
     def test_batching(self):
-        s1 = Signal(1)
-        s2 = Signal(10)
+        s1 = Signal(1, name="s1")
+        s2 = Signal(10, name="s2")
 
         runs = 0
 
-        c = Computed(lambda: s1() + s2())
+        c = Computed(lambda: s1() + s2(), name="c")
 
         def my_effect():
             nonlocal runs
             c()
             runs += 1
 
-        Effect(my_effect)
+        Effect(my_effect, name="batching_effect")
 
         assert runs == 1
         assert c() == 11
@@ -144,15 +140,20 @@ class TestReactiveSystem:
         assert runs == 2
 
     def test_cycle_detection(self):
-        s1 = Signal(1)
-        c1 = Computed(lambda: s1() if s1() < 10 else c2())
-        c2 = Computed(lambda: c1())
+        s1 = Signal(1, name="s1")
+        c1 = Computed(lambda: s1() if s1() < 10 else c2(), name="c1")
+        c2 = Computed(lambda: c1(), name="c2")
+
+        # This should not raise an error
+        c2()
+
+        s1.write(10)
 
         with pytest.raises(RuntimeError, match="Circular dependency detected"):
             c2()
 
     def test_unused_computed_are_not_recomputed(self):
-        a = Signal(1)
+        a = Signal(1, name="a")
 
         b_runs = 0
 
@@ -161,7 +162,7 @@ class TestReactiveSystem:
             b_runs += 1
             return a() * 2
 
-        b = Computed(b_fn)
+        b = Computed(b_fn, name="b")
 
         c_runs = 0
 
@@ -170,7 +171,7 @@ class TestReactiveSystem:
             c_runs += 1
             return b() * 2
 
-        c = Computed(c_fn)
+        c = Computed(c_fn, name="c")
 
         d_runs = 0
 
@@ -179,7 +180,7 @@ class TestReactiveSystem:
             d_runs += 1
             return c() * 2
 
-        d = Computed(d_fn)
+        d = Computed(d_fn, name="d")
 
         effect_runs = 0
 
@@ -188,7 +189,7 @@ class TestReactiveSystem:
             effect_runs += 1
             b()
 
-        Effect(effect)
+        Effect(effect, name="effect1")
 
         assert b_runs == 1
         assert c_runs == 0  # c is not used yet
@@ -211,7 +212,7 @@ class TestReactiveSystem:
             effect2_runs += 1
             d()
 
-        Effect(effect2)
+        Effect(effect2, name="effect2")
 
         assert b_runs == 2  # b should not recompute
         assert c_runs == 1  # c is now used, so it computes once
@@ -219,9 +220,63 @@ class TestReactiveSystem:
         assert effect2_runs == 1
 
         a.write(3)
-
         assert b_runs == 3
         assert c_runs == 2
         assert d_runs == 2
         assert effect_runs == 3
         assert effect2_runs == 2
+
+    def test_diamond_problem(self):
+        a = Signal(1, name="a")
+
+        b = Computed(lambda: a() * 2, name="b")
+        c = Computed(lambda: a() * 3, name="c")
+
+        d_runs = 0
+
+        def d_fn():
+            nonlocal d_runs
+            d_runs += 1
+            return b() + c()
+
+        d = Computed(d_fn, name="d")
+
+        result = 0
+
+        def effect():
+            nonlocal result
+            result = d()
+
+        Effect(effect, name="diamond_effect")
+
+        assert result == 5
+        assert d_runs == 1
+
+        a.write(2)
+
+        assert result == 10
+        assert d_runs == 2, "d should only be recomputed once"
+
+    def test_glitch_avoidance(self):
+        a = Signal(1, name="a")
+        b = Signal(10, name="b")
+
+        c_values = []
+        c = Computed(lambda: a() + b(), name="c")
+
+        effect_runs = 0
+
+        def effect():
+            nonlocal effect_runs
+            c_values.append(c())
+            effect_runs += 1
+
+        Effect(effect, name="glitch_effect")
+
+        assert effect_runs == 1
+        assert c_values == [11]
+
+        batch(lambda: (a.write(2), b.write(20)))
+
+        assert effect_runs == 2, "Effect should only run once for a batched update"
+        assert c_values == [11, 22]

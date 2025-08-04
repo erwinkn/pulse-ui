@@ -8,7 +8,7 @@ to define routes and configure their Pulse application.
 import asyncio
 import logging
 from enum import IntEnum
-from typing import List, Optional, TypeVar
+from typing import List, Optional, Sequence, TypeVar
 
 import socketio
 from fastapi import FastAPI
@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.messages import ClientMessage
-from pulse.routing import Route, RouteTree
+from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ class App:
 
     def __init__(
         self,
-        routes: Optional[List[Route]] = None,
+        routes: Optional[Sequence[Route | Layout]] = None,
         codegen: Optional[CodegenConfig] = None,
     ):
         """
@@ -144,34 +144,6 @@ class App:
         self.run_codegen(host=host, port=port)
         self.setup()
         return self.asgi
-
-    def route(
-        self,
-        path: str,
-        components: Optional[List] = None,
-        parent: Optional[Route] = None,
-    ):
-        """
-        Decorator to define a route on this app instance.
-
-        Args:
-            path: URL path for the route
-            components: List of component keys used by this route
-
-        Returns:
-            Decorator function
-        """
-
-        def decorator(render_func):
-            route_obj = Route(path, render_func, components=components, parent=parent)
-            self.add_route(route_obj)
-            return route_obj
-
-        return decorator
-
-    def add_route(self, route: Route):
-        """Add a route to this app instance."""
-        self.routes.add(route)
 
     def get_route(self, path: str):
         self.routes.find(path)

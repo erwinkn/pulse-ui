@@ -74,7 +74,7 @@ class Session:
             with active_route.reactive_state.start_render() as new_reactive_state:
                 # The render_fn is expected to return a single VDOMNode
                 previous_vdom = active_route.vdom
-                new_node = route.render_fn()
+                new_node = route.render.fn() # type: ignore
                 new_vdom, new_callbacks = new_node.render()
 
                 active_route.reactive_state = new_reactive_state
@@ -82,9 +82,7 @@ class Session:
                 active_route.vdom = new_vdom
                 if new_reactive_state.render_count == 1:
                     self.notify(
-                        ServerInitMessage(
-                            type="vdom_init", path=path, vdom=new_vdom
-                        )
+                        ServerInitMessage(type="vdom_init", path=path, vdom=new_vdom)
                     )
                 else:
                     operations = diff_vdom(previous_vdom, new_vdom)

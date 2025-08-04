@@ -45,9 +45,7 @@ class TestSession:
         mock_render_fn = MagicMock()
         mock_node = MockVDOMNode("div")
         mock_render_fn.return_value = mock_node
-        self.routes.find.return_value = ps.routing.Route(
-            path=path, render_fn=mock_render_fn
-        )
+        self.routes.find.return_value = ps.Route(path=path, render=mock_render_fn)
 
         message_listener = MagicMock()
         self.session.connect(message_listener)
@@ -60,7 +58,7 @@ class TestSession:
 
         sent_message = message_listener.call_args[0][0]
         assert sent_message["type"] == "vdom_init"
-        assert sent_message["route"] == path
+        assert sent_message["path"] == path
         assert "vdom" in sent_message
 
     def test_rerender_on_state_change(self):
@@ -71,10 +69,11 @@ class TestSession:
 
         state = MyState()
 
+        @ps.component
         def render_fn():
             return MockVDOMNode("p", children=[str(state.count)])
 
-        self.routes.find.return_value = ps.routing.Route(path=path, render_fn=render_fn)
+        self.routes.find.return_value = ps.Route(path=path, render=render_fn)
 
         message_listener = MagicMock()
         self.session.connect(message_listener)
@@ -99,11 +98,12 @@ class TestSession:
         path = "/test"
         setup_fn = MagicMock(return_value={"count": ps.Signal(0)})
 
+        @ps.component
         def render_fn():
             state = ps.init(setup_fn)
             return MockVDOMNode("p", children=[str(state["count"]())])
 
-        self.routes.find.return_value = ps.routing.Route(path=path, render_fn=render_fn)
+        self.routes.find.return_value = ps.Route(path=path, render=render_fn)
 
         self.session.navigate(path)
 
@@ -121,12 +121,13 @@ class TestSession:
     def test_init_called_twice_raises_error(self):
         path = "/test"
 
+        @ps.component
         def render_fn():
             ps.init(lambda: {})
             ps.init(lambda: {})  # Call it again
             return MockVDOMNode("div")
 
-        self.routes.find.return_value = ps.routing.Route(path=path, render_fn=render_fn)
+        self.routes.find.return_value = ps.Route(path=path, render=render_fn)
 
         with pytest.raises(RuntimeError):
             self.session.navigate(path)
@@ -135,10 +136,11 @@ class TestSession:
         path = "/test"
         mock_callback = MagicMock()
 
+        @ps.component
         def render_fn():
             return MockVDOMNode("div", props={"onClick": mock_callback})
 
-        self.routes.find.return_value = ps.routing.Route(path=path, render_fn=render_fn)
+        self.routes.find.return_value = ps.Route(path=path, render=render_fn)
 
         self.session.navigate(path)
 
@@ -148,8 +150,8 @@ class TestSession:
 
     def test_leave_route(self):
         path = "/test"
-        self.routes.find.return_value = ps.routing.Route(
-            path=path, render_fn=lambda: MockVDOMNode("div")
+        self.routes.find.return_value = ps.Route(
+            path=path, render=ps.component(lambda: MockVDOMNode("div"))
         )
 
         self.session.navigate(path)
@@ -163,8 +165,8 @@ class TestSession:
     def test_session_close(self):
         paths = ["/a", "/b"]
         for path in paths:
-            self.routes.find.return_value = ps.routing.Route(
-                path=path, render_fn=lambda: MockVDOMNode("div")
+            self.routes.find.return_value = ps.Route(
+                path=path, render=ps.component(lambda: MockVDOMNode("div"))
             )
             self.session.navigate(path)
 

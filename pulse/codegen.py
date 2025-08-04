@@ -8,7 +8,7 @@ from mako.template import Template
 
 from pulse.hooks import ReactiveState
 
-from .routing import Route, RouteTree
+from .routing import Layout, Route, RouteTree
 from .vdom import VDOMNode
 
 logger = logging.getLogger(__file__)
@@ -67,15 +67,21 @@ ROUTES_CONFIG_TEMPLATE = Template(
     """
 <%def name="render_routes(routes)">
 % for route in routes:
-  % if route.children:
-    route("${route.path}", "${pulse_dir}/routes/${route.get_file_path()}", [
+  % if isinstance(route, Layout):
+    layout("${pulse_dir}/layouts/${route.file_path()}", [
       ${render_routes(route.children)}
     ]),
   % else:
-    % if route.is_index:
-      index("${pulse_dir}/routes/${route.get_file_path()}"),
+    % if route.children:
+      route("${route.path}", "${pulse_dir}/routes/${route.file_path()}", [
+        ${render_routes(route.children)}
+      ]),
     % else:
-      route("${route.path}", "${pulse_dir}/routes/${route.get_file_path()}"),
+      % if route.is_index:
+        index("${pulse_dir}/routes/${route.file_path()}"),
+      % else:
+        route("${route.path}", "${pulse_dir}/routes/${route.file_path()}"),
+      % endif
     % endif
   % endif
 % endfor
@@ -129,7 +135,7 @@ const externalComponents: ComponentRegistry = {};
 // The initial VDOM is bootstrapped from the server
 const initialVDOM: VDOM = ${vdom};
 
-const path = "${route.get_full_path()}";
+const path = "${route.full_path()}";
 
 export default function RouteComponent() {
   return (
@@ -209,16 +215,22 @@ class Codegen:
         """Generate TypeScript code for the routes configuration."""
         content = str(
             ROUTES_CONFIG_TEMPLATE.render_unicode(
-                route_tree=self.routes, pulse_dir=self.cfg.pulse_dir
+                route_tree=self.routes,
+                pulse_dir=self.cfg.pulse_dir,
+                isinstance=isinstance,
+                Layout=Layout,
             )
         )
         return write_file_if_changed(self.output_folder / "routes.ts", content)
 
-    def generate_route(self, route: Route):
-        output_path = self.output_folder / "routes" / route.get_file_path()
+    def generate_route(self, route: Route | Layout):
+        if isinstance(route, Layout):
+            output_path = self.output_folder / "layouts" / route.file_path()
+        else:
+            output_path = self.output_folder / "routes" / route.file_path()
         # Generate initial UI tree by calling the route function
         with ReactiveState.create().start_render():
-          initial_node = route.render_fn()
+            initial_node = route.render.fn()  # type: ignore
         vdom, _ = initial_node.render()
         content = str(
             ROUTE_PAGE_TEMPLATE.render_unicode(

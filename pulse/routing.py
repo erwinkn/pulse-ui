@@ -1,12 +1,16 @@
 import re
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, Union
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 
-from pulse.components.registry import ReactComponent, registered_react_components
+from pulse.component import Component
+from pulse.components.registry import ReactComponent
 from pulse.vdom import Node
 
-ROUTE_PATH_SEPARATOR = '|'
+ROUTE_PATH_SEPARATOR = "|"
+# angle brackets cannot appear in a regular URL path, this ensures no name conflicts
+LAYOUT_INDICATOR = "<layout>"
+
 
 @dataclass
 class PathParameters:
@@ -82,146 +86,68 @@ class Route:
     def __init__(
         self,
         path: str,
-        render_fn: Callable[[], Node],
-        children: "Optional[list[Route]]" = None,
+        render: Component | Callable[[], Node],
+        children: "Optional[list[Route | Layout]]" = None,
         components: Optional[list[ReactComponent]] = None,
-        parent: "Optional[Route]" = None,
     ):
         self.path = normalize_path(path)
-        self.render_fn = render_fn
-        self.children = children or []
-        self.components = components
-        self.parent = parent
-        self.is_index = self.path == ""
-
-        if self.parent:
-            if self.parent.is_index:
-                raise ValueError("Index routes cannot have children.")
-            self.parent.children.append(self)
-
         self.segments = parse_route_path(path)
 
-    def get_path_parts(self) -> Sequence[str]:
-        if self.parent:
-            return [*self.parent.get_path_parts(), self.path]
-        return [self.path]
-    
-    def get_full_path(self):
-        return ROUTE_PATH_SEPARATOR.join(self.get_path_parts())
+        if not isinstance(render, Component):
+            render = Component(render)
+        self.render = render
+        self.children = children or []
+        self.components = components
+        self.parent: Optional[Route | Layout] = None
 
-    def get_file_path(self) -> str:
-        path = self.get_path_parts()
-        path = "/".join(path)
+        self.is_index = self.path == ""
+
+    def path_list(self) -> Sequence[str]:
+        if self.parent:
+            return [*self.parent.path_list(), self.path]
+        return [self.path]
+
+    def full_path(self):
+        return ROUTE_PATH_SEPARATOR.join(self.path_list())
+
+    def file_path(self) -> str:
+        path_list = self.path_list()
+        path_list = [p for p in path_list if p != LAYOUT_INDICATOR]
+        path = "/".join(self.path_list())
         if self.is_index:
             path += "index"
         path += ".tsx"
         return path
 
-    def __call__(self):
-        return self.render_fn()
 
-    def get_full_segments(self) -> list[PathSegment]:
-        """Returns all segments from the root to this route."""
+class Layout:
+    def __init__(
+        self,
+        render: Component,
+        children: "Optional[list[Route | Layout]]" = None,
+        components: Optional[list[ReactComponent]] = None,
+    ):
+        self.render = render
+        self.children = children or []
+        self.components = components
+        self.parent: Optional[Route | Layout] = None
+
+    def path_list(self) -> Sequence[str]:
+        # Layouts don't contribute to the path
         if self.parent:
-            return self.parent.get_full_segments() + self.segments
-        return self.segments
+            return [*self.parent.path_list(), LAYOUT_INDICATOR]
+        else:
+            return [LAYOUT_INDICATOR]
 
-    def match(self, request_path: str) -> Optional[PathParameters]:
-        segments = self.get_full_segments()
+    def full_path(self):
+        return ROUTE_PATH_SEPARATOR.join(self.path_list())
 
-        if request_path.startswith("/"):
-            request_path = request_path[1:]
-        if request_path.endswith("/") and len(request_path) > 1:
-            request_path = request_path[:-1]
-
-        url_parts = request_path.split("/") if request_path else []
-
-        def _match_recursive(seg_idx: int, url_idx: int) -> Optional[PathParameters]:
-            # If we've consumed all route segments, we have a match only if
-            # we've also consumed all URL parts.
-            if seg_idx == len(segments):
-                if url_idx == len(url_parts):
-                    return PathParameters()
-                return None
-
-            segment = segments[seg_idx]
-
-            # A splat segment matches everything that remains.
-            if segment.is_splat:
-                return PathParameters(splat=url_parts[url_idx:])
-
-            # If the current segment is optional, we first try to match the
-            # rest of the route without consuming this segment.
-            if segment.is_optional:
-                result = _match_recursive(seg_idx + 1, url_idx)
-                if result:
-                    return result
-
-            # If we've run out of URL parts, the rest of the route segments
-            # must be optional to be a match.
-            if url_idx >= len(url_parts):
-                if all(s.is_optional for s in segments[seg_idx:]):
-                    return PathParameters()
-                return None
-
-            url_part = url_parts[url_idx]
-
-            # If the segment is dynamic or its name matches the URL part,
-            # we consume both and recurse.
-            if segment.is_dynamic or segment.name == url_part:
-                result = _match_recursive(seg_idx + 1, url_idx + 1)
-                if result:
-                    if segment.is_dynamic:
-                        result.params[segment.name] = url_part
-                    return result
-
-            return None
-
-        return _match_recursive(0, 0)
+    def file_path(self) -> str:
+        return "/".join(self.path_list()) + ".tsx"
 
 
-def route(
-    path: str, components: list[ReactComponent] | None = None, parent: Optional[Route] = None
-) -> Callable[[Callable[[], Node]], Route]:
-    """
-    Decorator to define a route with its component dependencies.
-
-    Args:
-        path: URL path for the route
-        components: List of component keys used by this route
-
-    Returns:
-        Decorator function
-    """
-    if components is None:
-        components = registered_react_components()
-
-    def decorator(render_func: Callable[[], Node]) -> Route:
-        route = Route(path, render_func, components=components, parent=parent)
-        add_route(route)
-        return route
-
-    return decorator
-
-
-# Global registry for routes
-ROUTES: list[Route] = []
-
-
-def add_route(route: Route):
-    """Register a route in the global registry"""
-    ROUTES.append(route)
-
-
-def decorated_routes() -> list[Route]:
-    """Get all registered routes"""
-    return ROUTES.copy()
-
-
-def clear_routes():
-    """Clear all registered routes"""
-    global ROUTES
-    ROUTES = []
+route = Route
+layout = Layout
 
 
 # According to RFC 3986, a path segment can contain "pchar" characters, which includes:
@@ -272,49 +198,52 @@ class RouteInfo:
         self.catch_all = path_params.splat
 
 
+def add_parental_links(route: Route | Layout):
+    if route.children:
+        for child in route.children:
+            child.parent = route
+            add_parental_links(child)
+
+
 class RouteTree:
-    routes: list[Route]
+    routes: list[Route | Layout]
 
-    def __init__(self, routes: list[Route]) -> None:
-        seen: set[str] = set()
-        self.routes = []
-        for route in routes:
-            if route.path in seen:
-                raise ValueError(f"Duplicate routes on path '{route.path}'")
-            seen.add(route.path)
-            # Children will be accessible through their parent
-            if route.parent:
-                continue
-            self.routes.append(route)
+    def __init__(self, routes: Sequence[Route | Layout]) -> None:
+        self.routes = list(routes)
+        for route in self.routes:
+            add_parental_links(route)
 
-    def add(self, route: Route):
-        """Add a route to the tree, checking for duplicates."""
-        if route.parent:
-            return  # automatically added by the constructor
-        if any(r.path == route.path for r in self.routes):
-            raise ValueError(f"Duplicate routes on path '{route.path}'")
-        self.routes.append(route)
-
-    def find(self, path: str):
+    def find(self, path: str) -> Union[Route, Layout]:
         parts = path.split(ROUTE_PATH_SEPARATOR)
-        result: Route | None = None
-        routes = self.routes
-        for path_fragment in parts:
+        current_nodes: list[Route | Layout] = self.routes
+        found_node: Route | Layout | None = None
+
+        for i, path_fragment in enumerate(parts):
             path_fragment = normalize_path(path_fragment)
-            for route in routes:
-                if route.path == path_fragment:
-                    result = route
-                    routes = route.children
+
+            node_for_fragment = None
+            for node in current_nodes:
+                if path_fragment == LAYOUT_INDICATOR and isinstance(node, Layout):
+                    node_for_fragment = node
                     break
-        if result is None:
-            raise ValueError(f"No route found for path '{'/'.join(path)}'")
-        return result
+                elif isinstance(node, Route) and node.path == path_fragment:
+                    node_for_fragment = node
+                    break
+
+            if node_for_fragment:
+                if i == len(parts) - 1:
+                    found_node = node_for_fragment
+                current_nodes = node_for_fragment.children
+            else:
+                raise ValueError(f"No route found for path '{path}'")
+
+        if found_node:
+            return found_node
+
+        raise ValueError(f"No route found for path '{path}'")
 
     def __iter__(self):
         return iter(self.routes)
-
-    def __getitem__(self, idx):
-        return self.routes[idx]
 
     def __len__(self):
         return len(self.routes)

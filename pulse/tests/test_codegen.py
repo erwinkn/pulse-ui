@@ -9,11 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from pulse.app import App, Route
+from pulse.app import App
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.components import Outlet
+import pulse as ps
 from pulse.components.registry import COMPONENT_REGISTRY, ReactComponent
-from pulse.routing import RouteTree
+from pulse.routing import RouteTree, Route
 from pulse.vdom import div
 
 
@@ -26,7 +27,9 @@ class TestCodegen:
 
     def test_generate_route_page_no_components(self, tmp_path):
         """Test generating a single route page with no components."""
-        route = Route("/simple", lambda: div()["Simple route"], components=[])
+        route = Route(
+            "/simple", ps.component(lambda: div()["Simple route"]), components=[]
+        )
         codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
         codegen = Codegen(RouteTree([route]), codegen_config)
         codegen.generate_route(route)
@@ -135,23 +138,27 @@ class TestCodegen:
         Footer = ReactComponent("Footer", "./components/Footer")
         Button = ReactComponent("Button", "./components/Button")
 
-        app = App()
+        home_route = ps.component(
+            lambda: div()[Header(title="Home"), Footer(year=2024)]
+        )
+        users_page = ps.component(lambda: div()["Users Layout", Outlet()])
+        user_details = ps.component(lambda: div()["User Details"])
+        interactive_route = ps.component(lambda: div()[Button(variant="primary")])
 
-        @app.route("/", components=[Header, Footer])
-        def home_route():
-            return div()[Header(title="Home"), Footer(year=2024)]
+        routes = [
+            Route("/", home_route, components=[Header, Footer]),
+            Route(
+                "/users",
+                users_page,
+                components=[],
+                children=[
+                    Route(":id", user_details, components=[]),
+                ],
+            ),
+            Route("/interactive", interactive_route, components=[Button]),
+        ]
 
-        @app.route("/users", components=[])
-        def users_page():
-            return div()["Users Layout", Outlet()]
-
-        @app.route(":id", components=[], parent=users_page)
-        def user_details():
-            return div()["User Details"]
-
-        @app.route("/interactive", components=[Button])
-        def interactive_route():
-            return div()[Button(variant="primary")]
+        app = App(routes=routes)
 
         codegen_config = CodegenConfig(
             web_dir=str(tmp_path),
@@ -188,8 +195,7 @@ class TestCodegen:
             'route("users", "test_pulse_app/routes/users.tsx", [' in routes_ts_content
         )
         assert (
-            'route(":id", "test_pulse_app/routes/users/:id.tsx")'
-            in routes_ts_content
+            'route(":id", "test_pulse_app/routes/users/:id.tsx")' in routes_ts_content
         )
 
         home_content = (routes_dir / "index.tsx").read_text()

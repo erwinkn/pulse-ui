@@ -1,7 +1,7 @@
 import pulse as ps
 
 
-@ps.route("/")
+@ps.component
 def home():
     """Home page with a greeting and interactive button."""
 
@@ -17,7 +17,7 @@ def home():
     )
 
 
-@ps.route("/about")
+@ps.component
 def about():
     """About page with information."""
     return ps.div(
@@ -41,7 +41,7 @@ class CounterState(ps.State):
         self.count += 1
 
 
-@ps.route("/counter")
+@ps.component
 def counter():
     """Interactive counter page."""
     # Both state methods and arbitrary functions work as event handlers
@@ -67,8 +67,8 @@ def counter():
     )
 
 
-@ps.route("/child", parent=counter)
-def child_route():
+@ps.component
+def counter_child():
     """A second, independent counter."""
 
     def decrement():
@@ -89,4 +89,10 @@ def child_route():
 
 
 # Create the Pulse app
-app = ps.App(routes=[*ps.decorated_routes()])
+app = ps.App(
+    routes=[
+        ps.Route("/about", about),
+        ps.Route("/", home),
+        ps.Route("/counter", counter, [ps.Route("/child", counter_child)]),
+    ]
+)

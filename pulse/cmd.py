@@ -15,7 +15,7 @@ import typer
 from rich.console import Console
 
 from pulse.app import App
-from pulse.routing import clear_routes
+# from pulse.routing import clear_routes
 
 from textual.app import App as TextualApp, ComposeResult
 from textual.containers import Container
@@ -55,7 +55,7 @@ def load_app_from_file(file_path: str | Path) -> App:
         typer.echo(f"❌ File must be a Python file (.py): {file_path}")
         raise typer.Exit(1)
 
-    clear_routes()
+    # clear_routes()
     sys.path.insert(0, str(file_path.parent.absolute()))
 
     try:

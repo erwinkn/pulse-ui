@@ -1,5 +1,5 @@
 import pytest
-from pulse.reactive import Signal, Computed, Effect, batch, untrack
+from pulse.reactive import Signal, Computed, Effect, batch, computed, effect, untrack
 
 
 class TestReactiveSystem:
@@ -24,12 +24,12 @@ class TestReactiveSystem:
         runs = 0
         effect_value = 0
 
+        @effect
         def my_effect():
             nonlocal runs, effect_value
             runs += 1
             effect_value = s()
 
-        Effect(my_effect, name="effect")
 
         assert runs == 1
         assert effect_value == 10
@@ -136,6 +136,38 @@ class TestReactiveSystem:
         assert c() == 22
         assert runs == 2
 
+    def test_effects_run_after_batch(self):
+        with batch():
+
+            @effect(name="effect_in_batch")
+            def e(): ...
+
+            assert e.runs == 0
+
+        assert e.runs == 1
+
+    def test_computed_updated_within_batch(self):
+        s = Signal(1)
+        double = Computed(lambda: 2 * s())
+        with batch():
+            s.write(2)
+            # Depending on the reactive architecture chosen, this may return `2`
+            # still. To avoid surprises, Pulse favors consistency.
+            assert double() == 4
+
+    def test_no_update_if_value_didnt_change(self):
+        s = Signal(1)
+
+        @effect
+        def e():
+            s()
+
+        assert e.runs == 1
+        s.write(2)
+        assert e.runs == 2
+        s.write(2)
+        assert e.runs == 2
+
     def test_cycle_detection(self):
         s1 = Signal(1, name="s1")
         c1 = Computed(lambda: s1() if s1() < 10 else c2(), name="c1")
@@ -231,20 +263,20 @@ class TestReactiveSystem:
 
         d_runs = 0
 
-        def d_fn():
+        @computed(name='d')
+        def d():
             nonlocal d_runs
             d_runs += 1
             return b() + c()
 
-        d = Computed(d_fn, name="d")
+        assert d_runs == 0, "d should not run unless used by an effect"
 
         result = 0
 
-        def effect():
+        @effect(name='diamond_effect')
+        def e():
             nonlocal result
             result = d()
-
-        Effect(effect, name="diamond_effect")
 
         assert result == 5
         assert d_runs == 1

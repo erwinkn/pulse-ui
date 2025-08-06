@@ -134,7 +134,7 @@ class App:
             session = self.get_session(sid)
             if data["type"] == "mount":
                 session.mount(data["path"], data["routeInfo"], data["currentVDOM"])
-            if data["type"] == "navigate":
+            elif data["type"] == "navigate":
                 session.navigate(data["path"], data["routeInfo"])
             elif data["type"] == "callback":
                 session.execute_callback(data["path"], data["callback"], data["args"])

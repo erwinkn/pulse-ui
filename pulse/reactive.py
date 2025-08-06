@@ -244,7 +244,7 @@ def effect(
     fn: Optional[Callable[[], None]] = None,
     *,
     name: Optional[str] = None,
-    immediate: bool = False
+    immediate: bool = False,
 ):
     if fn is not None:
         return Effect(fn, name=name or fn.__name__, immediate=immediate)
@@ -276,11 +276,11 @@ class Scope:
 
 class Batch:
     def __init__(self) -> None:
-        self.__effects: list[Effect] = []
+        self._effects: list[Effect] = []
 
     def register_effect(self, effect: Effect):
-        if effect not in self.__effects:
-            self.__effects.append(effect)
+        if effect not in self._effects:
+            self._effects.append(effect)
 
     def flush(self):
         global_batch = BATCH.get()
@@ -291,15 +291,15 @@ class Batch:
         MAX_ITERS = 10000
         epoch = start_epoch = EPOCH.get()
 
-        while len(self.__effects) > 0:
+        while len(self._effects) > 0:
             if epoch - start_epoch > MAX_ITERS:
                 raise RuntimeError(
                     f"Pulse's reactive system registered more than {MAX_ITERS} iterations. There is likely an update cycle in your application.\n"
                     "This is most often caused through a state update during rerender or in an effect that ends up triggering the same rerender or effect."
                 )
 
-            current_effects = self.__effects
-            self.__effects = []
+            current_effects = self._effects
+            self._effects = []
 
             for effect in current_effects:
                 if effect._should_run():

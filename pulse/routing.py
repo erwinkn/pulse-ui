@@ -107,13 +107,14 @@ class Route:
         self.is_dynamic = any(
             seg.is_dynamic or seg.is_optional for seg in self.segments
         )
-        if self.is_dynamic:
-            raise NotImplementedError("Dynamic routes are not supported yet")
 
     def _path_list(self, include_layouts=False) -> list[str]:
+        # Question marks cause problems for the URL of our prerendering requests +
+        # React-Router file loading
+        path = self.path.replace("?", "^")
         if self.parent:
-            return [*self.parent._path_list(include_layouts=include_layouts), self.path]
-        return [self.path]
+            return [*self.parent._path_list(include_layouts=include_layouts), path]
+        return [path]
 
     def unique_path(self):
         return "/".join(self._path_list())

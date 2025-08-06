@@ -82,7 +82,7 @@ def about():
 def counter():
     """An interactive counter page demonstrating state management."""
     state = ps.states(CounterState)
-    # ps.effects(ps.Effect(lambda: print(f"Count is {state.count}")))
+    ps.effects(lambda: print(f"Count is {state.count}"))
 
     def decrement():
         state.count -= 1
@@ -127,6 +127,24 @@ def counter_details():
 
 
 @ps.component
+def dynamic_route():
+    router = ps.router()
+    return ps.div(
+        ps.h2("Dynamic Route Info", className="text-xl font-bold mb-2"),
+        ps.ul(
+            ps.li(f"Pathname: {router.pathname}"),
+            ps.li(f"Hash: {router.hash}"),
+            ps.li(f"Query: {router.query}"),
+            ps.li(f"Query Params: {router.queryParams}"),
+            ps.li(f"Path Params: {router.pathParams}"),
+            ps.li(f"Catchall: {router.catchall}"),
+            className="list-disc ml-6",
+        ),
+        className="bg-yellow-50 p-4 rounded-lg",
+    )
+
+
+@ps.component
 def app_layout():
     """The main layout for the application, including navigation and a persistent counter."""
     state = ps.states(LayoutState)
@@ -150,6 +168,7 @@ def app_layout():
                 ps.Link("Home", to="/", className="nav-link"),
                 ps.Link("Counter", to="/counter", className="nav-link"),
                 ps.Link("About", to="/about", className="nav-link"),
+                ps.Link("Dynamic", to="/dynamic", className="nav-link"),
                 className="flex justify-center space-x-4 p-4 bg-gray-700 text-white rounded-b-lg",
             ),
             className="mb-8",
@@ -177,6 +196,7 @@ app = ps.App(
                         ps.Route("details", counter_details),
                     ],
                 ),
+                ps.Route("/dynamic/:route_id/:optional_segment?/*", dynamic_route),
             ],
         )
     ]

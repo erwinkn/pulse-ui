@@ -1,4 +1,5 @@
 from contextvars import ContextVar
+from multiprocessing import Value
 from typing import (
     Any,
     Callable,
@@ -64,8 +65,8 @@ class Router(State):
 
 class HookState:
     setup: SetupState
-    states: State | tuple[State, ...]
-    effects: Effect | tuple[Effect, ...]
+    states: tuple[State, ...]
+    effects: tuple[Effect, ...]
     router: Router
 
     def __init__(self, route_info: RouteInfo):
@@ -143,7 +144,7 @@ class RenderContext:
             new_vdom, new_callbacks = new_tree.render()
             if self.prerendering:
                 batch = BATCH.get()
-                batch.__effects = []
+                batch._effects = []
 
             self.vdom = new_vdom
             self.callbacks = new_callbacks
@@ -342,46 +343,34 @@ def states(*args):
                 states.append(arg())
             else:
                 states.append(arg)
-        if len(states) == 1:
-            ctx.hooks.states = states[0]
-        else:
-            ctx.hooks.states = tuple(states)
+        ctx.hooks.states = tuple(states)
 
-    return ctx.hooks.states  # type: ignore
+    if len(ctx.hooks.states) == 1:
+        return ctx.hooks.states[0]
+    else:
+        return ctx.hooks.states
 
 
-# Easier types for pulse.effects as we don't nee to be generic
-# Overload 1: one effect
-@overload
-def effects(*effects: Unpack[tuple[Effect]]) -> Effect: ...
-@overload
-def effects(*effects: Effect) -> tuple[Effect]: ...
-# Overload 1: nultiple effects
-def effects(*effects: Effect):
+def effects(*fns: Callable[[], None]) -> None:
     # Assumption: RenderContext will set up a render context and a batch before
     # rendering. The batch ensures the effects run *after* rendering.
     ctx = RENDER_CONTEXT.get()
-    batch = BATCH.get()
-    if not ctx or not batch:
+    if not ctx:
         raise RuntimeError(
             "`pulse.states` can only be called within a component, during rendering."
         )
 
     # Remove the effects passed here from the batch, ensuring they only run on mount
-    for eff in effects:
-        batch.__effects.remove(eff)
-
     if ctx.render_count == 1:
-        if len(effects) == 1:
-            ctx.hooks.effects = effects[0]
-        else:
-            ctx.hooks.effects = effects
-
-    return ctx.hooks.effects
+        effects = []
+        for fn in fns:
+            if not callable(fn):
+                raise ValueError("Only pass functions or callable objects to `ps.effects`")
+            effects.append(Effect(fn, name=fn.__name__))
+        ctx.hooks.effects = tuple(effects)
 
 
 def router():
-
     ctx = RENDER_CONTEXT.get()
     if not ctx:
         raise RuntimeError(

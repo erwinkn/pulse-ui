@@ -5,90 +5,27 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import asyncio
 import logging
-import socket
 from enum import IntEnum
-from typing import Any, Awaitable, Callable, List, Optional, TypeVar
+from typing import Optional, Sequence, TypeVar, TypedDict, Unpack
 
 import socketio
-import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from pulse.codegen import CodegenConfig
-from pulse.diff import diff_vdom
-from pulse.messages import (
-    ClientMessage,
-    ServerInitMessage,
-    ServerUpdateMessage,
-)
-from pulse.reactive import ReactiveContext, UpdateScheduler
+import os
+from pulse.codegen import Codegen, CodegenConfig
 from pulse.components.registry import ReactComponent, registered_react_components
-from pulse.vdom import Node, VDOMNode
+from pulse.messages import ClientMessage, RouteInfo
+from pulse.render import RenderContext
+from pulse.routing import Layout, Route, RouteTree
+from pulse.session import Session
+from pulse.vdom import VDOM
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-class Route:
-    """
-    Represents a route definition with its component dependencies.
-    """
-
-    def __init__(
-        self,
-        path: str,
-        render_fn: Callable[[], Node],
-        components: list[ReactComponent],
-    ):
-        self.path = path
-        self.render_fn = render_fn
-        self.components = components
-
-
-def route(
-    path: str, components: list[ReactComponent] | None = None
-) -> Callable[[Callable[[], Node]], Route]:
-    """
-    Decorator to define a route with its component dependencies.
-
-    Args:
-        path: URL path for the route
-        components: List of component keys used by this route
-
-    Returns:
-        Decorator function
-    """
-    if components is None:
-        components = registered_react_components()
-
-    def decorator(render_func: Callable[[], Node]) -> Route:
-        route = Route(path, render_func, components=components)
-        add_route(route)
-        return route
-
-    return decorator
-
-
-# Global registry for routes
-ROUTES: list[Route] = []
-
-
-def add_route(route: Route):
-    """Register a route in the global registry"""
-    ROUTES.append(route)
-
-
-def decorated_routes() -> list[Route]:
-    """Get all registered routes"""
-    return ROUTES.copy()
-
-
-def clear_routes():
-    """Clear all registered routes"""
-    global ROUTES
-    ROUTES = []
 
 
 class AppStatus(IntEnum):
@@ -96,6 +33,10 @@ class AppStatus(IntEnum):
     initialized = 1
     running = 2
     stopped = 3
+
+
+class AppConfig(TypedDict, total=False):
+    server_address: str
 
 
 class App:
@@ -118,8 +59,9 @@ class App:
 
     def __init__(
         self,
-        routes: Optional[List[Route]] = None,
+        routes: Optional[Sequence[Route | Layout]] = None,
         codegen: Optional[CodegenConfig] = None,
+        **config: Unpack[AppConfig],
     ):
         """
         Initialize a new Pulse App.
@@ -128,15 +70,18 @@ class App:
             routes: Optional list of Route objects to register.
             codegen: Optional codegen configuration.
         """
+        self.config = config
+
         routes = routes or []
-        self.routes: dict[str, Route] = {}
-        for route_obj in routes:
-            if route_obj.path in self.routes:
-                raise ValueError(f"Duplicate routes on path '{route_obj.path}'")
-            self.routes[route_obj.path] = route_obj
+        # Auto-add React components to all routes
+        add_react_components(routes, registered_react_components())
+        self.routes = RouteTree(routes)
         self.sessions: dict[str, Session] = {}
 
-        self.codegen = codegen or CodegenConfig()
+        self.codegen = Codegen(
+            self.routes,
+            config=codegen or CodegenConfig(),
+        )
 
         self.fastapi = FastAPI(title="Pulse UI Server")
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
@@ -161,104 +106,70 @@ class App:
         def healthcheck():
             return {"health": "ok", "message": "Pulse server is running"}
 
-    def run(
-        self,
-        host: str = "127.0.0.1",
-        port=8000,
-        find_port=True,
-        log_level: str = "info",
-    ):
-        if self.status == AppStatus.running:
-            raise RuntimeError("Server already running")
-        if self.status == AppStatus.created:
-            self.setup()
-            self._setup_socketio_endpoints()
+        # RouteInfo is the request body
+        @self.fastapi.post("/prerender/{path:path}")
+        def prerender(path: str, route_info: RouteInfo) -> VDOM:
+            ctx = RenderContext(
+                self.routes.find(path), route_info, prerendering=True, vdom=None
+            )
+            result = ctx.render()
+            return result.new_vdom
 
-        logging.basicConfig(
-            level=log_level.upper(),
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
-
-        if find_port:
-            port = find_available_port(port)
-
-        logger.info(f"🚀 Starting Pulse UI Server on http://{host}:{port}")
-        logger.info(f"🔌 WebSocket endpoint: ws://{host}:{port}/ws")
-
-        uvicorn.run(self.asgi, host=host, port=port, log_level=log_level)
-
-    def _setup_socketio_endpoints(self):
         @self.sio.event
         async def connect(sid: str, environ, auth=None):
-            logger.info(f"-> Creating session: {sid}")
             session = self.create_session(sid)
             session.connect(
-                lambda message: self.sio.emit("message", message, to=sid),
+                lambda message: asyncio.create_task(
+                    self.sio.emit("message", message, to=sid)
+                ),
             )
 
         @self.sio.event
         def disconnect(sid: str):
             # TODO: keep the session open for some time in case the client reconnects?
-            logger.info(f"-> Disconnecting session: {sid}")
             self.close_session(sid)
 
         @self.sio.event
-        async def message(sid: str, data: ClientMessage):
+        def message(sid: str, data: ClientMessage):
             session = self.get_session(sid)
-            logger.info(f"-> Received message: {data}")
-
-            if data["type"] == "navigate":
-                await session.hydrate(data["route"])
+            if data["type"] == "mount":
+                session.mount(data["path"], data["routeInfo"], data["currentVDOM"])
+            elif data["type"] == "navigate":
+                session.navigate(data["path"], data["routeInfo"])
             elif data["type"] == "callback":
-                session.execute_callback(data["callback"], data["args"])
+                session.execute_callback(data["path"], data["callback"], data["args"])
+            elif data["type"] == "leave":
+                session.unmount(data["path"])
             else:
                 logger.warning(f"Unknown message type received: {data}")
 
-    def route(self, path: str, components: Optional[List] = None):
+    def run_codegen(self, address: Optional[str] = None):
+        address = address or self.config.get('server_address')
+        if not address:
+            raise RuntimeError("Please provide a server address to the App constructor or the Pulse CLI.")
+        self.codegen.generate_all(address)
+
+    def asgi_factory(self):
         """
-        Decorator to define a route on this app instance.
-
-        Args:
-            path: URL path for the route
-            components: List of component keys used by this route
-
-        Returns:
-            Decorator function
+        ASGI factory for uvicorn. This is called on every reload.
         """
 
-        if components is None:
-            components = registered_react_components()
+        host = os.environ.get("PULSE_HOST", "127.0.0.1")
+        port = int(os.environ.get("PULSE_PORT", 8000))
+        protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
 
-        def decorator(render_func):
-            route_obj = Route(path, render_func, components=components)
-            self.add_route(route_obj)
-            return route_obj
-
-        return decorator
-
-    def add_route(self, route: Route):
-        """Add a route to this app instance."""
-        if route.path in self.routes:
-            raise ValueError(f"Duplicate routes on path '{route.path}'")
-        self.routes[route.path] = route
-
-    def list_routes(self) -> List[Route]:
-        """Get all routes registered on this app (both via constructor and decorator)."""
-        return list(self.routes.values())
-
-    def clear_routes(self):
-        """Clear all routes from this app instance."""
-        self.routes.clear()
+        self.run_codegen(f"{protocol}://{host}:{port}")
+        self.setup()
+        return self.asgi
 
     def get_route(self, path: str):
-        if path not in self.routes:
-            raise ValueError(f"No route found for path '{path}'")
-        return self.routes[path]
+        self.routes.find(path)
 
     def create_session(self, id: str):
         if id in self.sessions:
             raise ValueError(f"Session {id} already exists")
-        self.sessions[id] = Session(id, self)
+        print(f"--> Creating session {id}")
+        self.sessions[id] = Session(id, self.routes)
         return self.sessions[id]
 
     def get_session(self, id: str):
@@ -273,114 +184,11 @@ class App:
         del self.sessions[id]
 
 
-class Session:
-    def __init__(self, id: str, app: App) -> None:
-        self.id = id
-        self.app = app
-        self.message_listeners: set[
-            Callable[[ServerUpdateMessage | ServerInitMessage], Awaitable[Any]]
-        ] = set()
-
-        self.current_route: str | None = None
-        self.ctx = ReactiveContext()
-        self.scheduler = UpdateScheduler()
-        self.callback_registry: dict[str, Callable] = {}
-        self.vdom: VDOMNode | None = None
-
-    def connect(
-        self,
-        message_listener: Callable[
-            [ServerUpdateMessage | ServerInitMessage], Awaitable[Any]
-        ],
-    ):
-        self.message_listeners.add(message_listener)
-        # Return a disconnect function
-        return lambda: (self.message_listeners.remove(message_listener),)
-
-    async def notify(self, message: ServerUpdateMessage | ServerInitMessage):
-        for listener in self.message_listeners:
-            await listener(message)
-
-    def close(self):
-        self.message_listeners.clear()
-        self.vdom = None
-        self.callback_registry.clear()
-        for state, fields in self.ctx.client_states.items():
-            state.remove_listener(fields, self.rerender)
-
-    def execute_callback(self, key: str, args: list | tuple):
-        self.callback_registry[key](*args)
-
-    def rerender(self):
-        if self.current_route is None:
-            raise RuntimeError("Failed to rerender: no route set for the session!")
-        self.app.sio.start_background_task(self.update_render)
-
-    async def hydrate(self, path: str):
-        route = self.app.get_route(path)
-
-        # Clear old state listeners from previous route
-        for state, fields in self.ctx.client_states.items():
-            state.remove_listener(fields, self.rerender)
-
-        # Reinitialize render state for the new route
-        self.current_route = path
-        self.ctx = ReactiveContext.empty()
-        self.callback_registry.clear()
-        self.vdom = None
-
-        with self.ctx.next_render() as new_ctx:
-            node_tree = route.render_fn()
-            vdom_tree, callbacks = node_tree.render()
-            self.vdom = vdom_tree
-            self.callback_registry = callbacks
-            self.ctx = new_ctx
-
-            # Set up new state subscriptions
-            for state, fields in self.ctx.client_states.items():
-                state.add_listener(fields, self.rerender)
-
-            # Send the full VDOM to the client for initial hydration
-            await self.notify(ServerInitMessage(type="vdom_init", vdom=vdom_tree))
-
-    async def update_render(self):
-        if self.current_route is None:
-            return  # Should not happen if called from rerender
-
-        route = self.app.get_route(self.current_route)
-
-        with self.ctx.next_render() as new_ctx:
-            new_node_tree = route.render_fn()
-            new_vdom_tree, new_callbacks = new_node_tree.render()
-
-            operations = diff_vdom(self.vdom, new_vdom_tree)
-
-            # Update state listeners
-            for state, fields in self.ctx.client_states.items():
-                state.remove_listener(fields, self.rerender)
-            for state, fields in new_ctx.client_states.items():
-                state.add_listener(fields, self.rerender)
-
-            self.callback_registry = new_callbacks
-            self.vdom = new_vdom_tree
-            self.ctx = new_ctx
-
-            # Send diff to client if there are any changes
-            if operations:
-                await self.notify(
-                    ServerUpdateMessage(type="vdom_update", ops=operations)
-                )
-
-
-def find_available_port(start_port: int = 8000, max_attempts: int = 10) -> int:
-    """Find an available port starting from start_port."""
-    for port in range(start_port, start_port + max_attempts):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("localhost", port))
-                return port
-        except OSError:
-            continue
-    raise RuntimeError(
-        f"Could not find available port after {max_attempts} attempts starting from {start_port}"
-    )
+def add_react_components(
+    routes: Sequence[Route | Layout], components: list[ReactComponent]
+):
+    for route in routes:
+        if route.components is None:
+            route.components = components
+        if route.children:
+            add_react_components(route.children, components)

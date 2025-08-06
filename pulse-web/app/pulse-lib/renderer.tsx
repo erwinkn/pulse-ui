@@ -50,8 +50,8 @@ export const VDOMRenderer = memo<VDOMRendererProps>(({ node }) => {
     // Process props for callbacks
     const processedProps: Record<string, any> = {};
     for (const [key, value] of Object.entries(props)) {
-      if (typeof value === "string" && value.startsWith("$$callback:")) {
-        const callbackKey = value.substring("$$callback:".length);
+      if (typeof value === "string" && value.startsWith("$$fn:")) {
+        const callbackKey = value.substring("$$fn:".length);
         processedProps[key] = getCallback(callbackKey);
       } else {
         processedProps[key] = value;

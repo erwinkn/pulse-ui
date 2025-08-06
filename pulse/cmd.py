@@ -302,7 +302,7 @@ def generate(
     app = load_app_from_file(app_file)
     console.log(f"📋 Found {len(app.routes.flat_tree)} routes")
 
-    app.run_codegen()
+    app.run_codegen("127.0.0.1:8000")
 
     if len(app.routes.flat_tree) > 0:
         console.log(f"✅ Generated {len(app.routes.flat_tree)} routes successfully!")

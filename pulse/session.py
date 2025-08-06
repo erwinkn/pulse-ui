@@ -1,25 +1,19 @@
-from dataclasses import dataclass
+import logging
 from typing import Any, Awaitable, Callable
 
-import inspect
-from pulse.diff import VDOM, diff_vdom
-from pulse.hooks import ReactiveState
+from pulse.diff import diff_vdom
 from pulse.messages import (
+    RouteInfo,
     ServerInitMessage,
     ServerMessage,
     ServerUpdateMessage,
 )
-from pulse.reactive import Effect, batch
+from pulse.reactive import batch
+from pulse.render import RenderContext, RenderResult
 from pulse.routing import RouteTree
-from pulse.vdom import Callbacks, VDOMNode, Node
+from pulse.vdom import VDOM, VDOMNode
 
-
-@dataclass
-class ActiveRoute:
-    callbacks: Callbacks
-    reactive_state: ReactiveState
-    vdom: VDOMNode | None
-    effect: Effect | None
+logger = logging.getLogger(__file__)
 
 
 class Session:
@@ -28,7 +22,7 @@ class Session:
         self.routes = routes
         self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
 
-        self.active_routes: dict[str, ActiveRoute] = {}
+        self.active_routes: dict[str, RenderContext] = {}
         self.vdom: VDOMNode | None = None
 
     def connect(
@@ -52,7 +46,7 @@ class Session:
         # The effect will be garbage collected, and with it the dependencies
         self.message_listeners.clear()
         for path in list(self.active_routes.keys()):
-            self.leave(path)
+            self.unmount(path)
         self.active_routes.clear()
 
     def execute_callback(self, route: str, key: str, args: list | tuple):
@@ -60,53 +54,40 @@ class Session:
             fn, n_params = self.active_routes[route].callbacks[key]
             fn(*args[:n_params])
 
-    def navigate(self, path: str):
-        # Erwin: I don't think we want this. If the server restarts, it
-        # disconnects and reconnects & the active clients should reload to make
-        #     sure they get the latest version. 
-        if active_route := self.active_routes.get(path):
-            if active_route.vdom:
-                self.notify(ServerInitMessage(type="vdom_init", path=path, vdom=active_route.vdom))
-                return
-        #     raise RuntimeError(f"Cannot navigate to already active route
-        #     '{path}'")
+    def mount(self, path: str, route_info: RouteInfo, current_vdom: VDOM):
+        if path in self.active_routes:
+            logger.error(f"Route already mounted: '{path}'")
+
+        def on_render(res: RenderResult):
+            if res.current_vdom is None:
+                self.notify(
+                    ServerInitMessage(type="vdom_init", path=path, vdom=res.new_vdom)
+                )
+            else:
+                operations = diff_vdom(res.current_vdom, res.new_vdom)
+                if operations:
+                    self.notify(
+                        ServerUpdateMessage(
+                            type="vdom_update", path=path, ops=operations
+                        )
+                    )
 
         route = self.routes.find(path)
-        active_route = ActiveRoute(
-            callbacks={},
-            reactive_state=ReactiveState.create(),
-            vdom=None,
-            effect=None,
+        ctx = RenderContext(
+            route, position="", route_info=route_info, vdom=current_vdom
         )
+        self.active_routes[path] = ctx
+        ctx.mount(on_render)
 
-        def render():
-            with active_route.reactive_state.start_render() as new_reactive_state:
-                # The render_fn is expected to return a single VDOMNode
-                previous_vdom = active_route.vdom
-                new_node = route.render.fn() # type: ignore
-                new_vdom, new_callbacks = new_node.render()
+    def navigate(self, path: str, route_info: RouteInfo):
+        # Route is already mounted, we can just update the routing state
+        if path not in self.active_routes:
+            logger.error(f"Navigating to unmounted route '{path}'")
+        else:
+            self.active_routes[path].update_route_info(route_info)
 
-                active_route.reactive_state = new_reactive_state
-                active_route.callbacks = new_callbacks
-                active_route.vdom = new_vdom
-
-                if new_reactive_state.render_count == 1:
-                    self.notify(
-                        ServerInitMessage(type="vdom_init", path=path, vdom=new_vdom)
-                    )
-                else:
-                    operations = diff_vdom(previous_vdom, new_vdom)
-                    if operations:
-                        self.notify(
-                            ServerUpdateMessage(
-                                type="vdom_update", path=path, ops=operations
-                            )
-                        )
-
-        active_route.effect = Effect(render)
-        self.active_routes[path] = active_route
-
-    def leave(self, path: str):
-        active_route = self.active_routes.pop(path)
-        if active_route.effect:
-            active_route.effect.dispose()
+    def unmount(self, path: str):
+        if path not in self.active_routes:
+            return
+        ctx = self.active_routes.pop(path)
+        ctx.unmount()

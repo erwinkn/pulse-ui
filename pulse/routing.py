@@ -1,13 +1,11 @@
 import re
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Optional, Sequence
 from dataclasses import dataclass, field
-from urllib.parse import parse_qs, urlparse
 
 from pulse.component import Component
 from pulse.components.registry import ReactComponent
 from pulse.vdom import Node
 
-ROUTE_PATH_SEPARATOR = "|"
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"
 
@@ -29,11 +27,8 @@ class PathSegment:
 
         self.is_splat = part == "*"
         self.is_optional = part.endswith("?")
-
         value = part[:-1] if self.is_optional else part
-
         self.is_dynamic = value.startswith(":")
-
         self.name = value[1:] if self.is_dynamic else value
 
         # Validate characters
@@ -112,19 +107,19 @@ class Route:
         self.is_dynamic = any(
             seg.is_dynamic or seg.is_optional for seg in self.segments
         )
+        if self.is_dynamic:
+            raise NotImplementedError("Dynamic routes are not supported yet")
 
-    def path_list(self, include_layouts=False) -> list[str]:
+    def _path_list(self, include_layouts=False) -> list[str]:
         if self.parent:
-            return [*self.parent.path_list(include_layouts=include_layouts), self.path]
+            return [*self.parent._path_list(include_layouts=include_layouts), self.path]
         return [self.path]
 
     def unique_path(self):
-        return ROUTE_PATH_SEPARATOR.join(self.path_list())
+        return "/".join(self._path_list())
 
     def file_path(self) -> str:
-        path_list = self.path_list()
-        path_list = [p for p in path_list if p != LAYOUT_INDICATOR]
-        path = "/".join(path_list)
+        path = "/".join(self._path_list(include_layouts=False))
         if self.is_index:
             path += "index"
         path += ".tsx"
@@ -160,9 +155,9 @@ class Layout:
         self.components = components
         self.parent: Optional[Route | Layout] = None
 
-    def path_list(self, include_layouts=False) -> list[str]:
+    def _path_list(self, include_layouts=False) -> list[str]:
         path_list = (
-            self.parent.path_list(include_layouts=include_layouts)
+            self.parent._path_list(include_layouts=include_layouts)
             if self.parent
             else []
         )
@@ -171,10 +166,10 @@ class Layout:
         return path_list
 
     def unique_path(self):
-        return ROUTE_PATH_SEPARATOR.join(self.path_list(include_layouts=True))
+        return "/".join(self._path_list(include_layouts=True))
 
     def file_path(self) -> str:
-        path_list = self.path_list(include_layouts=True)
+        path_list = self._path_list(include_layouts=True)
         path_list = ["layout" if p == LAYOUT_INDICATOR else p for p in path_list]
         # Convert all parent layout indicators to simply `layout`
         path_list = path_list[:-1] + ["_layout.tsx"]
@@ -187,50 +182,6 @@ class Layout:
 class InvalidRouteError(Exception): ...
 
 
-class RouteInfo:
-    """
-    Represents all the parts of a URL.
-    """
-
-    fragment: str
-    """Fragment identifier (e.g., 'section1')"""
-    query_params: dict
-    """Parsed query parameters as a dict"""
-    url: str
-    """The original URL string"""
-    hostname: Optional[str]
-    """The hostname from the netloc"""
-    port: Optional[int]
-    """The port number from the netloc"""
-
-    path_parameters: dict[str, str]
-    "Dynamic and optional path parameters"
-    catch_all: list[str]
-    "Catch-all path parameters"
-
-    def __init__(self, url: str, path_params: PathParameters):
-        self.url = url
-        parsed_url = urlparse(url)
-        self.scheme = parsed_url.scheme
-        self.netloc = parsed_url.netloc
-        self.path = parsed_url.path
-        self.params = parsed_url.params
-        self.query = parsed_url.query
-        self.fragment = parsed_url.fragment
-        self.query_params = parse_qs(self.query)
-        self.hostname = parsed_url.hostname
-        self.port = parsed_url.port
-        self.path_parameters = path_params.params
-        self.catch_all = path_params.splat
-
-
-def link_parental_tree(route: Route | Layout):
-    if route.children:
-        for child in route.children:
-            child.parent = route
-            link_parental_tree(child)
-
-
 class RouteTree:
     flat_tree: dict[str, Route | Layout]
 
@@ -239,7 +190,14 @@ class RouteTree:
         self.flat_tree = {}
 
         def _flatten_route_tree(route: Route | Layout):
-            self.flat_tree[route.unique_path()] = route
+            key = route.unique_path()
+            if key in self.flat_tree:
+                if isinstance(route, Layout):
+                    raise RuntimeError(f"Multiple layouts have the same path '{key}'")
+                else:
+                    raise RuntimeError(f"Multiple routes have the same path '{key}'")
+
+            self.flat_tree[key] = route
             for child in route.children:
                 child.parent = route
                 _flatten_route_tree(child)

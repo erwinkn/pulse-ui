@@ -165,7 +165,7 @@ class TestSession:
         dispose_mock = MagicMock()
         active_route.effect.dispose = dispose_mock
 
-        self.session.leave(path)
+        self.session.unmount(path)
 
         dispose_mock.assert_called_once()
 

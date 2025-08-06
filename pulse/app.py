@@ -8,7 +8,7 @@ to define routes and configure their Pulse application.
 import asyncio
 import logging
 from enum import IntEnum
-from typing import List, Optional, Sequence, TypeVar
+from typing import Optional, Sequence, TypeVar, TypedDict, Unpack
 
 import socketio
 from fastapi import FastAPI
@@ -17,10 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.components.registry import ReactComponent, registered_react_components
-from pulse.messages import ClientMessage
-from pulse.routing import Layout, Route, RouteTree 
+from pulse.messages import ClientMessage, RouteInfo
+from pulse.render import RenderContext
+from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
-from pulse.vendor.flatted import parse
+from pulse.vdom import VDOM
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,10 @@ class AppStatus(IntEnum):
     initialized = 1
     running = 2
     stopped = 3
+
+
+class AppConfig(TypedDict, total=False):
+    server_address: str
 
 
 class App:
@@ -56,6 +61,7 @@ class App:
         self,
         routes: Optional[Sequence[Route | Layout]] = None,
         codegen: Optional[CodegenConfig] = None,
+        **config: Unpack[AppConfig],
     ):
         """
         Initialize a new Pulse App.
@@ -64,6 +70,8 @@ class App:
             routes: Optional list of Route objects to register.
             codegen: Optional codegen configuration.
         """
+        self.config = config
+
         routes = routes or []
         # Auto-add React components to all routes
         add_react_components(routes, registered_react_components())
@@ -98,6 +106,15 @@ class App:
         def healthcheck():
             return {"health": "ok", "message": "Pulse server is running"}
 
+        # RouteInfo is the request body
+        @self.fastapi.post("/prerender/{path:path}")
+        def prerender(path: str, route_info: RouteInfo) -> VDOM:
+            ctx = RenderContext(
+                self.routes.find(path), route_info, prerendering=True, vdom=None
+            )
+            result = ctx.render()
+            return result.new_vdom
+
         @self.sio.event
         async def connect(sid: str, environ, auth=None):
             session = self.create_session(sid)
@@ -115,23 +132,22 @@ class App:
         @self.sio.event
         def message(sid: str, data: ClientMessage):
             session = self.get_session(sid)
+            if data["type"] == "mount":
+                session.mount(data["path"], data["routeInfo"], data["currentVDOM"])
             if data["type"] == "navigate":
-                session.navigate(data["path"])
+                session.navigate(data["path"], data["routeInfo"])
             elif data["type"] == "callback":
                 session.execute_callback(data["path"], data["callback"], data["args"])
             elif data["type"] == "leave":
-                session.leave(data["path"])
+                session.unmount(data["path"])
             else:
                 logger.warning(f"Unknown message type received: {data}")
 
-    def run_codegen(
-        self,
-        host: str = "127.0.0.1",
-        port=8000,
-    ):
-        self.codegen.host = host
-        self.codegen.port = port
-        self.codegen.generate_all()
+    def run_codegen(self, address: Optional[str] = None):
+        address = address or self.config.get('server_address')
+        if not address:
+            raise RuntimeError("Please provide a server address to the App constructor or the Pulse CLI.")
+        self.codegen.generate_all(address)
 
     def asgi_factory(self):
         """
@@ -140,8 +156,9 @@ class App:
 
         host = os.environ.get("PULSE_HOST", "127.0.0.1")
         port = int(os.environ.get("PULSE_PORT", 8000))
+        protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
 
-        self.run_codegen(host=host, port=port)
+        self.run_codegen(f"{protocol}://{host}:{port}")
         self.setup()
         return self.asgi
 
@@ -165,6 +182,7 @@ class App:
             raise KeyError(f"Session {id} does not exist")
         self.sessions[id].close()
         del self.sessions[id]
+
 
 def add_react_components(
     routes: Sequence[Route | Layout], components: list[ReactComponent]

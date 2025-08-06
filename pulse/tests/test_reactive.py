@@ -475,3 +475,22 @@ async def test_sync_writes_are_batched():
     await asyncio.sleep(0)
     b.write(6)
     assert e.runs == 3
+
+
+def test_immediate_effect():
+    s = Signal(1)
+
+    @effect()
+    def e1():
+        s()
+
+    assert e1.runs == 0
+
+    @effect(immediate=True)
+    def e2():
+        s()
+
+    assert e2.runs == 1
+    flush_effects()
+    assert e1.runs == 1
+    assert e2.runs == 1

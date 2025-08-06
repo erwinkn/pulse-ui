@@ -6,7 +6,7 @@ that enables automatic re-rendering when state changes.
 """
 
 from abc import ABC, ABCMeta
-from typing import Any, Callable, Never, TypeVar
+from typing import Any, Callable, Never, TypeVar, cast
 import functools
 
 from pulse.reactive import Signal, Computed, Effect
@@ -14,24 +14,6 @@ from pulse.reactive import Signal, Computed, Effect
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound="State")
-
-
-# The type annotation is meant to show that the method will be converted to a property
-def computed(fn: Callable[[TState], T]) -> T:
-    "Define a computed State variable"
-    fn._is_computed = True
-    return fn  # type: ignore
-
-
-def effect(fn: Callable[[TState], None]) -> Callable[[TState], None]:
-    """
-    Define an effect on a State class.
-
-    The decorated method will be automatically run as an effect when the
-    state object is initialized.
-    """
-    fn._is_effect = True
-    return fn
 
 
 class StateProperty:
@@ -72,28 +54,33 @@ class ComputedProperty:
     Descriptor for computed properties on State classes.
     """
 
-    def __init__(self, name: str, func: Callable):
+    def __init__(self, name: str, computed: Computed):
         self.name = name
-        self.func = func
-        self.private_name = f"__computed_{name}"
-
-    def get_computed(self, obj):
-        if not hasattr(obj, self.private_name):
-            # Create the Computed object on first access
-            # The method needs to be bound to the instance `obj`
-            bound_method = functools.partial(self.func, obj)
-            computed = Computed(
-                bound_method, name=f"{obj.__class__.__name__}.{self.name}"
-            )
-            setattr(obj, self.private_name, computed)
-            return computed
-        return getattr(obj, self.private_name)
+        self.computed = computed
+        self.curried_obj = None
 
     def __get__(self, obj: Any, objtype: Any = None) -> Any:
         if obj is None:
             return self
 
-        return self.get_computed(obj).read()
+        if self.curried_obj is None:
+            self.curried_obj = obj
+            # Since the computed has been defined as a method, it expects the
+            # first argument to be the state object. We turn this into a regular
+            # pulse.Computed, where the function doesn't take any argument.
+            self.computed = Computed(
+                lambda: self.computed.fn(obj),  # type: ignore
+                name=self.computed.name,
+            )
+
+        if obj is not self.curried_obj:
+            print("Obj:", obj)
+            print("self.curried_obj:", self.curried_obj)
+            raise RuntimeError(
+                "Invariant violation: ComputedProperty must be accessed on the same object instance it was created for."
+            )
+
+        return self.computed.read()
 
     def __set__(self, obj: Any, value: Any) -> Never:
         raise AttributeError(f"Cannot set computed property '{self.name}'")
@@ -113,7 +100,7 @@ class StateMeta(ABCMeta):
                 namespace[attr_name] = StateProperty(attr_name, default_value)
 
         for attr_name, attr_value in list(namespace.items()):
-            if callable(attr_value) and getattr(attr_value, "_is_computed", False):
+            if isinstance(attr_value, Computed):
                 namespace[attr_name] = ComputedProperty(attr_name, attr_value)
 
         return super().__new__(mcs, name, bases, namespace)

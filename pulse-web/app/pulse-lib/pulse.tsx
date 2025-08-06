@@ -7,9 +7,10 @@ import React, {
   type ComponentType,
 } from "react";
 import { VDOMRenderer } from "./renderer";
-import { PulseClient } from "./client";
-import { SocketIOTransport } from "./transport";
+import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry } from "./vdom";
+import { useLocation, useParams } from "react-router";
+import type { RouteInfo } from "./messages";
 
 // =================================================================
 // Types
@@ -17,7 +18,6 @@ import type { VDOM, ComponentRegistry } from "./vdom";
 
 export interface PulseConfig {
   serverAddress: string;
-  serverPort: number;
 }
 
 // =================================================================
@@ -25,7 +25,7 @@ export interface PulseConfig {
 // =================================================================
 
 // Context for the client, provided by PulseProvider
-const PulseClientContext = createContext<PulseClient | null>(null);
+const PulseClientContext = createContext<PulseSocketIOClient | null>(null);
 
 export const usePulseClient = () => {
   const client = useContext(PulseClientContext);
@@ -62,30 +62,28 @@ export interface PulseProviderProps {
   config: PulseConfig;
 }
 
-export function PulseProvider({ children, config }: PulseProviderProps) {
-  const [connectionError, setConnectionError] = useState(false);
+const inBrowser = typeof window !== "undefined";
 
-  const client = useMemo(() => {
-    const transport = new SocketIOTransport(
-      `${config.serverAddress}:${config.serverPort}`
-    );
-    return new PulseClient(transport);
-  }, [config.serverAddress, config.serverPort]);
+export function PulseProvider({ children, config }: PulseProviderProps) {
+  const [connected, setConnected] = useState(true);
+
+  const client = useMemo(
+    () => new PulseSocketIOClient(`${config.serverAddress}`),
+    [config.serverAddress]
+  );
+
+  useEffect(() => client.onConnectionChange(setConnected), [client]);
 
   useEffect(() => {
-    const inBrowser = typeof window !== "undefined";
     if (inBrowser) {
-      // Listen for connection state changes
-      const unsubscribe = client.onConnectionChange((connected) => {
-        setConnectionError(!connected);
-      });
-      return () => unsubscribe();
+      client.connect();
+      return () => client.disconnect();
     }
   }, [client]);
 
   return (
     <PulseClientContext.Provider value={client}>
-      {connectionError && (
+      {!connected && (
         <div
           style={{
             position: "fixed",
@@ -122,20 +120,45 @@ export function PulseView({
   path,
 }: PulseViewProps) {
   const client = usePulseClient();
-  const [vdom, setVdom] = useState(client.getVDOM(path) ?? initialVDOM);
+  const [vdom, setVdom] = useState(initialVDOM);
+
+  const location = useLocation();
+  const params = useParams();
+
+  const routeInfo = useMemo(() => {
+    const { "*": catchall = "", ...pathParams } = params;
+    const queryParams = new URLSearchParams(location.search);
+    return {
+      hash: location.hash,
+      pathname: location.pathname,
+      query: location.search,
+      queryParams: Object.fromEntries(queryParams.entries()),
+      pathParams,
+      catchall: catchall.length > 0 ? catchall.split("/") : [],
+    } satisfies RouteInfo;
+  }, [
+    location.hash,
+    location.pathname,
+    location.search,
+    JSON.stringify(params),
+  ]);
 
   useEffect(() => {
-    const inBrowser = typeof window !== "undefined";
     if (inBrowser) {
-      const unsubscribe = client.subscribe(path, setVdom);
-      client.navigate(path);
-
-      return () => {
-        unsubscribe();
-        client.leave(path);
-      };
+      return client.mountView(path, {
+        vdom: initialVDOM,
+        listener: setVdom,
+        routeInfo,
+      });
     }
-  }, [client, path]);
+    // routeInfo is NOT included here on purpose
+  }, [client, initialVDOM]);
+
+  useEffect(() => {
+    if (inBrowser) {
+      client.navigate(path, routeInfo);
+    }
+  }, [client, path, routeInfo]);
 
   const renderHelpers = useMemo(() => {
     const callbackCache = new Map<string, (...args: any[]) => void>();

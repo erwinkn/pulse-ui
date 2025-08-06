@@ -14,15 +14,15 @@ class CounterState(ps.State):
     def decrement(self):
         self.count -= 1
 
-    @ps.computed
-    def double_count(self) -> int:
-        """A computed property that doubles the count."""
-        return self.count * 2
+    # @ps.computed
+    # def double_count(self) -> int:
+    #     """A computed property that doubles the count."""
+    #     return self.count * 2
 
-    @ps.effect
-    def on_count_change(self):
-        """An effect that runs whenever the count changes."""
-        print(f"Effect: Count is now {self.count}. Double is {self.double_count}.")
+    # @ps.effect
+    # def on_count_change(self):
+    #     """An effect that runs whenever the count changes."""
+    #     print(f"Effect: Count is now {self.count}. Double is {self.double_count}.")
 
 
 # A state class for the layout, demonstrating persistent state across routes.
@@ -81,7 +81,8 @@ def about():
 @ps.component
 def counter():
     """An interactive counter page demonstrating state management."""
-    state = ps.init(CounterState)
+    state = ps.states(CounterState)
+    # ps.effects(ps.Effect(lambda: print(f"Count is {state.count}")))
 
     def decrement():
         state.count -= 1
@@ -94,7 +95,7 @@ def counter():
             ps.button("Increment", onClick=state.increment, className="btn-primary"),
             className="flex items-center justify-center mb-4",
         ),
-        ps.p(f"The doubled count is: {state.double_count}", className="text-lg mb-4"),
+        # ps.p(f"The doubled count is: {state.double_count}", className="text-lg mb-4"),
         ps.p(
             "Check your server logs for messages from the @ps.effect.",
             className="text-sm text-gray-500 mb-6",
@@ -128,7 +129,7 @@ def counter_details():
 @ps.component
 def app_layout():
     """The main layout for the application, including navigation and a persistent counter."""
-    state = ps.init(LayoutState)
+    state = ps.states(LayoutState)
 
     return ps.div(
         ps.header(

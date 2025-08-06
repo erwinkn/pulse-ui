@@ -4,9 +4,9 @@
 
 
 from contextvars import ContextVar
-from typing import Literal
+from typing import Literal, Optional
 
-from pulse.vdom import Node, NodeChild, extract_callbacks_from_props
+from pulse.vdom import Node, NodeChild, _extract_callbacks_from_props
 
 
 class ReactComponent:
@@ -30,11 +30,13 @@ class ReactComponent:
         import_path: str,
         alias: str | None = None,
         is_default=False,
+        default_props: Optional[dict] = None 
     ):
         self.tag = tag
         self.key = alias or tag
         self.import_path = import_path
         self.alias = alias
+        self.default_props = default_props
         self.is_default = is_default
         if is_default and alias:
             raise ValueError(
@@ -44,7 +46,9 @@ class ReactComponent:
         COMPONENT_REGISTRY.get().add(self)
 
     def __call__(self, *children: NodeChild, **props) -> Node:
-        props, callbacks = extract_callbacks_from_props(props)
+        if self.default_props:
+            props = props | self.default_props
+        props, callbacks = _extract_callbacks_from_props(props)
         return Node(
             tag=f"$${self.key}",
             props=props,

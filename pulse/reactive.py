@@ -39,7 +39,6 @@ class Signal(Generic[T]):
     def write(self, value: T):
         if value == self.value:
             return
-        print(f"Writing to {self.name}")
         self.value = value
         self.last_change = EPOCH.get()
         # If there is no current batch, this ensures that the full graph gets
@@ -86,7 +85,6 @@ class Computed(Generic[T]):
         if self.dirty:
             return
 
-        print(f"Marking {self.name} as dirty")
         self.dirty = True
         for obs in self.obs:
             obs._push_change()
@@ -166,7 +164,7 @@ EffectFn = EffectFnWithCleanup | EffectFnWithoutCleanup
 
 
 class Effect:
-    def __init__(self, fn: EffectFn, name: Optional[str] = None):
+    def __init__(self, fn: EffectFn, name: Optional[str] = None, immediate=False):
         self.fn = fn
         self.name = name
         self.deps: list[Signal | Computed] = []
@@ -179,7 +177,10 @@ class Effect:
             scope.new_effects.add(self)
 
         # Will either run the effect now or add it to the current batch
-        self._push_change()
+        if immediate:
+            self._run()
+        else:
+            self._push_change()
 
     def dispose(self):
         # Run children cleanups first
@@ -189,17 +190,14 @@ class Effect:
             self.cleanup()
 
     def _push_change(self):
-        print(f"Pushed change to {self.name}")
         BATCH.get().register_effect(self)
 
     def _should_run(self):
         return self.runs == 0 or self._deps_changed()
 
     def _deps_changed(self):
-        print(f"Checking if deps of {self.name} changed")
         epoch = EPOCH.get()
         for dep in self.deps:
-            print("Dep")
             if dep.last_change == epoch:
                 return True
             if isinstance(dep, Computed):
@@ -213,7 +211,6 @@ class Effect:
         if IS_PRERENDERING.get():
             return
 
-        print(f"Running effect {self.name}")
         current_deps = set(self.deps)
 
         with Scope() as scope:
@@ -234,21 +231,28 @@ class Effect:
 
 
 @overload
-def effect(fn: Callable[[], None], *, name: Optional[str] = None) -> Effect: ...
+def effect(
+    fn: Callable[[], None], *, name: Optional[str] = None, immediate: bool = False
+) -> Effect: ...
 @overload
 def effect(
-    fn: None = None, *, name: Optional[str] = None
+    fn: None = None, *, name: Optional[str] = None, immediate: bool = False
 ) -> Callable[[Callable[[], None]], Effect]: ...
 
 
-def effect(fn: Optional[Callable[[], None]] = None, *, name: Optional[str] = None):
+def effect(
+    fn: Optional[Callable[[], None]] = None,
+    *,
+    name: Optional[str] = None,
+    immediate: bool = False
+):
     if fn is not None:
-        return Effect(fn, name=name or fn.__name__)
+        return Effect(fn, name=name or fn.__name__, immediate=immediate)
     else:
         # For some reason, I need to add the `/` to make `fn` a positional
         # argument for the Python type checker to be happy.
         def decorator(fn: Callable[[], None], /):
-            return Effect(fn, name=name or fn.__name__)
+            return Effect(fn, name=name or fn.__name__, immediate=immediate)
 
         return decorator
 
@@ -335,12 +339,13 @@ class GlobalBatch(Batch):
         return super().register_effect(effect)
 
     def flush(self):
-        print("Flushing global batch")
         super().flush()
         self.is_scheduled = False
 
+
 def flush_effects():
     BATCH.get().flush()
+
 
 def batch():
     return Batch()

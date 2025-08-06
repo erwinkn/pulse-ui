@@ -8,7 +8,6 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 import inspect
 from typing import (
     Any,
-    Literal,
     NamedTuple,
     NotRequired,
     Optional,
@@ -161,6 +160,8 @@ class Callback(NamedTuple):
 
 
 Callbacks = dict[str, Callback]
+VDOM = Union[VDOMNode, PrimitiveNode]
+Props = dict[str, Any]
 
 
 class Node:
@@ -228,7 +229,7 @@ class Node:
             for callback_name, callback_fn in self.callbacks.items():
                 callback_key = f"{path_prefix}{callback_name}"
                 # Props are guaranteed to exist here
-                vdom["props"][callback_name] = f"$$callback:{callback_key}"
+                vdom["props"][callback_name] = f"$$fn:{callback_key}"
                 callbacks[callback_key] = callback_fn
 
         return vdom
@@ -266,7 +267,7 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
     def create_element(*children: NodeChild, **props: Any) -> Node:
         """Create a UITreeNode for this tag."""
         props = {**default_props, **props}
-        props, callbacks = extract_callbacks_from_props(props)
+        props, callbacks = _extract_callbacks_from_props(props)
         return Node(tag=name, props=props, callbacks=callbacks, children=children)
 
     return create_element
@@ -288,7 +289,7 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
     def create_element(**props: Any) -> Node:
         """Create a self-closing UITreeNode for this tag."""
         props = {**default_props, **props}
-        props, callbacks = extract_callbacks_from_props(props)
+        props, callbacks = _extract_callbacks_from_props(props)
 
         return Node(
             tag=name,
@@ -300,7 +301,7 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
     return create_element
 
 
-def extract_callbacks_from_props(
+def _extract_callbacks_from_props(
     props: dict[str, Any],
 ) -> tuple[dict[str, Any], Callbacks]:
     clean_props = {}

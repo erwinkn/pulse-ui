@@ -10,5 +10,10 @@ class Component:
         self.fn = fn
 
 
+class ComponentInstance:
+    def __init__(self) -> None:
+        pass
+
+
 def component(fn: Callable[P, Node]):
     return Component(fn)

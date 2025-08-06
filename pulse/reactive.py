@@ -1,3 +1,4 @@
+import asyncio
 from contextvars import ContextVar
 from typing import (
     Callable,
@@ -9,15 +10,12 @@ from typing import (
     overload,
 )
 
+from pulse.flags import IS_PRERENDERING
+
 T = TypeVar("T")
 P = ParamSpec("P")
 
-# --- Globals ---
-
-EPOCH = ContextVar("EPOCH", default=1)
-SCOPE: "ContextVar[Optional[Scope]]" = ContextVar("pulse_scope", default=None)
-BATCH: "ContextVar[Optional[Batch]]" = ContextVar("pulse_batch", default=None)
-IS_PRERENDERING: ContextVar[bool] = ContextVar("pulse_is_prerendering", default=False)
+# NOTE: globals at the bottom of the file
 
 
 class Signal(Generic[T]):
@@ -47,9 +45,9 @@ class Signal(Generic[T]):
         # If there is no current batch, this ensures that the full graph gets
         # flagged as dirty before any effects are executed. This is necessary to
         # avoid the diamond problem.
-        with EnsureBatch():
-            for obs in self.obs:
-                obs._push_change()
+        # with EnsureBatch():
+        for obs in self.obs:
+            obs._push_change()
 
     # def _push_change(self):
     #     for obs in self.obs:
@@ -108,7 +106,7 @@ class Computed(Generic[T]):
             if prev_value != self.value:
                 self.last_change = epoch
 
-            if len(scope.effects) > 0:
+            if len(scope.new_effects) > 0:
                 raise RuntimeError(
                     "An effect was created within a computed variable's function. "
                     "This behavior is not allowed, computed variables should be pure calculations."
@@ -178,26 +176,21 @@ class Effect:
         self.runs = 0
 
         if scope := SCOPE.get():
-            scope.effects.add(self)
+            scope.new_effects.add(self)
 
         # Will either run the effect now or add it to the current batch
         self._push_change()
 
     def dispose(self):
-        with EnsureBatch():
-            # Run children cleanups first
-            for child in self.children:
-                child.dispose()
-            if self.cleanup:
-                self.cleanup()
+        # Run children cleanups first
+        for child in self.children:
+            child.dispose()
+        if self.cleanup:
+            self.cleanup()
 
     def _push_change(self):
         print(f"Pushed change to {self.name}")
-        if batch := BATCH.get():
-            batch.effects.add(self)
-        else:
-            if self._should_run():
-                self._run()
+        BATCH.get().register_effect(self)
 
     def _should_run(self):
         return self.runs == 0 or self._deps_changed()
@@ -223,10 +216,10 @@ class Effect:
         print(f"Running effect {self.name}")
         current_deps = set(self.deps)
 
-        with Scope() as scope, EnsureBatch():
+        with Scope() as scope:
             self.dispose()
             self.cleanup = self.fn()
-            self.children = list(scope.effects)
+            self.children = list(scope.new_effects)
             self.runs += 1
 
         new_deps = scope.accessed
@@ -263,11 +256,11 @@ def effect(fn: Optional[Callable[[], None]] = None, *, name: Optional[str] = Non
 class Scope:
     def __init__(self):
         self.accessed: Set[Signal | Computed] = set()
-        self.effects: set[Effect] = set()
+        self.new_effects: set[Effect] = set()
 
     def clear(self):
         self.accessed.clear()
-        self.effects.clear()
+        self.new_effects.clear()
 
     def __enter__(self):
         self._token = SCOPE.set(self)
@@ -279,11 +272,11 @@ class Scope:
 
 class Batch:
     def __init__(self) -> None:
-        # self.signals: list[tuple[Signal, Any]] = []
-        self.effects: set[Effect] = set()
+        self.__effects: list[Effect] = []
 
-    # def schedule_signal(self, signal: Signal[T], value: T):
-    #     self.signals.append((signal, value))
+    def register_effect(self, effect: Effect):
+        if effect not in self.__effects:
+            self.__effects.append(effect)
 
     def flush(self):
         global_batch = BATCH.get()
@@ -294,15 +287,15 @@ class Batch:
         MAX_ITERS = 10000
         epoch = start_epoch = EPOCH.get()
 
-        while len(self.effects) > 0:
+        while len(self.__effects) > 0:
             if epoch - start_epoch > MAX_ITERS:
                 raise RuntimeError(
                     f"Pulse's reactive system registered more than {MAX_ITERS} iterations. There is likely an update cycle in your application.\n"
                     "This is most often caused through a state update during rerender or in an effect that ends up triggering the same rerender or effect."
                 )
 
-            current_effects = self.effects
-            self.effects = set()
+            current_effects = self.__effects
+            self.__effects = []
 
             for effect in current_effects:
                 if effect._should_run():
@@ -326,23 +319,28 @@ class Batch:
         BATCH.reset(self._token)
 
 
-class EnsureBatch:
+class GlobalBatch(Batch):
     def __init__(self) -> None:
-        self._token = None
+        self.is_scheduled = False
+        super().__init__()
 
-    def __enter__(self):
-        batch = BATCH.get()
-        if batch is None:
-            batch = Batch()
-            self._token = BATCH.set(batch)
-        return batch
+    def register_effect(self, effect: Effect):
+        if not self.is_scheduled:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.call_soon_threadsafe(self.flush)
+                self.is_scheduled = True
+            except RuntimeError:
+                pass
+        return super().register_effect(effect)
 
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        if self._token is not None:
-            batch = BATCH.get()
-            batch.flush()  # type: ignore
-            BATCH.reset(self._token)
+    def flush(self):
+        print("Flushing global batch")
+        super().flush()
+        self.is_scheduled = False
 
+def flush_effects():
+    BATCH.get().flush()
 
 def batch():
     return Batch()
@@ -353,3 +351,9 @@ def untrack():
 
 
 class InvariantError(Exception): ...
+
+
+# --- Globals ---
+EPOCH = ContextVar("EPOCH", default=1)
+SCOPE: ContextVar[Optional[Scope]] = ContextVar("pulse_scope", default=None)
+BATCH: ContextVar[Batch] = ContextVar("pulse_batch", default=GlobalBatch())

@@ -1,31 +1,70 @@
 from typing import Any, TypedDict, Literal
 
 from pulse.diff import VDOMOperation
-from pulse.vdom import VDOMNode
+from pulse.vdom import VDOM
 
 
+# ====================
+# Helpers
+# ====================
+class RouteInfo(TypedDict):
+    pathname: str
+    hash: str
+    query: str
+    queryParams: dict[str, str]
+    pathParams: dict[str, str]
+    catchall: list[str]
+
+
+# ====================
+# Server messages
+# ====================
 class ServerInitMessage(TypedDict):
     type: Literal["vdom_init"]
-    vdom: VDOMNode
+    path: str
+    vdom: VDOM
 
 
 class ServerUpdateMessage(TypedDict):
     type: Literal["vdom_update"]
+    path: str
     ops: list[VDOMOperation]
 
 
 ServerMessage = ServerInitMessage | ServerUpdateMessage
 
 
+# ====================
+# Client messages
+# ====================
 class ClientCallbackMessage(TypedDict):
     type: Literal["callback"]
+    path: str
     callback: str
     args: list[Any]
 
 
+class ClientMountMessage(TypedDict):
+    type: Literal["mount"]
+    path: str
+    routeInfo: RouteInfo
+    currentVDOM: VDOM
+
+
 class ClientNavigateMessage(TypedDict):
     type: Literal["navigate"]
-    route: str
+    path: str
+    routeInfo: RouteInfo
 
 
-ClientMessage = ClientCallbackMessage | ClientNavigateMessage
+class ClientUnmountMessage(TypedDict):
+    type: Literal["leave"]
+    path: str
+
+
+ClientMessage = (
+    ClientCallbackMessage
+    | ClientMountMessage
+    | ClientNavigateMessage
+    | ClientUnmountMessage
+)

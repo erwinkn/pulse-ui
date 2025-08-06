@@ -1,47 +1,19 @@
 import { io, Socket } from "socket.io-client";
-import type { VDOMNode, VDOMUpdate } from "./vdom";
-
-// =================================================================
-// Message Types
-// =================================================================
-
-// Based on pulse/messages.py
-export interface ServerInitMessage {
-  type: "vdom_init";
-  vdom: VDOMNode;
-}
-
-export interface ServerUpdateMessage {
-  type: "vdom_update";
-  ops: VDOMUpdate[];
-}
-
-export type ServerMessage = ServerInitMessage | ServerUpdateMessage;
-
-export interface ClientCallbackMessage {
-  type: "callback";
-  callback: string;
-  args: any[];
-}
-
-export interface ClientNavigateMessage {
-  type: "navigate";
-  route: string;
-}
-
-export type ClientMessage = ClientCallbackMessage | ClientNavigateMessage;
+import type { ServerMessage, ClientMessage } from "./messages";
 
 // =================================================================
 // Transport Abstraction
 // =================================================================
 
 export type MessageListener = (message: ServerMessage) => void;
+export type ConnectionStatusListener = (connected: boolean) => void;
 
 export interface Transport {
   connect(listener: MessageListener): Promise<void>;
   disconnect(): void;
   sendMessage(payload: ClientMessage): Promise<void>;
   isConnected(): boolean;
+  onConnectionChange(listener: ConnectionStatusListener): () => void;
 }
 
 // =================================================================
@@ -52,6 +24,7 @@ export class SocketIOTransport implements Transport {
   private socket: Socket | null = null;
   private listener: MessageListener | null = null;
   private messageQueue: ClientMessage[] = [];
+  private connectionListeners: Set<ConnectionStatusListener> = new Set();
 
   constructor(private url: string) {}
 
@@ -66,25 +39,28 @@ export class SocketIOTransport implements Transport {
         console.log("[SocketIOTransport] Connected:", this.socket?.id);
 
         for (const payload of this.messageQueue) {
-          console.log("[SocketIOTransport] Sending queued message:", payload);
+          // console.log("[SocketIOTransport] Sending queued message:", payload);
           this.socket?.emit("message", payload);
         }
         this.messageQueue = [];
 
+        this.notifyConnectionListeners(true);
         resolve();
       });
 
       this.socket.on("connect_error", (err) => {
         console.error("[SocketIOTransport] Connection failed:", err);
+        this.notifyConnectionListeners(false);
         reject(err);
       });
 
       this.socket.on("disconnect", () => {
         console.log("[SocketIOTransport] Disconnected");
+        this.notifyConnectionListeners(false);
       });
 
       this.socket.on("message", (data: ServerMessage) => {
-        console.log("[SocketIOTransport] Received message:", data);
+        // console.log("[SocketIOTransport] Received message:", data);
         this.listener?.(data);
       });
     });
@@ -95,20 +71,35 @@ export class SocketIOTransport implements Transport {
     this.socket = null;
     this.listener = null;
     this.messageQueue = [];
+    this.connectionListeners.clear();
   }
 
   async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
-      console.log("[SocketIOTransport] Sending:", payload);
+      // console.log("[SocketIOTransport] Sending:", payload);
       this.socket!.emit("message", payload);
     } else {
-      console.log("[SocketIOTransport] Queuing message:", payload);
+      // console.log("[SocketIOTransport] Queuing message:", payload);
       this.messageQueue.push(payload);
     }
   }
 
   isConnected(): boolean {
     return this.socket?.connected || false;
+  }
+
+  onConnectionChange(listener: ConnectionStatusListener): () => void {
+    this.connectionListeners.add(listener);
+    listener(this.isConnected());
+    return () => {
+      this.connectionListeners.delete(listener);
+    };
+  }
+
+  private notifyConnectionListeners(connected: boolean): void {
+    for (const listener of this.connectionListeners) {
+      listener(connected);
+    }
   }
 }
 
@@ -119,6 +110,7 @@ export class SocketIOTransport implements Transport {
 export class InMemoryTransport implements Transport {
   private listener: MessageListener | null = null;
   private connected = false;
+  private connectionListeners: Set<ConnectionStatusListener> = new Set();
 
   // Simulate server-side message dispatching
   public dispatchMessage(message: ServerMessage) {
@@ -151,5 +143,12 @@ export class InMemoryTransport implements Transport {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  onConnectionChange(listener: ConnectionStatusListener): () => void {
+    this.connectionListeners.add(listener);
+    return () => {
+      this.connectionListeners.delete(listener);
+    };
   }
 }

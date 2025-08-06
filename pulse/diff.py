@@ -6,47 +6,38 @@ minimal update sequences. The diffing algorithm handles keyed reconciliation
 similar to React's diffing algorithm.
 """
 
-from dataclasses import dataclass
 from typing import (
     List,
-    Any,
-    NamedTuple,
     TypedDict,
     Union,
     Optional,
     Literal,
-    Callable,
     Sequence,
 )
-from .vdom import VDOMNode, PrimitiveNode
-
-# Type aliases
-Path = str
-VDOM = Union[VDOMNode, PrimitiveNode]
-Props = dict[str, Any]
+from .vdom import VDOM, Props
 
 
 class InsertOperation(TypedDict):
     type: Literal["insert"]
-    path: Path
+    path: str
     data: VDOM
 
 
 class RemoveOperation(TypedDict):
     type: Literal["remove"]
-    path: Path
+    path: str
     data: Optional[str]  # optional key, for keyed removals
 
 
 class ReplaceOperation(TypedDict):
     type: Literal["replace"]
-    path: Path
+    path: str
     data: VDOM
 
 
 class UpdatePropsOperation(TypedDict):
     type: Literal["update_props"]
-    path: Path
+    path: str
     data: Props
 
 
@@ -58,7 +49,7 @@ class MoveOperationData(TypedDict):
 
 class MoveOperation(TypedDict):
     type: Literal["move"]
-    path: Path
+    path: str
     data: MoveOperationData
 
 
@@ -72,7 +63,7 @@ VDOMOperation = Union[
 
 
 def diff_vdom(
-    old_node: Optional[VDOM], new_node: Optional[VDOM], path: Path = ""
+    old_node: Optional[VDOM], new_node: Optional[VDOM], path: str = ""
 ) -> list[VDOMOperation]:
     """
     Main VDOM diffing function that compares two VDOM trees and produces update operations.
@@ -137,7 +128,7 @@ def diff_vdom(
 
 
 def _diff_node_children(
-    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: Path
+    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: str
 ) -> list[VDOMOperation]:
     """
     Diff VDOM children directly, avoiding double traversal.
@@ -173,7 +164,7 @@ def _diff_node_children(
 
 
 def _diff_keyed_node_children(
-    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: Path
+    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: str
 ) -> list[VDOMOperation]:
     """Handle keyed VDOM children reconciliation."""
     operations = []
@@ -273,7 +264,7 @@ def _diff_keyed_node_children(
 
 
 def _diff_positional_node_children(
-    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: Path
+    old_children: Sequence[VDOM], new_children: Sequence[VDOM], path: str
 ) -> list[VDOMOperation]:
     """Handle unkeyed VDOM children using positional diffing."""
     operations = []

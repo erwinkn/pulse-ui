@@ -6,11 +6,11 @@ import React, {
   useContext,
   type ComponentType,
 } from "react";
-import { useLocation } from "react-router";
 import { VDOMRenderer } from "./renderer";
-import { PulseClient } from "./client";
-import { SocketIOTransport } from "./transport";
+import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry } from "./vdom";
+import { useLocation, useParams } from "react-router";
+import type { RouteInfo } from "./messages";
 
 // =================================================================
 // Types
@@ -18,7 +18,6 @@ import type { VDOM, ComponentRegistry } from "./vdom";
 
 export interface PulseConfig {
   serverAddress: string;
-  serverPort: number;
 }
 
 // =================================================================
@@ -26,7 +25,7 @@ export interface PulseConfig {
 // =================================================================
 
 // Context for the client, provided by PulseProvider
-const PulseClientContext = createContext<PulseClient | null>(null);
+const PulseClientContext = createContext<PulseSocketIOClient | null>(null);
 
 export const usePulseClient = () => {
   const client = useContext(PulseClientContext);
@@ -63,21 +62,43 @@ export interface PulseProviderProps {
   config: PulseConfig;
 }
 
+const inBrowser = typeof window !== "undefined";
+
 export function PulseProvider({ children, config }: PulseProviderProps) {
-  const client = useMemo(() => {
-    const transport = new SocketIOTransport(
-      `${config.serverAddress}:${config.serverPort}`
-    );
-    return new PulseClient(transport);
-  }, [config.serverAddress, config.serverPort]);
+  const [connected, setConnected] = useState(true);
+
+  const client = useMemo(
+    () => new PulseSocketIOClient(`${config.serverAddress}`),
+    [config.serverAddress]
+  );
+
+  useEffect(() => client.onConnectionChange(setConnected), [client]);
 
   useEffect(() => {
-    void client.connect();
-    return () => client.disconnect();
+    if (inBrowser) {
+      client.connect();
+      return () => client.disconnect();
+    }
   }, [client]);
 
   return (
     <PulseClientContext.Provider value={client}>
+      {!connected && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            right: "20px",
+            backgroundColor: "red",
+            color: "white",
+            padding: "10px",
+            borderRadius: "5px",
+            zIndex: 1000,
+          }}
+        >
+          Failed to connect to the server.
+        </div>
+      )}
       {children}
     </PulseClientContext.Provider>
   );
@@ -90,21 +111,54 @@ export function PulseProvider({ children, config }: PulseProviderProps) {
 export interface PulseViewProps {
   initialVDOM: VDOM;
   externalComponents: ComponentRegistry;
+  path: string;
 }
 
-export function PulseView({ initialVDOM, externalComponents }: PulseViewProps) {
+export function PulseView({
+  initialVDOM,
+  externalComponents,
+  path,
+}: PulseViewProps) {
   const client = usePulseClient();
   const [vdom, setVdom] = useState(initialVDOM);
+
   const location = useLocation();
+  const params = useParams();
+
+  const routeInfo = useMemo(() => {
+    const { "*": catchall = "", ...pathParams } = params;
+    const queryParams = new URLSearchParams(location.search);
+    return {
+      hash: location.hash,
+      pathname: location.pathname,
+      query: location.search,
+      queryParams: Object.fromEntries(queryParams.entries()),
+      pathParams,
+      catchall: catchall.length > 0 ? catchall.split("/") : [],
+    } satisfies RouteInfo;
+  }, [
+    location.hash,
+    location.pathname,
+    location.search,
+    JSON.stringify(params),
+  ]);
 
   useEffect(() => {
-    const unsubscribe = client.subscribe(setVdom);
-    const route = location.pathname + location.search;
-    client.navigate(route);
-    return () => {
-      unsubscribe();
-    };
-  }, [client, location, initialVDOM]);
+    if (inBrowser) {
+      return client.mountView(path, {
+        vdom: initialVDOM,
+        listener: setVdom,
+        routeInfo,
+      });
+    }
+    // routeInfo is NOT included here on purpose
+  }, [client, initialVDOM]);
+
+  useEffect(() => {
+    if (inBrowser) {
+      client.navigate(path, routeInfo);
+    }
+  }, [client, path, routeInfo]);
 
   const renderHelpers = useMemo(() => {
     const callbackCache = new Map<string, (...args: any[]) => void>();
@@ -112,8 +166,7 @@ export function PulseView({ initialVDOM, externalComponents }: PulseViewProps) {
     const getCallback = (key: string) => {
       let fn = callbackCache.get(key);
       if (!fn) {
-        // IMPORTANT: no arguments for now
-        fn = () => client.invokeCallback(key, []);
+        fn = (...args) => client.invokeCallback(path, key, args);
         callbackCache.set(key, fn);
       }
       return fn;
@@ -128,7 +181,7 @@ export function PulseView({ initialVDOM, externalComponents }: PulseViewProps) {
     };
 
     return { getCallback, getComponent };
-  }, [client, externalComponents]);
+  }, [client, externalComponents, path]);
 
   return (
     <PulseRenderContext.Provider value={renderHelpers}>

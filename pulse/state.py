@@ -5,16 +5,15 @@ This module provides the base State class and reactive property system
 that enables automatic re-rendering when state changes.
 """
 
-from collections import defaultdict
-from typing import Any, Iterable, Callable, TypeVar
 from abc import ABC, ABCMeta
+from typing import Any, Callable, Never, TypeVar, cast
+import functools
 
-from pulse.reactive import RENDER_CONTEXT, UPDATE_SCHEDULER
+from pulse.reactive import Signal, Computed, Effect
 
-
-# Global context for tracking state access during rendering
 
 T = TypeVar("T")
+TState = TypeVar("TState", bound="State")
 
 
 class StateProperty:
@@ -26,28 +25,65 @@ class StateProperty:
     def __init__(self, name: str, default_value: Any = None):
         self.name = name
         self.default_value = default_value
-        self.private_name = f"_state_{name}"
+        self.private_name = f"__signal_{name}"
+
+    def get_signal(self, obj) -> Signal:
+        if not hasattr(obj, self.private_name):
+            # Create the signal on first access
+            signal = Signal(
+                self.default_value, name=f"{obj.__class__.__name__}.{self.name}_{id}"
+            )
+            setattr(obj, self.private_name, signal)
+            return signal
+
+        return getattr(obj, self.private_name)
 
     def __get__(self, obj: Any, objtype: Any = None) -> Any:
         if obj is None:
             return self
 
-        # Track that this property was accessed during rendering
-        ctx = RENDER_CONTEXT.get()
-        if ctx is not None:
-            ctx.track_state_access(obj, self.name)
-
-        # Return the current value or default
-        return getattr(obj, self.private_name, self.default_value)
+        return self.get_signal(obj).read()
 
     def __set__(self, obj: Any, value: Any) -> None:
-        if not isinstance(obj, State):
-            raise TypeError("StateProperty can only be defined on a State object")
-        # Get the old value
-        old_value = getattr(obj, self.private_name, self.default_value)
-        if old_value != value:
-            setattr(obj, self.private_name, value)
-            obj.notify_listeners(self.name)
+        signal = self.get_signal(obj)
+        signal.write(value)
+
+
+class ComputedProperty:
+    """
+    Descriptor for computed properties on State classes.
+    """
+
+    def __init__(self, name: str, computed: Computed):
+        self.name = name
+        self.computed = computed
+        self.curried_obj = None
+
+    def __get__(self, obj: Any, objtype: Any = None) -> Any:
+        if obj is None:
+            return self
+
+        if self.curried_obj is None:
+            self.curried_obj = obj
+            # Since the computed has been defined as a method, it expects the
+            # first argument to be the state object. We turn this into a regular
+            # pulse.Computed, where the function doesn't take any argument.
+            self.computed = Computed(
+                lambda: self.computed.fn(obj),  # type: ignore
+                name=self.computed.name,
+            )
+
+        if obj is not self.curried_obj:
+            print("Obj:", obj)
+            print("self.curried_obj:", self.curried_obj)
+            raise RuntimeError(
+                "Invariant violation: ComputedProperty must be accessed on the same object instance it was created for."
+            )
+
+        return self.computed.read()
+
+    def __set__(self, obj: Any, value: Any) -> Never:
+        raise AttributeError(f"Cannot set computed property '{self.name}'")
 
 
 class StateMeta(ABCMeta):
@@ -56,17 +92,16 @@ class StateMeta(ABCMeta):
     """
 
     def __new__(mcs, name: str, bases: tuple, namespace: dict, **kwargs):
-        # Get type annotations
         annotations = namespace.get("__annotations__", {})
 
-        # Convert annotated attributes to reactive properties
-        for attr_name, attr_type in annotations.items():
+        for attr_name in annotations:
             if not attr_name.startswith("_"):
-                # Check if there's a default value
-                default_value = namespace.get(attr_name, None)
-
-                # Create a StateProperty descriptor
+                default_value = namespace.get(attr_name)
                 namespace[attr_name] = StateProperty(attr_name, default_value)
+
+        for attr_name, attr_value in list(namespace.items()):
+            if isinstance(attr_value, Computed):
+                namespace[attr_name] = ComputedProperty(attr_name, attr_value)
 
         return super().__new__(mcs, name, bases, namespace)
 
@@ -81,47 +116,47 @@ class State(ABC, metaclass=StateMeta):
     class CounterState(ps.State):
         count: int = 0
         name: str = "Counter"
+
+        @ps.computed
+        def double_count(self):
+            return self.count * 2
+
+        @ps.state_effect
+        def print_count(self):
+            print(f"Count is now: {self.count}")
     ```
 
     Properties will automatically trigger re-renders when changed.
     """
 
     def __init__(self):
-        # Track listeners for this state instance
-        self._listeners: dict[str, set[Callable[[], None]]] = defaultdict(set)
+        """Initializes the state and registers effects."""
+        # Effects are stored to keep them from being garbage collected.
+        self._effects: list[Effect] = []
+        for name, attr in self.__class__.__dict__.items():
+            if callable(attr) and getattr(attr, "_is_effect", False):
+                bound_method = getattr(self, name)
+                effect = Effect(bound_method, name=f"{self.__class__.__name__}.{name}")
+                self._effects.append(effect)
 
     def __repr__(self) -> str:
         """Return a developer-friendly representation of the state."""
         props = []
-        for name in self.__class__.__annotations__:
+
+        # Annotated properties (Signals)
+        for name in getattr(self.__class__, "__annotations__", {}):
             if not name.startswith("_"):
                 prop_value = getattr(self, name)
                 props.append(f"{name}={prop_value!r}")
+
+        # Computed properties
+        for name, value in self.__class__.__dict__.items():
+            if isinstance(value, ComputedProperty):
+                prop_value = getattr(self, name)
+                props.append(f"{name}={prop_value!r} (computed)")
+
         return f"<{self.__class__.__name__} {' '.join(props)}>"
 
     def __str__(self) -> str:
         """Return a user-friendly representation of the state."""
         return self.__repr__()
-
-    def add_listener(self, fields: Iterable[str], fn: Callable[[], Any]):
-        for field in fields:
-            self._listeners[field].add(fn)
-
-    def remove_listener(self, fields: Iterable[str], fn: Callable[[], Any]):
-        for field in fields:
-            self._listeners[field].remove(fn)
-
-    def notify_listeners(self, field: str):
-        """Notify all listeners that a property has changed."""
-
-        # Notify property-specific listeners
-        scheduler = UPDATE_SCHEDULER.get()
-        if field in self._listeners:
-            for listener in self._listeners[field].copy():
-                if scheduler:
-                    scheduler.schedule(listener)
-                else:
-                    try:
-                        listener()
-                    except Exception as e:
-                        print(f"Error in state listener: {e}")

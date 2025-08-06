@@ -8,14 +8,16 @@ within the UI tree generation system.
 import pytest
 
 from pulse.vdom import (
-    COMPONENT_REGISTRY,
-    ReactComponent,
     Node,
     VDOMNode,
-    react_component_registry,
     div,
     p,
     h1,
+)
+from pulse.components.registry import (
+    COMPONENT_REGISTRY,
+    ComponentRegistry,
+    ReactComponent,
 )
 from pulse.tests.test_utils import assert_node_renders_to
 
@@ -26,27 +28,29 @@ class TestReactComponent:
     def test_component_creation(self):
         """Test creating ReactComponent instances."""
         component = ReactComponent(
-            tag="test-component",
+            tag="TestComponent",
             import_path="./TestComponent",
-            export_name="TestComponent",
-            is_default_export=False,
+            alias="test-component",
+            is_default=False,
         )
 
-        assert component.component_key == "test-component"
+        assert component.key == "test-component"
         assert component.import_path == "./TestComponent"
-        assert component.export_name == "TestComponent"
-        assert not component.is_default_export
+        assert component.tag == "TestComponent"
+        assert not component.is_default
 
     def test_component_with_default_export(self):
         """Test ReactComponent with default export."""
         component = ReactComponent(
-            tag="default-component", import_path="./DefaultComponent"
+            tag="default-component",
+            import_path="./DefaultComponent",
+            is_default=True,
         )
 
-        assert component.component_key == "default-component"
+        assert component.key == "default-component"
         assert component.import_path == "./DefaultComponent"
-        assert component.export_name == "default"
-        assert component.is_default_export
+        # For default exports, the tag is the key, and the conceptual "export name" is "default"
+        assert component.is_default
 
 
 class TestDefineReactComponent:
@@ -54,44 +58,46 @@ class TestDefineReactComponent:
 
     def setup_method(self):
         """Clear the component registry before each test."""
-        COMPONENT_REGISTRY.clear()
+        # This is a bit of a hack to ensure a clean slate for tests,
+        # as the global registry persists.
+        COMPONENT_REGISTRY.set(ComponentRegistry())
 
     def test_define_component_basic(self):
         """Test defining a basic React component."""
         TestComponent = ReactComponent(
-            tag="test",
+            tag="TestComponent",
             import_path="./TestComponent",
-            export_name="TestComponent",
-            is_default_export=False,
+            alias="test",
+            is_default=False,
         )
 
         # Should return a callable
         assert callable(TestComponent)
 
         # Component should be registered
-        components = react_component_registry()
+        components = COMPONENT_REGISTRY.get().items()
         assert "test" in components
-        assert components["test"].tag == "test"
+        assert components["test"].tag == "TestComponent"
         assert components["test"].import_path == "./TestComponent"
-        assert components["test"].export_name == "TestComponent"
-        assert not components["test"].is_default_export
+        assert not components["test"].is_default
 
     def test_define_component_default_export(self):
         """Test defining a component with default export."""
-        ReactComponent(tag="default-comp", import_path="./DefaultComponent")
+        ReactComponent(
+            tag="default-comp", import_path="./DefaultComponent", is_default=True
+        )
 
-        components = react_component_registry()
+        components = COMPONENT_REGISTRY.get().items()
         assert "default-comp" in components
-        assert components["default-comp"].export_name == "default"
-        assert components["default-comp"].is_default_export
+        assert components["default-comp"].is_default
 
     def test_component_mount_point_creation(self):
         """Test that defined components create mount points."""
         TestComponent = ReactComponent(
-            tag="test-component",
+            tag="TestComponent",
             import_path="./TestComponent",
-            export_name="TestComponent",
-            is_default_export=False,
+            alias="test-component",
+            is_default=False,
         )
 
         # Create a mount point
@@ -104,10 +110,10 @@ class TestDefineReactComponent:
     def test_component_with_children(self):
         """Test creating mount points with children."""
         Container = ReactComponent(
-            tag="container",
+            tag="Container",
             import_path="./Container",
-            export_name="Container",
-            is_default_export=False,
+            alias="container",
+            is_default=False,
         )
 
         # Create mount point with children
@@ -126,10 +132,7 @@ class TestDefineReactComponent:
     def test_component_with_indexing_syntax(self):
         """Test using indexing syntax with React components."""
         Card = ReactComponent(
-            tag="card",
-            import_path="./Card",
-            export_name="Card",
-            is_default_export=False,
+            tag="Card", import_path="./Card", alias="card", is_default=False
         )
 
         # Use indexing syntax
@@ -145,11 +148,11 @@ class TestDefineReactComponent:
 
     def test_multiple_components(self):
         """Test defining multiple components."""
-        ReactComponent("button", "./Button", "Button", False)
-        ReactComponent("input", "./Input", "Input", False)
-        ReactComponent("modal", "./Modal", "Modal", False)
+        ReactComponent("Button", "./Button", "button", False)
+        ReactComponent("Input", "./Input", "input", False)
+        ReactComponent("Modal", "./Modal", "modal", False)
 
-        components = react_component_registry()
+        components = COMPONENT_REGISTRY.get().items()
 
         assert len(components) == 3
         assert "button" in components
@@ -159,11 +162,11 @@ class TestDefineReactComponent:
     def test_component_overwrite(self):
         """Test that defining a component with same key raises an error."""
         # Define first component
-        ReactComponent("test", "./First", "First", False)
+        ReactComponent("First", "./First", "test", False)
 
         # Define second component with same key
         with pytest.raises(ValueError):
-            ReactComponent("test", "./Second", "Second", False)
+            ReactComponent("Second", "./Second", "test", False)
 
 
 class TestComponentRegistry:
@@ -171,26 +174,26 @@ class TestComponentRegistry:
 
     def setup_method(self):
         """Clear the component registry before each test."""
-        COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.set(ComponentRegistry())
 
     def test_empty_registry(self):
         """Test empty component registry."""
-        components = react_component_registry()
+        components = COMPONENT_REGISTRY.get().items()
         assert components == {}
 
     def test_registry_isolation(self):
         """Test that get_registered_components returns a copy."""
-        ReactComponent("test", "./Test", "Test", False)
+        ReactComponent("Test", "./Test", "test", False)
 
-        components1 = react_component_registry()
-        components2 = react_component_registry()
+        components1 = COMPONENT_REGISTRY.get().items()
+        components2 = COMPONENT_REGISTRY.get().items()
 
         # Should be equal but not the same object
         assert components1 == components2
         assert components1 is not components2
 
         # Modifying one shouldn't affect the other
-        components1["new"] = ReactComponent("new", "./New", "New", False)
+        components1["new"] = ReactComponent("New", "./New", "new", False)
         assert "new" not in components2
 
 
@@ -199,17 +202,17 @@ class TestMountPointGeneration:
 
     def setup_method(self):
         """Clear the component registry before each test."""
-        COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.set(ComponentRegistry())
 
     def test_mount_point_tag_format(self):
         """Test that mount points have correct tag format."""
-        TestComp = ReactComponent("test-component", "./Test", "Test", False)
+        TestComp = ReactComponent("Test", "./Test", "test-component", False)
         mount_point = TestComp()
         assert mount_point.tag == "$$test-component"
 
     def test_mount_point_serialization(self):
         """Test that mount points serialize correctly."""
-        Counter = ReactComponent("counter", "./Counter", "Counter", False)
+        Counter = ReactComponent("Counter", "./Counter", "counter", False)
 
         mount_point = Counter(count=5, label="Test Counter")[
             p()["Counter description"], "Additional text"
@@ -221,6 +224,7 @@ class TestMountPointGeneration:
             "children": [
                 {
                     "tag": "p",
+                    "props": {},
                     "children": ["Counter description"],
                 },
                 "Additional text",
@@ -231,8 +235,8 @@ class TestMountPointGeneration:
 
     def test_nested_mount_points(self):
         """Test nesting mount points within each other."""
-        Card = ReactComponent("card", "./Card", "Card", False)
-        Button = ReactComponent("button", "./Button", "Button", False)
+        Card = ReactComponent("Card", "./Card", "card", False)
+        Button = ReactComponent("Button", "./Button", "button", False)
 
         nested_structure = Card(title="Nested Example")[
             p()["This card contains a button:"],
@@ -244,7 +248,7 @@ class TestMountPointGeneration:
             "tag": "$$card",
             "props": {"title": "Nested Example"},
             "children": [
-                {"tag": "p", "children": ["This card contains a button:"]},
+                {"tag": "p", "props": {}, "children": ["This card contains a button:"]},
                 {
                     "tag": "$$button",
                     "props": {"variant": "primary"},
@@ -262,12 +266,12 @@ class TestComponentIntegrationWithHTML:
 
     def setup_method(self):
         """Clear the component registry before each test."""
-        COMPONENT_REGISTRY.clear()
+        COMPONENT_REGISTRY.set(ComponentRegistry())
 
     def test_mixed_html_and_components(self):
         """Test mixing HTML elements and React components."""
-        UserCard = ReactComponent("user-card", "./UserCard", "UserCard", False)
-        Counter = ReactComponent("counter", "./Counter", "Counter", False)
+        UserCard = ReactComponent("UserCard", "./UserCard", "user-card", False)
+        Counter = ReactComponent("Counter", "./Counter", "counter", False)
 
         mixed_structure = div(className="app")[
             h1()["My App"],
@@ -281,18 +285,19 @@ class TestComponentIntegrationWithHTML:
             "tag": "div",
             "props": {"className": "app"},
             "children": [
-                {"tag": "h1", "children": ["My App"]},
+                {"tag": "h1", "props": {}, "children": ["My App"]},
                 {
                     "tag": "$$user-card",
                     "props": {"name": "John Doe", "email": "john@example.com"},
+                    "children": [],
                 },
-                {"tag": "p", "children": ["Some regular HTML content"]},
+                {"tag": "p", "props": {}, "children": ["Some regular HTML content"]},
                 {
                     "tag": "$$counter",
                     "props": {"count": 42},
                     "children": ["This counter has children"],
                 },
-                {"tag": "div", "children": ["More HTML content"]},
+                {"tag": "div", "props": {}, "children": ["More HTML content"]},
             ],
         }
 
@@ -300,7 +305,7 @@ class TestComponentIntegrationWithHTML:
 
     def test_component_props_types(self):
         """Test that component props handle various data types."""
-        DataComponent = ReactComponent("data", "./Data", "Data", False)
+        DataComponent = ReactComponent("Data", "./Data", "data", False)
 
         mount_point = DataComponent(
             stringProp="text",

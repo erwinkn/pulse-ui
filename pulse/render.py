@@ -1,5 +1,5 @@
 from contextvars import ContextVar
-from multiprocessing import Value
+import enum
 from typing import (
     Any,
     Callable,
@@ -13,7 +13,7 @@ from typing import (
 
 from pulse.diff import VDOM
 from pulse.messages import RouteInfo
-from pulse.reactive import BATCH, Effect
+from pulse.reactive import BATCH, Effect, EffectFn, Scope, Signal, untrack
 from pulse.routing import Layout, Route
 from pulse.state import State
 from pulse.vdom import Callbacks
@@ -33,6 +33,9 @@ class SetupState:
     value: Any
     last_access: int
     initialized: bool
+    args: list[Signal]
+    kwargs: dict[str, Signal]
+    effects: list[Effect]
 
     def __init__(
         self, value: Any = None, last_access: int = 0, initialized: bool = False
@@ -40,6 +43,9 @@ class SetupState:
         self.value = value
         self.last_access = last_access
         self.initialized = initialized
+        self.args = []
+        self.kwargs = {}
+        self.effects = []
 
 
 class Router(State):
@@ -51,10 +57,10 @@ class Router(State):
     catchall: list[str]
 
     def __init__(self, info: RouteInfo):
-        self.__update_route_info(info)
+        self._update_route_info(info)
         super().__init__()
 
-    def __update_route_info(self, info: RouteInfo):
+    def _update_route_info(self, info: RouteInfo):
         self.pathname = info["pathname"]
         self.hash = info["hash"]
         self.query = info["query"]
@@ -76,10 +82,12 @@ class HookState:
         self.router = Router(route_info)
 
     def dispose(self):
-        if isinstance(self.effects, Effect):
-            self.effects.dispose()
-        else:
-            for effect in self.effects:
+        for effect in self.setup.effects:
+            effect.dispose()
+        for effect in self.effects:
+            effect.dispose()
+        for state in self.states:
+            for effect in state.effects():
                 effect.dispose()
 
 
@@ -123,7 +131,7 @@ class RenderContext:
         self.effect = None
 
     def update_route_info(self, info: RouteInfo):
-        self.hooks.router.__update_route_info(info)
+        self.hooks.router._update_route_info(info)
 
     def mount(self, on_render: Callable[[RenderResult], None]):
         if self.effect is not None:
@@ -144,7 +152,7 @@ class RenderContext:
             new_vdom, new_callbacks = new_tree.render()
             if self.prerendering:
                 batch = BATCH.get()
-                batch._effects = []
+                batch.effects = []
 
             self.vdom = new_vdom
             self.callbacks = new_callbacks
@@ -185,8 +193,27 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
         raise RuntimeError("Cannot call `pulse.init` outside rendering")
     state = ctx.hooks.setup
     if not state.initialized:
-        state.value = init_func(*args, **kwargs)
-        state.initialized = True
+        with Scope() as scope:
+            state.value = init_func(*args, **kwargs)
+            state.initialized = True
+            state.effects = list(scope.effects)
+            state.args = [Signal(x) for x in args]
+            state.kwargs = {k: Signal(v) for k, v in kwargs.items()}
+    else:
+        if len(args) != len(state.args):
+            raise RuntimeError(
+                "Number of positional arguments passed to `pulse.setup` changed. Make sure you always call `pulse.setup` with the same number of positional arguments and the same keyword arguments."
+            )
+        if kwargs.keys() != state.kwargs.keys():
+            new_keys = kwargs.keys() - state.kwargs.keys()
+            missing_keys = state.kwargs.keys() - kwargs.keys()
+            raise RuntimeError(
+                f"Keyword arguments passed to `pulse.setup` changed. New arguments: {list(new_keys)}. Missing arguments: {list(missing_keys)}. Make sure you always call `pulse.setup` with the same number of positional arguments and the same keyword arguments."
+            )
+        for i, arg in enumerate(args):
+            state.args[i].write(arg)
+        for k, v in kwargs.items():
+            state.kwargs[k].write(v)
     if state.last_access >= ctx.render_count:
         raise RuntimeError(
             "Cannot call `pulse.init` can only be called once per component render"
@@ -339,11 +366,19 @@ def states(*args):
     if ctx.render_count == 1:
         states: list[State] = []
         for arg in args:
-            if callable(arg):
-                states.append(arg())
-            else:
-                states.append(arg)
+            state_instance = arg() if callable(arg) else arg
+            states.append(state_instance)
+            # Schedule all effects to run
+            for effect in state_instance.effects():
+                effect.schedule()
+
         ctx.hooks.states = tuple(states)
+    else:
+        for arg in args:
+            if isinstance(arg, State):
+                # This will unregister the effects before they have a chance to
+                # run
+                arg.dispose()
 
     if len(ctx.hooks.states) == 1:
         return ctx.hooks.states[0]
@@ -351,7 +386,7 @@ def states(*args):
         return ctx.hooks.states
 
 
-def effects(*fns: Callable[[], None]) -> None:
+def effects(*fns: EffectFn) -> None:
     # Assumption: RenderContext will set up a render context and a batch before
     # rendering. The batch ensures the effects run *after* rendering.
     ctx = RENDER_CONTEXT.get()
@@ -362,12 +397,15 @@ def effects(*fns: Callable[[], None]) -> None:
 
     # Remove the effects passed here from the batch, ensuring they only run on mount
     if ctx.render_count == 1:
-        effects = []
-        for fn in fns:
-            if not callable(fn):
-                raise ValueError("Only pass functions or callable objects to `ps.effects`")
-            effects.append(Effect(fn, name=fn.__name__))
-        ctx.hooks.effects = tuple(effects)
+        with untrack():
+            effects = []
+            for fn in fns:
+                if not callable(fn):
+                    raise ValueError(
+                        "Only pass functions or callable objects to `ps.effects`"
+                    )
+                effects.append(Effect(fn, name=fn.__name__))
+            ctx.hooks.effects = tuple(effects)
 
 
 def router():

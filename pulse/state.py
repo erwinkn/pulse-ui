@@ -6,14 +6,12 @@ that enables automatic re-rendering when state changes.
 """
 
 from abc import ABC, ABCMeta
-from typing import Any, Callable, Never, TypeVar, cast
-import functools
+from typing import Any, Callable, Generic, Never, TypeVar
 
 from pulse.reactive import Signal, Computed, Effect
 
 
 T = TypeVar("T")
-TState = TypeVar("TState", bound="State")
 
 
 class StateProperty:
@@ -31,7 +29,7 @@ class StateProperty:
         if not hasattr(obj, self.private_name):
             # Create the signal on first access
             signal = Signal(
-                self.default_value, name=f"{obj.__class__.__name__}.{self.name}_{id}"
+                self.default_value, name=f"{obj.__class__.__name__}.{self.name}"
             )
             setattr(obj, self.private_name, signal)
             return signal
@@ -49,41 +47,50 @@ class StateProperty:
         signal.write(value)
 
 
-class ComputedProperty:
+class ComputedProperty(Generic[T]):
     """
     Descriptor for computed properties on State classes.
     """
 
-    def __init__(self, name: str, computed: Computed):
+    def __init__(self, name: str, fn: "Callable[[State], T]"):
         self.name = name
-        self.computed = computed
-        self.curried_obj = None
+        self.private_name = f"__computed_{name}"
+        # The computed_template holds the original method
+        self.fn = fn
 
-    def __get__(self, obj: Any, objtype: Any = None) -> Any:
+    def get_computed(self, obj) -> Computed[T]:
+        if not isinstance(obj, State):
+            raise ValueError(
+                f"Computed property {self.name} defined on a non-State class"
+            )
+        if not hasattr(obj, self.private_name):
+            # Create the computed on first access for this instance
+            bound_method = self.fn.__get__(obj, obj.__class__)
+            new_computed = Computed(
+                bound_method,
+                name=f"{obj.__class__.__name__}.{self.name}",
+            )
+            setattr(obj, self.private_name, new_computed)
+        return getattr(obj, self.private_name)
+
+    def __get__(self, obj: Any, objtype: Any = None) -> T:
         if obj is None:
-            return self
+            return self  # type: ignore
 
-        if self.curried_obj is None:
-            self.curried_obj = obj
-            # Since the computed has been defined as a method, it expects the
-            # first argument to be the state object. We turn this into a regular
-            # pulse.Computed, where the function doesn't take any argument.
-            self.computed = Computed(
-                lambda: self.computed.fn(obj),  # type: ignore
-                name=self.computed.name,
-            )
-
-        if obj is not self.curried_obj:
-            print("Obj:", obj)
-            print("self.curried_obj:", self.curried_obj)
-            raise RuntimeError(
-                "Invariant violation: ComputedProperty must be accessed on the same object instance it was created for."
-            )
-
-        return self.computed.read()
+        return self.get_computed(obj).read()
 
     def __set__(self, obj: Any, value: Any) -> Never:
         raise AttributeError(f"Cannot set computed property '{self.name}'")
+
+
+class StateEffect(Generic[T]):
+    def __init__(
+        self,
+        fn: "Callable[[State], T]",
+        immediate: bool = False,
+    ):
+        self.fn = fn
+        self.immediate = immediate
 
 
 class StateMeta(ABCMeta):
@@ -98,10 +105,6 @@ class StateMeta(ABCMeta):
             if not attr_name.startswith("_"):
                 default_value = namespace.get(attr_name)
                 namespace[attr_name] = StateProperty(attr_name, default_value)
-
-        for attr_name, attr_value in list(namespace.items()):
-            if isinstance(attr_value, Computed):
-                namespace[attr_name] = ComputedProperty(attr_name, attr_value)
 
         return super().__new__(mcs, name, bases, namespace)
 
@@ -121,7 +124,7 @@ class State(ABC, metaclass=StateMeta):
         def double_count(self):
             return self.count * 2
 
-        @ps.state_effect
+        @ps.effect
         def print_count(self):
             print(f"Count is now: {self.count}")
     ```
@@ -131,13 +134,40 @@ class State(ABC, metaclass=StateMeta):
 
     def __init__(self):
         """Initializes the state and registers effects."""
-        # Effects are stored to keep them from being garbage collected.
-        self._effects: list[Effect] = []
         for name, attr in self.__class__.__dict__.items():
-            if callable(attr) and getattr(attr, "_is_effect", False):
-                bound_method = getattr(self, name)
-                effect = Effect(bound_method, name=f"{self.__class__.__name__}.{name}")
-                self._effects.append(effect)
+            if isinstance(attr, StateEffect):
+                bound_method = attr.fn.__get__(self, self.__class__)
+                effect = Effect(
+                    bound_method,
+                    name=f"{self.__class__.__name__}.{name}",
+                    immediate=attr.immediate,
+                    lazy=True,
+                )
+                # Set the effect directly on the instance, making it callable
+                setattr(self, name, effect)
+
+    def properties(self):
+        """Iterate over the state's `Signal` instances."""
+        for prop in self.__class__.__dict__.values():
+            if isinstance(prop, StateProperty):
+                yield prop.get_signal(self)
+
+    def computeds(self):
+        """Iterate over the state's `Computed` instances."""
+        for comp_prop in self.__class__.__dict__.values():
+            if isinstance(comp_prop, ComputedProperty):
+                yield comp_prop.get_computed(self)
+
+    def effects(self):
+        """Iterate over the state's `Effect` instances."""
+        for value in self.__dict__.values():
+            if isinstance(value, Effect):
+                yield value
+
+    def dispose(self):
+        for value in self.__dict__.values():
+            if isinstance(value, Effect):
+                value.dispose()
 
     def __repr__(self) -> str:
         """Return a developer-friendly representation of the state."""

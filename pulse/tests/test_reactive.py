@@ -1,15 +1,15 @@
 import asyncio
 import pytest
-from pulse.reactive import (
+from pulse import (
     Signal,
     Computed,
     Effect,
     batch,
     computed,
     effect,
-    flush_effects,
     untrack,
 )
+from pulse.reactive import Batch, flush_effects
 
 
 def test_signal_creation_and_access():
@@ -138,19 +138,15 @@ def test_batching():
     s1 = Signal(1, name="s1")
     s2 = Signal(10, name="s2")
 
-    runs = 0
-
     c = Computed(lambda: s1() + s2(), name="c")
 
-    def my_effect():
-        nonlocal runs
+    @effect
+    def batching_effect():
         c()
-        runs += 1
 
-    Effect(my_effect, name="batching_effect")
     flush_effects()
 
-    assert runs == 1
+    assert batching_effect.runs == 1
     assert c() == 11
 
     with batch():
@@ -158,7 +154,7 @@ def test_batching():
         s2.write(20)
 
     assert c() == 22
-    assert runs == 2
+    assert batching_effect.runs == 2
 
 
 def test_effects_run_after_batch():
@@ -172,7 +168,7 @@ def test_effects_run_after_batch():
     assert e.runs == 1
 
 
-def test_computed_updated_within_batch():
+def test_computed_updates_within_batch():
     s = Signal(1)
     double = Computed(lambda: 2 * s())
     with batch():
@@ -379,7 +375,7 @@ def test_effect_cleanup_on_rerun():
     assert cleanup_runs == 2
 
 
-def test_effect_manual_dispose():
+def test_effect_manual_cleanup():
     cleanup_runs = 0
 
     def my_effect():
@@ -447,8 +443,8 @@ def test_nested_effect_cleanup_on_dispose():
 
 @pytest.mark.asyncio
 async def test_sync_writes_are_batched():
-    a = Signal(1)
-    b = Signal(2)
+    a = Signal(1, "a")
+    b = Signal(2, "b")
 
     @effect
     def e():
@@ -473,6 +469,7 @@ async def test_sync_writes_are_batched():
     a.write(3)
     assert e.runs == 2
     await asyncio.sleep(0)
+    assert e.runs == 3
     b.write(6)
     assert e.runs == 3
 
@@ -494,3 +491,131 @@ def test_immediate_effect():
     flush_effects()
     assert e1.runs == 1
     assert e2.runs == 1
+
+
+def test_disposed_effect_doesnt_rerun():
+    s = Signal(1)
+
+    @effect()
+    def e():
+        s()
+
+    flush_effects()
+    assert e.runs == 1
+
+    s.write(2)
+    flush_effects()
+    assert e.runs == 2
+
+    e.dispose()
+    s.write(3)
+    flush_effects()
+    assert e.runs == 2
+
+
+def test_schedule_lazy_effect():
+    s = Signal(1)
+
+    @effect(lazy=True)
+    def e():
+        s()
+
+    assert e.runs == 0
+    flush_effects()
+    assert e.runs == 0
+
+    e.schedule()
+    flush_effects()
+    assert e.runs == 1
+
+    s.write(2)
+    flush_effects()
+    assert e.runs == 2
+
+
+def test_run_lazy_effect():
+    s = Signal(1)
+
+    @effect(lazy=True)
+    def e():
+        s()
+
+    assert e.runs == 0
+    flush_effects()
+    assert e.runs == 0
+
+    e.run()
+    assert e.runs == 1
+    flush_effects()
+    assert e.runs == 1
+
+    s.write(2)
+    flush_effects()
+    assert e.runs == 2
+
+
+def test_dispose_effect_removes_from_exact_batch():
+    @effect
+    def e(): ...
+
+    assert e.runs == 0
+
+    with batch():
+        e.dispose()
+    flush_effects()
+    assert e.runs == 0
+
+
+def test_effect_unregister_from_parent_on_disposal():
+    @effect
+    def e():
+        @effect
+        def e2(): ...
+
+    flush_effects()
+    assert len(e.children) == 1
+    e = e.children[0]
+    e.dispose()
+    assert e.children == []
+
+
+def test_effect_unregister_from_batch_on_disposal():
+    with Batch() as batch:
+
+        @effect
+        def e(): ...
+
+        assert batch.effects == [e]
+        e.dispose()
+        assert batch.effects == []
+
+
+def test_effect_unset_batch_after_run():
+    with Batch() as batch:
+
+        @effect
+        def e(): ...
+
+        assert e.batch == batch
+    assert e.batch is None
+
+
+def test_effect_rescheduling_itself():
+    s = Signal(0)
+    with Batch() as batch:
+
+        @effect
+        def e():
+            print("Running e")
+            val = s()
+            if val == 0:
+                print("Writing to s")
+                print(f"s observers: {s.obs}")
+                s.write(1)
+
+    assert e.runs == 2
+
+
+# TODO:
+# - Tests to verify that effects unregister themselves from their batch
+# - The above, BUT the effect is rescheduled into the same batch as a result of running

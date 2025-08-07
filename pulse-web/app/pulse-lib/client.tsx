@@ -65,7 +65,7 @@ export class PulseSocketIOClient {
         for (const [path, route] of this.activeViews) {
           socket.emit("message", {
             type: "mount",
-            path,
+            path: path,
             routeInfo: route.routeInfo,
             currentVDOM: route.vdom,
           } satisfies ClientMountMessage);

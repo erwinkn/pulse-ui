@@ -51,10 +51,12 @@ def computed(fn: Optional[Callable] = None, *, name: Optional[str] = None):
 def effect(
     fn: EffectFn, *, name: Optional[str] = None, immediate: bool = False, lazy=False
 ) -> Effect: ...
+# In practice this overload returns a StateEffect, but it gets converted into an
+# Effect at state instantiation.
 @overload
 def effect(
     fn: Callable[[TState], None] | Callable[[TState], EffectCleanup],
-) -> StateEffect: ...
+) -> Effect: ...
 @overload
 def effect(
     fn: None = None, *, name: Optional[str] = None, immediate: bool = False, lazy=False
@@ -74,7 +76,7 @@ def effect(
         params = list(sig.parameters.values())
 
         if len(params) == 1 and params[0].name == "self":
-            return StateEffect(func, immediate=immediate)
+            return StateEffect(func)
 
         if len(params) > 0:
             raise TypeError(

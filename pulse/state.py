@@ -87,10 +87,8 @@ class StateEffect(Generic[T]):
     def __init__(
         self,
         fn: "Callable[[State], T]",
-        immediate: bool = False,
     ):
         self.fn = fn
-        self.immediate = immediate
 
 
 class StateMeta(ABCMeta):
@@ -101,12 +99,40 @@ class StateMeta(ABCMeta):
     def __new__(mcs, name: str, bases: tuple, namespace: dict, **kwargs):
         annotations = namespace.get("__annotations__", {})
 
+        # 1) Turn annotated fields into StateProperty descriptors
         for attr_name in annotations:
-            if not attr_name.startswith("_"):
-                default_value = namespace.get(attr_name)
-                namespace[attr_name] = StateProperty(attr_name, default_value)
+            if attr_name.startswith("__"):
+                continue
+            default_value = namespace.get(attr_name)
+            namespace[attr_name] = StateProperty(attr_name, default_value)
+
+        # 2) Turn non-annotated plain values into StateProperty descriptors
+        for attr_name, value in list(namespace.items()):
+            if attr_name.startswith("__"):
+                continue
+            # Skip if already set as a descriptor we care about
+            if isinstance(value, (StateProperty, ComputedProperty, StateEffect)):
+                continue
+            # Skip common callables and descriptors
+            if callable(value) or isinstance(
+                value, (staticmethod, classmethod, property)
+            ):
+                continue
+            # Convert plain class var into a StateProperty
+            namespace[attr_name] = StateProperty(attr_name, value)
 
         return super().__new__(mcs, name, bases, namespace)
+
+    def __call__(cls, *args, **kwargs):
+        # Create the instance (runs __new__ and the class' __init__)
+        instance = super().__call__(*args, **kwargs)
+        # Ensure state effects are initialized even if user __init__ skipped super().__init__
+        try:
+            initializer = getattr(instance, "_initialize_state_effects")
+        except AttributeError:
+            return instance
+        initializer()
+        return instance
 
 
 class State(ABC, metaclass=StateMeta):
@@ -134,29 +160,55 @@ class State(ABC, metaclass=StateMeta):
 
     def __init__(self):
         """Initializes the state and registers effects."""
-        for name, attr in self.__class__.__dict__.items():
-            if isinstance(attr, StateEffect):
-                bound_method = attr.fn.__get__(self, self.__class__)
-                effect = Effect(
-                    bound_method,
-                    name=f"{self.__class__.__name__}.{name}",
-                    immediate=attr.immediate,
-                    lazy=True,
-                )
-                # Set the effect directly on the instance, making it callable
-                setattr(self, name, effect)
+        self._initialize_state_effects()
+
+    def _initialize_state_effects(self):
+        # Idempotent: avoid double-initialization when subclass calls super().__init__
+        if getattr(self, "__state_effects_initialized__", False):
+            return
+        setattr(self, "__state_effects_initialized__", True)
+
+        # Traverse MRO so effects declared on base classes are also initialized
+        for cls in self.__class__.__mro__:
+            if cls is State or cls is ABC:
+                continue
+            for name, attr in cls.__dict__.items():
+                # If the attribute is shadowed in a subclass with a non-StateEffect, skip
+                if getattr(self.__class__, name, attr) is not attr:
+                    continue
+                if isinstance(attr, StateEffect):
+                    bound_method = attr.fn.__get__(self, self.__class__)
+                    effect = Effect(
+                        bound_method,
+                        name=f"{self.__class__.__name__}.{name}",
+                    )
+                    setattr(self, name, effect)
 
     def properties(self):
-        """Iterate over the state's `Signal` instances."""
-        for prop in self.__class__.__dict__.values():
-            if isinstance(prop, StateProperty):
-                yield prop.get_signal(self)
+        """Iterate over the state's `Signal` instances, including base classes."""
+        seen: set[str] = set()
+        for cls in self.__class__.__mro__:
+            if cls in (State, ABC):
+                continue
+            for name, prop in cls.__dict__.items():
+                if name in seen:
+                    continue
+                if isinstance(prop, StateProperty):
+                    seen.add(name)
+                    yield prop.get_signal(self)
 
     def computeds(self):
-        """Iterate over the state's `Computed` instances."""
-        for comp_prop in self.__class__.__dict__.values():
-            if isinstance(comp_prop, ComputedProperty):
-                yield comp_prop.get_computed(self)
+        """Iterate over the state's `Computed` instances, including base classes."""
+        seen: set[str] = set()
+        for cls in self.__class__.__mro__:
+            if cls in (State, ABC):
+                continue
+            for name, comp_prop in cls.__dict__.items():
+                if name in seen:
+                    continue
+                if isinstance(comp_prop, ComputedProperty):
+                    seen.add(name)
+                    yield comp_prop.get_computed(self)
 
     def effects(self):
         """Iterate over the state's `Effect` instances."""
@@ -171,19 +223,33 @@ class State(ABC, metaclass=StateMeta):
 
     def __repr__(self) -> str:
         """Return a developer-friendly representation of the state."""
-        props = []
+        props: list[str] = []
 
-        # Annotated properties (Signals)
-        for name in getattr(self.__class__, "__annotations__", {}):
-            if not name.startswith("_"):
-                prop_value = getattr(self, name)
-                props.append(f"{name}={prop_value!r}")
+        # Include StateProperty values from MRO
+        seen: set[str] = set()
+        for cls in self.__class__.__mro__:
+            if cls in (State, ABC):
+                continue
+            for name, value in cls.__dict__.items():
+                if name in seen:
+                    continue
+                if isinstance(value, StateProperty):
+                    seen.add(name)
+                    prop_value = getattr(self, name)
+                    props.append(f"{name}={prop_value!r}")
 
-        # Computed properties
-        for name, value in self.__class__.__dict__.items():
-            if isinstance(value, ComputedProperty):
-                prop_value = getattr(self, name)
-                props.append(f"{name}={prop_value!r} (computed)")
+        # Include ComputedProperty values from MRO
+        seen.clear()
+        for cls in self.__class__.__mro__:
+            if cls in (State, ABC):
+                continue
+            for name, value in cls.__dict__.items():
+                if name in seen:
+                    continue
+                if isinstance(value, ComputedProperty):
+                    seen.add(name)
+                    prop_value = getattr(self, name)
+                    props.append(f"{name}={prop_value!r} (computed)")
 
         return f"<{self.__class__.__name__} {' '.join(props)}>"
 

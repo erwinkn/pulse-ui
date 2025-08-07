@@ -188,7 +188,7 @@ class Effect:
         if immediate:
             self.run()
         elif not lazy:
-            self._push_change()
+            self.schedule()
 
     def _cleanup_before_run(self):
         # Run children cleanups first

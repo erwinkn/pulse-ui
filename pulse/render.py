@@ -356,7 +356,7 @@ def states(
 def states(*args: S1 | Callable[[], S1]) -> tuple[S1, ...]: ...
 
 
-def states(*args):
+def states(*args: State | Callable[[], State]):
     ctx = RENDER_CONTEXT.get()
     if not ctx:
         raise RuntimeError(
@@ -368,9 +368,11 @@ def states(*args):
         for arg in args:
             state_instance = arg() if callable(arg) else arg
             states.append(state_instance)
-            # Schedule all effects to run
+            # Schedule all effects to run + remove them from their scope
             for effect in state_instance.effects():
                 effect.schedule()
+                if effect.scope:
+                    effect.scope.effects.remove(effect)
 
         ctx.hooks.states = tuple(states)
     else:

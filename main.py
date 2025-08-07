@@ -7,6 +7,10 @@ import pulse as ps
 # computed properties, and effects.
 class CounterState(ps.State):
     count: int = 0
+    count2: int = 0
+
+    def __init__(self, name: str):
+        self.name = name
 
     def increment(self):
         self.count += 1
@@ -22,7 +26,7 @@ class CounterState(ps.State):
     @ps.effect
     def on_count_change(self):
         """An effect that runs whenever the count changes."""
-        print(f"Effect: Count is now {self.count}. Double is {self.double_count}.")
+        print(f"{self.name}: Count is now {self.count}. Double is {self.double_count}.")
 
 
 # A state class for the layout, demonstrating persistent state across routes.
@@ -78,23 +82,34 @@ def about():
     )
 
 
+def setup_counter(count: int):
+    @ps.effect
+    def log_count():
+        print(f"Logging count from setup: {count}")
+
+
 @ps.component
 def counter():
     """An interactive counter page demonstrating state management."""
-    state = ps.states(CounterState())
-
-    def decrement():
-        state.count -= 1
+    state1, state2 = ps.states(CounterState("Counter 1"), CounterState("Counter2"))
 
     return ps.div(
         ps.h1("Interactive Counter", className="text-3xl font-bold mb-4"),
         ps.div(
-            ps.button("Decrement", onClick=decrement, className="btn-primary"),
-            ps.span(f"{state.count}", className="mx-4 text-2xl font-mono"),
-            ps.button("Increment", onClick=state.increment, className="btn-primary"),
+            ps.button("Decrement", onClick=state1.decrement, className="btn-primary"),
+            ps.span(f"{state1.count}", className="mx-4 text-2xl font-mono"),
+            ps.button("Increment", onClick=state1.increment, className="btn-primary"),
             className="flex items-center justify-center mb-4",
         ),
-        ps.p(f"The doubled count is: {state.double_count}", className="text-lg mb-4"),
+        ps.p(f"The doubled count is: {state1.double_count}", className="text-lg mb-4"),
+        ps.h1("Interactive Counter 2", className="text-3xl font-bold mb-4"),
+        ps.div(
+            ps.button("Decrement", onClick=state2.decrement, className="btn-primary"),
+            ps.span(f"{state2.count}", className="mx-4 text-2xl font-mono"),
+            ps.button("Increment", onClick=state2.increment, className="btn-primary"),
+            className="flex items-center justify-center mb-4",
+        ),
+        ps.p(f"The doubled count is: {state2.double_count}", className="text-lg mb-4"),
         ps.p(
             "Check your server logs for messages from the @ps.effect.",
             className="text-sm text-gray-500 mb-6",
@@ -200,3 +215,6 @@ app = ps.App(
         )
     ]
 )
+
+@ps.query('a', 'b', 'c') # option 1 : pass key directly here
+async def fetch_user(user_id: str)

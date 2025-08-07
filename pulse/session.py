@@ -57,6 +57,7 @@ class Session:
     def mount(self, path: str, route_info: RouteInfo, current_vdom: VDOM):
         if path in self.active_routes:
             logger.error(f"Route already mounted: '{path}'")
+            return
 
         def on_render(res: RenderResult):
             if res.current_vdom is None:
@@ -72,6 +73,7 @@ class Session:
                         )
                     )
 
+        print(f"Mounting '{path}'")
         route = self.routes.find(path)
         ctx = RenderContext(
             route, position="", route_info=route_info, vdom=current_vdom
@@ -89,5 +91,6 @@ class Session:
     def unmount(self, path: str):
         if path not in self.active_routes:
             return
+        print(f"Unmounting '{path}'")
         ctx = self.active_routes.pop(path)
         ctx.unmount()

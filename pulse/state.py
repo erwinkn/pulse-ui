@@ -9,6 +9,7 @@ from abc import ABC, ABCMeta
 from typing import Any, Callable, Generic, Never, TypeVar
 
 from pulse.reactive import Signal, Computed, Effect
+from pulse.query import QueryProperty
 
 
 T = TypeVar("T")
@@ -111,7 +112,9 @@ class StateMeta(ABCMeta):
             if attr_name.startswith("__"):
                 continue
             # Skip if already set as a descriptor we care about
-            if isinstance(value, (StateProperty, ComputedProperty, StateEffect)):
+            if isinstance(
+                value, (StateProperty, ComputedProperty, StateEffect, QueryProperty)
+            ):
                 continue
             # Skip common callables and descriptors
             if callable(value) or isinstance(
@@ -176,6 +179,12 @@ class State(ABC, metaclass=StateMeta):
                 # If the attribute is shadowed in a subclass with a non-StateEffect, skip
                 if getattr(self.__class__, name, attr) is not attr:
                     continue
+                # Validate query properties have a key defined
+                if isinstance(attr, QueryProperty):
+                    if getattr(attr, "key_fn", None) is None:
+                        raise RuntimeError(
+                            f"State query '{name}' is missing a '@{name}.key' definition"
+                        )
                 if isinstance(attr, StateEffect):
                     bound_method = attr.fn.__get__(self, self.__class__)
                     effect = Effect(

@@ -4,7 +4,7 @@ from .routing import Route, Layout
 from .component import component
 from .reactive import Signal, Computed, Effect, batch, untrack
 from .render import states, effects, setup, router
-from .decorators import computed, effect
+from .decorators import computed, effect, query
 
 # Import HTML tags and other UI components
 from .vdom import (

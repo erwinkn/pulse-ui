@@ -4,6 +4,7 @@ from typing import Callable, Optional, TypeVar, overload
 from pulse.state import State, ComputedProperty, StateEffect
 from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn
 import inspect
+from pulse.query import QueryProperty
 
 
 T = TypeVar("T")
@@ -85,6 +86,31 @@ def effect(
 
         # This is a standalone effect function. Create the Effect object.
         return Effect(func, name=name or func.__name__, immediate=immediate, lazy=lazy)
+
+    if fn:
+        return decorator(fn)
+    return decorator
+
+
+# -----------------
+# Query decorator
+# -----------------
+@overload
+def query(fn: Callable[[TState], T]) -> QueryProperty[T]: ...
+@overload
+def query(
+    fn: None = None,
+) -> Callable[[Callable[[State], T]], QueryProperty[T]]: ...
+
+
+def query(fn: Optional[Callable] = None):
+    def decorator(func: Callable, /):
+        sig = inspect.signature(func)
+        params = list(sig.parameters.values())
+        # Only state-method form supported for now (single 'self')
+        if not (len(params) == 1 and params[0].name == "self"):
+            raise TypeError("@query currently only supports state methods (self)")
+        return QueryProperty(func.__name__, func)
 
     if fn:
         return decorator(fn)

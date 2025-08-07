@@ -156,10 +156,8 @@ class Computed(Generic[T]):
         self.dirty = False
 
 
-EffectFnWithoutCleanup = Callable[[], None]
 EffectCleanup = Callable[[], None]
-EffectFnWithCleanup = Callable[[], EffectCleanup]
-EffectFn = EffectFnWithCleanup | EffectFnWithoutCleanup
+EffectFn = Callable[[], Optional[EffectCleanup]]
 
 
 class Effect:

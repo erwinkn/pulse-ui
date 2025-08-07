@@ -215,6 +215,3 @@ app = ps.App(
         )
     ]
 )
-
-@ps.query('a', 'b', 'c') # option 1 : pass key directly here
-async def fetch_user(user_id: str)

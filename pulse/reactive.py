@@ -14,37 +14,6 @@ from pulse.flags import IS_PRERENDERING
 T = TypeVar("T")
 P = ParamSpec("P")
 
-# NOTE: globals at the bottom of the file
-
-
-# Used to track dependencies and effects created within a certain function or
-# context.
-class Scope:
-    def __init__(self):
-        # Use lists to preserve insertion order
-        self.deps: list[Signal | Computed] = []
-        self.effects: list[Effect] = []
-
-    def register_effect(self, effect: "Effect"):
-        if effect not in self.effects:
-            self.effects.append(effect)
-
-    def register_dep(self, value: "Signal | Computed"):
-        if value not in self.deps:
-            self.deps.append(value)
-
-    def __enter__(self):
-        self._prev = SCOPE.get()
-        SCOPE.set(self)
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        SCOPE.set(self._prev)
-        self._prev = None
-
-
-class EmptyScope(Scope): ...
-
 
 class Signal(Generic[T]):
     def __init__(self, value: T, name: Optional[str] = None):
@@ -55,8 +24,9 @@ class Signal(Generic[T]):
         self.last_change = -1
 
     def read(self) -> T:
-        if scope := SCOPE.get():
-            scope.register_dep(self)
+        rc = REACTIVE_CONTEXT.get()
+        if rc.scope is not None:
+            rc.scope.register_dep(self)
         return self.value
 
     def __call__(self) -> T:
@@ -114,8 +84,9 @@ class Computed(Generic[T]):
         if self.on_stack:
             raise RuntimeError("Circular dependency detected")
 
-        if scope := SCOPE.get():
-            scope.register_dep(self)
+        rc = REACTIVE_CONTEXT.get()
+        if rc.scope is not None:
+            rc.scope.register_dep(self)
 
         self._recompute_if_necessary()
         return self.value
@@ -229,8 +200,9 @@ class Effect:
         if immediate and lazy:
             raise ValueError("An effect cannot be boht immediate and lazy")
 
-        if scope := SCOPE.get():
-            scope.register_effect(self)
+        rc = REACTIVE_CONTEXT.get()
+        if rc.scope is not None:
+            rc.scope.register_effect(self)
 
         # Will either run the effect now or add it to the current batch
         if immediate:
@@ -260,7 +232,9 @@ class Effect:
             self.batch.effects.remove(self)
 
     def schedule(self):
-        batch = BATCH.get()
+        # Prefer composite reactive context if set
+        rc = REACTIVE_CONTEXT.get()
+        batch = rc.batch
         print(f"Scheduling {self.name} to batch {batch}")
         batch.register_effect(self)
         self.batch = batch
@@ -290,7 +264,7 @@ class Effect:
             return
 
         # Don't track what happens in the cleanup
-        with untrack():
+        with Untrack():
             # Run children cleanup first
             self._cleanup_before_run()
 
@@ -330,10 +304,10 @@ class Batch:
             self.effects.append(effect)
 
     def flush(self):
-        global_batch = BATCH.get()
         token = None
-        if global_batch != self:
-            token = BATCH.set(self)
+        rc = REACTIVE_CONTEXT.get()
+        if rc.batch is not self:
+            token = REACTIVE_CONTEXT.set(ReactiveContext(rc.epoch, self, rc.scope))
 
         MAX_ITERS = 10000
         iters = 0
@@ -361,17 +335,18 @@ class Batch:
             iters += 1
 
         if token:
-            BATCH.reset(token)
+            REACTIVE_CONTEXT.reset(token)
 
     def __enter__(self):
-        self._token = BATCH.set(self)
+        rc = REACTIVE_CONTEXT.get()
+        self._parent = rc.batch
+        rc.batch = self
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self.flush()
-        # Reset AFTER flushing, as the batch needs to capture any signals or
-        # effects triggered while flushing.
-        BATCH.reset(self._token)
+        rc = REACTIVE_CONTEXT.get()
+        rc.batch = self._parent
 
 
 class GlobalBatch(Batch):
@@ -394,30 +369,77 @@ class GlobalBatch(Batch):
         self.is_scheduled = False
 
 
+class Epoch:
+    def __init__(self, current: int = 0) -> None:
+        self.current = current
+
+
+# Used to track dependencies and effects created within a certain function or
+# context.
+class Scope:
+    def __init__(self):
+        # Use lists to preserve insertion order
+        self.deps: list[Signal | Computed] = []
+        self.effects: list[Effect] = []
+
+    def register_effect(self, effect: "Effect"):
+        if effect not in self.effects:
+            self.effects.append(effect)
+
+    def register_dep(self, value: "Signal | Computed"):
+        if value not in self.deps:
+            self.deps.append(value)
+
+    def __enter__(self):
+        rc = REACTIVE_CONTEXT.get()
+        self._parent = rc.scope
+        rc.scope = self
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        rc = REACTIVE_CONTEXT.get()
+        rc.scope = self._parent
+
+
+class Untrack(Scope): ...
+
+
+# --- Reactive Context (composite of epoch, batch, scope) ---
+class ReactiveContext:
+    def __init__(
+        self, epoch: "Epoch", batch: "Batch", scope: Optional[Scope] = None
+    ) -> None:
+        self.epoch = epoch
+        self.batch = batch
+        self.scope = scope
+
+    def get_epoch(self) -> int:
+        return self.epoch.current
+
+    def increment_epoch(self) -> None:
+        self.epoch.current += 1
+
+    def __enter__(self):
+        self._tok_rc = REACTIVE_CONTEXT.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        REACTIVE_CONTEXT.reset(self._tok_rc)
+
+def epoch():
+    return REACTIVE_CONTEXT.get().get_epoch()
+
+def increment_epoch():
+    return REACTIVE_CONTEXT.get().increment_epoch()
+
+# Default global context (used in tests / outside app)
+REACTIVE_CONTEXT: ContextVar[ReactiveContext] = ContextVar(
+    "pulse_reactive_context", default=ReactiveContext(Epoch(), GlobalBatch())
+)
+
+
 def flush_effects():
-    BATCH.get().flush()
-
-
-def untrack():
-    return EmptyScope()
+    REACTIVE_CONTEXT.get().batch.flush()
 
 
 class InvariantError(Exception): ...
-
-
-# --- Globals ---
-class Epoch:
-    current: int = 0
-
-
-EPOCH = ContextVar("pulse_epoch", default=Epoch())
-SCOPE: ContextVar[Optional[Scope]] = ContextVar("pulse_scope", default=None)
-BATCH: ContextVar[Batch] = ContextVar("pulse_batch", default=GlobalBatch())
-
-
-def epoch():
-    return EPOCH.get().current
-
-
-def increment_epoch():
-    EPOCH.get().current += 1

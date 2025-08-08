@@ -8,7 +8,12 @@ from pulse.messages import (
     ServerMessage,
     ServerUpdateMessage,
 )
-from pulse.reactive import Batch
+from pulse.reactive import (
+    Batch,
+    Epoch,
+    GlobalBatch,
+    ReactiveContext,
+)
 from pulse.render import RenderContext, RenderResult
 from pulse.routing import RouteTree
 from pulse.vdom import VDOM, VDOMNode
@@ -24,6 +29,10 @@ class Session:
 
         self.active_routes: dict[str, RenderContext] = {}
         self.vdom: VDOMNode | None = None
+        # Per-session reactive context
+        self._epoch = Epoch()
+        self._batch = GlobalBatch()
+        self._rc = ReactiveContext(self._epoch, self._batch)
 
     def connect(
         self,
@@ -50,8 +59,10 @@ class Session:
         self.active_routes.clear()
 
     def execute_callback(self, route: str, key: str, args: list | tuple):
-        fn, n_params = self.active_routes[route].callbacks[key]
-        fn(*args[:n_params])
+        with self._rc:
+            fn, n_params = self.active_routes[route].callbacks[key]
+            with Batch():
+                fn(*args[:n_params])
 
     def mount(self, path: str, route_info: RouteInfo, current_vdom: VDOM):
         if path in self.active_routes:
@@ -72,24 +83,27 @@ class Session:
                         )
                     )
 
-        print(f"Mounting '{path}'")
-        route = self.routes.find(path)
-        ctx = RenderContext(
-            route, position="", route_info=route_info, vdom=current_vdom
-        )
-        self.active_routes[path] = ctx
-        ctx.mount(on_render)
+        with self._rc:
+            print(f"Mounting '{path}'")
+            route = self.routes.find(path)
+            ctx = RenderContext(
+                route, position="", route_info=route_info, vdom=current_vdom
+            )
+            self.active_routes[path] = ctx
+            ctx.mount(on_render)
 
     def navigate(self, path: str, route_info: RouteInfo):
         # Route is already mounted, we can just update the routing state
-        if path not in self.active_routes:
-            logger.error(f"Navigating to unmounted route '{path}'")
-        else:
-            self.active_routes[path].update_route_info(route_info)
+        with self._rc:
+            if path not in self.active_routes:
+                logger.error(f"Navigating to unmounted route '{path}'")
+            else:
+                self.active_routes[path].update_route_info(route_info)
 
     def unmount(self, path: str):
-        if path not in self.active_routes:
-            return
-        print(f"Unmounting '{path}'")
-        ctx = self.active_routes.pop(path)
-        ctx.unmount()
+        with self._rc:
+            if path not in self.active_routes:
+                return
+            print(f"Unmounting '{path}'")
+            ctx = self.active_routes.pop(path)
+            ctx.unmount()

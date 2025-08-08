@@ -1,5 +1,4 @@
 from contextvars import ContextVar
-import enum
 from typing import (
     Any,
     Callable,
@@ -13,7 +12,7 @@ from typing import (
 
 from pulse.diff import VDOM
 from pulse.messages import RouteInfo
-from pulse.reactive import BATCH, Effect, EffectFn, Scope, Signal, untrack
+from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack, REACTIVE_CONTEXT
 from pulse.routing import Layout, Route
 from pulse.state import State
 from pulse.vdom import Callbacks
@@ -164,8 +163,7 @@ class RenderContext:
             new_tree = self.route.render.fn()  # type: ignore
             new_vdom, new_callbacks = new_tree.render()
             if self.prerendering:
-                batch = BATCH.get()
-                batch.effects = []
+                REACTIVE_CONTEXT.get().batch.effects = []
 
             self.vdom = new_vdom
             self.callbacks = new_callbacks
@@ -404,7 +402,7 @@ def effects(*fns: EffectFn) -> None:
 
     # Remove the effects passed here from the batch, ensuring they only run on mount
     if ctx.render_count == 1:
-        with untrack():
+        with Untrack():
             effects = []
             for fn in fns:
                 if not callable(fn):

@@ -6,7 +6,7 @@ from pulse import (
     Effect,
     computed,
     effect,
-    untrack,
+    Untrack,
 )
 from pulse.reactive import Batch, flush_effects
 
@@ -116,7 +116,7 @@ def test_untrack():
         nonlocal runs
         runs += 1
         s1()  # dependency
-        with untrack():
+        with Untrack():
             s2()  # no dependency
 
     Effect(my_effect, name="untrack_effect")

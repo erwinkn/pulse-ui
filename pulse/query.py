@@ -3,7 +3,7 @@ import asyncio
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 import uuid
 
-from pulse.reactive import Computed, Effect, Signal, untrack
+from pulse.reactive import Computed, Effect, Signal, Untrack 
 
 
 T = TypeVar("T")
@@ -168,7 +168,7 @@ class QueryProperty(Generic[T]):
             result._set_loading()
 
             # Create a background task for the user async function
-            with untrack():
+            with Untrack():
                 unique_id = uuid.uuid4().hex[:8]
                 task = loop.create_task(
                     bound_fetch(), name=f"query:{self.name}:{key}:{unique_id}"

@@ -2,7 +2,7 @@ from .app import App, Session
 from .state import State
 from .routing import Route, Layout
 from .component import component
-from .reactive import Signal, Computed, Effect, Batch, untrack
+from .reactive import Signal, Computed, Effect, Batch, Untrack
 from .render import states, effects, setup, router
 from .decorators import computed, effect, query
 

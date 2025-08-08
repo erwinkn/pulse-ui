@@ -8,7 +8,7 @@ from pulse.messages import (
     ServerMessage,
     ServerUpdateMessage,
 )
-from pulse.reactive import batch
+from pulse.reactive import Batch
 from pulse.render import RenderContext, RenderResult
 from pulse.routing import RouteTree
 from pulse.vdom import VDOM, VDOMNode
@@ -50,9 +50,8 @@ class Session:
         self.active_routes.clear()
 
     def execute_callback(self, route: str, key: str, args: list | tuple):
-        with batch():
-            fn, n_params = self.active_routes[route].callbacks[key]
-            fn(*args[:n_params])
+        fn, n_params = self.active_routes[route].callbacks[key]
+        fn(*args[:n_params])
 
     def mount(self, path: str, route_info: RouteInfo, current_vdom: VDOM):
         if path in self.active_routes:

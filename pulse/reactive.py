@@ -51,6 +51,7 @@ class Signal(Generic[T]):
         self.value = value
         self.name = name
         self.obs: list[Computed | Effect] = []
+        self._obs_change_listeners: list[Callable[[int], None]] = []
         self.last_change = -1
 
     def read(self) -> T:
@@ -62,7 +63,29 @@ class Signal(Generic[T]):
         return self.read()
 
     def _add_obs(self, obs: "Computed | Effect"):
+        prev = len(self.obs)
         self.obs.append(obs)
+        if prev == 0 and len(self.obs) == 1:
+            for cb in list(self._obs_change_listeners):
+                cb(len(self.obs))
+
+    def _remove_obs(self, obs: "Computed | Effect"):
+        if obs in self.obs:
+            self.obs.remove(obs)
+            if len(self.obs) == 0:
+                for cb in list(self._obs_change_listeners):
+                    cb(0)
+
+    def on_observer_change(self, cb: Callable[[int], None]) -> Callable[[], None]:
+        self._obs_change_listeners.append(cb)
+
+        def off():
+            try:
+                self._obs_change_listeners.remove(cb)
+            except ValueError:
+                pass
+
+        return off
 
     def write(self, value: T):
         if value == self.value:
@@ -70,6 +93,7 @@ class Signal(Generic[T]):
         increment_epoch()
         self.value = value
         self.last_change = epoch()
+        print(f"Wrote to {self.name}, pushing change to {[o.name for o in self.obs]}")
         for obs in self.obs:
             obs._push_change()
 
@@ -84,6 +108,7 @@ class Computed(Generic[T]):
         self.last_change: int = -1
         self.deps: list[Signal | Computed] = []
         self.obs: list[Computed | Effect] = []
+        self._obs_change_listeners: list[Callable[[int], None]] = []
 
     def read(self) -> T:
         if self.on_stack:
@@ -135,9 +160,9 @@ class Computed(Generic[T]):
         add_deps = new_deps - prev_deps
         remove_deps = prev_deps - new_deps
         for dep in add_deps:
-            dep.obs.append(self)
+            dep._add_obs(self)
         for dep in remove_deps:
-            dep.obs.remove(self)
+            dep._remove_obs(self)
 
     def _recompute_if_necessary(self):
         if self.last_change < 0:
@@ -154,6 +179,31 @@ class Computed(Generic[T]):
                 return
 
         self.dirty = False
+
+    def _add_obs(self, obs: "Computed | Effect"):
+        prev = len(self.obs)
+        self.obs.append(obs)
+        if prev == 0 and len(self.obs) == 1:
+            for cb in list(self._obs_change_listeners):
+                cb(len(self.obs))
+
+    def _remove_obs(self, obs: "Computed | Effect"):
+        if obs in self.obs:
+            self.obs.remove(obs)
+            if len(self.obs) == 0:
+                for cb in list(self._obs_change_listeners):
+                    cb(0)
+
+    def on_observer_change(self, cb: Callable[[int], None]) -> Callable[[], None]:
+        self._obs_change_listeners.append(cb)
+
+        def off():
+            try:
+                self._obs_change_listeners.remove(cb)
+            except ValueError:
+                pass
+
+        return off
 
 
 EffectCleanup = Callable[[], None]
@@ -211,6 +261,7 @@ class Effect:
 
     def schedule(self):
         batch = BATCH.get()
+        print(f"Scheduling {self.name} to batch {batch}")
         batch.register_effect(self)
         self.batch = batch
 
@@ -261,17 +312,18 @@ class Effect:
         add_deps = new_deps - prev_deps
         remove_deps = prev_deps - new_deps
         for dep in add_deps:
-            dep.obs.append(self)
+            dep._add_obs(self)
         for dep in remove_deps:
-            dep.obs.remove(self)
+            dep._remove_obs(self)
 
         if self._deps_changed_since_last_run():
             self.schedule()
 
 
 class Batch:
-    def __init__(self) -> None:
+    def __init__(self, name: Optional[str] = None) -> None:
         self.effects: list[Effect] = []
+        self.name = name
 
     def register_effect(self, effect: Effect):
         if effect not in self.effects:
@@ -301,7 +353,10 @@ class Batch:
 
             for effect in current_effects:
                 if effect._should_run():
+                    print(f"Running effect {effect.name}")
                     effect.run()
+                else:
+                    print(f"Skipping effect {effect.name}")
 
             iters += 1
 
@@ -341,10 +396,6 @@ class GlobalBatch(Batch):
 
 def flush_effects():
     BATCH.get().flush()
-
-
-def batch():
-    return Batch()
 
 
 def untrack():

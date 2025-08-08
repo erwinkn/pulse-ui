@@ -96,21 +96,23 @@ def effect(
 # Query decorator
 # -----------------
 @overload
-def query(fn: Callable[[TState], T]) -> QueryProperty[T]: ...
+def query(
+    fn: Callable[[TState], T], *, keep_alive: bool = False
+) -> QueryProperty[T]: ...
 @overload
 def query(
-    fn: None = None,
+    fn: None = None, *, keep_alive: bool = False
 ) -> Callable[[Callable[[State], T]], QueryProperty[T]]: ...
 
 
-def query(fn: Optional[Callable] = None):
+def query(fn: Optional[Callable] = None, *, keep_alive: bool = False):
     def decorator(func: Callable, /):
         sig = inspect.signature(func)
         params = list(sig.parameters.values())
         # Only state-method form supported for now (single 'self')
         if not (len(params) == 1 and params[0].name == "self"):
             raise TypeError("@query currently only supports state methods (self)")
-        return QueryProperty(func.__name__, func)
+        return QueryProperty(func.__name__, func, keep_alive=keep_alive)
 
     if fn:
         return decorator(fn)

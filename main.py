@@ -1,3 +1,4 @@
+import asyncio
 import pulse as ps
 
 
@@ -140,6 +141,52 @@ def counter_details():
     )
 
 
+class QueryDemoState(ps.State):
+    user_id: int = 1
+    calls: int = 0
+
+    @ps.query
+    async def user(self) -> dict:
+        print("Executing query")
+        self.calls += 1
+        # Simulate async work
+        await asyncio.sleep(1)
+        return {"id": self.user_id, "name": f"User {self.user_id}"}
+
+    @user.key
+    def _user_key(self):
+        return ("user", self.user_id)
+
+
+@ps.component
+def query_demo():
+    state = ps.states(QueryDemoState)
+    q = state.user
+    print("rendering query demo")
+
+    def prev():
+        state.user_id = max(1, state.user_id - 1)
+
+    def next_():
+        state.user_id = state.user_id + 1
+
+    def refetch():
+        q.refetch()
+
+    return ps.div(
+        ps.h2("Query Demo", className="text-2xl font-bold mb-4"),
+        ps.p(f"User ID: {state.user_id}"),
+        ps.p(f"Fetch calls: {state.calls}"),
+        ps.p("Loading..." if q.is_loading else f"Data: {q.data}", className="mb-4"),
+        ps.div(
+            ps.button("Prev", onClick=prev, className="btn-secondary mr-2"),
+            ps.button("Next", onClick=next_, className="btn-secondary mr-2"),
+            ps.button("Refetch", onClick=refetch, className="btn-primary"),
+        ),
+        className="p-4",
+    )
+
+
 @ps.component
 def dynamic_route():
     router = ps.router()
@@ -183,6 +230,7 @@ def app_layout():
                 ps.Link("Counter", to="/counter", className="nav-link"),
                 ps.Link("About", to="/about", className="nav-link"),
                 ps.Link("Dynamic", to="/dynamic", className="nav-link"),
+                ps.Link("Query", to="/query", className="nav-link"),
                 className="flex justify-center space-x-4 p-4 bg-gray-700 text-white rounded-b-lg",
             ),
             className="mb-8",
@@ -210,6 +258,7 @@ app = ps.App(
                         ps.Route("details", counter_details),
                     ],
                 ),
+                ps.Route("/query", query_demo),
                 ps.Route("/dynamic/:route_id/:optional_segment?/*", dynamic_route),
             ],
         )

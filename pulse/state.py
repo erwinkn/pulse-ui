@@ -8,7 +8,7 @@ that enables automatic re-rendering when state changes.
 from abc import ABC, ABCMeta
 from typing import Any, Callable, Generic, Never, TypeVar
 
-from pulse.reactive import Signal, Computed, Effect
+from pulse.reactive import Scope, Signal, Computed, Effect
 from pulse.query import QueryProperty
 
 
@@ -91,6 +91,14 @@ class StateEffect(Generic[T]):
     ):
         self.fn = fn
 
+    def initialize(self, state: "State", name: str):
+        bound_method = self.fn.__get__(state, state.__class__)
+        effect = Effect(
+            bound_method,
+            name=f"{state.__class__.__name__}.{name}",
+        )
+        setattr(state, name, effect)
+
 
 class StateMeta(ABCMeta):
     """
@@ -131,7 +139,7 @@ class StateMeta(ABCMeta):
         instance = super().__call__(*args, **kwargs)
         # Ensure state effects are initialized even if user __init__ skipped super().__init__
         try:
-            initializer = getattr(instance, "_initialize_state_effects")
+            initializer = getattr(instance, "_initialize")
         except AttributeError:
             return instance
         initializer()
@@ -161,37 +169,39 @@ class State(ABC, metaclass=StateMeta):
     Properties will automatically trigger re-renders when changed.
     """
 
+    __scope__: Scope
+
     def __init__(self):
         """Initializes the state and registers effects."""
-        self._initialize_state_effects()
+        self._initialize()
 
-    def _initialize_state_effects(self):
+    def _initialize(self):
         # Idempotent: avoid double-initialization when subclass calls super().__init__
-        if getattr(self, "__state_effects_initialized__", False):
+        if getattr(self, "__state_initialized__", False):
             return
-        setattr(self, "__state_effects_initialized__", True)
+        setattr(self, "__state_initialized__", True)
+        print(f"initializing state {self.__class__.__name__}")
 
-        # Traverse MRO so effects declared on base classes are also initialized
-        for cls in self.__class__.__mro__:
-            if cls is State or cls is ABC:
-                continue
-            for name, attr in cls.__dict__.items():
-                # If the attribute is shadowed in a subclass with a non-StateEffect, skip
-                if getattr(self.__class__, name, attr) is not attr:
+        self.scope = Scope()
+        with self.scope:
+            # Traverse MRO so effects declared on base classes are also initialized
+            for cls in self.__class__.__mro__:
+                if cls is State or cls is ABC:
                     continue
-                # Validate query properties have a key defined
-                if isinstance(attr, QueryProperty):
-                    if getattr(attr, "key_fn", None) is None:
-                        raise RuntimeError(
-                            f"State query '{name}' is missing a '@{name}.key' definition"
-                        )
-                if isinstance(attr, StateEffect):
-                    bound_method = attr.fn.__get__(self, self.__class__)
-                    effect = Effect(
-                        bound_method,
-                        name=f"{self.__class__.__name__}.{name}",
-                    )
-                    setattr(self, name, effect)
+                for name, attr in cls.__dict__.items():
+                    # If the attribute is shadowed in a subclass with a non-StateEffect, skip
+                    if getattr(self.__class__, name, attr) is not attr:
+                        continue
+                    # Validate query properties have a key defined
+                    if isinstance(attr, QueryProperty):
+                        if getattr(attr, "key_fn", None) is None:
+                            raise RuntimeError(
+                                f"State query '{name}' is missing a '@{name}.key' definition"
+                            )
+                        # Initialize query now so Effect exists and can be managed by hooks
+                        attr.initialize(self)
+                    if isinstance(attr, StateEffect):
+                        attr.initialize(self, name)
 
     def properties(self):
         """Iterate over the state's `Signal` instances, including base classes."""
@@ -224,11 +234,19 @@ class State(ABC, metaclass=StateMeta):
         for value in self.__dict__.values():
             if isinstance(value, Effect):
                 yield value
+            # if isinstance(value,QueryProperty):
+            #     value.
 
     def dispose(self):
+        disposed = set()
         for value in self.__dict__.values():
             if isinstance(value, Effect):
                 value.dispose()
+                disposed.add(value)
+
+        # TODO: remove this debug check
+        if len(set(self.scope.effects) - disposed) > 0:
+            raise RuntimeError(f"State.dispose() missed effects defined on its Scope: {[e.name for e in self.scope.effects]}")
 
     def __repr__(self) -> str:
         """Return a developer-friendly representation of the state."""

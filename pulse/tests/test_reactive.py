@@ -4,7 +4,6 @@ from pulse import (
     Signal,
     Computed,
     Effect,
-    batch,
     computed,
     effect,
     untrack,
@@ -149,7 +148,7 @@ def test_batching():
     assert batching_effect.runs == 1
     assert c() == 11
 
-    with batch():
+    with Batch():
         s1.write(2)
         s2.write(20)
 
@@ -158,7 +157,7 @@ def test_batching():
 
 
 def test_effects_run_after_batch():
-    with batch():
+    with Batch():
 
         @effect(name="effect_in_batch")
         def e(): ...
@@ -171,7 +170,7 @@ def test_effects_run_after_batch():
 def test_computed_updates_within_batch():
     s = Signal(1)
     double = Computed(lambda: 2 * s())
-    with batch():
+    with Batch():
         s.write(2)
         # Depending on the reactive architecture chosen, this may return `2`
         # still. To avoid surprises, Pulse favors consistency.
@@ -342,7 +341,7 @@ def test_glitch_avoidance():
     assert effect_runs == 1
     assert c_values == [11]
 
-    with batch():
+    with Batch():
         a.write(2)
         b.write(20)
 
@@ -560,7 +559,7 @@ def test_dispose_effect_removes_from_exact_batch():
 
     assert e.runs == 0
 
-    with batch():
+    with Batch():
         e.dispose()
     flush_effects()
     assert e.runs == 0

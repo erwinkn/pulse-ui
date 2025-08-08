@@ -136,7 +136,20 @@ class RenderContext:
     def mount(self, on_render: Callable[[RenderResult], None]):
         if self.effect is not None:
             raise RuntimeError("RenderContext is already mounted")
-        self.effect = Effect(lambda: on_render(self.render()), immediate=True)
+
+        def render_fn():
+            on_render(self.render())
+            if self.effect:
+                print(
+                    "Render effect dependencies:",
+                    [dep.name for dep in self.effect.deps],
+                )
+
+        self.effect = Effect(
+            render_fn,
+            immediate=True,
+            name=f"{self.route.path if isinstance(self.route, Route) else 'layout'}:render:{self.position or 'root'}",
+        )
 
     def unmount(self):
         self.hooks.dispose()
@@ -368,18 +381,10 @@ def states(*args: State | Callable[[], State]):
         for arg in args:
             state_instance = arg() if callable(arg) else arg
             states.append(state_instance)
-            # Schedule all effects to run + remove them from their scope
-            for effect in state_instance.effects():
-                effect.schedule()
-                if effect.scope:
-                    effect.scope.effects.remove(effect)
-
         ctx.hooks.states = tuple(states)
     else:
         for arg in args:
             if isinstance(arg, State):
-                # This will unregister the effects before they have a chance to
-                # run
                 arg.dispose()
 
     if len(ctx.hooks.states) == 1:

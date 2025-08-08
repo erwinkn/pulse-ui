@@ -1,7 +1,7 @@
 import asyncio
 
-import uuid
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
+import uuid
 
 from pulse.reactive import Computed, Effect, Signal, untrack
 
@@ -24,14 +24,17 @@ class QueryResult(Generic[T]):
 
     @property
     def is_error(self) -> bool:
+        print(f"[QueryResult] Accessing is_error = {self._is_error.read()}")
         return self._is_error.read()
 
     @property
     def error(self) -> Exception | None:
+        print(f"[QueryResult] Accessing error = {self._error.read()}")
         return self._error.read()
 
     @property
     def data(self) -> Optional[T]:
+        print(f"[QueryResult] Accessing data = {self._data.read()}")
         return self._data.read()
 
     # Internal setters used by the query machinery
@@ -102,23 +105,26 @@ class QueryProperty(Generic[T]):
                 return ("user", self.user_id)
     """
 
-    def __init__(self, name: str, fetch_fn: "Callable[[Any], Awaitable[T]]"):
+    def __init__(
+        self,
+        name: str,
+        fetch_fn: "Callable[[Any], Awaitable[T]]",
+        keep_alive: bool = False,
+    ):
         self.name = name
         self.fetch_fn = fetch_fn
         self.key_fn: Optional[Callable[[Any], tuple]] = None
+        self.keep_alive = keep_alive
         self._priv_query = f"__query_{name}"
         self._priv_effect = f"__query_effect_{name}"
+        self._priv_key_comp = f"__query_key_{name}"
 
     # Decorator to attach a key function
     def key(self, fn: Callable[[Any], tuple]):
         self.key_fn = fn
         return fn
 
-    def __get__(self, obj: Any, objtype: Any = None) -> StateQuery[T]:
-        if obj is None:
-            print(f"[QueryProperty:{self.name}] accessed on class")
-            return self  # type: ignore
-
+    def initialize(self, obj: Any) -> StateQuery[T]:
         # Return cached query instance if present
         query: Optional[StateQuery[T]] = getattr(obj, self._priv_query, None)
         if query:
@@ -126,7 +132,6 @@ class QueryProperty(Generic[T]):
             return query
 
         if self.key_fn is None:
-            print(f"[QueryProperty:{self.name}] missing @key")
             raise RuntimeError(
                 f"State query '{self.name}' is missing a '@{self.name}.key' definition"
             )
@@ -144,21 +149,7 @@ class QueryProperty(Generic[T]):
             return k
 
         key_computed = Computed(compute_key, name=f"query.key.{self.name}")
-
-        async def do_fetch():
-            try:
-                print(f"[QueryProperty:{self.name}] do_fetch start")
-                result._set_loading()
-                data = await bound_fetch()
-                print(f"[QueryProperty:{self.name}] do_fetch success -> {data!r}")
-                result._set_success(data)
-            except asyncio.CancelledError:
-                # Don't set error on cancellation
-                print(f"[QueryProperty:{self.name}] do_fetch cancelled")
-                pass
-            except Exception as e:  # noqa: BLE001
-                print(f"[QueryProperty:{self.name}] do_fetch error -> {e!r}")
-                result._set_error(e)
+        setattr(obj, self._priv_key_comp, key_computed)
 
         def run_effect():
             print(f"[QueryProperty:{self.name}] effect RUN")
@@ -173,27 +164,40 @@ class QueryProperty(Generic[T]):
                 result._set_error(RuntimeError("No running event loop for query fetch"))
                 return
 
-            # Without untrack, the task will inherit the same ContextVar,
-            # notably with the Scope object created by the effect. reactive.py
-            # doesn't create a copy of the list of deps and effecs of the scope
-            # before assigning them to the effect, so anything that happens in
-            # this async task will be recorded as an effect dependency. This is
-            # actually a very cool behavior for async, but we don't want that
-            # here.
+            # Set loading immediately; run user fetch as a background task
+            result._set_loading()
+
+            # Create a background task for the user async function
             with untrack():
-                # The UUID ensures unicity of task name across reruns
                 unique_id = uuid.uuid4().hex[:8]
                 task = loop.create_task(
-                    do_fetch(), name=f"query:{self.name}:{key}:{unique_id}"
+                    bound_fetch(), name=f"query:{self.name}:{key}:{unique_id}"
                 )
             print(
                 f"[QueryProperty:{self.name}] scheduled task={task.get_name()} running={not task.done()}"
             )
 
+            def on_done(fut: asyncio.Task):
+                try:
+                    data = fut.result()
+                except asyncio.CancelledError:
+                    print(f"[QueryProperty:{self.name}] task cancelled")
+                    return
+                except Exception as e:  # noqa: BLE001
+                    print(f"[QueryProperty:{self.name}] task error -> {e!r}")
+                    result._set_error(e)
+                else:
+                    print(f"[QueryProperty:{self.name}] task success -> {data!r}")
+                    result._set_success(data)
+
+            task.add_done_callback(on_done)
+
             def cleanup() -> None:
                 print(f"[QueryProperty:{self.name}] cleanup")
                 if task and not task.done():
-                    print(f"[QueryProperty:{self.name}] cleanup -> cancel task {task.get_name()}")
+                    print(
+                        f"[QueryProperty:{self.name}] cleanup -> cancel task {task.get_name()}"
+                    )
                     task.cancel()
 
             return cleanup
@@ -206,5 +210,22 @@ class QueryProperty(Generic[T]):
 
         query = StateQuery(result=result, effect=effect)
         setattr(obj, self._priv_query, query)
-        print(f"[QueryProperty:{self.name}] created StateQuery and cached on instance")
+
+        if not self.keep_alive:
+
+            def on_obs(count: int):
+                if count == 0:
+                    print("[QueryProperty] Disposing of effect due to no observers")
+                    effect.dispose()
+
+            # Stop when no one observes key or data
+            # result._data.on_observer_change(on_obs)
+            # result._is_error.on_observer_change(on_obs)
+            # result._is_loading.on_observer_change(on_obs)
+
         return query
+
+    def __get__(self, obj: Any, objtype: Any = None) -> StateQuery[T]:
+        if obj is None:
+            return self  # type: ignore
+        return self.initialize(obj)

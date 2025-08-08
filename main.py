@@ -227,7 +227,7 @@ def app_layout():
                 ps.Link("Home", to="/", className="nav-link"),
                 ps.Link("Counter", to="/counter", className="nav-link"),
                 ps.Link("About", to="/about", className="nav-link"),
-                ps.Link("Dynamic", to="/dynamic", className="nav-link"),
+                ps.Link("Dynamic", to="/dynamic/example/optional/a/b/c?q1=x&q2=y", className="nav-link"),
                 ps.Link("Query", to="/query", className="nav-link"),
                 className="flex justify-center space-x-4 p-4 bg-gray-700 text-white rounded-b-lg",
             ),

@@ -151,7 +151,7 @@ class App:
                     session.execute_callback(
                         data["path"], data["callback"], data["args"]
                     )
-                elif data["type"] == "leave":
+                elif data["type"] == "unmount":
                     session.unmount(data["path"])
                 else:
                     logger.warning(f"Unknown message type received: {data}")

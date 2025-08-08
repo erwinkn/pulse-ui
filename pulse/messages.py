@@ -75,7 +75,7 @@ class ClientNavigateMessage(TypedDict):
 
 
 class ClientUnmountMessage(TypedDict):
-    type: Literal["leave"]
+    type: Literal["unmount"]
     path: str
 
 

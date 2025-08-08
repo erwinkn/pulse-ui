@@ -152,19 +152,15 @@ export class PulseSocketIOClient {
       throw new Error(`Path ${path} is already mounted`);
     }
     this.activeViews.set(path, view);
-    this.sendMessage({
+    void this.sendMessage({
       type: "mount",
       currentVDOM: view.vdom,
       path,
       routeInfo: view.routeInfo,
     });
-    return () => {
-      this.activeViews.delete(path);
-    };
   }
 
   public async navigate(path: string, routeInfo: RouteInfo) {
-    const route = this.activeViews.get(path)!;
     await this.sendMessage({
       type: "navigate",
       path,
@@ -172,8 +168,9 @@ export class PulseSocketIOClient {
     });
   }
 
-  public async leave(path: string) {
-    await this.sendMessage({ type: "unmount", path });
+  public unmount(path: string) {
+    void this.sendMessage({ type: "unmount", path });
+    this.activeViews.delete(path);
   }
 
   public disconnect() {

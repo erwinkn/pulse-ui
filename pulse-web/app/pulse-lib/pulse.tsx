@@ -146,7 +146,7 @@ export function PulseView({
 
   useEffect(() => {
     if (inBrowser) {
-      const unmount = client.mountView(path, {
+      client.mountView(path, {
         vdom: initialVDOM,
         listener: setVdom,
         routeInfo,
@@ -156,7 +156,7 @@ export function PulseView({
       });
       return () => {
         offErr();
-        unmount();
+        client.unmount(path);
       };
     }
     // routeInfo is NOT included here on purpose

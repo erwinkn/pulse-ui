@@ -91,7 +91,8 @@ class Session:
 
     def mount(self, path: str, route_info: RouteInfo, current_vdom: VDOM):
         if path in self.active_routes:
-            logger.error(f"Route already mounted: '{path}'")
+            # No logging, this is bound to happen with React strict mode
+            # logger.error(f"Route already mounted: '{path}'")
             return
 
         def on_render(res: RenderResult):
@@ -136,10 +137,11 @@ class Session:
                 self.report_error(path, "navigate", e)
 
     def unmount(self, path: str):
+        print(f"Unmounting '{path}'")
         with self._rc:
             if path not in self.active_routes:
+                print("Skipping unmount")
                 return
-            print(f"Unmounting '{path}'")
             try:
                 ctx = self.active_routes.pop(path)
                 ctx.unmount()

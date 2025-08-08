@@ -11,7 +11,7 @@ T = TypeVar("T")
 
 class QueryResult(Generic[T]):
     def __init__(self):
-        print("[QueryResult] initialize")
+        # print("[QueryResult] initialize")
         self._is_loading: Signal[bool] = Signal(True, name="query.is_loading")
         self._is_error: Signal[bool] = Signal(False, name="query.is_error")
         self._error: Signal[Exception | None] = Signal(None, name="query.error")
@@ -19,40 +19,40 @@ class QueryResult(Generic[T]):
 
     @property
     def is_loading(self) -> bool:
-        print(f"[QueryResult] Accessing is_loading = {self._is_loading.read()}")
+        # print(f"[QueryResult] Accessing is_loading = {self._is_loading.read()}")
         return self._is_loading.read()
 
     @property
     def is_error(self) -> bool:
-        print(f"[QueryResult] Accessing is_error = {self._is_error.read()}")
+        # print(f"[QueryResult] Accessing is_error = {self._is_error.read()}")
         return self._is_error.read()
 
     @property
     def error(self) -> Exception | None:
-        print(f"[QueryResult] Accessing error = {self._error.read()}")
+        # print(f"[QueryResult] Accessing error = {self._error.read()}")
         return self._error.read()
 
     @property
     def data(self) -> Optional[T]:
-        print(f"[QueryResult] Accessing data = {self._data.read()}")
+        # print(f"[QueryResult] Accessing data = {self._data.read()}")
         return self._data.read()
 
     # Internal setters used by the query machinery
     def _set_loading(self):
-        print("[QueryResult] set loading=True")
+        # print("[QueryResult] set loading=True")
         self._is_loading.write(True)
         self._is_error.write(False)
         self._error.write(None)
 
     def _set_success(self, data: T):
-        print(f"[QueryResult] set success data={data!r}")
+        # print(f"[QueryResult] set success data={data!r}")
         self._data.write(data)
         self._is_loading.write(False)
         self._is_error.write(False)
         self._error.write(None)
 
     def _set_error(self, err: Exception):
-        print(f"[QueryResult] set error err={err!r}")
+        # print(f"[QueryResult] set error err={err!r}")
         self._error.write(err)
         self._is_loading.write(False)
         self._is_error.write(True)
@@ -60,7 +60,7 @@ class QueryResult(Generic[T]):
 
 class StateQuery(Generic[T]):
     def __init__(self, result: QueryResult[T], effect: Effect):
-        print("[StateQuery] create")
+        # print("[StateQuery] create")
         self._result = result
         self._effect = effect
 
@@ -82,12 +82,12 @@ class StateQuery(Generic[T]):
         return self._result.data
 
     def refetch(self) -> None:
-        print("[StateQuery] refetch -> schedule effect")
+        # print("[StateQuery] refetch -> schedule effect")
         # If we use .schedule(), the effect may not rerun if the query key hasn't changed
         self._effect.run()
 
     def dispose(self) -> None:
-        print("[StateQuery] dispose")
+        # print("[StateQuery] dispose")
         self._effect.dispose()
 
 
@@ -128,7 +128,7 @@ class QueryProperty(Generic[T]):
         # Return cached query instance if present
         query: Optional[StateQuery[T]] = getattr(obj, self._priv_query, None)
         if query:
-            print(f"[QueryProperty:{self.name}] return cached StateQuery")
+            # print(f"[QueryProperty:{self.name}] return cached StateQuery")
             return query
 
         if self.key_fn is None:
@@ -139,22 +139,22 @@ class QueryProperty(Generic[T]):
         # Bind methods to this instance
         bound_fetch = self.fetch_fn.__get__(obj, obj.__class__)
         bound_key_fn = self.key_fn.__get__(obj, obj.__class__)  # type: ignore[union-attr]
-        print(f"[QueryProperty:{self.name}] bound fetch and key functions")
+        # print(f"[QueryProperty:{self.name}] bound fetch and key functions")
 
         result = QueryResult[T]()
 
         def compute_key():
             k = bound_key_fn()
-            print(f"[QueryProperty:{self.name}] compute key -> {k!r}")
+            # print(f"[QueryProperty:{self.name}] compute key -> {k!r}")
             return k
 
         key_computed = Computed(compute_key, name=f"query.key.{self.name}")
         setattr(obj, self._priv_key_comp, key_computed)
 
         def run_effect():
-            print(f"[QueryProperty:{self.name}] effect RUN")
+            # print(f"[QueryProperty:{self.name}] effect RUN")
             key = key_computed()
-            print(f"[QueryProperty:{self.name}] effect key={key!r}")
+            # print(f"[QueryProperty:{self.name}] effect key={key!r}")
 
             # Start fetch in the event loop
             try:
@@ -173,37 +173,37 @@ class QueryProperty(Generic[T]):
                 task = loop.create_task(
                     bound_fetch(), name=f"query:{self.name}:{key}:{unique_id}"
                 )
-            print(
-                f"[QueryProperty:{self.name}] scheduled task={task.get_name()} running={not task.done()}"
-            )
+            # print(
+            #     f"[QueryProperty:{self.name}] scheduled task={task.get_name()} running={not task.done()}"
+            # )
 
             def on_done(fut: asyncio.Task):
                 try:
                     data = fut.result()
                 except asyncio.CancelledError:
-                    print(f"[QueryProperty:{self.name}] task cancelled")
+                    # print(f"[QueryProperty:{self.name}] task cancelled")
                     return
                 except Exception as e:  # noqa: BLE001
-                    print(f"[QueryProperty:{self.name}] task error -> {e!r}")
+                    # print(f"[QueryProperty:{self.name}] task error -> {e!r}")
                     result._set_error(e)
                 else:
-                    print(f"[QueryProperty:{self.name}] task success -> {data!r}")
+                    # print(f"[QueryProperty:{self.name}] task success -> {data!r}")
                     result._set_success(data)
 
             task.add_done_callback(on_done)
 
             def cleanup() -> None:
-                print(f"[QueryProperty:{self.name}] cleanup")
+                # print(f"[QueryProperty:{self.name}] cleanup")
                 if task and not task.done():
-                    print(
-                        f"[QueryProperty:{self.name}] cleanup -> cancel task {task.get_name()}"
-                    )
+                    # print(
+                    #     f"[QueryProperty:{self.name}] cleanup -> cancel task {task.get_name()}"
+                    # )
                     task.cancel()
 
             return cleanup
 
         effect = Effect(run_effect, name=f"query.effect.{self.name}")
-        print(f"[QueryProperty:{self.name}] created Effect name={effect.name}")
+        # print(f"[QueryProperty:{self.name}] created Effect name={effect.name}")
 
         # Expose the effect on the instance so State.effects() sees it
         setattr(obj, self._priv_effect, effect)
@@ -215,7 +215,7 @@ class QueryProperty(Generic[T]):
 
             def on_obs(count: int):
                 if count == 0:
-                    print("[QueryProperty] Disposing of effect due to no observers")
+                    # print("[QueryProperty] Disposing of effect due to no observers")
                     effect.dispose()
 
             # Stop when no one observes key or data

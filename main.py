@@ -16,6 +16,10 @@ class CounterState(ps.State):
     def increment(self):
         self.count += 1
 
+    async def increment_with_delay(self):
+        await asyncio.sleep(1)
+        self.count += 1
+
     def decrement(self):
         self.count -= 1
 
@@ -98,9 +102,14 @@ def counter():
         ps.h1("Interactive Counter", className="text-3xl font-bold mb-4"),
         ps.div(
             ps.button("Decrement", onClick=state1.decrement, className="btn-primary"),
-            ps.span(f"{state1.count}", className="mx-4 text-2xl font-mono"),
+            ps.span(f"{state1.count}", className="text-2xl font-mono"),
             ps.button("Increment", onClick=state1.increment, className="btn-primary"),
-            className="flex items-center justify-center mb-4",
+            ps.button(
+                "Increment with delay",
+                onClick=state1.increment_with_delay,
+                className="btn-primary",
+            ),
+            className="flex items-center justify-center space-x-4",
         ),
         ps.p(f"The doubled count is: {state1.double_count}", className="text-lg mb-4"),
         ps.h1("Interactive Counter 2", className="text-3xl font-bold mb-4"),
@@ -227,7 +236,11 @@ def app_layout():
                 ps.Link("Home", to="/", className="nav-link"),
                 ps.Link("Counter", to="/counter", className="nav-link"),
                 ps.Link("About", to="/about", className="nav-link"),
-                ps.Link("Dynamic", to="/dynamic/example/optional/a/b/c?q1=x&q2=y", className="nav-link"),
+                ps.Link(
+                    "Dynamic",
+                    to="/dynamic/example/optional/a/b/c?q1=x&q2=y",
+                    className="nav-link",
+                ),
                 ps.Link("Query", to="/query", className="nav-link"),
                 className="flex justify-center space-x-4 p-4 bg-gray-700 text-white rounded-b-lg",
             ),

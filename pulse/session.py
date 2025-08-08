@@ -1,3 +1,5 @@
+from asyncio import iscoroutine
+import asyncio
 import logging
 from typing import Any, Callable
 import traceback
@@ -85,7 +87,23 @@ class Session:
             try:
                 fn, n_params = self.active_routes[route].callbacks[key]
                 with Batch():
-                    fn(*args[:n_params])
+                    res = fn(*args[:n_params])
+                    if iscoroutine(res):
+                        loop = asyncio.get_running_loop()
+                        task = loop.create_task(res)
+
+                        def _on_task_done(t):
+                            try:
+                                t.result()
+                            except Exception as e:  # noqa: BLE001 - forward all
+                                self.report_error(
+                                    route,
+                                    "callback",
+                                    e,
+                                    {"callback": key, "async": True},
+                                )
+
+                        task.add_done_callback(_on_task_done)
             except Exception as e:  # noqa: BLE001 - forward all
                 self.report_error(route, "callback", e, {"callback": key})
 

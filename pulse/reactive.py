@@ -293,8 +293,8 @@ class Effect:
 
 
 class Batch:
-    def __init__(self, name: Optional[str] = None) -> None:
-        self.effects: list[Effect] = []
+    def __init__(self, effects: Optional[list[Effect]] = None, name: Optional[str] = None) -> None:
+        self.effects: list[Effect] = effects or []
         self.name = name
 
     def register_effect(self, effect: Effect):
@@ -324,8 +324,17 @@ class Batch:
             self.effects = []
 
             for effect in current_effects:
-                if effect._should_run():
+                if not effect._should_run():
+                    continue
+                try:
                     effect.run()
+                except Exception as exc:
+                    # Report via reactive context if a handler is present
+                    handler = getattr(REACTIVE_CONTEXT.get(), "on_effect_error", None)
+                    if callable(handler):
+                        handler(effect, exc)
+                    else:
+                        raise
 
             iters += 1
 
@@ -410,6 +419,8 @@ class ReactiveContext:
         self.epoch = epoch or Epoch()
         self.batch = batch or GlobalBatch()
         self.scope = scope
+        # Optional effect error handler set by integrators (e.g., session)
+        self.on_effect_error: Optional[Callable[[Effect, Exception], None]] = None
 
     def get_epoch(self) -> int:
         return self.epoch.current

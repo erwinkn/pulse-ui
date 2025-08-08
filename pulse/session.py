@@ -28,6 +28,15 @@ class Session:
         self.vdom: VDOMNode | None = None
         self._rc = ReactiveContext()
 
+        # Install effect error handler (batch-level) to surface runtime errors
+        def _on_effect_error(effect, exc: Exception):
+            # We don't want to couple effects to routing; broadcast to all active paths
+            details = {"effect": getattr(effect, "name", "<unnamed>")}
+            for path in list(self.active_routes.keys()):
+                self.report_error(path, "effect", exc, details)
+
+        self._rc.on_effect_error = _on_effect_error
+
     def connect(
         self,
         message_listener: Callable[[ServerMessage], Any],
@@ -104,7 +113,7 @@ class Session:
                     )
 
         def on_error(e: Exception):
-            self.report_error(path, 'render', e)
+            self.report_error(path, "render", e)
 
         with self._rc:
             print(f"Mounting '{path}'")
@@ -113,9 +122,7 @@ class Session:
                 route, position="", route_info=route_info, vdom=current_vdom
             )
             self.active_routes[path] = ctx
-            ctx.mount(
-                on_render=on_render, on_error=on_error
-            )
+            ctx.mount(on_render=on_render, on_error=on_error)
 
     def navigate(self, path: str, route_info: RouteInfo):
         # Route is already mounted, we can just update the routing state

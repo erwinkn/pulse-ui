@@ -63,7 +63,6 @@ class Signal(Generic[T]):
         increment_epoch()
         self.value = value
         self.last_change = epoch()
-        print(f"Wrote to {self.name}, pushing change to {[o.name for o in self.obs]}")
         for obs in self.obs:
             obs._push_change()
 
@@ -235,7 +234,6 @@ class Effect:
         # Prefer composite reactive context if set
         rc = REACTIVE_CONTEXT.get()
         batch = rc.batch
-        print(f"Scheduling {self.name} to batch {batch}")
         batch.register_effect(self)
         self.batch = batch
 
@@ -327,10 +325,7 @@ class Batch:
 
             for effect in current_effects:
                 if effect._should_run():
-                    print(f"Running effect {effect.name}")
                     effect.run()
-                else:
-                    print(f"Skipping effect {effect.name}")
 
             iters += 1
 
@@ -407,10 +402,13 @@ class Untrack(Scope): ...
 # --- Reactive Context (composite of epoch, batch, scope) ---
 class ReactiveContext:
     def __init__(
-        self, epoch: "Epoch", batch: "Batch", scope: Optional[Scope] = None
+        self,
+        epoch: Optional[Epoch] = None,
+        batch: Optional[Batch] = None,
+        scope: Optional[Scope] = None,
     ) -> None:
-        self.epoch = epoch
-        self.batch = batch
+        self.epoch = epoch or Epoch()
+        self.batch = batch or GlobalBatch()
         self.scope = scope
 
     def get_epoch(self) -> int:
@@ -426,11 +424,14 @@ class ReactiveContext:
     def __exit__(self, exc_type, exc_value, exc_tb):
         REACTIVE_CONTEXT.reset(self._tok_rc)
 
+
 def epoch():
     return REACTIVE_CONTEXT.get().get_epoch()
 
+
 def increment_epoch():
     return REACTIVE_CONTEXT.get().increment_epoch()
+
 
 # Default global context (used in tests / outside app)
 REACTIVE_CONTEXT: ContextVar[ReactiveContext] = ContextVar(

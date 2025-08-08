@@ -10,7 +10,7 @@ import { VDOMRenderer } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry } from "./vdom";
 import { useLocation, useParams } from "react-router";
-import type { RouteInfo } from "./messages";
+import type { RouteInfo, ServerErrorInfo } from "./messages";
 
 // =================================================================
 // Types
@@ -121,6 +121,7 @@ export function PulseView({
 }: PulseViewProps) {
   const client = usePulseClient();
   const [vdom, setVdom] = useState(initialVDOM);
+  const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
 
   const location = useLocation();
   const params = useParams();
@@ -145,11 +146,18 @@ export function PulseView({
 
   useEffect(() => {
     if (inBrowser) {
-      return client.mountView(path, {
+      const unmount = client.mountView(path, {
         vdom: initialVDOM,
         listener: setVdom,
         routeInfo,
       });
+      const offErr = client.onServerError((p, err) => {
+        if (p === path) setServerError(err);
+      });
+      return () => {
+        offErr();
+        unmount();
+      };
     }
     // routeInfo is NOT included here on purpose
   }, [client, initialVDOM]);
@@ -185,7 +193,38 @@ export function PulseView({
 
   return (
     <PulseRenderContext.Provider value={renderHelpers}>
-      <VDOMRenderer node={vdom} />
+      {serverError ? (
+        <ServerError error={serverError} />
+      ) : (
+        <VDOMRenderer node={vdom} />
+      )}
     </PulseRenderContext.Provider>
+  );
+}
+
+function ServerError({ error }: { error: ServerErrorInfo }) {
+  return (
+    <div
+      style={{
+        padding: 16,
+        border: "1px solid #e00",
+        background: "#fff5f5",
+        color: "#900",
+        fontFamily:
+          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        whiteSpace: "pre-wrap",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>
+        Server Error during {error.phase}
+      </div>
+      {error.message && <div>{error.message}</div>}
+      {error.stack && (
+        <details open style={{ marginTop: 8 }}>
+          <summary>Stack trace</summary>
+          <pre style={{ margin: 0 }}>{error.stack}</pre>
+        </details>
+      )}
+    </div>
   );
 }

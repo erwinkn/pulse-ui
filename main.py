@@ -147,7 +147,6 @@ class QueryDemoState(ps.State):
 
     @ps.query
     async def user(self) -> dict:
-        print("Executing query")
         self.calls += 1
         # Simulate async work
         await asyncio.sleep(1)
@@ -162,7 +161,6 @@ class QueryDemoState(ps.State):
 def query_demo():
     state = ps.states(QueryDemoState)
     q = state.user
-    print("rendering query demo")
 
     def prev():
         state.user_id = max(1, state.user_id - 1)

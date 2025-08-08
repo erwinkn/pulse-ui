@@ -31,7 +31,24 @@ class ServerUpdateMessage(TypedDict):
     ops: list[VDOMOperation]
 
 
-ServerMessage = ServerInitMessage | ServerUpdateMessage
+class ServerErrorInfo(TypedDict, total=False):
+    # High-level human message
+    message: str
+    # Full stack trace string (server formatted)
+    stack: str
+    # Which phase failed
+    phase: Literal["render", "callback", "mount", "unmount", "navigate", "server"]
+    # Optional extra details (callback key, etc.)
+    details: dict[str, Any]
+
+
+class ServerErrorMessage(TypedDict):
+    type: Literal["server_error"]
+    path: str
+    error: ServerErrorInfo
+
+
+ServerMessage = ServerInitMessage | ServerUpdateMessage | ServerErrorMessage
 
 
 # ====================

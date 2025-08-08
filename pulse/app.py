@@ -18,6 +18,13 @@ import os
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.components.registry import ReactComponent, registered_react_components
 from pulse.messages import ClientMessage, RouteInfo
+from pulse.reactive import (
+    REACTIVE_CONTEXT,
+    Epoch,
+    GlobalBatch,
+    ReactiveContext,
+    Scope,
+)
 from pulse.render import RenderContext
 from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
@@ -94,6 +101,7 @@ class App:
             return
 
         # Add CORS middleware
+        REACTIVE_CONTEXT.set(AppReactiveContext())
         self.fastapi.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
@@ -109,11 +117,13 @@ class App:
         # RouteInfo is the request body
         @self.fastapi.post("/prerender/{path:path}")
         def prerender(path: str, route_info: RouteInfo) -> VDOM:
-            ctx = RenderContext(
-                self.routes.find(path), route_info, prerendering=True, vdom=None
-            )
-            result = ctx.render()
-            return result.new_vdom
+            # Provide a working reactive context (and not the global AppReactiveContext which errors)
+            with ReactiveContext():
+                ctx = RenderContext(
+                    self.routes.find(path), route_info, prerendering=True, vdom=None
+                )
+                result = ctx.render()
+                return result.new_vdom
 
         @self.sio.event
         async def connect(sid: str, environ, auth=None):
@@ -131,22 +141,38 @@ class App:
 
         @self.sio.event
         def message(sid: str, data: ClientMessage):
-            session = self.get_session(sid)
-            if data["type"] == "mount":
-                session.mount(data["path"], data["routeInfo"], data["currentVDOM"])
-            elif data["type"] == "navigate":
-                session.navigate(data["path"], data["routeInfo"])
-            elif data["type"] == "callback":
-                session.execute_callback(data["path"], data["callback"], data["args"])
-            elif data["type"] == "leave":
-                session.unmount(data["path"])
-            else:
-                logger.warning(f"Unknown message type received: {data}")
+            try:
+                session = self.get_session(sid)
+                if data["type"] == "mount":
+                    session.mount(data["path"], data["routeInfo"], data["currentVDOM"])
+                elif data["type"] == "navigate":
+                    session.navigate(data["path"], data["routeInfo"])
+                elif data["type"] == "callback":
+                    session.execute_callback(
+                        data["path"], data["callback"], data["args"]
+                    )
+                elif data["type"] == "leave":
+                    session.unmount(data["path"])
+                else:
+                    logger.warning(f"Unknown message type received: {data}")
+            except Exception as e:
+                try:
+                    # Best effort: report error for this path if available
+                    path = data.get("path", "") if isinstance(data, dict) else ""
+                    session = self.sessions.get(sid)
+                    if session and path:
+                        session.report_error(path, "server", e)
+                    else:
+                        logger.exception("Error handling client message")
+                except Exception:
+                    logger.exception("Error while reporting server error")
 
     def run_codegen(self, address: Optional[str] = None):
-        address = address or self.config.get('server_address')
+        address = address or self.config.get("server_address")
         if not address:
-            raise RuntimeError("Please provide a server address to the App constructor or the Pulse CLI.")
+            raise RuntimeError(
+                "Please provide a server address to the App constructor or the Pulse CLI."
+            )
         self.codegen.generate_all(address)
 
     def asgi_factory(self):
@@ -192,3 +218,35 @@ def add_react_components(
             route.components = components
         if route.children:
             add_react_components(route.children, components)
+
+
+class AppReactiveContext(ReactiveContext):
+    def __init__(self, allow_usage=False) -> None:
+        self._epoch = Epoch()
+        self._batch = GlobalBatch()
+        self._scope = Scope()
+        self.allow_usage = allow_usage
+
+    @property
+    def epoch(self):
+        if self.allow_usage:
+            return self._epoch
+        raise RuntimeError(
+            "App reactive context should not be used, all reactive context should be scoped to sessions."
+        )
+
+    @property
+    def batch(self):
+        if self.allow_usage:
+            return self._batch
+        raise RuntimeError(
+            "App reactive context should not be used, all reactive context should be scoped to sessions."
+        )
+
+    @property
+    def scope(self):
+        if self.allow_usage:
+            return self._scope
+        raise RuntimeError(
+            "App reactive context should not be used, all reactive context should be scoped to sessions."
+        )

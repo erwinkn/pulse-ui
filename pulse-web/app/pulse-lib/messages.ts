@@ -18,7 +18,23 @@ export interface ServerUpdateMessage {
   ops: VDOMUpdate[];
 }
 
-export type ServerMessage = ServerInitMessage | ServerUpdateMessage;
+export interface ServerErrorInfo {
+  message: string;
+  stack?: string;
+  phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
+  details?: Record<string, any>;
+}
+
+export interface ServerErrorMessage {
+  type: "server_error";
+  path: string;
+  error: ServerErrorInfo;
+}
+
+export type ServerMessage =
+  | ServerInitMessage
+  | ServerUpdateMessage
+  | ServerErrorMessage;
 
 export interface ClientCallbackMessage {
   type: "callback";

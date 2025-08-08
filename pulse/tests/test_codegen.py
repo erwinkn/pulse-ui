@@ -18,6 +18,8 @@ from pulse.routing import RouteTree, Route
 from pulse.vdom import div
 
 
+SERVER_ADDRESS = "http://localhost:8000"
+
 class TestCodegen:
     """Test the Codegen class."""
 
@@ -32,7 +34,7 @@ class TestCodegen:
         )
         codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
         codegen = Codegen(RouteTree([route]), codegen_config)
-        codegen.generate_route(route)
+        codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
         route_page_path = codegen.output_folder / "routes" / "simple.tsx"
         assert route_page_path.exists()
@@ -60,7 +62,7 @@ class TestCodegen:
         )
         codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
         codegen = Codegen(RouteTree([route]), codegen_config)
-        codegen.generate_route(route)
+        codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
         route_page_path = codegen.output_folder / "routes" / "with-components.tsx"
         assert route_page_path.exists()
@@ -82,7 +84,7 @@ class TestCodegen:
         )
         codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
         codegen = Codegen(RouteTree([route]), codegen_config)
-        codegen.generate_route(route)
+        codegen.generate_route(route, server_address= SERVER_ADDRESS)
 
         route_page_path = codegen.output_folder / "routes" / "default-export.tsx"
         assert route_page_path.exists()
@@ -164,8 +166,8 @@ class TestCodegen:
             pulse_dir="test_pulse_app",
             lib_path="~/test-lib",
         )
-        codegen = Codegen(app.routes, codegen_config, "testhost", 1234)
-        codegen.generate_all()
+        codegen = Codegen(app.routes, codegen_config)
+        codegen.generate_all(server_address=SERVER_ADDRESS)
 
         pulse_app_dir = Path(codegen.output_folder)
         routes_dir = pulse_app_dir / "routes"

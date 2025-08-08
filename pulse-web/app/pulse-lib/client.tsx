@@ -8,7 +8,7 @@ import type {
   RouteInfo,
 } from "./messages";
 
-import type { ServerMessage, ClientMessage } from "./messages";
+import type { ServerMessage, ClientMessage, ServerErrorInfo } from "./messages";
 import { io, Socket } from "socket.io-client";
 
 export interface MountedView {
@@ -19,6 +19,10 @@ export interface MountedView {
 
 export type VDOMListener = (node: VDOMNode) => void;
 export type ConnectionStatusListener = (connected: boolean) => void;
+export type ServerErrorListener = (
+  path: string,
+  error: ServerErrorInfo | null
+) => void;
 
 export interface PulseClient {
   // Connection management
@@ -39,6 +43,8 @@ export class PulseSocketIOClient {
   private socket: Socket | null = null;
   private messageQueue: ClientMessage[];
   private connectionListeners: Set<ConnectionStatusListener> = new Set();
+  private serverErrors: Map<string, ServerErrorInfo> = new Map();
+  private serverErrorListeners: Set<ServerErrorListener> = new Set();
 
   constructor(private url: string) {
     this.socket = null;
@@ -118,6 +124,19 @@ export class PulseSocketIOClient {
     }
   }
 
+  public onServerError(listener: ServerErrorListener): () => void {
+    this.serverErrorListeners.add(listener);
+    // Emit current errors to new listener
+    for (const [path, err] of this.serverErrors) listener(path, err);
+    return () => {
+      this.serverErrorListeners.delete(listener);
+    };
+  }
+
+  private notifyServerError(path: string, error: ServerErrorInfo | null) {
+    for (const listener of this.serverErrorListeners) listener(path, error);
+  }
+
   private async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
       // console.log("[SocketIOTransport] Sending:", payload);
@@ -163,6 +182,8 @@ export class PulseSocketIOClient {
     this.messageQueue = [];
     this.connectionListeners.clear();
     this.activeViews.clear();
+    this.serverErrors.clear();
+    this.serverErrorListeners.clear();
   }
 
   private handleServerMessage(message: ServerMessage) {
@@ -173,6 +194,11 @@ export class PulseSocketIOClient {
         if (route) {
           route.vdom = message.vdom;
           route.listener(route.vdom);
+        }
+        // Clear any prior error for this path on successful init
+        if (this.serverErrors.has(message.path)) {
+          this.serverErrors.delete(message.path);
+          this.notifyServerError(message.path, null);
         }
         break;
       }
@@ -186,6 +212,16 @@ export class PulseSocketIOClient {
         }
         route.vdom = applyVDOMUpdates(route.vdom, message.ops);
         route.listener(route.vdom);
+        // Clear any prior error for this path on successful update
+        if (this.serverErrors.has(message.path)) {
+          this.serverErrors.delete(message.path);
+          this.notifyServerError(message.path, null);
+        }
+        break;
+      }
+      case "server_error": {
+        this.serverErrors.set(message.path, message.error);
+        this.notifyServerError(message.path, message.error);
         break;
       }
     }

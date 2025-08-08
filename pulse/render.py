@@ -132,17 +132,22 @@ class RenderContext:
     def update_route_info(self, info: RouteInfo):
         self.hooks.router._update_route_info(info)
 
-    def mount(self, on_render: Callable[[RenderResult], None]):
+    def mount(
+        self,
+        on_render: Callable[[RenderResult], None],
+        on_error: Callable[[Exception], None] | None = None,
+    ):
         if self.effect is not None:
             raise RuntimeError("RenderContext is already mounted")
 
         def render_fn():
-            on_render(self.render())
-            if self.effect:
-                print(
-                    "Render effect dependencies:",
-                    [dep.name for dep in self.effect.deps],
-                )
+            try:
+                on_render(self.render())
+            except Exception as e:  # noqa: BLE001 - we want to forward any error up
+                if on_error:
+                    on_error(e)
+                else:
+                    raise
 
         self.effect = Effect(
             render_fn,

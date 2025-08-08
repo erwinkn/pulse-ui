@@ -180,7 +180,6 @@ class State(ABC, metaclass=StateMeta):
         if getattr(self, "__state_initialized__", False):
             return
         setattr(self, "__state_initialized__", True)
-        print(f"initializing state {self.__class__.__name__}")
 
         self.scope = Scope()
         with self.scope:

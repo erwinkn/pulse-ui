@@ -173,7 +173,7 @@ async def test_state_query_refetch_on_key_change():
 def test_state_query_missing_key_raises():
     class Bad(ps.State):
         @ps.query
-        async def user(self):  # type: ignore[empty-body]
+        async def user(self):  
             ...
 
     with pytest.raises(RuntimeError, match="missing a '@user.key'"):

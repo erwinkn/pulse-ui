@@ -9,7 +9,7 @@ import React, {
 import { VDOMRenderer } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry } from "./vdom";
-import { useLocation, useParams } from "react-router";
+import { useLocation, useParams, useNavigate } from "react-router";
 import type { RouteInfo, ServerErrorInfo } from "./messages";
 
 // =================================================================
@@ -66,10 +66,11 @@ const inBrowser = typeof window !== "undefined";
 
 export function PulseProvider({ children, config }: PulseProviderProps) {
   const [connected, setConnected] = useState(true);
+  const rrNavigate = useNavigate();
 
   const client = useMemo(
-    () => new PulseSocketIOClient(`${config.serverAddress}`),
-    [config.serverAddress]
+    () => new PulseSocketIOClient(`${config.serverAddress}`, rrNavigate),
+    [config.serverAddress, rrNavigate]
   );
 
   useEffect(() => client.onConnectionChange(setConnected), [client]);

@@ -34,7 +34,9 @@ export interface ServerErrorMessage {
 export type ServerMessage =
   | ServerInitMessage
   | ServerUpdateMessage
-  | ServerErrorMessage;
+  | ServerErrorMessage
+  | ServerApiCallMessage
+  | ServerNavigateToMessage;
 
 export interface ClientCallbackMessage {
   type: "callback";
@@ -59,11 +61,38 @@ export interface ClientUnmountMessage {
   path: string;
 }
 
+export interface ServerApiCallMessage {
+  type: "api_call";
+  id: string;
+  path: string; // logical path
+  url: string; // absolute or relative
+  method: string;
+  headers: Record<string, string>;
+  body: any | null;
+  credentials: "include" | "omit";
+}
+
+export interface ServerNavigateToMessage {
+  type: "navigate_to";
+  path: string;
+}
+
+export interface ClientApiResultMessage {
+  type: "api_result";
+  id: string;
+  path: string;
+  ok: boolean;
+  status: number;
+  headers: Record<string, string>;
+  body: any | null;
+}
+
 export type ClientMessage =
   | ClientMountMessage
   | ClientCallbackMessage
   | ClientNavigateMessage
-  | ClientUnmountMessage;
+  | ClientUnmountMessage
+  | ClientApiResultMessage;
 
 // =================================================================
 // Other Types

@@ -9,7 +9,7 @@ that updates from one session do not leak into the other.
 from typing import cast
 
 import pulse as ps
-from pulse.messages import ServerMessage
+from pulse.messages import RouteInfo, ServerMessage
 from pulse.routing import Route, RouteTree
 from pulse.session import Session
 from pulse.reactive import flush_effects
@@ -42,7 +42,7 @@ def make_routes() -> RouteTree:
     return RouteTree([route_a, route_b])
 
 
-def make_route_info(pathname: str):
+def make_route_info(pathname: str) -> RouteInfo:
     return {
         "pathname": pathname,
         "hash": "",
@@ -62,7 +62,7 @@ def mount_with_listener(session: Session, path: str):
         messages.append(msg)
 
     disconnect = session.connect(on_message)
-    session.mount(path, make_route_info(path), current_vdom=None)  # type: ignore[arg-type]
+    session.mount(path, make_route_info(path), current_vdom=None)  
     flush_effects()
     return messages, disconnect
 

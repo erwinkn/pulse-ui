@@ -2,6 +2,7 @@ from contextvars import ContextVar
 from typing import (
     Any,
     Callable,
+    Mapping,
     NamedTuple,
     ParamSpec,
     TypeVar,
@@ -73,12 +74,12 @@ class HookState:
     states: tuple[State, ...]
     effects: tuple[Effect, ...]
     router: Router
-    session_context: dict[str, Any]
+    session_context: Mapping[str, Any]
 
     def __init__(
         self,
         route_info: RouteInfo,
-        session_context: dict[str, Any] | None = None,
+        session_context: Mapping[str, Any] | None = None,
     ):
         self.setup = SetupState()
         self.effects = ()
@@ -122,7 +123,7 @@ class RenderContext:
         vdom: VDOM | None,
         prerendering: bool = False,
         position: str = "",
-        session_context: dict[str, Any] | None = None,
+        session_context: Mapping[str, Any] | None = None,
     ):
         self.route = route
         self.position = position
@@ -437,7 +438,7 @@ def router():
     return ctx.hooks.router
 
 
-def session_context() -> dict[str, Any]:
+def session_context() -> Mapping[str, Any]:
     ctx = RENDER_CONTEXT.get()
     if not ctx:
         raise RuntimeError(

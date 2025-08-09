@@ -293,7 +293,9 @@ class Effect:
 
 
 class Batch:
-    def __init__(self, effects: Optional[list[Effect]] = None, name: Optional[str] = None) -> None:
+    def __init__(
+        self, effects: Optional[list[Effect]] = None, name: Optional[str] = None
+    ) -> None:
         self.effects: list[Effect] = effects or []
         self.name = name
 
@@ -455,3 +457,79 @@ def flush_effects():
 
 
 class InvariantError(Exception): ...
+
+
+# =============================
+# ReactiveDict (entry subscriptions)
+# =============================
+
+
+from collections.abc import Mapping, Iterator, MutableMapping  # noqa: E402
+from typing import Any as _Any  # noqa: E402
+
+
+class ReactiveDict(MutableMapping[str, _Any]):
+    """A dict-like container with per-key reactivity.
+
+    - Reading a key registers a dependency on that key's Signal
+    - Writing a key updates only that key's Signal
+    - Deleting a key writes `None` to its Signal (preserving subscriptions)
+    - Iteration and len are NOT reactive; use explicit key reads inside render
+    """
+
+    __slots__ = ("_signals",)
+
+    def __init__(self, initial: Mapping[str, _Any] | None = None) -> None:
+        self._signals: dict[str, Signal[_Any]] = {}
+        if initial:
+            for k, v in initial.items():
+                self._signals[k] = Signal(v)
+
+    # --- Mapping protocol ---
+    def __getitem__(self, key: str) -> _Any:
+        if key not in self._signals:
+            # Lazily create missing key with None so it can be reactive
+            self._signals[key] = Signal(None)
+        return self._signals[key].read()
+
+    def __setitem__(self, key: str, value: _Any) -> None:
+        self.set(key, value)
+
+    def __delitem__(self, key: str) -> None:
+        # Preserve signal and subscribers; write None
+        if key not in self._signals:
+            self._signals[key] = Signal(None)
+        else:
+            self._signals[key].write(None)
+
+    def get(self, key: str, default: _Any = None) -> _Any:
+        if key not in self._signals:
+            return default
+        return self._signals[key].read()
+
+    def __iter__(self) -> Iterator[str]:
+        # Not reactive; snapshot of keys at iteration time
+        return iter(self._signals.keys())
+
+    def __len__(self) -> int:
+        return len(self._signals)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._signals
+
+    # --- Mutation helpers ---
+    def set(self, key: str, value: _Any) -> None:
+        sig = self._signals.get(key)
+        if sig is None:
+            self._signals[key] = Signal(value)
+        else:
+            sig.write(value)
+
+    def update(self, values: Mapping[str, _Any]) -> None:  # type: ignore[override]
+        for k, v in values.items():
+            self.set(k, v)
+
+    def delete(self, key: str) -> None:
+        if key in self._signals:
+            # Preserve signal object for existing subscribers; set to None
+            self._signals[key].write(None)

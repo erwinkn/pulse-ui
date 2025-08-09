@@ -1,7 +1,9 @@
 from asyncio import iscoroutine
-import asyncio
 import logging
 from typing import Any, Callable
+from contextvars import ContextVar
+import uuid
+import asyncio
 import traceback
 
 from pulse.diff import diff_vdom
@@ -12,7 +14,7 @@ from pulse.messages import (
     ServerUpdateMessage,
     ServerErrorMessage,
 )
-from pulse.reactive import Batch, ReactiveContext
+from pulse.reactive import Batch, ReactiveContext, ReactiveDict
 from pulse.render import RenderContext, RenderResult
 from pulse.routing import RouteTree
 from pulse.vdom import VDOM, VDOMNode
@@ -30,7 +32,8 @@ class Session:
         self.active_routes: dict[str, RenderContext] = {}
         self.vdom: VDOMNode | None = None
         self._rc = ReactiveContext()
-        self.context: dict[str, Any] = {}
+        self.context: ReactiveDict = ReactiveDict()
+        self._pending_api: dict[str, asyncio.Future] = {}
 
         # Install effect error handler (batch-level) to surface runtime errors
         def _on_effect_error(effect, exc: Exception):
@@ -89,25 +92,79 @@ class Session:
             try:
                 fn, n_params = self.active_routes[route].callbacks[key]
                 with Batch():
-                    res = fn(*args[:n_params])
-                    if iscoroutine(res):
-                        loop = asyncio.get_running_loop()
-                        task = loop.create_task(res)
+                    # Bind session and route path for helper functions during callback
+                    tok_sess = CURRENT_SESSION.set(self)
+                    tok_route = CURRENT_ROUTE.set(route)
+                    try:
+                        res = fn(*args[:n_params])
+                        if iscoroutine(res):
+                            loop = asyncio.get_running_loop()
+                            task = loop.create_task(res)
 
-                        def _on_task_done(t):
-                            try:
-                                t.result()
-                            except Exception as e:  # noqa: BLE001 - forward all
-                                self.report_error(
-                                    route,
-                                    "callback",
-                                    e,
-                                    {"callback": key, "async": True},
-                                )
+                            def _on_task_done(t):
+                                try:
+                                    t.result()
+                                except Exception as e:  # noqa: BLE001 - forward all
+                                    self.report_error(
+                                        route,
+                                        "callback",
+                                        e,
+                                        {"callback": key, "async": True},
+                                    )
 
-                        task.add_done_callback(_on_task_done)
+                            task.add_done_callback(_on_task_done)
+                    finally:
+                        CURRENT_ROUTE.reset(tok_route)
+                        CURRENT_SESSION.reset(tok_sess)
             except Exception as e:  # noqa: BLE001 - forward all
                 self.report_error(route, "callback", e, {"callback": key})
+
+    async def call_api(
+        self,
+        route: str,
+        url: str,
+        *,
+        method: str = "POST",
+        headers: dict[str, str] | None = None,
+        body: Any | None = None,
+        credentials: str = "include",
+    ) -> dict[str, Any]:
+        """Request the client to perform a fetch and await the result."""
+        corr_id = uuid.uuid4().hex
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._pending_api[corr_id] = fut
+        headers = headers or {}
+        headers["x-pulse-session-id"] = self.id
+        self.notify(
+            {
+                "type": "api_call",
+                "id": corr_id,
+                "path": route,
+                "url": url,
+                "method": method,
+                "headers": headers,
+                "body": body,
+                "credentials": "include" if credentials == "include" else "omit",
+            }
+        )
+        result = await fut
+        return result
+
+    def handle_api_result(self, data: dict[str, Any]):
+        id_ = data.get("id")
+        if id_ is None:
+            return
+        id_ = str(id_)
+        fut = self._pending_api.pop(id_, None)
+        if fut and not fut.done():
+            fut.set_result(
+                {
+                    "ok": data.get("ok", False),
+                    "status": data.get("status", 0),
+                    "headers": data.get("headers", {}),
+                    "body": data.get("body"),
+                }
+            )
 
     def mount(self, path: str, route_info: RouteInfo, current_vdom: VDOM):
         if path in self.active_routes:
@@ -171,3 +228,24 @@ class Session:
                 ctx.unmount()
             except Exception as e:  # noqa: BLE001
                 self.report_error(path, "unmount", e)
+
+    # ---- Session-side utilities ----
+    def update_context(self, updates: dict[str, Any]) -> None:
+        """Update session context and trigger rerender for all active routes."""
+        with self._rc:
+            self.context.update(updates)
+            for ctx in list(self.active_routes.values()):
+                # Force a render pass for each active route context
+                if ctx.effect:
+                    try:
+                        ctx.effect.run()
+                    except Exception as e:
+                        any_path = next(iter(self.active_routes.keys()), "<unknown>")
+                        self.report_error(any_path, "render", e)
+
+
+# Context for helpers during callbacks
+CURRENT_SESSION: ContextVar[Session | None] = ContextVar(
+    "pulse_current_session", default=None
+)
+CURRENT_ROUTE: ContextVar[str | None] = ContextVar("pulse_current_route", default=None)

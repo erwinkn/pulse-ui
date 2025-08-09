@@ -29,12 +29,7 @@ from pulse.render import RenderContext
 from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
 from pulse.vdom import VDOM
-from pulse.middleware import (
-    PulseMiddleware,
-    PrerenderResponse,
-    ConnectResult,
-    MessageResult,
-)
+from pulse.middleware import PulseMiddleware, Ok, Redirect, NotFound, Deny
 from fastapi import HTTPException
 from pulse.request import PulseRequest
 
@@ -114,7 +109,7 @@ class App:
         REACTIVE_CONTEXT.set(AppReactiveContext())
         self.fastapi.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
+            allow_origin_regex=".*",
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -128,6 +123,8 @@ class App:
         @self.fastapi.post("/prerender/{path:path}")
         def prerender(path: str, route_info: RouteInfo, request: Request) -> VDOM:
             # Provide a working reactive context (and not the global AppReactiveContext which errors)
+            if not path.startswith("/"):
+                path = "/" + path
             with ReactiveContext():
                 # Build request context (mutable dict passed to middleware)
                 req_ctx: dict[str, object] = {}
@@ -147,62 +144,59 @@ class App:
                 if self._middleware:
                     try:
 
-                        def _next() -> PrerenderResponse:
+                        def _next():
                             # Seed session context with any values set in the request context
                             session_ctx.update(req_ctx)
-                            return {"kind": "ok", "vdom": _default_render()}
+                            return Ok(_default_render())
 
                         res = self._middleware.prerender(
                             path=path,
-                            route_info=route_info,  # type: ignore[arg-type]
+                            route_info=route_info,
                             request=PulseRequest.from_fastapi(request),
                             context=req_ctx,
                             next=_next,
                         )
                     except Exception:
                         logger.exception("Error in prerender middleware")
-                        res = {"kind": "ok", "vdom": _default_render()}
-
-                    kind = res.get("kind", "ok")
-                    if kind == "redirect":
-                        location = res.get("location")
+                        res = Ok(_default_render())
+                    if isinstance(res, Redirect):
                         raise HTTPException(
-                            status_code=302, headers={"Location": location or "/"}
+                            status_code=302, headers={"Location": res.path or "/"}
                         )
-                    if kind == "unauthorized":
-                        raise HTTPException(status_code=401)
-                    if kind == "not_found":
+                    elif isinstance(res, NotFound):
                         raise HTTPException(status_code=404)
-                    vdom = res.get("vdom")
-                    return vdom if vdom is not None else _default_render()
+                    elif isinstance(res, Ok):
+                        return res.payload
+                    # Fallback to default render
+                    else:
+                        return _default_render()
                 else:
                     return _default_render()
 
         @self.sio.event
         async def connect(sid: str, environ, auth=None):
-            # Build request context via middleware for the session
-            session_ctx: dict[str, object] = {}
+            # Create session first so middleware can mutate the same ReactiveDict instance
+            session = self.create_session(sid)
             if self._middleware:
                 try:
 
-                    def _next() -> ConnectResult:
-                        return {"kind": "ok"}
+                    def _next():
+                        return Ok(None)
 
                     res = self._middleware.connect(
                         request=PulseRequest.from_socketio_environ(environ, auth),
-                        ctx=session_ctx,
+                        ctx=session.context,
                         next=_next,
                     )
                 except Exception:
                     logger.exception("Error in connect middleware")
-                    res = {"kind": "ok", "session_context": session_ctx}
-                if res.get("kind") == "unauthorized":
-                    await self.sio.disconnect(sid)
-                    return
-                # middleware mutates session_ctx in-place
-
-            session = self.create_session(sid)
-            session.context = session_ctx  # type: ignore[assignment]
+                    res = Ok(None)
+                if isinstance(res, Deny):
+                    # Tear down the created session if denied
+                    try:
+                        self.close_session(sid)
+                    finally:
+                        return False
             session.connect(
                 lambda message: asyncio.create_task(
                     self.sio.emit("message", message, to=sid)
@@ -211,15 +205,32 @@ class App:
 
         @self.sio.event
         def disconnect(sid: str):
-            # TODO: keep the session open for some time in case the client reconnects?
             self.close_session(sid)
 
         @self.sio.event
         def message(sid: str, data: ClientMessage):
             try:
-                session = self.get_session(sid)
+                session = self.sessions[sid]
 
-                def _default_handle(sess: Session) -> None:
+                def _handler(sess: Session) -> None:
+                    # Per-message middleware guard
+                    if self._middleware:
+                        try:
+                            res = self._middleware.message(
+                                ctx=sess.context, data=data, next=lambda: Ok(None)
+                            )
+                            if isinstance(res, Deny):
+                                # Report as server error for this path
+                                path = data["path"]
+                                sess.report_error(
+                                    path,
+                                    "server",
+                                    Exception("Request denied by server"),
+                                    {"kind": "deny"},
+                                )
+                                return
+                        except Exception:
+                            logger.exception("Error in message middleware")
                     if data["type"] == "mount":
                         sess.mount(data["path"], data["routeInfo"], data["currentVDOM"])
                     elif data["type"] == "navigate":
@@ -230,29 +241,13 @@ class App:
                         )
                     elif data["type"] == "unmount":
                         sess.unmount(data["path"])
+                    elif data["type"] == "api_result":
+                        # type: ignore[union-attr]
+                        sess.handle_api_result(data)  # type: ignore[arg-type]
                     else:
                         logger.warning(f"Unknown message type received: {data}")
 
-                if self._middleware:
-                    try:
-
-                        def _next() -> MessageResult:
-                            _default_handle(session)  # type: ignore[arg-type]
-                            return {"kind": "ok"}
-
-                        res = self._middleware.message(
-                            ctx=session.context,  # type: ignore[arg-type]
-                            data=data,
-                            next=_next,
-                        )
-                        if res.get("kind") == "deny":
-                            return
-                        # If middleware returns ok without calling next(), we consider it handled.
-                    except Exception:
-                        logger.exception("Error in message middleware")
-                        _default_handle(session)  # type: ignore[arg-type]
-                else:
-                    _default_handle(session)  # type: ignore[arg-type]
+                _handler(session)
             except Exception as e:
                 try:
                     # Best effort: report error for this path if available
@@ -294,11 +289,6 @@ class App:
             raise ValueError(f"Session {id} already exists")
         print(f"--> Creating session {id}")
         self.sessions[id] = Session(id, self.routes)
-        return self.sessions[id]
-
-    def get_session(self, id: str):
-        if id not in self.sessions:
-            raise KeyError(f"Session {id} does not exist")
         return self.sessions[id]
 
     def close_session(self, id: str):

@@ -8,7 +8,7 @@ from pulse import (
     effect,
     Untrack,
 )
-from pulse.reactive import Batch, flush_effects
+from pulse.reactive import Batch, flush_effects, ReactiveDict
 
 
 def test_signal_creation_and_access():
@@ -579,7 +579,7 @@ def test_effect_unregister_from_parent_on_disposal():
 
 
 def test_effect_unregister_from_batch_on_disposal():
-    with Batch() as batch:
+    with Batch() as batch:  # noqa: F841
 
         @effect
         def e(): ...
@@ -590,7 +590,7 @@ def test_effect_unregister_from_batch_on_disposal():
 
 
 def test_effect_unset_batch_after_run():
-    with Batch() as batch:
+    with Batch() as batch:  # noqa: F841
 
         @effect
         def e(): ...
@@ -613,6 +613,77 @@ def test_effect_rescheduling_itself():
                 s.write(1)
 
     assert e.runs == 2
+
+
+def test_reactive_dict_basic_reads_and_writes():
+    ctx = ReactiveDict({"a": 1})
+    reads = []
+
+    @effect
+    def e():
+        reads.append(ctx["a"])  # subscribe to key 'a'
+
+    flush_effects()
+    assert reads == [1]
+
+    ctx["a"] = 2
+    flush_effects()
+    assert reads == [1, 2]
+
+    # setting same value should not schedule effect run
+    @effect
+    def e2():
+        _ = ctx["a"]
+
+    flush_effects()
+    runs = e2.runs
+    ctx["a"] = 2
+    flush_effects()
+    assert e2.runs == runs
+
+
+def test_reactive_dict_per_key_isolation():
+    ctx = ReactiveDict({"a": 1, "b": 10})
+
+    @effect
+    def ea():
+        _ = ctx["a"]
+
+    @effect
+    def eb():
+        _ = ctx["b"]
+
+    flush_effects()
+    assert ea.runs == 1 and eb.runs == 1
+
+    ctx["a"] = 2
+    flush_effects()
+    assert ea.runs == 2 and eb.runs == 1
+
+    ctx["b"] = 20
+    flush_effects()
+    assert ea.runs == 2 and eb.runs == 2
+
+
+def test_reactive_dict_delete_sets_none_preserving_subscribers():
+    ctx = ReactiveDict({"a": 1})
+    values = []
+
+    @effect
+    def e():
+        values.append(ctx["a"])  # subscribe
+
+    flush_effects()
+    assert values == [1]
+
+    del ctx["a"]
+    flush_effects()
+    assert values == [1, None]
+
+    # re-set should notify again
+    ctx["a"] = 3
+    flush_effects()
+    assert values == [1, None, 3]
 
 
 # TODO:

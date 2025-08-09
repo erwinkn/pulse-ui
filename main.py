@@ -326,7 +326,7 @@ class LoggingMiddleware(ps.PulseMiddleware):
     def message(self, *, ctx, data, next):
         # Light logging of message types
         try:
-            msg_type = data.get("type")  # type: ignore[attr-defined]
+            msg_type = data.get("type")  
         except Exception:
             msg_type = "<unknown>"
         # Do not spam logs for vdom churn; only mount/navigate/callback

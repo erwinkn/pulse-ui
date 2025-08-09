@@ -48,7 +48,32 @@ class ServerErrorMessage(TypedDict):
     error: ServerErrorInfo
 
 
-ServerMessage = ServerInitMessage | ServerUpdateMessage | ServerErrorMessage
+class ServerNavigateToMessage(TypedDict):
+    type: Literal["navigate_to"]
+    path: str
+
+
+class ServerApiCallMessage(TypedDict):
+    type: Literal["api_call"]
+    # Correlation id to match request/response
+    id: str
+    path: str
+    url: str
+    method: str
+    headers: dict[str, str]
+    # Body can be JSON-serializable or None
+    body: Any | None
+    # Whether to include credentials (cookies)
+    credentials: Literal["include", "omit"]
+
+
+ServerMessage = (
+    ServerInitMessage
+    | ServerUpdateMessage
+    | ServerErrorMessage
+    | ServerApiCallMessage
+    | ServerNavigateToMessage
+)
 
 
 # ====================
@@ -79,9 +104,20 @@ class ClientUnmountMessage(TypedDict):
     path: str
 
 
+class ClientApiResultMessage(TypedDict):
+    type: Literal["api_result"]
+    id: str
+    path: str
+    ok: bool
+    status: int
+    headers: dict[str, str]
+    body: Any | None
+
+
 ClientMessage = (
     ClientCallbackMessage
     | ClientMountMessage
     | ClientNavigateMessage
     | ClientUnmountMessage
+    | ClientApiResultMessage
 )

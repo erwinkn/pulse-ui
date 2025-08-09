@@ -138,7 +138,7 @@ class QueryProperty(Generic[T]):
 
         # Bind methods to this instance
         bound_fetch = self.fetch_fn.__get__(obj, obj.__class__)
-        bound_key_fn = self.key_fn.__get__(obj, obj.__class__)  # type: ignore[union-attr]
+        bound_key_fn = self.key_fn.__get__(obj, obj.__class__)  
         # print(f"[QueryProperty:{self.name}] bound fetch and key functions")
 
         result = QueryResult[T]()

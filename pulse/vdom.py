@@ -143,7 +143,7 @@ __all__ = [
 # Core VDOM
 # ============================================================================
 
-PrimitiveNode = Union[str, int, float]
+PrimitiveNode = Union[str, int, float, None]
 NodeChild = Union["Node", PrimitiveNode]
 
 

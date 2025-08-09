@@ -8,7 +8,13 @@ import type {
   RouteInfo,
 } from "./messages";
 
-import type { ServerMessage, ClientMessage, ServerErrorInfo } from "./messages";
+import type {
+  ServerMessage,
+  ClientMessage,
+  ServerErrorInfo,
+  ServerApiCallMessage,
+  ClientApiResultMessage,
+} from "./messages";
 import { io, Socket } from "socket.io-client";
 
 export interface MountedView {
@@ -46,7 +52,10 @@ export class PulseSocketIOClient {
   private serverErrors: Map<string, ServerErrorInfo> = new Map();
   private serverErrorListeners: Set<ServerErrorListener> = new Set();
 
-  constructor(private url: string) {
+  constructor(
+    private url: string,
+    private frameworkNavigate?: (to: string) => void
+  ) {
     this.socket = null;
     this.activeViews = new Map();
     this.messageQueue = [];
@@ -221,6 +230,75 @@ export class PulseSocketIOClient {
         this.notifyServerError(message.path, message.error);
         break;
       }
+      case "api_call": {
+        void this.performApiCall(message as ServerApiCallMessage);
+        break;
+      }
+      case "navigate_to": {
+        try {
+          const dest = (message as any).path as string;
+          if (this.frameworkNavigate) {
+            this.frameworkNavigate(dest);
+          } else {
+            window.history.pushState({}, "", dest);
+            window.dispatchEvent(new PopStateEvent("popstate"));
+          }
+        } catch (e) {
+          console.error("Navigation error:", e);
+        }
+        break;
+      }
+    }
+  }
+
+  private async performApiCall(msg: ServerApiCallMessage) {
+    try {
+      const res = await fetch(msg.url, {
+        method: msg.method || "GET",
+        headers: {
+          ...(msg.headers || {}),
+          ...(msg.body != null && !("content-type" in (msg.headers || {}))
+            ? { "content-type": "application/json" }
+            : {}),
+        },
+        body:
+          msg.body != null
+            ? typeof msg.body === "string"
+              ? msg.body
+              : JSON.stringify(msg.body)
+            : undefined,
+        credentials: msg.credentials || "include",
+      });
+      const headersObj: Record<string, string> = {};
+      res.headers.forEach((v, k) => (headersObj[k] = v));
+      let body: any = null;
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        body = await res.json().catch(() => null);
+      } else {
+        body = await res.text().catch(() => null);
+      }
+      const reply: ClientApiResultMessage = {
+        type: "api_result",
+        id: msg.id,
+        path: msg.path,
+        ok: res.ok,
+        status: res.status,
+        headers: headersObj,
+        body,
+      };
+      await this.sendMessage(reply);
+    } catch (err) {
+      const reply: ClientApiResultMessage = {
+        type: "api_result",
+        id: msg.id,
+        path: msg.path,
+        ok: false,
+        status: 0,
+        headers: {},
+        body: { error: String(err) },
+      };
+      await this.sendMessage(reply);
     }
   }
 

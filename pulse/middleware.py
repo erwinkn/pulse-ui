@@ -1,66 +1,35 @@
 from __future__ import annotations
 
-from typing import TypedDict, Literal, Callable, Union
+from typing import Generic, TypeVar, Callable, Any
+from collections.abc import MutableMapping
 from pulse.messages import ClientMessage, RouteInfo
 from pulse.request import PulseRequest
 from pulse.vdom import VDOM
 
 
-class RequestContext(TypedDict, total=False):
-    """A generic, mutable context bag propagated through prerender and WS.
-
-    Middleware can read and write keys on this object to share information with
-    later phases and with rendering code (via RenderContext hooks).
-    """
+T = TypeVar("T")
 
 
-class SessionContext(TypedDict, total=False):
-    """Per-session context stored on WS connect and exposed to routes/hooks."""
+class Redirect:
+    path: str
+
+    def __init__(self, path: str) -> None:
+        self.path = path
 
 
-class PrerenderOk(TypedDict):
-    kind: Literal["ok"]
-    vdom: VDOM
+class NotFound: ...
 
 
-class PrerenderRedirect(TypedDict):
-    kind: Literal["redirect"]
-    location: str
+class Ok(Generic[T]):
+    def __init__(self, payload: T = None) -> None:
+        self.payload = payload
 
 
-class PrerenderUnauthorized(TypedDict):
-    kind: Literal["unauthorized"]
+class Deny: ...
 
 
-class PrerenderNotFound(TypedDict):
-    kind: Literal["not_found"]
-
-
-PrerenderResponse = Union[
-    PrerenderOk, PrerenderRedirect, PrerenderUnauthorized, PrerenderNotFound
-]
-
-
-class ConnectOk(TypedDict):
-    kind: Literal["ok"]
-
-
-class ConnectUnauthorized(TypedDict):
-    kind: Literal["unauthorized"]
-
-
-ConnectResult = Union[ConnectOk, ConnectUnauthorized]
-
-
-class MessageOk(TypedDict):
-    kind: Literal["ok"]
-
-
-class MessageDeny(TypedDict):
-    kind: Literal["deny"]
-
-
-MessageResult = Union[MessageOk, MessageDeny]
+PrerenderResponse = Ok[VDOM] | Redirect | NotFound
+ConnectResponse = Ok[None] | Deny
 
 
 class PulseMiddleware:
@@ -76,7 +45,7 @@ class PulseMiddleware:
         path: str,
         route_info: RouteInfo,
         request: PulseRequest,
-        context: dict,
+        context: MutableMapping[str, Any],
         next: Callable[[], PrerenderResponse],
     ) -> PrerenderResponse:
         return next()
@@ -85,16 +54,20 @@ class PulseMiddleware:
         self,
         *,
         request: PulseRequest,
-        ctx: dict,
-        next: Callable[[], ConnectResult],
-    ) -> ConnectResult:
+        ctx: MutableMapping[str, Any],
+        next: Callable[[], ConnectResponse],
+    ) -> ConnectResponse:
         return next()
 
     def message(
         self,
         *,
-        ctx: dict,
+        ctx: MutableMapping[str, Any],
         data: ClientMessage,
-        next: Callable[[], MessageResult],
-    ) -> MessageResult:
+        next: Callable[[], Ok[None]],
+    ) -> Ok[None] | Deny:
+        """Handle per-message authorization.
+
+        Return Deny() to block, Ok(None) to allow.
+        """
         return next()

@@ -207,6 +207,7 @@ class RouteTree:
             _flatten_route_tree(route)
 
     def find(self, path: str):
+        path = normalize_path(path)
         route = self.flat_tree.get(path)
         if not route:
             raise ValueError(f"No route found for path '{path}'")

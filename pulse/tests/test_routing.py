@@ -3,7 +3,6 @@ import pytest
 from pulse.component import component
 from pulse.routing import (
     InvalidRouteError,
-    PathParameters,
     PathSegment,
     Route,
     Layout,
@@ -100,9 +99,10 @@ def test_route_tree_find_root(route_tree):
 
 
 def test_route_tree_find_nested_route(route_tree):
-    route = route_tree.find("|about")
+    route = route_tree.find("about")
     assert isinstance(route, Route)
     assert route.path == "about"
+    assert isinstance(route.parent, Route)
     assert route.parent.path == ""
 
 
@@ -148,6 +148,7 @@ def test_route_tree_consecutive_layouts():
     )
     route = route_tree.find("counter-2")
     assert isinstance(route, Route) and route.path == "counter-2"
+
 
 def test_route_tree_nested_layouts():
     def render():

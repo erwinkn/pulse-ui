@@ -5,6 +5,7 @@ Tests for the State class and computed properties.
 from typing import cast
 import pulse as ps
 from pulse.reactive import flush_effects
+from pulse.reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet
 
 
 class TestState:
@@ -306,3 +307,52 @@ class TestState:
         s.count = 5
         assert s.doubled == 10
         assert s.prop == 15
+
+    def test_nested_structures_wrapped_and_reactive(self):
+        class S(ps.State):
+            data = {
+                "user": {"name": "Ada", "friends": ["b"]},
+                "ids": [1, 2],
+                "set": {"x"},
+            }
+
+        s = S()
+        # Ensure wrapping
+        assert isinstance(s.data, ReactiveDict)
+        assert isinstance(s.data["user"], ReactiveDict)
+        assert isinstance(s.data["user"]["friends"], ReactiveList)
+        assert isinstance(s.data["ids"], ReactiveList)
+        assert isinstance(s.data["set"], ReactiveSet)
+
+        name_reads = []
+        ids_versions = []
+        set_checks = []
+
+        @ps.effect
+        def track():
+            name_reads.append(s.data["user"]["name"])  # reactive path user.name
+            ids_versions.append(s.data["ids"].version)  # structural version
+            set_checks.append("x" in s.data["set"])  # membership signal
+
+        flush_effects()
+        assert name_reads == ["Ada"] and ids_versions == [0] and set_checks == [True]
+
+        # Non-related update shouldn't trigger name update
+        s.data["other"] = 1
+        flush_effects()
+        assert name_reads == ["Ada"]
+
+        # Update name
+        s.data["user"]["name"] = "Grace"
+        flush_effects()
+        assert name_reads[-1] == "Grace"
+
+        # Bump ids structure
+        s.data["ids"].append(3)
+        flush_effects()
+        assert ids_versions[-1] == 1
+
+        # Toggle set membership
+        s.data["set"].discard("x")
+        flush_effects()
+        assert set_checks[-1] is False

@@ -117,7 +117,8 @@ class Route:
         return [path]
 
     def unique_path(self):
-        return "/".join(self._path_list())
+        # Ensure consistent keys without accidental leading/trailing slashes
+        return normalize_path("/".join(self._path_list()))
 
     def file_path(self) -> str:
         path = "/".join(self._path_list(include_layouts=False))

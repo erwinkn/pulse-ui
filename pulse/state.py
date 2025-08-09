@@ -8,44 +8,16 @@ that enables automatic re-rendering when state changes.
 from abc import ABC, ABCMeta
 from typing import Any, Callable, Generic, Never, TypeVar
 
-from pulse.reactive import Scope, Signal, Computed, Effect
+from pulse.reactive import Scope, Computed, Effect
+from pulse.reactive_extensions import ReactiveProperty
 from pulse.query import QueryProperty
 
 
 T = TypeVar("T")
 
 
-class StateProperty:
-    """
-    Descriptor that creates reactive properties on State classes.
-    Tracks when properties are accessed and triggers updates when set.
-    """
-
-    def __init__(self, name: str, default_value: Any = None):
-        self.name = name
-        self.default_value = default_value
-        self.private_name = f"__signal_{name}"
-
-    def get_signal(self, obj) -> Signal:
-        if not hasattr(obj, self.private_name):
-            # Create the signal on first access
-            signal = Signal(
-                self.default_value, name=f"{obj.__class__.__name__}.{self.name}"
-            )
-            setattr(obj, self.private_name, signal)
-            return signal
-
-        return getattr(obj, self.private_name)
-
-    def __get__(self, obj: Any, objtype: Any = None) -> Any:
-        if obj is None:
-            return self
-
-        return self.get_signal(obj).read()
-
-    def __set__(self, obj: Any, value: Any) -> None:
-        signal = self.get_signal(obj)
-        signal.write(value)
+class StateProperty(ReactiveProperty):
+    pass
 
 
 class ComputedProperty(Generic[T]):
@@ -211,7 +183,7 @@ class State(ABC, metaclass=StateMeta):
             for name, prop in cls.__dict__.items():
                 if name in seen:
                     continue
-                if isinstance(prop, StateProperty):
+                if isinstance(prop, ReactiveProperty):
                     seen.add(name)
                     yield prop.get_signal(self)
 
@@ -245,7 +217,9 @@ class State(ABC, metaclass=StateMeta):
 
         # TODO: remove this debug check
         if len(set(self.scope.effects) - disposed) > 0:
-            raise RuntimeError(f"State.dispose() missed effects defined on its Scope: {[e.name for e in self.scope.effects]}")
+            raise RuntimeError(
+                f"State.dispose() missed effects defined on its Scope: {[e.name for e in self.scope.effects]}"
+            )
 
     def __repr__(self) -> str:
         """Return a developer-friendly representation of the state."""
@@ -259,7 +233,7 @@ class State(ABC, metaclass=StateMeta):
             for name, value in cls.__dict__.items():
                 if name in seen:
                     continue
-                if isinstance(value, StateProperty):
+                if isinstance(value, ReactiveProperty):
                     seen.add(name)
                     prop_value = getattr(self, name)
                     props.append(f"{name}={prop_value!r}")

@@ -8,7 +8,14 @@ from pulse import (
     effect,
     Untrack,
 )
-from pulse.reactive import Batch, flush_effects, ReactiveDict
+from pulse.reactive import Batch, flush_effects
+from pulse.reactive_extensions import (
+    ReactiveDict,
+    ReactiveList,
+    ReactiveSet,
+    reactive_dataclass,
+)
+import pulse as ps
 
 
 def test_signal_creation_and_access():
@@ -601,18 +608,14 @@ def test_effect_unset_batch_after_run():
 
 def test_effect_rescheduling_itself():
     s = Signal(0)
-    with Batch() as batch:
+    @effect
+    def e():
+        if s() < 10:
+            s.write(s() + 1)
 
-        @effect
-        def e():
-            print("Running e")
-            val = s()
-            if val == 0:
-                print("Writing to s")
-                print(f"s observers: {s.obs}")
-                s.write(1)
-
-    assert e.runs == 2
+    flush_effects()
+    assert s() == 10
+    assert e.runs == 11 # 10 increment runs + 1 run without a write
 
 
 def test_reactive_dict_basic_reads_and_writes():
@@ -684,6 +687,283 @@ def test_reactive_dict_delete_sets_none_preserving_subscribers():
     ctx["a"] = 3
     flush_effects()
     assert values == [1, None, 3]
+
+
+def test_reactive_list_basic_index_reactivity():
+    lst = ReactiveList([1, 2, 3])
+    assert isinstance(lst, list)
+
+    seen: list = []
+
+    @effect
+    def e():
+        seen.append(lst[1])  # subscribe to index 1
+
+    flush_effects()
+    assert e.runs == 1
+    assert seen == [2]
+
+    # mutate a different index -> no rerun
+    lst[0] = 10
+    flush_effects()
+    assert e.runs == 1
+    assert seen == [2]
+
+    # mutate the observed index
+    lst[1] = 20
+    flush_effects()
+    assert e.runs == 2
+    assert seen == [2, 20]
+
+    # setting same value should not trigger
+    lst[1] = 20
+    flush_effects()
+    assert e.runs == 2
+    assert seen == [2, 20]
+
+
+def test_reactive_list_structural_changes_bump_version_and_remap_dependencies():
+    lst = ReactiveList([3, 1, 2])
+
+    versions: list[int] = []
+    first_values: list = []
+
+    @effect
+    def e():
+        # depend on structural version and first item
+        versions.append(lst.version)
+        first_values.append(lst[0])
+
+    flush_effects()
+    assert versions[-1] == 0 and first_values[-1] == 3
+
+    lst.append(0)
+    flush_effects()
+    assert versions[-1] == 1 and first_values[-1] == 3
+
+    lst.pop()
+    flush_effects()
+    assert versions[-1] == 2 and first_values[-1] == 3
+
+    # sort should reorder signals and cause effect to rerun; first item changes to 1
+    lst.sort()
+    flush_effects()
+    assert versions[-1] == 3
+    assert first_values[-1] == 1
+
+
+def test_reactive_set_membership_reactivity_add_remove():
+    s = ReactiveSet({"a"})
+    assert isinstance(s, set)
+
+    checks: list[bool] = []
+
+    @effect
+    def e():
+        # subscribe to membership for "b"
+        checks.append("b" in s)
+
+    flush_effects()
+    assert checks == [False]
+
+    s.add("b")
+    flush_effects()
+    assert checks == [False, True]
+
+    s.discard("b")
+    flush_effects()
+    assert checks == [False, True, False]
+
+    # discarding again should not change
+    runs = e.runs
+    s.discard("b")
+    flush_effects()
+    assert e.runs == runs
+
+
+def test_reactive_dataclass_fields_are_signals_and_wrapped():
+    @reactive_dataclass
+    class Model:
+        x: int = 1
+        tags: list[int] = None  # type: ignore[assignment]
+
+    m = Model()
+    m.x = 2
+    m.tags = [1, 2]
+
+    # fields read/write go through signals
+    seen: list[int] = []
+
+    @effect
+    def e():
+        seen.append(m.x)
+
+    flush_effects()
+    assert seen == [2]
+
+    m.x = 5
+    flush_effects()
+    assert seen == [2, 5]
+
+    # collections are auto-wrapped
+    assert isinstance(m.tags, ReactiveList)
+    m.tags.append(3)
+    # structural change shouldn't affect x subscribers
+    runs = e.runs
+    flush_effects()
+    assert e.runs == runs
+
+
+def test_nested_reactive_dict_and_list_deep_reactivity():
+    ctx = ReactiveDict(
+        {
+            "user": {
+                "name": "Ada",
+                "tags": ["a", "b"],
+            }
+        }
+    )
+
+    # ensure wrapping
+    user = ctx["user"]
+    assert isinstance(user, ReactiveDict)
+    assert isinstance(user["tags"], ReactiveList)
+
+    name_reads: list[str] = []
+    v_reads: list[int] = []
+
+    @effect
+    def e():
+        u = ctx["user"]  # depend on user key
+        name_reads.append(u["name"])  # and nested name key
+        v_reads.append(u["tags"].version)
+
+    flush_effects()
+    assert name_reads == ["Ada"] and v_reads == [0]
+
+    # Update unrelated top-level key should not rerun
+    ctx["other"] = 1
+    flush_effects()
+    assert name_reads == ["Ada"] and v_reads == [0]
+
+    # Update nested name should rerun
+    u2 = ctx["user"]
+    u2["name"] = "Grace"
+    flush_effects()
+    assert name_reads == ["Ada", "Grace"]
+
+    # Structural change to nested tags should bump version and rerun
+    u2["tags"].append("c")
+    flush_effects()
+    assert v_reads[-1] == 1
+
+    # Changing a non-watched index shouldn't change name dependency
+    len_v_reads = len(v_reads)
+    u2["tags"][1] = "bb"
+    flush_effects()
+    assert name_reads[-1] == "Grace"
+    assert len(v_reads) == len_v_reads
+
+
+def test_reactive_list_len_is_reactive_and_slice_optimization():
+    lst = ReactiveList([1, 2, 3, 4])
+
+    len_reads: list[int] = []
+
+    @effect
+    def e():
+        len_reads.append(len(lst))
+
+    flush_effects()
+    assert len_reads == [4]
+
+    # In-place per-index change should not affect len-based effect
+    runs = e.runs
+    lst[1] = 20
+    flush_effects()
+    assert e.runs == runs
+
+    # Equal-length slice assignment: should not bump len
+    lst[1:3] = [200, 300]
+    flush_effects()
+    assert e.runs == runs
+    assert len_reads == [4]
+
+    # Unequal-length slice assignment: should bump len
+    lst[0:2] = [100]
+    flush_effects()
+    assert len_reads[-1] == 3
+
+    # Structural ops bump len
+    lst.append(9)
+    flush_effects()
+    assert len_reads[-1] == 4
+    lst.pop()
+    flush_effects()
+    assert len_reads[-1] == 3
+
+
+def test_reactive_list_iter_is_reactive_to_structure_only():
+    lst = ReactiveList([1, 2, 3])
+
+    iter_counts: list[int] = []
+
+    @effect
+    def e():
+        # Depend only on iteration count, not values
+        iter_counts.append(sum(1 for _ in lst))
+
+    flush_effects()
+    assert iter_counts == [3]
+
+    # Change a value in place: should not rerun, since __iter__ depends on structure only
+    runs = e.runs
+    lst[0] = 10
+    flush_effects()
+    assert e.runs == runs
+
+    # Structural change via append triggers rerun
+    lst.append(4)
+    flush_effects()
+    assert iter_counts[-1] == 4
+
+    # Equal-length slice replacement should not rerun
+    lst[1:3] = [20, 30]
+    flush_effects()
+    assert iter_counts[-1] == 4
+
+    # Unequal-length slice replacement should rerun
+    lst[0:2] = [100]
+    flush_effects()
+    assert iter_counts[-1] == 3
+
+
+def test_state_wraps_collection_defaults_and_sets():
+    class S(ps.State):
+        items = [1, 2]
+        flags = {"a"}
+
+    s = S()
+    assert isinstance(s.items, ReactiveList)
+    assert isinstance(s.flags, ReactiveSet)
+
+    seen = []
+
+    @effect
+    def e():
+        seen.append(s.items[0])
+
+    flush_effects()
+    assert seen == [1]
+
+    s.items[0] = 9
+    flush_effects()
+    assert seen == [1, 9]
+
+    # setting a new collection value gets wrapped
+    s.items = [7]
+    assert isinstance(s.items, ReactiveList)
+    assert s.items[0] == 7
 
 
 # TODO:

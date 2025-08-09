@@ -14,7 +14,8 @@ from pulse.messages import (
     ServerUpdateMessage,
     ServerErrorMessage,
 )
-from pulse.reactive import Batch, ReactiveContext, ReactiveDict
+from pulse.reactive import Batch, ReactiveContext
+from pulse.reactive_extensions import ReactiveDict
 from pulse.render import RenderContext, RenderResult
 from pulse.routing import RouteTree
 from pulse.vdom import VDOM, VDOMNode

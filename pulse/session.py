@@ -17,6 +17,7 @@ from pulse.render import RenderContext, RenderResult
 from pulse.routing import RouteTree
 from pulse.vdom import VDOM, VDOMNode
 
+
 logger = logging.getLogger(__file__)
 
 
@@ -29,6 +30,7 @@ class Session:
         self.active_routes: dict[str, RenderContext] = {}
         self.vdom: VDOMNode | None = None
         self._rc = ReactiveContext()
+        self.context: dict[str, Any] = {}
 
         # Install effect error handler (batch-level) to surface runtime errors
         def _on_effect_error(effect, exc: Exception):
@@ -138,7 +140,11 @@ class Session:
             print(f"Mounting '{path}'")
             route = self.routes.find(path)
             ctx = RenderContext(
-                route, position="", route_info=route_info, vdom=current_vdom
+                route,
+                position="",
+                route_info=route_info,
+                vdom=current_vdom,
+                session_context=self.context,
             )
             self.active_routes[path] = ctx
             ctx.mount(on_render=on_render, on_error=on_error)

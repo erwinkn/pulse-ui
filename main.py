@@ -1,4 +1,5 @@
 import asyncio
+import time
 import pulse as ps
 
 
@@ -53,14 +54,29 @@ class LayoutState(ps.State):
 @ps.component
 def home():
     """A simple and welcoming home page."""
-    return ps.div(
+    sess = ps.session_context()
+    content = [
         ps.h1("Welcome to Pulse UI!", className="text-4xl font-bold mb-4"),
         ps.p(
             "This is a demonstration of a web application built with Python and Pulse.",
             className="text-lg text-gray-700",
         ),
-        className="text-center",
-    )
+    ]
+    # Avoid prerender flash of None by only rendering once we have values
+    if sess.get("connected_at") or sess.get("ip") or sess.get("user_agent"):
+        content.append(
+            ps.div(
+                ps.h3("Session Context", className="text-2xl font-semibold mb-2"),
+                ps.ul(
+                    ps.li(f"connected_at: {sess.get('connected_at') or ''}"),
+                    ps.li(f"ip: {sess.get('ip') or ''}"),
+                    ps.li(f"user_agent: {sess.get('user_agent') or ''}"),
+                    className="list-disc list-inside text-left mx-auto max-w-md",
+                ),
+                className="mt-6 p-4 bg-gray-50 rounded border",
+            )
+        )
+    return ps.div(*content, className="text-center")
 
 
 @ps.component
@@ -273,5 +289,53 @@ app = ps.App(
                 ps.Route("/dynamic/:route_id/:optional_segment?/*", dynamic_route),
             ],
         )
-    ]
+    ],
+    middleware=None,
 )
+
+
+# --- Demo Middleware ---------------------------------------------------------
+
+
+class LoggingMiddleware(ps.PulseMiddleware):
+    def prerender(self, *, path, route_info, request, context, next):
+        # before
+        print(f"[MW prerender] path={path} host={request.headers.get('host')}")
+        # Seed same keys as connect to avoid prerender flash
+        context["user_agent"] = request.headers.get("user-agent")
+        context["ip"] = request.headers.get("x-forwarded-for") or (
+            request.client[0] if request.client else None
+        )
+        context["connected_at"] = context.get("connected_at") or int(time.time())
+        res = next()
+        # after
+        kind = res.get("kind")
+        print(f"[MW prerender:after] kind={kind}")
+        return res
+
+    def connect(self, *, request, ctx, next):
+        # Add some context visible in components
+        ua = request.headers.get("user-agent")
+        ip = request.client[0] if request.client else None
+        ctx["user_agent"] = ua
+        ctx["ip"] = ip
+        ctx["connected_at"] = int(time.time())
+        print(f"[MW connect] ip={ip} ua={(ua or '')[:40]}")
+        return next()
+
+    def message(self, *, ctx, data, next):
+        # Light logging of message types
+        try:
+            msg_type = data.get("type")  # type: ignore[attr-defined]
+        except Exception:
+            msg_type = "<unknown>"
+        # Do not spam logs for vdom churn; only mount/navigate/callback
+        if msg_type in {"mount", "navigate", "callback", "unmount"}:
+            print(f"[MW message] type={msg_type}")
+        res = next()
+        print(f"[MW message:after] type={msg_type} result={res.get('kind')}")
+        return res
+
+
+# Attach middleware (keep config separate from routes for clarity)
+app._middleware = LoggingMiddleware()

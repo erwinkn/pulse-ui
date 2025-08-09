@@ -11,7 +11,7 @@ from enum import IntEnum
 from typing import Optional, Sequence, TypeVar, TypedDict, Unpack
 
 import socketio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 import os
@@ -29,6 +29,14 @@ from pulse.render import RenderContext
 from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
 from pulse.vdom import VDOM
+from pulse.middleware import (
+    PulseMiddleware,
+    PrerenderResponse,
+    ConnectResult,
+    MessageResult,
+)
+from fastapi import HTTPException
+from pulse.request import PulseRequest
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +76,7 @@ class App:
         self,
         routes: Optional[Sequence[Route | Layout]] = None,
         codegen: Optional[CodegenConfig] = None,
+        middleware: Optional[PulseMiddleware] = None,
         **config: Unpack[AppConfig],
     ):
         """
@@ -94,6 +103,7 @@ class App:
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
         self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
         self.status = AppStatus.created
+        self._middleware: PulseMiddleware | None = middleware
 
     def setup(self):
         if self.status >= AppStatus.initialized:
@@ -116,18 +126,83 @@ class App:
 
         # RouteInfo is the request body
         @self.fastapi.post("/prerender/{path:path}")
-        def prerender(path: str, route_info: RouteInfo) -> VDOM:
+        def prerender(path: str, route_info: RouteInfo, request: Request) -> VDOM:
             # Provide a working reactive context (and not the global AppReactiveContext which errors)
             with ReactiveContext():
-                ctx = RenderContext(
-                    self.routes.find(path), route_info, prerendering=True, vdom=None
-                )
-                result = ctx.render()
-                return result.new_vdom
+                # Build request context (mutable dict passed to middleware)
+                req_ctx: dict[str, object] = {}
+                session_ctx: dict[str, object] = {}
+
+                def _default_render() -> VDOM:
+                    ctx = RenderContext(
+                        self.routes.find(path),
+                        route_info,
+                        prerendering=True,
+                        vdom=None,
+                        session_context=session_ctx,
+                    )
+                    result = ctx.render()
+                    return result.new_vdom
+
+                if self._middleware:
+                    try:
+
+                        def _next() -> PrerenderResponse:
+                            # Seed session context with any values set in the request context
+                            session_ctx.update(req_ctx)
+                            return {"kind": "ok", "vdom": _default_render()}
+
+                        res = self._middleware.prerender(
+                            path=path,
+                            route_info=route_info,  # type: ignore[arg-type]
+                            request=PulseRequest.from_fastapi(request),
+                            context=req_ctx,
+                            next=_next,
+                        )
+                    except Exception:
+                        logger.exception("Error in prerender middleware")
+                        res = {"kind": "ok", "vdom": _default_render()}
+
+                    kind = res.get("kind", "ok")
+                    if kind == "redirect":
+                        location = res.get("location")
+                        raise HTTPException(
+                            status_code=302, headers={"Location": location or "/"}
+                        )
+                    if kind == "unauthorized":
+                        raise HTTPException(status_code=401)
+                    if kind == "not_found":
+                        raise HTTPException(status_code=404)
+                    vdom = res.get("vdom")
+                    return vdom if vdom is not None else _default_render()
+                else:
+                    return _default_render()
 
         @self.sio.event
         async def connect(sid: str, environ, auth=None):
+            # Build request context via middleware for the session
+            session_ctx: dict[str, object] = {}
+            if self._middleware:
+                try:
+
+                    def _next() -> ConnectResult:
+                        return {"kind": "ok"}
+
+                    res = self._middleware.connect(
+                        request=PulseRequest.from_socketio_environ(environ, auth),
+                        ctx=session_ctx,
+                        next=_next,
+                    )
+                except Exception:
+                    logger.exception("Error in connect middleware")
+                    res = {"kind": "ok", "session_context": session_ctx}
+                if res.get("kind") == "unauthorized":
+                    await self.sio.disconnect(sid)
+                    return
+                # middleware mutates session_ctx in-place
+
             session = self.create_session(sid)
+            session.context = session_ctx  # type: ignore[assignment]
             session.connect(
                 lambda message: asyncio.create_task(
                     self.sio.emit("message", message, to=sid)
@@ -143,18 +218,41 @@ class App:
         def message(sid: str, data: ClientMessage):
             try:
                 session = self.get_session(sid)
-                if data["type"] == "mount":
-                    session.mount(data["path"], data["routeInfo"], data["currentVDOM"])
-                elif data["type"] == "navigate":
-                    session.navigate(data["path"], data["routeInfo"])
-                elif data["type"] == "callback":
-                    session.execute_callback(
-                        data["path"], data["callback"], data["args"]
-                    )
-                elif data["type"] == "unmount":
-                    session.unmount(data["path"])
+
+                def _default_handle(sess: Session) -> None:
+                    if data["type"] == "mount":
+                        sess.mount(data["path"], data["routeInfo"], data["currentVDOM"])
+                    elif data["type"] == "navigate":
+                        sess.navigate(data["path"], data["routeInfo"])
+                    elif data["type"] == "callback":
+                        sess.execute_callback(
+                            data["path"], data["callback"], data["args"]
+                        )
+                    elif data["type"] == "unmount":
+                        sess.unmount(data["path"])
+                    else:
+                        logger.warning(f"Unknown message type received: {data}")
+
+                if self._middleware:
+                    try:
+
+                        def _next() -> MessageResult:
+                            _default_handle(session)  # type: ignore[arg-type]
+                            return {"kind": "ok"}
+
+                        res = self._middleware.message(
+                            ctx=session.context,  # type: ignore[arg-type]
+                            data=data,
+                            next=_next,
+                        )
+                        if res.get("kind") == "deny":
+                            return
+                        # If middleware returns ok without calling next(), we consider it handled.
+                    except Exception:
+                        logger.exception("Error in message middleware")
+                        _default_handle(session)  # type: ignore[arg-type]
                 else:
-                    logger.warning(f"Unknown message type received: {data}")
+                    _default_handle(session)  # type: ignore[arg-type]
             except Exception as e:
                 try:
                     # Best effort: report error for this path if available

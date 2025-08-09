@@ -73,10 +73,17 @@ const path = "${route.unique_path()}";
 
 export async function loader(args: LoaderFunctionArgs) {
   const routeInfo = extractServerRouteInfo(args);
+  // Forward inbound headers (cookies, auth, user-agent, etc.) to the Python server
+  const fwd = new Headers(args.request.headers);
+  // These request-specific headers must be recomputed for the new request
+  fwd.delete("content-length");
+  // Ensure JSON body content type
+  fwd.set("content-type", "application/json");
   const res = await fetch("${server_address}" + "/prerender/" + path, {
     method: "POST",
+    headers: fwd,
     body: JSON.stringify(routeInfo),
-    headers: { "Content-Type": "application/json" },
+    redirect: "manual",
   });
   if (res.status === 404) {
     return redirect("/not-found");

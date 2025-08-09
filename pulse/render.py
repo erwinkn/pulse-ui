@@ -73,12 +73,18 @@ class HookState:
     states: tuple[State, ...]
     effects: tuple[Effect, ...]
     router: Router
+    session_context: dict[str, Any]
 
-    def __init__(self, route_info: RouteInfo):
+    def __init__(
+        self,
+        route_info: RouteInfo,
+        session_context: dict[str, Any] | None = None,
+    ):
         self.setup = SetupState()
         self.effects = ()
         self.states = ()
         self.router = Router(route_info)
+        self.session_context = session_context or {}
 
     def dispose(self):
         for effect in self.setup.effects:
@@ -116,6 +122,7 @@ class RenderContext:
         vdom: VDOM | None,
         prerendering: bool = False,
         position: str = "",
+        session_context: dict[str, Any] | None = None,
     ):
         self.route = route
         self.position = position
@@ -126,7 +133,10 @@ class RenderContext:
         self.children = []
 
         self.callbacks = {}
-        self.hooks = HookState(route_info=route_info)
+        self.hooks = HookState(
+            route_info=route_info,
+            session_context=session_context,
+        )
         self.effect = None
 
     def update_route_info(self, info: RouteInfo):
@@ -425,3 +435,12 @@ def router():
             "`pulse.router` can only be called within a component, during rendering."
         )
     return ctx.hooks.router
+
+
+def session_context() -> dict[str, Any]:
+    ctx = RENDER_CONTEXT.get()
+    if not ctx:
+        raise RuntimeError(
+            "`pulse.session_context` can only be called within a component, during rendering."
+        )
+    return ctx.hooks.session_context

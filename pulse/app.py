@@ -8,7 +8,7 @@ to define routes and configure their Pulse application.
 import asyncio
 import logging
 from enum import IntEnum
-from typing import Optional, Sequence, TypeVar, TypedDict, Unpack
+from typing import Any, Optional, Sequence, TypeVar, TypedDict, Unpack
 
 import socketio
 from fastapi import FastAPI, Request
@@ -29,7 +29,14 @@ from pulse.render import RenderContext
 from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
 from pulse.vdom import VDOM
-from pulse.middleware import PulseMiddleware, Ok, Redirect, NotFound, Deny
+from pulse.middleware import (
+    PulseMiddleware,
+    Ok,
+    Redirect,
+    NotFound,
+    Deny,
+    MiddlewareStack,
+)
 from fastapi import HTTPException
 from pulse.request import PulseRequest
 
@@ -71,7 +78,7 @@ class App:
         self,
         routes: Optional[Sequence[Route | Layout]] = None,
         codegen: Optional[CodegenConfig] = None,
-        middleware: Optional[PulseMiddleware] = None,
+        middleware: Optional[PulseMiddleware | Sequence[PulseMiddleware]] = None,
         **config: Unpack[AppConfig],
     ):
         """
@@ -98,7 +105,13 @@ class App:
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
         self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
         self.status = AppStatus.created
-        self._middleware: PulseMiddleware | None = middleware
+        # Allow single middleware or sequence; compose into a stack when needed
+        if middleware is None:
+            self._middleware: PulseMiddleware | None = None
+        elif isinstance(middleware, PulseMiddleware):
+            self._middleware = middleware
+        else:
+            self._middleware = MiddlewareStack(middleware)
 
     def setup(self):
         if self.status >= AppStatus.initialized:
@@ -126,19 +139,17 @@ class App:
             if not path.startswith("/"):
                 path = "/" + path
             with ReactiveContext():
-                # Build request context (mutable dict passed to middleware)
-                req_ctx: dict[str, object] = {}
-                session_ctx: dict[str, object] = {}
+                ctx: dict[str, Any] = {}
 
                 def _default_render() -> VDOM:
-                    ctx = RenderContext(
+                    render_ctx = RenderContext(
                         self.routes.find(path),
                         route_info,
                         prerendering=True,
                         vdom=None,
-                        session_context=session_ctx,
+                        session_context=ctx,
                     )
-                    result = ctx.render()
+                    result = render_ctx.render()
                     return result.new_vdom
 
                 if self._middleware:
@@ -146,14 +157,13 @@ class App:
 
                         def _next():
                             # Seed session context with any values set in the request context
-                            session_ctx.update(req_ctx)
                             return Ok(_default_render())
 
                         res = self._middleware.prerender(
                             path=path,
                             route_info=route_info,
                             request=PulseRequest.from_fastapi(request),
-                            context=req_ctx,
+                            context=ctx,
                             next=_next,
                         )
                     except Exception:
@@ -183,11 +193,13 @@ class App:
                     def _next():
                         return Ok(None)
 
-                    res = self._middleware.connect(
-                        request=PulseRequest.from_socketio_environ(environ, auth),
-                        ctx=session.context,
-                        next=_next,
-                    )
+                    # Ensure middleware executes within the session's reactive context
+                    with session._rc:
+                        res = self._middleware.connect(
+                            request=PulseRequest.from_socketio_environ(environ, auth),
+                            ctx=session.context,
+                            next=_next,
+                        )
                 except Exception:
                     logger.exception("Error in connect middleware")
                     res = Ok(None)
@@ -216,9 +228,13 @@ class App:
                     # Per-message middleware guard
                     if self._middleware:
                         try:
-                            res = self._middleware.message(
-                                ctx=sess.context, data=data, next=lambda: Ok(None)
-                            )
+                            # Run middleware within the session's reactive context
+                            with sess._rc:
+                                res = self._middleware.message(
+                                    ctx=sess.context,
+                                    data=data,
+                                    next=lambda: Ok(None),
+                                )
                             if isinstance(res, Deny):
                                 # Report as server error for this path
                                 path = data["path"]

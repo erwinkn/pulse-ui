@@ -19,6 +19,8 @@ from .middleware import (
     PulseRequest,
     ConnectResponse,
     PrerenderResponse,
+    MiddlewareStack,
+    stack,
 )
 from .decorators import computed, effect, query
 
@@ -307,6 +309,8 @@ __all__ = [
     "PulseRequest",
     "ConnectResponse",
     "PrerenderResponse",
+    "MiddlewareStack",
+    "stack",
     # Decorators
     "computed",
     "effect",

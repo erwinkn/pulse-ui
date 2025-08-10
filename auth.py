@@ -14,6 +14,7 @@ This example shows:
 
 from __future__ import annotations
 from urllib.parse import urlparse
+import time
 
 import pulse as ps
 from fastapi import Response, Request
@@ -64,16 +65,41 @@ class AuthMiddleware(ps.PulseMiddleware):
         return next()
 
 
+# Simple logging/timing middleware
+class LoggingMiddleware(ps.PulseMiddleware):
+    def prerender(self, *, path, route_info, request, context, next):
+        start = time.perf_counter()
+        res = next()
+        duration_ms = (time.perf_counter() - start) * 1000
+        print(f"[MW prerender] path={path} took={duration_ms:.1f}ms")
+        return res
+
+    def connect(self, *, request, ctx, next):
+        ua = request.headers.get("user-agent")
+        ip = request.client[0] if request.client else None
+        print(f"[MW connect] ip={ip} ua={(ua or '')[:60]}")
+        return next()
+
+    def message(self, *, ctx, data, next):
+        t = data.get("type") if isinstance(data, dict) else None
+        if t:
+            print(f"[MW message] type={t}")
+        return next()
+
+
 # ---------------------- UI ----------------------
+
 
 class LoginState(ps.State):
     email: str = ""
     password: str = ""
 
-    def set_email(self, email:str):
+    def set_email(self, email: str):
         self.email = email
+
     def set_password(self, password: str):
-        self.password =password
+        self.password = password
+
 
 @ps.component
 def login():
@@ -81,7 +107,7 @@ def login():
 
     async def submit():
         # Use call_api helper to set the cookie without page reload
-        body = {"email": state.email, 'password': state.password }
+        body = {"email": state.email, "password": state.password}
         print("Calling API with body:", body)
         res = await call_api(
             "http://localhost:8000/api/login", method="POST", body=body
@@ -100,7 +126,7 @@ def login():
                 type="email",
                 required=True,
                 className="input mb-3",
-                onChange=lambda evt: state.set_email(evt['target']['value'])
+                onChange=lambda evt: state.set_email(evt["target"]["value"]),
             ),
         ),
         ps.div(
@@ -111,7 +137,7 @@ def login():
                 type="password",
                 required=True,
                 className="input mb-3",
-                onChange=lambda evt: state.set_password(evt['target']['value'])
+                onChange=lambda evt: state.set_password(evt["target"]["value"]),
             ),
         ),
         ps.button("Sign in", onClick=submit, className="btn-primary"),
@@ -169,7 +195,7 @@ app = ps.App(
             ],
         )
     ],
-    middleware=AuthMiddleware(),
+    middleware=[LoggingMiddleware(), AuthMiddleware()],
 )
 
 

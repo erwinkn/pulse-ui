@@ -188,9 +188,10 @@ class Node:
         key: Optional[str] = None,
     ):
         self.tag = tag
-        self.props = props
-        self.children = children
-        self.key = key
+        # Normalize to None
+        self.props = props or None
+        self.children = children or None
+        self.key = key or None
 
     # --- Pretty printing helpers -------------------------------------------------
     def __repr__(self) -> str:  # pragma: no cover - trivial formatting

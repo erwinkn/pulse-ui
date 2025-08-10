@@ -74,12 +74,12 @@ class HookState:
         self.called = HookCalled()
         self.render_count = 0
 
-    def mount(self):
+    def ctx(self):
         self.called.reset()
         self.render_count += 1
         return MountHookState(self)
 
-    def dispose(self):
+    def unmount(self):
         for effect in self.setup.effects:
             effect.dispose()
         for effect in self.effects:
@@ -87,8 +87,6 @@ class HookState:
         for state in self.states:
             for effect in state.effects():
                 effect.dispose()
-
-
 
 
 HOOK_CONTEXT: ContextVar[HookState | None] = ContextVar(
@@ -334,14 +332,17 @@ class Router(State):
         self.pathParams = info["pathParams"]
         self.catchall = info["catchall"]
 
+
 class RouteContext:
     def __init__(self, route_info: Router, session_context: ReactiveDict) -> None:
         self.route_info = route_info
         self.session_context = session_context
 
+
 ROUTE_CONTEXT: ContextVar[RouteContext | None] = ContextVar(
     "pulse_route_context", default=None
 )
+
 
 def route_info() -> Router:
     ctx = ROUTE_CONTEXT.get()

@@ -1,7 +1,10 @@
-import json
+from pulse.reactive import flush_effects
 from pulse.reconciler import Resolver
-from pulse.reconciler import RenderNode
+from pulse.reconciler import RenderNode, RenderRoot
 import pulse as ps
+from typing import Callable, cast
+
+from pulse.vdom import Callback
 
 
 # =================
@@ -29,7 +32,7 @@ def test_capture_callbacks_single_with_and_without_path():
     out1 = r._capture_callbacks(props1, path="")
     assert out1 is not props1
     assert out1["onClick"] == "$$fn:onClick"
-    assert r.callbacks["onClick"] is cb
+    assert r.callbacks["onClick"].fn is cb
     assert out1["id"] == "a"
 
     # With path: prefix and dot should be added
@@ -37,7 +40,7 @@ def test_capture_callbacks_single_with_and_without_path():
     props2 = {"onClick": cb}
     out2 = r2._capture_callbacks(props2, path="1.child")
     assert out2["onClick"] == "$$fn:1.child.onClick"
-    assert r2.callbacks["1.child.onClick"] is cb
+    assert r2.callbacks["1.child.onClick"].fn is cb
 
 
 def test_capture_callbacks_multiple_callbacks_preserved_and_mapped():
@@ -58,8 +61,8 @@ def test_capture_callbacks_multiple_callbacks_preserved_and_mapped():
     assert out["label"] == "L"
 
     assert r.callbacks == {
-        "root.onClick": a,
-        "root.onHover": b,
+        "root.onClick": Callback(a, 0),
+        "root.onHover": Callback(b, 0),
     }
 
 
@@ -76,16 +79,15 @@ def test_render_tree_simple_component_and_callbacks():
 
     resolver = Resolver()
     root = RenderNode(Simple.fn)
-    vdom = resolver.render_tree(root, Simple(), path="")
+    vdom, _ = resolver.render_tree(root, Simple(), path="")
 
-    print("vdom:", json.dumps(vdom, indent=2))
     assert vdom == {
         "tag": "button",
         "props": {"onClick": "$$fn:onClick"},
         "children": ["Go"],
     }
     assert "" in root.children  # top-level component tracked
-    assert callable(resolver.callbacks["onClick"])  # captured
+    assert callable(resolver.callbacks["onClick"].fn)  # captured
 
 
 def test_render_tree_nested_components_depth_3_callbacks_and_paths():
@@ -107,7 +109,7 @@ def test_render_tree_nested_components_depth_3_callbacks_and_paths():
     resolver = Resolver()
     root = RenderNode(lambda: None)
 
-    vdom = resolver.render_tree(root, Top(), path="")
+    vdom, _ = resolver.render_tree(root, Top(), path="")
 
     assert vdom == {
         "tag": "div",
@@ -136,3 +138,394 @@ def test_render_tree_nested_components_depth_3_callbacks_and_paths():
 
     # Callback captured with fully qualified path
     assert "0.0.onClick" in resolver.callbacks
+
+
+# TODOs:
+# - Verify diffs are correct (first step)
+# - Verify components are mounted/unmounted
+# - Verify keyed components are
+
+
+def test_render_tree_component_with_children_kwarg_and_nested_component():
+    @ps.component
+    def Child():
+        def click():
+            return "ok"
+
+        return ps.button(onClick=click)["X"]
+
+    @ps.component
+    def Wrapper(children=None, id: str = "wrap"):
+        children = children or []
+        return ps.div(id=id)[*children]
+
+    @ps.component
+    def Top():
+        return Wrapper(id="w")[Child()]
+
+    resolver = Resolver()
+    root = RenderNode(Top.fn)
+    vdom, _ = resolver.render_tree(root, Top(), path="")
+
+    assert vdom == {
+        "tag": "div",
+        "props": {"id": "w"},
+        "children": [
+            {"tag": "button", "props": {"onClick": "$$fn:0.onClick"}, "children": ["X"]}
+        ],
+    }
+    assert "0.onClick" in resolver.callbacks
+
+
+# =====================
+# Reconciliation (unkeyed)
+# =====================
+
+
+def test_reconcile_initial_insert_simple_component():
+    @ps.component
+    def Simple():
+        def on_click():
+            return "ok"
+
+        return ps.button(onClick=on_click)["Go"]
+
+    root = RenderRoot(Simple)
+    result = root.render()
+
+    assert result.ops == [
+        {
+            "type": "insert",
+            "path": "",
+            "data": {
+                "tag": "button",
+                "props": {"onClick": "$$fn:onClick"},
+                "children": ["Go"],
+            },
+        }
+    ]
+    assert "onClick" in result.callbacks
+
+
+def test_reconcile_props_update_between_renders():
+    attrs = {"className": "a"}
+
+    @ps.component
+    def View():
+        res = ps.div(className=attrs["className"])["x"]
+        return res
+
+    # First render -> insert
+    r1 = RenderRoot(View)
+    first = r1.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # mutate props
+    attrs["className"] = "b"
+
+    # Second render using previous VDOM -> update_props
+    second = r1.render()
+    assert second.ops == [
+        {"type": "update_props", "path": "", "data": {"className": "b"}}
+    ]
+
+
+def test_reconcile_primitive_changes_and_none():
+    val: dict[str, str | None] = {"text": "A"}
+
+    @ps.component
+    def P():
+        return val["text"]
+
+    # Initial insert of primitive
+    root = RenderRoot(P)
+    first = root.render()
+    assert first.ops == [{"type": "insert", "path": "", "data": "A"}]
+
+    # Change primitive -> replace
+    val["text"] = "B"
+    second = root.render()
+    assert second.ops == [{"type": "replace", "path": "", "data": "B"}]
+
+    # Change to None -> remove
+    val["text"] = None
+    third = root.render()
+    assert third.ops == [{"type": "remove", "path": ""}]
+
+
+def test_reconcile_conditional_children_insert_remove():
+    show_extra = {"flag": False}
+
+    @ps.component
+    def View():
+        children = [ps.span("A")]
+        if show_extra["flag"]:
+            children.append(ps.span("B"))
+        return ps.div(*children)
+
+    # First render (no extra) -> insert
+    root = RenderRoot(View)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # Add extra child -> insert at path 1
+    show_extra["flag"] = True
+    second = root.render()
+    assert second.ops == [
+        {"type": "insert", "path": "1", "data": {"tag": "span", "children": ["B"]}}
+    ]
+
+    # Remove extra child -> remove at path 1
+    show_extra["flag"] = False
+    third = root.render()
+    assert third.ops == [{"type": "remove", "path": "1"}]
+
+
+def test_reconcile_deep_nested_text_replace():
+    content = {"b": "B"}
+
+    @ps.component
+    def View():
+        # div()[ div()[ span("A"), span(content['b']) ] ]
+        return ps.div(
+            ps.div(
+                ps.span("A"),
+                ps.span(content["b"]),
+            )
+        )
+
+    root = RenderRoot(View)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    content["b"] = "BB"
+    second = root.render()
+    assert second.ops == [{"type": "replace", "path": "0.1.0", "data": "BB"}]
+
+
+def test_component_unmount_on_remove_runs_cleanup():
+    logs: list[str] = []
+    state = {"on": True}
+
+    @ps.component
+    def Child():
+        def eff():
+            def cleanup():
+                logs.append("child_cleanup")
+
+            return cleanup
+
+        ps.effects(eff)
+        return ps.div("child")
+
+    @ps.component
+    def Parent():
+        return ps.div(Child()) if state["on"] else ps.div()
+
+    root = RenderRoot(Parent)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # Simulate an effect execution after first render
+    flush_effects()
+
+    state["on"] = False
+    second = root.render()
+    print("Finished rendering")
+    assert second.ops == [{"type": "remove", "path": "0"}]
+    assert logs == ["child_cleanup"]
+
+
+def test_component_unmount_on_replace_runs_cleanup_and_replaces_subtree():
+    logs: list[str] = []
+    which = {"a": True}
+
+    @ps.component
+    def A():
+        def eff():
+            def cleanup():
+                logs.append("A_cleanup")
+
+            return cleanup
+
+        ps.effects(eff)
+        return ps.span("Achild")
+
+    @ps.component
+    def B():
+        def eff():
+            def cleanup():
+                logs.append("B_cleanup")
+
+            return cleanup
+
+        ps.effects(eff)
+        return ps.span("Bchild")
+
+    @ps.component
+    def Parent():
+        child = A() if which["a"] else B()
+        return ps.div(child)
+
+    root = RenderRoot(Parent)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # Simulate an effect execution after first render
+    flush_effects()
+
+    which["a"] = False
+    second = root.render()
+    assert second.ops == [
+        {
+            "type": "replace",
+            "path": "0",
+            "data": {"tag": "span", "children": ["Bchild"]},
+        }
+    ]
+    # Only A should have been cleaned up
+    assert logs.count("A_cleanup") == 1
+    assert logs.count("B_cleanup") == 0
+
+
+def test_state_persistence_nested_siblings_and_isolation():
+    class Counter(ps.State):
+        count: int = 0
+
+        def inc(self):
+            self.count += 1
+
+    @ps.component
+    def Nested(label: str):
+        s = ps.states(Counter)
+
+        def do_inc():
+            s.inc()
+
+        return ps.div(
+            ps.span(f"{label}:{s.count}"),
+            ps.button(onClick=do_inc)["incN"],
+        )
+
+    @ps.component
+    def Sibling(name: str):
+        s = ps.states(Counter)
+
+        def do_inc():
+            s.inc()
+
+        return ps.div(
+            ps.span(f"{name}:{s.count}"),  # 0
+            ps.button(onClick=do_inc)["inc"],  # 1
+            Nested(f"{name}-child"),  # 2
+        )
+
+    @ps.component
+    def Top():
+        return ps.div(
+            Sibling("A"),  # path 0
+            Sibling("B"),  # path 1
+        )
+
+    root = RenderRoot(Top)
+    first = root.render()
+    cbs = first.callbacks
+
+    # Sanity: expected callbacks are present
+    assert set(cbs.keys()) >= {
+        "0.1.onClick",
+        "0.2.1.onClick",
+        "1.1.onClick",
+        "1.2.1.onClick",
+    }
+
+    # Increment A's own counter
+    cbs["0.1.onClick"].fn()  # simulate button click
+    second = root.render()
+    print("second.ops = ", second.ops)
+    assert second.ops == [{"type": "replace", "path": "0.0.0", "data": "A:1"}]
+
+    # Increment A's nested counter
+    cbs = second.callbacks
+    cbs["0.2.1.onClick"].fn()
+    third = root.render()
+    print("third.ops = ", second.ops)
+    assert third.ops == [{"type": "replace", "path": "0.2.0.0", "data": "A-child:1"}]
+
+    # Increment B's own counter; A should not change
+    cbs = third.callbacks
+    cbs["1.1.onClick"].fn()
+    fourth = root.render()
+    print("fourth.ops = ", second.ops)
+    assert fourth.ops == [{"type": "replace", "path": "1.0.0", "data": "B:1"}]
+
+
+def test_callback_identity_change_no_update_props_and_callbacks_swap():
+    fn = {}
+
+    def f1():
+        return None
+
+    def f2():
+        return None
+
+    fn["cur"] = f1
+
+    @ps.component
+    def View():
+        return ps.button(onClick=fn["cur"])["X"]
+
+    root = RenderRoot(View)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.callbacks["onClick"].fn is f1
+
+    fn["cur"] = f2
+    second = root.render()
+    assert second.ops == []
+    assert second.callbacks["onClick"].fn is f2
+
+
+def test_component_arg_change_rerenders_leaf_not_remount():
+    logs: list[str] = []
+    name = {"msg": "A"}
+
+    @ps.component
+    def Child(msg: str):
+        def eff():
+            def cleanup():
+                logs.append("cleanup")
+
+            return cleanup
+
+        ps.effects(eff)
+        return ps.span(msg)
+
+    @ps.component
+    def Parent():
+        return ps.div(Child(name["msg"]))
+
+    root = RenderRoot(Parent)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    name["msg"] = "B"
+    second = root.render()
+    assert second.ops == [{"type": "replace", "path": "0.0", "data": "B"}]
+    assert logs == []
+
+
+def test_props_removal_emits_empty_update_props():
+    toggle = {"on": True}
+
+    @ps.component
+    def View():
+        return ps.div(className="a") if toggle["on"] else ps.div()
+
+    root = RenderRoot(View)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    toggle["on"] = False
+    second = root.render()
+    assert second.ops == [{"type": "update_props", "path": "", "data": {}}]

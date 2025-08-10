@@ -2,9 +2,8 @@ import re
 from typing import Callable, Optional, Sequence
 from dataclasses import dataclass, field
 
-from pulse.component import Component
 from pulse.components.registry import ReactComponent
-from pulse.vdom import Node
+from pulse.vdom import Node, Component
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"

@@ -323,7 +323,7 @@ class TestComplexStructures:
 
         # Just test that it renders without checking exact structure
         # Form structures are complex and the exact layout may vary
-        result, callbacks = form_structure.render()
+        result = form_structure.render()
         assert result["tag"] == "form"
         props = result.get("props")
         assert props is not None
@@ -480,7 +480,7 @@ class TestFromVDOM:
 
     def test_from_vdom_roundtrip_without_callbacks(self):
         structure = div(className="box")[span()["Hi"]]
-        tree, _ = structure.render()
+        tree = structure.render()
         rebuilt = Node.from_vdom(tree)
         assert isinstance(rebuilt, Node)
         assert_node_equal(rebuilt, structure)
@@ -490,8 +490,8 @@ class TestFromVDOM:
             pass
 
         btn = button(onClick=cb)["X"]
-        tree, _ = btn.render()
+        tree = btn.render()
         rebuilt = Node.from_vdom(tree)
         assert isinstance(rebuilt, Node)
-        rebuilt_vdom, _ = rebuilt.render()
+        rebuilt_vdom = rebuilt.render()
         assert (rebuilt_vdom.get("props") or {}).get("onClick", "").startswith("$$fn:")

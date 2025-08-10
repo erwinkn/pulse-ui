@@ -156,6 +156,8 @@ class Layout:
         self.children = children or []
         self.components = components
         self.parent: Optional[Route | Layout] = None
+        # 1-based sibling index assigned by RouteTree at each level
+        self.idx: int = 1
 
     def _path_list(self, include_layouts=False) -> list[str]:
         path_list = (
@@ -164,7 +166,8 @@ class Layout:
             else []
         )
         if include_layouts:
-            path_list.append(LAYOUT_INDICATOR)
+            nb = "" if self.idx == 1 else str(self.idx)
+            path_list.append(LAYOUT_INDICATOR + nb)
         return path_list
 
     def unique_path(self):
@@ -200,11 +203,19 @@ class RouteTree:
                     raise RuntimeError(f"Multiple routes have the same path '{key}'")
 
             self.flat_tree[key] = route
+            layout_count = 0
             for child in route.children:
+                if isinstance(route, Layout):
+                    layout_count += 1
+                    route.idx = layout_count
                 child.parent = route
                 _flatten_route_tree(child)
 
+        layout_count = 0
         for route in routes:
+            if isinstance(route, Layout):
+                layout_count += 1
+                route.idx = layout_count
             _flatten_route_tree(route)
 
     def find(self, path: str):

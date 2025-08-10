@@ -205,9 +205,9 @@ class RouteTree:
             self.flat_tree[key] = route
             layout_count = 0
             for child in route.children:
-                if isinstance(route, Layout):
+                if isinstance(child, Layout):
                     layout_count += 1
-                    route.idx = layout_count
+                    child.idx = layout_count
                 child.parent = route
                 _flatten_route_tree(child)
 
@@ -215,8 +215,10 @@ class RouteTree:
         for route in routes:
             if isinstance(route, Layout):
                 layout_count += 1
+                print(f"Marking layout with idx = {layout_count}")
                 route.idx = layout_count
             _flatten_route_tree(route)
+        print("Route tree:", self.flat_tree)
 
     def find(self, path: str):
         path = normalize_path(path)

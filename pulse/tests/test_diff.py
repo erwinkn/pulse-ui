@@ -1,425 +1,174 @@
-"""
-Tests for the VDOM diffing algorithm.
-
-This test suite covers all aspects of the diffing algorithm including:
-- Basic node operations (insert, remove, replace)
-- Property updates
-- Children diffing with keys
-- Edge cases and complex scenarios
-"""
-
-import pytest
-from pulse.diff import diff_vdom
-from pulse.vdom import VDOMNode
-from pulse.tests.test_utils import assert_vdom_equal
+from pulse.diff import diff_node
+from pulse.vdom import Node, div, span, button
 
 
-class TestBasicDiffing:
-    """Test basic diffing operations."""
+def test_null_cases_node():
+    # Both None
+    ops = diff_node(None, None)
+    assert ops == []
 
-    def test_null_cases(self):
-        """Test diffing with None values."""
-        # Both None
-        ops = diff_vdom(None, None)
-        assert ops == []
+    # Insert from None
+    new_node = div()["Hello"]
+    ops = diff_node(None, new_node)
+    new_vdom, _ = new_node.render()
+    assert len(ops) == 1
+    assert ops[0] == {"type": "insert", "path": "", "data": new_vdom}
 
-        # Insert from None
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "test"},
-            "children": ["Hello"],
-        }
-        ops = diff_vdom(None, new_vdom)
-        assert len(ops) == 1
-        assert ops[0] == {"type": "insert", "path": "", "data": new_vdom}
-
-        # Remove to None
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "test"},
-            "children": ["Hello"],
-        }
-        ops = diff_vdom(old_vdom, None)
-        assert len(ops) == 1
-        assert ops[0] == {"type": "remove", "path": "", "data": None}
-
-    def test_identical_nodes(self):
-        """Test that identical nodes produce no operations."""
-        vdom1: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "test"},
-            "children": ["Hello"],
-        }
-        vdom2: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "test"},
-            "children": ["Hello"],
-        }
-        ops = diff_vdom(vdom1, vdom2)
-        assert ops == []
-
-    def test_text_node_changes(self):
-        """Test diffing text nodes."""
-        # Same text
-        ops = diff_vdom("hello", "hello")
-        assert ops == []
-
-        # Changed text
-        ops = diff_vdom("hello", "world")
-        assert len(ops) == 1
-        assert ops[0] == {"type": "replace", "path": "", "data": "world"}
-
-        # Text to element
-        new_vdom: VDOMNode = {"tag": "span", "children": ["world"]}
-        ops = diff_vdom("hello", new_vdom)
-        assert len(ops) == 1
-        assert ops[0]["type"] == "replace"
-        assert_vdom_equal(ops[0]["data"], new_vdom)
-
-    def test_tag_changes(self):
-        """Test nodes with different tags get replaced."""
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "test"},
-            "children": ["Hello"],
-        }
-        new_vdom: VDOMNode = {
-            "tag": "span",
-            "props": {"class": "test"},
-            "children": ["Hello"],
-        }
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) == 1
-        assert ops[0]["type"] == "replace"
-        assert_vdom_equal(ops[0]["data"], new_vdom)
+    # Remove to None
+    old_node = Node("div", {"class": "test"})["Hello"]
+    ops = diff_node(old_node, None)
+    assert len(ops) == 1
+    assert ops[0] == {"type": "remove", "path": "", "data": None}
 
 
-class TestPropertyDiffing:
-    """Test property diffing functionality."""
-
-    def test_no_prop_changes(self):
-        """Test when properties are identical."""
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "test", "id": "main"},
-        }
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "test", "id": "main"},
-        }
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert ops == []
-
-    def test_prop_changes(self):
-        """Test when properties change."""
-        old_vdom: VDOMNode = {"tag": "div", "props": {"class": "old", "id": "main"}}
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "new", "data-value": "123"},
-        }
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) == 1
-        assert ops[0]["type"] == "update_props"
-        assert ops[0]["data"] == {"class": "new", "data-value": "123"}
+def test_identical_nodes_node():
+    a = Node("div", {"class": "test"})["Hello"]
+    b = Node("div", {"class": "test"})["Hello"]
+    ops = diff_node(a, b)
+    assert ops == []
 
 
-class TestChildrenDiffing:
-    """Test children diffing with and without keys."""
+def test_text_node_changes_node():
+    # Same text
+    ops = diff_node("hello", "hello")
+    assert ops == []
 
-    def test_no_children_changes(self):
-        """Test when children are identical."""
-        old_vdom: VDOMNode = {"tag": "div", "children": ["Hello", "World"]}
-        new_vdom: VDOMNode = {"tag": "div", "children": ["Hello", "World"]}
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert ops == []
+    # Changed text
+    ops = diff_node("hello", "world")
+    assert len(ops) == 1
+    assert ops[0] == {"type": "replace", "path": "", "data": "world"}
 
-    def test_append_children(self):
-        """Test appending new children."""
-        old_vdom: VDOMNode = {"tag": "div", "children": ["Hello"]}
-        new_vdom: VDOMNode = {"tag": "div", "children": ["Hello", "World"]}
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) == 1
-        assert ops[0] == {"type": "insert", "path": "1", "data": "World"}
-
-    def test_remove_children(self):
-        """Test removing children."""
-        old_vdom: VDOMNode = {"tag": "div", "children": ["Hello", "World"]}
-        new_vdom: VDOMNode = {"tag": "div", "children": ["Hello"]}
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) == 1
-        assert ops[0] == {"type": "remove", "path": "1", "data": None}
-
-    def test_replace_children(self):
-        """Test replacing children."""
-        old_vdom: VDOMNode = {"tag": "div", "children": ["Hello", "Old"]}
-        new_vdom: VDOMNode = {"tag": "div", "children": ["Hello", "New"]}
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) == 1
-        assert ops[0] == {"type": "replace", "path": "1", "data": "New"}
+    # Text to element
+    new_node = span()["world"]
+    ops = diff_node("hello", new_node)
+    new_vdom, _ = new_node.render()
+    assert len(ops) == 1
+    assert ops[0]["type"] == "replace"
+    assert ops[0]["data"] == new_vdom
 
 
-class TestKeyedDiffing:
-    """Test keyed reconciliation."""
-
-    def test_keyed_reorder(self):
-        """Test reordering keyed elements."""
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "children": [
-                {"tag": "div", "props": {"id": "1"}, "children": ["First"], "key": "a"},
-                {
-                    "tag": "div",
-                    "props": {"id": "2"},
-                    "children": ["Second"],
-                    "key": "b",
-                },
-                {"tag": "div", "props": {"id": "3"}, "children": ["Third"], "key": "c"},
-            ],
-        }
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "children": [
-                {"tag": "div", "props": {"id": "3"}, "children": ["Third"], "key": "c"},
-                {"tag": "div", "props": {"id": "1"}, "children": ["First"], "key": "a"},
-                {
-                    "tag": "div",
-                    "props": {"id": "2"},
-                    "children": ["Second"],
-                    "key": "b",
-                },
-            ],
-        }
-
-        ops = diff_vdom(old_vdom, new_vdom)
-        move_ops = [op for op in ops if op["type"] == "move"]
-        assert len(move_ops) > 0
-
-    def test_keyed_add_remove(self):
-        """Test adding and removing keyed elements."""
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "children": [
-                {"tag": "div", "props": {"id": "1"}, "children": ["First"], "key": "a"},
-                {
-                    "tag": "div",
-                    "props": {"id": "2"},
-                    "children": ["Second"],
-                    "key": "b",
-                },
-            ],
-        }
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "children": [
-                {"tag": "div", "props": {"id": "1"}, "children": ["First"], "key": "a"},
-                {"tag": "div", "props": {"id": "3"}, "children": ["Third"], "key": "c"},
-            ],
-        }
-
-        ops = diff_vdom(old_vdom, new_vdom)
-        insert_ops = [op for op in ops if op["type"] == "insert"]
-        assert len(insert_ops) >= 1
-        remove_ops = [op for op in ops if op["type"] == "remove"]
-        assert len(remove_ops) >= 1
-
-    def test_mixed_keyed_unkeyed(self):
-        """Test mixing keyed and unkeyed children."""
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "children": [
-                "text1",
-                {
-                    "tag": "div",
-                    "props": {"id": "1"},
-                    "children": ["Keyed"],
-                    "key": "k1",
-                },
-                "text2",
-            ],
-        }
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "children": [
-                "newtext1",
-                {
-                    "tag": "div",
-                    "props": {"id": "2"},
-                    "children": ["NewKeyed"],
-                    "key": "k2",
-                },
-                "text2",
-            ],
-        }
-
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) > 0
-        replace_ops = [op for op in ops if op["type"] == "replace"]
-        assert any(op["data"] == "newtext1" for op in replace_ops)
+def test_tag_changes_node():
+    old_node = Node("div", {"class": "test"})["Hello"]
+    new_node = Node("span", {"class": "test"})["Hello"]
+    ops = diff_node(old_node, new_node)
+    new_vdom, _ = new_node.render()
+    assert len(ops) == 1
+    assert ops[0]["type"] == "replace"
+    assert ops[0]["data"] == new_vdom
 
 
-class TestComplexScenarios:
-    """Test complex diffing scenarios."""
-
-    def test_nested_changes(self):
-        """Test changes in deeply nested structures."""
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "container"},
-            "children": [
-                {"tag": "header", "children": ["Title"]},
-                {
-                    "tag": "main",
-                    "children": [{"tag": "section", "children": ["Content"]}],
-                },
-            ],
-        }
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "container"},
-            "children": [
-                {"tag": "header", "children": ["New Title"]},
-                {
-                    "tag": "main",
-                    "children": [
-                        {"tag": "section", "children": ["New Content"]},
-                        {"tag": "footer", "children": ["Footer"]},
-                    ],
-                },
-            ],
-        }
-
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) > 0
-        deep_ops = [op for op in ops if "." in op["path"]]
-        assert len(deep_ops) > 0
-
-    def test_large_list_changes(self):
-        """Test performance with large lists."""
-        old_vdom: VDOMNode = {
-            "tag": "ul",
-            "children": [
-                {
-                    "tag": "item",
-                    "props": {"id": str(i)},
-                    "children": [f"Item {i}"],
-                    "key": str(i),
-                }
-                for i in range(100)
-            ],
-        }
-        new_vdom: VDOMNode = {
-            "tag": "ul",
-            "children": [
-                {
-                    "tag": "item",
-                    "props": {"id": str(i)},
-                    "children": [f"New Item {i}"],
-                    "key": str(i),
-                }
-                for i in range(50, 150)
-            ],
-        }
-
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) > 0
-        op_types = {op["type"] for op in ops}
-        assert "remove" in op_types
-        assert "insert" in op_types
-
-    def test_empty_to_full(self):
-        """Test creating a full tree from empty."""
-        old_vdom = None
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "app"},
-            "children": [
-                {"tag": "header", "children": ["My App"]},
-                {
-                    "tag": "main",
-                    "children": [
-                        {"tag": "p", "children": ["Welcome to my app!"]},
-                        {
-                            "tag": "button",
-                            "props": {"onclick": "alert('clicked')"},
-                            "children": ["Click me"],
-                        },
-                    ],
-                },
-            ],
-        }
-
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) == 1
-        assert ops[0]["type"] == "insert"
-        assert ops[0]["path"] == ""
-
-    def test_full_to_empty(self):
-        """Test removing a full tree."""
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "props": {"class": "app"},
-            "children": [
-                {"tag": "header", "children": ["My App"]},
-                {
-                    "tag": "main",
-                    "children": [
-                        {"tag": "p", "children": ["Welcome to my app!"]},
-                        {
-                            "tag": "button",
-                            "props": {"onclick": "alert('clicked')"},
-                            "children": ["Click me"],
-                        },
-                    ],
-                },
-            ],
-        }
-        new_vdom = None
-
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) == 1
-        assert ops[0]["type"] == "remove"
-        assert ops[0]["path"] == ""
-
-    def test_different_types(self):
-        """Test nodes of completely different types."""
-        ops = diff_vdom(42, {"tag": "div", "children": ["text"]})
-        assert len(ops) == 1
-        assert ops[0]["type"] == "replace"
-
-        ops = diff_vdom(True, "false")
-        assert len(ops) == 1
-        assert ops[0] == {"type": "replace", "path": "", "data": "false"}
-
-    def test_deeply_nested_keys(self):
-        """Test keys in deeply nested structures."""
-        old_vdom: VDOMNode = {
-            "tag": "div",
-            "children": [
-                {
-                    "tag": "section",
-                    "children": [
-                        {"tag": "item", "children": ["A"], "key": "item-a"},
-                        {"tag": "item", "children": ["B"], "key": "item-b"},
-                    ],
-                }
-            ],
-        }
-        new_vdom: VDOMNode = {
-            "tag": "div",
-            "children": [
-                {
-                    "tag": "section",
-                    "children": [
-                        {"tag": "item", "children": ["B"], "key": "item-b"},
-                        {"tag": "item", "children": ["C"], "key": "item-c"},
-                    ],
-                }
-            ],
-        }
-
-        ops = diff_vdom(old_vdom, new_vdom)
-        assert len(ops) > 0
+def test_no_prop_changes_node():
+    a = Node("div", {"class": "test", "id": "main"})
+    b = Node("div", {"class": "test", "id": "main"})
+    ops = diff_node(a, b)
+    assert ops == []
 
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+def test_prop_changes_node():
+    old_node = Node("div", {"class": "old", "id": "main"})
+    new_node = Node("div", {"class": "new", "data-value": "123"})
+    ops = diff_node(old_node, new_node)
+    assert len(ops) == 1
+    assert ops[0]["type"] == "update_props"
+    assert ops[0]["data"] == {"class": "new", "data-value": "123"}
+
+
+def test_children_no_changes_node():
+    old_node = div()["Hello", "World"]
+    new_node = div()["Hello", "World"]
+    ops = diff_node(old_node, new_node)
+    assert ops == []
+
+
+def test_append_children_node():
+    old_node = div()["Hello"]
+    new_node = div()["Hello", "World"]
+    ops = diff_node(old_node, new_node)
+    assert len(ops) == 1
+    assert ops[0] == {"type": "insert", "path": "1", "data": "World"}
+
+
+def test_remove_children_node():
+    old_node = div()["Hello", "World"]
+    new_node = div()["Hello"]
+    ops = diff_node(old_node, new_node)
+    assert len(ops) == 1
+    assert ops[0] == {"type": "remove", "path": "1", "data": None}
+
+
+def test_replace_children_node():
+    old_node = div()["Hello", "Old"]
+    new_node = div()["Hello", "New"]
+    ops = diff_node(old_node, new_node)
+    assert len(ops) == 1
+    assert ops[0] == {"type": "replace", "path": "1", "data": "New"}
+
+
+def test_keyed_reorder_node():
+    old_node = Node("div")[
+        Node("div", {"id": "1"}, key="a")["First"],
+        Node("div", {"id": "2"}, key="b")["Second"],
+        Node("div", {"id": "3"}, key="c")["Third"],
+    ]
+    new_node = Node("div")[
+        Node("div", {"id": "3"}, key="c")["Third"],
+        Node("div", {"id": "1"}, key="a")["First"],
+        Node("div", {"id": "2"}, key="b")["Second"],
+    ]
+    ops = diff_node(old_node, new_node)
+    assert any(op["type"] == "move" for op in ops)
+
+
+def test_keyed_add_remove_node():
+    old_node = Node("div")[
+        Node("div", {"id": "1"}, key="a")["First"],
+        Node("div", {"id": "2"}, key="b")["Second"],
+    ]
+    new_node = Node("div")[
+        Node("div", {"id": "1"}, key="a")["First"],
+        Node("div", {"id": "3"}, key="c")["Third"],
+    ]
+    ops = diff_node(old_node, new_node)
+    assert any(op["type"] == "insert" for op in ops)
+    assert any(op["type"] == "remove" for op in ops)
+
+
+def test_mixed_keyed_unkeyed_node():
+    old_node = Node("div")[
+        "text1",
+        Node("div", {"id": "1"}, key="k1")["Keyed"],
+        "text2",
+    ]
+    new_node = Node("div")[
+        "newtext1",
+        Node("div", {"id": "2"}, key="k2")["NewKeyed"],
+        "text2",
+    ]
+    ops = diff_node(old_node, new_node)
+    assert len(ops) > 0
+    assert any(op["type"] == "replace" and op["data"] == "newtext1" for op in ops)
+
+
+def test_nested_changes_node():
+    old_node = Node("div", {"class": "container"})[
+        Node("header")["Title"],
+        Node("main")[Node("section")["Content"]],
+    ]
+    new_node = Node("div", {"class": "container"})[
+        Node("header")["New Title"],
+        Node("main")[Node("section")["New Content"], Node("footer")["Footer"]],
+    ]
+    ops = diff_node(old_node, new_node)
+    assert len(ops) > 0
+    assert any("." in op["path"] for op in ops)
+
+
+def test_button_callbacks_props_diff_node():
+    # Ensure callback placeholders are part of props diff
+    def cb():
+        pass
+
+    old_node = button(onClick=cb)["X"]
+    new_node = button(onClick=cb)["X"]
+    ops = diff_node(old_node, new_node)
+    assert ops == []

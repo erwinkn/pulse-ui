@@ -16,7 +16,7 @@ from pulse.messages import RouteInfo
 from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack, REACTIVE_CONTEXT
 from pulse.routing import Layout, Route
 from pulse.state import State
-from pulse.vdom import Callbacks
+from pulse.vdom import Callbacks, Node, NodeTree
 
 # Hooks we want:
 # - Setup
@@ -99,7 +99,8 @@ class HookState:
 
 class RenderResult(NamedTuple):
     render_count: int
-    current_vdom: VDOM | None
+    current_node: NodeTree
+    new_node: NodeTree
     new_vdom: VDOM
 
 
@@ -111,7 +112,6 @@ class RenderContext:
     prerendering: bool
     children: "list[RenderContext]"
 
-    vdom: VDOM | None
     callbacks: Callbacks
     hooks: HookState
     effect: Effect | None
@@ -128,7 +128,9 @@ class RenderContext:
         self.route = route
         self.position = position
         self.prerendering = prerendering
-        self.vdom = vdom
+        # If a current VDOM was provided (hydration), store only its Node form
+        # We keep a Node reference as the authoritative server tree
+        self.node: NodeTree = Node.from_vdom(vdom)
 
         self.render_count = 0
         self.children = []
@@ -175,17 +177,18 @@ class RenderContext:
     def render(self) -> RenderResult:
         self.render_count += 1
         with self:
-            current_vdom = self.vdom
-            new_tree = self.route.render.fn()  # type: ignore
-            new_vdom, new_callbacks = new_tree.render()
+            current_node = self.node
+            new_node = self.route.render.fn()  # type: ignore
+            new_vdom, new_callbacks = new_node.render()
             if self.prerendering:
                 REACTIVE_CONTEXT.get().batch.effects = []
 
-            self.vdom = new_vdom
+            self.node = new_node
             self.callbacks = new_callbacks
             return RenderResult(
                 render_count=self.render_count,
-                current_vdom=current_vdom,
+                current_node=current_node,
+                new_node=new_node,
                 new_vdom=new_vdom,
             )
 

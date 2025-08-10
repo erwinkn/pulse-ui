@@ -29,7 +29,7 @@ from pulse.vdom import (
     define_tag,
     define_self_closing_tag,
 )
-from pulse.tests.test_utils import assert_node_renders_to
+from pulse.tests.test_utils import assert_node_renders_to, assert_node_equal
 
 
 class TestUITreeNode:
@@ -424,3 +424,74 @@ class TestEdgeCases:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestFromVDOM:
+    def test_from_vdom_primitives(self):
+        for value in ["text", 123, 3.14, True, None]:
+            assert Node.from_vdom(value) == value
+
+    def test_from_vdom_simple_element(self):
+        vdom: VDOMNode = {"tag": "div"}
+        node = Node.from_vdom(vdom)
+        assert isinstance(node, Node)
+        assert node.tag == "div"
+        assert_node_equal(node, Node("div"))
+
+    def test_from_vdom_with_props_and_children(self):
+        vdom: VDOMNode = {
+            "tag": "div",
+            "props": {"className": "container"},
+            "children": [
+                "Hello",
+                {"tag": "span", "children": ["World"]},
+            ],
+        }
+
+        node = Node.from_vdom(vdom)
+        assert isinstance(node, Node)
+        expected = Node(
+            "div",
+            {"className": "container"},
+            [
+                "Hello",
+                Node("span", None, ["World"]),
+            ],
+        )
+        assert_node_equal(node, expected)
+
+    def test_from_vdom_preserves_key_and_strips_callbacks(self):
+        vdom: VDOMNode = {
+            "tag": "button",
+            "key": "k1",
+            "props": {
+                "type": "button",
+                "onClick": "$$fn:0.onClick",
+            },
+            "children": ["Click"],
+        }
+
+        node = Node.from_vdom(vdom)
+        assert isinstance(node, Node)
+        # onClick placeholder should be removed
+        assert node.props == {"type": "button"}
+        assert node.key == "k1"
+        assert_node_equal(node, Node("button", {"type": "button"}, ["Click"], key="k1"))
+
+    def test_from_vdom_roundtrip_without_callbacks(self):
+        structure = div(className="box")[span()["Hi"]]
+        tree, _ = structure.render()
+        rebuilt = Node.from_vdom(tree)
+        assert isinstance(rebuilt, Node)
+        assert_node_equal(rebuilt, structure)
+
+    def test_from_vdom_roundtrip_preserves_callback_placeholder_on_render(self):
+        def cb():
+            pass
+
+        btn = button(onClick=cb)["X"]
+        tree, _ = btn.render()
+        rebuilt = Node.from_vdom(tree)
+        assert isinstance(rebuilt, Node)
+        rebuilt_vdom, _ = rebuilt.render()
+        assert (rebuilt_vdom.get("props") or {}).get("onClick", "").startswith("$$fn:")

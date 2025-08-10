@@ -13,6 +13,7 @@ from pulse.messages import RouteInfo, ServerMessage
 from pulse.routing import Route, RouteTree
 from pulse.session import Session
 from pulse.reactive import flush_effects
+from pulse.vdom import Node
 
 
 class Counter(ps.State):
@@ -57,21 +58,23 @@ def mount_with_listener(session: Session, path: str):
     messages: list = []
 
     def on_message(msg: ServerMessage):
-        if msg['path'] != path:
+        if msg["path"] != path:
             return
         messages.append(msg)
 
     disconnect = session.connect(on_message)
-    session.mount(path, make_route_info(path), current_vdom=None)  
+    session.mount(path, make_route_info(path), current_vdom=None)
     flush_effects()
     return messages, disconnect
 
 
 def extract_count_from_ctx(session: Session, path: str) -> int:
-    vdom = session.active_routes[path].vdom
-    assert vdom is not None
-    vdom_dict = cast(dict, vdom)
-    children = cast(list, vdom_dict.get("children", []) or [])
+    # Read latest VDOM by re-rendering the server node and inspecting it
+    ctx = session.active_routes[path]
+    node = ctx.node
+    assert isinstance(node, Node)
+    vdom, _ = node.render()
+    children = cast(list, (vdom.get("children", []) or []))
     span = cast(dict, children[0])
     text_children = cast(list, span.get("children", [0]))
     text = text_children[0]

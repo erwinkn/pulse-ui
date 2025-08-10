@@ -6,12 +6,13 @@ from pulse.reactive import flush_effects
 
 
 async def run_query():
-    print('--- Running query ----')
+    "Assumes an async query with a single `await asyncio.sleep(0)` in the middle"
+    # print('--- Running query ----')
     flush_effects()  # runs the effect
-    await asyncio.sleep(0)  # runs the _do_fetch async function
-    await asyncio.sleep(0)  # runs the actual async query
-    await asyncio.sleep(0)
-    print('--- Query should be finished ----')
+    await asyncio.sleep(0)  # starts the async query. stops at the sleep call.
+    await asyncio.sleep(0)  # finishes the async query
+    await asyncio.sleep(0) # executes the `done` callback
+    # print('--- Query should be finished ----')
 
 
 @pytest.mark.asyncio
@@ -44,8 +45,8 @@ async def test_state_query_success():
     await asyncio.sleep(0)  # wait for query to start
     assert query_running
     await asyncio.sleep(0)  # wait for query to run
+    await asyncio.sleep(0) # wait for callback to execute
     assert not query_running
-
     assert not q.is_loading
     assert not q.is_error
     assert q.data == {"id": s.uid}

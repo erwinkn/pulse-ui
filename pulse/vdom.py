@@ -144,7 +144,7 @@ __all__ = [
 # ============================================================================
 
 PrimitiveNode = Union[str, int, float, None]
-NodeChild = Union["Node", PrimitiveNode]
+NodeTree = Union["Node", PrimitiveNode]
 
 
 class VDOMNode(TypedDict):
@@ -157,6 +157,10 @@ class VDOMNode(TypedDict):
 class Callback(NamedTuple):
     fn: Callable
     n_args: int
+
+
+def NOOP(*_args):
+    return None
 
 
 Callbacks = dict[str, Callback]
@@ -174,7 +178,7 @@ class Node:
         self,
         tag: str,
         props: Optional[dict[str, Any] | None] = None,
-        children: Optional[Sequence["NodeChild"]] = None,
+        children: Optional[Sequence["NodeTree"]] = None,
         key: Optional[str] = None,
         callbacks: Optional[dict[str, Callback]] = None,
     ):
@@ -186,14 +190,14 @@ class Node:
 
     def __getitem__(
         self,
-        children_arg: Union[NodeChild, tuple[NodeChild, ...]],
+        children_arg: Union[NodeTree, tuple[NodeTree, ...]],
     ):
         """Support indexing syntax: div()[children] or div()["text"]"""
         if self.children:
             raise ValueError(f"Node already has children: {self.children}")
 
         if isinstance(children_arg, tuple):
-            new_children = cast(list[NodeChild], list(children_arg))
+            new_children = cast(list[NodeTree], list(children_arg))
         else:
             new_children = [children_arg]
 
@@ -245,6 +249,50 @@ class Node:
         tree = self._render_node(path, callbacks)
         return tree, callbacks
 
+    @staticmethod
+    def from_vdom(vdom: VDOM) -> Union["Node", PrimitiveNode]:
+        """Create a Node tree from a VDOM structure.
+
+        - Primitive values are returned as-is
+        - Callback placeholders (values starting with "$$fn:") are stripped
+          from props since we cannot reconstruct Python callables here
+        """
+
+        if not isinstance(vdom, dict):
+            return vdom
+
+        tag = cast(str, vdom.get("tag"))
+        props_in = cast(dict[str, Any] | None, vdom.get("props")) or {}
+
+        props: dict[str, Any] = {}
+        callbacks: dict[str, Callback] = {}
+
+        for prop_key, prop_value in props_in.items():
+            if isinstance(prop_value, str) and prop_value.startswith("$$fn:"):
+                # Preserve as callback metadata on Node so diffs are stable
+                callbacks[prop_key] = Callback(NOOP, 0)
+                continue
+            props[prop_key] = prop_value
+
+        key_value = cast(Optional[str], vdom.get("key"))
+
+        children_value: list[NodeTree] | None = None
+        raw_children = cast(
+            Sequence[VDOMNode | PrimitiveNode] | None, vdom.get("children")
+        )
+        if raw_children is not None:
+            children_value = []
+            for raw_child in raw_children:
+                children_value.append(Node.from_vdom(raw_child))
+
+        return Node(
+            tag=tag,
+            props=props or None,
+            children=children_value,
+            key=key_value,
+            callbacks=callbacks or None,
+        )
+
 
 # ============================================================================
 # Tag Definition Functions
@@ -264,7 +312,7 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
     """
     default_props = default_props or {}
 
-    def create_element(*children: NodeChild, **props: Any) -> Node:
+    def create_element(*children: NodeTree, **props: Any) -> Node:
         """Create a UITreeNode for this tag."""
         props = {**default_props, **props}
         props, callbacks = _extract_callbacks_from_props(props)

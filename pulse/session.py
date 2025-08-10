@@ -6,7 +6,7 @@ import uuid
 import asyncio
 import traceback
 
-from pulse.diff import diff_vdom
+from pulse.diff import diff_node
 from pulse.messages import (
     RouteInfo,
     ServerInitMessage,
@@ -18,7 +18,7 @@ from pulse.reactive import Batch, ReactiveContext
 from pulse.reactive_extensions import ReactiveDict
 from pulse.render import RenderContext, RenderResult
 from pulse.routing import RouteTree
-from pulse.vdom import VDOM, VDOMNode
+from pulse.vdom import VDOM, VDOMNode, Node
 
 
 logger = logging.getLogger(__file__)
@@ -174,13 +174,14 @@ class Session:
             return
 
         def on_render(res: RenderResult):
-            if res.current_vdom is None:
+            if res.current_node is None:
+                # First render for this context
                 self.notify(
                     ServerInitMessage(type="vdom_init", path=path, vdom=res.new_vdom)
                 )
             else:
                 try:
-                    operations = diff_vdom(res.current_vdom, res.new_vdom)
+                    operations = diff_node(res.current_node, res.new_node)
                 except Exception as e:
                     self.report_error(path, "render", e)
                     return

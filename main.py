@@ -1,6 +1,7 @@
 import asyncio
 import time
 import pulse as ps
+from pulse.middleware import Ok, Redirect, NotFound, Deny
 
 
 # State Management
@@ -10,6 +11,7 @@ import pulse as ps
 class CounterState(ps.State):
     count: int = 0
     count2: int = 0
+    ticking = False
 
     def __init__(self, name: str):
         self.name = name
@@ -20,6 +22,21 @@ class CounterState(ps.State):
     async def increment_with_delay(self):
         await asyncio.sleep(1)
         self.count += 1
+        self.count += 1
+        await asyncio.sleep(1)
+        self.count += 1
+        self.count += 1
+
+    async def start_ticking(self):
+        self.ticking = True
+        while True:
+            if not self.ticking:
+                break
+            self.count += 1
+            await asyncio.sleep(1)
+
+    def stop_ticking(self):
+        self.ticking = False
 
     def decrement(self):
         self.count -= 1
@@ -121,12 +138,20 @@ def counter():
             ps.span(f"{state1.count}", className="text-2xl font-mono"),
             ps.button("Increment", onClick=state1.increment, className="btn-primary"),
             ps.button(
-                "Increment with delay",
+                "Batch increment with delay",
                 onClick=state1.increment_with_delay,
                 className="btn-primary",
             ),
             className="flex items-center justify-center space-x-4",
         ),
+        ps.div(className="flex items-center justify-center space-x-4")[
+            ps.button(
+                "Start ticking", onClick=state1.start_ticking, className="btn-primary"
+            ),
+            ps.button(
+                "Stop ticking", onClick=state1.stop_ticking, className="btn-primary"
+            ),
+        ],
         ps.p(f"The doubled count is: {state1.double_count}", className="text-lg mb-4"),
         ps.h1("Interactive Counter 2", className="text-3xl font-bold mb-4"),
         ps.div(
@@ -309,7 +334,14 @@ class LoggingMiddleware(ps.PulseMiddleware):
         context["connected_at"] = context.get("connected_at") or int(time.time())
         res = next()
         # after
-        kind = res.get("kind")
+        if isinstance(res, Ok):
+            kind = "ok"
+        elif isinstance(res, Redirect):
+            kind = f"redirect:{res.path}"
+        elif isinstance(res, NotFound):
+            kind = "not_found"
+        else:
+            kind = type(res).__name__
         print(f"[MW prerender:after] kind={kind}")
         return res
 
@@ -326,14 +358,20 @@ class LoggingMiddleware(ps.PulseMiddleware):
     def message(self, *, ctx, data, next):
         # Light logging of message types
         try:
-            msg_type = data.get("type")  
+            msg_type = data.get("type")
         except Exception:
             msg_type = "<unknown>"
         # Do not spam logs for vdom churn; only mount/navigate/callback
         if msg_type in {"mount", "navigate", "callback", "unmount"}:
             print(f"[MW message] type={msg_type}")
         res = next()
-        print(f"[MW message:after] type={msg_type} result={res.get('kind')}")
+        if isinstance(res, Ok):
+            result = "ok"
+        elif isinstance(res, Deny):
+            result = "deny"
+        else:
+            result = type(res).__name__
+        print(f"[MW message:after] type={msg_type} result={result}")
         return res
 
 

@@ -5,6 +5,7 @@ This library provides a Python API for building UI trees that match
 the TypeScript UINode format exactly, eliminating the need for translation.
 """
 
+from __future__ import annotations
 import functools
 from typing import (
     Any,
@@ -12,6 +13,7 @@ from typing import (
     NotRequired,
     Optional,
     Callable,
+    Protocol,
     Sequence,
     TypedDict,
     Union,
@@ -253,8 +255,6 @@ class Node:
         )
 
 
-
-
 # ============================================================================
 # Tag Definition Functions
 # ============================================================================
@@ -470,8 +470,12 @@ class Component(Generic[P]):
         self.fn = fn
         self.name = name or _infer_component_name(fn)
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> "ComponentNode":
-        return ComponentNode(fn=self.fn, args=args, kwargs=kwargs, name=self.name)
+    def __call__(
+        self, key: Optional[str] = None, *args: P.args, **kwargs: P.kwargs
+    ) -> "ComponentNode":
+        return ComponentNode(
+            fn=self.fn, key=key, args=args, kwargs=kwargs, name=self.name
+        )
 
     def __repr__(self) -> str:  # pragma: no cover - trivial formatting
         return f"Component(name={self.name!r}, fn={_callable_qualname(self.fn)!r})"
@@ -486,12 +490,13 @@ class ComponentNode:
         fn: Callable,
         args: tuple,
         kwargs: dict,
-        name: Optional[str],
+        name: Optional[str] = None,
+        key: Optional[str] = None,
     ) -> None:
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
-        self.key: Optional[str] = kwargs.pop("key", None)
+        self.key = key
         self.name = name or _infer_component_name(fn)
 
     def __getitem__(self, *children: NodeTree):

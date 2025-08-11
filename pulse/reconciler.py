@@ -7,6 +7,7 @@ from pulse.diff import (
     RemoveOperation,
     ReplaceOperation,
     UpdatePropsOperation,
+    MoveOperation,
     VDOMOperation,
 )
 from pulse.reactive import Effect
@@ -78,6 +79,8 @@ class RenderNode:
 
     def unmount(self):
         self.hooks.unmount()
+        for child in self.children.values():
+            child.unmount()
 
 
 RENDER_CTX: ContextVar[RenderNode | None] = ContextVar(
@@ -179,62 +182,81 @@ class Resolver:
         old_children: Sequence[NodeTree],
         new_children: Sequence[NodeTree],
     ) -> list[NodeTree]:
-        print(f"[reconcile_children] {old_children} vs. {new_children}")
-        path_prefix = path + "." if len(path) > 0 else path
         # - hasattr/getattr avoids isinstance checks.
         # - (TODO: benchmark whether this is better).
         # - We store the current position of the keyed elements to make it easy
         #   to retrieve RenderNodes and build move operations.
-        by_key_old: dict[str, tuple[int, NodeTree]] = {}
-        by_key_new: dict[str, tuple[int, NodeTree]] = {}
-        for i, node in enumerate(old_children):
-            if key := getattr(node, "key", None):
-                by_key_old[key] = (i, node)
-        for i, node in enumerate(new_children):
-            if key := getattr(node, "key", None):
-                by_key_new[key] = (i, node)
-        print(f"[reconcile_children] by_key_old = {by_key_old}")
-        print(f"[reconcile_children] by_key_new = {by_key_new}")
+        keyed = any(getattr(node, "key", None) for node in old_children) or any(
+            getattr(node, "key", None) for node in new_children
+        )
 
-        if len(by_key_old) > 0 or len(by_key_new) > 0:
-            # keyed reconciliation first
-            raise NotImplementedError()
-
+        if keyed:
+            return self.reconcile_children_keyed(
+                render_parent=render_parent,
+                path=path,
+                old_children=old_children,
+                new_children=new_children,
+            )
         else:
-            N_shared = min(len(old_children), len(new_children))
-            normalized_children: list[NodeTree] = []
-            for i in range(N_shared):
-                child_norm = self.reconcile_node(
-                    render_parent=render_parent,
-                    path=f"{path_prefix}{i}",
-                    old_tree=old_children[i],
-                    new_tree=new_children[i],
-                )
-                normalized_children.append(child_norm)
+            return self.reconcile_children_unkeyed(
+                render_parent=render_parent,
+                path=path,
+                old_children=old_children,
+                new_children=new_children,
+            )
 
-            # Only runs if there are more old nodes than new ones
-            for i in range(N_shared, len(old_children)):
-                child_path = f"{path_prefix}{i}"
-                if isinstance(old_children[i], ComponentNode):
-                    # TODO in tests: verify that components are unmounted correctly
-                    render_parent.children[child_path].unmount()
-                self.operations.append(
-                    RemoveOperation(type="remove", path=f"{path_prefix}{i}")
-                )
+    def reconcile_children_keyed(
+        self,
+        render_parent: RenderNode,
+        path: str,
+        old_children: Sequence[NodeTree],
+        new_children: Sequence[NodeTree],
+    ) -> list[NodeTree]:
+        path_prefix = path + "." if len(path) > 0 else path
+        raise NotImplementedError()
 
-            # Only runs if there are more new nodes than old ones
-            for i in range(N_shared, len(new_children)):
-                child_path = f"{path_prefix}{i}"
-                new_node = new_children[i]
-                new_vdom, norm_child = self.render_tree(
-                    render_parent=render_parent, node=new_node, path=child_path
-                )
-                self.operations.append(
-                    InsertOperation(type="insert", path=child_path, data=new_vdom)
-                )
-                normalized_children.append(norm_child)
+    def reconcile_children_unkeyed(
+        self,
+        render_parent: RenderNode,
+        path: str,
+        old_children: Sequence[NodeTree],
+        new_children: Sequence[NodeTree],
+    ) -> list[NodeTree]:
+        path_prefix = path + "." if len(path) > 0 else path
+        N_shared = min(len(old_children), len(new_children))
+        normalized_children: list[NodeTree] = []
+        for i in range(N_shared):
+            child_norm = self.reconcile_node(
+                render_parent=render_parent,
+                path=f"{path_prefix}{i}",
+                old_tree=old_children[i],
+                new_tree=new_children[i],
+            )
+            normalized_children.append(child_norm)
 
-            return normalized_children
+        # Only runs if there are more old nodes than new ones
+        for i in range(N_shared, len(old_children)):
+            child_path = f"{path_prefix}{i}"
+            if isinstance(old_children[i], ComponentNode):
+                # TODO in tests: verify that components are unmounted correctly
+                render_parent.children[child_path].unmount()
+            self.operations.append(
+                RemoveOperation(type="remove", path=f"{path_prefix}{i}")
+            )
+
+        # Only runs if there are more new nodes than old ones
+        for i in range(N_shared, len(new_children)):
+            child_path = f"{path_prefix}{i}"
+            new_node = new_children[i]
+            new_vdom, norm_child = self.render_tree(
+                render_parent=render_parent, node=new_node, path=child_path
+            )
+            self.operations.append(
+                InsertOperation(type="insert", path=child_path, data=new_vdom)
+            )
+            normalized_children.append(norm_child)
+
+        return normalized_children
 
     def render_tree(
         self, render_parent: RenderNode, node: NodeTree, path: str
@@ -312,3 +334,35 @@ def same_node(left: NodeTree, right: NodeTree):
         return left.fn == right.fn and left.key == right.key
 
     return False
+
+
+# Longest increasing subsequence algorithm
+def lis(seq: list[int]) -> list[int]:
+    if not seq:
+        return []
+    # patience sorting style; store indices of seq
+    tails: list[int] = []  # indices in seq forming tails
+    prev: list[int] = [-1] * len(seq)
+    for i, v in enumerate(seq):
+        # binary search in tails on values of seq
+        lo, hi = 0, len(tails)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if seq[tails[mid]] < v:
+                lo = mid + 1
+            else:
+                hi = mid
+        if lo > 0:
+            prev[i] = tails[lo - 1]
+        if lo == len(tails):
+            tails.append(i)
+        else:
+            tails[lo] = i
+    # reconstruct LIS as indices into seq
+    lis_indices: list[int] = []
+    k = tails[-1] if tails else -1
+    while k != -1:
+        lis_indices.append(k)
+        k = prev[k]
+    lis_indices.reverse()
+    return lis_indices

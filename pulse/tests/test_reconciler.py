@@ -1,8 +1,9 @@
+import json
 from pulse.reactive import flush_effects
 from pulse.reconciler import Resolver
 from pulse.reconciler import RenderNode, RenderRoot
+from pulse.reconciler import lis
 import pulse as ps
-from typing import Callable, cast
 
 from pulse.vdom import Callback
 
@@ -300,6 +301,7 @@ def test_reconcile_deep_nested_text_replace():
 
     content["b"] = "BB"
     second = root.render()
+    print("second.ops = ", second.ops)
     assert second.ops == [{"type": "replace", "path": "0.1.0", "data": "BB"}]
 
 
@@ -417,14 +419,14 @@ def test_state_persistence_nested_siblings_and_isolation():
         return ps.div(
             ps.span(f"{name}:{s.count}"),  # 0
             ps.button(onClick=do_inc)["inc"],  # 1
-            Nested(f"{name}-child"),  # 2
+            Nested(label=f"{name}-child"),  # 2
         )
 
     @ps.component
     def Top():
         return ps.div(
-            Sibling("A"),  # path 0
-            Sibling("B"),  # path 1
+            Sibling(name="A"),  # path 0
+            Sibling(name="B"),  # path 1
         )
 
     root = RenderRoot(Top)
@@ -503,7 +505,7 @@ def test_component_arg_change_rerenders_leaf_not_remount():
 
     @ps.component
     def Parent():
-        return ps.div(Child(name["msg"]))
+        return ps.div(Child(msg=name["msg"]))
 
     root = RenderRoot(Parent)
     first = root.render()
@@ -529,3 +531,210 @@ def test_props_removal_emits_empty_update_props():
     toggle["on"] = False
     second = root.render()
     assert second.ops == [{"type": "update_props", "path": "", "data": {}}]
+
+
+def test_keyed_component_move_preserves_state_and_no_cleanup():
+    logs: list[str] = []
+    order = {"keys": ["a", "b"]}
+
+    class C(ps.State):
+        n: int = 0
+
+        def inc(self):
+            self.n += 1
+
+    @ps.component
+    def Item(label: str):
+        s = ps.states(C)
+
+        def eff():
+            def cleanup():
+                logs.append(f"cleanup:{label}")
+
+            return cleanup
+
+        ps.effects(eff)
+        return ps.div(
+            ps.span(f"{label}:{s.n}"),
+            ps.button(onClick=s.inc)["inc"],
+        )
+
+    @ps.component
+    def List():
+        return ps.div(*[Item(label=k, key=k) for k in order["keys"]])
+
+    root = RenderRoot(List)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+    print("Initial VDOM:", json.dumps(first.ops[0]["data"], indent=2))
+
+    flush_effects()  # simulate effect pass after render
+
+    # inc first item (key 'a')
+    first.callbacks["0.1.onClick"].fn()
+    second = root.render()
+    print("Second.ops:", second.ops)
+    assert second.ops == [{"type": "replace", "path": "0.0", "data": "a:1"}]
+
+    flush_effects()  # simulate effect pass after render
+
+    # reorder: move 'a' to the end
+    order["keys"] = ["b", "a"]
+    third = root.render()
+    # Expect two moves (b->0, a->1) or at least one move including 'a'
+    move_ops = [op for op in third.ops if op["type"] == "move"]
+    assert any(
+        op["data"]["key"] == "a" and op["data"]["to_index"] == 1 for op in move_ops
+    )
+    assert logs == []  # no cleanup on move
+
+    flush_effects()  # simulate effect pass after render
+
+    # inc 'a' at its new index 1, should go to 2
+    third.callbacks["1.1.onClick"].fn()
+    fourth = root.render()
+    assert fourth.ops == [{"type": "replace", "path": "1.0", "data": "a:2"}]
+
+
+def test_keyed_nested_components_move_preserves_nested_state():
+    order = {"keys": ["x", "y"]}
+
+    class C(ps.State):
+        n: int = 0
+
+        def inc(self):
+            self.n += 1
+
+    @ps.component
+    def Leaf(tag: str):
+        s = ps.states(C)
+        return ps.div(ps.span(f"{tag}:{s.n}"), ps.button(onClick=s.inc)["+"])
+
+    @ps.component
+    def Wrapper(tag: str):
+        return ps.div(Leaf(tag=tag))
+
+    @ps.component
+    def List():
+        items = [Wrapper(tag=k) for k in order["keys"]]
+        for i, k in enumerate(order["keys"]):
+            items[i].key = k  # type: ignore[attr-defined]
+        return ps.div(*items)
+
+    root = RenderRoot(List)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # bump x
+    first.callbacks["0.0.1.onClick"].fn()  # path: wrapper0 -> leaf -> button
+    second = root.render()
+    assert second.ops == [{"type": "replace", "path": "0.0.0", "data": "x:1"}]
+
+    # reorder: x to the end
+    order["keys"] = ["y", "x"]
+    third = root.render()
+    assert any(op["type"] == "move" and op["data"]["key"] == "x" for op in third.ops)
+
+    # bump x again at new path
+    third.callbacks["1.0.1.onClick"].fn()
+    fourth = root.render()
+    assert fourth.ops == [{"type": "replace", "path": "1.0.0", "data": "x:2"}]
+
+
+def test_unmount_parent_unmounts_children_components():
+    logs: list[str] = []
+    show = {"on": True}
+
+    @ps.component
+    def Child():
+        def eff():
+            def cleanup():
+                logs.append("child_cleanup")
+
+            return cleanup
+
+        ps.effects(eff)
+        return ps.div("child")
+
+    @ps.component
+    def Parent():
+        def eff():
+            def cleanup():
+                logs.append("parent_cleanup")
+
+            return cleanup
+
+        ps.effects(eff)
+        return Child()
+
+    @ps.component
+    def View():
+        return Parent() if show["on"] else ps.div()
+
+    root = RenderRoot(View)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+    # Simulate an effect pass after render
+    flush_effects()
+
+    show["on"] = False
+    _ = root.render()
+    # Confirm both parent and child are cleaned up
+    assert "parent_cleanup" in logs and "child_cleanup" in logs
+
+
+# =====================
+# LIS helper
+# =====================
+
+
+def test_lis_empty_returns_empty_list():
+    assert lis([]) == []
+
+
+def test_lis_strictly_increasing_returns_all_indices():
+    seq = [1, 2, 3, 4, 5]
+    assert lis(seq) == [0, 1, 2, 3, 4]
+
+
+def test_lis_strictly_decreasing_returns_last_index():
+    seq = [5, 4, 3, 2, 1]
+    out = lis(seq)
+    assert out == [4]
+    assert seq[out[0]] == 1
+
+
+def test_lis_with_duplicates_picks_last_occurrence():
+    seq = [3, 3, 3]
+    assert lis(seq) == [2]
+
+
+def test_lis_typical_case_matches_expected_indices():
+    seq = [10, 9, 2, 5, 3, 7, 101, 18]
+    # One valid LIS is indices [2, 4, 5, 7] -> values [2, 3, 7, 18]
+    assert lis(seq) == [2, 4, 5, 7]
+
+
+def test_lis_classic_sequence_length_and_increasing():
+    seq = [
+        0,
+        8,
+        4,
+        12,
+        2,
+        10,
+        6,
+        14,
+        1,
+        9,
+        5,
+        13,
+        3,
+        11,
+        7,
+        15,
+    ]
+    idx = lis(seq)
+    vals = [seq[i] for i in idx]
+    assert len(vals) == 6  # Known LIS length for this sequence
+    assert all(vals[i] < vals[i + 1] for i in range(len(vals) - 1))

@@ -873,3 +873,664 @@ def test_lis_classic_sequence_length_and_increasing():
     vals = [seq[i] for i in idx]
     assert len(vals) == 6  # Known LIS length for this sequence
     assert all(vals[i] < vals[i + 1] for i in range(len(vals) - 1))
+
+
+def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed():
+    logs: list[str] = []
+    order = {"keys": ["a", "b", "c", "d"]}
+
+    class C(ps.State):
+        n: int = 0
+
+        def __init__(self, label: str):
+            self.label = label
+
+        def inc(self):
+            self.n += 1
+
+    @ps.component
+    def Item(label: str):
+        s = ps.states(C(label))
+
+        def eff():
+            def cleanup():
+                logs.append(f"cleanup:{label}")
+
+            return cleanup
+
+        ps.effects(eff)
+        return ps.div(ps.span(f"{label}:{s.n}"), ps.button(onClick=s.inc)["+"])
+
+    @ps.component
+    def List():
+        return ps.div(*(Item(key=k, label=k) for k in order["keys"]))
+
+    root = RenderRoot(List)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+    flush_effects()
+
+    # bump b twice and d once
+    first.callbacks["1.1.onClick"].fn()
+    first.callbacks["1.1.onClick"].fn()
+    first.callbacks["3.1.onClick"].fn()
+    second = root.render()
+
+    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:2"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["c:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["d:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+    flush_effects()
+
+    # Reorder with insert and remove: remove 'c', insert 'e', move others
+    order["keys"] = ["d", "b", "e", "a"]
+    third = root.render()
+
+    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["d:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:2"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["e:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Only 'c' should have been cleaned up
+    flush_effects()
+    assert logs.count("cleanup:c") == 1
+    assert all(x.startswith("cleanup:") for x in logs)
+    assert (
+        logs.count("cleanup:a") == 0
+        and logs.count("cleanup:b") == 0
+        and logs.count("cleanup:d") == 0
+    )
+
+    # bump 'a' at its new index 3
+    third.callbacks["3.1.onClick"].fn()
+    fourth = root.render()
+    vdom, _ = Resolver().render_tree(root.render_tree, fourth.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["d:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:2"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["e:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Reverse-ish reorder and verify states still preserved
+    order["keys"] = ["a", "e", "b", "d"]
+    fifth = root.render()
+    vdom, _ = Resolver().render_tree(root.render_tree, fifth.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["e:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:2"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["d:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # bump 'd' at its new index 3
+    fifth.callbacks["3.1.onClick"].fn()
+    sixth = root.render()
+    vdom, _ = Resolver().render_tree(root.render_tree, sixth.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["e:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:2"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["d:2"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def test_keyed_reverse_preserves_all_states():
+    order = {"keys": ["k1", "k2", "k3", "k4"]}
+
+    class C(ps.State):
+        n: int = 0
+
+        def inc(self):
+            self.n += 1
+
+    @ps.component
+    def Item(label: str):
+        s = ps.states(C)
+        return ps.div(ps.span(f"{label}:{s.n}"), ps.button(onClick=s.inc)["+"])
+
+    @ps.component
+    def List():
+        return ps.div(*(Item(key=k, label=k) for k in order["keys"]))
+
+    root = RenderRoot(List)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # bump counts: k1->1, k2->2, k3->3, k4->4
+    first.callbacks["0.1.onClick"].fn()
+    first.callbacks["1.1.onClick"].fn()
+    first.callbacks["1.1.onClick"].fn()
+    for _ in range(3):
+        first.callbacks["2.1.onClick"].fn()
+    for _ in range(4):
+        first.callbacks["3.1.onClick"].fn()
+    second = root.render()
+
+    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["k1:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["k2:2"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["k3:3"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["k4:4"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Reverse order
+    order["keys"] = ["k4", "k3", "k2", "k1"]
+    third = root.render()
+    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["k4:4"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["k3:3"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["k2:2"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["k1:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
+    logs: list[str] = []
+    order = {"keys": ["a", "b"]}
+
+    class C(ps.State):
+        n: int = 0
+
+        def __init__(self, label: str):
+            self.label = label
+
+        def inc(self):
+            self.n += 1
+
+    @ps.component
+    def Item(label: str):
+        s = ps.states(C(label))
+
+        def eff():
+            def cleanup():
+                logs.append(f"cleanup:{label}")
+
+            return cleanup
+
+        ps.effects(eff)
+        return ps.div(ps.span(f"{label}:{s.n}"), ps.button(onClick=s.inc)["+"])
+
+    @ps.component
+    def List():
+        return ps.div(*(Item(key=k, label=k) for k in order["keys"]))
+
+    root = RenderRoot(List)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+    flush_effects()
+
+    # bump 'a'
+    first.callbacks["0.1.onClick"].fn()
+    second = root.render()
+    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+    flush_effects()
+
+    # remove 'a'
+    order["keys"] = ["b"]
+    _ = root.render()
+    flush_effects()
+    assert logs.count("cleanup:a") == 1
+
+    # re-add 'a' at end -> should reset to 0
+    order["keys"] = ["b", "a"]
+    third = root.render()
+    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
+    order = {"keys": ["a", "b"]}
+
+    class C(ps.State):
+        n: int = 0
+
+        def inc(self):
+            self.n += 1
+
+    @ps.component
+    def Item(label: str):
+        s = ps.states(C)
+        return ps.div(ps.span(f"{label}:{s.n}"), ps.button(onClick=s.inc)["+"])
+
+    @ps.component
+    def List():
+        # Interleave an unkeyed separator node
+        return ps.div(
+            Item(key=order["keys"][0], label=order["keys"][0]),
+            ps.span("sep"),
+            Item(key=order["keys"][1], label=order["keys"][1]),
+        )
+
+    root = RenderRoot(List)
+    first = root.render()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # bump first item and second item
+    first.callbacks["0.1.onClick"].fn()
+    first.callbacks["2.1.onClick"].fn()
+    second = root.render()
+    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {"tag": "span", "children": ["sep"]},
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # swap keys around the separator
+    order["keys"] = ["b", "a"]
+    third = root.render()
+    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["b:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {"tag": "span", "children": ["sep"]},
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["a:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }

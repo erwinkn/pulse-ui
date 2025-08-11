@@ -257,6 +257,24 @@ class Resolver:
             if key:
                 old_keys[key] = old_idx
 
+        # Determine which keys are present in the new children
+        new_keys: set[str] = {
+            key
+            for node in new_children
+            if isinstance(node, ComponentNode)
+            for key in [getattr(node, "key", None)]
+            if key is not None
+        }
+
+        # Unmount any components that were present before but are now removed
+        # BEFORE we remap/move nodes, so we don't lose references by overwrite.
+        for key, old_idx in old_keys.items():
+            if key not in new_keys:
+                old_path = join_path(relative_path, old_idx)
+                old_render_node = render_parent.children.pop(old_path, None)
+                if old_render_node is not None:
+                    old_render_node.unmount()
+
         # Avoid overwriting children due to swaps. We first register all the
         # moves, then perform them.
         remap: dict[str, RenderNode] = {}
@@ -269,7 +287,11 @@ class Resolver:
                 if old_idx != new_idx:
                     old_path = join_path(relative_path, old_idx)
                     new_path = join_path(relative_path, new_idx)
-                    remap[new_path] = render_parent.children.pop(old_path)
+                    # It's possible the old_path was already popped if it was
+                    # removed; guard with .pop(..., None)
+                    moved_node = render_parent.children.pop(old_path, None)
+                    if moved_node is not None:
+                        remap[new_path] = moved_node
                     print(f"Moving {key} from {old_path} to {new_path}")
                     # Q: remove key from old node?
         render_parent.children.update(remap)
@@ -309,8 +331,12 @@ class Resolver:
             old_child = old_children[i]
             if isinstance(old_child, ComponentNode):
                 # TODO in tests: verify that components are unmounted correctly
-                old_render_node = render_parent.children[join_path(relative_path, i)]
-                if old_render_node.key == old_child.key:
+                old_rel_path = join_path(relative_path, i)
+                old_render_node = render_parent.children.get(old_rel_path)
+                # The render node may have been moved earlier during keyed
+                # reconciliation. Only unmount if it still exists at this
+                # location and corresponds to the same key.
+                if old_render_node is not None and old_render_node.key == old_child.key:
                     old_render_node.unmount()
             self.operations.append(
                 RemoveOperation(type="remove", path=join_path(path, i))

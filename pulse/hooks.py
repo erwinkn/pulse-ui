@@ -274,6 +274,7 @@ def states(*args: State | Callable[[], State]):
         )
 
     if ctx.render_count == 1:
+        print("ps.states first render")
         states: list[State] = []
         for arg in args:
             state_instance = arg() if callable(arg) else arg

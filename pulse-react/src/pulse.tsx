@@ -9,8 +9,9 @@ import React, {
 import { VDOMRenderer } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry } from "./vdom";
-import { useLocation, useParams } from "react-router";
-import type { RouteInfo } from "./messages";
+import { useLocation, useParams, useNavigate } from "react-router";
+import type { ServerErrorInfo } from "./messages";
+import type { RouteInfo } from "./helpers";
 
 // =================================================================
 // Types
@@ -66,10 +67,11 @@ const inBrowser = typeof window !== "undefined";
 
 export function PulseProvider({ children, config }: PulseProviderProps) {
   const [connected, setConnected] = useState(true);
+  const rrNavigate = useNavigate();
 
   const client = useMemo(
-    () => new PulseSocketIOClient(`${config.serverAddress}`),
-    [config.serverAddress]
+    () => new PulseSocketIOClient(`${config.serverAddress}`, rrNavigate),
+    [config.serverAddress, rrNavigate]
   );
 
   useEffect(() => client.onConnectionChange(setConnected), [client]);
@@ -121,6 +123,7 @@ export function PulseView({
 }: PulseViewProps) {
   const client = usePulseClient();
   const [vdom, setVdom] = useState(initialVDOM);
+  const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
 
   const location = useLocation();
   const params = useParams();
@@ -145,14 +148,22 @@ export function PulseView({
 
   useEffect(() => {
     if (inBrowser) {
-      return client.mountView(path, {
+      client.mountView(path, {
         vdom: initialVDOM,
         listener: setVdom,
         routeInfo,
       });
+      const offErr = client.onServerError((p, err) => {
+        if (p === path) setServerError(err);
+      });
+      return () => {
+        console.log("Unmounting", path)
+        offErr();
+        client.unmount(path);
+      };
     }
     // routeInfo is NOT included here on purpose
-  }, [client, initialVDOM]);
+  }, [client]);
 
   useEffect(() => {
     if (inBrowser) {
@@ -185,7 +196,38 @@ export function PulseView({
 
   return (
     <PulseRenderContext.Provider value={renderHelpers}>
-      <VDOMRenderer node={vdom} />
+      {serverError ? (
+        <ServerError error={serverError} />
+      ) : (
+        <VDOMRenderer node={vdom} />
+      )}
     </PulseRenderContext.Provider>
+  );
+}
+
+function ServerError({ error }: { error: ServerErrorInfo }) {
+  return (
+    <div
+      style={{
+        padding: 16,
+        border: "1px solid #e00",
+        background: "#fff5f5",
+        color: "#900",
+        fontFamily:
+          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        whiteSpace: "pre-wrap",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>
+        Server Error during {error.phase}
+      </div>
+      {error.message && <div>{error.message}</div>}
+      {error.stack && (
+        <details open style={{ marginTop: 8 }}>
+          <summary>Stack trace</summary>
+          <pre style={{ margin: 0 }}>{error.stack}</pre>
+        </details>
+      )}
+    </div>
   );
 }

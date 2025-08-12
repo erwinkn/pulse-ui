@@ -1,38 +1,21 @@
 from contextvars import ContextVar
-from multiprocessing import Value
-from typing import (
-    Any,
-    Callable,
-    NamedTuple,
-    ParamSpec,
-    TypeVar,
-    TypeVarTuple,
-    Unpack,
-    overload,
-)
+from typing import Any, Callable, Mapping, NamedTuple
 
 from pulse.diff import VDOM
 from pulse.messages import RouteInfo
-from pulse.reactive import BATCH, Effect
+from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack, REACTIVE_CONTEXT
 from pulse.routing import Layout, Route
 from pulse.state import State
-from pulse.vdom import Callbacks
-
-# Hooks we want:
-# - Setup
-# - State (computeds go there too)
-# - Effects
-# - Router (with data + navigate / push)
-
-
-class RenderFlags:
-    route: Route | Layout
+from pulse.vdom import Callbacks, Node, NodeTree
 
 
 class SetupState:
     value: Any
     last_access: int
     initialized: bool
+    args: list[Signal]
+    kwargs: dict[str, Signal]
+    effects: list[Effect]
 
     def __init__(
         self, value: Any = None, last_access: int = 0, initialized: bool = False
@@ -40,6 +23,9 @@ class SetupState:
         self.value = value
         self.last_access = last_access
         self.initialized = initialized
+        self.args = []
+        self.kwargs = {}
+        self.effects = []
 
 
 class Router(State):
@@ -51,10 +37,10 @@ class Router(State):
     catchall: list[str]
 
     def __init__(self, info: RouteInfo):
-        self.__update_route_info(info)
+        self._update_route_info(info)
         super().__init__()
 
-    def __update_route_info(self, info: RouteInfo):
+    def _update_route_info(self, info: RouteInfo):
         self.pathname = info["pathname"]
         self.hash = info["hash"]
         self.query = info["query"]
@@ -68,24 +54,33 @@ class HookState:
     states: tuple[State, ...]
     effects: tuple[Effect, ...]
     router: Router
+    session_context: Mapping[str, Any]
 
-    def __init__(self, route_info: RouteInfo):
+    def __init__(
+        self,
+        route_info: RouteInfo,
+        session_context: Mapping[str, Any] | None = None,
+    ):
         self.setup = SetupState()
         self.effects = ()
         self.states = ()
         self.router = Router(route_info)
+        self.session_context = session_context or {}
 
     def dispose(self):
-        if isinstance(self.effects, Effect):
-            self.effects.dispose()
-        else:
-            for effect in self.effects:
+        for effect in self.setup.effects:
+            effect.dispose()
+        for effect in self.effects:
+            effect.dispose()
+        for state in self.states:
+            for effect in state.effects():
                 effect.dispose()
 
 
 class RenderResult(NamedTuple):
     render_count: int
-    current_vdom: VDOM | None
+    current_node: NodeTree
+    new_node: NodeTree
     new_vdom: VDOM
 
 
@@ -95,9 +90,7 @@ class RenderContext:
 
     render_count: int
     prerendering: bool
-    children: "list[RenderContext]"
 
-    vdom: VDOM | None
     callbacks: Callbacks
     hooks: HookState
     effect: Effect | None
@@ -109,26 +102,50 @@ class RenderContext:
         vdom: VDOM | None,
         prerendering: bool = False,
         position: str = "",
+        session_context: Mapping[str, Any] | None = None,
     ):
         self.route = route
         self.position = position
         self.prerendering = prerendering
-        self.vdom = vdom
+        # If a current VDOM was provided (hydration), store only its Node form
+        # We keep a Node reference as the authoritative server tree
+        self.node: NodeTree = Node.from_vdom(vdom)
 
         self.render_count = 0
         self.children = []
 
         self.callbacks = {}
-        self.hooks = HookState(route_info=route_info)
+        self.hooks = HookState(
+            route_info=route_info,
+            session_context=session_context,
+        )
         self.effect = None
 
     def update_route_info(self, info: RouteInfo):
-        self.hooks.router.__update_route_info(info)
+        self.hooks.router._update_route_info(info)
 
-    def mount(self, on_render: Callable[[RenderResult], None]):
+    def mount(
+        self,
+        on_render: Callable[[RenderResult], None],
+        on_error: Callable[[Exception], None] | None = None,
+    ):
         if self.effect is not None:
             raise RuntimeError("RenderContext is already mounted")
-        self.effect = Effect(lambda: on_render(self.render()), immediate=True)
+
+        def render_fn():
+            try:
+                on_render(self.render())
+            except Exception as e:  # noqa: BLE001 - we want to forward any error up
+                if on_error:
+                    on_error(e)
+                else:
+                    raise
+
+        self.effect = Effect(
+            render_fn,
+            immediate=True,
+            name=f"{self.route.path if isinstance(self.route, Route) else 'layout'}:render:{self.position or 'root'}",
+        )
 
     def unmount(self):
         self.hooks.dispose()
@@ -139,18 +156,18 @@ class RenderContext:
     def render(self) -> RenderResult:
         self.render_count += 1
         with self:
-            current_vdom = self.vdom
-            new_tree = self.route.render.fn()  # type: ignore
-            new_vdom, new_callbacks = new_tree.render()
+            current_node = self.node
+            new_node = self.route.render.fn()  # type: ignore
+            new_vdom, new_callbacks = new_node.render()
             if self.prerendering:
-                batch = BATCH.get()
-                batch._effects = []
+                REACTIVE_CONTEXT.get().batch.effects = []
 
-            self.vdom = new_vdom
+            self.node = new_node
             self.callbacks = new_callbacks
             return RenderResult(
                 render_count=self.render_count,
-                current_vdom=current_vdom,
+                current_node=current_node,
+                new_node=new_node,
                 new_vdom=new_vdom,
             )
 
@@ -173,207 +190,3 @@ class RenderContext:
 RENDER_CONTEXT: ContextVar[RenderContext | None] = ContextVar(
     "pulse_render_context", default=None
 )
-
-
-P = ParamSpec("P")
-T = TypeVar("T")
-
-
-def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    ctx = RENDER_CONTEXT.get()
-    if ctx is None:
-        raise RuntimeError("Cannot call `pulse.init` outside rendering")
-    state = ctx.hooks.setup
-    if not state.initialized:
-        state.value = init_func(*args, **kwargs)
-        state.initialized = True
-    if state.last_access >= ctx.render_count:
-        raise RuntimeError(
-            "Cannot call `pulse.init` can only be called once per component render"
-        )
-    state.last_access += 1
-    return state.value
-
-
-# -----------------------------------------------------
-# Ugly types, sorry, no other way to do this in Python
-# -----------------------------------------------------
-S1 = TypeVar("S1", bound=State)
-S2 = TypeVar("S2", bound=State)
-S3 = TypeVar("S3", bound=State)
-S4 = TypeVar("S4", bound=State)
-S5 = TypeVar("S5", bound=State)
-S6 = TypeVar("S6", bound=State)
-S7 = TypeVar("S7", bound=State)
-S8 = TypeVar("S8", bound=State)
-S9 = TypeVar("S9", bound=State)
-S10 = TypeVar("S10", bound=State)
-
-
-Ts = TypeVarTuple("Ts")
-
-
-@overload
-def states(*args: Unpack[tuple[S1 | Callable[[], S1]]]) -> S1: ...
-@overload
-def states(
-    *args: Unpack[tuple[S1 | Callable[[], S1], S2 | Callable[[], S2]]],
-) -> tuple[S1, S2]: ...
-@overload
-def states(
-    *args: Unpack[
-        tuple[S1 | Callable[[], S1], S2 | Callable[[], S2], S3 | Callable[[], S3]]
-    ],
-) -> tuple[S1, S2, S3]: ...
-@overload
-def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-        ]
-    ],
-) -> tuple[S1, S2, S3, S4]: ...
-@overload
-def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-        ]
-    ],
-) -> tuple[S1, S2, S3, S4, S5]: ...
-@overload
-def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-        ]
-    ],
-) -> tuple[S1, S2, S3, S4, S5, S6]: ...
-@overload
-def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-        ]
-    ],
-) -> tuple[S1, S2, S3, S4, S5, S6, S7]: ...
-@overload
-def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-        ]
-    ],
-) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8]: ...
-@overload
-def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-            S9 | Callable[[], S9],
-        ]
-    ],
-) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8, S9]: ...
-@overload
-def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-            S9 | Callable[[], S9],
-            S10 | Callable[[], S10],
-        ]
-    ],
-) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8, S9, S10]: ...
-
-
-@overload
-def states(*args: S1 | Callable[[], S1]) -> tuple[S1, ...]: ...
-
-
-def states(*args):
-    ctx = RENDER_CONTEXT.get()
-    if not ctx:
-        raise RuntimeError(
-            "`pulse.states` can only be called within a component, during rendering."
-        )
-
-    if ctx.render_count == 1:
-        states: list[State] = []
-        for arg in args:
-            if callable(arg):
-                states.append(arg())
-            else:
-                states.append(arg)
-        ctx.hooks.states = tuple(states)
-
-    if len(ctx.hooks.states) == 1:
-        return ctx.hooks.states[0]
-    else:
-        return ctx.hooks.states
-
-
-def effects(*fns: Callable[[], None]) -> None:
-    # Assumption: RenderContext will set up a render context and a batch before
-    # rendering. The batch ensures the effects run *after* rendering.
-    ctx = RENDER_CONTEXT.get()
-    if not ctx:
-        raise RuntimeError(
-            "`pulse.states` can only be called within a component, during rendering."
-        )
-
-    # Remove the effects passed here from the batch, ensuring they only run on mount
-    if ctx.render_count == 1:
-        effects = []
-        for fn in fns:
-            if not callable(fn):
-                raise ValueError("Only pass functions or callable objects to `ps.effects`")
-            effects.append(Effect(fn, name=fn.__name__))
-        ctx.hooks.effects = tuple(effects)
-
-
-def router():
-    ctx = RENDER_CONTEXT.get()
-    if not ctx:
-        raise RuntimeError(
-            "`pulse.router` can only be called within a component, during rendering."
-        )
-    return ctx.hooks.router

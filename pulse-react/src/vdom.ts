@@ -43,7 +43,6 @@ export interface InsertUpdate extends VDOMUpdateBase {
 
 export interface RemoveUpdate extends VDOMUpdateBase {
   type: "remove";
-  data?: string; // Optional key for keyed removals
 }
 
 export interface ReplaceUpdate extends VDOMUpdateBase {

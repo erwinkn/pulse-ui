@@ -18,6 +18,9 @@ from pulse.routing import RouteTree, Route
 from pulse.vdom import div
 
 
+SERVER_ADDRESS = "http://localhost:8000"
+
+
 class TestCodegen:
     """Test the Codegen class."""
 
@@ -32,7 +35,7 @@ class TestCodegen:
         )
         codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
         codegen = Codegen(RouteTree([route]), codegen_config)
-        codegen.generate_route(route)
+        codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
         route_page_path = codegen.output_folder / "routes" / "simple.tsx"
         assert route_page_path.exists()
@@ -44,10 +47,13 @@ class TestCodegen:
         )
         assert "// No components needed for this route" in result
         assert "const externalComponents: ComponentRegistry = {};" in result
-        assert '"tag": "div"' in result
-        assert '"Simple route"' in result
-        assert "export default function RouteComponent()" in result
-        assert "<PulseView" in result
+        assert "export async function loader" in result
+        assert 'const path = "simple"' in result
+        assert (
+            "export default function RouteComponent({ loaderData }: { loaderData: VDOM })"
+            in result
+        )
+        assert "initialVDOM={loaderData}" in result
 
     def test_generate_route_page_with_components(self, tmp_path):
         """Test generating route with React components."""
@@ -60,7 +66,7 @@ class TestCodegen:
         )
         codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
         codegen = Codegen(RouteTree([route]), codegen_config)
-        codegen.generate_route(route)
+        codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
         route_page_path = codegen.output_folder / "routes" / "with-components.tsx"
         assert route_page_path.exists()
@@ -82,7 +88,7 @@ class TestCodegen:
         )
         codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
         codegen = Codegen(RouteTree([route]), codegen_config)
-        codegen.generate_route(route)
+        codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
         route_page_path = codegen.output_folder / "routes" / "default-export.tsx"
         assert route_page_path.exists()
@@ -164,8 +170,8 @@ class TestCodegen:
             pulse_dir="test_pulse_app",
             lib_path="~/test-lib",
         )
-        codegen = Codegen(app.routes, codegen_config, "testhost", 1234)
-        codegen.generate_all()
+        codegen = Codegen(app.routes, codegen_config)
+        codegen.generate_all(server_address=SERVER_ADDRESS)
 
         pulse_app_dir = Path(codegen.output_folder)
         routes_dir = pulse_app_dir / "routes"
@@ -182,8 +188,7 @@ class TestCodegen:
             'import { PulseProvider, type PulseConfig } from "~/test-lib/pulse";'
             in layout_content
         )
-        assert 'serverAddress: "testhost",' in layout_content
-        assert "serverPort: 1234," in layout_content
+        assert 'serverAddress: "http://localhost:8000"' in layout_content
 
         routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
         assert (
@@ -201,13 +206,15 @@ class TestCodegen:
         assert 'import { PulseView } from "~/test-lib/pulse";' in home_content
         assert 'import { Header } from "./components/Header";' in home_content
         assert '"Header": Header,' in home_content
-        assert '"tag": "$$Header"' in home_content
+        assert 'const path = ""' in home_content
+        assert "initialVDOM={loaderData}" in home_content
 
         interactive_content = (routes_dir / "interactive.tsx").read_text()
         assert 'import { Button } from "./components/Button";' in interactive_content
         assert '"Header": Header,' not in interactive_content
         assert '"Button": Button,' in interactive_content
-        assert '"tag": "$$Button"' in interactive_content
+        assert 'const path = "interactive"' in interactive_content
+        assert "initialVDOM={loaderData}" in interactive_content
 
 
 if __name__ == "__main__":

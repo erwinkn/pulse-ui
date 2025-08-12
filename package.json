@@ -1,0 +1,5 @@
+{
+  "name": "pulse-ui",
+  "version": "1.0.0",
+  "workspaces": ["pulse-react/", "pulse-web/"]
+}

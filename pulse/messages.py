@@ -2,18 +2,7 @@ from typing import Any, TypedDict, Literal
 
 from pulse.diff import VDOMOperation
 from pulse.vdom import VDOM
-
-
-# ====================
-# Helpers
-# ====================
-class RouteInfo(TypedDict):
-    pathname: str
-    hash: str
-    query: str
-    queryParams: dict[str, str]
-    pathParams: dict[str, str]
-    catchall: list[str]
+from pulse.routing import RouteInfo
 
 
 # ====================
@@ -31,7 +20,48 @@ class ServerUpdateMessage(TypedDict):
     ops: list[VDOMOperation]
 
 
-ServerMessage = ServerInitMessage | ServerUpdateMessage
+class ServerErrorInfo(TypedDict, total=False):
+    # High-level human message
+    message: str
+    # Full stack trace string (server formatted)
+    stack: str
+    # Which phase failed
+    phase: Literal["render", "callback", "mount", "unmount", "navigate", "server"]
+    # Optional extra details (callback key, etc.)
+    details: dict[str, Any]
+
+
+class ServerErrorMessage(TypedDict):
+    type: Literal["server_error"]
+    path: str
+    error: ServerErrorInfo
+
+
+class ServerNavigateToMessage(TypedDict):
+    type: Literal["navigate_to"]
+    path: str
+
+
+class ServerApiCallMessage(TypedDict):
+    type: Literal["api_call"]
+    # Correlation id to match request/response
+    id: str
+    url: str
+    method: str
+    headers: dict[str, str]
+    # Body can be JSON-serializable or None
+    body: Any | None
+    # Whether to include credentials (cookies)
+    credentials: Literal["include", "omit"]
+
+
+ServerMessage = (
+    ServerInitMessage
+    | ServerUpdateMessage
+    | ServerErrorMessage
+    | ServerApiCallMessage
+    | ServerNavigateToMessage
+)
 
 
 # ====================
@@ -48,7 +78,6 @@ class ClientMountMessage(TypedDict):
     type: Literal["mount"]
     path: str
     routeInfo: RouteInfo
-    currentVDOM: VDOM
 
 
 class ClientNavigateMessage(TypedDict):
@@ -58,8 +87,17 @@ class ClientNavigateMessage(TypedDict):
 
 
 class ClientUnmountMessage(TypedDict):
-    type: Literal["leave"]
+    type: Literal["unmount"]
     path: str
+
+
+class ClientApiResultMessage(TypedDict):
+    type: Literal["api_result"]
+    id: str
+    ok: bool
+    status: int
+    headers: dict[str, str]
+    body: Any | None
 
 
 ClientMessage = (
@@ -67,4 +105,5 @@ ClientMessage = (
     | ClientMountMessage
     | ClientNavigateMessage
     | ClientUnmountMessage
+    | ClientApiResultMessage
 )

@@ -5,17 +5,14 @@ from typing import (
     Generic,
     ParamSpec,
     TypeVar,
-    Set,
     Optional,
-    overload,
 )
+
 
 from pulse.flags import IS_PRERENDERING
 
 T = TypeVar("T")
 P = ParamSpec("P")
-
-# NOTE: globals at the bottom of the file
 
 
 class Signal(Generic[T]):
@@ -23,57 +20,72 @@ class Signal(Generic[T]):
         self.value = value
         self.name = name
         self.obs: list[Computed | Effect] = []
+        self._obs_change_listeners: list[Callable[[int], None]] = []
         self.last_change = -1
 
     def read(self) -> T:
-        if scope := SCOPE.get():
-            scope.accessed.add(self)
+        rc = REACTIVE_CONTEXT.get()
+        if rc.scope is not None:
+            rc.scope.register_dep(self)
         return self.value
 
     def __call__(self) -> T:
         return self.read()
 
     def _add_obs(self, obs: "Computed | Effect"):
+        prev = len(self.obs)
         self.obs.append(obs)
+        if prev == 0 and len(self.obs) == 1:
+            for cb in list(self._obs_change_listeners):
+                cb(len(self.obs))
+
+    def _remove_obs(self, obs: "Computed | Effect"):
+        if obs in self.obs:
+            self.obs.remove(obs)
+            if len(self.obs) == 0:
+                for cb in list(self._obs_change_listeners):
+                    cb(0)
+
+    def on_observer_change(self, cb: Callable[[int], None]) -> Callable[[], None]:
+        self._obs_change_listeners.append(cb)
+
+        def off():
+            try:
+                self._obs_change_listeners.remove(cb)
+            except ValueError:
+                pass
+
+        return off
 
     def write(self, value: T):
         if value == self.value:
             return
+        increment_epoch()
         self.value = value
-        self.last_change = EPOCH.get()
-        # If there is no current batch, this ensures that the full graph gets
-        # flagged as dirty before any effects are executed. This is necessary to
-        # avoid the diamond problem.
-        # with EnsureBatch():
+        self.last_change = epoch()
         for obs in self.obs:
             obs._push_change()
 
-    # def _push_change(self):
-    #     for obs in self.obs:
-    #         obs._push_change()
-
-    # def write(self, value: T):
-    #     with EnsureBatch() as batch:
-    #         batch.schedule_signal(self, value)
-
 
 class Computed(Generic[T]):
-    def __init__(self, fn: Callable[[], T], name: Optional[str] = None):
+    def __init__(self, fn: Callable[..., T], name: Optional[str] = None):
         self.fn = fn
         self.value: T = None  # type: ignore
         self.name = name
         self.dirty = False
         self.on_stack = False
-        self.last_change = -1
+        self.last_change: int = -1
         self.deps: list[Signal | Computed] = []
         self.obs: list[Computed | Effect] = []
+        self._obs_change_listeners: list[Callable[[int], None]] = []
 
     def read(self) -> T:
         if self.on_stack:
             raise RuntimeError("Circular dependency detected")
 
-        if scope := SCOPE.get():
-            scope.accessed.add(self)
+        rc = REACTIVE_CONTEXT.get()
+        if rc.scope is not None:
+            rc.scope.register_dep(self)
 
         self._recompute_if_necessary()
         return self.value
@@ -90,35 +102,37 @@ class Computed(Generic[T]):
             obs._push_change()
 
     def _recompute(self):
-        epoch = EPOCH.get()
-        current_deps = set(self.deps)
-
         prev_value = self.value
+        prev_deps = set(self.deps)
         with Scope() as scope:
             if self.on_stack:
                 raise RuntimeError("Circular dependency detected")
             self.on_stack = True
+            execution_epoch = epoch()
             self.value = self.fn()
+            if epoch() != execution_epoch:
+                raise RuntimeError(
+                    f"Detected write to a signal in computed {self.name}. Computeds should be read-only."
+                )
             self.on_stack = False
             self.dirty = False
             if prev_value != self.value:
-                self.last_change = epoch
+                self.last_change = execution_epoch
 
-            if len(scope.new_effects) > 0:
+            if len(scope.effects) > 0:
                 raise RuntimeError(
                     "An effect was created within a computed variable's function. "
                     "This behavior is not allowed, computed variables should be pure calculations."
                 )
 
-        new_deps = scope.accessed
-        add_deps = new_deps - current_deps
-        remove_deps = current_deps - new_deps
+        self.deps = scope.deps
+        new_deps = set(self.deps)
+        add_deps = new_deps - prev_deps
+        remove_deps = prev_deps - new_deps
         for dep in add_deps:
-            dep.obs.append(self)
+            dep._add_obs(self)
         for dep in remove_deps:
-            dep.obs.remove(self)
-
-        self.deps = list(new_deps)
+            dep._remove_obs(self)
 
     def _recompute_if_necessary(self):
         if self.last_change < 0:
@@ -130,197 +144,246 @@ class Computed(Generic[T]):
         for dep in self.deps:
             if isinstance(dep, Computed):
                 dep._recompute_if_necessary()
-            if dep.last_change >= self.last_change:
+            if dep.last_change > self.last_change:
                 self._recompute()
                 return
 
         self.dirty = False
 
+    def _add_obs(self, obs: "Computed | Effect"):
+        prev = len(self.obs)
+        self.obs.append(obs)
+        if prev == 0 and len(self.obs) == 1:
+            for cb in list(self._obs_change_listeners):
+                cb(len(self.obs))
 
-@overload
-def computed(fn: Callable[[], T], *, name: Optional[str] = None) -> Computed[T]: ...
-@overload
-def computed(
-    fn: None = None, *, name: Optional[str] = None
-) -> Callable[[Callable[[], T]], Computed[T]]: ...
+    def _remove_obs(self, obs: "Computed | Effect"):
+        if obs in self.obs:
+            self.obs.remove(obs)
+            if len(self.obs) == 0:
+                for cb in list(self._obs_change_listeners):
+                    cb(0)
+
+    def on_observer_change(self, cb: Callable[[int], None]) -> Callable[[], None]:
+        self._obs_change_listeners.append(cb)
+
+        def off():
+            try:
+                self._obs_change_listeners.remove(cb)
+            except ValueError:
+                pass
+
+        return off
 
 
-def computed(fn: Optional[Callable[[], T]] = None, *, name: Optional[str] = None):
-    if fn is not None:
-        return Computed(fn, name=name or fn.__name__)
-    else:
-        # For some reason, I need to add the `/` to make `fn` a positional
-        # argument for the Python type checker to be happy.
-        def decorator(fn: Callable[[], T], /):
-            return Computed(fn, name=name or fn.__name__)
-
-        return decorator
-
-
-EffectFnWithoutCleanup = Callable[[], None]
 EffectCleanup = Callable[[], None]
-EffectFnWithCleanup = Callable[[], EffectCleanup]
-EffectFn = EffectFnWithCleanup | EffectFnWithoutCleanup
+EffectFn = Callable[[], Optional[EffectCleanup]]
 
 
 class Effect:
-    def __init__(self, fn: EffectFn, name: Optional[str] = None, immediate=False):
-        self.fn = fn
-        self.name = name
+    def __init__(
+        self,
+        fn: EffectFn,
+        name: Optional[str] = None,
+        immediate: bool = False,
+        lazy: bool = False,
+        on_error: Optional[Callable[[Exception], None]] = None,
+    ):
+        self.fn: EffectFn = fn
+        self.name: Optional[str] = name
+        self.on_error: Optional[Callable[[Exception], None]] = on_error
+        self.cleanup_fn: Optional[EffectCleanup] = None
         self.deps: list[Signal | Computed] = []
-        self.cleanup: Optional[EffectCleanup] = None
         self.children: list[Effect] = []
+        self.parent: Optional[Effect] = None
         # Used to detect the first run, but useful for testing/optimization
-        self.runs = 0
+        self.runs: int = 0
+        self.last_run: int = -1
+        self.scope: Optional[Scope] = None
+        self.batch: Optional[Batch] = None
 
-        if scope := SCOPE.get():
-            scope.new_effects.add(self)
+        if immediate and lazy:
+            raise ValueError("An effect cannot be boht immediate and lazy")
+
+        rc = REACTIVE_CONTEXT.get()
+        if rc.scope is not None:
+            rc.scope.register_effect(self)
 
         # Will either run the effect now or add it to the current batch
         if immediate:
-            self._run()
-        else:
-            self._push_change()
+            self.run()
+        elif not lazy:
+            self.schedule()
 
-    def dispose(self):
+    def _cleanup_before_run(self):
         # Run children cleanups first
         for child in self.children:
+            child._cleanup_before_run()
+        if self.cleanup_fn:
+            self.cleanup_fn()
+
+    def dispose(self):
+        # Run children cleanups first. Children will unregister themselves, so
+        # self.children will change size -> convert to a list first.
+        for child in self.children.copy():
             child.dispose()
-        if self.cleanup:
-            self.cleanup()
+        if self.cleanup_fn:
+            self.cleanup_fn()
+        for dep in self.deps:
+            dep.obs.remove(self)
+        if self.parent:
+            self.parent.children.remove(self)
+        if self.batch:
+            self.batch.effects.remove(self)
+
+    def schedule(self):
+        # Prefer composite reactive context if set
+        rc = REACTIVE_CONTEXT.get()
+        batch = rc.batch
+        batch.register_effect(self)
+        self.batch = batch
 
     def _push_change(self):
-        BATCH.get().register_effect(self)
+        self.schedule()
 
     def _should_run(self):
-        return self.runs == 0 or self._deps_changed()
+        return self.runs == 0 or self._deps_changed_since_last_run()
 
-    def _deps_changed(self):
-        epoch = EPOCH.get()
+    def _deps_changed_since_last_run(self):
         for dep in self.deps:
-            if dep.last_change == epoch:
+            if dep.last_change > self.last_run:
                 return True
             if isinstance(dep, Computed):
                 dep._recompute_if_necessary()
-                if dep.last_change == epoch:
+                if dep.last_change > self.last_run:
                     return True
         return False
 
-    def _run(self):
+    def __call__(self):
+        self.run()
+
+    def _handle_error(self, exc: Exception) -> None:
+        """Handle an exception raised during this effect's execution.
+
+        Preference order:
+        1) This effect's on_error handler, if provided
+        2) Reactive context's on_effect_error handler, if provided
+        3) Re-raise the exception
+        """
+        if callable(self.on_error):
+            self.on_error(exc)
+            return
+        # Report via reactive context if a handler is present
+        handler = getattr(REACTIVE_CONTEXT.get(), "on_effect_error", None)
+        if callable(handler):
+            handler(self, exc)
+            return
+        raise exc
+
+    def run(self):
         # Skip effects during prerendering
         if IS_PRERENDERING.get():
             return
 
-        current_deps = set(self.deps)
+        # Don't track what happens in the cleanup
+        with Untrack():
+            # Run children cleanup first
+            try:
+                self._cleanup_before_run()
+            except Exception as e:
+                self._handle_error(e)
 
+        prev_deps = set(self.deps)
+        execution_epoch = epoch()
         with Scope() as scope:
-            self.dispose()
-            self.cleanup = self.fn()
-            self.children = list(scope.new_effects)
+            # Clear batch *before* running as we may update a signal that causes
+            # this effect to be rescheduled.
+            self.batch = None
+            try:
+                self.cleanup_fn = self.fn()
+            except Exception as e:
+                self._handle_error(e)
             self.runs += 1
+            self.last_run = execution_epoch
 
-        new_deps = scope.accessed
-        add_deps = new_deps - current_deps
-        remove_deps = current_deps - new_deps
+        # Update children
+        self.children = scope.effects
+        for child in self.children:
+            child.parent = self
+
+        # Update deps
+        self.deps = scope.deps
+        new_deps = set(self.deps)
+        add_deps = new_deps - prev_deps
+        remove_deps = prev_deps - new_deps
         for dep in add_deps:
-            dep.obs.append(self)
+            dep._add_obs(self)
+            # New dependencies may have been affected by this run of the effect.
+            # If that's the case, we should reschedule it.
+            is_dirty = isinstance(dep, Computed) and dep.dirty
+            has_changed = isinstance(dep, Signal) and dep.last_change > self.last_run
+            if is_dirty or has_changed:
+                self.schedule()
         for dep in remove_deps:
-            dep.obs.remove(self)
-
-        self.deps = list(new_deps)
-
-
-@overload
-def effect(
-    fn: Callable[[], None], *, name: Optional[str] = None, immediate: bool = False
-) -> Effect: ...
-@overload
-def effect(
-    fn: None = None, *, name: Optional[str] = None, immediate: bool = False
-) -> Callable[[Callable[[], None]], Effect]: ...
-
-
-def effect(
-    fn: Optional[Callable[[], None]] = None,
-    *,
-    name: Optional[str] = None,
-    immediate: bool = False,
-):
-    if fn is not None:
-        return Effect(fn, name=name or fn.__name__, immediate=immediate)
-    else:
-        # For some reason, I need to add the `/` to make `fn` a positional
-        # argument for the Python type checker to be happy.
-        def decorator(fn: Callable[[], None], /):
-            return Effect(fn, name=name or fn.__name__, immediate=immediate)
-
-        return decorator
-
-
-class Scope:
-    def __init__(self):
-        self.accessed: Set[Signal | Computed] = set()
-        self.new_effects: set[Effect] = set()
-
-    def clear(self):
-        self.accessed.clear()
-        self.new_effects.clear()
-
-    def __enter__(self):
-        self._token = SCOPE.set(self)
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        SCOPE.reset(self._token)
+            dep._remove_obs(self)
 
 
 class Batch:
-    def __init__(self) -> None:
-        self._effects: list[Effect] = []
+    def __init__(
+        self, effects: Optional[list[Effect]] = None, name: Optional[str] = None
+    ) -> None:
+        self.effects: list[Effect] = effects or []
+        self.name = name
 
     def register_effect(self, effect: Effect):
-        if effect not in self._effects:
-            self._effects.append(effect)
+        if effect not in self.effects:
+            self.effects.append(effect)
 
     def flush(self):
-        global_batch = BATCH.get()
         token = None
-        if global_batch != self:
-            token = BATCH.set(self)
+        rc = REACTIVE_CONTEXT.get()
+        if rc.batch is not self:
+            token = REACTIVE_CONTEXT.set(ReactiveContext(rc.epoch, self, rc.scope))
 
         MAX_ITERS = 10000
-        epoch = start_epoch = EPOCH.get()
+        iters = 0
 
-        while len(self._effects) > 0:
-            if epoch - start_epoch > MAX_ITERS:
+        while len(self.effects) > 0:
+            if iters > MAX_ITERS:
                 raise RuntimeError(
                     f"Pulse's reactive system registered more than {MAX_ITERS} iterations. There is likely an update cycle in your application.\n"
                     "This is most often caused through a state update during rerender or in an effect that ends up triggering the same rerender or effect."
                 )
 
-            current_effects = self._effects
-            self._effects = []
-
-            for effect in current_effects:
-                if effect._should_run():
-                    effect._run()
-
             # This ensures the epoch is incremented *after* all the signal
             # writes and associated effects have been run.
-            epoch += 1
-            EPOCH.set(epoch)
+
+            current_effects = self.effects
+            self.effects = []
+
+            for effect in current_effects:
+                if not effect._should_run():
+                    continue
+                try:
+                    effect.run()
+                except Exception as exc:
+                    effect._handle_error(exc)
+
+            iters += 1
+
         if token:
-            BATCH.reset(token)
+            REACTIVE_CONTEXT.reset(token)
 
     def __enter__(self):
-        self._token = BATCH.set(self)
+        rc = REACTIVE_CONTEXT.get()
+        self._parent = rc.batch
+        rc.batch = self
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self.flush()
-        # Reset AFTER flushing, as the batch needs to capture any signals or
-        # effects triggered while flushing.
-        BATCH.reset(self._token)
+        rc = REACTIVE_CONTEXT.get()
+        rc.batch = self._parent
 
 
 class GlobalBatch(Batch):
@@ -343,22 +406,86 @@ class GlobalBatch(Batch):
         self.is_scheduled = False
 
 
+class Epoch:
+    def __init__(self, current: int = 0) -> None:
+        self.current = current
+
+
+# Used to track dependencies and effects created within a certain function or
+# context.
+class Scope:
+    def __init__(self):
+        # Use lists to preserve insertion order
+        self.deps: list[Signal | Computed] = []
+        self.effects: list[Effect] = []
+
+    def register_effect(self, effect: "Effect"):
+        if effect not in self.effects:
+            self.effects.append(effect)
+
+    def register_dep(self, value: "Signal | Computed"):
+        if value not in self.deps:
+            self.deps.append(value)
+
+    def __enter__(self):
+        rc = REACTIVE_CONTEXT.get()
+        self._parent = rc.scope
+        rc.scope = self
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        rc = REACTIVE_CONTEXT.get()
+        rc.scope = self._parent
+
+
+class Untrack(Scope): ...
+
+
+# --- Reactive Context (composite of epoch, batch, scope) ---
+class ReactiveContext:
+    def __init__(
+        self,
+        epoch: Optional[Epoch] = None,
+        batch: Optional[Batch] = None,
+        scope: Optional[Scope] = None,
+        on_effect_error: Optional[Callable[[Effect, Exception], None]] = None,
+    ) -> None:
+        self.epoch = epoch or Epoch()
+        self.batch = batch or GlobalBatch()
+        self.scope = scope
+        # Optional effect error handler set by integrators (e.g., session)
+        self.on_effect_error = on_effect_error
+
+    def get_epoch(self) -> int:
+        return self.epoch.current
+
+    def increment_epoch(self) -> None:
+        self.epoch.current += 1
+
+    def __enter__(self):
+        self._tok_rc = REACTIVE_CONTEXT.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        REACTIVE_CONTEXT.reset(self._tok_rc)
+
+
+def epoch():
+    return REACTIVE_CONTEXT.get().get_epoch()
+
+
+def increment_epoch():
+    return REACTIVE_CONTEXT.get().increment_epoch()
+
+
+# Default global context (used in tests / outside app)
+REACTIVE_CONTEXT: ContextVar[ReactiveContext] = ContextVar(
+    "pulse_reactive_context", default=ReactiveContext(Epoch(), GlobalBatch())
+)
+
+
 def flush_effects():
-    BATCH.get().flush()
-
-
-def batch():
-    return Batch()
-
-
-def untrack():
-    return Scope()
+    REACTIVE_CONTEXT.get().batch.flush()
 
 
 class InvariantError(Exception): ...
-
-
-# --- Globals ---
-EPOCH = ContextVar("EPOCH", default=1)
-SCOPE: ContextVar[Optional[Scope]] = ContextVar("pulse_scope", default=None)
-BATCH: ContextVar[Batch] = ContextVar("pulse_batch", default=GlobalBatch())

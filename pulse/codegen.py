@@ -21,13 +21,13 @@ class CodegenConfig:
         pulse_path (Path): Full path to the generated app directory.
     """
 
-    web_dir: str = "pulse-web"
+    web_dir: Path | str = "pulse-web"
     """Root directory for the web output."""
 
-    pulse_dir: str = "pulse"
+    pulse_dir: Path | str = "pulse"
     """Name of the Pulse app directory."""
 
-    lib_path: str = "~/pulse-lib"
+    lib_path: Path | str = "pulse-react"
     """Path to the Pulse library."""
 
     @property

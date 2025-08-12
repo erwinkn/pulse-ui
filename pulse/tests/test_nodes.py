@@ -29,7 +29,7 @@ from pulse.vdom import (
     define_tag,
     define_self_closing_tag,
 )
-from pulse.tests.test_utils import assert_node_renders_to
+from pulse.tests.test_utils import assert_node_equal
 
 
 class TestUITreeNode:
@@ -62,29 +62,10 @@ class TestUITreeNode:
         assert node.children[0] == child1
         assert node.children[1] == "text content"
 
-    def test_node_to_dict(self):
-        """Test converting nodes to dictionary format."""
-        child = Node("p", {"className": "text"}, ["Hello"])
-        node = Node("div", {"id": "container"}, [child, "world"])
-
-        expected: VDOMNode = {
-            "tag": "div",
-            "props": {"id": "container"},
-            "children": [
-                {"tag": "p", "props": {"className": "text"}, "children": ["Hello"]},
-                "world",
-            ],
-        }
-
-        assert_node_renders_to(node, expected)
-
     def test_node_with_key(self):
         """Test creating nodes with keys."""
         node = Node("div", key="my-key")
         assert node.key == "my-key"
-
-        expected: VDOMNode = {"tag": "div", "key": "my-key"}
-        assert_node_renders_to(node, expected)
 
     def test_indexing_syntax(self):
         """Test the indexing syntax for adding children."""
@@ -118,8 +99,8 @@ class TestHTMLTags:
         """Test basic tag creation."""
         node = div()
         assert node.tag == "div"
-        assert node.props == {}
-        assert node.children == ()
+        assert node.props is None
+        assert node.children is None
 
         node = p()
         assert node.tag == "p"
@@ -208,16 +189,16 @@ class TestHTMLTags:
         """Test self-closing tags."""
         node = br()
         assert node.tag == "br"
-        assert node.children == ()
+        assert node.children is None
 
         node = hr()
         assert node.tag == "hr"
-        assert node.children == ()
+        assert node.children is None
 
         node = img(src="/image.jpg", alt="Description")
         assert node.tag == "img"
         assert node.props == {"src": "/image.jpg", "alt": "Description"}
-        assert node.children == ()
+        assert node.children is None
 
     def test_default_props(self):
         """Test tags with default props."""
@@ -252,8 +233,8 @@ class TestTagDefinition:
 
         node = custom_tag()
         assert node.tag == "custom"
-        assert node.props == {}
-        assert node.children == ()
+        assert node.props is None
+        assert node.children is None
 
         node = custom_tag(prop1="value1")["Child content"]
         assert node.tag == "custom"
@@ -278,13 +259,13 @@ class TestTagDefinition:
 
         node = self_closing()
         assert node.tag == "void-element"
-        assert node.props == {}
-        assert node.children == ()
+        assert node.props is None
+        assert node.children is None
 
         node = self_closing(prop="value")
         assert node.tag == "void-element"
         assert node.props == {"prop": "value"}
-        assert node.children == ()
+        assert node.children is None
 
 
 class TestComplexStructures:
@@ -306,29 +287,6 @@ class TestComplexStructures:
         }
 
         assert_node_renders_to(list_structure, expected)
-
-    def test_form_structure(self):
-        """Test creating form structures."""
-        form_structure = form(action="/submit", method="POST")[
-            div(className="form-group")[
-                label(htmlFor="name")["Name:"],
-                input(type="text", id="name", name="name", required=True),
-            ],
-            div(className="form-group")[
-                label(htmlFor="email")["Email:"],
-                input(type="email", id="email", name="email", required=True),
-            ],
-            button(type="submit")["Submit"],
-        ]
-
-        # Just test that it renders without checking exact structure
-        # Form structures are complex and the exact layout may vary
-        result, callbacks = form_structure.render()
-        assert result["tag"] == "form"
-        props = result.get("props")
-        assert props is not None
-        assert props["action"] == "/submit"
-        assert props["method"] == "POST"
 
     def test_mixed_content_types(self):
         """Test mixing different content types."""
@@ -424,3 +382,56 @@ class TestEdgeCases:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestFromVDOM:
+    def test_from_vdom_primitives(self):
+        for value in ["text", 123, 3.14, True, None]:
+            assert Node.from_vdom(value) == value
+
+    def test_from_vdom_simple_element(self):
+        vdom: VDOMNode = {"tag": "div"}
+        node = Node.from_vdom(vdom)
+        assert isinstance(node, Node)
+        assert node.tag == "div"
+        assert_node_equal(node, Node("div"))
+
+    def test_from_vdom_with_props_and_children(self):
+        vdom: VDOMNode = {
+            "tag": "div",
+            "props": {"className": "container"},
+            "children": [
+                "Hello",
+                {"tag": "span", "children": ["World"]},
+            ],
+        }
+
+        node = Node.from_vdom(vdom)
+        assert isinstance(node, Node)
+        expected = Node(
+            "div",
+            {"className": "container"},
+            [
+                "Hello",
+                Node("span", None, ["World"]),
+            ],
+        )
+        assert_node_equal(node, expected)
+
+    def test_from_vdom_preserves_key_and_strips_callbacks(self):
+        vdom: VDOMNode = {
+            "tag": "button",
+            "key": "k1",
+            "props": {
+                "type": "button",
+                "onClick": "$$fn:0.onClick",
+            },
+            "children": ["Click"],
+        }
+
+        node = Node.from_vdom(vdom)
+        assert isinstance(node, Node)
+        # onClick placeholder should be removed
+        assert node.props == {"type": "button"}
+        assert node.key == "k1"
+        assert_node_equal(node, Node("button", {"type": "button"}, ["Click"], key="k1"))

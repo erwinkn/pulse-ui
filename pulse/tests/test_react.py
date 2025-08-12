@@ -289,7 +289,7 @@ class TestComponentIntegrationWithHTML:
                 {
                     "tag": "$$user-card",
                     "props": {"name": "John Doe", "email": "john@example.com"},
-                    "children": [],
+                    "children": None,
                 },
                 {"tag": "p", "props": {}, "children": ["Some regular HTML content"]},
                 {

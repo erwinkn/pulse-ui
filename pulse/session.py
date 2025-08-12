@@ -13,7 +13,7 @@ from pulse.messages import (
     ServerUpdateMessage,
     ServerErrorMessage,
 )
-from pulse.reactive import REACTIVE_CONTEXT, Effect, ReactiveContext
+from pulse.reactive import REACTIVE_CONTEXT, Effect, ReactiveContext, flush_effects
 from pulse.reactive_extensions import ReactiveDict
 from pulse.reconciler import RenderRoot, RenderDiff
 from pulse.routing import ROUTE_CONTEXT, Layout, Route, RouteContext, RouteTree
@@ -81,6 +81,7 @@ class Session:
         self.message_listeners.discard(message_listener)
 
     def notify(self, message: ServerMessage):
+        print(f"Session {self.id}, sending message {message}")
         for listener in self.message_listeners:
             listener(message)
 
@@ -214,6 +215,7 @@ class Session:
         ctx = self.render_context(path, route_info, create=True)
 
         def _render_effect():
+            print(f"Render effect {self.id}")
             with ctx:
                 if ctx.root.render_count == 0:
                     vdom = ctx.root.render_vdom(prerendering=False)
@@ -233,10 +235,14 @@ class Session:
         with self.reactive_context:
             ctx.effect = Effect(
                 _render_effect,
-                # immediate=True,
+                immediate=True,
                 name=f"{path}:render",
                 on_error=lambda e: self.report_error(path, "render", e),
             )
+    
+    def flush(self):
+        with self.reactive_context:
+            flush_effects()
 
     def navigate(self, path: str, route_info: RouteInfo):
         # Route is already mounted, we can just update the routing state

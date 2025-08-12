@@ -289,7 +289,6 @@ class RouteTree:
                 print(f"Marking layout with idx = {layout_count}")
                 route.idx = layout_count
             _flatten_route_tree(route)
-        print("Route tree:", self.flat_tree)
 
     def find(self, path: str):
         path = normalize_path(path)

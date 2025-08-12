@@ -9,14 +9,17 @@ that updates from one session do not leak into the other.
 from typing import cast
 
 import pulse as ps
-from pulse.messages import RouteInfo, ServerMessage
+from pulse.messages import (
+    RouteInfo,
+    ServerMessage,
+)
+from pulse.reactive import flush_effects
 from pulse.routing import Route, RouteTree
 from pulse.session import Session
-from pulse.reactive import flush_effects
-from pulse.vdom import Node
+from pulse.vdom import VDOM
 
 
-class Counter(ps.State):
+class CounterState(ps.State):
     count: int = 0
 
     @ps.effect
@@ -24,11 +27,12 @@ class Counter(ps.State):
         _ = self.count  # track
 
 
-def make_counter_component(session_name: str, key_prefix: str):
-    state = ps.states(Counter)
+def Counter(session_name: str, key_prefix: str):
+    state = ps.states(CounterState)
 
     def inc():
         state.count = state.count + 1
+    print(f"Rendering counter {key_prefix}:{session_name} with count {state.count}")
 
     # Render current count + a callback
     return ps.div(key=f"{key_prefix}:{session_name}")[
@@ -38,8 +42,8 @@ def make_counter_component(session_name: str, key_prefix: str):
 
 
 def make_routes() -> RouteTree:
-    route_a = Route("a", lambda: make_counter_component("A", "route-a"))
-    route_b = Route("b", lambda: make_counter_component("B", "route-b"))
+    route_a = Route("a", lambda: Counter("A", "route-a"))
+    route_b = Route("b", lambda: Counter("B", "route-b"))
     return RouteTree([route_a, route_b])
 
 
@@ -55,26 +59,25 @@ def make_route_info(pathname: str) -> RouteInfo:
 
 
 def mount_with_listener(session: Session, path: str):
-    messages: list = []
+    messages: list[ServerMessage] = []
 
     def on_message(msg: ServerMessage):
-        if msg["path"] != path:
+        if msg["type"] == "api_call" or msg["path"] != path:
             return
         messages.append(msg)
 
     disconnect = session.connect(on_message)
-    session.mount(path, make_route_info(path), current_vdom=None)
-    flush_effects()
+    session.mount(path, make_route_info(path))
     return messages, disconnect
 
 
 def extract_count_from_ctx(session: Session, path: str) -> int:
-    # Read latest VDOM by re-rendering the server node and inspecting it
-    ctx = session.active_routes[path]
-    node = ctx.node
-    assert isinstance(node, Node)
-    vdom, _ = node.render()
-    children = cast(list, (vdom.get("children", []) or []))
+    # Read latest VDOM by re-rendering from the RenderRoot and inspecting it
+    ctx = session.render_contexts[path]
+    with ctx:
+        vdom: VDOM = ctx.root.render_vdom()
+    vdom_dict = cast(dict, vdom)
+    children = cast(list, (vdom_dict.get("children", []) or []))
     span = cast(dict, children[0])
     text_children = cast(list, span.get("children", [0]))
     text = text_children[0]
@@ -100,7 +103,8 @@ def test_two_sessions_two_routes_are_isolated():
 
     # Click a button in session 1 route a (button is second child, index 1)
     s1.execute_callback("a", "1.onClick", [])
-    flush_effects()
+    s1.flush()
+    s2.flush()
 
     # s1:a should update, others should remain unchanged
     assert extract_count_from_ctx(s1, "a") == 1
@@ -116,7 +120,8 @@ def test_two_sessions_two_routes_are_isolated():
 
     # Click a button in session 2 route a (button is second child, index 1)
     s2.execute_callback("a", "1.onClick", [])
-    flush_effects()
+    s1.flush()
+    s2.flush()
 
     # s2:a should update, others should remain unchanged
     assert extract_count_from_ctx(s1, "a") == 1

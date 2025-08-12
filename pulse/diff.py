@@ -18,7 +18,6 @@ class InsertOperation(TypedDict):
 class RemoveOperation(TypedDict):
     type: Literal["remove"]
     path: str
-    data: Optional[str]  # optional key, for keyed removals
 
 
 class ReplaceOperation(TypedDict):

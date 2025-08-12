@@ -60,14 +60,17 @@ class StateEffect(Generic[T]):
     def __init__(
         self,
         fn: "Callable[[State], T]",
+        on_error: "Callable[[Exception], None] | None" = None,
     ):
         self.fn = fn
+        self.on_error = on_error
 
     def initialize(self, state: "State", name: str):
         bound_method = self.fn.__get__(state, state.__class__)
         effect = Effect(
             bound_method,
             name=f"{state.__class__.__name__}.{name}",
+            on_error=self.on_error,
         )
         setattr(state, name, effect)
 

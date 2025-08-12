@@ -5,17 +5,22 @@ This library provides a Python API for building UI trees that match
 the TypeScript UINode format exactly, eliminating the need for translation.
 """
 
-import inspect
+from __future__ import annotations
+import functools
 from typing import (
     Any,
     NamedTuple,
     NotRequired,
     Optional,
     Callable,
+    Protocol,
     Sequence,
     TypedDict,
     Union,
     cast,
+    Generic,
+    ParamSpec,
+    overload,
 )
 
 __all__ = [
@@ -144,7 +149,10 @@ __all__ = [
 # ============================================================================
 
 PrimitiveNode = Union[str, int, float, None]
-NodeTree = Union["Node", PrimitiveNode]
+NodeTree = Union["Node", "ComponentNode", PrimitiveNode]
+Children = Sequence[NodeTree]
+
+P = ParamSpec("P")
 
 
 class VDOMNode(TypedDict):
@@ -178,15 +186,21 @@ class Node:
         self,
         tag: str,
         props: Optional[dict[str, Any] | None] = None,
-        children: Optional[Sequence["NodeTree"]] = None,
+        children: Optional[Sequence[NodeTree]] = None,
         key: Optional[str] = None,
-        callbacks: Optional[dict[str, Callback]] = None,
     ):
         self.tag = tag
-        self.props = props
-        self.children = children
-        self.key = key
-        self.callbacks = callbacks
+        # Normalize to None
+        self.props = props or None
+        self.children = children or None
+        self.key = key or None
+
+    # --- Pretty printing helpers -------------------------------------------------
+    def __repr__(self) -> str:  # pragma: no cover - trivial formatting
+        return (
+            f"Node(tag={self.tag!r}, key={self.key!r}, props={_short_props(self.props)}, "
+            f"children={_short_children(self.children)})"
+        )
 
     def __getitem__(
         self,
@@ -204,50 +218,9 @@ class Node:
         return Node(
             tag=self.tag,
             props=self.props,
-            callbacks=self.callbacks,
             children=new_children,
             key=self.key,
         )
-
-    def _render_node(self, path: str, callbacks: dict[str, Callback]) -> VDOMNode:
-        """Convert to dictionary format for JSON serialization."""
-        path_prefix = (path + ".") if path else ""
-
-        vdom: VDOMNode = {
-            "tag": self.tag,
-        }
-        if self.key:
-            vdom["key"] = self.key
-        if self.props:
-            vdom["props"] = self.props
-        if self.children:
-            vdom["children"] = [
-                child._render_node(f"{path_prefix}{i}", callbacks)
-                if isinstance(child, Node)
-                else child
-                for i, child in enumerate(self.children or [])
-            ]
-        if self.callbacks:
-            if "props" not in vdom:
-                vdom["props"] = {}
-            for callback_name, callback_fn in self.callbacks.items():
-                callback_key = f"{path_prefix}{callback_name}"
-                # Props are guaranteed to exist here
-                vdom["props"][callback_name] = f"$$fn:{callback_key}"
-                callbacks[callback_key] = callback_fn
-
-        return vdom
-
-    def list_callbacks(self, path="") -> dict[str, Callback]:
-        if not self.callbacks:
-            return {}
-        path_prefix = (path + ".") if path else ""
-        return {path_prefix + key: callback for key, callback in self.callbacks.items()}
-
-    def render(self, path="") -> tuple[VDOMNode, Callbacks]:
-        callbacks: dict[str, Callback] = {}
-        tree = self._render_node(path, callbacks)
-        return tree, callbacks
 
     @staticmethod
     def from_vdom(vdom: VDOM) -> Union["Node", PrimitiveNode]:
@@ -262,18 +235,7 @@ class Node:
             return vdom
 
         tag = cast(str, vdom.get("tag"))
-        props_in = cast(dict[str, Any] | None, vdom.get("props")) or {}
-
-        props: dict[str, Any] = {}
-        callbacks: dict[str, Callback] = {}
-
-        for prop_key, prop_value in props_in.items():
-            if isinstance(prop_value, str) and prop_value.startswith("$$fn:"):
-                # Preserve as callback metadata on Node so diffs are stable
-                callbacks[prop_key] = Callback(NOOP, 0)
-                continue
-            props[prop_key] = prop_value
-
+        props = cast(dict[str, Any] | None, vdom.get("props")) or {}
         key_value = cast(Optional[str], vdom.get("key"))
 
         children_value: list[NodeTree] | None = None
@@ -290,7 +252,6 @@ class Node:
             props=props or None,
             children=children_value,
             key=key_value,
-            callbacks=callbacks or None,
         )
 
 
@@ -310,13 +271,12 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
     Returns:
         A function that creates UITreeNode instances
     """
-    default_props = default_props or {}
 
     def create_element(*children: NodeTree, **props: Any) -> Node:
         """Create a UITreeNode for this tag."""
-        props = {**default_props, **props}
-        props, callbacks = _extract_callbacks_from_props(props)
-        return Node(tag=name, props=props, callbacks=callbacks, children=children)
+        if default_props:
+            props = default_props | props
+        return Node(tag=name, props=props, children=children)
 
     return create_element
 
@@ -332,34 +292,54 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
     Returns:
         A function that creates UITreeNode instances (no children allowed)
     """
-    default_props = default_props or {}
+    default_props = default_props
 
     def create_element(**props: Any) -> Node:
         """Create a self-closing UITreeNode for this tag."""
-        props = {**default_props, **props}
-        props, callbacks = _extract_callbacks_from_props(props)
-
+        if default_props:
+            props = default_props | props
         return Node(
             tag=name,
             props=props,
-            callbacks=callbacks,
             children=(),  # Self-closing tags never have children
         )
 
     return create_element
 
 
-def _extract_callbacks_from_props(
-    props: dict[str, Any],
-) -> tuple[dict[str, Any], Callbacks]:
-    clean_props = {}
-    callbacks: Callbacks = {}
-    for k, v in props.items():
-        if callable(v):
-            callbacks[k] = Callback(v, len(inspect.signature(v).parameters))
+# ----------------------------------------------------------------------------
+# Formatting helpers (internal)
+# ----------------------------------------------------------------------------
+
+
+def _short_props(
+    props: dict[str, Any] | None, max_items: int = 6
+) -> dict[str, Any] | str:
+    if not props:
+        return {}
+    items = list(props.items())
+    if len(items) <= max_items:
+        return props
+    head = dict(items[: max_items - 1])
+    return {**head, "…": f"+{len(items) - (max_items - 1)} more"}
+
+
+def _short_children(
+    children: Sequence[NodeTree] | None, max_items: int = 4
+) -> list[str] | str:
+    if not children:
+        return []
+    out: list[str] = []
+    for child in children[: max_items - 1]:
+        if isinstance(child, Node):
+            out.append(f"<{child.tag}>")
+        elif isinstance(child, ComponentNode):
+            out.append(f"<{child.name} />")
         else:
-            clean_props[k] = v
-    return clean_props, callbacks
+            out.append(repr(child))
+    if len(children) > (max_items - 1):
+        out.append(f"…(+{len(children) - (max_items - 1)})")
+    return out
 
 
 # ============================================================================
@@ -480,3 +460,135 @@ param = define_self_closing_tag("param")
 source = define_self_closing_tag("source")
 track = define_self_closing_tag("track")
 wbr = define_self_closing_tag("wbr")
+
+
+# --- Components ---
+
+
+class Component(Generic[P]):
+    def __init__(self, fn: Callable[P, NodeTree], name: Optional[str] = None) -> None:
+        self.fn = fn
+        self.name = name or _infer_component_name(fn)
+
+    def __call__(
+        self, key: Optional[str] = None, *args: P.args, **kwargs: P.kwargs
+    ) -> "ComponentNode":
+        return ComponentNode(
+            fn=self.fn, key=key, args=args, kwargs=kwargs, name=self.name
+        )
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial formatting
+        return f"Component(name={self.name!r}, fn={_callable_qualname(self.fn)!r})"
+
+    def __str__(self) -> str:  # pragma: no cover - trivial formatting
+        return self.name
+
+
+class ComponentNode:
+    def __init__(
+        self,
+        fn: Callable,
+        args: tuple,
+        kwargs: dict,
+        name: Optional[str] = None,
+        key: Optional[str] = None,
+    ) -> None:
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.key = key
+        self.name = name or _infer_component_name(fn)
+
+    def __getitem__(self, *children: NodeTree):
+        if "children" in self.kwargs and self.kwargs.get("children"):
+            raise ValueError(
+                f"Component {self.name} already has children: {self.kwargs.get('children')}"
+            )
+        kwargs = self.kwargs.copy()
+        kwargs["children"] = children
+        result = ComponentNode(
+            fn=self.fn,
+            args=self.args,
+            kwargs=kwargs,
+            name=self.name,
+        )
+        return result
+
+    def __repr__(self) -> str:
+        return (
+            f"ComponentNode(name={self.name!r}, key={self.key!r}, "
+            f"args={_short_args(self.args)}, kwargs={_short_props(self.kwargs)})"
+        )
+
+
+@overload
+def component(fn: Callable[P, NodeTree]) -> Component[P]: ...
+@overload
+def component(
+    fn: None = None, *, name: Optional[str] = None
+) -> Callable[[Callable[P, NodeTree]], Component[P]]: ...
+
+
+# The explicit return type is necessary for the type checker to be happy
+def component(
+    fn: Callable[P, NodeTree] | None = None, *, name: str | None = None
+) -> Component[P] | Callable[[Callable[P, NodeTree]], Component[P]]:
+    def decorator(fn: Callable[P, NodeTree]):
+        return Component(fn, name)
+
+    if fn is not None:
+        return decorator(fn)
+    return decorator
+
+
+# ----------------------------------------------------------------------------
+# Component naming heuristics
+# ----------------------------------------------------------------------------
+
+
+def _short_args(args: tuple[Any, ...], max_items: int = 4) -> list[str] | str:
+    if not args:
+        return []
+    out: list[str] = []
+    for a in args[: max_items - 1]:
+        s = repr(a)
+        if len(s) > 32:
+            s = s[:29] + "…" + s[-1]
+        out.append(s)
+    if len(args) > (max_items - 1):
+        out.append(f"…(+{len(args) - (max_items - 1)})")
+    return out
+
+
+def _infer_component_name(fn: Callable[..., Any]) -> str:
+    # Unwrap partials and single-level wrappers
+    original = fn
+    if isinstance(original, functools.partial):
+        original = original.func  # type: ignore[attr-defined]
+
+    name: str | None = getattr(original, "__name__", None)
+    if name and name != "<lambda>":
+        return name
+
+    qualname: str | None = getattr(original, "__qualname__", None)
+    if qualname and "<locals>" not in qualname:
+        # Best-effort: take the last path component
+        return qualname.split(".")[-1]
+
+    # Callable instances (classes defining __call__)
+    cls = getattr(original, "__class__", None)
+    if cls and getattr(cls, "__name__", None):
+        return cls.__name__
+
+    # Fallback
+    return "Component"
+
+
+def _callable_qualname(fn: Callable[..., Any]) -> str:
+    mod = getattr(fn, "__module__", None) or "__main__"
+    qual = (
+        getattr(fn, "__qualname__", None)
+        or getattr(fn, "__name__", None)
+        or "<callable>"
+    )
+    return f"{mod}.{qual}"

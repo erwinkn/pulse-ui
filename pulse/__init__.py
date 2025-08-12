@@ -1,7 +1,6 @@
 from .app import App, Session
 from .state import State
 from .routing import Route, Layout
-from .component import component
 from .reactive import Signal, Computed, Effect, Batch, Untrack
 from .reactive_extensions import (
     ReactiveDict,
@@ -9,7 +8,15 @@ from .reactive_extensions import (
     ReactiveSet,
     reactive_dataclass,
 )
-from .render import states, effects, setup, router, session_context
+from .hooks import (
+    states,
+    effects,
+    setup,
+    route_info,
+    session_context,
+    call_api,
+    navigate,
+)
 from .middleware import (
     PulseMiddleware,
     Ok,
@@ -26,6 +33,10 @@ from .decorators import computed, effect, query
 
 # Import HTML tags and other UI components
 from .vdom import (
+    # Components
+    component,
+    Component,
+    ComponentNode,
     # Core types and functions
     Node,
     define_tag,
@@ -154,6 +165,10 @@ from .components import (
 )
 
 __all__ = [
+    # Components
+    "component",
+    "Component",
+    "ComponentNode",
     # VDOM core
     "Node",
     "define_tag",
@@ -298,8 +313,10 @@ __all__ = [
     "setup",
     "states",
     "effects",
-    "router",
+    "route_info",
     "session_context",
+    "call_api",
+    "navigate",
     # Middleware
     "PulseMiddleware",
     "Ok",

@@ -101,12 +101,3 @@ def assert_node_equal(
     )
 
 
-def assert_node_renders_to(node: Node, expected_vdom: Union[VDOMNode, PrimitiveNode]):
-    """
-    Assert that a Node renders to the expected VDOM structure.
-
-    This is a convenience function that renders the node and compares
-    the resulting VDOM tree using normalized comparison.
-    """
-    actual_vdom, callbacks = node.render()
-    assert_vdom_equal(actual_vdom, expected_vdom)

@@ -1,21 +1,17 @@
-import type { VDOM, VDOMNode } from "./vdom";
+import type { RouteInfo } from "./helpers";
+import type { ClientMountMessage } from "./messages";
 import { applyVDOMUpdates } from "./renderer";
 import { extractEvent } from "./serialize";
-import type {
-  ClientCallbackMessage,
-  ClientMountMessage,
-  ClientNavigateMessage,
-  RouteInfo,
-} from "./messages";
+import type { VDOM, VDOMNode } from "./vdom";
 
-import type {
-  ServerMessage,
-  ClientMessage,
-  ServerErrorInfo,
-  ServerApiCallMessage,
-  ClientApiResultMessage,
-} from "./messages";
 import { io, Socket } from "socket.io-client";
+import type {
+  ClientApiResultMessage,
+  ClientMessage,
+  ServerApiCallMessage,
+  ServerErrorInfo,
+  ServerMessage,
+} from "./messages";
 
 export interface MountedView {
   vdom: VDOM;
@@ -82,7 +78,6 @@ export class PulseSocketIOClient {
             type: "mount",
             path: path,
             routeInfo: route.routeInfo,
-            currentVDOM: route.vdom,
           } satisfies ClientMountMessage);
         }
 
@@ -163,7 +158,6 @@ export class PulseSocketIOClient {
     this.activeViews.set(path, view);
     void this.sendMessage({
       type: "mount",
-      currentVDOM: view.vdom,
       path,
       routeInfo: view.routeInfo,
     });
@@ -231,7 +225,7 @@ export class PulseSocketIOClient {
         break;
       }
       case "api_call": {
-        void this.performApiCall(message as ServerApiCallMessage);
+        void this.performApiCall(message);
         break;
       }
       case "navigate_to": {
@@ -281,7 +275,6 @@ export class PulseSocketIOClient {
       const reply: ClientApiResultMessage = {
         type: "api_result",
         id: msg.id,
-        path: msg.path,
         ok: res.ok,
         status: res.status,
         headers: headersObj,
@@ -292,7 +285,6 @@ export class PulseSocketIOClient {
       const reply: ClientApiResultMessage = {
         type: "api_result",
         id: msg.id,
-        path: msg.path,
         ok: false,
         status: 0,
         headers: {},

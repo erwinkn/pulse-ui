@@ -1,15 +1,5 @@
 from contextvars import ContextVar
-from typing import (
-    Any,
-    Callable,
-    Mapping,
-    NamedTuple,
-    ParamSpec,
-    TypeVar,
-    TypeVarTuple,
-    Unpack,
-    overload,
-)
+from typing import Any, Callable, Mapping, NamedTuple
 
 from pulse.diff import VDOM
 from pulse.messages import RouteInfo
@@ -92,8 +82,6 @@ class RenderResult(NamedTuple):
     current_node: NodeTree
     new_node: NodeTree
     new_vdom: VDOM
-
-
 
 
 class RenderContext:
@@ -202,4 +190,3 @@ class RenderContext:
 RENDER_CONTEXT: ContextVar[RenderContext | None] = ContextVar(
     "pulse_render_context", default=None
 )
-

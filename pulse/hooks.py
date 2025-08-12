@@ -1,10 +1,8 @@
-from contextvars import ContextVar, Token
+from contextvars import ContextVar
 from typing import (
     Any,
     Callable,
     Mapping,
-    NamedTuple,
-    Optional,
     ParamSpec,
     TypeVar,
     TypeVarTuple,
@@ -12,13 +10,9 @@ from typing import (
     overload,
 )
 
-from pulse.diff import VDOM
-from pulse.messages import RouteInfo
-from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack, REACTIVE_CONTEXT
-from pulse.reactive_extensions import ReactiveDict
-from pulse.routing import Layout, Route
+from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
+from pulse.routing import ROUTE_CONTEXT, RouteContext
 from pulse.state import State
-from pulse.vdom import Callbacks, Node, NodeTree
 
 
 class SetupState:
@@ -291,7 +285,9 @@ def states(*args: State | Callable[[], State]):
         return ctx.states
 
 
-def effects(*fns: EffectFn) -> None:
+def effects(
+    *fns: EffectFn, on_error: Callable[[Exception], None] | None = None
+) -> None:
     # Assumption: RenderContext will set up a render context and a batch before
     # rendering. The batch ensures the effects run *after* rendering.
     ctx = HOOK_CONTEXT.get()
@@ -307,57 +303,65 @@ def effects(*fns: EffectFn) -> None:
             for fn in fns:
                 if not callable(fn):
                     raise ValueError(
-                        "Only pass functions or callable objects to `ps.effects`"
+                        "Only pass functions or callabGle objects to `ps.effects`"
                     )
-                effects.append(Effect(fn, name=fn.__name__))
+                effects.append(Effect(fn, name=fn.__name__, on_error=on_error))
             ctx.effects = tuple(effects)
 
 
-class Router(State):
-    pathname: str
-    hash: str
-    query: str
-    queryParams: dict[str, str]
-    pathParams: dict[str, str]
-    catchall: list[str]
-
-    def __init__(self, info: RouteInfo):
-        self._update_route_info(info)
-        super().__init__()
-
-    def _update_route_info(self, info: RouteInfo):
-        self.pathname = info["pathname"]
-        self.hash = info["hash"]
-        self.query = info["query"]
-        self.queryParams = info["queryParams"]
-        self.pathParams = info["pathParams"]
-        self.catchall = info["catchall"]
-
-
-class RouteContext:
-    def __init__(self, route_info: Router, session_context: ReactiveDict) -> None:
-        self.route_info = route_info
-        self.session_context = session_context
-
-
-ROUTE_CONTEXT: ContextVar[RouteContext | None] = ContextVar(
-    "pulse_route_context", default=None
-)
-
-
-def route_info() -> Router:
+def route_info() -> RouteContext:
     ctx = ROUTE_CONTEXT.get()
     if not ctx:
         raise RuntimeError(
-            "`pulse.router` can only be called within a component, during rendering."
+            "`pulse.router` can only be called within a component during rendering."
         )
-    return ctx.route_info
+    return ctx
 
 
 def session_context() -> dict[str, Any]:
-    ctx = ROUTE_CONTEXT.get()
-    if not ctx:
+    from pulse.session import SESSION_CONTEXT
+    session = SESSION_CONTEXT.get()
+    if not session:
         raise RuntimeError(
-            "`pulse.session_context` can only be called within a component, during rendering."
+            "`pulse.session_context` can only be called within a component during rendering."
         )
-    return ctx.session_context
+    return session.context
+
+
+async def call_api(
+    url: str,
+    *,
+    method: str = "POST",
+    headers: Mapping[str, str] | None = None,
+    body: Any | None = None,
+    credentials: str = "include",
+) -> dict[str, Any]:
+    """Ask the client to perform an HTTP request and await the result.
+
+    This hides session plumbing; safe to call inside Pulse callbacks.
+    """
+    from pulse.session import SESSION_CONTEXT
+    session = SESSION_CONTEXT.get()
+    if session is None:
+        raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
+    return await session.call_api(
+        url,
+        method=method,
+        headers=dict(headers or {}),
+        body=body,
+        credentials=credentials,
+    )
+
+
+def navigate(path: str) -> None:
+    """Instruct the client to navigate to a new path for the current route tree.
+
+    Non-async; sends a server message to the client to perform SPA navigation.
+    """
+    from pulse.session import SESSION_CONTEXT
+    session = SESSION_CONTEXT.get()
+    if session is None:
+        raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
+    # Emit navigate_to once; client will handle redirect at app-level
+    session.notify({"type": "navigate_to", "path": path})
+

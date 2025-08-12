@@ -182,10 +182,16 @@ EffectFn = Callable[[], Optional[EffectCleanup]]
 
 class Effect:
     def __init__(
-        self, fn: EffectFn, name: Optional[str] = None, immediate=False, lazy=False
+        self,
+        fn: EffectFn,
+        name: Optional[str] = None,
+        immediate: bool = False,
+        lazy: bool = False,
+        on_error: Optional[Callable[[Exception], None]] = None,
     ):
         self.fn: EffectFn = fn
         self.name: Optional[str] = name
+        self.on_error: Optional[Callable[[Exception], None]] = on_error
         self.cleanup_fn: Optional[EffectCleanup] = None
         self.deps: list[Signal | Computed] = []
         self.children: list[Effect] = []
@@ -256,6 +262,24 @@ class Effect:
     def __call__(self):
         self.run()
 
+    def _handle_error(self, exc: Exception) -> None:
+        """Handle an exception raised during this effect's execution.
+
+        Preference order:
+        1) This effect's on_error handler, if provided
+        2) Reactive context's on_effect_error handler, if provided
+        3) Re-raise the exception
+        """
+        if callable(self.on_error):
+            self.on_error(exc)
+            return
+        # Report via reactive context if a handler is present
+        handler = getattr(REACTIVE_CONTEXT.get(), "on_effect_error", None)
+        if callable(handler):
+            handler(self, exc)
+            return
+        raise exc
+
     def run(self):
         # Skip effects during prerendering
         if IS_PRERENDERING.get():
@@ -264,7 +288,10 @@ class Effect:
         # Don't track what happens in the cleanup
         with Untrack():
             # Run children cleanup first
-            self._cleanup_before_run()
+            try:
+                self._cleanup_before_run()
+            except Exception as e:
+                self._handle_error(e)
 
         prev_deps = set(self.deps)
         execution_epoch = epoch()
@@ -272,7 +299,10 @@ class Effect:
             # Clear batch *before* running as we may update a signal that causes
             # this effect to be rescheduled.
             self.batch = None
-            self.cleanup_fn = self.fn()
+            try:
+                self.cleanup_fn = self.fn()
+            except Exception as e:
+                self._handle_error(e)
             self.runs += 1
             self.last_run = execution_epoch
 
@@ -337,12 +367,7 @@ class Batch:
                 try:
                     effect.run()
                 except Exception as exc:
-                    # Report via reactive context if a handler is present
-                    handler = getattr(REACTIVE_CONTEXT.get(), "on_effect_error", None)
-                    if callable(handler):
-                        handler(effect, exc)
-                    else:
-                        raise
+                    effect._handle_error(exc)
 
             iters += 1
 
@@ -423,12 +448,13 @@ class ReactiveContext:
         epoch: Optional[Epoch] = None,
         batch: Optional[Batch] = None,
         scope: Optional[Scope] = None,
+        on_effect_error: Optional[Callable[[Effect, Exception], None]] = None,
     ) -> None:
         self.epoch = epoch or Epoch()
         self.batch = batch or GlobalBatch()
         self.scope = scope
         # Optional effect error handler set by integrators (e.g., session)
-        self.on_effect_error: Optional[Callable[[Effect, Exception], None]] = None
+        self.on_effect_error = on_effect_error
 
     def get_epoch(self) -> int:
         return self.epoch.current

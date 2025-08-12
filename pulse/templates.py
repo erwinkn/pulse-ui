@@ -42,7 +42,7 @@ ROUTE_TEMPLATE = Template(
     """import { redirect, type LoaderFunctionArgs } from "react-router";
 import { PulseView } from "${lib_path}/pulse";
 import type { VDOM, ComponentRegistry } from "${lib_path}/vdom";
-import { extractServerRouteInfo } from "${lib_path}/messages";
+import { extractServerRouteInfo } from "${lib_path}/helpers";
 
 % if components:
 // Component imports
@@ -72,6 +72,7 @@ const externalComponents: ComponentRegistry = {};
 const path = "${route.unique_path()}";
 
 export async function loader(args: LoaderFunctionArgs) {
+  console.log("Running loader for", path);
   const routeInfo = extractServerRouteInfo(args);
   // Forward inbound headers (cookies, auth, user-agent, etc.) to the Python server
   const fwd = new Headers(args.request.headers);

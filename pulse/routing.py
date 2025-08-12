@@ -1,8 +1,12 @@
+from contextvars import ContextVar
 import re
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, TypedDict
 from dataclasses import dataclass, field
 
 from pulse.components.registry import ReactComponent
+from pulse.reactive import Untrack
+from pulse.reactive_extensions import ReactiveDict
+from pulse.state import State
 from pulse.vdom import Node, Component
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
@@ -80,6 +84,22 @@ def normalize_path(path: str):
     return path
 
 
+# ---- Shared helpers ----------------------------------------------------------
+def segments_are_dynamic(segments: list[PathSegment]) -> bool:
+    """Return True if any segment is dynamic, optional, or a catch-all."""
+    return any(s.is_dynamic or s.is_optional or s.is_splat for s in segments)
+
+
+def route_or_ancestors_have_dynamic(node: "Route | Layout") -> bool:
+    """Check whether this node or any ancestor Route contains dynamic segments."""
+    current = node
+    while current is not None:
+        if isinstance(current, Route) and segments_are_dynamic(current.segments):
+            return True
+        current = current.parent
+    return False
+
+
 class Route:
     """
     Represents a route definition with its component dependencies.
@@ -133,6 +153,31 @@ class Route:
             + ")"
         )
 
+    def default_route_info(self) -> "RouteInfo":
+        """Return a default RouteInfo for this route.
+
+        Only valid for non-dynamic routes. Raises InvalidRouteError if the
+        route contains any dynamic (":name"), optional ("segment?"), or
+        catch-all ("*") segments. Also rejects if any ancestor Route is dynamic.
+        """
+
+        # Disallow optional, dynamic, and catch-all segments on self and ancestors
+        if route_or_ancestors_have_dynamic(self):
+            raise InvalidRouteError(
+                f"Cannot build default RouteInfo for dynamic route '{self.path}'."
+            )
+
+        unique = self.unique_path()
+        pathname = "/" if unique == "" else f"/{unique}"
+        return {
+            "pathname": pathname,
+            "hash": "",
+            "query": "",
+            "queryParams": {},
+            "pathParams": {},
+            "catchall": [],
+        }
+
 
 def filter_layouts(path_list: list[str]):
     return [p for p in path_list if p != LAYOUT_INDICATOR]
@@ -182,6 +227,33 @@ class Layout:
     def __repr__(self) -> str:
         return f"Layout(children={len(self.children)})"
 
+    def default_route_info(self) -> "RouteInfo":
+        """Return a default RouteInfo corresponding to this layout's URL path.
+
+        The layout itself does not contribute a path segment. The resulting
+        pathname is the URL path formed by its ancestor routes. This method
+        raises InvalidRouteError if any ancestor route includes dynamic,
+        optional, or catch-all segments because defaults cannot be derived.
+        """
+        # Walk up the tree to ensure there are no dynamic segments in ancestor routes
+        if route_or_ancestors_have_dynamic(self):
+            raise InvalidRouteError(
+                "Cannot build default RouteInfo for layout under a dynamic route."
+            )
+
+        # Build pathname from ancestor route path segments (exclude layout indicators)
+        path_list = self._path_list(include_layouts=False)
+        unique = normalize_path("/".join(path_list))
+        pathname = "/" if unique == "" else f"/{unique}"
+        return {
+            "pathname": pathname,
+            "hash": "",
+            "query": "",
+            "queryParams": {},
+            "pathParams": {},
+            "catchall": [],
+        }
+
 
 class InvalidRouteError(Exception): ...
 
@@ -225,3 +297,56 @@ class RouteTree:
         if not route:
             raise ValueError(f"No route found for path '{path}'")
         return route
+
+
+class RouteInfo(TypedDict):
+    pathname: str
+    hash: str
+    query: str
+    queryParams: dict[str, str]
+    pathParams: dict[str, str]
+    catchall: list[str]
+
+
+class RouteContext:
+    @property
+    def pathname(self) -> str:
+        return self.info["pathname"]
+
+    @property
+    def hash(self) -> str:
+        return self.info["hash"]
+
+    @property
+    def query(self) -> str:
+        return self.info["query"]
+
+    @property
+    def queryParams(self) -> dict[str, str]:
+        return self.info["queryParams"]
+
+    @property
+    def pathParams(self) -> dict[str, str]:
+        return self.info["pathParams"]
+
+    @property
+    def catchall(self) -> list[str]:
+        return self.info["catchall"]
+
+    def __init__(self, info: RouteInfo):
+        self.info = ReactiveDict(info)
+
+    def update(self, info: RouteInfo):
+        self.info.update(info)
+
+    def __enter__(self):
+        self._token = ROUTE_CONTEXT.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        ROUTE_CONTEXT.reset(self._token)
+
+
+ROUTE_CONTEXT: ContextVar[RouteContext | None] = ContextVar(
+    "pulse_route_context", default=None
+)

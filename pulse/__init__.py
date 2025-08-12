@@ -8,7 +8,15 @@ from .reactive_extensions import (
     ReactiveSet,
     reactive_dataclass,
 )
-from .hooks import states, effects, setup, route_info, session_context
+from .hooks import (
+    states,
+    effects,
+    setup,
+    route_info,
+    session_context,
+    call_api,
+    navigate,
+)
 from .middleware import (
     PulseMiddleware,
     Ok,
@@ -307,6 +315,8 @@ __all__ = [
     "effects",
     "route_info",
     "session_context",
+    "call_api",
+    "navigate",
     # Middleware
     "PulseMiddleware",
     "Ok",

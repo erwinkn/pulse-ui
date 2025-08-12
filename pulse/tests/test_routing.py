@@ -1,6 +1,5 @@
 import pytest
 
-from pulse.component import component
 from pulse.routing import (
     InvalidRouteError,
     PathSegment,
@@ -9,7 +8,7 @@ from pulse.routing import (
     RouteTree,
 )
 import pulse as ps
-from pulse.vdom import Node
+from pulse.vdom import Node, component
 
 
 # --- PathSegment Tests ---

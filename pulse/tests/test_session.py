@@ -70,7 +70,7 @@ def mount_with_listener(session: Session, path: str):
 
 def extract_count_from_ctx(session: Session, path: str) -> int:
     # Read latest VDOM by re-rendering the server node and inspecting it
-    ctx = session.active_routes[path]
+    ctx = session.render_contexts[path]
     node = ctx.node
     assert isinstance(node, Node)
     vdom, _ = node.render()

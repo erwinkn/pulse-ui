@@ -50,7 +50,12 @@ def computed(fn: Optional[Callable] = None, *, name: Optional[str] = None):
 
 @overload
 def effect(
-    fn: EffectFn, *, name: Optional[str] = None, immediate: bool = False, lazy=False
+    fn: EffectFn,
+    *,
+    name: Optional[str] = None,
+    immediate: bool = False,
+    lazy: bool = False,
+    on_error: Optional[Callable[[Exception], None]] = None,
 ) -> Effect: ...
 # In practice this overload returns a StateEffect, but it gets converted into an
 # Effect at state instantiation.
@@ -60,7 +65,12 @@ def effect(
 ) -> Effect: ...
 @overload
 def effect(
-    fn: None = None, *, name: Optional[str] = None, immediate: bool = False, lazy=False
+    fn: None = None,
+    *,
+    name: Optional[str] = None,
+    immediate: bool = False,
+    lazy: bool = False,
+    on_error: Optional[Callable[[Exception], None]] = None,
 ) -> Callable[[EffectFn], Effect]: ...
 
 
@@ -69,7 +79,8 @@ def effect(
     *,
     name: Optional[str] = None,
     immediate: bool = False,
-    lazy=False,
+    lazy: bool = False,
+    on_error: Optional[Callable[[Exception], None]] = None,
 ):
     # The type checker is not happy if I don't specify the `/` here.
     def decorator(func: Callable, /):
@@ -77,7 +88,7 @@ def effect(
         params = list(sig.parameters.values())
 
         if len(params) == 1 and params[0].name == "self":
-            return StateEffect(func)
+            return StateEffect(func, on_error=on_error)
 
         if len(params) > 0:
             raise TypeError(
@@ -85,7 +96,13 @@ def effect(
             )
 
         # This is a standalone effect function. Create the Effect object.
-        return Effect(func, name=name or func.__name__, immediate=immediate, lazy=lazy)
+        return Effect(
+            func,
+            name=name or func.__name__,
+            immediate=immediate,
+            lazy=lazy,
+            on_error=on_error,
+        )
 
     if fn:
         return decorator(fn)

@@ -9,8 +9,11 @@ from pulse.diff import (
     UpdatePropsOperation,
     VDOMOperation,
 )
+from typing import Any, Mapping
+from pulse.flags import IS_PRERENDERING
 from pulse.reactive import Effect
 from pulse.hooks import HookState
+from pulse.reactive_extensions import ReactiveDict
 from pulse.vdom import (
     VDOM,
     Callback,
@@ -24,7 +27,7 @@ from pulse.vdom import (
 
 
 @dataclass
-class RenderResult:
+class RenderDiff:
     tree: NodeTree
     render_count: int
     ops: list[VDOMOperation]
@@ -32,10 +35,9 @@ class RenderResult:
 
 
 class RenderRoot:
-    # global for now, will have separate effets per render node down the line
-    effect: Effect | None
     render_tree: "RenderNode"
     render_count: int
+    callbacks: Callbacks
 
     def __init__(self, fn: Callable[[], NodeTree]) -> None:
         self.render_tree = RenderNode(fn)
@@ -44,7 +46,7 @@ class RenderRoot:
         self.render_count = 0
         pass
 
-    def render(self) -> RenderResult:
+    def render_diff(self) -> RenderDiff:
         self.render_count += 1
         resolver = Resolver()
         last_render = self.render_tree.last_render
@@ -53,12 +55,36 @@ class RenderRoot:
             render_parent=self.render_tree, old_tree=last_render, new_tree=new_tree
         )
         self.render_tree.last_render = new_tree
-        return RenderResult(
+        self.callbacks = resolver.callbacks
+        return RenderDiff(
             tree=new_tree,
             render_count=self.render_count,
             callbacks=resolver.callbacks,
             ops=resolver.operations,
         )
+
+    def render_vdom(self, prerendering: bool = False) -> VDOM:
+        """One-shot render to VDOM + callbacks, without mounting an Effect."""
+        token = IS_PRERENDERING.set(prerendering)
+        self.render_count += 1
+        resolver = Resolver()
+        # Fresh render of the root component into a VDOM tree
+        vdom, normalized = resolver.render_tree(
+            render_parent=self.render_tree,
+            node=self.render_tree.render(),
+        )
+        self.render_tree.last_render = normalized
+        self.callbacks = resolver.callbacks
+        IS_PRERENDERING.reset(token)
+        return vdom
+
+    def unmount(self) -> None:
+        if self.effect is not None:
+            self.effect.dispose()
+            self.effect = None
+        # Unmount tree to dispose hooks/effects recursively
+        if self.render_tree is not None:
+            self.render_tree.unmount()
 
 
 class RenderNode:
@@ -86,11 +112,6 @@ class RenderNode:
         self.hooks.unmount()
         for child in self.children.values():
             child.unmount()
-
-
-RENDER_CTX: ContextVar[RenderNode | None] = ContextVar(
-    "pulse_render_context", default=None
-)
 
 
 class Resolver:
@@ -359,7 +380,11 @@ class Resolver:
         return normalized_children
 
     def render_tree(
-        self, render_parent: RenderNode, node: NodeTree, path: str, relative_path: str
+        self,
+        render_parent: RenderNode,
+        node: NodeTree,
+        path: str = "",
+        relative_path: str = "",
     ) -> tuple[VDOM, NodeTree]:
         if isinstance(node, ComponentNode):
             print(

@@ -193,7 +193,7 @@ def test_reconcile_initial_insert_simple_component():
         return ps.button(onClick=on_click)["Go"]
 
     root = RenderRoot(Simple)
-    result = root.render()
+    result = root.render_diff()
 
     assert result.ops == [
         {
@@ -219,14 +219,14 @@ def test_reconcile_props_update_between_renders():
 
     # First render -> insert
     r1 = RenderRoot(View)
-    first = r1.render()
+    first = r1.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     # mutate props
     attrs["className"] = "b"
 
     # Second render using previous VDOM -> update_props
-    second = r1.render()
+    second = r1.render_diff()
     assert second.ops == [
         {"type": "update_props", "path": "", "data": {"className": "b"}}
     ]
@@ -241,17 +241,17 @@ def test_reconcile_primitive_changes_and_none():
 
     # Initial insert of primitive
     root = RenderRoot(P)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops == [{"type": "insert", "path": "", "data": "A"}]
 
     # Change primitive -> replace
     val["text"] = "B"
-    second = root.render()
+    second = root.render_diff()
     assert second.ops == [{"type": "replace", "path": "", "data": "B"}]
 
     # Change to None -> remove
     val["text"] = None
-    third = root.render()
+    third = root.render_diff()
     assert third.ops == [{"type": "remove", "path": ""}]
 
 
@@ -267,19 +267,19 @@ def test_reconcile_conditional_children_insert_remove():
 
     # First render (no extra) -> insert
     root = RenderRoot(View)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     # Add extra child -> insert at path 1
     show_extra["flag"] = True
-    second = root.render()
+    second = root.render_diff()
     assert second.ops == [
         {"type": "insert", "path": "1", "data": {"tag": "span", "children": ["B"]}}
     ]
 
     # Remove extra child -> remove at path 1
     show_extra["flag"] = False
-    third = root.render()
+    third = root.render_diff()
     assert third.ops == [{"type": "remove", "path": "1"}]
 
 
@@ -297,11 +297,11 @@ def test_reconcile_deep_nested_text_replace():
         )
 
     root = RenderRoot(View)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     content["b"] = "BB"
-    second = root.render()
+    second = root.render_diff()
     print("second.ops = ", second.ops)
     assert second.ops == [{"type": "replace", "path": "0.1.0", "data": "BB"}]
 
@@ -326,14 +326,14 @@ def test_component_unmount_on_remove_runs_cleanup():
         return ps.div(Child()) if state["on"] else ps.div()
 
     root = RenderRoot(Parent)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     # Simulate an effect execution after first render
     flush_effects()
 
     state["on"] = False
-    second = root.render()
+    second = root.render_diff()
     print("Finished rendering")
     assert second.ops == [{"type": "remove", "path": "0"}]
     assert logs == ["child_cleanup"]
@@ -374,14 +374,14 @@ def test_component_unmount_on_replace_runs_cleanup_and_replaces_subtree():
         return ps.div(child)
 
     root = RenderRoot(Parent)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     # Simulate an effect execution after first render
     flush_effects()
 
     which["a"] = False
-    second = root.render()
+    second = root.render_diff()
     print("Second.ops:", second.ops)
     assert second.ops == [
         {
@@ -435,7 +435,7 @@ def test_state_persistence_nested_siblings_and_isolation():
         )
 
     root = RenderRoot(Top)
-    first = root.render()
+    first = root.render_diff()
     cbs = first.callbacks
 
     # Sanity: expected callbacks are present
@@ -448,21 +448,21 @@ def test_state_persistence_nested_siblings_and_isolation():
 
     # Increment A's own counter
     cbs["0.1.onClick"].fn()  # simulate button click
-    second = root.render()
+    second = root.render_diff()
     print("second.ops = ", second.ops)
     assert second.ops == [{"type": "replace", "path": "0.0.0", "data": "A:1"}]
 
     # Increment A's nested counter
     cbs = second.callbacks
     cbs["0.2.1.onClick"].fn()
-    third = root.render()
+    third = root.render_diff()
     print("third.ops = ", second.ops)
     assert third.ops == [{"type": "replace", "path": "0.2.0.0", "data": "A-child:1"}]
 
     # Increment B's own counter; A should not change
     cbs = third.callbacks
     cbs["1.1.onClick"].fn()
-    fourth = root.render()
+    fourth = root.render_diff()
     print("fourth.ops = ", second.ops)
     assert fourth.ops == [{"type": "replace", "path": "1.0.0", "data": "B:1"}]
 
@@ -483,12 +483,12 @@ def test_callback_identity_change_no_update_props_and_callbacks_swap():
         return ps.button(onClick=fn["cur"])["X"]
 
     root = RenderRoot(View)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
     assert first.callbacks["onClick"].fn is f1
 
     fn["cur"] = f2
-    second = root.render()
+    second = root.render_diff()
     assert second.ops == []
     assert second.callbacks["onClick"].fn is f2
 
@@ -513,11 +513,11 @@ def test_component_arg_change_rerenders_leaf_not_remount():
         return ps.div(Child(msg=name["msg"]))
 
     root = RenderRoot(Parent)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     name["msg"] = "B"
-    second = root.render()
+    second = root.render_diff()
     assert second.ops == [{"type": "replace", "path": "0.0", "data": "B"}]
     assert logs == []
 
@@ -530,11 +530,11 @@ def test_props_removal_emits_empty_update_props():
         return ps.div(className="a") if toggle["on"] else ps.div()
 
     root = RenderRoot(View)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     toggle["on"] = False
-    second = root.render()
+    second = root.render_diff()
     assert second.ops == [{"type": "update_props", "path": "", "data": {}}]
 
 
@@ -575,21 +575,21 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
         return ps.div(*[Item(label=k, key=k) for k in order["keys"]])
 
     root = RenderRoot(List)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     flush_effects()  # simulate effect pass after render
 
     # inc first item (key 'a')
     first.callbacks["0.1.onClick"].fn()
-    second = root.render()
+    second = root.render_diff()
     assert second.ops == [{"type": "replace", "path": "0.0.0", "data": "a:1"}]
 
     flush_effects()  # simulate effect pass after render
 
     # reorder: move 'a' to the end
     order["keys"] = ["b", "a"]
-    third = root.render()
+    third = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -623,7 +623,7 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
 
     # inc 'a' at its new index 1, should go to 2
     third.callbacks["1.1.onClick"].fn()
-    fourth = root.render()
+    fourth = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, fourth.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -678,20 +678,20 @@ def test_keyed_nested_components_move_preserves_nested_state():
         return ps.div(*(Wrapper(key=k, tag=k) for k in order["keys"]))
 
     root = RenderRoot(List)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     # bump x
     first.callbacks["0.0.1.onClick"].fn()  # path: wrapper0 -> leaf -> button
     print("--- Second render ---")
-    second = root.render()
+    second = root.render_diff()
     print("---------------------")
     assert second.ops == [{"type": "replace", "path": "0.0.0.0", "data": "x:1"}]
 
     # reorder: x to the end
     order["keys"] = ["y", "x"]
     print("--- Third render ---")
-    third = root.render()
+    third = root.render_diff()
     print("---------------------")
     vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
     print("3rd render VDOM:", json.dumps(vdom, indent=2))
@@ -735,7 +735,7 @@ def test_keyed_nested_components_move_preserves_nested_state():
 
     # bump x again at new path
     third.callbacks["1.0.1.onClick"].fn()
-    fourth = root.render()
+    fourth = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, fourth.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -807,13 +807,13 @@ def test_unmount_parent_unmounts_children_components():
         return Parent() if show["on"] else ps.div()
 
     root = RenderRoot(View)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
     # Simulate an effect pass after render
     flush_effects()
 
     show["on"] = False
-    _ = root.render()
+    _ = root.render_diff()
     # Confirm both parent and child are cleaned up
     assert "parent_cleanup" in logs and "child_cleanup" in logs
 
@@ -906,7 +906,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
         return ps.div(*(Item(key=k, label=k) for k in order["keys"]))
 
     root = RenderRoot(List)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
     flush_effects()
 
@@ -914,7 +914,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
     first.callbacks["1.1.onClick"].fn()
     first.callbacks["1.1.onClick"].fn()
     first.callbacks["3.1.onClick"].fn()
-    second = root.render()
+    second = root.render_diff()
 
     vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
     assert vdom == {
@@ -970,7 +970,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
 
     # Reorder with insert and remove: remove 'c', insert 'e', move others
     order["keys"] = ["d", "b", "e", "a"]
-    third = root.render()
+    third = root.render_diff()
 
     vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
     assert vdom == {
@@ -1035,7 +1035,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
 
     # bump 'a' at its new index 3
     third.callbacks["3.1.onClick"].fn()
-    fourth = root.render()
+    fourth = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, fourth.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -1089,7 +1089,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
 
     # Reverse-ish reorder and verify states still preserved
     order["keys"] = ["a", "e", "b", "d"]
-    fifth = root.render()
+    fifth = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, fifth.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -1143,7 +1143,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
 
     # bump 'd' at its new index 3
     fifth.callbacks["3.1.onClick"].fn()
-    sixth = root.render()
+    sixth = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, sixth.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -1215,7 +1215,7 @@ def test_keyed_reverse_preserves_all_states():
         return ps.div(*(Item(key=k, label=k) for k in order["keys"]))
 
     root = RenderRoot(List)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     # bump counts: k1->1, k2->2, k3->3, k4->4
@@ -1226,7 +1226,7 @@ def test_keyed_reverse_preserves_all_states():
         first.callbacks["2.1.onClick"].fn()
     for _ in range(4):
         first.callbacks["3.1.onClick"].fn()
-    second = root.render()
+    second = root.render_diff()
 
     vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
     assert vdom == {
@@ -1281,7 +1281,7 @@ def test_keyed_reverse_preserves_all_states():
 
     # Reverse order
     order["keys"] = ["k4", "k3", "k2", "k1"]
-    third = root.render()
+    third = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -1365,13 +1365,13 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
         return ps.div(*(Item(key=k, label=k) for k in order["keys"]))
 
     root = RenderRoot(List)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
     flush_effects()
 
     # bump 'a'
     first.callbacks["0.1.onClick"].fn()
-    second = root.render()
+    second = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -1404,13 +1404,13 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
 
     # remove 'a'
     order["keys"] = ["b"]
-    _ = root.render()
+    _ = root.render_diff()
     flush_effects()
     assert logs.count("cleanup:a") == 1
 
     # re-add 'a' at end -> should reset to 0
     order["keys"] = ["b", "a"]
-    third = root.render()
+    third = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -1465,13 +1465,13 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
         )
 
     root = RenderRoot(List)
-    first = root.render()
+    first = root.render_diff()
     assert first.ops and first.ops[0]["type"] == "insert"
 
     # bump first item and second item
     first.callbacks["0.1.onClick"].fn()
     first.callbacks["2.1.onClick"].fn()
-    second = root.render()
+    second = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
     assert vdom == {
         "tag": "div",
@@ -1504,7 +1504,7 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
 
     # swap keys around the separator
     order["keys"] = ["b", "a"]
-    third = root.render()
+    third = root.render_diff()
     vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
     assert vdom == {
         "tag": "div",

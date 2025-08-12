@@ -2,18 +2,7 @@ from typing import Any, TypedDict, Literal
 
 from pulse.diff import VDOMOperation
 from pulse.vdom import VDOM
-
-
-# ====================
-# Helpers
-# ====================
-class RouteInfo(TypedDict):
-    pathname: str
-    hash: str
-    query: str
-    queryParams: dict[str, str]
-    pathParams: dict[str, str]
-    catchall: list[str]
+from pulse.routing import RouteInfo
 
 
 # ====================
@@ -57,7 +46,6 @@ class ServerApiCallMessage(TypedDict):
     type: Literal["api_call"]
     # Correlation id to match request/response
     id: str
-    path: str
     url: str
     method: str
     headers: dict[str, str]
@@ -90,7 +78,6 @@ class ClientMountMessage(TypedDict):
     type: Literal["mount"]
     path: str
     routeInfo: RouteInfo
-    currentVDOM: VDOM
 
 
 class ClientNavigateMessage(TypedDict):
@@ -107,7 +94,6 @@ class ClientUnmountMessage(TypedDict):
 class ClientApiResultMessage(TypedDict):
     type: Literal["api_result"]
     id: str
-    path: str
     ok: bool
     status: int
     headers: dict[str, str]

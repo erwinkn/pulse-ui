@@ -7,17 +7,26 @@ to define routes and configure their Pulse application.
 
 import asyncio
 import logging
+import os
 from enum import IntEnum
-from typing import Any, Optional, Sequence, TypeVar, TypedDict, Unpack
+from typing import Optional, Sequence, TypedDict, TypeVar, Unpack
+from uuid import uuid4
 
 import socketio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-import os
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.components.registry import ReactComponent, registered_react_components
 from pulse.messages import ClientMessage, RouteInfo
+from pulse.middleware import (
+    Deny,
+    MiddlewareStack,
+    NotFound,
+    Ok,
+    PulseMiddleware,
+    Redirect,
+)
 from pulse.reactive import (
     REACTIVE_CONTEXT,
     Epoch,
@@ -25,20 +34,10 @@ from pulse.reactive import (
     ReactiveContext,
     Scope,
 )
-from pulse.render import RenderContext
+from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
 from pulse.vdom import VDOM
-from pulse.middleware import (
-    PulseMiddleware,
-    Ok,
-    Redirect,
-    NotFound,
-    Deny,
-    MiddlewareStack,
-)
-from fastapi import HTTPException
-from pulse.request import PulseRequest
 
 logger = logging.getLogger(__name__)
 
@@ -138,54 +137,44 @@ class App:
             # Provide a working reactive context (and not the global AppReactiveContext which errors)
             if not path.startswith("/"):
                 path = "/" + path
-            with ReactiveContext():
-                ctx: dict[str, Any] = {}
+            session = Session(uuid4().hex, self.routes)
 
-                def _default_render() -> VDOM:
-                    render_ctx = RenderContext(
-                        self.routes.find(path),
-                        route_info,
-                        prerendering=True,
-                        vdom=None,
-                        session_context=ctx,
+            def _render() -> VDOM:
+                return session.render(path, route_info, prerendering=True)
+
+            if not self._middleware:
+                return _render()
+            try:
+
+                def _next():
+                    return Ok(_render())
+
+                with session.reactive_context:
+                    res = self._middleware.prerender(
+                        path=path,
+                        route_info=route_info,
+                        request=PulseRequest.from_fastapi(request),
+                        context=session.context,
+                        next=_next,
                     )
-                    result = render_ctx.render()
-                    return result.new_vdom
-
-                if self._middleware:
-                    try:
-
-                        def _next():
-                            # Seed session context with any values set in the request context
-                            return Ok(_default_render())
-
-                        res = self._middleware.prerender(
-                            path=path,
-                            route_info=route_info,
-                            request=PulseRequest.from_fastapi(request),
-                            context=ctx,
-                            next=_next,
-                        )
-                    except Exception:
-                        logger.exception("Error in prerender middleware")
-                        res = Ok(_default_render())
-                    if isinstance(res, Redirect):
-                        raise HTTPException(
-                            status_code=302, headers={"Location": res.path or "/"}
-                        )
-                    elif isinstance(res, NotFound):
-                        raise HTTPException(status_code=404)
-                    elif isinstance(res, Ok):
-                        return res.payload
-                    # Fallback to default render
-                    else:
-                        return _default_render()
-                else:
-                    return _default_render()
+            except Exception:
+                logger.exception("Error in prerender middleware")
+                res = Ok(_render())
+            if isinstance(res, Redirect):
+                raise HTTPException(
+                    status_code=302, headers={"Location": res.path or "/"}
+                )
+            elif isinstance(res, NotFound):
+                raise HTTPException(status_code=404)
+            elif isinstance(res, Ok):
+                return res.payload
+            # Fallback to default render
+            else:
+                raise NotImplementedError(f"Unexpected middleware return: {res}")
 
         @self.sio.event
         async def connect(sid: str, environ, auth=None):
-            # Create session first so middleware can mutate the same ReactiveDict instance
+            # Create session first to instantiate reactive and session contexts
             session = self.create_session(sid)
             if self._middleware:
                 try:
@@ -194,7 +183,7 @@ class App:
                         return Ok(None)
 
                     # Ensure middleware executes within the session's reactive context
-                    with session._rc:
+                    with session.reactive_context:
                         res = self._middleware.connect(
                             request=PulseRequest.from_socketio_environ(environ, auth),
                             ctx=session.context,
@@ -229,7 +218,7 @@ class App:
                     if self._middleware:
                         try:
                             # Run middleware within the session's reactive context
-                            with sess._rc:
+                            with sess.reactive_context:
                                 res = self._middleware.message(
                                     ctx=sess.context,
                                     data=data,
@@ -237,9 +226,9 @@ class App:
                                 )
                             if isinstance(res, Deny):
                                 # Report as server error for this path
-                                path = data["path"]
+                                path = data.get("path")
                                 sess.report_error(
-                                    path,
+                                    path or "api_response",
                                     "server",
                                     Exception("Request denied by server"),
                                     {"kind": "deny"},
@@ -248,7 +237,7 @@ class App:
                         except Exception:
                             logger.exception("Error in message middleware")
                     if data["type"] == "mount":
-                        sess.mount(data["path"], data["routeInfo"], data["currentVDOM"])
+                        sess.mount(data["path"], data["routeInfo"])
                     elif data["type"] == "navigate":
                         sess.navigate(data["path"], data["routeInfo"])
                     elif data["type"] == "callback":
@@ -269,12 +258,12 @@ class App:
                     # Best effort: report error for this path if available
                     path = data.get("path", "") if isinstance(data, dict) else ""
                     session = self.sessions.get(sid)
-                    if session and path:
+                    if session:
                         session.report_error(path, "server", e)
                     else:
-                        logger.exception("Error handling client message")
-                except Exception:
-                    logger.exception("Error while reporting server error")
+                        logger.exception("Error handling client message: %s", data)
+                except Exception as e:
+                    logger.exception("Error while reporting server error: %s", e)
 
     def run_codegen(self, address: Optional[str] = None):
         address = address or self.config.get("server_address")

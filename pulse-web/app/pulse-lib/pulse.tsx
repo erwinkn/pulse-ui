@@ -10,7 +10,8 @@ import { VDOMRenderer } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry } from "./vdom";
 import { useLocation, useParams, useNavigate } from "react-router";
-import type { RouteInfo, ServerErrorInfo } from "./messages";
+import type { ServerErrorInfo } from "./messages";
+import type { RouteInfo } from "./helpers";
 
 // =================================================================
 // Types
@@ -156,12 +157,13 @@ export function PulseView({
         if (p === path) setServerError(err);
       });
       return () => {
+        console.log("Unmounting", path)
         offErr();
         client.unmount(path);
       };
     }
     // routeInfo is NOT included here on purpose
-  }, [client, initialVDOM]);
+  }, [client]);
 
   useEffect(() => {
     if (inBrowser) {

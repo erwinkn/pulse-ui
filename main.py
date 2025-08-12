@@ -62,6 +62,30 @@ class LayoutState(ps.State):
         self.shared_count += 1
 
 
+# Nested Components Demo State
+# ----------------------------
+class LeafState(ps.State):
+    count: int = 0
+
+    def __init__(self, label: str):
+        self.label = label
+
+    def inc(self):
+        self.count += 1
+
+    @ps.effect
+    def on_change(self):
+        # Demonstrate a state-level effect; safe to be defined once per instance
+        _ = self.count  # read to establish dependency
+
+
+class NestedDemoState(ps.State):
+    swapped: bool = False
+
+    def toggle_swap(self):
+        self.swapped = not self.swapped
+
+
 # Components & Pages
 # ------------------
 # Components are the building blocks of a Pulse UI. They can have their own
@@ -124,6 +148,82 @@ def setup_counter(count: int):
     @ps.effect
     def log_count():
         print(f"Logging count from setup: {count}")
+
+
+@ps.component
+def Leaf(label: str):
+    # setup: called once per component instance; captures mount-only effect
+    def _init(lbl: str):
+        @ps.effect
+        def on_mount():
+            print(f"[Leaf mount] {lbl}")
+
+        return {"label": lbl}
+
+    meta = ps.setup(_init, label)
+
+    # states: called once per component instance
+    state = ps.states(LeafState(meta["label"]))
+
+    # effects: register a mount-only effect for the component instance
+    ps.effects(lambda: print(f"[Leaf effects] ready: {meta['label']}"))
+
+    return ps.div(
+        ps.div(
+            ps.span(f"{meta['label']}: ", className="font-semibold mr-2"),
+            ps.button("+", onClick=state.inc, className="btn-primary mr-2"),
+            ps.span(f"{state.count}", className="font-mono"),
+            className="flex items-center",
+        ),
+        className="p-2 border rounded",
+    )
+
+
+@ps.component
+def Row(left: str, right: str, *, use_keys: bool, swapped: bool):
+    # effects: one-time row mount log
+    ps.effects(lambda: print(f"[Row mount] keys={use_keys}"))
+
+    left_node = Leaf(label=left) if not use_keys else Leaf(key="left", label=left)
+    right_node = Leaf(label=right) if not use_keys else Leaf(key="right", label=right)
+
+    a, b = (right_node, left_node) if swapped else (left_node, right_node)
+    return ps.div(a, b, className="grid grid-cols-2 gap-4")
+
+
+@ps.component
+def nested_demo():
+    state = ps.states(NestedDemoState)
+
+    return ps.div(
+        ps.h1("Nested Components & Keys", className="text-2xl font-bold mb-4"),
+        ps.div(
+            ps.button(
+                "Swap children",
+                onClick=state.toggle_swap,
+                className="btn-secondary",
+            ),
+            ps.span(
+                f" swapped={state.swapped}",
+                className="ml-3 text-sm text-gray-600",
+            ),
+            className="mb-4",
+        ),
+        ps.div(
+            ps.h2("Unkeyed children", className="text-xl font-semibold mb-2"),
+            Row(left="Left", right="Right", use_keys=False, swapped=state.swapped),
+            className="mb-6 p-4 rounded bg-white shadow",
+        ),
+        ps.div(
+            ps.h2("Keyed children", className="text-xl font-semibold mb-2"),
+            Row(left="Left", right="Right", use_keys=True, swapped=state.swapped),
+            ps.p(
+                "With keys, each child's state sticks with its key across reordering.",
+                className="text-sm text-gray-600 mt-2",
+            ),
+            className="p-4 rounded bg-white shadow",
+        ),
+    )
 
 
 @ps.component
@@ -237,16 +337,16 @@ def query_demo():
 
 @ps.component
 def dynamic_route():
-    router = ps.router()
+    route = ps.route_info()
     return ps.div(
         ps.h2("Dynamic Route Info", className="text-xl font-bold mb-2"),
         ps.ul(
-            ps.li(f"Pathname: {router.pathname}"),
-            ps.li(f"Hash: {router.hash}"),
-            ps.li(f"Query: {router.query}"),
-            ps.li(f"Query Params: {router.queryParams}"),
-            ps.li(f"Path Params: {router.pathParams}"),
-            ps.li(f"Catchall: {router.catchall}"),
+            ps.li(f"Pathname: {route.pathname}"),
+            ps.li(f"Hash: {route.hash}"),
+            ps.li(f"Query: {route.query}"),
+            ps.li(f"Query Params: {route.queryParams}"),
+            ps.li(f"Path Params: {route.pathParams}"),
+            ps.li(f"Catchall: {route.catchall}"),
             className="list-disc ml-6",
         ),
         className="bg-yellow-50 p-4 rounded-lg",
@@ -277,6 +377,7 @@ def app_layout():
                 ps.Link("Home", to="/", className="nav-link"),
                 ps.Link("Counter", to="/counter", className="nav-link"),
                 ps.Link("About", to="/about", className="nav-link"),
+                ps.Link("Nested", to="/nested", className="nav-link"),
                 ps.Link(
                     "Dynamic",
                     to="/dynamic/example/optional/a/b/c?q1=x&q2=y",
@@ -310,6 +411,7 @@ app = ps.App(
                         ps.Route("details", counter_details),
                     ],
                 ),
+                ps.Route("/nested", nested_demo),
                 ps.Route("/query", query_demo),
                 ps.Route("/dynamic/:route_id/:optional_segment?/*", dynamic_route),
             ],

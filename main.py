@@ -83,6 +83,7 @@ class NestedDemoState(ps.State):
     swapped: bool = False
 
     def toggle_swap(self):
+        print("--- SWAP ---")
         self.swapped = not self.swapped
 
 
@@ -164,13 +165,14 @@ def Leaf(label: str):
 
     # states: called once per component instance
     state = ps.states(LeafState(meta["label"]))
+    print(f"Rendering leaf {label} with count {state.count}")
 
     # effects: register a mount-only effect for the component instance
     ps.effects(lambda: print(f"[Leaf effects] ready: {meta['label']}"))
 
     return ps.div(
         ps.div(
-            ps.span(f"{meta['label']}: ", className="font-semibold mr-2"),
+            ps.span(f"{label}: ", className="font-semibold mr-2"),
             ps.button("+", onClick=state.inc, className="btn-primary mr-2"),
             ps.span(f"{state.count}", className="font-mono"),
             className="flex items-center",
@@ -180,19 +182,24 @@ def Leaf(label: str):
 
 
 @ps.component
-def Row(left: str, right: str, *, use_keys: bool, swapped: bool):
+def Row(use_keys: bool, swapped: bool):
     # effects: one-time row mount log
     ps.effects(lambda: print(f"[Row mount] keys={use_keys}"))
 
-    left_node = Leaf(label=left) if not use_keys else Leaf(key="left", label=left)
-    right_node = Leaf(label=right) if not use_keys else Leaf(key="right", label=right)
-
-    a, b = (right_node, left_node) if swapped else (left_node, right_node)
-    return ps.div(a, b, className="grid grid-cols-2 gap-4")
+    if not swapped:
+        return ps.div(className="grid grid-cols-2 gap-4")[
+            Leaf(label="Left", key="left" if use_keys else None),
+            Leaf(label="Right", key="right" if use_keys else None),
+        ]
+    else:
+        return ps.div(className="grid grid-cols-2 gap-4")[
+            Leaf(label="Right", key="right" if use_keys else None),
+            Leaf(label="Left", key="left" if use_keys else None),
+        ]
 
 
 @ps.component
-def nested_demo():
+def components_demo():
     state = ps.states(NestedDemoState)
 
     return ps.div(
@@ -211,12 +218,12 @@ def nested_demo():
         ),
         ps.div(
             ps.h2("Unkeyed children", className="text-xl font-semibold mb-2"),
-            Row(left="Left", right="Right", use_keys=False, swapped=state.swapped),
+            Row(use_keys=False, swapped=state.swapped),
             className="mb-6 p-4 rounded bg-white shadow",
         ),
         ps.div(
             ps.h2("Keyed children", className="text-xl font-semibold mb-2"),
-            Row(left="Left", right="Right", use_keys=True, swapped=state.swapped),
+            Row(use_keys=True, swapped=state.swapped),
             ps.p(
                 "With keys, each child's state sticks with its key across reordering.",
                 className="text-sm text-gray-600 mt-2",
@@ -377,7 +384,7 @@ def app_layout():
                 ps.Link("Home", to="/", className="nav-link"),
                 ps.Link("Counter", to="/counter", className="nav-link"),
                 ps.Link("About", to="/about", className="nav-link"),
-                ps.Link("Nested", to="/nested", className="nav-link"),
+                ps.Link("Components", to="/components", className="nav-link"),
                 ps.Link(
                     "Dynamic",
                     to="/dynamic/example/optional/a/b/c?q1=x&q2=y",
@@ -411,7 +418,7 @@ app = ps.App(
                         ps.Route("details", counter_details),
                     ],
                 ),
-                ps.Route("/nested", nested_demo),
+                ps.Route("/components", components_demo),
                 ps.Route("/query", query_demo),
                 ps.Route("/dynamic/:route_id/:optional_segment?/*", dynamic_route),
             ],
@@ -478,4 +485,4 @@ class LoggingMiddleware(ps.PulseMiddleware):
 
 
 # Attach middleware (keep config separate from routes for clarity)
-app._middleware = LoggingMiddleware()
+# app._middleware = LoggingMiddleware()

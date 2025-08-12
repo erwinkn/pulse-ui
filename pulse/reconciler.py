@@ -1,4 +1,3 @@
-from contextvars import ContextVar
 from dataclasses import dataclass
 import inspect
 from typing import Callable, Optional, Sequence
@@ -9,11 +8,8 @@ from pulse.diff import (
     UpdatePropsOperation,
     VDOMOperation,
 )
-from typing import Any, Mapping
 from pulse.flags import IS_PRERENDERING
-from pulse.reactive import Effect
 from pulse.hooks import HookState
-from pulse.reactive_extensions import ReactiveDict
 from pulse.vdom import (
     VDOM,
     Callback,
@@ -108,7 +104,6 @@ class RenderNode:
             return self.fn(*args, **kwargs)
 
     def unmount(self):
-        print(f"Unmounting RenderNode with key {self.key}")
         self.hooks.unmount()
         for child in self.children.values():
             child.unmount()
@@ -133,7 +128,6 @@ class Resolver:
             # NOTE: with our hack of only preserving component state during
             # keyed reconciliation, we will encounter scenarios where the render
             # node has already been moved here.
-            print(f"Replacing {old_tree} with {new_tree}")
             if (
                 isinstance(old_tree, ComponentNode)
                 and relative_path in render_parent.children
@@ -141,8 +135,6 @@ class Resolver:
                 # HACK due to our general keyed reconciliation hack
                 old_render_child = render_parent.children[relative_path]
                 if old_render_child.key == old_tree.key:
-                    print("Old child key:", old_render_child.key)
-                    print("Old tree key:", old_tree.key)
                     render_parent.children.pop(relative_path).unmount()
             new_vdom, normalized = self.render_tree(
                 render_parent=render_parent,
@@ -200,7 +192,6 @@ class Resolver:
                 and old_tree.fn == new_tree.fn
                 and old_tree.key == new_tree.key
             )
-            print("render parent children:", render_parent.children)
             render_child = render_parent.children[relative_path]
             last_render = render_child.last_render
             new_render = render_child.render(*new_tree.args, **new_tree.kwargs)
@@ -313,7 +304,6 @@ class Resolver:
                     moved_node = render_parent.children.pop(old_path, None)
                     if moved_node is not None:
                         remap[new_path] = moved_node
-                    print(f"Moving {key} from {old_path} to {new_path}")
                     # Q: remove key from old node?
         render_parent.children.update(remap)
 
@@ -387,9 +377,6 @@ class Resolver:
         relative_path: str = "",
     ) -> tuple[VDOM, NodeTree]:
         if isinstance(node, ComponentNode):
-            print(
-                f"Rendering {node} at path {path}, relative path {relative_path}. Render siblings: {render_parent.children}"
-            )
             if relative_path in render_parent.children:
                 render_node = render_parent.children[relative_path]
             else:

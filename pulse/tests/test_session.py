@@ -1,195 +1,143 @@
 """
-Tests for the Session class.
+Integration-ish tests for session isolation.
+
+We spin up a minimal route tree with two routes and create two sessions.
+Each session mounts both routes and mutates state via callbacks. We assert
+that updates from one session do not leak into the other.
 """
 
-from unittest.mock import MagicMock, call
-import inspect
-import pytest
+from typing import cast
+
 import pulse as ps
-from pulse.session import Session, ActiveRoute
-from pulse.diff import VDOM
-from pulse.vdom import VDOMNode, Node
+from pulse.messages import (
+    RouteInfo,
+    ServerMessage,
+)
+from pulse.routing import Route, RouteTree
+from pulse.session import Session
+from pulse.vdom import VDOM
 
 
-class MockVDOMNode(Node):
-    def render(self):
-        # A simplified render that extracts callbacks like the real one
-        callbacks = {}
-        clean_props = {}
-        for k, v in (self.props or {}).items():
-            if callable(v):
-                try:
-                    n_params = len(inspect.signature(v).parameters)
-                except ValueError:
-                    n_params = 100  # Assume mock object can take many args
-                callbacks[k] = (v, n_params)
-            else:
-                clean_props[k] = v
+class CounterState(ps.State):
+    count: int = 0
 
-        children = []
-        for child in self.children or []:
-            if isinstance(child, Node):
-                child_vdom, child_callbacks = child.render()
-                children.append(child_vdom)
-                callbacks.update(child_callbacks)
-            else:
-                children.append(child)
-
-        vdom: VDOMNode = {"tag": self.tag, "props": clean_props, "children": children}
-        return vdom, callbacks
+    @ps.effect
+    def on_change(self):
+        _ = self.count  # track
 
 
-class TestSession:
-    def setup_method(self):
-        self.routes = MagicMock()
-        self.session = Session("test_session", self.routes)
+def Counter(session_name: str, key_prefix: str):
+    state = ps.states(CounterState)
 
-    def test_navigate_initial_render(self):
-        path = "/test"
+    def inc():
+        state.count = state.count + 1
+    print(f"Rendering counter {key_prefix}:{session_name} with count {state.count}")
 
-        mock_render_fn = MagicMock()
-        mock_node = MockVDOMNode("div")
-        mock_render_fn.return_value = mock_node
-        self.routes.find.return_value = ps.Route(path=path, render=mock_render_fn)
+    # Render current count + a callback
+    return ps.div(key=f"{key_prefix}:{session_name}")[
+        ps.span(id=f"count-{session_name}")[str(state.count)],
+        ps.button(onClick=inc)["inc"],
+    ]
 
-        message_listener = MagicMock()
-        self.session.connect(message_listener)
 
-        self.session.navigate(path)
+def make_routes() -> RouteTree:
+    route_a = Route("a", lambda: Counter("A", "route-a"))
+    route_b = Route("b", lambda: Counter("B", "route-b"))
+    return RouteTree([route_a, route_b])
 
-        assert path in self.session.active_routes
-        mock_render_fn.assert_called_once()
-        message_listener.assert_called_once()
 
-        sent_message = message_listener.call_args[0][0]
-        assert sent_message["type"] == "vdom_init"
-        assert sent_message["path"] == path
-        assert "vdom" in sent_message
+def make_route_info(pathname: str) -> RouteInfo:
+    return {
+        "pathname": pathname,
+        "hash": "",
+        "query": "",
+        "queryParams": {},
+        "pathParams": {},
+        "catchall": [],
+    }
 
-    def test_rerender_on_state_change(self):
-        path = "/test"
 
-        class MyState(ps.State):
-            count: int = 0
+def mount_with_listener(session: Session, path: str):
+    messages: list[ServerMessage] = []
 
-        state = MyState()
+    def on_message(msg: ServerMessage):
+        if msg["type"] == "api_call" or msg["path"] != path:
+            return
+        messages.append(msg)
 
-        @ps.component
-        def render_fn():
-            return MockVDOMNode("p", children=[str(state.count)])
+    disconnect = session.connect(on_message)
+    session.mount(path, make_route_info(path))
+    return messages, disconnect
 
-        self.routes.find.return_value = ps.Route(path=path, render=render_fn)
 
-        message_listener = MagicMock()
-        self.session.connect(message_listener)
+def extract_count_from_ctx(session: Session, path: str) -> int:
+    # Read latest VDOM by re-rendering from the RenderRoot and inspecting it
+    ctx = session.render_contexts[path]
+    with ctx:
+        vdom: VDOM = ctx.root.render_vdom()
+    vdom_dict = cast(dict, vdom)
+    children = cast(list, (vdom_dict.get("children", []) or []))
+    span = cast(dict, children[0])
+    text_children = cast(list, span.get("children", [0]))
+    text = text_children[0]
+    return int(text)  # type: ignore[arg-type]
 
-        self.session.navigate(path)
 
-        # Initial render sends vdom_init
-        message_listener.assert_called_once()
-        first_message = message_listener.call_args[0][0]
-        assert first_message["type"] == "vdom_init"
+def test_two_sessions_two_routes_are_isolated():
+    routes = make_routes()
+    s1 = Session("s1", routes)
+    s2 = Session("s2", routes)
 
-        # Update state and trigger rerender
-        state.count = 1
+    # Mount both routes on both sessions and keep listeners active
+    msgs_s1_a, disc_s1_a = mount_with_listener(s1, "a")
+    msgs_s1_b, disc_s1_b = mount_with_listener(s1, "b")
+    msgs_s2_a, disc_s2_a = mount_with_listener(s2, "a")
+    msgs_s2_b, disc_s2_b = mount_with_listener(s2, "b")
 
-        # Should have been called a second time
-        assert message_listener.call_count == 2
-        second_message = message_listener.call_args_list[1][0][0]
-        assert second_message["type"] == "vdom_update"
-        assert "ops" in second_message
+    # Initial counts are zero
+    assert extract_count_from_ctx(s1, "a") == 0
+    assert extract_count_from_ctx(s1, "b") == 0
+    assert extract_count_from_ctx(s2, "a") == 0
+    assert extract_count_from_ctx(s2, "b") == 0
 
-    def test_init_hook(self):
-        path = "/test"
-        setup_fn = MagicMock(return_value={"count": ps.Signal(0)})
+    # Click a button in session 1 route a (button is second child, index 1)
+    s1.execute_callback("a", "1.onClick", [])
+    s1.flush()
+    s2.flush()
 
-        @ps.component
-        def render_fn():
-            state = ps.init(setup_fn)
-            return MockVDOMNode("p", children=[str(state["count"]())])
+    # s1:a should update, others should remain unchanged
+    assert extract_count_from_ctx(s1, "a") == 1
+    assert extract_count_from_ctx(s1, "b") == 0
+    assert extract_count_from_ctx(s2, "a") == 0
+    assert extract_count_from_ctx(s2, "b") == 0
 
-        self.routes.find.return_value = ps.Route(path=path, render=render_fn)
+    # Ensure s2 did not receive any update messages for either route
+    assert len([m for m in msgs_s1_a if m["type"] == "vdom_update"]) == 1
+    assert len([m for m in msgs_s1_b if m["type"] == "vdom_update"]) == 0
+    assert len([m for m in msgs_s2_a if m["type"] == "vdom_update"]) == 0
+    assert len([m for m in msgs_s2_b if m["type"] == "vdom_update"]) == 0
 
-        self.session.navigate(path)
+    # Click a button in session 2 route a (button is second child, index 1)
+    s2.execute_callback("a", "1.onClick", [])
+    s1.flush()
+    s2.flush()
 
-        # setup_fn should be called once on first render
-        setup_fn.assert_called_once()
+    # s2:a should update, others should remain unchanged
+    assert extract_count_from_ctx(s1, "a") == 1
+    assert extract_count_from_ctx(s1, "b") == 0
+    assert extract_count_from_ctx(s2, "a") == 1
+    assert extract_count_from_ctx(s2, "b") == 0
 
-        # Trigger a re-render
-        active_route = self.session.active_routes[path]
-        state = active_route.reactive_state.setup.value
-        state["count"].write(1)
+    # Ensure s1 did not receive any update messages for either route
+    assert len([m for m in msgs_s1_a if m["type"] == "vdom_update"]) == 1
+    assert len([m for m in msgs_s1_b if m["type"] == "vdom_update"]) == 0
+    assert len([m for m in msgs_s2_a if m["type"] == "vdom_update"]) == 1
+    assert len([m for m in msgs_s2_b if m["type"] == "vdom_update"]) == 0
 
-        # setup_fn should still only have been called once
-        setup_fn.assert_called_once()
-
-    def test_init_called_twice_raises_error(self):
-        path = "/test"
-
-        @ps.component
-        def render_fn():
-            ps.init(lambda: {})
-            ps.init(lambda: {})  # Call it again
-            return MockVDOMNode("div")
-
-        self.routes.find.return_value = ps.Route(path=path, render=render_fn)
-
-        with pytest.raises(RuntimeError):
-            self.session.navigate(path)
-
-    def test_execute_callback(self):
-        path = "/test"
-        mock_callback = MagicMock()
-
-        @ps.component
-        def render_fn():
-            return MockVDOMNode("div", props={"onClick": mock_callback})
-
-        self.routes.find.return_value = ps.Route(path=path, render=render_fn)
-
-        self.session.navigate(path)
-
-        self.session.execute_callback(path, "onClick", (1, "hello"))
-
-        mock_callback.assert_called_once_with(1, "hello")
-
-    def test_leave_route(self):
-        path = "/test"
-        self.routes.find.return_value = ps.Route(
-            path=path, render=ps.component(lambda: MockVDOMNode("div"))
-        )
-
-        self.session.navigate(path)
-        active_route = self.session.active_routes[path]
-        assert active_route.effect
-        dispose_mock = MagicMock()
-        active_route.effect.dispose = dispose_mock
-
-        self.session.unmount(path)
-
-        dispose_mock.assert_called_once()
-
-    def test_session_close(self):
-        paths = ["/a", "/b"]
-        for path in paths:
-            self.routes.find.return_value = ps.Route(
-                path=path, render=ps.component(lambda: MockVDOMNode("div"))
-            )
-            self.session.navigate(path)
-
-        # Mock dispose on each effect
-        for route in self.session.active_routes.values():
-            assert route.effect
-            route.effect.dispose = MagicMock()
-
-        dispose_mocks = [
-            route.effect.dispose
-            for route in self.session.active_routes.values()
-            if route.effect
-        ]
-
-        self.session.close()
-
-        for mock in dispose_mocks:
-            mock.assert_called_once()
-        assert len(self.session.active_routes) == 0
+    # Cleanup listeners and sessions
+    disc_s1_a()
+    disc_s1_b()
+    disc_s2_a()
+    disc_s2_b()
+    s1.close()
+    s2.close()

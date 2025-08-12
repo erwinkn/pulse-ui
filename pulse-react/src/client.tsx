@@ -1,15 +1,17 @@
-import type { VDOM, VDOMNode } from "./vdom";
+import type { RouteInfo } from "./helpers";
+import type { ClientMountMessage } from "./messages";
 import { applyVDOMUpdates } from "./renderer";
 import { extractEvent } from "./serialize";
-import type {
-  ClientCallbackMessage,
-  ClientMountMessage,
-  ClientNavigateMessage,
-  RouteInfo,
-} from "./messages";
+import type { VDOM, VDOMNode } from "./vdom";
 
-import type { ServerMessage, ClientMessage } from "./messages";
 import { io, Socket } from "socket.io-client";
+import type {
+  ClientApiResultMessage,
+  ClientMessage,
+  ServerApiCallMessage,
+  ServerErrorInfo,
+  ServerMessage,
+} from "./messages";
 
 export interface MountedView {
   vdom: VDOM;
@@ -19,6 +21,10 @@ export interface MountedView {
 
 export type VDOMListener = (node: VDOMNode) => void;
 export type ConnectionStatusListener = (connected: boolean) => void;
+export type ServerErrorListener = (
+  path: string,
+  error: ServerErrorInfo | null
+) => void;
 
 export interface PulseClient {
   // Connection management
@@ -39,8 +45,13 @@ export class PulseSocketIOClient {
   private socket: Socket | null = null;
   private messageQueue: ClientMessage[];
   private connectionListeners: Set<ConnectionStatusListener> = new Set();
+  private serverErrors: Map<string, ServerErrorInfo> = new Map();
+  private serverErrorListeners: Set<ServerErrorListener> = new Set();
 
-  constructor(private url: string) {
+  constructor(
+    private url: string,
+    private frameworkNavigate?: (to: string) => void
+  ) {
     this.socket = null;
     this.activeViews = new Map();
     this.messageQueue = [];
@@ -65,9 +76,8 @@ export class PulseSocketIOClient {
         for (const [path, route] of this.activeViews) {
           socket.emit("message", {
             type: "mount",
-            path,
+            path: path,
             routeInfo: route.routeInfo,
-            currentVDOM: route.vdom,
           } satisfies ClientMountMessage);
         }
 
@@ -118,6 +128,19 @@ export class PulseSocketIOClient {
     }
   }
 
+  public onServerError(listener: ServerErrorListener): () => void {
+    this.serverErrorListeners.add(listener);
+    // Emit current errors to new listener
+    for (const [path, err] of this.serverErrors) listener(path, err);
+    return () => {
+      this.serverErrorListeners.delete(listener);
+    };
+  }
+
+  private notifyServerError(path: string, error: ServerErrorInfo | null) {
+    for (const listener of this.serverErrorListeners) listener(path, error);
+  }
+
   private async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
       // console.log("[SocketIOTransport] Sending:", payload);
@@ -133,19 +156,14 @@ export class PulseSocketIOClient {
       throw new Error(`Path ${path} is already mounted`);
     }
     this.activeViews.set(path, view);
-    this.sendMessage({
+    void this.sendMessage({
       type: "mount",
-      currentVDOM: view.vdom,
       path,
       routeInfo: view.routeInfo,
     });
-    return () => {
-      this.activeViews.delete(path);
-    };
   }
 
   public async navigate(path: string, routeInfo: RouteInfo) {
-    const route = this.activeViews.get(path)!;
     await this.sendMessage({
       type: "navigate",
       path,
@@ -153,8 +171,9 @@ export class PulseSocketIOClient {
     });
   }
 
-  public async leave(path: string) {
-    await this.sendMessage({ type: "unmount", path });
+  public unmount(path: string) {
+    void this.sendMessage({ type: "unmount", path });
+    this.activeViews.delete(path);
   }
 
   public disconnect() {
@@ -163,6 +182,8 @@ export class PulseSocketIOClient {
     this.messageQueue = [];
     this.connectionListeners.clear();
     this.activeViews.clear();
+    this.serverErrors.clear();
+    this.serverErrorListeners.clear();
   }
 
   private handleServerMessage(message: ServerMessage) {
@@ -173,6 +194,11 @@ export class PulseSocketIOClient {
         if (route) {
           route.vdom = message.vdom;
           route.listener(route.vdom);
+        }
+        // Clear any prior error for this path on successful init
+        if (this.serverErrors.has(message.path)) {
+          this.serverErrors.delete(message.path);
+          this.notifyServerError(message.path, null);
         }
         break;
       }
@@ -186,8 +212,85 @@ export class PulseSocketIOClient {
         }
         route.vdom = applyVDOMUpdates(route.vdom, message.ops);
         route.listener(route.vdom);
+        // Clear any prior error for this path on successful update
+        if (this.serverErrors.has(message.path)) {
+          this.serverErrors.delete(message.path);
+          this.notifyServerError(message.path, null);
+        }
         break;
       }
+      case "server_error": {
+        this.serverErrors.set(message.path, message.error);
+        this.notifyServerError(message.path, message.error);
+        break;
+      }
+      case "api_call": {
+        void this.performApiCall(message);
+        break;
+      }
+      case "navigate_to": {
+        try {
+          const dest = (message as any).path as string;
+          if (this.frameworkNavigate) {
+            this.frameworkNavigate(dest);
+          } else {
+            window.history.pushState({}, "", dest);
+            window.dispatchEvent(new PopStateEvent("popstate"));
+          }
+        } catch (e) {
+          console.error("Navigation error:", e);
+        }
+        break;
+      }
+    }
+  }
+
+  private async performApiCall(msg: ServerApiCallMessage) {
+    try {
+      const res = await fetch(msg.url, {
+        method: msg.method || "GET",
+        headers: {
+          ...(msg.headers || {}),
+          ...(msg.body != null && !("content-type" in (msg.headers || {}))
+            ? { "content-type": "application/json" }
+            : {}),
+        },
+        body:
+          msg.body != null
+            ? typeof msg.body === "string"
+              ? msg.body
+              : JSON.stringify(msg.body)
+            : undefined,
+        credentials: msg.credentials || "include",
+      });
+      const headersObj: Record<string, string> = {};
+      res.headers.forEach((v, k) => (headersObj[k] = v));
+      let body: any = null;
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        body = await res.json().catch(() => null);
+      } else {
+        body = await res.text().catch(() => null);
+      }
+      const reply: ClientApiResultMessage = {
+        type: "api_result",
+        id: msg.id,
+        ok: res.ok,
+        status: res.status,
+        headers: headersObj,
+        body,
+      };
+      await this.sendMessage(reply);
+    } catch (err) {
+      const reply: ClientApiResultMessage = {
+        type: "api_result",
+        id: msg.id,
+        ok: false,
+        status: 0,
+        headers: {},
+        body: { error: String(err) },
+      };
+      await this.sendMessage(reply);
     }
   }
 

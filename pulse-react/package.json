@@ -1,0 +1,24 @@
+{
+  "name": "pulse-react",
+  "module": "./src/index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^24.2.1",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7"
+  },
+  "peerDependencies": {
+    "typescript": "^5",
+    "react-router": "^7.0.0"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

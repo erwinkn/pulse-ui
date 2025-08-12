@@ -13,15 +13,14 @@ This example shows:
 """
 
 from __future__ import annotations
-from urllib.parse import urlparse
+
 import time
+from urllib.parse import urlparse
+
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 
 import pulse as ps
-from fastapi import Response, Request
-from fastapi.responses import JSONResponse
-from pulse.middleware import Redirect, Deny
-from pulse.api import call_api, navigate
-
 
 AUTH_COOKIE = "pulse_auth"
 
@@ -40,7 +39,7 @@ class AuthMiddleware(ps.PulseMiddleware):
         # Protect /secret at prerender time
         if path.startswith("/secret") and not user:
             print("[Prerender] Redirecting to login")
-            return Redirect("/login")
+            return ps.Redirect("/login")
 
         return next()
 
@@ -61,7 +60,7 @@ class AuthMiddleware(ps.PulseMiddleware):
                 and isinstance(path, str)
                 and path.startswith("/secret")
             ):
-                return Deny()
+                return ps.Deny()
         return next()
 
 
@@ -109,12 +108,12 @@ def login():
         # Use call_api helper to set the cookie without page reload
         body = {"email": state.email, "password": state.password}
         print("Calling API with body:", body)
-        res = await call_api(
+        res = await ps.call_api(
             "http://localhost:8000/api/login", method="POST", body=body
         )
         print("API result:", res)
         if res.get("ok"):
-            navigate("/secret")
+            ps.navigate("/secret")
 
     return ps.div(
         ps.h2("Login", className="text-2xl font-bold mb-4"),
@@ -150,9 +149,9 @@ def secret():
     sess = ps.session_context()
 
     async def sign_out():
-        res = await call_api("http://localhost:8000/api/logout", method="POST")
+        res = await ps.call_api("http://localhost:8000/api/logout", method="POST")
         if res.get("ok"):
-            navigate("/")
+            ps.navigate("/")
 
     return ps.div(
         ps.h2("Secret", className="text-2xl font-bold mb-4"),

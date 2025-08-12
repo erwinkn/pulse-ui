@@ -81,7 +81,6 @@ class Session:
         self.message_listeners.discard(message_listener)
 
     def notify(self, message: ServerMessage):
-        print(f"Session {self.id}, sending message {message}")
         for listener in self.message_listeners:
             listener(message)
 
@@ -92,6 +91,7 @@ class Session:
         exc: Exception,
         details: dict[str, Any] | None = None,
     ):
+
         error_msg: ServerErrorMessage = {
             "type": "server_error",
             "path": path,
@@ -103,6 +103,7 @@ class Session:
             },
         }
         self.notify(error_msg)
+        logger.error("Error reported for path %r during %s: %s\n%s", path, phase, exc, traceback.format_exc())
 
     def close(self):
         # The effect will be garbage collected, and with it the dependencies
@@ -215,7 +216,6 @@ class Session:
         ctx = self.render_context(path, route_info, create=True)
 
         def _render_effect():
-            print(f"Render effect {self.id}")
             with ctx:
                 if ctx.root.render_count == 0:
                     vdom = ctx.root.render_vdom(prerendering=False)

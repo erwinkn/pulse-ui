@@ -1,6 +1,8 @@
 import asyncio
+from pathlib import Path
 import time
 import pulse as ps
+from pulse.codegen import CodegenConfig
 from pulse.middleware import Ok, Redirect, NotFound, Deny
 
 
@@ -237,6 +239,7 @@ def components_demo():
 def counter():
     """An interactive counter page demonstrating state management."""
     state1, state2 = ps.states(CounterState("Counter 1"), CounterState("Counter2"))
+    route_info = ps.route_info()
 
     return ps.div(
         ps.h1("Interactive Counter", className="text-3xl font-bold mb-4"),
@@ -273,7 +276,13 @@ def counter():
             className="text-sm text-gray-500 mb-6",
         ),
         ps.div(
-            ps.Link("Show Nested Route", to="/counter/details", className="link"),
+            ps.button(
+                "Show Nested Route",
+                onClick=lambda: ps.navigate("/counter/details"),
+                className="link",
+            )
+            if route_info.pathname == "/counter"
+            else ps.Link("Hide Nested Route", to="/counter", className="link"),
             className="text-center",
         ),
         ps.div(
@@ -425,6 +434,7 @@ app = ps.App(
         )
     ],
     middleware=None,
+    codegen=CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )
 
 

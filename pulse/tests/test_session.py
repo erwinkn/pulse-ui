@@ -13,7 +13,6 @@ from pulse.messages import (
     RouteInfo,
     ServerMessage,
 )
-from pulse.reactive import flush_effects
 from pulse.routing import Route, RouteTree
 from pulse.session import Session
 from pulse.vdom import VDOM

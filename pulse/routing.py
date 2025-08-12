@@ -286,7 +286,6 @@ class RouteTree:
         for route in routes:
             if isinstance(route, Layout):
                 layout_count += 1
-                print(f"Marking layout with idx = {layout_count}")
                 route.idx = layout_count
             _flatten_route_tree(route)
 

@@ -266,6 +266,12 @@ def states(*args: State | Callable[[], State]):
         raise RuntimeError(
             "`pulse.states` can only be called within a component, during rendering."
         )
+    # Enforce single call per component render
+    if ctx.called.states:
+        raise RuntimeError(
+            "`pulse.states` can only be called once per component render"
+        )
+    ctx.called.states = True
 
     if ctx.render_count == 1:
         states: list[State] = []
@@ -292,8 +298,15 @@ def effects(
     ctx = HOOK_CONTEXT.get()
     if not ctx:
         raise RuntimeError(
-            "`pulse.states` can only be called within a component, during rendering."
+            "`pulse.effects` can only be called within a component, during rendering."
         )
+
+    # Enforce single call per component render
+    if ctx.called.effects:
+        raise RuntimeError(
+            "`pulse.effects` can only be called once per component render"
+        )
+    ctx.called.effects = True
 
     # Remove the effects passed here from the batch, ensuring they only run on mount
     if ctx.render_count == 1:
@@ -319,6 +332,7 @@ def route_info() -> RouteContext:
 
 def session_context() -> dict[str, Any]:
     from pulse.session import SESSION_CONTEXT
+
     session = SESSION_CONTEXT.get()
     if not session:
         raise RuntimeError(
@@ -340,6 +354,7 @@ async def call_api(
     This hides session plumbing; safe to call inside Pulse callbacks.
     """
     from pulse.session import SESSION_CONTEXT
+
     session = SESSION_CONTEXT.get()
     if session is None:
         raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
@@ -358,9 +373,9 @@ def navigate(path: str) -> None:
     Non-async; sends a server message to the client to perform SPA navigation.
     """
     from pulse.session import SESSION_CONTEXT
+
     session = SESSION_CONTEXT.get()
     if session is None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
     session.notify({"type": "navigate_to", "path": path})
-

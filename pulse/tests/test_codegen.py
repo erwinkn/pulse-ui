@@ -15,7 +15,7 @@ from pulse.components import Outlet
 import pulse as ps
 from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
 from pulse.routing import RouteTree, Route
-from pulse.vdom import div
+from pulse import div
 
 
 SERVER_ADDRESS = "http://localhost:8000"

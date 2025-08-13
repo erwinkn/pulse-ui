@@ -164,6 +164,7 @@ from .components import (
     Link,
     Outlet,
 )
+from .helpers import EventHandler
 
 __all__ = [
     # VDOM core
@@ -334,4 +335,6 @@ __all__ = [
     "computed",
     "effect",
     "query",
+    # Helpers
+    "EventHandler",
 ]

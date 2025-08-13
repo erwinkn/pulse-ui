@@ -27,7 +27,7 @@ class CodegenConfig:
     pulse_dir: Path | str = "pulse"
     """Name of the Pulse app directory."""
 
-    lib_path: Path | str = "pulse-react"
+    lib_path: Path | str = "pulse-ui-client"
     """Path to the Pulse library."""
 
     @property

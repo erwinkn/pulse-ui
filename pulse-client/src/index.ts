@@ -1,4 +1,4 @@
-// Public API surface for pulse-react
+// Public API surface for pulse-client
 
 // Core React bindings
 export {
@@ -55,7 +55,7 @@ export type {
 } from "./messages";
 
 // Transports
-export { SocketIOTransport, InMemoryTransport } from "./transport";
+export { SocketIOTransport } from "./transport";
 export type { Transport, MessageListener } from "./transport";
 
 // Server helpers

@@ -7,18 +7,14 @@ TypedDict. It intentionally does not include any runtime helpers.
 """
 
 from typing import (
-    Any,
-    Callable,
-    Coroutine,
     Generic,
     Literal,
     Optional,
-    ParamSpec,
-    TypeVarTuple,
     TypedDict,
     TypeVar,
 )
 
+from pulse.helpers import EventHandler
 from pulse.html.elements import (
     HTMLDialogElement,
     HTMLElement,
@@ -27,13 +23,6 @@ from pulse.html.elements import (
     HTMLTextAreaElement,
 )
 
-TEvent = TypeVar("TEvent")
-EventHandler = (
-    Callable[[], None]
-    | Callable[[], Coroutine[Any, Any, None]]
-    | Callable[[TEvent], None]
-    | Callable[[TEvent], Coroutine[Any, Any, None]]
-)
 # Generic TypeVar for the element target
 TElement = TypeVar("TElement", bound=HTMLElement)
 

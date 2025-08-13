@@ -6,7 +6,7 @@ the TypeScript UIElementNode format.
 """
 
 import pytest
-from pulse.vdom import (
+from pulse import (
     Node,
     VDOMNode,
     div,
@@ -26,9 +26,8 @@ from pulse.vdom import (
     form,
     input,
     label,
-    define_tag,
-    define_self_closing_tag,
 )
+from pulse.html.tags import define_tag, define_self_closing_tag
 from pulse.tests.test_utils import assert_node_equal
 
 

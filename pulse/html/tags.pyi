@@ -1,21 +1,18 @@
-# Self-closing tags
-
-from typing import Optional, Unpack
+from typing import Any, Optional, Protocol, Unpack
 
 from pulse.html.attributes import (
-    HTMLProps,
     HTMLAnchorProps,
     HTMLAreaProps,
+    HTMLAudioProps,
     HTMLBaseProps,
     HTMLBlockquoteProps,
-    HTMLAudioProps,
     HTMLButtonProps,
     HTMLCanvasProps,
-    HTMLColProps,
     HTMLColgroupProps,
+    HTMLColProps,
     HTMLDataProps,
-    HTMLDetailsProps,
     HTMLDelProps,
+    HTMLDetailsProps,
     HTMLDialogProps,
     HTMLEmbedProps,
     HTMLFieldsetProps,
@@ -26,8 +23,8 @@ from pulse.html.attributes import (
     HTMLInputProps,
     HTMLInsProps,
     HTMLLabelProps,
-    HTMLLiProps,
     HTMLLinkProps,
+    HTMLLiProps,
     HTMLMapProps,
     HTMLMenuProps,
     HTMLMetaProps,
@@ -39,14 +36,15 @@ from pulse.html.attributes import (
     HTMLOutputProps,
     HTMLParamProps,
     HTMLProgressProps,
+    HTMLProps,
     HTMLQuoteProps,
     HTMLScriptProps,
     HTMLSelectProps,
     HTMLSourceProps,
     HTMLStyleProps,
     HTMLTableProps,
-    HTMLTextareaProps,
     HTMLTdProps,
+    HTMLTextareaProps,
     HTMLThProps,
     HTMLTimeProps,
     HTMLTrackProps,
@@ -54,6 +52,19 @@ from pulse.html.attributes import (
 )
 from pulse.vdom import Node, NodeTree
 
+class Tag(Protocol):
+    def __call__(self, *children: NodeTree, **props) -> Node: ...
+
+def define_tag(
+    name: str,
+    default_props: Optional[dict[str, Any]] = None,
+) -> Tag: ...
+def define_self_closing_tag(
+    name: str,
+    default_props: Optional[dict[str, Any]] = None,
+) -> Tag: ...
+
+# --- Self-closing tags ----
 def area(*, key: Optional[str] = None, **props: Unpack[HTMLAreaProps]) -> Node: ...
 def base(*, key: Optional[str] = None, **props: Unpack[HTMLBaseProps]) -> Node: ...
 def br(*, key: Optional[str] = None, **props: Unpack[HTMLProps]) -> Node: ...
@@ -69,12 +80,7 @@ def source(*, key: Optional[str] = None, **props: Unpack[HTMLSourceProps]) -> No
 def track(*, key: Optional[str] = None, **props: Unpack[HTMLTrackProps]) -> Node: ...
 def wbr(*, key: Optional[str] = None, **props: Unpack[HTMLProps]) -> Node: ...
 
-"""
-Redefined standard HTML tags using the tag decorator.
-All non self-closing tags accept variadic children and an optional key.
-"""
-
-# Regular tags ---------------------------------------------------------------
+# --- Regular tags ---
 
 def a(
     *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLAnchorProps]

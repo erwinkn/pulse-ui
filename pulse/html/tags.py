@@ -47,6 +47,7 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
             tag=name,
             props=props,
             children=(),  # Self-closing tags never have children
+            allow_children=False
         )
 
     return create_element

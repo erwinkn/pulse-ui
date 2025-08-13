@@ -189,12 +189,16 @@ class Node:
         props: Optional[dict[str, Any] | None] = None,
         children: Optional[Sequence[NodeTree]] = None,
         key: Optional[str] = None,
+        allow_children=True,
     ):
         self.tag = tag
         # Normalize to None
         self.props = props or None
         self.children = children or None
+        self.allow_children = allow_children
         self.key = key or None
+        if not self.allow_children and children:
+            raise ValueError(f"{self.tag} cannot have children")
 
     # --- Pretty printing helpers -------------------------------------------------
     def __repr__(self) -> str:  # pragma: no cover - trivial formatting
@@ -221,6 +225,7 @@ class Node:
             props=self.props,
             children=new_children,
             key=self.key,
+            allow_children=self.allow_children,
         )
 
     @staticmethod
@@ -426,4 +431,3 @@ def _callable_qualname(fn: Callable[..., Any]) -> str:
         or "<callable>"
     )
     return f"{mod}.{qual}"
-

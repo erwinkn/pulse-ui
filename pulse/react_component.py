@@ -90,20 +90,25 @@ class ReactComponent(Generic[P]):
     def __call__(self, *children: P.args, **props: P.kwargs) -> Node:
         # Merge defaults from constructor with call-time props (call-time wins)
         if self.default_props:
-            props.update(self.default_props)
+            merged_props: dict[str, Any] = {
+                **self.default_props,
+                **cast(dict[str, Any], props),
+            }
+        else:
+            merged_props = cast(dict[str, Any], props)
 
         # Apply optional props specification: fill defaults, enforce required,
         # run serializers, and pass through unknown keys unchanged
         if self.props_spec is not None:
-            self._apply_props_spec(props)
-        key = props.pop("key", None)
+            self._apply_props_spec(merged_props)
+        key = merged_props.pop("key", None)
         if key is not None and not isinstance(key, str):
             raise ValueError("Key has to be a string or None.")
 
         return Node(
             tag=f"$${self.key}",
             key=key,
-            props=props,
+            props=merged_props,
             children=cast(tuple[NodeTree], children),
         )
 
@@ -150,17 +155,13 @@ class ReactComponent(Generic[P]):
                     # Optional and no default: skip including key
                     continue
 
-            # Best-effort runtime type check if expected_type is a class/tuple
-            try:
-                if isinstance(prop.type_, type) or isinstance(prop.type_, tuple):
-                    if value is not None and not isinstance(value, prop.type_):
-                        raise TypeError(
-                            f"Invalid type for prop '{key}': got {type(value).__name__}, "
-                            f"expected {getattr(prop.type_, '__name__', prop.type_)!r}"
-                        )
-            except TypeError:
-                # expected_type is likely a typing construct not suitable for isinstance
-                pass
+            # Runtime type check when type_ is a class or tuple of classes
+            if isinstance(prop.type_, type) or isinstance(prop.type_, tuple):
+                if value is not None and not isinstance(value, prop.type_):
+                    raise TypeError(
+                        f"Invalid type for prop '{key}': got {type(value).__name__}, "
+                        f"expected {getattr(prop.type_, '__name__', prop.type_)!r}"
+                    )
 
             # Apply serializer if present
             if prop.serialize is not None:
@@ -189,6 +190,13 @@ def _validate_hint_signature(hint: Callable[..., Any]) -> None:
     for p in params:
         if p.kind is inspect.Parameter.POSITIONAL_ONLY:
             raise ValueError("Hint must not declare positional-only parameters")
+
+    # Forbid any fixed positional-or-keyword parameter except the special 'key'
+    for p in params:
+        if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD and p.name != "key":
+            raise ValueError(
+                "Hint must not declare fixed positional parameters; only *children is allowed for positionals"
+            )
 
     for p in params:
         if p.kind is inspect.Parameter.VAR_POSITIONAL:

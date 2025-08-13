@@ -6,20 +6,24 @@ within the UI tree generation system.
 """
 
 import pytest
+from typing import Optional
 
-from pulse.vdom import (
+from pulse import (
     Node,
     VDOMNode,
     div,
     p,
     h1,
 )
-from pulse.components.registry import (
+from pulse.react_component import (
     COMPONENT_REGISTRY,
     ComponentRegistry,
     ReactComponent,
+    Props,
+    Prop,
 )
-from pulse.tests.test_utils import assert_node_renders_to
+from pulse.tests.test_utils import assert_node_equal
+from pulse.vdom import NodeTree
 
 
 class TestReactComponent:
@@ -105,7 +109,7 @@ class TestDefineReactComponent:
 
         assert mount_point.tag == "$$test-component"
         assert mount_point.props == {"prop1": "value1", "prop2": "value2"}
-        assert mount_point.children == []
+        assert mount_point.children is None
 
     def test_component_with_children(self):
         """Test creating mount points with children."""
@@ -231,7 +235,8 @@ class TestMountPointGeneration:
             ],
         }
 
-        assert_node_renders_to(mount_point, expected)
+        # Compare Node trees using assert_node_equal
+        assert_node_equal(mount_point, Node.from_vdom(expected))
 
     def test_nested_mount_points(self):
         """Test nesting mount points within each other."""
@@ -258,7 +263,7 @@ class TestMountPointGeneration:
             ],
         }
 
-        assert_node_renders_to(nested_structure, expected)
+        assert_node_equal(nested_structure, Node.from_vdom(expected))
 
 
 class TestComponentIntegrationWithHTML:
@@ -301,7 +306,7 @@ class TestComponentIntegrationWithHTML:
             ],
         }
 
-        assert_node_renders_to(mixed_structure, expected)
+        assert_node_equal(mixed_structure, Node.from_vdom(expected))
 
     def test_component_props_types(self):
         """Test that component props handle various data types."""
@@ -324,6 +329,82 @@ class TestComponentIntegrationWithHTML:
         }
 
         assert mount_point.props == expected_props
+
+
+class TestPropsAndHintValidation:
+    def setup_method(self):
+        COMPONENT_REGISTRY.set(ComponentRegistry())
+
+    def test_props_missing_required_raises(self):
+        spec = Props({"title": str}, total=True)
+        Comp = ReactComponent("Card", "./Card", "card", False, props=spec)
+        with pytest.raises(ValueError):
+            Comp()
+
+    def test_props_unexpected_raises(self):
+        spec = Props({"title": str}, total=False)
+        Comp = ReactComponent("Card", "./Card", "card", False, props=spec)
+        with pytest.raises(ValueError):
+            Comp(unknown=1)
+
+    def test_props_defaults_and_factories_and_serialize(self):
+        spec = Props(
+            {
+                "title": Prop(str, default="Untitled"),
+                "count": Prop(int, default_factory=lambda: 2),
+                "flag": Prop(bool, default=False, serialize=lambda b: int(b)),
+            },
+            total=False,
+        )
+        Comp = ReactComponent("Card", "./Card", "card", False, props=spec)
+        n = Comp()
+        assert n.props == {"title": "Untitled", "count": 2, "flag": 0}
+
+    def test_props_type_mismatch_raises(self):
+        spec = Props({"count": int})
+        Comp = ReactComponent("Counter", "./Counter", "counter", False, props=spec)
+        with pytest.raises(TypeError):
+            Comp(count="x")
+
+    def test_hint_valid_no_children(self):
+        def hint(*, key: Optional[str] = None, value: int = 0):
+            return "ok"
+
+        ReactComponent("X", "./X", "x", False, hint=hint)
+
+    def test_hint_valid_with_children(self):
+        def hint(*children: NodeTree, key: Optional[str] = None, value: int = 0):
+            return "ok"
+
+        ReactComponent("X", "./X", "x", False, hint=hint)
+
+    def test_hint_children_wrong_annotation_raises(self):
+        def bad(*children: int, key: Optional[str] = None):
+            return "bad"
+
+        with pytest.raises(TypeError):
+            ReactComponent("X", "./X", "x", False, hint=bad)
+
+    def test_hint_missing_key_raises(self):
+        def bad(*children: NodeTree):
+            return "bad"
+
+        with pytest.raises(ValueError):
+            ReactComponent("X", "./X", "x", False, hint=bad)
+
+    def test_hint_key_wrong_default_raises(self):
+        def bad(*children: NodeTree, key: Optional[str] = "x"):
+            return "bad"
+
+        with pytest.raises(ValueError):
+            ReactComponent("X", "./X", "x", False, hint=bad)
+
+    def test_hint_extra_fixed_positional_raises(self):
+        def bad(x, *children: NodeTree, key: Optional[str] = None):
+            return "bad"
+
+        with pytest.raises(ValueError):
+            ReactComponent("X", "./X", "x", False, hint=bad)
 
 
 if __name__ == "__main__":

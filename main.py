@@ -138,12 +138,13 @@ def about():
             "Pulse bridges the gap between Python and modern web development, enabling you to build interactive UIs with ease.",
             className="mb-6",
         ),
-        ps.ul(className="list-disc list-inside")[
+        ps.ul(
             *[
                 ps.li(feature, className="mb-2 p-2 bg-gray-100 rounded")
                 for feature in features
             ],
-        ],
+            className="list-disc list-inside",
+        ),
     )
 
 

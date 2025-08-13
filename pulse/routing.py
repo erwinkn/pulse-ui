@@ -3,7 +3,7 @@ import re
 from typing import Callable, Optional, Sequence, TypedDict
 from dataclasses import dataclass, field
 
-from pulse.components.registry import ReactComponent
+from pulse.react_component import ReactComponent
 from pulse.reactive import Untrack
 from pulse.reactive_extensions import ReactiveDict
 from pulse.state import State

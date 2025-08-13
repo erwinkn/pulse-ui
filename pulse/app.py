@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from pulse.codegen import Codegen, CodegenConfig
-from pulse.components.registry import ReactComponent, registered_react_components
+from pulse.react_component import ReactComponent, registered_react_components
 from pulse.messages import ClientMessage, RouteInfo
 from pulse.middleware import (
     Deny,

@@ -185,9 +185,6 @@ def Leaf(label: str):
 
 @ps.component
 def Row(use_keys: bool, swapped: bool):
-    # effects: one-time row mount log
-    ps.effects(lambda: print(f"[Row mount] keys={use_keys}"))
-
     if not swapped:
         return ps.div(className="grid grid-cols-2 gap-4")[
             Leaf(label="Left", key="left" if use_keys else None),

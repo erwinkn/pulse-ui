@@ -1,4 +1,4 @@
-# pulse-react
+# pulse-client
 
 To install dependencies:
 

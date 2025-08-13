@@ -1,0 +1,39 @@
+{
+  "name": "pulse-ui-client",
+  "version": "0.0.1",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "@types/bun": "latest",
+    "@types/node": "^24.2.1",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7"
+  },
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19",
+    "react-router": "^7"
+  },
+  "scripts": {
+    "build": "rm -rf dist || true && bun build ./src/index.ts --outdir=dist --format=esm --target=browser --minify --sourcemap=external --external react --external react-dom --external react-router --external socket.io-client && tsc -p tsconfig.build.json",
+    "build:dev": "rm -rf dist || true && bun build ./src/index.ts --outdir=dist --format=esm --target=browser --sourcemap=inline --external react --external react-dom --external react-router --external socket.io-client && tsc -p tsconfig.build.json",
+    "prepublishOnly": "bun run build"
+  }
+}

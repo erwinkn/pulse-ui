@@ -4,7 +4,7 @@ from .routing import ROUTE_CONTEXT
 # NOTE: SessionContext objecst set both the SESSION_CONTEXT and REACTIVE_CONTEXT
 from .session import SESSION_CONTEXT
 from .hooks import HOOK_CONTEXT
-from .components.registry import COMPONENT_REGISTRY
+from .react_component import COMPONENT_REGISTRY
 
 __all__ = [
     "REACTIVE_CONTEXT",

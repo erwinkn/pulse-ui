@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 from typing import (
     Any,
+    Coroutine,
     NamedTuple,
     NotRequired,
     Optional,
@@ -425,3 +426,4 @@ def _callable_qualname(fn: Callable[..., Any]) -> str:
         or "<callable>"
     )
     return f"{mod}.{qual}"
+

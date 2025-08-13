@@ -33,14 +33,15 @@ from .decorators import computed, effect, query
 
 # Import HTML tags and other UI components
 from .vdom import (
-    # Components
+    Node,
+    NodeTree,
+    PrimitiveNode,
+    VDOMNode,
     component,
     Component,
     ComponentNode,
-    # Core types and functions
-    Node,
 )
-from .html.tags import(
+from .html.tags import (
     # Standard HTML tags
     a,
     abbr,
@@ -165,12 +166,15 @@ from .components import (
 )
 
 __all__ = [
+    # VDOM core
+    "VDOMNode",
+    "PrimitiveNode",
+    "Node",
+    "NodeTree",
     # Components
     "component",
     "Component",
     "ComponentNode",
-    # VDOM core
-    "Node",
     # HTML tags
     "a",
     "abbr",

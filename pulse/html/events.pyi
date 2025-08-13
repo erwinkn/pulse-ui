@@ -6,7 +6,18 @@ DOM event handler names to their corresponding event payload types using
 TypedDict. It intentionally does not include any runtime helpers.
 """
 
-from typing import Generic, Literal, Optional, TypeVar, TypedDict
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Generic,
+    Literal,
+    Optional,
+    ParamSpec,
+    TypeVarTuple,
+    TypedDict,
+    TypeVar,
+)
 
 from pulse.html.elements import (
     HTMLDialogElement,
@@ -16,15 +27,19 @@ from pulse.html.elements import (
     HTMLTextAreaElement,
 )
 
-
+TEvent = TypeVar("TEvent")
+EventHandler = (
+    Callable[[], None]
+    | Callable[[], Coroutine[Any, Any, None]]
+    | Callable[[TEvent], None]
+    | Callable[[TEvent], Coroutine[Any, Any, None]]
+)
 # Generic TypeVar for the element target
 TElement = TypeVar("TElement", bound=HTMLElement)
-
 
 class DataTransferItem(TypedDict):
     kind: str
     type: str
-
 
 class DataTransfer(TypedDict):
     dropEffect: Literal["none", "copy", "link", "move"]
@@ -43,7 +58,6 @@ class DataTransfer(TypedDict):
     items: list[DataTransferItem]  # DataTransferItemList
     types: list[str]
 
-
 class Touch(TypedDict):
     target: HTMLElement
     identifier: int
@@ -53,7 +67,6 @@ class Touch(TypedDict):
     clientY: float
     pageX: float
     pageY: float
-
 
 # Base SyntheticEvent using TypedDict and Generic
 class SyntheticEvent(TypedDict, Generic[TElement]):
@@ -73,11 +86,9 @@ class SyntheticEvent(TypedDict, Generic[TElement]):
     timestamp: int
     type: str
 
-
 class UIEvent(SyntheticEvent[TElement]):
     detail: int
     # view: Any # AbstractView - Omitted
-
 
 class MouseEvent(UIEvent[TElement]):
     altKey: bool
@@ -97,18 +108,14 @@ class MouseEvent(UIEvent[TElement]):
     screenY: float
     shiftKey: bool
 
-
 class ClipboardEvent(SyntheticEvent[TElement]):
     clipboardData: DataTransfer
-
 
 class CompositionEvent(SyntheticEvent[TElement]):
     data: str
 
-
 class DragEvent(MouseEvent[TElement]):
     dataTransfer: DataTransfer
-
 
 class PointerEvent(MouseEvent[TElement]):
     pointerId: int
@@ -122,24 +129,19 @@ class PointerEvent(MouseEvent[TElement]):
     pointerType: Literal["mouse", "pen", "touch"]
     isPrimary: bool
 
-
 class FocusEvent(SyntheticEvent[TElement]):
     target: TElement
     relatedTarget: Optional[HTMLElement]
-
 
 class FormEvent(SyntheticEvent[TElement]):
     # No specific fields added here
     pass
 
-
 class InvalidEvent(SyntheticEvent[TElement]):
     target: TElement
 
-
 class ChangeEvent(SyntheticEvent[TElement]):
     target: TElement
-
 
 ModifierKey = Literal[
     "Alt",
@@ -158,7 +160,6 @@ ModifierKey = Literal[
     "SymbolLock",
 ]
 
-
 class KeyboardEvent(UIEvent[TElement]):
     altKey: bool
     # char_code: int  # deprecated
@@ -174,7 +175,6 @@ class KeyboardEvent(UIEvent[TElement]):
     shiftKey: bool
     # which: int  # deprecated
 
-
 class TouchEvent(UIEvent[TElement]):
     altKey: bool
     changedTouches: list[Touch]  # TouchList
@@ -185,234 +185,228 @@ class TouchEvent(UIEvent[TElement]):
     targetTouches: list[Touch]  # TouchList
     touches: list[Touch]  # TouchList
 
-
 class WheelEvent(MouseEvent[TElement]):
     deltaMode: int
     deltaX: float
     deltaY: float
     deltaZ: float
 
-
 class AnimationEvent(SyntheticEvent[TElement]):
     animationName: str
     elapsedTime: float
     pseudoElement: str
 
-
 class ToggleEvent(SyntheticEvent[TElement]):
     oldState: Literal["closed", "open"]
     newState: Literal["closed", "open"]
-
 
 class TransitionEvent(SyntheticEvent[TElement]):
     elapsedTime: float
     propertyName: str
     pseudoElement: str
 
-
 class DOMEvents(TypedDict, Generic[TElement], total=False):
     # Clipboard Events
-    onCopy: ClipboardEvent[TElement]
-    onCopyCapture: ClipboardEvent[TElement]
-    onCut: ClipboardEvent[TElement]
-    onCutCapture: ClipboardEvent[TElement]
-    onPaste: ClipboardEvent[TElement]
-    onPasteCapture: ClipboardEvent[TElement]
+    onCopy: EventHandler[ClipboardEvent[TElement]]
+    onCopyCapture: EventHandler[ClipboardEvent[TElement]]
+    onCut: EventHandler[ClipboardEvent[TElement]]
+    onCutCapture: EventHandler[ClipboardEvent[TElement]]
+    onPaste: EventHandler[ClipboardEvent[TElement]]
+    onPasteCapture: EventHandler[ClipboardEvent[TElement]]
 
     # Composition Events
-    onCompositionEnd: CompositionEvent[TElement]
-    onCompositionEndCapture: CompositionEvent[TElement]
-    onCompositionStart: CompositionEvent[TElement]
-    onCompositionStartCapture: CompositionEvent[TElement]
-    onCompositionUpdate: CompositionEvent[TElement]
-    onCompositionUpdateCapture: CompositionEvent[TElement]
+    onCompositionEnd: EventHandler[CompositionEvent[TElement]]
+    onCompositionEndCapture: EventHandler[CompositionEvent[TElement]]
+    onCompositionStart: EventHandler[CompositionEvent[TElement]]
+    onCompositionStartCapture: EventHandler[CompositionEvent[TElement]]
+    onCompositionUpdate: EventHandler[CompositionEvent[TElement]]
+    onCompositionUpdateCapture: EventHandler[CompositionEvent[TElement]]
 
     # Focus Events
-    onFocus: FocusEvent[TElement]
-    onFocusCapture: FocusEvent[TElement]
-    onBlur: FocusEvent[TElement]
-    onBlurCapture: FocusEvent[TElement]
+    onFocus: EventHandler[FocusEvent[TElement]]
+    onFocusCapture: EventHandler[FocusEvent[TElement]]
+    onBlur: EventHandler[FocusEvent[TElement]]
+    onBlurCapture: EventHandler[FocusEvent[TElement]]
 
     # Form Events (default mapping)
-    onChange: FormEvent[TElement]
-    onChangeCapture: FormEvent[TElement]
-    onBeforeInput: FormEvent[TElement]
-    onBeforeInputCapture: FormEvent[TElement]
-    onInput: FormEvent[TElement]
-    onInputCapture: FormEvent[TElement]
-    onReset: FormEvent[TElement]
-    onResetCapture: FormEvent[TElement]
-    onSubmit: FormEvent[TElement]
-    onSubmitCapture: FormEvent[TElement]
-    onInvalid: FormEvent[TElement]
-    onInvalidCapture: FormEvent[TElement]
+    onChange: EventHandler[FormEvent[TElement]]
+    onChangeCapture: EventHandler[FormEvent[TElement]]
+    onBeforeInput: EventHandler[FormEvent[TElement]]
+    onBeforeInputCapture: EventHandler[FormEvent[TElement]]
+    onInput: EventHandler[FormEvent[TElement]]
+    onInputCapture: EventHandler[FormEvent[TElement]]
+    onReset: EventHandler[FormEvent[TElement]]
+    onResetCapture: EventHandler[FormEvent[TElement]]
+    onSubmit: EventHandler[FormEvent[TElement]]
+    onSubmitCapture: EventHandler[FormEvent[TElement]]
+    onInvalid: EventHandler[FormEvent[TElement]]
+    onInvalidCapture: EventHandler[FormEvent[TElement]]
 
     # Image/Media-ish Events (using SyntheticEvent by default)
-    onLoad: SyntheticEvent[TElement]
-    onLoadCapture: SyntheticEvent[TElement]
-    onError: SyntheticEvent[TElement]
-    onErrorCapture: SyntheticEvent[TElement]
+    onLoad: EventHandler[SyntheticEvent[TElement]]
+    onLoadCapture: EventHandler[SyntheticEvent[TElement]]
+    onError: EventHandler[SyntheticEvent[TElement]]
+    onErrorCapture: EventHandler[SyntheticEvent[TElement]]
 
     # Keyboard Events
-    onKeyDown: KeyboardEvent[TElement]
-    onKeyDownCapture: KeyboardEvent[TElement]
-    onKeyPress: KeyboardEvent[TElement]
-    onKeyPressCapture: KeyboardEvent[TElement]
-    onKeyUp: KeyboardEvent[TElement]
-    onKeyUpCapture: KeyboardEvent[TElement]
+    onKeyDown: EventHandler[KeyboardEvent[TElement]]
+    onKeyDownCapture: EventHandler[KeyboardEvent[TElement]]
+    onKeyPress: EventHandler[KeyboardEvent[TElement]]
+    onKeyPressCapture: EventHandler[KeyboardEvent[TElement]]
+    onKeyUp: EventHandler[KeyboardEvent[TElement]]
+    onKeyUpCapture: EventHandler[KeyboardEvent[TElement]]
 
     # Media Events (default SyntheticEvent payloads)
-    onAbort: SyntheticEvent[TElement]
-    onAbortCapture: SyntheticEvent[TElement]
-    onCanPlay: SyntheticEvent[TElement]
-    onCanPlayCapture: SyntheticEvent[TElement]
-    onCanPlayThrough: SyntheticEvent[TElement]
-    onCanPlayThroughCapture: SyntheticEvent[TElement]
-    onDurationChange: SyntheticEvent[TElement]
-    onDurationChangeCapture: SyntheticEvent[TElement]
-    onEmptied: SyntheticEvent[TElement]
-    onEmptiedCapture: SyntheticEvent[TElement]
-    onEncrypted: SyntheticEvent[TElement]
-    onEncryptedCapture: SyntheticEvent[TElement]
-    onEnded: SyntheticEvent[TElement]
-    onEndedCapture: SyntheticEvent[TElement]
-    onLoadedData: SyntheticEvent[TElement]
-    onLoadedDataCapture: SyntheticEvent[TElement]
-    onLoadedMetadata: SyntheticEvent[TElement]
-    onLoadedMetadataCapture: SyntheticEvent[TElement]
-    onLoadStart: SyntheticEvent[TElement]
-    onLoadStartCapture: SyntheticEvent[TElement]
-    onPause: SyntheticEvent[TElement]
-    onPauseCapture: SyntheticEvent[TElement]
-    onPlay: SyntheticEvent[TElement]
-    onPlayCapture: SyntheticEvent[TElement]
-    onPlaying: SyntheticEvent[TElement]
-    onPlayingCapture: SyntheticEvent[TElement]
-    onProgress: SyntheticEvent[TElement]
-    onProgressCapture: SyntheticEvent[TElement]
-    onRateChange: SyntheticEvent[TElement]
-    onRateChangeCapture: SyntheticEvent[TElement]
-    onResize: SyntheticEvent[TElement]
-    onResizeCapture: SyntheticEvent[TElement]
-    onSeeked: SyntheticEvent[TElement]
-    onSeekedCapture: SyntheticEvent[TElement]
-    onSeeking: SyntheticEvent[TElement]
-    onSeekingCapture: SyntheticEvent[TElement]
-    onStalled: SyntheticEvent[TElement]
-    onStalledCapture: SyntheticEvent[TElement]
-    onSuspend: SyntheticEvent[TElement]
-    onSuspendCapture: SyntheticEvent[TElement]
-    onTimeUpdate: SyntheticEvent[TElement]
-    onTimeUpdateCapture: SyntheticEvent[TElement]
-    onVolumeChange: SyntheticEvent[TElement]
-    onVolumeChangeCapture: SyntheticEvent[TElement]
-    onWaiting: SyntheticEvent[TElement]
-    onWaitingCapture: SyntheticEvent[TElement]
+    onAbort: EventHandler[SyntheticEvent[TElement]]
+    onAbortCapture: EventHandler[SyntheticEvent[TElement]]
+    onCanPlay: EventHandler[SyntheticEvent[TElement]]
+    onCanPlayCapture: EventHandler[SyntheticEvent[TElement]]
+    onCanPlayThrough: EventHandler[SyntheticEvent[TElement]]
+    onCanPlayThroughCapture: EventHandler[SyntheticEvent[TElement]]
+    onDurationChange: EventHandler[SyntheticEvent[TElement]]
+    onDurationChangeCapture: EventHandler[SyntheticEvent[TElement]]
+    onEmptied: EventHandler[SyntheticEvent[TElement]]
+    onEmptiedCapture: EventHandler[SyntheticEvent[TElement]]
+    onEncrypted: EventHandler[SyntheticEvent[TElement]]
+    onEncryptedCapture: EventHandler[SyntheticEvent[TElement]]
+    onEnded: EventHandler[SyntheticEvent[TElement]]
+    onEndedCapture: EventHandler[SyntheticEvent[TElement]]
+    onLoadedData: EventHandler[SyntheticEvent[TElement]]
+    onLoadedDataCapture: EventHandler[SyntheticEvent[TElement]]
+    onLoadedMetadata: EventHandler[SyntheticEvent[TElement]]
+    onLoadedMetadataCapture: EventHandler[SyntheticEvent[TElement]]
+    onLoadStart: EventHandler[SyntheticEvent[TElement]]
+    onLoadStartCapture: EventHandler[SyntheticEvent[TElement]]
+    onPause: EventHandler[SyntheticEvent[TElement]]
+    onPauseCapture: EventHandler[SyntheticEvent[TElement]]
+    onPlay: EventHandler[SyntheticEvent[TElement]]
+    onPlayCapture: EventHandler[SyntheticEvent[TElement]]
+    onPlaying: EventHandler[SyntheticEvent[TElement]]
+    onPlayingCapture: EventHandler[SyntheticEvent[TElement]]
+    onProgress: EventHandler[SyntheticEvent[TElement]]
+    onProgressCapture: EventHandler[SyntheticEvent[TElement]]
+    onRateChange: EventHandler[SyntheticEvent[TElement]]
+    onRateChangeCapture: EventHandler[SyntheticEvent[TElement]]
+    onResize: EventHandler[SyntheticEvent[TElement]]
+    onResizeCapture: EventHandler[SyntheticEvent[TElement]]
+    onSeeked: EventHandler[SyntheticEvent[TElement]]
+    onSeekedCapture: EventHandler[SyntheticEvent[TElement]]
+    onSeeking: EventHandler[SyntheticEvent[TElement]]
+    onSeekingCapture: EventHandler[SyntheticEvent[TElement]]
+    onStalled: EventHandler[SyntheticEvent[TElement]]
+    onStalledCapture: EventHandler[SyntheticEvent[TElement]]
+    onSuspend: EventHandler[SyntheticEvent[TElement]]
+    onSuspendCapture: EventHandler[SyntheticEvent[TElement]]
+    onTimeUpdate: EventHandler[SyntheticEvent[TElement]]
+    onTimeUpdateCapture: EventHandler[SyntheticEvent[TElement]]
+    onVolumeChange: EventHandler[SyntheticEvent[TElement]]
+    onVolumeChangeCapture: EventHandler[SyntheticEvent[TElement]]
+    onWaiting: EventHandler[SyntheticEvent[TElement]]
+    onWaitingCapture: EventHandler[SyntheticEvent[TElement]]
 
     # Mouse Events
-    onAuxClick: MouseEvent[TElement]
-    onAuxClickCapture: MouseEvent[TElement]
-    onClick: MouseEvent[TElement]
-    onClickCapture: MouseEvent[TElement]
-    onContextMenu: MouseEvent[TElement]
-    onContextMenuCapture: MouseEvent[TElement]
-    onDoubleClick: MouseEvent[TElement]
-    onDoubleClickCapture: MouseEvent[TElement]
-    onDrag: DragEvent[TElement]
-    onDragCapture: DragEvent[TElement]
-    onDragEnd: DragEvent[TElement]
-    onDragEndCapture: DragEvent[TElement]
-    onDragEnter: DragEvent[TElement]
-    onDragEnterCapture: DragEvent[TElement]
-    onDragExit: DragEvent[TElement]
-    onDragExitCapture: DragEvent[TElement]
-    onDragLeave: DragEvent[TElement]
-    onDragLeaveCapture: DragEvent[TElement]
-    onDragOver: DragEvent[TElement]
-    onDragOverCapture: DragEvent[TElement]
-    onDragStart: DragEvent[TElement]
-    onDragStartCapture: DragEvent[TElement]
-    onDrop: DragEvent[TElement]
-    onDropCapture: DragEvent[TElement]
-    onMouseDown: MouseEvent[TElement]
-    onMouseDownCapture: MouseEvent[TElement]
-    onMouseEnter: MouseEvent[TElement]
-    onMouseLeave: MouseEvent[TElement]
-    onMouseMove: MouseEvent[TElement]
-    onMouseMoveCapture: MouseEvent[TElement]
-    onMouseOut: MouseEvent[TElement]
-    onMouseOutCapture: MouseEvent[TElement]
-    onMouseOver: MouseEvent[TElement]
-    onMouseOverCapture: MouseEvent[TElement]
-    onMouseUp: MouseEvent[TElement]
-    onMouseUpCapture: MouseEvent[TElement]
+    onAuxClick: EventHandler[MouseEvent[TElement]]
+    onAuxClickCapture: EventHandler[MouseEvent[TElement]]
+    onClick: EventHandler[MouseEvent[TElement]]
+    onClickCapture: EventHandler[MouseEvent[TElement]]
+    onContextMenu: EventHandler[MouseEvent[TElement]]
+    onContextMenuCapture: EventHandler[MouseEvent[TElement]]
+    onDoubleClick: EventHandler[MouseEvent[TElement]]
+    onDoubleClickCapture: EventHandler[MouseEvent[TElement]]
+    onDrag: EventHandler[DragEvent[TElement]]
+    onDragCapture: EventHandler[DragEvent[TElement]]
+    onDragEnd: EventHandler[DragEvent[TElement]]
+    onDragEndCapture: EventHandler[DragEvent[TElement]]
+    onDragEnter: EventHandler[DragEvent[TElement]]
+    onDragEnterCapture: EventHandler[DragEvent[TElement]]
+    onDragExit: EventHandler[DragEvent[TElement]]
+    onDragExitCapture: EventHandler[DragEvent[TElement]]
+    onDragLeave: EventHandler[DragEvent[TElement]]
+    onDragLeaveCapture: EventHandler[DragEvent[TElement]]
+    onDragOver: EventHandler[DragEvent[TElement]]
+    onDragOverCapture: EventHandler[DragEvent[TElement]]
+    onDragStart: EventHandler[DragEvent[TElement]]
+    onDragStartCapture: EventHandler[DragEvent[TElement]]
+    onDrop: EventHandler[DragEvent[TElement]]
+    onDropCapture: EventHandler[DragEvent[TElement]]
+    onMouseDown: EventHandler[MouseEvent[TElement]]
+    onMouseDownCapture: EventHandler[MouseEvent[TElement]]
+    onMouseEnter: EventHandler[MouseEvent[TElement]]
+    onMouseLeave: EventHandler[MouseEvent[TElement]]
+    onMouseMove: EventHandler[MouseEvent[TElement]]
+    onMouseMoveCapture: EventHandler[MouseEvent[TElement]]
+    onMouseOut: EventHandler[MouseEvent[TElement]]
+    onMouseOutCapture: EventHandler[MouseEvent[TElement]]
+    onMouseOver: EventHandler[MouseEvent[TElement]]
+    onMouseOverCapture: EventHandler[MouseEvent[TElement]]
+    onMouseUp: EventHandler[MouseEvent[TElement]]
+    onMouseUpCapture: EventHandler[MouseEvent[TElement]]
 
     # Selection Events
-    onSelect: SyntheticEvent[TElement]
-    onSelectCapture: SyntheticEvent[TElement]
+    onSelect: EventHandler[SyntheticEvent[TElement]]
+    onSelectCapture: EventHandler[SyntheticEvent[TElement]]
 
     # Touch Events
-    onTouchCancel: TouchEvent[TElement]
-    onTouchCancelCapture: TouchEvent[TElement]
-    onTouchEnd: TouchEvent[TElement]
-    onTouchEndCapture: TouchEvent[TElement]
-    onTouchMove: TouchEvent[TElement]
-    onTouchMoveCapture: TouchEvent[TElement]
-    onTouchStart: TouchEvent[TElement]
-    onTouchStartCapture: TouchEvent[TElement]
+    onTouchCancel: EventHandler[TouchEvent[TElement]]
+    onTouchCancelCapture: EventHandler[TouchEvent[TElement]]
+    onTouchEnd: EventHandler[TouchEvent[TElement]]
+    onTouchEndCapture: EventHandler[TouchEvent[TElement]]
+    onTouchMove: EventHandler[TouchEvent[TElement]]
+    onTouchMoveCapture: EventHandler[TouchEvent[TElement]]
+    onTouchStart: EventHandler[TouchEvent[TElement]]
+    onTouchStartCapture: EventHandler[TouchEvent[TElement]]
 
     # Pointer Events
-    onPointerDown: PointerEvent[TElement]
-    onPointerDownCapture: PointerEvent[TElement]
-    onPointerMove: PointerEvent[TElement]
-    onPointerMoveCapture: PointerEvent[TElement]
-    onPointerUp: PointerEvent[TElement]
-    onPointerUpCapture: PointerEvent[TElement]
-    onPointerCancel: PointerEvent[TElement]
-    onPointerCancelCapture: PointerEvent[TElement]
-    onPointerEnter: PointerEvent[TElement]
-    onPointerLeave: PointerEvent[TElement]
-    onPointerOver: PointerEvent[TElement]
-    onPointerOverCapture: PointerEvent[TElement]
-    onPointerOut: PointerEvent[TElement]
-    onPointerOutCapture: PointerEvent[TElement]
-    onGotPointerCapture: PointerEvent[TElement]
-    onGotPointerCaptureCapture: PointerEvent[TElement]
-    onLostPointerCapture: PointerEvent[TElement]
-    onLostPointerCaptureCapture: PointerEvent[TElement]
+    onPointerDown: EventHandler[PointerEvent[TElement]]
+    onPointerDownCapture: EventHandler[PointerEvent[TElement]]
+    onPointerMove: EventHandler[PointerEvent[TElement]]
+    onPointerMoveCapture: EventHandler[PointerEvent[TElement]]
+    onPointerUp: EventHandler[PointerEvent[TElement]]
+    onPointerUpCapture: EventHandler[PointerEvent[TElement]]
+    onPointerCancel: EventHandler[PointerEvent[TElement]]
+    onPointerCancelCapture: EventHandler[PointerEvent[TElement]]
+    onPointerEnter: EventHandler[PointerEvent[TElement]]
+    onPointerLeave: EventHandler[PointerEvent[TElement]]
+    onPointerOver: EventHandler[PointerEvent[TElement]]
+    onPointerOverCapture: EventHandler[PointerEvent[TElement]]
+    onPointerOut: EventHandler[PointerEvent[TElement]]
+    onPointerOutCapture: EventHandler[PointerEvent[TElement]]
+    onGotPointerCapture: EventHandler[PointerEvent[TElement]]
+    onGotPointerCaptureCapture: EventHandler[PointerEvent[TElement]]
+    onLostPointerCapture: EventHandler[PointerEvent[TElement]]
+    onLostPointerCaptureCapture: EventHandler[PointerEvent[TElement]]
 
     # UI Events
-    onScroll: UIEvent[TElement]
-    onScrollCapture: UIEvent[TElement]
-    onScrollEnd: UIEvent[TElement]
-    onScrollEndCapture: UIEvent[TElement]
+    onScroll: EventHandler[UIEvent[TElement]]
+    onScrollCapture: EventHandler[UIEvent[TElement]]
+    onScrollEnd: EventHandler[UIEvent[TElement]]
+    onScrollEndCapture: EventHandler[UIEvent[TElement]]
 
     # Wheel Events
-    onWheel: WheelEvent[TElement]
-    onWheelCapture: WheelEvent[TElement]
+    onWheel: EventHandler[WheelEvent[TElement]]
+    onWheelCapture: EventHandler[WheelEvent[TElement]]
 
     # Animation Events
-    onAnimationStart: AnimationEvent[TElement]
-    onAnimationStartCapture: AnimationEvent[TElement]
-    onAnimationEnd: AnimationEvent[TElement]
-    onAnimationEndCapture: AnimationEvent[TElement]
-    onAnimationIteration: AnimationEvent[TElement]
-    onAnimationIterationCapture: AnimationEvent[TElement]
+    onAnimationStart: EventHandler[AnimationEvent[TElement]]
+    onAnimationStartCapture: EventHandler[AnimationEvent[TElement]]
+    onAnimationEnd: EventHandler[AnimationEvent[TElement]]
+    onAnimationEndCapture: EventHandler[AnimationEvent[TElement]]
+    onAnimationIteration: EventHandler[AnimationEvent[TElement]]
+    onAnimationIterationCapture: EventHandler[AnimationEvent[TElement]]
 
     # Toggle Events
-    onToggle: ToggleEvent[TElement]
-    onBeforeToggle: ToggleEvent[TElement]
+    onToggle: EventHandler[ToggleEvent[TElement]]
+    onBeforeToggle: EventHandler[ToggleEvent[TElement]]
 
     # Transition Events
-    onTransitionCancel: TransitionEvent[TElement]
-    onTransitionCancelCapture: TransitionEvent[TElement]
-    onTransitionEnd: TransitionEvent[TElement]
-    onTransitionEndCapture: TransitionEvent[TElement]
-    onTransitionRun: TransitionEvent[TElement]
-    onTransitionRunCapture: TransitionEvent[TElement]
-    onTransitionStart: TransitionEvent[TElement]
-    onTransitionStartCapture: TransitionEvent[TElement]
-
+    onTransitionCancel: EventHandler[TransitionEvent[TElement]]
+    onTransitionCancelCapture: EventHandler[TransitionEvent[TElement]]
+    onTransitionEnd: EventHandler[TransitionEvent[TElement]]
+    onTransitionEndCapture: EventHandler[TransitionEvent[TElement]]
+    onTransitionRun: EventHandler[TransitionEvent[TElement]]
+    onTransitionRunCapture: EventHandler[TransitionEvent[TElement]]
+    onTransitionStart: EventHandler[TransitionEvent[TElement]]
+    onTransitionStartCapture: EventHandler[TransitionEvent[TElement]]
 
 class FormControlDOMEvents(DOMEvents[TElement], total=False):
     """Specialized DOMEvents where on_change is a ChangeEvent.
@@ -420,21 +414,17 @@ class FormControlDOMEvents(DOMEvents[TElement], total=False):
     Use this for inputs, textareas, and selects.
     """
 
-    onChange: ChangeEvent[TElement]
-
+    onChange: EventHandler[ChangeEvent[TElement]]
 
 class InputDOMEvents(FormControlDOMEvents[HTMLInputElement], total=False):
     pass
 
-
 class TextAreaDOMEvents(FormControlDOMEvents[HTMLTextAreaElement], total=False):
     pass
-
 
 class SelectDOMEvents(FormControlDOMEvents[HTMLSelectElement], total=False):
     pass
 
-
 class DialogDOMEvents(DOMEvents[HTMLDialogElement], total=False):
-    onCancel: SyntheticEvent[HTMLDialogElement]
-    onClose: SyntheticEvent[HTMLDialogElement]
+    onCancel: EventHandler[SyntheticEvent[HTMLDialogElement]]
+    onClose: EventHandler[SyntheticEvent[HTMLDialogElement]]

@@ -13,7 +13,7 @@ from pulse.app import App
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.components import Outlet
 import pulse as ps
-from pulse.components.registry import COMPONENT_REGISTRY, ReactComponent
+from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
 from pulse.routing import RouteTree, Route
 from pulse.vdom import div
 

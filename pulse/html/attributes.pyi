@@ -73,34 +73,34 @@ CrossOrigin = Literal["anonymous", "use-credentials", ""] | None
 
 class BaseHTMLProps(TypedDict, total=False):
     # React-specific Attributes
-    default_checked: bool
-    default_value: Union[str, int, List[str]]
-    suppress_content_editable_warning: bool
-    suppress_hydration_warning: bool
+    defaultChecked: bool
+    defaultValue: Union[str, int, List[str]]
+    suppressContentEditableWarning: bool
+    suppressHydrationWarning: bool
 
     # Standard HTML Attributes
-    access_key: str
-    auto_capitalize: Literal["off", "none", "on", "sentences", "words", "characters"]
-    auto_focus: bool
-    class_name: str
-    content_editable: Union[Booleanish, Literal["inherit", "plaintext-only"]]
-    context_menu: str
+    accessKey: str
+    autoCapitalize: Literal["off", "none", "on", "sentences", "words", "characters"]
+    autoFocus: bool
+    className: str
+    contentEditable: Union[Booleanish, Literal["inherit", "plaintext-only"]]
+    contextMenu: str
     dir: str
     draggable: Booleanish
-    enter_key_hint: Literal["enter", "done", "go", "next", "previous", "search", "send"]
+    enterKeyHint: Literal["enter", "done", "go", "next", "previous", "search", "send"]
     hidden: bool
     id: str
     lang: str
     nonce: str
     slot: str
-    spell_check: Booleanish
+    spellCheck: Booleanish
     style: Dict[str, Any]
-    tab_index: int
+    tabIndex: int
     title: str
     translate: Literal["yes", "no"]
 
     # Unknown
-    radio_group: str  # <command>, <menuitem>
+    radioGroup: str  # <command>, <menuitem>
 
     # role: skipped
 
@@ -118,29 +118,29 @@ class BaseHTMLProps(TypedDict, total=False):
     vocab: str
 
     # Non-standard Attributes
-    auto_correct: str
-    auto_save: str
+    autoCorrect: str
+    autoSave: str
     color: str
-    item_prop: str
-    item_scope: bool
-    item_type: str
-    item_id: str
-    item_ref: str
+    itemProp: str
+    itemScope: bool
+    itemType: str
+    itemId: str
+    itemRef: str
     results: int
     security: str
     unselectable: Literal["on", "off"]
 
     # Popover API
     popover: Literal["", "auto", "manual"]
-    popover_target_action: Literal["toggle", "show", "hide"]
-    popover_target: str
+    popoverTargetAction: Literal["toggle", "show", "hide"]
+    popoverTarget: str
 
     # Living Standard
     # https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/inert
     inert: bool
     # Hints at the type of data that might be entered by the user while editing the element or its contents
     # https://html.spec.whatwg.org/multipage/interaction.html#input-modalities:-the-inputmode-attribute
-    input_mode: Literal[
+    inputMode: Literal[
         "none", "text", "tel", "url", "email", "numeric", "decimal", "search"
     ]
 
@@ -176,7 +176,7 @@ class HTMLAnchorProps(BaseHTMLProps, DOMEvents[HTMLAnchorElement], total=False):
     ping: str
     target: str
     type: str
-    referrer_policy: HTMLAttributeReferrerPolicy
+    referrerPolicy: HTMLAttributeReferrerPolicy
 
 
 class HTMLAreaProps(BaseHTMLProps, DOMEvents[HTMLAreaElement], total=False):
@@ -184,9 +184,9 @@ class HTMLAreaProps(BaseHTMLProps, DOMEvents[HTMLAreaElement], total=False):
     coords: str
     download: str
     href: str
-    href_lang: str
+    hrefLang: str
     media: str
-    referrer_policy: HTMLAttributeReferrerPolicy
+    referrerPolicy: HTMLAttributeReferrerPolicy
     shape: str
     target: str
 
@@ -204,11 +204,11 @@ class HTMLButtonProps(BaseHTMLProps, DOMEvents[HTMLButtonElement], total=False):
     disabled: bool
     form: str
     # NOTE: support form_action callbacks?
-    form_action: str
-    form_enc_type: str
-    form_method: str
-    form_no_validate: bool
-    form_target: str
+    formAction: str
+    formEncType: str
+    formMethod: str
+    formNoValidate: bool
+    formTarget: str
     name: str
     type: Literal["submit", "reset", "button"]
     value: Union[str, List[str], int]
@@ -239,7 +239,7 @@ class HTMLDetailsProps(BaseHTMLProps, DOMEvents[HTMLDetailsElement], total=False
 
 class HTMLDelProps(BaseHTMLProps, DOMEvents[HTMLModElement], total=False):
     cite: str
-    date_time: str
+    dateTime: str
 
 
 class HTMLDialogProps(BaseHTMLProps, DialogDOMEvents, total=False):
@@ -260,14 +260,14 @@ class HTMLFieldsetProps(BaseHTMLProps, DOMEvents[HTMLFieldSetElement], total=Fal
 
 
 class HTMLFormProps(BaseHTMLProps, DOMEvents[HTMLFormElement], total=False):
-    accept_charset: str
+    acceptCharset: str
     # NOTE: support action callbacks?
     action: str
-    auto_complete: str
-    enc_type: str
+    autoComplete: str
+    encType: str
     method: str
     name: str
-    no_validate: bool
+    noValidate: bool
     target: str
 
 
@@ -277,41 +277,41 @@ class HTMLHtmlProps(BaseHTMLProps, DOMEvents[HTMLHtmlElement], total=False):
 
 class HTMLIframeProps(BaseHTMLProps, DOMEvents[HTMLIFrameElement], total=False):
     allow: str
-    allow_full_screen: bool
-    allow_transparency: bool
-    frame_border: Union[int, str]
+    allowFullScreen: bool
+    allowTransparency: bool
+    frameBorder: Union[int, str]
     height: Union[int, str]
     loading: Literal["eager", "lazy"]
-    margin_height: int
-    margin_width: int
+    marginHeight: int
+    marginWidth: int
     name: str
-    referrer_policy: HTMLAttributeReferrerPolicy
+    referrerPolicy: HTMLAttributeReferrerPolicy
     sandbox: str
     scrolling: str
     seamless: bool
     src: str
-    src_doc: str
+    srcDoc: str
     width: Union[int, str]
 
 
 class HTMLImgProps(BaseHTMLProps, DOMEvents[HTMLImageElement], total=False):
     alt: str
-    cross_origin: CrossOrigin
+    crossOrigin: CrossOrigin
     decoding: Literal["async", "auto", "sync"]
-    fetch_priority: Literal["high", "low", "auto"]
+    fetchPriority: Literal["high", "low", "auto"]
     height: Union[int, str]
     loading: Literal["eager", "lazy"]
-    referrer_policy: HTMLAttributeReferrerPolicy
+    referrerPolicy: HTMLAttributeReferrerPolicy
     sizes: str
     src: str
-    src_set: str
-    use_map: str
+    srcSet: str
+    useMap: str
     width: Union[int, str]
 
 
 class HTMLInsProps(BaseHTMLProps, DOMEvents[HTMLModElement], total=False):
     cite: str
-    date_time: str
+    dateTime: str
 
 
 HTMLInputType = (
@@ -346,27 +346,27 @@ HTMLInputType = (
 class HTMLInputProps(BaseHTMLProps, InputDOMEvents, total=False):
     accept: str
     alt: str
-    auto_complete: str  # HTMLInputAutoCompleteAttribute
+    autoComplete: str  # HTMLInputAutoCompleteAttribute
     capture: Union[bool, Literal["user", "environment"]]
     checked: bool
     disabled: bool
     form: str
-    form_action: str
-    form_enc_type: str
-    form_method: str
-    form_no_validate: bool
-    form_target: str
+    formAction: str
+    formEncType: str
+    formMethod: str
+    formNoValidate: bool
+    formTarget: str
     height: Union[int, str]
     list: str
     max: Union[int, str]
-    max_length: int
+    maxLength: int
     min: Union[int, str]
-    min_length: int
+    minLength: int
     multiple: bool
     name: str
     pattern: str
     placeholder: str
-    read_only: bool
+    readOnly: bool
     required: bool
     size: int
     src: str
@@ -380,14 +380,14 @@ class HTMLKeygenProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False)
     challenge: str
     disabled: bool
     form: str
-    key_type: str
-    key_params: str
+    keyType: str
+    keyParams: str
     name: str
 
 
 class HTMLLabelProps(BaseHTMLProps, DOMEvents[HTMLLabelElement], total=False):
     form: str
-    html_for: str
+    htmlFor: str
 
 
 class HTMLLiProps(BaseHTMLProps, DOMEvents[HTMLLiElement], total=False):
@@ -397,17 +397,17 @@ class HTMLLiProps(BaseHTMLProps, DOMEvents[HTMLLiElement], total=False):
 class HTMLLinkProps(BaseHTMLProps, DOMEvents[HTMLLinkElement], total=False):
     href: str
     as_: str
-    cross_origin: CrossOrigin
-    fetch_priority: Literal["high", "low", "auto"]
-    href_lang: str
+    crossOrigin: CrossOrigin
+    fetchPriority: Literal["high", "low", "auto"]
+    hrefLang: str
     integrity: str
     media: str
-    image_src_set: str
-    image_sizes: str
-    referrer_policy: HTMLAttributeReferrerPolicy
+    imageSrcSet: str
+    imageSizes: str
+    referrerPolicy: HTMLAttributeReferrerPolicy
     sizes: str
     type: str
-    char_set: str
+    charSet: str
     precedence: str
 
 
@@ -420,14 +420,14 @@ class HTMLMenuProps(BaseHTMLProps, DOMEvents[HTMLMenuElement], total=False):
 
 
 class HTMLMediaProps(BaseHTMLProps, DOMEvents[HTMLMediaElement], total=False):
-    auto_play: bool
+    autoPlay: bool
     controls: bool
-    controls_list: str
-    cross_origin: CrossOrigin
+    controlsList: str
+    crossOrigin: CrossOrigin
     loop: bool
-    media_group: str
+    mediaGroup: str
     muted: bool
-    plays_inline: bool
+    playsInline: bool
     preload: str
     src: str
 
@@ -438,9 +438,9 @@ class HTMLAudioProps(HTMLMediaProps, total=False):
 
 
 class HTMLMetaProps(BaseHTMLProps, DOMEvents[HTMLMetaElement], total=False):
-    char_set: str
+    charSet: str
     content: str
-    http_equiv: str
+    httpEquiv: str
     media: str
     name: str
 
@@ -460,13 +460,13 @@ class HTMLQuoteProps(BaseHTMLProps, DOMEvents[HTMLQuoteElement], total=False):
 
 
 class HTMLObjectProps(BaseHTMLProps, DOMEvents[HTMLObjectElement], total=False):
-    class_id: str
+    classId: str
     data: str
     form: str
     height: Union[int, str]
     name: str
     type: str
-    use_map: str
+    useMap: str
     width: Union[int, str]
     wmode: str
 
@@ -491,7 +491,7 @@ class HTMLOptionProps(BaseHTMLProps, DOMEvents[HTMLOptionElement], total=False):
 
 class HTMLOutputProps(BaseHTMLProps, DOMEvents[HTMLOutputElement], total=False):
     form: str
-    html_for: str
+    htmlFor: str
     name: str
 
 
@@ -511,18 +511,18 @@ class HTMLSlotProps(BaseHTMLProps, DOMEvents[HTMLSlotElement], total=False):
 
 class HTMLScriptProps(BaseHTMLProps, DOMEvents[HTMLScriptElement], total=False):
     async_: bool
-    char_set: str  # deprecated
-    cross_origin: CrossOrigin
+    charSet: str  # deprecated
+    crossOrigin: CrossOrigin
     defer: bool
     integrity: str
-    no_module: bool
-    referrer_policy: HTMLAttributeReferrerPolicy
+    noModule: bool
+    referrerPolicy: HTMLAttributeReferrerPolicy
     src: str
     type: str
 
 
 class HTMLSelectProps(BaseHTMLProps, SelectDOMEvents, total=False):
-    auto_complete: str
+    autoComplete: str
     disabled: bool
     form: str
     multiple: bool
@@ -537,7 +537,7 @@ class HTMLSourceProps(BaseHTMLProps, DOMEvents[HTMLSourceElement], total=False):
     media: str
     sizes: str
     src: str
-    src_set: str
+    srcSet: str
     type: str
     width: Union[int, str]
 
@@ -554,8 +554,8 @@ class HTMLTableProps(BaseHTMLProps, DOMEvents[HTMLTableElement], total=False):
     align: Literal["left", "center", "right"]
     bgcolor: str
     border: int
-    cell_padding: Union[int, str]
-    cell_spacing: Union[int, str]
+    cellPadding: Union[int, str]
+    cellSpacing: Union[int, str]
     frame: bool
     rules: Literal["none", "groups", "rows", "columns", "all"]
     summary: str
@@ -563,16 +563,16 @@ class HTMLTableProps(BaseHTMLProps, DOMEvents[HTMLTableElement], total=False):
 
 
 class HTMLTextareaProps(BaseHTMLProps, TextAreaDOMEvents, total=False):
-    auto_complete: str
+    autoComplete: str
     cols: int
-    dir_name: str
+    dirName: str
     disabled: bool
     form: str
-    max_length: int
-    min_length: int
+    maxLength: int
+    minLength: int
     name: str
     placeholder: str
-    read_only: bool
+    readOnly: bool
     required: bool
     rows: int
     value: Union[str, List[str], int]
@@ -581,9 +581,9 @@ class HTMLTextareaProps(BaseHTMLProps, TextAreaDOMEvents, total=False):
 
 class HTMLTdProps(BaseHTMLProps, DOMEvents[HTMLTableCellElement], total=False):
     align: Literal["left", "center", "right", "justify", "char"]
-    col_span: int
+    colSpan: int
     headers: str
-    row_span: int
+    rowSpan: int
     scope: str
     abbr: str
     height: Union[int, str]
@@ -593,15 +593,15 @@ class HTMLTdProps(BaseHTMLProps, DOMEvents[HTMLTableCellElement], total=False):
 
 class HTMLThProps(BaseHTMLProps, DOMEvents[HTMLTableCellElement], total=False):
     align: Literal["left", "center", "right", "justify", "char"]
-    col_span: int
+    colSpan: int
     headers: str
-    row_span: int
+    rowSpan: int
     scope: str
     abbr: str
 
 
 class HTMLTimeProps(BaseHTMLProps, DOMEvents[HTMLTimeElement], total=False):
-    date_time: str
+    dateTime: str
 
 
 class HTMLTrackProps(BaseHTMLProps, DOMEvents[HTMLTrackElement], total=False):
@@ -609,16 +609,16 @@ class HTMLTrackProps(BaseHTMLProps, DOMEvents[HTMLTrackElement], total=False):
     kind: str
     label: str
     src: str
-    src_lang: str
+    srcLang: str
 
 
 class HTMLVideoProps(HTMLMediaProps, total=False):
     height: Union[int, str]
-    plays_inline: bool
+    playsInline: bool
     poster: str
     width: Union[int, str]
-    disable_picture_in_picture: bool
-    disable_remote_playback: bool
+    disablePictureInPicture: bool
+    disableRemotePlayback: bool
 
 
 class HTMLSVGProps(TypedDict, total=False):
@@ -628,10 +628,10 @@ class HTMLSVGProps(TypedDict, total=False):
     """
 
     # React-specific attributes
-    suppress_hydration_warning: bool
+    suppressHydrationWarning: bool
 
     # Shared with HTMLAttributes
-    class_name: str  # type: ignore
+    className: str  # type: ignore
     color: str
     height: Union[int, str]
     id: str  # type: ignore
@@ -648,14 +648,14 @@ class HTMLSVGProps(TypedDict, total=False):
 
     # Other HTML properties
     role: str
-    tab_index: int
-    cross_origin: str
+    tabIndex: int
+    crossOrigin: str
 
     # SVG specific attributes
-    accent_height: Union[int, str]
+    accentHeight: Union[int, str]
     accumulate: Literal["none", "sum"]
     additive: Literal["replace", "sum"]
-    alignment_baseline: Literal[
+    alignmentBaseline: Literal[
         "auto",
         "baseline",
         "before-edge",
@@ -671,70 +671,70 @@ class HTMLSVGProps(TypedDict, total=False):
         "inherit",
     ]
 
-    allow_reorder: Literal["no", "yes"]
+    allowReorder: Literal["no", "yes"]
     alphabetic: Union[int, str]
     amplitude: Union[int, str]
-    arabic_form: Literal["initial", "medial", "terminal", "isolated"]
+    arabicForm: Literal["initial", "medial", "terminal", "isolated"]
     ascent: Union[int, str]
-    attribute_name: str
-    attribute_type: str
-    auto_reverse: bool
+    attributeName: str
+    attributeType: str
+    autoReverse: bool
     azimuth: Union[int, str]
-    base_frequency: Union[int, str]
-    baseline_shift: Union[int, str]
-    base_profile: Union[int, str]
+    baseFrequency: Union[int, str]
+    baselineShift: Union[int, str]
+    baseProfile: Union[int, str]
     bbox: Union[int, str]
     begin: Union[int, str]
     bias: Union[int, str]
     by: Union[int, str]
-    calc_mode: Union[int, str]
-    cap_height: Union[int, str]
+    calcMode: Union[int, str]
+    capHeight: Union[int, str]
     clip: Union[int, str]
-    clip_path: str
-    clip_path_units: Union[int, str]
-    clip_rule: Union[int, str]
-    color_interpolation: Union[int, str]
-    color_interpolation_filters: Literal["auto", "sRGB", "linearRGB", "inherit"]
-    color_profile: Union[int, str]
-    color_rendering: Union[int, str]
-    content_script_type: Union[int, str]
-    content_style_type: Union[int, str]
+    clipPath: str
+    clipPathUnits: Union[int, str]
+    clipRule: Union[int, str]
+    colorInterpolation: Union[int, str]
+    colorInterpolationFilters: Literal["auto", "sRGB", "linearRGB", "inherit"]
+    colorProfile: Union[int, str]
+    colorRendering: Union[int, str]
+    contentScriptType: Union[int, str]
+    contentStyleType: Union[int, str]
     cursor: Union[int, str]
     cx: Union[int, str]
     cy: Union[int, str]
     d: str
     decelerate: Union[int, str]
     descent: Union[int, str]
-    diffuse_constant: Union[int, str]
+    diffuseConstant: Union[int, str]
     direction: Union[int, str]
     display: Union[int, str]
     divisor: Union[int, str]
-    dominant_baseline: Union[int, str]
+    dominantBaseline: Union[int, str]
     dur: Union[int, str]
     dx: Union[int, str]
     dy: Union[int, str]
-    edge_mode: Union[int, str]
+    edgeMode: Union[int, str]
     elevation: Union[int, str]
-    enable_background: Union[int, str]
+    enableBackground: Union[int, str]
     end: Union[int, str]
     exponent: Union[int, str]
-    external_resources_required: bool
+    externalResourcesRequired: bool
     fill: str
-    fill_opacity: Union[int, str]
-    fill_rule: Literal["nonzero", "evenodd", "inherit"]
+    fillOpacity: Union[int, str]
+    fillRule: Literal["nonzero", "evenodd", "inherit"]
     filter: str
-    filter_res: Union[int, str]
-    filter_units: Union[int, str]
-    flood_color: Union[int, str]
-    flood_opacity: Union[int, str]
+    filterRes: Union[int, str]
+    filterUnits: Union[int, str]
+    floodColor: Union[int, str]
+    floodOpacity: Union[int, str]
     focusable: Union[bool, Literal["auto"]]
-    font_family: str
-    font_size: Union[int, str]
-    font_size_adjust: Union[int, str]
-    font_stretch: Union[int, str]
-    font_style: Union[int, str]
-    font_variant: Union[int, str]
-    font_weight: Union[int, str]
+    fontFamily: str
+    fontSize: Union[int, str]
+    fontSizeAdjust: Union[int, str]
+    fontStretch: Union[int, str]
+    fontStyle: Union[int, str]
+    fontVariant: Union[int, str]
+    fontWeight: Union[int, str]
     format: Union[int, str]
     fr: Union[int, str]
     from_: Union[int, str]
@@ -742,18 +742,18 @@ class HTMLSVGProps(TypedDict, total=False):
     fy: Union[int, str]
     g1: Union[int, str]
     g2: Union[int, str]
-    glyph_name: Union[int, str]
-    glyph_orientation_horizontal: Union[int, str]
-    glyph_orientation_vertical: Union[int, str]
-    glyph_ref: Union[int, str]
-    gradient_transform: str
-    gradient_units: str
+    glyphName: Union[int, str]
+    glyphOrientationHorizontal: Union[int, str]
+    glyphOrientationVertical: Union[int, str]
+    glyphRef: Union[int, str]
+    gradientTransform: str
+    gradientUnits: str
     hanging: Union[int, str]
-    horiz_adv_x: Union[int, str]
-    horiz_origin_x: Union[int, str]
+    horizAdvX: Union[int, str]
+    horizOriginX: Union[int, str]
     href: str
     ideographic: Union[int, str]
-    image_rendering: Union[int, str]
+    imageRendering: Union[int, str]
     in2: Union[int, str]
     in_: str
     intercept: Union[int, str]
@@ -762,29 +762,29 @@ class HTMLSVGProps(TypedDict, total=False):
     k3: Union[int, str]
     k4: Union[int, str]
     k: Union[int, str]
-    kernel_matrix: Union[int, str]
-    kernel_unit_length: Union[int, str]
+    kernelMatrix: Union[int, str]
+    kernelUnitLength: Union[int, str]
     kerning: Union[int, str]
-    key_points: Union[int, str]
-    key_splines: Union[int, str]
-    key_times: Union[int, str]
-    length_adjust: Union[int, str]
-    letter_spacing: Union[int, str]
-    lighting_color: Union[int, str]
-    limiting_cone_angle: Union[int, str]
+    keyPoints: Union[int, str]
+    keySplines: Union[int, str]
+    keyTimes: Union[int, str]
+    lengthAdjust: Union[int, str]
+    letterSpacing: Union[int, str]
+    lightingColor: Union[int, str]
+    limitingConeAngle: Union[int, str]
     local: Union[int, str]
-    marker_end: str
-    marker_height: Union[int, str]
-    marker_mid: str
-    marker_start: str
-    marker_units: Union[int, str]
-    marker_width: Union[int, str]
+    markerEnd: str
+    markerHeight: Union[int, str]
+    markerMid: str
+    markerStart: str
+    markerUnits: Union[int, str]
+    markerWidth: Union[int, str]
     mask: str
-    mask_content_units: Union[int, str]
-    mask_units: Union[int, str]
+    maskContentUnits: Union[int, str]
+    maskUnits: Union[int, str]
     mathematical: Union[int, str]
     mode: Union[int, str]
-    num_octaves: Union[int, str]
+    numOctaves: Union[int, str]
     offset: Union[int, str]
     opacity: Union[int, str]
     operator: Union[int, str]
@@ -793,32 +793,32 @@ class HTMLSVGProps(TypedDict, total=False):
     orientation: Union[int, str]
     origin: Union[int, str]
     overflow: Union[int, str]
-    overline_position: Union[int, str]
-    overline_thickness: Union[int, str]
-    paint_order: Union[int, str]
+    overlinePosition: Union[int, str]
+    overlineThickness: Union[int, str]
+    paintOrder: Union[int, str]
     panose1: Union[int, str]
     path: str
-    path_length: Union[int, str]
-    pattern_content_units: str
-    pattern_transform: Union[int, str]
-    pattern_units: str
-    pointer_events: Union[int, str]
+    pathLength: Union[int, str]
+    patternContentUnits: str
+    patternTransform: Union[int, str]
+    patternUnits: str
+    pointerEvents: Union[int, str]
     points: str
-    points_at_x: Union[int, str]
-    points_at_y: Union[int, str]
-    points_at_z: Union[int, str]
-    preserve_alpha: bool
-    preserve_aspect_ratio: str
-    primitive_units: Union[int, str]
+    pointsAtX: Union[int, str]
+    pointsAtY: Union[int, str]
+    pointsAtZ: Union[int, str]
+    preserveAlpha: bool
+    preserveAspectRatio: str
+    primitiveUnits: Union[int, str]
     r: Union[int, str]
     radius: Union[int, str]
-    ref_x: Union[int, str]
-    ref_y: Union[int, str]
-    rendering_intent: Union[int, str]
-    repeat_count: Union[int, str]
-    repeat_dur: Union[int, str]
-    required_extensions: Union[int, str]
-    required_features: Union[int, str]
+    refX: Union[int, str]
+    refY: Union[int, str]
+    renderingIntent: Union[int, str]
+    repeatCount: Union[int, str]
+    repeatDur: Union[int, str]
+    requiredExtensions: Union[int, str]
+    requiredFeatures: Union[int, str]
     restart: Union[int, str]
     result: str
     rotate: Union[int, str]
@@ -826,93 +826,93 @@ class HTMLSVGProps(TypedDict, total=False):
     ry: Union[int, str]
     scale: Union[int, str]
     seed: Union[int, str]
-    shape_rendering: Union[int, str]
+    shapeRendering: Union[int, str]
     slope: Union[int, str]
     spacing: Union[int, str]
-    specular_constant: Union[int, str]
-    specular_exponent: Union[int, str]
+    specularConstant: Union[int, str]
+    specularExponent: Union[int, str]
     speed: Union[int, str]
-    spread_method: str
-    start_offset: Union[int, str]
-    std_deviation: Union[int, str]
+    spreadMethod: str
+    startOffset: Union[int, str]
+    stdDeviation: Union[int, str]
     stemh: Union[int, str]
     stemv: Union[int, str]
-    stitch_tiles: Union[int, str]
-    stop_color: str
-    stop_opacity: Union[int, str]
-    strikethrough_position: Union[int, str]
-    strikethrough_thickness: Union[int, str]
+    stitchTiles: Union[int, str]
+    stopColor: str
+    stopOpacity: Union[int, str]
+    strikethroughPosition: Union[int, str]
+    strikethroughThickness: Union[int, str]
     string: Union[int, str]
     stroke: str
-    stroke_dasharray: Union[int, str]
-    stroke_dashoffset: Union[int, str]
-    stroke_linecap: Literal["butt", "round", "square", "inherit"]
-    stroke_linejoin: Literal["miter", "round", "bevel", "inherit"]
-    stroke_miterlimit: Union[int, str]
-    stroke_opacity: Union[int, str]
-    stroke_width: Union[int, str]
-    surface_scale: Union[int, str]
-    system_language: Union[int, str]
-    table_values: Union[int, str]
-    target_x: Union[int, str]
-    target_y: Union[int, str]
-    text_anchor: str
-    text_decoration: Union[int, str]
-    text_length: Union[int, str]
-    text_rendering: Union[int, str]
+    strokeDasharray: Union[int, str]
+    strokeDashoffset: Union[int, str]
+    strokeLinecap: Literal["butt", "round", "square", "inherit"]
+    strokeLinejoin: Literal["miter", "round", "bevel", "inherit"]
+    strokeMiterlimit: Union[int, str]
+    strokeOpacity: Union[int, str]
+    strokeWidth: Union[int, str]
+    surfaceScale: Union[int, str]
+    systemLanguage: Union[int, str]
+    tableValues: Union[int, str]
+    targetX: Union[int, str]
+    targetY: Union[int, str]
+    textAnchor: str
+    textDecoration: Union[int, str]
+    textLength: Union[int, str]
+    textRendering: Union[int, str]
     to: Union[int, str]
     transform: str
     u1: Union[int, str]
     u2: Union[int, str]
-    underline_position: Union[int, str]
-    underline_thickness: Union[int, str]
+    underlinePosition: Union[int, str]
+    underlineThickness: Union[int, str]
     unicode: Union[int, str]
-    unicode_bidi: Union[int, str]
-    unicode_range: Union[int, str]
-    units_per_em: Union[int, str]
-    v_alphabetic: Union[int, str]
+    unicodeBidi: Union[int, str]
+    unicodeRange: Union[int, str]
+    unitsPerEm: Union[int, str]
+    vAlphabetic: Union[int, str]
     values: str
-    vector_effect: Union[int, str]
+    vectorEffect: Union[int, str]
     version: str
-    vert_adv_y: Union[int, str]
-    vert_origin_x: Union[int, str]
-    vert_origin_y: Union[int, str]
-    v_hanging: Union[int, str]
-    v_ideographic: Union[int, str]
-    view_box: str
-    view_target: Union[int, str]
+    vertAdvY: Union[int, str]
+    vertOriginX: Union[int, str]
+    vertOriginY: Union[int, str]
+    vHanging: Union[int, str]
+    vIdeographic: Union[int, str]
+    viewBox: str
+    viewTarget: Union[int, str]
     visibility: Union[int, str]
-    v_mathematical: Union[int, str]
+    vMathematical: Union[int, str]
     widths: Union[int, str]
-    word_spacing: Union[int, str]
-    writing_mode: Union[int, str]
+    wordSpacing: Union[int, str]
+    writingMode: Union[int, str]
     x1: Union[int, str]
     x2: Union[int, str]
     x: Union[int, str]
-    x_channel_selector: str
-    x_height: Union[int, str]
-    xlink_actuate: str
-    xlink_arcrole: str
-    xlink_href: str
-    xlink_role: str
-    xlink_show: str
-    xlink_title: str
-    xlink_type: str
-    xml_base: str
-    xml_lang: str
+    xChannelSelector: str
+    xHeight: Union[int, str]
+    xlinkActuate: str
+    xlinkArcrole: str
+    xlinkHref: str
+    xlinkRole: str
+    xlinkShow: str
+    xlinkTitle: str
+    xlinkType: str
+    xmlBase: str
+    xmlLang: str
     xmlns: str
-    xmlns_xlink: str
-    xml_space: str
+    xmlnsXlink: str
+    xmlSpace: str
     y1: Union[int, str]
     y2: Union[int, str]
     y: Union[int, str]
-    y_channel_selector: str
+    yChannelSelector: str
     z: Union[int, str]
-    zoom_and_pan: str
+    zoomAndPan: str
 
 
 class WebViewAttributes(BaseHTMLProps):
-    allow_full_screen: bool
+    allowFullScreen: bool
     allowpopups: bool
     autosize: bool
     blinkfeatures: str

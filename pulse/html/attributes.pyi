@@ -2,7 +2,7 @@
 # NOT the same thing as the properties in `elements.py` (but very similar)
 from typing import Any, Dict, List, Literal, Union, TypedDict
 
-from pulse.types.elements import (  # noqa: F401
+from pulse.html.elements import (  # noqa: F401
     GenericHTMLElement,
     HTMLAnchorElement,
     HTMLAreaElement,
@@ -59,7 +59,7 @@ from pulse.types.elements import (  # noqa: F401
     HTMLUListElement,
     HTMLVideoElement,
 )
-from pulse.types.events import (
+from pulse.html.events import (
     DOMEvents,
     DialogDOMEvents,
     InputDOMEvents,

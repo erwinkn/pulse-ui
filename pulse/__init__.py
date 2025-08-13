@@ -39,8 +39,8 @@ from .vdom import (
     ComponentNode,
     # Core types and functions
     Node,
-    define_tag,
-    define_self_closing_tag,
+)
+from .html.tags import(
     # Standard HTML tags
     a,
     abbr,
@@ -171,8 +171,6 @@ __all__ = [
     "ComponentNode",
     # VDOM core
     "Node",
-    "define_tag",
-    "define_self_closing_tag",
     # HTML tags
     "a",
     "abbr",

@@ -8,7 +8,7 @@ TypedDict. It intentionally does not include any runtime helpers.
 
 from typing import Generic, Literal, Optional, TypeVar, TypedDict
 
-from pulse.types.elements import (
+from pulse.html.elements import (
     HTMLDialogElement,
     HTMLElement,
     HTMLInputElement,

@@ -3,7 +3,7 @@ Test utilities for comparing VDOM trees and Node structures.
 """
 
 from typing import Any, Union
-from pulse.vdom import Node, VDOMNode, PrimitiveNode
+from pulse.vdom import ComponentNode, Node, NodeTree, VDOMNode, PrimitiveNode
 
 
 def normalize_vdom_node(node: VDOMNode) -> dict[str, Any]:
@@ -61,11 +61,13 @@ def normalize_node(node: Node) -> dict[str, Any]:
 
 
 def normalize_node_tree(
-    tree: Union[Node, PrimitiveNode],
+    tree: NodeTree,
 ) -> Union[dict[str, Any], PrimitiveNode]:
     """
     Normalize a Node tree (Node or primitive) for comparison.
     """
+    if isinstance(tree, ComponentNode):
+        raise NotImplementedError()
     return normalize_node(tree) if isinstance(tree, Node) else tree
 
 

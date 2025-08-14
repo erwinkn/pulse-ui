@@ -6,20 +6,23 @@ within the UI tree generation system.
 """
 
 import pytest
-from typing import Optional
+from typing import Optional, TypedDict, Unpack, NotRequired, Literal, Union, Any, cast
 
+import pulse as ps
 from pulse import (
     Node,
     VDOMNode,
     div,
     p,
     h1,
+    react_component,
+    prop,
 )
 from pulse.react_component import (
     COMPONENT_REGISTRY,
     ComponentRegistry,
     ReactComponent,
-    Props,
+    PropSpec,
     Prop,
 )
 from pulse.tests.test_utils import assert_node_equal
@@ -336,19 +339,19 @@ class TestPropsAndHintValidation:
         COMPONENT_REGISTRY.set(ComponentRegistry())
 
     def test_props_missing_required_raises(self):
-        spec = Props({"title": str}, total=True)
+        spec = PropSpec({"title": str}, total=True)
         Comp = ReactComponent("Card", "./Card", "card", False, props=spec)
         with pytest.raises(ValueError):
             Comp()
 
     def test_props_unexpected_raises(self):
-        spec = Props({"title": str}, total=False)
+        spec = PropSpec({"title": str}, total=False)
         Comp = ReactComponent("Card", "./Card", "card", False, props=spec)
         with pytest.raises(ValueError):
             Comp(unknown=1)
 
     def test_props_defaults_and_factories_and_serialize(self):
-        spec = Props(
+        spec = PropSpec(
             {
                 "title": Prop(str, default="Untitled"),
                 "count": Prop(int, default_factory=lambda: 2),
@@ -361,7 +364,7 @@ class TestPropsAndHintValidation:
         assert n.props == {"title": "Untitled", "count": 2, "flag": 0}
 
     def test_props_type_mismatch_raises(self):
-        spec = Props({"count": int})
+        spec = PropSpec({"count": int})
         Comp = ReactComponent("Counter", "./Counter", "counter", False, props=spec)
         with pytest.raises(TypeError):
             Comp(count="x")
@@ -370,41 +373,256 @@ class TestPropsAndHintValidation:
         def hint(*, key: Optional[str] = None, value: int = 0):
             return "ok"
 
-        ReactComponent("X", "./X", "x", False, hint=hint)
+        ReactComponent("X", "./X", "x", False, fn_signature=hint)
 
     def test_hint_valid_with_children(self):
         def hint(*children: NodeTree, key: Optional[str] = None, value: int = 0):
             return "ok"
 
-        ReactComponent("X", "./X", "x", False, hint=hint)
+        ReactComponent("X", "./X", "x", False, fn_signature=hint)
 
     def test_hint_children_wrong_annotation_raises(self):
         def bad(*children: int, key: Optional[str] = None):
             return "bad"
 
         with pytest.raises(TypeError):
-            ReactComponent("X", "./X", "x", False, hint=bad)
+            ReactComponent("X", "./X", "x", False, fn_signature=bad)
 
     def test_hint_missing_key_raises(self):
         def bad(*children: NodeTree):
             return "bad"
 
         with pytest.raises(ValueError):
-            ReactComponent("X", "./X", "x", False, hint=bad)
+            ReactComponent("X", "./X", "x", False, fn_signature=bad)
 
     def test_hint_key_wrong_default_raises(self):
         def bad(*children: NodeTree, key: Optional[str] = "x"):
             return "bad"
 
         with pytest.raises(ValueError):
-            ReactComponent("X", "./X", "x", False, hint=bad)
+            ReactComponent("X", "./X", "x", False, fn_signature=bad)
 
     def test_hint_extra_fixed_positional_raises(self):
         def bad(x, *children: NodeTree, key: Optional[str] = None):
             return "bad"
 
         with pytest.raises(ValueError):
-            ReactComponent("X", "./X", "x", False, hint=bad)
+            ReactComponent("X", "./X", "x", False, fn_signature=bad)
+
+
+class TestReactDecorator:
+    def setup_method(self):
+        COMPONENT_REGISTRY.set(ComponentRegistry())
+
+    def test_decorator_with_unpacked_typeddict_and_children(self):
+        class AccordionProps(TypedDict, total=False):
+            open: bool
+            other: str
+
+        @react_component(tag="Accordion", import_="./Accordion")
+        def accordion(
+            *children: NodeTree,
+            key: Optional[str] = None,
+            **props: Unpack[AccordionProps],
+        ) -> NodeTree:
+            return "hint"
+
+        # Should be callable and registered
+        assert callable(accordion)
+        assert COMPONENT_REGISTRY.get().get("Accordion") is not None
+
+        n = accordion("child", open=True)
+        assert n.tag == "$$Accordion"
+        assert n.props == {"open": True}
+        assert n.children is not None and len(n.children) == 1
+
+        # Type mismatch raises
+        with pytest.raises(TypeError):
+            accordion(open=cast(Any, "yes"))
+
+        # Unknown prop raises
+        with pytest.raises(ValueError):
+            cast(Any, accordion)(bad=1)
+
+    def test_decorator_no_children_signature(self):
+        class TooltipProps(TypedDict):
+            text: str
+
+        @react_component(tag="Tooltip", import_="./Tooltip")
+        def tooltip(
+            *, key: Optional[str] = None, **props: Unpack[TooltipProps]
+        ) -> NodeTree:
+            return "hint"
+
+        n = tooltip(text="hi")
+        assert n.tag == "$$Tooltip"
+        assert n.props == {"text": "hi"}
+        assert n.children is None
+
+    def test_decorator_without_props_allows_only_key(self):
+        @react_component(tag="Badge", import_="./Badge")
+        def badge(*, key: Optional[str] = None) -> NodeTree:
+            return "hint"
+
+        badge(key="k1")
+        with pytest.raises(ValueError):
+            cast(Any, badge)(color="red")
+
+    def test_required_notrequired_and_total(self):
+        class Cfg(TypedDict, total=True):
+            a: int
+            b: NotRequired[str]
+
+        @react_component(tag="Cfg", import_="./Cfg")
+        def cfg(*, key: Optional[str] = None, **props: Unpack[Cfg]) -> NodeTree:
+            return "hint"
+
+        # missing required raises
+        with pytest.raises(ValueError):
+            cast(Any, cfg)()
+        # optional omitted OK
+        n = cfg(a=1)
+        assert n.props == {"a": 1}
+        # wrong type raises
+        with pytest.raises(TypeError):
+            cfg(a=cast(Any, "1"))
+
+    def test_literal_and_union(self):
+        class BtnProps(TypedDict, total=False):
+            size: Literal["sm", "md", "lg"]
+            id_or_num: Union[int, str]
+
+        @react_component(tag="Btn", import_="./Btn")
+        def btn(*, key: Optional[str] = None, **props: Unpack[BtnProps]) -> NodeTree:
+            return "hint"
+
+        btn(size="sm")
+        btn(id_or_num=10)
+        btn(id_or_num="x")
+        with pytest.raises(TypeError):
+            btn(size=cast(Any, 1))  # wrong type
+
+    def test_nested_typeddict_field(self):
+        class Inner(TypedDict):
+            x: int
+
+        class Outer(TypedDict, total=False):
+            inner: Inner
+
+        @react_component(tag="Outer", import_="./Outer")
+        def outer(*, key: Optional[str] = None, **props: Unpack[Outer]) -> NodeTree:
+            return "hint"
+
+        # nested TypedDict is treated as dict at runtime
+        outer(inner={"x": 1})
+        with pytest.raises(TypeError):
+            outer(inner=cast(Any, 1))
+
+    def test_prop_inference_and_defaults(self):
+        class Defaults(TypedDict, total=False):
+            a: int = ps.prop(default=1)
+            b: str = ps.prop(default="x")
+            c: bool = ps.prop(default=True)
+
+        @react_component(tag="D", import_="./D")
+        def D(*, key: Optional[str] = None, **props: Unpack[Defaults]) -> NodeTree:
+            return "hint"
+
+        n = D()
+        assert n.props == {"a": 1, "b": "x", "c": True}
+
+        with pytest.raises(TypeError):
+            D(a=cast(Any, "1"))
+
+    def test_serializer(self):
+        class SProps(TypedDict, total=False):
+            val: int = ps.prop(prop(default=2, serialize=lambda v: str(v)))
+
+        object.__setattr__(
+            SProps,
+            "val",
+        )
+
+        @react_component(tag="S", import_="./S")
+        def S(*, key: Optional[str] = None, **props: Unpack[SProps]) -> NodeTree:
+            return "hint"
+
+        assert S().props == {"val": "2"}
+        assert S(val=3).props == {"val": "3"}
+
+    def test_map_to_and_conflict(self):
+        class MProps(TypedDict, total=False):
+            href: str
+            to: str
+
+        object.__setattr__(MProps, "href", prop(map_to="to"))
+
+        @react_component(tag="M", import_="./M")
+        def M(*, key: Optional[str] = None, **props: Unpack[MProps]) -> NodeTree:
+            return "hint"
+
+        # href maps to 'to'
+        assert M(href="/a").props == {"to": "/a"}
+        # setting both href and to is allowed; last one wins at Python level since unknown props are validated
+        assert M(to="/b").props == {"to": "/b"}
+
+        # Conflicting map_to targets across two different fields
+        class Bad(TypedDict, total=False):
+            a: int
+            b: int
+
+        object.__setattr__(Bad, "a", prop(map_to="x"))
+        object.__setattr__(Bad, "b", prop(map_to="x"))
+
+        @react_component(tag="Bad", import_="./Bad")
+        def BadC(*, key: Optional[str] = None, **props: Unpack[Bad]) -> NodeTree:
+            return "hint"
+
+        with pytest.raises(ValueError):
+            BadC(a=1)
+
+    def test_enforces_unpack_annotation_and_typed_dict(self):
+        # Missing **props entirely is allowed (covered elsewhere)
+
+        # Bad: **props without Unpack
+        def bad1(*, key: Optional[str] = None, **props) -> NodeTree:
+            return "hint"
+
+        with pytest.raises(TypeError):
+            react_component(tag="Bad1", import_="./Bad1")(bad1)
+
+        # Bad: Unpack but not a TypedDict
+        def bad2(
+            *,
+            key: Optional[str] = None,
+            **props: Unpack[dict[str, int]],  # type: ignore[type-arg]
+        ) -> NodeTree:
+            return "hint"
+
+        with pytest.raises(TypeError):
+            react_component(tag="Bad2", import_="./Bad2")(bad2)
+
+    def test_signature_rules_on_children_and_key(self):
+        # Wrong children annotation
+        def bad_children(*children: int, key: Optional[str] = None) -> NodeTree:
+            return "hint"
+
+        with pytest.raises(TypeError):
+            react_component(tag="X", import_="./X")(bad_children)
+
+        # Missing key
+        def bad_missing_key(*children: NodeTree):
+            return "hint"
+
+        with pytest.raises(ValueError):
+            react_component(tag="Y", import_="./Y")(bad_missing_key)
+
+        # Wrong key default
+        def bad_key_default(*children: NodeTree, key: Optional[str] = "x") -> NodeTree:
+            return "hint"
+
+        with pytest.raises(ValueError):
+            react_component(tag="Z", import_="./Z")(bad_key_default)
 
 
 if __name__ == "__main__":

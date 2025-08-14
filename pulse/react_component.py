@@ -28,6 +28,7 @@ from pulse.vdom import Node, NodeTree
 
 
 T = TypeVar("T")
+P = ParamSpec("P")
 # used when we need to distinguish between an unspecified value and None
 MISSING = object()
 
@@ -36,6 +37,7 @@ class Prop(Generic[T]):
     def __init__(
         self,
         default: Optional[T] = MISSING,
+        # Will be set by all the conventional ways of defining PropSpec
         required: bool = MISSING,  # type: ignore
         default_factory: Optional[Callable[[], T]] = None,
         serialize: Optional[Callable[[T], Any]] = None,
@@ -77,7 +79,6 @@ def prop(
     default_factory: Optional[Callable[[], T]] = None,
     serialize: Optional[Callable[[T], Any]] = None,
     map_to: Optional[str] = None,
-    required=True,
 ) -> Prop[T]:
     """
     Convenience constructor for Prop to be used inside TypedDict defaults.
@@ -85,7 +86,6 @@ def prop(
     return Prop(
         default=default,
         default_factory=default_factory,
-        required=required,
         serialize=serialize,
         map_to=map_to,
     )
@@ -153,7 +153,7 @@ class PropSpec:
         overlaps: dict[str, list[str]] = defaultdict(list)
         for py_key, prop in self.spec.items():
             if not isinstance(prop, Prop):
-                prop = Prop(type_=prop)
+                prop = Prop(_type=prop)
 
             # Resolve value + defaults
             if py_key in props:
@@ -193,10 +193,6 @@ class PropSpec:
             )
 
         return result
-
-
-P = ParamSpec("P")
-MISSING = object()  # used to detect whether a default was specified ()
 
 
 def default_signature(
@@ -359,7 +355,7 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
 
         if isinstance(p.default, Prop):
             prop = p.default
-            if prop._type is MISSING:
+            if prop._type is None:
                 prop._type = runtime_type
         elif p.default is not inspect._empty:
             prop = Prop(default=p.default, _type=runtime_type)
@@ -374,7 +370,7 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
         annotation = var_positional.annotation
         if annotation is not inspect._empty and annotation is not NodeTree:
             raise TypeError(
-                f"*{var_positional.name} must be annotated as `*{var_positional}: NodeTree`"
+                f"*{var_positional.name} must be annotated as `*{var_positional.name}: NodeTree`"
             )
 
     # Validate `key`` argument
@@ -587,12 +583,12 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
         raise TypeError("Unpack must wrap a TypedDict class, e.g., Unpack[MyProps]")
     typed_dict_cls = unpack_args[0]
 
-    if not isinstance(typed_dict_cls, type) and _is_typeddict_type(typed_dict_cls):
+    if not isinstance(typed_dict_cls, type) or not _is_typeddict_type(typed_dict_cls):
         raise TypeError("Unpack must wrap a TypedDict class, e.g., Unpack[MyProps]")
 
     annotations: dict[str, Any] = getattr(typed_dict_cls, "__annotations__", {})
     required_keys: set[str] | None = getattr(typed_dict_cls, "__required_keys__", None)
-    total_default: bool = bool(getattr(typed_dict_cls, "__total__", True))
+    is_total: bool = bool(getattr(typed_dict_cls, "__total__", True))
 
     spec: dict[str, type | Prop] = {}
 
@@ -603,22 +599,25 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
         annotation, annotation_prop = _extract_prop_from_annotated(annotation)
         if required_keys is not None:
             required = key in required_keys
-        else:
+        elif annotation_required is not None:
             required = annotation_required
+        else:
+            required = is_total
 
         runtime_type = _annotation_to_runtime_type(annotation)
+        prop = annotation_prop or Prop()
+        # In case the annotation defined `required`
+        if prop.required is not MISSING:
+            raise TypeError(
+                "Use total=True + NotRequired[T] or total=False + Required[T] to define required and optional props within a TypedDict"
+            )
+        prop._type = runtime_type
+        prop.required = required
 
-        if is_required:
-            # Keep minimal form unless we need tuple types
-            if isinstance(runtime_type, tuple):
-                spec[key] = Prop(runtime_type)  # type: ignore[arg-type]
-            else:
-                spec[key] = runtime_type  # type: ignore[assignment]
-        else:
-            spec[key] = Prop(runtime_type, required=False)  # type: ignore[arg-type]
+        spec[key] = prop
 
     # We choose total=True since we marked optional fields ourselves
-    return PropSpec(spec, total=True)
+    return PropSpec(spec, _skip_validation=True)
 
 
 # ----------------------------------------------------------------------------

@@ -298,6 +298,7 @@ dependencies = [
     { name = "rich" },
     { name = "textual" },
     { name = "typer" },
+    { name = "typing-extensions" },
     { name = "uvicorn" },
     { name = "websockets" },
 ]
@@ -318,6 +319,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7.1" },
     { name = "textual", specifier = ">=5.2.0" },
     { name = "typer", specifier = ">=0.16.0" },
+    { name = "typing-extensions", specifier = ">=4.14.1" },
     { name = "uvicorn", specifier = ">=0.24.0" },
     { name = "websockets", specifier = ">=12.0" },
 ]

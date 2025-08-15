@@ -7,6 +7,7 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 
 from __future__ import annotations
 import functools
+from types import NoneType
 from typing import (
     Any,
     Coroutine,
@@ -229,7 +230,9 @@ class Node:
         )
 
     @staticmethod
-    def from_vdom(vdom: VDOM) -> Union["Node", PrimitiveNode]:
+    def from_vdom(
+        vdom: VDOM, callbacks: Optional[Callbacks] = None
+    ) -> Union["Node", PrimitiveNode]:
         """Create a Node tree from a VDOM structure.
 
         - Primitive values are returned as-is
@@ -237,12 +240,25 @@ class Node:
           from props since we cannot reconstruct Python callables here
         """
 
-        if not isinstance(vdom, dict):
+        if isinstance(vdom, (str, int, float, bool, NoneType)):
             return vdom
 
         tag = cast(str, vdom.get("tag"))
         props = cast(dict[str, Any] | None, vdom.get("props")) or {}
         key_value = cast(Optional[str], vdom.get("key"))
+
+        callbacks = callbacks or {}
+        copied = False
+        for k, v in props.items():
+            if isinstance(v, str) and v.startswith("$$fn:"):
+                callback_id = v[len("$$fn:") :]
+                callback = callbacks.get(callback_id)
+                if not callback:
+                    raise ValueError(f"Missing callback '{callback_id}'")
+                if not copied:
+                    props = props.copy()
+                    copied = True
+                props[k] = callback.fn
 
         children_value: list[NodeTree] | None = None
         raw_children = cast(
@@ -251,7 +267,7 @@ class Node:
         if raw_children is not None:
             children_value = []
             for raw_child in raw_children:
-                children_value.append(Node.from_vdom(raw_child))
+                children_value.append(Node.from_vdom(raw_child, callbacks=callbacks))
 
         return Node(
             tag=tag,

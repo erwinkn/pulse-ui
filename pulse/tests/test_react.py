@@ -744,3 +744,41 @@ def test_default_sentinel_props_in_fn_and_typed_dict():
 
     node = Pane(name="hi")
     assert node.props == {"name": "hi"}
+
+
+def test_parse_typed_dict_props_inheritance_two_levels():
+    class BaseProps(TypedDict):
+        a: int
+        b: NotRequired[str]
+
+    class MidProps(BaseProps, total=False):
+        c: Required[bool]
+        d: float  # optional because total=False
+
+    class FinalProps(MidProps):
+        e: NotRequired[Annotated[int, prop(map_to="ee")]]
+
+    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[FinalProps]):
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    spec = parse_typed_dict_props(var_kw)
+
+    # Keys present from all inheritance levels
+    keys = ["a", "b", "c", "d", "e"]
+    assert list(spec.spec.keys()) == keys
+
+    a, b, c, d, e = [spec.spec[k] for k in keys]
+
+    assert a.required is True and a._type is int
+    assert b.required is False and b._type is str
+    assert c.required is True and c._type is bool
+    assert d.required is False and d._type is float
+    assert e.required is False and e._type is int and e.map_to == "ee"
+
+    # Apply should accept only requireds and map e->ee when provided
+    applied_min = spec.apply("Final", {"a": 1, "c": False})
+    assert applied_min == {"a": 1, "c": False}
+
+    applied_with_e = spec.apply("Final", {"a": 1, "c": True, "e": 7})
+    assert applied_with_e == {"a": 1, "c": True, "ee": 7}

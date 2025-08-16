@@ -602,6 +602,8 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
 
     spec: dict[str, type | Prop] = {}
 
+    # NOTE: For TypedDicts, the annotations contain the fields of all classes in
+    # the hierarchy, we don't need to walk the MRO.
     for key, annotation in annotations.items():
         # First see if runtime provides explicit required/optional sets
         annotation, annotation_required = _unwrap_required_notrequired(annotation)

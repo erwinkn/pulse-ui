@@ -35,6 +35,7 @@ from pulse.react_component import (
     Prop,
     parse_typed_dict_props,
     parse_fn_signature,
+    DEFAULT,
 )
 from pulse.tests.test_utils import assert_node_equal
 from pulse.vdom import NodeTree
@@ -459,6 +460,13 @@ def test_parse_typed_dict_props_annotated_prop_cannot_set_required():
         parse_typed_dict_props(var_kw)
 
 
+def test_parse_fn_signature_no_children_annotation():
+    def ok(*children, key: Optional[str] = None): ...
+
+    # Should not raise
+    parse_fn_signature(ok)
+
+
 def test_parse_fn_signature_requires_key_param():
     def bad(*children: NodeTree):
         return cast(NodeTree, None)
@@ -651,7 +659,7 @@ def test_react_component_decorator_key_validation():
     assert node.key == "k1"
 
 
-def test_react_component_decorator_untyped_kwargs_allows_unknown_without_including():
+def test_react_component_decorator_untyped_kwargs_allows_unknown():
     @react_component(tag="Pane", import_="./Pane")
     def Pane(
         *children: NodeTree, key: Optional[str] = None, disabled: bool = False, **props
@@ -660,5 +668,79 @@ def test_react_component_decorator_untyped_kwargs_allows_unknown_without_includi
 
     # Should not raise for unknown props
     node = Pane(dataAttr=1)
-    # Unknowns are allowed but not included in normalized props; explicit default remains
+    # Unknowns are allowed and included since untyped kwargs are allowed
+    assert node.props == {"disabled": False, "dataAttr": 1}
+
+
+def test_default_sentinel_omits_explicit_prop():
+    @react_component(tag="Card", import_="./Card", alias="card-default-explicit")
+    def Card(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        title: str = "Untitled",
+        disabled: bool = DEFAULT,
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    # Passing DEFAULT should omit the prop entirely
+    node = Card()
+    assert node.tag == "$$card-default-explicit"
+    assert node.props == {"title": "Untitled"}
+
+    # Passing None should keep the key with None value (serialize to null client-side)
+    node_none = Card(title=cast(Any, None), disabled=False)
+    assert node_none.props == {"title": None, "disabled": False}
+
+
+def test_default_sentinel_omits_unpack_prop_and_skips_serialize():
+    # Serializer that must not be called if DEFAULT is provided
+    def bomb(x: object) -> Any:
+        raise AssertionError("serialize should not be called when DEFAULT is used")
+
+    class Props(TypedDict):
+        label: NotRequired[Annotated[str, prop(serialize=bomb)]]
+
+    @react_component(tag="Badge", import_="./Badge", alias="badge-default-unpack")
+    def Badge(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        **props: Unpack[Props],
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    node = Badge()
+    assert node.tag == "$$badge-default-unpack"
+    # Omitted entirely
+    assert node.props is None
+
+
+def test_default_sentinel_omits_unknown_when_untyped_kwargs():
+    @react_component(tag="Pane", import_="./Pane", alias="pane-default-unknown")
+    def Pane(
+        *children: NodeTree, key: Optional[str] = None, disabled: bool = False, **props
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    node = Pane(dataAttr=DEFAULT)
+    # Unknowns are allowed but DEFAULT should ensure omission
+    assert node.tag == "$$pane-default-unknown"
     assert node.props == {"disabled": False}
+
+
+def test_default_sentinel_props_in_fn_and_typed_dict():
+    class PaneProps(TypedDict):
+        label: NotRequired[Annotated[str, prop(DEFAULT)]]
+        # This one should be required, despite the DEFAULT value
+        name: Annotated[str, prop(DEFAULT)]
+
+    @react_component(tag="Pane", import_="./Pane", alias="pane")
+    def Pane(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        disabled: bool = DEFAULT,
+        **props: Unpack[PaneProps],
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    node = Pane(name="hi")
+    assert node.props == {"name": "hi"}

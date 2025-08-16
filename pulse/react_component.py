@@ -23,22 +23,24 @@ from typing import (
 )
 from types import UnionType
 import typing
-
+from pulse.helpers import Sentinel
 from pulse.vdom import Node, NodeTree
 
 
 T = TypeVar("T")
 P = ParamSpec("P")
-# used when we need to distinguish between an unspecified value and None
-MISSING = object()
+# Internal facing
+# MISSING: Any = Sentinel("MISSING")
+# User facing
+DEFAULT: Any = Sentinel("DEFAULT")
 
 
 class Prop(Generic[T]):
     def __init__(
         self,
-        default: Optional[T] = MISSING,
+        default: Optional[T] = DEFAULT,
         # Will be set by all the conventional ways of defining PropSpec
-        required: bool = MISSING,  # type: ignore
+        required: bool = DEFAULT,  # type: ignore
         default_factory: Optional[Callable[[], T]] = None,
         serialize: Optional[Callable[[T], Any]] = None,
         map_to: Optional[str] = None,
@@ -74,7 +76,7 @@ class Prop(Generic[T]):
 
 
 def prop(
-    default: T = MISSING,
+    default: T = DEFAULT,
     *,
     default_factory: Optional[Callable[[], T]] = None,
     serialize: Optional[Callable[[T], Any]] = None,
@@ -114,7 +116,7 @@ class PropSpec:
             for k, prop in spec.items():
                 if not isinstance(prop, Prop):
                     prop = Prop(prop)
-                if prop.required is MISSING:
+                if prop.required is DEFAULT:
                     prop.required = total
                 self.spec[k] = prop
 
@@ -138,17 +140,18 @@ class PropSpec:
         )
 
     def apply(self, comp_key: str, props: dict[str, Any]):
-        # Flag unknown props
-        if not self.allow_unspecified:
-            unknown_keys = props.keys() - self.spec.keys()
-            if unknown_keys:
-                valid = ", ".join(sorted(self.spec.keys())) or "<none>"
-                bad = ", ".join(repr(k) for k in unknown_keys)
-                raise ValueError(
-                    f"Unexpected prop(s) for component '{comp_key}': {bad}. Valid props: {valid}"
-                )
-
         result: dict[str, Any] = {}
+        unknown_keys = props.keys() - self.spec.keys()
+        if self.allow_unspecified:
+            for k in unknown_keys:
+                v = props[k]
+                if v is not DEFAULT:
+                    result[k] = props[k]
+        # Flag unknown props
+        if not self.allow_unspecified and unknown_keys:
+            bad = ", ".join(repr(k) for k in unknown_keys)
+            raise ValueError(f"Unexpected prop(s) for component '{comp_key}': {bad}")
+
         missing_props = []
         overlaps: dict[str, list[str]] = defaultdict(list)
         for py_key, prop in self.spec.items():
@@ -165,8 +168,9 @@ class PropSpec:
 
             # None could be a valid value or default, which is why we use the
             # "sentinel pattern" of a MISSING object.
-            if value is MISSING and prop.required:
-                missing_props.append(py_key)
+            if value is DEFAULT:
+                if prop.required:
+                    missing_props.append(py_key)
                 continue
 
             if prop.serialize:
@@ -235,14 +239,15 @@ class ReactComponent(Generic[P]):
         self.alias = alias
         self.is_default = is_default
         # Build props_spec from fn_signature if provided and props not provided
-        if props is None and fn_signature not in (
+        if props:
+            self.props_spec = props
+        elif fn_signature not in (
             default_signature,
             default_fn_signature_without_children,
         ):
             self.props_spec = parse_fn_signature(fn_signature)
         else:
-            # Optional runtime props specification used for validation/normalization
-            self.props_spec = props
+            self.props_spec = PropSpec({}, allow_unspecified=True)
         if is_default and alias:
             raise ValueError(
                 "A default import cannot have an alias (it uses the tag as the name)."
@@ -267,11 +272,9 @@ class ReactComponent(Generic[P]):
         key = props.pop("key", None)
         if key is not None and not isinstance(key, str):
             raise ValueError("key must be a string or None")
-        real_props = cast(dict[str, Any], props)
         # Apply optional props specification: fill defaults, enforce required,
         # run serializers, and remap keys.
-        if self.props_spec is not None:
-            real_props = self.props_spec.apply(self.key, real_props)
+        real_props = self.props_spec.apply(self.key, props)
 
         return Node(
             tag=f"$${self.key}",
@@ -365,7 +368,7 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
             if prop._type is None:
                 prop._type = runtime_type
         elif p.default is not inspect._empty:
-            prop = Prop(default=p.default, _type=runtime_type)
+            prop = Prop(default=p.default, required=False, _type=runtime_type)
         else:
             prop = Prop(_type=runtime_type)
         explicit_props[p.name] = prop
@@ -614,7 +617,7 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
         runtime_type = _annotation_to_runtime_type(annotation)
         prop = annotation_prop or Prop()
         # In case the annotation defined `required`
-        if prop.required is not MISSING:
+        if prop.required is not DEFAULT:
             raise TypeError(
                 "Use total=True + NotRequired[T] or total=False + Required[T] to define required and optional props within a TypedDict"
             )
@@ -633,19 +636,19 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
 
 
 def react_component(
-    *,
     tag: str | Literal["default"],
     import_: str,
+    *,
     alias: str | None = None,
     is_default: bool = False,
     lazy: bool = False,
-) -> Callable[[Callable[P, NodeTree]], ReactComponent[P]]:
+) -> Callable[[Callable[P, None] | Callable[P, NodeTree]], ReactComponent[P]]:
     """
     Decorator to define a React component wrapper. The decorated function is
     passed to `ReactComponent`, which parses and validates its signature.
     """
 
-    def decorator(fn: Callable[P, NodeTree]) -> ReactComponent[P]:
+    def decorator(fn: Callable[P, None] | Callable[P, NodeTree]) -> ReactComponent[P]:
         return ReactComponent(
             tag=tag,
             import_path=import_,

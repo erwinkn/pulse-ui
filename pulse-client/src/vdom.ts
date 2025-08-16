@@ -4,6 +4,8 @@ import type { ComponentType } from "react";
 export const FRAGMENT_TAG = "$$fragment";
 export const MOUNT_POINT_PREFIX = "$$";
 
+// export type LazyComponent = () => Promise<{ default: ComponentType<any> }>;
+export type RegistryEntry = ComponentType<any>;
 export type ComponentRegistry = Record<string, ComponentType<any>>;
 
 export interface VDOMElement {
@@ -11,6 +13,7 @@ export interface VDOMElement {
   props?: Record<string, any>;
   children?: VDOMNode[];
   key?: string;
+  lazy?: boolean;
 }
 
 // Primitive nodes that can be rendered

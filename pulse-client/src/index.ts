@@ -35,6 +35,7 @@ export {
   createFragment,
   createMountPoint,
   applyVDOMUpdates,
+  RenderLazy,
 } from "./renderer";
 
 // Messages (types only)

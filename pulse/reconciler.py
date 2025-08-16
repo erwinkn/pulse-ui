@@ -399,6 +399,9 @@ class Resolver:
                 vdom_node["props"] = (
                     self._capture_callbacks(node.props, path=path) or {}
                 )
+            # Preserve lazy flag if present
+            if node.lazy is not None:
+                vdom_node["lazy"] = True
             normalized_children: list[NodeTree] | None = None
             if node.children:
                 v_children: list[VDOM] = []
@@ -418,6 +421,7 @@ class Resolver:
                 props=vdom_node.get("props") or None,
                 children=normalized_children or None,
                 key=node.key,
+                lazy=vdom_node.get("lazy"),
             )
             return vdom_node, normalized_node
         else:

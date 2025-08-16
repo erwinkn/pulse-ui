@@ -1,5 +1,19 @@
-import React, { memo } from "react";
-import type { VDOM, VDOMElement, VDOMNode, VDOMUpdate } from "./vdom";
+import React, {
+  memo,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+} from "react";
+import type {
+  VDOM,
+  VDOMElement,
+  VDOMNode,
+  VDOMUpdate,
+  ComponentRegistry,
+  RegistryEntry,
+} from "./vdom";
 import {
   isElementNode,
   isFragment,
@@ -22,7 +36,7 @@ function getNodeKey(node: VDOMNode, index: number): string | number {
   return index;
 }
 
-export const VDOMRenderer = memo<VDOMRendererProps>(({ node }) => {
+export const VDOMRenderer = ({ node }: VDOMRendererProps) => {
   const { getCallback, getComponent } = usePulseRenderHelpers();
 
   // 1. Handle non-renderable cases first
@@ -65,6 +79,10 @@ export const VDOMRenderer = memo<VDOMRendererProps>(({ node }) => {
         <VDOMRenderer key={getNodeKey(child, index)} node={child} />
       ));
       return <Component {...processedProps}>{renderedChildren}</Component>;
+      // if (node.lazy) {
+      //   return <Component {...processedProps}>{renderedChildren}</Component>;
+      // } else {
+      // }
     }
 
     if (tag === FRAGMENT_TAG) {
@@ -89,7 +107,7 @@ export const VDOMRenderer = memo<VDOMRendererProps>(({ node }) => {
     console.error("Unknown VDOM node type:", node);
   }
   return null;
-});
+};
 
 VDOMRenderer.displayName = "VDOMRenderer";
 
@@ -266,4 +284,20 @@ export function applyVDOMUpdates(
   }
 
   return newTree;
+}
+
+// The `component` prop should be something like `() =>
+// import('~/path/to/component') (we'll need to remap if we're importing a named export and not the default)
+export function RenderLazy(
+  component: () => Promise<{ default: ComponentType<any> }>,
+  fallback?: React.ReactNode
+): React.FC<React.PropsWithChildren<unknown>> {
+  const Component = React.lazy(component);
+  return ({ children, ...props }: React.PropsWithChildren<unknown>) => {
+    return (
+      <Suspense fallback={fallback ?? <></>}>
+        <Component {...props}>{children}</Component>
+      </Suspense>
+    );
+  };
 }

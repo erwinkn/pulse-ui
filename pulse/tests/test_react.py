@@ -6,7 +6,17 @@ within the UI tree generation system.
 """
 
 import pytest
-from typing import Optional
+from typing import (
+    Optional,
+    TypedDict,
+    Unpack,
+    NotRequired,
+    Any,
+    cast,
+    Required,
+    Annotated,
+)
+import inspect
 
 from pulse import (
     Node,
@@ -14,13 +24,18 @@ from pulse import (
     div,
     p,
     h1,
+    react_component,
+    prop,
 )
 from pulse.react_component import (
     COMPONENT_REGISTRY,
     ComponentRegistry,
     ReactComponent,
-    Props,
+    PropSpec,
     Prop,
+    parse_typed_dict_props,
+    parse_fn_signature,
+    DEFAULT,
 )
 from pulse.tests.test_utils import assert_node_equal
 from pulse.vdom import NodeTree
@@ -331,81 +346,439 @@ class TestComponentIntegrationWithHTML:
         assert mount_point.props == expected_props
 
 
-class TestPropsAndHintValidation:
-    def setup_method(self):
-        COMPONENT_REGISTRY.set(ComponentRegistry())
+def test_parse_typed_dict_props_no_var_kw():
+    def fn(*children: NodeTree, key: Optional[str] = None):
+        return cast(NodeTree, None)
 
-    def test_props_missing_required_raises(self):
-        spec = Props({"title": str}, total=True)
-        Comp = ReactComponent("Card", "./Card", "card", False, props=spec)
-        with pytest.raises(ValueError):
-            Comp()
+    var_kw = None
+    spec = parse_typed_dict_props(var_kw)
+    assert isinstance(spec, PropSpec)
+    assert spec.spec == {}
 
-    def test_props_unexpected_raises(self):
-        spec = Props({"title": str}, total=False)
-        Comp = ReactComponent("Card", "./Card", "card", False, props=spec)
-        with pytest.raises(ValueError):
-            Comp(unknown=1)
 
-    def test_props_defaults_and_factories_and_serialize(self):
-        spec = Props(
-            {
-                "title": Prop(str, default="Untitled"),
-                "count": Prop(int, default_factory=lambda: 2),
-                "flag": Prop(bool, default=False, serialize=lambda b: int(b)),
-            },
-            total=False,
+def test_parse_typed_dict_props_untyped_kwargs_all_allowed():
+    def fn(*children: NodeTree, key: Optional[str] = None, **props):
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    spec = parse_typed_dict_props(var_kw)
+    assert isinstance(spec, PropSpec)
+    assert spec.spec == {}
+    assert spec.allow_unspecified is True
+
+
+def test_parse_typed_dict_props_non_unpack_annotation_raises():
+    def fn(*children: NodeTree, key: Optional[str] = None, **props: Any):
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    with pytest.raises(
+        TypeError, match=r"\*\*props must be annotated as typing.Unpack\[Props\]"
+    ):
+        parse_typed_dict_props(var_kw)
+
+
+def test_parse_typed_dict_props_unpack_must_wrap_typeddict():
+    class NotTD:
+        a: int
+
+    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[NotTD]):  # type: ignore
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    with pytest.raises(TypeError, match=r"Unpack must wrap a TypedDict class"):
+        parse_typed_dict_props(var_kw)
+
+
+def test_parse_typed_dict_props_required_and_optional_inference():
+    class P1(TypedDict):
+        a: int
+        b: NotRequired[str]
+
+    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[P1]):
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    spec = parse_typed_dict_props(var_kw)
+    assert set(spec.spec.keys()) == {"a", "b"}
+    a = cast(Prop, spec.spec["a"])
+    b = cast(Prop, spec.spec["b"])
+    assert a.required is True
+    assert b.required is False
+    assert a._type is int
+    assert b._type is str
+
+
+def test_total_false_with_required_wrapper():
+    class P2(TypedDict, total=False):
+        a: Required[int]
+        b: str
+
+    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[P2]):
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    spec = parse_typed_dict_props(var_kw)
+    a = cast(Prop, spec.spec["a"])
+    b = cast(Prop, spec.spec["b"])
+    assert a.required is True
+    assert b.required is False
+
+
+def test_parse_typed_dict_props_annotated_with_prop_metadata_and_default():
+    # Provide serialize with object param to satisfy contravariant Callable typing
+    def serialize_obj(x: object) -> Any:
+        return cast(int, x) + 1
+
+    class P3(TypedDict):
+        a: Annotated[int, prop(default_factory=lambda: 7, serialize=serialize_obj)]
+
+    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[P3]):
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    spec = parse_typed_dict_props(var_kw)
+    a = cast(Prop, spec.spec["a"])
+    assert a.required is True
+    assert a._type is int
+    assert callable(a.default_factory)
+    assert callable(a.serialize)
+
+
+def test_parse_typed_dict_props_annotated_prop_cannot_set_required():
+    class P4(TypedDict):
+        a: Annotated[int, Prop(required=True)]
+
+    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[P4]):
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    with pytest.raises(
+        TypeError,
+        match=r"Use total=True \+ NotRequired\[T\] or total=False \+ Required\[T\]",
+    ):
+        parse_typed_dict_props(var_kw)
+
+
+def test_parse_fn_signature_no_children_annotation():
+    def ok(*children, key: Optional[str] = None): ...
+
+    # Should not raise
+    parse_fn_signature(ok)
+
+
+def test_parse_fn_signature_requires_key_param():
+    def bad(*children: NodeTree):
+        return cast(NodeTree, None)
+
+    with pytest.raises(ValueError, match=r"must define a `key: str \| None = None`"):
+        parse_fn_signature(bad)
+
+
+def test_parse_fn_signature_key_must_default_to_none():
+    def bad(*children: NodeTree, key: Optional[str] = "abc"):
+        return cast(NodeTree, None)
+
+    with pytest.raises(ValueError, match=r"'key' parameter must default to None"):
+        parse_fn_signature(bad)
+
+
+def test_parse_fn_signature_disallow_positional_only_params():
+    def bad(a, /, *children: NodeTree, key: Optional[str] = None):
+        return cast(NodeTree, None)
+
+    with pytest.raises(
+        ValueError,
+        match=r"must not declare positional-only parameters besides \*children",
+    ):
+        parse_fn_signature(bad)
+
+
+def test_parse_fn_signature_children_annotation_must_be_nodetree():
+    def bad(*children: int, key: Optional[str] = None):
+        return cast(NodeTree, None)
+
+    with pytest.raises(
+        TypeError, match=r"\*children must be annotated as `\*children: NodeTree`"
+    ):
+        parse_fn_signature(bad)
+
+
+def test_parse_fn_signature_additional_required_positional_is_disallowed():
+    def bad(x, *children: NodeTree, key: Optional[str] = None):
+        return cast(NodeTree, None)
+
+    with pytest.raises(
+        ValueError, match=r"must not declare additional required positional parameters"
+    ):
+        parse_fn_signature(bad)
+
+
+def test_parse_fn_signature_annotated_param_with_prop_metadata_is_disallowed():
+    def bad(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        title: Annotated[str, prop(default="hi")],
+    ):
+        return cast(NodeTree, None)
+
+    with pytest.raises(TypeError, match=r"Annotated\[.*ps\.prop"):
+        parse_fn_signature(bad)
+
+
+def test_parse_fn_signature_explicit_and_unpack_overlap_raises():
+    class P(TypedDict):
+        title: str
+
+    def bad(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        title: str = "t",
+        **props: Unpack[P],  # type: ignore
+    ):
+        return cast(NodeTree, None)
+
+    with pytest.raises(ValueError, match=r"Conflicting prop definitions for: title"):
+        parse_fn_signature(bad)
+
+
+def test_parse_fn_signature_builds_propspec_from_annotation_and_defaults():
+    DEFAULT_TITLE_PROP: Any = prop(default="Untitled")
+
+    class P(TypedDict, total=False):
+        count: Required[int]
+
+    def good(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        title: str = DEFAULT_TITLE_PROP,
+        disabled: bool = False,
+        **props: Unpack[P],
+    ):
+        return cast(NodeTree, None)
+
+    spec = parse_fn_signature(good)
+    assert set(spec.spec.keys()) == {"title", "disabled", "count"}
+    title = cast(Prop, spec.spec["title"])
+    disabled = cast(Prop, spec.spec["disabled"])
+    count = cast(Prop, spec.spec["count"])
+    assert title._type is str
+    assert title.default == "Untitled"
+    assert disabled._type is bool
+    assert disabled.default is False
+    assert count._type is int
+    assert count.required is True
+
+
+def test_react_component_decorator_explicit_props_and_children():
+    TITLE_DEFAULT: Any = prop(default="Untitled")
+
+    @react_component(tag="Card", import_="./Card", alias="card")
+    def Card(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        title: str = TITLE_DEFAULT,
+        disabled: bool = False,
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    # With children and partial props (title default applies)
+    node = Card(p()["Body"], disabled=True)
+    assert isinstance(node, Node)
+    assert node.tag == "$$card"
+    assert node.props == {"title": "Untitled", "disabled": True}
+    assert node.children is not None and len(node.children) == 1
+
+    # Unknown prop should be rejected since spec is closed
+    with pytest.raises(ValueError, match=r"Unexpected prop\(s\) for component 'card'"):
+        Card(unknown=1)  # type: ignore
+
+
+def test_react_component_decorator_typed_dict_unpack_and_mapping():
+    class Props(TypedDict, total=False):
+        label: Required[str]
+        class_name: Annotated[str, prop(map_to="className")]
+        count: NotRequired[int]
+
+    @react_component(tag="Badge", import_="./Badge")
+    def Badge(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        disabled: bool = False,
+        **props: Unpack[Props],
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    # Missing required label -> error
+    with pytest.raises(ValueError, match=r"Missing required props: label"):
+        Badge()  # type: ignore
+
+    node = Badge("txt", label="New", class_name="pill", count=2, disabled=True)
+    assert node.tag == "$$Badge"
+    # class_name mapped to className, label preserved
+    assert node.props == {
+        "disabled": True,
+        "label": "New",
+        "className": "pill",
+        "count": 2,
+    }
+    assert node.children == ("txt",)
+
+
+def test_react_component_decorator_default_export_and_alias_rules():
+    # default export cannot have alias
+    with pytest.raises(ValueError, match=r"default import cannot have an alias"):
+
+        @react_component(
+            tag="DefaultComp", import_="./Comp", alias="x", is_default=True
         )
-        Comp = ReactComponent("Card", "./Card", "card", False, props=spec)
-        n = Comp()
-        assert n.props == {"title": "Untitled", "count": 2, "flag": 0}
+        def _Bad(*children: NodeTree, key: Optional[str] = None) -> NodeTree:
+            return cast(NodeTree, None)
 
-    def test_props_type_mismatch_raises(self):
-        spec = Props({"count": int})
-        Comp = ReactComponent("Counter", "./Counter", "counter", False, props=spec)
-        with pytest.raises(TypeError):
-            Comp(count="x")
+    # default export allowed without alias
+    @react_component(tag="DefaultComp", import_="./Comp", is_default=True)
+    def DefaultComp(*children: NodeTree, key: Optional[str] = None) -> NodeTree:
+        return cast(NodeTree, None)
 
-    def test_hint_valid_no_children(self):
-        def hint(*, key: Optional[str] = None, value: int = 0):
-            return "ok"
-
-        ReactComponent("X", "./X", "x", False, hint=hint)
-
-    def test_hint_valid_with_children(self):
-        def hint(*children: NodeTree, key: Optional[str] = None, value: int = 0):
-            return "ok"
-
-        ReactComponent("X", "./X", "x", False, hint=hint)
-
-    def test_hint_children_wrong_annotation_raises(self):
-        def bad(*children: int, key: Optional[str] = None):
-            return "bad"
-
-        with pytest.raises(TypeError):
-            ReactComponent("X", "./X", "x", False, hint=bad)
-
-    def test_hint_missing_key_raises(self):
-        def bad(*children: NodeTree):
-            return "bad"
-
-        with pytest.raises(ValueError):
-            ReactComponent("X", "./X", "x", False, hint=bad)
-
-    def test_hint_key_wrong_default_raises(self):
-        def bad(*children: NodeTree, key: Optional[str] = "x"):
-            return "bad"
-
-        with pytest.raises(ValueError):
-            ReactComponent("X", "./X", "x", False, hint=bad)
-
-    def test_hint_extra_fixed_positional_raises(self):
-        def bad(x, *children: NodeTree, key: Optional[str] = None):
-            return "bad"
-
-        with pytest.raises(ValueError):
-            ReactComponent("X", "./X", "x", False, hint=bad)
+    node = DefaultComp()
+    assert node.tag == "$$DefaultComp"
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def test_react_component_decorator_key_validation():
+    @react_component(tag="Box", import_="./Box")
+    def Box(*children: NodeTree, key: Optional[str] = None) -> NodeTree:
+        return cast(NodeTree, None)
+
+    # Non-string key should raise
+    with pytest.raises(ValueError, match=r"key must be a string or None"):
+        Box(key=123)  # type: ignore[arg-type]
+
+    # String key accepted
+    node = Box(key="k1")
+    assert node.tag == "$$Box"
+    assert node.key == "k1"
+
+
+def test_react_component_decorator_untyped_kwargs_allows_unknown():
+    @react_component(tag="Pane", import_="./Pane")
+    def Pane(
+        *children: NodeTree, key: Optional[str] = None, disabled: bool = False, **props
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    # Should not raise for unknown props
+    node = Pane(dataAttr=1)
+    # Unknowns are allowed and included since untyped kwargs are allowed
+    assert node.props == {"disabled": False, "dataAttr": 1}
+
+
+def test_default_sentinel_omits_explicit_prop():
+    @react_component(tag="Card", import_="./Card", alias="card-default-explicit")
+    def Card(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        title: str = "Untitled",
+        disabled: bool = DEFAULT,
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    # Passing DEFAULT should omit the prop entirely
+    node = Card()
+    assert node.tag == "$$card-default-explicit"
+    assert node.props == {"title": "Untitled"}
+
+    # Passing None should keep the key with None value (serialize to null client-side)
+    node_none = Card(title=cast(Any, None), disabled=False)
+    assert node_none.props == {"title": None, "disabled": False}
+
+
+def test_default_sentinel_omits_unpack_prop_and_skips_serialize():
+    # Serializer that must not be called if DEFAULT is provided
+    def bomb(x: object) -> Any:
+        raise AssertionError("serialize should not be called when DEFAULT is used")
+
+    class Props(TypedDict):
+        label: NotRequired[Annotated[str, prop(serialize=bomb)]]
+
+    @react_component(tag="Badge", import_="./Badge", alias="badge-default-unpack")
+    def Badge(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        **props: Unpack[Props],
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    node = Badge()
+    assert node.tag == "$$badge-default-unpack"
+    # Omitted entirely
+    assert node.props is None
+
+
+def test_default_sentinel_omits_unknown_when_untyped_kwargs():
+    @react_component(tag="Pane", import_="./Pane", alias="pane-default-unknown")
+    def Pane(
+        *children: NodeTree, key: Optional[str] = None, disabled: bool = False, **props
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    node = Pane(dataAttr=DEFAULT)
+    # Unknowns are allowed but DEFAULT should ensure omission
+    assert node.tag == "$$pane-default-unknown"
+    assert node.props == {"disabled": False}
+
+
+def test_default_sentinel_props_in_fn_and_typed_dict():
+    class PaneProps(TypedDict):
+        label: NotRequired[Annotated[str, prop(DEFAULT)]]
+        # This one should be required, despite the DEFAULT value
+        name: Annotated[str, prop(DEFAULT)]
+
+    @react_component(tag="Pane", import_="./Pane", alias="pane")
+    def Pane(
+        *children: NodeTree,
+        key: Optional[str] = None,
+        disabled: bool = DEFAULT,
+        **props: Unpack[PaneProps],
+    ) -> NodeTree:
+        return cast(NodeTree, None)
+
+    node = Pane(name="hi")
+    assert node.props == {"name": "hi"}
+
+
+def test_parse_typed_dict_props_inheritance_two_levels():
+    class BaseProps(TypedDict):
+        a: int
+        b: NotRequired[str]
+
+    class MidProps(BaseProps, total=False):
+        c: Required[bool]
+        d: float  # optional because total=False
+
+    class FinalProps(MidProps):
+        e: NotRequired[Annotated[int, prop(map_to="ee")]]
+
+    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[FinalProps]):
+        return cast(NodeTree, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    spec = parse_typed_dict_props(var_kw)
+
+    # Keys present from all inheritance levels
+    keys = ["a", "b", "c", "d", "e"]
+    assert list(spec.spec.keys()) == keys
+
+    a, b, c, d, e = [spec.spec[k] for k in keys]
+
+    assert a.required is True and a._type is int
+    assert b.required is False and b._type is str
+    assert c.required is True and c._type is bool
+    assert d.required is False and d._type is float
+    assert e.required is False and e._type is int and e.map_to == "ee"
+
+    # Apply should accept only requireds and map e->ee when provided
+    applied_min = spec.apply("Final", {"a": 1, "c": False})
+    assert applied_min == {"a": 1, "c": False}
+
+    applied_with_e = spec.apply("Final", {"a": 1, "c": True, "e": 7})
+    assert applied_with_e == {"a": 1, "c": True, "ee": 7}

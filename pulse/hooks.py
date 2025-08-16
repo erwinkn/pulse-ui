@@ -10,6 +10,7 @@ from typing import (
     overload,
 )
 
+from pulse.flags import IS_PRERENDERING
 from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
 from pulse.routing import ROUTE_CONTEXT, RouteContext
 from pulse.state import State
@@ -379,3 +380,6 @@ def navigate(path: str) -> None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
     session.notify({"type": "navigate_to", "path": path})
+
+def is_prerendering():
+    return IS_PRERENDERING.get()

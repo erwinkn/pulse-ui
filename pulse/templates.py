@@ -40,11 +40,12 @@ ${routes_str}
 # Mako template for server-rendered pages
 ROUTE_TEMPLATE = Template(
     """import { redirect, type LoaderFunctionArgs } from "react-router";
-import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo } from "${lib_path}";
+import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo${", RenderLazy" if components and any(c.lazy for c in components) else ""} } from "${lib_path}";
 
 % if components:
 // Component imports
 % for component in components:
+% if not component.lazy:
 % if component.is_default:
 import ${component.tag} from "${component.import_path}";
 % else:
@@ -54,12 +55,19 @@ import { ${component.tag} as ${component.alias} } from "${component.import_path}
 import { ${component.tag} } from "${component.import_path}";
 % endif
 % endif
+% endif
 % endfor
 
 // Component registry
 const externalComponents: ComponentRegistry = {
 % for component in components:
+% if component.lazy:
+  // Lazy loaded on client
+  "${component.key}": RenderLazy(() => import("${component.import_path}").then((m) => ({ default: m.${'default' if component.is_default else (component.alias or component.tag)} }))),
+% else:
+  // SSR-capable import
   "${component.key}": ${component.alias or component.tag},
+% endif
 % endfor
 };
 % else:

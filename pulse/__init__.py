@@ -160,10 +160,16 @@ from .html.tags import (
 
 
 from .components import (
+    Link,
+    Outlet,
+)
+from .react_component import (
     ComponentRegistry,
     COMPONENT_REGISTRY,
     ReactComponent,
-    Link,
-    Outlet,
+    react_component,
+    registered_react_components,
+    Prop,
+    prop,
 )
 from .helpers import EventHandler

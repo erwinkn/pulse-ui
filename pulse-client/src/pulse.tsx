@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { VDOMRenderer } from "./renderer";
 import { PulseSocketIOClient } from "./client";
-import type { VDOM, ComponentRegistry } from "./vdom";
+import type { VDOM, ComponentRegistry, RegistryEntry } from "./vdom";
 import { useLocation, useParams, useNavigate } from "react-router";
 import type { ServerErrorInfo } from "./messages";
 import type { RouteInfo } from "./helpers";
@@ -39,7 +39,7 @@ export const usePulseClient = () => {
 // Context for rendering helpers, provided by PulseView
 interface PulseRenderHelpers {
   getCallback: (key: string) => (...args: any[]) => void;
-  getComponent: (key: string) => ComponentType<any>;
+  getComponent: (key: string) => RegistryEntry;
 }
 
 const PulseRenderContext = createContext<PulseRenderHelpers | null>(null);

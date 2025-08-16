@@ -41,9 +41,9 @@ class TestCodegen:
         assert route_page_path.exists()
         result = route_page_path.read_text()
 
-        assert 'import { PulseView } from "~/pulse-lib/pulse";' in result
         assert (
-            'import type { VDOM, ComponentRegistry } from "~/pulse-lib/vdom";' in result
+            'import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo } from "pulse-ui-client";'
+            in result
         )
         assert "// No components needed for this route" in result
         assert "const externalComponents: ComponentRegistry = {};" in result
@@ -185,7 +185,7 @@ class TestCodegen:
 
         layout_content = (pulse_app_dir / "_layout.tsx").read_text()
         assert (
-            'import { PulseProvider, type PulseConfig } from "~/test-lib/pulse";'
+            'import { PulseProvider, type PulseConfig } from "~/test-lib";'
             in layout_content
         )
         assert 'serverAddress: "http://localhost:8000"' in layout_content
@@ -203,7 +203,10 @@ class TestCodegen:
         )
 
         home_content = (routes_dir / "index.tsx").read_text()
-        assert 'import { PulseView } from "~/test-lib/pulse";' in home_content
+        assert (
+            'import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo } from "~/test-lib";'
+            in home_content
+        )
         assert 'import { Header } from "./components/Header";' in home_content
         assert '"Header": Header,' in home_content
         assert 'const path = ""' in home_content

@@ -13,7 +13,6 @@ from pulse import (
     p,
     span,
     h1,
-    button,
     a,
     img,
     br,
@@ -24,11 +23,10 @@ from pulse import (
     script,
     style,
     form,
-    input,
-    label,
 )
 from pulse.html.tags import define_tag, define_self_closing_tag
 from pulse.tests.test_utils import assert_node_equal
+from pulse.vdom import Callback
 
 
 class TestUITreeNode:
@@ -182,7 +180,7 @@ class TestHTMLTags:
             ],
         }
 
-        assert_node_renders_to(structure, expected)
+        assert_node_equal(structure, Node.from_vdom(expected))
 
     def test_self_closing_tags(self):
         """Test self-closing tags."""
@@ -285,7 +283,7 @@ class TestComplexStructures:
             ],
         }
 
-        assert_node_renders_to(list_structure, expected)
+        assert_node_equal(list_structure, Node.from_vdom(expected))
 
     def test_mixed_content_types(self):
         """Test mixing different content types."""
@@ -308,7 +306,7 @@ class TestComplexStructures:
             ],
         }
 
-        assert_node_renders_to(mixed_content, expected)
+        assert_node_equal(mixed_content, Node.from_vdom(expected))
 
 
 class TestEdgeCases:
@@ -318,7 +316,7 @@ class TestEdgeCases:
         """Test empty structures."""
         node = div()
         expected: VDOMNode = {"tag": "div"}
-        assert_node_renders_to(node, expected)
+        assert_node_equal(node, Node.from_vdom(expected))
 
     def test_deeply_nested_structure(self):
         """Test deeply nested structures."""
@@ -346,7 +344,7 @@ class TestEdgeCases:
             ],
         }
 
-        assert_node_renders_to(deep_structure, expected)
+        assert_node_equal(deep_structure, Node.from_vdom(expected))
 
     def test_none_handling(self):
         """Test handling of None values."""
@@ -363,17 +361,17 @@ class TestEdgeCases:
         node = div(
             className="container",
             id="main",
-            dataValue=123,
-            enabled=True,
-            disabled=False,
+            tabIndex=123,
+            hidden=True,
+            spellCheck=False,
         )
 
         expected_props = {
             "className": "container",
             "id": "main",
-            "dataValue": 123,
-            "enabled": True,
-            "disabled": False,
+            "tabIndex": 123,
+            "hidden": True,
+            "spellCheck": False,
         }
 
         assert node.props == expected_props
@@ -417,7 +415,7 @@ class TestFromVDOM:
         )
         assert_node_equal(node, expected)
 
-    def test_from_vdom_preserves_key_and_strips_callbacks(self):
+    def test_from_vdom_preserves_key_and_maps_callbacks(self):
         vdom: VDOMNode = {
             "tag": "button",
             "key": "k1",
@@ -428,9 +426,14 @@ class TestFromVDOM:
             "children": ["Click"],
         }
 
-        node = Node.from_vdom(vdom)
+        onClick = lambda: None  # noqa: E731
+        callbacks = {"0.onClick": Callback(onClick, 0)}
+
+        node = Node.from_vdom(vdom, callbacks)
         assert isinstance(node, Node)
         # onClick placeholder should be removed
-        assert node.props == {"type": "button"}
+        assert node.props == {"type": "button", "onClick": onClick}
         assert node.key == "k1"
-        assert_node_equal(node, Node("button", {"type": "button"}, ["Click"], key="k1"))
+        assert_node_equal(
+            node, Node("button", {"type": "button", "onClick": onClick}, ["Click"], key="k1")
+        )

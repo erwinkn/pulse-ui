@@ -29,6 +29,7 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   dateFormat = showTimeSelect ? "MM/dd/yyyy HH:mm" : "MM/dd/yyyy",
   disabled = false,
 }) => {
+  console.log("Rendering CustomDatePicker");
   const [selectedDate, setSelectedDate] = useState<Date | null>(
     value ? new Date(value) : null
   );

@@ -162,7 +162,9 @@ class VDOMNode(TypedDict):
     key: NotRequired[str]
     props: NotRequired[dict[str, Any]]  # does not include callbacks
     children: "NotRequired[Sequence[VDOMNode | PrimitiveNode] | None]"
-
+    # Optional flag to indicate the element should be lazily loaded on the client
+    lazy: NotRequired[bool]
+ 
 
 class Callback(NamedTuple):
     fn: Callable
@@ -191,6 +193,8 @@ class Node:
         children: Optional[Sequence[NodeTree]] = None,
         key: Optional[str] = None,
         allow_children=True,
+        *,
+        lazy: bool | None = None
     ):
         self.tag = tag
         # Normalize to None
@@ -198,6 +202,7 @@ class Node:
         self.children = children or None
         self.allow_children = allow_children
         self.key = key or None
+        self.lazy = lazy or None
         if not self.allow_children and children:
             raise ValueError(f"{self.tag} cannot have children")
 

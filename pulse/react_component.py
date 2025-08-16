@@ -224,6 +224,8 @@ class ReactComponent(Generic[P]):
         import_path: str,
         alias: str | None = None,
         is_default=False,
+        *,
+        lazy: bool = False,
         props: Optional[PropSpec] = None,
         fn_signature: Callable[P, NodeTree] = default_signature,
     ):
@@ -247,6 +249,7 @@ class ReactComponent(Generic[P]):
             )
 
         self.fn_signature = fn_signature
+        self.lazy = lazy
         COMPONENT_REGISTRY.get().add(self)
 
     def __repr__(self) -> str:
@@ -255,7 +258,10 @@ class ReactComponent(Generic[P]):
         props_part = (
             f", props={self.props_spec!r}" if self.props_spec is not None else ""
         )
-        return f"ReactComponent(tag='{self.tag}', import='{self.import_path}'{alias_part}{default_part}{props_part})"
+        client_only_part = (
+            ", client_only=True" if getattr(self, "client_only", False) else ""
+        )
+        return f"ReactComponent(tag='{self.tag}', import='{self.import_path}'{alias_part}{default_part}{client_only_part}{props_part})"
 
     def __call__(self, *children: P.args, **props: P.kwargs) -> Node:
         key = props.pop("key", None)
@@ -272,6 +278,7 @@ class ReactComponent(Generic[P]):
             key=key,
             props=real_props,
             children=cast(tuple[NodeTree], children),
+            lazy=self.lazy,
         )
 
 
@@ -631,6 +638,7 @@ def react_component(
     import_: str,
     alias: str | None = None,
     is_default: bool = False,
+    lazy: bool = False,
 ) -> Callable[[Callable[P, NodeTree]], ReactComponent[P]]:
     """
     Decorator to define a React component wrapper. The decorated function is
@@ -642,7 +650,8 @@ def react_component(
             tag=tag,
             import_path=import_,
             alias=alias,
-            is_default=bool(is_default),
+            is_default=is_default,
+            lazy=lazy,
             fn_signature=fn,
         )
 

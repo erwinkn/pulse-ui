@@ -4,6 +4,7 @@ import time
 import pulse as ps
 from pulse.codegen import CodegenConfig
 from pulse.middleware import Ok, Redirect, NotFound, Deny
+from typing import Optional
 
 
 # State Management
@@ -367,6 +368,49 @@ def dynamic_route():
     )
 
 
+@ps.react_component(
+    tag="CustomDatePicker",
+    import_="~/components/date-picker",
+    is_default=True,
+    lazy=True,
+)
+def DatePicker(
+    *children: ps.NodeTree,
+    key: Optional[str] = None,
+    value: Optional[str] = None,
+    onChange: Optional[ps.EventHandler[str]] = None,
+    placeholder: str = "Select a date",
+    className: str = "",
+    showTimeSelect: bool = False,
+) -> ps.NodeTree:
+    return None  # signature-only; parsed for prop spec
+
+
+class DatePickerState(ps.State):
+    value: Optional[str] = None
+
+    def set_value(self, v: str):
+        self.value = v
+
+
+@ps.component
+def datepicker_demo():
+    state = ps.states(DatePickerState)
+
+    return ps.div(
+        ps.h2("Date Picker", className="text-2xl font-bold mb-4"),
+        ps.p("Pick a date and time (ISO string will show below).", className="mb-2"),
+        DatePicker(
+            value=state.value or "",
+            onChange=state.set_value,
+            showTimeSelect=True,
+            className="max-w-sm",
+        ),
+        ps.p(f"Selected: {state.value or '-'}", className="mt-4 font-mono"),
+        className="p-4",
+    )
+
+
 @ps.component
 def app_layout():
     """The main layout for the application, including navigation and a persistent counter."""
@@ -392,6 +436,7 @@ def app_layout():
                 ps.Link("Counter", to="/counter", className="nav-link"),
                 ps.Link("About", to="/about", className="nav-link"),
                 ps.Link("Components", to="/components", className="nav-link"),
+                ps.Link("Date Picker", to="/datepicker", className="nav-link"),
                 ps.Link(
                     "Dynamic",
                     to="/dynamic/example/optional/a/b/c?q1=x&q2=y",
@@ -426,6 +471,7 @@ app = ps.App(
                     ],
                 ),
                 ps.Route("/components", components_demo),
+                ps.Route("/datepicker", datepicker_demo),
                 ps.Route("/query", query_demo),
                 ps.Route("/dynamic/:route_id/:optional_segment?/*", dynamic_route),
             ],

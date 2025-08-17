@@ -152,10 +152,10 @@ export class PulseSocketIOClient {
 
   private async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
-      console.log("[SocketIOTransport] Sending:", payload);
+      // console.log("[SocketIOTransport] Sending:", payload);
       this.socket!.emit("message", flattedStringify(payload));
     } else {
-      console.log("[SocketIOTransport] Queuing message:", payload);
+      // console.log("[SocketIOTransport] Queuing message:", payload);
       this.messageQueue.push(payload);
     }
   }
@@ -196,7 +196,7 @@ export class PulseSocketIOClient {
   }
 
   private handleServerMessage(message: ServerMessage) {
-    console.log("[PulseClient] Received message:", message);
+    // console.log("[PulseClient] Received message:", message);
     switch (message.type) {
       case "vdom_init": {
         const route = this.activeViews.get(message.path);
@@ -252,7 +252,7 @@ export class PulseSocketIOClient {
         break;
       }
       default: {
-        console.error("Unexpected message:", message)
+        console.error("Unexpected message:", message);
       }
     }
   }

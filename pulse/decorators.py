@@ -1,6 +1,6 @@
 # Separate file from reactive.py due to needing to import from state too
 
-from typing import Callable, Optional, TypeVar, overload
+from typing import Any, Callable, Coroutine, Optional, TypeVar, overload
 from pulse.state import State, ComputedProperty, StateEffect
 from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn
 import inspect
@@ -114,12 +114,14 @@ def effect(
 # -----------------
 @overload
 def query(
-    fn: Callable[[TState], T], *, keep_alive: bool = False
+    fn: Callable[[TState], Coroutine[Any, Any, T]],
+    *,
+    keep_alive: bool = False,  # noqa: F821
 ) -> QueryProperty[T]: ...
 @overload
 def query(
     fn: None = None, *, keep_alive: bool = False
-) -> Callable[[Callable[[State], T]], QueryProperty[T]]: ...
+) -> Callable[[Callable[[State], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...
 
 
 def query(fn: Optional[Callable] = None, *, keep_alive: bool = False):

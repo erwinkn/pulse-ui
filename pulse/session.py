@@ -17,6 +17,7 @@ from pulse.reactive import REACTIVE_CONTEXT, Effect, ReactiveContext, flush_effe
 from pulse.reactive_extensions import ReactiveDict
 from pulse.reconciler import RenderRoot, RenderDiff
 from pulse.routing import ROUTE_CONTEXT, Layout, Route, RouteContext, RouteTree
+from pulse.state import State
 from pulse.vdom import VDOM
 
 
@@ -35,17 +36,20 @@ class RenderContext:
         self.root = RenderRoot(route.render.fn)
         self.route_context = RouteContext(route_info)
         self.effect: Optional[Effect] = None
+        self._reactive_ctx_tokens = []
+        self._session_ctx_tokens = []
+        self._route_ctx_tokens = []
 
     def __enter__(self):
-        self._reactive_ctx_token = REACTIVE_CONTEXT.set(self.session.reactive_context)
-        self._session_ctx_token = SESSION_CONTEXT.set(self.session)
-        self._route_ctx_token = ROUTE_CONTEXT.set(self.route_context)
+        self._reactive_ctx_tokens.append(REACTIVE_CONTEXT.set(self.session.reactive_context))
+        self._session_ctx_tokens.append(SESSION_CONTEXT.set(self.session))
+        self._route_ctx_tokens.append(ROUTE_CONTEXT.set(self.route_context))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        ROUTE_CONTEXT.reset(self._route_ctx_token)
-        SESSION_CONTEXT.reset(self._session_ctx_token)
-        REACTIVE_CONTEXT.reset(self._reactive_ctx_token)
+        ROUTE_CONTEXT.reset(self._route_ctx_tokens.pop())
+        SESSION_CONTEXT.reset(self._session_ctx_tokens.pop())
+        REACTIVE_CONTEXT.reset(self._reactive_ctx_tokens.pop())
 
 
 class Session:
@@ -59,6 +63,8 @@ class Session:
         self.context = ReactiveDict()
         self.reactive_context = ReactiveContext()
         self._pending_api: dict[str, asyncio.Future] = {}
+        # Registry of per-session global singletons (created via ps.global_state without id)
+        self._global_states: dict[str, State] = {}
 
     # Effect error handler (batch-level) to surface runtime errors
     def _on_effect_error(self, effect, exc: Exception):
@@ -91,7 +97,6 @@ class Session:
         exc: Exception,
         details: dict[str, Any] | None = None,
     ):
-
         error_msg: ServerErrorMessage = {
             "type": "server_error",
             "path": path,
@@ -103,7 +108,13 @@ class Session:
             },
         }
         self.notify(error_msg)
-        logger.error("Error reported for path %r during %s: %s\n%s", path, phase, exc, traceback.format_exc())
+        logger.error(
+            "Error reported for path %r during %s: %s\n%s",
+            path,
+            phase,
+            exc,
+            traceback.format_exc(),
+        )
 
     def close(self):
         # The effect will be garbage collected, and with it the dependencies
@@ -111,6 +122,14 @@ class Session:
         for path in list(self.render_contexts.keys()):
             self.unmount(path)
         self.render_contexts.clear()
+        # Dispose per-session global singletons if they expose dispose()
+        for value in list(self._global_states.values()):
+            try:
+                value.dispose()
+            except Exception as e:  # noqa: BLE001
+                # Best-effort: report but continue cleanup
+                logger.exception("Error disposing session global state: %s", e)
+        self._global_states.clear()
 
     def execute_callback(self, path: str, key: str, args: list | tuple):
         active_route = self.render_contexts[path]
@@ -197,6 +216,20 @@ class Session:
             self.render_contexts[path] = active_route
         return active_route
 
+    # ---- Session-local global state registry ----
+    def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
+        """Return a per-session singleton for the provided key.
+
+        The instance is created within this session's reactive context so any
+        effects are properly scheduled and associated with the session.
+        """
+        inst = self._global_states.get(key)
+        if inst is None:
+            with self.reactive_context:
+                inst = factory()
+            self._global_states[key] = inst
+        return inst
+
     def render(
         self, path: str, route_info: Optional[RouteInfo] = None, prerendering=False
     ):
@@ -239,7 +272,7 @@ class Session:
                 name=f"{path}:render",
                 on_error=lambda e: self.report_error(path, "render", e),
             )
-    
+
     def flush(self):
         with self.reactive_context:
             flush_effects()
@@ -270,8 +303,6 @@ class Session:
     def update_context(self, updates: dict[str, Any]) -> None:
         """Update session context and trigger rerender for all active routes."""
         self.context.update(updates)
-
-
 
 
 SESSION_CONTEXT: ContextVar["Session | None"] = ContextVar(

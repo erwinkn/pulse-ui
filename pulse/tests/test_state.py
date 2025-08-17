@@ -3,6 +3,7 @@ Tests for the State class and computed properties.
 """
 
 from typing import cast
+import pytest
 import pulse as ps
 from pulse.reactive import flush_effects
 from pulse.reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet
@@ -356,3 +357,144 @@ class TestState:
         s.data["set"].discard("x")
         flush_effects()
         assert set_checks[-1] is False
+
+    def test_non_reactive_property_detection(self):
+        """Test that assignment to non-reactive properties after initialization is caught"""
+
+        class MyState(ps.State):
+            count: int = 0
+            name: str = "test"
+
+        state = MyState()
+
+        # Setting reactive properties should work
+        state.count = 10
+        state.name = "updated"
+        assert state.count == 10
+        assert state.name == "updated"
+
+        # Setting non-reactive property should fail
+        with pytest.raises(
+            AttributeError,
+            match=r"Cannot assign to non-reactive property 'dynamic_prop'",
+        ):
+            state.dynamic_prop = "should fail"
+
+    def test_private_attributes_allowed(self):
+        """Test that private attributes can be set even after initialization"""
+
+        class MyState(ps.State):
+            count: int = 0
+
+        state = MyState()
+
+        # Private attributes should be allowed
+        state._private = "ok"
+        state.__very_private = "also ok"
+        state._internal_counter = 42
+
+        assert state._private == "ok" # type: ignore
+        assert state.__very_private == "also ok" # type: ignore
+        assert state._internal_counter == 42 # type: ignore
+
+    def test_special_state_attributes_allowed(self):
+        """Test that special State attributes can be set"""
+
+        class MyState(ps.State):
+            count: int = 0
+
+        state = MyState()
+
+        # These special attributes should be allowed
+        from pulse.reactive import Scope
+
+        new_scope = Scope()
+        state.scope = new_scope
+        assert state.scope is new_scope
+
+    def test_assignment_during_custom_init(self):
+        """Test that properties can be assigned during custom __init__ before full initialization"""
+
+        assignments_during_init = []
+
+        class MyState(ps.State):
+            count: int = 0
+
+            def __init__(self):
+                # Before calling super().__init__, we should be able to assign anything
+                assignments_during_init.append("before_super")
+
+                # This should work - we're not fully initialized yet
+                self.temp_property = "temporary"
+                assignments_during_init.append("assigned_temp")
+
+                super().__init__()
+                assignments_during_init.append("after_super")
+
+                # After initialization, assignment to non-reactive properties should fail
+                try:
+                    self.another_prop = "should fail"
+                    assignments_during_init.append("ERROR: should not reach here")
+                except AttributeError:
+                    assignments_during_init.append("correctly_caught_post_init")
+
+        state = MyState()
+
+        # Verify the sequence worked as expected
+        expected = [
+            "before_super",
+            "assigned_temp",
+            "after_super",
+            "correctly_caught_post_init",
+        ]
+        assert assignments_during_init == expected
+
+        # The temp property assigned during init should exist
+        assert hasattr(state, "temp_property")
+        assert state.temp_property == "temporary"
+
+        # But we can't assign new non-reactive properties now
+        with pytest.raises(AttributeError):
+            state.new_prop = "fail"
+
+    def test_descriptors_still_work(self):
+        """Test that computed properties and other descriptors still work correctly"""
+
+        class MyState(ps.State):
+            count: int = 0
+
+            @ps.computed
+            def double_count(self):
+                return self.count * 2
+
+        state = MyState()
+
+        # Computed property should work
+        assert state.double_count == 0
+
+        state.count = 5
+        assert state.double_count == 10
+
+        # Trying to assign to computed property should still raise the original error
+        with pytest.raises(
+            AttributeError, match=r"Cannot set computed property 'double_count'"
+        ):
+            state.double_count = 100
+
+    def test_helpful_error_message(self):
+        """Test that the error message provides helpful guidance"""
+
+        class MyState(ps.State):
+            count: int = 0
+
+        state = MyState()
+
+        try:
+            state.user_name = "john"
+            assert False, "Should have raised AttributeError"
+        except AttributeError as e:
+            error_msg = str(e)
+            assert "Cannot assign to non-reactive property 'user_name'" in error_msg
+            assert "MyState" in error_msg
+            assert "declare it with a type annotation at the class level" in error_msg
+            assert "'user_name: <type> = <default_value>'" in error_msg

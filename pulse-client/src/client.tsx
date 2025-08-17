@@ -1,7 +1,7 @@
 import type { RouteInfo } from "./helpers";
 import type { ClientMountMessage } from "./messages";
 import { applyVDOMUpdates } from "./renderer";
-import { extractEvent } from "./serialize";
+import { extractEvent } from "./serialize/events";
 import type { VDOM, VDOMNode } from "./vdom";
 
 import { io, Socket } from "socket.io-client";

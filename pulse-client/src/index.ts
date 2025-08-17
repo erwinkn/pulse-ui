@@ -64,4 +64,10 @@ export { extractServerRouteInfo } from "./helpers";
 export type { RouteInfo } from "./helpers";
 
 // Serialization helpers
-export { extractEvent } from "./serialize";
+export { extractEvent } from "./serialize/events";
+export {
+  encodeForWire,
+  decodeFromWire,
+  cleanForSerialization,
+} from "./serialize/clean";
+export { stringify, parse } from "./serialize/flatted";

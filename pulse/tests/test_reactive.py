@@ -617,6 +617,25 @@ def test_effect_rescheduling_itself():
     assert s() == 10
     assert e.runs == 11 # 10 increment runs + 1 run without a write
 
+def test_effect_doesnt_rerun_if_read_after_write():
+    s = Signal(0)
+    t = Signal(False)
+
+    @effect
+    def e():
+        if t():
+            s.write(1)
+            # read after write
+            s()
+
+    flush_effects()
+    assert e.runs == 1
+    t.write(True)
+
+    flush_effects()
+    assert e.runs == 2
+
+
 
 def test_reactive_dict_basic_reads_and_writes():
     ctx = ReactiveDict({"a": 1})

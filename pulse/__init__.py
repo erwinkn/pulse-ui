@@ -1,7 +1,7 @@
 from .app import App, Session
 from .state import State
 from .routing import Route, Layout
-from .reactive import Signal, Computed, Effect, Batch, Untrack
+from .reactive import Signal, Computed, Effect, Batch, Untrack, IgnoreBatch
 from .reactive_extensions import (
     ReactiveDict,
     ReactiveList,

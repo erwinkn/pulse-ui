@@ -354,7 +354,8 @@ class ReactiveProperty(Generic[T]):
 
     def __set__(self, obj, value: T) -> None:
         sig = self._get_signal(obj)
-        sig.write(wrap_collections(value))
+        value = wrap_collections(value)
+        sig.write(value)
 
     # Helper for State.properties() discovery
     def get_signal(self, obj) -> Signal:

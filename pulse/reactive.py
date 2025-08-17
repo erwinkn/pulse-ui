@@ -75,7 +75,8 @@ class Computed(Generic[T]):
         self.dirty = False
         self.on_stack = False
         self.last_change: int = -1
-        self.deps: list[Signal | Computed] = []
+        # Dep -> last_change
+        self.deps: dict[Signal | Computed, int] = {}
         self.obs: list[Computed | Effect] = []
         self._obs_change_listeners: list[Callable[[int], None]] = []
 
@@ -84,10 +85,12 @@ class Computed(Generic[T]):
             raise RuntimeError("Circular dependency detected")
 
         rc = REACTIVE_CONTEXT.get()
-        if rc.scope is not None:
-            rc.scope.register_dep(self)
-
+        # Ensure this computed is up-to-date before registering as a dep
         self._recompute_if_necessary()
+        if rc.scope is not None:
+            # Register after potential recompute so the scope records the
+            # latest observed version for this computed
+            rc.scope.register_dep(self)
         return self.value
 
     def __call__(self) -> T:
@@ -125,6 +128,7 @@ class Computed(Generic[T]):
                     "This behavior is not allowed, computed variables should be pure calculations."
                 )
 
+        # Update deps and their observed versions to the values seen during this recompute
         self.deps = scope.deps
         new_deps = set(self.deps)
         add_deps = new_deps - prev_deps
@@ -144,7 +148,10 @@ class Computed(Generic[T]):
         for dep in self.deps:
             if isinstance(dep, Computed):
                 dep._recompute_if_necessary()
-            if dep.last_change > self.last_change:
+            # Only recompute if a dependency has changed beyond the version
+            # we last observed during our previous recompute
+            last_seen = self.deps.get(dep, -1)
+            if dep.last_change > last_seen:
                 self._recompute()
                 return
 
@@ -193,7 +200,7 @@ class Effect:
         self.name: Optional[str] = name
         self.on_error: Optional[Callable[[Exception], None]] = on_error
         self.cleanup_fn: Optional[EffectCleanup] = None
-        self.deps: list[Signal | Computed] = []
+        self.deps: dict[Signal | Computed, int] = {}
         self.children: list[Effect] = []
         self.parent: Optional[Effect] = None
         # Used to detect the first run, but useful for testing/optimization
@@ -251,12 +258,11 @@ class Effect:
 
     def _deps_changed_since_last_run(self):
         for dep in self.deps:
-            if dep.last_change > self.last_run:
-                return True
             if isinstance(dep, Computed):
                 dep._recompute_if_necessary()
-                if dep.last_change > self.last_run:
-                    return True
+            last_seen = self.deps.get(dep, -1)
+            if dep.last_change > last_seen:
+                return True
         return False
 
     def __call__(self):
@@ -321,7 +327,9 @@ class Effect:
             # New dependencies may have been affected by this run of the effect.
             # If that's the case, we should reschedule it.
             is_dirty = isinstance(dep, Computed) and dep.dirty
-            has_changed = isinstance(dep, Signal) and dep.last_change > self.last_run
+            has_changed = isinstance(dep, Signal) and dep.last_change > self.deps.get(
+                dep, -1
+            )
             if is_dirty or has_changed:
                 self.schedule()
         for dep in remove_deps:
@@ -406,6 +414,21 @@ class GlobalBatch(Batch):
         self.is_scheduled = False
 
 
+class IgnoreBatch(Batch):
+    """
+    A batch that ignores effect registrations and does nothing when flushed.
+    Used during State initialization to prevent effects from running during setup.
+    """
+
+    def register_effect(self, effect: Effect):
+        # Silently ignore effect registrations during initialization
+        pass
+
+    def flush(self):
+        # No-op: don't run any effects
+        pass
+
+
 class Epoch:
     def __init__(self, current: int = 0) -> None:
         self.current = current
@@ -415,8 +438,8 @@ class Epoch:
 # context.
 class Scope:
     def __init__(self):
-        # Use lists to preserve insertion order
-        self.deps: list[Signal | Computed] = []
+        # Dict preserves insertion order. Maps dependency -> last_change
+        self.deps: dict[Signal | Computed, int] = {}
         self.effects: list[Effect] = []
 
     def register_effect(self, effect: "Effect"):
@@ -424,8 +447,7 @@ class Scope:
             self.effects.append(effect)
 
     def register_dep(self, value: "Signal | Computed"):
-        if value not in self.deps:
-            self.deps.append(value)
+        self.deps[value] = value.last_change
 
     def __enter__(self):
         rc = REACTIVE_CONTEXT.get()

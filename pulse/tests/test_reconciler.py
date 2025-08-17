@@ -74,7 +74,7 @@ def test_render_tree_simple_component_and_callbacks():
     @ps.component
     def Simple():
         def on_click():
-            return "ok"
+            ...
 
         return ps.button(onClick=on_click)["Go"]
 
@@ -95,7 +95,7 @@ def test_render_tree_nested_components_depth_3_callbacks_and_paths():
     @ps.component
     def Leaf():
         def cb():
-            return 1
+            ...
 
         return ps.button(onClick=cb)["X"]
 
@@ -152,7 +152,7 @@ def test_render_tree_component_with_children_kwarg_and_nested_component():
     @ps.component
     def Child():
         def click():
-            return "ok"
+            ...
 
         return ps.button(onClick=click)["X"]
 
@@ -188,7 +188,7 @@ def test_reconcile_initial_insert_simple_component():
     @ps.component
     def Simple():
         def on_click():
-            return "ok"
+            ...
 
         return ps.button(onClick=on_click)["Go"]
 
@@ -546,10 +546,10 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
         n: int = 0
 
         def __init__(self, label: str):
-            self.label = label
+            self._label = label
 
         def inc(self):
-            print(f"Incrementing {self.label}")
+            print(f"Incrementing {self._label}")
             self.n += 1
 
     @ps.component
@@ -883,7 +883,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
         n: int = 0
 
         def __init__(self, label: str):
-            self.label = label
+            self._label = label
 
         def inc(self):
             self.n += 1
@@ -1342,7 +1342,7 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
         n: int = 0
 
         def __init__(self, label: str):
-            self.label = label
+            self._label = label
 
         def inc(self):
             self.n += 1

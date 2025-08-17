@@ -6,12 +6,16 @@ that enables automatic re-rendering when state changes.
 """
 
 from abc import ABC, ABCMeta
+from enum import IntEnum
 from typing import Any, Callable, Generic, Never, TypeVar
 
-from pulse.reactive import Scope, Computed, Effect
-from pulse.reactive_extensions import ReactiveProperty
 from pulse.query import QueryProperty
-
+from pulse.reactive import (
+    Computed,
+    Effect,
+    Scope,
+)
+from pulse.reactive_extensions import ReactiveProperty
 
 T = TypeVar("T")
 
@@ -121,6 +125,15 @@ class StateMeta(ABCMeta):
         return instance
 
 
+class StateStatus(IntEnum):
+    UNINITIALIZED = 0
+    INITIALIZING = 1
+    INITIALIZED = 2
+
+
+STATE_STATUS_FIELD = "__pulse_status__"
+
+
 class State(ABC, metaclass=StateMeta):
     """
     Base class for reactive state objects.
@@ -144,56 +157,51 @@ class State(ABC, metaclass=StateMeta):
     Properties will automatically trigger re-renders when changed.
     """
 
-    __scope__: Scope
-
     def __init__(self):
         """Initializes the state and registers effects."""
         self._initialize()
 
     def __setattr__(self, name: str, value: Any) -> None:
-        # Allow setting private/internal attributes
-        if name.startswith("_"):
+        if (
+            # Allow writing private/internal attributes
+            name.startswith("_")
+            # Allow writing during initialization
+            or getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
+            == StateStatus.INITIALIZING
+        ):
             super().__setattr__(name, value)
             return
 
-        # Allow setting special State attributes
-        if name in ("scope", "__state_initialized__"):
-            super().__setattr__(name, value)
-            return
-
-        # Allow setting during initialization (before State is fully initialized)
-        if not getattr(self, "__state_initialized__", False):
-            super().__setattr__(name, value)
-            return
-
-        # Check if this is a known reactive property descriptor on the class
+        # Route reactive properties through their descriptor
         cls_attr = getattr(self.__class__, name, None)
-        if isinstance(cls_attr, (StateProperty, ComputedProperty, QueryProperty)):
-            # This should go through the descriptor's __set__ method
-            # But allow fallback to normal setattr just in case
-            super().__setattr__(name, value)
+        if isinstance(cls_attr, ReactiveProperty):
+            cls_attr.__set__(self, value)
             return
 
-        # Allow setting Effect instances (created by StateEffect.initialize)
-        if isinstance(value, Effect):
-            super().__setattr__(name, value)
-            return
+        if isinstance(cls_attr, ComputedProperty):
+            raise AttributeError(f"Cannot set computed property '{name}'")
 
-        # If we get here, it's an attempt to set a non-reactive property after initialization
+        # Reject all other public writes
         raise AttributeError(
-            f"Cannot assign to non-reactive property '{name}' on {self.__class__.__name__}. "
+            f"Cannot set non-reactive property '{name}' on {self.__class__.__name__}. "
             f"To make '{name}' reactive, declare it with a type annotation at the class level: "
             f"'{name}: <type> = <default_value>'"
+            f"Otherwise, make it private with an underscore: 'self._{name} = <value>'"
         )
 
     def _initialize(self):
         # Idempotent: avoid double-initialization when subclass calls super().__init__
-        if getattr(self, "__state_initialized__", False):
+        status = getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
+        if status == StateStatus.INITIALIZED:
             return
-        setattr(self, "__state_initialized__", True)
+        if status == StateStatus.INITIALIZING:
+            raise RuntimeError(
+                "Circular state initialization, this is a Pulse internal error"
+            )
+        setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZING)
 
-        self.scope = Scope()
-        with self.scope:
+        self._scope = Scope()
+        with self._scope:
             # Traverse MRO so effects declared on base classes are also initialized
             for cls in self.__class__.__mro__:
                 if cls is State or cls is ABC:
@@ -212,6 +220,8 @@ class State(ABC, metaclass=StateMeta):
                         attr.initialize(self)
                     if isinstance(attr, StateEffect):
                         attr.initialize(self, name)
+
+        setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 
     def properties(self):
         """Iterate over the state's `Signal` instances, including base classes."""
@@ -255,9 +265,9 @@ class State(ABC, metaclass=StateMeta):
                 disposed.add(value)
 
         # TODO: remove this debug check
-        if len(set(self.scope.effects) - disposed) > 0:
+        if len(set(self._scope.effects) - disposed) > 0:
             raise RuntimeError(
-                f"State.dispose() missed effects defined on its Scope: {[e.name for e in self.scope.effects]}"
+                f"State.dispose() missed effects defined on its Scope: {[e.name for e in self._scope.effects]}"
             )
 
     def __repr__(self) -> str:

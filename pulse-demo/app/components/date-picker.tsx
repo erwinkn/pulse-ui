@@ -3,8 +3,8 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
 interface CustomDatePickerProps {
-  value?: string;
-  onChange?: (date: string) => void;
+  value?: Date | null;
+  onChange?: (date: Date | null) => void;
   placeholder?: string;
   className?: string;
   minDate?: Date;
@@ -29,18 +29,17 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   dateFormat = showTimeSelect ? "MM/dd/yyyy HH:mm" : "MM/dd/yyyy",
   disabled = false,
 }) => {
-  console.log("Rendering CustomDatePicker");
-  const [selectedDate, setSelectedDate] = useState<Date | null>(
-    value ? new Date(value) : null
+  console.log("Rendering CustomDatePicker, value =", value);
+  console.log("Value is date:", value instanceof Date)
+  const [selectedDate, setSelectedDate] = useState(
+    value 
   );
+
 
   const handleChange = (date: Date | null) => {
     setSelectedDate(date);
     if (onChange && date) {
-      // Format date to ISO string for consistent handling
-      onChange(date.toISOString());
-    } else if (onChange) {
-      onChange("");
+      onChange(date)
     }
   };
 

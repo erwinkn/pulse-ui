@@ -3,13 +3,8 @@ Simple object transformation for socket.io transport
 Handles Dates, circular references, and basic Python objects
 """
 
-import datetime
+from datetime import datetime
 from typing import Any, Dict
-
-
-def is_datetime(value: Any) -> bool:
-    """Check if value is a datetime object."""
-    return isinstance(value, datetime.datetime)
 
 
 def stringify(input_value: Any) -> Any:
@@ -33,15 +28,13 @@ def stringify(input_value: Any) -> Any:
             return value
 
         # Handle objects that can have circular references
-        if isinstance(value, (dict, list, datetime.datetime)) or hasattr(
-            value, "__dict__"
-        ):
+        if isinstance(value, (dict, list, datetime)) or hasattr(value, "__dict__"):
             obj_id = id(value)
             if obj_id in seen:
                 return {"__ref": seen[obj_id]}
 
         # Special type transformations
-        if is_datetime(value):
+        if isinstance(value, datetime):
             current_id = next_id
             next_id += 1
             seen[id(value)] = current_id
@@ -133,7 +126,7 @@ def parse(input_value: Any) -> Any:
         if obj.get("__pulse") == "date":
             obj_id = obj["__id"]
             timestamp_ms = obj["timestamp"]
-            resolved = datetime.datetime.fromtimestamp(timestamp_ms / 1000.0)
+            resolved = datetime.fromtimestamp(timestamp_ms / 1000.0)
             objects[obj_id] = resolved
             return resolved
 

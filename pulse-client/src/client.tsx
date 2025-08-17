@@ -2,6 +2,10 @@ import type { RouteInfo } from "./helpers";
 import type { ClientMountMessage } from "./messages";
 import { applyVDOMUpdates } from "./renderer";
 import { extractEvent } from "./serialize/events";
+import {
+  stringify as flattedStringify,
+  parse as flattedParse,
+} from "./serialize/flatted";
 import type { VDOM, VDOMNode } from "./vdom";
 
 import { io, Socket } from "socket.io-client";
@@ -74,11 +78,14 @@ export class PulseSocketIOClient {
         console.log("[SocketIOTransport] Connected:", this.socket?.id);
         // Make sure to send a navigate payload for all the routes
         for (const [path, route] of this.activeViews) {
-          socket.emit("message", {
-            type: "mount",
-            path: path,
-            routeInfo: route.routeInfo,
-          } satisfies ClientMountMessage);
+          socket.emit(
+            "message",
+            flattedStringify({
+              type: "mount",
+              path: path,
+              routeInfo: route.routeInfo,
+            } satisfies ClientMountMessage)
+          );
         }
 
         for (const payload of this.messageQueue) {
@@ -90,7 +97,7 @@ export class PulseSocketIOClient {
           if (payload.type === "navigate") {
             continue;
           }
-          socket.emit("message", payload);
+          socket.emit("message", flattedStringify(payload));
         }
         this.messageQueue = [];
 
@@ -110,7 +117,9 @@ export class PulseSocketIOClient {
       });
 
       // Wrap in an arrow function to avoid losing the `this` reference
-      socket.on("message", (data) => this.handleServerMessage(data));
+      socket.on("message", (data) =>
+        this.handleServerMessage(flattedParse(data) as ServerMessage)
+      );
     });
   }
 
@@ -143,10 +152,10 @@ export class PulseSocketIOClient {
 
   private async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
-      // console.log("[SocketIOTransport] Sending:", payload);
-      this.socket!.emit("message", payload);
+      console.log("[SocketIOTransport] Sending:", payload);
+      this.socket!.emit("message", flattedStringify(payload));
     } else {
-      // console.log("[SocketIOTransport] Queuing message:", payload);
+      console.log("[SocketIOTransport] Queuing message:", payload);
       this.messageQueue.push(payload);
     }
   }
@@ -187,7 +196,7 @@ export class PulseSocketIOClient {
   }
 
   private handleServerMessage(message: ServerMessage) {
-    // console.log("[PulseClient] Received message:", message);
+    console.log("[PulseClient] Received message:", message);
     switch (message.type) {
       case "vdom_init": {
         const route = this.activeViews.get(message.path);
@@ -241,6 +250,9 @@ export class PulseSocketIOClient {
           console.error("Navigation error:", e);
         }
         break;
+      }
+      default: {
+        console.error("Unexpected message:", message)
       }
     }
   }

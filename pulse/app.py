@@ -18,7 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.react_component import ReactComponent, registered_react_components
-from pulse.messages import ClientMessage, RouteInfo
+from pulse.messages import ClientMessage, RouteInfo, ServerMessage
+from pulse import flatted
 from pulse.middleware import (
     Deny,
     MiddlewareStack,
@@ -198,11 +199,12 @@ class App:
                         self.close_session(sid)
                     finally:
                         return False
-            session.connect(
-                lambda message: asyncio.create_task(
-                    self.sio.emit("message", message, to=sid)
-                ),
-            )
+
+            def on_message(message: ServerMessage):
+                message = flatted.stringify(message)
+                asyncio.create_task(self.sio.emit("message", message, to=sid))
+
+            session.connect(on_message)
 
         @self.sio.event
         def disconnect(sid: str):
@@ -211,6 +213,8 @@ class App:
         @self.sio.event
         def message(sid: str, data: ClientMessage):
             try:
+                # Deserialize the message using flatted
+                data = flatted.parse(data)
                 session = self.sessions[sid]
 
                 def _handler(sess: Session) -> None:

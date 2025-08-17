@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from pathlib import Path
 import time
 import pulse as ps
@@ -17,7 +18,7 @@ class CounterState(ps.State):
     ticking = False
 
     def __init__(self, name: str):
-        self.name = name
+        self._name = name
 
     def increment(self):
         self.count += 1
@@ -52,7 +53,7 @@ class CounterState(ps.State):
     @ps.effect
     def on_count_change(self):
         """An effect that runs whenever the count changes."""
-        print(f"{self.name}: Count is now {self.count}. Double is {self.double_count}.")
+        print(f"{self._name}: Count is now {self.count}. Double is {self.double_count}.")
 
 
 # A state class for the layout, demonstrating persistent state across routes.
@@ -71,7 +72,7 @@ class LeafState(ps.State):
     count: int = 0
 
     def __init__(self, label: str):
-        self.label = label
+        self._label = label
 
     def inc(self):
         self.count += 1
@@ -377,8 +378,8 @@ def dynamic_route():
 def DatePicker(
     *children: ps.NodeTree,
     key: Optional[str] = None,
-    value: Optional[str] = None,
-    onChange: Optional[ps.EventHandler[str]] = None,
+    value: Optional[datetime] = None,
+    onChange: Optional[ps.EventHandler[datetime | None]] = None,
     placeholder: str = "Select a date",
     className: str = "",
     showTimeSelect: bool = False,
@@ -387,9 +388,10 @@ def DatePicker(
 
 
 class DatePickerState(ps.State):
-    value: Optional[str] = None
+    value: Optional[datetime] = None
 
-    def set_value(self, v: str):
+    def set_value(self, v: datetime | None):
+        print(f"Received value: {v} (type: {type(v)})")
         self.value = v
 
 
@@ -401,7 +403,7 @@ def datepicker_demo():
         ps.h2("Date Picker", className="text-2xl font-bold mb-4"),
         ps.p("Pick a date and time (ISO string will show below).", className="mb-2"),
         DatePicker(
-            value=state.value or "",
+            value=state.value,
             onChange=state.set_value,
             showTimeSelect=True,
             className="max-w-sm",

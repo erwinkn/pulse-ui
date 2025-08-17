@@ -150,6 +150,42 @@ class State(ABC, metaclass=StateMeta):
         """Initializes the state and registers effects."""
         self._initialize()
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Allow setting private/internal attributes
+        if name.startswith("_"):
+            super().__setattr__(name, value)
+            return
+
+        # Allow setting special State attributes
+        if name in ("scope", "__state_initialized__"):
+            super().__setattr__(name, value)
+            return
+
+        # Allow setting during initialization (before State is fully initialized)
+        if not getattr(self, "__state_initialized__", False):
+            super().__setattr__(name, value)
+            return
+
+        # Check if this is a known reactive property descriptor on the class
+        cls_attr = getattr(self.__class__, name, None)
+        if isinstance(cls_attr, (StateProperty, ComputedProperty, QueryProperty)):
+            # This should go through the descriptor's __set__ method
+            # But allow fallback to normal setattr just in case
+            super().__setattr__(name, value)
+            return
+
+        # Allow setting Effect instances (created by StateEffect.initialize)
+        if isinstance(value, Effect):
+            super().__setattr__(name, value)
+            return
+
+        # If we get here, it's an attempt to set a non-reactive property after initialization
+        raise AttributeError(
+            f"Cannot assign to non-reactive property '{name}' on {self.__class__.__name__}. "
+            f"To make '{name}' reactive, declare it with a type annotation at the class level: "
+            f"'{name}: <type> = <default_value>'"
+        )
+
     def _initialize(self):
         # Idempotent: avoid double-initialization when subclass calls super().__init__
         if getattr(self, "__state_initialized__", False):

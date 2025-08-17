@@ -73,8 +73,7 @@ def test_capture_callbacks_multiple_callbacks_preserved_and_mapped():
 def test_render_tree_simple_component_and_callbacks():
     @ps.component
     def Simple():
-        def on_click():
-            ...
+        def on_click(): ...
 
         return ps.button(onClick=on_click)["Go"]
 
@@ -94,8 +93,7 @@ def test_render_tree_simple_component_and_callbacks():
 def test_render_tree_nested_components_depth_3_callbacks_and_paths():
     @ps.component
     def Leaf():
-        def cb():
-            ...
+        def cb(): ...
 
         return ps.button(onClick=cb)["X"]
 
@@ -151,8 +149,7 @@ def test_render_tree_nested_components_depth_3_callbacks_and_paths():
 def test_render_tree_component_with_children_kwarg_and_nested_component():
     @ps.component
     def Child():
-        def click():
-            ...
+        def click(): ...
 
         return ps.button(onClick=click)["X"]
 
@@ -187,8 +184,7 @@ def test_render_tree_component_with_children_kwarg_and_nested_component():
 def test_reconcile_initial_insert_simple_component():
     @ps.component
     def Simple():
-        def on_click():
-            ...
+        def on_click(): ...
 
         return ps.button(onClick=on_click)["Go"]
 
@@ -1534,3 +1530,52 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
             },
         ],
     }
+
+
+# =====================
+# Multiple removes ordering
+# =====================
+def test_unkeyed_trailing_removes_are_emitted_in_descending_order():
+    items = {"vals": ["a", "b", "c", "d", "e"]}
+
+    @ps.component
+    def View():
+        return ps.ul(*(ps.li(v) for v in items["vals"]))
+
+    root = RenderRoot(View)
+    first = root.render_diff()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # remove trailing two items -> should emit two removes at paths 4 then 3
+    items["vals"] = ["a", "b", "c"]
+    second = root.render_diff()
+    assert second.ops == [
+        {"type": "remove", "path": "4"},
+        {"type": "remove", "path": "3"},
+    ]
+
+
+def test_nested_trailing_removes_descending_order_under_same_parent():
+    items = {"vals": ["x1", "x2", "x3", "x4", "x5"]}
+
+    @ps.component
+    def View():
+        # root div contains: header span, a container div with many spans, and a footer span
+        return ps.div(
+            ps.span("header"),
+            ps.div(*(ps.span(v) for v in items["vals"])),
+            ps.span("footer"),
+        )
+
+    root = RenderRoot(View)
+    first = root.render_diff()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # Remove last two spans inside the middle container div
+    items["vals"] = ["x1", "x2", "x3"]
+    second = root.render_diff()
+    # Expect removes on the inner container's children at paths 1.4 and 1.3 in that order
+    assert second.ops == [
+        {"type": "remove", "path": "1.4"},
+        {"type": "remove", "path": "1.3"},
+    ]

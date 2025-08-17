@@ -337,8 +337,10 @@ class Resolver:
             )
             normalized_children.append(child_norm)
 
-        # Only runs if there are more old nodes than new ones
-        for i in range(N_shared, len(old_children)):
+        # Only runs if there are more old nodes than new ones.
+        # Emit removes in descending index order to avoid index shifts
+        # when consumers apply operations sequentially.
+        for i in range(len(old_children) - 1, N_shared - 1, -1):
             old_child = old_children[i]
             if isinstance(old_child, ComponentNode):
                 # TODO in tests: verify that components are unmounted correctly

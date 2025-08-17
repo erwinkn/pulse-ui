@@ -165,3 +165,6 @@ param = define_self_closing_tag("param")
 source = define_self_closing_tag("source")
 track = define_self_closing_tag("track")
 wbr = define_self_closing_tag("wbr")
+
+# React fragment
+fragment = define_tag("$$fragment")

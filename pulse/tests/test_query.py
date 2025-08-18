@@ -293,3 +293,99 @@ async def test_state_query_manual_set_data():
     await asyncio.sleep(0)
     assert q.is_loading is False
     assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+async def test_state_query_with_initial_value_narrows_and_preserves():
+    class S(ps.State):
+        uid: int = 1
+
+        @ps.query(initial={"id": 0})
+        async def user(self) -> dict:
+            await asyncio.sleep(0)
+            return {"id": self.uid}
+
+        @user.key
+        def _user_key(self):
+            return ("user", self.uid)
+
+    s = S()
+    q = s.user
+
+    # Immediately available initial value, not None
+    assert q.data == {"id": 0}
+    assert q.is_loading is True
+
+    # After fetch, data updates
+    await run_query()
+    assert q.is_loading is False
+    assert q.data == {"id": 1}
+
+    # Disable keep_previous_data -> during refetch, it should reset to initial, not None
+    class S2(ps.State):
+        uid: int = 1
+
+        @ps.query(initial={"id": -1}, keep_previous_data=False)
+        async def user(self) -> dict[str, int]:
+            await asyncio.sleep(0)
+            return {"id": self.uid}
+
+        @user.key
+        def _user_key(self):
+            return ("user", self.uid)
+
+    s2 = S2()
+    q2 = s2.user
+    assert q2.data == {"id": -1}
+    await run_query()
+    assert q2.data == {"id": 1}
+
+    # change key -> refetch; while loading with keep_previous_data=False, it should reset to initial
+    s2.uid = 2
+    flush_effects()
+    await asyncio.sleep(0)
+    assert q2.is_loading is True
+    assert q2.data == {"id": -1}
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q2.is_loading is False
+    assert q2.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+async def test_state_query_set_initial_data_before_first_load_and_ignore_after():
+    class S(ps.State):
+        uid: int = 1
+
+        def __init__(self):
+            super().__init__()
+            # set initial data from constructor
+            self.user.set_initial_data({"id": 123})
+
+        @ps.query
+        async def user(self) -> dict:
+            await asyncio.sleep(0)
+            return {"id": self.uid}
+
+        @user.key
+        def _user_key(self):
+            return ("user", self.uid)
+
+    s = S()
+    q = s.user
+    # initial set is visible
+    assert q.data == {"id": 123}
+    assert q.has_loaded is False
+
+    # first load completes and flips has_loaded
+    await run_query()
+    assert q.has_loaded is True
+    assert q.data == {"id": 1}
+
+    # subsequent set_initial_data is ignored
+    q.set_initial_data({"id": 999})
+    assert q.data == {"id": 1}
+
+    # manual set_data still works
+    q.set_data({"id": 777})
+    assert q.data == {"id": 777}

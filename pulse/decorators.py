@@ -5,7 +5,7 @@ from typing import Any, Callable, Coroutine, Optional, TypeVar, overload
 from pulse.state import State, ComputedProperty, StateEffect
 from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn
 import inspect
-from pulse.query import QueryProperty
+from pulse.query import QueryProperty, QueryPropertyWithInitial
 
 
 T = TypeVar("T")
@@ -126,14 +126,40 @@ def query(
 ) -> Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...
 
 
+# When an initial value is provided, the resulting property narrows data to non-None
+@overload
+def query(
+    fn: Callable[[TState], Coroutine[Any, Any, T]],
+    *,
+    keep_alive: bool = False,
+    keep_previous_data: bool = True,
+    initial: T,
+) -> QueryPropertyWithInitial[T]: ...
+@overload
+def query(
+    fn: None = None,
+    *,
+    keep_alive: bool = False,
+    keep_previous_data: bool = True,
+    initial: T,
+) -> Callable[
+    [Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T]
+]: ...
+
+
 def query(
     fn: Optional[Callable] = None,
     *,
     keep_alive: bool = False,
     keep_previous_data: bool = True,
+    initial: Any = None,
 ) -> (
     QueryProperty[T]
-    | Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]
+    | QueryPropertyWithInitial[T]
+    | Callable[
+        [Callable[[TState], Coroutine[Any, Any, T]]],
+        QueryProperty[T] | QueryPropertyWithInitial[T],
+    ]
 ):
     def decorator(func: Callable[[TState], Coroutine[Any, Any, T]], /):
         sig = inspect.signature(func)
@@ -141,6 +167,14 @@ def query(
         # Only state-method form supported for now (single 'self')
         if not (len(params) == 1 and params[0].name == "self"):
             raise TypeError("@query currently only supports state methods (self)")
+        if initial is not None:
+            return QueryPropertyWithInitial(
+                func.__name__,
+                func,
+                keep_alive=keep_alive,
+                keep_previous_data=keep_previous_data,
+                initial=initial,
+            )
         return QueryProperty(
             func.__name__,
             func,

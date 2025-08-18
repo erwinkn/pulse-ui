@@ -17,6 +17,7 @@ from .hooks import (
     call_api,
     navigate,
 )
+from .hooks import global_state
 from .html import *  # noqa: F403
 from .middleware import (
     PulseMiddleware,
@@ -157,7 +158,7 @@ from .html.tags import (
     track,
     wbr,
     # React fragment
-    fragment
+    fragment,
 )
 
 

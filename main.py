@@ -307,6 +307,7 @@ def counter_details():
     )
 
 
+
 class QueryDemoState(ps.State):
     user_id: int = 1
     calls: int = 0

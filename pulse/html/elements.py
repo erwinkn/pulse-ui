@@ -5,7 +5,7 @@
 from typing import Literal, Optional, Union, TypedDict
 
 
-class Element(TypedDict, total=False):
+class Element(TypedDict):
     # Basic properties
     id: str
     className: str
@@ -22,14 +22,14 @@ class Element(TypedDict, total=False):
     slot: str
 
 
-class HTMLOrSVGElement(TypedDict, total=False):
+class HTMLOrSVGElement(TypedDict):
     autofocus: bool
     tabIndex: int
     nonce: Optional[str]
     # Not including dataset as it's not useful
 
 
-class HTMLElementBase(Element, HTMLOrSVGElement, total=False):
+class HTMLElementBase(Element, HTMLOrSVGElement):
     accessKey: str
     accessKeyLabel: Optional[str]
     autocapitalize: str
@@ -58,10 +58,10 @@ class HTMLElementBase(Element, HTMLOrSVGElement, total=False):
     # Not including inner_text and outer_text as those could be heavy
 
 
-class GenericHTMLElement(HTMLElementBase, total=False): ...
+class GenericHTMLElement(HTMLElementBase): ...
 
 
-class HTMLAnchorElement(HTMLElementBase, total=False):
+class HTMLAnchorElement(HTMLElementBase):
     """Properties specific to <a> elements."""
 
     tagName: Literal["a"]
@@ -99,7 +99,7 @@ class HTMLAnchorElement(HTMLElementBase, total=False):
     text: str
 
 
-class HTMLAreaElement(HTMLElementBase, total=False):
+class HTMLAreaElement(HTMLElementBase):
     """Properties specific to <area> elements."""
 
     tagName: Literal["area"]
@@ -137,7 +137,7 @@ class HTMLAreaElement(HTMLElementBase, total=False):
     ]
 
 
-class HTMLMediaElement(HTMLElementBase, total=False):
+class HTMLMediaElement(HTMLElementBase):
     """Properties specific to media elements like <audio> and <video>."""
 
     autoplay: bool
@@ -170,7 +170,7 @@ class HTMLAudioElement(HTMLMediaElement):
     tagName: Literal["audio"]
 
 
-class HTMLButtonElement(HTMLElementBase, total=False):
+class HTMLButtonElement(HTMLElementBase):
     """Properties specific to <button> elements."""
 
     tagName: Literal["button"]
@@ -189,7 +189,7 @@ class HTMLButtonElement(HTMLElementBase, total=False):
     popoverTargetAction: str
 
 
-class HTMLDataElement(HTMLElementBase, total=False):
+class HTMLDataElement(HTMLElementBase):
     """Properties specific to <data> elements."""
 
     tagName: Literal["data"]
@@ -197,7 +197,7 @@ class HTMLDataElement(HTMLElementBase, total=False):
     value: str
 
 
-class HTMLEmbedElement(HTMLElementBase, total=False):
+class HTMLEmbedElement(HTMLElementBase):
     """Properties specific to <embed> elements."""
 
     tagName: Literal["embed"]
@@ -212,7 +212,7 @@ class HTMLEmbedElement(HTMLElementBase, total=False):
     name: str
 
 
-class HTMLFieldSetElement(HTMLElementBase, total=False):
+class HTMLFieldSetElement(HTMLElementBase):
     """Properties specific to <fieldset> elements."""
 
     tagName: Literal["fieldset"]
@@ -226,7 +226,7 @@ class HTMLFieldSetElement(HTMLElementBase, total=False):
     willValidate: bool
 
 
-class HTMLFormElement(HTMLElementBase, total=False):
+class HTMLFormElement(HTMLElementBase):
     """Properties specific to <form> elements."""
 
     tagName: Literal["form"]
@@ -248,7 +248,7 @@ class HTMLFormElement(HTMLElementBase, total=False):
     rel: str
 
 
-class HTMLIFrameElement(HTMLElementBase, total=False):
+class HTMLIFrameElement(HTMLElementBase):
     """Properties specific to <iframe> elements."""
 
     tagName: Literal["iframe"]
@@ -281,7 +281,7 @@ class HTMLIFrameElement(HTMLElementBase, total=False):
     sandbox: str
 
 
-class HTMLImageElement(HTMLElementBase, total=False):
+class HTMLImageElement(HTMLElementBase):
     """Properties specific to <img> elements."""
 
     tagName: Literal["img"]
@@ -324,7 +324,7 @@ class HTMLImageElement(HTMLElementBase, total=False):
     fetchPriority: Literal["high", "low", "auto"]
 
 
-class HTMLInputElement(HTMLElementBase, total=False):
+class HTMLInputElement(HTMLElementBase):
     """Properties specific to <input> elements."""
 
     tagName: Literal["input"]
@@ -374,7 +374,7 @@ class HTMLInputElement(HTMLElementBase, total=False):
     popoverTargetAction: str
 
 
-class HTMLLabelElement(HTMLElementBase, total=False):
+class HTMLLabelElement(HTMLElementBase):
     """Properties specific to <label> elements."""
 
     tagName: Literal["label"]
@@ -382,7 +382,7 @@ class HTMLLabelElement(HTMLElementBase, total=False):
     htmlFor: str  # Corresponds to 'for' attribute
 
 
-class HTMLLiElement(HTMLElementBase, total=False):
+class HTMLLiElement(HTMLElementBase):
     """Properties specific to <li> elements."""
 
     tagName: Literal["li"]
@@ -391,7 +391,7 @@ class HTMLLiElement(HTMLElementBase, total=False):
     type: str
 
 
-class HTMLLinkElement(HTMLElementBase, total=False):
+class HTMLLinkElement(HTMLElementBase):
     """Properties specific to <link> elements."""
 
     tagName: Literal["link"]
@@ -426,7 +426,7 @@ class HTMLLinkElement(HTMLElementBase, total=False):
     sizes: str
 
 
-class HTMLMapElement(HTMLElementBase, total=False):
+class HTMLMapElement(HTMLElementBase):
     """Properties specific to <map> elements."""
 
     tagName: Literal["map"]
@@ -434,7 +434,7 @@ class HTMLMapElement(HTMLElementBase, total=False):
     name: str
 
 
-class HTMLMeterElement(HTMLElementBase, total=False):
+class HTMLMeterElement(HTMLElementBase):
     """Properties specific to <meter> elements."""
 
     tagName: Literal["meter"]
@@ -447,7 +447,7 @@ class HTMLMeterElement(HTMLElementBase, total=False):
     value: float
 
 
-class HTMLModElement(HTMLElementBase, total=False):
+class HTMLModElement(HTMLElementBase):
     """Properties specific to <ins> and <del> elements."""
 
     tagName: Literal["ins", "del"]
@@ -456,7 +456,7 @@ class HTMLModElement(HTMLElementBase, total=False):
     dateTime: str  # Corresponds to 'datetime' attribute
 
 
-class HTMLOListElement(HTMLElementBase, total=False):
+class HTMLOListElement(HTMLElementBase):
     """Properties specific to <ol> elements."""
 
     tagName: Literal["ol"]
@@ -467,7 +467,7 @@ class HTMLOListElement(HTMLElementBase, total=False):
     compact: bool
 
 
-class HTMLObjectElement(HTMLElementBase, total=False):
+class HTMLObjectElement(HTMLElementBase):
     """Properties specific to <object> elements."""
 
     tagName: Literal["object"]
@@ -495,7 +495,7 @@ class HTMLObjectElement(HTMLElementBase, total=False):
     willValidate: bool
 
 
-class HTMLOptGroupElement(HTMLElementBase, total=False):
+class HTMLOptGroupElement(HTMLElementBase):
     """Properties specific to <optgroup> elements."""
 
     tagName: Literal["optgroup"]
@@ -504,7 +504,7 @@ class HTMLOptGroupElement(HTMLElementBase, total=False):
     label: str
 
 
-class HTMLOptionElement(HTMLElementBase, total=False):
+class HTMLOptionElement(HTMLElementBase):
     """Properties specific to <option> elements."""
 
     tagName: Literal["option"]
@@ -518,7 +518,7 @@ class HTMLOptionElement(HTMLElementBase, total=False):
     value: str
 
 
-class HTMLOutputElement(HTMLElementBase, total=False):
+class HTMLOutputElement(HTMLElementBase):
     """Properties specific to <output> elements."""
 
     tagName: Literal["output"]
@@ -534,7 +534,7 @@ class HTMLOutputElement(HTMLElementBase, total=False):
     willValidate: bool
 
 
-class HTMLProgressElement(HTMLElementBase, total=False):
+class HTMLProgressElement(HTMLElementBase):
     """Properties specific to <progress> elements."""
 
     tagName: Literal["progress"]
@@ -544,7 +544,7 @@ class HTMLProgressElement(HTMLElementBase, total=False):
     value: float
 
 
-class HTMLQuoteElement(HTMLElementBase, total=False):
+class HTMLQuoteElement(HTMLElementBase):
     """Properties specific to <q> and <blockquote> elements."""
 
     tagName: Literal["q", "blockquote"]
@@ -552,13 +552,13 @@ class HTMLQuoteElement(HTMLElementBase, total=False):
     cite: str
 
 
-class HTMLCiteElement(HTMLElementBase, total=False):
+class HTMLCiteElement(HTMLElementBase):
     """Properties specific to <cite> elements."""
 
     tagName: Literal["cite"]
 
 
-class HTMLScriptElement(HTMLElementBase, total=False):
+class HTMLScriptElement(HTMLElementBase):
     """Properties specific to <script> elements."""
 
     tagName: Literal["script"]
@@ -590,7 +590,7 @@ class HTMLScriptElement(HTMLElementBase, total=False):
     htmlFor: str
 
 
-class HTMLSelectElement(HTMLElementBase, total=False):
+class HTMLSelectElement(HTMLElementBase):
     """Properties specific to <select> elements."""
 
     tagName: Literal["select"]
@@ -611,7 +611,7 @@ class HTMLSelectElement(HTMLElementBase, total=False):
     willValidate: bool
 
 
-class HTMLSlotElement(HTMLElementBase, total=False):
+class HTMLSlotElement(HTMLElementBase):
     """Properties specific to <slot> elements."""
 
     tagName: Literal["slot"]
@@ -619,7 +619,7 @@ class HTMLSlotElement(HTMLElementBase, total=False):
     name: str
 
 
-class HTMLSourceElement(HTMLElementBase, total=False):
+class HTMLSourceElement(HTMLElementBase):
     """Properties specific to <source> elements."""
 
     tagName: Literal["source"]
@@ -633,14 +633,14 @@ class HTMLSourceElement(HTMLElementBase, total=False):
     width: int
 
 
-class HTMLTableCaptionElement(HTMLElementBase, total=False):
+class HTMLTableCaptionElement(HTMLElementBase):
     """Properties specific to <caption> elements."""
 
     tagName: Literal["caption"]
     align: str
 
 
-class HTMLTableCellElement(HTMLElementBase, total=False):
+class HTMLTableCellElement(HTMLElementBase):
     """Properties specific to <td> and <th> elements."""
 
     tagName: Literal["td", "th"]
@@ -664,7 +664,7 @@ class HTMLTableCellElement(HTMLElementBase, total=False):
     width: str
 
 
-class HTMLTableColElement(HTMLElementBase, total=False):
+class HTMLTableColElement(HTMLElementBase):
     """Properties specific to <col> and <colgroup> elements."""
 
     tagName: Literal["col", "colgroup"]
@@ -679,7 +679,7 @@ class HTMLTableColElement(HTMLElementBase, total=False):
     width: str
 
 
-class HTMLTableElement(HTMLElementBase, total=False):
+class HTMLTableElement(HTMLElementBase):
     """Properties specific to <table> elements."""
 
     tagName: Literal["table"]
@@ -702,7 +702,7 @@ class HTMLTableElement(HTMLElementBase, total=False):
     width: str
 
 
-class HTMLTableRowElement(HTMLElementBase, total=False):
+class HTMLTableRowElement(HTMLElementBase):
     """Properties specific to <tr> elements."""
 
     tagName: Literal["tr"]
@@ -719,7 +719,7 @@ class HTMLTableRowElement(HTMLElementBase, total=False):
     vAlign: str
 
 
-class HTMLTableSectionElement(HTMLElementBase, total=False):
+class HTMLTableSectionElement(HTMLElementBase):
     """Properties specific to <thead>, <tbody>, <tfoot> elements."""
 
     tagName: Literal["thead", "tbody", "tfoot"]
@@ -732,7 +732,7 @@ class HTMLTableSectionElement(HTMLElementBase, total=False):
     vAlign: str
 
 
-class HTMLTemplateElement(HTMLElementBase, total=False):
+class HTMLTemplateElement(HTMLElementBase):
     """Properties specific to <template> elements."""
 
     tagName: Literal["template"]
@@ -741,7 +741,7 @@ class HTMLTemplateElement(HTMLElementBase, total=False):
     pass
 
 
-class HTMLTextAreaElement(HTMLElementBase, total=False):
+class HTMLTextAreaElement(HTMLElementBase):
     """Properties specific to <textarea> elements."""
 
     tagName: Literal["textarea"]
@@ -770,7 +770,7 @@ class HTMLTextAreaElement(HTMLElementBase, total=False):
     willValidate: bool
 
 
-class HTMLTimeElement(HTMLElementBase, total=False):
+class HTMLTimeElement(HTMLElementBase):
     """Properties specific to <time> elements."""
 
     tagName: Literal["time"]
@@ -778,7 +778,7 @@ class HTMLTimeElement(HTMLElementBase, total=False):
     datetime: str  # Corresponds to 'dateTime' attribute
 
 
-class HTMLTrackElement(HTMLElementBase, total=False):
+class HTMLTrackElement(HTMLElementBase):
     """Properties specific to <track> elements."""
 
     tagName: Literal["track"]
@@ -805,14 +805,14 @@ class HTMLVideoElement(HTMLMediaElement):
     playsInline: bool
 
 
-class HTMLBRElement(HTMLElementBase, total=False):
+class HTMLBRElement(HTMLElementBase):
     """Properties specific to <br> elements."""
 
     tagName: Literal["br"]
     clear: str
 
 
-class HTMLBaseElement(HTMLElementBase, total=False):
+class HTMLBaseElement(HTMLElementBase):
     """Properties specific to <base> elements."""
 
     tagName: Literal["base"]
@@ -820,7 +820,7 @@ class HTMLBaseElement(HTMLElementBase, total=False):
     target: str
 
 
-class HTMLBodyElement(HTMLElementBase, total=False):
+class HTMLBodyElement(HTMLElementBase):
     """Properties specific to <body> elements."""
 
     tagName: Literal["body"]
@@ -832,21 +832,21 @@ class HTMLBodyElement(HTMLElementBase, total=False):
     vLink: str
 
 
-class HTMLDListElement(HTMLElementBase, total=False):
+class HTMLDListElement(HTMLElementBase):
     """Properties specific to <dl> elements."""
 
     tagName: Literal["dl"]
     compact: bool
 
 
-class HTMLDetailsElement(HTMLElementBase, total=False):
+class HTMLDetailsElement(HTMLElementBase):
     """Properties specific to <details> elements."""
 
     tagName: Literal["details"]
     open: bool
 
 
-class HTMLDialogElement(HTMLElementBase, total=False):
+class HTMLDialogElement(HTMLElementBase):
     """Properties specific to <dialog> elements."""
 
     tagName: Literal["dialog"]
@@ -854,27 +854,27 @@ class HTMLDialogElement(HTMLElementBase, total=False):
     returnValue: str
 
 
-class HTMLDivElement(HTMLElementBase, total=False):
+class HTMLDivElement(HTMLElementBase):
     """Properties specific to <div> elements."""
 
     tagName: Literal["div"]
     align: str
 
 
-class HTMLHeadElement(HTMLElementBase, total=False):
+class HTMLHeadElement(HTMLElementBase):
     """Properties specific to <head> elements."""
 
     tagName: Literal["head"]
 
 
-class HTMLHeadingElement(HTMLElementBase, total=False):
+class HTMLHeadingElement(HTMLElementBase):
     """Properties specific to <h1> through <h6> elements."""
 
     tagName: Literal["h1", "h2", "h3", "h4", "h5", "h6"]
     align: str
 
 
-class HTMLHRElement(HTMLElementBase, total=False):
+class HTMLHRElement(HTMLElementBase):
     """Properties specific to <hr> elements."""
 
     tagName: Literal["hr"]
@@ -885,20 +885,20 @@ class HTMLHRElement(HTMLElementBase, total=False):
     width: str
 
 
-class HTMLHtmlElement(HTMLElementBase, total=False):
+class HTMLHtmlElement(HTMLElementBase):
     """Properties specific to <html> elements."""
 
     tagName: Literal["html"]
     version: str
 
 
-class HTMLMenuElement(HTMLElementBase, total=False):
+class HTMLMenuElement(HTMLElementBase):
     """Properties specific to <menu> elements."""
 
     tagName: Literal["menu"]
 
 
-class HTMLMetaElement(HTMLElementBase, total=False):
+class HTMLMetaElement(HTMLElementBase):
     """Properties specific to <meta> elements."""
 
     tagName: Literal["meta"]
@@ -908,34 +908,34 @@ class HTMLMetaElement(HTMLElementBase, total=False):
     scheme: str
 
 
-class HTMLParagraphElement(HTMLElementBase, total=False):
+class HTMLParagraphElement(HTMLElementBase):
     """Properties specific to <p> elements."""
 
     tagName: Literal["p"]
     align: str
 
 
-class HTMLPictureElement(HTMLElementBase, total=False):
+class HTMLPictureElement(HTMLElementBase):
     """Properties specific to <picture> elements."""
 
     tagName: Literal["picture"]
 
 
-class HTMLPreElement(HTMLElementBase, total=False):
+class HTMLPreElement(HTMLElementBase):
     """Properties specific to <pre> elements."""
 
     tagName: Literal["pre"]
     width: int
 
 
-class HTMLSpanElement(HTMLElementBase, total=False):
+class HTMLSpanElement(HTMLElementBase):
     """Properties specific to <span> elements."""
 
     tagName: Literal["span"]
     # No additional properties
 
 
-class HTMLStyleElement(HTMLElementBase, total=False):
+class HTMLStyleElement(HTMLElementBase):
     """Properties specific to <style> elements."""
 
     tagName: Literal["style"]
@@ -944,14 +944,14 @@ class HTMLStyleElement(HTMLElementBase, total=False):
     disabled: bool
 
 
-class HTMLTitleElement(HTMLElementBase, total=False):
+class HTMLTitleElement(HTMLElementBase):
     """Properties specific to <title> elements."""
 
     tagName: Literal["title"]
     text: str
 
 
-class HTMLUListElement(HTMLElementBase, total=False):
+class HTMLUListElement(HTMLElementBase):
     """Properties specific to <ul> elements."""
 
     tagName: Literal["ul"]

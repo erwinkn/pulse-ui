@@ -477,6 +477,7 @@ class ReactiveContext:
         self.scope = scope
         # Optional effect error handler set by integrators (e.g., session)
         self.on_effect_error = on_effect_error
+        self._tokens = []
 
     def get_epoch(self) -> int:
         return self.epoch.current
@@ -485,11 +486,11 @@ class ReactiveContext:
         self.epoch.current += 1
 
     def __enter__(self):
-        self._tok_rc = REACTIVE_CONTEXT.set(self)
+        self._tokens.append(REACTIVE_CONTEXT.set(self))
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
-        REACTIVE_CONTEXT.reset(self._tok_rc)
+        REACTIVE_CONTEXT.reset(self._tokens.pop())
 
 
 def epoch():

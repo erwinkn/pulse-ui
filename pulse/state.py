@@ -89,14 +89,16 @@ class StateMeta(ABCMeta):
 
         # 1) Turn annotated fields into StateProperty descriptors
         for attr_name in annotations:
-            if attr_name.startswith("__"):
+            # Do not wrap private/dunder attributes as reactive
+            if attr_name.startswith("_"):
                 continue
             default_value = namespace.get(attr_name)
             namespace[attr_name] = StateProperty(attr_name, default_value)
 
         # 2) Turn non-annotated plain values into StateProperty descriptors
         for attr_name, value in list(namespace.items()):
-            if attr_name.startswith("__"):
+            # Do not wrap private/dunder attributes as reactive
+            if attr_name.startswith("_"):
                 continue
             # Skip if already set as a descriptor we care about
             if isinstance(

@@ -515,3 +515,55 @@ class TestState:
         state.name = "updated"
         flush_effects()
         assert "name=updated" in effect_runs
+
+    def test_underscore_annotated_properties_are_non_reactive(self):
+        class S(ps.State):
+            _x: int = 1
+            y: int = 2
+
+            @ps.computed
+            def total(self):
+                # If _x were reactive, changing it would invalidate this computed.
+                return self._x + self.y
+
+        s = S()
+
+        # _x should not appear in reactive properties
+        prop_names = {str(sig.name).split(".", 1)[1] for sig in s.properties()}
+        assert "_x" not in prop_names
+        assert "y" in prop_names
+
+        # Initial computed
+        assert s.total == 3
+
+        # Changing non-reactive underscore property should not invalidate computed
+        s._x = 10
+        assert s.total == 3
+
+        # Changing reactive property should invalidate and recompute
+        s.y = 3
+        assert s.total == 13
+
+    def test_underscore_unannotated_properties_are_non_reactive(self):
+        class S(ps.State):
+            _data = {"a": 1}
+            value: int = 1
+
+            @ps.computed
+            def view(self):
+                # Access underscore field to ensure it doesn't become reactive
+                return self._data["a"] + self.value
+
+        s = S()
+
+        # _data should not be wrapped in a ReactiveDict
+        assert not isinstance(s._data, ReactiveDict)
+
+        # Changing underscore data should not affect computed caching
+        assert s.view == 2
+        s._data["a"] = 5
+        assert s.view == 2
+
+        # Changing reactive property should recompute
+        s.value = 2
+        assert s.view == 7

@@ -2,12 +2,15 @@ from contextvars import ContextVar
 from typing import (
     Any,
     Callable,
+    Generic,
     Mapping,
     ParamSpec,
+    Protocol,
     TypeVar,
     TypeVarTuple,
     Unpack,
     overload,
+    cast,
 )
 
 from pulse.flags import IS_PRERENDERING
@@ -381,5 +384,58 @@ def navigate(path: str) -> None:
     # Emit navigate_to once; client will handle redirect at app-level
     session.notify({"type": "navigate_to", "path": path})
 
+
 def is_prerendering():
     return IS_PRERENDERING.get()
+
+
+# -----------------------------------------------------
+# Session-local global singletons (ps.global_state)
+# -----------------------------------------------------
+
+S = TypeVar("S", covariant=True)
+
+
+class GlobalStateAccessor(Protocol, Generic[S]):
+    def __call__(self) -> S: ...
+
+
+def global_state(
+    factory: Callable[[], S] | type[S], key: str | None = None
+) -> GlobalStateAccessor[S]:
+    """Provider for per-session singletons.
+
+    Usage:
+        class Auth(ps.State): ...
+        auth = ps.global_state(Auth)
+        a = auth()  # same instance within the session
+
+    - key None: derive a stable key from factory's module+qualname
+    - future: allow passing an id in the accessor call to support cross-session sharing
+    """
+    from pulse.session import SESSION_CONTEXT
+
+    if isinstance(factory, type):
+        cls = factory
+
+        def _mk() -> S:  # type: ignore[misc]
+            return cast(S, cls())
+
+        default_key = f"{cls.__module__}:{cls.__qualname__}"
+        mk = _mk
+    else:
+        default_key = f"{factory.__module__}:{factory.__qualname__}"
+        mk = factory
+
+    base_key = key or default_key
+
+    def accessor() -> S:
+        # Default: session-local when no id provided
+        session = SESSION_CONTEXT.get()
+        if session is None:
+            raise RuntimeError(
+                "ps.global_state must be used inside a Pulse render/callback context"
+            )
+        return cast(S, session.get_global_state(base_key, mk))
+
+    return accessor

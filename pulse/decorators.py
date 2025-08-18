@@ -1,6 +1,7 @@
 # Separate file from reactive.py due to needing to import from state too
 
 from typing import Any, Callable, Coroutine, Optional, TypeVar, overload
+
 from pulse.state import State, ComputedProperty, StateEffect
 from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn
 import inspect
@@ -117,21 +118,35 @@ def query(
     fn: Callable[[TState], Coroutine[Any, Any, T]],
     *,
     keep_alive: bool = False,  # noqa: F821
+    keep_previous_data: bool = True,
 ) -> QueryProperty[T]: ...
 @overload
 def query(
-    fn: None = None, *, keep_alive: bool = False
-) -> Callable[[Callable[[State], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...
+    fn: None = None, *, keep_alive: bool = False, keep_previous_data: bool = True
+) -> Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...
 
 
-def query(fn: Optional[Callable] = None, *, keep_alive: bool = False):
-    def decorator(func: Callable, /):
+def query(
+    fn: Optional[Callable] = None,
+    *,
+    keep_alive: bool = False,
+    keep_previous_data: bool = True,
+) -> (
+    QueryProperty[T]
+    | Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]
+):
+    def decorator(func: Callable[[TState], Coroutine[Any, Any, T]], /):
         sig = inspect.signature(func)
         params = list(sig.parameters.values())
         # Only state-method form supported for now (single 'self')
         if not (len(params) == 1 and params[0].name == "self"):
             raise TypeError("@query currently only supports state methods (self)")
-        return QueryProperty(func.__name__, func, keep_alive=keep_alive)
+        return QueryProperty(
+            func.__name__,
+            func,
+            keep_alive=keep_alive,
+            keep_previous_data=keep_previous_data,
+        )
 
     if fn:
         return decorator(fn)

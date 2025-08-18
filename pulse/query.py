@@ -38,11 +38,13 @@ class QueryResult(Generic[T]):
         return self._data.read()
 
     # Internal setters used by the query machinery
-    def _set_loading(self):
+    def _set_loading(self, *, clear_data: bool = False):
         # print("[QueryResult] set loading=True")
         self._is_loading.write(True)
         self._is_error.write(False)
         self._error.write(None)
+        if clear_data:
+            self._data.write(None)
 
     def _set_success(self, data: T):
         # print(f"[QueryResult] set success data={data!r}")
@@ -56,6 +58,10 @@ class QueryResult(Generic[T]):
         self._error.write(err)
         self._is_loading.write(False)
         self._is_error.write(True)
+
+    # Public mutator useful for optimistic updates; does not change loading/error flags
+    def set_data(self, data: T):
+        self._data.write(data)
 
 
 class StateQuery(Generic[T]):
@@ -90,6 +96,9 @@ class StateQuery(Generic[T]):
         # print("[StateQuery] dispose")
         self._effect.dispose()
 
+    def set_data(self, data: T) -> None:
+        self._result.set_data(data)
+
 
 class QueryProperty(Generic[T]):
     """
@@ -110,11 +119,13 @@ class QueryProperty(Generic[T]):
         name: str,
         fetch_fn: "Callable[[Any], Awaitable[T]]",
         keep_alive: bool = False,
+        keep_previous_data: bool = True,
     ):
         self.name = name
         self.fetch_fn = fetch_fn
         self.key_fn: Optional[Callable[[Any], tuple]] = None
         self.keep_alive = keep_alive
+        self.keep_previous_data = keep_previous_data
         self._priv_query = f"__query_{name}"
         self._priv_effect = f"__query_effect_{name}"
         self._priv_key_comp = f"__query_key_{name}"
@@ -164,8 +175,8 @@ class QueryProperty(Generic[T]):
                 result._set_error(RuntimeError("No running event loop for query fetch"))
                 return
 
-            # Set loading immediately; run user fetch as a background task
-            result._set_loading()
+            # Set loading immediately; optionally clear previous data
+            result._set_loading(clear_data=not self.keep_previous_data)
 
             # Create a background task for the user async function
             with Untrack():

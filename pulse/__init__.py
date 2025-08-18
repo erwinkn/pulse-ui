@@ -161,7 +161,7 @@ from .html.tags import (
     fragment,
 )
 
-
+from .codegen import CodegenConfig
 from .components import (
     Link,
     Outlet,

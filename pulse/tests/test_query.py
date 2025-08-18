@@ -11,7 +11,7 @@ async def run_query():
     flush_effects()  # runs the effect
     await asyncio.sleep(0)  # starts the async query. stops at the sleep call.
     await asyncio.sleep(0)  # finishes the async query
-    await asyncio.sleep(0) # executes the `done` callback
+    await asyncio.sleep(0)  # executes the `done` callback
     # print('--- Query should be finished ----')
 
 
@@ -45,7 +45,7 @@ async def test_state_query_success():
     await asyncio.sleep(0)  # wait for query to start
     assert query_running
     await asyncio.sleep(0)  # wait for query to run
-    await asyncio.sleep(0) # wait for callback to execute
+    await asyncio.sleep(0)  # wait for callback to execute
     assert not query_running
     assert not q.is_loading
     assert not q.is_error
@@ -113,7 +113,6 @@ async def test_state_query_error_refetch():
     class S(ps.State):
         calls: int = 0
 
-
         @ps.query
         async def fail(self):
             self.calls += 1
@@ -174,8 +173,123 @@ async def test_state_query_refetch_on_key_change():
 def test_state_query_missing_key_raises():
     class Bad(ps.State):
         @ps.query
-        async def user(self):  
-            ...
+        async def user(self): ...
 
     with pytest.raises(RuntimeError, match="missing a '@user.key'"):
         Bad()
+
+
+@pytest.mark.asyncio
+async def test_state_query_keep_previous_data_on_refetch_default():
+    class S(ps.State):
+        uid: int = 1
+
+        @ps.query
+        async def user(self) -> dict:
+            await asyncio.sleep(0)
+            return {"id": self.uid}
+
+        @user.key
+        def _user_key(self):
+            return ("user", self.uid)
+
+    s = S()
+    q = s.user
+
+    # initial load
+    flush_effects()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q.data == {"id": 1}
+
+    # change key -> effect re-runs; while loading, previous data should be kept (default)
+    s.uid = 2
+    flush_effects()  # schedule new fetch
+    await asyncio.sleep(0)  # task started, still loading
+    assert q.is_loading is True
+    assert q.data == {"id": 1}
+    # finish
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q.is_loading is False
+    assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+async def test_state_query_keep_previous_data_can_be_disabled():
+    class S(ps.State):
+        uid: int = 1
+
+        @ps.query(keep_previous_data=False)
+        async def user(self) -> dict:
+            await asyncio.sleep(0)
+            return {"id": self.uid}
+
+        @user.key
+        def _user_key(self):
+            return ("user", self.uid)
+
+    s = S()
+    q = s.user
+
+    # initial load
+    flush_effects()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q.data == {"id": 1}
+
+    # change key -> while loading, data should be cleared when keep_previous_data=False
+    s.uid = 2
+    flush_effects()
+    await asyncio.sleep(0)  # task started
+    assert q.is_loading is True
+    assert q.data is None
+    # finish
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q.is_loading is False
+    assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+async def test_state_query_manual_set_data():
+    class S(ps.State):
+        uid: int = 1
+
+        @ps.query
+        async def user(self) -> dict:
+            await asyncio.sleep(0)
+            return {"id": self.uid}
+
+        @user.key
+        def _user_key(self):
+            return ("user", self.uid)
+
+    s = S()
+    q = s.user
+
+    # Finish first fetch
+    flush_effects()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q.data == {"id": 1}
+
+    # Manual override (optimistic update)
+    q.set_data({"id": 999})
+    assert q.data == {"id": 999}
+    assert q.is_loading is False
+
+    # Trigger refetch; while loading data should remain overridden when keep_previous_data=True
+    s.uid = 2
+    flush_effects()
+    await asyncio.sleep(0)
+    assert q.is_loading is True
+    assert q.data == {"id": 999}
+    # Complete fetch overwrites data with real value
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q.is_loading is False
+    assert q.data == {"id": 2}

@@ -8,6 +8,7 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 from __future__ import annotations
 import functools
 from types import NoneType
+from collections.abc import Iterable as _Iterable
 from typing import (
     Any,
     NamedTuple,
@@ -30,7 +31,9 @@ from typing import (
 
 PrimitiveNode = Union[str, int, float, None]
 NodeTree = Union["Node", "ComponentNode", PrimitiveNode]
-Children = Sequence[NodeTree]
+# A child can be a NodeTree or any iterable yielding children (e.g., generators)
+ChildItem = Union[NodeTree, _Iterable[NodeTree]]
+Children = Sequence[ChildItem]
 
 P = ParamSpec("P")
 
@@ -68,7 +71,7 @@ class Node:
         self,
         tag: str,
         props: Optional[dict[str, Any] | None] = None,
-        children: Optional[Sequence[NodeTree]] = None,
+        children: Optional[Children] = None,
         key: Optional[str] = None,
         allow_children=True,
         *,
@@ -93,14 +96,18 @@ class Node:
 
     def __getitem__(
         self,
-        children_arg: Union[NodeTree, tuple[NodeTree, ...]],
+        children_arg: Union[ChildItem, tuple[ChildItem, ...]],
     ):
-        """Support indexing syntax: div()[children] or div()["text"]"""
+        """Support indexing syntax: div()[children] or div()["text"]
+
+        Children may include iterables (lists, generators) of nodes, which will
+        be flattened during render.
+        """
         if self.children:
             raise ValueError(f"Node already has children: {self.children}")
 
         if isinstance(children_arg, tuple):
-            new_children = cast(list[NodeTree], list(children_arg))
+            new_children = cast(list[ChildItem], list(children_arg))
         else:
             new_children = [children_arg]
 
@@ -182,19 +189,30 @@ def _short_props(
     return {**head, "…": f"+{len(items) - (max_items - 1)} more"}
 
 
+def _pretty_repr(node: NodeTree):
+    if isinstance(node, Node):
+        return f"<{node.tag}>"
+    if isinstance(node, ComponentNode):
+        return f"<{node.name}"
+    return repr(node)
+
+
 def _short_children(
-    children: Sequence[NodeTree] | None, max_items: int = 4
+    children: Sequence[ChildItem] | None, max_items: int = 4
 ) -> list[str] | str:
     if not children:
         return []
     out: list[str] = []
-    for child in children[: max_items - 1]:
-        if isinstance(child, Node):
-            out.append(f"<{child.tag}>")
-        elif isinstance(child, ComponentNode):
-            out.append(f"<{child.name} />")
+    i = 0
+    while i < len(children) and len(out) < max_items:
+        child = children[i]
+        i += 1
+        if isinstance(child, _Iterable) and not isinstance(child, str):
+            child = list(child)
+            n_items = min(len(child), max_items - len(out))
+            out.extend(_pretty_repr(c) for c in child[:n_items])
         else:
-            out.append(repr(child))
+            out.append(_pretty_repr(child))
     if len(children) > (max_items - 1):
         out.append(f"…(+{len(children) - (max_items - 1)})")
     return out
@@ -237,13 +255,17 @@ class ComponentNode:
         self.key = key
         self.name = name or _infer_component_name(fn)
 
-    def __getitem__(self, *children: NodeTree):
+    def __getitem__(self, children_arg: Union[ChildItem, tuple[ChildItem, ...]]):
         if "children" in self.kwargs and self.kwargs.get("children"):
             raise ValueError(
                 f"Component {self.name} already has children: {self.kwargs.get('children')}"
             )
         kwargs = self.kwargs.copy()
-        kwargs["children"] = children
+        if isinstance(children_arg, tuple):
+            new_children = cast(list[ChildItem], list(children_arg))
+        else:
+            new_children = [children_arg]
+        kwargs["children"] = new_children
         result = ComponentNode(
             fn=self.fn,
             args=self.args,

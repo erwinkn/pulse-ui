@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from collections.abc import Iterable as _Iterable
+import warnings
 import inspect
-from typing import Callable, Optional, Sequence
+from typing import Callable, Iterable, Optional, Sequence, cast, TypeGuard
 from pulse.diff import (
     InsertOperation,
     RemoveOperation,
@@ -14,9 +16,11 @@ from pulse.vdom import (
     VDOM,
     Callback,
     Callbacks,
+    ChildItem,
     ComponentNode,
     Node,
     NodeTree,
+    Children,
     Props,
     VDOMNode,
 )
@@ -172,10 +176,23 @@ class Resolver:
                 )
             normalized_children: list[NodeTree] = []
             if old_tree.children or new_tree.children:
+                # Ensure new children are a flat list before diffing so that
+                # we can safely compute lengths and indices.
+                if new_tree.children:
+                    new_children_list = _flatten_children(
+                        cast(Children, new_tree.children),
+                        parent_tag=new_tree.tag,
+                        path=path,
+                    )
+                else:
+                    new_children_list = []
+                # old_tree.children should already be normalized NodeTree items,
+                # but it is typed as Children; cast for the type checker.
+                old_children_list = cast(Sequence[NodeTree], old_tree.children or [])
                 normalized_children = self.reconcile_children(
                     render_parent=render_parent,
-                    old_children=old_tree.children or [],
-                    new_children=new_tree.children or [],
+                    old_children=old_children_list,
+                    new_children=new_children_list,
                     path=path,
                     relative_path=relative_path,
                 )
@@ -406,9 +423,13 @@ class Resolver:
                 vdom_node["lazy"] = True
             normalized_children: list[NodeTree] | None = None
             if node.children:
+                # Flatten any iterable children (e.g., generators, lists) one or more levels deep
+                flat_children = _flatten_children(
+                    node.children, parent_tag=node.tag, path=path
+                )
                 v_children: list[VDOM] = []
                 normalized_children = []
-                for i, child in enumerate(node.children):
+                for i, child in enumerate(flat_children):
                     v, norm = self.render_tree(
                         render_parent=render_parent,
                         path=join_path(path, i),
@@ -443,6 +464,45 @@ class Resolver:
                     fn=v, n_args=len(inspect.signature(v).parameters)
                 )
         return updated_props
+
+    # --- Internal helpers -----------------------------------------------------
+
+
+def _flatten_children(
+    children: Children, *, parent_tag: str, path: str
+) -> list[NodeTree]:
+    flat: list[NodeTree] = []
+
+    def visit(item: ChildItem) -> None:
+        if isinstance(item, Iterable) and not isinstance(item, str):
+            # If any Node/ComponentNode yielded by this iterable lacks a key,
+            # emit a single warning for this iterable.
+            missing_key = False
+            for sub in item:  # type: ignore[operator]
+                if (
+                    isinstance(sub, (Node, ComponentNode))
+                    and getattr(sub, "key", None) is None
+                ):
+                    missing_key = True
+                visit(sub)
+            if missing_key:
+                # Warn once per iterable without keys on its elements
+                warnings.warn(
+                    (
+                        "[Pulse] Iterable children of <{}> at path '{}' contain elements without 'key'. "
+                        "Add a stable 'key' to each element inside iterables to improve reconciliation."
+                    ).format(parent_tag, path),
+                    stacklevel=3,
+                )
+            return
+
+        # Not an iterable child: must be a NodeTree or primitive
+        flat.append(item)
+
+    for child in children:
+        visit(child)
+
+    return flat
 
 
 def same_node(left: NodeTree, right: NodeTree):
@@ -514,3 +574,4 @@ def join_path(prefix: str, path: str | int):
         return f"{prefix}.{path}"
     else:
         return str(path)
+

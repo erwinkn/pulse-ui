@@ -6,7 +6,7 @@ from .reactive_extensions import (
     ReactiveDict,
     ReactiveList,
     ReactiveSet,
-    reactive_dataclass,
+    reactive
 )
 from .hooks import (
     states,

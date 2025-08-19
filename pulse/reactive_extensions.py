@@ -1,19 +1,18 @@
-from __future__ import annotations
-
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import MISSING as _DC_MISSING
 from dataclasses import dataclass as _dc_dataclass
 from dataclasses import fields as _dc_fields
 from dataclasses import is_dataclass
-from typing import Any as _Any
+from typing import Any as _Any, Optional
 from typing import Callable, Generic, TypeVar, overload, cast
 
 from pulse.reactive import Signal
 
-T = TypeVar("T")
+T1 = TypeVar("T1")
+T2 = TypeVar("T2")
 
 
-class ReactiveDict(dict[str, _Any]):
+class ReactiveDict(dict[T1, T2]):
     """A dict-like container with per-key reactivity.
 
     - Reading a key registers a dependency on that key's Signal
@@ -24,51 +23,54 @@ class ReactiveDict(dict[str, _Any]):
 
     __slots__ = ("_signals",)
 
-    def __init__(self, initial: Mapping[str, _Any] | None = None) -> None:
+    def __init__(self, initial: Mapping[T1, T2] | None = None) -> None:
         super().__init__()
-        self._signals: dict[str, Signal[_Any]] = {}
+        self._signals: dict[T1, Signal[_Any]] = {}
         if initial:
             for k, v in initial.items():
-                v = wrap_collections(v)
+                v = reactive(v)
                 super().__setitem__(k, v)
                 self._signals[k] = Signal(v)
 
     # --- Mapping protocol ---
-    def __getitem__(self, key: str) -> _Any:
+    def __getitem__(self, key: T1) -> T2:
         if key not in self._signals:
             # Lazily create missing key with None so it can be reactive
             self._signals[key] = Signal(None)
         return self._signals[key].read()
 
-    def __setitem__(self, key: str, value: _Any) -> None:
+    def __setitem__(self, key: T1, value: T2) -> None:
         self.set(key, value)
 
-    def __delitem__(self, key: str) -> None:
+    def __delitem__(self, key: T1) -> None:
         # Preserve signal and subscribers; write None and keep key with None value
         if key not in self._signals:
             self._signals[key] = Signal(None)
         else:
             self._signals[key].write(None)
-        super().__setitem__(key, None)
 
-    def get(self, key: str, default: _Any = None) -> _Any:
+    @overload
+    def get(self, key: T1, default: T2) -> T2: ...
+    @overload
+    def get(self, key: T1, default: None = None) -> Optional[T2]: ...
+    def get(self, key: T1, default: Optional[T2] = None) -> Optional[T2]:
         if key not in self._signals:
             return default
         return self._signals[key].read()
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterator[T1]:
         # Not reactive; snapshot of keys at iteration time
         return super().__iter__()
 
     def __len__(self) -> int:
         return super().__len__()
 
-    def __contains__(self, key: object) -> bool:
+    def __contains__(self, key: T1) -> bool:
         return super().__contains__(key)
 
     # --- Mutation helpers ---
-    def set(self, key: str, value: _Any) -> None:
-        value = wrap_collections(value)
+    def set(self, key: T1, value: T2) -> None:
+        value = reactive(value)
         sig = self._signals.get(key)
         if sig is None:
             self._signals[key] = Signal(value)
@@ -76,17 +78,17 @@ class ReactiveDict(dict[str, _Any]):
             sig.write(value)
         super().__setitem__(key, value)
 
-    def update(self, values: Mapping[str, _Any]) -> None:  # type: ignore[override]
+    def update(self, values: Mapping[T1, T2]) -> None:  # type: ignore[override]
         for k, v in values.items():
             self.set(k, v)
 
-    def delete(self, key: str) -> None:
+    def delete(self, key: T1) -> None:
         if key in self._signals:
             # Preserve signal object for existing subscribers; set to None
             self._signals[key].write(None)
 
 
-class ReactiveList(list[_Any]):
+class ReactiveList(list[T1]):
     """A list with item-level reactivity where possible and structural change signaling.
 
     Semantics:
@@ -105,7 +107,7 @@ class ReactiveList(list[_Any]):
         self._structure: Signal[int] = Signal(0)
         if initial:
             for item in initial:
-                v = wrap_collections(item)
+                v = reactive(item)
                 self._signals.append(Signal(v))
                 super().append(v)
 
@@ -132,18 +134,18 @@ class ReactiveList(list[_Any]):
             target_indices = list(range(start, stop, step))
 
             if len(replacement_seq) == len(target_indices):
-                wrapped = [wrap_collections(v) for v in replacement_seq]
+                wrapped = [reactive(v) for v in replacement_seq]
                 super().__setitem__(idx, wrapped)
                 for i, v in zip(target_indices, wrapped):
                     self._signals[i].write(v)
                 return
 
             super().__setitem__(idx, replacement_seq)
-            self._signals = [Signal(wrap_collections(v)) for v in super().__iter__()]
+            self._signals = [Signal(reactive(v)) for v in super().__iter__()]
             self._bump_structure()
             return
         # normal index
-        v = wrap_collections(value)
+        v = reactive(value)
         super().__setitem__(idx, v)
         self._signals[idx].write(v)
 
@@ -159,7 +161,7 @@ class ReactiveList(list[_Any]):
 
     # ---- structural operations ----
     def append(self, value: _Any) -> None:  # type: ignore[override]
-        v = wrap_collections(value)
+        v = reactive(value)
         super().append(v)
         self._signals.append(Signal(v))
         self._bump_structure()
@@ -167,7 +169,7 @@ class ReactiveList(list[_Any]):
     def extend(self, values: Iterable[_Any]) -> None:  # type: ignore[override]
         any_added = False
         for v in values:
-            vv = wrap_collections(v)
+            vv = reactive(v)
             super().append(vv)
             self._signals.append(Signal(vv))
             any_added = True
@@ -175,7 +177,7 @@ class ReactiveList(list[_Any]):
             self._bump_structure()
 
     def insert(self, index: int, value: _Any) -> None:
-        v = wrap_collections(value)
+        v = reactive(value)
         super().insert(index, v)
         self._signals.insert(index, Signal(v))
         self._bump_structure()
@@ -230,7 +232,7 @@ class ReactiveList(list[_Any]):
         return super().__iter__()
 
 
-class ReactiveSet(set[_Any]):
+class ReactiveSet(set[T1]):
     """A set with per-element membership reactivity.
 
     - `x in s` reads a membership Signal for element `x`
@@ -240,24 +242,24 @@ class ReactiveSet(set[_Any]):
 
     __slots__ = ("_signals",)
 
-    def __init__(self, initial: Iterable[_Any] | None = None) -> None:
+    def __init__(self, initial: Iterable[T1] | None = None) -> None:
         super().__init__()
-        self._signals: dict[_Any, Signal[bool]] = {}
+        self._signals: dict[T1, Signal[bool]] = {}
         if initial:
             for v in initial:
-                vv = wrap_collections(v)
+                vv = reactive(v)
                 super().add(vv)
                 self._signals[vv] = Signal(True)
 
-    def __contains__(self, element: object) -> bool:  # type: ignore[override]
-        sig = self._signals.get(element)  # type: ignore[index]
+    def __contains__(self, element: T1) -> bool:
+        sig = self._signals.get(element)
         if sig is None:
             present = set.__contains__(self, element)
-            self._signals[element] = Signal(bool(present))  # type: ignore[index]
-            sig = self._signals[element]  # type: ignore[index]
+            self._signals[element] = Signal(bool(present))
+            sig = self._signals[element]
         return bool(sig.read())
 
-    def membership(self, element: _Any) -> bool:
+    def membership(self, element: T1) -> bool:
         """Reactive check for membership of a value.
 
         Equivalent to `x in s` but explicitly documents reactivity.
@@ -265,8 +267,8 @@ class ReactiveSet(set[_Any]):
         return self.__contains__(element)
 
     # mutations
-    def add(self, element: _Any) -> None:  # type: ignore[override]
-        element = wrap_collections(element)
+    def add(self, element: T1) -> None:  
+        element = reactive(element)
         super().add(element)
         sig = self._signals.get(element)
         if sig is None:
@@ -274,8 +276,8 @@ class ReactiveSet(set[_Any]):
         else:
             sig.write(True)
 
-    def discard(self, element: _Any) -> None:  # type: ignore[override]
-        element = wrap_collections(element)
+    def discard(self, element: T1) -> None:  
+        element = reactive(element)
         if element in self:
             super().discard(element)
             sig = self._signals.get(element)
@@ -284,21 +286,21 @@ class ReactiveSet(set[_Any]):
             else:
                 sig.write(False)
 
-    def remove(self, element: _Any) -> None:  # type: ignore[override]
+    def remove(self, element: T1) -> None:  
         if element not in self:
             raise KeyError(element)
         self.discard(element)
 
-    def clear(self) -> None:  # type: ignore[override]
+    def clear(self) -> None:  
         for v in list(self):
             self.discard(v)
 
-    def update(self, *others: Iterable[_Any]) -> None:  # type: ignore[override]
+    def update(self, *others: Iterable[T1]) -> None:  
         for it in others:
             for v in it:
                 self.add(v)
 
-    def difference_update(self, *others: Iterable[_Any]) -> None:  # type: ignore[override]
+    def difference_update(self, *others: Iterable[T1]) -> None:
         to_remove = set()
         for it in others:
             for v in it:
@@ -314,32 +316,30 @@ class ReactiveSet(set[_Any]):
 _MISSING = object()
 
 
-class ReactiveProperty(Generic[T]):
+class ReactiveProperty(Generic[T1]):
     """Unified reactive descriptor used for State fields and dataclass fields."""
 
-    def __init__(self, name: str | None = None, default: _Any = _MISSING):
+    def __init__(self, name: str | None = None, default: Optional[T1] = _MISSING):
         self.name: str | None = name
         self.private_name: str | None = None
         self.owner_name: str | None = None
-        self.default = (
-            wrap_collections(default) if default is not _MISSING else _MISSING
-        )
+        self.default = reactive(default) if default is not _MISSING else _MISSING
 
     def __set_name__(self, owner, name):
         self.name = self.name or name
         self.private_name = f"__signal_{self.name}"
         self.owner_name = getattr(owner, "__name__", owner.__class__.__name__)
 
-    def _get_signal(self, obj) -> Signal:
+    def _get_signal(self, obj) -> Signal[T1]:
         priv = cast(str, self.private_name)
         sig = getattr(obj, priv, None)
         if sig is None:
             init_value = None if self.default is _MISSING else self.default
             sig = Signal(init_value, name=f"{self.owner_name}.{self.name}")
             setattr(obj, priv, sig)
-        return sig
+        return sig # type: ignore
 
-    def __get__(self, obj, objtype=None) -> T:
+    def __get__(self, obj, objtype=None) -> T1:
         if obj is None:
             return self  # type: ignore
         # If there is no signal yet and there was no default, mirror normal attribute error
@@ -352,9 +352,9 @@ class ReactiveProperty(Generic[T]):
             )
         return self._get_signal(obj).read()
 
-    def __set__(self, obj, value: T) -> None:
+    def __set__(self, obj, value: T1) -> None:
         sig = self._get_signal(obj)
-        value = wrap_collections(value)
+        value = reactive(value)
         sig.write(value)
 
     # Helper for State.properties() discovery
@@ -363,14 +363,14 @@ class ReactiveProperty(Generic[T]):
 
 
 @overload
-def reactive_dataclass(cls: type[T], /, **dataclass_kwargs) -> type[T]: ...
+def reactive_dataclass(cls: type[T1], /, **dataclass_kwargs) -> type[T1]: ...
 @overload
-def reactive_dataclass(**dataclass_kwargs) -> Callable[[type[T]], type[T]]: ...
+def reactive_dataclass(**dataclass_kwargs) -> Callable[[type[T1]], type[T1]]: ...
 
 
 def reactive_dataclass(
-    cls: type[T] | None = None, /, **dataclass_kwargs
-) -> Callable[[type[T]], type[T]] | type[T]:
+    cls: type[T1] | None = None, /, **dataclass_kwargs
+) -> Callable[[type[T1]], type[T1]] | type[T1]:
     """Decorator to make a dataclass' fields reactive.
 
     Usage:
@@ -383,7 +383,7 @@ def reactive_dataclass(
         class Model: ...   # will be dataclass()-ed with defaults
     """
 
-    def _wrap(cls_param: type[T]) -> type[T]:
+    def _wrap(cls_param: type[T1]) -> type[T1]:
         # ensure it's a dataclass
         klass = cls_param
         if not is_dataclass(klass):
@@ -408,7 +408,17 @@ def reactive_dataclass(
 # ---- Auto-wrapping helpers ----
 
 
-def wrap_collections(value: _Any) -> _Any:
+@overload
+def reactive(value: dict[T1, T2]) -> ReactiveDict[T1, T2]: ...
+@overload
+def reactive(value: list[T1]) -> ReactiveList[T1]: ...
+@overload
+def reactive(value: set[T1]) -> ReactiveSet[T1]: ...
+@overload
+def reactive(value: T1) -> T1: ...
+
+
+def reactive(value: _Any) -> _Any:
     """Wrap built-in collections in their reactive counterparts if not already reactive.
 
     - dict -> ReactiveDict

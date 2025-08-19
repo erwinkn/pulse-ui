@@ -3,6 +3,7 @@ from dataclasses import MISSING as _DC_MISSING
 from dataclasses import dataclass as _dc_dataclass
 from dataclasses import fields as _dc_fields
 from dataclasses import is_dataclass
+import dataclasses
 from typing import Any as _Any, Optional
 from typing import Callable, Generic, TypeVar, overload, cast
 
@@ -267,7 +268,7 @@ class ReactiveSet(set[T1]):
         return self.__contains__(element)
 
     # mutations
-    def add(self, element: T1) -> None:  
+    def add(self, element: T1) -> None:
         element = reactive(element)
         super().add(element)
         sig = self._signals.get(element)
@@ -276,7 +277,7 @@ class ReactiveSet(set[T1]):
         else:
             sig.write(True)
 
-    def discard(self, element: T1) -> None:  
+    def discard(self, element: T1) -> None:
         element = reactive(element)
         if element in self:
             super().discard(element)
@@ -286,16 +287,16 @@ class ReactiveSet(set[T1]):
             else:
                 sig.write(False)
 
-    def remove(self, element: T1) -> None:  
+    def remove(self, element: T1) -> None:
         if element not in self:
             raise KeyError(element)
         self.discard(element)
 
-    def clear(self) -> None:  
+    def clear(self) -> None:
         for v in list(self):
             self.discard(v)
 
-    def update(self, *others: Iterable[T1]) -> None:  
+    def update(self, *others: Iterable[T1]) -> None:
         for it in others:
             for v in it:
                 self.add(v)
@@ -337,7 +338,7 @@ class ReactiveProperty(Generic[T1]):
             init_value = None if self.default is _MISSING else self.default
             sig = Signal(init_value, name=f"{self.owner_name}.{self.name}")
             setattr(obj, priv, sig)
-        return sig # type: ignore
+        return sig  # type: ignore
 
     def __get__(self, obj, objtype=None) -> T1:
         if obj is None:
@@ -363,14 +364,21 @@ class ReactiveProperty(Generic[T1]):
 
 
 @overload
-def reactive_dataclass(cls: type[T1], /, **dataclass_kwargs) -> type[T1]: ...
+def reactive_dataclass(
+    cls: type[dataclasses._DataclassT], /, **dataclass_kwargs
+) -> type[dataclasses._DataclassT]: ...
 @overload
-def reactive_dataclass(**dataclass_kwargs) -> Callable[[type[T1]], type[T1]]: ...
+def reactive_dataclass(
+    **dataclass_kwargs,
+) -> Callable[[type[dataclasses._DataclassT]], type[dataclasses._DataclassT]]: ...
 
 
 def reactive_dataclass(
-    cls: type[T1] | None = None, /, **dataclass_kwargs
-) -> Callable[[type[T1]], type[T1]] | type[T1]:
+    cls: type[dataclasses._DataclassT] | None = None, /, **dataclass_kwargs
+) -> (
+    Callable[[type[dataclasses._DataclassT]], type[dataclasses._DataclassT]]
+    | type[dataclasses._DataclassT]
+):
     """Decorator to make a dataclass' fields reactive.
 
     Usage:
@@ -383,7 +391,9 @@ def reactive_dataclass(
         class Model: ...   # will be dataclass()-ed with defaults
     """
 
-    def _wrap(cls_param: type[T1]) -> type[T1]:
+    def _wrap(
+        cls_param: type[dataclasses._DataclassT],
+    ) -> type[dataclasses._DataclassT]:
         # ensure it's a dataclass
         klass = cls_param
         if not is_dataclass(klass):
@@ -434,4 +444,6 @@ def reactive(value: _Any) -> _Any:
         return ReactiveList(value)
     if isinstance(value, set):
         return ReactiveSet(value)
+    if isinstance(value, type) and is_dataclass(value):
+        return reactive_dataclass(value)
     return value

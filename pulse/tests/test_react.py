@@ -742,6 +742,7 @@ def test_default_sentinel_props_in_fn_and_typed_dict():
     ) -> NodeTree:
         return cast(NodeTree, None)
 
+
     node = Pane(name="hi")
     assert node.props == {"name": "hi"}
 

@@ -6,6 +6,7 @@ from pulse.reconciler import lis
 import pulse as ps
 
 from pulse.vdom import Callback
+import pytest
 
 
 # =================
@@ -1579,3 +1580,181 @@ def test_nested_trailing_removes_descending_order_under_same_parent():
         {"type": "remove", "path": "1.4"},
         {"type": "remove", "path": "1.3"},
     ]
+
+
+# =====================
+# Iterable children flattening
+# =====================
+
+
+def test_iterable_children_generator_is_flattened_in_render():
+    @ps.component
+    def View():
+        gen = (ps.span(str(i)) for i in range(3))
+        return ps.div()[gen]
+
+    r = Resolver()
+    root = RenderNode(View.fn)
+    with pytest.warns(UserWarning, match=r"Iterable children of <div>.*without 'key'"):
+        vdom, _ = r.render_tree(root, View(), path="", relative_path="")
+
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {"tag": "span", "children": ["0"]},
+            {"tag": "span", "children": ["1"]},
+            {"tag": "span", "children": ["2"]},
+        ],
+    }
+
+
+def test_iterable_children_list_is_flattened_in_render():
+    @ps.component
+    def View():
+        children = [ps.span("a"), ps.span("b")]
+        return ps.div()[children]
+
+    with pytest.warns(UserWarning, match=r"Iterable children of <div>.*without 'key'"):
+        vdom, _ = Resolver().render_tree(RenderNode(View.fn), View(), "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {"tag": "span", "children": ["a"]},
+            {"tag": "span", "children": ["b"]},
+        ],
+    }
+
+
+def test_iterable_children_missing_keys_emits_warning_once():
+    @ps.component
+    def Item(label: str):
+        return ps.div(ps.span(label))
+
+    @ps.component
+    def View():
+        iterable = (Item(label=x) for x in ["x", "y"])  # unkeyed elements
+        return ps.div()[iterable]
+
+    r = Resolver()
+    root = RenderNode(View.fn)
+    with pytest.warns(
+        UserWarning, match=r"Iterable children of <div>.*without 'key'"
+    ) as w:
+        _ = r.render_tree(root, View(), path="", relative_path="")
+    assert len(w) == 1
+
+
+def test_iterable_children_with_component_keys_no_warning():
+    @ps.component
+    def Item(label: str):
+        return ps.div(ps.span(label))
+
+    @ps.component
+    def View():
+        iterable = (Item(key=str(i), label=str(i)) for i in range(2))
+        return ps.div()[iterable]
+
+    r = Resolver()
+    root = RenderNode(View.fn)
+    _ = r.render_tree(root, View(), path="", relative_path="")
+
+
+def test_string_child_is_not_treated_as_iterable():
+    @ps.component
+    def View():
+        return ps.div()["abc"]
+
+    vdom, _ = Resolver().render_tree(RenderNode(View.fn), View(), "", "")
+    assert vdom == {"tag": "div", "children": ["abc"]}
+
+
+def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
+    order = {"keys": ["x", "y"]}
+
+    class C(ps.State):
+        n: int = 0
+
+        def __init__(self, label: str):
+            self._label = label
+
+        def inc(self):
+            self.n += 1
+
+    @ps.component
+    def Item(label: str):
+        s = ps.states(C(label))
+        return ps.div(ps.span(f"{label}:{s.n}"), ps.button(onClick=s.inc)["+"])
+
+    @ps.component
+    def List():
+        # Provide children as a single iterable to exercise flattening path
+        iterable = (Item(key=k, label=k) for k in order["keys"])
+        return ps.div()[iterable]
+
+    root = RenderRoot(List)
+    first = root.render_diff()
+    assert first.ops and first.ops[0]["type"] == "insert"
+
+    # bump 'x' once
+    first.callbacks["0.1.onClick"].fn()
+    second = root.render_diff()
+    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["x:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["y:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # reorder: move 'x' to the end
+    order["keys"] = ["y", "x"]
+    third = root.render_diff()
+    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
+    assert vdom == {
+        "tag": "div",
+        "children": [
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["y:0"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+            {
+                "tag": "div",
+                "children": [
+                    {"tag": "span", "children": ["x:1"]},
+                    {
+                        "tag": "button",
+                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "children": ["+"],
+                    },
+                ],
+            },
+        ],
+    }

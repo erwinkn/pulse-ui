@@ -3,12 +3,10 @@ from dataclasses import dataclass, field
 import dataclasses
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, TypedDict
-import time
+from typing import Optional
 from uuid import uuid4
 
 import pulse as ps
-from pulse.codegen import CodegenConfig
 
 
 # Data Models and Helpers
@@ -877,5 +875,5 @@ app = ps.App(
             ],
         )
     ],
-    codegen=CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )

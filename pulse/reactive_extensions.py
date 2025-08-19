@@ -1,3 +1,4 @@
+from __future__ import annotations # required to use dataclasses._DataclassT in this file
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import MISSING as _DC_MISSING
 from dataclasses import dataclass as _dc_dataclass

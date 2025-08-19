@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 import pytest
 from pulse import (
     Signal,
@@ -8,6 +9,7 @@ from pulse import (
     effect,
     Untrack,
 )
+from pulse import reactive
 from pulse.reactive import Batch, flush_effects
 from pulse.reactive_extensions import (
     ReactiveDict,
@@ -608,6 +610,7 @@ def test_effect_unset_batch_after_run():
 
 def test_effect_rescheduling_itself():
     s = Signal(0)
+
     @effect
     def e():
         if s() < 10:
@@ -615,7 +618,8 @@ def test_effect_rescheduling_itself():
 
     flush_effects()
     assert s() == 10
-    assert e.runs == 11 # 10 increment runs + 1 run without a write
+    assert e.runs == 11  # 10 increment runs + 1 run without a write
+
 
 def test_effect_doesnt_rerun_if_read_after_write():
     s = Signal(0)
@@ -634,7 +638,6 @@ def test_effect_doesnt_rerun_if_read_after_write():
 
     flush_effects()
     assert e.runs == 2
-
 
 
 def test_reactive_dict_basic_reads_and_writes():
@@ -834,13 +837,15 @@ def test_reactive_dataclass_fields_are_signals_and_wrapped():
 
 
 def test_nested_reactive_dict_and_list_deep_reactivity():
-    ctx = ReactiveDict(
-        {
-            "user": {
-                "name": "Ada",
-                "tags": ["a", "b"],
+    ctx: dict[str, Any] = reactive(
+        (
+            {
+                "user": {
+                    "name": "Ada",
+                    "tags": ["a", "b"],
+                }
             }
-        }
+        )
     )
 
     # ensure wrapping

@@ -10,12 +10,10 @@ import functools
 from types import NoneType
 from typing import (
     Any,
-    Coroutine,
     NamedTuple,
     NotRequired,
     Optional,
     Callable,
-    Protocol,
     Sequence,
     TypedDict,
     Union,

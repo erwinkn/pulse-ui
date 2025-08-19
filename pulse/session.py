@@ -264,7 +264,7 @@ class Session:
                             )
                         )
 
-        print(f"Mounting '{path}'")
+        # print(f"Mounting '{path}'")
         with self.reactive_context:
             ctx.effect = Effect(
                 _render_effect,
@@ -291,7 +291,7 @@ class Session:
     def unmount(self, path: str):
         if path not in self.render_contexts:
             return
-        print(f"Unmounting '{path}'")
+        # print(f"Unmounting '{path}'")
         active_route = self.render_contexts.pop(path)
         with active_route:
             try:

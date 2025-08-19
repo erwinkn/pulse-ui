@@ -1,6 +1,6 @@
-from typing import Literal, NotRequired, Optional, TypedDict, Unpack
+from typing import Literal, Optional, TypedDict, Unpack
 from pulse.html.attributes import HTMLAnchorProps
-from pulse.vdom import NodeTree
+from pulse.vdom import Child
 from ..react_component import DEFAULT, react_component
 
 
@@ -12,7 +12,7 @@ class LinkPath(TypedDict):
 
 @react_component("Link", "react-router")
 def Link(
-    *children: NodeTree,
+    *children: Child,
     key: Optional[str] = None,
     to: str,
     # Default: render

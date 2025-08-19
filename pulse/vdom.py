@@ -32,8 +32,8 @@ from typing import (
 PrimitiveNode = Union[str, int, float, None]
 NodeTree = Union["Node", "ComponentNode", PrimitiveNode]
 # A child can be a NodeTree or any iterable yielding children (e.g., generators)
-ChildItem = Union[NodeTree, _Iterable[NodeTree]]
-Children = Sequence[ChildItem]
+Child = Union[NodeTree, _Iterable[NodeTree]]
+Children = Sequence[Child]
 
 P = ParamSpec("P")
 
@@ -96,7 +96,7 @@ class Node:
 
     def __getitem__(
         self,
-        children_arg: Union[ChildItem, tuple[ChildItem, ...]],
+        children_arg: Union[Child, tuple[Child, ...]],
     ):
         """Support indexing syntax: div()[children] or div()["text"]
 
@@ -107,7 +107,7 @@ class Node:
             raise ValueError(f"Node already has children: {self.children}")
 
         if isinstance(children_arg, tuple):
-            new_children = cast(list[ChildItem], list(children_arg))
+            new_children = cast(list[Child], list(children_arg))
         else:
             new_children = [children_arg]
 
@@ -198,7 +198,7 @@ def _pretty_repr(node: NodeTree):
 
 
 def _short_children(
-    children: Sequence[ChildItem] | None, max_items: int = 4
+    children: Sequence[Child] | None, max_items: int = 4
 ) -> list[str] | str:
     if not children:
         return []
@@ -255,14 +255,14 @@ class ComponentNode:
         self.key = key
         self.name = name or _infer_component_name(fn)
 
-    def __getitem__(self, children_arg: Union[ChildItem, tuple[ChildItem, ...]]):
+    def __getitem__(self, children_arg: Union[Child, tuple[Child, ...]]):
         if "children" in self.kwargs and self.kwargs.get("children"):
             raise ValueError(
                 f"Component {self.name} already has children: {self.kwargs.get('children')}"
             )
         kwargs = self.kwargs.copy()
         if isinstance(children_arg, tuple):
-            new_children = cast(list[ChildItem], list(children_arg))
+            new_children = cast(list[Child], list(children_arg))
         else:
             new_children = [children_arg]
         kwargs["children"] = new_children

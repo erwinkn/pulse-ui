@@ -38,7 +38,7 @@ from pulse.react_component import (
     DEFAULT,
 )
 from pulse.tests.test_utils import assert_node_equal
-from pulse.vdom import NodeTree
+from pulse.vdom import Child, NodeTree
 
 
 class TestReactComponent:
@@ -347,7 +347,7 @@ class TestComponentIntegrationWithHTML:
 
 
 def test_parse_typed_dict_props_no_var_kw():
-    def fn(*children: NodeTree, key: Optional[str] = None):
+    def fn(*children: Child, key: Optional[str] = None):
         return cast(NodeTree, None)
 
     var_kw = None
@@ -357,7 +357,7 @@ def test_parse_typed_dict_props_no_var_kw():
 
 
 def test_parse_typed_dict_props_untyped_kwargs_all_allowed():
-    def fn(*children: NodeTree, key: Optional[str] = None, **props):
+    def fn(*children: Child, key: Optional[str] = None, **props):
         return cast(NodeTree, None)
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -368,7 +368,7 @@ def test_parse_typed_dict_props_untyped_kwargs_all_allowed():
 
 
 def test_parse_typed_dict_props_non_unpack_annotation_raises():
-    def fn(*children: NodeTree, key: Optional[str] = None, **props: Any):
+    def fn(*children: Child, key: Optional[str] = None, **props: Any):
         return cast(NodeTree, None)
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -382,7 +382,7 @@ def test_parse_typed_dict_props_unpack_must_wrap_typeddict():
     class NotTD:
         a: int
 
-    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[NotTD]):  # type: ignore
+    def fn(*children: Child, key: Optional[str] = None, **props: Unpack[NotTD]):  # type: ignore
         return cast(NodeTree, None)
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -395,7 +395,7 @@ def test_parse_typed_dict_props_required_and_optional_inference():
         a: int
         b: NotRequired[str]
 
-    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[P1]):
+    def fn(*children: Child, key: Optional[str] = None, **props: Unpack[P1]):
         return cast(NodeTree, None)
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -414,7 +414,7 @@ def test_total_false_with_required_wrapper():
         a: Required[int]
         b: str
 
-    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[P2]):
+    def fn(*children: Child, key: Optional[str] = None, **props: Unpack[P2]):
         return cast(NodeTree, None)
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -433,7 +433,7 @@ def test_parse_typed_dict_props_annotated_with_prop_metadata_and_default():
     class P3(TypedDict):
         a: Annotated[int, prop(default_factory=lambda: 7, serialize=serialize_obj)]
 
-    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[P3]):
+    def fn(*children: Child, key: Optional[str] = None, **props: Unpack[P3]):
         return cast(NodeTree, None)
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -449,7 +449,7 @@ def test_parse_typed_dict_props_annotated_prop_cannot_set_required():
     class P4(TypedDict):
         a: Annotated[int, Prop(required=True)]
 
-    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[P4]):
+    def fn(*children: Child, key: Optional[str] = None, **props: Unpack[P4]):
         return cast(NodeTree, None)
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -468,7 +468,7 @@ def test_parse_fn_signature_no_children_annotation():
 
 
 def test_parse_fn_signature_requires_key_param():
-    def bad(*children: NodeTree):
+    def bad(*children: Child):
         return cast(NodeTree, None)
 
     with pytest.raises(ValueError, match=r"must define a `key: str \| None = None`"):
@@ -476,7 +476,7 @@ def test_parse_fn_signature_requires_key_param():
 
 
 def test_parse_fn_signature_key_must_default_to_none():
-    def bad(*children: NodeTree, key: Optional[str] = "abc"):
+    def bad(*children: Child, key: Optional[str] = "abc"):
         return cast(NodeTree, None)
 
     with pytest.raises(ValueError, match=r"'key' parameter must default to None"):
@@ -484,7 +484,7 @@ def test_parse_fn_signature_key_must_default_to_none():
 
 
 def test_parse_fn_signature_disallow_positional_only_params():
-    def bad(a, /, *children: NodeTree, key: Optional[str] = None):
+    def bad(a, /, *children: Child, key: Optional[str] = None):
         return cast(NodeTree, None)
 
     with pytest.raises(
@@ -496,16 +496,16 @@ def test_parse_fn_signature_disallow_positional_only_params():
 
 def test_parse_fn_signature_children_annotation_must_be_nodetree():
     def bad(*children: int, key: Optional[str] = None):
-        return cast(NodeTree, None)
+        ...
 
     with pytest.raises(
-        TypeError, match=r"\*children must be annotated as `\*children: NodeTree`"
+        TypeError, match=r"\*children must be annotated as `\*children: ps.Child`"
     ):
         parse_fn_signature(bad)
 
 
 def test_parse_fn_signature_additional_required_positional_is_disallowed():
-    def bad(x, *children: NodeTree, key: Optional[str] = None):
+    def bad(x, *children: Child, key: Optional[str] = None):
         return cast(NodeTree, None)
 
     with pytest.raises(
@@ -516,7 +516,7 @@ def test_parse_fn_signature_additional_required_positional_is_disallowed():
 
 def test_parse_fn_signature_annotated_param_with_prop_metadata_is_disallowed():
     def bad(
-        *children: NodeTree,
+        *children: Child,
         key: Optional[str] = None,
         title: Annotated[str, prop(default="hi")],
     ):
@@ -531,7 +531,7 @@ def test_parse_fn_signature_explicit_and_unpack_overlap_raises():
         title: str
 
     def bad(
-        *children: NodeTree,
+        *children: Child,
         key: Optional[str] = None,
         title: str = "t",
         **props: Unpack[P],  # type: ignore
@@ -549,7 +549,7 @@ def test_parse_fn_signature_builds_propspec_from_annotation_and_defaults():
         count: Required[int]
 
     def good(
-        *children: NodeTree,
+        *children: Child,
         key: Optional[str] = None,
         title: str = DEFAULT_TITLE_PROP,
         disabled: bool = False,
@@ -575,7 +575,7 @@ def test_react_component_decorator_explicit_props_and_children():
 
     @react_component(tag="Card", import_="./Card", alias="card")
     def Card(
-        *children: NodeTree,
+        *children: Child,
         key: Optional[str] = None,
         title: str = TITLE_DEFAULT,
         disabled: bool = False,
@@ -602,7 +602,7 @@ def test_react_component_decorator_typed_dict_unpack_and_mapping():
 
     @react_component(tag="Badge", import_="./Badge")
     def Badge(
-        *children: NodeTree,
+        *children: Child,
         key: Optional[str] = None,
         disabled: bool = False,
         **props: Unpack[Props],
@@ -632,12 +632,12 @@ def test_react_component_decorator_default_export_and_alias_rules():
         @react_component(
             tag="DefaultComp", import_="./Comp", alias="x", is_default=True
         )
-        def _Bad(*children: NodeTree, key: Optional[str] = None) -> NodeTree:
+        def _Bad(*children: Child, key: Optional[str] = None) -> NodeTree:
             return cast(NodeTree, None)
 
     # default export allowed without alias
     @react_component(tag="DefaultComp", import_="./Comp", is_default=True)
-    def DefaultComp(*children: NodeTree, key: Optional[str] = None) -> NodeTree:
+    def DefaultComp(*children: Child, key: Optional[str] = None) -> NodeTree:
         return cast(NodeTree, None)
 
     node = DefaultComp()
@@ -646,7 +646,7 @@ def test_react_component_decorator_default_export_and_alias_rules():
 
 def test_react_component_decorator_key_validation():
     @react_component(tag="Box", import_="./Box")
-    def Box(*children: NodeTree, key: Optional[str] = None) -> NodeTree:
+    def Box(*children: Child, key: Optional[str] = None) -> NodeTree:
         return cast(NodeTree, None)
 
     # Non-string key should raise
@@ -662,7 +662,7 @@ def test_react_component_decorator_key_validation():
 def test_react_component_decorator_untyped_kwargs_allows_unknown():
     @react_component(tag="Pane", import_="./Pane")
     def Pane(
-        *children: NodeTree, key: Optional[str] = None, disabled: bool = False, **props
+        *children: Child, key: Optional[str] = None, disabled: bool = False, **props
     ) -> NodeTree:
         return cast(NodeTree, None)
 
@@ -675,7 +675,7 @@ def test_react_component_decorator_untyped_kwargs_allows_unknown():
 def test_default_sentinel_omits_explicit_prop():
     @react_component(tag="Card", import_="./Card", alias="card-default-explicit")
     def Card(
-        *children: NodeTree,
+        *children: Child,
         key: Optional[str] = None,
         title: str = "Untitled",
         disabled: bool = DEFAULT,
@@ -702,7 +702,7 @@ def test_default_sentinel_omits_unpack_prop_and_skips_serialize():
 
     @react_component(tag="Badge", import_="./Badge", alias="badge-default-unpack")
     def Badge(
-        *children: NodeTree,
+        *children: Child,
         key: Optional[str] = None,
         **props: Unpack[Props],
     ) -> NodeTree:
@@ -717,7 +717,7 @@ def test_default_sentinel_omits_unpack_prop_and_skips_serialize():
 def test_default_sentinel_omits_unknown_when_untyped_kwargs():
     @react_component(tag="Pane", import_="./Pane", alias="pane-default-unknown")
     def Pane(
-        *children: NodeTree, key: Optional[str] = None, disabled: bool = False, **props
+        *children: Child, key: Optional[str] = None, disabled: bool = False, **props
     ) -> NodeTree:
         return cast(NodeTree, None)
 
@@ -735,7 +735,7 @@ def test_default_sentinel_props_in_fn_and_typed_dict():
 
     @react_component(tag="Pane", import_="./Pane", alias="pane")
     def Pane(
-        *children: NodeTree,
+        *children: Child,
         key: Optional[str] = None,
         disabled: bool = DEFAULT,
         **props: Unpack[PaneProps],
@@ -759,8 +759,8 @@ def test_parse_typed_dict_props_inheritance_two_levels():
     class FinalProps(MidProps):
         e: NotRequired[Annotated[int, prop(map_to="ee")]]
 
-    def fn(*children: NodeTree, key: Optional[str] = None, **props: Unpack[FinalProps]):
-        return cast(NodeTree, None)
+    def fn(*children: Child, key: Optional[str] = None, **props: Unpack[FinalProps]):
+        ...
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
     spec = parse_typed_dict_props(var_kw)

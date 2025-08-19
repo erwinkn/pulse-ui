@@ -296,7 +296,7 @@ class App:
     def create_session(self, id: str):
         if id in self.sessions:
             raise ValueError(f"Session {id} already exists")
-        print(f"--> Creating session {id}")
+        # print(f"--> Creating session {id}")
         self.sessions[id] = Session(id, self.routes)
         return self.sessions[id]
 

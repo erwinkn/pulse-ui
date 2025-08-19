@@ -16,7 +16,7 @@ from pulse.vdom import (
     VDOM,
     Callback,
     Callbacks,
-    ChildItem,
+    Child,
     ComponentNode,
     Node,
     NodeTree,
@@ -473,7 +473,7 @@ def _flatten_children(
 ) -> list[NodeTree]:
     flat: list[NodeTree] = []
 
-    def visit(item: ChildItem) -> None:
+    def visit(item: Child) -> None:
         if isinstance(item, Iterable) and not isinstance(item, str):
             # If any Node/ComponentNode yielded by this iterable lacks a key,
             # emit a single warning for this iterable.
@@ -574,4 +574,3 @@ def join_path(prefix: str, path: str | int):
         return f"{prefix}.{path}"
     else:
         return str(path)
-

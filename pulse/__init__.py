@@ -174,5 +174,6 @@ from .react_component import (
     registered_react_components,
     Prop,
     prop,
+    DEFAULT,
 )
 from .helpers import EventHandler, For

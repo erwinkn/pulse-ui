@@ -50,10 +50,10 @@ from pulse.html.attributes import (
     HTMLTrackProps,
     HTMLVideoProps,
 )
-from pulse.vdom import Node, NodeTree
+from pulse.vdom import Child, Node
 
 class Tag(Protocol):
-    def __call__(self, *children: NodeTree, **props) -> Node: ...
+    def __call__(self, *children: Child, **props) -> Node: ...
 
 def define_tag(
     name: str,
@@ -83,294 +83,294 @@ def wbr(*, key: Optional[str] = None, **props: Unpack[HTMLProps]) -> Node: ...
 # --- Regular tags ---
 
 def a(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLAnchorProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLAnchorProps]
 ) -> Node: ...
 def abbr(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def address(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def article(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def aside(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def audio(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLAudioProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLAudioProps]
 ) -> Node: ...
 def b(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def bdi(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def bdo(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def blockquote(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLBlockquoteProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLBlockquoteProps]
 ) -> Node: ...
 def body(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def button(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLButtonProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLButtonProps]
 ) -> Node: ...
 def canvas(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLCanvasProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLCanvasProps]
 ) -> Node: ...
 def caption(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def cite(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def code(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def colgroup(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLColgroupProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLColgroupProps]
 ) -> Node: ...
 def data(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLDataProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLDataProps]
 ) -> Node: ...
 def datalist(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def dd(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def del_(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLDelProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLDelProps]
 ) -> Node: ...
 def details(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLDetailsProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLDetailsProps]
 ) -> Node: ...
 def dfn(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def dialog(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLDialogProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLDialogProps]
 ) -> Node: ...
 def div(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def dl(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def dt(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def em(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def fieldset(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLFieldsetProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLFieldsetProps]
 ) -> Node: ...
 def figcaption(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def figure(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def footer(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def form(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLFormProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLFormProps]
 ) -> Node: ...
 def h1(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def h2(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def h3(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def h4(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def h5(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def h6(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def head(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def header(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def hgroup(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def html(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLHtmlProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLHtmlProps]
 ) -> Node: ...
 def i(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def iframe(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLIframeProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLIframeProps]
 ) -> Node: ...
 def ins(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLInsProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLInsProps]
 ) -> Node: ...
 def kbd(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def label(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLLabelProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLLabelProps]
 ) -> Node: ...
 def legend(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def li(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLLiProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLLiProps]
 ) -> Node: ...
 def main(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def map_(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLMapProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLMapProps]
 ) -> Node: ...
 def mark(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def menu(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLMenuProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLMenuProps]
 ) -> Node: ...
 def meter(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLMeterProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLMeterProps]
 ) -> Node: ...
 def nav(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def noscript(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def object_(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLObjectProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLObjectProps]
 ) -> Node: ...
 def ol(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLOlProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLOlProps]
 ) -> Node: ...
 def optgroup(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLOptgroupProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLOptgroupProps]
 ) -> Node: ...
 def option(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLOptionProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLOptionProps]
 ) -> Node: ...
 def output(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLOutputProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLOutputProps]
 ) -> Node: ...
 def p(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def picture(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def pre(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def progress(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProgressProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProgressProps]
 ) -> Node: ...
 def q(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLQuoteProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLQuoteProps]
 ) -> Node: ...
 def rp(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def rt(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def ruby(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def s(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def samp(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def script(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLScriptProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLScriptProps]
 ) -> Node: ...
 def section(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def select(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLSelectProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSelectProps]
 ) -> Node: ...
 def small(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def span(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def strong(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def style(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLStyleProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLStyleProps]
 ) -> Node: ...
 def sub(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def summary(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def sup(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def table(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLTableProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLTableProps]
 ) -> Node: ...
 def tbody(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def td(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLTdProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLTdProps]
 ) -> Node: ...
 def template(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def textarea(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLTextareaProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLTextareaProps]
 ) -> Node: ...
 def tfoot(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def th(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLThProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLThProps]
 ) -> Node: ...
 def thead(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def time(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLTimeProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLTimeProps]
 ) -> Node: ...
 def title(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def tr(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def u(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def ul(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def var(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def video(
-    *children: NodeTree, key: Optional[str] = None, **props: Unpack[HTMLVideoProps]
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLVideoProps]
 ) -> Node: ...
-def fragment(*children: NodeTree, key: Optional[str] = None) -> Node: ...
+def fragment(*children: Child, key: Optional[str] = None) -> Node: ...

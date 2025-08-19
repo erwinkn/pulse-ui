@@ -24,7 +24,7 @@ from typing import (
 from types import UnionType
 import typing
 from pulse.helpers import Sentinel
-from pulse.vdom import Node, NodeTree
+from pulse.vdom import Child, Node, NodeTree
 
 
 T = TypeVar("T")
@@ -200,7 +200,7 @@ class PropSpec:
 
 
 def default_signature(
-    *children: NodeTree, key: Optional[str] = None, **props
+    *children: Child, key: Optional[str] = None, **props
 ) -> NodeTree: ...
 def default_fn_signature_without_children(
     key: Optional[str] = None, **props
@@ -280,7 +280,7 @@ class ReactComponent(Generic[P]):
             tag=f"$${self.key}",
             key=key,
             props=real_props,
-            children=cast(tuple[NodeTree], children),
+            children=cast(tuple[Child], children),
             lazy=self.lazy,
         )
 
@@ -378,9 +378,9 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
     # Validate *children annotation if present
     if var_positional is not None:
         annotation = var_positional.annotation
-        if annotation is not inspect._empty and annotation is not NodeTree:
+        if annotation is not inspect._empty and annotation is not Child:
             raise TypeError(
-                f"*{var_positional.name} must be annotated as `*{var_positional.name}: NodeTree`"
+                f"*{var_positional.name} must be annotated as `*{var_positional.name}: ps.Child`"
             )
 
     # Validate `key`` argument

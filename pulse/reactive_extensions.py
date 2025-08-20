@@ -1,12 +1,16 @@
-from __future__ import annotations # required to use dataclasses._DataclassT in this file
+from __future__ import (
+    annotations,
+)  # required to use dataclasses._DataclassT in this file
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import MISSING as _DC_MISSING
 from dataclasses import dataclass as _dc_dataclass
 from dataclasses import fields as _dc_fields
 from dataclasses import is_dataclass
-import dataclasses
+from dataclasses import InitVar as _DC_InitVar
+from dataclasses import FrozenInstanceError as _DC_FrozenInstanceError
 from typing import Any as _Any, Optional
 from typing import Callable, Generic, TypeVar, overload, cast
+import weakref
 
 from pulse.reactive import Signal
 
@@ -318,6 +322,98 @@ class ReactiveSet(set[T1]):
 _MISSING = object()
 
 
+# Fallback storage for signal instances on objects that cannot hold attributes
+# (e.g., slotted dataclasses). Keys are object ids; entries are cleaned up via
+# a weakref finalizer when possible. This avoids requiring objects to be hashable.
+_INSTANCE_SIGNAL_STORE_BY_ID: dict[int, dict[str, Signal]] = {}
+_INSTANCE_STORE_WEAKREFS: dict[int, weakref.ref] = {}
+
+# Cache mapping original dataclass type -> generated reactive dataclass subclass
+_REACTIVE_DATACLASS_CACHE: dict[type, type] = {}
+
+# Track objects currently initializing via dataclass __init__ or reactive upgrade
+_INITIALIZING_OBJECT_IDS: set[int] = set()
+
+
+def _copy_dataclass_params(parent: type) -> dict[str, _Any]:
+    params = getattr(parent, "__dataclass_params__", None)
+    if params is None:
+        return {}
+    copied: dict[str, _Any] = {}
+    for key in (
+        "init",
+        "repr",
+        "eq",
+        "order",
+        "unsafe_hash",
+        "frozen",
+        "match_args",
+        "kw_only",
+        "slots",
+        "weakref_slot",
+    ):
+        if hasattr(params, key):
+            copied[key] = getattr(params, key)
+    return copied
+
+
+def _get_reactive_dataclass_class(parent: type) -> type:
+    # Already reactive?
+    if getattr(parent, "__is_reactive_dataclass__", False):
+        return parent
+    cached = _REACTIVE_DATACLASS_CACHE.get(parent)
+    if cached is not None:
+        return cached
+    if not is_dataclass(parent):
+        raise TypeError("_get_reactive_dataclass_class expects a dataclass type")
+
+    subclass_name = f"Reactive{parent.__name__}"
+    subclass = type(
+        subclass_name,
+        (parent,),
+        {
+            "__module__": parent.__module__,
+            "__doc__": getattr(parent, "__doc__", None),
+        },
+    )
+
+    # Mirror parent dataclass parameters when generating dataclass on subclass
+    dc_kwargs = _copy_dataclass_params(parent)
+    reactive_subclass = reactive_dataclass(subclass, **dc_kwargs)  # type: ignore[arg-type]
+    setattr(reactive_subclass, "__is_reactive_dataclass__", True)
+    setattr(reactive_subclass, "__reactive_base__", parent)
+
+    # Hide InitVar attributes on instances by shadowing with a descriptor that raises
+    class _HiddenInitVar:
+        def __get__(self, obj, objtype=None):
+            raise AttributeError
+
+    parent_annotations = getattr(parent, "__annotations__", {}) or {}
+    for _name, _anno in parent_annotations.items():
+        # Detect dataclasses.InitVar annotations (e.g., InitVar[int])
+        try:
+            if isinstance(_anno, _DC_InitVar):
+                setattr(reactive_subclass, _name, _HiddenInitVar())
+        except Exception:
+            pass
+
+    # Wrap __init__ to allow field assignment during construction even if frozen
+    original_init = getattr(reactive_subclass, "__init__", None)
+    if callable(original_init):
+
+        def _wrapped_init(self, *args, **kwargs):
+            _INITIALIZING_OBJECT_IDS.add(id(self))
+            try:
+                return original_init(self, *args, **kwargs)
+            finally:
+                _INITIALIZING_OBJECT_IDS.discard(id(self))
+
+        setattr(reactive_subclass, "__init__", _wrapped_init)
+
+    _REACTIVE_DATACLASS_CACHE[parent] = reactive_subclass
+    return reactive_subclass
+
+
 class ReactiveProperty(Generic[T1]):
     """Unified reactive descriptor used for State fields and dataclass fields."""
 
@@ -334,12 +430,44 @@ class ReactiveProperty(Generic[T1]):
 
     def _get_signal(self, obj) -> Signal[T1]:
         priv = cast(str, self.private_name)
-        sig = getattr(obj, priv, None)
+        # Try fast path: attribute on the instance
+        try:
+            sig = getattr(obj, priv)
+        except AttributeError:
+            sig = None
+
+        # Fallback store for slotted instances (no __dict__) using id(obj)
+        if sig is None:
+            per_obj = _INSTANCE_SIGNAL_STORE_BY_ID.get(id(obj))
+            if per_obj is not None:
+                sig = per_obj.get(priv)
+
         if sig is None:
             init_value = None if self.default is _MISSING else self.default
             sig = Signal(init_value, name=f"{self.owner_name}.{self.name}")
-            setattr(obj, priv, sig)
-        return sig  # type: ignore
+            # Try to attach to the instance; if that fails (e.g., __slots__), use fallback store
+            try:
+                setattr(obj, priv, sig)
+            except Exception:
+                obj_id = id(obj)
+                mapping = _INSTANCE_SIGNAL_STORE_BY_ID.get(obj_id)
+                if mapping is None:
+                    mapping = {}
+                    _INSTANCE_SIGNAL_STORE_BY_ID[obj_id] = mapping
+                    # Install a weakref to clean up when object is GC'd
+                    try:
+                        _INSTANCE_STORE_WEAKREFS[obj_id] = weakref.ref(
+                            obj,
+                            lambda _r, oid=obj_id: (
+                                _INSTANCE_SIGNAL_STORE_BY_ID.pop(oid, None),
+                                _INSTANCE_STORE_WEAKREFS.pop(oid, None),
+                            ),
+                        )
+                    except TypeError:
+                        # Object not weakref-able; best effort leak-free by reusing id slot if recreated
+                        pass
+                mapping[priv] = sig
+        return cast(Signal[T1], sig)
 
     def __get__(self, obj, objtype=None) -> T1:
         if obj is None:
@@ -364,22 +492,42 @@ class ReactiveProperty(Generic[T1]):
         return self._get_signal(obj)
 
 
+class DataclassReactiveProperty(ReactiveProperty[T1]):
+    """Reactive descriptor for dataclass fields with frozen enforcement."""
+
+    def __init__(self, name: str | None = None, default: Optional[T1] = _MISSING):
+        super().__init__(name, default)
+        self.owner_cls: type | None = None
+
+    def __set_name__(self, owner, name):
+        super().__set_name__(owner, name)
+        self.owner_cls = owner
+
+    def __set__(self, obj, value: T1) -> None:  # type: ignore[override]
+        # Enforce frozen dataclasses semantics
+        owner = self.owner_cls or obj.__class__
+        params = getattr(owner, "__dataclass_params__", None)
+        if (
+            params is not None
+            and getattr(params, "frozen", False)
+            and id(obj) not in _INITIALIZING_OBJECT_IDS
+        ):
+            # Match dataclasses' message
+            raise _DC_FrozenInstanceError(f"cannot assign to field '{self.name}'")
+        super().__set__(obj, value)
+
+
 @overload
-def reactive_dataclass(
-    cls: type[dataclasses._DataclassT], /, **dataclass_kwargs
-) -> type[dataclasses._DataclassT]: ...
+def reactive_dataclass(cls: type, /, **dataclass_kwargs) -> type: ...
 @overload
 def reactive_dataclass(
     **dataclass_kwargs,
-) -> Callable[[type[dataclasses._DataclassT]], type[dataclasses._DataclassT]]: ...
+) -> Callable[[type], type]: ...
 
 
 def reactive_dataclass(
-    cls: type[dataclasses._DataclassT] | None = None, /, **dataclass_kwargs
-) -> (
-    Callable[[type[dataclasses._DataclassT]], type[dataclasses._DataclassT]]
-    | type[dataclasses._DataclassT]
-):
+    cls: type | None = None, /, **dataclass_kwargs
+) -> Callable[[type], type] | type:
     """Decorator to make a dataclass' fields reactive.
 
     Usage:
@@ -393,18 +541,18 @@ def reactive_dataclass(
     """
 
     def _wrap(
-        cls_param: type[dataclasses._DataclassT],
-    ) -> type[dataclasses._DataclassT]:
+        cls_param: type,
+    ) -> type:
         # ensure it's a dataclass
         klass = cls_param
         if not is_dataclass(klass):
             klass = _dc_dataclass(klass, **dataclass_kwargs)
 
-        # Replace fields with ReactiveProperty descriptors
+        # Replace fields with DataclassReactiveProperty descriptors
         for f in _dc_fields(klass):  # type: ignore[arg-type]
             # Skip ClassVars or InitVars implicitly as dataclasses excludes them from fields()
             default_val = f.default if f.default is not _DC_MISSING else _MISSING
-            rp = ReactiveProperty(f.name, default_val)
+            rp = DataclassReactiveProperty(f.name, default_val)
             setattr(klass, f.name, rp)
             # When assigning descriptors post-class-creation, __set_name__ is not called automatically
             rp.__set_name__(klass, f.name)
@@ -439,6 +587,34 @@ def reactive(value: _Any) -> _Any:
     """
     if isinstance(value, ReactiveDict | ReactiveList | ReactiveSet):
         return value
+    # Dataclass instance: upgrade to reactive subclass in-place
+    if not isinstance(value, type) and is_dataclass(value):
+        # Already reactive instance?
+        if getattr(type(value), "__is_reactive_dataclass__", False):
+            return value
+        base_cls = cast(type, type(value))
+        reactive_cls = _get_reactive_dataclass_class(base_cls)
+        # Capture current field values
+        field_values: dict[str, _Any] = {}
+        for f in _dc_fields(base_cls):  # type: ignore[arg-type]
+            try:
+                field_values[f.name] = getattr(value, f.name)
+            except Exception:
+                field_values[f.name] = None
+        # For dict-backed instances, drop raw attrs to avoid stale shadowing
+        if hasattr(value, "__dict__") and isinstance(value.__dict__, dict):
+            for name in field_values.keys():
+                value.__dict__.pop(name, None)
+        # Swap class
+        value.__class__ = reactive_cls  # type: ignore[assignment]
+        # Write back via descriptors (handles frozen via object.__setattr__)
+        _INITIALIZING_OBJECT_IDS.add(id(value))
+        try:
+            for name, v in field_values.items():
+                object.__setattr__(value, name, reactive(v))
+        finally:
+            _INITIALIZING_OBJECT_IDS.discard(id(value))
+        return value
     if isinstance(value, dict):
         return ReactiveDict(value)
     if isinstance(value, list):
@@ -446,5 +622,5 @@ def reactive(value: _Any) -> _Any:
     if isinstance(value, set):
         return ReactiveSet(value)
     if isinstance(value, type) and is_dataclass(value):
-        return reactive_dataclass(value)
+        return _get_reactive_dataclass_class(value)
     return value

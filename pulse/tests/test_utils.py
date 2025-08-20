@@ -3,7 +3,7 @@ Test utilities for comparing VDOM trees and Node structures.
 """
 
 from typing import Any, Union
-from pulse.vdom import ComponentNode, Node, NodeTree, VDOMNode, PrimitiveNode
+from pulse.vdom import ComponentNode, Node, Element, VDOMNode, Primitive
 
 
 def normalize_vdom_node(node: VDOMNode) -> dict[str, Any]:
@@ -25,8 +25,8 @@ def normalize_vdom_node(node: VDOMNode) -> dict[str, Any]:
 
 
 def normalize_vdom_tree(
-    tree: Union[VDOMNode, PrimitiveNode],
-) -> Union[dict[str, Any], PrimitiveNode]:
+    tree: Union[VDOMNode, Primitive],
+) -> Union[dict[str, Any], Primitive]:
     """
     Normalize a VDOM tree (VDOMNode or primitive) for comparison.
     """
@@ -61,8 +61,8 @@ def normalize_node(node: Node) -> dict[str, Any]:
 
 
 def normalize_node_tree(
-    tree: NodeTree,
-) -> Union[dict[str, Any], PrimitiveNode]:
+    tree: Element,
+) -> Union[dict[str, Any], Primitive]:
     """
     Normalize a Node tree (Node or primitive) for comparison.
     """
@@ -72,7 +72,7 @@ def normalize_node_tree(
 
 
 def assert_vdom_equal(
-    actual: Union[VDOMNode, PrimitiveNode], expected: Union[VDOMNode, PrimitiveNode]
+    actual: Union[VDOMNode, Primitive], expected: Union[VDOMNode, Primitive]
 ):
     """
     Assert that two VDOM trees are semantically equal.
@@ -87,9 +87,7 @@ def assert_vdom_equal(
     )
 
 
-def assert_node_equal(
-    actual: Union[Node, PrimitiveNode], expected: Union[Node, PrimitiveNode]
-):
+def assert_node_equal(actual: Union[Node, Primitive], expected: Union[Node, Primitive]):
     """
     Assert that two Node trees are semantically equal.
 
@@ -101,5 +99,3 @@ def assert_node_equal(
     assert normalized_actual == normalized_expected, (
         f"Node trees not equal:\nActual: {normalized_actual}\nExpected: {normalized_expected}"
     )
-
-

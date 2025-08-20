@@ -2,12 +2,7 @@ from .app import App, Session
 from .state import State
 from .routing import Route, Layout
 from .reactive import Signal, Computed, Effect, Batch, Untrack, IgnoreBatch
-from .reactive_extensions import (
-    ReactiveDict,
-    ReactiveList,
-    ReactiveSet,
-    reactive
-)
+from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive
 from .hooks import (
     states,
     effects,
@@ -36,12 +31,13 @@ from .decorators import computed, effect, query
 # Import HTML tags and other UI components
 from .vdom import (
     Node,
-    NodeTree,
-    PrimitiveNode,
+    Element,
+    Primitive,
     VDOMNode,
     component,
     Component,
     ComponentNode,
+    Child,
 )
 from .html.tags import (
     # Standard HTML tags

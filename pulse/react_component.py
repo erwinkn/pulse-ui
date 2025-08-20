@@ -24,7 +24,7 @@ from typing import (
 from types import UnionType
 import typing
 from pulse.helpers import Sentinel
-from pulse.vdom import Child, Node, NodeTree
+from pulse.vdom import Child, Node, Element
 
 
 T = TypeVar("T")
@@ -201,10 +201,10 @@ class PropSpec:
 
 def default_signature(
     *children: Child, key: Optional[str] = None, **props
-) -> NodeTree: ...
+) -> Element: ...
 def default_fn_signature_without_children(
     key: Optional[str] = None, **props
-) -> NodeTree: ...
+) -> Element: ...
 
 
 class ReactComponent(Generic[P]):
@@ -231,7 +231,7 @@ class ReactComponent(Generic[P]):
         *,
         lazy: bool = False,
         props: Optional[PropSpec] = None,
-        fn_signature: Callable[P, NodeTree] = default_signature,
+        fn_signature: Callable[P, Element] = default_signature,
     ):
         self.tag = tag
         self.key = alias or tag
@@ -289,7 +289,7 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
     """Parse a function signature into a Props spec using a single pass.
 
     Rules:
-    - May accept var-positional children `*children` (if annotated, must be NodeTree)
+    - May accept var-positional children `*children` (if annotated, must be Child)
     - Must define `key: Optional[str] = None` (keyword-accepting)
     - Other props may be explicit keyword params and/or via **props: Unpack[TypedDict]
     - A prop may not be specified both explicitly and in the Unpack
@@ -644,13 +644,13 @@ def react_component(
     alias: str | None = None,
     is_default: bool = False,
     lazy: bool = False,
-) -> Callable[[Callable[P, None] | Callable[P, NodeTree]], ReactComponent[P]]:
+) -> Callable[[Callable[P, None] | Callable[P, Element]], ReactComponent[P]]:
     """
     Decorator to define a React component wrapper. The decorated function is
     passed to `ReactComponent`, which parses and validates its signature.
     """
 
-    def decorator(fn: Callable[P, None] | Callable[P, NodeTree]) -> ReactComponent[P]:
+    def decorator(fn: Callable[P, None] | Callable[P, Element]) -> ReactComponent[P]:
         return ReactComponent(
             tag=tag,
             import_path=import_,

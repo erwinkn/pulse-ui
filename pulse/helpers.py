@@ -1,6 +1,6 @@
 from typing import Any, Callable, Coroutine, Iterable, TypeVar, TypeVarTuple, Unpack
 
-from pulse.vdom import NodeTree
+from pulse.vdom import Element
 
 
 Args = TypeVarTuple("Args")
@@ -23,5 +23,5 @@ class Sentinel:
 T = TypeVar("T")
 
 
-def For(items: Iterable[T], fn: Callable[[T], NodeTree]):
+def For(items: Iterable[T], fn: Callable[[T], Element]):
     return [fn(item) for item in items]

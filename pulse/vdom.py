@@ -30,10 +30,10 @@ from typing import (
 # Core VDOM
 # ============================================================================
 
-PrimitiveNode = Union[str, int, float, None]
-NodeTree = Union["Node", "ComponentNode", PrimitiveNode]
-# A child can be a NodeTree or any iterable yielding children (e.g., generators)
-Child = Union[NodeTree, _Iterable[NodeTree]]
+Primitive = Union[str, int, float, None]
+Element = Union["Node", "ComponentNode", Primitive]
+# A child can be an Element or any iterable yielding children (e.g., generators)
+Child = Union[Element, _Iterable[Element]]
 Children = Sequence[Child]
 
 P = ParamSpec("P")
@@ -43,7 +43,7 @@ class VDOMNode(TypedDict):
     tag: str
     key: NotRequired[str]
     props: NotRequired[dict[str, Any]]  # does not include callbacks
-    children: "NotRequired[Sequence[VDOMNode | PrimitiveNode] | None]"
+    children: "NotRequired[Sequence[VDOMNode | Primitive] | None]"
     # Optional flag to indicate the element should be lazily loaded on the client
     lazy: NotRequired[bool]
 
@@ -58,7 +58,7 @@ def NOOP(*_args):
 
 
 Callbacks = dict[str, Callback]
-VDOM = Union[VDOMNode, PrimitiveNode]
+VDOM = Union[VDOMNode, Primitive]
 Props = dict[str, Any]
 
 
@@ -123,7 +123,7 @@ class Node:
     @staticmethod
     def from_vdom(
         vdom: VDOM, callbacks: Optional[Callbacks] = None
-    ) -> Union["Node", PrimitiveNode]:
+    ) -> Union["Node", Primitive]:
         """Create a Node tree from a VDOM structure.
 
         - Primitive values are returned as-is
@@ -151,10 +151,8 @@ class Node:
                     copied = True
                 props[k] = callback.fn
 
-        children_value: list[NodeTree] | None = None
-        raw_children = cast(
-            Sequence[VDOMNode | PrimitiveNode] | None, vdom.get("children")
-        )
+        children_value: list[Element] | None = None
+        raw_children = cast(Sequence[VDOMNode | Primitive] | None, vdom.get("children"))
         if raw_children is not None:
             children_value = []
             for raw_child in raw_children:
@@ -190,7 +188,7 @@ def _short_props(
     return {**head, "…": f"+{len(items) - (max_items - 1)} more"}
 
 
-def _pretty_repr(node: NodeTree):
+def _pretty_repr(node: Element):
     if isinstance(node, Node):
         return f"<{node.tag}>"
     if isinstance(node, ComponentNode):
@@ -223,7 +221,7 @@ def _short_children(
 
 
 class Component(Generic[P]):
-    def __init__(self, fn: Callable[P, NodeTree], name: Optional[str] = None) -> None:
+    def __init__(self, fn: Callable[P, Element], name: Optional[str] = None) -> None:
         self.fn = fn
         self.name = name or _infer_component_name(fn)
         self._takes_children = _takes_children(fn)
@@ -298,18 +296,18 @@ class ComponentNode:
 
 
 @overload
-def component(fn: Callable[P, NodeTree]) -> Component[P]: ...
+def component(fn: Callable[P, Element]) -> Component[P]: ...
 @overload
 def component(
     fn: None = None, *, name: Optional[str] = None
-) -> Callable[[Callable[P, NodeTree]], Component[P]]: ...
+) -> Callable[[Callable[P, Element]], Component[P]]: ...
 
 
 # The explicit return type is necessary for the type checker to be happy
 def component(
-    fn: Callable[P, NodeTree] | None = None, *, name: str | None = None
-) -> Component[P] | Callable[[Callable[P, NodeTree]], Component[P]]:
-    def decorator(fn: Callable[P, NodeTree]):
+    fn: Callable[P, Element] | None = None, *, name: str | None = None
+) -> Component[P] | Callable[[Callable[P, Element]], Component[P]]:
+    def decorator(fn: Callable[P, Element]):
         return Component(fn, name)
 
     if fn is not None:

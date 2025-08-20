@@ -8,6 +8,7 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 from __future__ import annotations
 import functools
 from types import NoneType
+import inspect
 from collections.abc import Iterable as _Iterable
 from typing import (
     Any,
@@ -225,12 +226,20 @@ class Component(Generic[P]):
     def __init__(self, fn: Callable[P, NodeTree], name: Optional[str] = None) -> None:
         self.fn = fn
         self.name = name or _infer_component_name(fn)
+        self._takes_children = _takes_children(fn)
 
-    def __call__(
-        self, key: Optional[str] = None, *args: P.args, **kwargs: P.kwargs
-    ) -> "ComponentNode":
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> "ComponentNode":
+        key = kwargs.get("key")
+        if key is not None:
+            key = str(key)
+
         return ComponentNode(
-            fn=self.fn, key=key, args=args, kwargs=kwargs, name=self.name
+            fn=self.fn,
+            key=key,
+            args=args,
+            kwargs=kwargs,
+            name=self.name,
+            takes_children=self._takes_children,
         )
 
     def __repr__(self) -> str:  # pragma: no cover - trivial formatting
@@ -248,29 +257,36 @@ class ComponentNode:
         kwargs: dict,
         name: Optional[str] = None,
         key: Optional[str] = None,
+        takes_children: bool = True,
     ) -> None:
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
         self.key = key
         self.name = name or _infer_component_name(fn)
+        self.takes_children = takes_children
 
     def __getitem__(self, children_arg: Union[Child, tuple[Child, ...]]):
-        if "children" in self.kwargs and self.kwargs.get("children"):
-            raise ValueError(
-                f"Component {self.name} already has children: {self.kwargs.get('children')}"
+        if not self.takes_children:
+            raise TypeError(
+                (
+                    f"Component {self.name} does not accept children. "
+                    "Update the component signature to include '*children' to allow children."
+                )
             )
-        kwargs = self.kwargs.copy()
-        if isinstance(children_arg, tuple):
-            new_children = cast(list[Child], list(children_arg))
-        else:
-            new_children = [children_arg]
-        kwargs["children"] = new_children
+        if self.args:
+            raise ValueError(
+                f"Component {self.name} already received positional arguments. Pass all arguments as keyword arguments in order to pass children using brackets."
+            )
+        if not isinstance(children_arg, tuple):
+            children_arg = (children_arg,)
         result = ComponentNode(
             fn=self.fn,
-            args=self.args,
-            kwargs=kwargs,
+            args=children_arg,
+            kwargs=self.kwargs,
             name=self.name,
+            key=self.key,
+            takes_children=self.takes_children,
         )
         return result
 
@@ -352,3 +368,16 @@ def _callable_qualname(fn: Callable[..., Any]) -> str:
         or "<callable>"
     )
     return f"{mod}.{qual}"
+
+
+def _takes_children(fn: Callable[..., Any]) -> bool:
+    # Lightweight check: children allowed iff function has a VAR_POSITIONAL (*args)
+    try:
+        sig = inspect.signature(fn)
+    except (ValueError, TypeError):
+        # Builtins or callables without inspectable signature: assume no children
+        return False
+    for p in sig.parameters.values():
+        if p.kind == inspect.Parameter.VAR_POSITIONAL:
+            return True
+    return False

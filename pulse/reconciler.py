@@ -1,8 +1,7 @@
 from dataclasses import dataclass
-from collections.abc import Iterable as _Iterable
 import warnings
 import inspect
-from typing import Callable, Iterable, Optional, Sequence, cast, TypeGuard
+from typing import Callable, Iterable, Optional, Sequence, cast
 from pulse.diff import (
     InsertOperation,
     RemoveOperation,

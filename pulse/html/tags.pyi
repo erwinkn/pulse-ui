@@ -110,7 +110,9 @@ def bdo(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def blockquote(
-    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLBlockquoteProps]
+    *children: Child,
+    key: Optional[str] = None,
+    **props: Unpack[HTMLBlockquoteProps],
 ) -> Node: ...
 def body(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
@@ -131,7 +133,9 @@ def code(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def colgroup(
-    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLColgroupProps]
+    *children: Child,
+    key: Optional[str] = None,
+    **props: Unpack[HTMLColgroupProps],
 ) -> Node: ...
 def data(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLDataProps]
@@ -146,7 +150,9 @@ def del_(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLDelProps]
 ) -> Node: ...
 def details(
-    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLDetailsProps]
+    *children: Child,
+    key: Optional[str] = None,
+    **props: Unpack[HTMLDetailsProps],
 ) -> Node: ...
 def dfn(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
@@ -167,7 +173,9 @@ def em(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def fieldset(
-    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLFieldsetProps]
+    *children: Child,
+    key: Optional[str] = None,
+    **props: Unpack[HTMLFieldsetProps],
 ) -> Node: ...
 def figcaption(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
@@ -260,7 +268,9 @@ def ol(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLOlProps]
 ) -> Node: ...
 def optgroup(
-    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLOptgroupProps]
+    *children: Child,
+    key: Optional[str] = None,
+    **props: Unpack[HTMLOptgroupProps],
 ) -> Node: ...
 def option(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLOptionProps]
@@ -278,7 +288,9 @@ def pre(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def progress(
-    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProgressProps]
+    *children: Child,
+    key: Optional[str] = None,
+    **props: Unpack[HTMLProgressProps],
 ) -> Node: ...
 def q(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLQuoteProps]
@@ -341,7 +353,9 @@ def template(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
 def textarea(
-    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLTextareaProps]
+    *children: Child,
+    key: Optional[str] = None,
+    **props: Unpack[HTMLTextareaProps],
 ) -> Node: ...
 def tfoot(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]

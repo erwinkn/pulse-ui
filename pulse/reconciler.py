@@ -18,7 +18,7 @@ from pulse.vdom import (
     Child,
     ComponentNode,
     Node,
-    NodeTree,
+    Element,
     Children,
     Props,
     VDOMNode,
@@ -27,7 +27,7 @@ from pulse.vdom import (
 
 @dataclass
 class RenderDiff:
-    tree: NodeTree
+    tree: Element
     render_count: int
     ops: list[VDOMOperation]
     callbacks: Callbacks
@@ -38,7 +38,7 @@ class RenderRoot:
     render_count: int
     callbacks: Callbacks
 
-    def __init__(self, fn: Callable[[], NodeTree]) -> None:
+    def __init__(self, fn: Callable[[], Element]) -> None:
         self.render_tree = RenderNode(fn)
         self.callbacks = {}
         self.effect = None
@@ -87,21 +87,21 @@ class RenderRoot:
 
 
 class RenderNode:
-    fn: Callable[..., NodeTree]
+    fn: Callable[..., Element]
     hooks: HookState
-    last_render: NodeTree
+    last_render: Element
     key: Optional[str]
     # Absolute position in the tree
     children: dict[str, "RenderNode"]
 
-    def __init__(self, fn: Callable[..., NodeTree], key: Optional[str] = None) -> None:
+    def __init__(self, fn: Callable[..., Element], key: Optional[str] = None) -> None:
         self.fn = fn
         self.hooks = HookState()
         self.last_render = None
         self.children = {}
         self.key = key
 
-    def render(self, *args, **kwargs) -> NodeTree:
+    def render(self, *args, **kwargs) -> Element:
         # Render result needs to be normalized before reassigned to self.last_render
         with self.hooks.ctx():
             return self.fn(*args, **kwargs)
@@ -120,11 +120,11 @@ class Resolver:
     def reconcile_node(
         self,
         render_parent: RenderNode,
-        old_tree: NodeTree,
-        new_tree: NodeTree,
+        old_tree: Element,
+        new_tree: Element,
         path="",
         relative_path="",
-    ) -> NodeTree:
+    ) -> Element:
         if not same_node(old_tree, new_tree):
             # If we're replacing a ComponentNode, unmount the old one before
             # rendering the new.
@@ -173,7 +173,7 @@ class Resolver:
                         type="update_props", path=path, data=new_props or {}
                     )
                 )
-            normalized_children: list[NodeTree] = []
+            normalized_children: list[Element] = []
             if old_tree.children or new_tree.children:
                 # Ensure new children are a flat list before diffing so that
                 # we can safely compute lengths and indices.
@@ -185,9 +185,9 @@ class Resolver:
                     )
                 else:
                     new_children_list = []
-                # old_tree.children should already be normalized NodeTree items,
+                # old_tree.children should already be normalized Element items,
                 # but it is typed as Children; cast for the type checker.
-                old_children_list = cast(Sequence[NodeTree], old_tree.children or [])
+                old_children_list = cast(Sequence[Element], old_tree.children or [])
                 normalized_children = self.reconcile_children(
                     render_parent=render_parent,
                     old_children=old_children_list,
@@ -232,11 +232,11 @@ class Resolver:
     def reconcile_children(
         self,
         render_parent: RenderNode,
-        old_children: Sequence[NodeTree],
-        new_children: Sequence[NodeTree],
+        old_children: Sequence[Element],
+        new_children: Sequence[Element],
         path: str,
         relative_path: str,
-    ) -> list[NodeTree]:
+    ) -> list[Element]:
         # - hasattr/getattr avoids isinstance checks.
         # - (TODO: benchmark whether this is better).
         # - We store the current position of the keyed elements to make it easy
@@ -265,11 +265,11 @@ class Resolver:
     def reconcile_children_keyed(
         self,
         render_parent: RenderNode,
-        old_children: Sequence[NodeTree],
-        new_children: Sequence[NodeTree],
+        old_children: Sequence[Element],
+        new_children: Sequence[Element],
         path: str,
         relative_path: str,
-    ) -> list[NodeTree]:
+    ) -> list[Element]:
         # HACK: only preserve component state and then perform an unkeyed
         # reconciliation. This is absolutely not optimal in terms of emitted
         # operations, but is very easy to implement.
@@ -334,13 +334,13 @@ class Resolver:
     def reconcile_children_unkeyed(
         self,
         render_parent: RenderNode,
-        old_children: Sequence[NodeTree],
-        new_children: Sequence[NodeTree],
+        old_children: Sequence[Element],
+        new_children: Sequence[Element],
         path: str,
         relative_path: str,
-    ) -> list[NodeTree]:
+    ) -> list[Element]:
         N_shared = min(len(old_children), len(new_children))
-        normalized_children: list[NodeTree] = []
+        normalized_children: list[Element] = []
         for i in range(N_shared):
             old_child = old_children[i]
             new_child = new_children[i]
@@ -390,10 +390,10 @@ class Resolver:
     def render_tree(
         self,
         render_parent: RenderNode,
-        node: NodeTree,
+        node: Element,
         path: str = "",
         relative_path: str = "",
-    ) -> tuple[VDOM, NodeTree]:
+    ) -> tuple[VDOM, Element]:
         if isinstance(node, ComponentNode):
             if relative_path in render_parent.children:
                 render_node = render_parent.children[relative_path]
@@ -420,7 +420,7 @@ class Resolver:
             # Preserve lazy flag if present
             if node.lazy is not None:
                 vdom_node["lazy"] = True
-            normalized_children: list[NodeTree] | None = None
+            normalized_children: list[Element] | None = None
             if node.children:
                 # Flatten any iterable children (e.g., generators, lists) one or more levels deep
                 flat_children = _flatten_children(
@@ -469,8 +469,8 @@ class Resolver:
 
 def _flatten_children(
     children: Children, *, parent_tag: str, path: str
-) -> list[NodeTree]:
-    flat: list[NodeTree] = []
+) -> list[Element]:
+    flat: list[Element] = []
 
     def visit(item: Child) -> None:
         if isinstance(item, Iterable) and not isinstance(item, str):
@@ -495,7 +495,7 @@ def _flatten_children(
                 )
             return
 
-        # Not an iterable child: must be a NodeTree or primitive
+        # Not an iterable child: must be a Element or primitive
         flat.append(item)
 
     for child in children:
@@ -504,7 +504,7 @@ def _flatten_children(
     return flat
 
 
-def same_node(left: NodeTree, right: NodeTree):
+def same_node(left: Element, right: Element):
     # Handles primitive equality
     if left == right:
         return True

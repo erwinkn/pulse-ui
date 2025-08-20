@@ -6,7 +6,7 @@ from typing import (
     Sequence,
     Any,
 )
-from .vdom import VDOM, Props, Node, PrimitiveNode, NodeTree
+from .vdom import VDOM, Props, Node, Primitive, Element
 
 
 class InsertOperation(TypedDict):
@@ -53,7 +53,7 @@ VDOMOperation = Union[
 ]
 
 
-def _render_to_vdom(node: Union[Node, PrimitiveNode], path: str) -> VDOM:
+def _render_to_vdom(node: Union[Node, Primitive], path: str) -> VDOM:
     if isinstance(node, Node):
         return node._render_node(path, {})
     return node
@@ -69,8 +69,8 @@ def _effective_props(node: Node, path: str) -> dict[str, Any]:
 
 
 def diff_node(
-    old_node: Optional[Union[Node, PrimitiveNode]],
-    new_node: Optional[Union[Node, PrimitiveNode]],
+    old_node: Optional[Union[Node, Primitive]],
+    new_node: Optional[Union[Node, Primitive]],
     path: str = "",
 ) -> list[VDOMOperation]:
     operations: list[VDOMOperation] = []
@@ -116,8 +116,8 @@ def diff_node(
         operations.append({"type": "update_props", "path": path, "data": new_props})
 
     # Diff children
-    old_children: list[NodeTree] = list(old_node.children or [])
-    new_children: list[NodeTree] = list(new_node.children or [])
+    old_children: list[Element] = list(old_node.children or [])
+    new_children: list[Element] = list(new_node.children or [])
 
     # Determine strategy based on keys
     has_keyed_old = any(isinstance(c, Node) and c.key is not None for c in old_children)
@@ -132,7 +132,7 @@ def diff_node(
 
 
 def _diff_keyed_children(
-    old_children: Sequence[NodeTree], new_children: Sequence[NodeTree], path: str
+    old_children: Sequence[Element], new_children: Sequence[Element], path: str
 ) -> list[VDOMOperation]:
     operations: list[VDOMOperation] = []
 
@@ -226,7 +226,7 @@ def _diff_keyed_children(
 
 
 def _diff_positional_children(
-    old_children: Sequence[NodeTree], new_children: Sequence[NodeTree], path: str
+    old_children: Sequence[Element], new_children: Sequence[Element], path: str
 ) -> list[VDOMOperation]:
     operations: list[VDOMOperation] = []
     max_len = max(len(old_children), len(new_children))

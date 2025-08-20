@@ -53,7 +53,9 @@ class CounterState(ps.State):
     @ps.effect
     def on_count_change(self):
         """An effect that runs whenever the count changes."""
-        print(f"{self._name}: Count is now {self.count}. Double is {self.double_count}.")
+        print(
+            f"{self._name}: Count is now {self.count}. Double is {self.double_count}."
+        )
 
 
 # A state class for the layout, demonstrating persistent state across routes.
@@ -307,7 +309,6 @@ def counter_details():
     )
 
 
-
 class QueryDemoState(ps.State):
     user_id: int = 1
     calls: int = 0
@@ -377,14 +378,14 @@ def dynamic_route():
     lazy=True,
 )
 def DatePicker(
-    *children: ps.NodeTree,
+    *children: ps.Element,
     key: Optional[str] = None,
     value: Optional[datetime] = None,
     onChange: Optional[ps.EventHandler[datetime | None]] = None,
     placeholder: str = "Select a date",
     className: str = "",
     showTimeSelect: bool = False,
-) -> ps.NodeTree:
+) -> ps.Element:
     return None  # signature-only; parsed for prop spec
 
 

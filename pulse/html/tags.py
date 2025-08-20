@@ -1,5 +1,5 @@
 from typing import Any, ParamSpec
-from pulse.vdom import Node, NodeTree
+from pulse.vdom import Node, Element
 
 
 P = ParamSpec("P")
@@ -17,7 +17,7 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
         A function that creates UITreeNode instances
     """
 
-    def create_element(*children: NodeTree, **props: Any) -> Node:
+    def create_element(*children: Element, **props: Any) -> Node:
         """Create a UITreeNode for this tag."""
         if default_props:
             props = default_props | props
@@ -47,10 +47,11 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
             tag=name,
             props=props,
             children=(),  # Self-closing tags never have children
-            allow_children=False
+            allow_children=False,
         )
 
     return create_element
+
 
 a = define_tag("a")
 abbr = define_tag("abbr")

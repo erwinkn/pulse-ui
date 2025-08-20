@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any
+from typing import Any, cast, ClassVar
+from dataclasses import dataclass, field, asdict, astuple, replace, InitVar
 import pytest
 from pulse import (
     Signal,
@@ -960,6 +961,213 @@ def test_reactive_list_iter_is_reactive_to_structure_only():
     lst[0:2] = [100]
     flush_effects()
     assert iter_counts[-1] == 3
+
+
+def test_reactive_wraps_dataclass_class_and_caches():
+    @dataclass
+    class Model:
+        x: int = 1
+        tags: list[int] | None = None
+
+    R1 = reactive(Model)
+    R2 = reactive(Model)
+    assert R1 is R2
+    assert getattr(R1, "__is_reactive_dataclass__", False)
+    assert getattr(R1, "__reactive_base__", None) is Model
+
+    m = R1()
+
+    seen: list[int] = []
+
+    @effect
+    def e():
+        seen.append(m.x)
+
+    flush_effects()
+    assert seen == [1]
+
+    m.x = 2
+    flush_effects()
+    assert seen == [1, 2]
+
+    m.tags = [1, 2]
+    assert isinstance(m.tags, ReactiveList)
+
+
+def test_reactive_wraps_dataclass_instance_in_place():
+    @dataclass
+    class Item:
+        a: int = 1
+        tags: list[int] | None = None
+
+    i = Item()
+    original_id = id(i)
+    reactive(i)
+    assert id(i) == original_id
+    Ri = type(i)
+    assert getattr(Ri, "__is_reactive_dataclass__", False)
+    assert getattr(Ri, "__reactive_base__", None) is Item
+
+    seen: list[int] = []
+
+    @effect
+    def e():
+        seen.append(i.a)
+
+    flush_effects()
+    assert seen == [1]
+
+    i.a = 5
+    flush_effects()
+    assert seen == [1, 5]
+
+    i.tags = [10]
+    assert isinstance(i.tags, ReactiveList)
+
+
+def test_reactive_list_wraps_dataclass_items():
+    @dataclass
+    class D:
+        v: int = 1
+
+    d = D()
+    lst: ReactiveList[D] = ReactiveList([])
+    lst.append(d)
+
+    # Item should be upgraded to reactive dataclass instance
+    assert getattr(type(lst[0]), "__is_reactive_dataclass__", False)
+
+    seen: list[int] = []
+
+    @effect
+    def e():
+        item = cast(D, lst[0])
+        seen.append(item.v)
+
+    flush_effects()
+    assert seen == [1]
+
+    item2 = cast(D, lst[0])
+    item2.v = 3
+    flush_effects()
+    assert seen == [1, 3]
+
+
+def test_reactive_dataclass_eq_order_hash_and_repr():
+    @dataclass(order=True, frozen=True)
+    class A:
+        x: int
+        y: int
+
+    RA = reactive(A)
+    a1 = RA(1, 2)
+    a2 = RA(1, 2)
+    a3 = RA(2, 1)
+
+    # eq
+    assert a1 == a2 and a1 != a3
+    # order
+    assert a1 < a3
+    # hash (frozen)
+    s = {a1, a2}
+    assert len(s) == 1
+    # repr contains fields
+    r = repr(a1)
+    assert "x=1" in r and "y=2" in r
+
+    # Ensure frozen enforcement at runtime through reactive descriptors
+    with pytest.raises(Exception):
+        a1.x = 10  # type: ignore[misc]
+
+
+def test_reactive_dataclass_asdict_astuple_replace_default_factory():
+    @dataclass
+    class B:
+        x: int = 1
+        tags: list[int] = field(default_factory=list)
+
+    RB = reactive(B)
+    b = RB()
+    # default_factory should be wrapped
+    assert isinstance(b.tags, ReactiveList)
+    b.tags.append(3)
+
+    # asdict/astuple work and produce plain containers
+    d = asdict(b)
+    t = astuple(b)
+    assert d == {"x": 1, "tags": [3]}
+    assert t == (1, [3])
+
+    # replace returns a new instance with updated immutables
+    b2 = replace(b, x=9)
+    assert isinstance(b2, RB)
+    assert b2.x == 9 and b.x == 1
+
+
+def test_reactive_dataclass_initvar_and_classvar_excluded():
+    @dataclass
+    class C:
+        x: int
+        cfg: ClassVar[int] = 7
+        temp: InitVar[int] = 0
+
+        def __post_init__(self, temp: int):  # type: ignore[override]
+            # not stored
+            assert isinstance(temp, int)
+
+    RC = reactive(C)
+    c = RC(5, 123)
+
+    # ClassVar not a field; value accessible on class, not as reactive field
+    assert RC.cfg == 7
+    # InitVar not present as attribute
+    assert not hasattr(c, "temp")
+
+
+def test_reactive_dataclass_kw_only_and_match_args():
+    @dataclass(kw_only=True)
+    class D:
+        a: int
+        b: int = 2
+
+    RD = reactive(D)
+    with pytest.raises(TypeError):
+        RD(1)  # type: ignore[call-arg]
+    d = RD(a=1)
+    assert d.a == 1 and d.b == 2
+
+    # __match_args__ should only include positional fields (none when kw_only=True)
+    assert getattr(RD, "__match_args__", ()) == ()
+
+
+def test_reactive_dataclass_inheritance_works():
+    @dataclass
+    class Base:
+        a: int = 1
+
+    @dataclass
+    class Sub(Base):
+        b: int = 2
+
+    RSub = reactive(Sub)
+    s = RSub()
+    assert s.a == 1 and s.b == 2
+    # asdict includes inherited fields
+    assert asdict(s) == {"a": 1, "b": 2}
+
+
+def test_reactive_dataclass_slots_basic():
+    @dataclass(slots=True)
+    class S:
+        x: int = 1
+        y: int = 2
+
+    RS = reactive(S)
+    s = RS()
+    # Basic read/write through descriptor should work with slots
+    assert s.x == 1
+    s.x = 3
+    assert s.x == 3
 
 
 def test_state_wraps_collection_defaults_and_sets():

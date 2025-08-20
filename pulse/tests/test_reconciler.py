@@ -155,8 +155,7 @@ def test_render_tree_component_with_children_kwarg_and_nested_component():
         return ps.button(onClick=click)["X"]
 
     @ps.component
-    def Wrapper(children=None, id: str = "wrap"):
-        children = children or []
+    def Wrapper(*children, id: str = "wrap"):
         return ps.div(id=id)[*children]
 
     @ps.component
@@ -550,7 +549,7 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
             self.n += 1
 
     @ps.component
-    def Item(label: str):
+    def Item(label: str, key=None):
         s = ps.states(C(label))
 
         def eff():
@@ -667,7 +666,7 @@ def test_keyed_nested_components_move_preserves_nested_state():
         return ps.div(ps.span(f"{tag}:{s.n}"), ps.button(onClick=s.inc)["+"])
 
     @ps.component
-    def Wrapper(tag: str):
+    def Wrapper(tag: str, key=None):
         return ps.div(Leaf(tag=tag))
 
     @ps.component
@@ -886,7 +885,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
             self.n += 1
 
     @ps.component
-    def Item(label: str):
+    def Item(label: str, key=None):
         s = ps.states(C(label))
 
         def eff():
@@ -1203,7 +1202,7 @@ def test_keyed_reverse_preserves_all_states():
             self.n += 1
 
     @ps.component
-    def Item(label: str):
+    def Item(label: str, key=None):
         s = ps.states(C)
         return ps.div(ps.span(f"{label}:{s.n}"), ps.button(onClick=s.inc)["+"])
 
@@ -1345,7 +1344,7 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
             self.n += 1
 
     @ps.component
-    def Item(label: str):
+    def Item(label: str, key=None):
         s = ps.states(C(label))
 
         def eff():
@@ -1448,7 +1447,7 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
             self.n += 1
 
     @ps.component
-    def Item(label: str):
+    def Item(label: str, key=None):
         s = ps.states(C)
         return ps.div(ps.span(f"{label}:{s.n}"), ps.button(onClick=s.inc)["+"])
 
@@ -1646,7 +1645,7 @@ def test_iterable_children_missing_keys_emits_warning_once():
 
 def test_iterable_children_with_component_keys_no_warning():
     @ps.component
-    def Item(label: str):
+    def Item(label: str, key=None):
         return ps.div(ps.span(label))
 
     @ps.component
@@ -1681,7 +1680,7 @@ def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
             self.n += 1
 
     @ps.component
-    def Item(label: str):
+    def Item(label: str, key=None):
         s = ps.states(C(label))
         return ps.div(ps.span(f"{label}:{s.n}"), ps.button(onClick=s.inc)["+"])
 

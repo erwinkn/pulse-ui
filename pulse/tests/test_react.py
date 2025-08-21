@@ -179,13 +179,20 @@ class TestDefineReactComponent:
         assert "modal" in components
 
     def test_component_overwrite(self):
-        """Test that defining a component with same key raises an error."""
+        """Defining a component with the same key should auto-rename to avoid conflict."""
         # Define first component
-        ReactComponent("First", "./First", "test", False)
+        first = ReactComponent("First", "./First", "test", False)
 
-        # Define second component with same key
-        with pytest.raises(ValueError):
-            ReactComponent("Second", "./Second", "test", False)
+        # Define second component with same key; should be auto-renamed to 'test2'
+        second = ReactComponent("Second", "./Second", "test", False)
+
+        components = COMPONENT_REGISTRY.get().items()
+        assert "test" in components
+        assert "test2" in components
+        assert components["test"].tag == "First"
+        assert components["test2"].tag == "Second"
+        assert first.key == "test"
+        assert second.key == "test2"
 
 
 class TestComponentRegistry:

@@ -23,6 +23,7 @@ from typing import (
 )
 from types import UnionType
 import typing
+import re
 from pulse.helpers import Sentinel
 from pulse.vdom import Child, Node, Element
 
@@ -409,10 +410,19 @@ class ComponentRegistry:
 
     def add(self, component: ReactComponent):
         """Adds a component to the registry."""
-        if component.key in self._components:
-            raise ValueError(
-                f"Duplicate component key '{component.key}' (existing: {self._components[component.key]!r}, new: {component!r})"
-            )
+        desired_key = component.key
+        if desired_key in self._components:
+            base_key = desired_key
+            match = re.match(r"^(.*?)(\d+)$", base_key)
+            if match:
+                base_name, suffix = match.group(1), int(match.group(2)) + 1
+            else:
+                base_name, suffix = base_key, 2
+            new_key = f"{base_name}{suffix}"
+            while new_key in self._components:
+                suffix += 1
+                new_key = f"{base_name}{suffix}"
+            component.key = new_key
         self._components[component.key] = component
 
     def clear(self):

@@ -23,6 +23,7 @@ from typing import (
 )
 from types import UnionType
 import typing
+from functools import lru_cache
 import re
 from pulse.helpers import Sentinel
 from pulse.vdom import Child, Node, Element
@@ -494,6 +495,7 @@ def _unwrap_required_notrequired(annotation: Any) -> tuple[Any, Optional[bool]]:
     return annotation, None
 
 
+@lru_cache(maxsize=None)
 def _annotation_to_runtime_type(annotation: Any) -> type | tuple[type, ...]:
     """
     Convert a typing annotation into a runtime-checkable class or tuple of classes
@@ -575,6 +577,79 @@ def _extract_prop_from_annotated(annotation: Any) -> tuple[Any, Optional[Prop[An
     return annotation, None
 
 
+def _clone_prop(p: Prop[Any]) -> Prop[Any]:
+    """Shallow clone a Prop to avoid sharing instances across cached specs."""
+    return Prop(
+        default=p.default,
+        required=p.required,
+        default_factory=p.default_factory,
+        serialize=p.serialize,
+        map_to=p.map_to,
+        _type=p._type,
+    )
+
+
+def _typed_dict_bases(typed_dict_cls: type) -> list[type]:
+    return [
+        b for b in getattr(typed_dict_cls, "__bases__", ()) if _is_typeddict_type(b)
+    ]
+
+
+@lru_cache(maxsize=None)
+def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
+    """Build and cache a Props spec from a TypedDict class tree.
+
+    Caches by the TypedDict class object (stable and hashable). This speeds up
+    repeated reuse of common props like HTMLProps and HTMLAnchorProps across many
+    component definitions.
+    """
+    annotations: dict[str, Any] = getattr(typed_dict_cls, "__annotations__", {})
+    required_keys: set[str] | None = getattr(typed_dict_cls, "__required_keys__", None)
+    is_total: bool = bool(getattr(typed_dict_cls, "__total__", True))
+
+    # 1) Merge cached specs from TypedDict base classes (preserve insertion order)
+    merged: dict[str, Prop] = {}
+    for base in _typed_dict_bases(typed_dict_cls):
+        base_spec = _propspec_from_typeddict(base)
+        for k, p in base_spec.spec.items():
+            merged[k] = _clone_prop(p)
+
+    # 2) Add/override keys declared locally on this class in definition order.
+    #    If a key exists in a base, this intentionally shadows the base entry.
+    for key in annotations.keys():
+        annotation = annotations[key]
+        # First see if runtime provides explicit required/optional wrappers
+        annotation, _annotation_required = _unwrap_required_notrequired(annotation)
+        # Extract Prop metadata from Annotated if present
+        annotation, annotation_prop = _extract_prop_from_annotated(annotation)
+
+        runtime_type = _annotation_to_runtime_type(annotation)
+        prop = annotation_prop or Prop()
+        if prop.required is not DEFAULT:
+            raise TypeError(
+                "Use total=True + NotRequired[T] or total=False + Required[T] to define required and optional props within a TypedDict"
+            )
+        prop._type = runtime_type
+        merged[key] = prop
+
+    # 3) Finalize required flags per this class's semantics
+    if required_keys is not None:
+        for k, p in merged.items():
+            p.required = k in required_keys
+    else:
+        # Fallback: infer via wrappers if available; otherwise default to class total
+        for k, p in merged.items():
+            ann = annotations.get(k, None)
+            if ann is not None:
+                _, req = _unwrap_required_notrequired(ann)
+                if req is not None:
+                    p.required = req
+                    continue
+            p.required = is_total
+
+    return PropSpec(merged, _skip_validation=True)
+
+
 def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
     """
     Build a Props spec from a TypedDict class.
@@ -606,40 +681,9 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
     if not isinstance(typed_dict_cls, type) or not _is_typeddict_type(typed_dict_cls):
         raise TypeError("Unpack must wrap a TypedDict class, e.g., Unpack[MyProps]")
 
-    annotations: dict[str, Any] = getattr(typed_dict_cls, "__annotations__", {})
-    required_keys: set[str] | None = getattr(typed_dict_cls, "__required_keys__", None)
-    is_total: bool = bool(getattr(typed_dict_cls, "__total__", True))
-
-    spec: dict[str, type | Prop] = {}
-
     # NOTE: For TypedDicts, the annotations contain the fields of all classes in
-    # the hierarchy, we don't need to walk the MRO.
-    for key, annotation in annotations.items():
-        # First see if runtime provides explicit required/optional sets
-        annotation, annotation_required = _unwrap_required_notrequired(annotation)
-        # Extract Prop metadata from Annotated if present
-        annotation, annotation_prop = _extract_prop_from_annotated(annotation)
-        if required_keys is not None:
-            required = key in required_keys
-        elif annotation_required is not None:
-            required = annotation_required
-        else:
-            required = is_total
-
-        runtime_type = _annotation_to_runtime_type(annotation)
-        prop = annotation_prop or Prop()
-        # In case the annotation defined `required`
-        if prop.required is not DEFAULT:
-            raise TypeError(
-                "Use total=True + NotRequired[T] or total=False + Required[T] to define required and optional props within a TypedDict"
-            )
-        prop._type = runtime_type
-        prop.required = required
-
-        spec[key] = prop
-
-    # We choose total=True since we marked optional fields ourselves
-    return PropSpec(spec, _skip_validation=True)
+    # the hierarchy, we don't need to walk the MRO. Use cached builder.
+    return _propspec_from_typeddict(typed_dict_cls)
 
 
 # ----------------------------------------------------------------------------

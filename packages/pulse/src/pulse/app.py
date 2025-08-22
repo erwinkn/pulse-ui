@@ -105,6 +105,8 @@ class App:
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
         self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
         self.status = AppStatus.created
+        # Persist the server address for use by sessions (API calls, etc.)
+        self.server_address: Optional[str] = self.config.get("server_address")
         # Allow single middleware or sequence; compose into a stack when needed
         if middleware is None:
             self._middleware: PulseMiddleware | None = None
@@ -138,7 +140,9 @@ class App:
             # Provide a working reactive context (and not the global AppReactiveContext which errors)
             if not path.startswith("/"):
                 path = "/" + path
-            session = Session(uuid4().hex, self.routes)
+            session = Session(
+                uuid4().hex, self.routes, server_address=self.server_address
+            )
 
             def _render() -> VDOM:
                 return session.render(path, route_info, prerendering=True)
@@ -275,6 +279,8 @@ class App:
             raise RuntimeError(
                 "Please provide a server address to the App constructor or the Pulse CLI."
             )
+        # Store the active server address so sessions can use it
+        self.server_address = address
         self.codegen.generate_all(address)
 
     def asgi_factory(self):
@@ -297,7 +303,7 @@ class App:
         if id in self.sessions:
             raise ValueError(f"Session {id} already exists")
         # print(f"--> Creating session {id}")
-        self.sessions[id] = Session(id, self.routes)
+        self.sessions[id] = Session(id, self.routes, server_address=self.server_address)
         return self.sessions[id]
 
     def close_session(self, id: str):

@@ -108,9 +108,7 @@ def login():
         # Use call_api helper to set the cookie without page reload
         body = {"email": state.email, "password": state.password}
         print("Calling API with body:", body)
-        res = await ps.call_api(
-            "http://localhost:8000/api/login", method="POST", body=body
-        )
+        res = await ps.call_api("/api/login", method="POST", body=body)
         print("API result:", res)
         if res.get("ok"):
             ps.navigate("/secret")
@@ -149,7 +147,7 @@ def secret():
     sess = ps.session_context()
 
     async def sign_out():
-        res = await ps.call_api("http://localhost:8000/api/logout", method="POST")
+        res = await ps.call_api("/api/logout", method="POST")
         if res.get("ok"):
             ps.navigate("/")
 

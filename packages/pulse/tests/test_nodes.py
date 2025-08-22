@@ -25,7 +25,7 @@ from pulse import (
     form,
 )
 from pulse.html.tags import define_tag, define_self_closing_tag
-from pulse.tests.test_utils import assert_node_equal
+from .test_utils import assert_node_equal
 from pulse.vdom import Callback
 
 

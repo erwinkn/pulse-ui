@@ -4,9 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "pulse-framework",
-]
+dependencies = ["pulse-framework", "pulse-lucide"]
 
 
 [dependency-groups]
@@ -14,6 +12,7 @@ dev = ["mypy>=1.17.0", "pytest>=8.3.4", "pytest-asyncio>=1.1.0"]
 
 [tool.uv.sources]
 pulse-framework = { workspace = true }
+pulse-lucide = { workspace = true }
 
 
 [tool.uv.workspace]

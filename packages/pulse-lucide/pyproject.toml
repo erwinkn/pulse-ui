@@ -1,0 +1,16 @@
+[project]
+name = "pulse-lucide"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
+requires-python = ">=3.12"
+dependencies = ["pulse-framework"]
+
+
+[build-system]
+requires = ["uv_build>=0.8.13,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+pulse-framework = { workspace = true }

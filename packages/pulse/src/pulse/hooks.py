@@ -346,7 +346,7 @@ def session_context() -> dict[str, Any]:
 
 
 async def call_api(
-    url: str,
+    path: str,
     *,
     method: str = "POST",
     headers: Mapping[str, str] | None = None,
@@ -355,13 +355,24 @@ async def call_api(
 ) -> dict[str, Any]:
     """Ask the client to perform an HTTP request and await the result.
 
-    This hides session plumbing; safe to call inside Pulse callbacks.
+    Only a path should be provided. The absolute server URL is inferred from the
+    current app/session configuration.
     """
     from pulse.session import SESSION_CONTEXT
 
     session = SESSION_CONTEXT.get()
     if session is None:
         raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
+
+    base = session.server_address
+    if not base:
+        raise RuntimeError(
+            "Server address unavailable. Ensure App.run_codegen/asgi_factory set server_address."
+        )
+    if not path.startswith("/"):
+        path = "/" + path
+    url = f"{base}{path}"
+
     return await session.call_api(
         url,
         method=method,

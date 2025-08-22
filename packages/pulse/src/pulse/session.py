@@ -41,7 +41,9 @@ class RenderContext:
         self._route_ctx_tokens = []
 
     def __enter__(self):
-        self._reactive_ctx_tokens.append(REACTIVE_CONTEXT.set(self.session.reactive_context))
+        self._reactive_ctx_tokens.append(
+            REACTIVE_CONTEXT.set(self.session.reactive_context)
+        )
         self._session_ctx_tokens.append(SESSION_CONTEXT.set(self.session))
         self._route_ctx_tokens.append(ROUTE_CONTEXT.set(self.route_context))
         return self
@@ -53,9 +55,13 @@ class RenderContext:
 
 
 class Session:
-    def __init__(self, id: str, routes: RouteTree) -> None:
+    def __init__(
+        self, id: str, routes: RouteTree, *, server_address: Optional[str] = None
+    ) -> None:
         self.id = id
         self.routes = routes
+        # Base server address for building absolute API URLs (e.g., http://localhost:8000)
+        self.server_address: Optional[str] = server_address
         self.render_contexts: dict[str, RenderContext] = {}
         self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
         # These two contexts are shared across all renders, but they are mounted
@@ -302,7 +308,8 @@ class Session:
     # ---- Session-side utilities ----
     def update_context(self, updates: dict[str, Any]) -> None:
         """Update session context and trigger rerender for all active routes."""
-        self.context.update(updates)
+        with self.reactive_context:
+            self.context.update(updates)
 
 
 SESSION_CONTEXT: ContextVar["Session | None"] = ContextVar(

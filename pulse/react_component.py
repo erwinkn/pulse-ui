@@ -11,7 +11,6 @@ from typing import (
     Callable,
     Generic,
     Literal,
-    Mapping,
     Optional,
     ParamSpec,
     TypeVar,
@@ -96,93 +95,145 @@ def prop(
 
 
 class PropSpec:
-    spec: dict[str, Prop]
-
     def __init__(
         self,
-        spec: Mapping[str, type | Prop],
-        total=True,
-        allow_unspecified=False,
-        _skip_validation=False,
+        required: dict[str, Prop],
+        optional: dict[str, Prop],
+        allow_unspecified: bool = False,
     ) -> None:
-        if "key" in spec:
+        if "key" in required or "key" in optional:
             raise ValueError(
                 "'key' is a reserved prop, please use another name (like 'id', 'label', or even 'key_')"
             )
+        self.required: dict[str, Prop] = required
+        self.optional: dict[str, Prop] = optional
         self.allow_unspecified = allow_unspecified
-        # spec maps canonical python prop name -> Prop or type
-        if _skip_validation:
-            self.spec = spec  # type: ignore
-        else:
-            self.spec = {}
-            for k, prop in spec.items():
-                if not isinstance(prop, Prop):
-                    prop = Prop(prop)
-                if prop.required is DEFAULT:
-                    prop.required = total
-                self.spec[k] = prop
+        # Precompute optional keys that provide defaults so we can apply them
+        # without scanning all optional props on every apply call.
+        self._optional_with_defaults: tuple[str, ...] = tuple(
+            k
+            for k, p in optional.items()
+            if (p.default is not DEFAULT) or (p.default_factory is not None)
+        )
 
     def __repr__(self) -> str:
-        keys_preview = ", ".join(list(self.spec.keys())[:5])
-        if len(self.spec) > 5:
+        keys_list = list(self.keys())
+        keys_preview = ", ".join(keys_list[:5])
+        if len(keys_list) > 5:
             keys_preview += ", ..."
         return f"Props(keys=[{keys_preview}])"
 
+    def as_dict(self) -> dict[str, Prop]:
+        """Return a merged dict of required and optional props."""
+        return self.required | self.optional
+
+    def __getitem__(self, key: str) -> Prop:
+        if key in self.required:
+            return self.required[key]
+        if key in self.optional:
+            return self.optional[key]
+        raise KeyError(key)
+
+    def keys(self):
+        return self.required.keys() | self.optional.keys()
+
     def merge(self, other: "PropSpec"):
-        conflicts = self.spec.keys() & other.spec.keys()
+        conflicts = self.keys() & other.keys()
         if conflicts:
             conflict_list = ", ".join(sorted(conflicts))
             raise ValueError(
                 f"Conflicting prop definitions for: {conflict_list}. Define each prop only once across explicit params and Unpack[TypedDict]",
             )
+        merged_required = self.required | other.required
+        merged_optional = self.optional | other.optional
         return PropSpec(
-            self.spec | other.spec,
+            required=merged_required,
+            optional=merged_optional,
             allow_unspecified=self.allow_unspecified or other.allow_unspecified,
-            _skip_validation=True,
         )
 
     def apply(self, comp_key: str, props: dict[str, Any]):
         result: dict[str, Any] = {}
-        unknown_keys = props.keys() - self.spec.keys()
+        known_keys = self.keys()
+
+        # Unknown keys handling
+        unknown_keys = props.keys() - known_keys
+        if not self.allow_unspecified and unknown_keys:
+            bad = ", ".join(repr(k) for k in sorted(unknown_keys))
+            raise ValueError(f"Unexpected prop(s) for component '{comp_key}': {bad}")
         if self.allow_unspecified:
             for k in unknown_keys:
                 v = props[k]
                 if v is not DEFAULT:
-                    result[k] = props[k]
-        # Flag unknown props
-        if not self.allow_unspecified and unknown_keys:
-            bad = ", ".join(repr(k) for k in unknown_keys)
-            raise ValueError(f"Unexpected prop(s) for component '{comp_key}': {bad}")
+                    result[k] = v
 
-        missing_props = []
+        missing_props: list[str] = []
         overlaps: dict[str, list[str]] = defaultdict(list)
-        for py_key, prop in self.spec.items():
-            if not isinstance(prop, Prop):
-                prop = Prop(_type=prop)
 
-            # Resolve value + defaults
+        # 1) Apply required props (including their defaults if provided)
+        for py_key, prop in self.required.items():
+            p = prop if isinstance(prop, Prop) else Prop(_type=prop)
             if py_key in props:
                 value = props[py_key]
-            elif prop.default_factory:
-                value = prop.default_factory()
+            elif p.default_factory is not None:
+                value = p.default_factory()
             else:
-                value = prop.default
+                value = p.default
 
-            # None could be a valid value or default, which is why we use the
-            # "sentinel pattern" of a MISSING object.
             if value is DEFAULT:
-                if prop.required:
-                    missing_props.append(py_key)
+                missing_props.append(py_key)
                 continue
 
-            if prop.serialize:
-                value = prop.serialize(value)
+            if p.serialize is not None:
+                value = p.serialize(value)
 
-            js_key = prop.map_to or py_key
+            js_key = p.map_to or py_key
             if js_key in result:
                 overlaps[js_key].append(py_key)
                 continue
+            result[js_key] = value
 
+        # 2) Apply provided optional props (only those present)
+        provided_known_optional = props.keys() & self.optional.keys()
+        for py_key in provided_known_optional:
+            prop = self.optional[py_key]
+            p = prop if isinstance(prop, Prop) else Prop(_type=prop)
+            value = props[py_key]
+
+            if value is DEFAULT:
+                # Omit optional prop when DEFAULT sentinel is used
+                continue
+
+            if p.serialize is not None:
+                value = p.serialize(value)
+
+            js_key = p.map_to or py_key
+            if js_key in result:
+                overlaps[js_key].append(py_key)
+                continue
+            result[js_key] = value
+
+        # 3) Apply optional props that have defaults and were not provided
+        for py_key in self._optional_with_defaults:
+            if py_key in props:
+                continue
+            prop = self.optional[py_key]
+            p = prop if isinstance(prop, Prop) else Prop(_type=prop)
+            if p.default_factory is not None:
+                value = p.default_factory()
+            else:
+                value = p.default
+
+            if value is DEFAULT:
+                continue
+
+            if p.serialize is not None:
+                value = p.serialize(value)
+
+            js_key = p.map_to or py_key
+            if js_key in result:
+                overlaps[js_key].append(py_key)
+                continue
             result[js_key] = value
 
         if missing_props or overlaps:
@@ -198,7 +249,7 @@ class PropSpec:
                 f"Invalid props for component '{comp_key}': {'; '.join(errors)}"
             )
 
-        return result
+        return result or None
 
 
 def default_signature(
@@ -249,7 +300,7 @@ class ReactComponent(Generic[P]):
         ):
             self.props_spec = parse_fn_signature(fn_signature)
         else:
-            self.props_spec = PropSpec({}, allow_unspecified=True)
+            self.props_spec = PropSpec({}, {}, allow_unspecified=True)
         if is_default and alias:
             raise ValueError(
                 "A default import cannot have an alias (it uses the tag as the name)."
@@ -301,7 +352,9 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())
 
-    explicit_props: dict[str, Prop] = {}
+    explicit_required: dict[str, Prop] = {}
+    explicit_optional: dict[str, Prop] = {}
+    explicit_order: list[str] = []
     explicit_spec: PropSpec
     unpack_spec: PropSpec
 
@@ -369,13 +422,24 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
             prop = p.default
             if prop._type is None:
                 prop._type = runtime_type
+            # Has default via Prop -> optional
+            explicit_optional[p.name] = prop
+            explicit_order.append(p.name)
         elif p.default is not inspect._empty:
             prop = Prop(default=p.default, required=False, _type=runtime_type)
+            explicit_optional[p.name] = prop
+            explicit_order.append(p.name)
         else:
             prop = Prop(_type=runtime_type)
-        explicit_props[p.name] = prop
+            # No default -> required
+            prop.required = True
+            explicit_required[p.name] = prop
+            explicit_order.append(p.name)
 
-    explicit_spec = PropSpec(explicit_props, _skip_validation=True)
+    explicit_spec = PropSpec(
+        explicit_required,
+        explicit_optional,
+    )
 
     # Validate *children annotation if present
     if var_positional is not None:
@@ -611,7 +675,7 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
     merged: dict[str, Prop] = {}
     for base in _typed_dict_bases(typed_dict_cls):
         base_spec = _propspec_from_typeddict(base)
-        for k, p in base_spec.spec.items():
+        for k, p in base_spec.as_dict().items():
             merged[k] = _clone_prop(p)
 
     # 2) Add/override keys declared locally on this class in definition order.
@@ -647,7 +711,16 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
                     continue
             p.required = is_total
 
-    return PropSpec(merged, _skip_validation=True)
+    # Split into required/optional
+    required: dict[str, Prop] = {}
+    optional: dict[str, Prop] = {}
+    for k, p in merged.items():
+        if p.required is True:
+            required[k] = p
+        else:
+            optional[k] = p
+
+    return PropSpec(required, optional)
 
 
 def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
@@ -660,12 +733,12 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
     """
     # No **props -> no keyword arguments defined here
     if not var_kw:
-        return PropSpec({})
+        return PropSpec({}, {})
 
     # Untyped **props -> allow all
     annot = var_kw.annotation
     if annot in (None, inspect._empty):
-        return PropSpec({}, allow_unspecified=True)
+        return PropSpec({}, {}, allow_unspecified=True)
 
     # From here, we should have **props: Unpack[MyProps] where MyProps is a TypedDict
     origin = get_origin(annot)

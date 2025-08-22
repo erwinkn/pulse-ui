@@ -205,7 +205,7 @@ class TestComponentRegistry:
     def test_empty_registry(self):
         """Test empty component registry."""
         components = COMPONENT_REGISTRY.get().items()
-        assert components == {}
+        assert len(components) == 0
 
     def test_registry_isolation(self):
         """Test that get_registered_components returns a copy."""
@@ -360,7 +360,7 @@ def test_parse_typed_dict_props_no_var_kw():
     var_kw = None
     spec = parse_typed_dict_props(var_kw)
     assert isinstance(spec, PropSpec)
-    assert spec.spec == {}
+    assert len(spec.keys()) == 0
 
 
 def test_parse_typed_dict_props_untyped_kwargs_all_allowed():
@@ -370,7 +370,7 @@ def test_parse_typed_dict_props_untyped_kwargs_all_allowed():
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
     spec = parse_typed_dict_props(var_kw)
     assert isinstance(spec, PropSpec)
-    assert spec.spec == {}
+    assert len(spec.keys()) == 0
     assert spec.allow_unspecified is True
 
 
@@ -407,9 +407,9 @@ def test_parse_typed_dict_props_required_and_optional_inference():
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
     spec = parse_typed_dict_props(var_kw)
-    assert set(spec.spec.keys()) == {"a", "b"}
-    a = cast(Prop, spec.spec["a"])
-    b = cast(Prop, spec.spec["b"])
+    assert set(spec.keys()) == {"a", "b"}
+    a = cast(Prop, spec["a"])
+    b = cast(Prop, spec["b"])
     assert a.required is True
     assert b.required is False
     assert a._type is int
@@ -426,8 +426,8 @@ def test_total_false_with_required_wrapper():
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
     spec = parse_typed_dict_props(var_kw)
-    a = cast(Prop, spec.spec["a"])
-    b = cast(Prop, spec.spec["b"])
+    a = cast(Prop, spec["a"])
+    b = cast(Prop, spec["b"])
     assert a.required is True
     assert b.required is False
 
@@ -445,7 +445,7 @@ def test_parse_typed_dict_props_annotated_with_prop_metadata_and_default():
 
     var_kw = list(inspect.signature(fn).parameters.values())[-1]
     spec = parse_typed_dict_props(var_kw)
-    a = cast(Prop, spec.spec["a"])
+    a = cast(Prop, spec["a"])
     assert a.required is True
     assert a._type is int
     assert callable(a.default_factory)
@@ -564,10 +564,10 @@ def test_parse_fn_signature_builds_propspec_from_annotation_and_defaults():
         return cast(Element, None)
 
     spec = parse_fn_signature(good)
-    assert set(spec.spec.keys()) == {"title", "disabled", "count"}
-    title = cast(Prop, spec.spec["title"])
-    disabled = cast(Prop, spec.spec["disabled"])
-    count = cast(Prop, spec.spec["count"])
+    assert set(spec.keys()) == {"title", "disabled", "count"}
+    title = cast(Prop, spec["title"])
+    disabled = cast(Prop, spec["disabled"])
+    count = cast(Prop, spec["count"])
     assert title._type is str
     assert title.default == "Untitled"
     assert disabled._type is bool
@@ -779,9 +779,9 @@ def test_parse_typed_dict_props_inheritance_two_levels():
 
     # Keys present from all inheritance levels
     keys = ["a", "b", "c", "d", "e"]
-    assert list(spec.spec.keys()) == keys
+    assert set(spec.keys()) == set(keys)
 
-    a, b, c, d, e = [spec.spec[k] for k in keys]
+    a, b, c, d, e = [spec[k] for k in keys]
 
     assert a.required is True and a._type is int
     assert b.required is False and b._type is str

@@ -159,7 +159,7 @@ def setup_counter(count: int):
 
 
 @ps.component
-def Leaf(label: str):
+def Leaf(label: str, key=None):
     # setup: called once per component instance; captures mount-only effect
     def _init(lbl: str):
         @ps.effect
@@ -172,7 +172,6 @@ def Leaf(label: str):
 
     # states: called once per component instance
     state = ps.states(LeafState(meta["label"]))
-    print(f"Rendering leaf {label} with count {state.count}")
 
     # effects: register a mount-only effect for the component instance
     ps.effects(lambda: print(f"[Leaf effects] ready: {meta['label']}"))
@@ -378,7 +377,7 @@ def dynamic_route():
     lazy=True,
 )
 def DatePicker(
-    *children: ps.Element,
+    *children: ps.Child,
     key: Optional[str] = None,
     value: Optional[datetime] = None,
     onChange: Optional[ps.EventHandler[datetime | None]] = None,
@@ -393,7 +392,6 @@ class DatePickerState(ps.State):
     value: Optional[datetime] = None
 
     def set_value(self, v: datetime | None):
-        print(f"Received value: {v} (type: {type(v)})")
         self.value = v
 
 

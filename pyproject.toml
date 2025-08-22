@@ -1,7 +1,7 @@
 [project]
-name = "pulse"
+name = "pulse-framework"
 version = "0.1.0"
-description = "Pulse UI Server Integration - Python to TypeScript bridge"
+description = "Pulse - Full-stack framework for building real-time React applications in Python"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -24,3 +24,6 @@ dev = ["mypy>=1.17.0", "pytest>=8.3.4", "pytest-asyncio>=1.1.0"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pulse"]

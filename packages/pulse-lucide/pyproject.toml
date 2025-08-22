@@ -1,7 +1,7 @@
 [project]
 name = "pulse-lucide"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.541.0.a"
+description = "Lucide icons for the Pulse framework"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
 requires-python = ">=3.12"

@@ -14,7 +14,7 @@
     "@react-router/node": "^7.7.1",
     "@react-router/serve": "^7.7.1",
     "isbot": "^5.1.27",
-    "pulse-ui-client": "../pulse-client",
+    "pulse-ui-client": "../../packages/pulse-ui-client",
     "react": "^19.1.0",
     "react-datepicker": "^8.4.0",
     "react-dom": "^19.1.0",

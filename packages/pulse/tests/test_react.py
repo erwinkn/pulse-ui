@@ -37,7 +37,7 @@ from pulse.react_component import (
     parse_fn_signature,
     DEFAULT,
 )
-from pulse.tests.test_utils import assert_node_equal
+from .test_utils import assert_node_equal
 from pulse.vdom import Child, Element
 
 

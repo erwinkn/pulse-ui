@@ -279,7 +279,7 @@ wheels = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/pulse" }
 dependencies = [
     { name = "fastapi" },
@@ -320,7 +320,7 @@ dev = [
 
 [[package]]
 name = "pulse-lucide"
-version = "0.1.0"
+version = "0.541.0a0"
 source = { editable = "packages/pulse-lucide" }
 dependencies = [
     { name = "pulse-framework" },

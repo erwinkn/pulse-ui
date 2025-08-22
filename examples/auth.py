@@ -15,12 +15,12 @@ This example shows:
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
+import pulse as ps
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
-
-import pulse as ps
 
 AUTH_COOKIE = "pulse_auth"
 
@@ -195,6 +195,7 @@ app = ps.App(
         )
     ],
     middleware=[LoggingMiddleware(), AuthMiddleware()],
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )
 
 

@@ -5,7 +5,7 @@ import time
 import pulse as ps
 from pulse.codegen import CodegenConfig
 from pulse.middleware import Ok, Redirect, NotFound, Deny
-from typing import Optional
+from typing import Optional, Callable, cast
 
 
 # State Management
@@ -97,6 +97,30 @@ class NestedDemoState(ps.State):
 # ------------------
 # Components are the building blocks of a Pulse UI. They can have their own
 # state and render other components.
+
+
+# --- Custom demo components (React-side) -------------------------------------
+# We will use a small React component that accepts a synchronous formatter
+# callback. See app/components/demo-components.tsx: FormatterPreview
+@ps.react_component(
+    tag="FormatterPreview",
+    import_="~/components/demo-components",
+)
+def FormatterPreview(
+    *,
+    key: Optional[str] = None,
+    value: Optional[float] = None,
+    label: str = "Formatted",
+    formatter: Optional[Callable[[float], str]] = None,
+) -> ps.Element:
+    return None
+
+
+# A Python function compiled to JS at runtime for synchronous callback usage
+@ps.javascript
+def two_dec(n: float) -> str:
+    # Render to two decimal places. This compiles to Number(n).toFixed(2) in JS.
+    return f"{n:.2f}"
 
 
 @ps.component
@@ -232,6 +256,15 @@ def components_demo():
                 className="text-sm text-gray-600 mt-2",
             ),
             className="p-4 rounded bg-white shadow",
+        ),
+        ps.div(
+            ps.h2("JS-compiled callback demo", className="text-xl font-semibold mb-2"),
+            FormatterPreview(
+                value=1234.5678,
+                label="Rounded (2 dp)",
+                formatter=cast(Callable[[float], str], two_dec),
+            ),
+            className="mt-6 p-4 rounded bg-white shadow",
         ),
     )
 

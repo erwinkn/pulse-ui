@@ -1,6 +1,6 @@
 from typing import Any, TypedDict, Literal
 
-from pulse.diff import VDOMOperation
+from pulse.reconciler import VDOMOperation
 from pulse.vdom import VDOM
 from pulse.routing import RouteInfo
 

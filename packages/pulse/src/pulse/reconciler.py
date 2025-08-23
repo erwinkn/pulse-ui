@@ -1,13 +1,15 @@
 from dataclasses import dataclass
 import warnings
 import inspect
-from typing import Callable, Iterable, Optional, Sequence, cast
-from pulse.diff import (
-    InsertOperation,
-    RemoveOperation,
-    ReplaceOperation,
-    UpdatePropsOperation,
-    VDOMOperation,
+from typing import (
+    Callable,
+    Iterable,
+    Literal,
+    Optional,
+    Sequence,
+    TypedDict,
+    Union,
+    cast,
 )
 from pulse.flags import IS_PRERENDERING
 from pulse.hooks import HookState
@@ -23,6 +25,50 @@ from pulse.vdom import (
     Props,
     VDOMNode,
 )
+
+
+class InsertOperation(TypedDict):
+    type: Literal["insert"]
+    path: str
+    data: VDOM
+
+
+class RemoveOperation(TypedDict):
+    type: Literal["remove"]
+    path: str
+
+
+class ReplaceOperation(TypedDict):
+    type: Literal["replace"]
+    path: str
+    data: VDOM
+
+
+class UpdatePropsOperation(TypedDict):
+    type: Literal["update_props"]
+    path: str
+    data: Props
+
+
+class MoveOperationData(TypedDict):
+    from_index: int
+    to_index: int
+    key: str
+
+
+class MoveOperation(TypedDict):
+    type: Literal["move"]
+    path: str
+    data: MoveOperationData
+
+
+VDOMOperation = Union[
+    InsertOperation,
+    RemoveOperation,
+    ReplaceOperation,
+    UpdatePropsOperation,
+    MoveOperation,
+]
 
 
 @dataclass
@@ -457,6 +503,22 @@ class Resolver:
         updated_props = props.copy()
         for k, v in props.items():
             if callable(v):
+                # If function was decorated with @javascript, emit compiled JS inline (base64)
+                js_code = getattr(v, "__pulse_js__", None)
+                if isinstance(js_code, str):
+                    try:
+                        import base64
+
+                        js_hash = getattr(v, "__pulse_js_hash__", "")
+                        js_b64 = base64.b64encode(js_code.encode("utf-8")).decode(
+                            "ascii"
+                        )
+                        updated_props[k] = f"$$jsb64:{js_hash}:{js_b64}"
+                        continue
+                    except Exception:
+                        # Fallback to server-callback path if encoding fails
+                        pass
+
                 callback_key = f"{path_prefix}{k}"
                 updated_props[k] = f"$$fn:{callback_key}"
                 self.callbacks[callback_key] = Callback(

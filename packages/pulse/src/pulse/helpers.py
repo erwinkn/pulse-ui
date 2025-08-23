@@ -12,12 +12,22 @@ EventHandler = (
 )
 
 
+MISSING = object()
+
+
 class Sentinel:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, value=MISSING) -> None:
         self.name = name
+        self.value = value
+
+    def __call__(self, value):
+        return Sentinel(self.name, value)
 
     def __repr__(self) -> str:
-        return self.name
+        if self.value is not MISSING:
+            return f"{self.name}({self.value})"
+        else:
+            return self.name
 
 
 T = TypeVar("T")

@@ -238,6 +238,28 @@ return n.toFixed(2);
     )
 
 
+def test_compile_full_format_specifiers_numeric_and_string():
+    def f(x):
+        return f"{x:08.2f}"
+
+    code, _, _ = compile_python_to_js(f)
+    # zero-pad width 8, 2 decimals
+    assert code == (
+        """function(x){
+return (((Number(x) < 0) ? `-` : ``) + (Number(Math.abs(Number(x))).toFixed(2)).padStart(8 - (((Number(x) < 0) ? `-` : ``)).length, `0`));
+}"""
+    )
+
+    def g(x):
+        return f"{x:+.1f}"
+
+    code2, _, _ = compile_python_to_js(g)
+    assert code2 == (
+        """function(x){
+return (((Number(x) < 0) ? `-` : `+`) + `` + Number(Math.abs(Number(x))).toFixed(1));
+}"""
+    )
+
 def test_compile_compare_chaining_exact():
     def f(x):
         return 0 < x < 10

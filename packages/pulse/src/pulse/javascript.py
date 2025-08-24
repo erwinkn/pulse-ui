@@ -84,6 +84,230 @@ class PyToJS(ast.NodeVisitor):
             return "".join(parts)
         return None
 
+    def _parse_format_spec(self, spec: str) -> dict[str, object]:
+        """Parse a Python format specification mini-language string.
+
+        Returns a dict with keys: fill, align, sign, alt, zero, width, grouping,
+        precision, type. Values may be None.
+        """
+        i = 0
+        n = len(spec)
+        fill: str | None = None
+        align: str | None = None
+        sign: str | None = None
+        alt: bool = False
+        zero: bool = False
+        width: int | None = None
+        grouping: str | None = None
+        precision: int | None = None
+        typ: str | None = None
+
+        # [fill][align]
+        if n - i >= 2 and spec[i + 1] in "<>^=":
+            fill = spec[i]
+            align = spec[i + 1]
+            i += 2
+        elif i < n and spec[i] in "<>^=":
+            align = spec[i]
+            i += 1
+
+        # [sign]
+        if i < n and spec[i] in "+- ":
+            sign = spec[i]
+            i += 1
+
+        # [#]
+        if i < n and spec[i] == "#":
+            alt = True
+            i += 1
+
+        # [0]
+        if i < n and spec[i] == "0":
+            zero = True
+            i += 1
+
+        # [width]
+        start = i
+        while i < n and spec[i].isdigit():
+            i += 1
+        if i > start:
+            width = int(spec[start:i])
+
+        # [grouping]
+        if i < n and spec[i] in ",_":
+            grouping = spec[i]
+            i += 1
+
+        # [.precision]
+        if i < n and spec[i] == ".":
+            i += 1
+            start = i
+            while i < n and spec[i].isdigit():
+                i += 1
+            if i > start:
+                precision = int(spec[start:i])
+            else:
+                precision = 0
+
+        # [type]
+        if i < n:
+            typ = spec[i]
+
+        return {
+            "fill": fill,
+            "align": align,
+            "sign": sign,
+            "alt": alt,
+            "zero": zero,
+            "width": width,
+            "grouping": grouping,
+            "precision": precision,
+            "type": typ,
+        }
+
+    def _apply_format_spec(self, value_code: str, value_node: ast.expr, spec: str) -> str:
+        spec_info = self._parse_format_spec(spec)
+        fill = spec_info["fill"] or " "
+        align = spec_info["align"]  # may be None
+        sign = spec_info["sign"]  # '+', '-', ' ', or None
+        alt = bool(spec_info["alt"])  # bool
+        zero = bool(spec_info["zero"])  # bool
+        width = spec_info["width"]  # int | None
+        grouping = spec_info["grouping"]  # ',', '_' or None
+        precision = spec_info["precision"]  # int | None
+        typ = spec_info["type"]  # str | None
+
+        # Escape backtick in fill if present
+        fill_js = fill.replace("\\", "\\\\").replace("`", "\\`")
+        fill_literal = f"`{fill_js}`"
+
+        # Determine base string for the value
+        def is_numeric_type(t: str | None) -> bool:
+            return t in {"d", "b", "o", "x", "X", "f", "F", "e", "E", "g", "G", "n", "%", "c"}
+
+        # Special-case minimal 'f' with only precision (no width/align/sign/etc.)
+        if (
+            typ in {"f", "F"}
+            and precision is not None
+            and align is None
+            and sign is None
+            and not alt
+            and not zero
+            and width is None
+            and grouping is None
+        ):
+            # Match prior behavior: x.toFixed(p)
+            return f"{value_code}.toFixed({precision})"
+        # Build numeric/string representations
+        base_expr = ""
+        prefix_expr = "``"  # empty template literal
+        if typ is None:
+            # Default to string conversion
+            base_expr = f"String({value_code})"
+        elif typ == "s":
+            base_expr = f"String({value_code})"
+            if precision is not None:
+                base_expr = f"({base_expr}.slice(0, {precision}))"
+        elif typ == "c":
+            base_expr = f"String.fromCharCode(Number({value_code}))"
+        elif typ in {"d", "b", "o", "x", "X"}:
+            num = f"Number({value_code})"
+            abs_num = f"Math.abs({num})"
+            if typ == "d":
+                digits = f"String(Math.trunc({abs_num}))"
+            else:
+                base_map = {"b": 2, "o": 8, "x": 16, "X": 16}
+                digits = f"(Math.trunc({abs_num}).toString({base_map[typ]}))"
+                if typ == "X":
+                    digits = f"({digits}.toUpperCase())"
+            if alt and typ in {"b", "o", "x", "X"}:
+                prefix = {"b": "0b", "o": "0o", "x": "0x", "X": "0X"}[typ]
+                prefix_expr = f"`{prefix}`"
+            # Apply grouping for decimal with comma
+            if grouping == "," and typ == "d":
+                # Use locale formatting for thousands separators
+                digits = f"(Math.trunc({abs_num}).toLocaleString(`en-US`))"
+            base_expr = digits
+        elif typ in {"f", "F", "e", "E", "g", "G", "n", "%"}:
+            num = f"Number({value_code})"
+            abs_num = f"Math.abs({num})"
+            if typ in {"f", "F"}:
+                p = precision if precision is not None else 6
+                s = f"Number({abs_num}).toFixed({p})"
+            elif typ in {"e", "E"}:
+                p = precision if precision is not None else 6
+                s = f"Number({abs_num}).toExponential({p})"
+                if typ == "E":
+                    s = f"({s}.toUpperCase())"
+            elif typ in {"g", "G"}:
+                p = precision if precision is not None else 6
+                s = f"Number({abs_num}).toPrecision({p})"
+                if typ == "G":
+                    s = f"({s}.toUpperCase())"
+            elif typ == "n":
+                if precision is None:
+                    s = f"Number({abs_num}).toLocaleString(`en-US`)"
+                else:
+                    s = (
+                        f"Number({abs_num}).toLocaleString(`en-US`, "
+                        f"{{minimumFractionDigits: {precision}, maximumFractionDigits: {precision}}})"
+                    )
+            else:  # '%'
+                p = precision if precision is not None else 6
+                s = f"((Number({abs_num}) * 100).toFixed({p}) + `%`)"
+            base_expr = s
+        else:
+            # Fallback to String conversion
+            base_expr = f"String({value_code})"
+
+        # Apply sign for numeric types
+        if typ in {"d", "b", "o", "x", "X", "f", "F", "e", "E", "g", "G", "n", "%"}:
+            num = f"Number({value_code})"
+            if sign == "+":
+                sign_expr = f"(({num} < 0) ? `-` : `+`)"
+            elif sign == " ":
+                sign_expr = f"(({num} < 0) ? `-` : ` `)"
+            else:
+                sign_expr = f"(({num} < 0) ? `-` : ``)"
+        else:
+            sign_expr = "``"
+
+        # Combine sign/prefix and base
+        combined = f"({sign_expr} + {prefix_expr} + {base_expr})" if prefix_expr != "``" or sign_expr != "``" else base_expr
+
+        # Width, alignment and zero-padding
+        if width is not None and width > 0:
+            if align == "^":
+                combined = (
+                    f"(({combined}).padStart(Math.floor(({width} + ({combined}).length)/2), {fill_literal}).padEnd({width}, {fill_literal}))"
+                )
+            elif align == "<":
+                combined = f"(({combined}).padEnd({width}, {fill_literal}))"
+            elif align == "=":
+                # Pad after sign+prefix for numbers; otherwise same as '>'
+                if typ in {"d", "b", "o", "x", "X", "f", "F", "e", "E", "g", "G", "n", "%"}:
+                    head = f"({sign_expr} + {prefix_expr})"
+                    tail = base_expr
+                    combined = f"({head} + ({tail}).padStart({width} - ({head}).length, {fill_literal}))"
+                else:
+                    combined = f"(({combined}).padStart({width}, {fill_literal}))"
+            else:
+                # Default or '>'
+                pad_fill = fill_literal if not zero else "`0`"
+                if zero and align is None and typ in {"d", "f", "F", "e", "E", "g", "G", "n", "%"}:
+                    # Zero-pad numerics: equivalent to '=' with fill '0'
+                    head = sign_expr
+                    tail = base_expr
+                    combined = f"({head} + ({tail}).padStart({width} - ({head}).length, `0`))"
+                    if prefix_expr != "``":
+                        # Include prefix before digits
+                        head2 = f"({head} + {prefix_expr})"
+                        combined = f"({head2} + ({tail}).padStart({width} - ({head2}).length, `0`))"
+                else:
+                    combined = f"(({combined}).padStart({width}, {pad_fill}))"
+
+        return combined
+
     def _emit_slice_index_arg(self, node: ast.expr) -> str:
         """Emit a slice index argument without redundant parentheses for negatives.
 
@@ -362,20 +586,14 @@ class PyToJS(ast.NodeVisitor):
             index = self.emit_expr(node.slice)
             return f"({value}[{index}])"
         if isinstance(node, ast.JoinedStr):
-            # Special-case a single formatted value like f"{x:.2f}" -> x.toFixed(2)
+            # Special-case a single formatted value like f"{x:...}" -> apply format spec
             if len(node.values) == 1 and isinstance(node.values[0], ast.FormattedValue):
                 fv = node.values[0]
                 if fv.format_spec is not None:
                     spec_str = self._const_joinedstr_to_str(fv.format_spec)
-                    if (
-                        spec_str is not None
-                        and spec_str.startswith(".")
-                        and spec_str.endswith("f")
-                        and spec_str[1:-1].isdigit()
-                    ):
-                        precision = spec_str[1:-1]
+                    if spec_str is not None:
                         inner = self.emit_expr(fv.value)
-                        return f"{inner}.toFixed({precision})"
+                        return self._apply_format_spec(inner, fv.value, spec_str)
 
             # General f-strings -> backtick template
             parts: list[str] = []
@@ -385,16 +603,11 @@ class PyToJS(ast.NodeVisitor):
                     parts.append(s)
                 elif isinstance(part, ast.FormattedValue):
                     expr_inner = self.emit_expr(part.value)
-                    # Handle precision format like .2f within template literals
+                    # Apply full format spec if provided
                     if part.format_spec is not None:
                         spec_str = self._const_joinedstr_to_str(part.format_spec)
-                        if (
-                            spec_str is not None
-                            and spec_str.startswith(".")
-                            and spec_str.endswith("f")
-                            and spec_str[1:-1].isdigit()
-                        ):
-                            expr_inner = f"({expr_inner}).toFixed({spec_str[1:-1]})"
+                        if spec_str is not None:
+                            expr_inner = self._apply_format_spec(expr_inner, part.value, spec_str)
                     parts.append(f"${{{expr_inner}}}")
                 else:
                     raise JSCompilationError("Unsupported f-string component")

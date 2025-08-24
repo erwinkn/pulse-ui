@@ -107,3 +107,39 @@ def test_zfill():
 return s.padStart(5, `0`);
 }"""
     )
+
+
+def test_string_split():
+    def f(s):
+        return s.split(",")
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.split(`,`);
+}"""
+    )
+
+
+def test_string_join():
+    def f(xs):
+        return ",".join(xs)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return xs.join(`,`);
+}"""
+    )
+
+
+def test_membership_in_string():
+    def f(s):
+        return "x" in s
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.includes(`x`);
+}"""
+    )

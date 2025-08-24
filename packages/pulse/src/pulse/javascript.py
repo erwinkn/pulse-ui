@@ -427,6 +427,39 @@ class PyToJS(ast.NodeVisitor):
 
     # --- Expressions ---------------------------------------------------------
     def emit_expr(self, node: ast.expr) -> str:
+        if isinstance(node, ast.ListComp):
+            # Support single-generator list comprehension with optional ifs.
+            if len(node.generators) != 1:
+                raise JSCompilationError("Only single 'for' comprehensions are supported")
+            gen = node.generators[0]
+            if gen.is_async:
+                raise JSCompilationError("Async comprehensions are not supported")
+            if not isinstance(gen.target, ast.Name):
+                raise JSCompilationError("Only simple name targets are supported in comprehensions")
+            iter_code = self.emit_expr(gen.iter)
+            param = gen.target.id
+            # Build predicate if any
+            if gen.ifs:
+                # Combine multiple ifs with &&
+                old_locals = set(self.locals)
+                self.locals.add(param)
+                pred_code = " && ".join(self.emit_expr(cond) for cond in gen.ifs)
+                self.locals = old_locals
+                # filter chain
+                chain = f"({iter_code}.filter({param} => ({pred_code})))"
+            else:
+                chain = iter_code
+            # Map if the element expression is not a direct identity
+            old_locals2 = set(self.locals)
+            self.locals.add(param)
+            elt_code = self.emit_expr(node.elt)
+            self.locals = old_locals2
+            if isinstance(node.elt, ast.Name) and node.elt.id == param and chain != iter_code:
+                # Identity map after filter can be skipped
+                return chain
+            if chain == iter_code:
+                return f"({iter_code}.map({param} => {elt_code}))"
+            return f"({chain}.map({param} => {elt_code}))"
         if isinstance(node, ast.List):
             items = ", ".join(self.emit_expr(e) for e in node.elts)
             return f"[{items}]"
@@ -469,8 +502,13 @@ class PyToJS(ast.NodeVisitor):
             return f"({left} {ALLOWED_BINOPS[op]} {right})"
         if isinstance(node, ast.UnaryOp):
             if isinstance(node.op, ast.USub):
+                # Emit bare negative numeric literals without extra parens
+                if isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)):
+                    return f"-{repr(node.operand.value)}"
                 return f"(-{self.emit_expr(node.operand)})"
             if isinstance(node.op, ast.UAdd):
+                if isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)):
+                    return f"+{repr(node.operand.value)}"
                 return f"(+{self.emit_expr(node.operand)})"
             if isinstance(node.op, ast.Not):
                 return f"(!{self.emit_expr(node.operand)})"
@@ -590,6 +628,10 @@ class PyToJS(ast.NodeVisitor):
                         "strip": "trim",
                     }
                     return f"({obj}.{mapping[attr]}())"
+                if attr == "capitalize" and len(args) == 0:
+                    return f"(({obj}.charAt(0).toUpperCase()) + ({obj}.slice(1).toLowerCase()))"
+                if attr == "zfill" and len(args) == 1:
+                    return f"({obj}.padStart({args[0]}, `0`))"
                 if attr in {"startswith", "endswith"} and len(args) == 1:
                     mapping = {
                         "startswith": "startsWith",

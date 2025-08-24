@@ -424,6 +424,68 @@ return ((d["x"] ?? 0));
 }"""
     )
 
+
+def test_list_comprehensions_and_precedence_and_more_string_methods():
+    def f(xs):
+        return [x + 1 for x in xs]
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return (xs.map(x => (x + 1)));
+}"""
+    )
+
+    def g(xs):
+        return [x for x in xs if x > 0]
+
+    code2, _, _ = compile_python_to_js(g)
+    assert code2 == (
+        """function(xs){
+return (xs.filter(x => ((x > 0))));
+}"""
+    )
+
+    def h(a, b, c):
+        return (a and b) or c
+
+    code3, _, _ = compile_python_to_js(h)
+    assert code3 == (
+        """function(a, b, c){
+return ((a && b) || c);
+}"""
+    )
+
+    def i(x):
+        return 1 if x > 0 else 2 if x < -1 else 3
+
+    code4, _, _ = compile_python_to_js(i)
+    assert code4 == (
+        """function(x){
+return ((x > 0) ? 1 : ((x < -1) ? 2 : 3));
+}"""
+    )
+
+    def j(s):
+        return s.capitalize()
+
+    code5, _, _ = compile_python_to_js(j)
+    assert code5 == (
+        """function(s){
+return ((s.charAt(0).toUpperCase()) + (s.slice(1).toLowerCase()));
+}"""
+    )
+
+    def k(s):
+        return s.zfill(5)
+
+    code6, _, _ = compile_python_to_js(k)
+    assert code6 == (
+        """function(s){
+return (s.padStart(5, `0`));
+}"""
+    )
+
     def g(d):
         return d.get("y")
 

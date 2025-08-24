@@ -110,15 +110,26 @@ class PyToJS(ast.NodeVisitor):
                     "Only simple assignments to local names are supported."
                 )
             target = node.targets[0].id
-            self.locals.add(target)
-            return f"let {_mangle_identifier(target)} = {self.emit_expr(node.value)};"
+            target_ident = _mangle_identifier(target)
+            value_code = self.emit_expr(node.value)
+            # Use 'let' only on first assignment to a local name. Parameters
+            # are considered locals from the start and thus won't be re-declared.
+            if target in self.locals:
+                return f"{target_ident} = {value_code};"
+            else:
+                self.locals.add(target)
+                return f"let {target_ident} = {value_code};"
         if isinstance(node, ast.AnnAssign):
             if not isinstance(node.target, ast.Name):
                 raise JSCompilationError("Only simple annotated assignments supported.")
             target = node.target.id
-            self.locals.add(target)
+            target_ident = _mangle_identifier(target)
             value = "null" if node.value is None else self.emit_expr(node.value)
-            return f"let {_mangle_identifier(target)} = {value};"
+            if target in self.locals:
+                return f"{target_ident} = {value};"
+            else:
+                self.locals.add(target)
+                return f"let {target_ident} = {value};"
         if isinstance(node, ast.If):
             test = self.emit_expr(node.test)
             body = "\n".join(self.emit_stmt(s) for s in node.body)

@@ -186,6 +186,35 @@ return y;
     )
 
 
+def test_compile_reassignment_without_let_exact():
+    def f(x):
+        y = x + 1
+        y = y + 2
+        return y
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(x){
+let y = (x + 1);
+y = (y + 2);
+return y;
+}"""
+    )
+
+
+def test_compile_param_reassignment_without_let_exact():
+    def f(x):
+        x = x + 1
+        return x
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(x){
+x = (x + 1);
+return x;
+}"""
+    )
+
 def test_compile_unary_ops_exact():
     def f(x):
         return -x

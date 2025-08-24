@@ -165,6 +165,28 @@ class PyToJS(ast.NodeVisitor):
             "type": typ,
         }
 
+    def _arrow_param_from_target(self, target: ast.expr) -> tuple[str, list[str]]:
+        if isinstance(target, ast.Name):
+            return target.id, [target.id]
+        if isinstance(target, ast.Tuple) and all(isinstance(e, ast.Name) for e in target.elts):
+            names = [e.id for e in target.elts]
+            return f"([{', '.join(names)}])", names
+        raise JSCompilationError("Only name or 2-tuple targets supported in comprehensions")
+
+    def _build_comp_chain(self, gen: ast.comprehension, pred_nodes: list[ast.expr]) -> tuple[str, str, list[str]]:
+        iter_code = self.emit_expr(gen.iter)
+        param_str, name_list = self._arrow_param_from_target(gen.target)
+        # Build predicate ifs
+        chain = iter_code
+        if pred_nodes:
+            old_locals = set(self.locals)
+            for n in name_list:
+                self.locals.add(n)
+            pred_code = " && ".join(self.emit_expr(cond) for cond in pred_nodes)
+            self.locals = old_locals
+            chain = f"{iter_code}.filter({param_str} => ({pred_code}))"
+        return chain, param_str, name_list
+
     def _apply_format_spec(self, value_code: str, value_node: ast.expr, spec: str) -> str:
         spec_info = self._parse_format_spec(spec)
         fill = spec_info["fill"] or " "
@@ -434,32 +456,60 @@ class PyToJS(ast.NodeVisitor):
             gen = node.generators[0]
             if gen.is_async:
                 raise JSCompilationError("Async comprehensions are not supported")
-            if not isinstance(gen.target, ast.Name):
-                raise JSCompilationError("Only simple name targets are supported in comprehensions")
-            iter_code = self.emit_expr(gen.iter)
-            param = gen.target.id
-            # Build predicate if any
-            if gen.ifs:
-                # Combine multiple ifs with &&
-                old_locals = set(self.locals)
-                self.locals.add(param)
-                pred_code = " && ".join(self.emit_expr(cond) for cond in gen.ifs)
-                self.locals = old_locals
-                # filter chain
-                chain = f"({iter_code}.filter({param} => ({pred_code})))"
-            else:
-                chain = iter_code
+            iter_expr = self.emit_expr(gen.iter)
+            chain, param, name_list = self._build_comp_chain(gen, gen.ifs)
             # Map if the element expression is not a direct identity
             old_locals2 = set(self.locals)
-            self.locals.add(param)
+            for n in name_list:
+                self.locals.add(n)
             elt_code = self.emit_expr(node.elt)
             self.locals = old_locals2
-            if isinstance(node.elt, ast.Name) and node.elt.id == param and chain != iter_code:
+            if isinstance(node.elt, ast.Name) and node.elt.id in name_list and chain != iter_expr:
                 # Identity map after filter can be skipped
-                return chain
-            if chain == iter_code:
-                return f"({iter_code}.map({param} => {elt_code}))"
+                return f"({chain})"
+            if chain == iter_expr:
+                return f"({iter_expr}.map({param} => {elt_code}))"
             return f"({chain}.map({param} => {elt_code}))"
+        if isinstance(node, ast.GeneratorExp):
+            # Similar to ListComp but returns a chained array expression
+            if len(node.generators) != 1:
+                raise JSCompilationError("Only single 'for' generators are supported")
+            gen = node.generators[0]
+            if gen.is_async:
+                raise JSCompilationError("Async generators are not supported")
+            iter_expr = self.emit_expr(gen.iter)
+            chain, param, name_list = self._build_comp_chain(gen, gen.ifs)
+            old_locals2 = set(self.locals)
+            for n in name_list:
+                self.locals.add(n)
+            elt_code = self.emit_expr(node.elt)
+            self.locals = old_locals2
+            if isinstance(node.elt, ast.Name) and node.elt.id in name_list and chain != iter_expr:
+                return f"({chain})"
+            if chain == iter_expr:
+                return f"({iter_expr}.map({param} => {elt_code}))"
+            return f"({chain}.map({param} => {elt_code}))"
+        if isinstance(node, ast.DictComp):
+            if len(node.generators) != 1:
+                raise JSCompilationError("Only single 'for' dict comprehensions are supported")
+            gen = node.generators[0]
+            if gen.is_async:
+                raise JSCompilationError("Async comprehensions are not supported")
+            chain, param, name_list = self._build_comp_chain(gen, gen.ifs)
+            old_locals = set(self.locals)
+            for n in name_list:
+                self.locals.add(n)
+            key_code = self.emit_expr(node.key)
+            val_code = self.emit_expr(node.value)
+            self.locals = old_locals
+            # Ensure string keys for JS object entries
+            key_expr = f"String({key_code})"
+            # Build entries via map to [key, value]
+            if chain == self.emit_expr(gen.iter):
+                entries = f"{self.emit_expr(gen.iter)}.map({param} => [{key_expr}, {val_code}])"
+            else:
+                entries = f"{chain}.map({param} => [{key_expr}, {val_code}])"
+            return f"(Object.fromEntries({entries}))"
         if isinstance(node, ast.List):
             items = ", ".join(self.emit_expr(e) for e in node.elts)
             return f"[{items}]"
@@ -592,6 +642,34 @@ class PyToJS(ast.NodeVisitor):
                     return f"parseFloat({args[0]})"
                 if fname == "list" and len(args) == 1:
                     return f"({args[0]})"
+                if fname in {"any", "all"} and len(node.args) == 1:
+                    gen_arg = node.args[0]
+                    if isinstance(gen_arg, ast.GeneratorExp) and len(gen_arg.generators) == 1:
+                        gen = gen_arg.generators[0]
+                        if gen.is_async:
+                            raise JSCompilationError("Async generators are not supported")
+                        iter_expr = self.emit_expr(gen.iter)
+                        chain, param, name_list = self._build_comp_chain(gen, gen.ifs)
+                        old_locals = set(self.locals)
+                        for n in name_list:
+                            self.locals.add(n)
+                        elt_code = self.emit_expr(gen_arg.elt)
+                        self.locals = old_locals
+                        method = "some" if fname == "any" else "every"
+                        if chain == iter_expr:
+                            return f"({iter_expr}.{method}({param} => ({elt_code})))"
+                        return f"({chain}.{method}({param} => ({elt_code})))"
+                    # Fallback: treat as array-like boolean test
+                    if fname == "any":
+                        return f"({args[0]}.some(v => v))"
+                    else:
+                        return f"({args[0]}.every(v => v))"
+                if fname == "sum" and 1 <= len(args) <= 2:
+                    start = args[1] if len(args) == 2 else "0"
+                    base = args[0]
+                    if base.startswith("(") and base.endswith(")"):
+                        base = base[1:-1]
+                    return f"({base}.reduce((a, b) => (a + b), {start}))"
                 raise JSCompilationError(f"Call to unsupported function: {fname}()")
             if isinstance(node.func, ast.Attribute):
                 obj = self.emit_expr(node.func.value)

@@ -436,6 +436,88 @@ return (xs.map(x => (x + 1)));
 }"""
     )
 
+
+def test_dict_comprehensions_and_any_all_sum():
+    def f(xs):
+        return {x: x + 1 for x in xs}
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return (Object.fromEntries(xs.map(x => [String(x), (x + 1)])));
+}"""
+    )
+
+    def g(pairs):
+        return {k: v for (k, v) in pairs if v > 0}
+
+    code2, _, _ = compile_python_to_js(g)
+    assert code2 == (
+        """function(pairs){
+return (Object.fromEntries(pairs.filter(([k, v]) => ((v > 0))).map(([k, v]) => [String(k), v])));
+}"""
+    )
+
+    def h(xs):
+        return any(xs)
+
+    code3, _, _ = compile_python_to_js(h)
+    assert code3 == (
+        """function(xs){
+return (xs.some(v => v));
+}"""
+    )
+
+    def i(xs):
+        return all(xs)
+
+    code4, _, _ = compile_python_to_js(i)
+    assert code4 == (
+        """function(xs){
+return (xs.every(v => v));
+}"""
+    )
+
+    def j(xs):
+        return any(x > 0 for x in xs)
+
+    code5, _, _ = compile_python_to_js(j)
+    assert code5 == (
+        """function(xs){
+return (xs.some(x => ((x > 0))));
+}"""
+    )
+
+    def k(xs):
+        return all(x > 0 for x in xs)
+
+    code6, _, _ = compile_python_to_js(k)
+    assert code6 == (
+        """function(xs){
+return (xs.every(x => ((x > 0))));
+}"""
+    )
+
+    def m(xs):
+        return sum(xs)
+
+    code7, _, _ = compile_python_to_js(m)
+    assert code7 == (
+        """function(xs){
+return (xs.reduce((a, b) => (a + b), 0));
+}"""
+    )
+
+    def n(xs):
+        return sum(x + 1 for x in xs if x > 0)
+
+    code8, _, _ = compile_python_to_js(n)
+    assert code8 == (
+        """function(xs){
+return (xs.filter(x => ((x > 0))).map(x => (x + 1)).reduce((a, b) => (a + b), 0));
+}"""
+    )
+
     def g(xs):
         return [x for x in xs if x > 0]
 

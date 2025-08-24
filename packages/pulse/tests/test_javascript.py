@@ -342,6 +342,76 @@ def test_format_spec_errors_and_unsupported():
     except JSCompilationError as e:
         assert "Alignment '=' is only supported for numeric types" in str(e)
 
+
+def test_list_tuple_dict_literals_and_join_and_slice_step_error():
+    def f():
+        return [1, 2, 3]
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(){
+return [1, 2, 3];
+}"""
+    )
+
+    def g(x):
+        return (1, x)
+
+    code2, _, _ = compile_python_to_js(g)
+    assert code2 == (
+        """function(x){
+return [1, x];
+}"""
+    )
+
+    def h(x):
+        return (x,)
+
+    code3, _, _ = compile_python_to_js(h)
+    assert code3 == (
+        """function(x){
+return [x];
+}"""
+    )
+
+    def i(x):
+        return {"a": 1, "b": x}
+
+    code4, _, _ = compile_python_to_js(i)
+    assert code4 == (
+        """function(x){
+return ({"a": 1, "b": x});
+}"""
+    )
+
+    def j(xs):
+        return ",".join(xs)
+
+    code5, _, _ = compile_python_to_js(j)
+    assert code5 == (
+        """function(xs){
+return (xs.join(`,`));
+}"""
+    )
+
+    def k(a):
+        return a[::2]
+
+    try:
+        compile_python_to_js(k)
+        assert False, "Expected JSCompilationError for slice step"
+    except JSCompilationError as e:
+        assert "slice step" in str(e).lower()
+
+    def m(x):
+        return {x: 1}
+
+    try:
+        compile_python_to_js(m)
+        assert False, "Expected JSCompilationError for non-string dict key"
+    except JSCompilationError as e:
+        assert "dict keys" in str(e)
+
 def test_compile_compare_chaining_exact():
     def f(x):
         return 0 < x < 10

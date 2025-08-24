@@ -431,6 +431,21 @@ class PyToJS(ast.NodeVisitor):
 
     # --- Expressions ---------------------------------------------------------
     def emit_expr(self, node: ast.expr) -> str:
+        if isinstance(node, ast.List):
+            items = ", ".join(self.emit_expr(e) for e in node.elts)
+            return f"[{items}]"
+        if isinstance(node, ast.Tuple):
+            items = ", ".join(self.emit_expr(e) for e in node.elts)
+            return f"[{items}]"
+        if isinstance(node, ast.Dict):
+            pairs: list[str] = []
+            for k, v in zip(node.keys, node.values):
+                if not isinstance(k, ast.Constant) or not isinstance(k.value, str):
+                    raise JSCompilationError("Only string literal dict keys are supported")
+                key_str = k.value.replace("\\", "\\\\").replace("\"", "\\\"")
+                val_code = self.emit_expr(v)
+                pairs.append(f"\"{key_str}\": {val_code}")
+            return "({" + ", ".join(pairs) + "})"
         if isinstance(node, ast.Constant):
             v = node.value
             if isinstance(v, str):
@@ -547,6 +562,9 @@ class PyToJS(ast.NodeVisitor):
                 attr = node.func.attr
                 args = [self.emit_expr(a) for a in node.args]
                 # Allow common string methods
+                if attr == "join" and len(args) == 1:
+                    # "sep".join(xs) -> xs.join("sep")
+                    return f"({args[0]}.join({obj}))"
                 if attr in {"lower", "upper", "strip"} and len(args) == 0:
                     mapping = {
                         "lower": "toLowerCase",
@@ -574,6 +592,8 @@ class PyToJS(ast.NodeVisitor):
             value = self.emit_expr(node.value)
             # Slice handling
             if isinstance(node.slice, ast.Slice):
+                if node.slice.step is not None:
+                    raise JSCompilationError("Unsupported slice step in slicing")
                 lower = node.slice.lower
                 upper = node.slice.upper
                 if lower is None and upper is None:

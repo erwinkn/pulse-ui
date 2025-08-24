@@ -1,0 +1,109 @@
+from pulse.javascript import compile_python_to_js
+
+
+def test_lower():
+    def f(s):
+        return s.lower()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.toLowerCase();
+}"""
+    )
+
+
+def test_upper():
+    def f(s):
+        return s.upper()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.toUpperCase();
+}"""
+    )
+
+
+def test_strip():
+    def f(s):
+        return s.strip()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.trim();
+}"""
+    )
+
+
+def test_startswith():
+    def f(s):
+        return s.startswith("a")
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.startsWith(`a`);
+}"""
+    )
+
+
+def test_endswith():
+    def f(s):
+        return s.endswith("b")
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.endsWith(`b`);
+}"""
+    )
+
+
+def test_lstrip_and_rstrip():
+    def f(s):
+        return s.lstrip() + s.rstrip()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.trimStart() + s.trimEnd();
+}"""
+    )
+
+
+def test_replace_all():
+    def f(s):
+        return s.replace("a", "b")
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.replaceAll(`a`, `b`);
+}"""
+    )
+
+
+def test_capitalize():
+    def f(s):
+        return s.capitalize()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}"""
+    )
+
+
+def test_zfill():
+    def f(s):
+        return s.zfill(5)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+return s.padStart(5, `0`);
+}"""
+    )

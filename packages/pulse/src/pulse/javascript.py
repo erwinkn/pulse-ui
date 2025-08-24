@@ -84,6 +84,42 @@ class PyToJS(ast.NodeVisitor):
             return "".join(parts)
         return None
 
+    def _emit_slice_index_arg(self, node: ast.expr) -> str:
+        """Emit a slice index argument without redundant parentheses for negatives.
+
+        Ensures that a unary negative integer like -2 is emitted as -2 (not (-2)).
+        """
+        # -<int>
+        if (
+            isinstance(node, ast.UnaryOp)
+            and isinstance(node.op, ast.USub)
+            and isinstance(node.operand, ast.Constant)
+            and isinstance(node.operand.value, int)
+        ):
+            return f"-{node.operand.value}"
+        return self.emit_expr(node)
+
+    def _emit_single_compare(self, left_code: str, left_node: ast.expr, op: ast.cmpop, right_code: str, right_node: ast.expr) -> str:
+        # Identity comparisons with None
+        if isinstance(op, ast.Is) or isinstance(op, ast.IsNot):
+            is_not = isinstance(op, ast.IsNot)
+            if (isinstance(right_node, ast.Constant) and right_node.value is None) or (
+                isinstance(left_node, ast.Constant) and left_node.value is None
+            ):
+                # normalize to <expr> === null
+                expr_code = right_code if isinstance(left_node, ast.Constant) else left_code
+                return f"({expr_code} {'!==' if is_not else '==='} null)"
+            raise JSCompilationError("'is'/'is not' only supported with None")
+        # Membership
+        if isinstance(op, ast.In) or isinstance(op, ast.NotIn):
+            inner = f"({right_code}.includes({left_code}))"
+            return f"(!{inner})" if isinstance(op, ast.NotIn) else inner
+        # Standard comparisons
+        op_type = type(op)
+        if op_type not in ALLOWED_CMPOPS:
+            raise JSCompilationError("Comparison not allowed")
+        return f"({left_code} {ALLOWED_CMPOPS[op_type]} {right_code})"
+
     # --- Entrypoints ---------------------------------------------------------
     def emit_function(self, body: list[ast.stmt]) -> str:
         stmts = [self.emit_stmt(stmt) for stmt in body]
@@ -104,6 +140,16 @@ class PyToJS(ast.NodeVisitor):
         if isinstance(node, ast.Return):
             expr = "null" if node.value is None else self.emit_expr(node.value)
             return f"return {expr};"
+        if isinstance(node, ast.AugAssign):
+            if not isinstance(node.target, ast.Name):
+                raise JSCompilationError("Only simple augmented assignments supported.")
+            target = _mangle_identifier(node.target.id)
+            # Support only whitelisted binary ops via mapping
+            op_type = type(node.op)
+            if op_type not in ALLOWED_BINOPS:
+                raise JSCompilationError("AugAssign operator not allowed")
+            value_code = self.emit_expr(node.value)
+            return f"{target} {ALLOWED_BINOPS[op_type]}= {value_code};"
         if isinstance(node, ast.Assign):
             if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
                 raise JSCompilationError(
@@ -183,14 +229,22 @@ class PyToJS(ast.NodeVisitor):
             op = "&&" if isinstance(node.op, ast.And) else "||"
             return f"({f' {op} '.join(self.emit_expr(v) for v in node.values)})"
         if isinstance(node, ast.Compare):
-            if len(node.ops) != 1 or len(node.comparators) != 1:
-                raise JSCompilationError("Only simple comparisons supported")
-            op = type(node.ops[0])
-            if op not in ALLOWED_CMPOPS:
-                raise JSCompilationError("Comparison not allowed")
-            left = self.emit_expr(node.left)
-            right = self.emit_expr(node.comparators[0])
-            return f"({left} {ALLOWED_CMPOPS[op]} {right})"
+            # Support chained comparisons, identity with None, and membership
+            # Build sequential comparisons combined with &&
+            operands: list[ast.expr] = [node.left, *node.comparators]
+            codes: list[str] = [self.emit_expr(e) for e in operands]
+            parts: list[str] = []
+            for i, op in enumerate(node.ops):
+                left_node = operands[i]
+                right_node = operands[i + 1]
+                left_code = codes[i]
+                right_code = codes[i + 1]
+                parts.append(
+                    self._emit_single_compare(left_code, left_node, op, right_code, right_node)
+                )
+            if len(parts) == 1:
+                return parts[0]
+            return f"({ ' && '.join(parts) })"
         if isinstance(node, ast.IfExp):
             test = self.emit_expr(node.test)
             body = self.emit_expr(node.body)
@@ -201,21 +255,51 @@ class PyToJS(ast.NodeVisitor):
             if isinstance(node.func, ast.Name):
                 fname = node.func.id
                 args = [self.emit_expr(a) for a in node.args]
+                # Support keyword arguments for round/int
+                kw_map: dict[str, str] = {}
+                for kw in node.keywords:
+                    if kw.arg is None:
+                        raise JSCompilationError("**kwargs not supported")
+                    kw_map[kw.arg] = self.emit_expr(kw.value)
                 if fname == "len" and len(args) == 1:
                     return f"({args[0]}?.length ?? 0)"
                 if fname in {"min", "max"}:
                     return f"Math.{fname}({', '.join(args)})"
                 if fname == "abs" and len(args) == 1:
                     return f"Math.abs({args[0]})"
-                if fname == "round" and (1 <= len(args) <= 2):
+                if fname == "round":
+                    if kw_map:
+                        # round(number=x) or round(number=x, ndigits=2)
+                        num = kw_map.get("number")
+                        nd = kw_map.get("ndigits")
+                        if num is None:
+                            raise JSCompilationError("round() requires 'number' kw when using keywords")
+                        if nd is None:
+                            return f"Math.round({num})"
+                        return f"(Number({num}).toFixed({nd}))"
+                    # positional
+                    if not (1 <= len(args) <= 2):
+                        raise JSCompilationError("round() arity not supported")
                     # round(x) -> Math.round(x); round(x, n) -> Number(x).toFixed(n)
                     if len(args) == 1:
                         return f"Math.round({args[0]})"
                     return f"(Number({args[0]}).toFixed({args[1]}))"
                 if fname == "str" and len(args) == 1:
                     return f"String({args[0]})"
-                if fname == "int" and len(args) in (1, 2):
-                    return f"parseInt({args[0]})"
+                if fname == "int":
+                    if kw_map:
+                        num = kw_map.get("x")
+                        base = kw_map.get("base")
+                        if num is None:
+                            raise JSCompilationError("int() requires 'x' kw when using keywords")
+                        if base is None:
+                            return f"parseInt({num})"
+                        return f"parseInt({num}, {base})"
+                    if len(args) in (1, 2):
+                        # When base is provided positionally, include it
+                        if len(args) == 1:
+                            return f"parseInt({args[0]})"
+                        return f"parseInt({args[0]}, {args[1]})"
                 if fname == "float" and len(args) == 1:
                     return f"parseFloat({args[0]})"
                 raise JSCompilationError(f"Call to unsupported function: {fname}()")
@@ -231,17 +315,51 @@ class PyToJS(ast.NodeVisitor):
                         "strip": "trim",
                     }
                     return f"({obj}.{mapping[attr]}())"
+                if attr in {"startswith", "endswith"} and len(args) == 1:
+                    mapping = {
+                        "startswith": "startsWith",
+                        "endswith": "endsWith",
+                    }
+                    return f"({obj}.{mapping[attr]}({args[0]}))"
+                if attr == "lstrip" and len(args) == 0:
+                    return f"({obj}.trimStart())"
+                if attr == "rstrip" and len(args) == 0:
+                    return f"({obj}.trimEnd())"
+                if attr == "replace" and len(args) == 2:
+                    return f"({obj}.replaceAll({args[0]}, {args[1]}))"
                 return f"({obj}.{attr}({', '.join(args)}))"
         if isinstance(node, ast.Attribute):
             value = self.emit_expr(node.value)
             return f"({value}.{node.attr})"
         if isinstance(node, ast.Subscript):
             value = self.emit_expr(node.value)
-            index = self.emit_expr(
-                node.slice
-                if not isinstance(node.slice, ast.Slice)
-                else node.slice.lower or ast.Constant(0)
-            )
+            # Slice handling
+            if isinstance(node.slice, ast.Slice):
+                lower = node.slice.lower
+                upper = node.slice.upper
+                if lower is None and upper is None:
+                    # full slice -> copy
+                    return f"({value}.slice())"
+                if lower is None:
+                    start = "0"
+                    end = self._emit_slice_index_arg(node.slice.upper)
+                    return f"({value}.slice({start}, {end}))"
+                if upper is None:
+                    start = self._emit_slice_index_arg(node.slice.lower)
+                    return f"({value}.slice({start}))"
+                start = self._emit_slice_index_arg(node.slice.lower)
+                end = self._emit_slice_index_arg(node.slice.upper)
+                return f"({value}.slice({start}, {end}))"
+            # Negative index single access -> at()
+            if (
+                isinstance(node.slice, ast.UnaryOp)
+                and isinstance(node.slice.op, ast.USub)
+                and isinstance(node.slice.operand, ast.Constant)
+                and isinstance(node.slice.operand.value, int)
+            ):
+                idx = f"-{node.slice.operand.value}"
+                return f"({value}.at({idx}))"
+            index = self.emit_expr(node.slice)
             return f"({value}[{index}])"
         if isinstance(node, ast.JoinedStr):
             # Special-case a single formatted value like f"{x:.2f}" -> x.toFixed(2)

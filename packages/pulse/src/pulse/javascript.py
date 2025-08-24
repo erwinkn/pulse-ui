@@ -190,10 +190,6 @@ class PyToJS(ast.NodeVisitor):
         fill_js = fill.replace("\\", "\\\\").replace("`", "\\`")
         fill_literal = f"`{fill_js}`"
 
-        # Determine base string for the value
-        def is_numeric_type(t: str | None) -> bool:
-            return t in {"d", "b", "o", "x", "X", "f", "F", "e", "E", "g", "G", "n", "%", "c"}
-
         # Special-case minimal 'f' with only precision (no width/align/sign/etc.)
         if (
             typ in {"f", "F"}
@@ -556,6 +552,8 @@ class PyToJS(ast.NodeVisitor):
                         return f"parseInt({args[0]}, {args[1]})"
                 if fname == "float" and len(args) == 1:
                     return f"parseFloat({args[0]})"
+                if fname == "list" and len(args) == 1:
+                    return f"({args[0]})"
                 raise JSCompilationError(f"Call to unsupported function: {fname}()")
             if isinstance(node.func, ast.Attribute):
                 obj = self.emit_expr(node.func.value)
@@ -565,6 +563,26 @@ class PyToJS(ast.NodeVisitor):
                 if attr == "join" and len(args) == 1:
                     # "sep".join(xs) -> xs.join("sep")
                     return f"({args[0]}.join({obj}))"
+                # Dict-like helpers: get/keys/values/items
+                if attr == "get" and 1 <= len(node.args) <= 2:
+                    # obj.get(k, default) -> (obj[k] ?? default)
+                    key_node = node.args[0]
+                    if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                        key_str = key_node.value.replace("\\", "\\\\").replace("\"", "\\\"")
+                        key_code = f"\"{key_str}\""
+                    else:
+                        key_code = self.emit_expr(key_node)
+                    if len(node.args) == 2:
+                        default = self.emit_expr(node.args[1])
+                        return f"(({obj}[{key_code}] ?? {default}))"
+                    else:
+                        return f"({obj}[{key_code}] ?? null)"
+                if attr == "keys" and len(args) == 0:
+                    return f"Object.keys({obj})"
+                if attr == "values" and len(args) == 0:
+                    return f"Object.values({obj})"
+                if attr == "items" and len(args) == 0:
+                    return f"Object.entries({obj})"
                 if attr in {"lower", "upper", "strip"} and len(args) == 0:
                     mapping = {
                         "lower": "toLowerCase",
@@ -700,3 +718,4 @@ def javascript(fn: Callable[..., Any] | None = None):
     if fn is not None:
         return decorator(fn)
     return decorator
+

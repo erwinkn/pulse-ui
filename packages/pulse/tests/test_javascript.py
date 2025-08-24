@@ -412,6 +412,68 @@ return (xs.join(`,`));
     except JSCompilationError as e:
         assert "dict keys" in str(e)
 
+
+def test_dict_methods_and_string_split():
+    def f(d):
+        return d.get("x", 0)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return ((d["x"] ?? 0));
+}"""
+    )
+
+    def g(d):
+        return d.get("y")
+
+    code2, _, _ = compile_python_to_js(g)
+    assert code2 == (
+        """function(d){
+return (d["y"] ?? null);
+}"""
+    )
+
+    def h(s):
+        return s.split(",")
+
+    code3, _, _ = compile_python_to_js(h)
+    assert code3 == (
+        """function(s){
+return (s.split(`,`));
+}"""
+    )
+
+    def i(d):
+        return list(d.keys())
+
+    code4, _, _ = compile_python_to_js(i)
+    assert code4 == (
+        """function(d){
+return (Object.keys(d));
+}"""
+    )
+
+    def j(d):
+        return list(d.values())
+
+    code5, _, _ = compile_python_to_js(j)
+    assert code5 == (
+        """function(d){
+return (Object.values(d));
+}"""
+    )
+
+    def k(d):
+        return list(d.items())
+
+    code6, _, _ = compile_python_to_js(k)
+    assert code6 == (
+        """function(d){
+return (Object.entries(d));
+}"""
+    )
+
 def test_compile_compare_chaining_exact():
     def f(x):
         return 0 < x < 10

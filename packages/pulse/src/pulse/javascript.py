@@ -66,6 +66,24 @@ class PyToJS(ast.NodeVisitor):
         self.freevars: set[str] = set()
         self._lines: list[str] = []
 
+    def _const_joinedstr_to_str(self, node: ast.AST) -> str | None:
+        """Return the literal string of a format spec if it is constant-only.
+
+        For f-strings, ast.FormattedValue.format_spec can be a JoinedStr. We
+        only support cases where the format spec is entirely constant text.
+        """
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.JoinedStr):
+            parts: list[str] = []
+            for v in node.values:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    parts.append(v.value)
+                else:
+                    return None
+            return "".join(parts)
+        return None
+
     # --- Entrypoints ---------------------------------------------------------
     def emit_function(self, body: list[ast.stmt]) -> str:
         stmts = [self.emit_stmt(stmt) for stmt in body]
@@ -215,15 +233,40 @@ class PyToJS(ast.NodeVisitor):
             )
             return f"({value}[{index}])"
         if isinstance(node, ast.JoinedStr):
-            # f-strings -> backtick template
+            # Special-case a single formatted value like f"{x:.2f}" -> x.toFixed(2)
+            if len(node.values) == 1 and isinstance(node.values[0], ast.FormattedValue):
+                fv = node.values[0]
+                if fv.format_spec is not None:
+                    spec_str = self._const_joinedstr_to_str(fv.format_spec)
+                    if (
+                        spec_str is not None
+                        and spec_str.startswith(".")
+                        and spec_str.endswith("f")
+                        and spec_str[1:-1].isdigit()
+                    ):
+                        precision = spec_str[1:-1]
+                        inner = self.emit_expr(fv.value)
+                        return f"{inner}.toFixed({precision})"
+
+            # General f-strings -> backtick template
             parts: list[str] = []
             for part in node.values:
                 if isinstance(part, ast.Constant) and isinstance(part.value, str):
                     s = part.value.replace("\\", "\\\\").replace("`", "\\`")
                     parts.append(s)
                 elif isinstance(part, ast.FormattedValue):
-                    expr = self.emit_expr(part.value)
-                    parts.append(f"${{{expr}}}")
+                    expr_inner = self.emit_expr(part.value)
+                    # Handle precision format like .2f within template literals
+                    if part.format_spec is not None:
+                        spec_str = self._const_joinedstr_to_str(part.format_spec)
+                        if (
+                            spec_str is not None
+                            and spec_str.startswith(".")
+                            and spec_str.endswith("f")
+                            and spec_str[1:-1].isdigit()
+                        ):
+                            expr_inner = f"({expr_inner}).toFixed({spec_str[1:-1]})"
+                    parts.append(f"${{{expr_inner}}}")
                 else:
                     raise JSCompilationError("Unsupported f-string component")
             return "`" + "".join(parts) + "`"

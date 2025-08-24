@@ -177,6 +177,15 @@ class PyToJS(ast.NodeVisitor):
         precision = spec_info["precision"]  # int | None
         typ = spec_info["type"]  # str | None
 
+        # Validate support
+        allowed_types = {None, "s", "c", "d", "b", "o", "x", "X", "f", "F", "e", "E", "g", "G", "n", "%"}
+        if typ not in allowed_types:
+            raise JSCompilationError(f"Unsupported format type: {typ}")
+        if grouping == "_":
+            raise JSCompilationError("Unsupported grouping separator '_' in format spec")
+        if align == "=" and typ in {None, "s"}:
+            raise JSCompilationError("Alignment '=' is only supported for numeric types")
+
         # Escape backtick in fill if present
         fill_js = fill.replace("\\", "\\\\").replace("`", "\\`")
         fill_literal = f"`{fill_js}`"
@@ -233,7 +242,13 @@ class PyToJS(ast.NodeVisitor):
             abs_num = f"Math.abs({num})"
             if typ in {"f", "F"}:
                 p = precision if precision is not None else 6
-                s = f"Number({abs_num}).toFixed({p})"
+                if grouping == ",":
+                    s = (
+                        f"Number({abs_num}).toLocaleString(`en-US`, "
+                        f"{{minimumFractionDigits: {p}, maximumFractionDigits: {p}}})"
+                    )
+                else:
+                    s = f"Number({abs_num}).toFixed({p})"
             elif typ in {"e", "E"}:
                 p = precision if precision is not None else 6
                 s = f"Number({abs_num}).toExponential({p})"
@@ -591,9 +606,10 @@ class PyToJS(ast.NodeVisitor):
                 fv = node.values[0]
                 if fv.format_spec is not None:
                     spec_str = self._const_joinedstr_to_str(fv.format_spec)
-                    if spec_str is not None:
-                        inner = self.emit_expr(fv.value)
-                        return self._apply_format_spec(inner, fv.value, spec_str)
+                    if spec_str is None:
+                        raise JSCompilationError("Format spec must be a constant string")
+                    inner = self.emit_expr(fv.value)
+                    return self._apply_format_spec(inner, fv.value, spec_str)
 
             # General f-strings -> backtick template
             parts: list[str] = []
@@ -606,8 +622,9 @@ class PyToJS(ast.NodeVisitor):
                     # Apply full format spec if provided
                     if part.format_spec is not None:
                         spec_str = self._const_joinedstr_to_str(part.format_spec)
-                        if spec_str is not None:
-                            expr_inner = self._apply_format_spec(expr_inner, part.value, spec_str)
+                        if spec_str is None:
+                            raise JSCompilationError("Format spec must be a constant string")
+                        expr_inner = self._apply_format_spec(expr_inner, part.value, spec_str)
                     parts.append(f"${{{expr_inner}}}")
                 else:
                     raise JSCompilationError("Unsupported f-string component")

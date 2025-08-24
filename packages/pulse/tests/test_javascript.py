@@ -260,6 +260,88 @@ return (((Number(x) < 0) ? `-` : `+`) + `` + Number(Math.abs(Number(x))).toFixed
 }"""
     )
 
+    def h(x):
+        return f"{x:#x}"
+
+    code3, _, _ = compile_python_to_js(h)
+    assert code3 == (
+        """function(x){
+return (((Number(x) < 0) ? `-` : ``) + `0x` + (Math.trunc(Math.abs(Number(x))).toString(16)));
+}"""
+    )
+
+    def i(x):
+        return f"{x:#X}"
+
+    code4, _, _ = compile_python_to_js(i)
+    assert code4 == (
+        """function(x){
+return (((Number(x) < 0) ? `-` : ``) + `0X` + ((Math.trunc(Math.abs(Number(x))).toString(16)).toUpperCase()));
+}"""
+    )
+
+    def j(x):
+        return f"{x:b}"
+
+    code5, _, _ = compile_python_to_js(j)
+    assert code5 == (
+        """function(x){
+return (((Number(x) < 0) ? `-` : ``) + `` + (Math.trunc(Math.abs(Number(x))).toString(2)));
+}"""
+    )
+
+    def k(y):
+        return f"{y:^7s}"
+
+    code6, _, _ = compile_python_to_js(k)
+    assert code6 == (
+        """function(y){
+return ((String(y)).padStart(Math.floor((7 + (String(y)).length)/2), ` `).padEnd(7, ` `));
+}"""
+    )
+
+
+def test_format_spec_errors_and_unsupported():
+    # Non-constant format spec should error
+    def f(x, p):
+        return f"{x:{p}}"
+
+    try:
+        compile_python_to_js(f)
+        assert False, "Expected JSCompilationError for non-constant format spec"
+    except JSCompilationError as e:
+        assert "constant" in str(e)
+
+    # Unsupported type
+    def g(x):
+        return f"{x:Z}"
+
+    try:
+        compile_python_to_js(g)
+        assert False, "Expected JSCompilationError for unsupported type"
+    except JSCompilationError as e:
+        assert "Unsupported format type" in str(e)
+
+    # Unsupported grouping '_'
+    def h(x):
+        return f"{x:_d}"
+
+    try:
+        compile_python_to_js(h)
+        assert False, "Expected JSCompilationError for unsupported grouping"
+    except JSCompilationError as e:
+        assert "Unsupported grouping" in str(e)
+
+    # '=' alignment not allowed for strings
+    def i(s):
+        return f"{s:=10s}"
+
+    try:
+        compile_python_to_js(i)
+        assert False, "Expected JSCompilationError for '=' alignment on string"
+    except JSCompilationError as e:
+        assert "Alignment '=' is only supported for numeric types" in str(e)
+
 def test_compile_compare_chaining_exact():
     def f(x):
         return 0 < x < 10

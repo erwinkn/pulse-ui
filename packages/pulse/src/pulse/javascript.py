@@ -128,7 +128,30 @@ class JSArray(JSExpr):
     elements: Sequence[JSExpr]
 
     def emit(self) -> str:
-        inner = ", ".join(e.emit() for e in self.elements)
+        parts: list[str] = []
+        for e in self.elements:
+            if isinstance(e, JSSpread):
+                parts.append(e.emit())
+            else:
+                parts.append(e.emit())
+        inner = ", ".join(parts)
+        return f"[{inner}]"
+
+
+@dataclass
+class JSSpread(JSExpr):
+    expr: JSExpr
+
+    def emit(self) -> str:
+        return f"...{self.expr.emit()}"
+
+
+@dataclass
+class JSArraySpread(JSExpr):
+    parts: Sequence[Union[JSExpr, JSSpread]]
+
+    def emit(self) -> str:
+        inner = ", ".join(p.emit() for p in self.parts)
         return f"[{inner}]"
 
 
@@ -140,6 +163,32 @@ class JSObject(JSExpr):
     def emit(self) -> str:
         inner = ", ".join(f'"{k}": {v.emit()}' for k, v in self.pairs)
         return "{" + inner + "}"
+
+
+@dataclass
+class JSProp(JSExpr):
+    key: str
+    value: JSExpr
+
+    def emit(self) -> str:
+        return f'"{self.key}": {self.value.emit()}'
+
+
+@dataclass
+class JSComputedProp(JSExpr):
+    key: JSExpr
+    value: JSExpr
+
+    def emit(self) -> str:
+        return f"[{self.key.emit()}]: {self.value.emit()}"
+
+
+@dataclass
+class JSObjectConstructor(JSExpr):
+    parts: Sequence[JSExpr]  # JSProp | JSComputedProp | JSSpread
+
+    def emit(self) -> str:
+        return "{" + ", ".join(p.emit() for p in self.parts) + "}"
 
 
 @dataclass
@@ -324,6 +373,31 @@ class JSAugAssign(JSStmt):
 
 
 @dataclass
+class JSConstAssign(JSStmt):
+    name: str
+    value: JSExpr
+
+    def emit(self) -> str:
+        return f"const {self.name} = {self.value.emit()};"
+
+
+@dataclass
+class JSExprStmt(JSStmt):
+    expr: JSExpr
+
+    def emit(self) -> str:
+        return f"{self.expr.emit()};"
+
+
+@dataclass
+class JSMulti(JSStmt):
+    stmts: Sequence[JSStmt]
+
+    def emit(self) -> str:
+        return "\n".join(s.emit() for s in self.stmts)
+
+
+@dataclass
 class JSIf(JSStmt):
     test: JSExpr
     body: Sequence[JSStmt]
@@ -371,6 +445,27 @@ class JSContinue(JSStmt):
 
 
 @dataclass
+class JSSwitch(JSStmt):
+    discriminant: JSExpr
+    cases: Sequence[tuple[list[JSExpr] | None, Sequence[JSStmt]]]
+
+    def emit(self) -> str:
+        parts: list[str] = [f"switch ({self.discriminant.emit()}){{"]
+        for labels, body in self.cases:
+            if labels is None:
+                parts.append("default:")
+            else:
+                for label in labels:
+                    parts.append(f"case {label.emit()}:")
+            for s in body:
+                parts.append(s.emit())
+            if labels is not None:
+                parts.append("break;")
+        parts.append("}")
+        return "\n".join(parts)
+
+
+@dataclass
 class JSFunctionExpr(JSExpr):
     params: Sequence[str]
     body: Sequence[JSStmt]
@@ -395,6 +490,7 @@ class PyToJS(ast.NodeVisitor):
         self.locals: set[str] = set(arg_names)
         self.freevars: set[str] = set()
         self._lines: list[str] = []
+        self._temp_counter: int = 0
 
     def _const_joinedstr_to_str(self, node: ast.AST) -> str | None:
         """Return the literal string of a format spec if it is constant-only.
@@ -888,16 +984,18 @@ class PyToJS(ast.NodeVisitor):
         right_expr: JSExpr,
         right_node: ast.expr,
     ) -> JSExpr:
-        # Identity comparisons with None
+        # Identity comparisons: treat as strict equality; special-case None to
+        # output x === null regardless of order.
         if isinstance(op, ast.Is) or isinstance(op, ast.IsNot):
             is_not = isinstance(op, ast.IsNot)
             if (isinstance(right_node, ast.Constant) and right_node.value is None) or (
                 isinstance(left_node, ast.Constant) and left_node.value is None
             ):
-                # normalize to <expr> === null
+                # For None identity, allow null or undefined via loose equality
                 expr = right_expr if isinstance(left_node, ast.Constant) else left_expr
-                return JSBinary(expr, "!==" if is_not else "===", JSNull())
-            raise JSCompilationError("'is'/'is not' only supported with None")
+                return JSBinary(expr, "!=" if is_not else "==", JSNull())
+            # For non-None, use strict equality which matches desired semantics for our subset
+            return JSBinary(left_expr, "!==" if is_not else "===", right_expr)
         # Membership
         if isinstance(op, ast.In) or isinstance(op, ast.NotIn):
             # Runtime branch: arrays/strings use includes, objects use hasOwnProperty
@@ -927,6 +1025,8 @@ class PyToJS(ast.NodeVisitor):
     # --- Entrypoints ---------------------------------------------------------
     def emit_function(self, body: list[ast.stmt]) -> JSFunctionExpr:
         stmts: list[JSStmt] = []
+        # Reset temp counter per function emission
+        self._temp_counter = 0
         for stmt in body:
             s = self.emit_stmt(stmt)
             if s is None:
@@ -962,11 +1062,40 @@ class PyToJS(ast.NodeVisitor):
             value_expr = self.emit_expr(node.value)
             return JSAugAssign(target, ALLOWED_BINOPS[op_type], value_expr)
         if isinstance(node, ast.Assign):
-            if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            if len(node.targets) != 1:
+                raise JSCompilationError(
+                    "Multiple assignment targets are not supported"
+                )
+            target_node = node.targets[0]
+            # Tuple/list unpacking of flat names only
+            if isinstance(target_node, (ast.Tuple, ast.List)):
+                elements = target_node.elts
+                if not elements or not all(isinstance(e, ast.Name) for e in elements):
+                    raise JSCompilationError(
+                        "Only flat name unpacking is supported in assignment unpacking"
+                    )
+                tmp_name = f"__tmp{self._temp_counter}"
+                self._temp_counter += 1
+                value_expr = self.emit_expr(node.value)
+                stmts: list[JSStmt] = [
+                    JSConstAssign(tmp_name, value_expr),
+                ]
+                for idx, e in enumerate(elements):
+                    name = cast(ast.Name, e).id
+                    ident = _mangle_identifier(name)
+                    index_expr = JSNumber(str(idx))
+                    sub = JSSubscript(JSIdentifier(tmp_name), index_expr)
+                    if name in self.locals:
+                        stmts.append(JSAssign(ident, sub, declare=False))
+                    else:
+                        self.locals.add(name)
+                        stmts.append(JSAssign(ident, sub, declare=True))
+                return JSMulti(stmts)
+            if not isinstance(target_node, ast.Name):
                 raise JSCompilationError(
                     "Only simple assignments to local names are supported."
                 )
-            target = node.targets[0].id
+            target = target_node.id
             target_ident = _mangle_identifier(target)
             value_expr = self.emit_expr(node.value)
             # Use 'let' only on first assignment to a local name. Parameters
@@ -992,6 +1121,19 @@ class PyToJS(ast.NodeVisitor):
             body = [self.emit_stmt(s) for s in node.body]
             orelse = [self.emit_stmt(s) for s in node.orelse] if node.orelse else []
             return JSIf(test, body, orelse)
+        if isinstance(node, ast.Expr):
+            # Expression statement; support print(...) -> console.log(...)
+            if isinstance(node.value, ast.Call) and isinstance(
+                node.value.func, ast.Name
+            ):
+                if node.value.func.id == "print":
+                    args = [self.emit_expr(a) for a in node.value.args]
+                    return JSExprStmt(
+                        JSCall(JSMember(JSIdentifier("console"), "log"), args)
+                    )
+            # Generic call as expression statement
+            if isinstance(node.value, ast.Call):
+                return JSExprStmt(self.emit_expr(node.value))
         if isinstance(node, ast.While):
             test = self.emit_expr(node.test)
             body = [self.emit_stmt(s) for s in node.body]
@@ -1011,6 +1153,35 @@ class PyToJS(ast.NodeVisitor):
             iter_expr = self.emit_expr(node.iter)
             body = [self.emit_stmt(s) for s in node.body]
             return JSForOf(target_ident, iter_expr, body)
+        if hasattr(ast, "Match") and isinstance(node, ast.Match):  # Python 3.10+
+            # Only support value matching on constants and simple OR patterns; no guards
+            subject = self.emit_expr(node.subject)
+            cases: list[tuple[list[JSExpr] | None, list[JSStmt]]] = []
+            for c in node.cases:
+                # Guard unsupported
+                if c.guard is not None:
+                    raise JSCompilationError("Match guards are not supported")
+                labels: list[JSExpr] | None
+                pat = c.pattern
+                if isinstance(pat, ast.MatchAs) and pat.pattern is None:
+                    labels = None  # default
+                elif isinstance(pat, ast.MatchValue):
+                    labels = [self.emit_expr(pat.value)]
+                elif isinstance(pat, ast.MatchOr):
+                    labels = []
+                    for p in pat.patterns:
+                        if not isinstance(p, ast.MatchValue):
+                            raise JSCompilationError(
+                                "Only value patterns supported in OR"
+                            )
+                        labels.append(self.emit_expr(p.value))
+                else:
+                    raise JSCompilationError(
+                        "Only simple value patterns supported in match"
+                    )
+                body = [self.emit_stmt(s) for s in c.body]
+                cases.append((labels, body))
+            return JSSwitch(subject, cases)
         raise JSCompilationError(
             f"Unsupported statement: {ast.dump(node, include_attributes=False)}"
         )
@@ -1094,20 +1265,74 @@ class PyToJS(ast.NodeVisitor):
                 entries = JSMemberCall(chain, "map", [mapper])
             return JSCall(JSIdentifier("Object.fromEntries"), [entries])
         if isinstance(node, ast.List):
-            return JSArray([self.emit_expr(e) for e in node.elts])
+            parts = cast(list[Union[JSExpr, JSSpread]], [])
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    parts.append(JSSpread(self.emit_expr(e.value)))
+                else:
+                    parts.append(self.emit_expr(e))
+            if any(isinstance(p, JSSpread) for p in parts):
+                return JSArraySpread(parts)
+            return JSArray([cast(JSExpr, p) for p in parts])
         if isinstance(node, ast.Tuple):
-            return JSArray([self.emit_expr(e) for e in node.elts])
+            parts = cast(list[Union[JSExpr, JSSpread]], [])
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    parts.append(JSSpread(self.emit_expr(e.value)))
+                else:
+                    parts.append(self.emit_expr(e))
+            if any(isinstance(p, JSSpread) for p in parts):
+                return JSArraySpread(parts)
+            return JSArray([cast(JSExpr, p) for p in parts])
         if isinstance(node, ast.Dict):
-            pairs: list[Tuple[str, JSExpr]] = []
+            # Support dynamic keys and dict unpacking (**)
+            props: list[Tuple[Union[str, JSExpr], JSExpr]] = []
+            pieces: list[JSExpr] = []
+            had_spread = False
             for k, v in zip(node.keys, node.values):
-                if not isinstance(k, ast.Constant) or not isinstance(k.value, str):
-                    raise JSCompilationError(
-                        "Only string literal dict keys are supported"
-                    )
-                key_str = k.value.replace("\\", "\\\\").replace('"', '\\"')
+                if k is None:
+                    # Spread mapping: {**expr}
+                    if props:
+                        obj_parts0: list[JSExpr] = []
+                        for key, val in props:
+                            if isinstance(key, str):
+                                obj_parts0.append(JSProp(key, val))
+                            else:
+                                obj_parts0.append(JSComputedProp(key, val))
+                        pieces.append(JSObjectConstructor(obj_parts0))
+                        props = []
+                    pieces.append(self.emit_expr(v))
+                    had_spread = True
+                    continue
                 val_expr = self.emit_expr(v)
-                pairs.append((key_str, val_expr))
-            return JSObject(pairs)
+                if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                    key_str = k.value.replace("\\", "\\\\").replace('"', '\\"')
+                    props.append((key_str, val_expr))
+                else:
+                    # Computed key -> [String(key)]
+                    comp_key = JSCall(JSIdentifier("String"), [self.emit_expr(k)])
+                    props.append((comp_key, val_expr))
+            if props:
+                obj_parts: list[JSExpr] = []
+                for key, val in props:
+                    if isinstance(key, str):
+                        obj_parts.append(JSProp(key, val))
+                    else:
+                        obj_parts.append(JSComputedProp(key, val))
+                pieces.append(JSObjectConstructor(obj_parts))
+            if had_spread:
+                # Emit object spread literal: {...a, {...props}}
+                parts = cast(list[JSExpr], [])
+                for p in pieces:
+                    if isinstance(p, JSObjectConstructor):
+                        parts.extend(p.parts)
+                    else:
+                        parts.append(JSSpread(p))
+                return JSObjectConstructor(parts)
+            if not pieces:
+                return JSObjectConstructor([])
+            # No spreads: single object literal possibly with computed keys
+            return pieces[0]
         if isinstance(node, ast.Constant):
             v = node.value
             if isinstance(v, str):
@@ -1365,6 +1590,95 @@ class PyToJS(ast.NodeVisitor):
                     return JSMemberCall(obj, "trimEnd", [])
                 if attr == "replace" and len(args) == 2:
                     return JSMemberCall(obj, "replaceAll", [args[0], args[1]])
+                # List/array-like helpers
+                if attr == "index" and len(args) == 1:
+                    return JSMemberCall(obj, "indexOf", [args[0]])
+                if attr == "count" and len(args) == 1:
+                    filtered = JSMemberCall(
+                        obj,
+                        "filter",
+                        [
+                            JSArrowFunction(
+                                "v", JSBinary(JSIdentifier("v"), "===", args[0])
+                            )
+                        ],
+                    )
+                    return JSMember(filtered, "length")
+                if attr == "copy" and len(args) == 0:
+                    # Prefer array slice when array; otherwise shallow object copy via spread
+                    return JSConditional(
+                        JSCall(JSIdentifier("Array.isArray"), [obj]),
+                        JSMemberCall(obj, "slice", []),
+                        JSObjectConstructor([JSSpread(obj)]),
+                    )
+                # Dict-like mutators
+                if attr == "pop" and (len(args) == 1 or len(args) == 2):
+                    # Disambiguate list vs dict: if 1 arg and it's not a string literal, treat as list pop(index)
+                    if len(args) == 1:
+                        try:
+                            is_str_literal = isinstance(
+                                node.args[0], ast.Constant
+                            ) and isinstance(node.args[0].value, str)
+                        except Exception:
+                            is_str_literal = False
+                        if not is_str_literal:
+                            return JSSubscript(
+                                JSMemberCall(obj, "splice", [args[0], JSNumber("1")]),
+                                JSNumber("0"),
+                            )
+                    key_expr = args[0]
+                    default_expr = args[1] if len(args) == 2 else JSNull()
+                    code = f"(() => {{const __k={key_expr.emit()}; if (Object.hasOwn({obj.emit()}, __k)) {{ const __v = {obj.emit()}[__k]; delete {obj.emit()}[__k]; return __v; }} return {default_expr.emit()}; }})()"
+                    return JSIdentifier(code)
+                if attr == "popitem" and len(args) == 0:
+                    code = f"(() => {{const __ks = Object.keys({obj.emit()}); if (__ks.length === 0) {{ return null; }} const __k = __ks[__ks.length-1]; const __v = {obj.emit()}[__k]; delete {obj.emit()}[__k]; return [__k, __v]; }})()"
+                    return JSIdentifier(code)
+                if attr == "setdefault" and (len(args) == 1 or len(args) == 2):
+                    key_expr = args[0]
+                    default_expr = args[1] if len(args) == 2 else JSNull()
+                    code = f"(() => {{const __k={key_expr.emit()}; if (!Object.hasOwn({obj.emit()}, __k)) {{ {obj.emit()}[__k] = {default_expr.emit()}; return {default_expr.emit()}; }} return {obj.emit()}[__k]; }})()"
+                    return JSIdentifier(code)
+                if attr == "update" and len(args) == 1:
+                    return JSIdentifier(
+                        f"(() => {{Object.assign({obj.emit()}, {args[0].emit()}); return null; }})()"
+                    )
+                if attr == "clear" and len(args) == 0:
+                    return JSIdentifier(
+                        f"(() => {{for (const __k in {obj.emit()}){{ if (Object.hasOwn({obj.emit()}, __k)) delete {obj.emit()}[__k]; }} return null; }})()"
+                    )
+                # Mutating list methods (allowed):
+                if attr == "append" and len(args) == 1:
+                    return JSIdentifier(f"({obj.emit()}.push({args[0].emit()}), null)")
+                if attr == "extend" and len(args) == 1:
+                    return JSParen(
+                        JSIdentifier(f"({obj.emit()}.push(...{args[0].emit()}), null)")
+                    )
+                if attr == "insert" and len(args) == 2:
+                    return JSIdentifier(
+                        f"({obj.emit()}.splice({args[0].emit()}, 0, {args[1].emit()}), null)"
+                    )
+                if attr == "remove" and len(args) == 1:
+                    # Remove first occurrence if present; return None
+                    code = (
+                        f"(()=>{{const __i={obj.emit()}.indexOf({args[0].emit()});"
+                        f" if(__i>=0){{{obj.emit()}.splice(__i,1);}} return null;}})()"
+                    )
+                    return JSIdentifier(code)
+                if attr == "pop" and len(args) in (0, 1):
+                    if len(args) == 0:
+                        return JSMemberCall(obj, "pop", [])
+                    else:
+                        # splice(i,1)[0]
+                        return JSSubscript(
+                            JSMemberCall(obj, "splice", [args[0], JSNumber("1")]),
+                            JSNumber("0"),
+                        )
+                if attr == "clear" and len(args) == 0:
+                    return JSIdentifier(f"({obj.emit()}.length = 0, null)")
+                if attr == "reverse" and len(args) == 0:
+                    return JSIdentifier(f"({obj.emit()}.reverse(), null)")
+                if attr == "sort" and len(args) == 0:
+                    return JSIdentifier(f"({obj.emit()}.sort(), null)")
                 return JSMemberCall(obj, attr, args)
         if isinstance(node, ast.Attribute):
             value = self.emit_expr(node.value)
@@ -1412,7 +1726,7 @@ class PyToJS(ast.NodeVisitor):
                     return self._apply_format_spec(inner, fv.value, spec_str)
 
             # General f-strings -> backtick template
-            parts: list[Union[str, JSExpr]] = []
+            parts = cast(list[Union[str, JSExpr]], [])
             for part in node.values:
                 if isinstance(part, ast.Constant) and isinstance(part.value, str):
                     s = part.value.replace("\\", "\\\\").replace("`", "\\`")

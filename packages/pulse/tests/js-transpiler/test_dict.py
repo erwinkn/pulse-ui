@@ -85,6 +85,126 @@ return {"a": 1, "b": x};
     )
 
 
+def test_dynamic_dict_key():
+    def f(k, v):
+        return {k: v}
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(k, v){
+return {[String(k)]: v};
+}"""
+    )
+
+
+def test_dict_unpacking():
+    def f(a, b):
+        return {"x": 1, **a, **b, "y": 2}
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(a, b){
+return {"x": 1, ...a, ...b, "y": 2};
+}"""
+    )
+
+
+def test_dict_copy():
+    def f(d):
+        return d.copy()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return Array.isArray(d) ? d.slice() : {...d};
+}"""
+    )
+
+
+def test_dict_pop_existing():
+    def f(d):
+        return d.pop("a")
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return (() => {const __k=`a`; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } return null; })();
+}"""
+    )
+
+
+def test_dict_pop_missing_with_default():
+    def f(d):
+        return d.pop("a", 0)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return (() => {const __k=`a`; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } return 0; })();
+}"""
+    )
+
+
+def test_dict_pop_missing_returns_null():
+    def f(d):
+        return d.pop("a")
+
+    code, _, _ = compile_python_to_js(f)
+    assert "return (() => {const __k=`a`;" in code
+
+
+def test_dict_popitem():
+    def f(d):
+        return d.popitem()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return (() => {const __ks = Object.keys(d); if (__ks.length === 0) { return null; } const __k = __ks[__ks.length-1]; const __v = d[__k]; delete d[__k]; return [__k, __v]; })();
+}"""
+    )
+
+
+def test_dict_setdefault_missing():
+    def f(d):
+        return d.setdefault("a", 1)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return (() => {const __k=`a`; if (!Object.hasOwn(d, __k)) { d[__k] = 1; return 1; } return d[__k]; })();
+}"""
+    )
+
+
+def test_dict_setdefault_existing():
+    def f(d):
+        return d.setdefault("a")
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return (() => {const __k=`a`; if (!Object.hasOwn(d, __k)) { d[__k] = null; return null; } return d[__k]; })();
+}"""
+    )
+
+
+def test_dict_update_and_clear():
+    def f(d, o):
+        d.update(o)
+        d.clear()
+        return d
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d, o){
+(() => {Object.assign(d, o); return null; })();
+(() => {for (const __k in d){ if (Object.hasOwn(d, __k)) delete d[__k]; } return null; })();
+return d;
+}"""
+    )
+
+
 def test_dict_comprehension_filter():
     def f(pairs):
         return {k: v for (k, v) in pairs if v > 0}

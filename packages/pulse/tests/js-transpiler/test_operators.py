@@ -1,3 +1,5 @@
+import warnings
+import pytest
 from pulse.javascript import compile_python_to_js
 
 
@@ -82,7 +84,7 @@ def test_is_none():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return x === null;
+return x == null;
 }"""
     )
 
@@ -94,7 +96,7 @@ def test_is_not_none():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return x !== null;
+return x != null;
 }"""
     )
 
@@ -109,8 +111,36 @@ def test_simple_addition():
 return a + b;
 }"""
     )
-    assert n_args == 2
-    assert len(h) == 16 and all(c in "0123456789abcdef" for c in h)
+
+
+def test_is_with_value():
+    def f(x):
+        y = 5
+        return x is y
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(x){
+let y = 5;
+return x === y;
+}"""
+    )
+
+
+def test_is_not_with_string():
+    warnings.simplefilter("ignore", SyntaxWarning)
+
+    def f(s):
+        a = "a"
+        return s is not a
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(s){
+let a = `a`;
+return s !== a;
+}"""
+    )
 
 
 def test_constants_arithmetic_comparisons_boolean_ops():

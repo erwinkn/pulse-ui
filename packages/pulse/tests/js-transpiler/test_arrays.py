@@ -61,6 +61,126 @@ return [x];
     )
 
 
+def test_list_literal_with_spread():
+    def f(a):
+        return [1, *a, 3]
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(a){
+return [1, ...a, 3];
+}"""
+    )
+
+
+def test_tuple_spread_mixed_sources():
+    def f(a, b):
+        return (*a, 2, *b)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(a, b){
+return [...a, 2, ...b];
+}"""
+    )
+
+
+def test_list_index():
+    def f(xs):
+        return xs.index(3)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return xs.indexOf(3);
+}"""
+    )
+
+
+def test_list_count():
+    def f(xs):
+        return xs.count(1)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return xs.filter(v => v === 1).length;
+}"""
+    )
+
+
+def test_list_copy():
+    def f(xs):
+        return xs.copy()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return Array.isArray(xs) ? xs.slice() : {...xs};
+}"""
+    )
+
+
+def test_list_append_emits_push_and_returns_none():
+    def f(xs):
+        return xs.append(1)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return (xs.push(1), null);
+}"""
+    )
+
+
+def test_list_sort_mutates_and_returns_none():
+    def f(xs):
+        return xs.sort()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return (xs.sort(), null);
+}"""
+    )
+
+
+def test_list_reverse_mutates_and_returns_none():
+    def f(xs):
+        return xs.reverse()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return (xs.reverse(), null);
+}"""
+    )
+
+
+def test_list_pop_noarg():
+    def f(xs):
+        return xs.pop()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return xs.pop();
+}"""
+    )
+
+
+def test_list_pop_index():
+    def f(xs):
+        return xs.pop(2)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return xs.splice(2, 1)[0];
+}"""
+    )
+
+
 def test_membership_in_list():
     def f(a):
         return 2 in a

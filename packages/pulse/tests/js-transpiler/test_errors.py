@@ -36,14 +36,3 @@ def test_slice_step_error():
         assert False, "Expected JSCompilationError for slice step"
     except JSCompilationError as e:
         assert "slice step" in str(e).lower()
-
-
-def test_non_string_dict_key_error():
-    def f(x):
-        return {x: 1}
-
-    try:
-        compile_python_to_js(f)
-        assert False, "Expected JSCompilationError for non-string dict key"
-    except JSCompilationError as e:
-        assert "dict keys" in str(e)

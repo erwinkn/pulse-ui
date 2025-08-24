@@ -1,4 +1,4 @@
-from pulse.javascript import compile_python_to_js
+from pulse.javascript import compile_python_to_js, JSCompilationError
 
 
 def test_if_else_statement():
@@ -54,3 +54,83 @@ def test_nested_ternary():
 return x > 0 ? 1 : x < -1 ? 2 : 3;
 }"""
     )
+
+
+def test_unpack_tuple_assignment():
+    def f(t):
+        a, b = t
+        return a + b
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(t){
+const __tmp0 = t;
+let a = __tmp0[0];
+let b = __tmp0[1];
+return a + b;
+}"""
+    )
+
+
+def test_print_single_and_multiple_args():
+    def f(a, b):
+        print("x")
+        print(a, b)
+        return 0
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(a, b){
+console.log(`x`);
+console.log(a, b);
+return 0;
+}"""
+    )
+
+
+def test_unpack_list_assignment_literal_rhs():
+    def f():
+        a, b = [1, 2]
+        return a * b
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(){
+const __tmp0 = [1, 2];
+let a = __tmp0[0];
+let b = __tmp0[1];
+return a * b;
+}"""
+    )
+
+
+def test_unpack_tuple_reassignment_no_let():
+    def f(t):
+        a, b = t
+        a, b = t
+        return a - b
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(t){
+const __tmp0 = t;
+let a = __tmp0[0];
+let b = __tmp0[1];
+const __tmp1 = t;
+a = __tmp1[0];
+b = __tmp1[1];
+return a - b;
+}"""
+    )
+
+
+def test_unpack_nested_unsupported():
+    def f(t):
+        (a, (b, c)) = t
+        return a
+
+    try:
+        compile_python_to_js(f)
+        assert False, "Expected JSCompilationError for nested unpacking"
+    except JSCompilationError as e:
+        assert "unpacking" in str(e).lower()

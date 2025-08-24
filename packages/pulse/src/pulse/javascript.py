@@ -168,12 +168,18 @@ class PyToJS(ast.NodeVisitor):
     def _arrow_param_from_target(self, target: ast.expr) -> tuple[str, list[str]]:
         if isinstance(target, ast.Name):
             return target.id, [target.id]
-        if isinstance(target, ast.Tuple) and all(isinstance(e, ast.Name) for e in target.elts):
+        if isinstance(target, ast.Tuple) and all(
+            isinstance(e, ast.Name) for e in target.elts
+        ):
             names = [e.id for e in target.elts]
             return f"([{', '.join(names)}])", names
-        raise JSCompilationError("Only name or 2-tuple targets supported in comprehensions")
+        raise JSCompilationError(
+            "Only name or 2-tuple targets supported in comprehensions"
+        )
 
-    def _build_comp_chain(self, gen: ast.comprehension, pred_nodes: list[ast.expr]) -> tuple[str, str, list[str]]:
+    def _build_comp_chain(
+        self, gen: ast.comprehension, pred_nodes: list[ast.expr]
+    ) -> tuple[str, str, list[str]]:
         iter_code = self.emit_expr(gen.iter)
         param_str, name_list = self._arrow_param_from_target(gen.target)
         # Build predicate ifs
@@ -187,7 +193,9 @@ class PyToJS(ast.NodeVisitor):
             chain = f"{iter_code}.filter({param_str} => ({pred_code}))"
         return chain, param_str, name_list
 
-    def _apply_format_spec(self, value_code: str, value_node: ast.expr, spec: str) -> str:
+    def _apply_format_spec(
+        self, value_code: str, value_node: ast.expr, spec: str
+    ) -> str:
         spec_info = self._parse_format_spec(spec)
         fill = spec_info["fill"] or " "
         align = spec_info["align"]  # may be None
@@ -200,13 +208,34 @@ class PyToJS(ast.NodeVisitor):
         typ = spec_info["type"]  # str | None
 
         # Validate support
-        allowed_types = {None, "s", "c", "d", "b", "o", "x", "X", "f", "F", "e", "E", "g", "G", "n", "%"}
+        allowed_types = {
+            None,
+            "s",
+            "c",
+            "d",
+            "b",
+            "o",
+            "x",
+            "X",
+            "f",
+            "F",
+            "e",
+            "E",
+            "g",
+            "G",
+            "n",
+            "%",
+        }
         if typ not in allowed_types:
             raise JSCompilationError(f"Unsupported format type: {typ}")
         if grouping == "_":
-            raise JSCompilationError("Unsupported grouping separator '_' in format spec")
+            raise JSCompilationError(
+                "Unsupported grouping separator '_' in format spec"
+            )
         if align == "=" and typ in {None, "s"}:
-            raise JSCompilationError("Alignment '=' is only supported for numeric types")
+            raise JSCompilationError(
+                "Alignment '=' is only supported for numeric types"
+            )
 
         # Escape backtick in fill if present
         fill_js = fill.replace("\\", "\\\\").replace("`", "\\`")
@@ -306,19 +335,35 @@ class PyToJS(ast.NodeVisitor):
             sign_expr = "``"
 
         # Combine sign/prefix and base
-        combined = f"({sign_expr} + {prefix_expr} + {base_expr})" if prefix_expr != "``" or sign_expr != "``" else base_expr
+        combined = (
+            f"({sign_expr} + {prefix_expr} + {base_expr})"
+            if prefix_expr != "``" or sign_expr != "``"
+            else base_expr
+        )
 
         # Width, alignment and zero-padding
         if width is not None and width > 0:
             if align == "^":
-                combined = (
-                    f"(({combined}).padStart(Math.floor(({width} + ({combined}).length)/2), {fill_literal}).padEnd({width}, {fill_literal}))"
-                )
+                combined = f"(({combined}).padStart(Math.floor(({width} + ({combined}).length)/2), {fill_literal}).padEnd({width}, {fill_literal}))"
             elif align == "<":
                 combined = f"(({combined}).padEnd({width}, {fill_literal}))"
             elif align == "=":
                 # Pad after sign+prefix for numbers; otherwise same as '>'
-                if typ in {"d", "b", "o", "x", "X", "f", "F", "e", "E", "g", "G", "n", "%"}:
+                if typ in {
+                    "d",
+                    "b",
+                    "o",
+                    "x",
+                    "X",
+                    "f",
+                    "F",
+                    "e",
+                    "E",
+                    "g",
+                    "G",
+                    "n",
+                    "%",
+                }:
                     head = f"({sign_expr} + {prefix_expr})"
                     tail = base_expr
                     combined = f"({head} + ({tail}).padStart({width} - ({head}).length, {fill_literal}))"
@@ -327,11 +372,17 @@ class PyToJS(ast.NodeVisitor):
             else:
                 # Default or '>'
                 pad_fill = fill_literal if not zero else "`0`"
-                if zero and align is None and typ in {"d", "f", "F", "e", "E", "g", "G", "n", "%"}:
+                if (
+                    zero
+                    and align is None
+                    and typ in {"d", "f", "F", "e", "E", "g", "G", "n", "%"}
+                ):
                     # Zero-pad numerics: equivalent to '=' with fill '0'
                     head = sign_expr
                     tail = base_expr
-                    combined = f"({head} + ({tail}).padStart({width} - ({head}).length, `0`))"
+                    combined = (
+                        f"({head} + ({tail}).padStart({width} - ({head}).length, `0`))"
+                    )
                     if prefix_expr != "``":
                         # Include prefix before digits
                         head2 = f"({head} + {prefix_expr})"
@@ -356,7 +407,14 @@ class PyToJS(ast.NodeVisitor):
             return f"-{node.operand.value}"
         return self.emit_expr(node)
 
-    def _emit_single_compare(self, left_code: str, left_node: ast.expr, op: ast.cmpop, right_code: str, right_node: ast.expr) -> str:
+    def _emit_single_compare(
+        self,
+        left_code: str,
+        left_node: ast.expr,
+        op: ast.cmpop,
+        right_code: str,
+        right_node: ast.expr,
+    ) -> str:
         # Identity comparisons with None
         if isinstance(op, ast.Is) or isinstance(op, ast.IsNot):
             is_not = isinstance(op, ast.IsNot)
@@ -364,7 +422,9 @@ class PyToJS(ast.NodeVisitor):
                 isinstance(left_node, ast.Constant) and left_node.value is None
             ):
                 # normalize to <expr> === null
-                expr_code = right_code if isinstance(left_node, ast.Constant) else left_code
+                expr_code = (
+                    right_code if isinstance(left_node, ast.Constant) else left_code
+                )
                 return f"({expr_code} {'!==' if is_not else '==='} null)"
             raise JSCompilationError("'is'/'is not' only supported with None")
         # Membership
@@ -452,7 +512,9 @@ class PyToJS(ast.NodeVisitor):
         if isinstance(node, ast.ListComp):
             # Support single-generator list comprehension with optional ifs.
             if len(node.generators) != 1:
-                raise JSCompilationError("Only single 'for' comprehensions are supported")
+                raise JSCompilationError(
+                    "Only single 'for' comprehensions are supported"
+                )
             gen = node.generators[0]
             if gen.is_async:
                 raise JSCompilationError("Async comprehensions are not supported")
@@ -464,7 +526,11 @@ class PyToJS(ast.NodeVisitor):
                 self.locals.add(n)
             elt_code = self.emit_expr(node.elt)
             self.locals = old_locals2
-            if isinstance(node.elt, ast.Name) and node.elt.id in name_list and chain != iter_expr:
+            if (
+                isinstance(node.elt, ast.Name)
+                and node.elt.id in name_list
+                and chain != iter_expr
+            ):
                 # Identity map after filter can be skipped
                 return f"({chain})"
             if chain == iter_expr:
@@ -484,14 +550,20 @@ class PyToJS(ast.NodeVisitor):
                 self.locals.add(n)
             elt_code = self.emit_expr(node.elt)
             self.locals = old_locals2
-            if isinstance(node.elt, ast.Name) and node.elt.id in name_list and chain != iter_expr:
+            if (
+                isinstance(node.elt, ast.Name)
+                and node.elt.id in name_list
+                and chain != iter_expr
+            ):
                 return f"({chain})"
             if chain == iter_expr:
                 return f"({iter_expr}.map({param} => {elt_code}))"
             return f"({chain}.map({param} => {elt_code}))"
         if isinstance(node, ast.DictComp):
             if len(node.generators) != 1:
-                raise JSCompilationError("Only single 'for' dict comprehensions are supported")
+                raise JSCompilationError(
+                    "Only single 'for' dict comprehensions are supported"
+                )
             gen = node.generators[0]
             if gen.is_async:
                 raise JSCompilationError("Async comprehensions are not supported")
@@ -520,10 +592,12 @@ class PyToJS(ast.NodeVisitor):
             pairs: list[str] = []
             for k, v in zip(node.keys, node.values):
                 if not isinstance(k, ast.Constant) or not isinstance(k.value, str):
-                    raise JSCompilationError("Only string literal dict keys are supported")
-                key_str = k.value.replace("\\", "\\\\").replace("\"", "\\\"")
+                    raise JSCompilationError(
+                        "Only string literal dict keys are supported"
+                    )
+                key_str = k.value.replace("\\", "\\\\").replace('"', '\\"')
                 val_code = self.emit_expr(v)
-                pairs.append(f"\"{key_str}\": {val_code}")
+                pairs.append(f'"{key_str}": {val_code}')
             return "({" + ", ".join(pairs) + "})"
         if isinstance(node, ast.Constant):
             v = node.value
@@ -553,11 +627,15 @@ class PyToJS(ast.NodeVisitor):
         if isinstance(node, ast.UnaryOp):
             if isinstance(node.op, ast.USub):
                 # Emit bare negative numeric literals without extra parens
-                if isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)):
+                if isinstance(node.operand, ast.Constant) and isinstance(
+                    node.operand.value, (int, float)
+                ):
                     return f"-{repr(node.operand.value)}"
                 return f"(-{self.emit_expr(node.operand)})"
             if isinstance(node.op, ast.UAdd):
-                if isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)):
+                if isinstance(node.operand, ast.Constant) and isinstance(
+                    node.operand.value, (int, float)
+                ):
                     return f"+{repr(node.operand.value)}"
                 return f"(+{self.emit_expr(node.operand)})"
             if isinstance(node.op, ast.Not):
@@ -578,11 +656,13 @@ class PyToJS(ast.NodeVisitor):
                 left_code = codes[i]
                 right_code = codes[i + 1]
                 parts.append(
-                    self._emit_single_compare(left_code, left_node, op, right_code, right_node)
+                    self._emit_single_compare(
+                        left_code, left_node, op, right_code, right_node
+                    )
                 )
             if len(parts) == 1:
                 return parts[0]
-            return f"({ ' && '.join(parts) })"
+            return f"({' && '.join(parts)})"
         if isinstance(node, ast.IfExp):
             test = self.emit_expr(node.test)
             body = self.emit_expr(node.body)
@@ -611,7 +691,9 @@ class PyToJS(ast.NodeVisitor):
                         num = kw_map.get("number")
                         nd = kw_map.get("ndigits")
                         if num is None:
-                            raise JSCompilationError("round() requires 'number' kw when using keywords")
+                            raise JSCompilationError(
+                                "round() requires 'number' kw when using keywords"
+                            )
                         if nd is None:
                             return f"Math.round({num})"
                         return f"(Number({num}).toFixed({nd}))"
@@ -629,7 +711,9 @@ class PyToJS(ast.NodeVisitor):
                         num = kw_map.get("x")
                         base = kw_map.get("base")
                         if num is None:
-                            raise JSCompilationError("int() requires 'x' kw when using keywords")
+                            raise JSCompilationError(
+                                "int() requires 'x' kw when using keywords"
+                            )
                         if base is None:
                             return f"parseInt({num})"
                         return f"parseInt({num}, {base})"
@@ -644,10 +728,15 @@ class PyToJS(ast.NodeVisitor):
                     return f"({args[0]})"
                 if fname in {"any", "all"} and len(node.args) == 1:
                     gen_arg = node.args[0]
-                    if isinstance(gen_arg, ast.GeneratorExp) and len(gen_arg.generators) == 1:
+                    if (
+                        isinstance(gen_arg, ast.GeneratorExp)
+                        and len(gen_arg.generators) == 1
+                    ):
                         gen = gen_arg.generators[0]
                         if gen.is_async:
-                            raise JSCompilationError("Async generators are not supported")
+                            raise JSCompilationError(
+                                "Async generators are not supported"
+                            )
                         iter_expr = self.emit_expr(gen.iter)
                         chain, param, name_list = self._build_comp_chain(gen, gen.ifs)
                         old_locals = set(self.locals)
@@ -683,9 +772,13 @@ class PyToJS(ast.NodeVisitor):
                 if attr == "get" and 1 <= len(node.args) <= 2:
                     # obj.get(k, default) -> (obj[k] ?? default)
                     key_node = node.args[0]
-                    if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
-                        key_str = key_node.value.replace("\\", "\\\\").replace("\"", "\\\"")
-                        key_code = f"\"{key_str}\""
+                    if isinstance(key_node, ast.Constant) and isinstance(
+                        key_node.value, str
+                    ):
+                        key_str = key_node.value.replace("\\", "\\\\").replace(
+                            '"', '\\"'
+                        )
+                        key_code = f'"{key_str}"'
                     else:
                         key_code = self.emit_expr(key_node)
                     if len(node.args) == 2:
@@ -765,7 +858,9 @@ class PyToJS(ast.NodeVisitor):
                 if fv.format_spec is not None:
                     spec_str = self._const_joinedstr_to_str(fv.format_spec)
                     if spec_str is None:
-                        raise JSCompilationError("Format spec must be a constant string")
+                        raise JSCompilationError(
+                            "Format spec must be a constant string"
+                        )
                     inner = self.emit_expr(fv.value)
                     return self._apply_format_spec(inner, fv.value, spec_str)
 
@@ -781,8 +876,12 @@ class PyToJS(ast.NodeVisitor):
                     if part.format_spec is not None:
                         spec_str = self._const_joinedstr_to_str(part.format_spec)
                         if spec_str is None:
-                            raise JSCompilationError("Format spec must be a constant string")
-                        expr_inner = self._apply_format_spec(expr_inner, part.value, spec_str)
+                            raise JSCompilationError(
+                                "Format spec must be a constant string"
+                            )
+                        expr_inner = self._apply_format_spec(
+                            expr_inner, part.value, spec_str
+                        )
                     parts.append(f"${{{expr_inner}}}")
                 else:
                     raise JSCompilationError("Unsupported f-string component")
@@ -838,4 +937,3 @@ def javascript(fn: Callable[..., Any] | None = None):
     if fn is not None:
         return decorator(fn)
     return decorator
-

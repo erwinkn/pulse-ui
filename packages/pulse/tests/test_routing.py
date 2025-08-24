@@ -163,5 +163,4 @@ def test_route_tree_nested_layouts():
     assert isinstance(route, Route) and route.path == "counter"
     # This gets the two layouts
     paths = [route.unique_path() for route in route_tree.tree]
-    assert paths == ['<layout>', '<layout>2']
-        
+    assert paths == ["<layout>", "<layout>2"]

@@ -435,5 +435,6 @@ class TestFromVDOM:
         assert node.props == {"type": "button", "onClick": onClick}
         assert node.key == "k1"
         assert_node_equal(
-            node, Node("button", {"type": "button", "onClick": onClick}, ["Click"], key="k1")
+            node,
+            Node("button", {"type": "button", "onClick": onClick}, ["Click"], key="k1"),
         )

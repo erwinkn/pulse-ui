@@ -215,6 +215,7 @@ return x;
 }"""
     )
 
+
 def test_compile_unary_ops_exact():
     def f(x):
         return -x
@@ -225,6 +226,7 @@ def test_compile_unary_ops_exact():
 return (-x);
 }"""
     )
+
 
 def test_compile_format_strings_exact():
     def f(n):
@@ -617,6 +619,7 @@ return (Object.values(d));
 return (Object.entries(d));
 }"""
     )
+
 
 def test_compile_compare_chaining_exact():
     def f(x):

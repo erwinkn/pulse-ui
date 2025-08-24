@@ -14,18 +14,17 @@ def test_freevars_raise():
         assert "free variables" in str(e)
 
 
-def test_unsupported_statement_for_loop():
-    def f(xs):
-        s = 0
-        for i in xs:
-            s = s + i
-        return s
+def test_unsupported_statement_augassign_op():
+    def f(x):
+        y = 1
+        y //= x
+        return y
 
     try:
         compile_python_to_js(f)
-        assert False, "Expected JSCompilationError for unsupported statement"
+        assert False, "Expected JSCompilationError for unsupported operator"
     except JSCompilationError as e:
-        assert "Unsupported statement" in str(e)
+        assert "operator" in str(e).lower()
 
 
 def test_slice_step_error():

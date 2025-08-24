@@ -95,3 +95,27 @@ def test_dict_comprehension_filter():
 return Object.fromEntries(pairs.filter(([k, v]) => (v > 0)).map(([k, v]) => [String(k), v]));
 }"""
     )
+
+
+def test_len_on_dict_counts_keys():
+    def f(d):
+        return len(d)
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return (d?.length ?? Object.keys(d).length);
+}"""
+    )
+
+
+def test_membership_in_object_or_array_uses_runtime_branch():
+    def f(d):
+        return "a" in d
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return ((Array.isArray(d) || typeof d === "string") ? d.includes(`a`) : (d && typeof d === "object" && Object.hasOwn(d, `a`)));
+}"""
+    )

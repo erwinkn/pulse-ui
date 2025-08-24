@@ -140,6 +140,18 @@ def test_membership_in_string():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.includes(`x`);
+return ((Array.isArray(s) || typeof s === "string") ? s.includes(`x`) : (s && typeof s === "object" && Object.hasOwn(s, `x`)));
+}"""
+    )
+
+
+def test_constant_string_escapes_backtick_and_dollar_brace():
+    def f():
+        return "a`b${c}d"
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        r"""function(){
+return `a\`b\${c}d`;
 }"""
     )

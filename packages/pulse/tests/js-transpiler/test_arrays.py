@@ -68,7 +68,7 @@ def test_membership_in_list():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(a){
-return a.includes(2);
+return ((Array.isArray(a) || typeof a === "string") ? a.includes(2) : (a && typeof a === "object" && Object.hasOwn(a, String(2))));
 }"""
     )
 
@@ -80,7 +80,7 @@ def test_not_in_list():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(a){
-return !a.includes(3);
+return !((Array.isArray(a) || typeof a === "string") ? a.includes(3) : (a && typeof a === "object" && Object.hasOwn(a, String(3))));
 }"""
     )
 
@@ -157,6 +157,18 @@ return a.at(-1);
     )
 
 
+def test_index_negative_variable_uses_at():
+    def f(a, i):
+        return a[-i]
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(a, i){
+return a.at(-i);
+}"""
+    )
+
+
 def test_any_over_iterable():
     def f(xs):
         return any(xs)
@@ -167,6 +179,7 @@ def test_any_over_iterable():
 return xs.some(v => v);
 }"""
     )
+
 
 def test_all_over_iterable():
     def f(xs):
@@ -202,6 +215,7 @@ def test_all_with_predicate():
 return xs.every(x => x > 0);
 }"""
     )
+
 
 def test_sum_simple():
     def f(xs):

@@ -12,6 +12,7 @@ return `value=${x}`;
 }"""
     )
 
+
 def test_simple_format_fixed_2():
     def f(n):
         return f"{n:.2f}"
@@ -31,7 +32,7 @@ def test_numeric_format_zero_pad_width_8_two_decimals():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return ((Number(x) < 0) ? `-` : ``) + (Number(Math.abs(Number(x))).toFixed(2)).padStart(8 - ((Number(x) < 0) ? `-` : ``).length, `0`);
+return ((Number(x) < 0) ? `-` : ``) + Math.abs(Number(x)).toFixed(2).padStart(8 - ((Number(x) < 0) ? `-` : ``).length, `0`);
 }"""
     )
 
@@ -43,7 +44,19 @@ def test_numeric_format_signed_plus_one_decimal():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return ((Number(x) < 0) ? `-` : `+`) + `` + Number(Math.abs(Number(x))).toFixed(1);
+return ((Number(x) < 0) ? `-` : `+`) + `` + Math.abs(Number(x)).toFixed(1);
+}"""
+    )
+
+
+def test_string_format_precision_cuts_from_left():
+    def f(y):
+        return f"a{y:.2s}"
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(y){
+return `a${String(y).slice(0, 2)}`;
 }"""
     )
 

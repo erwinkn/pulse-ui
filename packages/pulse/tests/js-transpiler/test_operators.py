@@ -147,3 +147,15 @@ def test_compare_chaining():
 return 0 < x && x < 10;
 }"""
     )
+
+
+def test_pow_with_negative_base_parenthesized():
+    def f():
+        return (-2) ** 2
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(){
+return (-2) ** 2;
+}"""
+    )

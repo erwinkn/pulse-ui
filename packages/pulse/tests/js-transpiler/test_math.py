@@ -8,7 +8,7 @@ def test_len():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(a){
-return (a?.length ?? 0);
+return (a?.length ?? Object.keys(a).length);
 }"""
     )
 

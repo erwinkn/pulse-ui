@@ -1,16 +1,36 @@
-from typing import Any, Callable, Coroutine, Iterable, TypeVar, TypeVarTuple, Unpack
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Iterable,
+    ParamSpec,
+    Protocol,
+    TypeVar,
+    TypeVarTuple,
+    Unpack,
+)
 
 from pulse.vdom import Element
 
 
 Args = TypeVarTuple("Args")
+
+T = TypeVar("T")
+P = ParamSpec("P")
 EventHandler = (
     Callable[[], None]
     | Callable[[], Coroutine[Any, Any, None]]
     | Callable[[Unpack[Args]], None]
     | Callable[[Unpack[Args]], Coroutine[Any, Any, None]]
 )
+JsFunction = Callable[P, T]
 
+# In case we refine it later
+CssStyle = dict[str, Any]
+
+# Will be replaced by a JS transpiler type
+class JsObject(Protocol):
+    ...
 
 MISSING = object()
 
@@ -28,9 +48,6 @@ class Sentinel:
             return f"{self.name}({self.value})"
         else:
             return self.name
-
-
-T = TypeVar("T")
 
 
 def For(items: Iterable[T], fn: Callable[[T], Element]):

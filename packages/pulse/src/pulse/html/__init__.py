@@ -96,7 +96,7 @@ from .events import (
     DialogDOMEvents,
 )
 
-from .attributes import (
+from .props import (
     BaseHTMLProps,
     HTMLProps,
     HTMLAnchorProps,

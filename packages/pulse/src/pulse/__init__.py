@@ -172,4 +172,4 @@ from .react_component import (
     prop,
     DEFAULT,
 )
-from .helpers import EventHandler, For
+from .helpers import EventHandler, For, JsFunction, CssStyle, JsObject

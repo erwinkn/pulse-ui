@@ -56,12 +56,19 @@ class RenderContext:
 
 class Session:
     def __init__(
-        self, id: str, routes: RouteTree, *, server_address: Optional[str] = None
+        self,
+        id: str,
+        routes: RouteTree,
+        *,
+        server_address: Optional[str] = None,
+        client_address: Optional[str] = None,
     ) -> None:
         self.id = id
         self.routes = routes
         # Base server address for building absolute API URLs (e.g., http://localhost:8000)
         self.server_address: Optional[str] = server_address
+        # Best-effort client address, captured at prerender or socket connect time
+        self.client_address: Optional[str] = client_address
         self.render_contexts: dict[str, RenderContext] = {}
         self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
         # These two contexts are shared across all renders, but they are mounted
@@ -165,14 +172,30 @@ class Session:
 
     async def call_api(
         self,
-        url: str,
+        url_or_path: str,
         *,
         method: str = "POST",
         headers: dict[str, str] | None = None,
         body: Any | None = None,
         credentials: str = "include",
     ) -> dict[str, Any]:
-        """Request the client to perform a fetch and await the result."""
+        """Request the client to perform a fetch and await the result.
+
+        Accepts either an absolute URL (http/https) or a relative path. When a
+        relative path is provided, it is resolved against this session's
+        server_address.
+        """
+        # Resolve to absolute URL if a relative path is passed
+        if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
+            url = url_or_path
+        else:
+            base = self.server_address
+            if not base:
+                raise RuntimeError(
+                    "Server address unavailable. Ensure App.run_codegen/asgi_factory set server_address."
+                )
+            path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
+            url = f"{base}{path}"
         corr_id = uuid.uuid4().hex
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending_api[corr_id] = fut

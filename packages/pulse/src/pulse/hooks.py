@@ -355,8 +355,8 @@ async def call_api(
 ) -> dict[str, Any]:
     """Ask the client to perform an HTTP request and await the result.
 
-    Only a path should be provided. The absolute server URL is inferred from the
-    current app/session configuration.
+    Accepts either a relative path or absolute URL; URL resolution happens in
+    Session.call_api using the session's server_address.
     """
     from pulse.session import SESSION_CONTEXT
 
@@ -364,17 +364,8 @@ async def call_api(
     if session is None:
         raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
 
-    base = session.server_address
-    if not base:
-        raise RuntimeError(
-            "Server address unavailable. Ensure App.run_codegen/asgi_factory set server_address."
-        )
-    if not path.startswith("/"):
-        path = "/" + path
-    url = f"{base}{path}"
-
     return await session.call_api(
-        url,
+        path,
         method=method,
         headers=dict(headers or {}),
         body=body,
@@ -398,6 +389,49 @@ def navigate(path: str) -> None:
 
 def is_prerendering():
     return IS_PRERENDERING.get()
+
+
+# -----------------------------------------------------
+# Server/Client addressing hooks
+# -----------------------------------------------------
+
+
+def server_address() -> str:
+    """Return the base server address for the current session.
+
+    Example return values: "http://127.0.0.1:8000", "https://example.com:443"
+    """
+    from pulse.session import SESSION_CONTEXT
+
+    session = SESSION_CONTEXT.get()
+    if session is None:
+        raise RuntimeError(
+            "server_address() must be called inside a Pulse render/callback context"
+        )
+    if not session.server_address:
+        raise RuntimeError(
+            "Server address unavailable. Ensure App.run_codegen/asgi_factory configured server_address."
+        )
+    return session.server_address
+
+
+def client_address() -> str:
+    """Return the best-known client address (IP or forwarded value) for this session.
+
+    Available during prerender (HTTP request) and after websocket connect.
+    """
+    from pulse.session import SESSION_CONTEXT
+
+    session = SESSION_CONTEXT.get()
+    if session is None:
+        raise RuntimeError(
+            "client_address() must be called inside a Pulse render/callback context"
+        )
+    if not session.client_address:
+        raise RuntimeError(
+            "Client address unavailable. It is set during prerender or socket connect."
+        )
+    return session.client_address
 
 
 # -----------------------------------------------------

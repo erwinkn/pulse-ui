@@ -6,6 +6,7 @@ to define routes and configure their Pulse application.
 """
 
 import asyncio
+import json
 import logging
 import os
 from enum import IntEnum
@@ -39,10 +40,116 @@ from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
 from pulse.vdom import VDOM
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+# -----------------------------
+# Client address helper methods
+# -----------------------------
+
+
+def _extract_client_address_from_fastapi(request: Request) -> str | None:
+    """Best-effort client origin/address from an HTTP request.
+
+    Preference order:
+      1) Origin (full scheme://host:port)
+      1b) Referer (full URL) when Origin missing during prerender forwarding
+      2) Forwarded header (proto + for)
+      3) X-Forwarded-* headers
+      4) request.client host:port
+    """
+    try:
+        origin = request.headers.get("origin")
+        if origin:
+            return origin
+        referer = request.headers.get("referer")
+        if referer:
+            parts = urlsplit(referer)
+            if parts.scheme and parts.netloc:
+                return f"{parts.scheme}://{parts.netloc}"
+
+        fwd = request.headers.get("forwarded")
+        proto = request.headers.get("x-forwarded-proto") or (
+            [p.split("proto=")[-1] for p in fwd.split(";") if "proto=" in p][0]
+            .strip()
+            .strip('"')
+            if fwd and "proto=" in fwd
+            else request.url.scheme
+        )
+        if fwd and "for=" in fwd:
+            part = [p for p in fwd.split(";") if "for=" in p]
+            hostport = part[0].split("for=")[-1].strip().strip('"') if part else ""
+            if hostport:
+                return f"{proto}://{hostport}"
+
+        xff = request.headers.get("x-forwarded-for")
+        xfp = request.headers.get("x-forwarded-port")
+        if xff:
+            host = xff.split(",")[0].strip()
+            if host in ("127.0.0.1", "::1"):
+                host = "localhost"
+            return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
+
+        host = request.client.host if request.client else ""
+        port = request.client.port if request.client else None
+        if host in ("127.0.0.1", "::1"):
+            host = "localhost"
+        if host and port:
+            return f"{proto}://{host}:{port}"
+        if host:
+            return f"{proto}://{host}"
+        return None
+    except Exception:
+        return None
+
+
+def _extract_client_address_from_socketio(environ: dict) -> str | None:
+    """Best-effort client origin/address from a WS environ mapping.
+
+    Preference order mirrors HTTP variant using environ keys.
+    """
+    try:
+        origin = environ.get("HTTP_ORIGIN")
+        if origin:
+            return origin
+
+        fwd = environ.get("HTTP_FORWARDED")
+        proto = environ.get("HTTP_X_FORWARDED_PROTO") or (
+            [p.split("proto=")[-1] for p in str(fwd).split(";") if "proto=" in p][0]
+            .strip()
+            .strip('"')
+            if fwd and "proto=" in str(fwd)
+            else environ.get("wsgi.url_scheme", "http")
+        )
+        if fwd and "for=" in str(fwd):
+            part = [p for p in str(fwd).split(";") if "for=" in p]
+            hostport = part[0].split("for=")[-1].strip().strip('"') if part else ""
+            if hostport:
+                return f"{proto}://{hostport}"
+
+        xff = environ.get("HTTP_X_FORWARDED_FOR")
+        xfp = environ.get("HTTP_X_FORWARDED_PORT")
+        if xff:
+            host = str(xff).split(",")[0].strip()
+            if host in ("127.0.0.1", "::1"):
+                host = "localhost"
+            return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
+
+        host = environ.get("REMOTE_ADDR", "")
+        port = environ.get("REMOTE_PORT")
+        if host in ("127.0.0.1", "::1"):
+            host = "localhost"
+        if host and port:
+            return f"{proto}://{host}:{port}"
+        if host:
+            return f"{proto}://{host}"
+        return None
+    except Exception as e:
+        return None
 
 
 class AppStatus(IntEnum):
@@ -140,8 +247,13 @@ class App:
             # Provide a working reactive context (and not the global AppReactiveContext which errors)
             if not path.startswith("/"):
                 path = "/" + path
+            # Determine client address/origin prior to creating the session
+            client_addr: str | None = _extract_client_address_from_fastapi(request)
             session = Session(
-                uuid4().hex, self.routes, server_address=self.server_address
+                uuid4().hex,
+                self.routes,
+                server_address=self.server_address,
+                client_address=client_addr,
             )
 
             def _render() -> VDOM:
@@ -178,9 +290,11 @@ class App:
                 raise NotImplementedError(f"Unexpected middleware return: {res}")
 
         @self.sio.event
-        async def connect(sid: str, environ, auth=None):
+        async def connect(sid: str, environ: dict, auth=None):
+            # Determine client address/origin prior to creating the session
+            client_addr: str | None = _extract_client_address_from_socketio(environ)
             # Create session first to instantiate reactive and session contexts
-            session = self.create_session(sid)
+            session = self.create_session(sid, client_address=client_addr)
             if self._middleware:
                 try:
 
@@ -299,11 +413,16 @@ class App:
     def get_route(self, path: str):
         self.routes.find(path)
 
-    def create_session(self, id: str):
+    def create_session(self, id: str, *, client_address: Optional[str] = None):
         if id in self.sessions:
             raise ValueError(f"Session {id} already exists")
         # print(f"--> Creating session {id}")
-        self.sessions[id] = Session(id, self.routes, server_address=self.server_address)
+        self.sessions[id] = Session(
+            id,
+            self.routes,
+            server_address=self.server_address,
+            client_address=client_address,
+        )
         return self.sessions[id]
 
     def close_session(self, id: str):

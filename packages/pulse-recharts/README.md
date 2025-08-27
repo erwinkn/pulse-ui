@@ -1,0 +1,56 @@
+## Roadmap
+[] General
+  [x] ResponsiveContainer
+  [x] Legend
+  [x] Tooltip
+  [] Cell
+  [x] Text
+  [x] Label
+  [x] LabelList
+  [] Customized
+[] Charts
+  [x] AreaChart
+  [x] BarChart
+  [x] LineChart
+  [x] ComposedChart
+  [x] PieChart
+  [x] RadarChart
+  [x] RadialBarChart
+  [x] ScatterChart
+  [x] FunnelChart
+  [] Treemap
+  [] SankeyChart
+[] Cartesian components
+  [] Area
+  [x] Bar
+  [x] Line
+  [] Scatter
+  [x] XAxis
+  [x] YAxis
+  [] ZAxis
+  [] Brush
+  [] CartesianAxis
+  [x] CartesianGrid
+  [] ReferenceLine
+  [] ReferenceDot
+  [] ReferenceArea
+  [] ErrorBar
+  [] Funnel
+[] Polar components
+  [] Pie
+  [] Radar
+  [] RadialBar
+  [] PolarAngleAxis
+  [] PolarGrid
+  [] PolarRadiusAxis
+[] Shapes
+  [] Cross
+  [x] Curve
+  [] Dot
+  [] Polygon
+  [] Rectangle
+  [] Sector
+  [] Trapezoid
+[] Improvements
+  [] Check usage of custom formatting and render functions
+  [] Add proper types for all SVG elements and use them for Recharts components

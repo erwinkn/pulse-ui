@@ -1,6 +1,6 @@
 from typing import Any, Optional, Protocol, Unpack
 
-from pulse.html.attributes import (
+from pulse.html.props import (
     HTMLAnchorProps,
     HTMLAreaProps,
     HTMLAudioProps,

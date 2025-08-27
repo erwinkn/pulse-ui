@@ -749,14 +749,18 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
     unpack_args = get_args(annot)
     if not unpack_args:
         raise TypeError("Unpack must wrap a TypedDict class, e.g., Unpack[MyProps]")
-    typed_dict_cls = unpack_args[0]
+    typed_arg = unpack_args[0]
 
-    if not isinstance(typed_dict_cls, type) or not _is_typeddict_type(typed_dict_cls):
+    # Handle parameterized TypedDicts like MyProps[T] or MyProps[int]
+    # typing.get_origin returns the underlying class for parameterized generics
+    origin_td = get_origin(typed_arg) or typed_arg
+
+    if not isinstance(origin_td, type) or not _is_typeddict_type(origin_td):
         raise TypeError("Unpack must wrap a TypedDict class, e.g., Unpack[MyProps]")
 
     # NOTE: For TypedDicts, the annotations contain the fields of all classes in
     # the hierarchy, we don't need to walk the MRO. Use cached builder.
-    return _propspec_from_typeddict(typed_dict_cls)
+    return _propspec_from_typeddict(origin_td)
 
 
 # ----------------------------------------------------------------------------

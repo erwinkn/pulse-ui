@@ -1,6 +1,6 @@
 from contextvars import ContextVar
 import re
-from typing import Callable, Optional, Sequence, TypedDict
+from typing import Callable, Optional, Sequence, TypedDict, cast
 from dataclasses import dataclass, field
 
 from pulse.react_component import ReactComponent
@@ -108,7 +108,7 @@ class Route:
     def __init__(
         self,
         path: str,
-        render: Component | Callable[[], Node],
+        render: Component[[]],
         children: "Optional[list[Route | Layout]]" = None,
         components: Optional[list[ReactComponent]] = None,
     ):
@@ -332,7 +332,7 @@ class RouteContext:
         return self.info["catchall"]
 
     def __init__(self, info: RouteInfo):
-        self.info = ReactiveDict(info)
+        self.info = cast(RouteInfo, ReactiveDict(info))
 
     def update(self, info: RouteInfo):
         self.info.update(info)

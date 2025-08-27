@@ -1,29 +1,38 @@
-import React, { type ReactNode, useState } from 'react';
+import React, { type ReactNode, useState } from "react";
+import { ResponsiveContainer } from "recharts";
 
 export interface CounterProps {
   count?: number;
   label?: string;
-  color?: 'blue' | 'green' | 'red' | 'purple';
-  size?: 'sm' | 'md' | 'lg';
+  color?: "blue" | "green" | "red" | "purple";
+  size?: "sm" | "md" | "lg";
   children?: ReactNode;
 }
 
-export function Counter({ count = 0, label = 'Count', color = 'blue', size = 'md', children }: CounterProps) {
+export function Counter({
+  count = 0,
+  label = "Count",
+  color = "blue",
+  size = "md",
+  children,
+}: CounterProps) {
   const sizeClasses = {
-    sm: 'text-sm p-2',
-    md: 'text-base p-4',
-    lg: 'text-lg p-6'
+    sm: "text-sm p-2",
+    md: "text-base p-4",
+    lg: "text-lg p-6",
   };
 
   const colorClasses = {
-    blue: 'bg-blue-50 border-blue-200 text-blue-800',
-    green: 'bg-green-50 border-green-200 text-green-800',
-    red: 'bg-red-50 border-red-200 text-red-800',
-    purple: 'bg-purple-50 border-purple-200 text-purple-800'
+    blue: "bg-blue-50 border-blue-200 text-blue-800",
+    green: "bg-green-50 border-green-200 text-green-800",
+    red: "bg-red-50 border-red-200 text-red-800",
+    purple: "bg-purple-50 border-purple-200 text-purple-800",
   };
 
   return (
-    <div className={`border rounded-lg ${sizeClasses[size]} ${colorClasses[color]}`}>
+    <div
+      className={`border rounded-lg ${sizeClasses[size]} ${colorClasses[color]}`}
+    >
       <div className="font-semibold">{label}</div>
       <div className="text-2xl font-bold mt-2">{count}</div>
       {children && (
@@ -40,20 +49,20 @@ export interface UserCardProps {
   email?: string;
   avatar?: string;
   role?: string;
-  status?: 'online' | 'offline' | 'away';
+  status?: "online" | "offline" | "away";
 }
 
-export function UserCard({ 
-  name = 'Anonymous User', 
-  email = 'user@example.com', 
-  avatar, 
-  role = 'User', 
-  status = 'offline' 
+export function UserCard({
+  name = "Anonymous User",
+  email = "user@example.com",
+  avatar,
+  role = "User",
+  status = "offline",
 }: UserCardProps) {
   const statusColors = {
-    online: 'bg-green-400',
-    offline: 'bg-gray-400',
-    away: 'bg-yellow-400'
+    online: "bg-green-400",
+    offline: "bg-gray-400",
+    away: "bg-yellow-400",
   };
 
   return (
@@ -67,7 +76,9 @@ export function UserCard({
               {name.charAt(0).toUpperCase()}
             </div>
           )}
-          <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${statusColors[status]}`}></div>
+          <div
+            className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${statusColors[status]}`}
+          ></div>
         </div>
         <div className="flex-1">
           <h3 className="font-semibold text-gray-900">{name}</h3>
@@ -83,24 +94,24 @@ export interface ProgressBarProps {
   value?: number;
   max?: number;
   label?: string;
-  color?: 'blue' | 'green' | 'red' | 'purple';
+  color?: "blue" | "green" | "red" | "purple";
   showPercentage?: boolean;
 }
 
-export function ProgressBar({ 
-  value = 0, 
-  max = 100, 
-  label = 'Progress', 
-  color = 'blue',
-  showPercentage = true 
+export function ProgressBar({
+  value = 0,
+  max = 100,
+  label = "Progress",
+  color = "blue",
+  showPercentage = true,
 }: ProgressBarProps) {
   const percentage = Math.round((value / max) * 100);
-  
+
   const colorClasses = {
-    blue: 'bg-blue-500',
-    green: 'bg-green-500',
-    red: 'bg-red-500',
-    purple: 'bg-purple-500'
+    blue: "bg-blue-500",
+    green: "bg-green-500",
+    red: "bg-red-500",
+    purple: "bg-purple-500",
   };
 
   return (
@@ -112,7 +123,7 @@ export function ProgressBar({
         )}
       </div>
       <div className="w-full bg-gray-200 rounded-full h-2">
-        <div 
+        <div
           className={`h-2 rounded-full transition-all duration-300 ${colorClasses[color]}`}
           style={{ width: `${percentage}%` }}
         ></div>
@@ -126,45 +137,51 @@ export function ProgressBar({
 }
 
 export interface StatusBadgeProps {
-  status?: 'success' | 'warning' | 'error' | 'info';
+  status?: "success" | "warning" | "error" | "info";
   text?: string;
-  size?: 'sm' | 'md' | 'lg';
+  size?: "sm" | "md" | "lg";
   pulse?: boolean;
 }
 
-export function StatusBadge({ 
-  status = 'info', 
-  text = 'Status', 
-  size = 'md',
-  pulse = false 
+export function StatusBadge({
+  status = "info",
+  text = "Status",
+  size = "md",
+  pulse = false,
 }: StatusBadgeProps) {
   const statusClasses = {
-    success: 'bg-green-100 text-green-800 border-green-200',
-    warning: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    error: 'bg-red-100 text-red-800 border-red-200',
-    info: 'bg-blue-100 text-blue-800 border-blue-200'
+    success: "bg-green-100 text-green-800 border-green-200",
+    warning: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    error: "bg-red-100 text-red-800 border-red-200",
+    info: "bg-blue-100 text-blue-800 border-blue-200",
   };
 
   const sizeClasses = {
-    sm: 'px-2 py-1 text-xs',
-    md: 'px-3 py-1 text-sm',
-    lg: 'px-4 py-2 text-base'
+    sm: "px-2 py-1 text-xs",
+    md: "px-3 py-1 text-sm",
+    lg: "px-4 py-2 text-base",
   };
 
   return (
-    <span 
+    <span
       className={`
         inline-flex items-center border rounded-full font-medium
         ${statusClasses[status]} 
         ${sizeClasses[size]}
-        ${pulse ? 'animate-pulse' : ''}
+        ${pulse ? "animate-pulse" : ""}
       `}
     >
-      <div className={`w-2 h-2 rounded-full mr-2 ${
-        status === 'success' ? 'bg-green-400' :
-        status === 'warning' ? 'bg-yellow-400' :
-        status === 'error' ? 'bg-red-400' : 'bg-blue-400'
-      }`}></div>
+      <div
+        className={`w-2 h-2 rounded-full mr-2 ${
+          status === "success"
+            ? "bg-green-400"
+            : status === "warning"
+              ? "bg-yellow-400"
+              : status === "error"
+                ? "bg-red-400"
+                : "bg-blue-400"
+        }`}
+      ></div>
       {text}
     </span>
   );
@@ -174,29 +191,29 @@ export interface MetricCardProps {
   title?: string;
   value?: string | number;
   change?: number;
-  trend?: 'up' | 'down' | 'neutral';
+  trend?: "up" | "down" | "neutral";
   icon?: string;
   children?: ReactNode;
 }
 
-export function MetricCard({ 
-  title = 'Metric', 
-  value = '0', 
-  change = 0, 
-  trend = 'neutral',
-  icon = '📊',
-  children
+export function MetricCard({
+  title = "Metric",
+  value = "0",
+  change = 0,
+  trend = "neutral",
+  icon = "📊",
+  children,
 }: MetricCardProps) {
   const trendColors = {
-    up: 'text-green-600',
-    down: 'text-red-600',
-    neutral: 'text-gray-600'
+    up: "text-green-600",
+    down: "text-red-600",
+    neutral: "text-gray-600",
   };
 
   const trendIcons = {
-    up: '↗️',
-    down: '↘️',
-    neutral: '➡️'
+    up: "↗️",
+    down: "↘️",
+    neutral: "➡️",
   };
 
   return (
@@ -217,9 +234,7 @@ export function MetricCard({
         )}
       </div>
       {children && (
-        <div className="mt-4 pt-4 border-t border-gray-200">
-          {children}
-        </div>
+        <div className="mt-4 pt-4 border-t border-gray-200">{children}</div>
       )}
     </div>
   );
@@ -228,73 +243,71 @@ export function MetricCard({
 export interface CardProps {
   title?: string;
   subtitle?: string;
-  variant?: 'default' | 'primary' | 'success' | 'warning';
+  variant?: "default" | "primary" | "success" | "warning";
   children?: ReactNode;
 }
 
-export function Card({ 
-  title = 'Card Title', 
+export function Card({
+  title = "Card Title",
   subtitle,
-  variant = 'default',
-  children 
+  variant = "default",
+  children,
 }: CardProps) {
   const variantClasses = {
-    default: 'bg-white border-gray-200',
-    primary: 'bg-blue-50 border-blue-200',
-    success: 'bg-green-50 border-green-200',
-    warning: 'bg-yellow-50 border-yellow-200'
+    default: "bg-white border-gray-200",
+    primary: "bg-blue-50 border-blue-200",
+    success: "bg-green-50 border-green-200",
+    warning: "bg-yellow-50 border-yellow-200",
   };
 
   return (
-    <div className={`border rounded-lg p-4 shadow-sm ${variantClasses[variant]}`}>
+    <div
+      className={`border rounded-lg p-4 shadow-sm ${variantClasses[variant]}`}
+    >
       <div className="mb-3">
         <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-        {subtitle && (
-          <p className="text-sm text-gray-600 mt-1">{subtitle}</p>
-        )}
+        {subtitle && <p className="text-sm text-gray-600 mt-1">{subtitle}</p>}
       </div>
-      <div className="space-y-2">
-        {children}
-      </div>
+      <div className="space-y-2">{children}</div>
     </div>
   );
 }
 
 export interface ButtonProps {
   text?: string;
-  variant?: 'primary' | 'secondary' | 'success' | 'danger';
-  size?: 'sm' | 'md' | 'lg';
+  variant?: "primary" | "secondary" | "success" | "danger";
+  size?: "sm" | "md" | "lg";
   disabled?: boolean;
   children?: ReactNode;
 }
 
-export function Button({ 
-  text = 'Button',
-  variant = 'primary',
-  size = 'md',
+export function Button({
+  text = "Button",
+  variant = "primary",
+  size = "md",
   disabled = false,
-  children
+  children,
 }: ButtonProps) {
   const variantClasses = {
-    primary: 'bg-blue-600 hover:bg-blue-700 text-white',
-    secondary: 'bg-gray-600 hover:bg-gray-700 text-white',
-    success: 'bg-green-600 hover:bg-green-700 text-white',
-    danger: 'bg-red-600 hover:bg-red-700 text-white'
+    primary: "bg-blue-600 hover:bg-blue-700 text-white",
+    secondary: "bg-gray-600 hover:bg-gray-700 text-white",
+    success: "bg-green-600 hover:bg-green-700 text-white",
+    danger: "bg-red-600 hover:bg-red-700 text-white",
   };
 
   const sizeClasses = {
-    sm: 'px-3 py-1 text-sm',
-    md: 'px-4 py-2 text-base',
-    lg: 'px-6 py-3 text-lg'
+    sm: "px-3 py-1 text-sm",
+    md: "px-4 py-2 text-base",
+    lg: "px-6 py-3 text-lg",
   };
 
   return (
-    <button 
+    <button
       className={`
         rounded font-medium transition-colors
         ${variantClasses[variant]} 
         ${sizeClasses[size]}
-        ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'}
+        ${disabled ? "opacity-50 cursor-not-allowed" : "hover:shadow-md"}
       `}
       disabled={disabled}
     >
@@ -306,35 +319,37 @@ export function Button({
 
 export interface ColorBoxProps {
   title?: string;
-  initialColor?: 'red' | 'blue' | 'green' | 'purple' | 'yellow';
+  initialColor?: "red" | "blue" | "green" | "purple" | "yellow";
   children?: ReactNode;
 }
 
-export function ColorBox({ 
-  title = 'Stateful Color Box', 
-  initialColor = 'blue',
-  children 
+export function ColorBox({
+  title = "Stateful Color Box",
+  initialColor = "blue",
+  children,
 }: ColorBoxProps) {
   const [currentColor, setCurrentColor] = useState(initialColor);
 
   const colors = {
-    red: 'bg-red-100 border-red-300',
-    blue: 'bg-blue-100 border-blue-300', 
-    green: 'bg-green-100 border-green-300',
-    purple: 'bg-purple-100 border-purple-300',
-    yellow: 'bg-yellow-100 border-yellow-300'
+    red: "bg-red-100 border-red-300",
+    blue: "bg-blue-100 border-blue-300",
+    green: "bg-green-100 border-green-300",
+    purple: "bg-purple-100 border-purple-300",
+    yellow: "bg-yellow-100 border-yellow-300",
   };
 
   const colorButtons = {
-    red: 'bg-red-500 hover:bg-red-600',
-    blue: 'bg-blue-500 hover:bg-blue-600',
-    green: 'bg-green-500 hover:bg-green-600', 
-    purple: 'bg-purple-500 hover:bg-purple-600',
-    yellow: 'bg-yellow-500 hover:bg-yellow-600'
+    red: "bg-red-500 hover:bg-red-600",
+    blue: "bg-blue-500 hover:bg-blue-600",
+    green: "bg-green-500 hover:bg-green-600",
+    purple: "bg-purple-500 hover:bg-purple-600",
+    yellow: "bg-yellow-500 hover:bg-yellow-600",
   };
 
   return (
-    <div className={`border-2 rounded-lg p-4 transition-all duration-300 ${colors[currentColor]}`}>
+    <div
+      className={`border-2 rounded-lg p-4 transition-all duration-300 ${colors[currentColor]}`}
+    >
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
         <div className="flex space-x-2">
@@ -343,24 +358,30 @@ export function ColorBox({
               key={color}
               onClick={() => setCurrentColor(color as keyof typeof colors)}
               className={`w-6 h-6 rounded-full transition-all ${colorButtons[color as keyof typeof colors]} ${
-                currentColor === color ? 'ring-2 ring-gray-800 ring-offset-2' : ''
+                currentColor === color
+                  ? "ring-2 ring-gray-800 ring-offset-2"
+                  : ""
               }`}
               title={`Switch to ${color}`}
             />
           ))}
         </div>
       </div>
-      
+
       <div className="text-sm text-gray-700 mb-3">
-        Current color: <span className="font-medium capitalize">{currentColor}</span>
+        Current color:{" "}
+        <span className="font-medium capitalize">{currentColor}</span>
       </div>
-      
+
       {children && (
         <div className="bg-white bg-opacity-50 rounded p-3 space-y-2">
-          <div className="text-sm font-medium text-gray-600">Server-rendered content:</div>
+          <div className="text-sm font-medium text-gray-600">
+            Server-rendered content:
+          </div>
           {children}
         </div>
       )}
     </div>
   );
 }
+import { BarChart, ScatterChart, FunnelChart, AreaChart, ComposedChart, RadialBarChart, Treemap, Sankey, Bar } from "recharts";

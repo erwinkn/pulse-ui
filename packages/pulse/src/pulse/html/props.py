@@ -2,6 +2,7 @@
 # NOT the same thing as the properties in `elements.py` (but very similar)
 from typing import Any, Dict, List, Literal, Union, TypedDict
 
+from pulse.helpers import CssStyle
 from pulse.html.elements import (  # noqa: F401
     GenericHTMLElement,
     HTMLAnchorElement,
@@ -64,6 +65,7 @@ from pulse.html.events import (
     DialogDOMEvents,
     InputDOMEvents,
     SelectDOMEvents,
+    TElement,
     TextAreaDOMEvents,
 )
 
@@ -94,7 +96,7 @@ class BaseHTMLProps(TypedDict, total=False):
     nonce: str
     slot: str
     spellCheck: Booleanish
-    style: Dict[str, Any]
+    style: CssStyle
     tabIndex: int
     title: str
     translate: Literal["yes", "no"]
@@ -621,7 +623,7 @@ class HTMLVideoProps(HTMLMediaProps, total=False):
     disableRemotePlayback: bool
 
 
-class HTMLSVGProps(TypedDict, total=False):
+class HTMLSVGProps(DOMEvents[TElement], total=False):
     """SVG attributes supported by React (subset placeholder).
 
     Note: Full SVG attribute surface is large; extend as needed.
@@ -641,7 +643,7 @@ class HTMLSVGProps(TypedDict, total=False):
     method: str
     min: Union[int, str]
     name: str
-    style: Dict[str, Any]  # type: ignore
+    style: CssStyle
     target: str
     type: str
     width: Union[int, str]

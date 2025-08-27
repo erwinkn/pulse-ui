@@ -7,6 +7,7 @@ within the UI tree generation system.
 
 import pytest
 from typing import (
+    Generic,
     Optional,
     TypedDict,
     Unpack,
@@ -15,6 +16,7 @@ from typing import (
     cast,
     Required,
     Annotated,
+    TypeVar,
 )
 import inspect
 
@@ -795,3 +797,54 @@ def test_parse_typed_dict_props_inheritance_two_levels():
 
     applied_with_e = spec.apply("Final", {"a": 1, "c": True, "e": 7})
     assert applied_with_e == {"a": 1, "c": True, "ee": 7}
+
+
+def test_parse_typed_dict_props_generic_like_typed_dict_with_typevars():
+    T = TypeVar("T")
+
+    class GenericLikeProps(TypedDict, Generic[T]):
+        required: T
+        optional: NotRequired[list[T]]
+
+    def fn(
+        *children: Child, key: Optional[str] = None, **props: Unpack[GenericLikeProps]
+    ):
+        return cast(Element, None)
+
+    var_kw = list(inspect.signature(fn).parameters.values())[-1]
+    spec = parse_typed_dict_props(var_kw)
+
+    # Keys and required/optional inference
+    assert set(spec.keys()) == {"required", "optional"}
+    required_prop = cast(Prop, spec["required"])
+    optional_prop = cast(Prop, spec["optional"])
+
+    # total=True by default: required is required, optional is NotRequired
+    assert required_prop.required is True
+    assert optional_prop.required is False
+
+    # Runtime types: TypeVar collapses to object, parametrized containers map to their origin
+    assert required_prop._type is object
+    assert optional_prop._type is list
+
+
+def test_react_component_accepts_generic_like_typed_dict_props():
+    T = TypeVar("T")
+
+    class Parent(TypedDict, total=False):
+        label: str
+
+    class DataProps(Parent, Generic[T], total=False):
+        value: T
+
+    @react_component(tag="DataBox", import_="./DataBox", alias="data-box")
+    def DataBox(
+        *children: Child, key: Optional[str] = None, **props: Unpack[DataProps[int]]
+    ) -> Element:
+        return cast(Element, None)
+
+    node = DataBox(value=123, label="n")
+    assert isinstance(node, Node)
+    assert node.tag == "$$data-box"
+    # Value typed by TypeVar should be accepted and passed through unchanged
+    assert node.props == {"value": 123, "label": "n"}

@@ -2,6 +2,7 @@ from .elements import (
     Element,
     HTMLOrSVGElement,
     HTMLElementBase,
+    HTMLElement,
     GenericHTMLElement,
     HTMLAnchorElement,
     HTMLAreaElement,
@@ -95,7 +96,7 @@ from .events import (
     DialogDOMEvents,
 )
 
-from .attributes import (
+from .props import (
     BaseHTMLProps,
     HTMLProps,
     HTMLAnchorProps,
@@ -157,6 +158,7 @@ __all__ = [
     "Element",
     "HTMLOrSVGElement",
     "HTMLElementBase",
+    "HTMLElement",
     "GenericHTMLElement",
     "HTMLAnchorElement",
     "HTMLAreaElement",

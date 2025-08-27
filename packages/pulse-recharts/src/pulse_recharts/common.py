@@ -100,3 +100,17 @@ custom function: will receive two arguments and should return an index of the ac
 argument 1: ticks from the current chart
 argument 2: active tooltip state from the other chart
 """
+
+
+class Rectangle(TypedDict):
+    x: float | None
+    y: float | None
+    width: float
+    height: float
+
+
+AnimationTiming = Literal["ease", "ease-in", "ease-out", "ease-in-out", "linear"]
+
+
+MinPointSize = float | ps.JsFunction[[float | None, int], float]
+"A number or function (value: float | None, index: int) => minPointSize: float"

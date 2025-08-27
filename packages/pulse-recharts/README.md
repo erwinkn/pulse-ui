@@ -9,28 +9,28 @@
   [x] LabelList
   [] Customized
 [] Charts
-  [] AreaChart
-  [] BarChart
-  [] LineChart
-  [] ComposedChart
-  [] PieChart
-  [] RadarChart
-  [] RadialBarChart
-  [] ScatterChart
-  [] FunnelChart
+  [x] AreaChart
+  [x] BarChart
+  [x] LineChart
+  [x] ComposedChart
+  [x] PieChart
+  [x] RadarChart
+  [x] RadialBarChart
+  [x] ScatterChart
+  [x] FunnelChart
   [] Treemap
   [] SankeyChart
 [] Cartesian components
   [] Area
-  [] Bar
-  [] Line
+  [x] Bar
+  [x] Line
   [] Scatter
-  [] XAxis
-  [] YAxis
+  [x] XAxis
+  [x] YAxis
   [] ZAxis
   [] Brush
   [] CartesianAxis
-  [] CartesianGrid
+  [x] CartesianGrid
   [] ReferenceLine
   [] ReferenceDot
   [] ReferenceArea
@@ -45,7 +45,7 @@
   [] PolarRadiusAxis
 [] Shapes
   [] Cross
-  [] Curve
+  [x] Curve
   [] Dot
   [] Polygon
   [] Rectangle

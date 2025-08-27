@@ -1,4 +1,5 @@
 import React, { type ReactNode, useState } from "react";
+import { ResponsiveContainer } from "recharts";
 
 export interface CounterProps {
   count?: number;
@@ -383,3 +384,4 @@ export function ColorBox({
     </div>
   );
 }
+import { BarChart, ScatterChart, FunnelChart, AreaChart, ComposedChart, RadialBarChart, Treemap, Sankey, Bar } from "recharts";

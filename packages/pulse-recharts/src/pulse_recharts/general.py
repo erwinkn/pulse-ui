@@ -65,7 +65,7 @@ ViewBox = CartesianViewBox | PolarViewBox
 ViewBoxRequired = CartesianViewBoxRequired | PolarViewBoxRequired
 
 
-class ResponsiveContainerProps(TypedDict, total=False):
+class ResponsiveContainerProps(ps.HTMLProps, total=False):
     # HTML props
     id: str
     className: str
@@ -75,11 +75,11 @@ class ResponsiveContainerProps(TypedDict, total=False):
     """width / height. If specified, the height will be calculated by width /
     aspect."""
 
-    widthPercentage: float | str
+    width: float | str
     """The percentage value of the chart's width or a fixed width. Default:
     '100%'"""
 
-    heightPercentage: float | str
+    height: float | str
     """The percentage value of the chart's width or a fixed height. Default:
     '100%'"""
 
@@ -410,7 +410,7 @@ def Label(
 ): ...
 
 
-class LabelListProps(HTMLSVGProps, Generic[T], total=False):
+class LabelListProps(ps.HTMLSVGProps, Generic[T], total=False):
     id: str
     "The unique id of this component, which will be used to generate unique clip path id internally. This props is suggested to be set in SSR."
 
@@ -444,18 +444,19 @@ Examples:
 <LabelList content={<CustomizedLabel external={external} />} />
 <LabelList content={renderLabel} />"""
 
+
 @ps.react_component("LabelList", "recharts")
 def LabelList(
     key: Optional[str] = None,
-    **props: Unpack[LabelListProps[T]],
+    **props: Unpack[LabelListProps],
 ): ...
 
 
-# TODO: Customizezd 
+# TODO: Customizezd
 
 __all__ = [
     "ResponsiveContainer",
-    "ResponsiveContainerProps", 
+    "ResponsiveContainerProps",
     "Legend",
     "LegendProps",
     "LegendPayload",
@@ -464,5 +465,5 @@ __all__ = [
     "Label",
     "LabelProps",
     "LabelList",
-    "LabelListProps"
+    "LabelListProps",
 ]

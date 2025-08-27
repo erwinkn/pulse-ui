@@ -1,6 +1,6 @@
 from typing import Literal, Optional, Sequence, TypedDict, Unpack
 import pulse as ps
-from .common import LayoutType, NullableCoordinate
+from .common import AnimationTiming, LayoutType, NullableCoordinate
 
 CurveType = Literal[
     "basis",
@@ -36,3 +36,22 @@ class CurveProps(ps.HTMLSVGProps, total=False):
 
 @ps.react_component("Curve", "recharts")
 def Curve(key: Optional[str] = None, **props: Unpack[CurveProps]): ...
+
+
+# TODO: SVG <rect>
+class RectangleProps(ps.HTMLSVGProps, total=False):
+    className: str
+    x: float
+    y: float
+    width: float
+    height: float
+    radius: float | tuple[float, float]
+    isAnimationActive: bool
+    isUpdateAnimationActive: bool
+    animationBegin: float
+    animationDuration: float
+    animationEasing: AnimationTiming
+
+
+@ps.react_component("Rectangle", "recharts")
+def Rectangle(key: Optional[str] = None, **props: Unpack[RectangleProps]): ...

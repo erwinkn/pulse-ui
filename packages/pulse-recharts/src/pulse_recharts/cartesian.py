@@ -1,8 +1,9 @@
+from re import A
 from typing import Any, Callable, Literal, Optional, Sequence, TypedDict, Union, Unpack
 import pulse as ps
-from .common import ChartOffsetInternal, DataKey
+from .common import AnimationTiming, ChartOffsetInternal, DataKey, MinPointSize
 from .general import LegendType, AnimationEasing
-from .shapes import CurveProps
+from .shapes import CurveProps, RectangleProps
 
 # Placeholder for TooltipType until a concrete definition is provided
 TooltipType = Any
@@ -457,6 +458,39 @@ class LineProps(CurveProps, total=False):
     """Series data input. Usually inherited from parent chart."""
 
 
-
 @ps.react_component("Line", "recharts")
 def Line(key: Optional[str] = None, **props: Unpack[LineProps]): ...
+
+
+class BarProps(RectangleProps, total=False):
+    className: str
+    index: str | int
+    xAxisId: str | int
+    yAxisId: str | int
+    stackId: str | int
+    barSize: str | float
+    unit: str | int
+    name: str | int
+    dataKey: DataKey
+    tooltipType: TooltipType
+    legendType: LegendType
+    minPointSize: MinPointSize
+    maxBarSize: float
+    hide: bool
+    shape: "ActiveBar"
+    activeBar: "ActiveBar"
+    background: "ActiveBar"
+    radius: float | tuple[float, float, float, float]
+    # NO argument event handlers
+    onAnimationStart: ps.EventHandler
+    onAnimationEnd: ps.EventHandler
+    isAnimationActive: bool
+    animationBegin: float
+    animationDuration: float
+    animationEasing: AnimationTiming
+    id: str
+    # Convoluted type where I think it's better to just use Label or LabelList
+    # label: bool | str | float
+
+
+ActiveBar = bool | ps.Element | ps.JsFunction[[BarProps], ps.Element]

@@ -349,6 +349,16 @@ class JSMemberCall(JSExpr):
 
 
 @dataclass
+class JSNew(JSExpr):
+    ctor: JSExpr
+    args: Sequence[JSExpr]
+
+    def emit(self) -> str:
+        ctor_code = _emit_child_for_primary(self.ctor)
+        return f"new {ctor_code}({', '.join(a.emit() for a in self.args)})"
+
+
+@dataclass
 class JSArrowFunction(JSExpr):
     params_code: str  # already formatted e.g. 'x' or '(a, b)' or '([k, v])'
     body: JSExpr
@@ -433,7 +443,7 @@ def _precedence_of_expr(e: JSExpr) -> int:
     if isinstance(e, JSLogicalChain):
         return _precedence_of_op(e.op)
     # Nullish now represented as JSBinary with op "??"; precedence resolved below
-    if isinstance(e, (JSMember, JSSubscript, JSCall, JSMemberCall)):
+    if isinstance(e, (JSMember, JSSubscript, JSCall, JSMemberCall, JSNew)):
         return _precedence_of_op(".")
     # Treat primitives and containers as primary
     if isinstance(
@@ -630,6 +640,49 @@ class PyToJS(ast.NodeVisitor):
         raise JSCompilationError(
             "Only name or 2-tuple targets supported in comprehensions"
         )
+
+    def _build_comprehension_chain(
+        self, generators: list[ast.comprehension], build_last: Callable[[], JSExpr]
+    ) -> JSExpr:
+        """Build a left-to-right flatMap/map chain for Python comprehensions.
+
+        The provided build_last callback is invoked when the recursion reaches
+        the innermost generator, and must return the mapped element expression
+        (e.g., the `elt` for list/set comps or the `[key, value]` pair for
+        dict comps). This helper snapshots and restores local scope so that
+        comprehension-target variables do not leak to the outer scope.
+        """
+        if len(generators) == 0:
+            raise JSCompilationError("Empty comprehension")
+
+        saved_locals = set(self.locals)
+
+        def build_chain(gen_index: int) -> JSExpr:
+            gen = generators[gen_index]
+            if gen.is_async:
+                raise JSCompilationError("Async comprehensions are not supported")
+            iter_expr = self.emit_expr(gen.iter)
+            param_code, names = self._arrow_param_from_target(gen.target)
+            for nm in names:
+                self.locals.add(nm)
+            base: JSExpr = iter_expr
+            if gen.ifs:
+                conds = [self.emit_expr(test) for test in gen.ifs]
+                cond = JSLogicalChain("&&", conds) if len(conds) > 1 else conds[0]
+                base = JSMemberCall(base, "filter", [JSArrowFunction(param_code, cond)])
+            is_last = gen_index == len(generators) - 1
+            if is_last:
+                elt_expr = build_last()
+                return JSMemberCall(
+                    base, "map", [JSArrowFunction(param_code, elt_expr)]
+                )
+            inner = build_chain(gen_index + 1)
+            return JSMemberCall(base, "flatMap", [JSArrowFunction(param_code, inner)])
+
+        try:
+            return build_chain(0)
+        finally:
+            self.locals = saved_locals
 
     # --- Entrypoints ---------------------------------------------------------
     def emit_function(self, body: list[ast.stmt]) -> JSFunctionExpr:
@@ -832,137 +885,30 @@ class PyToJS(ast.NodeVisitor):
                     parts.append(JSComputedProp(comp_key, val_expr))
             return JSObject(parts)
         if isinstance(node, ast.ListComp):
-            if len(node.generators) == 0:
-                raise JSCompilationError("Empty list comprehension")
-            # Build nested flatMap/map chain, left-to-right, with filter attached
-            # to the generator it guards. Comprehension targets should not leak
-            # into outer scope for freevar tracking, so snapshot/restore locals.
-            saved_locals = set(self.locals)
-            try:
-
-                def build_chain(gen_index: int) -> JSExpr:
-                    gen = node.generators[gen_index]
-                    if gen.is_async:
-                        raise JSCompilationError(
-                            "Async comprehensions are not supported"
-                        )
-                    iter_expr = self.emit_expr(gen.iter)
-                    param_code, names = self._arrow_param_from_target(gen.target)
-                    # Current generator variables become available to subsequent
-                    # generators, filters, and the element expression
-                    for nm in names:
-                        self.locals.add(nm)
-                    base: JSExpr = iter_expr
-                    if gen.ifs:
-                        conds = [self.emit_expr(test) for test in gen.ifs]
-                        cond = (
-                            JSLogicalChain("&&", conds) if len(conds) > 1 else conds[0]
-                        )
-                        base = JSMemberCall(
-                            base, "filter", [JSArrowFunction(param_code, cond)]
-                        )
-                    is_last = gen_index == len(node.generators) - 1
-                    if is_last:
-                        elt_expr = self.emit_expr(node.elt)
-                        return JSMemberCall(
-                            base, "map", [JSArrowFunction(param_code, elt_expr)]
-                        )
-                    inner = build_chain(gen_index + 1)
-                    return JSMemberCall(
-                        base, "flatMap", [JSArrowFunction(param_code, inner)]
-                    )
-
-                return build_chain(0)
-            finally:
-                self.locals = saved_locals
+            return self._build_comprehension_chain(
+                node.generators, lambda: self.emit_expr(node.elt)
+            )
         if isinstance(node, ast.GeneratorExp):
-            if len(node.generators) == 0:
-                raise JSCompilationError("Empty generator expression")
-            saved_locals = set(self.locals)
-            try:
-
-                def build_chain(gen_index: int) -> JSExpr:
-                    gen = node.generators[gen_index]
-                    if gen.is_async:
-                        raise JSCompilationError(
-                            "Async comprehensions are not supported"
-                        )
-                    iter_expr = self.emit_expr(gen.iter)
-                    param_code, names = self._arrow_param_from_target(gen.target)
-                    for nm in names:
-                        self.locals.add(nm)
-                    base: JSExpr = iter_expr
-                    if gen.ifs:
-                        conds = [self.emit_expr(test) for test in gen.ifs]
-                        cond = (
-                            JSLogicalChain("&&", conds) if len(conds) > 1 else conds[0]
-                        )
-                        base = JSMemberCall(
-                            base, "filter", [JSArrowFunction(param_code, cond)]
-                        )
-                    is_last = gen_index == len(node.generators) - 1
-                    if is_last:
-                        elt_expr = self.emit_expr(node.elt)
-                        return JSMemberCall(
-                            base, "map", [JSArrowFunction(param_code, elt_expr)]
-                        )
-                    inner = build_chain(gen_index + 1)
-                    return JSMemberCall(
-                        base, "flatMap", [JSArrowFunction(param_code, inner)]
-                    )
-
-                return build_chain(0)
-            finally:
-                self.locals = saved_locals
+            return self._build_comprehension_chain(
+                node.generators, lambda: self.emit_expr(node.elt)
+            )
         if isinstance(node, ast.SetComp):
-            # TODO
-            raise JSCompilationError("Set comprehensions are not implemented yet")
+            arr = self._build_comprehension_chain(
+                node.generators, lambda: self.emit_expr(node.elt)
+            )
+            return JSNew(JSIdentifier("Set"), [arr])
         if isinstance(node, ast.DictComp):
             # {k: v for ...} -> Object.fromEntries(chain.map(x => [k, v]))
-            if len(node.generators) == 0:
-                raise JSCompilationError("Empty dict comprehension")
-            saved_locals = set(self.locals)
-            try:
-
-                def build_chain(gen_index: int) -> JSExpr:
-                    gen = node.generators[gen_index]
-                    if gen.is_async:
-                        raise JSCompilationError(
-                            "Async comprehensions are not supported"
-                        )
-                    iter_expr = self.emit_expr(gen.iter)
-                    param_code, names = self._arrow_param_from_target(gen.target)
-                    for nm in names:
-                        self.locals.add(nm)
-                    base: JSExpr = iter_expr
-                    if gen.ifs:
-                        conds = [self.emit_expr(test) for test in gen.ifs]
-                        cond = (
-                            JSLogicalChain("&&", conds) if len(conds) > 1 else conds[0]
-                        )
-                        base = JSMemberCall(
-                            base, "filter", [JSArrowFunction(param_code, cond)]
-                        )
-                    is_last = gen_index == len(node.generators) - 1
-                    if is_last:
-                        # Keys must be coerced to strings for JS object entries
-                        key_expr = JSCall(
-                            JSIdentifier("String"), [self.emit_expr(node.key)]
-                        )
-                        val_expr = self.emit_expr(node.value)
-                        pair = JSArray([key_expr, val_expr])
-                        return JSMemberCall(
-                            base, "map", [JSArrowFunction(param_code, pair)]
-                        )
-                    inner = build_chain(gen_index + 1)
-                    return JSMemberCall(
-                        base, "flatMap", [JSArrowFunction(param_code, inner)]
-                    )
-
-                pairs = build_chain(0)
-                return JSCall(JSIdentifier("Object.fromEntries"), [pairs])
-            finally:
-                self.locals = saved_locals
+            pairs = self._build_comprehension_chain(
+                node.generators,
+                lambda: JSArray(
+                    [
+                        JSCall(JSIdentifier("String"), [self.emit_expr(node.key)]),
+                        self.emit_expr(node.value),
+                    ]
+                ),
+            )
+            return JSCall(JSIdentifier("Object.fromEntries"), [pairs])
         if isinstance(node, ast.BinOp):
             op = type(node.op)
             if op not in ALLOWED_BINOPS:

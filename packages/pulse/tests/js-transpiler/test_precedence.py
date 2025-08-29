@@ -144,3 +144,39 @@ def test_call_parens_on_complex_callee():
 return (a + b)(1);
 }"""
     )
+
+
+def test_new_expression_in_member_call_no_extra_parens():
+    def f(xs):
+        return ({x for x in xs}).has(1)  # type: ignore
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return new Set(xs.map(x => x)).has(1);
+}"""
+    )
+
+
+def test_new_expression_in_logical_or_chain():
+    def f(xs):
+        return ({x for x in xs}) or []
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return new Set(xs.map(x => x)) || [];
+}"""
+    )
+
+
+def test_new_expression_as_return_value():
+    def f(xs):
+        return {x for x in xs}
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(xs){
+return new Set(xs.map(x => x));
+}"""
+    )

@@ -136,7 +136,7 @@ def test_is_not_with_string():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-let a = `a`;
+let a = "a";
 return s !== a;
 }"""
     )
@@ -149,7 +149,7 @@ def test_constants_arithmetic_comparisons_boolean_ops():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return (x * 2 + 3 > 0) && !(x === 5);
+return x * 2 + 3 > 0 && !(x === 5);
 }"""
     )
 

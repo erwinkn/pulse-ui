@@ -199,20 +199,15 @@ class JSObject(JSExpr):
 
 
 @dataclass
-class JSParen(JSExpr):
-    inner: JSExpr
-
-    def emit(self) -> str:
-        return f"({self.inner.emit()})"
-
-
-@dataclass
 class JSUnary(JSExpr):
     op: str  # '-', '+', '!'
     operand: JSExpr
 
     def emit(self) -> str:
-        return f"{self.op}{self.operand.emit()}"
+        operand_code = _emit_child_for_binary_like(
+            self.operand, parent_op=self.op, side="unary"
+        )
+        return f"{self.op}{operand_code}"
 
 
 @dataclass
@@ -222,7 +217,26 @@ class JSBinary(JSExpr):
     right: JSExpr
 
     def emit(self) -> str:
-        return f"{self.left.emit()} {self.op} {self.right.emit()}"
+        # Left child
+        force_left_paren = False
+        # Special JS grammar rule: left operand of ** cannot be a unary +/- without parentheses
+        if (
+            self.op == "**"
+            and isinstance(self.left, JSUnary)
+            and self.left.op in {"-", "+"}
+        ):
+            force_left_paren = True
+        left_code = _emit_child_for_binary_like(
+            self.left,
+            parent_op=self.op,
+            side="left",
+            force_paren=force_left_paren,
+        )
+        # Right child
+        right_code = _emit_child_for_binary_like(
+            self.right, parent_op=self.op, side="right"
+        )
+        return f"{left_code} {self.op} {right_code}"
 
 
 @dataclass
@@ -234,7 +248,12 @@ class JSLogicalChain(JSExpr):
     def emit(self) -> str:
         if len(self.values) == 1:
             return self.values[0].emit()
-        return f" {self.op} ".join(v.emit() for v in self.values)
+        parts: list[str] = []
+        for v in self.values:
+            # No strict left/right in chains, but treat as middle
+            code = _emit_child_for_binary_like(v, parent_op=self.op, side="chain")
+            parts.append(code)
+        return f" {self.op} ".join(parts)
 
 
 @dataclass
@@ -294,13 +313,7 @@ class JSMember(JSExpr):
     prop: str
 
     def emit(self) -> str:
-        obj_code = self.obj.emit()
-        # Wrap complex expressions so property access binds correctly
-        if not isinstance(
-            self.obj,
-            (JSIdentifier, JSMember, JSSubscript, JSCall, JSMemberCall),
-        ):
-            obj_code = f"({obj_code})"
+        obj_code = _emit_child_for_primary(self.obj)
         return f"{obj_code}.{self.prop}"
 
 
@@ -310,12 +323,7 @@ class JSSubscript(JSExpr):
     index: JSExpr
 
     def emit(self) -> str:
-        obj_code = self.obj.emit()
-        if isinstance(
-            self.obj,
-            (JSBinary, JSTertiary, JSLogicalChain, JSNullishCoalesce, JSTemplate),
-        ):
-            obj_code = f"({obj_code})"
+        obj_code = _emit_child_for_primary(self.obj)
         return f"{obj_code}[{self.index.emit()}]"
 
 
@@ -325,9 +333,7 @@ class JSCall(JSExpr):
     args: Sequence[JSExpr]
 
     def emit(self) -> str:
-        fn = self.callee.emit()
-        if not isinstance(self.callee, JSIdentifier):
-            fn = f"({fn})"
+        fn = _emit_child_for_primary(self.callee)
         return f"{fn}({', '.join(a.emit() for a in self.args)})"
 
 
@@ -338,12 +344,7 @@ class JSMemberCall(JSExpr):
     args: Sequence[JSExpr]
 
     def emit(self) -> str:
-        obj_code = self.obj.emit()
-        if not isinstance(
-            self.obj,
-            (JSIdentifier, JSMember, JSSubscript, JSCall, JSMemberCall),
-        ):
-            obj_code = f"({obj_code})"
+        obj_code = _emit_child_for_primary(self.obj)
         return f"{obj_code}.{self.method}({', '.join(a.emit() for a in self.args)})"
 
 
@@ -354,15 +355,6 @@ class JSArrowFunction(JSExpr):
 
     def emit(self) -> str:
         return f"{self.params_code} => {self.body.emit()}"
-
-
-@dataclass
-class JSNullishCoalesce(JSExpr):
-    left: JSExpr
-    right: JSExpr
-
-    def emit(self) -> str:
-        return f"{self.left.emit()} ?? {self.right.emit()}"
 
 
 @dataclass
@@ -391,6 +383,129 @@ class JSRaw(JSExpr):
 
     def emit(self) -> str:
         return self.content
+
+
+# -----------------------------
+# Precedence helpers
+# -----------------------------
+
+_PRIMARY_PRECEDENCE = 20
+
+
+def _precedence_of_op(op: str) -> int:
+    # Higher number = binds tighter
+    if op in {".", "[]", "()"}:  # pseudo ops for primary contexts
+        return _PRIMARY_PRECEDENCE
+    if op in {"!", "+u", "-u"}:  # unary; we encode + and - as unary with +u/-u
+        return 17
+    if op == "**":
+        return 16
+    if op in {"*", "/", "%"}:
+        return 15
+    if op in {"+", "-"}:
+        return 14
+    if op in {"<", "<=", ">", ">=", "===", "!=="}:
+        return 12
+    if op == "&&":
+        return 7
+    if op == "||":
+        return 6
+    if op == "??":
+        return 6
+    if op == "?:":  # ternary
+        return 4
+    return 0
+
+
+def _is_right_associative(op: str) -> bool:
+    return op == "**"
+
+
+def _precedence_of_expr(e: JSExpr) -> int:
+    if isinstance(e, JSBinary):
+        return _precedence_of_op(e.op)
+    if isinstance(e, JSUnary):
+        # Distinguish unary + and - from binary precedence table by tag
+        tag = "+u" if e.op == "+" else ("-u" if e.op == "-" else e.op)
+        return _precedence_of_op(tag)
+    if isinstance(e, JSTertiary):
+        return _precedence_of_op("?:")
+    if isinstance(e, JSLogicalChain):
+        return _precedence_of_op(e.op)
+    # Nullish now represented as JSBinary with op "??"; precedence resolved below
+    if isinstance(e, (JSMember, JSSubscript, JSCall, JSMemberCall)):
+        return _precedence_of_op(".")
+    # Treat primitives and containers as primary
+    if isinstance(
+        e,
+        (
+            JSIdentifier,
+            JSString,
+            JSNumber,
+            JSBoolean,
+            JSNull,
+            JSUndefined,
+            JSArray,
+            JSObject,
+            JSTemplate,
+            JSRaw,
+        ),
+    ):
+        return _PRIMARY_PRECEDENCE
+    return 0
+
+
+def _mixes_nullish_and_logical(parent_op: str, child: JSExpr) -> bool:
+    if parent_op in {"&&", "||"} and isinstance(child, JSBinary) and child.op == "??":
+        return True
+    if parent_op == "??" and isinstance(child, JSLogicalChain):
+        return True
+    return False
+
+
+def _emit_child_for_binary_like(
+    child: JSExpr, parent_op: str, side: str, force_paren: bool = False
+) -> str:
+    # side is one of: 'left', 'right', 'unary', 'chain'
+    code = child.emit()
+    if force_paren:
+        return f"({code})"
+    # Ternary as child should always be wrapped under binary-like contexts
+    if isinstance(child, JSTertiary):
+        return f"({code})"
+    # Explicit parens when mixing ?? with &&/||
+    if _mixes_nullish_and_logical(parent_op, child):
+        return f"({code})"
+    child_prec = _precedence_of_expr(child)
+    parent_prec = _precedence_of_op(parent_op)
+    if child_prec < parent_prec:
+        return f"({code})"
+    if child_prec == parent_prec:
+        # Handle associativity for exact same precedence buckets
+        if isinstance(child, JSBinary):
+            if _is_right_associative(parent_op):
+                # Need parens on left child for same prec to preserve grouping
+                if side == "left":
+                    return f"({code})"
+            else:
+                # Left-associative: protect right child when equal precedence
+                if side == "right":
+                    return f"({code})"
+        if isinstance(child, JSLogicalChain):
+            # Same op chains don't need parens; different logical ops rely on precedence
+            if child.op != parent_op:
+                # '&&' has higher precedence than '||'; no parens needed for tighter child
+                # But if equal (shouldn't happen here), remain as-is
+                pass
+        # For other equal-precedence non-binary nodes, keep as-is
+    return code
+
+
+def _emit_child_for_primary(expr: JSExpr) -> str:
+    code = expr.emit()
+    if _precedence_of_expr(expr) < _PRIMARY_PRECEDENCE or isinstance(expr, JSTertiary):
+        return f"({code})"
+    return code
 
 
 @dataclass
@@ -719,28 +834,141 @@ class PyToJS(ast.NodeVisitor):
         if isinstance(node, ast.ListComp):
             if len(node.generators) == 0:
                 raise JSCompilationError("Empty list comprehension")
-            expr = None
-            for i, gen in enumerate(node.generators):
-                is_last = i == len(node.generators) - 1
-                if gen.is_async:
-                    raise JSCompilationError("Async comprehensions are not supported")
+            # Build nested flatMap/map chain, left-to-right, with filter attached
+            # to the generator it guards. Comprehension targets should not leak
+            # into outer scope for freevar tracking, so snapshot/restore locals.
+            saved_locals = set(self.locals)
+            try:
+
+                def build_chain(gen_index: int) -> JSExpr:
+                    gen = node.generators[gen_index]
+                    if gen.is_async:
+                        raise JSCompilationError(
+                            "Async comprehensions are not supported"
+                        )
+                    iter_expr = self.emit_expr(gen.iter)
+                    param_code, names = self._arrow_param_from_target(gen.target)
+                    # Current generator variables become available to subsequent
+                    # generators, filters, and the element expression
+                    for nm in names:
+                        self.locals.add(nm)
+                    base: JSExpr = iter_expr
+                    if gen.ifs:
+                        conds = [self.emit_expr(test) for test in gen.ifs]
+                        cond = (
+                            JSLogicalChain("&&", conds) if len(conds) > 1 else conds[0]
+                        )
+                        base = JSMemberCall(
+                            base, "filter", [JSArrowFunction(param_code, cond)]
+                        )
+                    is_last = gen_index == len(node.generators) - 1
+                    if is_last:
+                        elt_expr = self.emit_expr(node.elt)
+                        return JSMemberCall(
+                            base, "map", [JSArrowFunction(param_code, elt_expr)]
+                        )
+                    inner = build_chain(gen_index + 1)
+                    return JSMemberCall(
+                        base, "flatMap", [JSArrowFunction(param_code, inner)]
+                    )
+
+                return build_chain(0)
+            finally:
+                self.locals = saved_locals
+        if isinstance(node, ast.GeneratorExp):
+            if len(node.generators) == 0:
+                raise JSCompilationError("Empty generator expression")
+            saved_locals = set(self.locals)
+            try:
+
+                def build_chain(gen_index: int) -> JSExpr:
+                    gen = node.generators[gen_index]
+                    if gen.is_async:
+                        raise JSCompilationError(
+                            "Async comprehensions are not supported"
+                        )
+                    iter_expr = self.emit_expr(gen.iter)
+                    param_code, names = self._arrow_param_from_target(gen.target)
+                    for nm in names:
+                        self.locals.add(nm)
+                    base: JSExpr = iter_expr
+                    if gen.ifs:
+                        conds = [self.emit_expr(test) for test in gen.ifs]
+                        cond = (
+                            JSLogicalChain("&&", conds) if len(conds) > 1 else conds[0]
+                        )
+                        base = JSMemberCall(
+                            base, "filter", [JSArrowFunction(param_code, cond)]
+                        )
+                    is_last = gen_index == len(node.generators) - 1
+                    if is_last:
+                        elt_expr = self.emit_expr(node.elt)
+                        return JSMemberCall(
+                            base, "map", [JSArrowFunction(param_code, elt_expr)]
+                        )
+                    inner = build_chain(gen_index + 1)
+                    return JSMemberCall(
+                        base, "flatMap", [JSArrowFunction(param_code, inner)]
+                    )
+
+                return build_chain(0)
+            finally:
+                self.locals = saved_locals
         if isinstance(node, ast.SetComp):
             # TODO
             raise JSCompilationError("Set comprehensions are not implemented yet")
         if isinstance(node, ast.DictComp):
-            raise JSCompilationError("Dict comprehensions are not implemented yet")
+            # {k: v for ...} -> Object.fromEntries(chain.map(x => [k, v]))
+            if len(node.generators) == 0:
+                raise JSCompilationError("Empty dict comprehension")
+            saved_locals = set(self.locals)
+            try:
+
+                def build_chain(gen_index: int) -> JSExpr:
+                    gen = node.generators[gen_index]
+                    if gen.is_async:
+                        raise JSCompilationError(
+                            "Async comprehensions are not supported"
+                        )
+                    iter_expr = self.emit_expr(gen.iter)
+                    param_code, names = self._arrow_param_from_target(gen.target)
+                    for nm in names:
+                        self.locals.add(nm)
+                    base: JSExpr = iter_expr
+                    if gen.ifs:
+                        conds = [self.emit_expr(test) for test in gen.ifs]
+                        cond = (
+                            JSLogicalChain("&&", conds) if len(conds) > 1 else conds[0]
+                        )
+                        base = JSMemberCall(
+                            base, "filter", [JSArrowFunction(param_code, cond)]
+                        )
+                    is_last = gen_index == len(node.generators) - 1
+                    if is_last:
+                        # Keys must be coerced to strings for JS object entries
+                        key_expr = JSCall(
+                            JSIdentifier("String"), [self.emit_expr(node.key)]
+                        )
+                        val_expr = self.emit_expr(node.value)
+                        pair = JSArray([key_expr, val_expr])
+                        return JSMemberCall(
+                            base, "map", [JSArrowFunction(param_code, pair)]
+                        )
+                    inner = build_chain(gen_index + 1)
+                    return JSMemberCall(
+                        base, "flatMap", [JSArrowFunction(param_code, inner)]
+                    )
+
+                pairs = build_chain(0)
+                return JSCall(JSIdentifier("Object.fromEntries"), [pairs])
+            finally:
+                self.locals = saved_locals
         if isinstance(node, ast.BinOp):
             op = type(node.op)
             if op not in ALLOWED_BINOPS:
                 raise JSCompilationError(f"Operator not allowed: {op.__name__}")
             left = self.emit_expr(node.left)
             right = self.emit_expr(node.right)
-            # Parenthesize negative base for exponentiation to avoid JS parse error
-            if op is ast.Pow:
-                if isinstance(node.left, ast.UnaryOp) and isinstance(
-                    node.left.op, ast.USub
-                ):
-                    left = JSParen(left)
             return JSBinary(left, ALLOWED_BINOPS[op], right)
         if isinstance(node, ast.UnaryOp):
             op = type(node.op)
@@ -786,13 +1014,10 @@ class PyToJS(ast.NodeVisitor):
                 if fname == "len" and len(args) == 1:
                     # (x?.length ?? Object.keys(x).length)
                     x = args[0]
-                    return JSParen(
-                        JSNullishCoalesce(
-                            JSMember(x, "length"),
-                            JSMember(
-                                JSCall(JSIdentifier("Object.keys"), [x]), "length"
-                            ),
-                        )
+                    return JSBinary(
+                        JSMember(x, "length"),
+                        "??",
+                        JSMember(JSCall(JSIdentifier("Object.keys"), [x]), "length"),
                     )
                 if fname in {"min", "max"}:
                     return JSCall(JSIdentifier(f"Math.{fname}"), args)
@@ -851,23 +1076,33 @@ class PyToJS(ast.NodeVisitor):
                 if fname == "list" and len(args) == 1:
                     return args[0]
                 if fname in {"any", "all"} and len(node.args) == 1:
+                    # Special-case single-generator predicate form: any(x > 0 for x in xs) -> xs.some(x => x > 0)
                     gen_arg = node.args[0]
                     if (
                         isinstance(gen_arg, ast.GeneratorExp)
                         and len(gen_arg.generators) == 1
+                        and not gen_arg.generators[0].ifs
                     ):
-                        raise JSCompilationError(
-                            "Generator expressions have not been implemented yet"
-                        )
-                    # Fallback: treat as array-like boolean test
-                    if fname == "any":
+                        # Only one generator; no if-guards; elt is predicate using the target
+                        g = gen_arg.generators[0]
+                        if g.is_async:
+                            raise JSCompilationError(
+                                "Async comprehensions are not supported"
+                            )
+                        iter_expr = self.emit_expr(g.iter)
+                        param_code, names = self._arrow_param_from_target(g.target)
+                        for nm in names:
+                            self.locals.add(nm)
+                        pred = self.emit_expr(gen_arg.elt)
+                        method = "some" if fname == "any" else "every"
                         return JSMemberCall(
-                            args[0], "some", [JSArrowFunction("v", JSIdentifier("v"))]
+                            iter_expr, method, [JSArrowFunction(param_code, pred)]
                         )
-                    else:
-                        return JSMemberCall(
-                            args[0], "every", [JSArrowFunction("v", JSIdentifier("v"))]
-                        )
+                    # Fallback: treat input as array-like of booleans
+                    method = "some" if fname == "any" else "every"
+                    return JSMemberCall(
+                        args[0], method, [JSArrowFunction("v", JSIdentifier("v"))]
+                    )
                 if fname == "sum" and 1 <= len(args) <= 2:
                     start = args[1] if len(args) == 2 else JSNumber(0)
                     base = args[0]
@@ -927,9 +1162,9 @@ class PyToJS(ast.NodeVisitor):
                     lhs = JSSubscript(obj, key_expr)
                     if len(node.args) == 2:
                         default = self.emit_expr(node.args[1])
-                        return JSNullishCoalesce(lhs, default)
+                        return JSBinary(lhs, "??", default)
                     else:
-                        return JSNullishCoalesce(lhs, JSUndefined())
+                        return JSBinary(lhs, "??", JSUndefined())
                 if attr == "keys" and len(args) == 0:
                     return JSCall(JSIdentifier("Object.keys"), [obj])
                 if attr == "values" and len(args) == 0:
@@ -1045,6 +1280,14 @@ class PyToJS(ast.NodeVisitor):
                 if attr == "sort" and len(args) == 0:
                     return JSIdentifier(f"({obj.emit()}.sort(), undefined)")
                 return JSMemberCall(obj, attr, args)
+            # Generic call: allow any expression as callee, e.g. (a + b)(1)
+            callee = self.emit_expr(node.func)
+            if node.keywords:
+                raise JSCompilationError(
+                    "Keyword arguments are not supported for arbitrary calls"
+                )
+            args = [self.emit_expr(a) for a in node.args]
+            return JSCall(callee, args)
         if isinstance(node, ast.Attribute):
             value = self.emit_expr(node.value)
             return JSMember(value, node.attr)
@@ -1475,13 +1718,13 @@ def _apply_format_spec(value_expr: JSExpr, spec: str) -> JSExpr:
     # Apply sign for numeric types
     if typ in {"d", "b", "o", "x", "X", "f", "F", "e", "E", "g", "G", "n", "%"}:
         num = JSCall(JSIdentifier("Number"), [value_expr])
-        cond = JSParen(JSBinary(num, "<", JSNumber(0)))
+        cond = JSBinary(num, "<", JSNumber(0))
         if sign == "+":
-            sign_expr: JSExpr = JSParen(JSTertiary(cond, JSString("-"), JSString("+")))
+            sign_expr = JSTertiary(cond, JSString("-"), JSString("+"))
         elif sign == " ":
-            sign_expr = JSParen(JSTertiary(cond, JSString("-"), JSString(" ")))
+            sign_expr = JSTertiary(cond, JSString("-"), JSString(" "))
         else:
-            sign_expr = JSParen(JSTertiary(cond, JSString("-"), JSString("")))
+            sign_expr = JSTertiary(cond, JSString("-"), JSString(""))
     else:
         sign_expr = JSString("")
 
@@ -1513,12 +1756,10 @@ def _apply_format_spec(value_expr: JSExpr, spec: str) -> JSExpr:
                 JSIdentifier("Math.floor"),
                 [
                     JSBinary(
-                        JSParen(
-                            JSBinary(
-                                JSNumber(width),
-                                "+",
-                                JSMember(combined, "length"),
-                            )
+                        JSBinary(
+                            JSNumber(width),
+                            "+",
+                            JSMember(combined, "length"),
                         ),
                         "/",
                         JSNumber(2),
@@ -1558,6 +1799,7 @@ def _apply_format_spec(value_expr: JSExpr, spec: str) -> JSExpr:
                     if not use_prefix_in_len
                     else JSBinary(sign_expr, "+", prefix_expr)
                 )
+                # Avoid double parentheses around sign template
                 width_arg = JSIdentifier(f"{width} - ({head_for_len.emit()}).length")
                 tail = base_expr
                 combined = JSBinary(

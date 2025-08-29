@@ -214,7 +214,7 @@ def test_dict_comprehension_filter():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(pairs){
-return Object.fromEntries(pairs.filter(([k, v]) => (v > 0)).map(([k, v]) => [String(k), v]));
+return Object.fromEntries(pairs.filter(([k, v]) => v > 0).map(([k, v]) => [String(k), v]));
 }"""
     )
 
@@ -226,7 +226,7 @@ def test_len_on_dict_counts_keys():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return (d.length ?? Object.keys(d).length);
+return d.length ?? Object.keys(d).length;
 }"""
     )
 

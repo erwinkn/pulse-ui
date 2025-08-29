@@ -56,7 +56,7 @@ def test_dict_get_without_default():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return d["y"] ?? null;
+return d["y"] ?? undefined;
 }"""
     )
 
@@ -128,7 +128,7 @@ def test_dict_pop_existing():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return (() => {const __k=`a`; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } return null; })();
+return (() => {const __k="a"; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } })();
 }"""
     )
 
@@ -140,7 +140,7 @@ def test_dict_pop_missing_with_default():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return (() => {const __k=`a`; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } return 0; })();
+return (() => {const __k="a"; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } return 0; })();
 }"""
     )
 
@@ -150,7 +150,7 @@ def test_dict_pop_missing_returns_null():
         return d.pop("a")
 
     code, _, _ = compile_python_to_js(f)
-    assert "return (() => {const __k=`a`;" in code
+    assert 'return (() => {const __k="a";' in code
 
 
 def test_dict_popitem():
@@ -160,7 +160,7 @@ def test_dict_popitem():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return (() => {const __ks = Object.keys(d); if (__ks.length === 0) { return null; } const __k = __ks[__ks.length-1]; const __v = d[__k]; delete d[__k]; return [__k, __v]; })();
+return (() => {const __ks = Object.keys(d); if (__ks.length === 0) { return; } const __k = __ks[__ks.length-1]; const __v = d[__k]; delete d[__k]; return [__k, __v]; })();
 }"""
     )
 
@@ -172,7 +172,7 @@ def test_dict_setdefault_missing():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return (() => {const __k=`a`; if (!Object.hasOwn(d, __k)) { d[__k] = 1; return 1; } return d[__k]; })();
+return (() => {const __k="a"; if (!Object.hasOwn(d, __k)) { d[__k] = 1; return 1; } return d[__k]; })();
 }"""
     )
 
@@ -182,9 +182,11 @@ def test_dict_setdefault_existing():
         return d.setdefault("a")
 
     code, _, _ = compile_python_to_js(f)
+    # The logic for setdefault produces `return undefined` here. This is fine,
+    # minimizers will handle it anyways.
     assert code == (
         """function(d){
-return (() => {const __k=`a`; if (!Object.hasOwn(d, __k)) { d[__k] = null; return null; } return d[__k]; })();
+return (() => {const __k="a"; if (!Object.hasOwn(d, __k)) { d[__k] = undefined; return undefined; } return d[__k]; })();
 }"""
     )
 
@@ -198,8 +200,8 @@ def test_dict_update_and_clear():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d, o){
-(() => {Object.assign(d, o); return null; })();
-(() => {for (const __k in d){ if (Object.hasOwn(d, __k)) delete d[__k]; } return null; })();
+(() => {Object.assign(d, o); })();
+(() => {if (Array.isArray(d)) { d.length = 0; return; } if (d && typeof d === "object") { for (const __k in d){ if (Object.hasOwn(d, __k)) delete d[__k]; } return; } return d.clear(); })();
 return d;
 }"""
     )
@@ -224,7 +226,7 @@ def test_len_on_dict_counts_keys():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return (d?.length ?? Object.keys(d).length);
+return (d.length ?? Object.keys(d).length);
 }"""
     )
 
@@ -236,6 +238,6 @@ def test_membership_in_object_or_array_uses_runtime_branch():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return ((Array.isArray(d) || typeof d === "string") ? d.includes(`a`) : (d && typeof d === "object" && Object.hasOwn(d, `a`)));
+return ((Array.isArray(d) || typeof d === "string") ? d.includes("a") : (d && typeof d === "object" && Object.hasOwn(d, "a")));
 }"""
     )

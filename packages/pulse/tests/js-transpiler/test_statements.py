@@ -81,7 +81,7 @@ def test_print_single_and_multiple_args():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(a, b){
-console.log(`x`);
+console.log("x");
 console.log(a, b);
 return 0;
 }"""

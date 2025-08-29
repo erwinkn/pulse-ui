@@ -128,7 +128,7 @@ def test_list_append_emits_push_and_returns_none():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return (xs.push(1), null);
+return (() => {if (Array.isArray(xs)) { xs.push(1); return; } if (xs && typeof xs.append === "function") { return xs.append(1); } return; })();
 }"""
     )
 
@@ -140,7 +140,7 @@ def test_list_sort_mutates_and_returns_none():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return (xs.sort(), null);
+return (xs.sort(), undefined);
 }"""
     )
 
@@ -152,7 +152,7 @@ def test_list_reverse_mutates_and_returns_none():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return (xs.reverse(), null);
+return (xs.reverse(), undefined);
 }"""
     )
 
@@ -176,7 +176,19 @@ def test_list_pop_index():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return xs.splice(2, 1)[0];
+return (() => {const __k=2; if (Array.isArray(xs)) { return xs.splice(__k, 1)[0]; } if (xs && typeof xs === "object") { if (Object.hasOwn(xs, __k)) { const __v = xs[__k]; delete xs[__k]; return __v; } } return xs.pop(__k); })();
+}"""
+    )
+
+
+def test_dict_pop():
+    def f(d: dict):
+        return d.pop("aa")
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(d){
+return (() => {const __k="aa"; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } })();
 }"""
     )
 

@@ -13,6 +13,30 @@ return `value=${x}`;
     )
 
 
+def test_fstring_escapes_backtick_dollar_brace_and_backslash():
+    def f(x):
+        return f"$`${{{x}"
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        r"""function(x){
+return `$\`\${${x}`;
+}"""
+    )
+
+
+def test_fstring_escapes_line_separators():
+    def f():
+        return f"\r\n\b\t\u2028\u2029"
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        r"""function(){
+return `\r\n\b\t\u2028\u2029`;
+}"""
+    )
+
+
 def test_simple_format_fixed_2():
     def f(n):
         return f"{n:.2f}"
@@ -32,7 +56,7 @@ def test_numeric_format_zero_pad_width_8_two_decimals():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return ((Number(x) < 0) ? `-` : ``) + Math.abs(Number(x)).toFixed(2).padStart(8 - ((Number(x) < 0) ? `-` : ``).length, `0`);
+return ((Number(x) < 0) ? "-" : "") + Math.abs(Number(x)).toFixed(2).padStart(8 - ((Number(x) < 0) ? "-" : "").length, "0");
 }"""
     )
 
@@ -44,7 +68,7 @@ def test_numeric_format_signed_plus_one_decimal():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return ((Number(x) < 0) ? `-` : `+`) + `` + Math.abs(Number(x)).toFixed(1);
+return ((Number(x) < 0) ? "-" : "+") + Math.abs(Number(x)).toFixed(1);
 }"""
     )
 
@@ -68,7 +92,7 @@ def test_numeric_format_alt_hex_lowercase():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return ((Number(x) < 0) ? `-` : ``) + `0x` + Math.trunc(Math.abs(Number(x))).toString(16);
+return ((Number(x) < 0) ? "-" : "") + "0x" + Math.trunc(Math.abs(Number(x))).toString(16);
 }"""
     )
 
@@ -80,7 +104,7 @@ def test_numeric_format_alt_hex_uppercase():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return ((Number(x) < 0) ? `-` : ``) + `0X` + Math.trunc(Math.abs(Number(x))).toString(16).toUpperCase();
+return ((Number(x) < 0) ? "-" : "") + "0X" + Math.trunc(Math.abs(Number(x))).toString(16).toUpperCase();
 }"""
     )
 
@@ -92,7 +116,7 @@ def test_numeric_format_binary():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return ((Number(x) < 0) ? `-` : ``) + `` + Math.trunc(Math.abs(Number(x))).toString(2);
+return ((Number(x) < 0) ? "-" : "") + Math.trunc(Math.abs(Number(x))).toString(2);
 }"""
     )
 
@@ -104,7 +128,7 @@ def test_string_format_center_width_7():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(y){
-return String(y).padStart(Math.floor((7 + String(y).length) / 2), ` `).padEnd(7, ` `);
+return String(y).padStart(Math.floor((7 + String(y).length) / 2), " ").padEnd(7, " ");
 }"""
     )
 

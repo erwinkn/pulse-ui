@@ -8,7 +8,7 @@ def test_len():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(a){
-return (a?.length ?? Object.keys(a).length);
+return (a.length ?? Object.keys(a).length);
 }"""
     )
 
@@ -68,7 +68,7 @@ def test_float_parse_literal():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(){
-return parseFloat(`2.5`);
+return parseFloat("2.5");
 }"""
     )
 

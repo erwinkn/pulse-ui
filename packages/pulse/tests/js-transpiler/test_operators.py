@@ -1,5 +1,4 @@
 import warnings
-import pytest
 from pulse.javascript import compile_python_to_js
 
 

@@ -44,7 +44,7 @@ def test_startswith():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.startsWith(`a`);
+return s.startsWith("a");
 }"""
     )
 
@@ -56,7 +56,7 @@ def test_endswith():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.endsWith(`b`);
+return s.endsWith("b");
 }"""
     )
 
@@ -80,7 +80,7 @@ def test_replace_all():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.replaceAll(`a`, `b`);
+return s.replaceAll("a", "b");
 }"""
     )
 
@@ -104,7 +104,7 @@ def test_zfill():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.padStart(5, `0`);
+return s.padStart(5, "0");
 }"""
     )
 
@@ -116,7 +116,7 @@ def test_string_split():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.split(`,`);
+return s.split(",");
 }"""
     )
 
@@ -128,7 +128,7 @@ def test_string_join():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return xs.join(`,`);
+return xs.join(",");
 }"""
     )
 
@@ -140,18 +140,31 @@ def test_membership_in_string():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return ((Array.isArray(s) || typeof s === "string") ? s.includes(`x`) : (s && typeof s === "object" && Object.hasOwn(s, `x`)));
+return ((Array.isArray(s) || typeof s === "string") ? s.includes("x") : (s && typeof s === "object" && Object.hasOwn(s, "x")));
 }"""
     )
 
 
-def test_constant_string_escapes_backtick_and_dollar_brace():
+
+def test_constant_string_escapes_quote_and_backslash():
     def f():
-        return "a`b${c}d"
+        return 'a"b\\c'
 
     code, _, _ = compile_python_to_js(f)
     assert code == (
         r"""function(){
-return `a\`b\${c}d`;
+return "a\"b\\c";
+}"""
+    )
+
+
+def test_constant_string_escapes_control_chars():
+    def f():
+        return "a\nb\rc\t\b\f\v"
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        r"""function(){
+return "a\nb\rc\t\b\f\v";
 }"""
     )

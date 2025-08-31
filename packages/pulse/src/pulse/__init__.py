@@ -27,7 +27,7 @@ from .middleware import (
     stack,
 )
 from .decorators import computed, effect, query
-from .javascript import javascript
+from .javascript.function import javascript
 
 # Import HTML tags and other UI components
 from .vdom import (

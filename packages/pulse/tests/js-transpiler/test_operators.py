@@ -1,5 +1,5 @@
 import warnings
-from pulse.javascript import compile_python_to_js
+from pulse.javascript.transpiler import compile_python_to_js
 
 
 def test_assign_and_return():

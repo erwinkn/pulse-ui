@@ -1,4 +1,4 @@
-from pulse.javascript import JSCompilationError, compile_python_to_js
+from pulse.javascript.transpiler import JSCompilationError, compile_python_to_js
 
 
 def test_fstring_to_template_literal():

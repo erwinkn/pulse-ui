@@ -1,4 +1,4 @@
-from pulse.javascript import compile_python_to_js
+from pulse.javascript.transpiler import compile_python_to_js
 
 
 def test_lower():
@@ -143,7 +143,6 @@ def test_membership_in_string():
 return ((Array.isArray(s) || typeof s === "string") ? s.includes("x") : (s && typeof s === "object" && Object.hasOwn(s, "x")));
 }"""
     )
-
 
 
 def test_constant_string_escapes_quote_and_backslash():

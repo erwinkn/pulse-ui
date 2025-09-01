@@ -8,7 +8,7 @@ def test_keys():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return Object.keys(d);
+return d instanceof Map ? [...d.keys()] : d.keys();
 }"""
     )
 
@@ -20,7 +20,7 @@ def test_values():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return Object.values(d);
+return d instanceof Map ? [...d.values()] : d.values();
 }"""
     )
 
@@ -32,7 +32,7 @@ def test_items():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return Object.entries(d);
+return d instanceof Map ? [...d.entries()] : d.items();
 }"""
     )
 
@@ -44,7 +44,7 @@ def test_dict_get_with_default():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return d["x"] ?? 0;
+return d instanceof Map ? d.get("x") ?? 0 : d.get("x", 0);
 }"""
     )
 
@@ -56,7 +56,7 @@ def test_dict_get_without_default():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return d["y"] ?? undefined;
+return d.get("y");
 }"""
     )
 
@@ -68,7 +68,7 @@ def test_dict_comprehension_simple():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return Object.fromEntries(xs.map(x => [String(x), x + 1]));
+return new Map(xs.map(x => [x, x + 1]));
 }"""
     )
 
@@ -80,7 +80,7 @@ def test_dict_literal():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(x){
-return {"a": 1, "b": x};
+return new Map([["a", 1], ["b", x]]);
 }"""
     )
 
@@ -92,7 +92,7 @@ def test_dynamic_dict_key():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(k, v){
-return {[String(k)]: v};
+return new Map([[k, v]]);
 }"""
     )
 
@@ -104,7 +104,7 @@ def test_dict_unpacking():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(a, b){
-return {"x": 1, ...a, ...b, "y": 2};
+return new Map([["x", 1], ...a instanceof Map ? a.entries() : Object.entries(a), ...b instanceof Map ? b.entries() : Object.entries(b), ["y", 2]]);
 }"""
     )
 
@@ -116,19 +116,28 @@ def test_dict_copy():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return Array.isArray(d) ? d.slice() : {...d};
+return Array.isArray(d) ? d.slice() : d instanceof Map ? new Map(d.entries()) : d.copy();
 }"""
     )
 
 
-def test_dict_pop_existing():
+def test_dict_pop():
     def f(d):
         return d.pop("a")
 
     code, _, _ = compile_python_to_js(f)
+    print(code)
     assert code == (
         """function(d){
-return (() => {const __k="a"; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } })();
+return Array.isArray(d) ? d.splice("a", 1)[0] : d instanceof Map ? (() => {
+if (d.has("a")){
+const $v = d.get("a");
+d.delete("a");
+return $v;
+} else {
+return undefined;
+}
+})() : d.pop("a");
 }"""
     )
 
@@ -138,19 +147,20 @@ def test_dict_pop_missing_with_default():
         return d.pop("a", 0)
 
     code, _, _ = compile_python_to_js(f)
+    print(code)
     assert code == (
         """function(d){
-return (() => {const __k="a"; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } return 0; })();
+return d instanceof Map ? (() => {
+if (d.has("a")){
+const $v = d.get("a");
+d.delete("a");
+return $v;
+} else {
+return 0;
+}
+})() : d.pop("a", 0);
 }"""
     )
-
-
-def test_dict_pop_missing_returns_null():
-    def f(d):
-        return d.pop("a")
-
-    code, _, _ = compile_python_to_js(f)
-    assert 'return (() => {const __k="a";' in code
 
 
 def test_dict_popitem():
@@ -158,9 +168,19 @@ def test_dict_popitem():
         return d.popitem()
 
     code, _, _ = compile_python_to_js(f)
+    print(code)
     assert code == (
         """function(d){
-return (() => {const __ks = Object.keys(d); if (__ks.length === 0) { return; } const __k = __ks[__ks.length-1]; const __v = d[__k]; delete d[__k]; return [__k, __v]; })();
+return d instanceof Map ? (() => {
+const $k = d.keys().next();
+if ($k.done){
+return undefined;
+} else {
+const $v = d.get($k.value);
+d.delete($k);
+return [$k, $v];
+}
+})() : d.popitem();
 }"""
     )
 
@@ -172,7 +192,7 @@ def test_dict_setdefault_missing():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(d){
-return (() => {const __k="a"; if (!Object.hasOwn(d, __k)) { d[__k] = 1; return 1; } return d[__k]; })();
+return d instanceof Map ? d.has("a") ? d.get("a") : (d.set("a", 1), 1) : d.setdefault("a", 1);
 }"""
     )
 
@@ -182,11 +202,10 @@ def test_dict_setdefault_existing():
         return d.setdefault("a")
 
     code, _, _ = compile_python_to_js(f)
-    # The logic for setdefault produces `return undefined` here. This is fine,
-    # minimizers will handle it anyways.
+    print(code)
     assert code == (
         """function(d){
-return (() => {const __k="a"; if (!Object.hasOwn(d, __k)) { d[__k] = undefined; return undefined; } return d[__k]; })();
+return d instanceof Map ? d.has("a") ? d.get("a") : (d.set("a", undefined), undefined) : d.setdefault("a");
 }"""
     )
 
@@ -198,10 +217,25 @@ def test_dict_update_and_clear():
         return d
 
     code, _, _ = compile_python_to_js(f)
+    print(code)
     assert code == (
         """function(d, o){
-(() => {Object.assign(d, o); })();
-(() => {if (Array.isArray(d)) { d.length = 0; return; } if (d && typeof d === "object") { for (const __k in d){ if (Object.hasOwn(d, __k)) delete d[__k]; } return; } return d.clear(); })();
+d instanceof Map ? (() => {
+if (o instanceof Map){
+for (const [k, v] of o){
+d.set(k, v);
+}
+} else {
+if (o && typeof o === "object"){
+for (const k of Object.keys(o)){
+if (Object.hasOwn(o, k)){
+d.set(k, o[k]);
+}
+}
+}
+}
+})() : d.update(o);
+d.clear();
 return d;
 }"""
     )
@@ -214,7 +248,7 @@ def test_dict_comprehension_filter():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(pairs){
-return Object.fromEntries(pairs.filter(([k, v]) => v > 0).map(([k, v]) => [String(k), v]));
+return new Map(pairs.filter(([k, v]) => v > 0).map(([k, v]) => [k, v]));
 }"""
     )
 
@@ -236,8 +270,9 @@ def test_membership_in_object_or_array_uses_runtime_branch():
         return "a" in d
 
     code, _, _ = compile_python_to_js(f)
+    print(code)
     assert code == (
         """function(d){
-return ((Array.isArray(d) || typeof d === "string") ? d.includes("a") : (d && typeof d === "object" && Object.hasOwn(d, "a")));
+return Array.isArray(d) || typeof d === "string" ? d.includes("a") : d instanceof Set || d instanceof Map ? d.has("a") : "a" in d;
 }"""
     )

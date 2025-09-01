@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import ast
-import hashlib
-import inspect
-import textwrap
+import hashlib  # noqa: F401
+import inspect  # noqa: F401
+import textwrap  # noqa: F401
 from dataclasses import dataclass, field
 from typing import (
     Any,
-    Callable,
+    Callable,  # noqa: F401
     Optional,
     Sequence,
-    TypedDict,
+    TypedDict,  # noqa: F401
     Union,
-    cast,
+    cast,  # noqa: F401
 )
 
 
@@ -158,7 +158,7 @@ class JSComputedProp(JSExpr):
 
 
 @dataclass
-class JSObject(JSExpr):
+class JSObjectExpr(JSExpr):
     props: Sequence[JSProp | JSComputedProp | JSSpread]
 
     def emit(self) -> str:
@@ -175,6 +175,8 @@ class JSUnary(JSExpr):
         operand_code = _emit_child_for_binary_like(
             self.operand, parent_op=self.op, side="unary"
         )
+        if self.op == "typeof":
+            return f"typeof {operand_code}"
         return f"{self.op}{operand_code}"
 
 
@@ -329,10 +331,20 @@ class JSNew(JSExpr):
 @dataclass
 class JSArrowFunction(JSExpr):
     params_code: str  # already formatted e.g. 'x' or '(a, b)' or '([k, v])'
-    body: JSExpr
+    body: Union[JSExpr, "JSBlock"]
 
     def emit(self) -> str:
         return f"{self.params_code} => {self.body.emit()}"
+
+
+@dataclass
+class JSComma(JSExpr):
+    values: Sequence[JSExpr]
+
+    def emit(self) -> str:
+        # Always wrap comma expressions in parentheses to avoid precedence surprises
+        inner = ", ".join(v.emit() for v in self.values)
+        return f"({inner})"
 
 
 @dataclass
@@ -401,6 +413,8 @@ def op_precedence(op: str) -> int:
         return PRIMARY_PRECEDENCE
     if op in {"!", "+u", "-u"}:  # unary; we encode + and - as unary with +u/-u
         return 17
+    if op == "typeof":
+        return 17
     if op == "**":
         return 16
     if op in {"*", "/", "%"}:
@@ -408,6 +422,10 @@ def op_precedence(op: str) -> int:
     if op in {"+", "-"}:
         return 14
     if op in {"<", "<=", ">", ">=", "===", "!=="}:
+        return 12
+    if op == "instanceof":
+        return 12
+    if op == "in":
         return 12
     if op == "&&":
         return 7
@@ -417,6 +435,8 @@ def op_precedence(op: str) -> int:
         return 6
     if op == "?:":  # ternary
         return 4
+    if op == ",":
+        return 1
     return 0
 
 
@@ -435,6 +455,8 @@ def expr_precedence(e: JSExpr) -> int:
         return op_precedence("?:")
     if isinstance(e, JSLogicalChain):
         return op_precedence(e.op)
+    if isinstance(e, JSComma):
+        return op_precedence(",")
     # Nullish now represented as JSBinary with op "??"; precedence resolved below
     if isinstance(e, (JSMember, JSSubscript, JSCall, JSMemberCall, JSNew)):
         return op_precedence(".")
@@ -449,13 +471,22 @@ def expr_precedence(e: JSExpr) -> int:
             JSNull,
             JSUndefined,
             JSArray,
-            JSObject,
+            JSObjectExpr,
             JSTemplate,
             JSRaw,
         ),
     ):
         return PRIMARY_PRECEDENCE
     return 0
+
+
+@dataclass
+class JSBlock(JSStmt):
+    body: Sequence[JSStmt]
+
+    def emit(self) -> str:
+        body_code = "\n".join(s.emit() for s in self.body)
+        return f"{{\n{body_code}\n}}"
 
 
 @dataclass
@@ -478,7 +509,7 @@ class JSConstAssign(JSStmt):
 
 
 @dataclass
-class JsSingleStmt(JSStmt):
+class JSSingleStmt(JSStmt):
     expr: JSExpr
 
     def emit(self) -> str:
@@ -592,3 +623,6 @@ def _emit_child_for_primary(expr: JSExpr) -> str:
     if expr_precedence(expr) < PRIMARY_PRECEDENCE or isinstance(expr, JSTertiary):
         return f"({code})"
     return code
+
+def is_primary(expr: JSExpr):
+    return isinstance(expr, (JSNumber, JSString, JSUndefined, JSNull, JSIdentifier))

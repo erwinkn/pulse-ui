@@ -92,7 +92,7 @@ def test_list_index():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return xs.indexOf(3);
+return Array.isArray(xs) ? xs.indexOf(3) : xs.index(3);
 }"""
     )
 
@@ -104,31 +104,33 @@ def test_list_count():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return xs.filter(v => v === 1).length;
+return Array.isArray(xs) ? xs.filter(v => v === 1).length : xs.count(1);
 }"""
     )
 
 
-def test_list_copy():
+def test_copy():
     def f(xs):
         return xs.copy()
 
     code, _, _ = compile_python_to_js(f)
+    print(code)
     assert code == (
         """function(xs){
-return Array.isArray(xs) ? xs.slice() : {...xs};
+return Array.isArray(xs) ? xs.slice() : xs instanceof Map ? new Map(xs.entries()) : xs.copy();
 }"""
     )
 
 
-def test_list_append_emits_push_and_returns_none():
+def test_append():
+    # Append should be mapped to push and return None
     def f(xs):
         return xs.append(1)
 
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return (() => {if (Array.isArray(xs)) { xs.push(1); return; } if (xs && typeof xs.append === "function") { return xs.append(1); } return; })();
+return Array.isArray(xs) ? (xs.push(1), undefined) : xs.append(1);
 }"""
     )
 
@@ -140,7 +142,7 @@ def test_list_sort_mutates_and_returns_none():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return (xs.sort(), undefined);
+return Array.isArray(xs) ? (xs.sort(), undefined) : xs.sort();
 }"""
     )
 
@@ -152,67 +154,73 @@ def test_list_reverse_mutates_and_returns_none():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return (xs.reverse(), undefined);
+return Array.isArray(xs) ? (xs.reverse(), undefined) : xs.reverse();
 }"""
     )
 
 
-def test_list_pop_noarg():
+def test_pop_noarg():
     def f(xs):
         return xs.pop()
 
     code, _, _ = compile_python_to_js(f)
+    print(code)
     assert code == (
         """function(xs){
-return xs.pop();
+return xs instanceof Set ? (() => {
+const $it = xs.values();
+const $r = $it.next();
+if (!$r.done){
+const $v = $r.value;
+xs.delete($v);
+return $v;
+}
+})() : xs.pop();
 }"""
     )
 
 
-def test_list_pop_index():
+def test_pop_index():
     def f(xs):
         return xs.pop(2)
 
     code, _, _ = compile_python_to_js(f)
+    print("Code:\n", code)
     assert code == (
         """function(xs){
-return (() => {const __k=2; if (Array.isArray(xs)) { return xs.splice(__k, 1)[0]; } if (xs && typeof xs === "object") { if (Object.hasOwn(xs, __k)) { const __v = xs[__k]; delete xs[__k]; return __v; } } return xs.pop(__k); })();
+return Array.isArray(xs) ? xs.splice(2, 1)[0] : xs instanceof Map ? (() => {
+if (xs.has(2)){
+const $v = xs.get(2);
+xs.delete(2);
+return $v;
+} else {
+return undefined;
+}
+})() : xs.pop(2);
 }"""
     )
 
 
-def test_dict_pop():
-    def f(d: dict):
-        return d.pop("aa")
-
-    code, _, _ = compile_python_to_js(f)
-    assert code == (
-        """function(d){
-return (() => {const __k="aa"; if (Object.hasOwn(d, __k)) { const __v = d[__k]; delete d[__k]; return __v; } })();
-}"""
-    )
-
-
-def test_membership_in_list():
+def test_in_list():
     def f(a):
         return 2 in a
 
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(a){
-return ((Array.isArray(a) || typeof a === "string") ? a.includes(2) : (a && typeof a === "object" && Object.hasOwn(a, String(2))));
+return Array.isArray(a) || typeof a === "string" ? a.includes(2) : a instanceof Set || a instanceof Map ? a.has(2) : 2 in a;
 }"""
     )
 
 
 def test_not_in_list():
     def f(a):
-        return 3 not in a
+        return 2 not in a
 
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(a){
-return !((Array.isArray(a) || typeof a === "string") ? a.includes(3) : (a && typeof a === "object" && Object.hasOwn(a, String(3))));
+return !(Array.isArray(a) || typeof a === "string" ? a.includes(2) : a instanceof Set || a instanceof Map ? a.has(2) : 2 in a);
 }"""
     )
 

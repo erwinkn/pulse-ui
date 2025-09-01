@@ -23,7 +23,7 @@ from .nodes import (
     JSImport,
     JSNew,
     JSNumber,
-    JSObject,
+    JSObjectExpr,
     JSProp,
     JSString,
 )
@@ -64,7 +64,7 @@ def _const_to_js_expr(value: object) -> JSExpr:
             if not isinstance(k, str):
                 raise JSCompilationError("Only string keys supported in constant dicts")
             props.append(JSProp(JSString(k), _const_to_js_expr(v)))
-        return JSObject(props)
+        return JSObjectExpr(props)
     raise JSCompilationError(f"Unsupported global constant: {type(value).__name__}")
 
 

@@ -64,9 +64,9 @@ def test_unpack_tuple_assignment():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(t){
-const __tmp0 = t;
-let a = __tmp0[0];
-let b = __tmp0[1];
+const $tmp0 = t;
+let a = $tmp0[0];
+let b = $tmp0[1];
 return a + b;
 }"""
     )
@@ -96,9 +96,9 @@ def test_unpack_list_assignment_literal_rhs():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(){
-const __tmp0 = [1, 2];
-let a = __tmp0[0];
-let b = __tmp0[1];
+const $tmp0 = [1, 2];
+let a = $tmp0[0];
+let b = $tmp0[1];
 return a * b;
 }"""
     )
@@ -113,12 +113,12 @@ def test_unpack_tuple_reassignment_no_let():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(t){
-const __tmp0 = t;
-let a = __tmp0[0];
-let b = __tmp0[1];
-const __tmp1 = t;
-a = __tmp1[0];
-b = __tmp1[1];
+const $tmp0 = t;
+let a = $tmp0[0];
+let b = $tmp0[1];
+const $tmp1 = t;
+a = $tmp1[0];
+b = $tmp1[1];
 return a - b;
 }"""
     )

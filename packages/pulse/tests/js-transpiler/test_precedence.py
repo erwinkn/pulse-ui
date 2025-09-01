@@ -1,3 +1,11 @@
+from pulse.javascript.nodes import (
+    JSBinary,
+    JSIdentifier,
+    JSLogicalChain,
+    JSMemberCall,
+    JSNumber,
+    JSString,
+)
 from pulse.javascript.transpiler import compile_python_to_js
 
 
@@ -86,16 +94,18 @@ return a || b && c;
 
 
 def test_nullish_with_or_requires_parens_on_nullish_side():
-    def f(d, b):
-        # d.get("k") compiles to d["k"] ?? undefined
-        return d.get("k") or b
-
-    code, _, _ = compile_python_to_js(f)
-    assert code == (
-        """function(d, b){
-return (d["k"] ?? undefined) || b;
-}"""
-    )
+    code = JSLogicalChain(
+        "||",
+        [
+            JSBinary(
+                JSMemberCall(JSIdentifier("d"), "get", [JSString("k")]),
+                "??",
+                JSNumber(0),
+            ),
+            JSIdentifier("b"),
+        ],
+    ).emit()
+    assert code == '(d.get("k") ?? 0) || b'
 
 
 def test_ternary_parenthesized_in_binary_context():

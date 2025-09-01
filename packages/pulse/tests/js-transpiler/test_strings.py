@@ -8,7 +8,7 @@ def test_lower():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.toLowerCase();
+return typeof s === "string" ? s.toLowerCase() : s.lower();
 }"""
     )
 
@@ -20,7 +20,7 @@ def test_upper():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.toUpperCase();
+return typeof s === "string" ? s.toUpperCase() : s.upper();
 }"""
     )
 
@@ -32,7 +32,7 @@ def test_strip():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.trim();
+return typeof s === "string" ? s.trim() : s.strip();
 }"""
     )
 
@@ -44,7 +44,7 @@ def test_startswith():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.startsWith("a");
+return typeof s === "string" ? s.startsWith("a") : s.startswith("a");
 }"""
     )
 
@@ -56,7 +56,7 @@ def test_endswith():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.endsWith("b");
+return typeof s === "string" ? s.endsWith("b") : s.endswith("b");
 }"""
     )
 
@@ -68,7 +68,7 @@ def test_lstrip_and_rstrip():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.trimStart() + s.trimEnd();
+return (typeof s === "string" ? s.trimStart() : s.lstrip()) + (typeof s === "string" ? s.trimEnd() : s.rstrip());
 }"""
     )
 
@@ -80,7 +80,7 @@ def test_replace_all():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.replaceAll("a", "b");
+return typeof s === "string" ? s.replaceAll("a", "b") : s.replace("a", "b");
 }"""
     )
 
@@ -92,7 +92,7 @@ def test_capitalize():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+return typeof s === "string" ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s.capitalize();
 }"""
     )
 
@@ -104,7 +104,7 @@ def test_zfill():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return s.padStart(5, "0");
+return typeof s === "string" ? s.padStart(5, "0") : s.zfill(5);
 }"""
     )
 
@@ -140,7 +140,7 @@ def test_membership_in_string():
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(s){
-return ((Array.isArray(s) || typeof s === "string") ? s.includes("x") : (s && typeof s === "object" && Object.hasOwn(s, "x")));
+return Array.isArray(s) || typeof s === "string" ? s.includes("x") : s instanceof Set || s instanceof Map ? s.has("x") : "x" in s;
 }"""
     )
 

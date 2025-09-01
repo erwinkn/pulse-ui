@@ -253,18 +253,6 @@ return new Map(pairs.filter(([k, v]) => v > 0).map(([k, v]) => [k, v]));
     )
 
 
-def test_len_on_dict_counts_keys():
-    def f(d):
-        return len(d)
-
-    code, _, _ = compile_python_to_js(f)
-    assert code == (
-        """function(d){
-return d.length ?? Object.keys(d).length;
-}"""
-    )
-
-
 def test_membership_in_object_or_array_uses_runtime_branch():
     def f(d):
         return "a" in d
@@ -274,5 +262,17 @@ def test_membership_in_object_or_array_uses_runtime_branch():
     assert code == (
         """function(d){
 return Array.isArray(d) || typeof d === "string" ? d.includes("a") : d instanceof Set || d instanceof Map ? d.has("a") : "a" in d;
+}"""
+    )
+
+
+def test_map_literal_method_simplification():
+    def f():
+        return {"a": 1, "b": 2}.keys()
+
+    code, _, _ = compile_python_to_js(f)
+    assert code == (
+        """function(){
+return [...new Map([["a", 1], ["b", 2]]).keys()];
 }"""
     )

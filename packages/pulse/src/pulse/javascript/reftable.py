@@ -12,4 +12,3 @@ if TYPE_CHECKING:
 class ReferenceTable:
     rename: dict[str, JSExpr]
     replace_function: dict[str, Callable[[ast.Call, "JsTranspiler"], JSExpr]]
-    replace_method: dict[str, Callable[[ast.Call, "JsTranspiler"], JSExpr]]

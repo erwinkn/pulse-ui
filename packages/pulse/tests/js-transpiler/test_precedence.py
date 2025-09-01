@@ -158,12 +158,12 @@ return (a + b)(1);
 
 def test_new_expression_in_member_call_no_extra_parens():
     def f(xs):
-        return ({x for x in xs}).has(1)  # type: ignore
+        return ({x for x in xs}).add(1)  # type: ignore
 
     code, _, _ = compile_python_to_js(f)
     assert code == (
         """function(xs){
-return new Set(xs.map(x => x)).has(1);
+return new Set(xs.map(x => x)).add(1);
 }"""
     )
 

@@ -379,3 +379,16 @@ def test_sum_comprehension_filter_map():
 return xs.filter(x => x > 0).map(x => x + 1).reduce((a, b) => a + b, 0);
 }"""
     )
+
+
+def test_list_literal_method_simplification():
+    def f():
+        return [1, 2, 3].index(2)
+
+    code, _, _ = compile_python_to_js(f)
+    # Normally this would get transpiled to something with an `Array.isArray` check. However, in this case, t
+    assert code == (
+        """function(){
+return [1, 2, 3].indexOf(2);
+}"""
+    )

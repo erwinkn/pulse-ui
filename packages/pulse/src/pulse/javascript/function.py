@@ -140,7 +140,7 @@ class JsFunction(Generic[*Args, R]):
 
         # Predeclared identifiers are handled by the PyToJS constructor now
 
-        ref = ReferenceTable(rename=refs, replace_function={}, replace_method={})
+        ref = ReferenceTable(rename=refs, replace_function={})
         visitor = JsTranspiler(
             fndef,
             arg_names,

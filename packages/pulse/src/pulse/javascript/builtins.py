@@ -770,6 +770,9 @@ def _make_jsx_tag_fn(tag_name: str) -> Callable[..., JSXElement]:
             for it in items:
                 if isinstance(it, JSArray):
                     _flatten(list(it.elements), out)
+                elif isinstance(it, JSSpread):
+                    # Spread children: pass the inner expression; React handles arrays
+                    out.append(it.expr)
                 elif isinstance(it, JSString):
                     out.append(it.value)
                 else:

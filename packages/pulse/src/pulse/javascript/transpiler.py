@@ -300,7 +300,12 @@ class JsTranspiler(ast.NodeVisitor):
                     child_nodes.extend(cast(list[ast.expr], slice_node.elts))
                 else:
                     child_nodes.append(cast(ast.expr, slice_node))
-                extra_children = [self.emit_expr(ch) for ch in child_nodes]
+                extra_children: list[JSExpr] = []
+                for ch in child_nodes:
+                    if isinstance(ch, ast.Starred):
+                        extra_children.append(JSSpread(self.emit_expr(ch.value)))
+                    else:
+                        extra_children.append(self.emit_expr(ch))
                 all_children = base_args + extra_children
                 builtin_fn = self.module_builtins[mod_alias][attr]
                 base_kwargs["__ordered_props__"] = ordered_props  # type: ignore[assignment]

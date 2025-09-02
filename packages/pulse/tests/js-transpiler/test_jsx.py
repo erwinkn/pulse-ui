@@ -104,3 +104,12 @@ def test_fragment_with_nested_arrays_and_vars():
 
     code = _emit(f)
     assert "return <>a<div>b</div>{x}</>;" in code
+
+
+def test_child_spread_iterable_passthrough():
+    def f(arr):
+        return ps.div()[*arr]
+
+    code = _emit(f)
+    # We expect React to handle iterables/arrays spread as children, so just a brace expression
+    assert "return <div>{arr}</div>;" in code

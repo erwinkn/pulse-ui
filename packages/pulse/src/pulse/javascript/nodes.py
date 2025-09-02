@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import ast
-import hashlib  # noqa: F401
-import inspect  # noqa: F401
-import textwrap  # noqa: F401
 from dataclasses import dataclass, field
 from typing import (
     Any,
-    Callable,  # noqa: F401
     Optional,
     Sequence,
-    TypedDict,  # noqa: F401
     Union,
-    cast,  # noqa: F401
 )
 
 
@@ -375,6 +369,84 @@ class JSRaw(JSExpr):
         return self.content
 
 
+###############################################################################
+# JSX AST (minimal)
+###############################################################################
+
+
+def _escape_jsx_text(text: str) -> str:
+    # Minimal escaping for text nodes
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+@dataclass
+class JSXProp(JSExpr):
+    name: str
+    value: JSExpr | None = None
+
+    def emit(self) -> str:
+        if self.value is None:
+            return self.name
+        # Prefer compact string literal attribute when possible
+        if isinstance(self.value, JSString):
+            return f"{self.name}={self.value.emit()}"
+        return self.name + "={" + self.value.emit() + "}"
+
+
+@dataclass
+class JSXSpreadProp(JSExpr):
+    value: JSExpr
+
+    def emit(self) -> str:
+        return f"{{...{self.value.emit()}}}"
+
+
+@dataclass
+class JSXElement(JSExpr):
+    tag: str | JSExpr
+    props: Sequence[JSXProp | JSXSpreadProp] = tuple()
+    children: Sequence[str | JSExpr | "JSXElement"] = tuple()
+
+    def emit(self) -> str:
+        tag_code = self.tag if isinstance(self.tag, str) else self.tag.emit()
+        props_code = " ".join(p.emit() for p in self.props) if self.props else ""
+        if not self.children:
+            if props_code:
+                return f"<{tag_code} {props_code} />"
+            return f"<{tag_code} />"
+        # Open tag
+        open_tag = f"<{tag_code}>" if not props_code else f"<{tag_code} {props_code}>"
+        # Children
+        child_parts: list[str] = []
+        for c in self.children:
+            if isinstance(c, str):
+                child_parts.append(_escape_jsx_text(c))
+            elif isinstance(c, JSXElement):
+                child_parts.append(c.emit())
+            else:
+                child_parts.append("{" + c.emit() + "}")
+        inner = "".join(child_parts)
+        return f"{open_tag}{inner}</{tag_code}>"
+
+
+@dataclass
+class JSXFragment(JSExpr):
+    children: Sequence[str | JSExpr | JSXElement] = tuple()
+
+    def emit(self) -> str:
+        if not self.children:
+            return "<></>"
+        parts: list[str] = []
+        for c in self.children:
+            if isinstance(c, str):
+                parts.append(_escape_jsx_text(c))
+            elif isinstance(c, JSXElement):
+                parts.append(c.emit())
+            else:
+                parts.append("{" + c.emit() + "}")
+        return "<>" + "".join(parts) + "</>"
+
+
 @dataclass
 class JSImport:
     src: str
@@ -474,6 +546,8 @@ def expr_precedence(e: JSExpr) -> int:
             JSObjectExpr,
             JSTemplate,
             JSRaw,
+            JSXElement,
+            JSXFragment,
         ),
     ):
         return PRIMARY_PRECEDENCE
@@ -623,6 +697,7 @@ def _emit_child_for_primary(expr: JSExpr) -> str:
     if expr_precedence(expr) < PRIMARY_PRECEDENCE or isinstance(expr, JSTertiary):
         return f"({code})"
     return code
+
 
 def is_primary(expr: JSExpr):
     return isinstance(expr, (JSNumber, JSString, JSUndefined, JSNull, JSIdentifier))

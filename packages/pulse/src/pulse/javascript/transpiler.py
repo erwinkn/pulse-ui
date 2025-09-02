@@ -34,7 +34,6 @@ import textwrap
 from typing import Any, Callable, cast
 
 from pulse.javascript.format_spec import _apply_format_spec, _extract_formatspec_str
-from pulse.javascript.reftable import ReferenceTable
 
 from .builtins import (
     BUILTINS,
@@ -107,12 +106,14 @@ class JsTranspiler(ast.NodeVisitor):
         globals: list[str],
         builtins: dict[str, Builtin],
         rename: dict[str, str],
+        module_builtins: dict[str, dict[str, Builtin]] | None = None,
     ) -> None:
         self.fndef = fndef
         self.args = args
         self.globals = globals
         self.builtins = builtins
         self.rename = rename
+        self.module_builtins = module_builtins or {}
 
         self.predeclared: set[str] = set(args) | set(globals)
         # Track locals for declaration decisions
@@ -125,6 +126,11 @@ class JsTranspiler(ast.NodeVisitor):
     # -----------------------------
 
     def _build_function_call(self, node: ast.Call) -> JSExpr:
+        # typing.cast: ignore first type argument and return the value unchanged
+        if isinstance(node.func, ast.Name) and node.func.id == "cast":
+            if len(node.args) >= 2:
+                return self.emit_expr(node.args[1])
+            raise JSCompilationError("typing.cast requires two arguments")
         args = [self.emit_expr(a) for a in node.args]
         # Build kw_map as JSExprs
         kwargs: dict[str, JSExpr] = {}
@@ -227,6 +233,80 @@ class JsTranspiler(ast.NodeVisitor):
                     pass
         return expr
 
+    # -----------------------------
+    # JSX helpers (namespaced builtins via module alias)
+    # -----------------------------
+
+    def _attempt_jsx_call(self, node: ast.Call) -> JSExpr | None:
+        # Detect ps.tag(...)
+        if isinstance(node.func, ast.Attribute) and isinstance(
+            node.func.value, ast.Name
+        ):
+            mod_alias = node.func.value.id
+            if mod_alias in self.module_builtins:
+                attr = node.func.attr
+                builtins_for_mod = self.module_builtins[mod_alias]
+                if attr in builtins_for_mod:
+                    args = [self.emit_expr(a) for a in node.args]
+                    # Preserve props order and support **spread via ordered meta list
+                    ordered_props: list[
+                        tuple[str, str, JSExpr] | tuple[str, JSExpr]
+                    ] = []
+                    plain_kwargs: dict[str, JSExpr] = {}
+                    for kw in node.keywords:
+                        if kw.arg is None:
+                            # **kwargs spread
+                            ordered_props.append(("spread", self.emit_expr(kw.value)))
+                        else:
+                            val = self.emit_expr(kw.value)
+                            ordered_props.append(("named", kw.arg, val))
+                            plain_kwargs[kw.arg] = val
+                    # Pass ordered list for JSX while also providing plain kwargs as fallback
+                    return builtins_for_mod[attr](
+                        *args, __ordered_props__=ordered_props, **plain_kwargs
+                    )
+        return None
+
+    def _attempt_jsx_subscript(self, node: ast.Subscript) -> JSExpr | None:
+        # Detect ps.tag(...)[children]
+        if (
+            isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and isinstance(node.value.func.value, ast.Name)
+        ):
+            mod_alias = node.value.func.value.id
+            attr = node.value.func.attr
+            if (
+                mod_alias in self.module_builtins
+                and attr in self.module_builtins[mod_alias]
+            ):
+                # Collect original call args/kwargs (children/props)
+                base_args = [self.emit_expr(a) for a in node.value.args]
+                base_kwargs: dict[str, JSExpr] = {}
+                ordered_props: list[tuple[str, str, JSExpr] | tuple[str, JSExpr]] = []
+                for kw in node.value.keywords:
+                    if kw.arg is None:
+                        ordered_props.append(("spread", self.emit_expr(kw.value)))
+                    else:
+                        val = self.emit_expr(kw.value)
+                        ordered_props.append(("named", kw.arg, val))
+                        base_kwargs[kw.arg] = val
+                # Collect bracket-children from subscript slice
+                slice_node = node.slice
+                child_nodes: list[ast.expr] = []
+                if isinstance(slice_node, ast.Tuple):
+                    child_nodes.extend(cast(list[ast.expr], slice_node.elts))
+                elif isinstance(slice_node, ast.List):
+                    child_nodes.extend(cast(list[ast.expr], slice_node.elts))
+                else:
+                    child_nodes.append(cast(ast.expr, slice_node))
+                extra_children = [self.emit_expr(ch) for ch in child_nodes]
+                all_children = base_args + extra_children
+                builtin_fn = self.module_builtins[mod_alias][attr]
+                base_kwargs["__ordered_props__"] = ordered_props  # type: ignore[assignment]
+                return builtin_fn(*all_children, **base_kwargs)
+        return None
+
     def _arrow_param_from_target(self, target: ast.expr) -> tuple[str, list[str]]:
         if isinstance(target, ast.Name):
             return target.id, [target.id]
@@ -283,11 +363,11 @@ class JsTranspiler(ast.NodeVisitor):
             self.locals = saved_locals
 
     # --- Entrypoints ---------------------------------------------------------
-    def transpile(self, body: list[ast.stmt]) -> JSFunctionDef:
+    def transpile(self) -> JSFunctionDef:
         stmts: list[JSStmt] = []
         # Reset temp counter per function emission
         self._temp_counter = 0
-        for stmt in body:
+        for stmt in self.fndef.body:
             s = self.emit_stmt(stmt)
             if s is None:
                 continue
@@ -448,14 +528,13 @@ class JsTranspiler(ast.NodeVisitor):
             return JSNumber(v)
         if isinstance(node, ast.Name):
             ident = node.id
-            if ident in self.locals:
-                return JSIdentifier(_mangle_identifier(ident))
+            # Renames take precedence over predeclared locals/globals
             if ident in self.rename:
                 return JSIdentifier(self.rename[ident])
+            if ident in self.locals:
+                return JSIdentifier(_mangle_identifier(ident))
             # Unresolved non-local
-            raise JSCompilationError(
-                f"Unsupported free variables referenced: {ident}. Only parameters and local variables are allowed."
-            )
+            raise JSCompilationError(f"Unbound name referenced: {ident}.")
         if isinstance(node, (ast.List, ast.Tuple)):
             list_parts: list[JSExpr] = []
             for e in node.elts:
@@ -545,6 +624,9 @@ class JsTranspiler(ast.NodeVisitor):
             orelse = self.emit_expr(node.orelse)
             return JSTertiary(test, body, orelse)
         if isinstance(node, ast.Call):
+            jsx = self._attempt_jsx_call(node)
+            if jsx is not None:
+                return jsx
             if isinstance(node.func, ast.Attribute):
                 obj = self.emit_expr(node.func.value)
                 attr = node.func.attr
@@ -555,6 +637,9 @@ class JsTranspiler(ast.NodeVisitor):
             value = self.emit_expr(node.value)
             return JSMember(value, node.attr)
         if isinstance(node, ast.Subscript):
+            jsx = self._attempt_jsx_subscript(node)
+            if jsx is not None:
+                return jsx
             value = self.emit_expr(node.value)
             # TODO: handle ast.Tuple for node.slice
             if isinstance(node.slice, ast.Tuple):
@@ -640,11 +725,10 @@ def compile_python_to_js(fn: Callable[..., Any]) -> tuple[str, int, str]:
 
     arg_names = [arg.arg for arg in fndef.args.args]
     # Legacy compile uses bare transpiler with no refs/globals
-    ref = ReferenceTable(rename={}, replace_function={})
     visitor = JsTranspiler(
         fndef, args=arg_names, globals=[], builtins=BUILTINS, rename={}
     )
-    js_fn = visitor.transpile(fndef.body)
+    js_fn = visitor.transpile()
     code = js_fn.emit()
     n_args = len(arg_names)
     h = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]

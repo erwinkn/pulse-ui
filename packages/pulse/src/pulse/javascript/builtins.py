@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Callable, cast
 
@@ -11,6 +13,10 @@ from .nodes import (
     JSCompilationError,
     JSConstAssign,
     JSExpr,
+    JSXElement,
+    JSXFragment,
+    JSXProp,
+    JSXSpreadProp,
     JSForOf,
     JSIdentifier,
     JSIf,
@@ -29,6 +35,7 @@ from .nodes import (
     JSUndefined,
 )
 from .utils import define_if_not_primary, iife, extract_constant_number
+from pulse.html import tags as _html_tags
 from .format_spec import _apply_format_spec
 
 
@@ -750,3 +757,85 @@ class DictMethods(BuiltinMethods):
 
 
 DICT_METHODS = {k for k in DictMethods.__dict__.keys() if not k.startswith("__")}
+
+
+# ------------------------------------------------------------
+# HTML tag builtins -> JSXElement/JSXFragment constructors
+# ------------------------------------------------------------
+
+
+def _make_jsx_tag_fn(tag_name: str) -> Callable[..., JSXElement]:
+    def _fn(*children: JSExpr, **props: JSExpr):
+        def _flatten(items: list[JSExpr], out: list[JSExpr | JSXElement | str]):
+            for it in items:
+                if isinstance(it, JSArray):
+                    _flatten(list(it.elements), out)
+                elif isinstance(it, JSString):
+                    out.append(it.value)
+                else:
+                    out.append(it)
+
+        jsx_children: list[JSExpr | JSXElement | str] = []
+        _flatten(list(children), jsx_children)
+
+        # Ordered props path (supports spreads). Expect a list of tuples:
+        # ("named", name: str, value: JSExpr) | ("spread", value: JSExpr)
+        ordered = props.pop("__ordered_props__", None)  # type: ignore[assignment]
+        jsx_props: list[JSXProp | JSXSpreadProp] = []
+        if ordered is not None and isinstance(ordered, list):
+            for entry in ordered:
+                try:
+                    kind = entry[0]
+                except Exception:
+                    continue
+                if kind == "named" and len(entry) == 3:
+                    _, name, val = entry
+                    jsx_props.append(JSXProp(name, val))
+                elif kind == "spread" and len(entry) == 2:
+                    _, val = entry
+                    jsx_props.append(JSXSpreadProp(val))
+        else:
+            # Fallback: non-ordered named props only
+            jsx_props = [JSXProp(k, v) for k, v in props.items()]
+        return JSXElement(tag=tag_name, props=jsx_props, children=jsx_children)
+
+    return _fn
+
+
+def _make_fragment_fn() -> Callable[..., JSXFragment]:
+    def _fn(*children: JSExpr, **props: JSExpr):
+        def _flatten(items: list[JSExpr], out: list[JSExpr | JSXElement | str]):
+            for it in items:
+                if isinstance(it, JSArray):
+                    _flatten(list(it.elements), out)
+                elif isinstance(it, JSString):
+                    out.append(it.value)
+                else:
+                    out.append(it)
+
+        jsx_children: list[JSExpr | JSXElement | str] = []
+        _flatten(list(children), jsx_children)
+        return JSXFragment(children=jsx_children)
+
+    return _fn
+
+
+# Names exported by pulse.html.tags with suffixes for conflicts
+_tags_mod = _html_tags  # keep symbol for runtime; typing may not know attributes
+_all_tag_entries = set(name for name, _ in (_tags_mod.TAGS)) | set(  # type: ignore[attr-defined]
+    (
+        _tags_mod.SELF_CLOSING_TAGS  # type: ignore[attr-defined]
+    )
+)
+
+TAG_BUILTINS: dict[str, Builtin] = {}
+for _name in sorted(_all_tag_entries):
+    # Alias only `del` (Python keyword). `map` and `object` stay unsuffixed.
+    _var = f"{_name}_" if _name == "del" else _name
+    TAG_BUILTINS[_var] = _make_jsx_tag_fn(_name)
+
+# React-style fragment helper
+TAG_BUILTINS["fragment"] = _make_fragment_fn()
+
+# Merge tag builtins into global BUILTINS registry
+BUILTINS.update(TAG_BUILTINS)

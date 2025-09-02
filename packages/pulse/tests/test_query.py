@@ -14,7 +14,6 @@ async def run_query():
     await asyncio.sleep(0)  # executes the `done` callback
     # print('--- Query should be finished ----')
 
-
 @pytest.mark.asyncio
 async def test_state_query_success():
     query_running = False

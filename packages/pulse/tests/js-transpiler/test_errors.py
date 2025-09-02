@@ -11,7 +11,7 @@ def test_freevars_raise():
         compile_python_to_js(f)
         assert False, "Expected JSCompilationError for free variable"
     except JSCompilationError as e:
-        assert "free variables" in str(e)
+        assert "Unbound name" in str(e)
 
 
 def test_unsupported_statement_augassign_op():

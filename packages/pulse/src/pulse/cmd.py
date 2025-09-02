@@ -76,8 +76,10 @@ def load_app_from_file(file_path: str | Path) -> App:
         typer.echo(f"⚠️  No app found in {file_path}")
         raise typer.Exit(1)
 
-    except Exception as e:
-        typer.echo(f"❌ Error loading {file_path}: {e}")
+    except Exception:
+        console = Console()
+        console.log(f"❌ Error loading {file_path}")
+        console.print_exception()
         raise typer.Exit(1)
     finally:
         if str(file_path.parent.absolute()) in sys.path:
@@ -314,9 +316,9 @@ def main():
     """Main CLI entry point."""
     try:
         cli()
-    except Exception as e:
+    except Exception:
         console = Console()
-        console.log(f"❌ Error: {e}")
+        console.print_exception()
         raise typer.Exit(1)
 
 

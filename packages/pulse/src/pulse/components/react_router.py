@@ -1,5 +1,5 @@
 from typing import Literal, Optional, TypedDict, Unpack
-from pulse.html.attributes import HTMLAnchorProps
+from pulse.html.props import HTMLAnchorProps
 from pulse.vdom import Child
 from ..react_component import DEFAULT, react_component
 

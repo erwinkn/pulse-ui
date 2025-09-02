@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 members = [
     "pulse-framework",
     "pulse-lucide",
+    "pulse-recharts",
     "pulse-workspace",
 ]
 
@@ -602,12 +603,18 @@ dependencies = [
 requires-dist = [{ name = "pulse-framework", editable = "packages/pulse" }]
 
 [[package]]
+name = "pulse-recharts"
+version = "0.1.0"
+source = { editable = "packages/pulse-recharts" }
+
+[[package]]
 name = "pulse-workspace"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "pulse-framework" },
     { name = "pulse-lucide" },
+    { name = "pulse-recharts" },
 ]
 
 [package.dev-dependencies]
@@ -622,6 +629,7 @@ dev = [
 requires-dist = [
     { name = "pulse-framework", editable = "packages/pulse" },
     { name = "pulse-lucide", editable = "packages/pulse-lucide" },
+    { name = "pulse-recharts", editable = "packages/pulse-recharts" },
 ]
 
 [package.metadata.requires-dev]

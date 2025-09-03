@@ -1,11 +1,7 @@
 // Public API surface for pulse-client
 
 // Core React bindings
-export {
-  PulseProvider,
-  usePulseClient,
-  PulseView,
-} from "./pulse";
+export { PulseProvider, usePulseClient, PulseView } from "./pulse";
 export type { PulseConfig, PulseProviderProps } from "./pulse";
 
 // Client implementation
@@ -13,7 +9,6 @@ export { PulseSocketIOClient } from "./client";
 export type {
   PulseClient,
   MountedView,
-  VDOMListener,
   ConnectionStatusListener,
   ServerErrorListener,
 } from "./client";
@@ -30,7 +25,7 @@ export type {
 // Renderer helpers
 export {
   VDOMRenderer,
-  applyVDOMUpdates,
+  applyUpdates as applyReactTreeUpdates,
   RenderLazy,
 } from "./renderer";
 

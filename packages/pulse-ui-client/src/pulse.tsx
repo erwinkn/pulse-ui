@@ -6,7 +6,7 @@ import React, {
   useContext,
   type ComponentType,
 } from "react";
-import { VDOMRenderer } from "./renderer";
+import { VDOMRenderer, applyUpdates } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry, RegistryEntry } from "./vdom";
 import { useLocation, useParams, useNavigate } from "react-router";
@@ -104,7 +104,13 @@ export function PulseView({
   path,
 }: PulseViewProps) {
   const client = usePulseClient();
-  const [vdom, setVdom] = useState(initialVDOM);
+  const renderer = useMemo(
+    () => new VDOMRenderer(client, path, externalComponents),
+    [client, path, externalComponents]
+  );
+  const [tree, setTree] = useState<React.ReactNode>(() =>
+    renderer.renderNode(initialVDOM)
+  );
   const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
 
   const location = useLocation();
@@ -131,15 +137,20 @@ export function PulseView({
   useEffect(() => {
     if (inBrowser) {
       client.mountView(path, {
-        vdom: initialVDOM,
-        listener: setVdom,
         routeInfo,
+        onInit: (vdom) => {
+          setTree(renderer.renderNode(vdom));
+        },
+        onUpdate: (ops) => {
+          setTree((prev) =>
+            prev == null ? prev : applyUpdates(prev, ops, renderer)
+          );
+        },
       });
       const offErr = client.onServerError((p, err) => {
         if (p === path) setServerError(err);
       });
       return () => {
-        // console.log("Unmounting", path)
         offErr();
         client.unmount(path);
       };
@@ -153,16 +164,11 @@ export function PulseView({
     }
   }, [client, path, routeInfo]);
 
-  const renderer = useMemo(
-    () => new VDOMRenderer(client, path, externalComponents),
-    [client, path, externalComponents]
-  );
-
   if (serverError) {
     return <ServerError error={serverError} />;
   }
 
-  return renderer.renderNode(vdom);
+  return tree;
 }
 
 function ServerError({ error }: { error: ServerErrorInfo }) {

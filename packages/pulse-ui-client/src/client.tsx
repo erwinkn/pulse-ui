@@ -1,12 +1,11 @@
 import type { RouteInfo } from "./helpers";
 import type { ClientMountMessage } from "./messages";
-import { applyVDOMUpdates } from "./renderer";
+import type { VDOM, VDOMUpdate } from "./vdom";
 import { extractEvent } from "./serialize/events";
 import {
   stringify as flattedStringify,
   parse as flattedParse,
 } from "./serialize/flatted";
-import type { VDOM, VDOMNode } from "./vdom";
 
 import { io, Socket } from "socket.io-client";
 import type {
@@ -18,12 +17,10 @@ import type {
 } from "./messages";
 
 export interface MountedView {
-  vdom: VDOM;
-  listener: VDOMListener;
   routeInfo: RouteInfo;
+  onInit: (vdom: VDOM) => void;
+  onUpdate: (ops: VDOMUpdate[]) => void;
 }
-
-export type VDOMListener = (node: VDOMNode) => void;
 export type ConnectionStatusListener = (connected: boolean) => void;
 export type ServerErrorListener = (
   path: string,
@@ -201,8 +198,7 @@ export class PulseSocketIOClient {
       case "vdom_init": {
         const route = this.activeViews.get(message.path);
         if (route) {
-          route.vdom = message.vdom;
-          route.listener(route.vdom);
+          route.onInit(message.vdom);
         }
         // Clear any prior error for this path on successful init
         if (this.serverErrors.has(message.path)) {
@@ -213,14 +209,13 @@ export class PulseSocketIOClient {
       }
       case "vdom_update": {
         const route = this.activeViews.get(message.path);
-        if (!route || !route.vdom) {
+        if (!route) {
           console.error(
             `[PulseClient] Received VDOM update for path ${message.path} before initial tree was set.`
           );
           return;
         }
-        route.vdom = applyVDOMUpdates(route.vdom, message.ops);
-        route.listener(route.vdom);
+        route.onUpdate(message.ops);
         // Clear any prior error for this path on successful update
         if (this.serverErrors.has(message.path)) {
           this.serverErrors.delete(message.path);

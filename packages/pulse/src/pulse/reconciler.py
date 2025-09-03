@@ -42,7 +42,6 @@ class UpdatePropsOperation(TypedDict):
 class MoveOperationData(TypedDict):
     from_index: int
     to_index: int
-    key: str
 
 
 class MoveOperation(TypedDict):

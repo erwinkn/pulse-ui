@@ -63,7 +63,6 @@ export interface MoveUpdate extends VDOMUpdateBase {
   data: {
     from_index: number;
     to_index: number;
-    key: string;
   };
 }
 

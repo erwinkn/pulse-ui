@@ -5,7 +5,6 @@ export {
   PulseProvider,
   usePulseClient,
   PulseView,
-  usePulseRenderHelpers,
 } from "./pulse";
 export type { PulseConfig, PulseProviderProps } from "./pulse";
 
@@ -31,9 +30,6 @@ export type {
 // Renderer helpers
 export {
   VDOMRenderer,
-  createElementNode,
-  createFragment,
-  createMountPoint,
   applyVDOMUpdates,
   RenderLazy,
 } from "./renderer";

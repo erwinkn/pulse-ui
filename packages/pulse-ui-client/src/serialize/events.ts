@@ -304,7 +304,6 @@ export function extractEvent(value: any): any {
     typeof value.isDefaultPrevented === "function"
   ) {
     const evt = value as React.SyntheticEvent;
-    console.log("React event:", evt)
     // The `type` property is crucial for the lookup.
     if (typeof evt.type !== "string") {
       return value;

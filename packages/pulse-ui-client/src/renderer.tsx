@@ -93,107 +93,155 @@ export class VDOMRenderer {
 }
 
 // =================================================================
-// VDOM Update Functions
+// Update Functions (shallow-clone along update path)
 // =================================================================
 
-function findNodeByPath(root: VDOMNode, path: string): VDOMElement | null {
-  if (path === "") return isElementNode(root) ? root : null;
-
-  const parts = path.split(".").map(Number);
-  let current: VDOMNode | VDOMElement = root;
-
-  for (const index of parts) {
-    if (!isElementNode(current)) {
-      console.error(
-        `[findNodeByPath] Invalid path: part of it is not an element node.`
-      );
-      return null;
-    }
-    if (!current.children || index >= current.children.length) {
-      console.error(
-        `[findNodeByPath] Invalid path: index ${index} out of bounds.`
-      );
-      return null;
-    }
-    current = current.children[index]!;
-  }
-
-  return isElementNode(current) ? current : null;
+function toChildrenArrayFromElement(el: React.ReactElement): React.ReactNode[] {
+  const children = (el.props as any)?.children as React.ReactNode | undefined;
+  if (children == null) return [];
+  return Array.isArray(children) ? children.slice() : [children];
 }
 
-function cloneNode<T extends VDOMNode>(node: T): T {
-  if (typeof node !== "object" || node === null) {
-    return node;
+function processPropsForCallbacks(
+  renderer: VDOMRenderer,
+  props: Record<string, any>
+): Record<string, any> {
+  const processed: Record<string, any> = {};
+  for (const [propKey, value] of Object.entries(props || {})) {
+    if (typeof value === "string" && value.startsWith("$$fn:")) {
+      const callbackKey = value.substring("$$fn:".length);
+      processed[propKey] = renderer.getCallback(callbackKey);
+    } else {
+      processed[propKey] = value;
+    }
   }
-  // Basic deep clone for VDOM nodes
-  return JSON.parse(JSON.stringify(node));
+  return processed;
 }
 
-// TODO: optimize by only cloning along the update path
-export function applyVDOMUpdates(
-  initialTree: VDOMNode,
-  updates: VDOMUpdate[]
-): VDOMNode {
-  let newTree = structuredClone(initialTree);
+function cloneElementWithChildren(
+  el: React.ReactElement,
+  children: React.ReactNode[]
+): React.ReactElement {
+  // Preserve existing props; only override children
+  return React.cloneElement(el, undefined, ...children);
+}
+
+export function applyReactTreeUpdates(
+  initialTree: React.ReactNode,
+  updates: VDOMUpdate[],
+  renderer: VDOMRenderer
+): React.ReactNode {
+  let newTree: React.ReactNode = initialTree;
+
+  const updateParentAtPath = (
+    node: React.ReactNode,
+    pathParts: number[],
+    onParent: (parentEl: React.ReactElement) => React.ReactElement
+  ): React.ReactNode => {
+    if (pathParts.length === 0) {
+      if (!React.isValidElement(node)) return node;
+      return onParent(node);
+    }
+    if (!React.isValidElement(node)) return node;
+    const idx = pathParts[0]!;
+    const rest = pathParts.slice(1);
+    const childrenArr = toChildrenArrayFromElement(node);
+    const child = childrenArr[idx];
+    childrenArr[idx] = updateParentAtPath(child, rest, onParent) as any;
+    return cloneElementWithChildren(node, childrenArr);
+  };
 
   for (const update of updates) {
     const { type, path, data } = update;
 
-    // Handle root-level operations separately
     if (path === "") {
       switch (type) {
-        case "replace":
-          newTree = data;
+        case "replace": {
+          newTree = renderer.renderNode(data);
           break;
-        case "update_props":
-          if (isElementNode(newTree)) {
-            newTree.props = { ...(newTree.props ?? {}), ...data };
+        }
+        case "update_props": {
+          if (React.isValidElement(newTree)) {
+            const nextProps = processPropsForCallbacks(renderer, data);
+            const currentChildren = toChildrenArrayFromElement(newTree);
+            newTree = React.cloneElement(
+              newTree,
+              nextProps,
+              ...currentChildren
+            );
           }
           break;
-        default:
-          console.error(`[applyUpdates] Invalid root operation: ${type}`);
+        }
+        default: {
+          if (process.env.NODE_ENV !== "production") {
+            console.error(
+              `[applyReactTreeUpdates] Invalid root operation: ${type}`
+            );
+          }
+        }
       }
-      continue; // Continue to next update
-    }
-
-    const parentPath = path.substring(0, path.lastIndexOf("."));
-    const childIndex = parseInt(path.substring(path.lastIndexOf(".") + 1), 10);
-
-    const targetParent = findNodeByPath(newTree, parentPath);
-
-    if (!targetParent) {
-      console.error(`[applyUpdates] Could not find parent for path: ${path}`);
       continue;
     }
 
-    if (!targetParent.children) {
-      targetParent.children = [];
-    }
+    const parts = path.split(".").map(Number);
+    const parentParts = parts.slice(0, -1);
+    const childIndex = parts[parts.length - 1]!;
 
     switch (type) {
-      case "replace":
-        targetParent.children[childIndex] = data;
+      case "replace": {
+        newTree = updateParentAtPath(newTree, parentParts, (parentEl) => {
+          const childrenArr = toChildrenArrayFromElement(parentEl);
+          childrenArr[childIndex] = renderer.renderNode(data);
+          return cloneElementWithChildren(parentEl, childrenArr);
+        });
         break;
-
-      case "update_props":
-        const nodeToUpdate = targetParent.children[childIndex]!;
-        if (isElementNode(nodeToUpdate)) {
-          nodeToUpdate.props = { ...(nodeToUpdate.props ?? {}), ...data };
-        }
+      }
+      case "update_props": {
+        newTree = updateParentAtPath(newTree, parentParts, (parentEl) => {
+          const childrenArr = toChildrenArrayFromElement(parentEl);
+          const target = childrenArr[childIndex];
+          if (React.isValidElement(target)) {
+            const nextProps = processPropsForCallbacks(renderer, data);
+            const currentChildren = toChildrenArrayFromElement(target);
+            childrenArr[childIndex] = React.cloneElement(
+              target,
+              nextProps,
+              ...currentChildren
+            );
+          }
+          return cloneElementWithChildren(parentEl, childrenArr);
+        });
         break;
-
-      case "insert":
-        targetParent.children.splice(childIndex, 0, data);
+      }
+      case "insert": {
+        newTree = updateParentAtPath(newTree, parentParts, (parentEl) => {
+          const childrenArr = toChildrenArrayFromElement(parentEl);
+          childrenArr.splice(childIndex, 0, renderer.renderNode(data));
+          return cloneElementWithChildren(parentEl, childrenArr);
+        });
         break;
-
-      case "remove":
-        targetParent.children.splice(childIndex, 1);
+      }
+      case "remove": {
+        newTree = updateParentAtPath(newTree, parentParts, (parentEl) => {
+          const childrenArr = toChildrenArrayFromElement(parentEl);
+          childrenArr.splice(childIndex, 1);
+          return cloneElementWithChildren(parentEl, childrenArr);
+        });
         break;
-
+      }
       case "move": {
-        const item = targetParent.children.splice(data.from_index, 1)[0]!;
-        targetParent.children.splice(data.to_index, 0, item);
+        newTree = updateParentAtPath(newTree, parentParts, (parentEl) => {
+          const childrenArr = toChildrenArrayFromElement(parentEl);
+          const item = childrenArr.splice(data.from_index, 1)[0];
+          childrenArr.splice(data.to_index, 0, item);
+          return cloneElementWithChildren(parentEl, childrenArr);
+        });
         break;
+      }
+      default: {
+        if (process.env.NODE_ENV !== "production") {
+          console.error(`[applyReactTreeUpdates] Unknown update type: ${type}`);
+        }
       }
     }
   }

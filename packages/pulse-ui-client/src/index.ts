@@ -13,7 +13,6 @@ export { PulseSocketIOClient } from "./client";
 export type {
   PulseClient,
   MountedView,
-  VDOMListener,
   ConnectionStatusListener,
   ServerErrorListener,
 } from "./client";
@@ -30,7 +29,7 @@ export type {
 // Renderer helpers
 export {
   VDOMRenderer,
-  applyVDOMUpdates,
+  applyReactTreeUpdates,
   RenderLazy,
 } from "./renderer";
 

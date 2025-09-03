@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
-import { VDOMRenderer, applyReactTreeUpdates } from "./renderer";
+import { VDOMRenderer, applyUpdates } from "./renderer";
 
 import type { VDOMNode, VDOMUpdate } from "./vdom";
 
@@ -32,7 +32,7 @@ describe("applyReactTreeUpdates", () => {
       },
     ];
 
-    tree = applyReactTreeUpdates(tree, ops, renderer);
+    tree = applyUpdates(tree, ops, renderer);
     const root = tree as React.ReactElement;
     expect(root.type).toBe("div");
     expect((root.props as any).id).toBe("root");
@@ -52,7 +52,7 @@ describe("applyReactTreeUpdates", () => {
         data: { id: "root", onClick: "$$fn:cb" },
       },
     ];
-    tree = applyReactTreeUpdates(tree, ops, renderer);
+    tree = applyUpdates(tree, ops, renderer);
     const root = tree as React.ReactElement;
     expect((root.props as any).id).toBe("root");
     expect(typeof (root.props as any).onClick).toBe("function");
@@ -74,7 +74,7 @@ describe("applyReactTreeUpdates", () => {
         data: { tag: "span", children: ["B"] },
       },
     ];
-    tree = applyReactTreeUpdates(tree, ops, renderer);
+    tree = applyUpdates(tree, ops, renderer);
     const root = tree as React.ReactElement;
     const rootChildren = childrenArray(root);
     const child0 = rootChildren[0] as React.ReactElement;
@@ -94,7 +94,7 @@ describe("applyReactTreeUpdates", () => {
     let tree = renderer.renderNode(initialVDOM);
 
     // Insert at index 1 under parent path 0
-    tree = applyReactTreeUpdates(
+    tree = applyUpdates(
       tree,
       [
         {
@@ -114,7 +114,7 @@ describe("applyReactTreeUpdates", () => {
     expect((kids[1] as React.ReactElement).type).toBe("span");
 
     // Remove the first child under parent path 0 (index 0)
-    tree = applyReactTreeUpdates(
+    tree = applyUpdates(
       tree,
       [
         {
@@ -157,7 +157,7 @@ describe("applyReactTreeUpdates", () => {
         data: { from_index: 0, to_index: 1 },
       },
     ];
-    tree = applyReactTreeUpdates(tree, ops, renderer);
+    tree = applyUpdates(tree, ops, renderer);
     const root = tree as React.ReactElement;
     const p0 = childrenArray(root)[0] as React.ReactElement;
     const kids = childrenArray(p0) as React.ReactElement[];

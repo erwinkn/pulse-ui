@@ -6,7 +6,7 @@ import React, {
   useContext,
   type ComponentType,
 } from "react";
-import { VDOMRenderer, applyReactTreeUpdates } from "./renderer";
+import { VDOMRenderer, applyUpdates } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry, RegistryEntry } from "./vdom";
 import { useLocation, useParams, useNavigate } from "react-router";
@@ -108,7 +108,9 @@ export function PulseView({
     () => new VDOMRenderer(client, path, externalComponents),
     [client, path, externalComponents]
   );
-  const [tree, setTree] = useState<React.ReactNode>(() => renderer.renderNode(initialVDOM));
+  const [tree, setTree] = useState<React.ReactNode>(() =>
+    renderer.renderNode(initialVDOM)
+  );
   const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
 
   const location = useLocation();
@@ -141,7 +143,7 @@ export function PulseView({
         },
         onUpdate: (ops) => {
           setTree((prev) =>
-            prev == null ? prev : applyReactTreeUpdates(prev, ops, renderer)
+            prev == null ? prev : applyUpdates(prev, ops, renderer)
           );
         },
       });

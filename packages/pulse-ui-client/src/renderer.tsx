@@ -1,11 +1,5 @@
 import React, { Suspense, type ComponentType } from "react";
-import type {
-  ComponentRegistry,
-  RegistryEntry,
-  VDOMElement,
-  VDOMNode,
-  VDOMUpdate,
-} from "./vdom";
+import type { ComponentRegistry, VDOMNode, VDOMUpdate } from "./vdom";
 import {
   FRAGMENT_TAG,
   isElementNode,
@@ -126,7 +120,7 @@ function cloneElementWithChildren(
   return React.cloneElement(el, undefined, ...children);
 }
 
-export function applyReactTreeUpdates(
+export function applyUpdates(
   initialTree: React.ReactNode,
   updates: VDOMUpdate[],
   renderer: VDOMRenderer
@@ -140,11 +134,13 @@ export function applyReactTreeUpdates(
       .map(Number);
 
     const descend = (node: React.ReactNode, depth: number): React.ReactNode => {
-      if (!React.isValidElement(node)) return node;
+      if (!React.isValidElement(node)) {
+        throw new Error(
+          "Invalid node at path " + parts.slice(0, depth).join(".")
+        );
+      }
       if (depth === parts.length) {
-        const childrenArr = React.isValidElement(node)
-          ? toChildrenArrayFromElement(node)
-          : [];
+        const childrenArr = toChildrenArrayFromElement(node);
         switch (update.type) {
           case "replace": {
             return renderer.renderNode(update.data);
@@ -175,9 +171,8 @@ export function applyReactTreeUpdates(
             }
           }
         }
-        return React.isValidElement(node)
-          ? cloneElementWithChildren(node, childrenArr)
-          : node;
+        return cloneElementWithChildren(node, childrenArr);
+      } else {
       }
       const idx = parts[depth]!;
       const childrenArr = toChildrenArrayFromElement(node);

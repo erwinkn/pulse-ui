@@ -42,10 +42,12 @@ export interface VDOMUpdateBase {
 export interface InsertUpdate extends VDOMUpdateBase {
   type: "insert";
   data: VDOMNode; // The node to insert
+  idx: number;
 }
 
 export interface RemoveUpdate extends VDOMUpdateBase {
   type: "remove";
+  idx: number;
 }
 
 export interface ReplaceUpdate extends VDOMUpdateBase {
@@ -63,7 +65,6 @@ export interface MoveUpdate extends VDOMUpdateBase {
   data: {
     from_index: number;
     to_index: number;
-    key: string;
   };
 }
 

@@ -36,24 +36,6 @@ export const usePulseClient = () => {
   return client;
 };
 
-// Context for rendering helpers, provided by PulseView
-interface PulseRenderHelpers {
-  getCallback: (key: string) => (...args: any[]) => void;
-  getComponent: (key: string) => RegistryEntry;
-}
-
-const PulseRenderContext = createContext<PulseRenderHelpers | null>(null);
-
-export const usePulseRenderHelpers = () => {
-  const context = useContext(PulseRenderContext);
-  if (!context) {
-    throw new Error(
-      "usePulseRenderHelpers must be used within a PulseRenderContext (provided by <PulseView>)"
-    );
-  }
-  return context;
-};
-
 // =================================================================
 // Provider
 // =================================================================
@@ -157,7 +139,7 @@ export function PulseView({
         if (p === path) setServerError(err);
       });
       return () => {
-        console.log("Unmounting", path)
+        // console.log("Unmounting", path)
         offErr();
         client.unmount(path);
       };
@@ -171,38 +153,16 @@ export function PulseView({
     }
   }, [client, path, routeInfo]);
 
-  const renderHelpers = useMemo(() => {
-    const callbackCache = new Map<string, (...args: any[]) => void>();
-
-    const getCallback = (key: string) => {
-      let fn = callbackCache.get(key);
-      if (!fn) {
-        fn = (...args) => client.invokeCallback(path, key, args);
-        callbackCache.set(key, fn);
-      }
-      return fn;
-    };
-
-    const getComponent = (key: string) => {
-      const component = externalComponents[key];
-      if (!component) {
-        throw new Error(`Component with key "${key}" not found.`);
-      }
-      return component;
-    };
-
-    return { getCallback, getComponent };
-  }, [client, externalComponents, path]);
-
-  return (
-    <PulseRenderContext.Provider value={renderHelpers}>
-      {serverError ? (
-        <ServerError error={serverError} />
-      ) : (
-        <VDOMRenderer node={vdom} />
-      )}
-    </PulseRenderContext.Provider>
+  const renderer = useMemo(
+    () => new VDOMRenderer(client, path, externalComponents),
+    [client, path, externalComponents]
   );
+
+  if (serverError) {
+    return <ServerError error={serverError} />;
+  }
+
+  return renderer.renderNode(vdom);
 }
 
 function ServerError({ error }: { error: ServerErrorInfo }) {

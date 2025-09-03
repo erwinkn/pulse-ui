@@ -96,10 +96,3 @@ export function isTextNode(node: VDOMNode): node is string {
 export function isFragment(node: VDOMNode): boolean {
   return typeof node === "object" && node !== null && node.tag === FRAGMENT_TAG;
 }
-
-export function getMountPointComponentKey(node: VDOMElement): string {
-  if (!isMountPointNode(node)) {
-    throw new Error("Node is not a mount point");
-  }
-  return node.tag.slice(MOUNT_POINT_PREFIX.length);
-}

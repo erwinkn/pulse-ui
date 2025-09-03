@@ -1,181 +1,95 @@
-import React, {
-  memo,
-  Suspense,
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentType,
-} from "react";
+import React, { Suspense, type ComponentType } from "react";
 import type {
-  VDOM,
+  ComponentRegistry,
+  RegistryEntry,
   VDOMElement,
   VDOMNode,
   VDOMUpdate,
-  ComponentRegistry,
-  RegistryEntry,
 } from "./vdom";
 import {
-  isElementNode,
-  isFragment,
-  isMountPointNode,
-  getMountPointComponentKey,
-  MOUNT_POINT_PREFIX,
   FRAGMENT_TAG,
+  isElementNode,
+  isMountPointNode,
+  MOUNT_POINT_PREFIX,
 } from "./vdom";
-import { usePulseRenderHelpers } from "./pulse";
+import type { PulseSocketIOClient } from "./client";
 
-interface VDOMRendererProps {
-  node: VDOMNode;
-}
-
-// Helper function to generate keys for React reconciliation
-function getNodeKey(node: VDOMNode, index: number): string | number {
-  if (isElementNode(node)) {
-    return node.key || index;
+export class VDOMRenderer {
+  private callbackCache: Map<string, (...args: any[]) => void>;
+  constructor(
+    private client: PulseSocketIOClient,
+    private path: string,
+    private components: ComponentRegistry
+  ) {
+    this.callbackCache = new Map();
   }
-  return index;
-}
 
-export const VDOMRenderer = ({ node }: VDOMRendererProps) => {
-  const { getCallback, getComponent } = usePulseRenderHelpers();
+  getCallback(key: string) {
+    let fn = this.callbackCache.get(key);
+    if (!fn) {
+      fn = (...args) => this.client.invokeCallback(this.path, key, args);
+      this.callbackCache.set(key, fn);
+    }
+    return fn;
+  }
 
-  // 1. Handle non-renderable cases first
-  if (node === null || typeof node === "boolean" || node === undefined) {
+  renderNode(node: VDOMNode): React.ReactNode {
+    // Handle primitives early
+    if (
+      node == null || // catches both null and undefined
+      typeof node === "boolean" ||
+      typeof node === "number" ||
+      typeof node === "string"
+    ) {
+      return node;
+    }
+
+    // Element nodes
+    if (isElementNode(node)) {
+      const { tag, props = {}, children = [] } = node;
+
+      // Process props for callbacks
+      const processedProps: Record<string, any> = {};
+      for (const [propKey, value] of Object.entries(props)) {
+        if (typeof value === "string" && value.startsWith("$$fn:")) {
+          const callbackKey = value.substring("$$fn:".length);
+          processedProps[propKey] = this.getCallback(callbackKey);
+        } else {
+          processedProps[propKey] = value;
+        }
+      }
+      if (node.key) {
+        processedProps.key = node.key;
+      }
+
+      const renderedChildren = [];
+      for (const child of children) {
+        renderedChildren.push(this.renderNode(child));
+      }
+
+      if (isMountPointNode(node)) {
+        const componentKey = node.tag.slice(MOUNT_POINT_PREFIX.length);
+        const Component = this.components[componentKey]!;
+        return React.createElement(
+          Component,
+          processedProps,
+          ...renderedChildren
+        );
+      }
+
+      return React.createElement(
+        tag === FRAGMENT_TAG ? React.Fragment : tag,
+        processedProps,
+        ...renderedChildren
+      );
+    }
+
+    // Fallback for unknown node types
+    if (process.env.NODE_ENV !== "production") {
+      console.error("Unknown VDOM node type:", node);
+    }
     return null;
   }
-
-  // 2. Handle primitive nodes
-  if (typeof node === "string" || typeof node === "number") {
-    return <>{node}</>;
-  }
-
-  // 3. Handle element nodes
-  if (isElementNode(node)) {
-    if (process.env.NODE_ENV !== "production") {
-      const hasTag = "tag" in node && typeof node.tag === "string";
-      if (!hasTag) {
-        console.error("Invalid VDOM element node received:", node);
-        return null;
-      }
-    }
-
-    const { tag, props = {}, children = [] } = node;
-
-    // Process props for callbacks
-    const processedProps: Record<string, any> = {};
-    for (const [key, value] of Object.entries(props)) {
-      if (typeof value === "string" && value.startsWith("$$fn:")) {
-        const callbackKey = value.substring("$$fn:".length);
-        processedProps[key] = getCallback(callbackKey);
-      } else {
-        processedProps[key] = value;
-      }
-    }
-
-    if (isMountPointNode(node)) {
-      const componentKey = getMountPointComponentKey(node);
-      const Component = getComponent(componentKey);
-      const renderedChildren = children.map((child, index) => (
-        <VDOMRenderer key={getNodeKey(child, index)} node={child} />
-      ));
-      return <Component {...processedProps}>{renderedChildren}</Component>;
-      // if (node.lazy) {
-      //   return <Component {...processedProps}>{renderedChildren}</Component>;
-      // } else {
-      // }
-    }
-
-    if (tag === FRAGMENT_TAG) {
-      return (
-        <>
-          {children.map((child, index) => (
-            <VDOMRenderer key={getNodeKey(child, index)} node={child} />
-          ))}
-        </>
-      );
-    }
-
-    const renderedChildren = children.map((child, index) => (
-      <VDOMRenderer key={getNodeKey(child, index)} node={child} />
-    ));
-
-    return React.createElement(tag, processedProps, ...renderedChildren);
-  }
-
-  // 4. Fallback for unknown node types
-  if (process.env.NODE_ENV !== "production") {
-    console.error("Unknown VDOM node type:", node);
-  }
-  return null;
-};
-
-VDOMRenderer.displayName = "VDOMRenderer";
-
-// =================================================================
-// Node Creation Functions
-// =================================================================
-
-export function createElementNode(
-  tag: string,
-  props: Record<string, any> = {},
-  children: VDOMNode[] = [],
-  key?: string
-): VDOMElement {
-  if (process.env.NODE_ENV !== "production") {
-    if (tag.startsWith(MOUNT_POINT_PREFIX)) {
-      console.error(
-        `[Pulse] Error: The tag "${tag}" starts with a reserved prefix "${MOUNT_POINT_PREFIX}". Please use a different tag name.`
-      );
-    }
-  }
-
-  const node: VDOMElement = {
-    tag,
-    props,
-    children,
-  };
-
-  if (key !== undefined) {
-    node.key = key;
-  }
-
-  return node;
-}
-
-export function createFragment(
-  children: VDOMNode[] = [],
-  key?: string
-): VDOMElement {
-  const node: VDOMElement = {
-    tag: FRAGMENT_TAG,
-    props: {},
-    children,
-  };
-
-  if (key !== undefined) {
-    node.key = key;
-  }
-
-  return node;
-}
-
-export function createMountPoint(
-  componentKey: string,
-  props: Record<string, any> = {},
-  children: VDOMNode[] = [],
-  key?: string
-): VDOMElement {
-  const node: VDOMElement = {
-    tag: MOUNT_POINT_PREFIX + componentKey,
-    props,
-    children,
-  };
-
-  if (key !== undefined) {
-    node.key = key;
-  }
-
-  return node;
 }
 
 // =================================================================
@@ -215,11 +129,12 @@ function cloneNode<T extends VDOMNode>(node: T): T {
   return JSON.parse(JSON.stringify(node));
 }
 
+// TODO: optimize by only cloning along the update path
 export function applyVDOMUpdates(
   initialTree: VDOMNode,
   updates: VDOMUpdate[]
 ): VDOMNode {
-  let newTree = cloneNode(initialTree);
+  let newTree = structuredClone(initialTree);
 
   for (const update of updates) {
     const { type, path, data } = update;

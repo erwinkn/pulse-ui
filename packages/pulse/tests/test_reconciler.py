@@ -193,7 +193,7 @@ def test_reconcile_initial_insert_simple_component():
 
     assert result.ops == [
         {
-            "type": "insert",
+            "type": "replace",
             "path": "",
             "data": {
                 "tag": "button",
@@ -216,7 +216,7 @@ def test_reconcile_props_update_between_renders():
     # First render -> insert
     r1 = RenderRoot(View)
     first = r1.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # mutate props
     attrs["className"] = "b"
@@ -238,7 +238,7 @@ def test_reconcile_primitive_changes_and_none():
     # Initial insert of primitive
     root = RenderRoot(P)
     first = root.render_diff()
-    assert first.ops == [{"type": "insert", "path": "", "data": "A"}]
+    assert first.ops == [{"type": "replace", "path": "", "data": "A"}]
 
     # Change primitive -> replace
     val["text"] = "B"
@@ -248,7 +248,7 @@ def test_reconcile_primitive_changes_and_none():
     # Change to None -> remove
     val["text"] = None
     third = root.render_diff()
-    assert third.ops == [{"type": "remove", "path": ""}]
+    assert third.ops == [{"type": "replace", "path": "", "data": None}]
 
 
 def test_reconcile_conditional_children_insert_remove():
@@ -264,19 +264,24 @@ def test_reconcile_conditional_children_insert_remove():
     # First render (no extra) -> insert
     root = RenderRoot(View)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # Add extra child -> insert at path 1
     show_extra["flag"] = True
     second = root.render_diff()
     assert second.ops == [
-        {"type": "insert", "path": "1", "data": {"tag": "span", "children": ["B"]}}
+        {
+            "type": "insert",
+            "path": "",
+            "idx": 1,
+            "data": {"tag": "span", "children": ["B"]},
+        }
     ]
 
     # Remove extra child -> remove at path 1
     show_extra["flag"] = False
     third = root.render_diff()
-    assert third.ops == [{"type": "remove", "path": "1"}]
+    assert third.ops == [{"type": "remove", "path": "", "idx": 1}]
 
 
 def test_reconcile_deep_nested_text_replace():
@@ -294,7 +299,7 @@ def test_reconcile_deep_nested_text_replace():
 
     root = RenderRoot(View)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     content["b"] = "BB"
     second = root.render_diff()
@@ -323,15 +328,14 @@ def test_component_unmount_on_remove_runs_cleanup():
 
     root = RenderRoot(Parent)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # Simulate an effect execution after first render
     flush_effects()
 
     state["on"] = False
     second = root.render_diff()
-    print("Finished rendering")
-    assert second.ops == [{"type": "remove", "path": "0"}]
+    assert second.ops == [{"type": "remove", "path": "", "idx": 0}]
     assert logs == ["child_cleanup"]
 
 
@@ -371,7 +375,7 @@ def test_component_unmount_on_replace_runs_cleanup_and_replaces_subtree():
 
     root = RenderRoot(Parent)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # Simulate an effect execution after first render
     flush_effects()
@@ -480,7 +484,7 @@ def test_callback_identity_change_no_update_props_and_callbacks_swap():
 
     root = RenderRoot(View)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
     assert first.callbacks["onClick"].fn is f1
 
     fn["cur"] = f2
@@ -510,7 +514,7 @@ def test_component_arg_change_rerenders_leaf_not_remount():
 
     root = RenderRoot(Parent)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     name["msg"] = "B"
     second = root.render_diff()
@@ -527,7 +531,7 @@ def test_props_removal_emits_empty_update_props():
 
     root = RenderRoot(View)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     toggle["on"] = False
     second = root.render_diff()
@@ -572,7 +576,7 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
 
     root = RenderRoot(List)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     flush_effects()  # simulate effect pass after render
 
@@ -675,7 +679,7 @@ def test_keyed_nested_components_move_preserves_nested_state():
 
     root = RenderRoot(List)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # bump x
     first.callbacks["0.0.1.onClick"].fn()  # path: wrapper0 -> leaf -> button
@@ -804,7 +808,7 @@ def test_unmount_parent_unmounts_children_components():
 
     root = RenderRoot(View)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
     # Simulate an effect pass after render
     flush_effects()
 
@@ -903,7 +907,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
 
     root = RenderRoot(List)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
     flush_effects()
 
     # bump b twice and d once
@@ -1212,7 +1216,7 @@ def test_keyed_reverse_preserves_all_states():
 
     root = RenderRoot(List)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # bump counts: k1->1, k2->2, k3->3, k4->4
     first.callbacks["0.1.onClick"].fn()
@@ -1362,7 +1366,7 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
 
     root = RenderRoot(List)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
     flush_effects()
 
     # bump 'a'
@@ -1462,7 +1466,7 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
 
     root = RenderRoot(List)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # bump first item and second item
     first.callbacks["0.1.onClick"].fn()
@@ -1544,14 +1548,14 @@ def test_unkeyed_trailing_removes_are_emitted_in_descending_order():
 
     root = RenderRoot(View)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # remove trailing two items -> should emit two removes at paths 4 then 3
     items["vals"] = ["a", "b", "c"]
     second = root.render_diff()
     assert second.ops == [
-        {"type": "remove", "path": "4"},
-        {"type": "remove", "path": "3"},
+        {"type": "remove", "path": "", "idx": 4},
+        {"type": "remove", "path": "", "idx": 3},
     ]
 
 
@@ -1569,15 +1573,15 @@ def test_nested_trailing_removes_descending_order_under_same_parent():
 
     root = RenderRoot(View)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # Remove last two spans inside the middle container div
     items["vals"] = ["x1", "x2", "x3"]
     second = root.render_diff()
     # Expect removes on the inner container's children at paths 1.4 and 1.3 in that order
     assert second.ops == [
-        {"type": "remove", "path": "1.4"},
-        {"type": "remove", "path": "1.3"},
+        {"type": "remove", "path": "1", "idx": 4},
+        {"type": "remove", "path": "1", "idx": 3},
     ]
 
 
@@ -1692,7 +1696,7 @@ def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
 
     root = RenderRoot(List)
     first = root.render_diff()
-    assert first.ops and first.ops[0]["type"] == "insert"
+    assert first.ops and first.ops[0]["type"] == "replace"
 
     # bump 'x' once
     first.callbacks["0.1.onClick"].fn()

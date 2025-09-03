@@ -99,7 +99,8 @@ describe("applyReactTreeUpdates", () => {
       [
         {
           type: "insert",
-          path: "0.1",
+          path: "0",
+          idx: 1,
           data: { tag: "span", children: ["B"] },
         },
       ],
@@ -118,8 +119,9 @@ describe("applyReactTreeUpdates", () => {
       [
         {
           type: "remove",
-          path: "0.0",
-        } as VDOMUpdate,
+          path: "0",
+          idx: 0,
+        },
       ],
       renderer
     );
@@ -160,6 +162,6 @@ describe("applyReactTreeUpdates", () => {
     const p0 = childrenArray(root)[0] as React.ReactElement;
     const kids = childrenArray(p0) as React.ReactElement[];
     const texts = kids.map((k) => childrenArray(k)[0]);
-    expect(texts).toEqual(["B","A", "C"]);
+    expect(texts).toEqual(["B", "A", "C"]);
   });
 });

@@ -134,95 +134,43 @@ export function applyReactTreeUpdates(
   let newTree: React.ReactNode = initialTree;
 
   for (const update of updates) {
-    const { type, path, data } = update;
-
-    const parts = path
+    const parts = update.path
       .split(".")
       .filter((s) => s.length > 0)
       .map(Number);
-    let parentParts: number[];
-    let childIndex: number | null;
-    switch (type) {
-      case "move": {
-        // Path points to parent directly
-        parentParts = parts;
-        childIndex = null;
-        break;
-      }
-      case "insert":
-      case "remove": {
-        // Path points to the child index under the parent
-        parentParts = parts.slice(0, -1);
-        childIndex = parts.length > 0 ? parts[parts.length - 1]! : 0;
-        break;
-      }
-      case "replace":
-      case "update_props":
-      default: {
-        // Operate on the node at the exact path (self)
-        parentParts = parts;
-        childIndex = null;
-        break;
-      }
-    }
 
     const descend = (node: React.ReactNode, depth: number): React.ReactNode => {
       if (!React.isValidElement(node)) return node;
-      if (depth === parentParts.length) {
+      if (depth === parts.length) {
         const childrenArr = React.isValidElement(node)
           ? toChildrenArrayFromElement(node)
           : [];
-        switch (type) {
+        switch (update.type) {
           case "replace": {
-            if (childIndex == null) {
-              return renderer.renderNode(data);
-            } else {
-              const idx = childIndex;
-              childrenArr[idx] = renderer.renderNode(data);
-            }
-            break;
+            return renderer.renderNode(update.data);
           }
           case "update_props": {
-            if (childIndex == null) {
-              if (React.isValidElement(node)) {
-                const nextProps = processPropsForCallbacks(renderer, data);
-                const currentChildren = toChildrenArrayFromElement(node);
-                return React.cloneElement(node, nextProps, ...currentChildren);
-              }
-            } else {
-              const idx = childIndex;
-              const target = childrenArr[idx];
-              if (React.isValidElement(target)) {
-                const nextProps = processPropsForCallbacks(renderer, data);
-                const currentChildren = toChildrenArrayFromElement(target);
-                childrenArr[idx] = React.cloneElement(
-                  target,
-                  nextProps,
-                  ...currentChildren
-                );
-              }
-            }
-            break;
+            const nextProps = processPropsForCallbacks(renderer, update.data);
+            const currentChildren = toChildrenArrayFromElement(node);
+            return React.cloneElement(node, nextProps, ...currentChildren);
           }
           case "insert": {
-            const idx = childIndex!;
-            childrenArr.splice(idx, 0, renderer.renderNode(data));
+            childrenArr.splice(update.idx, 0, renderer.renderNode(update.data));
             break;
           }
           case "remove": {
-            const idx = childIndex!;
-            childrenArr.splice(idx, 1);
+            childrenArr.splice(update.idx, 1);
             break;
           }
           case "move": {
-            const item = childrenArr.splice(data.from_index, 1)[0];
-            childrenArr.splice(data.to_index, 0, item);
+            const item = childrenArr.splice(update.data.from_index, 1)[0];
+            childrenArr.splice(update.data.to_index, 0, item);
             break;
           }
           default: {
             if (process.env.NODE_ENV !== "production") {
               console.error(
-                `[applyReactTreeUpdates] Unknown update type: ${type}`
+                `[applyReactTreeUpdates] Unknown update type: ${update["type"]}`
               );
             }
           }
@@ -231,7 +179,7 @@ export function applyReactTreeUpdates(
           ? cloneElementWithChildren(node, childrenArr)
           : node;
       }
-      const idx = parentParts[depth]!;
+      const idx = parts[depth]!;
       const childrenArr = toChildrenArrayFromElement(node);
       const child = childrenArr[idx];
       childrenArr[idx] = descend(child, depth + 1) as any;

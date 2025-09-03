@@ -1,7 +1,16 @@
 from dataclasses import dataclass
 import warnings
 import inspect
-from typing import Callable, Iterable, Literal, Optional, Sequence, TypedDict, Union, cast
+from typing import (
+    Callable,
+    Iterable,
+    Literal,
+    Optional,
+    Sequence,
+    TypedDict,
+    Union,
+    cast,
+)
 from pulse.flags import IS_PRERENDERING
 from pulse.hooks import HookState
 from pulse.vdom import (
@@ -16,14 +25,18 @@ from pulse.vdom import (
     Props,
     VDOMNode,
 )
+
+
 class InsertOperation(TypedDict):
     type: Literal["insert"]
     path: str
+    idx: int
     data: VDOM
 
 
 class RemoveOperation(TypedDict):
     type: Literal["remove"]
+    idx: int
     path: str
 
 
@@ -179,16 +192,9 @@ class Resolver:
                 path=path,
                 relative_path=relative_path,
             )
-            if old_tree is None:
-                self.operations.append(
-                    InsertOperation(type="insert", path=path, data=new_vdom)
-                )
-            elif new_tree is None:
-                self.operations.append(RemoveOperation(type="remove", path=path))
-            else:
-                self.operations.append(
-                    ReplaceOperation(type="replace", path=path, data=new_vdom)
-                )
+            self.operations.append(
+                ReplaceOperation(type="replace", path=path, data=new_vdom)
+            )
             return normalized
 
         # At this point, we are dealing with the same node. We need to diff its props + its children
@@ -401,9 +407,7 @@ class Resolver:
                 # location and corresponds to the same key.
                 if old_render_node is not None and old_render_node.key == old_child.key:
                     old_render_node.unmount()
-            self.operations.append(
-                RemoveOperation(type="remove", path=join_path(path, i))
-            )
+            self.operations.append(RemoveOperation(type="remove", path=path, idx=i))
 
         # Only runs if there are more new nodes than old ones
         for i in range(N_shared, len(new_children)):
@@ -415,7 +419,7 @@ class Resolver:
                 relative_path=join_path(relative_path, i),
             )
             self.operations.append(
-                InsertOperation(type="insert", path=join_path(path, i), data=new_vdom)
+                InsertOperation(type="insert", path=path, idx=i, data=new_vdom)
             )
             normalized_children.append(norm_child)
 

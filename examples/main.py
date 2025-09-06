@@ -21,6 +21,7 @@ class CounterState(ps.State):
         self._name = name
 
     def increment(self):
+        print("Incrementing count")
         self.count += 1
 
     async def increment_with_delay(self):
@@ -241,6 +242,7 @@ def counter():
     """An interactive counter page demonstrating state management."""
     state1, state2 = ps.states(CounterState("Counter 1"), CounterState("Counter2"))
     route_info = ps.route_info()
+    print("Rendering counter")
 
     return ps.div(
         ps.h1("Interactive Counter", className="text-3xl font-bold mb-4"),

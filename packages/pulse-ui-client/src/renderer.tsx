@@ -1,4 +1,4 @@
-import React, { Suspense, type ComponentType } from "react";
+import React, { isValidElement, Suspense, type ComponentType } from "react";
 import type { ComponentRegistry, VDOMNode, VDOMUpdate } from "./vdom";
 import {
   FRAGMENT_TAG,
@@ -126,7 +126,6 @@ export function applyUpdates(
   renderer: VDOMRenderer
 ): React.ReactNode {
   let newTree: React.ReactNode = initialTree;
-
   for (const update of updates) {
     const parts = update.path
       .split(".")
@@ -134,56 +133,60 @@ export function applyUpdates(
       .map(Number);
 
     const descend = (node: React.ReactNode, depth: number): React.ReactNode => {
-      if (!React.isValidElement(node)) {
-        throw new Error(
-          "Invalid node at path " + parts.slice(0, depth).join(".")
-        );
-      }
-      if (depth === parts.length) {
+      if (depth < parts.length) {
+        assertIsElement(node, parts, depth);
+        node = node as React.ReactElement;
+        const childIdx = parts[depth]!;
         const childrenArr = toChildrenArrayFromElement(node);
-        switch (update.type) {
-          case "replace": {
-            return renderer.renderNode(update.data);
-          }
-          case "update_props": {
-            const nextProps = processPropsForCallbacks(renderer, update.data);
-            const currentChildren = toChildrenArrayFromElement(node);
-            return React.cloneElement(node, nextProps, ...currentChildren);
-          }
-          case "insert": {
-            childrenArr.splice(update.idx, 0, renderer.renderNode(update.data));
-            break;
-          }
-          case "remove": {
-            childrenArr.splice(update.idx, 1);
-            break;
-          }
-          case "move": {
-            const item = childrenArr.splice(update.data.from_index, 1)[0];
-            childrenArr.splice(update.data.to_index, 0, item);
-            break;
-          }
-          default: {
-            if (process.env.NODE_ENV !== "production") {
-              console.error(
-                `[applyReactTreeUpdates] Unknown update type: ${update["type"]}`
-              );
-            }
-          }
-        }
+        const child = childrenArr[childIdx];
+        childrenArr[childIdx] = descend(child, depth + 1) as any;
         return cloneElementWithChildren(node, childrenArr);
-      } else {
       }
-      const idx = parts[depth]!;
-      const childrenArr = toChildrenArrayFromElement(node);
-      const child = childrenArr[idx];
-      childrenArr[idx] = descend(child, depth + 1) as any;
-      return cloneElementWithChildren(node, childrenArr);
+      switch (update.type) {
+        case "replace": {
+          return renderer.renderNode(update.data);
+        }
+        case "update_props": {
+          assertIsElement(node, parts, depth);
+          node = node as React.ReactElement;
+          const nextProps = processPropsForCallbacks(renderer, update.data);
+          // Not passing children -> only update the props
+          return React.cloneElement(node, nextProps);
+        }
+        case "insert": {
+          assertIsElement(node, parts, depth);
+          node = node as React.ReactElement;
+          const children = toChildrenArrayFromElement(node);
+          children.splice(update.idx, 0, renderer.renderNode(update.data));
+          // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
+          return React.cloneElement(node, null!, ...children);
+        }
+        case "remove": {
+          assertIsElement(node, parts, depth);
+          node = node as React.ReactElement;
+          const children = toChildrenArrayFromElement(node);
+          children.splice(update.idx, 1);
+          // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
+          return React.cloneElement(node, null!, ...children);
+        }
+        case "move": {
+          assertIsElement(node, parts, depth);
+          node = node as React.ReactElement;
+          const children = toChildrenArrayFromElement(node);
+          const item = children.splice(update.data.from_index, 1)[0];
+          children.splice(update.data.to_index, 0, item);
+          // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
+          return React.cloneElement(node, null!, ...children);
+        }
+        default:
+          throw new Error(
+            `[Pulse renderer] Unknown update type: ${update["type"]}`
+          );
+      }
     };
 
     newTree = descend(newTree, 0);
   }
-
   return newTree;
 }
 
@@ -201,4 +204,16 @@ export function RenderLazy(
       </Suspense>
     );
   };
+}
+
+function assertIsElement(
+  node: React.ReactNode,
+  parts: number[],
+  depth: number
+): node is React.ReactElement {
+  if (process.env.NODE_ENV !== "production" && !isValidElement(node)) {
+    console.error("Invalid node:", node);
+    throw new Error("Invalid node at path " + parts.slice(0, depth).join("."));
+  }
+  return true;
 }

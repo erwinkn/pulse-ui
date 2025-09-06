@@ -441,30 +441,45 @@ def client_address() -> str:
 S = TypeVar("S", covariant=True)
 
 
-class GlobalStateAccessor(Protocol, Generic[S]):
-    def __call__(self) -> S: ...
+class GlobalStateAccessor(Protocol, Generic[P, S]):
+    def __call__(
+        self, id: str | None = None, *args: P.args, **kwargs: P.kwargs
+    ) -> S: ...
+
+    # Process-wide shared registry for cross-session instances
+    # Keyed by f"{base_key}|{id}"
+
+
+GLOBAL_STATES: dict[str, State] = {}
 
 
 def global_state(
-    factory: Callable[[], S] | type[S], key: str | None = None
-) -> GlobalStateAccessor[S]:
-    """Provider for per-session singletons.
+    factory: Callable[[P], S] | type[S], key: str | None = None
+) -> GlobalStateAccessor[P, S]:
+    """Provider for per-session or cross-session shared state.
+
+    Returns an accessor: `accessor(id: str | None = None, *args, **kwargs) -> S`.
 
     Usage:
         class Auth(ps.State): ...
         auth = ps.global_state(Auth)
-        a = auth()  # same instance within the session
+        a = auth()                # per-session state (isolated per session)
+        b = auth("tenant-42")     # shared state across sessions for id "tenant-42"
 
+    Notes:
     - key None: derive a stable key from factory's module+qualname
-    - future: allow passing an id in the accessor call to support cross-session sharing
+    - id None: session-local singleton (requires session context)
+      - constructor args: pass on the first call to initialize; ignored thereafter
+    - id str: process-wide shared singleton for that id (cross-session)
+      - constructor args: pass on the first call for that id; ignored thereafter
     """
     from pulse.session import SESSION_CONTEXT
 
     if isinstance(factory, type):
         cls = factory
 
-        def _mk() -> S:  # type: ignore[misc]
-            return cast(S, cls())
+        def _mk(*args, **kwargs) -> S:
+            return cast(S, cls(*args, **kwargs))
 
         default_key = f"{cls.__module__}:{cls.__qualname__}"
         mk = _mk
@@ -474,13 +489,22 @@ def global_state(
 
     base_key = key or default_key
 
-    def accessor() -> S:
+    def accessor(_id: str | None = None, *args: P.args, **kwargs: P.kwargs) -> S:
+        # Cross-session shared instance when id is provided
+        if _id is not None:
+            shared_key = f"{base_key}|{_id}"
+            inst = GLOBAL_STATES.get(shared_key)
+            if inst is None:
+                inst = mk(*args, **kwargs)
+                GLOBAL_STATES[shared_key] = inst
+            return cast(S, inst)
+
         # Default: session-local when no id provided
         session = SESSION_CONTEXT.get()
         if session is None:
             raise RuntimeError(
                 "ps.global_state must be used inside a Pulse render/callback context"
             )
-        return cast(S, session.get_global_state(base_key, mk))
+        return cast(S, session.get_global_state(base_key, lambda: mk(*args, **kwargs)))
 
     return accessor

@@ -401,6 +401,7 @@ class GlobalBatch(Batch):
 
     def register_effect(self, effect: Effect):
         if not self.is_scheduled:
+            print("Scheduling global batch")
             try:
                 loop = asyncio.get_running_loop()
                 loop.call_soon_threadsafe(self.flush)
@@ -410,6 +411,7 @@ class GlobalBatch(Batch):
         return super().register_effect(effect)
 
     def flush(self):
+        print("Running global batch")
         super().flush()
         self.is_scheduled = False
 

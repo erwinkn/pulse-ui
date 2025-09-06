@@ -442,7 +442,13 @@ S = TypeVar("S", covariant=True)
 
 
 class GlobalStateAccessor(Protocol, Generic[S]):
-    def __call__(self) -> S: ...
+    def __call__(self, id: str | None = None) -> S: ...
+
+    # Process-wide shared registry for cross-session instances
+    # Keyed by f"{base_key}|{id}"
+
+
+GLOBAL_STATES: dict[str, State] = {}
 
 
 def global_state(
@@ -456,7 +462,7 @@ def global_state(
         a = auth()  # same instance within the session
 
     - key None: derive a stable key from factory's module+qualname
-    - future: allow passing an id in the accessor call to support cross-session sharing
+    - pass id to the returned accessor to get a shared instance across sessions
     """
     from pulse.session import SESSION_CONTEXT
 
@@ -474,7 +480,16 @@ def global_state(
 
     base_key = key or default_key
 
-    def accessor() -> S:
+    def accessor(id: str | None = None) -> S:
+        # Cross-session shared instance when id is provided
+        if id is not None:
+            shared_key = f"{base_key}|{id}"
+            inst = GLOBAL_STATES.get(shared_key)
+            if inst is None:
+                inst = mk()
+                GLOBAL_STATES[shared_key] = inst
+            return cast(S, inst)
+
         # Default: session-local when no id provided
         session = SESSION_CONTEXT.get()
         if session is None:

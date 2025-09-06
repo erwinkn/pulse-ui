@@ -8,13 +8,13 @@ from .hooks import (
     effects,
     setup,
     route_info,
-    session_context,
     call_api,
     navigate,
     server_address,
     client_address,
+    global_state,
+    session,
 )
-from .hooks import global_state
 from .html import *  # noqa: F403
 from .middleware import (
     PulseMiddleware,

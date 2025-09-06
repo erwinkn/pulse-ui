@@ -14,8 +14,9 @@ from typing import (
 )
 
 from pulse.flags import IS_PRERENDERING
+from pulse.reactive_extensions import ReactiveDict
 from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
-from pulse.routing import ROUTE_CONTEXT, RouteContext
+from pulse.routing import RouteContext
 from pulse.state import State
 
 
@@ -326,23 +327,31 @@ def effects(
 
 
 def route_info() -> RouteContext:
-    ctx = ROUTE_CONTEXT.get()
-    if not ctx:
+    from pulse.session import PULSE_CONTEXT
+
+    pctx = PULSE_CONTEXT.get()
+    if not pctx:
         raise RuntimeError(
             "`pulse.router` can only be called within a component during rendering."
         )
-    return ctx
+    return pctx.route
 
 
-def session_context() -> dict[str, Any]:
-    from pulse.session import SESSION_CONTEXT
+def session() -> ReactiveDict:
+    """Return the shared per-user session ReactiveDict.
 
-    session = SESSION_CONTEXT.get()
-    if not session:
+    Available during prerender, rendering, callbacks, middleware, and API routes.
+    """
+    from pulse.session import PULSE_CONTEXT
+
+    ctx = PULSE_CONTEXT.get()
+    if not ctx:
         raise RuntimeError(
-            "`pulse.session_context` can only be called within a component during rendering."
+            "`ps.session()` can only be called within a Pulse render/callback context."
         )
-    return session.context
+    return ctx.session
+
+
 
 
 async def call_api(
@@ -358,13 +367,13 @@ async def call_api(
     Accepts either a relative path or absolute URL; URL resolution happens in
     Session.call_api using the session's server_address.
     """
-    from pulse.session import SESSION_CONTEXT
+    from pulse.session import PULSE_CONTEXT
 
-    session = SESSION_CONTEXT.get()
-    if session is None:
+    ctx = PULSE_CONTEXT.get()
+    if ctx is None:
         raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
 
-    return await session.call_api(
+    return await ctx.socket.call_api(
         path,
         method=method,
         headers=dict(headers or {}),
@@ -378,13 +387,13 @@ def navigate(path: str) -> None:
 
     Non-async; sends a server message to the client to perform SPA navigation.
     """
-    from pulse.session import SESSION_CONTEXT
+    from pulse.session import PULSE_CONTEXT
 
-    session = SESSION_CONTEXT.get()
-    if session is None:
+    ctx = PULSE_CONTEXT.get()
+    if ctx is None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
-    session.notify({"type": "navigate_to", "path": path})
+    ctx.socket.notify({"type": "navigate_to", "path": path})
 
 
 def is_prerendering():
@@ -401,18 +410,18 @@ def server_address() -> str:
 
     Example return values: "http://127.0.0.1:8000", "https://example.com:443"
     """
-    from pulse.session import SESSION_CONTEXT
+    from pulse.session import PULSE_CONTEXT
 
-    session = SESSION_CONTEXT.get()
-    if session is None:
+    ctx = PULSE_CONTEXT.get()
+    if ctx is None:
         raise RuntimeError(
             "server_address() must be called inside a Pulse render/callback context"
         )
-    if not session.server_address:
+    if not ctx.socket.server_address:
         raise RuntimeError(
             "Server address unavailable. Ensure App.run_codegen/asgi_factory configured server_address."
         )
-    return session.server_address
+    return ctx.socket.server_address
 
 
 def client_address() -> str:
@@ -420,18 +429,18 @@ def client_address() -> str:
 
     Available during prerender (HTTP request) and after websocket connect.
     """
-    from pulse.session import SESSION_CONTEXT
+    from pulse.session import PULSE_CONTEXT
 
-    session = SESSION_CONTEXT.get()
-    if session is None:
+    ctx = PULSE_CONTEXT.get()
+    if ctx is None:
         raise RuntimeError(
             "client_address() must be called inside a Pulse render/callback context"
         )
-    if not session.client_address:
+    if not ctx.socket.client_address:
         raise RuntimeError(
             "Client address unavailable. It is set during prerender or socket connect."
         )
-    return session.client_address
+    return ctx.socket.client_address
 
 
 # -----------------------------------------------------
@@ -473,7 +482,7 @@ def global_state(
     - id str: process-wide shared singleton for that id (cross-session)
       - constructor args: pass on the first call for that id; ignored thereafter
     """
-    from pulse.session import SESSION_CONTEXT
+    from pulse.session import PULSE_CONTEXT
 
     if isinstance(factory, type):
         cls = factory
@@ -500,11 +509,13 @@ def global_state(
             return cast(S, inst)
 
         # Default: session-local when no id provided
-        session = SESSION_CONTEXT.get()
-        if session is None:
+        ctx = PULSE_CONTEXT.get()
+        if ctx is None:
             raise RuntimeError(
                 "ps.global_state must be used inside a Pulse render/callback context"
             )
-        return cast(S, session.get_global_state(base_key, lambda: mk(*args, **kwargs)))
+        return cast(
+            S, ctx.socket.get_global_state(base_key, lambda: mk(*args, **kwargs))
+        )
 
     return accessor

@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from urllib.parse import urlparse
+import json
 
 import pulse as ps
 from fastapi import Request, Response
@@ -144,7 +145,8 @@ def login():
 
 @ps.component
 def secret():
-    sess = ps.session_context()
+    sess = ps.session()
+    nickname = sess.get("nickname", "")
 
     async def sign_out():
         res = await ps.call_api("/api/logout", method="POST")
@@ -154,6 +156,24 @@ def secret():
     return ps.div(
         ps.h2("Secret", className="text-2xl font-bold mb-4"),
         ps.p(f"Welcome {sess.get('user_email', '<unknown>')}"),
+        ps.div(
+            ps.label("Nickname", htmlFor="nickname", className="block mb-1 mt-4"),
+            ps.input(
+                id="nickname",
+                name="nickname",
+                type="text",
+                className="input mb-3",
+                value=nickname,
+                onChange=lambda evt: sess.update({"nickname": evt["target"]["value"]}),
+            ),
+        ),
+        ps.div(
+            ps.h3("Session context", className="text-xl font-semibold mt-4 mb-2"),
+            ps.pre(
+                json.dumps({k:v for k,v in sess.items()}, indent=2),
+                className="bg-gray-100 p-3 rounded text-sm overflow-auto",
+            ),
+        ),
         ps.button("Sign out", onClick=sign_out, className="btn-secondary"),
         className="max-w-md mx-auto p-6",
     )

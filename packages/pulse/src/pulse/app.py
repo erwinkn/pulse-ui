@@ -9,11 +9,12 @@ import asyncio
 import logging
 import os
 from enum import IntEnum
-from typing import Optional, Sequence, TypedDict, TypeVar, Unpack
+from typing import Optional, Sequence, TypedDict, TypeVar, Unpack, Literal
 from uuid import uuid4
 
 import socketio
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from pulse.codegen import Codegen, CodegenConfig
@@ -31,6 +32,12 @@ from pulse.middleware import (
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session
+from pulse.session_store import (
+    InMemorySessionStore,
+    SessionStore,
+    new_sid,
+    parse_cookie_header,
+)
 from pulse.vdom import VDOM
 from urllib.parse import urlsplit
 
@@ -153,6 +160,11 @@ class AppStatus(IntEnum):
 
 class AppConfig(TypedDict, total=False):
     server_address: str
+    session_cookie_name: str
+    session_cookie_domain: str
+    session_cookie_secure: bool
+    session_cookie_samesite: Literal["lax", "strict", "none"]
+    session_max_age_seconds: int
 
 
 class App:
@@ -206,6 +218,17 @@ class App:
         self.status = AppStatus.created
         # Persist the server address for use by sessions (API calls, etc.)
         self.server_address: Optional[str] = self.config.get("server_address")
+        # Session store and cookie config
+        self.session_store: SessionStore = (
+            self.config.get("session_store") or InMemorySessionStore()
+        )
+        self.cookie_name: str = self.config.get("session_cookie_name", "pulse.sid")  # type: ignore[arg-type]
+        self.cookie_domain: Optional[str] = self.config.get("session_cookie_domain")  # type: ignore[assignment]
+        self.cookie_secure: bool = bool(self.config.get("session_cookie_secure", True))
+        self.cookie_samesite: str = self.config.get("session_cookie_samesite", "lax")  # type: ignore[assignment]
+        self.cookie_max_age: int = int(
+            self.config.get("session_max_age_seconds", 7 * 24 * 3600)
+        )
         # Allow single middleware or sequence; compose into a stack when needed
         if middleware is None:
             self._middleware: PulseMiddleware | None = None
@@ -234,24 +257,52 @@ class App:
 
         # RouteInfo is the request body
         @self.fastapi.post("/prerender/{path:path}")
-        def prerender(path: str, route_info: RouteInfo, request: Request) -> VDOM:
+        def prerender(path: str, route_info: RouteInfo, request: Request):
             # Provide a working reactive context (and not the global AppReactiveContext which errors)
             if not path.startswith("/"):
                 path = "/" + path
             # Determine client address/origin prior to creating the session
             client_addr: str | None = _extract_client_address_from_fastapi(request)
+            # Session cookie handling
+            sid = None
+            cookie_header = request.headers.get("cookie")
+            cookies = parse_cookie_header(cookie_header)
+            if cookies.get(self.cookie_name):
+                sid = cookies[self.cookie_name]
+            ctx = None
+            set_cookie_needed = False
+            if sid:
+                ctx = self.session_store.get(sid)
+            if ctx is None:
+                sid = new_sid()
+                ctx = self.session_store.create(sid)
+                set_cookie_needed = True
             session = Session(
                 uuid4().hex,
                 self.routes,
                 server_address=self.server_address,
                 client_address=client_addr,
+                session_context=ctx,
             )
 
             def _render() -> VDOM:
                 return session.render(path, route_info, prerendering=True)
 
             if not self._middleware:
-                return _render()
+                payload = _render()
+                resp = JSONResponse(payload)
+                if set_cookie_needed:
+                    resp.set_cookie(
+                        key=self.cookie_name,
+                        value=sid or "",
+                        httponly=True,
+                        samesite=self.cookie_samesite,
+                        secure=self.cookie_secure,
+                        max_age=self.cookie_max_age,
+                        domain=self.cookie_domain,
+                        path="/",
+                    )
+                return resp
             try:
 
                 def _next():
@@ -274,7 +325,20 @@ class App:
             elif isinstance(res, NotFound):
                 raise HTTPException(status_code=404)
             elif isinstance(res, Ok):
-                return res.payload
+                payload = res.payload
+                resp = JSONResponse(payload)
+                if set_cookie_needed:
+                    resp.set_cookie(
+                        key=self.cookie_name,
+                        value=sid or "",
+                        httponly=True,
+                        samesite=self.cookie_samesite,
+                        secure=self.cookie_secure,
+                        max_age=self.cookie_max_age,
+                        domain=self.cookie_domain,
+                        path="/",
+                    )
+                return resp
             # Fallback to default render
             else:
                 raise NotImplementedError(f"Unexpected middleware return: {res}")
@@ -283,8 +347,15 @@ class App:
         async def connect(sid: str, environ: dict, auth=None):
             # Determine client address/origin prior to creating the session
             client_addr: str | None = _extract_client_address_from_socketio(environ)
-            # Create session first to instantiate reactive and session contexts
-            session = self.create_session(sid, client_address=client_addr)
+            # Parse cookies from environ
+            raw_cookie = environ.get("HTTP_COOKIE")
+            cookies = parse_cookie_header(raw_cookie)
+            cookie_sid = cookies.get(self.cookie_name)
+            ctx = self.session_store.get(cookie_sid) if cookie_sid else None
+            # Create session with shared context
+            session = self.create_session(
+                sid, client_address=client_addr, session_context=ctx
+            )
             if self._middleware:
                 try:
 
@@ -400,7 +471,9 @@ class App:
     def get_route(self, path: str):
         self.routes.find(path)
 
-    def create_session(self, id: str, *, client_address: Optional[str] = None):
+    def create_session(
+        self, id: str, *, client_address: Optional[str] = None, session_context=None
+    ):
         if id in self.sessions:
             raise ValueError(f"Session {id} already exists")
         # print(f"--> Creating session {id}")
@@ -409,6 +482,7 @@ class App:
             self.routes,
             server_address=self.server_address,
             client_address=client_address,
+            session_context=session_context,
         )
         return self.sessions[id]
 

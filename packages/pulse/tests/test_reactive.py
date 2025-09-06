@@ -1201,3 +1201,167 @@ def test_state_wraps_collection_defaults_and_sets():
 # TODO:
 # - Tests to verify that effects unregister themselves from their batch
 # - The above, BUT the effect is rescheduled into the same batch as a result of running
+
+
+def test_reactive_dict_len_and_iter_reactivity():
+    ctx = ReactiveDict({"a": 1})
+
+    snapshots: list[tuple[int, list[str]]] = []
+
+    @effect
+    def e():
+        # Depend on structure via len() and iteration
+        snapshots.append((len(ctx), list(iter(ctx))))
+
+    flush_effects()
+    assert snapshots == [(1, ["a"])]
+
+    # Non-structural value change should not rerun
+    runs = e.runs
+    ctx["a"] = 10
+    flush_effects()
+    assert e.runs == runs
+
+    # Structural add triggers rerun
+    ctx["b"] = 2
+    flush_effects()
+    assert snapshots[-1] == (2, ["a", "b"])
+
+    # Structural delete triggers rerun
+    del ctx["a"]
+    flush_effects()
+    assert snapshots[-1] == (1, ["b"])
+
+    # update with new key triggers rerun
+    ctx.update({"c": 3})
+    flush_effects()
+    assert snapshots[-1] == (2, ["b", "c"])
+
+    # clear triggers rerun
+    ctx.clear()
+    flush_effects()
+    assert snapshots[-1] == (0, [])
+
+
+def test_reactive_dict_contains_reactivity_add_delete():
+    ctx = ReactiveDict({})
+
+    checks: list[bool] = []
+
+    @effect
+    def e():
+        # Presence check should subscribe to the key's value signal
+        checks.append("x" in ctx)
+
+    flush_effects()
+    assert checks == [False]
+
+    ctx["x"] = 1
+    flush_effects()
+    assert checks[-1] is True
+
+    del ctx["x"]
+    flush_effects()
+    assert checks[-1] is False
+
+
+def test_reactive_dict_views_and_methods():
+    ctx = ReactiveDict({"a": 1, "b": 2})
+
+    lens: list[tuple[int, int, int]] = []
+
+    @effect
+    def e():
+        # keys/items/values should be reactive to structure
+        lens.append((len(ctx.keys()), len(ctx.items()), len(ctx.values())))
+
+    flush_effects()
+    assert lens == [(2, 2, 2)]
+
+    # Value-only change should not rerun when depending only on structure/len
+    runs = e.runs
+    ctx["a"] = 10
+    flush_effects()
+    assert e.runs == runs
+
+    # pop changes structure
+    v = ctx.pop("a")
+    assert v == 10
+    flush_effects()
+    assert lens[-1] == (1, 1, 1)
+
+    # setdefault adds when absent, no-op when present
+    v = ctx.setdefault("c", 3)
+    assert v == 3 and "c" in ctx
+    flush_effects()
+    assert lens[-1] == (2, 2, 2)
+    v = ctx.setdefault("c", 9)
+    assert v == 3
+    runs_after = e.runs
+    flush_effects()
+    assert e.runs == runs_after
+
+    # popitem removes last item
+    k, _ = ctx.popitem()
+    assert k in ("b", "c")
+    flush_effects()
+    assert lens[-1] == (1, 1, 1)
+
+    # copy returns ReactiveDict
+    cpy = ctx.copy()
+    assert isinstance(cpy, ReactiveDict)
+
+    # fromkeys builds a ReactiveDict with given default
+    fk = ReactiveDict.fromkeys(["x", "y"], 9)
+    assert isinstance(fk, ReactiveDict)
+    assert sorted(list(fk)) == ["x", "y"]
+
+    # Union operators
+    u = ctx | {"z": 10}
+    assert isinstance(u, ReactiveDict) and "z" in u
+    ctx |= {"m": 3}
+    assert "m" in ctx
+
+
+def test_reactive_dict_values_reacts_to_value_changes():
+    ctx = ReactiveDict({"a": 1, "b": 2})
+
+    sums: list[int] = []
+
+    @effect
+    def e():
+        # Iterating values should subscribe to each key's value signal
+        sums.append(sum(ctx.values()))
+
+    flush_effects()
+    assert sums == [3]
+
+    # Value-only change should rerun
+    ctx["a"] = 5
+    flush_effects()
+    assert sums == [3, 7]
+
+    # No rerun on same-value write
+    runs = e.runs
+    ctx["a"] = 5
+    flush_effects()
+    assert e.runs == runs
+
+
+def test_reactive_dict_items_reacts_to_value_changes():
+    ctx = ReactiveDict({"a": 1, "b": 2})
+
+    snapshots: list[list[tuple[str, int]]] = []
+
+    @effect
+    def e():
+        # Iterating items should subscribe to each key's value signal
+        snapshots.append(sorted((k, v) for k, v in ctx.items()))
+
+    flush_effects()
+    assert snapshots[-1] == [("a", 1), ("b", 2)]
+
+    # Value-only change should rerun
+    ctx["b"] = 9
+    flush_effects()
+    assert snapshots[-1] == [("a", 1), ("b", 9)]

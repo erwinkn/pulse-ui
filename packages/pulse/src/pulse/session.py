@@ -1,7 +1,8 @@
 from asyncio import iscoroutine
 import logging
 from typing import Any, Callable, Optional
-from contextvars import Context, ContextVar
+from contextvars import ContextVar
+from dataclasses import dataclass
 import uuid
 import asyncio
 import traceback
@@ -15,20 +16,29 @@ from pulse.messages import (
 )
 from pulse.reactive import Effect, flush_effects
 from pulse.reactive_extensions import ReactiveDict
-from pulse.reconciler import RenderRoot, RenderDiff
-from pulse.routing import ROUTE_CONTEXT, Layout, Route, RouteContext, RouteTree
+from pulse.reconciler import RenderRoot
+from pulse.routing import Layout, Route, RouteContext, RouteTree
 from pulse.state import State
-from pulse.vdom import VDOM
 
 
 logger = logging.getLogger(__file__)
 
-# Contexts to mount:
-# - SessionContext (reactive + "user" session context)
-# - ActiveRoute on a per route basis
+
+@dataclass
+class PulseContext:
+    """Composite context accessible to hooks and internals.
+
+    - session: per-user session ReactiveDict
+    - socket: per-connection SocketIOSession (currently named Session)
+    - route: active RouteContext for this render/effect scope
+    """
+
+    session: ReactiveDict
+    socket: "Session"
+    route: RouteContext
 
 
-class RenderContext:
+class RenderScope:
     def __init__(
         self, session: "Session", route: Route | Layout, route_info: RouteInfo
     ) -> None:
@@ -36,17 +46,22 @@ class RenderContext:
         self.root = RenderRoot(route.render.fn)
         self.route_context = RouteContext(route_info)
         self.effect: Optional[Effect] = None
-        self._session_ctx_tokens = []
-        self._route_ctx_tokens = []
+        self._pulse_ctx_token = None
 
     def __enter__(self):
-        self._session_ctx_tokens.append(SESSION_CONTEXT.set(self.session))
-        self._route_ctx_tokens.append(ROUTE_CONTEXT.set(self.route_context))
+        self._pulse_ctx_token = PULSE_CONTEXT.set(
+            PulseContext(
+                session=self.session.context,
+                socket=self.session,
+                route=self.route_context,
+            )
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        ROUTE_CONTEXT.reset(self._route_ctx_tokens.pop())
-        SESSION_CONTEXT.reset(self._session_ctx_tokens.pop())
+        if self._pulse_ctx_token is not None:
+            PULSE_CONTEXT.reset(self._pulse_ctx_token)
+            self._pulse_ctx_token = None
 
 
 class Session:
@@ -57,6 +72,7 @@ class Session:
         *,
         server_address: Optional[str] = None,
         client_address: Optional[str] = None,
+        session_context: Optional[ReactiveDict] = None,
     ) -> None:
         self.id = id
         self.routes = routes
@@ -64,11 +80,14 @@ class Session:
         self.server_address: Optional[str] = server_address
         # Best-effort client address, captured at prerender or socket connect time
         self.client_address: Optional[str] = client_address
-        self.render_contexts: dict[str, RenderContext] = {}
+        self.render_contexts: dict[str, RenderScope] = {}
         self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
         # These two contexts are shared across all renders, but they are mounted
         # by each active render.
-        self.context = ReactiveDict()
+        if session_context is not None:
+            self.context = session_context 
+        else:
+            self.context = ReactiveDict()
         self._pending_api: dict[str, asyncio.Future] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
@@ -140,7 +159,7 @@ class Session:
 
     def execute_callback(self, path: str, key: str, args: list | tuple):
         active_route = self.render_contexts[path]
-        with self.render_context(path):
+        with active_route:
             try:
                 cb = active_route.root.callbacks[key]
                 fn, n_params = cb.fn, cb.n_args
@@ -225,7 +244,7 @@ class Session:
                 }
             )
 
-    def render_context(
+    def render_scope(
         self, path: str, route_info: Optional[RouteInfo] = None, create=False
     ):
         active_route = self.render_contexts.get(path)
@@ -233,7 +252,7 @@ class Session:
             if not create:
                 raise ValueError(f"No active route for '{path}'")
             route = self.routes.find(path)
-            active_route = RenderContext(
+            active_route = RenderScope(
                 self, route, route_info or route.default_route_info()
             )
             self.render_contexts[path] = active_route
@@ -251,11 +270,11 @@ class Session:
     def render(
         self, path: str, route_info: Optional[RouteInfo] = None, prerendering=False
     ):
-        with self.render_context(path, route_info, create=True) as ctx:
+        with self.render_scope(path, route_info, create=True) as ctx:
             return ctx.root.render_vdom(prerendering=prerendering)
 
     def rerender(self, path: str):
-        with self.render_context(path) as ctx:
+        with self.render_scope(path) as ctx:
             return ctx.root.render_diff()
 
     def mount(self, path: str, route_info: RouteInfo):
@@ -264,7 +283,7 @@ class Session:
             # logger.error(f"Route already mounted: '{path}'")
             return
 
-        ctx = self.render_context(path, route_info, create=True)
+        ctx = self.render_scope(path, route_info, create=True)
 
         def _render_effect():
             with ctx:
@@ -320,6 +339,6 @@ class Session:
         self.context.update(updates)
 
 
-SESSION_CONTEXT: ContextVar["Session | None"] = ContextVar(
-    "pulse_session_context", default=None
+PULSE_CONTEXT: ContextVar["PulseContext | None"] = ContextVar(
+    "pulse_context", default=None
 )

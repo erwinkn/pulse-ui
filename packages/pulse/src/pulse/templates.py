@@ -39,7 +39,7 @@ ${routes_str}
 
 # Mako template for server-rendered pages
 ROUTE_TEMPLATE = Template(
-    """import { redirect, type LoaderFunctionArgs } from "react-router";
+    """import { redirect, data, type LoaderFunctionArgs } from "react-router";
 import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo${", RenderLazy" if components and any(c.lazy for c in components) else ""} } from "${lib_path}";
 
 % if components:
@@ -106,7 +106,12 @@ export async function loader(args: LoaderFunctionArgs) {
     );
   }
   const vdom = await res.json();
-  return vdom;
+  const setCookies =
+    (res.headers.getSetCookie?.() as string[] | undefined) ??
+    (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
+  const headers = new Headers();
+  for (const c of setCookies) headers.append("Set-Cookie", c);
+  return data(vdom, { headers });
 }
 
 export default function RouteComponent({ loaderData }: { loaderData: VDOM }) {
@@ -118,6 +123,20 @@ export default function RouteComponent({ loaderData }: { loaderData: VDOM }) {
       path={path}
     />
   );
+}
+
+// Action and loader headers are not returned automatically
+function hasAnyHeaders(headers: Headers): boolean {
+  return [...headers].length > 0;
+}
+
+export function headers({
+  actionHeaders,
+  loaderHeaders,
+}: HeadersArgs) {
+  return hasAnyHeaders(actionHeaders)
+    ? actionHeaders
+    : loaderHeaders;
 }
 """
 )

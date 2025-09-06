@@ -42,8 +42,8 @@ def Counter(session_name: str, key_prefix: str):
 
 
 def make_routes() -> RouteTree:
-    route_a = Route("a", lambda: Counter("A", "route-a"))
-    route_b = Route("b", lambda: Counter("B", "route-b"))
+    route_a = Route("a", ps.component(lambda: Counter("A", "route-a")))
+    route_b = Route("b", ps.component(lambda: Counter("B", "route-b")))
     return RouteTree([route_a, route_b])
 
 
@@ -165,8 +165,8 @@ def GlobalCounter(tag: str):
 
 
 def make_global_routes() -> RouteTree:
-    route_a = Route("a", lambda: GlobalCounter("A"))
-    route_b = Route("b", lambda: GlobalCounter("B"))
+    route_a = Route("a", ps.component(lambda: GlobalCounter("A")))
+    route_b = Route("b", ps.component(lambda: GlobalCounter("B")))
     return RouteTree([route_a, route_b])
 
 
@@ -250,7 +250,9 @@ def test_global_state_disposed_on_session_close():
 
     accessor = ps.global_state(Disposable)
 
-    routes = RouteTree([Route("a", lambda: ps.div()[ps.span()[str(accessor().count)]])])
+    routes = RouteTree(
+        [Route("a", ps.component(lambda: ps.div()[ps.span()[str(accessor().count)]]))]
+    )
     s = Session("s1", routes)
     _msgs, disc = mount_with_listener(s, "a")
     # Ensure instance is created by rendering

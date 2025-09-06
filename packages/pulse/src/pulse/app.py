@@ -6,7 +6,6 @@ to define routes and configure their Pulse application.
 """
 
 import asyncio
-import json
 import logging
 import os
 from enum import IntEnum
@@ -28,13 +27,6 @@ from pulse.middleware import (
     Ok,
     PulseMiddleware,
     Redirect,
-)
-from pulse.reactive import (
-    REACTIVE_CONTEXT,
-    Epoch,
-    GlobalBatch,
-    ReactiveContext,
-    Scope,
 )
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree
@@ -148,7 +140,7 @@ def _extract_client_address_from_socketio(environ: dict) -> str | None:
         if host:
             return f"{proto}://{host}"
         return None
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -228,7 +220,6 @@ class App:
             return
 
         # Add CORS middleware
-        REACTIVE_CONTEXT.set(AppReactiveContext())
         self.fastapi.add_middleware(
             CORSMiddleware,
             allow_origin_regex=".*",
@@ -266,14 +257,13 @@ class App:
                 def _next():
                     return Ok(_render())
 
-                with session.reactive_context:
-                    res = self._middleware.prerender(
-                        path=path,
-                        route_info=route_info,
-                        request=PulseRequest.from_fastapi(request),
-                        context=session.context,
-                        next=_next,
-                    )
+                res = self._middleware.prerender(
+                    path=path,
+                    route_info=route_info,
+                    request=PulseRequest.from_fastapi(request),
+                    context=session.context,
+                    next=_next,
+                )
             except Exception:
                 logger.exception("Error in prerender middleware")
                 res = Ok(_render())
@@ -301,13 +291,11 @@ class App:
                     def _next():
                         return Ok(None)
 
-                    # Ensure middleware executes within the session's reactive context
-                    with session.reactive_context:
-                        res = self._middleware.connect(
-                            request=PulseRequest.from_socketio_environ(environ, auth),
-                            ctx=session.context,
-                            next=_next,
-                        )
+                    res = self._middleware.connect(
+                        request=PulseRequest.from_socketio_environ(environ, auth),
+                        ctx=session.context,
+                        next=_next,
+                    )
                 except Exception:
                     logger.exception("Error in connect middleware")
                     res = Ok(None)
@@ -340,12 +328,11 @@ class App:
                     if self._middleware:
                         try:
                             # Run middleware within the session's reactive context
-                            with sess.reactive_context:
-                                res = self._middleware.message(
-                                    ctx=sess.context,
-                                    data=data,
-                                    next=lambda: Ok(None),
-                                )
+                            res = self._middleware.message(
+                                ctx=sess.context,
+                                data=data,
+                                next=lambda: Ok(None),
+                            )
                             if isinstance(res, Deny):
                                 # Report as server error for this path
                                 path = data.get("path")
@@ -442,33 +429,33 @@ def add_react_components(
             add_react_components(route.children, components)
 
 
-class AppReactiveContext(ReactiveContext):
-    def __init__(self, allow_usage=False) -> None:
-        self._epoch = Epoch()
-        self._batch = GlobalBatch()
-        self._scope = Scope()
-        self.allow_usage = allow_usage
+# class AppReactiveContext(ReactiveContext):
+#     def __init__(self, allow_usage=False) -> None:
+#         self._epoch = Epoch()
+#         self._batch = GlobalBatch()
+#         self._scope = Scope()
+#         self.allow_usage = allow_usage
 
-    @property
-    def epoch(self):
-        if self.allow_usage:
-            return self._epoch
-        raise RuntimeError(
-            "App reactive context should not be used, all reactive context should be scoped to sessions."
-        )
+#     @property
+#     def epoch(self):
+#         if self.allow_usage:
+#             return self._epoch
+#         raise RuntimeError(
+#             "App reactive context should not be used, all reactive context should be scoped to sessions."
+#         )
 
-    @property
-    def batch(self):
-        if self.allow_usage:
-            return self._batch
-        raise RuntimeError(
-            "App reactive context should not be used, all reactive context should be scoped to sessions."
-        )
+#     @property
+#     def batch(self):
+#         if self.allow_usage:
+#             return self._batch
+#         raise RuntimeError(
+#             "App reactive context should not be used, all reactive context should be scoped to sessions."
+#         )
 
-    @property
-    def scope(self):
-        if self.allow_usage:
-            return self._scope
-        raise RuntimeError(
-            "App reactive context should not be used, all reactive context should be scoped to sessions."
-        )
+#     @property
+#     def scope(self):
+#         if self.allow_usage:
+#             return self._scope
+#         raise RuntimeError(
+#             "App reactive context should not be used, all reactive context should be scoped to sessions."
+#         )

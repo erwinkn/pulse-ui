@@ -8,6 +8,9 @@ from pulse.codegen import CodegenConfig
 class GlobalCounter(ps.State):
     count: int = 0
 
+    def __init__(self, label: str):
+      self._label = label
+
     def inc(self):
         self.count += 1
 
@@ -43,11 +46,11 @@ def GlobalStateDemo():
     room = ps.route_info().pathParams.get("room")
 
     # Per-session singleton
-    a = session_counter()
+    a = session_counter(label='Session')
 
     # Shared across sessions by id; default to "global" when no room provided
     shared_id = room or "global"
-    b = shared_counter(shared_id)
+    b = shared_counter(shared_id, label='Shared')
 
     return ps.div(
         ps.h1("Global State Demo", className="text-2xl font-bold mb-4"),

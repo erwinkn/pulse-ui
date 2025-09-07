@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from typing import Protocol, Optional
+from typing import Protocol, Optional, Literal, Any
 
 from pulse.reactive_extensions import ReactiveDict
+from dataclasses import dataclass
 
 
 class SessionStore(Protocol):
@@ -21,7 +22,6 @@ class InMemorySessionStore:
         return self._sessions.get(sid)
 
     def create(self, sid: str) -> ReactiveDict:
-        print(f"Creating session {sid}")
         ctx = ReactiveDict()
         self._sessions[sid] = ctx
         return ctx
@@ -32,6 +32,46 @@ class InMemorySessionStore:
     def touch(self, sid: str) -> None:
         # No-op for in-memory store
         pass
+
+
+@dataclass
+class SessionCookie:
+    domain: Optional[str] = None
+    name: str = "pulse.sid"
+    secure: bool = True
+    samesite: Literal["lax", "strict", "none"] = "lax"
+    max_age_seconds: int = 7 * 24 * 3600
+
+    def get_sid_from_fastapi(self, request: Any) -> Optional[str]:
+        """Extract sid from a FastAPI Request (by reading Cookie header)."""
+        header = (
+            getattr(request, "headers", {}).get("cookie")
+            if hasattr(request, "headers")
+            else None
+        )
+        cookies = parse_cookie_header(header)
+        return cookies.get(self.name)
+
+    def get_sid_from_socketio(self, environ: dict) -> Optional[str]:
+        """Extract sid from a socket.io environ mapping."""
+        raw = environ.get("HTTP_COOKIE") or environ.get("COOKIE")
+        cookies = parse_cookie_header(raw)
+        return cookies.get(self.name)
+
+    def set_on_fastapi_response(self, response: Any, sid: str) -> None:
+        """Set the session cookie on a FastAPI Response-like object."""
+        if not hasattr(response, "set_cookie"):
+            return
+        response.set_cookie(
+            key=self.name,
+            value=sid,
+            httponly=True,
+            samesite=self.samesite,
+            secure=self.secure,
+            max_age=self.max_age_seconds,
+            domain=self.domain,
+            path="/",
+        )
 
 
 def new_sid() -> str:

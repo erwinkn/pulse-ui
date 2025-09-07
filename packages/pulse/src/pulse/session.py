@@ -34,8 +34,17 @@ class PulseContext:
     """
 
     session: ReactiveDict
-    socket: "Session"
-    route: RouteContext
+    socket: "Session | None"
+    route: RouteContext | None
+
+    def __enter__(self):
+        self._token = PULSE_CONTEXT.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._token is not None:
+            PULSE_CONTEXT.reset(self._token)
+            self._token = None
 
 
 class RenderScope:
@@ -85,7 +94,7 @@ class Session:
         # These two contexts are shared across all renders, but they are mounted
         # by each active render.
         if session_context is not None:
-            self.context = session_context 
+            self.context = session_context
         else:
             self.context = ReactiveDict()
         self._pending_api: dict[str, asyncio.Future] = {}

@@ -36,6 +36,10 @@ class AuthMiddleware(ps.PulseMiddleware):
         # Seed session context during prerender to avoid first-paint flashes
         if user:
             context["user_email"] = user
+        try:
+            print("[MW prerender ctx]", {k: v for k, v in context.items()})
+        except Exception:
+            print("[MW prerender ctx] <unavailable>")
 
         # Protect /secret at prerender time
         if path.startswith("/secret") and not user:
@@ -48,6 +52,10 @@ class AuthMiddleware(ps.PulseMiddleware):
         user = self._extract_user(headers=request.headers, cookies=request.cookies)
         if user:
             ctx["user_email"] = user
+            try:
+                print("[MW connect ctx]", {k: v for k, v in ctx.items()})
+            except Exception:
+                print("[MW connect ctx] <unavailable>")
             return next()
         # Allow connection for public pages in this demo
         return next()
@@ -62,6 +70,10 @@ class AuthMiddleware(ps.PulseMiddleware):
                 and path.startswith("/secret")
             ):
                 return ps.Deny()
+        try:
+            print("[MW message ctx]", {k: v for k, v in ctx.items()})
+        except Exception:
+            print("[MW message ctx] <unavailable>")
         return next()
 
 
@@ -153,6 +165,12 @@ def secret():
         if res.get("ok"):
             ps.navigate("/")
 
+    def log_session_callback():
+        print("[CB] session ctx", {k: v for k, v in ps.session().items()})
+
+    async def log_session_via_api():
+        await ps.call_api("/api/log-session", method="POST")
+
     return ps.div(
         ps.h2("Secret", className="text-2xl font-bold mb-4"),
         ps.p(f"Welcome {sess.get('user_email', '<unknown>')}"),
@@ -168,9 +186,21 @@ def secret():
             ),
         ),
         ps.div(
+            ps.button(
+                "Log session on server (callback)",
+                onClick=log_session_callback,
+                className="btn mt-2 mr-2",
+            ),
+            ps.button(
+                "Log session via API",
+                onClick=log_session_via_api,
+                className="btn mt-2",
+            ),
+        ),
+        ps.div(
             ps.h3("Session context", className="text-xl font-semibold mt-4 mb-2"),
             ps.pre(
-                json.dumps({k:v for k,v in sess.items()}, indent=2),
+                json.dumps({k: v for k, v in sess.items()}, indent=2),
                 className="bg-gray-100 p-3 rounded text-sm overflow-auto",
             ),
         ),
@@ -255,6 +285,18 @@ async def api_logout(request: Request, response: Response):
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(key=AUTH_COOKIE, path="/")
     return resp
+
+
+@app.fastapi.post("/api/log-session")
+async def api_log_session(request: Request):
+    try:
+        import pulse as ps
+
+        ctx = ps.session()
+        print("[API log-session] ctx:", {k: v for k, v in ctx.items()})
+    except Exception as e:
+        print("[API log-session] failed to access session:", e)
+    return JSONResponse({"ok": True})
 
 
 def app_origin(req: Request) -> str:

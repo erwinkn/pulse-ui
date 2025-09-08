@@ -9,19 +9,18 @@ import asyncio
 import logging
 import os
 from enum import IntEnum
-from typing import Optional, Sequence, TypeVar
-
+from typing import Optional, Sequence, TypeVar, cast
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import socketio
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+import pulse.flatted as flatted
 from pulse.codegen import Codegen, CodegenConfig
-from pulse.react_component import ReactComponent, registered_react_components
 from pulse.messages import ClientMessage, RouteInfo, ServerMessage
-from pulse import flatted
 from pulse.middleware import (
     Deny,
     MiddlewareStack,
@@ -30,17 +29,17 @@ from pulse.middleware import (
     PulseMiddleware,
     Redirect,
 )
+from pulse.react_component import ReactComponent, registered_react_components
+from pulse.render_session import PulseContext, RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree
-from pulse.session import Session, PulseContext
-from pulse.session_store import (
+from pulse.session import (
     InMemorySessionStore,
-    SessionStore,
     SessionCookie,
+    SessionStore,
     new_sid,
 )
 from pulse.vdom import VDOM
-from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +91,7 @@ class App:
         # Auto-add React components to all routes
         add_react_components(routes, registered_react_components())
         self.routes = RouteTree(routes)
-        self.sessions: dict[str, Session] = {}
+        self.render_sessions: dict[str, RenderSession] = {}
 
         self.codegen = Codegen(
             self.routes,
@@ -107,11 +106,11 @@ class App:
         self.server_address: Optional[str] = server_address
         # Allow single middleware or sequence; compose into a stack when needed
         if middleware is None:
-            self._middleware: PulseMiddleware | None = None
+            self.middleware: PulseMiddleware | None = None
         elif isinstance(middleware, PulseMiddleware):
-            self._middleware = middleware
+            self.middleware = middleware
         else:
-            self._middleware = MiddlewareStack(middleware)
+            self.middleware = MiddlewareStack(middleware)
 
         self.cookie = cookie or SessionCookie()
         self.session_store = session_store or InMemorySessionStore()
@@ -133,31 +132,21 @@ class App:
         # Mount PulseContext for all FastAPI routes (no route info, no socket)
         @self.fastapi.middleware("http")
         async def pulse_context_middleware(request: Request, call_next):
-            # Prefer an active Socket session when provided by header
-            socket_session = None
+            # Prefer an active RenderSession when provided by header
+            render_session = None
             header_sid = request.headers.get("x-pulse-session-id")
             if header_sid:
-                socket_session = self.sessions.get(header_sid)
+                render_session = self.render_sessions.get(header_sid)
 
-            cookie_sid = self.cookie.get_sid_from_fastapi(request)
-            # Resolve session context: prefer socket session context if available
-            set_cookie_sid = None
-            if socket_session is not None:
-                ctx = socket_session.context
-            else:
-                ctx = self.session_store.get(cookie_sid) if cookie_sid else None
-                if ctx is None:
-                    sid = new_sid()
-                    ctx = self.session_store.create(sid)
-                    set_cookie_sid = sid
-
+            sid = self.cookie.get_sid_from_fastapi(request)
+            sid, session, session_created = self.get_or_create_session(sid)
             # Set context for the duration of the request; do not set cookie here
-            with PulseContext(session=ctx, socket=socket_session, route=None):
+            with PulseContext(session=session, render=render_session, route=None):
                 response = await call_next(request)
             # If we created a new sid for this request (no cookie), set it now
-            if set_cookie_sid:
+            if session_created:
                 try:
-                    self.cookie.set_on_fastapi_response(response, set_cookie_sid)
+                    self.cookie.set_on_fastapi_response(response, sid)
                 except Exception:
                     logger.exception("Failed to set session cookie on FastAPI response")
             return response
@@ -167,7 +156,9 @@ class App:
             return {"health": "ok", "message": "Pulse server is running"}
 
         # ------- Internal helpers (response + ctx) -------
-        def _respond_json(payload: VDOM, set_sid: Optional[str]) -> JSONResponse:
+        def _respond_and_set_sid_cookie(
+            payload: VDOM, set_sid: Optional[str]
+        ) -> JSONResponse:
             resp = JSONResponse(payload)
             if set_sid:
                 try:
@@ -175,15 +166,6 @@ class App:
                 except Exception:
                     logger.exception("Failed to set session cookie on FastAPI response")
             return resp
-
-        def _get_or_create_ctx_from_sid(sid: Optional[str]):
-            created = False
-            ctx = self.session_store.get(sid) if sid else None
-            if ctx is None:
-                sid = new_sid()
-                ctx = self.session_store.create(sid)
-                created = True
-            return sid, ctx, created
 
         # RouteInfo is the request body
         @self.fastapi.post("/prerender/{path:path}")
@@ -194,38 +176,38 @@ class App:
             # Determine client address/origin prior to creating the session
             client_addr: str | None = _extract_client_address_from_fastapi(request)
             # Session cookie handling
-            sid, ctx, created = _get_or_create_ctx_from_sid(
+            sid, session, created = self.get_or_create_session(
                 self.cookie.get_sid_from_fastapi(request)
             )
-            session = Session(
+            render = RenderSession(
                 uuid4().hex,
                 self.routes,
                 server_address=self.server_address,
                 client_address=client_addr,
-                session_context=ctx,
+                session=session,
             )
 
-            def _render() -> VDOM:
-                return session.render(path, route_info, prerendering=True)
+            def _prerender() -> VDOM:
+                return render.render(path, route_info, prerendering=True)
 
-            if not self._middleware:
-                payload = _render()
-                return _respond_json(payload, sid if created else None)
+            if not self.middleware:
+                payload = _prerender()
+                return _respond_and_set_sid_cookie(payload, sid if created else None)
             try:
 
                 def _next():
-                    return Ok(_render())
+                    return Ok(_prerender())
 
-                res = self._middleware.prerender(
+                res = self.middleware.prerender(
                     path=path,
                     route_info=route_info,
                     request=PulseRequest.from_fastapi(request),
-                    context=session.context,
+                    session=render.session,
                     next=_next,
                 )
             except Exception:
                 logger.exception("Error in prerender middleware")
-                res = Ok(_render())
+                res = Ok(_prerender())
             if isinstance(res, Redirect):
                 raise HTTPException(
                     status_code=302, headers={"Location": res.path or "/"}
@@ -234,7 +216,7 @@ class App:
                 raise HTTPException(status_code=404)
             elif isinstance(res, Ok):
                 payload = res.payload
-                return _respond_json(payload, sid if created else None)
+                return _respond_and_set_sid_cookie(payload, sid if created else None)
             # Fallback to default render
             else:
                 raise NotImplementedError(f"Unexpected middleware return: {res}")
@@ -245,20 +227,20 @@ class App:
             client_addr: str | None = _extract_client_address_from_socketio(environ)
             # Parse cookies from environ
             cookie_sid = self.cookie.get_sid_from_socketio(environ)
-            _sid, ctx, _created = _get_or_create_ctx_from_sid(cookie_sid)
+            _sid, session, _created = self.get_or_create_session(cookie_sid)
             # Create session with shared context
-            session = self.create_session(
-                sid, client_address=client_addr, session_context=ctx
+            render = self.create_render_session(
+                sid, client_address=client_addr, session=session
             )
-            if self._middleware:
+            if self.middleware:
                 try:
 
                     def _next():
                         return Ok(None)
 
-                    res = self._middleware.connect(
+                    res = self.middleware.connect(
                         request=PulseRequest.from_socketio_environ(environ, auth),
-                        ctx=session.context,
+                        session=render.session,
                         next=_next,
                     )
                 except Exception:
@@ -275,7 +257,7 @@ class App:
                 message = flatted.stringify(message)
                 asyncio.create_task(self.sio.emit("message", message, to=sid))
 
-            session.connect(on_message)
+            render.connect(on_message)
 
         @self.sio.event
         def disconnect(sid: str):
@@ -286,23 +268,23 @@ class App:
             try:
                 # Deserialize the message using flatted
                 data = flatted.parse(data)
-                session = self.sessions[sid]
+                render = self.render_sessions[sid]
 
-                def _handler(sess: Session) -> None:
+                def _handler(render: RenderSession) -> None:
                     # Per-message middleware guard
-                    if self._middleware:
+                    if self.middleware:
                         try:
                             # Run middleware within the session's reactive context
-                            res = self._middleware.message(
-                                ctx=sess.context,
+                            res = self.middleware.message(
                                 data=data,
+                                session=render.session,
                                 next=lambda: Ok(None),
                             )
                             if isinstance(res, Deny):
                                 # Report as server error for this path
-                                path = data.get("path")
-                                sess.report_error(
-                                    path or "api_response",
+                                path = cast(str, data.get("path", 'api_response'))
+                                render.report_error(
+                                    path,
                                     "server",
                                     Exception("Request denied by server"),
                                     {"kind": "deny"},
@@ -311,43 +293,51 @@ class App:
                         except Exception:
                             logger.exception("Error in message middleware")
                     if data["type"] == "mount":
-                        sess.mount(data["path"], data["routeInfo"])
+                        render.mount(data["path"], data["routeInfo"])
                     elif data["type"] == "navigate":
-                        sess.navigate(data["path"], data["routeInfo"])
+                        render.navigate(data["path"], data["routeInfo"])
                     elif data["type"] == "callback":
-                        sess.execute_callback(
+                        render.execute_callback(
                             data["path"], data["callback"], data["args"]
                         )
                     elif data["type"] == "unmount":
-                        sess.unmount(data["path"])
+                        render.unmount(data["path"])
                     elif data["type"] == "api_result":
                         # type: ignore[union-attr]
-                        sess.handle_api_result(data)  # type: ignore[arg-type]
+                        render.handle_api_result(data)  # type: ignore[arg-type]
                     else:
                         logger.warning(f"Unknown message type received: {data}")
 
-                _handler(session)
+                _handler(render)
             except Exception as e:
                 try:
                     # Best effort: report error for this path if available
-                    path = data.get("path", "") if isinstance(data, dict) else ""
-                    session = self.sessions.get(sid)
-                    if session:
-                        session.report_error(path, "server", e)
+                    path = cast(str, data.get("path", "") if isinstance(data, dict) else "")
+                    maybe_render = self.render_sessions.get(sid)
+                    if maybe_render:
+                        maybe_render.report_error(path, "server", e)
                     else:
                         logger.exception("Error handling client message: %s", data)
                 except Exception as e:
                     logger.exception("Error while reporting server error: %s", e)
 
+    def get_or_create_session(self, sid: Optional[str]):
+        created = False
+        session = self.session_store.get(sid) if sid else None
+        if session is None:
+            sid = new_sid()
+            session = self.session_store.create(sid)
+            created = True
+        return sid, session, created
+
     def run_codegen(self, address: Optional[str] = None):
-        address = address or self.cfg.get("server_address")
-        if not address:
+        if address:
+            self.server_address = address
+        if not self.server_address:
             raise RuntimeError(
                 "Please provide a server address to the App constructor or the Pulse CLI."
             )
-        # Store the active server address so sessions can use it
-        self.server_address = address
-        self.codegen.generate_all(address)
+        self.codegen.generate_all(self.server_address)
 
     def asgi_factory(self):
         """
@@ -365,26 +355,26 @@ class App:
     def get_route(self, path: str):
         self.routes.find(path)
 
-    def create_session(
-        self, id: str, *, client_address: Optional[str] = None, session_context=None
+    def create_render_session(
+        self, id_: str, *, client_address: Optional[str] = None, session=None
     ):
-        if id in self.sessions:
-            raise ValueError(f"Session {id} already exists")
+        if id_ in self.render_sessions:
+            raise ValueError(f"RenderSession {id_} already exists")
         # print(f"--> Creating session {id}")
-        self.sessions[id] = Session(
-            id,
+        self.render_sessions[id_] = RenderSession(
+            id_,
             self.routes,
             server_address=self.server_address,
             client_address=client_address,
-            session_context=session_context,
+            session=session,
         )
-        return self.sessions[id]
+        return self.render_sessions[id_]
 
     def close_session(self, id: str):
-        if id not in self.sessions:
-            raise KeyError(f"Session {id} does not exist")
-        self.sessions[id].close()
-        del self.sessions[id]
+        if id not in self.render_sessions:
+            raise KeyError(f"RenderSession {id} does not exist")
+        self.render_sessions[id].close()
+        del self.render_sessions[id]
 
 
 def add_react_components(

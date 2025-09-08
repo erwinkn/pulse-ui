@@ -21,7 +21,6 @@ class CounterState(ps.State):
         self._name = name
 
     def increment(self):
-        print("Incrementing count")
         self.count += 1
 
     async def increment_with_delay(self):
@@ -103,7 +102,7 @@ class NestedDemoState(ps.State):
 @ps.component
 def home():
     """A simple and welcoming home page."""
-    sess = ps.session_context()
+    sess = ps.session()
     content = [
         ps.h1("Welcome to Pulse UI!", className="text-4xl font-bold mb-4"),
         ps.p(
@@ -241,8 +240,7 @@ def components_demo():
 def counter():
     """An interactive counter page demonstrating state management."""
     state1, state2 = ps.states(CounterState("Counter 1"), CounterState("Counter2"))
-    route_info = ps.route_info()
-    print("Rendering counter")
+    route_info = ps.route()
 
     return ps.div(
         ps.h1("Interactive Counter", className="text-3xl font-bold mb-4"),
@@ -356,7 +354,7 @@ def query_demo():
 
 @ps.component
 def dynamic_route():
-    route = ps.route_info()
+    route = ps.route()
     return ps.div(
         ps.h2("Dynamic Route Info", className="text-xl font-bold mb-2"),
         ps.ul(

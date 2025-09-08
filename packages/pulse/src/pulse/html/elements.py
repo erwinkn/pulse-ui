@@ -229,7 +229,7 @@ class HTMLFieldSetElement(HTMLElementBase):
 class HTMLFormElement(HTMLElementBase):
     """Properties specific to <form> elements."""
 
-    tagName: Literal["form"]
+    tagName: Literal["form"]  # type: ignore[misc]
 
     acceptCharset: str
     action: str

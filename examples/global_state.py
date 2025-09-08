@@ -9,7 +9,7 @@ class GlobalCounter(ps.State):
     count: int = 0
 
     def __init__(self, label: str):
-      self._label = label
+        self._label = label
 
     def inc(self):
         self.count += 1
@@ -41,16 +41,16 @@ def CounterRow(title: str, counter: GlobalCounter):
 
 @ps.component
 def GlobalStateDemo():
-    sess = ps.session_context()
+    sess = ps.session()
     server = ps.server_address()
-    room = ps.route_info().pathParams.get("room")
+    room = ps.route().pathParams.get("room")
 
     # Per-session singleton
-    a = session_counter(label='Session')
+    a = session_counter(label="Session")
 
     # Shared across sessions by id; default to "global" when no room provided
     shared_id = room or "global"
-    b = shared_counter(shared_id, label='Shared')
+    b = shared_counter(shared_id, label="Shared")
 
     return ps.div(
         ps.h1("Global State Demo", className="text-2xl font-bold mb-4"),

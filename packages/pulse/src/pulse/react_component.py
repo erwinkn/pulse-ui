@@ -82,7 +82,7 @@ def prop(
     default_factory: Optional[Callable[[], T]] = None,
     serialize: Optional[Callable[[T], Any]] = None,
     map_to: Optional[str] = None,
-) -> Prop[T]:
+) -> T:
     """
     Convenience constructor for Prop to be used inside TypedDict defaults.
     """
@@ -91,7 +91,7 @@ def prop(
         default_factory=default_factory,
         serialize=serialize,
         map_to=map_to,
-    )
+    ) # type: ignore
 
 
 class PropSpec:

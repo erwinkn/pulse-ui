@@ -258,7 +258,7 @@ async def api_login(request: Request, response: Response):
     # Optionally update session server-side if the session id is provided
     sess_id = request.headers.get("x-pulse-session-id")
     if sess_id:
-        sess = app.sessions.get(sess_id)
+        sess = app.render_sessions.get(sess_id)
         if sess and sess.id == sess_id:
             sess.update_context({"user_email": email})
     resp = JSONResponse({"ok": True})
@@ -279,7 +279,7 @@ async def api_login(request: Request, response: Response):
 async def api_logout(request: Request, response: Response):
     sess_id = request.headers.get("x-pulse-session-id")
     if sess_id:
-        sess = app.sessions.get(sess_id)
+        sess = app.render_sessions.get(sess_id)
         if sess and sess.id == sess_id:
             sess.update_context({"user_email": None})
     resp = JSONResponse({"ok": True})

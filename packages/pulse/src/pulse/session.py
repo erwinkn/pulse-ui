@@ -1,353 +1,90 @@
-from asyncio import iscoroutine
-import logging
-from typing import Any, Callable, Optional
-from contextvars import ContextVar
-from dataclasses import dataclass
+from __future__ import annotations
+
 import uuid
-import asyncio
-import traceback
+from typing import Protocol, Optional, Literal, Any
 
-from pulse.messages import (
-    RouteInfo,
-    ServerInitMessage,
-    ServerMessage,
-    ServerUpdateMessage,
-    ServerErrorMessage,
-)
-from pulse.reactive import Effect, flush_effects
 from pulse.reactive_extensions import ReactiveDict
-from pulse.reconciler import RenderRoot
-from pulse.routing import Layout, Route, RouteContext, RouteTree
-from pulse.state import State
+from dataclasses import dataclass
 
 
-logger = logging.getLogger(__file__)
+class SessionStore(Protocol):
+    def get(self, sid: str) -> Optional[ReactiveDict]: ...
+    def create(self, sid: str) -> ReactiveDict: ...
+    def delete(self, sid: str) -> None: ...
+    def touch(self, sid: str) -> None: ...
+
+
+class InMemorySessionStore:
+    def __init__(self) -> None:
+        self._sessions: dict[str, ReactiveDict] = {}
+
+    def get(self, sid: str) -> Optional[ReactiveDict]:
+        return self._sessions.get(sid)
+
+    def create(self, sid: str) -> ReactiveDict:
+        session: ReactiveDict[str, Any] = ReactiveDict()
+        self._sessions[sid] = session
+        return session
+
+    def delete(self, sid: str) -> None:
+        self._sessions.pop(sid, None)
+
+    def touch(self, sid: str) -> None:
+        # No-op for in-memory store
+        pass
 
 
 @dataclass
-class PulseContext:
-    """Composite context accessible to hooks and internals.
+class SessionCookie:
+    domain: Optional[str] = None
+    name: str = "pulse.sid"
+    secure: bool = True
+    samesite: Literal["lax", "strict", "none"] = "lax"
+    max_age_seconds: int = 7 * 24 * 3600
 
-    - session: per-user session ReactiveDict
-    - socket: per-connection SocketIOSession (currently named Session)
-    - route: active RouteContext for this render/effect scope
-    """
-
-    session: ReactiveDict
-    socket: "Session | None"
-    route: RouteContext | None
-
-    def __enter__(self):
-        self._token = PULSE_CONTEXT.set(self)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._token is not None:
-            PULSE_CONTEXT.reset(self._token)
-            self._token = None
-
-
-class RenderScope:
-    def __init__(
-        self, session: "Session", route: Route | Layout, route_info: RouteInfo
-    ) -> None:
-        self.session = session
-        self.root = RenderRoot(route.render.fn)
-        self.route_context = RouteContext(route_info)
-        self.effect: Optional[Effect] = None
-        self._pulse_ctx_token = None
-
-    def __enter__(self):
-        self._pulse_ctx_token = PULSE_CONTEXT.set(
-            PulseContext(
-                session=self.session.context,
-                socket=self.session,
-                route=self.route_context,
-            )
+    def get_sid_from_fastapi(self, request: Any) -> Optional[str]:
+        """Extract sid from a FastAPI Request (by reading Cookie header)."""
+        header = (
+            getattr(request, "headers", {}).get("cookie")
+            if hasattr(request, "headers")
+            else None
         )
-        return self
+        cookies = parse_cookie_header(header)
+        return cookies.get(self.name)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._pulse_ctx_token is not None:
-            PULSE_CONTEXT.reset(self._pulse_ctx_token)
-            self._pulse_ctx_token = None
+    def get_sid_from_socketio(self, environ: dict) -> Optional[str]:
+        """Extract sid from a socket.io environ mapping."""
+        raw = environ.get("HTTP_COOKIE") or environ.get("COOKIE")
+        cookies = parse_cookie_header(raw)
+        return cookies.get(self.name)
 
-
-class Session:
-    def __init__(
-        self,
-        id: str,
-        routes: RouteTree,
-        *,
-        server_address: Optional[str] = None,
-        client_address: Optional[str] = None,
-        session_context: Optional[ReactiveDict] = None,
-    ) -> None:
-        self.id = id
-        self.routes = routes
-        # Base server address for building absolute API URLs (e.g., http://localhost:8000)
-        self.server_address: Optional[str] = server_address
-        # Best-effort client address, captured at prerender or socket connect time
-        self.client_address: Optional[str] = client_address
-        self.render_contexts: dict[str, RenderScope] = {}
-        self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
-        # These two contexts are shared across all renders, but they are mounted
-        # by each active render.
-        if session_context is not None:
-            self.context = session_context
-        else:
-            self.context = ReactiveDict()
-        self._pending_api: dict[str, asyncio.Future] = {}
-        # Registry of per-session global singletons (created via ps.global_state without id)
-        self._global_states: dict[str, State] = {}
-
-    # Effect error handler (batch-level) to surface runtime errors
-    def _on_effect_error(self, effect, exc: Exception):
-        # We don't want to couple effects to routing; broadcast to all active paths
-        details = {"effect": getattr(effect, "name", "<unnamed>")}
-        for path in list(self.render_contexts.keys()):
-            self.report_error(path, "effect", exc, details)
-
-    def connect(
-        self,
-        message_listener: Callable[[ServerMessage], Any],
-    ):
-        self.message_listeners.add(message_listener)
-        # Return a disconnect function. Use `discard` since there are two ways
-        # of disconnecting a message listener
-        return lambda: (self.message_listeners.discard(message_listener),)
-
-    # Use `discard` since there are two ways of disconnecting a message listener
-    def disconnect(self, message_listener: Callable[[ServerMessage], Any]):
-        self.message_listeners.discard(message_listener)
-
-    def notify(self, message: ServerMessage):
-        for listener in self.message_listeners:
-            listener(message)
-
-    def report_error(
-        self,
-        path: str,
-        phase: str,
-        exc: Exception,
-        details: dict[str, Any] | None = None,
-    ):
-        error_msg: ServerErrorMessage = {
-            "type": "server_error",
-            "path": path,
-            "error": {
-                "message": str(exc),
-                "stack": traceback.format_exc(),
-                "phase": phase,  # type: ignore
-                "details": details or {},
-            },
-        }
-        self.notify(error_msg)
-        logger.error(
-            "Error reported for path %r during %s: %s\n%s",
-            path,
-            phase,
-            exc,
-            traceback.format_exc(),
-        )
-
-    def close(self):
-        # The effect will be garbage collected, and with it the dependencies
-        self.message_listeners.clear()
-        for path in list(self.render_contexts.keys()):
-            self.unmount(path)
-        self.render_contexts.clear()
-        # Dispose per-session global singletons if they expose dispose()
-        for value in list(self._global_states.values()):
-            try:
-                value.dispose()
-            except Exception as e:  # noqa: BLE001
-                # Best-effort: report but continue cleanup
-                logger.exception("Error disposing session global state: %s", e)
-        self._global_states.clear()
-
-    def execute_callback(self, path: str, key: str, args: list | tuple):
-        active_route = self.render_contexts[path]
-        with active_route:
-            try:
-                cb = active_route.root.callbacks[key]
-                fn, n_params = cb.fn, cb.n_args
-                res = fn(*args[:n_params])
-                if iscoroutine(res):
-                    loop = asyncio.get_running_loop()
-                    task = loop.create_task(res)
-
-                    def _on_task_done(t):
-                        try:
-                            t.result()
-                        except Exception as e:  # noqa: BLE001 - forward all
-                            self.report_error(
-                                path,
-                                "callback",
-                                e,
-                                {"callback": key, "async": True},
-                            )
-
-                    task.add_done_callback(_on_task_done)
-            except Exception as e:  # noqa: BLE001 - forward all
-                self.report_error(path, "callback", e, {"callback": key})
-
-    async def call_api(
-        self,
-        url_or_path: str,
-        *,
-        method: str = "POST",
-        headers: dict[str, str] | None = None,
-        body: Any | None = None,
-        credentials: str = "include",
-    ) -> dict[str, Any]:
-        """Request the client to perform a fetch and await the result.
-
-        Accepts either an absolute URL (http/https) or a relative path. When a
-        relative path is provided, it is resolved against this session's
-        server_address.
-        """
-        # Resolve to absolute URL if a relative path is passed
-        if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
-            url = url_or_path
-        else:
-            base = self.server_address
-            if not base:
-                raise RuntimeError(
-                    "Server address unavailable. Ensure App.run_codegen/asgi_factory set server_address."
-                )
-            path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
-            url = f"{base}{path}"
-        corr_id = uuid.uuid4().hex
-        fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._pending_api[corr_id] = fut
-        headers = headers or {}
-        headers["x-pulse-session-id"] = self.id
-        self.notify(
-            {
-                "type": "api_call",
-                "id": corr_id,
-                "url": url,
-                "method": method,
-                "headers": headers,
-                "body": body,
-                "credentials": "include" if credentials == "include" else "omit",
-            }
-        )
-        result = await fut
-        return result
-
-    def handle_api_result(self, data: dict[str, Any]):
-        id_ = data.get("id")
-        if id_ is None:
+    def set_on_fastapi_response(self, response: Any, sid: str) -> None:
+        """Set the session cookie on a FastAPI Response-like object."""
+        if not hasattr(response, "set_cookie"):
             return
-        id_ = str(id_)
-        fut = self._pending_api.pop(id_, None)
-        if fut and not fut.done():
-            fut.set_result(
-                {
-                    "ok": data.get("ok", False),
-                    "status": data.get("status", 0),
-                    "headers": data.get("headers", {}),
-                    "body": data.get("body"),
-                }
-            )
-
-    def render_scope(
-        self, path: str, route_info: Optional[RouteInfo] = None, create=False
-    ):
-        active_route = self.render_contexts.get(path)
-        if not active_route:
-            if not create:
-                raise ValueError(f"No active route for '{path}'")
-            route = self.routes.find(path)
-            active_route = RenderScope(
-                self, route, route_info or route.default_route_info()
-            )
-            self.render_contexts[path] = active_route
-        return active_route
-
-    # ---- Session-local global state registry ----
-    def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
-        """Return a per-session singleton for the provided key."""
-        inst = self._global_states.get(key)
-        if inst is None:
-            inst = factory()
-            self._global_states[key] = inst
-        return inst
-
-    def render(
-        self, path: str, route_info: Optional[RouteInfo] = None, prerendering=False
-    ):
-        with self.render_scope(path, route_info, create=True) as ctx:
-            return ctx.root.render_vdom(prerendering=prerendering)
-
-    def rerender(self, path: str):
-        with self.render_scope(path) as ctx:
-            return ctx.root.render_diff()
-
-    def mount(self, path: str, route_info: RouteInfo):
-        if path in self.render_contexts:
-            # No logging, this is bound to happen with React strict mode
-            # logger.error(f"Route already mounted: '{path}'")
-            return
-
-        ctx = self.render_scope(path, route_info, create=True)
-
-        def _render_effect():
-            with ctx:
-                if ctx.root.render_count == 0:
-                    vdom = ctx.root.render_vdom(prerendering=False)
-                    self.notify(
-                        ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-                    )
-                else:
-                    result = ctx.root.render_diff()
-                    if result.ops:
-                        self.notify(
-                            ServerUpdateMessage(
-                                type="vdom_update", path=path, ops=result.ops
-                            )
-                        )
-
-        # print(f"Mounting '{path}'")
-        ctx.effect = Effect(
-            _render_effect,
-            immediate=True,
-            name=f"{path}:render",
-            on_error=lambda e: self.report_error(path, "render", e),
+        response.set_cookie(
+            key=self.name,
+            value=sid,
+            httponly=True,
+            samesite=self.samesite,
+            secure=self.secure,
+            max_age=self.max_age_seconds,
+            domain=self.domain,
+            path="/",
         )
 
-    def flush(self):
-        flush_effects()
 
-    def navigate(self, path: str, route_info: RouteInfo):
-        # Route is already mounted, we can just update the routing state
-        if path not in self.render_contexts:
-            logger.error(f"Navigating to unmounted route '{path}'")
-        active_route = self.render_contexts[path]
-        with active_route:
-            try:
-                active_route.route_context.update(route_info)
-            except Exception as e:  # noqa: BLE001
-                self.report_error(path, "navigate", e)
-
-    def unmount(self, path: str):
-        if path not in self.render_contexts:
-            return
-        active_route = self.render_contexts.pop(path)
-        with active_route:
-            try:
-                active_route.root.unmount()
-            except Exception as e:  # noqa: BLE001
-                self.report_error(path, "unmount", e)
-
-    # ---- Session-side utilities ----
-    def update_context(self, updates: dict[str, Any]) -> None:
-        """Update session context and trigger rerender for all active routes."""
-        self.context.update(updates)
+def new_sid() -> str:
+    return uuid.uuid4().hex
 
 
-PULSE_CONTEXT: ContextVar["PulseContext | None"] = ContextVar(
-    "pulse_context", default=None
-)
+def parse_cookie_header(header: str | None) -> dict[str, str]:
+    cookies: dict[str, str] = {}
+    if not header:
+        return cookies
+    parts = [p.strip() for p in header.split(";") if p.strip()]
+    for part in parts:
+        if "=" in part:
+            k, v = part.split("=", 1)
+            cookies[k.strip()] = v.strip()
+    return cookies

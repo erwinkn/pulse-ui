@@ -484,13 +484,8 @@ class BarProps(RectangleProps, total=False):
     # NO argument event handlers
     onAnimationStart: ps.EventHandler
     onAnimationEnd: ps.EventHandler
-    isAnimationActive: bool
-    animationBegin: float
-    animationDuration: float
-    animationEasing: AnimationTiming
-    id: str
     # Convoluted type where I think it's better to just use Label or LabelList
-    # label: bool | str | float
+    # label: bool | str | float | ??
 
 
 ActiveBar = bool | ps.Element | ps.JsFunction[[BarProps], ps.Element]

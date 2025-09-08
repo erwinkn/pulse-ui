@@ -326,15 +326,15 @@ def effects(
             ctx.effects = tuple(effects)
 
 
-def route_info() -> RouteContext:
-    from pulse.session import PULSE_CONTEXT
+def route() -> RouteContext:
+    from pulse.render_session import PULSE_CONTEXT
 
-    pctx = PULSE_CONTEXT.get()
-    if not pctx:
+    ctx = PULSE_CONTEXT.get()
+    if not ctx or not ctx.route:
         raise RuntimeError(
             "`pulse.router` can only be called within a component during rendering."
         )
-    return pctx.route
+    return ctx.route
 
 
 def session() -> ReactiveDict:
@@ -342,7 +342,7 @@ def session() -> ReactiveDict:
 
     Available during prerender, rendering, callbacks, middleware, and API routes.
     """
-    from pulse.session import PULSE_CONTEXT
+    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
     if not ctx:
@@ -350,8 +350,6 @@ def session() -> ReactiveDict:
             "`ps.session()` can only be called within a Pulse render/callback context."
         )
     return ctx.session
-
-
 
 
 async def call_api(
@@ -365,15 +363,15 @@ async def call_api(
     """Ask the client to perform an HTTP request and await the result.
 
     Accepts either a relative path or absolute URL; URL resolution happens in
-    Session.call_api using the session's server_address.
+    RenderSession.call_api using the session's server_address.
     """
-    from pulse.session import PULSE_CONTEXT
+    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
-    if ctx is None:
+    if ctx is None or ctx.render is None:
         raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
 
-    return await ctx.socket.call_api(
+    return await ctx.render.call_api(
         path,
         method=method,
         headers=dict(headers or {}),
@@ -387,13 +385,13 @@ def navigate(path: str) -> None:
 
     Non-async; sends a server message to the client to perform SPA navigation.
     """
-    from pulse.session import PULSE_CONTEXT
+    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
-    if ctx is None:
+    if ctx is None or ctx.render is None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
-    ctx.socket.notify({"type": "navigate_to", "path": path})
+    ctx.render.notify({"type": "navigate_to", "path": path})
 
 
 def is_prerendering():
@@ -410,18 +408,18 @@ def server_address() -> str:
 
     Example return values: "http://127.0.0.1:8000", "https://example.com:443"
     """
-    from pulse.session import PULSE_CONTEXT
+    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
-    if ctx is None:
+    if ctx is None or ctx.render is None:
         raise RuntimeError(
             "server_address() must be called inside a Pulse render/callback context"
         )
-    if not ctx.socket.server_address:
+    if not ctx.render.server_address:
         raise RuntimeError(
             "Server address unavailable. Ensure App.run_codegen/asgi_factory configured server_address."
         )
-    return ctx.socket.server_address
+    return ctx.render.server_address
 
 
 def client_address() -> str:
@@ -429,25 +427,25 @@ def client_address() -> str:
 
     Available during prerender (HTTP request) and after websocket connect.
     """
-    from pulse.session import PULSE_CONTEXT
+    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
-    if ctx is None:
+    if ctx is None or ctx.render is None:
         raise RuntimeError(
             "client_address() must be called inside a Pulse render/callback context"
         )
-    if not ctx.socket.client_address:
+    if not ctx.render.client_address:
         raise RuntimeError(
             "Client address unavailable. It is set during prerender or socket connect."
         )
-    return ctx.socket.client_address
+    return ctx.render.client_address
 
 
 # -----------------------------------------------------
 # Session-local global singletons (ps.global_state)
 # -----------------------------------------------------
 
-S = TypeVar("S", covariant=True)
+S = TypeVar("S", covariant=True, bound=State)
 
 
 class GlobalStateAccessor(Protocol, Generic[P, S]):
@@ -463,7 +461,7 @@ GLOBAL_STATES: dict[str, State] = {}
 
 
 def global_state(
-    factory: Callable[[P], S] | type[S], key: str | None = None
+    factory: Callable[P, S] | type[S], key: str | None = None
 ) -> GlobalStateAccessor[P, S]:
     """Provider for per-session or cross-session shared state.
 
@@ -482,7 +480,7 @@ def global_state(
     - id str: process-wide shared singleton for that id (cross-session)
       - constructor args: pass on the first call for that id; ignored thereafter
     """
-    from pulse.session import PULSE_CONTEXT
+    from pulse.render_session import PULSE_CONTEXT
 
     if isinstance(factory, type):
         cls = factory
@@ -498,11 +496,11 @@ def global_state(
 
     base_key = key or default_key
 
-    def accessor(_id: str | None = None, *args: P.args, **kwargs: P.kwargs) -> S:
+    def accessor(id: str | None = None, *args: P.args, **kwargs: P.kwargs) -> S:
         # Cross-session shared instance when id is provided
-        if _id is not None:
-            shared_key = f"{base_key}|{_id}"
-            inst = GLOBAL_STATES.get(shared_key)
+        if id is not None:
+            shared_key = f"{base_key}|{id}"
+            inst = cast(S | None, GLOBAL_STATES.get(shared_key))
             if inst is None:
                 inst = mk(*args, **kwargs)
                 GLOBAL_STATES[shared_key] = inst
@@ -510,12 +508,12 @@ def global_state(
 
         # Default: session-local when no id provided
         ctx = PULSE_CONTEXT.get()
-        if ctx is None:
+        if ctx is None or ctx.render is None:
             raise RuntimeError(
                 "ps.global_state must be used inside a Pulse render/callback context"
             )
         return cast(
-            S, ctx.socket.get_global_state(base_key, lambda: mk(*args, **kwargs))
+            S, ctx.render.get_global_state(base_key, lambda: mk(*args, **kwargs))
         )
 
     return accessor

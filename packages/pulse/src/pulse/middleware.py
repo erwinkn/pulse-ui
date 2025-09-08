@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar, Callable, Any
-from collections.abc import MutableMapping, Sequence
+from typing import Generic, TypeVar, Callable, Any, overload
+from collections.abc import Sequence
 from pulse.messages import ClientMessage, RouteInfo
 from pulse.request import PulseRequest
 from pulse.vdom import VDOM
@@ -21,7 +21,13 @@ class NotFound: ...
 
 
 class Ok(Generic[T]):
-    def __init__(self, payload: T = None) -> None:
+    @overload
+    def __init__(self, payload: T) -> None:
+        ...
+    @overload
+    def __init__(self, payload: T | None = None) -> None:
+        ...
+    def __init__(self, payload: T | None = None) -> None:
         self.payload = payload
 
 
@@ -43,9 +49,9 @@ class PulseMiddleware:
         self,
         *,
         path: str,
-        route_info: RouteInfo,
         request: PulseRequest,
-        context: MutableMapping[str, Any],
+        route_info: RouteInfo,
+        session: dict[str, Any],
         next: Callable[[], PrerenderResponse],
     ) -> PrerenderResponse:
         return next()
@@ -54,7 +60,7 @@ class PulseMiddleware:
         self,
         *,
         request: PulseRequest,
-        ctx: MutableMapping[str, Any],
+        session: dict[str, Any],
         next: Callable[[], ConnectResponse],
     ) -> ConnectResponse:
         return next()
@@ -62,8 +68,8 @@ class PulseMiddleware:
     def message(
         self,
         *,
-        ctx: MutableMapping[str, Any],
         data: ClientMessage,
+        session: dict[str, Any],
         next: Callable[[], Ok[None]],
     ) -> Ok[None] | Deny:
         """Handle per-message authorization.
@@ -87,9 +93,9 @@ class MiddlewareStack(PulseMiddleware):
         self,
         *,
         path: str,
-        route_info: RouteInfo,
         request: PulseRequest,
-        context: MutableMapping[str, Any],
+        route_info: RouteInfo,
+        session: dict[str, Any],
         next: Callable[[], PrerenderResponse],
     ) -> PrerenderResponse:
         def dispatch(index: int) -> PrerenderResponse:
@@ -104,7 +110,7 @@ class MiddlewareStack(PulseMiddleware):
                 path=path,
                 route_info=route_info,
                 request=request,
-                context=context,
+                session=session,
                 next=_next,
             )
 
@@ -114,7 +120,7 @@ class MiddlewareStack(PulseMiddleware):
         self,
         *,
         request: PulseRequest,
-        ctx: MutableMapping[str, Any],
+        session: dict[str, Any],
         next: Callable[[], ConnectResponse],
     ) -> ConnectResponse:
         def dispatch(index: int) -> ConnectResponse:
@@ -125,15 +131,15 @@ class MiddlewareStack(PulseMiddleware):
             def _next() -> ConnectResponse:
                 return dispatch(index + 1)
 
-            return mw.connect(request=request, ctx=ctx, next=_next)
+            return mw.connect(request=request, session=session, next=_next)
 
         return dispatch(0)
 
     def message(
         self,
         *,
-        ctx: MutableMapping[str, Any],
         data: ClientMessage,
+        session: dict[str, Any],
         next: Callable[[], Ok[None]],
     ) -> Ok[None] | Deny:
         def dispatch(index: int) -> Ok[None] | Deny:
@@ -144,7 +150,7 @@ class MiddlewareStack(PulseMiddleware):
             def _next() -> Ok[None]:
                 return dispatch(index + 1)  # type: ignore[return-value]
 
-            return mw.message(ctx=ctx, data=data, next=_next)
+            return mw.message(session=session, data=data, next=_next)
 
         return dispatch(0)
 

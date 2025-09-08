@@ -33,7 +33,6 @@ from pulse.middleware import (
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree
 from pulse.session import Session, PulseContext
-from pulse.reactive_extensions import ReactiveDict
 from pulse.session_store import (
     InMemorySessionStore,
     SessionStore,
@@ -167,6 +166,25 @@ class App:
         def healthcheck():
             return {"health": "ok", "message": "Pulse server is running"}
 
+        # ------- Internal helpers (response + ctx) -------
+        def _respond_json(payload: VDOM, set_sid: Optional[str]) -> JSONResponse:
+            resp = JSONResponse(payload)
+            if set_sid:
+                try:
+                    self.cookie.set_on_fastapi_response(resp, set_sid)
+                except Exception:
+                    logger.exception("Failed to set session cookie on FastAPI response")
+            return resp
+
+        def _get_or_create_ctx_from_sid(sid: Optional[str]):
+            created = False
+            ctx = self.session_store.get(sid) if sid else None
+            if ctx is None:
+                sid = new_sid()
+                ctx = self.session_store.create(sid)
+                created = True
+            return sid, ctx, created
+
         # RouteInfo is the request body
         @self.fastapi.post("/prerender/{path:path}")
         def prerender(path: str, route_info: RouteInfo, request: Request):
@@ -176,15 +194,9 @@ class App:
             # Determine client address/origin prior to creating the session
             client_addr: str | None = _extract_client_address_from_fastapi(request)
             # Session cookie handling
-            sid = self.cookie.get_sid_from_fastapi(request)
-            ctx = None
-            set_cookie_needed = False
-            if sid:
-                ctx = self.session_store.get(sid)
-            if ctx is None:
-                sid = new_sid()
-                ctx = self.session_store.create(sid)
-                set_cookie_needed = True
+            sid, ctx, created = _get_or_create_ctx_from_sid(
+                self.cookie.get_sid_from_fastapi(request)
+            )
             session = Session(
                 uuid4().hex,
                 self.routes,
@@ -198,10 +210,7 @@ class App:
 
             if not self._middleware:
                 payload = _render()
-                resp = JSONResponse(payload)
-                if set_cookie_needed and sid:
-                    self.cookie.set_on_fastapi_response(resp, sid)
-                return resp
+                return _respond_json(payload, sid if created else None)
             try:
 
                 def _next():
@@ -225,10 +234,7 @@ class App:
                 raise HTTPException(status_code=404)
             elif isinstance(res, Ok):
                 payload = res.payload
-                resp = JSONResponse(payload)
-                if set_cookie_needed and sid:
-                    self.cookie.set_on_fastapi_response(resp, sid)
-                return resp
+                return _respond_json(payload, sid if created else None)
             # Fallback to default render
             else:
                 raise NotImplementedError(f"Unexpected middleware return: {res}")
@@ -239,7 +245,7 @@ class App:
             client_addr: str | None = _extract_client_address_from_socketio(environ)
             # Parse cookies from environ
             cookie_sid = self.cookie.get_sid_from_socketio(environ)
-            ctx = self.session_store.get(cookie_sid) if cookie_sid else None
+            _sid, ctx, _created = _get_or_create_ctx_from_sid(cookie_sid)
             # Create session with shared context
             session = self.create_session(
                 sid, client_address=client_addr, session_context=ctx

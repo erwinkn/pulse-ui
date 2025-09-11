@@ -205,7 +205,6 @@ class Effect:
         on_error: Optional[Callable[[Exception], None]] = None,
         deps: Optional[list[Signal | Computed]] = None,
     ):
-        print(f"Creating effect {name}, lazy = {lazy}")
         self.fn: EffectFn = fn
         self.name: Optional[str] = name
         self.on_error: Optional[Callable[[Exception], None]] = on_error

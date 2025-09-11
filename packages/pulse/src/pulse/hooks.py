@@ -3,7 +3,9 @@ from typing import (
     Any,
     Callable,
     Generic,
+    Literal,
     Mapping,
+    Optional,
     ParamSpec,
     Protocol,
     TypeVar,
@@ -13,6 +15,7 @@ from typing import (
     cast,
 )
 
+from pulse.context import PULSE_CONTEXT
 from pulse.flags import IS_PRERENDERING
 from pulse.reactive_extensions import ReactiveDict
 from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
@@ -134,6 +137,7 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 # -----------------------------------------------------
 # Ugly types, sorry, no other way to do this in Python
 # -----------------------------------------------------
+S = TypeVar("S", bound=State)
 S1 = TypeVar("S1", bound=State)
 S2 = TypeVar("S2", bound=State)
 S3 = TypeVar("S3", bound=State)
@@ -147,122 +151,117 @@ S10 = TypeVar("S10", bound=State)
 
 
 Ts = TypeVarTuple("Ts")
+StateOrStateLambda = State | Callable[[], State]
 
 
 @overload
-def states(*args: Unpack[tuple[S1 | Callable[[], S1]]]) -> S1: ...
+def states(s1: S1 | Callable[[], S1], /) -> S1: ...
 @overload
 def states(
-    *args: Unpack[tuple[S1 | Callable[[], S1], S2 | Callable[[], S2]]],
+    s1: S1 | Callable[[], S1], s2: S2 | Callable[[], S2], /
 ) -> tuple[S1, S2]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[S1 | Callable[[], S1], S2 | Callable[[], S2], S3 | Callable[[], S3]]
-    ],
+    s1: S1 | Callable[[], S1], s2: S2 | Callable[[], S2], s3: S3 | Callable[[], S3], /
 ) -> tuple[S1, S2, S3]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    /,
 ) -> tuple[S1, S2, S3, S4]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    s8: S8 | Callable[[], S8],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-            S9 | Callable[[], S9],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    s8: S8 | Callable[[], S8],
+    s9: S9 | Callable[[], S9],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8, S9]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-            S9 | Callable[[], S9],
-            S10 | Callable[[], S10],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    s8: S8 | Callable[[], S8],
+    s9: S9 | Callable[[], S9],
+    s10: S10 | Callable[[], S10],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8, S9, S10]: ...
 
 
 @overload
-def states(*args: S1 | Callable[[], S1]) -> tuple[S1, ...]: ...
+def states(
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    s8: S8 | Callable[[], S8],
+    s9: S9 | Callable[[], S9],
+    s10: S10 | Callable[[], S10],
+    /,
+    *args: S | Callable[[], S],
+) -> tuple[S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | S, ...]: ...
+
+
+# @overload
+# def states(*args: S | Callable[[], S]) -> tuple[S, ...]: ...
 
 
 def states(*args: State | Callable[[], State]):
@@ -327,8 +326,6 @@ def effects(
 
 
 def route() -> RouteContext:
-    from pulse.render_session import PULSE_CONTEXT
-
     ctx = PULSE_CONTEXT.get()
     if not ctx or not ctx.route:
         raise RuntimeError(
@@ -342,7 +339,6 @@ def session() -> ReactiveDict:
 
     Available during prerender, rendering, callbacks, middleware, and API routes.
     """
-    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
     if not ctx:
@@ -365,8 +361,6 @@ async def call_api(
     Accepts either a relative path or absolute URL; URL resolution happens in
     RenderSession.call_api using the session's server_address.
     """
-    from pulse.render_session import PULSE_CONTEXT
-
     ctx = PULSE_CONTEXT.get()
     if ctx is None or ctx.render is None:
         raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
@@ -380,12 +374,42 @@ async def call_api(
     )
 
 
+async def set_cookie(
+    name: str,
+    value: str,
+    domain: Optional[str] = None,
+    secure: bool = True,
+    samesite: Literal["lax", "strict", "none"] = "lax",
+    max_age_seconds: int = 7 * 24 * 3600,
+) -> None:
+    """Request the client to set a cookie whose definition is stored server-side.
+
+    Stores (name, value, options) on the server under an opaque token, then calls
+    the internal endpoint with that token. Prevents client tampering with values.
+    """
+    ctx = PULSE_CONTEXT.get()
+    if ctx is None or ctx.render is None:
+        raise RuntimeError(
+            "set_cookie() must be invoked inside a Pulse callback context"
+        )
+
+    token = ctx.app.register_cookie_to_set(
+        name,
+        value,
+        domain=domain,
+        secure=secure,
+        samesite=samesite,
+        max_age_seconds=max_age_seconds,
+    )
+    path = f"/pulse/set-cookie?token={token}"
+    await ctx.render.call_api(path, method="POST", credentials="include")
+
+
 def navigate(path: str) -> None:
     """Instruct the client to navigate to a new path for the current route tree.
 
     Non-async; sends a server message to the client to perform SPA navigation.
     """
-    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
     if ctx is None or ctx.render is None:
@@ -408,7 +432,6 @@ def server_address() -> str:
 
     Example return values: "http://127.0.0.1:8000", "https://example.com:443"
     """
-    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
     if ctx is None or ctx.render is None:
@@ -427,7 +450,6 @@ def client_address() -> str:
 
     Available during prerender (HTTP request) and after websocket connect.
     """
-    from pulse.render_session import PULSE_CONTEXT
 
     ctx = PULSE_CONTEXT.get()
     if ctx is None or ctx.render is None:
@@ -480,7 +502,6 @@ def global_state(
     - id str: process-wide shared singleton for that id (cross-session)
       - constructor args: pass on the first call for that id; ignored thereafter
     """
-    from pulse.render_session import PULSE_CONTEXT
 
     if isinstance(factory, type):
         cls = factory

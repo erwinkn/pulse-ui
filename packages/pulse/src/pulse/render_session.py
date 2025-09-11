@@ -1,12 +1,11 @@
 from asyncio import iscoroutine
 import logging
 from typing import Any, Callable, Optional
-from contextvars import ContextVar
-from dataclasses import dataclass
 import uuid
 import asyncio
 import traceback
 
+from pulse.context import PULSE_CONTEXT
 from pulse.messages import (
     RouteInfo,
     ServerInitMessage,
@@ -24,29 +23,6 @@ from pulse.state import State
 logger = logging.getLogger(__file__)
 
 
-@dataclass
-class PulseContext:
-    """Composite context accessible to hooks and internals.
-
-    - session: per-user session ReactiveDict
-    - render: per-connection RenderSession
-    - route: active RouteContext for this render/effect scope
-    """
-
-    session: ReactiveDict
-    render: "RenderSession | None"
-    route: RouteContext | None
-
-    def __enter__(self):
-        self._token = PULSE_CONTEXT.set(self)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._token is not None:
-            PULSE_CONTEXT.reset(self._token)
-            self._token = None
-
-
 class RouteMount:
     def __init__(
         self, render: "RenderSession", route: Route | Layout, route_info: RouteInfo
@@ -56,21 +32,6 @@ class RouteMount:
         self.route = RouteContext(route_info)
         self.effect: Optional[Effect] = None
         self._pulse_ctx_token = None
-
-    def __enter__(self):
-        self._pulse_ctx_token = PULSE_CONTEXT.set(
-            PulseContext(
-                session=self.render.session,
-                render=self.render,
-                route=self.route,
-            )
-        )
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._pulse_ctx_token is not None:
-            PULSE_CONTEXT.reset(self._pulse_ctx_token)
-            self._pulse_ctx_token = None
 
 
 class RenderSession:
@@ -98,6 +59,8 @@ class RenderSession:
         self._pending_api: dict[str, asyncio.Future] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
+        # Pending cookies to set keyed by opaque token
+        self._cookies_to_set: dict[str, dict] = {}
 
     # Effect error handler (batch-level) to surface runtime errors
     def _on_effect_error(self, effect, exc: Exception):
@@ -166,29 +129,28 @@ class RenderSession:
 
     def execute_callback(self, path: str, key: str, args: list | tuple):
         active_route = self.route_mounts[path]
-        with active_route:
-            try:
-                cb = active_route.root.callbacks[key]
-                fn, n_params = cb.fn, cb.n_args
-                res = fn(*args[:n_params])
-                if iscoroutine(res):
-                    loop = asyncio.get_running_loop()
-                    task = loop.create_task(res)
+        try:
+            cb = active_route.root.callbacks[key]
+            fn, n_params = cb.fn, cb.n_args
+            res = fn(*args[:n_params])
+            if iscoroutine(res):
+                loop = asyncio.get_running_loop()
+                task = loop.create_task(res)
 
-                    def _on_task_done(t):
-                        try:
-                            t.result()
-                        except Exception as e:  # noqa: BLE001 - forward all
-                            self.report_error(
-                                path,
-                                "callback",
-                                e,
-                                {"callback": key, "async": True},
-                            )
+                def _on_task_done(t):
+                    try:
+                        t.result()
+                    except Exception as e:  # noqa: BLE001 - forward all
+                        self.report_error(
+                            path,
+                            "callback",
+                            e,
+                            {"callback": key, "async": True},
+                        )
 
-                    task.add_done_callback(_on_task_done)
-            except Exception as e:  # noqa: BLE001 - forward all
-                self.report_error(path, "callback", e, {"callback": key})
+                task.add_done_callback(_on_task_done)
+        except Exception as e:  # noqa: BLE001 - forward all
+            self.report_error(path, "callback", e, {"callback": key})
 
     async def call_api(
         self,
@@ -251,6 +213,21 @@ class RenderSession:
                 }
             )
 
+    # ---- Cookie registration for secure set_cookie helper ----
+    def register_cookie_to_set(
+        self, name: str, value: str, options: dict | None = None
+    ) -> str:
+        token = uuid.uuid4().hex
+        self._cookies_to_set[token] = {
+            "name": name,
+            "value": value,
+            "options": options or {},
+        }
+        return token
+
+    def pop_cookie_to_set(self, token: str) -> dict | None:
+        return self._cookies_to_set.pop(token, None)
+
     def get_or_create_route_mount(
         self, path: str, route_info: Optional[RouteInfo] = None, create=False
     ):
@@ -289,9 +266,10 @@ class RenderSession:
             return
 
         mount = self.get_or_create_route_mount(path, route_info, create=True)
+        ctx = PULSE_CONTEXT.get()
 
         def _render_effect():
-            with mount:
+            with ctx:
                 if mount.root.render_count == 0:
                     vdom = mount.root.render_vdom(prerendering=False)
                     self.notify(
@@ -320,28 +298,21 @@ class RenderSession:
     def navigate(self, path: str, route_info: RouteInfo):
         # Route is already mounted, we can just update the routing state
         mount = self.get_or_create_route_mount(path, route_info, create=False)
-        with mount:
-            try:
-                mount.route.update(route_info)
-            except Exception as e:  # noqa: BLE001
-                self.report_error(path, "navigate", e)
+        try:
+            mount.route.update(route_info)
+        except Exception as e:  # noqa: BLE001
+            self.report_error(path, "navigate", e)
 
     def unmount(self, path: str):
         if path not in self.route_mounts:
             return
-        active_route = self.route_mounts.pop(path)
-        with active_route:
-            try:
-                active_route.root.unmount()
-            except Exception as e:  # noqa: BLE001
-                self.report_error(path, "unmount", e)
+        try:
+            active_route = self.route_mounts.pop(path)
+            active_route.root.unmount()
+        except Exception as e:  # noqa: BLE001
+            self.report_error(path, "unmount", e)
 
     # ---- Session-side utilities ----
     def update_context(self, updates: dict[str, Any]) -> None:
         """Update session context and trigger rerender for all active routes."""
         self.session.update(updates)
-
-
-PULSE_CONTEXT: ContextVar["PulseContext | None"] = ContextVar(
-    "pulse_context", default=None
-)

@@ -8,11 +8,13 @@ to define routes and configure their Pulse application.
 import asyncio
 import logging
 import os
+import secrets
 from enum import IntEnum
 from typing import Optional, Sequence, TypeVar, cast
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from pulse.cookies import Cookie
 import socketio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +22,8 @@ from fastapi.responses import JSONResponse
 
 import pulse.flatted as flatted
 from pulse.codegen import Codegen, CodegenConfig
-from pulse.messages import ClientMessage, RouteInfo, ServerMessage
+from pulse.context import PulseContext
+from pulse.messages import ClientMessage, ServerMessage
 from pulse.middleware import (
     Deny,
     MiddlewareStack,
@@ -28,13 +31,16 @@ from pulse.middleware import (
     Ok,
     PulseMiddleware,
     Redirect,
+    PulseCoreMiddleware,
 )
 from pulse.react_component import ReactComponent, registered_react_components
-from pulse.render_session import PulseContext, RenderSession
+from pulse.reactive_extensions import ReactiveDict
+from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
-from pulse.routing import Layout, Route, RouteTree
+from pulse.routing import Layout, Route, RouteInfo, RouteTree
+from pulse.reactive import Effect
 from pulse.session import (
-    InMemorySessionStore,
+    CookieSessionStore,
     SessionCookie,
     SessionStore,
     new_sid,
@@ -104,16 +110,37 @@ class App:
         self.status = AppStatus.created
         # Persist the server address for use by sessions (API calls, etc.)
         self.server_address: Optional[str] = server_address
+        # Maps logical session id -> active websocket ids for that session
+        self._session_to_ws_ids: dict[str, set[str]] = {}
+        # Maps websocket id -> owning logical session id
+        self._ws_to_session_id: dict[str, str] = {}
         # Allow single middleware or sequence; compose into a stack when needed
         if middleware is None:
             self.middleware: PulseMiddleware | None = None
         elif isinstance(middleware, PulseMiddleware):
-            self.middleware = middleware
+            self.middleware = MiddlewareStack([PulseCoreMiddleware(), middleware])
         else:
-            self.middleware = MiddlewareStack(middleware)
+            self.middleware = MiddlewareStack([PulseCoreMiddleware(), *middleware])
 
         self.cookie = cookie or SessionCookie()
-        self.session_store = session_store or InMemorySessionStore()
+        if session_store is not None:
+            self.session_store = session_store
+        else:
+            # Default to cookie-backed sessions. Use provided secret or generate ephemeral for dev.
+            secret = (
+                os.environ.get("PULSE_SESSION_SECRET")
+                or os.environ.get("SECRET_KEY")
+                or ""
+            )
+            if not secret:
+                # Ephemeral secret for development; cookies will be invalidated on restart
+                secret = secrets.token_urlsafe(32)
+                logger.warning(
+                    "PULSE_SESSION_SECRET not set; using ephemeral secret for CookieSessionStore"
+                )
+            self.session_store = CookieSessionStore(secret)
+
+        self.cookies_to_set: dict[str,]
 
     def setup(self):
         if self.status >= AppStatus.initialized:
@@ -129,7 +156,9 @@ class App:
             allow_headers=["*"],
         )
 
-        # Mount PulseContext for all FastAPI routes (no route info, no socket)
+        # Mount PulseContext for all FastAPI routes (no route info). Other API
+        # routes / middleware should be added at the module-level, which means
+        # this middleware will wrap all of them.
         @self.fastapi.middleware("http")
         async def pulse_context_middleware(request: Request, call_next):
             # Prefer an active RenderSession when provided by header
@@ -138,17 +167,17 @@ class App:
             if header_sid:
                 render_session = self.render_sessions.get(header_sid)
 
-            sid = self.cookie.get_sid_from_fastapi(request)
-            sid, session, session_created = self.get_or_create_session(sid)
+            cookie = self.cookie.get_from_fastapi(request)
+            sid, session, _ = self.get_or_create_session(cookie)
             # Set context for the duration of the request; do not set cookie here
-            with PulseContext(session=session, render=render_session, route=None):
+            with PulseContext(
+                session=session, render=render_session, route=None, app=self
+            ):
+                # Handle request
                 response = await call_next(request)
-            # If we created a new sid for this request (no cookie), set it now
-            if session_created:
-                try:
-                    self.cookie.set_on_fastapi_response(response, sid)
-                except Exception:
-                    logger.exception("Failed to set session cookie on FastAPI response")
+            new_cookie = self.session_store.cookie_value(sid, session)
+            if new_cookie != cookie:
+                self.cookie.set_on_fastapi_response(response, new_cookie)
             return response
 
         @self.fastapi.get("/health")
@@ -157,14 +186,16 @@ class App:
 
         # ------- Internal helpers (response + ctx) -------
         def _respond_and_set_sid_cookie(
-            payload: VDOM, set_sid: Optional[str]
+            payload: VDOM, sid_for_cookie: Optional[str], session: ReactiveDict
         ) -> JSONResponse:
             resp = JSONResponse(payload)
-            if set_sid:
-                try:
-                    self.cookie.set_on_fastapi_response(resp, set_sid)
-                except Exception:
-                    logger.exception("Failed to set session cookie on FastAPI response")
+            # sid_for_cookie can be None if get_or_create failed, but normally not
+            token = (
+                self.session_store.cookie_value(sid_for_cookie, session)
+                if sid_for_cookie is not None
+                else self.session_store.cookie_value("", session)
+            )
+            self.cookie.set_on_fastapi_response(resp, token)
             return resp
 
         # RouteInfo is the request body
@@ -177,7 +208,7 @@ class App:
             client_addr: str | None = _extract_client_address_from_fastapi(request)
             # Session cookie handling
             sid, session, created = self.get_or_create_session(
-                self.cookie.get_sid_from_fastapi(request)
+                self.cookie.get_from_fastapi(request)
             )
             render = RenderSession(
                 uuid4().hex,
@@ -192,7 +223,7 @@ class App:
 
             if not self.middleware:
                 payload = _prerender()
-                return _respond_and_set_sid_cookie(payload, sid if created else None)
+                return _respond_and_set_sid_cookie(payload, sid, session)
             try:
 
                 def _next():
@@ -216,7 +247,7 @@ class App:
                 raise HTTPException(status_code=404)
             elif isinstance(res, Ok):
                 payload = res.payload
-                return _respond_and_set_sid_cookie(payload, sid if created else None)
+                return _respond_and_set_sid_cookie(payload, sid, session)
             # Fallback to default render
             else:
                 raise NotImplementedError(f"Unexpected middleware return: {res}")
@@ -226,12 +257,14 @@ class App:
             # Determine client address/origin prior to creating the session
             client_addr: str | None = _extract_client_address_from_socketio(environ)
             # Parse cookies from environ
-            cookie_sid = self.cookie.get_sid_from_socketio(environ)
+            cookie_sid = self.cookie.get_from_socketio(environ)
             _sid, session, _created = self.get_or_create_session(cookie_sid)
             # Create session with shared context
             render = self.create_render_session(
                 sid, client_address=client_addr, session=session
             )
+            # Map this websocket id to the logical session id and refcount
+            self._link_ws_to_session(sid, _sid)
             if self.middleware:
                 try:
 
@@ -243,8 +276,8 @@ class App:
                         session=render.session,
                         next=_next,
                     )
-                except Exception:
-                    logger.exception("Error in connect middleware")
+                except Exception as exc:
+                    render.report_error("/", "connect", exc)
                     res = Ok(None)
                 if isinstance(res, Deny):
                     # Tear down the created session if denied
@@ -258,6 +291,39 @@ class App:
                 asyncio.create_task(self.sio.emit("message", message, to=sid))
 
             render.connect(on_message)
+
+        @self.fastapi.post("/pulse/set-cookie")
+        def set_cookie_route(request: Request):
+            # Pulse context middleware has already established the session
+            try:
+                token = request.query_params.get("token")  # type: ignore[attr-defined]
+                resp = JSONResponse({"ok": True})
+                if token:
+                    # If a secure cookie registration exists, set that cookie
+                    sid_header = request.headers.get("x-pulse-session-id")
+                    render = (
+                        self.render_sessions.get(sid_header or "")
+                        if sid_header
+                        else None
+                    )
+                    entry = render.pop_cookie_to_set(token) if render else None
+                    if entry:
+                        name = entry.get("name")
+                        value = entry.get("value")
+                        opts = entry.get("options", {}) or {}
+                        if hasattr(resp, "set_cookie") and name and value:
+                            resp.set_cookie(key=name, value=value, **opts)
+                        return resp
+
+                # Fallback: set/update the Pulse session cookie itself
+                cookie_sid = self.cookie.get_from_fastapi(request)
+                sid, session, _ = self.get_or_create_session(cookie_sid)
+                token_value = self.session_store.cookie_value(sid, session)
+                self.cookie.set_on_fastapi_response(resp, token_value)
+                return resp
+            except Exception:
+                logger.exception("/pulse/set-cookie failed")
+                raise HTTPException(status_code=500)
 
         @self.sio.event
         def disconnect(sid: str):
@@ -282,7 +348,7 @@ class App:
                             )
                             if isinstance(res, Deny):
                                 # Report as server error for this path
-                                path = cast(str, data.get("path", 'api_response'))
+                                path = cast(str, data.get("path", "api_response"))
                                 render.report_error(
                                     path,
                                     "server",
@@ -312,7 +378,9 @@ class App:
             except Exception as e:
                 try:
                     # Best effort: report error for this path if available
-                    path = cast(str, data.get("path", "") if isinstance(data, dict) else "")
+                    path = cast(
+                        str, data.get("path", "") if isinstance(data, dict) else ""
+                    )
                     maybe_render = self.render_sessions.get(sid)
                     if maybe_render:
                         maybe_render.report_error(path, "server", e)
@@ -324,7 +392,7 @@ class App:
     def get_or_create_session(self, sid: Optional[str]):
         created = False
         session = self.session_store.get(sid) if sid else None
-        if session is None:
+        if sid is None or session is None:
             sid = new_sid()
             session = self.session_store.create(sid)
             created = True
@@ -373,8 +441,66 @@ class App:
     def close_session(self, id: str):
         if id not in self.render_sessions:
             raise KeyError(f"RenderSession {id} does not exist")
+        # Refcount and dispose autosave when the last WS for this session id closes
+        try:
+            sess_id = self._unlink_ws_from_session(id)
+            if sess_id is not None:
+                self._dispose_autosave_if_inactive(sess_id)
+        except Exception:
+            pass
         self.render_sessions[id].close()
         del self.render_sessions[id]
+
+    def register_user_cookie(self, sid: str, cookie: Cookie, value: str): ...
+
+    # ----- Render<->Session mapping helpers -----
+    def _link_ws_to_session(self, ws_id: str, session_id: str) -> None:
+        """Associate a websocket id to a logical session id and update refcounts."""
+        self._ws_to_session_id[ws_id] = session_id
+        ws_set = self._session_to_ws_ids.get(session_id)
+        if ws_set is None:
+            ws_set = set()
+            self._session_to_ws_ids[session_id] = ws_set
+        ws_set.add(ws_id)
+
+    def _unlink_ws_from_session(self, ws_id: str) -> str | None:
+        """Remove a websocket id mapping. Returns the associated session id if any."""
+        session_id = self._ws_to_session_id.pop(ws_id, None)
+        if session_id is not None:
+            ws_ids = self._session_to_ws_ids.get(session_id)
+            if ws_ids and ws_id in ws_ids:
+                ws_ids.discard(ws_id)
+                if not ws_ids:
+                    self._session_to_ws_ids.pop(session_id, None)
+        return session_id
+
+    def _get_session_id_for_ws(self, ws_id: str) -> str | None:
+        return self._ws_to_session_id.get(ws_id)
+
+    def _get_ws_ids_for_session(self, session_id: str) -> set[str] | None:
+        return self._session_to_ws_ids.get(session_id)
+
+    def _dispose_autosave_if_inactive(self, session_id: str) -> None:
+        """Dispose autosave effect when no active websockets are left for the session."""
+        ws_ids = self._session_to_ws_ids.get(session_id)
+        if not ws_ids:
+            eff = self._session_autosave_effects.pop(session_id, None)
+            if eff is not None:
+                try:
+                    eff.dispose()
+                except Exception:
+                    pass
+
+    def get_active_render_for_session(self, session_id: str) -> RenderSession | None:
+        """Pick any active RenderSession associated with the given logical session id."""
+        try:
+            ws_ids = self._session_to_ws_ids.get(session_id)
+            if not ws_ids:
+                return None
+            wsid = next(iter(ws_ids))
+            return self.render_sessions.get(wsid)
+        except Exception:
+            return None
 
 
 def add_react_components(

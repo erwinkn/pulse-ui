@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from pulse.messages import ClientMessage, RouteInfo
 from pulse.request import PulseRequest
 from pulse.vdom import VDOM
+from pulse.context import PulseContext
 
 
 T = TypeVar("T")
@@ -22,11 +23,9 @@ class NotFound: ...
 
 class Ok(Generic[T]):
     @overload
-    def __init__(self, payload: T) -> None:
-        ...
+    def __init__(self, payload: T) -> None: ...
     @overload
-    def __init__(self, payload: T | None = None) -> None:
-        ...
+    def __init__(self, payload: T | None = None) -> None: ...
     def __init__(self, payload: T | None = None) -> None:
         self.payload = payload
 
@@ -162,3 +161,66 @@ def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
     Prefer passing a `list`/`tuple` to `App` directly.
     """
     return MiddlewareStack(list(middlewares))
+
+
+class PulseCoreMiddleware(PulseMiddleware):
+    """Core middleware that ensures a PulseContext is mounted around the chain.
+
+    It executes first to set up the context, then lets subsequent middlewares
+    run, and finally returns their response unchanged.
+    """
+
+    # --- Normalization helpers -------------------------------------------------
+    def _normalize_prerender_response(self, res: Any) -> PrerenderResponse:
+        if isinstance(res, (Ok, Redirect, NotFound)):
+            return res  # type: ignore[return-value]
+        # Treat any other value as a VDOM payload
+        return Ok(res)
+
+    def _normalize_connect_response(self, res: Any) -> ConnectResponse:
+        if isinstance(res, (Ok, Deny)):
+            return res  # type: ignore[return-value]
+        # Treat any other value as allow
+        return Ok(None)
+
+    def _normalize_message_response(self, res: Any) -> Ok[None] | Deny:
+        if isinstance(res, (Ok, Deny)):
+            return res  # type: ignore[return-value]
+        # Treat any other value as allow
+        return Ok(None)
+
+    def prerender(
+        self,
+        *,
+        path: str,
+        request: PulseRequest,
+        route_info: RouteInfo,
+        session: dict[str, Any],
+        next: Callable[[], PrerenderResponse],
+    ) -> PrerenderResponse:
+        # No render object is available during prerender middleware
+        with PulseContext(session=session, render=None, route=None, app=None):
+            res = next()
+        return self._normalize_prerender_response(res)
+
+    def connect(
+        self,
+        *,
+        request: PulseRequest,
+        session: dict[str, Any],
+        next: Callable[[], ConnectResponse],
+    ) -> ConnectResponse:
+        with PulseContext(session=session, render=None, route=None, app=None):
+            res = next()
+        return self._normalize_connect_response(res)
+
+    def message(
+        self,
+        *,
+        data: ClientMessage,
+        session: dict[str, Any],
+        next: Callable[[], Ok[None]],
+    ) -> Ok[None] | Deny:
+        with PulseContext(session=session, render=None, route=None, app=None):
+            res = next()
+        return self._normalize_message_response(res)

@@ -1,68 +1,70 @@
 from .app import App
-from .render_session import RenderSession, PulseContext, RouteMount
-from .state import State
-from .routing import Route, Layout
-from .reactive import Signal, Computed, Effect, Batch, Untrack, IgnoreBatch
-from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive
-from .hooks import (
-    states,
-    effects,
-    setup,
-    route,
-    call_api,
-    navigate,
-    server_address,
-    client_address,
-    global_state,
-    session,
-)
-from .session import (
-    SessionCookie,
-    SessionStore,
-    InMemorySessionStore,
-)
-from .html import *  # noqa: F403
-from .middleware import (
-    PulseMiddleware,
-    Ok,
-    Redirect,
-    NotFound,
-    Deny,
-    PulseRequest,
-    ConnectResponse,
-    PrerenderResponse,
-    MiddlewareStack,
-    stack,
-)
-from .decorators import computed, effect, query
-
-from .vdom import (
-    Node,
-    Element,
-    Primitive,
-    VDOMNode,
-    component,
-    Component,
-    ComponentNode,
-    Child,
-)
-
 from .codegen import CodegenConfig
 from .components import (
     Link,
     Outlet,
 )
+from .context import PulseContext
+from .decorators import computed, effect, query
+from .helpers import CssStyle, EventHandler, For, JsFunction, JsObject
+from .hooks import (
+    call_api,
+    client_address,
+    effects,
+    global_state,
+    navigate,
+    route,
+    server_address,
+    session,
+    set_cookie,
+    setup,
+    states,
+)
+from .html import *  # noqa: F403
+from .middleware import (
+    ConnectResponse,
+    Deny,
+    MiddlewareStack,
+    NotFound,
+    Ok,
+    PrerenderResponse,
+    PulseMiddleware,
+    Redirect,
+    stack,
+)
 from .react_component import (
-    ComponentRegistry,
     COMPONENT_REGISTRY,
+    DEFAULT,
+    ComponentRegistry,
+    Prop,
     ReactComponent,
+    prop,
     react_component,
     registered_react_components,
-    Prop,
-    prop,
-    DEFAULT,
 )
-from .helpers import EventHandler, For, JsFunction, CssStyle, JsObject
+from .reactive import Batch, Computed, Effect, IgnoreBatch, Signal, Untrack
+from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive
+from .render_session import RenderSession, RouteMount
+from .request import PulseRequest
+from .routing import Layout, Route
+from .session import (
+    CookieSessionStore,
+    InMemorySessionStore,
+    ServerSessionStore,
+    SessionCookie,
+    SessionStore,
+)
+from .state import State
+from .vdom import (
+    Child,
+    Component,
+    ComponentNode,
+    Element,
+    Node,
+    Primitive,
+    VDOMNode,
+    component,
+)
 
 # Public API re-exports
 __all__ = [
@@ -93,6 +95,7 @@ __all__ = [
     "setup",
     "route",
     "call_api",
+    "set_cookie",
     "navigate",
     "server_address",
     "client_address",
@@ -145,5 +148,7 @@ __all__ = [
     # Session context infra
     "SessionCookie",
     "SessionStore",
+    "ServerSessionStore",
     "InMemorySessionStore",
+    "CookieSessionStore",
 ]

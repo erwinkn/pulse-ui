@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 import pulse as ps
 from pulse.codegen import CodegenConfig

@@ -7,7 +7,7 @@ that enables automatic re-rendering when state changes.
 
 from abc import ABC, ABCMeta
 from enum import IntEnum
-from typing import Any, Callable, Generic, Iterator, Never, TypeVar
+from typing import Any, Callable, Generic,Iterator, Never, Optional, TypeVar
 
 from pulse.query import QueryProperty
 from pulse.reactive import (
@@ -65,17 +65,28 @@ class StateEffect(Generic[T]):
     def __init__(
         self,
         fn: "Callable[[State], T]",
+        name: Optional[str] = None,
+        immediate: bool = False,
+        lazy: bool = False,
         on_error: "Callable[[Exception], None] | None" = None,
+        deps: "list[Signal | Computed] | None" = None,
     ):
         self.fn = fn
+        self.name = name
+        self.immediate = immediate
         self.on_error = on_error
+        self.lazy = lazy
+        self.deps = deps
 
     def initialize(self, state: "State", name: str):
         bound_method = self.fn.__get__(state, state.__class__)
         effect = Effect(
             bound_method,
-            name=f"{state.__class__.__name__}.{name}",
+            name=self.name or f"{state.__class__.__name__}.{name}",
+            immediate=self.immediate,
+            lazy=self.lazy,
             on_error=self.on_error,
+            deps=self.deps,
         )
         setattr(state, name, effect)
 
@@ -215,10 +226,6 @@ class State(ABC, metaclass=StateMeta):
                         continue
                     # Validate query properties have a key defined
                     if isinstance(attr, QueryProperty):
-                        if getattr(attr, "key_fn", None) is None:
-                            raise RuntimeError(
-                                f"State query '{name}' is missing a '@{name}.key' definition"
-                            )
                         # Initialize query now so Effect exists and can be managed by hooks
                         attr.initialize(self)
                     if isinstance(attr, StateEffect):

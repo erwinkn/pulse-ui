@@ -355,24 +355,33 @@ def counter_details():
 
 class QueryDemoState(ps.State):
     user_id: int = 1
-    calls: int = 0
+    keyed_calls: int = 0
+    unkeyed_calls: int = 0
 
     @ps.query
-    async def user(self) -> dict:
-        self.calls += 1
+    async def user_keyed(self) -> dict:
+        self.keyed_calls += 1
         # Simulate async work
         await asyncio.sleep(1)
         return {"id": self.user_id, "name": f"User {self.user_id}"}
 
-    @user.key
+    @user_keyed.key
     def _user_key(self):
         return ("user", self.user_id)
+
+    # Unkeyed (auto-tracked) query variant
+    @ps.query
+    async def user_unkeyed(self) -> dict:
+        with ps.Untrack():
+            self.unkeyed_calls += 1
+        # Simulate async work
+        await asyncio.sleep(1)
+        return {"id": self.user_id, "name": f"User {self.user_id}"}
 
 
 @ps.component
 def query_demo():
     state = ps.states(QueryDemoState)
-    q = state.user
 
     def prev():
         state.user_id = max(1, state.user_id - 1)
@@ -380,18 +389,52 @@ def query_demo():
     def next_():
         state.user_id = state.user_id + 1
 
-    def refetch():
-        q.refetch()
-
     return ps.div(
         ps.h2("Query Demo", className="text-2xl font-bold mb-4"),
         ps.p(f"User ID: {state.user_id}"),
-        ps.p(f"Fetch calls: {state.calls}"),
-        ps.p("Loading..." if q.is_loading else f"Data: {q.data}", className="mb-4"),
+        ps.p(f"Fetch calls (keyed): {state.keyed_calls}"),
+        ps.p(f"Fetch calls (unkeyed): {state.unkeyed_calls}"),
         ps.div(
-            ps.button("Prev", onClick=prev, className="btn-secondary mr-2"),
-            ps.button("Next", onClick=next_, className="btn-secondary mr-2"),
-            ps.button("Refetch", onClick=refetch, className="btn-primary"),
+            ps.h3("Keyed query", className="text-xl font-semibold mt-4"),
+            ps.p(
+                "Loading..."
+                if state.user_keyed.is_loading
+                else f"Data: {state.user_keyed.data}",
+                className="mb-2",
+            ),
+            ps.div(
+                ps.button("Prev", onClick=prev, className="btn-secondary mr-2"),
+                ps.button("Next", onClick=next_, className="btn-secondary mr-2"),
+                ps.button(
+                    "Refetch keyed",
+                    onClick=state.user_keyed.refetch,
+                    className="btn-primary",
+                ),
+                className="mb-4",
+            ),
+            className="mb-6 p-3 rounded bg-white shadow",
+        ),
+        ps.div(
+            ps.h3("Unkeyed (auto-tracked) query", className="text-xl font-semibold"),
+            ps.p(
+                "Loading..."
+                if state.user_unkeyed.is_loading
+                else f"Data: {state.user_unkeyed.data}",
+                className="mb-2",
+            ),
+            ps.div(
+                ps.button(
+                    "Refetch unkeyed",
+                    onClick=state.user_unkeyed.refetch,
+                    className="btn-primary",
+                ),
+                className="mb-2",
+            ),
+            ps.p(
+                "Note: changing User ID will automatically refetch this query without an explicit key.",
+                className="text-sm text-gray-600",
+            ),
+            className="p-3 rounded bg-white shadow",
         ),
         className="p-4",
     )

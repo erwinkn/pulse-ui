@@ -1,6 +1,6 @@
 # Separate file from reactive.py due to needing to import from state too
 
-from typing import Any, Callable, Coroutine, Optional, TypeVar, overload
+from typing import Any, Callable, Coroutine, Optional, Protocol, TypeVar, overload
 
 from pulse.state import State, ComputedProperty, StateEffect
 from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn
@@ -49,6 +49,12 @@ def computed(fn: Optional[Callable] = None, *, name: Optional[str] = None):
         return decorator
 
 
+StateEffectFn = (
+    Callable[[TState], Optional[EffectCleanup]]
+    | Callable[[TState], Coroutine[Any, Any, Optional[EffectCleanup]]]
+)
+
+
 @overload
 def effect(
     fn: EffectFn,
@@ -61,9 +67,7 @@ def effect(
 # In practice this overload returns a StateEffect, but it gets converted into an
 # Effect at state instantiation.
 @overload
-def effect(
-    fn: Callable[[TState], None] | Callable[[TState], EffectCleanup],
-) -> Effect: ...
+def effect(fn: StateEffectFn) -> Effect: ...
 @overload
 def effect(
     fn: None = None,
@@ -72,7 +76,7 @@ def effect(
     immediate: bool = False,
     lazy: bool = False,
     on_error: Optional[Callable[[Exception], None]] = None,
-) -> Callable[[EffectFn], Effect]: ...
+) -> Callable[[EffectFn | StateEffectFn], Effect]: ...
 
 
 def effect(
@@ -89,7 +93,13 @@ def effect(
         params = list(sig.parameters.values())
 
         if len(params) == 1 and params[0].name == "self":
-            return StateEffect(func, on_error=on_error)
+            return StateEffect(
+                func,
+                name=name,
+                immediate=immediate,
+                lazy=lazy,
+                on_error=on_error,
+            )
 
         if len(params) > 0:
             raise TypeError(
@@ -123,7 +133,7 @@ def query(
 @overload
 def query(
     fn: None = None, *, keep_alive: bool = False, keep_previous_data: bool = True
-) -> Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...
+) -> Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...  # pyright: ignore[reportInvalidTypeVarUse]
 
 
 # When an initial value is provided, the resulting property narrows data to non-None
@@ -143,7 +153,7 @@ def query(
     keep_previous_data: bool = True,
     initial: T,
 ) -> Callable[
-    [Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T]
+    [Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T]  # pyright: ignore[reportInvalidTypeVarUse]
 ]: ...
 
 

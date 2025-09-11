@@ -59,6 +59,49 @@ class CounterState(ps.State):
         )
 
 
+class AsyncEffectState(ps.State):
+    running: bool = False
+    step: int = 0
+
+    @ps.effect(lazy=True)
+    async def ticker(self):
+        # Simulate writes across awaits
+        await asyncio.sleep(0.5)
+        with ps.Untrack():
+            self.step += 1
+            self.step += 1
+        await asyncio.sleep(0.5)
+        # Keep going by rescheduling itself through a signal
+        self.step += 1
+
+    def start(self):
+        self.ticker.schedule()
+        self.running = True
+
+    def stop(self):
+        print(f"Real type of self.ticker: {type(self.ticker)}")
+        self.ticker.cancel()
+        self.running = False
+
+
+# Async effect demo component illustrating batch updates and cancellation
+@ps.component
+def AsyncEffectDemo():
+    state = ps.states(AsyncEffectState)
+
+    return ps.div(
+        ps.div(
+            ps.button(
+                "Start async effect", onClick=state.start, className="btn-secondary"
+            ),
+            ps.button("Stop", onClick=state.stop, className="btn-secondary ml-2"),
+            className="mb-2",
+        ),
+        ps.p(f"Running: {state.running}", className="text-sm"),
+        ps.p(f"Step: {state.step}", className="text-sm"),
+    )
+
+
 # A state class for the layout, demonstrating persistent state across routes.
 class LayoutState(ps.State):
     """A state class for the layout, demonstrating persistent state across routes."""
@@ -440,6 +483,7 @@ def app_layout():
                 ps.Link("Counter", to="/counter", className="nav-link"),
                 ps.Link("About", to="/about", className="nav-link"),
                 ps.Link("Components", to="/components", className="nav-link"),
+                ps.Link("Async effect", to="/async-effect", className="nav-link"),
                 ps.Link("Date Picker", to="/datepicker", className="nav-link"),
                 ps.Link(
                     "Dynamic",
@@ -477,6 +521,7 @@ app = ps.App(
                 ps.Route("/components", components_demo),
                 ps.Route("/datepicker", datepicker_demo),
                 ps.Route("/query", query_demo),
+                ps.Route("/async-effect", AsyncEffectDemo),
                 ps.Route("/dynamic/:route_id/:optional_segment?/*", dynamic_route),
             ],
         )

@@ -7,7 +7,7 @@ that enables automatic re-rendering when state changes.
 
 from abc import ABC, ABCMeta
 from enum import IntEnum
-from typing import Any, Callable, Generic, Never, TypeVar
+from typing import Any, Callable, Generic, Never, Optional, TypeVar
 
 from pulse.query import QueryProperty
 from pulse.reactive import (
@@ -64,16 +64,24 @@ class StateEffect(Generic[T]):
     def __init__(
         self,
         fn: "Callable[[State], T]",
+        name: Optional[str] = None,
+        immediate: bool = False,
+        lazy: bool = False,
         on_error: "Callable[[Exception], None] | None" = None,
     ):
         self.fn = fn
+        self.name = name
+        self.immediate = immediate
         self.on_error = on_error
+        self.lazy = lazy
 
     def initialize(self, state: "State", name: str):
         bound_method = self.fn.__get__(state, state.__class__)
         effect = Effect(
             bound_method,
-            name=f"{state.__class__.__name__}.{name}",
+            name=self.name or f"{state.__class__.__name__}.{name}",
+            immediate=self.immediate,
+            lazy=self.lazy,
             on_error=self.on_error,
         )
         setattr(state, name, effect)

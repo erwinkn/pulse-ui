@@ -1,9 +1,8 @@
 import asyncio
 
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
-import uuid
 
-from pulse.reactive import Computed, Effect, Signal, Untrack
+from pulse.reactive import Computed, Effect, Signal
 
 
 T = TypeVar("T")
@@ -85,7 +84,6 @@ class QueryResult(Generic[T]):
 
 class StateQuery(Generic[T]):
     def __init__(self, result: QueryResult[T], effect: Effect):
-        # print("[StateQuery] create")
         self._result = result
         self._effect = effect
 
@@ -112,7 +110,8 @@ class StateQuery(Generic[T]):
 
     def refetch(self) -> None:
         # print("[StateQuery] refetch -> schedule effect")
-        # If we use .schedule(), the effect may not rerun if the query key hasn't changed
+        # Cancel any in-flight run and run immediately
+        self._effect.cancel()
         self._effect.run()
 
     def dispose(self) -> None:
@@ -170,78 +169,62 @@ class QueryProperty(Generic[T]):
             # print(f"[QueryProperty:{self.name}] return cached StateQuery")
             return query
 
-        if self.key_fn is None:
-            raise RuntimeError(
-                f"State query '{self.name}' is missing a '@{self.name}.key' definition"
-            )
+        # key_fn being None means auto-tracked mode
 
         # Bind methods to this instance
         bound_fetch = self.fetch_fn.__get__(obj, obj.__class__)
-        bound_key_fn = self.key_fn.__get__(obj, obj.__class__)
         # print(f"[QueryProperty:{self.name}] bound fetch and key functions")
 
         result = QueryResult[T](initial_data=self.initial)
 
-        def compute_key():
-            k = bound_key_fn()
-            # print(f"[QueryProperty:{self.name}] compute key -> {k!r}")
-            return k
+        key_computed: Optional[Computed[tuple]] = None
+        if self.key_fn:
+            bound_key_fn = self.key_fn.__get__(obj, obj.__class__)
 
-        key_computed = Computed(compute_key, name=f"query.key.{self.name}")
-        setattr(obj, self._priv_key_comp, key_computed)
+            def compute_key():
+                k = bound_key_fn()
+                return k
 
-        def run_effect():
+            key_computed = Computed(compute_key, name=f"query.key.{self.name}")
+            setattr(obj, self._priv_key_comp, key_computed)
+
+        inflight_key: Optional[tuple] = None
+
+        async def run_effect():
             # print(f"[QueryProperty:{self.name}] effect RUN")
-            key = key_computed()
-            # print(f"[QueryProperty:{self.name}] effect key={key!r}")
+            # In key mode, deduplicate same-key concurrent reruns
+            if key_computed:
+                key = key_computed()
 
-            # Start fetch in the event loop
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                # No running loop; skip fetch and mark as error for now
-                result._set_error(RuntimeError("No running event loop for query fetch"))
-                return
+                nonlocal inflight_key
+                # De-duplicate same-key concurrent reruns
+                if key is not None and inflight_key == key:
+                    return None
+                inflight_key = key
 
             # Set loading immediately; optionally clear previous data
             result._set_loading(clear_data=not self.keep_previous_data)
+            try:
+                data = await bound_fetch()
+            except asyncio.CancelledError:
+                # Cancellation is expected during reruns; swallow
+                return None
+            except Exception as e:  # noqa: BLE001
+                result._set_error(e)
+            else:
+                result._set_success(data)
+            finally:
+                inflight_key = None
 
-            # Create a background task for the user async function
-            with Untrack():
-                unique_id = uuid.uuid4().hex[:8]
-                task = loop.create_task(
-                    bound_fetch(), name=f"query:{self.name}:{key}:{unique_id}"
-                )
-            # print(
-            #     f"[QueryProperty:{self.name}] scheduled task={task.get_name()} running={not task.done()}"
-            # )
-
-            def on_done(fut: asyncio.Task):
-                try:
-                    data = fut.result()
-                except asyncio.CancelledError:
-                    # print(f"[QueryProperty:{self.name}] task cancelled")
-                    return
-                except Exception as e:  # noqa: BLE001
-                    # print(f"[QueryProperty:{self.name}] task error -> {e!r}")
-                    result._set_error(e)
-                else:
-                    # print(f"[QueryProperty:{self.name}] task success -> {data!r}")
-                    result._set_success(data)
-
-            task.add_done_callback(on_done)
-
-            def cleanup() -> None:
-                # print(f"[QueryProperty:{self.name}] cleanup")
-                if task and not task.done():
-                    # print(
-                    #     f"[QueryProperty:{self.name}] cleanup -> cancel task {task.get_name()}"
-                    # )
-                    task.cancel()
-
-            return cleanup
-
-        effect = Effect(run_effect, name=f"query.effect.{self.name}")
+        # In key mode, depend only on key via explicit deps
+        if key_computed is not None:
+            effect = Effect(
+                run_effect,
+                name=f"query.effect.{self.name}",
+                deps=[key_computed],
+            )
+        else:
+            effect = Effect(run_effect, name=f"query.effect.{self.name}")
         # print(f"[QueryProperty:{self.name}] created Effect name={effect.name}")
 
         # Expose the effect on the instance so State.effects() sees it

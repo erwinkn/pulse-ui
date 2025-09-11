@@ -170,13 +170,29 @@ async def test_state_query_refetch_on_key_change():
     assert s.calls == 2
 
 
-def test_state_query_missing_key_raises():
-    class Bad(ps.State):
-        @ps.query
-        async def user(self): ...
+@pytest.mark.asyncio
+async def test_state_query_missing_key_defaults_to_auto_tracking():
+    class S(ps.State):
+        uid: int = 1
 
-    with pytest.raises(RuntimeError, match="missing a '@user.key'"):
-        Bad()
+        @ps.query
+        async def user(self):
+            await asyncio.sleep(0)
+            return {"id": self.uid}
+
+    s = S()
+    q = s.user
+    # initial
+    flush_effects()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q.data == {"id": 1}
+    # change dep -> auto re-run
+    s.uid = 2
+    flush_effects()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert q.data == {"id": 2}
 
 
 @pytest.mark.asyncio

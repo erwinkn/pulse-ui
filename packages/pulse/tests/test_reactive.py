@@ -641,6 +641,56 @@ def test_effect_doesnt_rerun_if_read_after_write():
     assert e.runs == 2
 
 
+def test_effect_explicit_deps_disable_tracking():
+    a = Signal(0, name="a")
+    b = Signal(0, name="b")
+
+    runs = 0
+
+    @effect(deps=[a])
+    def e():
+        nonlocal runs
+        runs += 1
+        # Read both signals, but only `a` should be tracked
+        _ = a()
+        _ = b()
+
+    flush_effects()
+    assert runs == 1
+
+    b.write(1)
+    flush_effects()
+    # Should NOT rerun because b is not tracked
+    assert runs == 1
+
+    a.write(1)
+    flush_effects()
+    # Should rerun because a is an explicit dep
+    assert runs == 2
+
+
+def test_effect_explicit_deps_only():
+    a = Signal(0, name="a")
+    b = Signal(0, name="b")
+
+    @effect(deps=[b])
+    def e():
+        # Read a dynamically; only b should matter
+        _ = a()
+        _ = b()
+
+    flush_effects()
+    assert e.runs == 1
+
+    a.write(1)
+    flush_effects()
+    assert e.runs == 1
+
+    b.write(2)
+    flush_effects()
+    assert e.runs == 2
+
+
 @pytest.mark.asyncio
 async def test_async_effect_tracks_dependencies_across_await():
     s1 = Signal(1, name="s1")

@@ -1,9 +1,9 @@
 # Separate file from reactive.py due to needing to import from state too
 
-from typing import Any, Callable, Coroutine, Optional, Protocol, TypeVar, overload
+from typing import Any, Callable, Coroutine, Optional, TypeVar, overload
 
 from pulse.state import State, ComputedProperty, StateEffect
-from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn
+from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn, Signal
 import inspect
 from pulse.query import QueryProperty, QueryPropertyWithInitial
 
@@ -63,6 +63,7 @@ def effect(
     immediate: bool = False,
     lazy: bool = False,
     on_error: Optional[Callable[[Exception], None]] = None,
+    deps: Optional[list[Signal | Computed]] = None,
 ) -> Effect: ...
 # In practice this overload returns a StateEffect, but it gets converted into an
 # Effect at state instantiation.
@@ -76,6 +77,7 @@ def effect(
     immediate: bool = False,
     lazy: bool = False,
     on_error: Optional[Callable[[Exception], None]] = None,
+    deps: Optional[list[Signal | Computed]] = None,
 ) -> Callable[[EffectFn | StateEffectFn], Effect]: ...
 
 
@@ -86,6 +88,7 @@ def effect(
     immediate: bool = False,
     lazy: bool = False,
     on_error: Optional[Callable[[Exception], None]] = None,
+    deps: Optional[list[Signal | Computed]] = None,
 ):
     # The type checker is not happy if I don't specify the `/` here.
     def decorator(func: Callable, /):
@@ -99,6 +102,7 @@ def effect(
                 immediate=immediate,
                 lazy=lazy,
                 on_error=on_error,
+                deps=deps,
             )
 
         if len(params) > 0:
@@ -113,6 +117,7 @@ def effect(
             immediate=immediate,
             lazy=lazy,
             on_error=on_error,
+            deps=deps,
         )
 
     if fn:
@@ -167,7 +172,7 @@ def query(
     QueryProperty[T]
     | QueryPropertyWithInitial[T]
     | Callable[
-        [Callable[[TState], Coroutine[Any, Any, T]]],
+        [Callable[[TState], Coroutine[Any, Any, T]]],  # pyright: ignore[reportInvalidTypeVarUse]
         QueryProperty[T] | QueryPropertyWithInitial[T],
     ]
 ):

@@ -203,6 +203,7 @@ class Effect:
         immediate: bool = False,
         lazy: bool = False,
         on_error: Optional[Callable[[Exception], None]] = None,
+        deps: Optional[list[Signal | Computed]] = None,
     ):
         print(f"Creating effect {name}, lazy = {lazy}")
         self.fn: EffectFn = fn
@@ -219,6 +220,8 @@ class Effect:
         self.batch: Optional[Batch] = None
         # Track an async task when running async effects
         self._task: Optional[asyncio.Task] = None
+        # Explicit dependency control
+        self._explicit_deps: Optional[list[Signal | Computed]] = deps
 
         if immediate and lazy:
             raise ValueError("An effect cannot be boht immediate and lazy")
@@ -309,7 +312,11 @@ class Effect:
             child.parent = self
 
         # Update deps
-        self.deps = scope.deps
+        if self._explicit_deps is not None:
+            # Only use provided deps (ignore automatic tracking)
+            self.deps = {dep: dep.last_change for dep in self._explicit_deps}
+        else:
+            self.deps = scope.deps
         new_deps = set(self.deps)
         add_deps = new_deps - prev_deps
         remove_deps = prev_deps - new_deps
@@ -402,9 +409,7 @@ class Effect:
                 self.last_run = execution_epoch
             self._apply_scope_results(scope, prev_deps)
 
-        # Create task outside of any tracking
-        with Untrack():
-            self._task = loop.create_task(_runner(), name=self._task_name())
+        self._task = loop.create_task(_runner(), name=self._task_name())
 
     def cancel(self) -> None:
         if self._task and not self._task.done():

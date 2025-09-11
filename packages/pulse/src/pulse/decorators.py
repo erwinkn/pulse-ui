@@ -3,7 +3,7 @@
 from typing import Any, Callable, Coroutine, Optional, TypeVar, overload
 
 from pulse.state import State, ComputedProperty, StateEffect
-from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn
+from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn, Signal
 import inspect
 from pulse.query import QueryProperty, QueryPropertyWithInitial
 
@@ -49,6 +49,12 @@ def computed(fn: Optional[Callable] = None, *, name: Optional[str] = None):
         return decorator
 
 
+StateEffectFn = (
+    Callable[[TState], Optional[EffectCleanup]]
+    | Callable[[TState], Coroutine[Any, Any, Optional[EffectCleanup]]]
+)
+
+
 @overload
 def effect(
     fn: EffectFn,
@@ -57,13 +63,12 @@ def effect(
     immediate: bool = False,
     lazy: bool = False,
     on_error: Optional[Callable[[Exception], None]] = None,
+    deps: Optional[list[Signal | Computed]] = None,
 ) -> Effect: ...
 # In practice this overload returns a StateEffect, but it gets converted into an
 # Effect at state instantiation.
 @overload
-def effect(
-    fn: Callable[[TState], None] | Callable[[TState], EffectCleanup],
-) -> Effect: ...
+def effect(fn: StateEffectFn) -> Effect: ...
 @overload
 def effect(
     fn: None = None,
@@ -72,7 +77,8 @@ def effect(
     immediate: bool = False,
     lazy: bool = False,
     on_error: Optional[Callable[[Exception], None]] = None,
-) -> Callable[[EffectFn], Effect]: ...
+    deps: Optional[list[Signal | Computed]] = None,
+) -> Callable[[EffectFn | StateEffectFn], Effect]: ...
 
 
 def effect(
@@ -82,6 +88,7 @@ def effect(
     immediate: bool = False,
     lazy: bool = False,
     on_error: Optional[Callable[[Exception], None]] = None,
+    deps: Optional[list[Signal | Computed]] = None,
 ):
     # The type checker is not happy if I don't specify the `/` here.
     def decorator(func: Callable, /):
@@ -89,7 +96,14 @@ def effect(
         params = list(sig.parameters.values())
 
         if len(params) == 1 and params[0].name == "self":
-            return StateEffect(func, on_error=on_error)
+            return StateEffect(
+                func,
+                name=name,
+                immediate=immediate,
+                lazy=lazy,
+                on_error=on_error,
+                deps=deps,
+            )
 
         if len(params) > 0:
             raise TypeError(
@@ -103,6 +117,7 @@ def effect(
             immediate=immediate,
             lazy=lazy,
             on_error=on_error,
+            deps=deps,
         )
 
     if fn:
@@ -123,7 +138,7 @@ def query(
 @overload
 def query(
     fn: None = None, *, keep_alive: bool = False, keep_previous_data: bool = True
-) -> Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...
+) -> Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...  # pyright: ignore[reportInvalidTypeVarUse]
 
 
 # When an initial value is provided, the resulting property narrows data to non-None
@@ -143,7 +158,7 @@ def query(
     keep_previous_data: bool = True,
     initial: T,
 ) -> Callable[
-    [Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T]
+    [Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T]  # pyright: ignore[reportInvalidTypeVarUse]
 ]: ...
 
 
@@ -157,7 +172,7 @@ def query(
     QueryProperty[T]
     | QueryPropertyWithInitial[T]
     | Callable[
-        [Callable[[TState], Coroutine[Any, Any, T]]],
+        [Callable[[TState], Coroutine[Any, Any, T]]],  # pyright: ignore[reportInvalidTypeVarUse]
         QueryProperty[T] | QueryPropertyWithInitial[T],
     ]
 ):

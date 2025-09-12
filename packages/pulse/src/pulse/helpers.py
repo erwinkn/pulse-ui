@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from typing import (
     Any,
     Callable,
@@ -8,6 +9,7 @@ from typing import (
     Protocol,
     TypeVar,
     TypeVarTuple,
+    TypedDict,
     Unpack,
 )
 
@@ -35,6 +37,15 @@ class JsObject(Protocol): ...
 
 
 MISSING = object()
+
+class File(TypedDict):
+    name: str
+    type: str
+    "Indicates the MIME type of the data. If the type is unknown, the string is empty."
+    size: int
+    last_modified: int
+    "Last modified time of the file, in millisecond since the UNIX epoch"
+    contents: bytes
 
 
 class Sentinel:

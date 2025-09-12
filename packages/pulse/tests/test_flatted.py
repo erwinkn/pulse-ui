@@ -245,6 +245,100 @@ class TestFlatted:
         assert parsed["self"] is parsed
         assert parsed["metadata"]["parent"] is parsed
 
+    def test_parse_file_object(self):
+        """Manual parse test for File-like objects coming from the client."""
+        file_bytes = b"\x00\x01abc"
+        serialized = {
+            "__pulse": "file",
+            "__id": 1,
+            "name": "foo.txt",
+            "type": "text/plain",
+            "size": 5,
+            "lastModified": 1710000000000,
+            "file": file_bytes,
+        }
+
+        parsed = parse(serialized)
+
+        assert parsed["name"] == "foo.txt"
+        assert parsed["type"] == "text/plain"
+        assert parsed["size"] == 5
+        assert parsed["last_modified"] == 1710000000000
+        assert parsed["contents"] == file_bytes
+
+    def test_parse_formdata_mixed_values(self):
+        """Manual parse test for FormData-like objects with mixed value types."""
+        date = datetime.datetime(2024, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        serialized = {
+            "__pulse": "formdata",
+            "__id": 1,
+            "fields": {
+                "title": "hello",
+                "tags": ["a", "b"],
+                "when": {
+                    "__pulse": "date",
+                    "__id": 2,
+                    "timestamp": int(date.timestamp() * 1000),
+                },
+                "upload": {
+                    "__pulse": "file",
+                    "__id": 3,
+                    "name": "foo.txt",
+                    "type": "text/plain",
+                    "size": 5,
+                    "lastModified": 1710000000000,
+                    "file": b"abcde",
+                },
+            },
+        }
+
+        parsed = parse(serialized)
+
+        assert parsed["title"] == "hello"
+        assert parsed["tags"] == ["a", "b"]
+        assert isinstance(parsed["when"], datetime.datetime)
+        assert parsed["upload"]["name"] == "foo.txt"
+        assert parsed["upload"]["contents"] == b"abcde"
+
+    def test_parse_formdata_multiple_values_per_key(self):
+        """FormData with duplicate keys should deserialize as lists of values."""
+        file1 = {
+            "__pulse": "file",
+            "__id": 10,
+            "name": "a.txt",
+            "type": "text/plain",
+            "size": 1,
+            "lastModified": 1710000000000,
+            "file": b"a",
+        }
+        file2 = {
+            "__pulse": "file",
+            "__id": 11,
+            "name": "b.txt",
+            "type": "text/plain",
+            "size": 1,
+            "lastModified": 1710000000001,
+            "file": b"b",
+        }
+
+        serialized = {
+            "__pulse": "formdata",
+            "__id": 1,
+            "fields": {
+                "names": ["alice", "bob"],
+                "files": [file1, file2],
+            },
+        }
+
+        parsed = parse(serialized)
+
+        assert parsed["names"] == ["alice", "bob"]
+        assert isinstance(parsed["files"], list)
+        assert parsed["files"][0]["name"] == "a.txt"
+        assert parsed["files"][0]["contents"] == b"a"
+        assert parsed["files"][1]["name"] == "b.txt"
+        assert parsed["files"][1]["contents"] == b"b"
+
     def test_empty_containers(self):
         """Test empty objects and arrays."""
         data = {"empty": {"obj": {}, "arr": []}}

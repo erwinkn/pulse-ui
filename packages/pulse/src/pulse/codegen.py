@@ -63,15 +63,14 @@ class Codegen:
 
     def generate_all(self, server_address: str):
         # Keep track of all generated files
-        generated_files = [
+        generated_files = set([
             self.generate_layout_tsx(server_address),
             self.generate_routes_ts(),
             *(
                 self.generate_route(route, server_address=server_address)
                 for route in self.routes.flat_tree.values()
             ),
-        ]
-        generated_files = set(generated_files)
+        ])
 
         # Clean up any remaining files that are not part of the generated files
         for path in self.output_folder.rglob("*"):

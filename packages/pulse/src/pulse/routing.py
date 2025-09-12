@@ -1,12 +1,9 @@
-from contextvars import ContextVar
 import re
 from typing import Callable, Optional, Sequence, TypedDict, cast
 from dataclasses import dataclass, field
 
 from pulse.react_component import ReactComponent
-from pulse.reactive import Untrack
 from pulse.reactive_extensions import ReactiveDict
-from pulse.state import State
 from pulse.vdom import Node, Component
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
@@ -307,6 +304,12 @@ class RouteInfo(TypedDict):
 
 
 class RouteContext:
+    def __init__(self, info: RouteInfo):
+        self.info = cast(RouteInfo, ReactiveDict(info))
+
+    def update(self, info: RouteInfo):
+        self.info.update(info)
+
     @property
     def pathname(self) -> str:
         return self.info["pathname"]
@@ -330,21 +333,3 @@ class RouteContext:
     @property
     def catchall(self) -> list[str]:
         return self.info["catchall"]
-
-    def __init__(self, info: RouteInfo):
-        self.info = cast(RouteInfo, ReactiveDict(info))
-
-    def update(self, info: RouteInfo):
-        self.info.update(info)
-
-    def __enter__(self):
-        self._token = ROUTE_CONTEXT.set(self)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        ROUTE_CONTEXT.reset(self._token)
-
-
-ROUTE_CONTEXT: ContextVar[RouteContext | None] = ContextVar(
-    "pulse_route_context", default=None
-)

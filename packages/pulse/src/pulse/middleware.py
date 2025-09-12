@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar, Callable, Any
-from collections.abc import MutableMapping, Sequence
+from typing import Generic, TypeVar, Callable, Any, overload
+from collections.abc import Sequence
 from pulse.messages import ClientMessage, RouteInfo
 from pulse.request import PulseRequest
 from pulse.vdom import VDOM
+from pulse.context import PulseContext
 
 
 T = TypeVar("T")
@@ -21,7 +22,11 @@ class NotFound: ...
 
 
 class Ok(Generic[T]):
-    def __init__(self, payload: T = None) -> None:
+    @overload
+    def __init__(self, payload: T) -> None: ...
+    @overload
+    def __init__(self, payload: T | None = None) -> None: ...
+    def __init__(self, payload: T | None = None) -> None:
         self.payload = payload
 
 
@@ -43,9 +48,9 @@ class PulseMiddleware:
         self,
         *,
         path: str,
-        route_info: RouteInfo,
         request: PulseRequest,
-        context: MutableMapping[str, Any],
+        route_info: RouteInfo,
+        session: dict[str, Any],
         next: Callable[[], PrerenderResponse],
     ) -> PrerenderResponse:
         return next()
@@ -54,7 +59,7 @@ class PulseMiddleware:
         self,
         *,
         request: PulseRequest,
-        ctx: MutableMapping[str, Any],
+        session: dict[str, Any],
         next: Callable[[], ConnectResponse],
     ) -> ConnectResponse:
         return next()
@@ -62,8 +67,8 @@ class PulseMiddleware:
     def message(
         self,
         *,
-        ctx: MutableMapping[str, Any],
         data: ClientMessage,
+        session: dict[str, Any],
         next: Callable[[], Ok[None]],
     ) -> Ok[None] | Deny:
         """Handle per-message authorization.
@@ -87,9 +92,9 @@ class MiddlewareStack(PulseMiddleware):
         self,
         *,
         path: str,
-        route_info: RouteInfo,
         request: PulseRequest,
-        context: MutableMapping[str, Any],
+        route_info: RouteInfo,
+        session: dict[str, Any],
         next: Callable[[], PrerenderResponse],
     ) -> PrerenderResponse:
         def dispatch(index: int) -> PrerenderResponse:
@@ -104,7 +109,7 @@ class MiddlewareStack(PulseMiddleware):
                 path=path,
                 route_info=route_info,
                 request=request,
-                context=context,
+                session=session,
                 next=_next,
             )
 
@@ -114,7 +119,7 @@ class MiddlewareStack(PulseMiddleware):
         self,
         *,
         request: PulseRequest,
-        ctx: MutableMapping[str, Any],
+        session: dict[str, Any],
         next: Callable[[], ConnectResponse],
     ) -> ConnectResponse:
         def dispatch(index: int) -> ConnectResponse:
@@ -125,15 +130,15 @@ class MiddlewareStack(PulseMiddleware):
             def _next() -> ConnectResponse:
                 return dispatch(index + 1)
 
-            return mw.connect(request=request, ctx=ctx, next=_next)
+            return mw.connect(request=request, session=session, next=_next)
 
         return dispatch(0)
 
     def message(
         self,
         *,
-        ctx: MutableMapping[str, Any],
         data: ClientMessage,
+        session: dict[str, Any],
         next: Callable[[], Ok[None]],
     ) -> Ok[None] | Deny:
         def dispatch(index: int) -> Ok[None] | Deny:
@@ -144,7 +149,7 @@ class MiddlewareStack(PulseMiddleware):
             def _next() -> Ok[None]:
                 return dispatch(index + 1)  # type: ignore[return-value]
 
-            return mw.message(ctx=ctx, data=data, next=_next)
+            return mw.message(session=session, data=data, next=_next)
 
         return dispatch(0)
 
@@ -156,3 +161,63 @@ def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
     Prefer passing a `list`/`tuple` to `App` directly.
     """
     return MiddlewareStack(list(middlewares))
+
+
+class PulseCoreMiddleware(PulseMiddleware):
+    """Core middleware that ensures a PulseContext is mounted around the chain.
+
+    It executes first to set up the context, then lets subsequent middlewares
+    run, and finally returns their response unchanged.
+    """
+
+    # --- Normalization helpers -------------------------------------------------
+    def _normalize_prerender_response(self, res: Any) -> PrerenderResponse:
+        if isinstance(res, (Ok, Redirect, NotFound)):
+            return res  # type: ignore[return-value]
+        # Treat any other value as a VDOM payload
+        return Ok(res)
+
+    def _normalize_connect_response(self, res: Any) -> ConnectResponse:
+        if isinstance(res, (Ok, Deny)):
+            return res  # type: ignore[return-value]
+        # Treat any other value as allow
+        return Ok(None)
+
+    def _normalize_message_response(self, res: Any) -> Ok[None] | Deny:
+        if isinstance(res, (Ok, Deny)):
+            return res  # type: ignore[return-value]
+        # Treat any other value as allow
+        return Ok(None)
+
+    def prerender(
+        self,
+        *,
+        path: str,
+        request: PulseRequest,
+        route_info: RouteInfo,
+        session: dict[str, Any],
+        next: Callable[[], PrerenderResponse],
+    ) -> PrerenderResponse:
+        # No render object is available during prerender middleware
+        res = next()
+        return self._normalize_prerender_response(res)
+
+    def connect(
+        self,
+        *,
+        request: PulseRequest,
+        session: dict[str, Any],
+        next: Callable[[], ConnectResponse],
+    ) -> ConnectResponse:
+        res = next()
+        return self._normalize_connect_response(res)
+
+    def message(
+        self,
+        *,
+        data: ClientMessage,
+        session: dict[str, Any],
+        next: Callable[[], Ok[None]],
+    ) -> Ok[None] | Deny:
+        res = next()
+        return self._normalize_message_response(res)

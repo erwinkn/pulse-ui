@@ -4,7 +4,7 @@ Handles Dates, circular references, and basic Python objects
 """
 
 from datetime import datetime
-from typing import Any 
+from typing import Any
 
 
 def stringify(input_value: Any) -> Any:
@@ -126,29 +126,61 @@ def parse(input_value: Any) -> Any:
         if obj.get("__pulse") == "date":
             obj_id = obj["__id"]
             timestamp_ms = obj["timestamp"]
-            resolved = datetime.fromtimestamp(timestamp_ms / 1000.0)
-            objects[obj_id] = resolved
-            return resolved
+            resolved_date = datetime.fromtimestamp(timestamp_ms / 1000.0)
+            objects[obj_id] = resolved_date
+            return resolved_date
+
+        # Handle File objects serialized from the client
+        if obj.get("__pulse") == "file":
+            obj_id = obj["__id"]
+            # Resolve the underlying binary payload if present (socket.io may provide bytes directly)
+            raw_file_value = obj.get("file")
+            resolved_bytes = resolve(raw_file_value)
+
+            resolved_file = {
+                "name": obj.get("name"),
+                "type": obj.get("type"),
+                "size": obj.get("size"),
+                "last_modified": obj.get("lastModified"),
+                "contents": resolved_bytes,
+            }
+            objects[obj_id] = resolved_file
+            return resolved_file
+
+        # Handle FormData objects serialized from the client
+        if obj.get("__pulse") == "formdata":
+            obj_id = obj["__id"]
+            fields = obj.get("fields", {})
+            resolved_formdata: dict[str, Any] = {}
+            objects[obj_id] = resolved_formdata
+
+            # Fields may contain single values or arrays (for duplicate keys)
+            for key, value in fields.items():
+                if isinstance(value, list):
+                    resolved_formdata[key] = [resolve(item) for item in value]
+                else:
+                    resolved_formdata[key] = resolve(value)
+            return resolved_formdata
 
         if obj.get("__pulse") == "array":
             obj_id = obj["__id"]
-            resolved = []
-            objects[obj_id] = resolved
+            resolved_list: list[Any] = []
+            objects[obj_id] = resolved_list
 
             items = obj["items"]
             for item in items:
-                resolved.append(resolve(item))
-            return resolved
+                resolved_list.append(resolve(item))
+            return resolved_list
 
         if obj.get("__pulse") == "object":
             obj_id = obj["__id"]
-            resolved = {}
-            objects[obj_id] = resolved
+            resolved_object: dict[str, Any] = {}
+            objects[obj_id] = resolved_object
 
             user_data = obj["__data"]
             for key, val in user_data.items():
-                resolved[key] = resolve(val)
-            return resolved
+                resolved_object[key] = resolve(val)
+            return resolved_object
 
         # Unknown object type - process properties
         result = {}

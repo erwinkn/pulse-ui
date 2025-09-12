@@ -43,6 +43,7 @@ from .middleware import (
     Redirect,
     stack,
 )
+from .plugin import Plugin
 from .react_component import (
     COMPONENT_REGISTRY,
     DEFAULT,
@@ -124,6 +125,8 @@ __all__ = [
     "PrerenderResponse",
     "MiddlewareStack",
     "stack",
+    # Plugin
+    "Plugin",
     # Decorators
     "computed",
     "effect",

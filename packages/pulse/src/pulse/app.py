@@ -44,6 +44,7 @@ from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
+from pulse.plugin import Plugin
 from pulse.user_session import (
     CookieSessionStore,
     SessionStore,
@@ -91,6 +92,7 @@ class App:
         dev_routes: Optional[Sequence[Route | Layout]] = None,
         codegen: Optional[CodegenConfig] = None,
         middleware: Optional[PulseMiddleware | Sequence[PulseMiddleware]] = None,
+        plugins: Optional[Sequence[Plugin]] = None,
         cookie: Optional[Cookie] = None,
         session_store: Optional[SessionStore] = None,
         server_address: Optional[str] = None,
@@ -108,10 +110,20 @@ class App:
             mode = "dev"
         self.mode: PulseMode = cast(PulseMode, mode)
 
-        # Build the complete route list, optionally including dev-only routes
+        # Resolve and store plugins (sorted by priority, highest first)
+        self.plugins: list[Plugin] = []
+        if plugins:
+            self.plugins = sorted(
+                list(plugins), key=lambda p: getattr(p, "priority", 0), reverse=True
+            )
+
+        # Build the complete route list from constructor args and plugins
         all_routes: list[Route | Layout] = list(routes or [])
-        if self.mode == "dev" and dev_routes:
-            all_routes.extend(dev_routes)
+        # Add plugin routes after user-defined routes
+        for plugin in self.plugins:
+            all_routes.extend(plugin.routes())
+            if self.mode == "dev":
+                all_routes.extend(plugin.dev_routes())
 
         # Auto-add React components to all routes
         add_react_components(all_routes, registered_react_components())
@@ -146,6 +158,9 @@ class App:
             except Exception:
                 logger.exception("Failed to create Pulse dev lock file")
                 raise
+            # Call plugin on_startup hooks before serving
+            for plugin in self.plugins:
+                plugin.on_startup(self)
             try:
                 yield
             finally:
@@ -166,11 +181,17 @@ class App:
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
         self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
         if middleware is None:
-            self.middleware = MiddlewareStack([PulseCoreMiddleware()])
+            mw_stack: list[PulseMiddleware] = [PulseCoreMiddleware()]
         elif isinstance(middleware, PulseMiddleware):
-            self.middleware = MiddlewareStack([PulseCoreMiddleware(), middleware])
+            mw_stack = [PulseCoreMiddleware(), middleware]
         else:
-            self.middleware = MiddlewareStack([PulseCoreMiddleware(), *middleware])
+            mw_stack = [PulseCoreMiddleware(), *middleware]
+
+        # Let plugins contribute middleware (in plugin priority order)
+        for plugin in self.plugins:
+            mw_stack.extend(plugin.middleware())
+
+        self.middleware = MiddlewareStack(mw_stack)
         self.cookie = cookie or session_cookie()
         self.session_store = session_store or CookieSessionStore()
 
@@ -302,6 +323,10 @@ class App:
             # Fallback to default render
             else:
                 raise NotImplementedError(f"Unexpected middleware return: {res}")
+
+        # Call on_setup hooks after FastAPI routes/middleware are in place
+        for plugin in self.plugins:
+            plugin.on_setup(self)
 
         @self.sio.event
         async def connect(sid: str, environ: dict, auth=None):

@@ -1,4 +1,4 @@
-import React, { isValidElement, Suspense, type ComponentType } from "react";
+import React, { cloneElement, createElement, isValidElement, lazy, Suspense, type ComponentType } from "react";
 import type { ComponentRegistry, VDOMNode, VDOMUpdate } from "./vdom";
 import {
   FRAGMENT_TAG,
@@ -64,14 +64,14 @@ export class VDOMRenderer {
       if (isMountPointNode(node)) {
         const componentKey = node.tag.slice(MOUNT_POINT_PREFIX.length);
         const Component = this.components[componentKey]!;
-        return React.createElement(
+        return createElement(
           Component,
           processedProps,
           ...renderedChildren
         );
       }
 
-      return React.createElement(
+      return createElement(
         tag === FRAGMENT_TAG ? React.Fragment : tag,
         processedProps,
         ...renderedChildren
@@ -117,7 +117,7 @@ function cloneElementWithChildren(
   children: React.ReactNode[]
 ): React.ReactElement {
   // Preserve existing props; only override children
-  return React.cloneElement(el, undefined, ...children);
+  return cloneElement(el, undefined, ...children);
 }
 
 export function applyUpdates(
@@ -151,7 +151,7 @@ export function applyUpdates(
           node = node as React.ReactElement;
           const nextProps = processPropsForCallbacks(renderer, update.data);
           // Not passing children -> only update the props
-          return React.cloneElement(node, nextProps);
+          return cloneElement(node, nextProps);
         }
         case "insert": {
           assertIsElement(node, parts, depth);
@@ -159,7 +159,7 @@ export function applyUpdates(
           const children = toChildrenArrayFromElement(node);
           children.splice(update.idx, 0, renderer.renderNode(update.data));
           // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
-          return React.cloneElement(node, null!, ...children);
+          return cloneElement(node, null!, ...children);
         }
         case "remove": {
           assertIsElement(node, parts, depth);
@@ -167,7 +167,7 @@ export function applyUpdates(
           const children = toChildrenArrayFromElement(node);
           children.splice(update.idx, 1);
           // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
-          return React.cloneElement(node, null!, ...children);
+          return cloneElement(node, null!, ...children);
         }
         case "move": {
           assertIsElement(node, parts, depth);
@@ -176,7 +176,7 @@ export function applyUpdates(
           const item = children.splice(update.data.from_index, 1)[0];
           children.splice(update.data.to_index, 0, item);
           // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
-          return React.cloneElement(node, null!, ...children);
+          return cloneElement(node, null!, ...children);
         }
         default:
           throw new Error(
@@ -196,7 +196,7 @@ export function RenderLazy(
   component: () => Promise<{ default: ComponentType<any> }>,
   fallback?: React.ReactNode
 ): React.FC<React.PropsWithChildren<unknown>> {
-  const Component = React.lazy(component);
+  const Component = lazy(component);
   return ({ children, ...props }: React.PropsWithChildren<unknown>) => {
     return (
       <Suspense fallback={fallback ?? <></>}>

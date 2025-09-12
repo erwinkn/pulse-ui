@@ -3,6 +3,25 @@
 import { extractHTMLElement } from "./elements";
 import { createExtractor } from "./extractor";
 
+// Reusable computed mappers (helps bundlers/minifiers share references)
+const mapTarget = (e: { target: EventTarget | null }) =>
+  extractHTMLElement(e.target as HTMLElement);
+const mapRelated = (e: { relatedTarget: EventTarget | null }) =>
+  e.relatedTarget ? extractHTMLElement(e.relatedTarget as HTMLElement) : null;
+
+function makeExtractor<K extends readonly any[]>(
+  keys: K,
+  computed?: Record<string, (evt: any) => any>
+) {
+  return createExtractor<any>()(
+    keys as any,
+    {
+      target: mapTarget,
+      ...(computed || {}),
+    } as any
+  );
+}
+
 const SYNTHETIC_KEYS = [
   "target",
   "bubbles",
@@ -51,84 +70,54 @@ const POINTER_KEYS = [
   "isPrimary",
 ] as const satisfies readonly (keyof React.PointerEvent)[];
 
-const syntheticExtractor = createExtractor<React.SyntheticEvent>()(
-  SYNTHETIC_KEYS,
-  {
-    target: (e) => extractHTMLElement(e.target as HTMLElement),
-  }
-);
+const syntheticExtractor = makeExtractor(SYNTHETIC_KEYS);
 
-const uiExtractor = createExtractor<React.UIEvent>()(UI_KEYS, {
-  target: (e) => extractHTMLElement(e.target as HTMLElement),
+const uiExtractor = makeExtractor(UI_KEYS);
+
+const mouseExtractor = makeExtractor(MOUSE_KEYS, { relatedTarget: mapRelated });
+
+const clipboardExtractor = makeExtractor(SYNTHETIC_KEYS, {
+  clipboardData: (e) => extractDataTransfer(e.clipboardData),
 });
 
-const mouseExtractor = createExtractor<React.MouseEvent>()(MOUSE_KEYS, {
-  target: (e) => extractHTMLElement(e.target as HTMLElement),
-  relatedTarget: (e) =>
-    e.relatedTarget ? extractHTMLElement(e.relatedTarget as HTMLElement) : null,
-});
+const compositionExtractor = makeExtractor([
+  ...SYNTHETIC_KEYS,
+  "data",
+] as const);
 
-const clipboardExtractor = createExtractor<React.ClipboardEvent>()(
-  SYNTHETIC_KEYS,
-  {
-    target: (e) => extractHTMLElement(e.target as HTMLElement),
-    clipboardData: (e) => extractDataTransfer(e.clipboardData),
-  }
-);
-
-const compositionExtractor = createExtractor<React.CompositionEvent>()(
-  [...SYNTHETIC_KEYS, "data"] as const,
-  { target: (e) => extractHTMLElement(e.target as HTMLElement) }
-);
-
-const dragExtractor = createExtractor<React.DragEvent>()(MOUSE_KEYS, {
-  target: (e) => extractHTMLElement(e.target as HTMLElement),
-  relatedTarget: (e) =>
-    e.relatedTarget ? extractHTMLElement(e.relatedTarget as HTMLElement) : null,
+const dragExtractor = makeExtractor(MOUSE_KEYS, {
+  relatedTarget: mapRelated,
   dataTransfer: (e) => extractDataTransfer(e.dataTransfer),
 });
 
-const pointerExtractor = createExtractor<React.PointerEvent>()(POINTER_KEYS, {
-  target: (e) => extractHTMLElement(e.target as HTMLElement),
-  relatedTarget: (e) =>
-    e.relatedTarget ? extractHTMLElement(e.relatedTarget as HTMLElement) : null,
+const pointerExtractor = makeExtractor(POINTER_KEYS, {
+  relatedTarget: mapRelated,
 });
 
-const focusExtractor = createExtractor<React.FocusEvent>()(SYNTHETIC_KEYS, {
-  target: (e) => extractHTMLElement(e.target as HTMLElement),
-  relatedTarget: (e) =>
-    e.relatedTarget ? extractHTMLElement(e.relatedTarget as HTMLElement) : null,
+const focusExtractor = makeExtractor(SYNTHETIC_KEYS, {
+  relatedTarget: mapRelated,
 });
 
-const formExtractor = createExtractor<React.FormEvent>()(SYNTHETIC_KEYS, {
-  target: (e) => extractHTMLElement(e.target as HTMLElement),
-});
+const formExtractor = makeExtractor(SYNTHETIC_KEYS);
 
-const invalidExtractor = createExtractor<React.InvalidEvent>()(SYNTHETIC_KEYS, {
-  target: (e) => extractHTMLElement(e.target as HTMLElement),
-});
+const invalidExtractor = makeExtractor(SYNTHETIC_KEYS);
 
-const changeExtractor = createExtractor<React.ChangeEvent>()(SYNTHETIC_KEYS, {
-  target: (e) => extractHTMLElement(e.target as HTMLElement),
-});
+const changeExtractor = makeExtractor(SYNTHETIC_KEYS);
 
-const keyboardExtractor = createExtractor<React.KeyboardEvent>()(
-  [
-    ...UI_KEYS,
-    "altKey",
-    "ctrlKey",
-    "code",
-    "key",
-    "locale",
-    "location",
-    "metaKey",
-    "repeat",
-    "shiftKey",
-  ] as const,
-  { target: (e) => extractHTMLElement(e.target as HTMLElement) }
-);
+const keyboardExtractor = makeExtractor([
+  ...UI_KEYS,
+  "altKey",
+  "ctrlKey",
+  "code",
+  "key",
+  "locale",
+  "location",
+  "metaKey",
+  "repeat",
+  "shiftKey",
+] as const);
 
-const touchExtractor = createExtractor<React.TouchEvent>()(
+const touchExtractor = makeExtractor(
   [
     ...UI_KEYS,
     "altKey",
@@ -140,38 +129,38 @@ const touchExtractor = createExtractor<React.TouchEvent>()(
     "touches",
   ] as const,
   {
-    target: (e) => extractHTMLElement(e.target as HTMLElement),
     changedTouches: (e) => mapTouchList(e.changedTouches),
     targetTouches: (e) => mapTouchList(e.targetTouches),
     touches: (e) => mapTouchList(e.touches),
   }
 );
 
-const wheelExtractor = createExtractor<React.WheelEvent>()(
+const wheelExtractor = makeExtractor(
   [...MOUSE_KEYS, "deltaMode", "deltaX", "deltaY", "deltaZ"] as const,
   {
-    target: (e) => extractHTMLElement(e.target as HTMLElement),
-    relatedTarget: (e) =>
-      e.relatedTarget
-        ? extractHTMLElement(e.relatedTarget as HTMLElement)
-        : null,
+    relatedTarget: mapRelated,
   }
 );
 
-const animationExtractor = createExtractor<React.AnimationEvent>()(
-  [...SYNTHETIC_KEYS, "animationName", "elapsedTime", "pseudoElement"] as const,
-  { target: (e) => extractHTMLElement(e.target as HTMLElement) }
-);
+const animationExtractor = makeExtractor([
+  ...SYNTHETIC_KEYS,
+  "animationName",
+  "elapsedTime",
+  "pseudoElement",
+] as const);
 
-const toggleExtractor = createExtractor<React.ToggleEvent>()(
-  [...SYNTHETIC_KEYS, "oldState", "newState"] as const,
-  { target: (e) => extractHTMLElement(e.target as HTMLElement) }
-);
+const toggleExtractor = makeExtractor([
+  ...SYNTHETIC_KEYS,
+  "oldState",
+  "newState",
+] as const);
 
-const transitionExtractor = createExtractor<React.TransitionEvent>()(
-  [...SYNTHETIC_KEYS, "elapsedTime", "propertyName", "pseudoElement"] as const,
-  { target: (e) => extractHTMLElement(e.target as HTMLElement) }
-);
+const transitionExtractor = makeExtractor([
+  ...SYNTHETIC_KEYS,
+  "elapsedTime",
+  "propertyName",
+  "pseudoElement",
+] as const);
 
 function mapTouchList(list: any): any[] {
   return Array.from(list as ArrayLike<any>).map((touch: any) => ({
@@ -209,90 +198,86 @@ function extractDataTransfer(dt: DataTransfer | null): object | null {
   };
 }
 
-const eventExtractorMap: { [key: string]: (evt: any) => object } = {
-  // Pointer Events
-  pointerdown: pointerExtractor,
-  pointermove: pointerExtractor,
-  pointerup: pointerExtractor,
-  pointercancel: pointerExtractor,
-  gotpointercapture: pointerExtractor,
-  lostpointercapture: pointerExtractor,
-  pointerenter: pointerExtractor,
-  pointerleave: pointerExtractor,
-  pointerover: pointerExtractor,
-  pointerout: pointerExtractor,
+const eventExtractorMap: { [key: string]: (evt: any) => object } = {};
 
-  // Mouse Events
-  click: mouseExtractor,
-  contextmenu: mouseExtractor,
-  dblclick: mouseExtractor,
-  mousedown: mouseExtractor,
-  mouseenter: mouseExtractor,
-  mouseleave: mouseExtractor,
-  mousemove: mouseExtractor,
-  mouseout: mouseExtractor,
-  mouseover: mouseExtractor,
-  mouseup: mouseExtractor,
+function add(map: Record<string, any>, names: readonly string[], fn: any) {
+  for (const n of names) map[n] = fn;
+}
 
-  // Drag Events
-  drag: dragExtractor,
-  dragend: dragExtractor,
-  dragenter: dragExtractor,
-  dragexit: dragExtractor,
-  dragleave: dragExtractor,
-  dragover: dragExtractor,
-  dragstart: dragExtractor,
-  drop: dragExtractor,
+add(
+  eventExtractorMap,
+  [
+    "pointerdown",
+    "pointermove",
+    "pointerup",
+    "pointercancel",
+    "gotpointercapture",
+    "lostpointercapture",
+    "pointerenter",
+    "pointerleave",
+    "pointerover",
+    "pointerout",
+  ],
+  pointerExtractor
+);
 
-  // Keyboard Events
-  keydown: keyboardExtractor,
-  keypress: keyboardExtractor,
-  keyup: keyboardExtractor,
+add(
+  eventExtractorMap,
+  [
+    "click",
+    "contextmenu",
+    "dblclick",
+    "mousedown",
+    "mouseenter",
+    "mouseleave",
+    "mousemove",
+    "mouseout",
+    "mouseover",
+    "mouseup",
+  ],
+  mouseExtractor
+);
 
-  // Focus Events
-  focus: focusExtractor,
-  blur: focusExtractor,
+add(
+  eventExtractorMap,
+  [
+    "drag",
+    "dragend",
+    "dragenter",
+    "dragexit",
+    "dragleave",
+    "dragover",
+    "dragstart",
+    "drop",
+  ],
+  dragExtractor
+);
 
-  // Form Events
-  change: changeExtractor,
-  input: changeExtractor, // often used with change
-  invalid: invalidExtractor,
-  reset: formExtractor,
-  submit: formExtractor,
-
-  // Clipboard Events
-  copy: clipboardExtractor,
-  cut: clipboardExtractor,
-  paste: clipboardExtractor,
-
-  // Composition Events
-  compositionend: compositionExtractor,
-  compositionstart: compositionExtractor,
-  compositionupdate: compositionExtractor,
-
-  // Touch Events
-  touchcancel: touchExtractor,
-  touchend: touchExtractor,
-  touchmove: touchExtractor,
-  touchstart: touchExtractor,
-
-  // UI Events
-  scroll: uiExtractor,
-
-  // Wheel Events
-  wheel: wheelExtractor,
-
-  // Animation Events
-  animationstart: animationExtractor,
-  animationend: animationExtractor,
-  animationiteration: animationExtractor,
-
-  // Transition Events
-  transitionend: transitionExtractor,
-
-  // Toggle Events
-  toggle: toggleExtractor,
-};
+add(eventExtractorMap, ["keydown", "keypress", "keyup"], keyboardExtractor);
+add(eventExtractorMap, ["focus", "blur"], focusExtractor);
+add(eventExtractorMap, ["change", "input"], changeExtractor);
+add(eventExtractorMap, ["invalid"], invalidExtractor);
+add(eventExtractorMap, ["reset", "submit"], formExtractor);
+add(eventExtractorMap, ["copy", "cut", "paste"], clipboardExtractor);
+add(
+  eventExtractorMap,
+  ["compositionend", "compositionstart", "compositionupdate"],
+  compositionExtractor
+);
+add(
+  eventExtractorMap,
+  ["touchcancel", "touchend", "touchmove", "touchstart"],
+  touchExtractor
+);
+add(eventExtractorMap, ["scroll"], uiExtractor);
+add(eventExtractorMap, ["wheel"], wheelExtractor);
+add(
+  eventExtractorMap,
+  ["animationstart", "animationend", "animationiteration"],
+  animationExtractor
+);
+add(eventExtractorMap, ["transitionend"], transitionExtractor);
+add(eventExtractorMap, ["toggle"], toggleExtractor);
 
 export function extractEvent(value: any): any {
   // Duck-typing for React's SyntheticEvent.

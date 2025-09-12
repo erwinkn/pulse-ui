@@ -9,6 +9,7 @@ dependencies = ["pulse-framework", "pulse-lucide", "pulse-recharts"]
 
 [dependency-groups]
 dev = [
+    "msal>=1.32.0,<1.33.0",
     "mypy>=1.17.0",
     "pytest>=8.3.4",
     "pytest-asyncio>=1.1.0",

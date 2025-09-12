@@ -12,7 +12,6 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from enum import IntEnum
 from typing import Literal, Optional, Sequence, TypeVar, cast
-from urllib.parse import urlsplit
 
 import socketio
 from fastapi import FastAPI, HTTPException, Request
@@ -23,7 +22,14 @@ import pulse.flatted as flatted
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.cookies import Cookie, session_cookie
-from pulse.helpers import later
+from pulse.helpers import (
+    get_client_address,
+    get_client_address_socketio,
+    later,
+    ensure_web_lock,
+    lock_path_for_web_root,
+    remove_web_lock,
+)
 from pulse.messages import ClientMessage, ServerMessage
 from pulse.middleware import (
     Deny,
@@ -127,6 +133,19 @@ class App:
                     await self.session_store.init()
             except Exception:
                 logger.exception("Error during SessionStore.init()")
+            # Create a lock file in the web project (unless the CLI manages it)
+            lock_path = None
+            try:
+                if os.environ.get("PULSE_LOCK_MANAGED_BY_CLI") != "1":
+                    try:
+                        lock_path = lock_path_for_web_root(self.codegen.cfg.web_root)
+                        ensure_web_lock(lock_path, owner="server")
+                    except RuntimeError as e:
+                        logger.error(str(e))
+                        raise
+            except Exception:
+                logger.exception("Failed to create Pulse dev lock file")
+                raise
             try:
                 yield
             finally:
@@ -135,6 +154,13 @@ class App:
                         await self.session_store.close()
                 except Exception:
                     logger.exception("Error during SessionStore.close()")
+                # Remove lock if we created it
+                try:
+                    if os.environ.get("PULSE_LOCK_MANAGED_BY_CLI") != "1" and lock_path:
+                        remove_web_lock(lock_path)
+                except Exception:
+                    # Best-effort
+                    pass
 
         self.fastapi = FastAPI(title="Pulse UI Server", lifespan=lifespan)
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
@@ -227,7 +253,7 @@ class App:
             session = PulseContext.get().session
             if session is None:
                 raise RuntimeError("Internal error: couldn't resolve user session")
-            client_addr: str | None = client_address_from_req(request)
+            client_addr: str | None = get_client_address(request)
             wsid = new_sid()
             # TODO: reuse RenderSession between prerender and connect
             render = self.create_render(wsid, session, client_address=client_addr)
@@ -282,7 +308,7 @@ class App:
             # We use `sid` to designate UserSession ID internally
             wsid = sid
             # Determine client address/origin prior to creating the session
-            client_addr: str | None = _extract_client_address_from_socketio(environ)
+            client_addr: str | None = get_client_address_socketio(environ)
             # Parse cookies from environ
             cookie = self.cookie.get_from_socketio(environ)
             session = await self.get_or_create_session(cookie)
@@ -480,103 +506,3 @@ def add_react_components(
             route.components = components
         if route.children:
             add_react_components(route.children, components)
-
-
-def client_address_from_req(request: Request) -> str | None:
-    """Best-effort client origin/address from an HTTP request.
-
-    Preference order:
-      1) Origin (full scheme://host:port)
-      1b) Referer (full URL) when Origin missing during prerender forwarding
-      2) Forwarded header (proto + for)
-      3) X-Forwarded-* headers
-      4) request.client host:port
-    """
-    try:
-        origin = request.headers.get("origin")
-        if origin:
-            return origin
-        referer = request.headers.get("referer")
-        if referer:
-            parts = urlsplit(referer)
-            if parts.scheme and parts.netloc:
-                return f"{parts.scheme}://{parts.netloc}"
-
-        fwd = request.headers.get("forwarded")
-        proto = request.headers.get("x-forwarded-proto") or (
-            [p.split("proto=")[-1] for p in fwd.split(";") if "proto=" in p][0]
-            .strip()
-            .strip('"')
-            if fwd and "proto=" in fwd
-            else request.url.scheme
-        )
-        if fwd and "for=" in fwd:
-            part = [p for p in fwd.split(";") if "for=" in p]
-            hostport = part[0].split("for=")[-1].strip().strip('"') if part else ""
-            if hostport:
-                return f"{proto}://{hostport}"
-
-        xff = request.headers.get("x-forwarded-for")
-        xfp = request.headers.get("x-forwarded-port")
-        if xff:
-            host = xff.split(",")[0].strip()
-            if host in ("127.0.0.1", "::1"):
-                host = "localhost"
-            return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
-
-        host = request.client.host if request.client else ""
-        port = request.client.port if request.client else None
-        if host in ("127.0.0.1", "::1"):
-            host = "localhost"
-        if host and port:
-            return f"{proto}://{host}:{port}"
-        if host:
-            return f"{proto}://{host}"
-        return None
-    except Exception:
-        return None
-
-
-def _extract_client_address_from_socketio(environ: dict) -> str | None:
-    """Best-effort client origin/address from a WS environ mapping.
-
-    Preference order mirrors HTTP variant using environ keys.
-    """
-    try:
-        origin = environ.get("HTTP_ORIGIN")
-        if origin:
-            return origin
-
-        fwd = environ.get("HTTP_FORWARDED")
-        proto = environ.get("HTTP_X_FORWARDED_PROTO") or (
-            [p.split("proto=")[-1] for p in str(fwd).split(";") if "proto=" in p][0]
-            .strip()
-            .strip('"')
-            if fwd and "proto=" in str(fwd)
-            else environ.get("wsgi.url_scheme", "http")
-        )
-        if fwd and "for=" in str(fwd):
-            part = [p for p in str(fwd).split(";") if "for=" in p]
-            hostport = part[0].split("for=")[-1].strip().strip('"') if part else ""
-            if hostport:
-                return f"{proto}://{hostport}"
-
-        xff = environ.get("HTTP_X_FORWARDED_FOR")
-        xfp = environ.get("HTTP_X_FORWARDED_PORT")
-        if xff:
-            host = str(xff).split(",")[0].strip()
-            if host in ("127.0.0.1", "::1"):
-                host = "localhost"
-            return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
-
-        host = environ.get("REMOTE_ADDR", "")
-        port = environ.get("REMOTE_PORT")
-        if host in ("127.0.0.1", "::1"):
-            host = "localhost"
-        if host and port:
-            return f"{proto}://{host}:{port}"
-        if host:
-            return f"{proto}://{host}"
-        return None
-    except Exception:
-        return None

@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,10 +31,41 @@ class CodegenConfig:
     lib_path: Path | str = "pulse-ui-client"
     """Path to the Pulse library."""
 
+    base_dir: Path | None = None
+    """Directory containing the user's app file. If not provided, resolved from env."""
+
+    @property
+    def resolved_base_dir(self) -> Path:
+        """Resolve the base directory where relative paths should be anchored.
+
+        Precedence:
+          1) Explicit `base_dir` if provided
+          2) Env var `PULSE_APP_FILE` (directory of the file)
+          3) Env var `PULSE_APP_DIR`
+          4) Current working directory
+        """
+        if isinstance(self.base_dir, Path):
+            return self.base_dir
+        app_file = os.environ.get("PULSE_APP_FILE")
+        if app_file:
+            return Path(app_file).parent
+        app_dir = os.environ.get("PULSE_APP_DIR")
+        if app_dir:
+            return Path(app_dir)
+        return Path.cwd()
+
+    @property
+    def web_root(self) -> Path:
+        """Absolute path to the web root directory (e.g. `<app_dir>/pulse-web`)."""
+        wd = Path(self.web_dir)
+        if wd.is_absolute():
+            return wd
+        return self.resolved_base_dir / wd
+
     @property
     def pulse_path(self) -> Path:
         """Full path to the generated app directory."""
-        return Path(self.web_dir) / "app" / self.pulse_dir
+        return self.web_root / "app" / self.pulse_dir
 
 
 def write_file_if_changed(path: Path, content: str) -> Path:
@@ -44,6 +76,7 @@ def write_file_if_changed(path: Path, content: str) -> Path:
             if current_content == content:
                 return path  # Skip writing, content is the same
         except Exception:
+            logging.warning(f"Can't read file {path.absolute()}")
             # If we can't read the file for any reason, just write it
             pass
 
@@ -63,14 +96,16 @@ class Codegen:
 
     def generate_all(self, server_address: str):
         # Keep track of all generated files
-        generated_files = set([
-            self.generate_layout_tsx(server_address),
-            self.generate_routes_ts(),
-            *(
-                self.generate_route(route, server_address=server_address)
-                for route in self.routes.flat_tree.values()
-            ),
-        ])
+        generated_files = set(
+            [
+                self.generate_layout_tsx(server_address),
+                self.generate_routes_ts(),
+                *(
+                    self.generate_route(route, server_address=server_address)
+                    for route in self.routes.flat_tree.values()
+                ),
+            ]
+        )
 
         # Clean up any remaining files that are not part of the generated files
         for path in self.output_folder.rglob("*"):

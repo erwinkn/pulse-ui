@@ -1,177 +1,163 @@
-from .app import App, Session
-from .state import State
-from .routing import Route, Layout
-from .reactive import Signal, Computed, Effect, Batch, Untrack, IgnoreBatch
-from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive
-from .hooks import (
-    states,
-    effects,
-    setup,
-    route_info,
-    session_context,
-    call_api,
-    navigate,
-    server_address,
-    client_address,
-)
-from .hooks import global_state
-from .html import *  # noqa: F403
-from .middleware import (
-    PulseMiddleware,
-    Ok,
-    Redirect,
-    NotFound,
-    Deny,
-    PulseRequest,
-    ConnectResponse,
-    PrerenderResponse,
-    MiddlewareStack,
-    stack,
-)
-from .decorators import computed, effect, query
-
-# Import HTML tags and other UI components
-from .vdom import (
-    Node,
-    Element,
-    Primitive,
-    VDOMNode,
-    component,
-    Component,
-    ComponentNode,
-    Child,
-)
-from .html.tags import (
-    # Standard HTML tags
-    a,
-    abbr,
-    address,
-    article,
-    aside,
-    audio,
-    b,
-    bdi,
-    bdo,
-    blockquote,
-    body,
-    button,
-    canvas,
-    caption,
-    cite,
-    code,
-    colgroup,
-    data,
-    datalist,
-    dd,
-    del_,
-    details,
-    dfn,
-    dialog,
-    div,
-    dl,
-    dt,
-    em,
-    fieldset,
-    figcaption,
-    figure,
-    footer,
-    form,
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    h6,
-    head,
-    header,
-    hgroup,
-    html,
-    i,
-    iframe,
-    ins,
-    kbd,
-    label,
-    legend,
-    li,
-    main,
-    map_,
-    mark,
-    menu,
-    meter,
-    nav,
-    noscript,
-    object_,
-    ol,
-    optgroup,
-    option,
-    output,
-    p,
-    picture,
-    pre,
-    progress,
-    q,
-    rp,
-    rt,
-    ruby,
-    s,
-    samp,
-    script,
-    section,
-    select,
-    small,
-    span,
-    strong,
-    style,
-    sub,
-    summary,
-    sup,
-    table,
-    tbody,
-    td,
-    template,
-    textarea,
-    tfoot,
-    th,
-    thead,
-    time,
-    title,
-    tr,
-    u,
-    ul,
-    var,
-    video,
-    # Self-closing tags
-    area,
-    base,
-    br,
-    col,
-    embed,
-    hr,
-    img,
-    input,
-    link,
-    meta,
-    param,
-    source,
-    track,
-    wbr,
-    # React fragment
-    fragment,
-)
-
+from .app import App
 from .codegen import CodegenConfig
 from .components import (
     Link,
     Outlet,
 )
+from .context import PulseContext
+from .cookies import Cookie, SetCookie
+from .decorators import computed, effect, query
+from .helpers import CssStyle, EventHandler, For, JsFunction, JsObject, later, repeat
+from .hooks import (
+    call_api,
+    client_address,
+    effects,
+    global_state,
+    navigate,
+    route,
+    server_address,
+    session,
+    session_id,
+    set_cookie,
+    setup,
+    states,
+    websocket_id,
+)
+from .html import *  # noqa: F403
+from .middleware import (
+    ConnectResponse,
+    Deny,
+    MiddlewareStack,
+    NotFound,
+    Ok,
+    PrerenderResponse,
+    PulseMiddleware,
+    Redirect,
+    stack,
+)
 from .react_component import (
-    ComponentRegistry,
     COMPONENT_REGISTRY,
+    DEFAULT,
+    ComponentRegistry,
+    Prop,
     ReactComponent,
+    prop,
     react_component,
     registered_react_components,
-    Prop,
-    prop,
-    DEFAULT,
 )
-from .helpers import EventHandler, For, JsFunction, CssStyle, JsObject
+from .reactive import Batch, Computed, Effect, IgnoreBatch, Signal, Untrack
+from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive
+from .render_session import RenderSession, RouteMount
+from .request import PulseRequest
+from .routing import Layout, Route
+from .state import State
+from .user_session import (
+    CookieSessionStore,
+    InMemorySessionStore,
+    SessionStore,
+    UserSession,
+)
+from .vdom import (
+    Child,
+    Component,
+    ComponentNode,
+    Element,
+    Node,
+    Primitive,
+    VDOMNode,
+    component,
+)
+
+# Public API re-exports
+__all__ = [
+    # Core app/session
+    "App",
+    "RenderSession",
+    "PulseContext",
+    "RouteMount",
+    # State and routing
+    "State",
+    "Route",
+    "Layout",
+    # Reactivity primitives
+    "Signal",
+    "Computed",
+    "Effect",
+    "Batch",
+    "Untrack",
+    "IgnoreBatch",
+    # Reactive containers
+    "ReactiveDict",
+    "ReactiveList",
+    "ReactiveSet",
+    "reactive",
+    # Hooks
+    "states",
+    "effects",
+    "setup",
+    "route",
+    "call_api",
+    "set_cookie",
+    "navigate",
+    "server_address",
+    "client_address",
+    "global_state",
+    "session",
+    "session_id",
+    "websocket_id",
+    # Middleware
+    "PulseMiddleware",
+    "Ok",
+    "Redirect",
+    "NotFound",
+    "Deny",
+    "PulseRequest",
+    "ConnectResponse",
+    "PrerenderResponse",
+    "MiddlewareStack",
+    "stack",
+    # Decorators
+    "computed",
+    "effect",
+    "query",
+    # VDOM / components
+    "Node",
+    "Element",
+    "Primitive",
+    "VDOMNode",
+    "component",
+    "Component",
+    "ComponentNode",
+    "Child",
+    # Codegen
+    "CodegenConfig",
+    # Router components
+    "Link",
+    "Outlet",
+    # React component registry
+    "ComponentRegistry",
+    "COMPONENT_REGISTRY",
+    "ReactComponent",
+    "react_component",
+    "registered_react_components",
+    "Prop",
+    "prop",
+    "DEFAULT",
+    # Helpers
+    "EventHandler",
+    "For",
+    "JsFunction",
+    "CssStyle",
+    "JsObject",
+    # Session context infra
+    "SessionStore",
+    "UserSession",
+    "InMemorySessionStore",
+    "CookieSessionStore",
+    # Cookies
+    "Cookie",
+    "SetCookie",
+    # Utils,
+    "later",
+    "repeat",
+]

@@ -7,7 +7,7 @@ that enables automatic re-rendering when state changes.
 
 from abc import ABC, ABCMeta
 from enum import IntEnum
-from typing import Any, Callable, Generic, Never, Optional, TypeVar
+from typing import Any, Callable, Generic,Iterator, Never, Optional, TypeVar
 
 from pulse.query import QueryProperty
 from pulse.reactive import (
@@ -233,7 +233,7 @@ class State(ABC, metaclass=StateMeta):
 
         setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 
-    def properties(self):
+    def properties(self) -> Iterator[Signal]:
         """Iterate over the state's `Signal` instances, including base classes."""
         seen: set[str] = set()
         for cls in self.__class__.__mro__:
@@ -246,7 +246,7 @@ class State(ABC, metaclass=StateMeta):
                     seen.add(name)
                     yield prop.get_signal(self)
 
-    def computeds(self):
+    def computeds(self) -> Iterator[Computed]:
         """Iterate over the state's `Computed` instances, including base classes."""
         seen: set[str] = set()
         for cls in self.__class__.__mro__:

@@ -9,6 +9,7 @@ from typing import (
     Optional,
     ParamSpec,
     TypeVar,
+    cast,
 )
 
 
@@ -358,7 +359,7 @@ class Effect:
             # this effect to be rescheduled.
             self.batch = None
             try:
-                self.cleanup_fn = self.fn()
+                self.cleanup_fn = cast(EffectCleanup | None, self.fn())
             except Exception as e:
                 self._handle_error(e)
             self.runs += 1

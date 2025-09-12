@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 import pulse as ps
 from pulse.codegen import CodegenConfig
@@ -9,7 +8,7 @@ class GlobalCounter(ps.State):
     count: int = 0
 
     def __init__(self, label: str):
-      self._label = label
+        self._label = label
 
     def inc(self):
         self.count += 1
@@ -41,16 +40,16 @@ def CounterRow(title: str, counter: GlobalCounter):
 
 @ps.component
 def GlobalStateDemo():
-    sess = ps.session_context()
+    sess = ps.session()
     server = ps.server_address()
-    room = ps.route_info().pathParams.get("room")
+    room = ps.route().pathParams.get("room")
 
     # Per-session singleton
-    a = session_counter(label='Session')
+    a = session_counter(label="Session")
 
     # Shared across sessions by id; default to "global" when no room provided
     shared_id = room or "global"
-    b = shared_counter(shared_id, label='Shared')
+    b = shared_counter(shared_id, label="Shared")
 
     return ps.div(
         ps.h1("Global State Demo", className="text-2xl font-bold mb-4"),
@@ -60,7 +59,6 @@ def GlobalStateDemo():
         ),
         ps.div(
             ps.span(f"server: {server}", className="mr-3"),
-            ps.span(f"client ip: {sess.get('ip') or '-'}"),
             className="text-xs text-gray-500 mb-4",
         ),
         ps.div(
@@ -71,18 +69,18 @@ def GlobalStateDemo():
         ps.div(
             ps.p("Routes:", className="mt-6 font-semibold"),
             ps.ul(
-                ps.li(ps.Link("/global-state", to="/global-state", className="link")),
+                ps.li(ps.Link("/", to="/", className="link")),
                 ps.li(
                     ps.Link(
-                        "/global-state/room1",
-                        to="/global-state/room1",
+                        "/room1",
+                        to="/room1",
                         className="link",
                     )
                 ),
                 ps.li(
                     ps.Link(
-                        "/global-state/room2",
-                        to="/global-state/room2",
+                        "/room2",
+                        to="/room2",
                         className="link",
                     )
                 ),
@@ -95,8 +93,8 @@ def GlobalStateDemo():
 
 app = ps.App(
     routes=[
-        ps.Route("/global-state", GlobalStateDemo),
-        ps.Route("/global-state/:room", GlobalStateDemo),
+        ps.Route("/", GlobalStateDemo),
+        ps.Route("/:room", GlobalStateDemo),
     ],
     codegen=CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )

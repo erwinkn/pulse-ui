@@ -579,7 +579,7 @@ def test_parse_fn_signature_builds_propspec_from_annotation_and_defaults():
 
 
 def test_react_component_decorator_explicit_props_and_children():
-    TITLE_DEFAULT: Any = prop(default="Untitled")
+    TITLE_DEFAULT = prop(default="Untitled")
 
     @react_component(tag="Card", import_="./Card", alias="card")
     def Card(

@@ -18,25 +18,34 @@ T1 = TypeVar("T1")
 T2 = TypeVar("T2")
 
 
+_MISSING = object()
+
+
 class ReactiveDict(dict[T1, T2]):
     """A dict-like container with per-key reactivity.
 
     - Reading a key registers a dependency on that key's Signal
     - Writing a key updates only that key's Signal
-    - Deleting a key writes `None` to its Signal (preserving subscriptions)
-    - Iteration and len are NOT reactive; use explicit key reads inside render
+    - Deleting a key removes the key from the mapping but preserves the Signal object
+      (writes `None` to it) for existing subscribers
+    - Iteration, membership checks, and len are reactive to structural changes
     """
 
-    __slots__ = ("_signals",)
+    __slots__ = ("_signals", "_structure")
 
     def __init__(self, initial: Mapping[T1, T2] | None = None) -> None:
         super().__init__()
         self._signals: dict[T1, Signal[_Any]] = {}
+        self._structure: Signal[int] = Signal(0)
         if initial:
             for k, v in initial.items():
                 v = reactive(v)
                 super().__setitem__(k, v)
                 self._signals[k] = Signal(v)
+
+    # ---- helpers ----
+    def _bump_structure(self) -> None:
+        self._structure.write(self._structure.read() + 1)
 
     # --- Mapping protocol ---
     def __getitem__(self, key: T1) -> T2:
@@ -49,11 +58,14 @@ class ReactiveDict(dict[T1, T2]):
         self.set(key, value)
 
     def __delitem__(self, key: T1) -> None:
-        # Preserve signal and subscribers; write None and keep key with None value
+        # Remove from mapping but preserve signal object for subscribers
         if key not in self._signals:
             self._signals[key] = Signal(None)
         else:
             self._signals[key].write(None)
+        if super().__contains__(key):
+            super().__delitem__(key)
+            self._bump_structure()
 
     @overload
     def get(self, key: T1, default: T2) -> T2: ...
@@ -65,33 +77,164 @@ class ReactiveDict(dict[T1, T2]):
         return self._signals[key].read()
 
     def __iter__(self) -> Iterator[T1]:
-        # Not reactive; snapshot of keys at iteration time
+        # Reactive to structural changes
+        _ = self._structure.read()
         return super().__iter__()
 
     def __len__(self) -> int:
+        _ = self._structure.read()
         return super().__len__()
 
     def __contains__(self, key: T1) -> bool:
-        return super().__contains__(key)
+        # Subscribe to the per-key value signal so presence checks are reactive
+        sig = self._signals.get(key)
+        if sig is None:
+            sig = Signal(None)
+            self._signals[key] = sig
+        _ = sig.read()
+        return dict.__contains__(self, key)
 
     # --- Mutation helpers ---
     def set(self, key: T1, value: T2) -> None:
         value = reactive(value)
+        was_present = super().__contains__(key)
         sig = self._signals.get(key)
         if sig is None:
             self._signals[key] = Signal(value)
         else:
             sig.write(value)
         super().__setitem__(key, value)
+        if not was_present:
+            self._bump_structure()
 
-    def update(self, values: Mapping[T1, T2]) -> None:  # type: ignore[override]
-        for k, v in values.items():
-            self.set(k, v)
+    def update(self, other=None, /, **kwargs) -> None:  # type: ignore[override]
+        # Match dict.update semantics
+        if other is not None:
+            if isinstance(other, Mapping):
+                for k, v in other.items():
+                    self.set(k, v)
+            else:
+                for k, v in other:
+                    self.set(k, v)
+        if kwargs:
+            for k, v in kwargs.items():
+                self.set(k, v)
 
     def delete(self, key: T1) -> None:
         if key in self._signals:
-            # Preserve signal object for existing subscribers; set to None
+            # Preserve signal and mark as not present; do not raise
             self._signals[key].write(None)
+            if super().__contains__(key):
+                super().__delitem__(key)
+                self._bump_structure()
+
+    # ---- standard dict methods ----
+    def keys(self):  # type: ignore[override]
+        _ = self._structure.read()
+        return super().keys()
+
+    def items(self):  # type: ignore[override]
+        # Return an iterable view that subscribes to per-key signals during iteration
+        class _ReactiveDictItemsView:
+            __slots__ = ("_host",)
+
+            def __init__(self, host: "ReactiveDict[T1, T2]") -> None:
+                self._host = host
+
+            def __iter__(self):
+                _ = self._host._structure.read()
+                for k in dict.__iter__(self._host):
+                    yield (k, self._host[k])
+
+            def __len__(self) -> int:
+                _ = self._host._structure.read()
+                return dict.__len__(self._host)
+
+        return _ReactiveDictItemsView(self)
+
+    def values(self):  # type: ignore[override]
+        # Return an iterable view that subscribes to per-key signals during iteration
+        class _ReactiveDictValuesView:
+            __slots__ = ("_host",)
+
+            def __init__(self, host: "ReactiveDict[T1, T2]") -> None:
+                self._host = host
+
+            def __iter__(self):
+                _ = self._host._structure.read()
+                for k in dict.__iter__(self._host):
+                    yield self._host[k]
+
+            def __len__(self) -> int:
+                _ = self._host._structure.read()
+                return dict.__len__(self._host)
+
+        return _ReactiveDictValuesView(self)
+
+    def pop(self, key: T1, default: _Any = _MISSING):  # type: ignore[override]
+        if super().__contains__(key):
+            val = dict.__getitem__(self, key)
+            self.__delitem__(key)
+            return val
+        if default is _MISSING:
+            raise KeyError(key)
+        return default
+
+    def popitem(self):  # type: ignore[override]
+        if not super().__len__():
+            raise KeyError("popitem(): dictionary is empty")
+        k, v = super().popitem()
+        # Preserve and update reactive metadata
+        sig = self._signals.get(k)
+        if sig is None:
+            self._signals[k] = Signal(None)
+        else:
+            sig.write(None)
+        self._bump_structure()
+        return k, v
+
+    def setdefault(self, key: T1, default: T2 | None = None):  # type: ignore[override]
+        if super().__contains__(key):
+            # Return current value without structural change
+            if key not in self._signals:
+                self._signals[key] = Signal(None)
+            return self._signals[key].read()
+        self.set(key, default)  # type: ignore[arg-type]
+        return dict.__getitem__(self, key)
+
+    def clear(self) -> None:  # type: ignore[override]
+        if not super().__len__():
+            return
+        for k in list(super().keys()):
+            # Use our deletion to keep signals/presence updated
+            self.__delitem__(k)
+        # bump already done per key; nothing else needed
+
+    def copy(self):  # type: ignore[override]
+        # Shallow copy preserving current values
+        return ReactiveDict({k: dict.__getitem__(self, k) for k in super().__iter__()})
+
+    @classmethod
+    def fromkeys(cls, iterable: Iterable[T1], value: _Any = None):  # type: ignore[override]
+        rd: ReactiveDict[T1, _Any] = cls()
+        for k in iterable:
+            rd.set(k, value)
+        return rd
+
+    # PEP 584 dict union operators
+    def __ior__(self, other):  # type: ignore[override]
+        self.update(other)
+        return self
+
+    def __or__(self, other):  # type: ignore[override]
+        result = ReactiveDict(self)
+        result.update(other)
+        return result
+
+    def __ror__(self, other):  # type: ignore[override]
+        result = ReactiveDict(other)
+        result.update(self)
+        return result
 
 
 class ReactiveList(list[T1]):

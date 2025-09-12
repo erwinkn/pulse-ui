@@ -4,7 +4,7 @@ Handles Dates, circular references, and basic Python objects
 """
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any 
 
 
 def stringify(input_value: Any) -> Any:
@@ -17,7 +17,7 @@ def stringify(input_value: Any) -> Any:
     Returns:
         A JSON-serializable object with special markers for complex types
     """
-    seen: Dict[int, int] = {}  # Map object id to assigned ID
+    seen: dict[int, int] = {}  # Map object id to assigned ID
     next_id = 1
 
     def transform(value: Any) -> Any:
@@ -38,8 +38,8 @@ def stringify(input_value: Any) -> Any:
             current_id = next_id
             next_id += 1
             seen[id(value)] = current_id
-            # Type checker safety: we know value is datetime.datetime here
-            dt_value: datetime.datetime = value  # type: ignore
+            # Type checker safety: we know value is datetime here
+            dt_value: datetime = value  # type: ignore
             return {
                 "__pulse": "date",
                 "__id": current_id,
@@ -103,7 +103,7 @@ def parse(input_value: Any) -> Any:
     Returns:
         The reconstructed Python object
     """
-    objects: Dict[int, Any] = {}
+    objects: dict[int, Any] = {}
 
     def resolve(value: Any) -> Any:
         if value is None or isinstance(value, (int, float, str, bool)):

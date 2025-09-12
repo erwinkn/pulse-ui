@@ -10,6 +10,7 @@ import pty
 import socket
 import sys
 from pathlib import Path
+from typing import override
 
 import typer
 from rich.console import Console
@@ -97,7 +98,8 @@ class Terminal(RichLog):
         self.pid = None
         self.fd = None
 
-    async def on_mount(self) -> None:
+    @override
+    def on_mount(self) -> None:
         """Start the command when the widget is mounted."""
         self.pid, self.fd = pty.fork()
 
@@ -260,7 +262,8 @@ def run(
             str(port),
             "--factory",
         ]
-        if not no_reload:
+        # Enable hot reload only when not explicitly disabled and not in prod mode
+        if not no_reload and app_instance.mode != "prod":
             server_command.append("--reload")
 
         server_cwd = Path(app_file).parent

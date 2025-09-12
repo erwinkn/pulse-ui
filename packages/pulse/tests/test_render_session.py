@@ -7,6 +7,7 @@ that updates from one session do not leak into the other.
 """
 
 from typing import cast
+import pytest
 
 import pulse as ps
 from pulse.messages import (
@@ -14,8 +15,16 @@ from pulse.messages import (
     ServerMessage,
 )
 from pulse.routing import Route, RouteTree
-from pulse.session import Session
+from pulse.render_session import RenderSession
 from pulse.vdom import VDOM
+
+
+@pytest.fixture(autouse=True)
+def _pulse_context():
+    app = ps.App()
+    ctx = ps.PulseContext(app=app)
+    with ctx:
+        yield
 
 
 class CounterState(ps.State):
@@ -58,7 +67,7 @@ def make_route_info(pathname: str) -> RouteInfo:
     }
 
 
-def mount_with_listener(session: Session, path: str):
+def mount_with_listener(session: RenderSession, path: str):
     messages: list[ServerMessage] = []
 
     def on_message(msg: ServerMessage):
@@ -67,15 +76,18 @@ def mount_with_listener(session: Session, path: str):
         messages.append(msg)
 
     disconnect = session.connect(on_message)
-    session.mount(path, make_route_info(path))
+    # Ensure RenderSession is present in PulseContext when mounting so the
+    # captured context for the render effect includes it
+    with ps.PulseContext.update(render=session):
+        session.mount(path, make_route_info(path))
     return messages, disconnect
 
 
-def extract_count_from_ctx(session: Session, path: str) -> int:
+def extract_count_from_ctx(session: RenderSession, path: str) -> int:
     # Read latest VDOM by re-rendering from the RenderRoot and inspecting it
-    ctx = session.render_contexts[path]
-    with ctx:
-        vdom: VDOM = ctx.root.render_vdom()
+    mount = session.route_mounts[path]
+    with ps.PulseContext.update(render=session, route=mount.route):
+        vdom = mount.root.render_vdom()
     vdom_dict = cast(dict, vdom)
     children = cast(list, (vdom_dict.get("children", []) or []))
     span = cast(dict, children[0])
@@ -86,8 +98,8 @@ def extract_count_from_ctx(session: Session, path: str) -> int:
 
 def test_two_sessions_two_routes_are_isolated():
     routes = make_routes()
-    s1 = Session("s1", routes)
-    s2 = Session("s2", routes)
+    s1 = RenderSession("s1", routes)
+    s2 = RenderSession("s2", routes)
 
     # Mount both routes on both sessions and keep listeners active
     msgs_s1_a, disc_s1_a = mount_with_listener(s1, "a")
@@ -170,10 +182,10 @@ def make_global_routes() -> RouteTree:
     return RouteTree([route_a, route_b])
 
 
-def extract_global_count(session: Session, path: str) -> int:
-    ctx = session.render_contexts[path]
-    with ctx:
-        vdom: VDOM = ctx.root.render_vdom()
+def extract_global_count(session: RenderSession, path: str) -> int:
+    mount = session.route_mounts[path]
+    with ps.PulseContext.update(render=session, route=mount.route):
+        vdom: VDOM = mount.root.render_vdom()
     vdom_dict = cast(dict, vdom)
     children = cast(list, (vdom_dict.get("children", []) or []))
     span = cast(dict, children[0])
@@ -184,8 +196,8 @@ def extract_global_count(session: Session, path: str) -> int:
 
 def test_global_state_shared_within_session_and_isolated_across_sessions():
     routes = make_global_routes()
-    s1 = Session("s1", routes)
-    s2 = Session("s2", routes)
+    s1 = RenderSession("s1", routes)
+    s2 = RenderSession("s2", routes)
 
     # Mount both routes on both sessions
     msgs_s1_a, disc_s1_a = mount_with_listener(s1, "a")
@@ -253,7 +265,7 @@ def test_global_state_disposed_on_session_close():
     routes = RouteTree(
         [Route("a", ps.component(lambda: ps.div()[ps.span()[str(accessor().count)]]))]
     )
-    s = Session("s1", routes)
+    s = RenderSession("s1", routes)
     _msgs, disc = mount_with_listener(s, "a")
     # Ensure instance is created by rendering
     assert extract_count_from_ctx(s, "a") == 0

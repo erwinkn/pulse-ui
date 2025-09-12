@@ -3,19 +3,22 @@ from typing import (
     Any,
     Callable,
     Generic,
+    Literal,
     Mapping,
+    Optional,
     ParamSpec,
     Protocol,
     TypeVar,
     TypeVarTuple,
-    Unpack,
-    overload,
     cast,
+    overload,
 )
 
+from pulse.context import PulseContext
 from pulse.flags import IS_PRERENDERING
 from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
-from pulse.routing import ROUTE_CONTEXT, RouteContext
+from pulse.reactive_extensions import ReactiveDict
+from pulse.routing import RouteContext
 from pulse.state import State
 
 
@@ -133,6 +136,8 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 # -----------------------------------------------------
 # Ugly types, sorry, no other way to do this in Python
 # -----------------------------------------------------
+# The covariant=True is necessary for the global_state definition below
+S = TypeVar("S", covariant=True, bound=State)
 S1 = TypeVar("S1", bound=State)
 S2 = TypeVar("S2", bound=State)
 S3 = TypeVar("S3", bound=State)
@@ -146,122 +151,117 @@ S10 = TypeVar("S10", bound=State)
 
 
 Ts = TypeVarTuple("Ts")
+StateOrStateLambda = State | Callable[[], State]
 
 
 @overload
-def states(*args: Unpack[tuple[S1 | Callable[[], S1]]]) -> S1: ...
+def states(s1: S1 | Callable[[], S1], /) -> S1: ...
 @overload
 def states(
-    *args: Unpack[tuple[S1 | Callable[[], S1], S2 | Callable[[], S2]]],
+    s1: S1 | Callable[[], S1], s2: S2 | Callable[[], S2], /
 ) -> tuple[S1, S2]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[S1 | Callable[[], S1], S2 | Callable[[], S2], S3 | Callable[[], S3]]
-    ],
+    s1: S1 | Callable[[], S1], s2: S2 | Callable[[], S2], s3: S3 | Callable[[], S3], /
 ) -> tuple[S1, S2, S3]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    /,
 ) -> tuple[S1, S2, S3, S4]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    s8: S8 | Callable[[], S8],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-            S9 | Callable[[], S9],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    s8: S8 | Callable[[], S8],
+    s9: S9 | Callable[[], S9],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8, S9]: ...
 @overload
 def states(
-    *args: Unpack[
-        tuple[
-            S1 | Callable[[], S1],
-            S2 | Callable[[], S2],
-            S3 | Callable[[], S3],
-            S4 | Callable[[], S4],
-            S5 | Callable[[], S5],
-            S6 | Callable[[], S6],
-            S7 | Callable[[], S7],
-            S8 | Callable[[], S8],
-            S9 | Callable[[], S9],
-            S10 | Callable[[], S10],
-        ]
-    ],
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    s8: S8 | Callable[[], S8],
+    s9: S9 | Callable[[], S9],
+    s10: S10 | Callable[[], S10],
+    /,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8, S9, S10]: ...
 
 
 @overload
-def states(*args: S1 | Callable[[], S1]) -> tuple[S1, ...]: ...
+def states(
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    s4: S4 | Callable[[], S4],
+    s5: S5 | Callable[[], S5],
+    s6: S6 | Callable[[], S6],
+    s7: S7 | Callable[[], S7],
+    s8: S8 | Callable[[], S8],
+    s9: S9 | Callable[[], S9],
+    s10: S10 | Callable[[], S10],
+    /,
+    *args: S | Callable[[], S],
+) -> tuple[S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | S, ...]: ...
+
+
+# @overload
+# def states(*args: S | Callable[[], S]) -> tuple[S, ...]: ...
 
 
 def states(*args: State | Callable[[], State]):
@@ -325,24 +325,39 @@ def effects(
             ctx.effects = tuple(effects)
 
 
-def route_info() -> RouteContext:
-    ctx = ROUTE_CONTEXT.get()
-    if not ctx:
+def route() -> RouteContext:
+    ctx = PulseContext.get()
+    if not ctx or not ctx.route:
         raise RuntimeError(
             "`pulse.router` can only be called within a component during rendering."
         )
-    return ctx
+    return ctx.route
 
 
-def session_context() -> dict[str, Any]:
-    from pulse.session import SESSION_CONTEXT
+def session() -> ReactiveDict:
+    """Return the shared per-user session ReactiveDict.
 
-    session = SESSION_CONTEXT.get()
-    if not session:
-        raise RuntimeError(
-            "`pulse.session_context` can only be called within a component during rendering."
-        )
-    return session.context
+    Available during prerender, rendering, callbacks, middleware, and API routes.
+    """
+
+    ctx = PulseContext.get()
+    if not ctx.session:
+        raise RuntimeError("Could not resolve user session")
+    return ctx.session.data
+
+
+def session_id() -> str:
+    ctx = PulseContext.get()
+    if not ctx.session:
+        raise RuntimeError("Could not resolve user session")
+    return ctx.session.sid
+
+
+def websocket_id() -> str:
+    ctx = PulseContext.get()
+    if not ctx.render:
+        raise RuntimeError("Could not resolve WebSocket session")
+    return ctx.render.id
 
 
 async def call_api(
@@ -356,15 +371,13 @@ async def call_api(
     """Ask the client to perform an HTTP request and await the result.
 
     Accepts either a relative path or absolute URL; URL resolution happens in
-    Session.call_api using the session's server_address.
+    RenderSession.call_api using the session's server_address.
     """
-    from pulse.session import SESSION_CONTEXT
-
-    session = SESSION_CONTEXT.get()
-    if session is None:
+    ctx = PulseContext.get()
+    if ctx is None or ctx.render is None:
         raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
 
-    return await session.call_api(
+    return await ctx.render.call_api(
         path,
         method=method,
         headers=dict(headers or {}),
@@ -373,18 +386,43 @@ async def call_api(
     )
 
 
+async def set_cookie(
+    name: str,
+    value: str,
+    domain: Optional[str] = None,
+    secure: bool = True,
+    samesite: Literal["lax", "strict", "none"] = "lax",
+    max_age_seconds: int = 7 * 24 * 3600,
+) -> None:
+    """Request the client to set a cookie whose definition is stored server-side.
+
+    Stores (name, value, options) on the server under an opaque token, then calls
+    the internal endpoint with that token. Prevents client tampering with values.
+    """
+    ctx = PulseContext.get()
+    if ctx.session is None:
+        raise RuntimeError("Could not resolve the user session")
+    ctx.session.set_cookie(
+        name=name,
+        value=value,
+        domain=domain,
+        secure=secure,
+        samesite=samesite,
+        max_age_seconds=max_age_seconds,
+    )
+
+
 def navigate(path: str) -> None:
     """Instruct the client to navigate to a new path for the current route tree.
 
     Non-async; sends a server message to the client to perform SPA navigation.
     """
-    from pulse.session import SESSION_CONTEXT
 
-    session = SESSION_CONTEXT.get()
-    if session is None:
+    ctx = PulseContext.get()
+    if ctx is None or ctx.render is None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
-    session.notify({"type": "navigate_to", "path": path})
+    ctx.render.notify({"type": "navigate_to", "path": path})
 
 
 def is_prerendering():
@@ -401,18 +439,17 @@ def server_address() -> str:
 
     Example return values: "http://127.0.0.1:8000", "https://example.com:443"
     """
-    from pulse.session import SESSION_CONTEXT
 
-    session = SESSION_CONTEXT.get()
-    if session is None:
+    ctx = PulseContext.get()
+    if ctx is None or ctx.render is None:
         raise RuntimeError(
             "server_address() must be called inside a Pulse render/callback context"
         )
-    if not session.server_address:
+    if not ctx.render.server_address:
         raise RuntimeError(
             "Server address unavailable. Ensure App.run_codegen/asgi_factory configured server_address."
         )
-    return session.server_address
+    return ctx.render.server_address
 
 
 def client_address() -> str:
@@ -420,25 +457,24 @@ def client_address() -> str:
 
     Available during prerender (HTTP request) and after websocket connect.
     """
-    from pulse.session import SESSION_CONTEXT
 
-    session = SESSION_CONTEXT.get()
-    if session is None:
+    ctx = PulseContext.get()
+    if ctx.render is None:
         raise RuntimeError(
             "client_address() must be called inside a Pulse render/callback context"
         )
-    if not session.client_address:
+    if not ctx.render.client_address:
         raise RuntimeError(
             "Client address unavailable. It is set during prerender or socket connect."
         )
-    return session.client_address
+    return ctx.render.client_address
 
 
 # -----------------------------------------------------
 # Session-local global singletons (ps.global_state)
 # -----------------------------------------------------
 
-S = TypeVar("S", covariant=True)
+S = TypeVar("S", covariant=True, bound=State)
 
 
 class GlobalStateAccessor(Protocol, Generic[P, S]):
@@ -454,7 +490,7 @@ GLOBAL_STATES: dict[str, State] = {}
 
 
 def global_state(
-    factory: Callable[[P], S] | type[S], key: str | None = None
+    factory: Callable[P, S] | type[S], key: str | None = None
 ) -> GlobalStateAccessor[P, S]:
     """Provider for per-session or cross-session shared state.
 
@@ -473,7 +509,6 @@ def global_state(
     - id str: process-wide shared singleton for that id (cross-session)
       - constructor args: pass on the first call for that id; ignored thereafter
     """
-    from pulse.session import SESSION_CONTEXT
 
     if isinstance(factory, type):
         cls = factory
@@ -489,22 +524,24 @@ def global_state(
 
     base_key = key or default_key
 
-    def accessor(_id: str | None = None, *args: P.args, **kwargs: P.kwargs) -> S:
+    def accessor(id: str | None = None, *args: P.args, **kwargs: P.kwargs) -> S:
         # Cross-session shared instance when id is provided
-        if _id is not None:
-            shared_key = f"{base_key}|{_id}"
-            inst = GLOBAL_STATES.get(shared_key)
+        if id is not None:
+            shared_key = f"{base_key}|{id}"
+            inst = cast(S | None, GLOBAL_STATES.get(shared_key))
             if inst is None:
                 inst = mk(*args, **kwargs)
                 GLOBAL_STATES[shared_key] = inst
             return cast(S, inst)
 
         # Default: session-local when no id provided
-        session = SESSION_CONTEXT.get()
-        if session is None:
+        ctx = PulseContext.get()
+        if ctx is None or ctx.render is None:
             raise RuntimeError(
                 "ps.global_state must be used inside a Pulse render/callback context"
             )
-        return cast(S, session.get_global_state(base_key, lambda: mk(*args, **kwargs)))
+        return cast(
+            S, ctx.render.get_global_state(base_key, lambda: mk(*args, **kwargs))
+        )
 
     return accessor

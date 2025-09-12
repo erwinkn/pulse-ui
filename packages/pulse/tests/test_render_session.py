@@ -7,6 +7,7 @@ that updates from one session do not leak into the other.
 """
 
 from typing import cast
+import pytest
 
 import pulse as ps
 from pulse.messages import (
@@ -16,6 +17,14 @@ from pulse.messages import (
 from pulse.routing import Route, RouteTree
 from pulse.render_session import RenderSession
 from pulse.vdom import VDOM
+
+
+@pytest.fixture(autouse=True)
+def _pulse_context():
+    app = ps.App()
+    ctx = ps.PulseContext(app=app)
+    with ctx:
+        yield
 
 
 class CounterState(ps.State):
@@ -67,14 +76,17 @@ def mount_with_listener(session: RenderSession, path: str):
         messages.append(msg)
 
     disconnect = session.connect(on_message)
-    session.mount(path, make_route_info(path))
+    # Ensure RenderSession is present in PulseContext when mounting so the
+    # captured context for the render effect includes it
+    with ps.PulseContext.update(render=session):
+        session.mount(path, make_route_info(path))
     return messages, disconnect
 
 
 def extract_count_from_ctx(session: RenderSession, path: str) -> int:
     # Read latest VDOM by re-rendering from the RenderRoot and inspecting it
     mount = session.route_mounts[path]
-    with mount:
+    with ps.PulseContext.update(render=session, route=mount.route):
         vdom = mount.root.render_vdom()
     vdom_dict = cast(dict, vdom)
     children = cast(list, (vdom_dict.get("children", []) or []))
@@ -172,7 +184,7 @@ def make_global_routes() -> RouteTree:
 
 def extract_global_count(session: RenderSession, path: str) -> int:
     mount = session.route_mounts[path]
-    with mount:
+    with ps.PulseContext.update(render=session, route=mount.route):
         vdom: VDOM = mount.root.render_vdom()
     vdom_dict = cast(dict, vdom)
     children = cast(list, (vdom_dict.get("children", []) or []))

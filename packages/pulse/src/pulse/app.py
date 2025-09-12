@@ -6,16 +6,14 @@ to define routes and configure their Pulse application.
 """
 
 import asyncio
-from collections import defaultdict
 import logging
 import os
+from collections import defaultdict
+from contextlib import asynccontextmanager
 from enum import IntEnum
-from typing import Optional, Sequence, TypeVar, cast
+from typing import Literal, Optional, Sequence, TypeVar, cast
 from urllib.parse import urlsplit
-from uuid import uuid4
 
-from pulse.cookies import Cookie, session_cookie
-from pulse.helpers import later
 import socketio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,18 +22,19 @@ from fastapi.responses import JSONResponse
 import pulse.flatted as flatted
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
+from pulse.cookies import Cookie, session_cookie
+from pulse.helpers import later
 from pulse.messages import ClientMessage, ServerMessage
 from pulse.middleware import (
     Deny,
     MiddlewareStack,
     NotFound,
     Ok,
+    PulseCoreMiddleware,
     PulseMiddleware,
     Redirect,
-    PulseCoreMiddleware,
 )
 from pulse.react_component import ReactComponent, registered_react_components
-from pulse.reactive_extensions import ReactiveDict
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
@@ -57,6 +56,9 @@ class AppStatus(IntEnum):
     initialized = 1
     running = 2
     stopped = 3
+
+
+PulseMode = Literal["dev", "ci", "prod"]
 
 
 class App:
@@ -102,12 +104,34 @@ class App:
         self.user_to_render: dict[str, list[str]] = defaultdict(list)
         self.render_to_user: dict[str, str] = {}
 
+        # Resolve mode from environment and expose on the app instance
+        mode = os.environ.get("PULSE_MODE", "dev").lower()
+        if mode not in {"dev", "ci", "prod"}:
+            mode = "dev"
+        self.mode: PulseMode = cast(PulseMode, mode)
+
         self.codegen = Codegen(
             self.routes,
             config=codegen or CodegenConfig(),
         )
 
-        self.fastapi = FastAPI(title="Pulse UI Server")
+        @asynccontextmanager
+        async def lifespan(_: FastAPI):
+            try:
+                if isinstance(self.session_store, SessionStore):
+                    await self.session_store.init()
+            except Exception:
+                logger.exception("Error during SessionStore.init()")
+            try:
+                yield
+            finally:
+                try:
+                    if isinstance(self.session_store, SessionStore):
+                        await self.session_store.close()
+                except Exception:
+                    logger.exception("Error during SessionStore.close()")
+
+        self.fastapi = FastAPI(title="Pulse UI Server", lifespan=lifespan)
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
         self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
         if middleware is None:
@@ -199,17 +223,19 @@ class App:
             if session is None:
                 raise RuntimeError("Internal error: couldn't resolve user session")
             client_addr: str | None = client_address_from_req(request)
+            wsid = new_sid()
+            # TODO: reuse RenderSession between prerender and connect
+            render = self.create_render(wsid, session, client_address=client_addr)
 
             def _prerender() -> VDOM:
-                # TODO: reuse RenderSession between prerender and connect
-                wsid = new_sid()
-                render = self.create_render(wsid, session, client_address=client_addr)
                 vdom = render.render(path, route_info, prerendering=True)
                 self.close_render(wsid)
                 return vdom
 
             if not self.middleware:
-                payload = _prerender()
+                with PulseContext.update(render=render):
+                    payload = _prerender()
+                self.close_render(wsid)
                 resp = JSONResponse(payload)
                 session.handle_response(resp)
                 return resp
@@ -218,13 +244,15 @@ class App:
                 def _next():
                     return Ok(_prerender())
 
-                res = self.middleware.prerender(
-                    path=path,
-                    route_info=route_info,
-                    request=PulseRequest.from_fastapi(request),
-                    session=session.data,
-                    next=_next,
-                )
+                with PulseContext.update(render=render):
+                    res = self.middleware.prerender(
+                        path=path,
+                        route_info=route_info,
+                        request=PulseRequest.from_fastapi(request),
+                        session=session.data,
+                        next=_next,
+                    )
+                self.close_render(wsid)
             except Exception:
                 # TODO: add ability to report errors in prerender
                 logger.exception("Error in prerender middleware")

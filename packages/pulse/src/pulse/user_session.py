@@ -11,7 +11,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
-from fastapi import Request, Response
+from fastapi import Response
 
 from pulse.context import PulseContext
 from pulse.cookies import SetCookie
@@ -30,12 +30,7 @@ class UserSession:
     sid: str
     data: Session
 
-    def __init__(
-        self,
-        sid: str,
-        data: dict[str, Any],
-        handling_request=False
-    ) -> None:
+    def __init__(self, sid: str, data: dict[str, Any], handling_request=False) -> None:
         self.sid = sid
         self.data = reactive(data)
         self._scheduled_cookie_refresh = False
@@ -44,7 +39,6 @@ class UserSession:
         self._effect = Effect(self.save, name=f"save_session:{self.sid}")
 
     async def save(self):
-        print("Saving session data:", dict(self.data))
         app = PulseContext.get().app
         if isinstance(app.session_store, CookieSessionStore):
             self._refresh_session_cookie(app)
@@ -95,15 +89,12 @@ class UserSession:
         )
         self._queued_cookies[name] = cookie
         if self._handling_request:
-            print("set_cookie -> processing request = True")
             # cookies will be set at the end of the reuqest
             return
         # Otherwise, schedule a cookie refresh for this user
         if not self._scheduled_cookie_refresh:
             ctx = PulseContext.get()
             ctx.app.refresh_cookies(self.sid)
-        else:
-            print("set_cookie -> scheduled cookie refresh = True")
 
 
 class SessionStore(ABC):
@@ -112,6 +103,22 @@ class SessionStore(ABC):
     Implementations persist session state on the server and place only a stable
     identifier in the cookie. Override methods to integrate with your backend.
     """
+
+    async def init(self) -> None:
+        """Optional async initializer, invoked when the app starts.
+
+        Override in implementations that need to establish connections or
+        perform startup work. Default is a no-op.
+        """
+        return None
+
+    async def close(self) -> None:
+        """Optional async cleanup, invoked when the app shuts down.
+
+        Override in implementations that need to tear down connections or
+        perform cleanup. Default is a no-op.
+        """
+        return None
 
     @abstractmethod
     async def get(self, sid: str) -> Optional[dict[str, Any]]: ...
@@ -163,16 +170,17 @@ class CookieSessionStore:
     ) -> None:
         if not secret:
             secret = (
-                os.environ.get("PULSE_SESSION_SECRET")
-                or os.environ.get("SECRET_KEY")
-                or ""
+                os.environ.get("PULSE_SECRET") or os.environ.get("SECRET_KEY") or ""
             )
             if not secret:
-                # Ephemeral secret for development; cookies will be invalidated on restart
+                mode = os.environ.get("PULSE_MODE", "dev").lower()
+                if mode == "prod":
+                    # In CI/production, require an explicit secret
+                    raise RuntimeError(
+                        "PULSE_SECRET must be set when using CookieSessionStore in production.\nCookieSessionStore is the default way of storing sessions in Pulse. Providing a secret is necessary to not invalidate all sessions on reload."
+                    )
+                # In dev, use an ephemeral secret silently
                 secret = secrets.token_urlsafe(32)
-                logger.warning(
-                    "PULSE_SESSION_SECRET not set; using ephemeral secret for CookieSessionStore"
-                )
         self._secret = secret.encode("utf-8")
         self._salt = salt.encode("utf-8")
         self._digest = getattr(hashlib, digestmod)

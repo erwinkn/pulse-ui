@@ -262,7 +262,8 @@ def run(
             str(port),
             "--factory",
         ]
-        if not no_reload:
+        # Enable hot reload only when not explicitly disabled and not in prod mode
+        if not no_reload and app_instance.mode != "prod":
             server_command.append("--reload")
 
         server_cwd = Path(app_file).parent

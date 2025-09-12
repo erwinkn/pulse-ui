@@ -459,7 +459,7 @@ def client_address() -> str:
     """
 
     ctx = PulseContext.get()
-    if ctx is None or ctx.render is None:
+    if ctx.render is None:
         raise RuntimeError(
             "client_address() must be called inside a Pulse render/callback context"
         )

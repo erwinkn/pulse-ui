@@ -59,7 +59,6 @@ def GlobalStateDemo():
         ),
         ps.div(
             ps.span(f"server: {server}", className="mr-3"),
-            ps.span(f"client ip: {sess.get('ip') or '-'}"),
             className="text-xs text-gray-500 mb-4",
         ),
         ps.div(
@@ -70,18 +69,18 @@ def GlobalStateDemo():
         ps.div(
             ps.p("Routes:", className="mt-6 font-semibold"),
             ps.ul(
-                ps.li(ps.Link("/global-state", to="/global-state", className="link")),
+                ps.li(ps.Link("/", to="/", className="link")),
                 ps.li(
                     ps.Link(
-                        "/global-state/room1",
-                        to="/global-state/room1",
+                        "/room1",
+                        to="/room1",
                         className="link",
                     )
                 ),
                 ps.li(
                     ps.Link(
-                        "/global-state/room2",
-                        to="/global-state/room2",
+                        "/room2",
+                        to="/room2",
                         className="link",
                     )
                 ),
@@ -94,8 +93,8 @@ def GlobalStateDemo():
 
 app = ps.App(
     routes=[
-        ps.Route("/global-state", GlobalStateDemo),
-        ps.Route("/global-state/:room", GlobalStateDemo),
+        ps.Route("/", GlobalStateDemo),
+        ps.Route("/:room", GlobalStateDemo),
     ],
     codegen=CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )

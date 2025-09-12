@@ -5,7 +5,7 @@ import uuid
 import asyncio
 import traceback
 
-from pulse.context import PULSE_CONTEXT
+from pulse.context import PulseContext
 from pulse.messages import (
     RouteInfo,
     ServerInitMessage,
@@ -14,7 +14,6 @@ from pulse.messages import (
     ServerErrorMessage,
 )
 from pulse.reactive import Effect, flush_effects
-from pulse.reactive_extensions import ReactiveDict
 from pulse.reconciler import RenderRoot
 from pulse.routing import Layout, Route, RouteContext, RouteTree
 from pulse.state import State
@@ -31,7 +30,7 @@ class RouteMount:
         self.root = RenderRoot(route.render.fn)
         self.route = RouteContext(route_info)
         self.effect: Optional[Effect] = None
-        self._pulse_ctx_token = None
+        self._pulse_ctx: PulseContext | None = None
 
 
 class RenderSession:
@@ -42,28 +41,35 @@ class RenderSession:
         *,
         server_address: Optional[str] = None,
         client_address: Optional[str] = None,
-        session: Optional[ReactiveDict] = None,
     ) -> None:
         self.id = id
         self.routes = routes
         # Base server address for building absolute API URLs (e.g., http://localhost:8000)
-        self.server_address: Optional[str] = server_address
+        self._server_address: Optional[str] = server_address
         # Best-effort client address, captured at prerender or socket connect time
-        self.client_address: Optional[str] = client_address
+        self._client_address: Optional[str] = client_address
         self.route_mounts: dict[str, RouteMount] = {}
         self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
-        if session is not None:
-            self.session = session
-        else:
-            self.session = ReactiveDict()
         self._pending_api: dict[str, asyncio.Future] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
-        # Pending cookies to set keyed by opaque token
-        self._cookies_to_set: dict[str, dict] = {}
+
+    @property
+    def server_address(self) -> str:
+        if self._server_address is None:
+            raise RuntimeError("Server address not set")
+        return self._server_address
+
+    @property
+    def client_address(self) -> str:
+        if self._client_address is None:
+            raise RuntimeError("Client address not set")
+        return self._client_address
 
     # Effect error handler (batch-level) to surface runtime errors
     def _on_effect_error(self, effect, exc: Exception):
+        # TODO: wirte into effects created within a Render
+
         # We don't want to couple effects to routing; broadcast to all active paths
         details = {"effect": getattr(effect, "name", "<unnamed>")}
         for path in list(self.route_mounts.keys()):
@@ -128,9 +134,9 @@ class RenderSession:
         self._global_states.clear()
 
     def execute_callback(self, path: str, key: str, args: list | tuple):
-        active_route = self.route_mounts[path]
+        mount = self.route_mounts[path]
         try:
-            cb = active_route.root.callbacks[key]
+            cb = mount.root.callbacks[key]
             fn, n_params = cb.fn, cb.n_args
             res = fn(*args[:n_params])
             if iscoroutine(res):
@@ -182,7 +188,7 @@ class RenderSession:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending_api[corr_id] = fut
         headers = headers or {}
-        headers["x-pulse-session-id"] = self.id
+        headers["x-pulse-render-id"] = self.id
         self.notify(
             {
                 "type": "api_call",
@@ -213,31 +219,19 @@ class RenderSession:
                 }
             )
 
-    # ---- Cookie registration for secure set_cookie helper ----
-    def register_cookie_to_set(
-        self, name: str, value: str, options: dict | None = None
-    ) -> str:
-        token = uuid.uuid4().hex
-        self._cookies_to_set[token] = {
-            "name": name,
-            "value": value,
-            "options": options or {},
-        }
-        return token
+    def create_route_mount(self, path: str, route_info: Optional[RouteInfo] = None):
+        route = self.routes.find(path)
+        mount = RouteMount(self, route, route_info or route.default_route_info())
+        self.route_mounts[path] = mount
+        return mount
 
-    def pop_cookie_to_set(self, token: str) -> dict | None:
-        return self._cookies_to_set.pop(token, None)
-
-    def get_or_create_route_mount(
-        self, path: str, route_info: Optional[RouteInfo] = None, create=False
+    def get_route_mount(
+        self,
+        path: str,
     ):
         mount = self.route_mounts.get(path)
         if not mount:
-            if not create:
-                raise ValueError(f"No active route for '{path}'")
-            route = self.routes.find(path)
-            mount = RouteMount(self, route, route_info or route.default_route_info())
-            self.route_mounts[path] = mount
+            raise ValueError(f"No active route for '{path}'")
         return mount
 
     # ---- Session-local global state registry ----
@@ -252,11 +246,13 @@ class RenderSession:
     def render(
         self, path: str, route_info: Optional[RouteInfo] = None, prerendering=False
     ):
-        with self.get_or_create_route_mount(path, route_info, create=True) as mount:
+        mount = self.create_route_mount(path, route_info)
+        with PulseContext.update(route=mount.route):
             return mount.root.render_vdom(prerendering=prerendering)
 
     def rerender(self, path: str):
-        with self.get_or_create_route_mount(path) as mount:
+        mount = self.get_route_mount(path)
+        with PulseContext.update(route=mount.route):
             return mount.root.render_diff()
 
     def mount(self, path: str, route_info: RouteInfo):
@@ -265,8 +261,10 @@ class RenderSession:
             # logger.error(f"Route already mounted: '{path}'")
             return
 
-        mount = self.get_or_create_route_mount(path, route_info, create=True)
-        ctx = PULSE_CONTEXT.get()
+        mount = self.create_route_mount(path, route_info)
+        # Get current context + add RouteContext. Save it to be able to mount it
+        # whenever the render effect reruns.
+        ctx = PulseContext.update(route=mount.route)
 
         def _render_effect():
             with ctx:
@@ -297,8 +295,8 @@ class RenderSession:
 
     def navigate(self, path: str, route_info: RouteInfo):
         # Route is already mounted, we can just update the routing state
-        mount = self.get_or_create_route_mount(path, route_info, create=False)
         try:
+            mount = self.get_route_mount(path)
             mount.route.update(route_info)
         except Exception as e:  # noqa: BLE001
             self.report_error(path, "navigate", e)
@@ -307,12 +305,9 @@ class RenderSession:
         if path not in self.route_mounts:
             return
         try:
-            active_route = self.route_mounts.pop(path)
-            active_route.root.unmount()
+            mount = self.route_mounts.pop(path)
+            mount.root.unmount()
+            if mount.effect:
+                mount.effect.dispose()
         except Exception as e:  # noqa: BLE001
             self.report_error(path, "unmount", e)
-
-    # ---- Session-side utilities ----
-    def update_context(self, updates: dict[str, Any]) -> None:
-        """Update session context and trigger rerender for all active routes."""
-        self.session.update(updates)

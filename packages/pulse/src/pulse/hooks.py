@@ -10,15 +10,14 @@ from typing import (
     Protocol,
     TypeVar,
     TypeVarTuple,
-    Unpack,
-    overload,
     cast,
+    overload,
 )
 
-from pulse.context import PULSE_CONTEXT
+from pulse.context import PulseContext
 from pulse.flags import IS_PRERENDERING
-from pulse.reactive_extensions import ReactiveDict
 from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
+from pulse.reactive_extensions import ReactiveDict
 from pulse.routing import RouteContext
 from pulse.state import State
 
@@ -137,7 +136,8 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 # -----------------------------------------------------
 # Ugly types, sorry, no other way to do this in Python
 # -----------------------------------------------------
-S = TypeVar("S", bound=State)
+# The covariant=True is necessary for the global_state definition below
+S = TypeVar("S", covariant=True, bound=State)
 S1 = TypeVar("S1", bound=State)
 S2 = TypeVar("S2", bound=State)
 S3 = TypeVar("S3", bound=State)
@@ -326,7 +326,7 @@ def effects(
 
 
 def route() -> RouteContext:
-    ctx = PULSE_CONTEXT.get()
+    ctx = PulseContext.get()
     if not ctx or not ctx.route:
         raise RuntimeError(
             "`pulse.router` can only be called within a component during rendering."
@@ -340,12 +340,10 @@ def session() -> ReactiveDict:
     Available during prerender, rendering, callbacks, middleware, and API routes.
     """
 
-    ctx = PULSE_CONTEXT.get()
-    if not ctx:
-        raise RuntimeError(
-            "`ps.session()` can only be called within a Pulse render/callback context."
-        )
-    return ctx.session
+    ctx = PulseContext.get()
+    if not ctx.session:
+        raise RuntimeError("Could not resolve user session")
+    return ctx.session.data
 
 
 async def call_api(
@@ -361,7 +359,7 @@ async def call_api(
     Accepts either a relative path or absolute URL; URL resolution happens in
     RenderSession.call_api using the session's server_address.
     """
-    ctx = PULSE_CONTEXT.get()
+    ctx = PulseContext.get()
     if ctx is None or ctx.render is None:
         raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
 
@@ -387,22 +385,17 @@ async def set_cookie(
     Stores (name, value, options) on the server under an opaque token, then calls
     the internal endpoint with that token. Prevents client tampering with values.
     """
-    ctx = PULSE_CONTEXT.get()
-    if ctx is None or ctx.render is None:
-        raise RuntimeError(
-            "set_cookie() must be invoked inside a Pulse callback context"
-        )
-
-    token = ctx.app.register_cookie_to_set(
-        name,
-        value,
+    ctx = PulseContext.get()
+    if ctx.session is None:
+        raise RuntimeError("Could not resolve the user session")
+    ctx.session.set_cookie(
+        name=name,
+        value=value,
         domain=domain,
         secure=secure,
         samesite=samesite,
         max_age_seconds=max_age_seconds,
     )
-    path = f"/pulse/set-cookie?token={token}"
-    await ctx.render.call_api(path, method="POST", credentials="include")
 
 
 def navigate(path: str) -> None:
@@ -411,7 +404,7 @@ def navigate(path: str) -> None:
     Non-async; sends a server message to the client to perform SPA navigation.
     """
 
-    ctx = PULSE_CONTEXT.get()
+    ctx = PulseContext.get()
     if ctx is None or ctx.render is None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
@@ -433,7 +426,7 @@ def server_address() -> str:
     Example return values: "http://127.0.0.1:8000", "https://example.com:443"
     """
 
-    ctx = PULSE_CONTEXT.get()
+    ctx = PulseContext.get()
     if ctx is None or ctx.render is None:
         raise RuntimeError(
             "server_address() must be called inside a Pulse render/callback context"
@@ -451,7 +444,7 @@ def client_address() -> str:
     Available during prerender (HTTP request) and after websocket connect.
     """
 
-    ctx = PULSE_CONTEXT.get()
+    ctx = PulseContext.get()
     if ctx is None or ctx.render is None:
         raise RuntimeError(
             "client_address() must be called inside a Pulse render/callback context"
@@ -528,7 +521,7 @@ def global_state(
             return cast(S, inst)
 
         # Default: session-local when no id provided
-        ctx = PULSE_CONTEXT.get()
+        ctx = PulseContext.get()
         if ctx is None or ctx.render is None:
             raise RuntimeError(
                 "ps.global_state must be used inside a Pulse render/callback context"

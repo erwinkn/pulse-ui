@@ -304,6 +304,12 @@ class RouteInfo(TypedDict):
 
 
 class RouteContext:
+    def __init__(self, info: RouteInfo):
+        self.info = cast(RouteInfo, ReactiveDict(info))
+
+    def update(self, info: RouteInfo):
+        self.info.update(info)
+
     @property
     def pathname(self) -> str:
         return self.info["pathname"]
@@ -327,9 +333,3 @@ class RouteContext:
     @property
     def catchall(self) -> list[str]:
         return self.info["catchall"]
-
-    def __init__(self, info: RouteInfo):
-        self.info = cast(RouteInfo, ReactiveDict(info))
-
-    def update(self, info: RouteInfo):
-        self.info.update(info)

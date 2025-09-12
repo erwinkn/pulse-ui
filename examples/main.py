@@ -78,7 +78,6 @@ class AsyncEffectState(ps.State):
         self.running = True
 
     def stop(self):
-        print(f"Real type of self.ticker: {type(self.ticker)}")
         self.ticker.cancel()
         self.running = False
 
@@ -576,15 +575,15 @@ app = ps.App(
 
 
 class LoggingMiddleware(ps.PulseMiddleware):
-    def prerender(self, *, path, route_info, request, context, next):
+    def prerender(self, *, path, route_info, request, session, next):
         # before
         print(f"[MW prerender] path={path} host={request.headers.get('host')}")
         # Seed same keys as connect to avoid prerender flash
-        context["user_agent"] = request.headers.get("user-agent")
-        context["ip"] = request.headers.get("x-forwarded-for") or (
+        session["user_agent"] = request.headers.get("user-agent")
+        session["ip"] = request.headers.get("x-forwarded-for") or (
             request.client[0] if request.client else None
         )
-        context["connected_at"] = context.get("connected_at") or int(time.time())
+        session["connected_at"] = session.get("connected_at") or int(time.time())
         res = next()
         # after
         if isinstance(res, Ok):
@@ -598,17 +597,17 @@ class LoggingMiddleware(ps.PulseMiddleware):
         print(f"[MW prerender:after] kind={kind}")
         return res
 
-    def connect(self, *, request, ctx, next):
+    def connect(self, *, request, session, next):
         # Add some context visible in components
         ua = request.headers.get("user-agent")
         ip = request.client[0] if request.client else None
-        ctx["user_agent"] = ua
-        ctx["ip"] = ip
-        ctx["connected_at"] = int(time.time())
+        session["user_agent"] = ua
+        session["ip"] = ip
+        session["connected_at"] = int(time.time())
         print(f"[MW connect] ip={ip} ua={(ua or '')[:40]}")
         return next()
 
-    def message(self, *, ctx, data, next):
+    def message(self, *, data, session, next):
         # Light logging of message types
         try:
             msg_type = data.get("type")

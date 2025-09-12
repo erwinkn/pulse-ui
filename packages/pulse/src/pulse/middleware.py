@@ -199,8 +199,7 @@ class PulseCoreMiddleware(PulseMiddleware):
         next: Callable[[], PrerenderResponse],
     ) -> PrerenderResponse:
         # No render object is available during prerender middleware
-        with PulseContext(session=session, render=None, route=None, app=None):
-            res = next()
+        res = next()
         return self._normalize_prerender_response(res)
 
     def connect(
@@ -210,8 +209,7 @@ class PulseCoreMiddleware(PulseMiddleware):
         session: dict[str, Any],
         next: Callable[[], ConnectResponse],
     ) -> ConnectResponse:
-        with PulseContext(session=session, render=None, route=None, app=None):
-            res = next()
+        res = next()
         return self._normalize_connect_response(res)
 
     def message(
@@ -221,6 +219,5 @@ class PulseCoreMiddleware(PulseMiddleware):
         session: dict[str, Any],
         next: Callable[[], Ok[None]],
     ) -> Ok[None] | Deny:
-        with PulseContext(session=session, render=None, route=None, app=None):
-            res = next()
+        res = next()
         return self._normalize_message_response(res)

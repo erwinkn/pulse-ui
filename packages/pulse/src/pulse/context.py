@@ -2,17 +2,14 @@
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from .reactive_extensions import ReactiveDict
 from .routing import RouteContext
-from .reactive import REACTIVE_CONTEXT
-from .hooks import HOOK_CONTEXT
-from .react_component import COMPONENT_REGISTRY
 
 if TYPE_CHECKING:
-    from .render_session import RenderSession
     from .app import App
+    from .render_session import RenderSession
+    from .user_session import UserSession
 
 
 @dataclass
@@ -24,11 +21,33 @@ class PulseContext:
     - route: active RouteContext for this render/effect scope
     """
 
-    session: ReactiveDict[str, Any]  # pyright: ignore[reportExplicitAny]
-    render: "RenderSession | None"
-    route: RouteContext | None
     app: "App"
+    session: "UserSession | None" = None
+    render: "RenderSession | None" = None
+    route: "RouteContext | None" = None
     _token: "Token[PulseContext | None] | None" = None
+
+    @classmethod
+    def get(cls):
+        ctx = PULSE_CONTEXT.get()
+        if ctx is None:
+            raise RuntimeError("Internal error: PULSE_CONTEXT is not set")
+        return ctx
+
+    @classmethod
+    def update(
+        cls,
+        session: "UserSession | None" = None,
+        render: "RenderSession | None" = None,
+        route: "RouteContext | None" = None,
+    ):
+        ctx = cls.get()
+        return PulseContext(
+            app=ctx.app,
+            session=session or ctx.session,
+            render=render or ctx.render,
+            route=route or ctx.route,
+        )
 
     def __enter__(self):
         self._token = PULSE_CONTEXT.set(self)
@@ -50,8 +69,5 @@ PULSE_CONTEXT: ContextVar["PulseContext | None"] = ContextVar(
 )
 
 __all__ = [
-    "REACTIVE_CONTEXT",
     "PULSE_CONTEXT",
-    "HOOK_CONTEXT",
-    "COMPONENT_REGISTRY",
 ]

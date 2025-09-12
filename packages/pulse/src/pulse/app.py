@@ -82,6 +82,7 @@ class App:
     def __init__(
         self,
         routes: Optional[Sequence[Route | Layout]] = None,
+        dev_routes: Optional[Sequence[Route | Layout]] = None,
         codegen: Optional[CodegenConfig] = None,
         middleware: Optional[PulseMiddleware | Sequence[PulseMiddleware]] = None,
         cookie: Optional[Cookie] = None,
@@ -95,20 +96,24 @@ class App:
             routes: Optional list of Route objects to register.
             codegen: Optional codegen configuration.
         """
-        routes = routes or []
-        # Auto-add React components to all routes
-        add_react_components(routes, registered_react_components())
-        self.routes = RouteTree(routes)
-        self.user_sessions: dict[str, UserSession] = {}
-        self.render_sessions: dict[str, RenderSession] = {}
-        self.user_to_render: dict[str, list[str]] = defaultdict(list)
-        self.render_to_user: dict[str, str] = {}
-
         # Resolve mode from environment and expose on the app instance
         mode = os.environ.get("PULSE_MODE", "dev").lower()
         if mode not in {"dev", "ci", "prod"}:
             mode = "dev"
         self.mode: PulseMode = cast(PulseMode, mode)
+
+        # Build the complete route list, optionally including dev-only routes
+        all_routes: list[Route | Layout] = list(routes or [])
+        if self.mode == "dev" and dev_routes:
+            all_routes.extend(dev_routes)
+
+        # Auto-add React components to all routes
+        add_react_components(all_routes, registered_react_components())
+        self.routes = RouteTree(all_routes)
+        self.user_sessions: dict[str, UserSession] = {}
+        self.render_sessions: dict[str, RenderSession] = {}
+        self.user_to_render: dict[str, list[str]] = defaultdict(list)
+        self.render_to_user: dict[str, str] = {}
 
         self.codegen = Codegen(
             self.routes,

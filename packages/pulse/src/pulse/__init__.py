@@ -17,9 +17,11 @@ from .hooks import (
     route,
     server_address,
     session,
+    session_id,
     set_cookie,
     setup,
     states,
+    websocket_id,
 )
 from .html import *  # noqa: F403
 from .middleware import (
@@ -101,6 +103,8 @@ __all__ = [
     "client_address",
     "global_state",
     "session",
+    "session_id",
+    "websocket_id",
     # Middleware
     "PulseMiddleware",
     "Ok",

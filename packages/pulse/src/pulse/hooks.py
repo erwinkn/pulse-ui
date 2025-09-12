@@ -346,6 +346,20 @@ def session() -> ReactiveDict:
     return ctx.session.data
 
 
+def session_id() -> str:
+    ctx = PulseContext.get()
+    if not ctx.session:
+        raise RuntimeError("Could not resolve user session")
+    return ctx.session.sid
+
+
+def websocket_id() -> str:
+    ctx = PulseContext.get()
+    if not ctx.render:
+        raise RuntimeError("Could not resolve WebSocket session")
+    return ctx.render.id
+
+
 async def call_api(
     path: str,
     *,

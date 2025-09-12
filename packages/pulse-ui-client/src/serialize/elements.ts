@@ -1,6 +1,8 @@
 import { createExtractor } from "./extractor";
 
 // Base extractors (camelCase) similar to events.ts style
+const lowerTagName = (e: Element) => e.tagName.toLowerCase();
+
 const ELEMENT_KEYS = [
   "id",
   "className",
@@ -48,7 +50,7 @@ const HTML_ELEMENT_BASE_KEYS = [
 ] as const satisfies readonly (keyof HTMLElement)[];
 
 const extractElement = createExtractor<Element>()(ELEMENT_KEYS, {
-  tagName: (e) => e.tagName.toLowerCase(),
+  tagName: lowerTagName,
 });
 
 const extractHTMLOrSVGElement =

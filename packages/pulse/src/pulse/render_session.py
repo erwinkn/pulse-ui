@@ -44,12 +44,12 @@ class RenderSession:
     ) -> None:
         self.id = id
         self.routes = routes
+        self.route_mounts: dict[str, RouteMount] = {}
         # Base server address for building absolute API URLs (e.g., http://localhost:8000)
         self._server_address: Optional[str] = server_address
         # Best-effort client address, captured at prerender or socket connect time
         self._client_address: Optional[str] = client_address
-        self.route_mounts: dict[str, RouteMount] = {}
-        self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
+        self._send_message: Callable[[ServerMessage], Any] | None = None
         self._pending_api: dict[str, asyncio.Future] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
@@ -75,22 +75,13 @@ class RenderSession:
         for path in list(self.route_mounts.keys()):
             self.report_error(path, "effect", exc, details)
 
-    def connect(
-        self,
-        message_listener: Callable[[ServerMessage], Any],
-    ):
-        self.message_listeners.add(message_listener)
-        # Return a disconnect function. Use `discard` since there are two ways
-        # of disconnecting a message listener
-        return lambda: self.message_listeners.discard(message_listener)
+    def connect(self, send_message: Callable[[ServerMessage], Any]):
+        self._send_message = send_message
 
-    # Use `discard` since there are two ways of disconnecting a message listener
-    def disconnect(self, message_listener: Callable[[ServerMessage], Any]):
-        self.message_listeners.discard(message_listener)
-
-    def notify(self, message: ServerMessage):
-        for listener in self.message_listeners:
-            listener(message)
+    def send(self, message: ServerMessage):
+        if not self._send_message:
+            raise RuntimeError("RenderSession is not connected")
+        self._send_message(message)
 
     def report_error(
         self,
@@ -109,7 +100,7 @@ class RenderSession:
                 "details": details or {},
             },
         }
-        self.notify(error_msg)
+        self.send(error_msg)
         logger.error(
             "Error reported for path %r during %s: %s\n%s",
             path,
@@ -120,7 +111,7 @@ class RenderSession:
 
     def close(self):
         # The effect will be garbage collected, and with it the dependencies
-        self.message_listeners.clear()
+        self._send_message = None
         for path in list(self.route_mounts.keys()):
             self.unmount(path)
         self.route_mounts.clear()
@@ -189,7 +180,7 @@ class RenderSession:
         self._pending_api[corr_id] = fut
         headers = headers or {}
         headers["x-pulse-render-id"] = self.id
-        self.notify(
+        self.send(
             {
                 "type": "api_call",
                 "id": corr_id,
@@ -270,13 +261,11 @@ class RenderSession:
             with ctx:
                 if mount.root.render_count == 0:
                     vdom = mount.root.render_vdom(prerendering=False)
-                    self.notify(
-                        ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-                    )
+                    self.send(ServerInitMessage(type="vdom_init", path=path, vdom=vdom))
                 else:
                     result = mount.root.render_diff()
                     if result.ops:
-                        self.notify(
+                        self.send(
                             ServerUpdateMessage(
                                 type="vdom_update", path=path, ops=result.ops
                             )

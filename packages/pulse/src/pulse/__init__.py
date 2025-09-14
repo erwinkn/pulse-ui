@@ -54,7 +54,17 @@ from .react_component import (
     react_component,
     registered_react_components,
 )
-from .reactive import Batch, Computed, Effect, IgnoreBatch, Signal, Untrack
+from .reactive import (
+    AsyncEffect,
+    AsyncEffectFn,
+    Batch,
+    Computed,
+    Effect,
+    EffectFn,
+    IgnoreBatch,
+    Signal,
+    Untrack,
+)
 from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive
 from .render_session import RenderSession, RouteMount
 from .request import PulseRequest
@@ -92,6 +102,9 @@ __all__ = [
     "Signal",
     "Computed",
     "Effect",
+    "AsyncEffect",
+    "EffectFn",
+    "AsyncEffectFn",
     "Batch",
     "Untrack",
     "IgnoreBatch",

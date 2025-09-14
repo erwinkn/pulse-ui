@@ -107,7 +107,12 @@ class ReactiveDict(dict[T1, T2]):
         if not was_present:
             self._bump_structure()
 
-    def update(self, other=None, /, **kwargs) -> None:  # type: ignore[override]
+    def update(
+        self,
+        other: Mapping[T1, T2] | Iterable[tuple[T1, T2]] | None = None,
+        /,
+        **kwargs: dict[T1, T2],
+    ) -> None:
         # Match dict.update semantics
         if other is not None:
             if isinstance(other, Mapping):
@@ -360,7 +365,7 @@ class ReactiveList(list[T1]):
         key = kwargs.get("key")
         reverse = kwargs.get("reverse", False)
 
-        def key_for_index(i):
+        def key_for_index(i: int):
             v = current[i]
             return key(v) if callable(key) else v
 

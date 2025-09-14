@@ -64,6 +64,7 @@ class Signal(Generic[T]):
     def write(self, value: T):
         if value == self.value:
             return
+        print(f"Signal update {self.name}")
         increment_epoch()
         self.value = value
         self.last_change = epoch()
@@ -188,15 +189,17 @@ class Computed(Generic[T]):
 
 
 EffectCleanup = Callable[[], None]
-# An effect function can be sync and return an optional cleanup function,
-# or async and return an awaitable producing an optional cleanup function.
-EffectFn = (
-    Callable[[], Optional[EffectCleanup]]
-    | Callable[[], Coroutine[Any, Any, Optional[EffectCleanup]]]
-)
+# Split effect function types into sync and async for clearer typing
+EffectFn = Callable[[], Optional[EffectCleanup]]
+AsyncEffectFn = Callable[[], Coroutine[Any, Any, Optional[EffectCleanup]]]
 
 
 class Effect:
+    """
+    Synchronous effect and base class. Use AsyncEffect for async effects.
+    Both are isinstance(Effect).
+    """
+
     def __init__(
         self,
         fn: EffectFn,
@@ -206,22 +209,19 @@ class Effect:
         on_error: Optional[Callable[[Exception], None]] = None,
         deps: Optional[list[Signal | Computed]] = None,
     ):
-        self.fn: EffectFn = fn
-        self.name: Optional[str] = name
-        self.on_error: Optional[Callable[[Exception], None]] = on_error
+        self.fn = fn  # type: ignore[assignment]
+        self.name = name
+        self.on_error = on_error
         self.cleanup_fn: Optional[EffectCleanup] = None
         self.deps: dict[Signal | Computed, int] = {}
         self.children: list[Effect] = []
         self.parent: Optional[Effect] = None
-        # Used to detect the first run, but useful for testing/optimization
-        self.runs: int = 0
-        self.last_run: int = -1
+        self.runs = 0
+        self.last_run = -1
         self.scope: Optional[Scope] = None
         self.batch: Optional[Batch] = None
-        # Track an async task when running async effects
-        self._task: Optional[asyncio.Task] = None
-        # Explicit dependency control
         self._explicit_deps: Optional[list[Signal | Computed]] = deps
+        self.immediate = immediate
 
         if immediate and lazy:
             raise ValueError("An effect cannot be boht immediate and lazy")
@@ -230,29 +230,22 @@ class Effect:
         if rc.scope is not None:
             rc.scope.register_effect(self)
 
-        # Will either run the effect now or add it to the current batch
         if immediate:
             self.run()
         elif not lazy:
             self.schedule()
 
     def _cleanup_before_run(self):
-        # Run children cleanups first
         for child in self.children:
             child._cleanup_before_run()
         if self.cleanup_fn:
             self.cleanup_fn()
 
     def dispose(self):
-        # Run children cleanups first. Children will unregister themselves, so
-        # self.children will change size -> convert to a list first.
         for child in self.children.copy():
             child.dispose()
         if self.cleanup_fn:
             self.cleanup_fn()
-        # Cancel any in-flight async task
-        if self._task and not self._task.done():
-            self._task.cancel()
         for dep in self.deps:
             dep.obs.remove(self)
         if self.parent:
@@ -261,7 +254,11 @@ class Effect:
             self.batch.effects.remove(self)
 
     def schedule(self):
-        # Prefer composite reactive context if set
+        # Immediate effects run right away when scheduled and do not enter a batch
+        if self.immediate:
+            self.run()
+            return
+        print(f"Scheduling effect {self.name}")
         rc = REACTIVE_CONTEXT.get()
         batch = rc.batch
         batch.register_effect(self)
@@ -285,18 +282,18 @@ class Effect:
     def __call__(self):
         self.run()
 
-    def _handle_error(self, exc: Exception) -> None:
-        """Handle an exception raised during this effect's execution.
+    def flush(self) -> None:
+        """If scheduled in a batch, remove and run immediately."""
+        if self.batch is not None:
+            self.batch.effects.remove(self)
+            self.batch = None
+        # Run now (respects IS_PRERENDERING and error handling)
+        self.run()
 
-        Preference order:
-        1) This effect's on_error handler, if provided
-        2) Reactive context's on_effect_error handler, if provided
-        3) Re-raise the exception
-        """
+    def _handle_error(self, exc: Exception) -> None:
         if callable(self.on_error):
             self.on_error(exc)
             return
-        # Report via reactive context if a handler is present
         handler = getattr(REACTIVE_CONTEXT.get(), "on_effect_error", None)
         if callable(handler):
             handler(self, exc)
@@ -306,14 +303,11 @@ class Effect:
     def _apply_scope_results(
         self, scope: "Scope", prev_deps: set["Signal | Computed"]
     ) -> None:
-        # Update children
         self.children = scope.effects
         for child in self.children:
             child.parent = self
 
-        # Update deps
         if self._explicit_deps is not None:
-            # Only use provided deps (ignore automatic tracking)
             self.deps = {dep: dep.last_change for dep in self._explicit_deps}
         else:
             self.deps = scope.deps
@@ -322,8 +316,6 @@ class Effect:
         remove_deps = prev_deps - new_deps
         for dep in add_deps:
             dep._add_obs(self)
-            # New dependencies may have been affected by this run of the effect.
-            # If that's the case, we should reschedule it.
             is_dirty = isinstance(dep, Computed) and dep.dirty
             has_changed = isinstance(dep, Signal) and dep.last_change > self.deps.get(
                 dep, -1
@@ -334,24 +326,16 @@ class Effect:
             dep._remove_obs(self)
 
     def run(self):
-        # Skip effects during prerendering
         if IS_PRERENDERING.get():
             return
-
-        # Don't track what happens in the cleanup
         with Untrack():
-            # Run children cleanup first
             try:
                 self._cleanup_before_run()
             except Exception as e:
                 self._handle_error(e)
+        self._execute()
 
-        if inspect.iscoroutinefunction(self.fn):
-            self._execute_async()
-        else:
-            self._execute_sync()
-
-    def _execute_sync(self) -> None:
+    def _execute(self) -> None:
         prev_deps = set(self.deps)
         execution_epoch = epoch()
         with Scope() as scope:
@@ -359,18 +343,39 @@ class Effect:
             # this effect to be rescheduled.
             self.batch = None
             try:
-                self.cleanup_fn = cast(EffectCleanup | None, self.fn())
+                self.cleanup_fn = self.fn()
             except Exception as e:
                 self._handle_error(e)
             self.runs += 1
             self.last_run = execution_epoch
         self._apply_scope_results(scope, prev_deps)
 
+
+class AsyncEffect(Effect):
+    def __init__(
+        self,
+        fn: AsyncEffectFn,
+        name: Optional[str] = None,
+        lazy: bool = False,
+        on_error: Optional[Callable[[Exception], None]] = None,
+        deps: Optional[list[Signal | Computed]] = None,
+    ):
+        super().__init__(
+            fn=fn,  # type: ignore[arg-type]
+            name=name,
+            immediate=False,
+            lazy=lazy,
+            on_error=on_error,
+            deps=deps,
+        )
+        # Track an async task when running async effects
+        self._task: Optional[asyncio.Task] = None
+
     def _task_name(self) -> str:
         base = self.name or "effect"
         return f"effect:{base}"
 
-    def _execute_async(self) -> None:
+    def _execute(self) -> None:
         prev_deps = set(self.deps)
         execution_epoch = epoch()
         try:
@@ -394,7 +399,7 @@ class Effect:
             nonlocal prev_deps, execution_epoch
             with Scope() as scope:
                 try:
-                    result = self.fn()
+                    result = cast(AsyncEffectFn, self.fn)()
                     if inspect.isawaitable(result):
                         self.cleanup_fn = await result  # type: ignore[assignment]
                     else:
@@ -414,6 +419,21 @@ class Effect:
     def cancel(self) -> None:
         if self._task and not self._task.done():
             self._task.cancel()
+
+    def dispose(self):
+        # Run children cleanups first, then cancel in-flight task
+        for child in self.children.copy():
+            child.dispose()
+        if self.cleanup_fn:
+            self.cleanup_fn()
+        if self._task and not self._task.done():
+            self._task.cancel()
+        for dep in self.deps:
+            dep.obs.remove(self)
+        if self.parent:
+            self.parent.children.remove(self)
+        if self.batch:
+            self.batch.effects.remove(self)
 
 
 class Batch:

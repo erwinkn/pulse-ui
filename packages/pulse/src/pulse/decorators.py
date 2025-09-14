@@ -1,9 +1,17 @@
 # Separate file from reactive.py due to needing to import from state too
 
-from typing import Any, Callable, Coroutine, Optional, TypeVar, overload
+from typing import Any, Callable, Coroutine, Optional, Protocol, TypeVar, overload
 
 from pulse.state import State, ComputedProperty, StateEffect
-from pulse.reactive import Computed, Effect, EffectCleanup, EffectFn, Signal
+from pulse.reactive import (
+    AsyncEffectFn,
+    Computed,
+    Effect,
+    EffectCleanup,
+    EffectFn,
+    Signal,
+    AsyncEffect,
+)
 import inspect
 from pulse.query import QueryProperty, QueryPropertyWithInitial
 
@@ -49,10 +57,18 @@ def computed(fn: Optional[Callable] = None, *, name: Optional[str] = None):
         return decorator
 
 
-StateEffectFn = (
-    Callable[[TState], Optional[EffectCleanup]]
-    | Callable[[TState], Coroutine[Any, Any, Optional[EffectCleanup]]]
-)
+StateEffectFn = Callable[[TState], Optional[EffectCleanup]]
+AsyncStateEffectFn = Callable[[TState], Coroutine[Any, Any, Optional[EffectCleanup]]]
+
+
+class EffectBuilder(Protocol):
+    @overload
+    def __call__(self, fn: EffectFn | StateEffectFn) -> Effect: ...
+    @overload
+    def __call__(self, fn: AsyncEffectFn | AsyncStateEffectFn) -> AsyncEffect: ...
+    def __call__(
+        self, fn: EffectFn | StateEffectFn | AsyncEffectFn | AsyncStateEffectFn
+    ) -> Effect | AsyncEffect: ...
 
 
 @overload
@@ -65,10 +81,24 @@ def effect(
     on_error: Optional[Callable[[Exception], None]] = None,
     deps: Optional[list[Signal | Computed]] = None,
 ) -> Effect: ...
+
+
+@overload
+def effect(
+    fn: AsyncEffectFn,
+    *,
+    name: Optional[str] = None,
+    immediate: bool = False,
+    lazy: bool = False,
+    on_error: Optional[Callable[[Exception], None]] = None,
+    deps: Optional[list[Signal | Computed]] = None,
+) -> AsyncEffect: ...
 # In practice this overload returns a StateEffect, but it gets converted into an
 # Effect at state instantiation.
 @overload
 def effect(fn: StateEffectFn) -> Effect: ...
+@overload
+def effect(fn: AsyncStateEffectFn) -> AsyncEffect: ...
 @overload
 def effect(
     fn: None = None,
@@ -78,7 +108,7 @@ def effect(
     lazy: bool = False,
     on_error: Optional[Callable[[Exception], None]] = None,
     deps: Optional[list[Signal | Computed]] = None,
-) -> Callable[[EffectFn | StateEffectFn], Effect]: ...
+) -> EffectBuilder: ...
 
 
 def effect(
@@ -95,6 +125,10 @@ def effect(
         sig = inspect.signature(func)
         params = list(sig.parameters.values())
 
+        # Disallow intermediate + async
+        if immediate and inspect.iscoroutinefunction(func):
+            raise ValueError("Async effects cannot have immediate=True")
+
         if len(params) == 1 and params[0].name == "self":
             return StateEffect(
                 func,
@@ -110,9 +144,17 @@ def effect(
                 f"@effect: Function '{func.__name__}' must take no arguments or a single 'self' argument"
             )
 
-        # This is a standalone effect function. Create the Effect object.
+        # This is a standalone effect function. Choose subclass based on async-ness
+        if inspect.iscoroutinefunction(func):
+            return AsyncEffect(
+                func,  # type: ignore[arg-type]
+                name=name or func.__name__,
+                lazy=lazy,
+                on_error=on_error,
+                deps=deps,
+            )
         return Effect(
-            func,
+            func,  # type: ignore[arg-type]
             name=name or func.__name__,
             immediate=immediate,
             lazy=lazy,

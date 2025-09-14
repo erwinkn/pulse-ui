@@ -6,15 +6,17 @@ that enables automatic re-rendering when state changes.
 """
 
 from abc import ABC, ABCMeta
+import inspect
 from enum import IntEnum
-from typing import Any, Callable, Generic,Iterator, Never, Optional, TypeVar
+from typing import Any, Callable, Generic, Iterator, Never, Optional, TypeVar
 
 from pulse.query import QueryProperty
 from pulse.reactive import (
     Computed,
-    Effect,
     Scope,
     Signal,
+    Effect,
+    AsyncEffect,
 )
 from pulse.reactive_extensions import ReactiveProperty
 
@@ -80,14 +82,24 @@ class StateEffect(Generic[T]):
 
     def initialize(self, state: "State", name: str):
         bound_method = self.fn.__get__(state, state.__class__)
-        effect = Effect(
-            bound_method,
-            name=self.name or f"{state.__class__.__name__}.{name}",
-            immediate=self.immediate,
-            lazy=self.lazy,
-            on_error=self.on_error,
-            deps=self.deps,
-        )
+        # Select sync/async effect type based on bound method
+        if inspect.iscoroutinefunction(bound_method):
+            effect: Effect = AsyncEffect(
+                bound_method,  # type: ignore[arg-type]
+                name=self.name or f"{state.__class__.__name__}.{name}",
+                lazy=self.lazy,
+                on_error=self.on_error,
+                deps=self.deps,
+            )
+        else:
+            effect = Effect(
+                bound_method,  # type: ignore[arg-type]
+                name=self.name or f"{state.__class__.__name__}.{name}",
+                immediate=self.immediate,
+                lazy=self.lazy,
+                on_error=self.on_error,
+                deps=self.deps,
+            )
         setattr(state, name, effect)
 
 

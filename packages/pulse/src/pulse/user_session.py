@@ -15,7 +15,7 @@ from fastapi import Response
 
 from pulse.context import PulseContext
 from pulse.cookies import SetCookie
-from pulse.reactive import Effect
+from pulse.reactive import AsyncEffect, Effect
 from pulse.reactive_extensions import ReactiveDict, reactive
 
 if TYPE_CHECKING:
@@ -30,23 +30,35 @@ class UserSession:
     sid: str
     data: Session
 
-    def __init__(self, sid: str, data: dict[str, Any], handling_request=False) -> None:
+    def __init__(
+        self, sid: str, data: dict[str, Any], app: "App", handling_request=False
+    ) -> None:
         self.sid = sid
         self.data = reactive(data)
         self._scheduled_cookie_refresh = False
         self._handling_request = handling_request
         self._queued_cookies: dict[str, SetCookie] = {}
-        self._effect = Effect(self.save, name=f"save_session:{self.sid}")
-
-    async def save(self):
-        app = PulseContext.get().app
+        self.app = app
+        self.is_cookie_session = isinstance(app.session_store, CookieSessionStore)
+        print(f"😈 Creating UserSession {sid}")
         if isinstance(app.session_store, CookieSessionStore):
-            self._refresh_session_cookie(app)
+            self._effect = Effect(
+                lambda: self._refresh_session_cookie(app),
+                name=f"save_session:{self.sid}",
+            )
         else:
-            await app.session_store.save(self.sid, self.data)
+            self._effect = AsyncEffect(
+                self._save_server_session, name=f"save_session:{self.sid}"
+            )
 
-    def _refresh_session_cookie(self, app: "App"):
+    async def _save_server_session(self):
+        print("Saving server session")
+        assert isinstance(self.app.session_store, SessionStore)
+        await self.app.session_store.save(self.sid, self.data)
+
+    def _refresh_session_cookie(self, app):
         assert isinstance(app.session_store, CookieSessionStore)
+        print("Refreshing session cookie")
         signed_cookie = app.session_store.encode(self.sid, self.data)
         self.set_cookie(
             name=app.cookie.name,
@@ -60,10 +72,13 @@ class UserSession:
     def dispose(self):
         self._effect.dispose()
 
-    def handling_request(self):
+    def start_request(self):
         self._handling_request = True
 
     def handle_response(self, res: Response):
+        # For cookie sessions, run the effect now if it's scheduled, in order to set the updated cookie
+        if self.is_cookie_session:
+            self._effect.flush()
         for cookie in self._queued_cookies.values():
             cookie.set_on_fastapi(res, cookie.value)
         self._queued_cookies.clear()
@@ -79,6 +94,7 @@ class UserSession:
         samesite: Literal["lax", "strict", "none"] = "lax",
         max_age_seconds: int = 7 * 24 * 3600,
     ):
+        print(f"Setting cookie {name}")
         cookie = SetCookie(
             name=name,
             value=value,
@@ -90,11 +106,14 @@ class UserSession:
         self._queued_cookies[name] = cookie
         if self._handling_request:
             # cookies will be set at the end of the reuqest
+            print("Already handling request, not scheduling")
             return
         # Otherwise, schedule a cookie refresh for this user
         if not self._scheduled_cookie_refresh:
+            print("Scheduling cookie refresh")
             ctx = PulseContext.get()
             ctx.app.refresh_cookies(self.sid)
+            self._scheduled_cookie_refresh = True
 
 
 class SessionStore(ABC):
@@ -195,30 +214,32 @@ class CookieSessionStore:
             signed = self._sign(payload)
             if len(signed) > self._max_cookie_bytes:
                 # If too large, fall back to an empty session to avoid breaking cookies
+                logging.warning("Session cookie too large, truncating")
                 return self.encode(sid, {})
             return signed
         except Exception:
+            logging.warning("Error encoding session cookie, truncating")
             # Best effort: fallback to an empty session if it's not serializable
             return self.encode(sid, {})
 
-    def decode(self, cookie: str) -> tuple[str, Session]:
+    def decode(self, cookie: str) -> tuple[str, Session] | None:
         """Decode a signed session cookie.
 
         Returns a tuple of (session_id, session_data). If the cookie is invalid,
         returns a new session ID and empty session.
         """
         if not cookie:
-            return new_sid(), ReactiveDict()
+            return None
 
         payload = self._unsign(cookie)
         if not payload:
-            return new_sid(), ReactiveDict()
+            return None
 
         try:
             data = json.loads(payload)
             return data["sid"], ReactiveDict(data["data"])
         except Exception:
-            return new_sid(), ReactiveDict()
+            return None
 
     # --- signing helpers ---
     def _mac(self, payload: bytes) -> bytes:

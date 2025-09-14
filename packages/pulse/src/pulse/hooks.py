@@ -422,7 +422,7 @@ def navigate(path: str) -> None:
     if ctx is None or ctx.render is None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
-    ctx.render.notify({"type": "navigate_to", "path": path})
+    ctx.render.send({"type": "navigate_to", "path": path})
 
 
 def is_prerendering():

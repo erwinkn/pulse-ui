@@ -96,6 +96,7 @@ class App:
         cookie: Optional[Cookie] = None,
         session_store: Optional[SessionStore] = None,
         server_address: Optional[str] = None,
+        not_found='/not-found'
     ):
         """
         Initialize a new Pulse App.
@@ -128,9 +129,9 @@ class App:
         # Auto-add React components to all routes
         add_react_components(all_routes, registered_react_components())
         self.routes = RouteTree(all_routes)
+        self.not_found = not_found
         # Default not-found path for client-side navigation on not_found()
         # Users can override via App(..., not_found_path="/my-404") in future
-        setattr(self.routes, "not_found_path", "/404")
         self.user_sessions: dict[str, UserSession] = {}
         self.render_sessions: dict[str, RenderSession] = {}
         self.user_to_render: dict[str, list[str]] = defaultdict(list)

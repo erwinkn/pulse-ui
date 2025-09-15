@@ -300,11 +300,10 @@ class RenderSession:
                     )
                 except NotFoundInterrupt:
                     # Use app-configured not-found path; fallback to '/404'
-                    nf = getattr(self.routes, "not_found_path", None) or "/404"
                     self.send(
                         {
                             "type": "navigate_to",
-                            "path": nf,
+                            "path": ctx.app.not_found,
                             "replace": True,
                         }
                     )

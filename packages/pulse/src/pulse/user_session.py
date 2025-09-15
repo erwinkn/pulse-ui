@@ -48,12 +48,10 @@ class UserSession:
             )
 
     async def _save_server_session(self):
-        print("Saving server session")
         assert isinstance(self.app.session_store, SessionStore)
         await self.app.session_store.save(self.sid, self.data)
 
     def _refresh_session_cookie(self, app):
-        print("Refreshing session cookie")
         assert isinstance(app.session_store, CookieSessionStore)
         signed_cookie = app.session_store.encode(self.sid, self.data)
         self.set_cookie(
@@ -73,7 +71,6 @@ class UserSession:
         if self.is_cookie_session:
             self._effect.flush()
         for cookie in self._queued_cookies.values():
-            print(f"Setting cookie {cookie.name} on response")
             cookie.set_on_fastapi(res, cookie.value)
         self._queued_cookies.clear()
         self._scheduled_cookie_refresh = False
@@ -87,7 +84,6 @@ class UserSession:
         samesite: Literal["lax", "strict", "none"] = "lax",
         max_age_seconds: int = 7 * 24 * 3600,
     ):
-        print(f"Setting cookie {name}")
         cookie = SetCookie(
             name=name,
             value=value,
@@ -98,7 +94,6 @@ class UserSession:
         )
         self._queued_cookies[name] = cookie
         if not self._scheduled_cookie_refresh:
-            print("Scheduling cookie refresh")
             self.app.refresh_cookies(self.sid)
             self._scheduled_cookie_refresh = True
 

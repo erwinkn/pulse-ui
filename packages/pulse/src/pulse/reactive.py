@@ -65,7 +65,6 @@ class Signal(Generic[T]):
     def write(self, value: T):
         if value == self.value:
             return
-        print(f"Signal update {self.name}")
         increment_epoch()
         self.value = value
         self.last_change = epoch()
@@ -259,7 +258,6 @@ class Effect:
         if self.immediate:
             self.run()
             return
-        print(f"Scheduling effect {self.name}")
         rc = REACTIVE_CONTEXT.get()
         batch = rc.batch
         batch.register_effect(self)
@@ -505,14 +503,6 @@ class GlobalBatch(Batch):
 
     def register_effect(self, effect: Effect):
         if not self.is_scheduled:
-            # try:
-            #     print("Getting running loop")
-            #     loop = asyncio.get_running_loop()
-            #     print("Scheduling batch flush")
-            #     loop.call_soon_threadsafe(self.flush)
-            #     self.is_scheduled = True
-            # except RuntimeError:
-            #     # No running loop here; schedule on the main loop cooperatively
             schedule_on_loop(self.flush)
             self.is_scheduled = True
         return super().register_effect(effect)

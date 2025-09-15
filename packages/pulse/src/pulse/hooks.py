@@ -5,7 +5,6 @@ from typing import (
     Generic,
     Literal,
     Mapping,
-    Never,
     NoReturn,
     Optional,
     ParamSpec,
@@ -25,17 +24,27 @@ from pulse.state import State
 
 
 class RedirectInterrupt(Exception):
-    def __init__(self, path: str):
+    def __init__(self, path: str, *, replace: bool = False):
         super().__init__(path)
         self.path = path
+        self.replace = replace
+
+
+class NotFoundInterrupt(Exception):
+    pass
+
+
+# Sentinel used to represent an unspecified key
+MISSING: Any = object()
 
 
 class SetupState:
     value: Any
     initialized: bool
-    args: list[Signal]
-    kwargs: dict[str, Signal]
+    args: list
+    kwargs: dict
     effects: list[Effect]
+    key: Any
 
     def __init__(self, value: Any = None, initialized: bool = False):
         self.value = value
@@ -43,9 +52,34 @@ class SetupState:
         self.args = []
         self.kwargs = {}
         self.effects = []
+        self.key = MISSING
 
 
-class HookCalled:
+class StatesHookState:
+    states: tuple[State, ...]
+    key: Any
+    initialized: bool
+
+    def __init__(self) -> None:
+        self.states = ()
+        self.key = MISSING
+        self.initialized = False
+
+
+class EffectsHookState:
+    effects: tuple[Effect, ...]
+    key: Any
+    initialized: bool
+
+    def __init__(
+        self,
+    ) -> None:
+        self.effects = ()
+        self.key = MISSING
+        self.initialized = False
+
+
+class HookCalls:
     def __init__(self) -> None:
         self.reset()
 
@@ -69,19 +103,29 @@ class MountHookState:
             HOOK_CONTEXT.reset(self._token)
 
 
+class StableEntry:
+    def __init__(self, value: Any, wrapper: Callable):
+        self.value = value
+        self.wrapper = wrapper
+
+
 class HookState:
     setup: SetupState
-    states: tuple[State, ...]
-    effects: tuple[Effect, ...]
-    called: HookCalled
+    states: StatesHookState
+    effects: EffectsHookState
+    called: HookCalls
     render_count: int
+    stable_registry: dict[str, StableEntry]
+    pending_setup_key: Any
 
     def __init__(self):
         self.setup = SetupState()
-        self.effects = ()
-        self.states = ()
-        self.called = HookCalled()
+        self.states = StatesHookState()
+        self.effects = EffectsHookState()
+        self.called = HookCalls()
         self.render_count = 0
+        self.stable_registry = {}
+        self.pending_setup_key = MISSING
 
     def ctx(self):
         self.called.reset()
@@ -91,9 +135,9 @@ class HookState:
     def unmount(self):
         for effect in self.setup.effects:
             effect.dispose()
-        for effect in self.effects:
+        for effect in self.effects.effects:
             effect.dispose()
-        for state in self.states:
+        for state in self.states.states:
             for effect in state.effects():
                 effect.dispose()
 
@@ -116,6 +160,24 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
             "Cannot call `pulse.init` can only be called once per component render"
         )
     state = ctx.setup
+    # Read and clear any pending key set by setup_key()
+    key = ctx.pending_setup_key
+    ctx.pending_setup_key = MISSING
+    # Re-run setup if a key is supplied and changed
+    if state.initialized and key is not MISSING and key != state.key:
+        # Dispose previous setup effects and reset tracked args/kwargs signals
+        for effect in state.effects:
+            effect.dispose()
+        state.effects = []
+        with Scope() as scope:
+            state.value = init_func(*args, **kwargs)
+            state.initialized = True
+            state.effects = list(scope.effects)
+            state.args = [Signal(x) for x in args]
+            state.kwargs = {k: Signal(v) for k, v in kwargs.items()}
+            state.key = key
+        return state.value
+
     if not state.initialized:
         with Scope() as scope:
             state.value = init_func(*args, **kwargs)
@@ -123,6 +185,8 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
             state.effects = list(scope.effects)
             state.args = [Signal(x) for x in args]
             state.kwargs = {k: Signal(v) for k, v in kwargs.items()}
+            if key is not MISSING:
+                state.key = key
     else:
         if len(args) != len(state.args):
             raise RuntimeError(
@@ -138,7 +202,23 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
             state.args[i].write(arg)
         for k, v in kwargs.items():
             state.kwargs[k].write(v)
+        if key is not MISSING:
+            state.key = key
     return state.value
+
+
+def setup_key(key: Any) -> None:
+    """Set a key for the next setup() call in this component render.
+
+    Must be invoked before setup() in the same render. If the key differs from the
+    previous value, setup() will dispose its prior resources and re-run.
+    """
+    ctx = HOOK_CONTEXT.get()
+    if ctx is None:
+        raise RuntimeError("setup_key() must be invoked during component render")
+    if ctx.called.setup:
+        raise RuntimeError("setup_key() must be called before setup() in a render")
+    ctx.pending_setup_key = key
 
 
 # -----------------------------------------------------
@@ -163,14 +243,19 @@ StateOrStateLambda = State | Callable[[], State]
 
 
 @overload
-def states(s1: S1 | Callable[[], S1], /) -> S1: ...
+def states(s1: S1 | Callable[[], S1], /, *, key: Any = ...) -> S1: ...  # pyright: ignore[reportOverlappingOverload]
 @overload
 def states(
-    s1: S1 | Callable[[], S1], s2: S2 | Callable[[], S2], /
+    s1: S1 | Callable[[], S1], s2: S2 | Callable[[], S2], /, *, key: Any = ...
 ) -> tuple[S1, S2]: ...
 @overload
 def states(
-    s1: S1 | Callable[[], S1], s2: S2 | Callable[[], S2], s3: S3 | Callable[[], S3], /
+    s1: S1 | Callable[[], S1],
+    s2: S2 | Callable[[], S2],
+    s3: S3 | Callable[[], S3],
+    /,
+    *,
+    key: Any = ...,
 ) -> tuple[S1, S2, S3]: ...
 @overload
 def states(
@@ -179,6 +264,8 @@ def states(
     s3: S3 | Callable[[], S3],
     s4: S4 | Callable[[], S4],
     /,
+    *,
+    key: Any = ...,
 ) -> tuple[S1, S2, S3, S4]: ...
 @overload
 def states(
@@ -188,6 +275,8 @@ def states(
     s4: S4 | Callable[[], S4],
     s5: S5 | Callable[[], S5],
     /,
+    *,
+    key: Any = ...,
 ) -> tuple[S1, S2, S3, S4, S5]: ...
 @overload
 def states(
@@ -198,6 +287,8 @@ def states(
     s5: S5 | Callable[[], S5],
     s6: S6 | Callable[[], S6],
     /,
+    *,
+    key: Any = ...,
 ) -> tuple[S1, S2, S3, S4, S5, S6]: ...
 @overload
 def states(
@@ -209,6 +300,8 @@ def states(
     s6: S6 | Callable[[], S6],
     s7: S7 | Callable[[], S7],
     /,
+    *,
+    key: Any = ...,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7]: ...
 @overload
 def states(
@@ -221,6 +314,8 @@ def states(
     s7: S7 | Callable[[], S7],
     s8: S8 | Callable[[], S8],
     /,
+    *,
+    key: Any = ...,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8]: ...
 @overload
 def states(
@@ -234,6 +329,8 @@ def states(
     s8: S8 | Callable[[], S8],
     s9: S9 | Callable[[], S9],
     /,
+    *,
+    key: Any = ...,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8, S9]: ...
 @overload
 def states(
@@ -248,31 +345,16 @@ def states(
     s9: S9 | Callable[[], S9],
     s10: S10 | Callable[[], S10],
     /,
+    *,
+    key: Any = ...,
 ) -> tuple[S1, S2, S3, S4, S5, S6, S7, S8, S9, S10]: ...
 
 
 @overload
-def states(
-    s1: S1 | Callable[[], S1],
-    s2: S2 | Callable[[], S2],
-    s3: S3 | Callable[[], S3],
-    s4: S4 | Callable[[], S4],
-    s5: S5 | Callable[[], S5],
-    s6: S6 | Callable[[], S6],
-    s7: S7 | Callable[[], S7],
-    s8: S8 | Callable[[], S8],
-    s9: S9 | Callable[[], S9],
-    s10: S10 | Callable[[], S10],
-    /,
-    *args: S | Callable[[], S],
-) -> tuple[S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | S, ...]: ...
+def states(*args: S | Callable[[], S], key: Any = ...) -> tuple[S, ...]: ...
 
 
-# @overload
-# def states(*args: S | Callable[[], S]) -> tuple[S, ...]: ...
-
-
-def states(*args: State | Callable[[], State]):
+def states(*args: State | Callable[[], State], key: Any = MISSING):
     ctx = HOOK_CONTEXT.get()
     if not ctx:
         raise RuntimeError(
@@ -285,25 +367,41 @@ def states(*args: State | Callable[[], State]):
         )
     ctx.called.states = True
 
-    if ctx.render_count == 1:
+    if not ctx.states.initialized:
         states: list[State] = []
         for arg in args:
             state_instance = arg() if callable(arg) else arg
             states.append(state_instance)
-        ctx.states = tuple(states)
+        ctx.states.states = tuple(states)
+        ctx.states.key = key
+        ctx.states.initialized = True
     else:
-        for arg in args:
-            if isinstance(arg, State):
-                arg.dispose()
+        # If key supplied and changed, dispose all previous states and recreate
+        if key is not MISSING and key != ctx.states.key:
+            for s in ctx.states.states:
+                s.dispose()
+            new_states: list[State] = []
+            for arg in args:
+                state_instance = arg() if callable(arg) else arg
+                new_states.append(state_instance)
+            ctx.states.states = tuple(new_states)
+            ctx.states.key = key
+        else:
+            # As before, dispose any instances passed positionally on subsequent renders
+            for arg in args:
+                if isinstance(arg, State):
+                    arg.dispose()
 
-    if len(ctx.states) == 1:
-        return ctx.states[0]
+    if len(ctx.states.states) == 1:
+        return ctx.states.states[0]
     else:
-        return ctx.states
+        return ctx.states.states
 
 
 def effects(
-    *fns: EffectFn, on_error: Callable[[Exception], None] | None = None
+    *fns: EffectFn,
+    on_error: Callable[[Exception], None] | None = None,
+    key: Any = MISSING,
 ) -> None:
     # Assumption: RenderContext will set up a render context and a batch before
     # rendering. The batch ensures the effects run *after* rendering.
@@ -321,7 +419,8 @@ def effects(
     ctx.called.effects = True
 
     # Remove the effects passed here from the batch, ensuring they only run on mount
-    if ctx.render_count == 1:
+    if not ctx.effects.initialized:
+        ctx.effects.initialized = True
         with Untrack():
             effects = []
             for fn in fns:
@@ -330,7 +429,68 @@ def effects(
                         "Only pass functions or callabGle objects to `ps.effects`"
                     )
                 effects.append(Effect(fn, name=fn.__name__, on_error=on_error))
-            ctx.effects = tuple(effects)
+            ctx.effects.effects = tuple(effects)
+            ctx.effects.key = key
+    else:
+        # If key supplied and changed, dispose old effects and recreate
+        if key is not MISSING and key != ctx.effects.key:
+            for eff in ctx.effects.effects:
+                eff.dispose()
+            with Untrack():
+                effects = []
+                for fn in fns:
+                    if not callable(fn):
+                        raise ValueError(
+                            "Only pass functions or callabGle objects to `ps.effects`"
+                        )
+                    effects.append(Effect(fn, name=fn.__name__, on_error=on_error))
+                ctx.effects.effects = tuple(effects)
+                ctx.effects.key = key
+
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+@overload
+def stable(key: str) -> Any: ...
+@overload
+def stable(key: str, value: Callable[P, R]) -> Callable[P, R]: ...
+@overload
+def stable(key: str, value: T) -> Callable[[], T]: ...
+def stable(key: str, value: Any = MISSING):
+    # Implement:
+    # - Just the key -> return the corresponding value (or raise if it doesn't exist)
+    # - Key + callable -> wrap the callable in a passthrough that has the same signature but always calls the latest passed in version of the callable
+    # - Key + value -> return a callable that always returns the latest passed in value
+    ctx = HOOK_CONTEXT.get()
+    if ctx is None:
+        raise RuntimeError("stable() must be invoked during component render")
+
+    registry = ctx.stable_registry
+
+    # When a value is provided, (re)register and return a stable wrapper
+    if value is not MISSING:
+        entry = registry.get(key)
+        if entry is None:
+
+            def wrapper(*args: Any, **kwargs: Any):
+                current = registry[key].value
+                if callable(current):
+                    return current(*args, **kwargs)
+                return current
+
+            entry = StableEntry(value, wrapper)
+            registry[key] = entry
+        else:
+            entry.value = value
+        return entry.wrapper
+
+    # Key-only: return existing stable wrapper
+    entry = registry.get(key)
+    if entry is None:
+        raise KeyError(f"stable(): no value registered for key '{key}'")
+    return entry.wrapper
 
 
 def route() -> RouteContext:
@@ -420,20 +580,20 @@ async def set_cookie(
     )
 
 
-def navigate(path: str) -> None:
+def navigate(path: str, *, replace: bool = False) -> None:
     """Instruct the client to navigate to a new path for the current route tree.
 
-    Non-async; sends a server message to the client to perform SPA navigation.
+    Non-blocking; sends a server message to the client to perform SPA navigation.
     """
 
     ctx = PulseContext.get()
     if ctx is None or ctx.render is None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
-    ctx.render.send({"type": "navigate_to", "path": path})
+    ctx.render.send({"type": "navigate_to", "path": path, "replace": replace})
 
 
-def redirect(path: str) -> NoReturn:
+def redirect(path: str, *, replace: bool = False) -> NoReturn:
     """Interrupt rendering to perform a redirect/navigation.
 
     - During prerender: surfaces to the server to return an HTTP redirect.
@@ -445,7 +605,14 @@ def redirect(path: str) -> NoReturn:
     ctx = HOOK_CONTEXT.get()
     if not ctx:
         raise RuntimeError("redirect() must be invoked during component render")
-    raise RedirectInterrupt(path)
+    raise RedirectInterrupt(path, replace=replace)
+
+
+def not_found() -> NoReturn:
+    ctx = HOOK_CONTEXT.get()
+    if not ctx:
+        raise RuntimeError("not_found() must be invoked during component render")
+    raise NotFoundInterrupt()
 
 
 def is_prerendering():

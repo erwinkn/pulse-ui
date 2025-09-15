@@ -6,7 +6,7 @@ Dev assumptions:
 - In prod, serve under the same origin or set Domain=.example.com on cookies
 
 Highlights:
-- Middleware sets `ctx["user"]` from MSAL ID token claims
+- Middleware sets `ctx["auth"]` from MSAL ID token claims
 - Protects `/secret` at prerender and on websocket `navigate`
 - Auth endpoints implement Authorization Code Flow
 - Token cache stored server-side and referenced by an HttpOnly cookie
@@ -14,7 +14,7 @@ Highlights:
 
 import json
 import os
-from typing import Any, Optional
+from typing import Any, Optional, Callable, Protocol, cast
 
 import msal
 import pulse as ps
@@ -33,57 +33,56 @@ def require_env(key: str):
 AZURE_CLIENT_ID = require_env("AZURE_CLIENT_ID")
 AZURE_CLIENT_SECRET = require_env("AZURE_CLIENT_SECRET")
 AZURE_TENANT_ID = require_env("AZURE_TENANT_ID")
-MSAL_SESSION_KEY = os.getenv("MSAL_SESSION_KEY", "msal")
+SESSION_KEY = os.getenv("MSAL_SESSION_KEY", "msal")
 
 
 def _default_authority(tenant_id: str) -> str:
     return f"https://login.microsoftonline.com/{tenant_id}"
 
 
-def _extract_user_from_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not result:
-        return None
-    claims = result.get("id_token_claims") or {}
-    if not claims:
-        return None
-    return {
+ClaimsMapper = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+class TokenCacheStore(Protocol):
+    def load(self, request: Request, ctx: dict[str, Any]) -> msal.TokenCache: ...
+
+    def save(
+        self, request: Request, cache: msal.TokenCache, ctx: dict[str, Any]
+    ) -> None: ...
+
+
+def _default_claims_mapper(claims: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact, JSON-serializable user dict from MSAL id_token claims."""
+    user = {
         "name": claims.get("name") or claims.get("given_name"),
         "email": claims.get("preferred_username"),
-        "oid": claims.get("oid"),
-        "tid": claims.get("tid"),
     }
+    # Remove keys with None values to keep payload compact
+    return {k: v for k, v in user.items() if v is not None}
 
 
-class MsalAuthMiddleware(ps.PulseMiddleware):
-    def __init__(
-        self,
-        *,
-        session_key: str = "msal",
-    ):
-        self.session_key = session_key
+def _json_clean(value: Any) -> Any:
+    """Convert value to JSON-serializable primitives for cookie-backed sessions."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [_json_clean(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _json_clean(v) for k, v in value.items()}
+    # Fallback: string representation
+    return str(value)
 
-    def _get_user(self, session) -> dict | None:
-        return session.get(self.session_key, {}).get("user")
 
-    def prerender(self, *, path, request, route_info, session, next):
-        # user = self._get_user(session)
-        return next()
+def auth(session_key=SESSION_KEY) -> dict[str, Any] | None:
+    return cast(dict[str, Any] | None, ps.session().get(session_key, {}).get("auth"))
 
-    def connect(self, *, request, session, next):
-        # No-op; session already contains user if authenticated
-        return next()
 
-    def message(self, *, data, session, next):
-        # t = data.get("type") if isinstance(data, dict) else None
-        # if t in {"mount", "navigate"}:
-        #     path = data.get("path")
-        #     if (
-        #         not self._get_user(session)
-        #         and isinstance(path, str)
-        #         and any(path.startswith(p) for p in self.protected_prefixes)
-        #     ):
-        #         return ps.Deny()
-        return next()
+def login():
+    ps.navigate("/auth/login")
+
+
+def logout():
+    del ps.session()[SESSION_KEY]
 
 
 class MsalPlugin(ps.Plugin):
@@ -95,21 +94,20 @@ class MsalPlugin(ps.Plugin):
         tenant_id: str,
         authority: Optional[str] = None,
         scopes: Optional[list[str]] = None,
-        session_key: str = "msal",
-        protected_prefixes: Optional[list[str]] = None,
+        session_key: Optional[str] = None,
+        claims_mapper: Optional[ClaimsMapper] = None,
+        token_cache_store: Optional[TokenCacheStore] = None,
     ) -> None:
         self.client_id = client_id
         self.client_secret = client_secret
         self.tenant_id = tenant_id
         self.authority = authority or _default_authority(tenant_id)
         self.scopes: list[str] = scopes or ["User.Read"]
-        self.session_key = session_key
-        self.middleware_instance = MsalAuthMiddleware(
-            session_key=session_key,
-            # protected_prefixes=protected_prefixes,
-        )
+        self.session_key = session_key or SESSION_KEY
+        self.claims_mapper = claims_mapper or _default_claims_mapper
+        self.token_cache_store = token_cache_store
 
-    def cca(self, cache: msal.SerializableTokenCache):
+    def cca(self, cache: msal.TokenCache):
         return msal.ConfidentialClientApplication(
             self.client_id,
             authority=self.authority,
@@ -117,22 +115,20 @@ class MsalPlugin(ps.Plugin):
             token_cache=cache,
         )
 
-    def middleware(self) -> list[ps.PulseMiddleware]:
-        return [self.middleware_instance]
-
     def on_setup(self, app: "ps.App") -> None:
-        session_key = self.session_key
-
         @app.fastapi.get("/auth/login")
         def auth_login(request: Request):
             sess = ps.session()
-            ctx = sess.setdefault(session_key, {})
-            cache = msal.SerializableTokenCache()
-            if serialized := ctx.get("token_cache"):
-                try:
-                    cache.deserialize(serialized)
-                except Exception:
-                    pass
+            ctx = sess.setdefault(self.session_key, {})
+            if self.token_cache_store:
+                cache = self.token_cache_store.load(request, ctx)
+            else:
+                cache = msal.SerializableTokenCache()
+                if serialized := ctx.get("token_cache"):
+                    try:
+                        cache.deserialize(serialized)
+                    except Exception:
+                        pass
 
             cca = self.cca(cache)
             redirect_uri = f"{app.server_address}/auth/callback"
@@ -151,13 +147,16 @@ class MsalPlugin(ps.Plugin):
         @app.fastapi.get("/auth/callback")
         def auth_callback(request: Request):
             sess = ps.session()
-            ctx = sess.setdefault(session_key, {})
-            cache = msal.SerializableTokenCache()
-            if serialized := ctx.get("token_cache"):
-                try:
-                    cache.deserialize(serialized)
-                except Exception:
-                    pass
+            ctx = sess.setdefault(self.session_key, {})
+            if self.token_cache_store:
+                cache = self.token_cache_store.load(request, ctx)
+            else:
+                cache = msal.SerializableTokenCache()
+                if serialized := ctx.get("token_cache"):
+                    try:
+                        cache.deserialize(serialized)
+                    except Exception:
+                        pass
 
             cca = self.cca(cache)
             try:
@@ -172,32 +171,31 @@ class MsalPlugin(ps.Plugin):
                 body = f"<h1>Auth error</h1><pre>{json.dumps(result, indent=2)}</pre>"
                 return HTMLResponse(content=body, status_code=400)
 
-            # Save user claims and token cache back into session
-            user = _extract_user_from_result(result) or {}
+            # Save user claims (mapped) and token cache back into session
+            claims = result.get("id_token_claims") or {}
+            print("Claims:", json.dumps(claims, indent=2))
+            user = self.claims_mapper(claims) if claims else {}
+            user = _json_clean(user)
 
             ctx.pop("flow", None)
             origin = ctx.pop("client_address", None)
             next_path = ctx.pop("next", "/")
-            ctx["user"] = user
-            if cache.has_state_changed:
-                ctx["token_cache"] = cache.serialize()
+            ctx["auth"] = user
+            if getattr(cache, "has_state_changed", False):
+                if self.token_cache_store:
+                    self.token_cache_store.save(request, cache, ctx)
+                else:
+                    # default to storing in session cookie
+                    try:
+                        # SerializableTokenCache
+                        ctx["token_cache"] = cache.serialize()  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
             return RedirectResponse(url=f"{origin}{next_path}")
-
-        @app.fastapi.get("/auth/logout")
-        def local_logout(request: Request):
-            session = ps.session()
-            print("Clearing context")
-            del session[session_key]
-            # Redirect back to the SPA origin or to provided next path
-            # origin = get_client_address(request) or ""
-            # next_path = request.query_params.get("next") or "/"
-            # if not isinstance(next_path, str) or not next_path.startswith("/"):
-            #     next_path = "/"
-            # return RedirectResponse(url=f"{origin}{next_path}")
 
 
 @ps.component
-def login():
+def LoginPage():
     # Just render a link that starts the server-side login redirect flow
     return ps.div(
         ps.h2("Sign in", className="text-2xl font-bold mb-4"),
@@ -212,21 +210,21 @@ def login():
 
 
 @ps.component
-def secret():
+def SecretPage():
     print("Rerendering secret")
     sess = ps.session()
-    auth = sess["msal"]
+    auth = sess.get(SESSION_KEY)
     if not auth:
         ps.redirect("/login")
 
-    user = auth["user"]
+    user = auth["auth"]
     name = user.get("name") or user.get("email")
 
     def update_session_entry(text: str):
         sess["pulse"] = text
 
     def logout():
-        del sess['msal']
+        del sess[SESSION_KEY]
 
     return ps.div(
         ps.h2("Secret", className="text-2xl font-bold mb-4"),
@@ -236,18 +234,18 @@ def secret():
             onClick=logout,
             className="btn-secondary mt-4",
         ),
-        # ps.label("Modify session", htmlFor="session-input"),
-        # ps.input(
-        #     id="session-input",
-        #     value=sess.get("pulse", ""),
-        #     onChange=lambda evt: update_session_entry(evt["target"]["value"]),
-        # ),
+        ps.label("Modify session", htmlFor="session-input"),
+        ps.input(
+            id="session-input",
+            value=sess.get("pulse", ""),
+            onChange=lambda evt: update_session_entry(evt["target"]["value"]),
+        ),
         className="max-w-md mx-auto p-6",
     )
 
 
 @ps.component
-def home():
+def Home():
     return ps.div(
         ps.h2("MSAL Auth Demo", className="text-2xl font-bold mb-4"),
         ps.div(
@@ -260,7 +258,7 @@ def home():
 
 
 @ps.component
-def shell():
+def Shell():
     return ps.div(
         ps.Outlet(),
         className="p-6",
@@ -270,11 +268,11 @@ def shell():
 app = ps.App(
     routes=[
         ps.Layout(
-            shell,
+            Shell,
             children=[
-                ps.Route("/", home),
-                ps.Route("/login", login),
-                ps.Route("/secret", secret),
+                ps.Route("/", Home),
+                ps.Route("/login", LoginPage),
+                ps.Route("/secret", SecretPage),
             ],
         )
     ],

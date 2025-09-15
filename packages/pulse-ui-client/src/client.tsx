@@ -15,6 +15,7 @@ import type {
   ServerErrorInfo,
   ServerMessage,
 } from "./messages";
+import type { NavigateFunction } from "react-router";
 
 export interface MountedView {
   routeInfo: RouteInfo;
@@ -51,7 +52,7 @@ export class PulseSocketIOClient {
 
   constructor(
     private url: string,
-    private frameworkNavigate?: (to: string) => void
+    private frameworkNavigate: NavigateFunction
   ) {
     this.socket = null;
     this.activeViews = new Map();
@@ -233,16 +234,34 @@ export class PulseSocketIOClient {
         break;
       }
       case "navigate_to": {
-        try {
-          const dest = (message as any).path as string;
-          if (this.frameworkNavigate) {
-            this.frameworkNavigate(dest);
+        const replace = !!message.replace;
+        let dest = message.path || "";
+        // Normalize protocol-relative URLs to absolute
+        if (dest.startsWith("//")) dest = `${window.location.protocol}${dest}`;
+        const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest);
+        if (hasScheme) {
+          if (dest.startsWith("http://") || dest.startsWith("https://")) {
+            try {
+              const url = new URL(dest);
+              if (url.origin === window.location.origin) {
+                const internal = `${url.pathname}${url.search}${url.hash}`;
+                this.frameworkNavigate(internal, { replace });
+              } else {
+                if (replace) window.location.replace(dest);
+                else window.location.assign(dest);
+              }
+            } catch {
+              if (replace) window.location.replace(dest);
+              else window.location.assign(dest);
+            }
           } else {
-            window.history.pushState({}, "", dest);
-            window.dispatchEvent(new PopStateEvent("popstate"));
+            // mailto:, tel:, data:, etc.
+            if (replace) window.location.replace(dest);
+            else window.location.assign(dest);
           }
-        } catch (e) {
-          console.error("Navigation error:", e);
+        } else {
+          // Relative or root-relative path → SPA navigate
+          this.frameworkNavigate(dest, { replace });
         }
         break;
       }

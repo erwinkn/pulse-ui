@@ -17,7 +17,7 @@ from pulse.reactive import Effect, flush_effects
 from pulse.reconciler import RenderRoot
 from pulse.routing import Layout, Route, RouteContext, RouteTree
 from pulse.state import State
-from pulse.hooks import RedirectInterrupt
+from pulse.hooks import RedirectInterrupt, NotFoundInterrupt
 
 
 logger = logging.getLogger(__file__)
@@ -295,7 +295,19 @@ class RenderSession:
                             )
                 except RedirectInterrupt as r:
                     # Prefer client-side navigation over emitting VDOM operations
-                    self.send({"type": "navigate_to", "path": r.path})
+                    self.send(
+                        {"type": "navigate_to", "path": r.path, "replace": r.replace}
+                    )
+                except NotFoundInterrupt:
+                    # Use app-configured not-found path; fallback to '/404'
+                    nf = getattr(self.routes, "not_found_path", None) or "/404"
+                    self.send(
+                        {
+                            "type": "navigate_to",
+                            "path": nf,
+                            "replace": True,
+                        }
+                    )
 
         # print(f"Mounting '{path}'")
         mount.effect = Effect(

@@ -44,6 +44,7 @@ export interface ServerApiCallMessage {
 export interface ServerNavigateToMessage {
   type: "navigate_to";
   path: string;
+  replace: boolean;
 }
 
 export type ServerMessage =

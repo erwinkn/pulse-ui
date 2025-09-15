@@ -45,7 +45,7 @@ from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
-from pulse.hooks import RedirectInterrupt
+from pulse.hooks import RedirectInterrupt, NotFoundInterrupt
 from pulse.user_session import (
     CookieSessionStore,
     SessionStore,
@@ -128,6 +128,9 @@ class App:
         # Auto-add React components to all routes
         add_react_components(all_routes, registered_react_components())
         self.routes = RouteTree(all_routes)
+        # Default not-found path for client-side navigation on not_found()
+        # Users can override via App(..., not_found_path="/my-404") in future
+        setattr(self.routes, "not_found_path", "/404")
         self.user_sessions: dict[str, UserSession] = {}
         self.render_sessions: dict[str, RenderSession] = {}
         self.user_to_render: dict[str, list[str]] = defaultdict(list)
@@ -246,7 +249,6 @@ class App:
         async def pulse_context_middleware(request: Request, call_next):
             # Session cookie handling
             cookie = self.cookie.get_from_fastapi(request)
-            print(f"--- MIDDLEWARE {request.url.path} (cookie = {cookie}) ---")
             session = await self.get_or_create_session(cookie)
             self._sessions_in_request[session.sid] = (
                 self._sessions_in_request.get(session.sid, 0) + 1
@@ -264,7 +266,6 @@ class App:
             if self._sessions_in_request[session.sid] == 0:
                 del self._sessions_in_request[session.sid]
 
-            print(f"--- MIDDLEWARE {request.url.path} END ---")
             return res
 
         @self.fastapi.get("/health")
@@ -278,7 +279,6 @@ class App:
         # RouteInfo is the request body
         @self.fastapi.post("/prerender/{path:path}")
         async def prerender(path: str, route_info: RouteInfo, request: Request):
-            print(f"--- PRERENDER {path} ---")
             if not path.startswith("/"):
                 path = "/" + path
             # The session is set by the FastAPI HTTP middleware above
@@ -299,6 +299,7 @@ class App:
 
             def _next():
                 return Ok(_prerender())
+
             with PulseContext.update(render=render):
                 try:
                     res = self.middleware.prerender(
@@ -310,13 +311,13 @@ class App:
                     )
                 except RedirectInterrupt as r:
                     res = Redirect(r.path)
+                except NotFoundInterrupt:
+                    res = NotFound()
 
-            print(f"--- PRERENDER {path} END ---")
             self.close_render(render.id)
             if isinstance(res, Redirect):
-                raise HTTPException(
-                    status_code=302, headers={"Location": res.path or "/"}
-                )
+                location = res.path or "/"
+                raise HTTPException(status_code=302, headers={"Location": location})
             elif isinstance(res, NotFound):
                 raise HTTPException(status_code=404)
             elif isinstance(res, Ok):
@@ -334,7 +335,6 @@ class App:
 
         @self.sio.event
         async def connect(sid: str, environ: dict, auth=None):
-            print("--- CONNECT ---")
             # We use `sid` to designate UserSession ID internally
             wsid = sid
             # Determine client address/origin prior to creating the session
@@ -365,7 +365,6 @@ class App:
 
             def on_message(message: ServerMessage):
                 payload = flatted.stringify(message)
-                print("Sending message:", payload)
                 try:
                     asyncio.create_task(self.sio.emit("message", payload, to=sid))
                 except RuntimeError:
@@ -378,7 +377,6 @@ class App:
 
             render.connect(on_message)
 
-            print("--- CONNECT END ---")
 
         @self.sio.event
         def disconnect(sid: str):
@@ -500,7 +498,6 @@ class App:
     ):
         if wsid in self.render_sessions:
             raise ValueError(f"RenderSession {wsid} already exists")
-        # print(f"--> Creating session {id}")
         render = RenderSession(
             wsid,
             self.routes,
@@ -522,7 +519,6 @@ class App:
         self.user_to_render[session.sid].remove(wsid)
 
         if len(self.user_to_render[session.sid]) == 0:
-            print(f"Scheduling session close for {session.sid}")
             later(10, self.close_session_if_inactive, sid)
 
     def close_session(self, sid: str):
@@ -536,23 +532,19 @@ class App:
             self.close_session(sid)
 
     def refresh_cookies(self, sid: str):
-        print(f"Refreshing cookies for session {sid}")
         sess = self.user_sessions.get(sid)
         render_ids = self.user_to_render[sid]
         if not sess or len(render_ids) == 0:
-            print("No active render, skipping")
             return
 
         # If the session is currently inside an HTTP request, we don't need to schedule
         # set-cookies via WS; cookies will be attached on the HTTP response.
         if sid in self._sessions_in_request:
-            print("Session in active request; skipping async cookie refresh")
             return
 
         sess._scheduled_cookie_refresh = True
         render = self.render_sessions[render_ids[0]]
         # We don't want to wait for this to resolve
-        print("Creating call_api task")
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(render.call_api("/set-cookies", method="GET"))

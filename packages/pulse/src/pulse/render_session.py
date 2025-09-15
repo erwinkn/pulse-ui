@@ -17,6 +17,7 @@ from pulse.reactive import Effect, flush_effects
 from pulse.reconciler import RenderRoot
 from pulse.routing import Layout, Route, RouteContext, RouteTree
 from pulse.state import State
+from pulse.hooks import RedirectInterrupt
 
 
 logger = logging.getLogger(__file__)
@@ -278,17 +279,23 @@ class RenderSession:
 
         def _render_effect():
             with ctx:
-                if mount.root.render_count == 0:
-                    vdom = mount.root.render_vdom(prerendering=False)
-                    self.send(ServerInitMessage(type="vdom_init", path=path, vdom=vdom))
-                else:
-                    result = mount.root.render_diff()
-                    if result.ops:
+                try:
+                    if mount.root.render_count == 0:
+                        vdom = mount.root.render_vdom(prerendering=False)
                         self.send(
-                            ServerUpdateMessage(
-                                type="vdom_update", path=path, ops=result.ops
-                            )
+                            ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
                         )
+                    else:
+                        result = mount.root.render_diff()
+                        if result.ops:
+                            self.send(
+                                ServerUpdateMessage(
+                                    type="vdom_update", path=path, ops=result.ops
+                                )
+                            )
+                except RedirectInterrupt as r:
+                    # Prefer client-side navigation over emitting VDOM operations
+                    self.send({"type": "navigate_to", "path": r.path})
 
         # print(f"Mounting '{path}'")
         mount.effect = Effect(

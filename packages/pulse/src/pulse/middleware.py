@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from pulse.messages import ClientMessage, RouteInfo
 from pulse.request import PulseRequest
 from pulse.vdom import VDOM
-from pulse.context import PulseContext
 
 
 T = TypeVar("T")

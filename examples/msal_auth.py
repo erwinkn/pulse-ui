@@ -59,20 +59,14 @@ class MsalAuthMiddleware(ps.PulseMiddleware):
         self,
         *,
         session_key: str = "msal",
-        protected_prefixes: Optional[list[str]] = None,
     ):
         self.session_key = session_key
-        self.protected_prefixes = protected_prefixes or ["/secret"]
 
     def _get_user(self, session) -> dict | None:
         return session.get(self.session_key, {}).get("user")
 
     def prerender(self, *, path, request, route_info, session, next):
-        user = self._get_user(session)
-        # Protect configured prefixes at prerender time
-        if any(path.startswith(p) for p in self.protected_prefixes) and not user:
-            # Send to our login route
-            return ps.Redirect("/login")
+        # user = self._get_user(session)
         return next()
 
     def connect(self, *, request, session, next):
@@ -80,15 +74,15 @@ class MsalAuthMiddleware(ps.PulseMiddleware):
         return next()
 
     def message(self, *, data, session, next):
-        t = data.get("type") if isinstance(data, dict) else None
-        if t in {"mount", "navigate"}:
-            path = data.get("path")
-            if (
-                not self._get_user(session)
-                and isinstance(path, str)
-                and any(path.startswith(p) for p in self.protected_prefixes)
-            ):
-                return ps.Deny()
+        # t = data.get("type") if isinstance(data, dict) else None
+        # if t in {"mount", "navigate"}:
+        #     path = data.get("path")
+        #     if (
+        #         not self._get_user(session)
+        #         and isinstance(path, str)
+        #         and any(path.startswith(p) for p in self.protected_prefixes)
+        #     ):
+        #         return ps.Deny()
         return next()
 
 
@@ -112,7 +106,7 @@ class MsalPlugin(ps.Plugin):
         self.session_key = session_key
         self.middleware_instance = MsalAuthMiddleware(
             session_key=session_key,
-            protected_prefixes=protected_prefixes,
+            # protected_prefixes=protected_prefixes,
         )
 
     def cca(self, cache: msal.SerializableTokenCache):
@@ -195,11 +189,11 @@ class MsalPlugin(ps.Plugin):
             print("Clearing context")
             del session[session_key]
             # Redirect back to the SPA origin or to provided next path
-            origin = get_client_address(request) or ""
-            next_path = request.query_params.get("next") or "/"
-            if not isinstance(next_path, str) or not next_path.startswith("/"):
-                next_path = "/"
-            return RedirectResponse(url=f"{origin}{next_path}")
+            # origin = get_client_address(request) or ""
+            # next_path = request.query_params.get("next") or "/"
+            # if not isinstance(next_path, str) or not next_path.startswith("/"):
+            #     next_path = "/"
+            # return RedirectResponse(url=f"{origin}{next_path}")
 
 
 @ps.component
@@ -221,19 +215,25 @@ def login():
 def secret():
     print("Rerendering secret")
     sess = ps.session()
-    user = (sess.get("msal") or {}).get("user", {})
-    name = user.get("name") or user.get("email") or "<unknown>"
-    print("Session keys:", sess.keys())
+    auth = sess["msal"]
+    if not auth:
+        ps.redirect("/login")
+
+    user = auth["user"]
+    name = user.get("name") or user.get("email")
 
     def update_session_entry(text: str):
         sess["pulse"] = text
 
+    def logout():
+        del sess['msal']
+
     return ps.div(
         ps.h2("Secret", className="text-2xl font-bold mb-4"),
         ps.p(f"Welcome {name}"),
-        ps.a(
+        ps.button(
             "Sign out",
-            href=f"{ps.server_address()}/auth/logout",
+            onClick=logout,
             className="btn-secondary mt-4",
         ),
         # ps.label("Modify session", htmlFor="session-input"),

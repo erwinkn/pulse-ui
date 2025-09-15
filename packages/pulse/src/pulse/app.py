@@ -17,7 +17,6 @@ import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.background import BackgroundTask, BackgroundTasks
 
 import pulse.flatted as flatted
 from pulse.codegen import Codegen, CodegenConfig
@@ -46,6 +45,7 @@ from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
+from pulse.hooks import RedirectInterrupt
 from pulse.user_session import (
     CookieSessionStore,
     SessionStore,
@@ -132,10 +132,6 @@ class App:
         self.render_sessions: dict[str, RenderSession] = {}
         self.user_to_render: dict[str, list[str]] = defaultdict(list)
         self.render_to_user: dict[str, str] = {}
-        # Queue outbound WS messages per render when an HTTP request is active
-        self._render_outbox: dict[str, list[ServerMessage]] = defaultdict(list)
-        # Track user sessions that are currently handling an HTTP request
-        self._sessions_in_request: dict[str, int] = {}
 
         self.codegen = Codegen(
             self.routes,
@@ -198,6 +194,7 @@ class App:
         self.middleware = MiddlewareStack(mw_stack)
         self.cookie = cookie or session_cookie()
         self.session_store = session_store or CookieSessionStore()
+        self._sessions_in_request: dict[str, int] = {}
 
         self.status = AppStatus.created
         # Persist the server address for use by sessions (API calls, etc.)
@@ -262,50 +259,10 @@ class App:
             with PulseContext.update(session=session, render=render):
                 res: Response = await call_next(request)
             session.handle_response(res)
+
             self._sessions_in_request[session.sid] -= 1
             if self._sessions_in_request[session.sid] == 0:
                 del self._sessions_in_request[session.sid]
-            # Attach background tasks to flush queued WS messages AFTER response is sent
-            sid = session.sid
-            render_ids = self.user_to_render.get(sid, [])
-            # Collect per-render messages and clear outbox synchronously
-            to_flush: list[tuple[str, list[ServerMessage]]] = []
-            for rid in list(render_ids):
-                outbox = self._render_outbox.get(rid)
-                if not outbox:
-                    continue
-                messages = outbox.copy()
-                self._render_outbox[rid].clear()
-                to_flush.append((rid, messages))
-
-            # If this response is a redirect, drop queued WS updates to avoid
-            # sending stale rerenders to a page the browser is navigating away from.
-            has_location = "location" in {k.lower() for k in res.headers.keys()}
-            is_redirect = 300 <= res.status_code < 400 and has_location
-            if is_redirect:
-                to_flush = []
-
-            if len(to_flush) > 0:
-                bg = BackgroundTasks()
-                # Preserve any existing background task
-                if res.background is not None:
-                    if isinstance(res.background, BackgroundTask):
-                        bg.tasks.append(res.background)
-                    elif isinstance(res.background, BackgroundTasks):
-                        bg.tasks.extend(res.background.tasks)
-                    else:
-                        bg.add_task(res.background)
-
-                async def _flush(payloads: list[ServerMessage], target: str):
-                    for msg in payloads:
-                        print(f"Sending {msg}")
-                        await self.sio.emit(
-                            "message", flatted.stringify(msg), to=target
-                        )
-
-                for rid, messages in to_flush:
-                    bg.add_task(_flush, messages, rid)
-                res.background = bg
 
             print(f"--- MIDDLEWARE {request.url.path} END ---")
             return res
@@ -340,12 +297,10 @@ class App:
                 vdom = render.render(path, route_info, prerendering=True)
                 return vdom
 
-            try:
-
-                def _next():
-                    return Ok(_prerender())
-
-                with PulseContext.update(render=render):
+            def _next():
+                return Ok(_prerender())
+            with PulseContext.update(render=render):
+                try:
                     res = self.middleware.prerender(
                         path=path,
                         route_info=route_info,
@@ -353,13 +308,11 @@ class App:
                         session=session.data,
                         next=_next,
                     )
+                except RedirectInterrupt as r:
+                    res = Redirect(r.path)
 
-                print(f"--- PRERENDER {path} END ---")
-                self.close_render(render.id)
-            except Exception:
-                # TODO: add ability to report errors in prerender
-                logger.exception("Error in prerender middleware")
-                res = Ok(_prerender())
+            print(f"--- PRERENDER {path} END ---")
+            self.close_render(render.id)
             if isinstance(res, Redirect):
                 raise HTTPException(
                     status_code=302, headers={"Location": res.path or "/"}
@@ -411,12 +364,6 @@ class App:
                     self.close_render(wsid)
 
             def on_message(message: ServerMessage):
-                # If an HTTP request is being handled for this session, enqueue the message
-                sess_id = self.render_to_user.get(sid)
-                if sess_id and sess_id in self._sessions_in_request:
-                    self._render_outbox[sid].append(message)
-                    return
-
                 payload = flatted.stringify(message)
                 print("Sending message:", payload)
                 try:

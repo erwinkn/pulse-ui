@@ -112,17 +112,19 @@ class RenderRoot:
     def render_vdom(self, prerendering: bool = False) -> VDOM:
         """One-shot render to VDOM + callbacks, without mounting an Effect."""
         token = IS_PRERENDERING.set(prerendering)
-        self.render_count += 1
-        resolver = Resolver()
-        # Fresh render of the root component into a VDOM tree
-        vdom, normalized = resolver.render_tree(
-            render_parent=self.render_tree,
-            node=self.render_tree.render(),
-        )
-        self.render_tree.last_render = normalized
-        self.callbacks = resolver.callbacks
-        IS_PRERENDERING.reset(token)
-        return vdom
+        try:
+            self.render_count += 1
+            resolver = Resolver()
+            # Fresh render of the root component into a VDOM tree
+            vdom, normalized = resolver.render_tree(
+                render_parent=self.render_tree,
+                node=self.render_tree.render(),
+            )
+            self.render_tree.last_render = normalized
+            self.callbacks = resolver.callbacks
+            return vdom
+        finally:
+            IS_PRERENDERING.reset(token)
 
     def unmount(self) -> None:
         if self.effect is not None:

@@ -5,6 +5,8 @@ from typing import (
     Generic,
     Literal,
     Mapping,
+    Never,
+    NoReturn,
     Optional,
     ParamSpec,
     Protocol,
@@ -20,6 +22,12 @@ from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
 from pulse.reactive_extensions import ReactiveDict
 from pulse.routing import RouteContext
 from pulse.state import State
+
+
+class RedirectInterrupt(Exception):
+    def __init__(self, path: str):
+        super().__init__(path)
+        self.path = path
 
 
 class SetupState:
@@ -423,6 +431,21 @@ def navigate(path: str) -> None:
         raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
     # Emit navigate_to once; client will handle redirect at app-level
     ctx.render.send({"type": "navigate_to", "path": path})
+
+
+def redirect(path: str) -> NoReturn:
+    """Interrupt rendering to perform a redirect/navigation.
+
+    - During prerender: surfaces to the server to return an HTTP redirect.
+    - During live render: caught by the render loop to send a navigate message
+      instead of emitting VDOM updates.
+
+    Must be invoked during component rendering.
+    """
+    ctx = HOOK_CONTEXT.get()
+    if not ctx:
+        raise RuntimeError("redirect() must be invoked during component render")
+    raise RedirectInterrupt(path)
 
 
 def is_prerendering():

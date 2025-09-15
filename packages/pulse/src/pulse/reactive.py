@@ -14,6 +14,7 @@ from typing import (
 
 
 from pulse.flags import IS_PRERENDERING
+from pulse.helpers import schedule_on_loop
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -287,8 +288,8 @@ class Effect:
         if self.batch is not None:
             self.batch.effects.remove(self)
             self.batch = None
-        # Run now (respects IS_PRERENDERING and error handling)
-        self.run()
+            # Run now (respects IS_PRERENDERING and error handling)
+            self.run()
 
     def _handle_error(self, exc: Exception) -> None:
         if callable(self.on_error):
@@ -470,6 +471,7 @@ class Batch:
             self.effects = []
 
             for effect in current_effects:
+                effect.batch = None
                 if not effect._should_run():
                     continue
                 try:
@@ -503,12 +505,16 @@ class GlobalBatch(Batch):
 
     def register_effect(self, effect: Effect):
         if not self.is_scheduled:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.call_soon_threadsafe(self.flush)
-                self.is_scheduled = True
-            except RuntimeError:
-                pass
+            # try:
+            #     print("Getting running loop")
+            #     loop = asyncio.get_running_loop()
+            #     print("Scheduling batch flush")
+            #     loop.call_soon_threadsafe(self.flush)
+            #     self.is_scheduled = True
+            # except RuntimeError:
+            #     # No running loop here; schedule on the main loop cooperatively
+            schedule_on_loop(self.flush)
+            self.is_scheduled = True
         return super().register_effect(effect)
 
     def flush(self):

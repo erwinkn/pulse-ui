@@ -50,9 +50,12 @@ class ReactiveDict(dict[T1, T2]):
     # --- Mapping protocol ---
     def __getitem__(self, key: T1) -> T2:
         if key not in self._signals:
-            # Lazily create missing key with None so it can be reactive
-            self._signals[key] = Signal(None)
-        return self._signals[key].read()
+            # Lazily create missing key with sentinel so it can be reactive
+            self._signals[key] = Signal(_MISSING)
+        val = self._signals[key].read()
+        # Preserve dict.__getitem__ typing by casting. Semantics: return None
+        # only if the stored value is explicitly None; otherwise unwrap sentinel.
+        return cast(T2, None) if val is _MISSING else cast(T2, val)
 
     def __setitem__(self, key: T1, value: T2) -> None:
         self.set(key, value)
@@ -60,9 +63,9 @@ class ReactiveDict(dict[T1, T2]):
     def __delitem__(self, key: T1) -> None:
         # Remove from mapping but preserve signal object for subscribers
         if key not in self._signals:
-            self._signals[key] = Signal(None)
+            self._signals[key] = Signal(_MISSING)
         else:
-            self._signals[key].write(None)
+            self._signals[key].write(_MISSING)
         if super().__contains__(key):
             super().__delitem__(key)
             self._bump_structure()
@@ -74,7 +77,8 @@ class ReactiveDict(dict[T1, T2]):
     def get(self, key: T1, default: Optional[T2] = None) -> Optional[T2]:
         if key not in self._signals:
             return default
-        return self._signals[key].read()
+        val = self._signals[key].read()
+        return default if val is _MISSING else val
 
     def __iter__(self) -> Iterator[T1]:
         # Reactive to structural changes
@@ -89,7 +93,7 @@ class ReactiveDict(dict[T1, T2]):
         # Subscribe to the per-key value signal so presence checks are reactive
         sig = self._signals.get(key)
         if sig is None:
-            sig = Signal(None)
+            sig = Signal(_MISSING)
             self._signals[key] = sig
         _ = sig.read()
         return dict.__contains__(self, key)
@@ -128,7 +132,7 @@ class ReactiveDict(dict[T1, T2]):
     def delete(self, key: T1) -> None:
         if key in self._signals:
             # Preserve signal and mark as not present; do not raise
-            self._signals[key].write(None)
+            self._signals[key].write(_MISSING)
             if super().__contains__(key):
                 super().__delitem__(key)
                 self._bump_structure()
@@ -192,9 +196,9 @@ class ReactiveDict(dict[T1, T2]):
         # Preserve and update reactive metadata
         sig = self._signals.get(k)
         if sig is None:
-            self._signals[k] = Signal(None)
+            self._signals[k] = Signal(_MISSING)
         else:
-            sig.write(None)
+            sig.write(_MISSING)
         self._bump_structure()
         return k, v
 
@@ -202,7 +206,7 @@ class ReactiveDict(dict[T1, T2]):
         if super().__contains__(key):
             # Return current value without structural change
             if key not in self._signals:
-                self._signals[key] = Signal(None)
+                self._signals[key] = Signal(_MISSING)
             return self._signals[key].read()
         self.set(key, default)  # type: ignore[arg-type]
         return dict.__getitem__(self, key)

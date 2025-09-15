@@ -14,9 +14,10 @@ from enum import IntEnum
 from typing import Literal, Optional, Sequence, TypeVar, cast
 
 import socketio
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.background import BackgroundTask, BackgroundTasks
 
 import pulse.flatted as flatted
 from pulse.codegen import Codegen, CodegenConfig
@@ -131,6 +132,10 @@ class App:
         self.render_sessions: dict[str, RenderSession] = {}
         self.user_to_render: dict[str, list[str]] = defaultdict(list)
         self.render_to_user: dict[str, str] = {}
+        # Queue outbound WS messages per render when an HTTP request is active
+        self._render_outbox: dict[str, list[ServerMessage]] = defaultdict(list)
+        # Track user sessions that are currently handling an HTTP request
+        self._sessions_in_request: dict[str, int] = {}
 
         self.codegen = Codegen(
             self.routes,
@@ -244,17 +249,63 @@ class App:
         async def pulse_context_middleware(request: Request, call_next):
             # Session cookie handling
             cookie = self.cookie.get_from_fastapi(request)
-            print(f"--- MIDDLEWARE {request.url.path} ---")
-            session = await self.get_or_create_session(cookie, handling_request=True)
-            session.start_request()
+            print(f"--- MIDDLEWARE {request.url.path} (cookie = {cookie}) ---")
+            session = await self.get_or_create_session(cookie)
+            self._sessions_in_request[session.sid] = (
+                self._sessions_in_request.get(session.sid, 0) + 1
+            )
             header_sid = request.headers.get("x-pulse-render-id")
             if header_sid:
                 render = self.render_sessions.get(header_sid)
             else:
                 render = None
             with PulseContext.update(session=session, render=render):
-                res = await call_next(request)
+                res: Response = await call_next(request)
             session.handle_response(res)
+            self._sessions_in_request[session.sid] -= 1
+            if self._sessions_in_request[session.sid] == 0:
+                del self._sessions_in_request[session.sid]
+            # Attach background tasks to flush queued WS messages AFTER response is sent
+            sid = session.sid
+            render_ids = self.user_to_render.get(sid, [])
+            # Collect per-render messages and clear outbox synchronously
+            to_flush: list[tuple[str, list[ServerMessage]]] = []
+            for rid in list(render_ids):
+                outbox = self._render_outbox.get(rid)
+                if not outbox:
+                    continue
+                messages = outbox.copy()
+                self._render_outbox[rid].clear()
+                to_flush.append((rid, messages))
+
+            # If this response is a redirect, drop queued WS updates to avoid
+            # sending stale rerenders to a page the browser is navigating away from.
+            has_location = "location" in {k.lower() for k in res.headers.keys()}
+            is_redirect = 300 <= res.status_code < 400 and has_location
+            if is_redirect:
+                to_flush = []
+
+            if len(to_flush) > 0:
+                bg = BackgroundTasks()
+                # Preserve any existing background task
+                if res.background is not None:
+                    if isinstance(res.background, BackgroundTask):
+                        bg.tasks.append(res.background)
+                    elif isinstance(res.background, BackgroundTasks):
+                        bg.tasks.extend(res.background.tasks)
+                    else:
+                        bg.add_task(res.background)
+
+                async def _flush(payloads: list[ServerMessage], target: str):
+                    for msg in payloads:
+                        print(f"Sending {msg}")
+                        await self.sio.emit(
+                            "message", flatted.stringify(msg), to=target
+                        )
+
+                for rid, messages in to_flush:
+                    bg.add_task(_flush, messages, rid)
+                res.background = bg
 
             print(f"--- MIDDLEWARE {request.url.path} END ---")
             return res
@@ -360,8 +411,23 @@ class App:
                     self.close_render(wsid)
 
             def on_message(message: ServerMessage):
-                message = flatted.stringify(message)
-                asyncio.create_task(self.sio.emit("message", message, to=sid))
+                # If an HTTP request is being handled for this session, enqueue the message
+                sess_id = self.render_to_user.get(sid)
+                if sess_id and sess_id in self._sessions_in_request:
+                    self._render_outbox[sid].append(message)
+                    return
+
+                payload = flatted.stringify(message)
+                print("Sending message:", payload)
+                try:
+                    asyncio.create_task(self.sio.emit("message", payload, to=sid))
+                except RuntimeError:
+                    from anyio import from_thread
+
+                    async def _emit():
+                        await self.sio.emit("message", payload, to=sid)
+
+                    from_thread.run(_emit)
 
             render.connect(on_message)
 
@@ -426,9 +492,7 @@ class App:
     def get_route(self, path: str):
         return self.routes.find(path)
 
-    async def get_or_create_session(
-        self, raw_cookie: Optional[str], handling_request=False
-    ) -> UserSession:
+    async def get_or_create_session(self, raw_cookie: Optional[str]) -> UserSession:
         if isinstance(self.session_store, CookieSessionStore):
             if raw_cookie is not None:
                 session_data = self.session_store.decode(raw_cookie)
@@ -441,7 +505,7 @@ class App:
 
             # No cookie: create fresh session
             sid = new_sid()
-            session = UserSession(sid, {}, app=self, handling_request=handling_request)
+            session = UserSession(sid, {}, app=self)
             session._refresh_session_cookie(self)
             self.user_sessions[sid] = session
             return session
@@ -456,9 +520,7 @@ class App:
             data = await self.session_store.get(sid) or await self.session_store.create(
                 sid
             )
-            session = UserSession(
-                sid, data, app=self, handling_request=handling_request
-            )
+            session = UserSession(sid, data, app=self)
             session.set_cookie(
                 name=self.cookie.name,
                 value=sid,
@@ -471,7 +533,9 @@ class App:
             sid = new_sid()
             data = await self.session_store.create(sid)
             session = UserSession(
-                sid, data, app=self, handling_request=handling_request
+                sid,
+                data,
+                app=self,
             )
             session.set_cookie(
                 name=self.cookie.name,
@@ -532,11 +596,26 @@ class App:
             print("No active render, skipping")
             return
 
+        # If the session is currently inside an HTTP request, we don't need to schedule
+        # set-cookies via WS; cookies will be attached on the HTTP response.
+        if sid in self._sessions_in_request:
+            print("Session in active request; skipping async cookie refresh")
+            return
+
         sess._scheduled_cookie_refresh = True
         render = self.render_sessions[render_ids[0]]
         # We don't want to wait for this to resolve
         print("Creating call_api task")
-        asyncio.create_task(render.call_api("/set-cookies", method="GET"))
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(render.call_api("/set-cookies", method="GET"))
+        except RuntimeError:
+            from anyio import from_thread
+
+            async def _schedule():
+                await render.call_api("/set-cookies", method="GET")
+
+            from_thread.run(_schedule)
 
 
 def add_react_components(

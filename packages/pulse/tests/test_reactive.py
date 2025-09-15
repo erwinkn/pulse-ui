@@ -1047,6 +1047,21 @@ def test_reactive_dict_delete_sets_none_preserving_subscribers():
     assert values == [1, None, 3]
 
 
+def test_reactive_dict_get_after_delete_uses_default_when_absent():
+    ctx = ReactiveDict({"a": 1})
+
+    # Remove key: value signal remains but marks logical absence
+    del ctx["a"]
+
+    assert "a" in ctx._signals
+
+    # Without default -> None
+    assert ctx.get("a") is None
+
+    # With default -> provided default
+    assert ctx.get("a", 42) == 42
+
+
 def test_reactive_list_basic_index_reactivity():
     lst = ReactiveList([1, 2, 3])
     assert isinstance(lst, list)

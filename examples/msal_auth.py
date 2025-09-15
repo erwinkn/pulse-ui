@@ -64,8 +64,11 @@ class MsalAuthMiddleware(ps.PulseMiddleware):
         self.session_key = session_key
         self.protected_prefixes = protected_prefixes or ["/secret"]
 
+    def _get_user(self, session) -> dict | None:
+        return session.get(self.session_key, {}).get("user")
+
     def prerender(self, *, path, request, route_info, session, next):
-        user = session.get(self.session_key, {}).get("user")
+        user = self._get_user(session)
         # Protect configured prefixes at prerender time
         if any(path.startswith(p) for p in self.protected_prefixes) and not user:
             # Send to our login route
@@ -81,7 +84,7 @@ class MsalAuthMiddleware(ps.PulseMiddleware):
         if t in {"mount", "navigate"}:
             path = data.get("path")
             if (
-                not (session.get(self.session_key) or {}).get("user")
+                not self._get_user(session)
                 and isinstance(path, str)
                 and any(path.startswith(p) for p in self.protected_prefixes)
             ):
@@ -189,9 +192,8 @@ class MsalPlugin(ps.Plugin):
         @app.fastapi.get("/auth/logout")
         def local_logout(request: Request):
             session = ps.session()
-            ctx = session.setdefault(session_key, {})
             print("Clearing context")
-            ctx.clear()
+            del session[session_key]
             # Redirect back to the SPA origin or to provided next path
             origin = get_client_address(request) or ""
             next_path = request.query_params.get("next") or "/"
@@ -217,10 +219,15 @@ def login():
 
 @ps.component
 def secret():
+    print("Rerendering secret")
     sess = ps.session()
     user = (sess.get("msal") or {}).get("user", {})
     name = user.get("name") or user.get("email") or "<unknown>"
     print("Session keys:", sess.keys())
+
+    def update_session_entry(text: str):
+        sess["pulse"] = text
+
     return ps.div(
         ps.h2("Secret", className="text-2xl font-bold mb-4"),
         ps.p(f"Welcome {name}"),
@@ -229,6 +236,12 @@ def secret():
             href=f"{ps.server_address()}/auth/logout",
             className="btn-secondary mt-4",
         ),
+        # ps.label("Modify session", htmlFor="session-input"),
+        # ps.input(
+        #     id="session-input",
+        #     value=sess.get("pulse", ""),
+        #     onChange=lambda evt: update_session_entry(evt["target"]["value"]),
+        # ),
         className="max-w-md mx-auto p-6",
     )
 

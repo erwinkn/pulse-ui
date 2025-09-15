@@ -18,6 +18,7 @@ from typing import (
     Unpack,
 )
 from urllib.parse import urlsplit
+from anyio import from_thread
 
 from fastapi import Request
 
@@ -73,6 +74,74 @@ class Sentinel:
 
 def For(items: Iterable[T], fn: Callable[[T], Element]):
     return [fn(item) for item in items]
+
+
+# --- Async scheduling helpers (work from loop or sync threads) ---
+
+
+def _running_under_pytest() -> bool:
+    """Detect if running inside pytest using environment variables."""
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or (
+        "PYTEST_XDIST_TESTRUNUID" in os.environ
+    )
+
+
+def schedule_on_loop(callback: Callable[[], None]) -> None:
+    """Schedule a callback to run ASAP on the main event loop from any thread."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.call_soon_threadsafe(callback)
+    except RuntimeError:
+
+        async def _runner():
+            loop = asyncio.get_running_loop()
+            loop.call_soon(callback)
+
+        try:
+            from_thread.run(_runner)
+        except RuntimeError:
+            if not _running_under_pytest():
+                raise
+
+
+def create_task(
+    factory: Callable[[], Coroutine[Any, Any, Any]],
+    *,
+    name: str | None = None,
+    on_done: Callable[[asyncio.Task[Any]], None] | None = None,
+) -> None:
+    """Create and schedule a coroutine task on the main loop from any thread.
+
+    - factory should create a fresh coroutine each call
+    - optional on_done is attached on the created task within the loop
+    """
+
+    def _schedule() -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            task = loop.create_task(factory(), name=name)
+        except TypeError:
+            task = loop.create_task(factory())
+        if on_done is not None:
+            task.add_done_callback(on_done)
+
+    from_thread.run
+
+    schedule_on_loop(_schedule)
+
+
+def create_future_on_loop() -> asyncio.Future:
+    """Create an asyncio Future on the main event loop from any thread."""
+    try:
+        return asyncio.get_running_loop().create_future()
+    except RuntimeError:
+        from anyio import from_thread
+
+        async def _create():
+            loop = asyncio.get_running_loop()
+            return loop.create_future()
+
+        return from_thread.run(_create)
 
 
 def later(

@@ -30,25 +30,21 @@ class UserSession:
     sid: str
     data: Session
 
-    def __init__(
-        self, sid: str, data: dict[str, Any], app: "App", handling_request=False
-    ) -> None:
+    def __init__(self, sid: str, data: dict[str, Any], app: "App") -> None:
         self.sid = sid
         self.data = reactive(data)
         self._scheduled_cookie_refresh = False
-        self._handling_request = handling_request
         self._queued_cookies: dict[str, SetCookie] = {}
         self.app = app
         self.is_cookie_session = isinstance(app.session_store, CookieSessionStore)
-        print(f"😈 Creating UserSession {sid}")
         if isinstance(app.session_store, CookieSessionStore):
             self._effect = Effect(
                 lambda: self._refresh_session_cookie(app),
-                name=f"save_session:{self.sid}",
+                name=f"save_cookie_session:{self.sid}",
             )
         else:
             self._effect = AsyncEffect(
-                self._save_server_session, name=f"save_session:{self.sid}"
+                self._save_server_session, name=f"save_server_session:{self.sid}"
             )
 
     async def _save_server_session(self):
@@ -57,8 +53,8 @@ class UserSession:
         await self.app.session_store.save(self.sid, self.data)
 
     def _refresh_session_cookie(self, app):
-        assert isinstance(app.session_store, CookieSessionStore)
         print("Refreshing session cookie")
+        assert isinstance(app.session_store, CookieSessionStore)
         signed_cookie = app.session_store.encode(self.sid, self.data)
         self.set_cookie(
             name=app.cookie.name,
@@ -72,18 +68,15 @@ class UserSession:
     def dispose(self):
         self._effect.dispose()
 
-    def start_request(self):
-        self._handling_request = True
-
     def handle_response(self, res: Response):
         # For cookie sessions, run the effect now if it's scheduled, in order to set the updated cookie
         if self.is_cookie_session:
             self._effect.flush()
         for cookie in self._queued_cookies.values():
+            print(f"Setting cookie {cookie.name} on response")
             cookie.set_on_fastapi(res, cookie.value)
         self._queued_cookies.clear()
         self._scheduled_cookie_refresh = False
-        self._handling_request = False
 
     def set_cookie(
         self,
@@ -104,15 +97,9 @@ class UserSession:
             max_age_seconds=max_age_seconds,
         )
         self._queued_cookies[name] = cookie
-        if self._handling_request:
-            # cookies will be set at the end of the reuqest
-            print("Already handling request, not scheduling")
-            return
-        # Otherwise, schedule a cookie refresh for this user
         if not self._scheduled_cookie_refresh:
             print("Scheduling cookie refresh")
-            ctx = PulseContext.get()
-            ctx.app.refresh_cookies(self.sid)
+            self.app.refresh_cookies(self.sid)
             self._scheduled_cookie_refresh = True
 
 

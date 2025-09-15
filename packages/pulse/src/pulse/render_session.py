@@ -131,8 +131,18 @@ class RenderSession:
             fn, n_params = cb.fn, cb.n_args
             res = fn(*args[:n_params])
             if iscoroutine(res):
-                loop = asyncio.get_running_loop()
-                task = loop.create_task(res)
+                try:
+                    loop = asyncio.get_running_loop()
+                    task = loop.create_task(res)
+                except RuntimeError:
+                    from anyio import from_thread
+
+                    async def _schedule():
+                        loop = asyncio.get_running_loop()
+                        task = loop.create_task(res)
+                        return task
+
+                    task = from_thread.run(_schedule)
 
                 def _on_task_done(t):
                     try:
@@ -176,7 +186,16 @@ class RenderSession:
             path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
             url = f"{base}{path}"
         corr_id = uuid.uuid4().hex
-        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        try:
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        except RuntimeError:
+            from anyio import from_thread
+
+            async def _create_future_holder():
+                loop = asyncio.get_running_loop()
+                return loop.create_future()
+
+            fut = from_thread.run(_create_future_holder)
         self._pending_api[corr_id] = fut
         headers = headers or {}
         headers["x-pulse-render-id"] = self.id

@@ -41,19 +41,18 @@ class TestCodegen:
         assert route_page_path.exists()
         result = route_page_path.read_text()
 
+        assert 'import { type HeadersArgs } from "react-router";' in result
         assert (
-            'import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo } from "pulse-ui-client";'
+            'import { PulseView, type VDOM, type ComponentRegistry } from "pulse-ui-client";'
             in result
         )
         assert "// No components needed for this route" in result
         assert "const externalComponents: ComponentRegistry = {};" in result
-        assert "export async function loader" in result
         assert 'const path = "simple"' in result
-        assert (
-            "export default function RouteComponent({ loaderData }: { loaderData: VDOM })"
-            in result
-        )
-        assert "initialVDOM={loaderData}" in result
+        assert "export function headers" in result
+        assert "export default function RouteComponent()" in result
+        assert "externalComponents={externalComponents}" in result
+        assert "path={path}" in result
 
     def test_generate_route_page_with_components(self, tmp_path):
         """Test generating route with React components."""
@@ -185,7 +184,7 @@ class TestCodegen:
 
         layout_content = (pulse_app_dir / "_layout.tsx").read_text()
         assert (
-            'import { PulseProvider, type PulseConfig } from "~/test-lib";'
+            'import { extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "~/test-lib";'
             in layout_content
         )
         assert 'serverAddress: "http://localhost:8000"' in layout_content
@@ -204,20 +203,22 @@ class TestCodegen:
 
         home_content = (routes_dir / "index.tsx").read_text()
         assert (
-            'import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo } from "~/test-lib";'
+            'import { PulseView, type VDOM, type ComponentRegistry } from "~/test-lib";'
             in home_content
         )
         assert 'import { Header } from "./components/Header";' in home_content
         assert '"Header": Header,' in home_content
         assert 'const path = ""' in home_content
-        assert "initialVDOM={loaderData}" in home_content
+        assert "externalComponents={externalComponents}" in home_content
+        assert "path={path}" in home_content
 
         interactive_content = (routes_dir / "interactive.tsx").read_text()
         assert 'import { Button } from "./components/Button";' in interactive_content
         assert '"Header": Header,' not in interactive_content
         assert '"Button": Button,' in interactive_content
         assert 'const path = "interactive"' in interactive_content
-        assert "initialVDOM={loaderData}" in interactive_content
+        assert "externalComponents={externalComponents}" in interactive_content
+        assert "path={path}" in interactive_content
 
 
 if __name__ == "__main__":

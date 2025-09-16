@@ -248,7 +248,8 @@ class RenderSession:
             # Run a diff and synthesize an update; however, for prerender we
             # expect initial mount. Return current tree as a full VDOM.
             mount = self.get_route_mount(path)
-            vdom = mount.root.render_vdom()
+            with PulseContext.update(route=mount.route):
+                vdom = mount.root.render_vdom()
             return {"type": "vdom_init", "vdom": vdom}
 
         captured: dict | None = None
@@ -281,7 +282,8 @@ class RenderSession:
         # Fallback: if nothing captured (shouldn't happen), return full VDOM
         if captured is None:
             mount = self.get_route_mount(path)
-            vdom = mount.root.render_vdom()
+            with PulseContext.update(route=mount.route):
+                vdom = mount.root.render_vdom()
             return {"type": "vdom_init", "vdom": vdom}
 
         return captured
@@ -325,10 +327,10 @@ class RenderSession:
         mount = self.create_route_mount(path, route_info)
         # Get current context + add RouteContext. Save it to be able to mount it
         # whenever the render effect reruns.
-        ctx = PulseContext.update(route=mount.route)
+        ctx = PulseContext.get()
 
         def _render_effect():
-            with ctx:
+            with ctx.update(route=mount.route):
                 try:
                     if mount.root.render_count == 0:
                         vdom = mount.root.render_vdom()

@@ -482,7 +482,6 @@ class App:
         def disconnect(sid: str):
             rid = self._socket_to_render.pop(sid, None)
             if rid is not None:
-                print(f"Disconnecting RenderSession {rid}")
                 # Close the RenderSession entirely to avoid lingering effects/tasks
                 self.close_render(rid)
 
@@ -612,7 +611,6 @@ class App:
     ):
         if rid in self.render_sessions:
             raise ValueError(f"RenderSession {rid} already exists")
-        print(f"Creating RenderSession {rid}")
         render = RenderSession(
             rid,
             self.routes,

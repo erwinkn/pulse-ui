@@ -496,7 +496,7 @@ def route() -> RouteContext:
     ctx = PulseContext.get()
     if not ctx or not ctx.route:
         raise RuntimeError(
-            "`pulse.router` can only be called within a component during rendering."
+            "`pulse.route` can only be called within a component during rendering."
         )
     return ctx.route
 

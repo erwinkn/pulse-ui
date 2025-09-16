@@ -482,6 +482,7 @@ class App:
         def disconnect(sid: str):
             rid = self._socket_to_render.pop(sid, None)
             if rid is not None:
+                print(f"Disconnecting RenderSession {rid}")
                 # Close the RenderSession entirely to avoid lingering effects/tasks
                 self.close_render(rid)
 
@@ -563,7 +564,6 @@ class App:
 
             # No cookie: create fresh session
             sid = new_sid()
-            print(f"Creating UserSession {sid}")
             session = UserSession(sid, {}, app=self)
             session._refresh_session_cookie(self)
             self.user_sessions[sid] = session
@@ -612,6 +612,7 @@ class App:
     ):
         if rid in self.render_sessions:
             raise ValueError(f"RenderSession {rid} already exists")
+
         render = RenderSession(
             rid,
             self.routes,

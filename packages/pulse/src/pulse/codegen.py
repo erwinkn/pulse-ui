@@ -2,6 +2,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 from pulse.templates import (
     LAYOUT_TEMPLATE,
@@ -154,7 +155,9 @@ class Codegen:
         )
         return write_file_if_changed(self.output_folder / "routes.runtime.ts", content)
 
-    def _render_routes_ts(self, routes: list[Route | Layout], indent_level: int) -> str:
+    def _render_routes_ts(
+        self, routes: Sequence[Route | Layout], indent_level: int
+    ) -> str:
         lines = []
         indent_str = "  " * indent_level
         for route in routes:
@@ -200,10 +203,7 @@ class Codegen:
         self, routes: list[Route | Layout], indent_level: int
     ) -> str:
         """
-        Render a single RRRouteObject literal suitable for matchRoutes.
-
-        We emit a single root with children when multiple roots exist by wrapping
-        them in a pathless root.
+        Render an array of RRRouteObject literals suitable for matchRoutes.
         """
 
         def render_node(node: Route | Layout, indent: int) -> str:
@@ -214,13 +214,18 @@ class Codegen:
             lines.append(f'{ind}  uniquePath: "{node.unique_path()}",')
             if isinstance(node, Layout):
                 # Pathless layout
-                pass
+                lines.append(
+                    f'{ind}  file: "{self.cfg.pulse_dir}/layouts/{node.file_path()}",'
+                )
             else:
                 # Route: index vs path
                 if node.is_index:
                     lines.append(f"{ind}  index: true,")
                 else:
                     lines.append(f'{ind}  path: "{node.path}",')
+                lines.append(
+                    f'{ind}  file: "{self.cfg.pulse_dir}/routes/{node.file_path()}",'
+                )
             if node.children:
                 lines.append(f"{ind}  children: [")
                 for c in node.children:
@@ -232,21 +237,11 @@ class Codegen:
             lines.append(f"{ind}}}")
             return "\n".join(lines)
 
-        if len(routes) == 1:
-            return render_node(routes[0], indent_level)
-        # Wrap multiple roots in a single pathless node
         ind = "  " * indent_level
-        out: list[str] = [
-            f"{ind}{{",
-            f'{ind}  id: "",',
-            f'{ind}  uniquePath: "",',
-            f"{ind}  children: [",
-        ]
-        for r in routes:
-            out.append(render_node(r, indent_level + 2))
-            out.append(f"{ind}  ,")
-        if out[-1] == f"{ind}  ,":
-            out.pop()
-        out.append(f"{ind}  ]")
-        out.append(f"{ind}}}")
+        out: list[str] = [f"{ind}["]
+        for index, r in enumerate(routes):
+            out.append(render_node(r, indent_level + 1))
+            if index != len(routes) - 1:
+                out.append(f"{ind}  ,")
+        out.append(f"{ind}]")
         return "\n".join(out)

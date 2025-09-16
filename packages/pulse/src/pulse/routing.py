@@ -106,8 +106,8 @@ class Route:
         self,
         path: str,
         render: Component[[]],
-        children: "Optional[list[Route | Layout]]" = None,
-        components: Optional[list[ReactComponent]] = None,
+        children: "Optional[Sequence[Route | Layout]]" = None,
+        components: Optional[Sequence[ReactComponent]] = None,
     ):
         self.path = normalize_path(path)
         self.segments = parse_route_path(path)
@@ -188,8 +188,8 @@ class Layout:
     def __init__(
         self,
         render: Component | Callable[[], Node],
-        children: "Optional[list[Route | Layout]]" = None,
-        components: Optional[list[ReactComponent]] = None,
+        children: "Optional[Sequence[Route | Layout]]" = None,
+        components: Optional[Sequence[ReactComponent]] = None,
     ):
         if not isinstance(render, Component):
             render = Component(render)

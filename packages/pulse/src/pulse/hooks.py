@@ -502,7 +502,7 @@ def route() -> RouteContext:
     return ctx.route
 
 
-def session() -> ReactiveDict:
+def session() -> ReactiveDict[str, Any]:
     """Return the shared per-user session ReactiveDict.
 
     Available during prerender, rendering, callbacks, middleware, and API routes.

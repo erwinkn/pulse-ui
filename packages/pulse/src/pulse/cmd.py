@@ -266,6 +266,61 @@ def run(
         console.log(f"❌ {e}")
         raise typer.Exit(1)
 
+    # In dev, provide a stable PULSE_SECRET persisted in a git-ignored .pulse/secret file
+    dev_secret: str | None = None
+    if app_instance.mode != "prod":
+        dev_secret = os.environ.get("PULSE_SECRET") or None
+        if not dev_secret:
+            try:
+                # Prefer the web root for the .pulse folder when available, otherwise the app file directory
+                secret_root = (
+                    web_root
+                    if web_root and web_root.exists()
+                    else Path(app_file).parent
+                )
+                secret_dir = Path(secret_root) / ".pulse"
+                secret_file = secret_dir / "secret"
+
+                # Ensure .pulse is present and git-ignored
+                try:
+                    secret_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                try:
+                    gi_path = Path(secret_root) / ".gitignore"
+                    pattern = "\n.pulse/\n"
+                    content = ""
+                    if gi_path.exists():
+                        try:
+                            content = gi_path.read_text()
+                        except Exception:
+                            content = ""
+                        if ".pulse/" not in content.split():
+                            gi_path.write_text(content + pattern)
+                    else:
+                        gi_path.write_text(pattern.lstrip("\n"))
+                except Exception:
+                    # Non-fatal
+                    pass
+
+                # Load or create the secret value
+                if secret_file.exists():
+                    try:
+                        dev_secret = secret_file.read_text().strip() or None
+                    except Exception:
+                        dev_secret = None
+                if not dev_secret:
+                    import secrets as _secrets
+
+                    dev_secret = _secrets.token_urlsafe(32)
+                    try:
+                        secret_file.write_text(dev_secret)
+                    except Exception:
+                        # Best effort; env will still carry the secret for this session
+                        pass
+            except Exception:
+                dev_secret = None
+
     if not web_only:
         module_name = Path(app_file).stem
         app_import_string = f"{module_name}:app.asgi_factory"
@@ -296,6 +351,8 @@ def run(
                 "PULSE_LOCK_MANAGED_BY_CLI": "1",
             }
         )
+        if dev_secret:
+            server_env["PULSE_SECRET"] = dev_secret
 
     if not server_only:
         web_command = ["bun", "run", "dev"]

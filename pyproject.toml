@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["pulse-framework", "pulse-lucide", "pulse-recharts"]
+dependencies = ["pulse-framework", "pulse-lucide", "pulse-recharts", "pulse-msal"]
 
 
 [dependency-groups]
@@ -20,6 +20,7 @@ dev = [
 pulse-framework = { workspace = true }
 pulse-lucide = { workspace = true }
 pulse-recharts = { workspace = true }
+pulse-msal = { workspace = true }
 
 
 [tool.uv.workspace]

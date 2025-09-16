@@ -8,3 +8,5 @@
 # PUlse
 app/pulse
 .pulse.lock
+
+.pulse/

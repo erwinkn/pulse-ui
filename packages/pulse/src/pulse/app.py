@@ -23,6 +23,7 @@ from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.cookies import Cookie, session_cookie
 from pulse.helpers import (
+    create_task,
     ensure_web_lock,
     get_client_address,
     get_client_address_socketio,
@@ -96,7 +97,7 @@ class App:
         cookie: Optional[Cookie] = None,
         session_store: Optional[SessionStore] = None,
         server_address: Optional[str] = None,
-        not_found='/not-found'
+        not_found="/not-found",
     ):
         """
         Initialize a new Pulse App.
@@ -378,7 +379,6 @@ class App:
 
             render.connect(on_message)
 
-
         @self.sio.event
         def disconnect(sid: str):
             self.close_render(sid)
@@ -447,6 +447,10 @@ class App:
                     existing = self.user_sessions.get(sid)
                     if existing is not None:
                         return existing
+                    else:
+                        session = UserSession(sid, data, self)
+                        self.user_sessions[sid] = session
+                        return session
                 # Invalid cookie = treat as no cookie
 
             # No cookie: create fresh session
@@ -546,16 +550,7 @@ class App:
         sess._scheduled_cookie_refresh = True
         render = self.render_sessions[render_ids[0]]
         # We don't want to wait for this to resolve
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(render.call_api("/set-cookies", method="GET"))
-        except RuntimeError:
-            from anyio import from_thread
-
-            async def _schedule():
-                await render.call_api("/set-cookies", method="GET")
-
-            from_thread.run(_schedule)
+        create_task(render.call_api("/set-cookies", method="GET"))
 
 
 def add_react_components(

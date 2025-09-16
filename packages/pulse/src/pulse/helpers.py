@@ -105,10 +105,10 @@ def schedule_on_loop(callback: Callable[[], None]) -> None:
 
 
 def create_task(
-    factory: Callable[[], Coroutine[Any, Any, Any]],
+    coroutine: Coroutine[Any, Any, T],
     *,
     name: str | None = None,
-    on_done: Callable[[asyncio.Task[Any]], None] | None = None,
+    on_done: Callable[[asyncio.Task[T]], None] | None = None,
 ) -> None:
     """Create and schedule a coroutine task on the main loop from any thread.
 
@@ -116,18 +116,23 @@ def create_task(
     - optional on_done is attached on the created task within the loop
     """
 
-    def _schedule() -> None:
+    try:
         loop = asyncio.get_running_loop()
-        try:
-            task = loop.create_task(factory(), name=name)
-        except TypeError:
-            task = loop.create_task(factory())
-        if on_done is not None:
+        task = loop.create_task(coroutine, name=name)
+        if on_done:
             task.add_done_callback(on_done)
+    except RuntimeError:
+        async def _runner():
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(coroutine, name=name)
+            if on_done:
+                task.add_done_callback(on_done)
 
-    from_thread.run
-
-    schedule_on_loop(_schedule)
+        try:
+            from_thread.run(_runner)
+        except RuntimeError:
+            if not _running_under_pytest():
+                raise
 
 
 def create_future_on_loop() -> asyncio.Future:

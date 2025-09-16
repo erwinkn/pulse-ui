@@ -433,6 +433,7 @@ class AsyncEffect(Effect):
             self.parent.children.remove(self)
         if self.batch:
             self.batch.effects.remove(self)
+            self.batch = None
 
 
 class Batch:

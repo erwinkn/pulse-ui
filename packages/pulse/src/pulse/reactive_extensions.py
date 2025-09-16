@@ -74,10 +74,13 @@ class ReactiveDict(dict[T1, T2]):
     def get(self, key: T1, default: T2) -> T2: ...
     @overload
     def get(self, key: T1, default: None = None) -> Optional[T2]: ...
-    def get(self, key: T1, default: Optional[T2] = None) -> Optional[T2]:
-        if key not in self._signals:
-            return default
-        val = self._signals[key].read()
+    def get(self, key: T1, default: Optional[T2] = None) -> Optional[T2]:  # type: ignore[override]
+        # Ensure a per-key signal exists so get() can subscribe even when absent
+        sig = self._signals.get(key)
+        if sig is None:
+            sig = cast(Signal[T2], Signal(_MISSING))
+            self._signals[key] = sig
+        val = sig.read()
         return default if val is _MISSING else val
 
     def __iter__(self) -> Iterator[T1]:
@@ -89,7 +92,7 @@ class ReactiveDict(dict[T1, T2]):
         _ = self._structure.read()
         return super().__len__()
 
-    def __contains__(self, key: T1) -> bool:
+    def __contains__(self, key: T1) -> bool:  # type: ignore[override]
         # Subscribe to the per-key value signal so presence checks are reactive
         sig = self._signals.get(key)
         if sig is None:
@@ -111,15 +114,16 @@ class ReactiveDict(dict[T1, T2]):
         if not was_present:
             self._bump_structure()
 
-    def update(
+    def update(  # type: ignore[override]
         self,
         other: Mapping[T1, T2] | Iterable[tuple[T1, T2]] | None = None,
         /,
-        **kwargs: dict[T1, T2],
+        **kwargs: T2,
     ) -> None:
         # Match dict.update semantics
         if other is not None:
             if isinstance(other, Mapping):
+                other = cast(Mapping[T1, T2], other)
                 for k, v in other.items():
                     self.set(k, v)
             else:
@@ -127,7 +131,7 @@ class ReactiveDict(dict[T1, T2]):
                     self.set(k, v)
         if kwargs:
             for k, v in kwargs.items():
-                self.set(k, v)
+                self.set(cast(T1, k), v)
 
     def delete(self, key: T1) -> None:
         if key in self._signals:
@@ -202,14 +206,23 @@ class ReactiveDict(dict[T1, T2]):
         self._bump_structure()
         return k, v
 
-    def setdefault(self, key: T1, default: T2 | None = None):  # type: ignore[override]
+    def setdefault(self, key: T1, default: T2 | None = None) -> T2:  # type: ignore[override]
         if super().__contains__(key):
             # Return current value without structural change
             if key not in self._signals:
                 self._signals[key] = Signal(_MISSING)
             return self._signals[key].read()
+        # Insert default
         self.set(key, default)  # type: ignore[arg-type]
-        return dict.__getitem__(self, key)
+        # Read structure after write to suppress immediate rerun of the current
+        # effect (if this is used in an effect) caused by the structural bump
+        # performed in set().
+        _ = self._structure.read()
+        sig = self._signals.get(key)
+        if sig is None:
+            sig = cast(Signal[T2], Signal(_MISSING))
+            self._signals[key] = sig
+        return sig.read()
 
     def clear(self) -> None:  # type: ignore[override]
         if not super().__len__():
@@ -334,7 +347,7 @@ class ReactiveList(list[T1]):
         if any_added:
             self._bump_structure()
 
-    def insert(self, index: int, value: _Any) -> None:
+    def insert(self, index: int, value: _Any) -> None:  # type: ignore[override]
         v = reactive(value)
         super().insert(index, v)
         self._signals.insert(index, Signal(v))
@@ -373,7 +386,7 @@ class ReactiveList(list[T1]):
             v = current[i]
             return key(v) if callable(key) else v
 
-        idxs.sort(key=key_for_index, reverse=reverse)
+        idxs.sort(key=key_for_index, reverse=reverse)  # type: ignore
         # Apply sort to underlying list
         super().sort(*args, **kwargs)
         # Reorder signals to match
@@ -409,7 +422,7 @@ class ReactiveSet(set[T1]):
                 super().add(vv)
                 self._signals[vv] = Signal(True)
 
-    def __contains__(self, element: T1) -> bool:
+    def __contains__(self, element: T1) -> bool:  # type: ignore[override]
         sig = self._signals.get(element)
         if sig is None:
             present = set.__contains__(self, element)

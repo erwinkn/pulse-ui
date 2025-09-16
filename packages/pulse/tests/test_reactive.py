@@ -1062,6 +1062,35 @@ def test_reactive_dict_get_after_delete_uses_default_when_absent():
     assert ctx.get("a", 42) == 42
 
 
+def test_reactive_dict_get_absent_subscribes_and_updates_on_set():
+    ctx = ReactiveDict({})
+
+    reads: list[int] = []
+
+    @effect
+    def e():
+        reads.append(int(cast(Any, ctx.get("x", 0))))
+
+    flush_effects()
+    assert reads == [0]
+
+    # Setting the key should trigger a rerun and pick up the new value
+    ctx["x"] = 7
+    flush_effects()
+    assert reads == [0, 7]
+
+    # Same-value write should not rerun
+    runs = e.runs
+    ctx["x"] = 7
+    flush_effects()
+    assert e.runs == runs
+
+    # Deleting should write missing and cause get() to return the default again
+    del ctx["x"]
+    flush_effects()
+    assert reads[-1] == 0
+
+
 def test_reactive_list_basic_index_reactivity():
     lst = ReactiveList([1, 2, 3])
     assert isinstance(lst, list)
@@ -1716,3 +1745,27 @@ def test_reactive_dict_items_reacts_to_value_changes():
     ctx["b"] = 9
     flush_effects()
     assert snapshots[-1] == [("a", 1), ("b", 9)]
+
+
+def test_reactive_dict_setdefault_absent_subscribes_and_updates_on_write():
+    ctx = ReactiveDict({})
+
+    reads: list[int] = []
+
+    @effect
+    def e():
+        reads.append(int(cast(Any, ctx.setdefault("k", 9))))
+
+    flush_effects()
+    assert reads == [9]
+
+    # Changing the value should rerun if setdefault subscribed properly
+    ctx["k"] = 10
+    flush_effects()
+    assert reads == [9, 10]
+
+    # Same-value write should not rerun
+    runs = e.runs
+    ctx["k"] = 10
+    flush_effects()
+    assert e.runs == runs

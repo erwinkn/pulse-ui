@@ -7,13 +7,13 @@ import json
 import logging
 import os
 import secrets
+import zlib
 import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from fastapi import Response
 
-from pulse.context import PulseContext
 from pulse.cookies import SetCookie
 from pulse.reactive import AsyncEffect, Effect
 from pulse.reactive_extensions import ReactiveDict, reactive
@@ -188,37 +188,34 @@ class CookieSessionStore:
         self._max_cookie_bytes = max_cookie_bytes
 
     def encode(self, sid: str, session: dict[str, Any]) -> str:
-        # Encode the entire session into the cookie
+        # Encode the entire session into the cookie (compressed v1)
         try:
-            # Convert to a plain dict for JSON serialization
             data = {"sid": sid, "data": dict(session)}
-            payload = json.dumps(data, separators=(",", ":"))
-            signed = self._sign(payload)
+            payload_json = json.dumps(data, separators=(",", ":")).encode("utf-8")
+            compressed = zlib.compress(payload_json, level=6)
+            signed = self._sign(compressed)
             if len(signed) > self._max_cookie_bytes:
-                # If too large, fall back to an empty session to avoid breaking cookies
                 logging.warning("Session cookie too large, truncating")
-                return self.encode(sid, {})
+                session.clear()
+                return self.encode(sid, session)
             return signed
         except Exception:
             logging.warning("Error encoding session cookie, truncating")
-            # Best effort: fallback to an empty session if it's not serializable
-            return self.encode(sid, {})
+            session.clear()
+            return self.encode(sid, session)
 
     def decode(self, cookie: str) -> tuple[str, Session] | None:
-        """Decode a signed session cookie.
-
-        Returns a tuple of (session_id, session_data). If the cookie is invalid,
-        returns a new session ID and empty session.
-        """
+        """Decode a signed session cookie (compressed v1)."""
         if not cookie:
             return None
 
-        payload = self._unsign(cookie)
-        if not payload:
+        raw = self._unsign(cookie)
+        if raw is None:
             return None
 
         try:
-            data = json.loads(payload)
+            payload_json = zlib.decompress(raw).decode("utf-8")
+            data = json.loads(payload_json)
             return data["sid"], ReactiveDict(data["data"])
         except Exception:
             return None
@@ -229,20 +226,18 @@ class CookieSessionStore:
             self._secret + b"|" + self._salt, payload, self._digest
         ).digest()
 
-    def _sign(self, payload: str) -> str:
-        raw = payload.encode("utf-8")
-        mac = self._mac(raw)
-        b64 = base64.urlsafe_b64encode(raw).rstrip(b"=")
+    def _sign(self, payload: bytes) -> str:
+        mac = self._mac(payload)
+        b64 = base64.urlsafe_b64encode(payload).rstrip(b"=")
         sig = base64.urlsafe_b64encode(mac).rstrip(b"=")
         return f"v1.{b64.decode('ascii')}.{sig.decode('ascii')}"
 
-    def _unsign(self, token: str) -> Optional[str]:
+    def _unsign(self, token: str) -> Optional[bytes]:
         try:
             if not token.startswith("v1."):
                 return None
             _, b64, sig = token.split(".", 2)
 
-            # Pad base64
             def _pad(s: str) -> bytes:
                 return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
@@ -251,7 +246,7 @@ class CookieSessionStore:
             expected = self._mac(raw)
             if not hmac.compare_digest(mac, expected):
                 return None
-            return raw.decode("utf-8")
+            return raw
         except Exception:
             return None
 

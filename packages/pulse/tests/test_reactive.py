@@ -976,6 +976,53 @@ async def test_async_effect_dynamic_dependency_after_await():
     assert reads[-1] == 11
 
 
+@pytest.mark.asyncio
+async def test_async_effect_retains_dependency_across_cancellations():
+    """If an async effect is cancelled repeatedly before reading a dep,
+    it should not lose previously established dependencies.
+
+    Regressions here can cause unkeyed queries to lose their auto-tracked signal
+    dependencies when the key changes rapidly.
+    """
+
+    id_sig = Signal(1, name="id_sig")
+    churn = Signal(0, name="churn")
+
+    runs: list[int] = []
+
+    @effect
+    async def e():
+        # Simulate some pre-work before binding dep
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        # Bind dependency late
+        runs.append(id_sig())
+
+    # Establish initial dependency by letting first run finish
+    flush_effects()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert e.runs == 1
+    assert runs[-1] == 1
+
+    # Now churn: schedule reruns and cancel them before they read the dep
+    for _ in range(5):
+        churn.write(churn() + 1)  # schedule rerun
+        await asyncio.sleep(0)  # let task start
+        # Immediately schedule again to cancel the in-flight run
+        churn.write(churn() + 1)
+        await asyncio.sleep(0)  # allow cancellation to happen
+
+    # Change the dependency signal -> effect should eventually rerun and read it
+    id_sig.write(2)
+    await asyncio.sleep(0)  # schedule rerun
+    await asyncio.sleep(0)  # run to first await
+    await asyncio.sleep(0)  # run to completion
+    await asyncio.sleep(0)  # just to be sure
+    assert runs[-1] == 2
+
+
 def test_reactive_dict_basic_reads_and_writes():
     ctx = ReactiveDict({"a": 1})
     reads = []

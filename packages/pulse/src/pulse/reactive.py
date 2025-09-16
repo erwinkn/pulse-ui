@@ -13,7 +13,7 @@ from typing import (
 )
 
 
-from pulse.helpers import schedule_on_loop
+from pulse.helpers import create_task, schedule_on_loop
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -298,13 +298,12 @@ class Effect:
             return
         raise exc
 
-    def _apply_scope_results(
-        self, scope: "Scope", prev_deps: set["Signal | Computed"]
-    ) -> None:
+    def _apply_scope_results(self, scope: "Scope") -> None:
         self.children = scope.effects
         for child in self.children:
             child.parent = self
 
+        prev_deps = set(self.deps)
         if self._explicit_deps is not None:
             self.deps = {dep: dep.last_change for dep in self._explicit_deps}
         else:
@@ -332,7 +331,6 @@ class Effect:
         self._execute()
 
     def _execute(self) -> None:
-        prev_deps = set(self.deps)
         execution_epoch = epoch()
         with Scope() as scope:
             # Clear batch *before* running as we may update a signal that causes
@@ -344,7 +342,7 @@ class Effect:
                 self._handle_error(e)
             self.runs += 1
             self.last_run = execution_epoch
-        self._apply_scope_results(scope, prev_deps)
+        self._apply_scope_results(scope)
 
 
 class AsyncEffect(Effect):
@@ -372,35 +370,25 @@ class AsyncEffect(Effect):
         return f"effect:{base}"
 
     def _execute(self) -> None:
-        prev_deps = set(self.deps)
         execution_epoch = epoch()
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop; report via error handler
-            self._handle_error(
-                RuntimeError("No running event loop for async effect execution")
-            )
-            return
 
         # Clear batch *before* running as we may update a signal that causes
         # this effect to be rescheduled.
         self.batch = None
 
         # Cancel any previous run still in flight
-        if self._task and not self._task.done():
-            self._task.cancel()
+        self.cancel()
 
         async def _runner():
-            nonlocal prev_deps, execution_epoch
+            nonlocal execution_epoch
             with Scope() as scope:
                 try:
                     result = cast(AsyncEffectFn, self.fn)()
                     if inspect.isawaitable(result):
-                        self.cleanup_fn = await result  # type: ignore[assignment]
+                        self.cleanup_fn = await result
                     else:
                         # Support accidental non-async returns in async-annotated fns
-                        self.cleanup_fn = result  # type: ignore[assignment]
+                        self.cleanup_fn = result
                 except asyncio.CancelledError:
                     # Swallow cancellation
                     return
@@ -408,9 +396,9 @@ class AsyncEffect(Effect):
                     self._handle_error(e)
                 self.runs += 1
                 self.last_run = execution_epoch
-            self._apply_scope_results(scope, prev_deps)
+            self._apply_scope_results(scope)
 
-        self._task = loop.create_task(_runner(), name=self._task_name())
+        self._task = create_task(_runner(), name=self._task_name())
 
     def cancel(self) -> None:
         if self._task and not self._task.done():

@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
 
@@ -150,16 +151,53 @@ class QueryProperty(Generic[T]):
         self.name = name
         self.fetch_fn = fetch_fn
         self.key_fn: Optional[Callable[[Any], tuple]] = None
+        self.initial_data_fn: Optional[Callable[[Any], Optional[T]]] = None
+        # Single handlers; error if set more than once
+        self.on_success_fn: Optional[Callable[[Any, T], Any]] = None
+        self.on_error_fn: Optional[Callable[[Any, Exception], Any]] = None
         self.keep_alive = keep_alive
         self.keep_previous_data = keep_previous_data
         self.initial = initial
         self._priv_query = f"__query_{name}"
         self._priv_effect = f"__query_effect_{name}"
         self._priv_key_comp = f"__query_key_{name}"
+        self._priv_initial_fn = f"__query_initial_fn_{name}"
+        self._priv_initial_applied = f"__query_initial_applied_{name}"
 
     # Decorator to attach a key function
     def key(self, fn: Callable[[Any], tuple]):
+        if self.key_fn is not None:
+            raise RuntimeError(
+                f"Duplicate key() decorator for query '{self.name}'. Only one is allowed."
+            )
         self.key_fn = fn
+        return fn
+
+    # Decorator to attach a function providing initial data
+    def initial_data(self, fn: Callable[[Any], Optional[T]]):
+        if self.initial_data_fn is not None:
+            raise RuntimeError(
+                f"Duplicate initial_data() decorator for query '{self.name}'. Only one is allowed."
+            )
+        self.initial_data_fn = fn
+        return fn
+
+    # Decorator to attach an on-success handler (sync or async)
+    def on_success(self, fn: Callable[[Any, T], Any]):
+        if self.on_success_fn is not None:
+            raise RuntimeError(
+                f"Duplicate on_success() decorator for query '{self.name}'. Only one is allowed."
+            )
+        self.on_success_fn = fn
+        return fn
+
+    # Decorator to attach an on-error handler (sync or async)
+    def on_error(self, fn: Callable[[Any, Exception], Any]):
+        if self.on_error_fn is not None:
+            raise RuntimeError(
+                f"Duplicate on_error() decorator for query '{self.name}'. Only one is allowed."
+            )
+        self.on_error_fn = fn
         return fn
 
     def initialize(self, obj: Any) -> StateQuery[T]:
@@ -173,9 +211,29 @@ class QueryProperty(Generic[T]):
 
         # Bind methods to this instance
         bound_fetch = self.fetch_fn.__get__(obj, obj.__class__)
-        # print(f"[QueryProperty:{self.name}] bound fetch and key functions")
+        bound_on_success = (
+            self.on_success_fn.__get__(obj, obj.__class__)
+            if self.on_success_fn
+            else None
+        )
+        bound_on_error = (
+            self.on_error_fn.__get__(obj, obj.__class__) if self.on_error_fn else None
+        )
+        bound_initial_data = (
+            self.initial_data_fn.__get__(obj, obj.__class__)
+            if self.initial_data_fn
+            else None
+        )
+        # print(f"[QueryProperty:{self.name}] bound fetch and key/handlers")
 
-        result = QueryResult[T](initial_data=self.initial)
+        # Defer evaluating initial_data provider until after user __init__ by
+        # storing it on the instance and marking it unapplied. Use constructor
+        # `initial` as the initial visible value for now.
+        setattr(obj, self._priv_initial_fn, bound_initial_data)
+        setattr(obj, self._priv_initial_applied, False)
+        initial_value: Optional[T] = self.initial
+
+        result = QueryResult[T](initial_data=initial_value)
 
         key_computed: Optional[Computed[tuple]] = None
         if self.key_fn:
@@ -211,8 +269,26 @@ class QueryProperty(Generic[T]):
                 return None
             except Exception as e:  # noqa: BLE001
                 result._set_error(e)
+                # Invoke error handler if provided
+                if bound_on_error:
+                    try:
+                        maybe = bound_on_error(e)
+                        if inspect.isawaitable(maybe):
+                            await maybe
+                    except Exception:
+                        # Swallow handler exceptions; effect error is already recorded
+                        pass
             else:
                 result._set_success(data)
+                # Invoke success handler if provided
+                if bound_on_success:
+                    try:
+                        maybe = bound_on_success(data)
+                        if inspect.isawaitable(maybe):
+                            await maybe
+                    except Exception:
+                        # Swallow handler exceptions to avoid breaking effect
+                        pass
             finally:
                 inflight_key = None
 
@@ -250,7 +326,26 @@ class QueryProperty(Generic[T]):
     def __get__(self, obj: Any, objtype: Any = None) -> StateQuery[T]:
         if obj is None:
             return self  # type: ignore
-        return self.initialize(obj)
+        query = self.initialize(obj)
+        # Apply initial_data provider once, after state __init__, before first load
+        try:
+            applied = bool(getattr(obj, self._priv_initial_applied, False))
+        except Exception:
+            applied = True  # fail safe: do not attempt if attribute missing
+        if not applied and not query.has_loaded:
+            bound_initial = getattr(obj, self._priv_initial_fn, None)
+            if callable(bound_initial):
+                try:
+                    value = bound_initial()
+                    if value is not None:
+                        query.set_initial_data(value)  # type: ignore[arg-type]
+                except Exception:
+                    pass
+            try:
+                setattr(obj, self._priv_initial_applied, True)
+            except Exception:
+                pass
+        return query
 
 
 class StateQueryNonNull(StateQuery[T]):

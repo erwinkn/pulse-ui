@@ -286,7 +286,6 @@ class State(ABC, metaclass=StateMeta):
                 value.dispose()
                 disposed.add(value)
 
-        # TODO: remove this debug check
         if len(set(self._scope.effects) - disposed) > 0:
             raise RuntimeError(
                 f"State.dispose() missed effects defined on its Scope: {[e.name for e in self._scope.effects]}"

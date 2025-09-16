@@ -48,12 +48,8 @@ class TokenCacheStore(Protocol):
 
 def _default_claims_mapper(claims: dict[str, Any]) -> dict[str, Any]:
     """Return a compact, JSON-serializable user dict from MSAL id_token claims."""
-    user = {
-        "name": claims.get("name") or claims.get("given_name"),
-        "email": claims.get("preferred_username"),
-    }
     # Remove keys with None values to keep payload compact
-    return {k: v for k, v in user.items() if v is not None}
+    return {k: v for k, v in claims.items() if v is not None}
 
 
 def _json_clean(value: Any) -> Any:

@@ -723,7 +723,7 @@ def global_state(
         ctx = PulseContext.get()
         if ctx is None or ctx.render is None:
             raise RuntimeError(
-                "ps.global_state must be used inside a Pulse render/callback context"
+                "ps.global_state must be called inside a Pulse render/callback context"
             )
         return cast(
             S, ctx.render.get_global_state(base_key, lambda: mk(*args, **kwargs))

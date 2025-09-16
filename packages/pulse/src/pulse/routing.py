@@ -216,10 +216,17 @@ class Layout:
 
     def file_path(self) -> str:
         path_list = self._path_list(include_layouts=True)
-        path_list = ["layout" if p == LAYOUT_INDICATOR else p for p in path_list]
-        # Convert all parent layout indicators to simply `layout`
-        path_list = path_list[:-1] + ["_layout.tsx"]
-        return "/".join(path_list)
+        # Map layout indicators (with optional numeric suffix) to directory names
+        # e.g., "<layout>" -> "layout" and "<layout>2" -> "layout2"
+        converted: list[str] = []
+        for seg in path_list:
+            if seg.startswith(LAYOUT_INDICATOR):
+                suffix = seg[len(LAYOUT_INDICATOR) :]
+                converted.append("layout" + suffix)
+            else:
+                converted.append(seg)
+        # Place file within the current layout's directory
+        return "/".join([*converted, "_layout.tsx"])
 
     def __repr__(self) -> str:
         return f"Layout(children={len(self.children)})"
@@ -333,3 +340,13 @@ class RouteContext:
     @property
     def catchall(self) -> list[str]:
         return self.info["catchall"]
+
+    def __str__(self) -> str:
+        return f"RouteContext(pathname='{self.pathname}', params={self.pathParams})"
+
+    def __repr__(self) -> str:
+        return (
+            f"RouteContext(pathname='{self.pathname}', hash='{self.hash}', "
+            f"query='{self.query}', queryParams={self.queryParams}, "
+            f"pathParams={self.pathParams}, catchall={self.catchall})"
+        )

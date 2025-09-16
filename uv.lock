@@ -677,7 +677,7 @@ wheels = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.6"
+version = "0.1.10"
 source = { editable = "packages/pulse" }
 dependencies = [
     { name = "fastapi" },
@@ -729,7 +729,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse" }]
 
 [[package]]
 name = "pulse-msal"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "packages/pulse-msal" }
 
 [[package]]

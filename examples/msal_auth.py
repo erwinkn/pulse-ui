@@ -57,7 +57,7 @@ def SecretPage():
 
     def update_session_entry(text: str):
         print(f"Updating session entry to {text}")
-        print("session entry = ", sess['pulse'])
+        print("session entry = ", sess["pulse"])
         sess["pulse"] = text
 
     return ps.div(

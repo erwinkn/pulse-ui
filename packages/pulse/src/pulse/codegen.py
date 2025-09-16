@@ -3,7 +3,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from pulse.templates import LAYOUT_TEMPLATE, ROUTE_TEMPLATE, ROUTES_CONFIG_TEMPLATE
+from pulse.templates import (
+    LAYOUT_TEMPLATE,
+    ROUTE_TEMPLATE,
+    ROUTES_CONFIG_TEMPLATE,
+    ROUTES_RUNTIME_TEMPLATE,
+)
 
 from .routing import Layout, Route, RouteTree
 
@@ -100,6 +105,7 @@ class Codegen:
             [
                 self.generate_layout_tsx(server_address),
                 self.generate_routes_ts(),
+                self.generate_routes_runtime_ts(),
                 *(
                     self.generate_route(route, server_address=server_address)
                     for route in self.routes.flat_tree.values()
@@ -137,6 +143,16 @@ class Codegen:
             )
         )
         return write_file_if_changed(self.output_folder / "routes.ts", content)
+
+    def generate_routes_runtime_ts(self):
+        """Generate a runtime React Router object tree for server-side matching."""
+        routes_str = self._render_routes_runtime(self.routes.tree, indent_level=0)
+        content = str(
+            ROUTES_RUNTIME_TEMPLATE.render_unicode(
+                routes_str=routes_str,
+            )
+        )
+        return write_file_if_changed(self.output_folder / "routes.runtime.ts", content)
 
     def _render_routes_ts(self, routes: list[Route | Layout], indent_level: int) -> str:
         lines = []
@@ -179,3 +195,58 @@ class Codegen:
             )
         )
         return write_file_if_changed(output_path, content)
+
+    def _render_routes_runtime(
+        self, routes: list[Route | Layout], indent_level: int
+    ) -> str:
+        """
+        Render a single RRRouteObject literal suitable for matchRoutes.
+
+        We emit a single root with children when multiple roots exist by wrapping
+        them in a pathless root.
+        """
+
+        def render_node(node: Route | Layout, indent: int) -> str:
+            ind = "  " * indent
+            lines: list[str] = [f"{ind}{{"]
+            # Common: id and uniquePath
+            lines.append(f'{ind}  id: "{node.unique_path()}",')
+            lines.append(f'{ind}  uniquePath: "{node.unique_path()}",')
+            if isinstance(node, Layout):
+                # Pathless layout
+                pass
+            else:
+                # Route: index vs path
+                if node.is_index:
+                    lines.append(f"{ind}  index: true,")
+                else:
+                    lines.append(f'{ind}  path: "{node.path}",')
+            if node.children:
+                lines.append(f"{ind}  children: [")
+                for c in node.children:
+                    lines.append(render_node(c, indent + 2))
+                    lines.append(f"{ind}  ,")
+                if lines[-1] == f"{ind}  ,":
+                    lines.pop()
+                lines.append(f"{ind}  ],")
+            lines.append(f"{ind}}}")
+            return "\n".join(lines)
+
+        if len(routes) == 1:
+            return render_node(routes[0], indent_level)
+        # Wrap multiple roots in a single pathless node
+        ind = "  " * indent_level
+        out: list[str] = [
+            f"{ind}{{",
+            f'{ind}  id: "",',
+            f'{ind}  uniquePath: "",',
+            f"{ind}  children: [",
+        ]
+        for r in routes:
+            out.append(render_node(r, indent_level + 2))
+            out.append(f"{ind}  ,")
+        if out[-1] == f"{ind}  ,":
+            out.pop()
+        out.append(f"{ind}  ]")
+        out.append(f"{ind}}}")
+        return "\n".join(out)

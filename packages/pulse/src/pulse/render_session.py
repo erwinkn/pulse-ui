@@ -6,6 +6,7 @@ import asyncio
 import traceback
 
 from pulse.context import PulseContext
+from pulse.helpers import create_future_on_loop
 from pulse.messages import (
     RouteInfo,
     ServerInitMessage,
@@ -54,6 +55,8 @@ class RenderSession:
         self._pending_api: dict[str, asyncio.Future] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
+        # Connection state
+        self.connected: bool = False
 
     @property
     def server_address(self) -> str:
@@ -78,6 +81,7 @@ class RenderSession:
 
     def connect(self, send_message: Callable[[ServerMessage], Any]):
         self._send_message = send_message
+        self.connected = True
 
     def send(self, message: ServerMessage):
         if not self._send_message:
@@ -113,6 +117,7 @@ class RenderSession:
     def close(self):
         # The effect will be garbage collected, and with it the dependencies
         self._send_message = None
+        self.connected = False
         for path in list(self.route_mounts.keys()):
             self.unmount(path)
         self.route_mounts.clear()
@@ -187,16 +192,7 @@ class RenderSession:
             path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
             url = f"{base}{path}"
         corr_id = uuid.uuid4().hex
-        try:
-            fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        except RuntimeError:
-            from anyio import from_thread
-
-            async def _create_future_holder():
-                loop = asyncio.get_running_loop()
-                return loop.create_future()
-
-            fut = from_thread.run(_create_future_holder)
+        fut = create_future_on_loop()
         self._pending_api[corr_id] = fut
         headers = headers or {}
         headers["x-pulse-render-id"] = self.id
@@ -308,7 +304,6 @@ class RenderSession:
                         }
                     )
 
-        # print(f"Mounting '{path}'")
         mount.effect = Effect(
             _render_effect,
             immediate=True,

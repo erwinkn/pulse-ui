@@ -52,6 +52,8 @@ class RenderSession:
         # Best-effort client address, captured at prerender or socket connect time
         self._client_address: Optional[str] = client_address
         self._send_message: Callable[[ServerMessage], Any] | None = None
+        # Buffer messages emitted before a connection is established
+        self._message_buffer: list[ServerMessage] = []
         self._pending_api: dict[str, asyncio.Future] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
@@ -82,11 +84,19 @@ class RenderSession:
     def connect(self, send_message: Callable[[ServerMessage], Any]):
         self._send_message = send_message
         self.connected = True
+        # Flush any buffered messages now that we can send
+        if self._message_buffer:
+            for msg in self._message_buffer:
+                self._send_message(msg)
+            self._message_buffer.clear()
 
     def send(self, message: ServerMessage):
-        if not self._send_message:
-            raise RuntimeError("RenderSession is not connected")
-        self._send_message(message)
+        # If a sender is available (connected or during prerender capture), send immediately.
+        # Otherwise, buffer until a connection is established.
+        if self._send_message:
+            self._send_message(message)
+        else:
+            self._message_buffer.append(message)
 
     def report_error(
         self,
@@ -115,20 +125,18 @@ class RenderSession:
         )
 
     def close(self):
-        # The effect will be garbage collected, and with it the dependencies
-        self._send_message = None
-        self.connected = False
         for path in list(self.route_mounts.keys()):
             self.unmount(path)
         self.route_mounts.clear()
         # Dispose per-session global singletons if they expose dispose()
-        for value in list(self._global_states.values()):
-            try:
-                value.dispose()
-            except Exception as e:  # noqa: BLE001
-                # Best-effort: report but continue cleanup
-                logger.exception("Error disposing session global state: %s", e)
+        for value in self._global_states.values():
+            value.dispose()
         self._global_states.clear()
+        # The effect will be garbage collected, and with it the dependencies
+        self._send_message = None
+        # Discard any buffered messages on close
+        self._message_buffer.clear()
+        self.connected = False
 
     def execute_callback(self, path: str, key: str, args: list | tuple):
         mount = self.route_mounts[path]
@@ -306,9 +314,7 @@ class RenderSession:
             self._global_states[key] = inst
         return inst
 
-    def render(
-        self, path: str, route_info: Optional[RouteInfo] = None
-    ):
+    def render(self, path: str, route_info: Optional[RouteInfo] = None):
         mount = self.create_route_mount(path, route_info)
         with PulseContext.update(route=mount.route):
             return mount.root.render_vdom()
@@ -328,9 +334,11 @@ class RenderSession:
         # Get current context + add RouteContext. Save it to be able to mount it
         # whenever the render effect reruns.
         ctx = PulseContext.get()
+        session = ctx.session
 
         def _render_effect():
-            with ctx.update(route=mount.route):
+            # Always ensure both render and route are present in context
+            with PulseContext.update(session=session, render=self, route=mount.route):
                 try:
                     if mount.root.render_count == 0:
                         vdom = mount.root.render_vdom()
@@ -368,7 +376,10 @@ class RenderSession:
         )
 
     def flush(self):
-        flush_effects()
+        # Ensure effects (including route render effects) run with this session
+        # bound on the PulseContext so hooks like ps.global_state work
+        with PulseContext.update(render=self):
+            flush_effects()
 
     def navigate(self, path: str, route_info: RouteInfo):
         # Route is already mounted, we can just update the routing state

@@ -29,6 +29,7 @@ from pulse.cookies import (
 )
 from pulse.helpers import (
     DeploymentMode,
+    PulseMode,
     create_task,
     ensure_web_lock,
     get_client_address,
@@ -72,7 +73,6 @@ class AppStatus(IntEnum):
     stopped = 3
 
 
-PulseMode = Literal["dev", "ci", "prod"]
 
 
 class App:
@@ -612,7 +612,7 @@ class App:
     ):
         if rid in self.render_sessions:
             raise ValueError(f"RenderSession {rid} already exists")
-
+        print(f"Creating RenderSession {rid}")
         render = RenderSession(
             rid,
             self.routes,

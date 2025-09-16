@@ -19,6 +19,7 @@ from pathlib import Path
 import secrets
 
 import msal
+from urllib.parse import quote
 import pulse as ps
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -71,8 +72,11 @@ def auth(session_key=SESSION_KEY) -> dict[str, Any] | None:
     return cast(dict[str, Any] | None, ps.session().get(session_key, {}).get("auth"))
 
 
-def login():
-    ps.navigate("/auth/login")
+def login(next: str | None = None):
+    url = "/auth/login"
+    if next:
+        url += f"?next={quote(next)}"
+    ps.navigate(url)
 
 
 def logout():

@@ -32,13 +32,14 @@ AZURE_TENANT_ID = require_env("AZURE_TENANT_ID")
 
 @ps.component
 def LoginPage():
-    # Just render a link that starts the server-side login redirect flow
+    r = ps.route()
+    next_path = r.queryParams.get("next") or "/"
     return ps.div(
         ps.h2("Sign in", className="text-2xl font-bold mb-4"),
         ps.p("You will be redirected to Microsoft to sign in."),
         ps.a(
             "Sign in with Microsoft",
-            href=f"{ps.server_address()}/auth/login",
+            href=f"{ps.server_address()}/auth/login?next={next_path}",
             className="btn-primary inline-block mt-4",
         ),
         className="max-w-md mx-auto p-6",
@@ -50,7 +51,8 @@ def SecretPage():
     sess = ps.session()
     user = auth()
     if not user:
-        ps.redirect("/login")
+        r = ps.route()
+        ps.redirect(f"/login?next={r.pathname}")
 
     name = user.get("name") or user.get("email")
 
@@ -76,12 +78,37 @@ def SecretPage():
 
 
 @ps.component
+def SecretSettingsPage():
+    user = auth()
+    if not user:
+        r = ps.route()
+        ps.redirect(f"/login?next={r.pathname}")
+
+    name = user.get("name") or user.get("email")
+
+    return ps.div(
+        ps.h2("Nested Secret", className="text-2xl font-bold mb-4"),
+        ps.p(f"Hello {name}, this is a nested protected page."),
+        ps.div(
+            ps.Link("Back to Secret", to="/secret", className="link"),
+            className="mt-4",
+        ),
+        className="max-w-md mx-auto p-6",
+    )
+
+
+@ps.component
 def Home():
     return ps.div(
         ps.h2("MSAL Auth Demo", className="text-2xl font-bold mb-4"),
         ps.div(
             ps.Link("Login", to="/login", className="link mr-4"),
-            ps.Link("Secret", to="/secret", className="link"),
+            ps.Link("Secret", to="/secret", className="link mr-4"),
+            ps.Link(
+                "Nested Secret",
+                to="/secret/settings/account",
+                className="link",
+            ),
             className="mb-4",
         ),
         ps.p("This page is public."),
@@ -104,6 +131,7 @@ app = ps.App(
                 ps.Route("/", Home),
                 ps.Route("/login", LoginPage),
                 ps.Route("/secret", SecretPage),
+                ps.Route("/secret/settings/account", SecretSettingsPage),
             ],
         )
     ],

@@ -6,6 +6,7 @@ import asyncio
 import traceback
 
 from pulse.context import PulseContext
+from pulse.helpers import create_future_on_loop
 from pulse.messages import (
     RouteInfo,
     ServerInitMessage,
@@ -54,6 +55,8 @@ class RenderSession:
         self._pending_api: dict[str, asyncio.Future] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
+        # Connection state
+        self.connected: bool = False
 
     @property
     def server_address(self) -> str:
@@ -78,6 +81,7 @@ class RenderSession:
 
     def connect(self, send_message: Callable[[ServerMessage], Any]):
         self._send_message = send_message
+        self.connected = True
 
     def send(self, message: ServerMessage):
         if not self._send_message:
@@ -113,6 +117,7 @@ class RenderSession:
     def close(self):
         # The effect will be garbage collected, and with it the dependencies
         self._send_message = None
+        self.connected = False
         for path in list(self.route_mounts.keys()):
             self.unmount(path)
         self.route_mounts.clear()
@@ -187,16 +192,7 @@ class RenderSession:
             path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
             url = f"{base}{path}"
         corr_id = uuid.uuid4().hex
-        try:
-            fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        except RuntimeError:
-            from anyio import from_thread
-
-            async def _create_future_holder():
-                loop = asyncio.get_running_loop()
-                return loop.create_future()
-
-            fut = from_thread.run(_create_future_holder)
+        fut = create_future_on_loop()
         self._pending_api[corr_id] = fut
         headers = headers or {}
         headers["x-pulse-render-id"] = self.id
@@ -236,6 +232,60 @@ class RenderSession:
         self.route_mounts[path] = mount
         return mount
 
+    def prerender_mount_capture(
+        self, path: str, route_info: Optional[RouteInfo] = None
+    ):
+        """
+        Mount the route and run the render effect immediately, capturing the
+        initial message instead of sending over a socket.
+
+        Returns a dict:
+          { "type": "vdom_init", "vdom": VDOM } or
+          { "type": "navigate_to", "path": str, "replace": bool }
+        """
+        # If already mounted (e.g., repeated prerender), do nothing special.
+        if path in self.route_mounts:
+            # Run a diff and synthesize an update; however, for prerender we
+            # expect initial mount. Return current tree as a full VDOM.
+            mount = self.get_route_mount(path)
+            vdom = mount.root.render_vdom()
+            return {"type": "vdom_init", "vdom": vdom}
+
+        captured: dict | None = None
+
+        def _capture(msg: ServerMessage):
+            nonlocal captured
+            # Only capture the first relevant message for this path
+            if captured is not None:
+                return
+            mtype = msg.get("type") if isinstance(msg, dict) else None
+            if mtype == "vdom_init" and msg.get("path") == path:
+                captured = {"type": "vdom_init", "vdom": msg.get("vdom")}
+            elif mtype == "navigate_to":
+                captured = {
+                    "type": "navigate_to",
+                    "path": msg.get("path"),
+                    "replace": bool(msg.get("replace")),
+                }
+
+        prev_sender = self._send_message
+        try:
+            self._send_message = _capture
+            # Reuse normal mount flow which creates and runs the effect
+            self.mount(path, route_info or self.routes.find(path).default_route_info())
+            # Flush any scheduled effects to stabilize output
+            self.flush()
+        finally:
+            self._send_message = prev_sender
+
+        # Fallback: if nothing captured (shouldn't happen), return full VDOM
+        if captured is None:
+            mount = self.get_route_mount(path)
+            vdom = mount.root.render_vdom()
+            return {"type": "vdom_init", "vdom": vdom}
+
+        return captured
+
     def get_route_mount(
         self,
         path: str,
@@ -255,11 +305,11 @@ class RenderSession:
         return inst
 
     def render(
-        self, path: str, route_info: Optional[RouteInfo] = None, prerendering=False
+        self, path: str, route_info: Optional[RouteInfo] = None
     ):
         mount = self.create_route_mount(path, route_info)
         with PulseContext.update(route=mount.route):
-            return mount.root.render_vdom(prerendering=prerendering)
+            return mount.root.render_vdom()
 
     def rerender(self, path: str):
         mount = self.get_route_mount(path)
@@ -281,7 +331,7 @@ class RenderSession:
             with ctx:
                 try:
                     if mount.root.render_count == 0:
-                        vdom = mount.root.render_vdom(prerendering=False)
+                        vdom = mount.root.render_vdom()
                         self.send(
                             ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
                         )
@@ -308,7 +358,6 @@ class RenderSession:
                         }
                     )
 
-        # print(f"Mounting '{path}'")
         mount.effect = Effect(
             _render_effect,
             immediate=True,

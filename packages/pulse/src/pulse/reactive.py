@@ -13,7 +13,6 @@ from typing import (
 )
 
 
-from pulse.flags import IS_PRERENDERING
 from pulse.helpers import schedule_on_loop
 
 T = TypeVar("T")
@@ -325,8 +324,6 @@ class Effect:
             dep._remove_obs(self)
 
     def run(self):
-        if IS_PRERENDERING.get():
-            return
         with Untrack():
             try:
                 self._cleanup_before_run()

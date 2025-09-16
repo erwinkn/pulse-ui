@@ -16,7 +16,13 @@ import typer
 from rich.console import Console
 
 from pulse.app import App
+
 # from pulse.routing import clear_routes
+from pulse.helpers import (
+    ensure_web_lock,
+    lock_path_for_web_root,
+    remove_web_lock,
+)
 
 from textual.app import App as TextualApp, ComposeResult
 from textual.containers import Container
@@ -55,6 +61,10 @@ def load_app_from_file(file_path: str | Path) -> App:
     if not file_path.suffix == ".py":
         typer.echo(f"❌ File must be a Python file (.py): {file_path}")
         raise typer.Exit(1)
+
+    # Set env so downstream codegen can resolve paths relative to the app file
+    os.environ["PULSE_APP_FILE"] = str(file_path.absolute())
+    os.environ["PULSE_APP_DIR"] = str(file_path.parent.absolute())
 
     # clear_routes()
     sys.path.insert(0, str(file_path.parent.absolute()))
@@ -240,13 +250,76 @@ def run(
     console.log(f"📁 Loading app from: {app_file}")
     app_instance = load_app_from_file(app_file)
 
-    web_dir = Path(app_instance.codegen.cfg.web_dir)
-    if not web_dir.exists() and not server_only:
-        console.log(f"❌ Directory not found: {web_dir}")
+    web_root = app_instance.codegen.cfg.web_root
+    if not web_root.exists() and not server_only:
+        console.log(f"❌ Directory not found: {web_root.absolute()}")
         raise typer.Exit(1)
 
     server_command, server_cwd, server_env = None, None, None
     web_command, web_cwd, web_env = None, None, None
+
+    # Create a dev-instance lock in the web root to prevent concurrent runs
+    lock_path = lock_path_for_web_root(web_root)
+    try:
+        ensure_web_lock(lock_path, owner="cli")
+    except RuntimeError as e:
+        console.log(f"❌ {e}")
+        raise typer.Exit(1)
+
+    # In dev, provide a stable PULSE_SECRET persisted in a git-ignored .pulse/secret file
+    dev_secret: str | None = None
+    if app_instance.mode != "prod":
+        dev_secret = os.environ.get("PULSE_SECRET") or None
+        if not dev_secret:
+            try:
+                # Prefer the web root for the .pulse folder when available, otherwise the app file directory
+                secret_root = (
+                    web_root
+                    if web_root and web_root.exists()
+                    else Path(app_file).parent
+                )
+                secret_dir = Path(secret_root) / ".pulse"
+                secret_file = secret_dir / "secret"
+
+                # Ensure .pulse is present and git-ignored
+                try:
+                    secret_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                try:
+                    gi_path = Path(secret_root) / ".gitignore"
+                    pattern = "\n.pulse/\n"
+                    content = ""
+                    if gi_path.exists():
+                        try:
+                            content = gi_path.read_text()
+                        except Exception:
+                            content = ""
+                        if ".pulse/" not in content.split():
+                            gi_path.write_text(content + pattern)
+                    else:
+                        gi_path.write_text(pattern.lstrip("\n"))
+                except Exception:
+                    # Non-fatal
+                    pass
+
+                # Load or create the secret value
+                if secret_file.exists():
+                    try:
+                        dev_secret = secret_file.read_text().strip() or None
+                    except Exception:
+                        dev_secret = None
+                if not dev_secret:
+                    import secrets as _secrets
+
+                    dev_secret = _secrets.token_urlsafe(32)
+                    try:
+                        secret_file.write_text(dev_secret)
+                    except Exception:
+                        # Best effort; env will still carry the secret for this session
+                        pass
+            except Exception:
+                dev_secret = None
 
     if not web_only:
         module_name = Path(app_file).stem
@@ -270,19 +343,28 @@ def run(
         server_env = os.environ.copy()
         server_env.update(
             {
-                "PULSE_APP_FILE": app_file,
                 "PULSE_HOST": address,
                 "PULSE_PORT": str(port),
                 "PYTHONUNBUFFERED": "1",
                 "FORCE_COLOR": "1",
+                # Signal that the CLI manages the dev lock lifecycle
+                "PULSE_LOCK_MANAGED_BY_CLI": "1",
             }
         )
+        if dev_secret:
+            server_env["PULSE_SECRET"] = dev_secret
 
     if not server_only:
         web_command = ["bun", "run", "dev"]
-        web_cwd = web_dir
+        web_cwd = web_root
         web_env = os.environ.copy()
-        web_env.update({"FORCE_COLOR": "1"})
+        web_env.update(
+            {
+                "FORCE_COLOR": "1",
+                # Keep web env consistent as child tools may also look at this
+                "PULSE_LOCK_MANAGED_BY_CLI": "1",
+            }
+        )
 
     app = PulseTerminalViewer(
         server_command=server_command,
@@ -292,7 +374,11 @@ def run(
         web_cwd=web_cwd,
         web_env=web_env,
     )
-    app.run()
+    try:
+        app.run()
+    finally:
+        # Best-effort cleanup of the lock
+        remove_web_lock(lock_path)
 
 
 @cli.command("generate")

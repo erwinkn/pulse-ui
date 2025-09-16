@@ -40,6 +40,7 @@ class ServerErrorMessage(TypedDict):
 class ServerNavigateToMessage(TypedDict):
     type: Literal["navigate_to"]
     path: str
+    replace: bool
 
 
 class ServerApiCallMessage(TypedDict):

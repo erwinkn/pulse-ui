@@ -7,12 +7,23 @@ from .components import (
 from .context import PulseContext
 from .cookies import Cookie, SetCookie
 from .decorators import computed, effect, query
-from .helpers import CssStyle, EventHandler, For, JsFunction, JsObject, later, repeat
+from .helpers import (
+    CssStyle,
+    EventHandler,
+    For,
+    JsFunction,
+    JsObject,
+    later,
+    repeat,
+)
 from .hooks import (
     call_api,
     client_address,
     effects,
     global_state,
+    setup_key,
+    redirect,
+    not_found,
     navigate,
     route,
     server_address,
@@ -20,6 +31,7 @@ from .hooks import (
     session_id,
     set_cookie,
     setup,
+    stable,
     states,
     websocket_id,
 )
@@ -35,6 +47,7 @@ from .middleware import (
     Redirect,
     stack,
 )
+from .plugin import Plugin
 from .react_component import (
     COMPONENT_REGISTRY,
     DEFAULT,
@@ -45,7 +58,17 @@ from .react_component import (
     react_component,
     registered_react_components,
 )
-from .reactive import Batch, Computed, Effect, IgnoreBatch, Signal, Untrack
+from .reactive import (
+    AsyncEffect,
+    AsyncEffectFn,
+    Batch,
+    Computed,
+    Effect,
+    EffectFn,
+    IgnoreBatch,
+    Signal,
+    Untrack,
+)
 from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive
 from .render_session import RenderSession, RouteMount
 from .request import PulseRequest
@@ -83,6 +106,9 @@ __all__ = [
     "Signal",
     "Computed",
     "Effect",
+    "AsyncEffect",
+    "EffectFn",
+    "AsyncEffectFn",
     "Batch",
     "Untrack",
     "IgnoreBatch",
@@ -95,10 +121,14 @@ __all__ = [
     "states",
     "effects",
     "setup",
+    "setup_key",
+    "stable",
     "route",
     "call_api",
     "set_cookie",
     "navigate",
+    "redirect",
+    "not_found",
     "server_address",
     "client_address",
     "global_state",
@@ -116,6 +146,8 @@ __all__ = [
     "PrerenderResponse",
     "MiddlewareStack",
     "stack",
+    # Plugin
+    "Plugin",
     # Decorators
     "computed",
     "effect",

@@ -6,6 +6,7 @@ from pulse import (
     Signal,
     Computed,
     Effect,
+    AsyncEffect,
     computed,
     effect,
     Untrack,
@@ -502,6 +503,79 @@ def test_immediate_effect():
     assert e2.runs == 1
 
 
+def test_immediate_effect_runs_on_schedule_and_skips_batch():
+    s = Signal(0)
+
+    with Batch() as batch:
+
+        @effect(immediate=True)
+        def e():
+            s()
+
+        # Should have run immediately and not be in the batch
+        assert e.runs == 1
+        assert e.batch is None
+        # And batch should not contain it
+        assert e not in batch.effects
+
+    # Exiting batch should not run e again
+    assert e.runs == 1
+
+
+def test_effect_flush_runs_when_scheduled_and_unschedules():
+    s = Signal(0)
+
+    @effect
+    def e():
+        _ = s()
+
+    # Initially scheduled globally; flush effects to bring to first run
+    flush_effects()
+    assert e.runs == 1
+
+    with Batch() as batch:
+        # Write to schedule rerun in this batch
+        s.write(1)
+        # Verify scheduled
+        assert e in batch.effects
+        # Now flush the single effect
+        e.flush()
+        # It should have run immediately and have been removed from batch
+        assert e.runs == 2
+        assert e not in batch.effects
+
+    # After exiting batch, no extra run should occur
+    assert e.runs == 2
+
+
+@pytest.mark.asyncio
+async def test_async_effect_immediate_not_allowed():
+    with pytest.raises(ValueError):
+
+        @effect(immediate=True)
+        async def e():
+            await asyncio.sleep(0)
+
+
+def test_cancel_only_on_async_effect():
+    @effect
+    def sync_e(): ...
+
+    # Sync effect should be instance of Effect (base) and not expose cancel
+    assert isinstance(sync_e, Effect)
+    assert not isinstance(sync_e, AsyncEffect)
+    assert not hasattr(sync_e, "cancel")
+
+    @effect(lazy=True)
+    async def async_e():
+        await asyncio.sleep(0)
+
+    assert isinstance(async_e, AsyncEffect)
+    assert hasattr(async_e, "cancel")
+    # Should be safe to call even if no task has started yet
+    async_e.cancel()
+
+
 def test_disposed_effect_doesnt_rerun():
     s = Signal(1)
 
@@ -583,9 +657,9 @@ def test_effect_unregister_from_parent_on_disposal():
 
     flush_effects()
     assert len(e.children) == 1
-    e = e.children[0]
-    e.dispose()
-    assert e.children == []
+    child = e.children[0]
+    child.dispose()
+    assert child.children == []
 
 
 def test_effect_unregister_from_batch_on_disposal():
@@ -971,6 +1045,50 @@ def test_reactive_dict_delete_sets_none_preserving_subscribers():
     ctx["a"] = 3
     flush_effects()
     assert values == [1, None, 3]
+
+
+def test_reactive_dict_get_after_delete_uses_default_when_absent():
+    ctx = ReactiveDict({"a": 1})
+
+    # Remove key: value signal remains but marks logical absence
+    del ctx["a"]
+
+    assert "a" in ctx._signals
+
+    # Without default -> None
+    assert ctx.get("a") is None
+
+    # With default -> provided default
+    assert ctx.get("a", 42) == 42
+
+
+def test_reactive_dict_get_absent_subscribes_and_updates_on_set():
+    ctx = ReactiveDict({})
+
+    reads: list[int] = []
+
+    @effect
+    def e():
+        reads.append(int(cast(Any, ctx.get("x", 0))))
+
+    flush_effects()
+    assert reads == [0]
+
+    # Setting the key should trigger a rerun and pick up the new value
+    ctx["x"] = 7
+    flush_effects()
+    assert reads == [0, 7]
+
+    # Same-value write should not rerun
+    runs = e.runs
+    ctx["x"] = 7
+    flush_effects()
+    assert e.runs == runs
+
+    # Deleting should write missing and cause get() to return the default again
+    del ctx["x"]
+    flush_effects()
+    assert reads[-1] == 0
 
 
 def test_reactive_list_basic_index_reactivity():
@@ -1540,7 +1658,7 @@ def test_reactive_dict_views_and_methods():
     assert lens == [(2, 2, 2)]
 
     # Value-only change should not rerun when depending only on structure/len
-    runs = e.runs
+    runs = cast(Any, e).runs
     ctx["a"] = 10
     flush_effects()
     assert e.runs == runs
@@ -1558,7 +1676,7 @@ def test_reactive_dict_views_and_methods():
     assert lens[-1] == (2, 2, 2)
     v = ctx.setdefault("c", 9)
     assert v == 3
-    runs_after = e.runs
+    runs_after = cast(Any, e).runs
     flush_effects()
     assert e.runs == runs_after
 
@@ -1592,7 +1710,8 @@ def test_reactive_dict_values_reacts_to_value_changes():
     @effect
     def e():
         # Iterating values should subscribe to each key's value signal
-        sums.append(sum(ctx.values()))
+        vals: list[int] = cast(list[int], list(ctx.values()))
+        sums.append(sum(vals))
 
     flush_effects()
     assert sums == [3]
@@ -1617,7 +1736,7 @@ def test_reactive_dict_items_reacts_to_value_changes():
     @effect
     def e():
         # Iterating items should subscribe to each key's value signal
-        snapshots.append(sorted((k, v) for k, v in ctx.items()))
+        snapshots.append(sorted((str(k), int(cast(Any, v))) for k, v in ctx.items()))
 
     flush_effects()
     assert snapshots[-1] == [("a", 1), ("b", 2)]
@@ -1626,3 +1745,27 @@ def test_reactive_dict_items_reacts_to_value_changes():
     ctx["b"] = 9
     flush_effects()
     assert snapshots[-1] == [("a", 1), ("b", 9)]
+
+
+def test_reactive_dict_setdefault_absent_subscribes_and_updates_on_write():
+    ctx = ReactiveDict({})
+
+    reads: list[int] = []
+
+    @effect
+    def e():
+        reads.append(int(cast(Any, ctx.setdefault("k", 9))))
+
+    flush_effects()
+    assert reads == [9]
+
+    # Changing the value should rerun if setdefault subscribed properly
+    ctx["k"] = 10
+    flush_effects()
+    assert reads == [9, 10]
+
+    # Same-value write should not rerun
+    runs = e.runs
+    ctx["k"] = 10
+    flush_effects()
+    assert e.runs == runs

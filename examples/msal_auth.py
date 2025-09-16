@@ -47,7 +47,6 @@ def LoginPage():
 
 @ps.component
 def SecretPage():
-    print("Rerendering secret")
     sess = ps.session()
     user = auth()
     if not user:
@@ -56,8 +55,6 @@ def SecretPage():
     name = user.get("name") or user.get("email")
 
     def update_session_entry(text: str):
-        print(f"Updating session entry to {text}")
-        print("session entry = ", sess["pulse"])
         sess["pulse"] = text
 
     return ps.div(

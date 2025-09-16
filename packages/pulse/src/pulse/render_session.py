@@ -86,7 +86,6 @@ class RenderSession:
     def send(self, message: ServerMessage):
         if not self._send_message:
             raise RuntimeError("RenderSession is not connected")
-        print(f"[Render {self.id}, send] {message}")
         self._send_message(message)
 
     def report_error(

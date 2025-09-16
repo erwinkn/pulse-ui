@@ -41,6 +41,7 @@ JsFunction = Callable[P, T]
 CssStyle = dict[str, Any]
 
 
+PulseMode = Literal["dev", "ci", "prod"]
 DeploymentMode = Literal["dev", "same_host", "subdomains"]
 
 

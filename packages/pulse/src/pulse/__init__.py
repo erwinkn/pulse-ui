@@ -15,6 +15,8 @@ from .helpers import (
     JsObject,
     later,
     repeat,
+    PulseMode,
+    DeploymentMode,
 )
 from .hooks import (
     call_api,
@@ -181,6 +183,8 @@ __all__ = [
     "JsFunction",
     "CssStyle",
     "JsObject",
+    "PulseMode",
+    "DeploymentMode",
     # Session context infra
     "SessionStore",
     "UserSession",

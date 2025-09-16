@@ -1,11 +1,10 @@
 import asyncio
-from datetime import datetime
-from pathlib import Path
 import time
-import pulse as ps
-from pulse.codegen import CodegenConfig
-from pulse.middleware import Ok, Redirect, NotFound, Deny
+from datetime import datetime
 from typing import Optional
+
+import pulse as ps
+from pulse.middleware import Deny, NotFound, Ok, Redirect
 
 
 # State Management
@@ -567,7 +566,6 @@ app = ps.App(
         )
     ],
     middleware=None,
-    codegen=CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )
 
 

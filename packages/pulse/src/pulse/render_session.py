@@ -17,6 +17,7 @@ from pulse.reactive import Effect, flush_effects
 from pulse.reconciler import RenderRoot
 from pulse.routing import Layout, Route, RouteContext, RouteTree
 from pulse.state import State
+from pulse.hooks import RedirectInterrupt, NotFoundInterrupt
 
 
 logger = logging.getLogger(__file__)
@@ -44,12 +45,12 @@ class RenderSession:
     ) -> None:
         self.id = id
         self.routes = routes
+        self.route_mounts: dict[str, RouteMount] = {}
         # Base server address for building absolute API URLs (e.g., http://localhost:8000)
         self._server_address: Optional[str] = server_address
         # Best-effort client address, captured at prerender or socket connect time
         self._client_address: Optional[str] = client_address
-        self.route_mounts: dict[str, RouteMount] = {}
-        self.message_listeners: set[Callable[[ServerMessage], Any]] = set()
+        self._send_message: Callable[[ServerMessage], Any] | None = None
         self._pending_api: dict[str, asyncio.Future] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
@@ -75,22 +76,13 @@ class RenderSession:
         for path in list(self.route_mounts.keys()):
             self.report_error(path, "effect", exc, details)
 
-    def connect(
-        self,
-        message_listener: Callable[[ServerMessage], Any],
-    ):
-        self.message_listeners.add(message_listener)
-        # Return a disconnect function. Use `discard` since there are two ways
-        # of disconnecting a message listener
-        return lambda: self.message_listeners.discard(message_listener)
+    def connect(self, send_message: Callable[[ServerMessage], Any]):
+        self._send_message = send_message
 
-    # Use `discard` since there are two ways of disconnecting a message listener
-    def disconnect(self, message_listener: Callable[[ServerMessage], Any]):
-        self.message_listeners.discard(message_listener)
-
-    def notify(self, message: ServerMessage):
-        for listener in self.message_listeners:
-            listener(message)
+    def send(self, message: ServerMessage):
+        if not self._send_message:
+            raise RuntimeError("RenderSession is not connected")
+        self._send_message(message)
 
     def report_error(
         self,
@@ -109,7 +101,7 @@ class RenderSession:
                 "details": details or {},
             },
         }
-        self.notify(error_msg)
+        self.send(error_msg)
         logger.error(
             "Error reported for path %r during %s: %s\n%s",
             path,
@@ -120,7 +112,7 @@ class RenderSession:
 
     def close(self):
         # The effect will be garbage collected, and with it the dependencies
-        self.message_listeners.clear()
+        self._send_message = None
         for path in list(self.route_mounts.keys()):
             self.unmount(path)
         self.route_mounts.clear()
@@ -140,8 +132,18 @@ class RenderSession:
             fn, n_params = cb.fn, cb.n_args
             res = fn(*args[:n_params])
             if iscoroutine(res):
-                loop = asyncio.get_running_loop()
-                task = loop.create_task(res)
+                try:
+                    loop = asyncio.get_running_loop()
+                    task = loop.create_task(res)
+                except RuntimeError:
+                    from anyio import from_thread
+
+                    async def _schedule():
+                        loop = asyncio.get_running_loop()
+                        task = loop.create_task(res)
+                        return task
+
+                    task = from_thread.run(_schedule)
 
                 def _on_task_done(t):
                     try:
@@ -185,11 +187,20 @@ class RenderSession:
             path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
             url = f"{base}{path}"
         corr_id = uuid.uuid4().hex
-        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        try:
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        except RuntimeError:
+            from anyio import from_thread
+
+            async def _create_future_holder():
+                loop = asyncio.get_running_loop()
+                return loop.create_future()
+
+            fut = from_thread.run(_create_future_holder)
         self._pending_api[corr_id] = fut
         headers = headers or {}
         headers["x-pulse-render-id"] = self.id
-        self.notify(
+        self.send(
             {
                 "type": "api_call",
                 "id": corr_id,
@@ -268,19 +279,34 @@ class RenderSession:
 
         def _render_effect():
             with ctx:
-                if mount.root.render_count == 0:
-                    vdom = mount.root.render_vdom(prerendering=False)
-                    self.notify(
-                        ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-                    )
-                else:
-                    result = mount.root.render_diff()
-                    if result.ops:
-                        self.notify(
-                            ServerUpdateMessage(
-                                type="vdom_update", path=path, ops=result.ops
-                            )
+                try:
+                    if mount.root.render_count == 0:
+                        vdom = mount.root.render_vdom(prerendering=False)
+                        self.send(
+                            ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
                         )
+                    else:
+                        result = mount.root.render_diff()
+                        if result.ops:
+                            self.send(
+                                ServerUpdateMessage(
+                                    type="vdom_update", path=path, ops=result.ops
+                                )
+                            )
+                except RedirectInterrupt as r:
+                    # Prefer client-side navigation over emitting VDOM operations
+                    self.send(
+                        {"type": "navigate_to", "path": r.path, "replace": r.replace}
+                    )
+                except NotFoundInterrupt:
+                    # Use app-configured not-found path; fallback to '/404'
+                    self.send(
+                        {
+                            "type": "navigate_to",
+                            "path": ctx.app.not_found,
+                            "replace": True,
+                        }
+                    )
 
         # print(f"Mounting '{path}'")
         mount.effect = Effect(

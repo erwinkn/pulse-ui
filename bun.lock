@@ -4,7 +4,7 @@
     "": {
       "name": "pulse-ui",
     },
-    "examples/pulse-demo": {
+    "examples/pulse-web": {
       "name": "pulse-web",
       "dependencies": {
         "@react-router/node": "^7.7.1",
@@ -49,7 +49,6 @@
         "@types/node": "^24.2.1",
         "@types/react": "^19.1.10",
         "@types/react-dom": "^19.1.7",
-        "terser": "^5.31.0",
         "typescript": "^5",
       },
       "peerDependencies": {
@@ -742,7 +741,7 @@
 
     "pulse-ui-client": ["pulse-ui-client@workspace:packages/pulse-ui-client"],
 
-    "pulse-web": ["pulse-web@workspace:examples/pulse-demo"],
+    "pulse-web": ["pulse-web@workspace:examples/pulse-web"],
 
     "qs": ["qs@6.13.0", "", { "dependencies": { "side-channel": "^1.0.6" } }, "sha512-+38qI9SOr8tfZ4QmJNplMUxqjbe7LKvvZgWdExBOmd+egZTtjLB67Gu0HRX3u/XOq7UU2Nx6nsjvS16Z9uwfpg=="],
 

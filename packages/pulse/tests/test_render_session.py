@@ -67,20 +67,52 @@ def make_route_info(pathname: str) -> RouteInfo:
     }
 
 
+# TODO: clean this up - this was refactored using GPT-5 and is thus quite hacky
 def mount_with_listener(session: RenderSession, path: str):
-    messages: list[ServerMessage] = []
+    # Maintain a session-level set of listened paths and a shared message log
+    listened: set[str] | None = getattr(session, "_test_listened_paths", None)
+    if listened is None:
+        listened = set()
+        setattr(session, "_test_listened_paths", listened)
 
-    def on_message(msg: ServerMessage):
-        if msg["type"] == "api_call" or msg["path"] != path:
-            return
-        messages.append(msg)
+    log: list[ServerMessage] | None = getattr(session, "_test_message_log", None)
+    if log is None:
+        log = []
+        setattr(session, "_test_message_log", log)
 
-    disconnect = session.connect(on_message)
+        def on_message(msg: ServerMessage):
+            if msg.get("type") == "api_call":
+                return
+            p = msg.get("path")
+            if not isinstance(p, str):
+                return
+            # Only record messages for paths we're currently listening to
+            if p in getattr(session, "_test_listened_paths", set()):
+                getattr(session, "_test_message_log").append(msg)
+
+        session.connect(on_message)
+
+    # Start listening for this path
+    listened.add(path)
+
+    class _PathMessages:
+        def __iter__(self):  # type: ignore[override]
+            for m in getattr(session, "_test_message_log", []):
+                if m.get("path") == path:
+                    yield m
+
     # Ensure RenderSession is present in PulseContext when mounting so the
     # captured context for the render effect includes it
     with ps.PulseContext.update(render=session):
         session.mount(path, make_route_info(path))
-    return messages, disconnect
+
+    def disconnect():
+        # Stop listening for this path; messages are still in the shared log
+        lst = getattr(session, "_test_listened_paths", set())
+        if isinstance(lst, set):
+            lst.discard(path)
+
+    return _PathMessages(), disconnect
 
 
 def extract_count_from_ctx(session: RenderSession, path: str) -> int:

@@ -39,7 +39,7 @@ ${routes_str}
 
 # Mako template for server-rendered pages
 ROUTE_TEMPLATE = Template(
-    """import { redirect, data, type LoaderFunctionArgs } from "react-router";
+    """import { redirect, data, type HeadersArgs, type LoaderFunctionArgs } from "react-router";
 import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo${", RenderLazy" if components and any(c.lazy for c in components) else ""} } from "${lib_path}";
 
 % if components:

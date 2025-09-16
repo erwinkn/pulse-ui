@@ -7,15 +7,15 @@ import json
 import logging
 import os
 import secrets
+import zlib
 import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from fastapi import Response
 
-from pulse.context import PulseContext
 from pulse.cookies import SetCookie
-from pulse.reactive import Effect
+from pulse.reactive import AsyncEffect, Effect
 from pulse.reactive_extensions import ReactiveDict, reactive
 
 if TYPE_CHECKING:
@@ -30,22 +30,28 @@ class UserSession:
     sid: str
     data: Session
 
-    def __init__(self, sid: str, data: dict[str, Any], handling_request=False) -> None:
+    def __init__(self, sid: str, data: dict[str, Any], app: "App") -> None:
         self.sid = sid
         self.data = reactive(data)
         self._scheduled_cookie_refresh = False
-        self._handling_request = handling_request
         self._queued_cookies: dict[str, SetCookie] = {}
-        self._effect = Effect(self.save, name=f"save_session:{self.sid}")
-
-    async def save(self):
-        app = PulseContext.get().app
+        self.app = app
+        self.is_cookie_session = isinstance(app.session_store, CookieSessionStore)
         if isinstance(app.session_store, CookieSessionStore):
-            self._refresh_session_cookie(app)
+            self._effect = Effect(
+                lambda: self._refresh_session_cookie(app),
+                name=f"save_cookie_session:{self.sid}",
+            )
         else:
-            await app.session_store.save(self.sid, self.data)
+            self._effect = AsyncEffect(
+                self._save_server_session, name=f"save_server_session:{self.sid}"
+            )
 
-    def _refresh_session_cookie(self, app: "App"):
+    async def _save_server_session(self):
+        assert isinstance(self.app.session_store, SessionStore)
+        await self.app.session_store.save(self.sid, self.data)
+
+    def _refresh_session_cookie(self, app):
         assert isinstance(app.session_store, CookieSessionStore)
         signed_cookie = app.session_store.encode(self.sid, self.data)
         self.set_cookie(
@@ -60,15 +66,14 @@ class UserSession:
     def dispose(self):
         self._effect.dispose()
 
-    def handling_request(self):
-        self._handling_request = True
-
     def handle_response(self, res: Response):
+        # For cookie sessions, run the effect now if it's scheduled, in order to set the updated cookie
+        if self.is_cookie_session:
+            self._effect.flush()
         for cookie in self._queued_cookies.values():
             cookie.set_on_fastapi(res, cookie.value)
         self._queued_cookies.clear()
         self._scheduled_cookie_refresh = False
-        self._handling_request = False
 
     def set_cookie(
         self,
@@ -88,13 +93,9 @@ class UserSession:
             max_age_seconds=max_age_seconds,
         )
         self._queued_cookies[name] = cookie
-        if self._handling_request:
-            # cookies will be set at the end of the reuqest
-            return
-        # Otherwise, schedule a cookie refresh for this user
         if not self._scheduled_cookie_refresh:
-            ctx = PulseContext.get()
-            ctx.app.refresh_cookies(self.sid)
+            self.app.refresh_cookies(self.sid)
+            self._scheduled_cookie_refresh = True
 
 
 class SessionStore(ABC):
@@ -187,38 +188,37 @@ class CookieSessionStore:
         self._max_cookie_bytes = max_cookie_bytes
 
     def encode(self, sid: str, session: dict[str, Any]) -> str:
-        # Encode the entire session into the cookie
+        # Encode the entire session into the cookie (compressed v1)
         try:
-            # Convert to a plain dict for JSON serialization
             data = {"sid": sid, "data": dict(session)}
-            payload = json.dumps(data, separators=(",", ":"))
-            signed = self._sign(payload)
+            payload_json = json.dumps(data, separators=(",", ":")).encode("utf-8")
+            compressed = zlib.compress(payload_json, level=6)
+            signed = self._sign(compressed)
             if len(signed) > self._max_cookie_bytes:
-                # If too large, fall back to an empty session to avoid breaking cookies
-                return self.encode(sid, {})
+                logging.warning("Session cookie too large, truncating")
+                session.clear()
+                return self.encode(sid, session)
             return signed
         except Exception:
-            # Best effort: fallback to an empty session if it's not serializable
-            return self.encode(sid, {})
+            logging.warning("Error encoding session cookie, truncating")
+            session.clear()
+            return self.encode(sid, session)
 
-    def decode(self, cookie: str) -> tuple[str, Session]:
-        """Decode a signed session cookie.
-
-        Returns a tuple of (session_id, session_data). If the cookie is invalid,
-        returns a new session ID and empty session.
-        """
+    def decode(self, cookie: str) -> tuple[str, Session] | None:
+        """Decode a signed session cookie (compressed v1)."""
         if not cookie:
-            return new_sid(), ReactiveDict()
+            return None
 
-        payload = self._unsign(cookie)
-        if not payload:
-            return new_sid(), ReactiveDict()
+        raw = self._unsign(cookie)
+        if raw is None:
+            return None
 
         try:
-            data = json.loads(payload)
+            payload_json = zlib.decompress(raw).decode("utf-8")
+            data = json.loads(payload_json)
             return data["sid"], ReactiveDict(data["data"])
         except Exception:
-            return new_sid(), ReactiveDict()
+            return None
 
     # --- signing helpers ---
     def _mac(self, payload: bytes) -> bytes:
@@ -226,20 +226,18 @@ class CookieSessionStore:
             self._secret + b"|" + self._salt, payload, self._digest
         ).digest()
 
-    def _sign(self, payload: str) -> str:
-        raw = payload.encode("utf-8")
-        mac = self._mac(raw)
-        b64 = base64.urlsafe_b64encode(raw).rstrip(b"=")
+    def _sign(self, payload: bytes) -> str:
+        mac = self._mac(payload)
+        b64 = base64.urlsafe_b64encode(payload).rstrip(b"=")
         sig = base64.urlsafe_b64encode(mac).rstrip(b"=")
         return f"v1.{b64.decode('ascii')}.{sig.decode('ascii')}"
 
-    def _unsign(self, token: str) -> Optional[str]:
+    def _unsign(self, token: str) -> Optional[bytes]:
         try:
             if not token.startswith("v1."):
                 return None
             _, b64, sig = token.split(".", 2)
 
-            # Pad base64
             def _pad(s: str) -> bytes:
                 return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
@@ -248,7 +246,7 @@ class CookieSessionStore:
             expected = self._mac(raw)
             if not hmac.compare_digest(mac, expected):
                 return None
-            return raw.decode("utf-8")
+            return raw
         except Exception:
             return None
 

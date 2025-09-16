@@ -2,7 +2,7 @@ import asyncio
 
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
 
-from pulse.reactive import Computed, Effect, Signal
+from pulse.reactive import Computed, AsyncEffect, Signal
 
 
 T = TypeVar("T")
@@ -83,7 +83,7 @@ class QueryResult(Generic[T]):
 
 
 class StateQuery(Generic[T]):
-    def __init__(self, result: QueryResult[T], effect: Effect):
+    def __init__(self, result: QueryResult[T], effect: AsyncEffect):
         self._result = result
         self._effect = effect
 
@@ -218,13 +218,13 @@ class QueryProperty(Generic[T]):
 
         # In key mode, depend only on key via explicit deps
         if key_computed is not None:
-            effect = Effect(
+            effect = AsyncEffect(
                 run_effect,
                 name=f"query.effect.{self.name}",
                 deps=[key_computed],
             )
         else:
-            effect = Effect(run_effect, name=f"query.effect.{self.name}")
+            effect = AsyncEffect(run_effect, name=f"query.effect.{self.name}")
         # print(f"[QueryProperty:{self.name}] created Effect name={effect.name}")
 
         # Expose the effect on the instance so State.effects() sees it

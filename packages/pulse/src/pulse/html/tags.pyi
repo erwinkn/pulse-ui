@@ -38,6 +38,7 @@ from pulse.html.props import (
     HTMLProgressProps,
     HTMLProps,
     HTMLQuoteProps,
+    HTMLSVGProps,
     HTMLScriptProps,
     HTMLSelectProps,
     HTMLSourceProps,
@@ -387,4 +388,57 @@ def var(
 def video(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLVideoProps]
 ) -> Node: ...
+
+# -- React Fragment ---
 def fragment(*children: Child, key: Optional[str] = None) -> Node: ...
+
+# -- SVG --
+def svg(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def circle(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def ellipse(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def g(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def line(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def path(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def polygon(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def polyline(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def rect(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def text(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def tspan(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def defs(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def clipPath(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def mask(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def pattern(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+def use(
+    *children: Child, key: Optional[str] = None, **props: Unpack[HTMLSVGProps]
+) -> Node: ...
+

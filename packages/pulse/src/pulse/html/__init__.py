@@ -267,6 +267,23 @@ from .tags import (  # Standard HTML tags
     wbr,
     # React fragment
     fragment,
+    # SVG tags
+    svg,
+    circle,
+    ellipse,
+    g,
+    line,
+    path,
+    polygon,
+    polyline,
+    rect,
+    text,
+    tspan,
+    defs,
+    clipPath,
+    mask,
+    pattern,
+    use,
 )
 
 __all__ = [
@@ -534,4 +551,21 @@ __all__ = [
     "wbr",
     # React fragment
     "fragment",
+    # SVG tags
+    "svg",
+    "circle",
+    "ellipse",
+    "g",
+    "line",
+    "path",
+    "polygon",
+    "polyline",
+    "rect",
+    "text",
+    "tspan",
+    "defs",
+    "clipPath",
+    "mask",
+    "pattern",
+    "use",
 ]

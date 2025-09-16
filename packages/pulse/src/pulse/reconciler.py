@@ -11,7 +11,6 @@ from typing import (
     Union,
     cast,
 )
-from pulse.flags import IS_PRERENDERING
 from pulse.hooks import HookState
 from pulse.vdom import (
     VDOM,
@@ -109,22 +108,18 @@ class RenderRoot:
             ops=resolver.operations,
         )
 
-    def render_vdom(self, prerendering: bool = False) -> VDOM:
+    def render_vdom(self) -> VDOM:
         """One-shot render to VDOM + callbacks, without mounting an Effect."""
-        token = IS_PRERENDERING.set(prerendering)
-        try:
-            self.render_count += 1
-            resolver = Resolver()
-            # Fresh render of the root component into a VDOM tree
-            vdom, normalized = resolver.render_tree(
-                render_parent=self.render_tree,
-                node=self.render_tree.render(),
-            )
-            self.render_tree.last_render = normalized
-            self.callbacks = resolver.callbacks
-            return vdom
-        finally:
-            IS_PRERENDERING.reset(token)
+        self.render_count += 1
+        resolver = Resolver()
+        # Fresh render of the root component into a VDOM tree
+        vdom, normalized = resolver.render_tree(
+            render_parent=self.render_tree,
+            node=self.render_tree.render(),
+        )
+        self.render_tree.last_render = normalized
+        self.callbacks = resolver.callbacks
+        return vdom
 
     def unmount(self) -> None:
         if self.effect is not None:
@@ -323,9 +318,8 @@ class Resolver:
             if not isinstance(node, ComponentNode):
                 continue
 
-            key: str | None = getattr(node, "key", None)
-            if key:
-                old_keys[key] = old_idx
+            if node.key:
+                old_keys[node.key] = old_idx
 
         # Determine which keys are present in the new children
         new_keys: set[str] = {

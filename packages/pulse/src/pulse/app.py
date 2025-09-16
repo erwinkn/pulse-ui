@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 from enum import IntEnum
 from typing import Literal, Optional, Sequence, TypeVar, cast
 
-from pulse.vdom import VDOM
 import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -352,9 +351,20 @@ class App:
 
             result = {"renderId": render_id, "views": {}}
 
-            def _prerender_one(path: str) -> VDOM:
-                vdom = render.render(path, route_info, prerendering=True)
-                return vdom
+            def _prerender_one(path: str):
+                captured = render.prerender_mount_capture(path, route_info)
+                t = captured.get("type") if isinstance(captured, dict) else None
+                if t == "vdom_init":
+                    return Ok(captured["vdom"])
+                if t == "navigate_to":
+                    nav_path = captured.get("path")
+                    replace = bool(captured.get("replace"))
+                    # Treat navigate to not_found (replace) as NotFound
+                    if replace and nav_path == self.not_found:
+                        return NotFound()
+                    return Redirect(path=str(nav_path) if nav_path else "/")
+                # Fallback: shouldn't happen, return not found to be safe
+                return NotFound()
 
             with PulseContext.update(render=render):
                 for p in paths:
@@ -364,7 +374,7 @@ class App:
                             route_info=route_info,
                             request=PulseRequest.from_fastapi(request),
                             session=session.data,
-                            next=lambda p=p: Ok(_prerender_one(p)),
+                            next=lambda p=p: _prerender_one(p),
                         )
                         if isinstance(res, Ok):
                             result["views"][p] = res.payload
@@ -553,6 +563,7 @@ class App:
 
             # No cookie: create fresh session
             sid = new_sid()
+            print(f"Creating UserSession {sid}")
             session = UserSession(sid, {}, app=self)
             session._refresh_session_cookie(self)
             self.user_sessions[sid] = session

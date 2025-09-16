@@ -86,6 +86,7 @@ class RenderSession:
     def send(self, message: ServerMessage):
         if not self._send_message:
             raise RuntimeError("RenderSession is not connected")
+        print(f"[Render {self.id}, send] {message}")
         self._send_message(message)
 
     def report_error(
@@ -232,6 +233,60 @@ class RenderSession:
         self.route_mounts[path] = mount
         return mount
 
+    def prerender_mount_capture(
+        self, path: str, route_info: Optional[RouteInfo] = None
+    ):
+        """
+        Mount the route and run the render effect immediately, capturing the
+        initial message instead of sending over a socket.
+
+        Returns a dict:
+          { "type": "vdom_init", "vdom": VDOM } or
+          { "type": "navigate_to", "path": str, "replace": bool }
+        """
+        # If already mounted (e.g., repeated prerender), do nothing special.
+        if path in self.route_mounts:
+            # Run a diff and synthesize an update; however, for prerender we
+            # expect initial mount. Return current tree as a full VDOM.
+            mount = self.get_route_mount(path)
+            vdom = mount.root.render_vdom()
+            return {"type": "vdom_init", "vdom": vdom}
+
+        captured: dict | None = None
+
+        def _capture(msg: ServerMessage):
+            nonlocal captured
+            # Only capture the first relevant message for this path
+            if captured is not None:
+                return
+            mtype = msg.get("type") if isinstance(msg, dict) else None
+            if mtype == "vdom_init" and msg.get("path") == path:
+                captured = {"type": "vdom_init", "vdom": msg.get("vdom")}
+            elif mtype == "navigate_to":
+                captured = {
+                    "type": "navigate_to",
+                    "path": msg.get("path"),
+                    "replace": bool(msg.get("replace")),
+                }
+
+        prev_sender = self._send_message
+        try:
+            self._send_message = _capture
+            # Reuse normal mount flow which creates and runs the effect
+            self.mount(path, route_info or self.routes.find(path).default_route_info())
+            # Flush any scheduled effects to stabilize output
+            self.flush()
+        finally:
+            self._send_message = prev_sender
+
+        # Fallback: if nothing captured (shouldn't happen), return full VDOM
+        if captured is None:
+            mount = self.get_route_mount(path)
+            vdom = mount.root.render_vdom()
+            return {"type": "vdom_init", "vdom": vdom}
+
+        return captured
+
     def get_route_mount(
         self,
         path: str,
@@ -251,11 +306,11 @@ class RenderSession:
         return inst
 
     def render(
-        self, path: str, route_info: Optional[RouteInfo] = None, prerendering=False
+        self, path: str, route_info: Optional[RouteInfo] = None
     ):
         mount = self.create_route_mount(path, route_info)
         with PulseContext.update(route=mount.route):
-            return mount.root.render_vdom(prerendering=prerendering)
+            return mount.root.render_vdom()
 
     def rerender(self, path: str):
         mount = self.get_route_mount(path)
@@ -277,7 +332,7 @@ class RenderSession:
             with ctx:
                 try:
                     if mount.root.render_count == 0:
-                        vdom = mount.root.render_vdom(prerendering=False)
+                        vdom = mount.root.render_vdom()
                         self.send(
                             ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
                         )

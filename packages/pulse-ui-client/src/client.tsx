@@ -200,6 +200,8 @@ export class PulseSocketIOClient {
     switch (message.type) {
       case "vdom_init": {
         const route = this.activeViews.get(message.path);
+        // Ignore messages for paths that are not mounted
+        if (!route) return;
         if (route) {
           route.onInit(message.vdom);
         }
@@ -212,12 +214,7 @@ export class PulseSocketIOClient {
       }
       case "vdom_update": {
         const route = this.activeViews.get(message.path);
-        if (!route) {
-          console.error(
-            `[PulseClient] Received VDOM update for path ${message.path} before initial tree was set.`
-          );
-          return;
-        }
+        if (!route) return; // Not an active path; discard
         route.onUpdate(message.ops);
         // Clear any prior error for this path on successful update
         if (this.serverErrors.has(message.path)) {
@@ -227,6 +224,7 @@ export class PulseSocketIOClient {
         break;
       }
       case "server_error": {
+        if (!this.activeViews.has(message.path)) return; // discard for inactive paths
         this.serverErrors.set(message.path, message.error);
         this.notifyServerError(message.path, message.error);
         break;
@@ -236,6 +234,7 @@ export class PulseSocketIOClient {
         break;
       }
       case "navigate_to": {
+        // `navigate_to` is navigational; allow regardless of activeViews membership
         const replace = !!message.replace;
         let dest = message.path || "";
         // Normalize protocol-relative URLs to absolute

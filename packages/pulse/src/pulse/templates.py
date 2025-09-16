@@ -2,21 +2,78 @@ from mako.template import Template
 
 # Mako template for the main layout
 LAYOUT_TEMPLATE = Template(
-    """import { PulseProvider, type PulseConfig } from "${lib_path}";
-import { Outlet } from "react-router";
+    """import { extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "${lib_path}";
+import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
+import { matchRoutes } from "react-router";
+import { rrPulseRouteTree } from "./routes.runtime";
+import { useLoaderData } from "react-router";
 
 // This config is imported by the layout and used to initialize the client
 export const config: PulseConfig = {
   serverAddress: "${server_address}",
 };
 
+
+// Server loader: perform initial prerender, abort on first redirect/not-found
+export async function loader(args: LoaderFunctionArgs) {
+  const url = new URL(args.request.url);
+  const matches = matchRoutes([rrPulseRouteTree], url.pathname) ?? [];
+  const paths = matches.map(m => m.route.uniquePath);
+  const fwd = new Headers(args.request.headers);
+  fwd.delete("content-length");
+  fwd.set("content-type", "application/json");
+  const res = await fetch("${server_address}/prerender", {
+    method: "POST",
+    headers: fwd,
+    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
+  });
+  if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
+  const body = await res.json();
+  if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
+  if (body.notFound) return new Response(null, { status: 404 });
+  const prerenderData = body as PulsePrerender;
+  const setCookies =
+    (res.headers.getSetCookie?.() as string[] | undefined) ??
+    (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
+  const headers = new Headers();
+  for (const c of setCookies) headers.append("Set-Cookie", c);
+  return data(prerenderData, { headers });
+}
+
+// Client loader: re-prerender on navigation while reusing renderId
+export async function clientLoader(args: ClientLoaderFunctionArgs) {
+  const url = new URL(args.request.url);
+  const matches = matchRoutes([rrPulseRouteTree], url.pathname) ?? [];
+  const paths = matches.map(m => m.route.uniquePath);
+  const renderId = 
+    typeof window !== "undefined" && typeof sessionStorage !== "undefined"
+      ? (sessionStorage.getItem("__PULSE_RENDER_ID") ?? undefined) 
+      : undefined;
+  const res = await fetch("${server_address}/prerender", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args), renderId }),
+  });
+  if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
+  const body = await res.json();
+  if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
+  if (body.notFound) return new Response(null, { status: 404 });
+  return body as PulsePrerender;
+}
+
 export default function PulseLayout() {
+  const data = useLoaderData<typeof loader>();
+  if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
+    sessionStorage.setItem("__PULSE_RENDER_ID", data.renderId);
+  }
   return (
-    <PulseProvider config={config}>
+    <PulseProvider config={config} prerender={data}>
       <Outlet />
     </PulseProvider>
   );
 }
+// Persist renderId in sessionStorage for reuse in clientLoader is handled within the component
 """
 )
 
@@ -37,10 +94,24 @@ ${routes_str}
 """
 )
 
+# Runtime route tree for matching (used by loader experiments)
+ROUTES_RUNTIME_TEMPLATE = Template(
+    """import type { RouteObject } from "react-router";
+
+export type RRRouteObject = RouteObject & {
+  id: string;
+  uniquePath?: string;
+  children?: RRRouteObject[];
+}
+
+export const rrPulseRouteTree = ${routes_str} satisfies RRRouteObject;
+"""
+)
+
 # Mako template for server-rendered pages
 ROUTE_TEMPLATE = Template(
-    """import { redirect, data, type HeadersArgs, type LoaderFunctionArgs } from "react-router";
-import { PulseView, type VDOM, type ComponentRegistry, extractServerRouteInfo${", RenderLazy" if components and any(c.lazy for c in components) else ""} } from "${lib_path}";
+    """import { type HeadersArgs } from "react-router";
+import { PulseView, type VDOM, type ComponentRegistry${", RenderLazy" if components and any(c.lazy for c in components) else ""} } from "${lib_path}";
 
 % if components:
 // Component imports
@@ -77,51 +148,9 @@ const externalComponents: ComponentRegistry = {};
 
 const path = "${route.unique_path()}";
 
-export async function loader(args: LoaderFunctionArgs) {
-  const routeInfo = extractServerRouteInfo(args);
-  // Forward inbound headers (cookies, auth, user-agent, etc.) to the Python server
-  const fwd = new Headers(args.request.headers);
-  // These request-specific headers must be recomputed for the new request
-  fwd.delete("content-length");
-  // Ensure JSON body content type
-  fwd.set("content-type", "application/json");
-  const res = await fetch("${server_address}" + "/prerender/" + path, {
-    method: "POST",
-    headers: fwd,
-    body: JSON.stringify(routeInfo),
-    redirect: "manual",
-  });
-  if (res.status === 404) {
-    return redirect("/not-found");
-  }
-  if (res.status === 302 || res.status === 301) {
-    const location = res.headers.get("Location");
-    if (location) {
-      return redirect(location);
-    }
-  }
-  if (!res.ok) {
-    throw new Error(
-      "Failed to fetch prerender route /"+ path+ ": " + res.status + " " + res.statusText
-    );
-  }
-  const vdom = await res.json();
-  const setCookies =
-    (res.headers.getSetCookie?.() as string[] | undefined) ??
-    (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
-  const headers = new Headers();
-  for (const c of setCookies) headers.append("Set-Cookie", c);
-  return data(vdom, { headers });
-}
-
-export default function RouteComponent({ loaderData }: { loaderData: VDOM }) {
+export default function RouteComponent() {
   return (
-    <PulseView
-      key={path}
-      initialVDOM={loaderData}
-      externalComponents={externalComponents}
-      path={path}
-    />
+    <PulseView key={path} externalComponents={externalComponents} path={path} />
   );
 }
 

@@ -52,6 +52,7 @@ export class PulseSocketIOClient {
 
   constructor(
     private url: string,
+    private renderId: string,
     private frameworkNavigate: NavigateFunction
   ) {
     this.socket = null;
@@ -68,7 +69,8 @@ export class PulseSocketIOClient {
     }
     return new Promise((resolve, reject) => {
       const socket = io(this.url, {
-        transports: ["websocket"],
+        transports: ["websocket", "webtransport"],
+        auth: { renderId: this.renderId },
       });
       this.socket = socket;
 

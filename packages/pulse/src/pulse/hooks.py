@@ -16,7 +16,6 @@ from typing import (
 )
 
 from pulse.context import PulseContext
-from pulse.flags import IS_PRERENDERING
 from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
 from pulse.reactive_extensions import ReactiveDict
 from pulse.routing import RouteContext
@@ -613,10 +612,6 @@ def not_found() -> NoReturn:
     if not ctx:
         raise RuntimeError("not_found() must be invoked during component render")
     raise NotFoundInterrupt()
-
-
-def is_prerendering():
-    return IS_PRERENDERING.get()
 
 
 # -----------------------------------------------------

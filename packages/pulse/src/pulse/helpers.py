@@ -10,6 +10,7 @@ from typing import (
     Callable,
     Coroutine,
     Iterable,
+    Literal,
     ParamSpec,
     Protocol,
     TypedDict,
@@ -38,6 +39,9 @@ JsFunction = Callable[P, T]
 
 # In case we refine it later
 CssStyle = dict[str, Any]
+
+
+DeploymentMode = Literal["dev", "same_host", "subdomains"]
 
 
 # Will be replaced by a JS transpiler type
@@ -122,6 +126,7 @@ def create_task(
         if on_done:
             task.add_done_callback(on_done)
     except RuntimeError:
+
         async def _runner():
             loop = asyncio.get_running_loop()
             task = loop.create_task(coroutine, name=name)

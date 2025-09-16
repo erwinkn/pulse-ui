@@ -2,7 +2,7 @@
 
 // Core React bindings
 export { PulseProvider, usePulseClient, PulseView } from "./pulse";
-export type { PulseConfig, PulseProviderProps } from "./pulse";
+export type { PulseConfig, PulseProviderProps, PulsePrerender } from "./pulse";
 
 // Client implementation
 export { PulseSocketIOClient } from "./client";

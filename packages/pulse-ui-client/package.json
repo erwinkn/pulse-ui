@@ -1,6 +1,6 @@
 {
   "name": "pulse-ui-client",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -13,7 +13,9 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
+      "browser": "./dist/index.js",
+      "node": "./dist/index.node.js",
+      "bun": "./dist/index.bun.js",
       "default": "./dist/index.js"
     }
   },
@@ -33,8 +35,13 @@
     "react-router": "^7"
   },
   "scripts": {
-    "build": "rm -rf dist || true && bun build ./src/index.ts --outdir=dist --format=esm --target=browser --minify --sourcemap=external --external react --external react-dom --external react-router --external socket.io-client && tsc -p tsconfig.build.json",
-    "build:dev": "rm -rf dist || true && bun build ./src/index.ts --outdir=dist --format=esm --target=browser --sourcemap=inline --external react --external react-dom --external react-router --external socket.io-client && tsc -p tsconfig.build.json",
+    "build": "bun --bun scripts/build.ts && bun run build:types",
+    "build:clean": "rm -rf dist || true",
+    "build:browser": "NODE_ENV=production bun build ./src/index.ts --outdir=dist --format=esm --target=browser --minify --sourcemap=external --external react --external react-dom --external react-router --external socket.io-client",
+    "build:node": "NODE_ENV=production bun build ./src/index.ts --outfile=dist/index.node.js --format=esm --target=node --minify --sourcemap=inline --define process.env.NODE_ENV=\\\"production\\\" --define __DEV__=false --external react --external react-dom --external react-router --external socket.io-client",
+    "build:bun": "NODE_ENV=production bun build ./src/index.ts --outfile=dist/index.bun.js --format=esm --target=bun --minify --sourcemap=inline --define process.env.NODE_ENV=\\\"production\\\" --define __DEV__=false --external react --external react-dom --external react-router --external socket.io-client",
+    "build:types": "tsc -p tsconfig.build.json",
+    "build:dev": "bun run build:clean && NODE_ENV=development bun build ./src/index.ts --outdir=dist --format=esm --target=browser --sourcemap=inline --external react --external react-dom --external react-router --external socket.io-client && bun run build:types",
     "prepublishOnly": "bun run build"
   }
 }

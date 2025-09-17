@@ -118,3 +118,8 @@ class Env:
 
 # Singleton
 env = Env()
+
+
+# Commonly used helpesr
+def mode():
+    return env.pulse_mode

@@ -13,7 +13,6 @@ from typing import Any, Literal, Optional, Sequence, TypeVar, cast
 
 import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -238,10 +237,20 @@ class App:
         ASGI factory for uvicorn. This is called on every reload.
         """
 
-        host = env.pulse_host  # defaults to "localhost"
-        port = env.pulse_port  # defaults to "port"
-        protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
-        server_address = f"{protocol}://{host}:{port}"
+        # In prod, prefer the public server address passed to App(...).
+        # In dev/ci, derive from environment variables which the CLI populates
+        # based on the actual bind host/port.
+        if self.mode == "prod":
+            if not self.server_address:
+                raise RuntimeError(
+                    "In prod, please provide an explicit server_address to App(...)."
+                )
+            server_address = self.server_address
+        else:
+            host = env.pulse_host  # defaults to "localhost"
+            port = env.pulse_port  # defaults to 8000
+            protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
+            server_address = f"{protocol}://{host}:{port}"
 
         self.run_codegen(server_address)
         self.setup(server_address)

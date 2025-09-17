@@ -71,7 +71,8 @@ class AsyncEffectState(ps.State):
             self.step += 1
         await asyncio.sleep(0.5)
         # Keep going by rescheduling itself through a signal
-        self.step += 1
+        if self.step < 100:
+            self.step += 1
 
     def start(self):
         self.ticker.schedule()

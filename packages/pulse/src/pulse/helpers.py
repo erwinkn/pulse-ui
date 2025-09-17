@@ -109,7 +109,7 @@ def create_task(
     *,
     name: str | None = None,
     on_done: Callable[[asyncio.Task[T]], None] | None = None,
-) -> None:
+) -> asyncio.Task[T]:
     """Create and schedule a coroutine task on the main loop from any thread.
 
     - factory should create a fresh coroutine each call
@@ -121,6 +121,7 @@ def create_task(
         task = loop.create_task(coroutine, name=name)
         if on_done:
             task.add_done_callback(on_done)
+        return task
     except RuntimeError:
 
         async def _runner():
@@ -128,12 +129,14 @@ def create_task(
             task = loop.create_task(coroutine, name=name)
             if on_done:
                 task.add_done_callback(on_done)
+            return task
 
         try:
-            from_thread.run(_runner)
+            return from_thread.run(_runner)
         except RuntimeError:
-            if not _running_under_pytest():
-                raise
+            if _running_under_pytest():
+                return None  # type: ignore
+            raise
 
 
 def create_future_on_loop() -> asyncio.Future:

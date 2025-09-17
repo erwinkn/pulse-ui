@@ -241,6 +241,7 @@ class Effect:
             self.cleanup_fn()
 
     def dispose(self):
+        self.unschedule()
         for child in self.children.copy():
             child.dispose()
         if self.cleanup_fn:
@@ -249,8 +250,6 @@ class Effect:
             dep.obs.remove(self)
         if self.parent:
             self.parent.children.remove(self)
-        if self.batch:
-            self.batch.effects.remove(self)
 
     def schedule(self):
         # Immediate effects run right away when scheduled and do not enter a batch
@@ -261,6 +260,11 @@ class Effect:
         batch = rc.batch
         batch.register_effect(self)
         self.batch = batch
+
+    def unschedule(self):
+        if self.batch is not None:
+            self.batch.effects.remove(self)
+            self.batch = None
 
     def _push_change(self):
         self.schedule()
@@ -401,24 +405,23 @@ class AsyncEffect(Effect):
         self._task = create_task(_runner(), name=self._task_name())
 
     def cancel(self) -> None:
+        self.unschedule()
         if self._task and not self._task.done():
             self._task.cancel()
 
     def dispose(self):
         # Run children cleanups first, then cancel in-flight task
+        self.unschedule()
+        if self._task and not self._task.done():
+            self._task.cancel()
         for child in self.children.copy():
             child.dispose()
         if self.cleanup_fn:
             self.cleanup_fn()
-        if self._task and not self._task.done():
-            self._task.cancel()
         for dep in self.deps:
             dep.obs.remove(self)
         if self.parent:
             self.parent.children.remove(self)
-        if self.batch:
-            self.batch.effects.remove(self)
-            self.batch = None
 
 
 class Batch:

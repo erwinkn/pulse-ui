@@ -19,8 +19,13 @@ export async function loader(args: LoaderFunctionArgs) {
   const url = new URL(args.request.url);
   const matches = matchRoutes(rrPulseRouteTree, url.pathname) ?? [];
   const paths = matches.map(m => m.route.uniquePath);
-  const fwd = new Headers(args.request.headers);
-  fwd.delete("content-length");
+  // Build minimal, safe headers for cross-origin API call
+  const incoming = args.request.headers;
+  const fwd = new Headers();
+  const cookie = incoming.get("cookie");
+  const authorization = incoming.get("authorization");
+  if (cookie) fwd.set("cookie", cookie);
+  if (authorization) fwd.set("authorization", authorization);
   fwd.set("content-type", "application/json");
   const res = await fetch("${server_address}/prerender", {
     method: "POST",

@@ -16,6 +16,8 @@ from pulse.env import (
     ENV_PULSE_DISABLE_CODEGEN,
     ENV_PULSE_LOCK_MANAGED_BY_CLI,
     ENV_PULSE_SECRET,
+    ENV_PULSE_HOST,
+    ENV_PULSE_PORT,
     env,
 )
 from pulse.helpers import (
@@ -49,7 +51,7 @@ def run(
         help=("App target: 'path/to/app.py[:var]' (default :app) or 'module.path:var'"),
     ),
     address: str = typer.Option(
-        "127.0.0.1",
+        "localhost",
         "--bind-address",
         help="Host uvicorn binds to",
     ),
@@ -273,6 +275,9 @@ def run(
                 "FORCE_COLOR": "1",
                 # Signal that the CLI manages the dev lock lifecycle
                 ENV_PULSE_LOCK_MANAGED_BY_CLI: "1",
+                # Communicate bind host/port to the server for dev codegen
+                ENV_PULSE_HOST: address,
+                ENV_PULSE_PORT: str(port),
             }
         )
         # In prod when running backend only, disable codegen inside the server
@@ -369,7 +374,7 @@ def generate(
     app = load_app_from_target(app_file)
     console.log(f"📋 Found {len(app.routes.flat_tree)} routes")
 
-    addr = app.server_address or "127.0.0.1:8000"
+    addr = app.server_address or "localhost:8000"
     app.run_codegen(addr)
 
     if len(app.routes.flat_tree) > 0:

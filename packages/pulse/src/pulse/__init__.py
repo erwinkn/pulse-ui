@@ -16,7 +16,7 @@ from .helpers import (
     later,
     repeat,
 )
-from .env import PulseMode, env
+from .env import PulseMode, env, mode
 from .hooks import (
     call_api,
     client_address,
@@ -101,6 +101,8 @@ __all__ = [
     "RouteMount",
     # Environment
     "env",
+    "PulseMode",
+    "mode",
     # State and routing
     "State",
     "Route",
@@ -185,7 +187,6 @@ __all__ = [
     "CssStyle",
     "JsObject",
     "mode",
-    "PulseMode",
     "DeploymentMode",
     # Session context infra
     "SessionStore",

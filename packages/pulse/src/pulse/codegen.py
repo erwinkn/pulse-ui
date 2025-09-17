@@ -1,6 +1,6 @@
 import logging
-import os
 from dataclasses import dataclass
+from pulse.env import env
 from pathlib import Path
 from typing import Sequence
 
@@ -11,7 +11,7 @@ from pulse.templates import (
     ROUTES_RUNTIME_TEMPLATE,
 )
 
-from .routing import Layout, Route, RouteTree
+from pulse.routing import Layout, Route, RouteTree
 
 logger = logging.getLogger(__file__)
 
@@ -52,10 +52,10 @@ class CodegenConfig:
         """
         if isinstance(self.base_dir, Path):
             return self.base_dir
-        app_file = os.environ.get("PULSE_APP_FILE")
+        app_file = env.pulse_app_file
         if app_file:
             return Path(app_file).parent
-        app_dir = os.environ.get("PULSE_APP_DIR")
+        app_dir = env.pulse_app_dir
         if app_dir:
             return Path(app_dir)
         return Path.cwd()

@@ -5,6 +5,7 @@ from typing import Optional
 
 import pulse as ps
 from pulse.middleware import Deny, NotFound, Ok, Redirect
+from pulse.user_session import InMemorySessionStore
 
 
 # State Management
@@ -565,7 +566,7 @@ app = ps.App(
             ],
         )
     ],
-    middleware=None,
+    session_store=InMemorySessionStore() if ps.env.pulse_mode == "prod" else None,
 )
 
 

@@ -6,20 +6,22 @@ to define routes and configure their Pulse application.
 """
 
 import logging
-import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from enum import IntEnum
-from typing import Literal, Optional, Sequence, TypeVar, cast
+from typing import Any, Literal, Optional, Sequence, TypeVar, cast
 
 import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.responses import JSONResponse
+
+from fastapi.middleware.cors import CORSMiddleware
 
 import pulse.flatted as flatted
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
+from pulse.env import PulseMode, env
 from pulse.cookies import (
     CORSOptions,
     Cookie,
@@ -28,8 +30,6 @@ from pulse.cookies import (
     compute_cookie_domain,
 )
 from pulse.helpers import (
-    DeploymentMode,
-    PulseMode,
     create_task,
     ensure_web_lock,
     get_client_address,
@@ -73,6 +73,7 @@ class AppStatus(IntEnum):
     stopped = 3
 
 
+DeploymentMode = Literal["dev", "same_host", "subdomains"]
 
 
 class App:
@@ -108,6 +109,7 @@ class App:
         mode: Optional[PulseMode] = None,
         deployment: DeploymentMode = "subdomains",
         cors: Optional[CORSOptions] = None,
+        fastapi: Optional[dict[str, Any]] = None,
     ):
         """
         Initialize a new Pulse App.
@@ -117,11 +119,7 @@ class App:
             codegen: Optional codegen configuration.
         """
         # Resolve mode from environment and expose on the app instance
-        if mode is None:
-            mode = os.environ.get("PULSE_MODE", "dev").lower()  # type: ignore
-            if mode not in {"dev", "ci", "prod"}:
-                mode = "dev"
-        self.mode: PulseMode = cast(PulseMode, mode)
+        self.mode: PulseMode = mode or env.pulse_mode
         self.deployment: DeploymentMode = "dev" if self.mode == "dev" else deployment
         self.status = AppStatus.created
         # Persist the server address for use by sessions (API calls, etc.)
@@ -175,7 +173,7 @@ class App:
             # Create a lock file in the web project (unless the CLI manages it)
             lock_path = None
             try:
-                if os.environ.get("PULSE_LOCK_MANAGED_BY_CLI") != "1":
+                if not env.lock_managed_by_cli:
                     try:
                         lock_path = lock_path_for_web_root(self.codegen.cfg.web_root)
                         ensure_web_lock(lock_path, owner="server")
@@ -198,13 +196,16 @@ class App:
                     logger.exception("Error during SessionStore.close()")
                 # Remove lock if we created it
                 try:
-                    if os.environ.get("PULSE_LOCK_MANAGED_BY_CLI") != "1" and lock_path:
+                    if not env.lock_managed_by_cli and lock_path:
                         remove_web_lock(lock_path)
                 except Exception:
                     # Best-effort
                     pass
 
-        self.fastapi = FastAPI(title="Pulse UI Server", lifespan=lifespan)
+        self.fastapi = FastAPI(
+            title="Pulse UI Server",
+            lifespan=lifespan,
+        )
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
         self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
         if middleware is None:
@@ -221,6 +222,9 @@ class App:
         self.middleware = MiddlewareStack(mw_stack)
 
     def run_codegen(self, address: Optional[str] = None):
+        # Allow the CLI to disable codegen in specific scenarios (e.g., prod server-only)
+        if env.codegen_disabled:
+            return
         if address:
             self.server_address = address
         if not self.server_address:
@@ -234,8 +238,8 @@ class App:
         ASGI factory for uvicorn. This is called on every reload.
         """
 
-        host = os.environ.get("PULSE_HOST", "localhost")
-        port = int(os.environ.get("PULSE_PORT", 8000))
+        host = env.pulse_host  # defaults to "localhost"
+        port = env.pulse_port  # defaults to "port"
         protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
         server_address = f"{protocol}://{host}:{port}"
 

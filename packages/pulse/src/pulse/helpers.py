@@ -1,16 +1,15 @@
 import asyncio
 import json
 import os
-from pathlib import Path
 import platform
 import socket
 import time
+from pathlib import Path
 from typing import (
     Any,
     Callable,
     Coroutine,
     Iterable,
-    Literal,
     ParamSpec,
     Protocol,
     TypedDict,
@@ -19,8 +18,8 @@ from typing import (
     Unpack,
 )
 from urllib.parse import urlsplit
-from anyio import from_thread
 
+from anyio import from_thread
 from fastapi import Request
 
 from pulse.vdom import Element
@@ -39,10 +38,6 @@ JsFunction = Callable[P, T]
 
 # In case we refine it later
 CssStyle = dict[str, Any]
-
-
-PulseMode = Literal["dev", "ci", "prod"]
-DeploymentMode = Literal["dev", "same_host", "subdomains"]
 
 
 # Will be replaced by a JS transpiler type

@@ -1,4 +1,4 @@
-from .app import App
+from .app import App, DeploymentMode
 from .codegen import CodegenConfig
 from .components import (
     Link,
@@ -15,9 +15,8 @@ from .helpers import (
     JsObject,
     later,
     repeat,
-    PulseMode,
-    DeploymentMode,
 )
+from .env import PulseMode, env
 from .hooks import (
     call_api,
     client_address,
@@ -100,6 +99,8 @@ __all__ = [
     "RenderSession",
     "PulseContext",
     "RouteMount",
+    # Environment
+    "env",
     # State and routing
     "State",
     "Route",
@@ -183,6 +184,7 @@ __all__ = [
     "JsFunction",
     "CssStyle",
     "JsObject",
+    "mode",
     "PulseMode",
     "DeploymentMode",
     # Session context infra

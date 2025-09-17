@@ -41,7 +41,6 @@ class Cookie:
 
     def set_on_fastapi(self, response: Response, value: str) -> None:
         """Set the session cookie on a FastAPI Response-like object."""
-        print(f"Setting cookie {self.name}, samesite = {self.samesite}, domain={self.domain}, secure={self.secure}")
         response.set_cookie(
             key=self.name,
             value=value,

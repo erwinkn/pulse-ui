@@ -5,7 +5,6 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import secrets
 import zlib
 import uuid
@@ -15,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 from fastapi import Response
 
 from pulse.cookies import SetCookie
+from pulse.env import env
 from pulse.reactive import AsyncEffect, Effect
 from pulse.reactive_extensions import ReactiveDict, reactive
 
@@ -170,11 +170,9 @@ class CookieSessionStore:
         max_cookie_bytes: int = 3800,
     ) -> None:
         if not secret:
-            secret = (
-                os.environ.get("PULSE_SECRET") or os.environ.get("SECRET_KEY") or ""
-            )
+            secret = env.pulse_secret or ""
             if not secret:
-                mode = os.environ.get("PULSE_MODE", "dev").lower()
+                mode = env.pulse_mode
                 if mode == "prod":
                     # In CI/production, require an explicit secret
                     raise RuntimeError(

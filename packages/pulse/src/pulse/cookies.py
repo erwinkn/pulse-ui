@@ -1,9 +1,11 @@
 from dataclasses import KW_ONLY, dataclass
-from typing import Literal, Optional, Sequence, TypedDict
+from typing import TYPE_CHECKING, Literal, Optional, Sequence, TypedDict
 from fastapi import Request, Response
-from pulse.helpers import DeploymentMode
 from pulse.hooks import set_cookie
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from pulse.app import DeploymentMode
 
 
 @dataclass
@@ -68,7 +70,7 @@ class SetCookie(Cookie):
 
 
 def session_cookie(
-    mode: DeploymentMode,
+    mode: "DeploymentMode",
     name: str = "pulse.sid",
     max_age_seconds: int = 7 * 24 * 3600,
 ):
@@ -132,9 +134,7 @@ def _base_domain(host: str) -> str:
     return host[i + 1 :] if i != -1 else host
 
 
-def compute_cookie_domain(
-    mode: DeploymentMode, server_address: str
-) -> Optional[str]:
+def compute_cookie_domain(mode: "DeploymentMode", server_address: str) -> Optional[str]:
     host = _parse_host(server_address)
     if mode == "dev" or not host:
         return None
@@ -145,7 +145,7 @@ def compute_cookie_domain(
     return None
 
 
-def cors_options(mode: DeploymentMode, server_address: str) -> CORSOptions:
+def cors_options(mode: "DeploymentMode", server_address: str) -> CORSOptions:
     host = _parse_host(server_address) or "localhost"
     opts: CORSOptions = {
         "allow_credentials": True,

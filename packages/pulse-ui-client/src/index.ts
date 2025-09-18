@@ -61,4 +61,4 @@ export {
   decodeFromWire,
   cleanForSerialization,
 } from "./serialize/clean";
-export { stringify, parse } from "./serialize/flatted";
+export { stringify, parse } from "./serialize/v1";

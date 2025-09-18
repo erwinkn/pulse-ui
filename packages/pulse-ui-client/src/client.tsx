@@ -3,9 +3,9 @@ import type { ClientMountMessage } from "./messages";
 import type { VDOM, VDOMUpdate } from "./vdom";
 import { extractEvent } from "./serialize/events";
 import {
-  stringify as flattedStringify,
-  parse as flattedParse,
-} from "./serialize/flatted";
+  stringify as v1Stringify,
+  parse as v1Parse,
+} from "./serialize/v1";
 
 import { io, Socket } from "socket.io-client";
 import type {
@@ -80,7 +80,7 @@ export class PulseSocketIOClient {
         for (const [path, route] of this.activeViews) {
           socket.emit(
             "message",
-            flattedStringify({
+            v1Stringify({
               type: "mount",
               path: path,
               routeInfo: route.routeInfo,
@@ -97,7 +97,7 @@ export class PulseSocketIOClient {
           if (payload.type === "navigate") {
             continue;
           }
-          socket.emit("message", flattedStringify(payload));
+          socket.emit("message", v1Stringify(payload));
         }
         this.messageQueue = [];
 
@@ -118,7 +118,7 @@ export class PulseSocketIOClient {
 
       // Wrap in an arrow function to avoid losing the `this` reference
       socket.on("message", (data) =>
-        this.handleServerMessage(flattedParse(data) as ServerMessage)
+        this.handleServerMessage(v1Parse(data) as ServerMessage)
       );
     });
   }
@@ -153,7 +153,7 @@ export class PulseSocketIOClient {
   private async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
       // console.log("[SocketIOTransport] Sending:", payload);
-      this.socket!.emit("message", flattedStringify(payload));
+      this.socket!.emit("message", v1Stringify(payload));
     } else {
       // console.log("[SocketIOTransport] Queuing message:", payload);
       this.messageQueue.push(payload);

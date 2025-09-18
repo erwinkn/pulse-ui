@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 
-import pulse.flatted as flatted
+from pulse.serializer_v2 import Serialized, serialize, deserialize, default_extensions
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.env import PulseMode, env
@@ -466,8 +466,10 @@ class App:
                     self._user_to_render[session.sid].append(rid)
 
             def on_message(message: ServerMessage):
-                payload = flatted.stringify(message)
-                create_task(self.sio.emit("message", payload, to=sid))
+                payload = serialize(message, default_extensions())
+                # `serialize` returns a tuple, which socket.io will mistake for multiple arguments
+                payload = list(payload)
+                create_task(self.sio.emit("message", list(payload), to=sid))
 
             render.connect(on_message)
             # Map socket sid to renderId for message routing
@@ -499,31 +501,47 @@ class App:
                 self.close_render(rid)
 
         @self.sio.event
-        def message(sid: str, data: ClientMessage):
+        def message(sid: str, data: Serialized):
             rid = self._socket_to_render.get(sid)
             if not rid:
                 return
             render = self.render_sessions.get(rid)
             if render is None:
                 return
+            # Use renderId mapping to user session
+            session = self.user_sessions[self._render_to_user[rid]]
+            # Deserialize the message using v2
+            msg: ClientMessage = deserialize(data, default_extensions())
             try:
-                # Deserialize the message using flatted
-                data = flatted.parse(data)
-                # Use renderId mapping to user session
-                session = self.user_sessions[self._render_to_user[rid]]
 
-                # Per-message middleware guard
+                def _handler():
+                    if msg["type"] == "mount":
+                        render.mount(msg["path"], msg["routeInfo"])
+                    elif msg["type"] == "navigate":
+                        render.navigate(msg["path"], msg["routeInfo"])
+                    elif msg["type"] == "callback":
+                        render.execute_callback(
+                            msg["path"], msg["callback"], msg["args"]
+                        )
+                    elif msg["type"] == "unmount":
+                        render.unmount(msg["path"])
+                    elif msg["type"] == "api_result":
+                        render.handle_api_result(dict(msg))
+                    else:
+                        logger.warning(f"Unknown message type received: {msg}")
+                    return Ok()
+
                 with PulseContext.update(session=session, render=render):
                     try:
                         # Run middleware within the session's reactive context
                         res = self.middleware.message(
-                            data=data,
+                            data=msg,
                             session=session.data,
-                            next=lambda: Ok(None),
+                            next=_handler,
                         )
                         if isinstance(res, Deny):
                             # Report as server error for this path
-                            path = cast(str, data.get("path", "api_response"))
+                            path = cast(str, msg.get("path", "api_response"))
                             render.report_error(
                                 path,
                                 "server",
@@ -533,21 +551,6 @@ class App:
                             return
                     except Exception:
                         logger.exception("Error in message middleware")
-                    if data["type"] == "mount":
-                        render.mount(data["path"], data["routeInfo"])
-                    elif data["type"] == "navigate":
-                        render.navigate(data["path"], data["routeInfo"])
-                    elif data["type"] == "callback":
-                        render.execute_callback(
-                            data["path"], data["callback"], data["args"]
-                        )
-                    elif data["type"] == "unmount":
-                        render.unmount(data["path"])
-                    elif data["type"] == "api_result":
-                        # type: ignore[union-attr]
-                        render.handle_api_result(data)  # type: ignore[arg-type]
-                    else:
-                        logger.warning(f"Unknown message type received: {data}")
 
             except Exception as e:
                 # Best effort: report error for this path if available

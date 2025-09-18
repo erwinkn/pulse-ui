@@ -5,7 +5,7 @@ Tests for the flatted serialization module.
 import datetime
 import pytest
 from typing import Any, Dict
-from pulse.flatted import stringify, parse
+from pulse.serializer import stringify, parse
 
 
 class TestFlatted:

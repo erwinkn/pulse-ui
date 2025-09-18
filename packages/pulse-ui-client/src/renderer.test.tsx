@@ -49,7 +49,7 @@ describe("applyReactTreeUpdates", () => {
       {
         type: "update_props",
         path: "",
-        data: { id: "root", onClick: "$$fn:cb" },
+        data: { set: { id: "root", onClick: "$$fn:cb" } },
       },
     ];
     tree = applyUpdates(tree, ops, renderer);
@@ -108,7 +108,6 @@ describe("applyReactTreeUpdates", () => {
     );
     let root = tree as React.ReactElement;
     let p0 = childrenArray(root)[0] as React.ReactElement;
-    console.log("p0:", p0)
     let kids = childrenArray(p0);
     expect(kids).toHaveLength(2);
     expect((kids[0] as React.ReactElement).type).toBe("span");

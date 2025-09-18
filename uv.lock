@@ -677,7 +677,7 @@ wheels = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.14"
+version = "0.1.15"
 source = { editable = "packages/pulse" }
 dependencies = [
     { name = "fastapi" },

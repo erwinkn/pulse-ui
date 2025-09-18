@@ -69,7 +69,6 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
 
 export default function PulseLayout() {
   const data = useLoaderData<typeof loader>();
-  console.log("Loader data:", data);
   if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
     sessionStorage.setItem("__PULSE_RENDER_ID", data.renderId);
   }

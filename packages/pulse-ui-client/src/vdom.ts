@@ -57,7 +57,10 @@ export interface ReplaceUpdate extends VDOMUpdateBase {
 
 export interface UpdatePropsUpdate extends VDOMUpdateBase {
   type: "update_props";
-  data: Record<string, any>; // The new props
+  data: {
+    set?: Record<string, any>;
+    remove?: string[];
+  };
 }
 
 export interface MoveUpdate extends VDOMUpdateBase {

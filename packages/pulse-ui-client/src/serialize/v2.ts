@@ -18,7 +18,7 @@ corresponding data entry, before handing it off to the extension.
 This format is similar to the one adopted by Flatted, but with a different
 extension system.
 */
-export type Primitive = number | string | boolean;
+export type Primitive = number | string | boolean | null | undefined;
 export type DataEntry = Primitive | Record<string, number> | Array<number>;
 export type Serialized = [Array<Array<number>>, Array<DataEntry>];
 
@@ -39,9 +39,8 @@ export type Serializable<Ext extends unknown = never> =
   | Array<PrimitiveWithExt<Ext>>
   | Record<string, PrimitiveWithExt<Ext>>;
 
-export type SerializableWith<Extensions extends Array<Extension<any>>> = Serializable<
-  ExtensionTypes<Extensions>
->;
+export type SerializableWith<Extensions extends Array<Extension<any>>> =
+  Serializable<ExtensionTypes<Extensions>>;
 
 export function serialize<Extensions extends Array<Extension>>(
   data: SerializableWith<Extensions>,
@@ -57,6 +56,7 @@ export function serialize<Extensions extends Array<Extension>>(
     if (cached !== undefined) return cached;
     // Primitives (as defined by this format) are stored directly
     if (
+      value == null || // catch both null and undefined
       typeof value === "number" ||
       typeof value === "string" ||
       typeof value === "boolean"
@@ -150,10 +150,10 @@ export function deserialize<Extensions extends Array<Extension>>(
   const resolve = (idx: number): any => {
     if (resolved.has(idx)) return resolved.get(idx);
 
-    const entry = entries[idx];
-    if (entry === undefined) {
+    if (idx < 0 || idx >= entries.length) {
       throw new Error(`Invalid serialized data: missing entry at index ${idx}`);
     }
+    let entry = entries[idx];
 
     if (nodeToExt.has(idx)) {
       const ext = extensions[nodeToExt.get(idx)!]!;
@@ -165,10 +165,12 @@ export function deserialize<Extensions extends Array<Extension>>(
     }
 
     if (
+      entry == null ||
       typeof entry === "number" ||
       typeof entry === "string" ||
       typeof entry === "boolean"
     ) {
+      entry ??= undefined;
       resolved.set(idx, entry);
       return entry;
     }
@@ -195,4 +197,132 @@ export function deserialize<Extensions extends Array<Extension>>(
     throw new Error("Invalid serialized data: empty entries array");
   }
   return resolve(0);
+}
+
+const dateExt: Extension<Date> = {
+  check(value: unknown): value is Date {
+    return value instanceof Date;
+  },
+  encode(value, encode) {
+    return { t: encode("date"), ts: encode(value.getTime()) };
+  },
+  decode(entry, decode) {
+    const t = decode((entry as Record<string, number>).t) as string;
+    if (t !== "date") throw new Error("Invalid date payload");
+    const ts = decode((entry as Record<string, number>).ts) as number;
+    return new Date(ts);
+  },
+};
+
+const fileExt: Extension<File> = {
+  check(value: unknown): value is File {
+    return typeof File !== "undefined" && value instanceof File;
+  },
+  encode(file: File, encode: (v: unknown) => number) {
+    return {
+      t: encode("file"),
+      n: encode(file.name),
+      tp: encode(file.type),
+      sz: encode(file.size),
+      lm: encode(file.lastModified),
+      // raw browser File object - socket.io will carry it as binary
+      b: file,
+    } as any;
+  },
+  decode(entry: DataEntry, decode: (i: number) => unknown): File {
+    const e = entry as any;
+    const t = decode(e.t) as string;
+    if (t !== "file") throw new Error("Invalid file payload");
+    const name = decode(e.n) as string;
+    const type = decode(e.tp) as string;
+    const size = decode(e.sz) as number;
+    const lastModified = decode(e.lm) as number;
+    const raw = e.file;
+    if (typeof File !== "undefined") {
+      if (raw instanceof File) return raw;
+      if (raw && (raw instanceof Uint8Array || raw instanceof ArrayBuffer)) {
+        const buf =
+          raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
+        return new File([buf as unknown as BlobPart], name, {
+          type,
+          lastModified,
+        });
+      }
+      // Try Blob
+      if (typeof Blob !== "undefined" && raw instanceof Blob) {
+        return new File([raw], name, { type, lastModified });
+      }
+    }
+    // Fallback return a plain object if File is not available
+    return { name, type, size, lastModified, file: raw } as unknown as File;
+  },
+} as any;
+
+const formDataExt: Extension<FormData> = {
+  check(value: unknown): value is FormData {
+    return typeof FormData !== "undefined" && value instanceof FormData;
+  },
+  encode(fd: FormData, encode: (v: unknown) => number) {
+    const fields: Record<string, unknown | unknown[]> = {};
+    for (const [key, val] of fd.entries()) {
+      const prev = fields[key];
+      if (prev === undefined) fields[key] = val as any;
+      else if (Array.isArray(prev)) prev.push(val as any);
+      else fields[key] = [prev, val as any];
+    }
+    return { t: encode("formdata"), f: encode(fields) };
+  },
+  decode(entry: DataEntry, decode: (i: number) => unknown) {
+    const t = decode((entry as Record<string, number>).t) as string;
+    if (t !== "formdata") throw new Error("Invalid formdata payload");
+    const data = decode((entry as Record<string, number>).f) as Record<
+      string,
+      unknown | unknown[]
+    >;
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(data)) {
+      if (Array.isArray(v)) {
+        for (const item of v) fd.append(k, item as any);
+      } else {
+        fd.append(k, v as any);
+      }
+    }
+    return fd;
+  },
+} as any;
+
+const setExt: Extension<Set<unknown>> = {
+  check(value: unknown): value is Set<unknown> {
+    return value instanceof Set;
+  },
+  encode(set, encode) {
+    return { t: encode("set"), items: encode(Array.from(set.values())) };
+  },
+  decode(entry, decode) {
+    const t = decode((entry as Record<string, number>).t) as string;
+    if (t !== "set") throw new Error("Invalid set payload");
+    const items = decode((entry as Record<string, number>).items) as unknown[];
+    return new Set(items);
+  },
+};
+
+const mapExt: Extension<Map<unknown, unknown>> = {
+  check(value: unknown): value is Map<unknown, unknown> {
+    return value instanceof Map;
+  },
+  encode(map, encode) {
+    return { t: encode("map"), entries: encode(Array.from(map.entries())) };
+  },
+  decode(entry, decode) {
+    const t = decode((entry as Record<string, number>).t) as string;
+    if (t !== "map") throw new Error("Invalid map payload");
+    const entriesArr = decode(
+      (entry as Record<string, number>).entries
+    ) as Array<[unknown, unknown]>;
+    return new Map(entriesArr);
+  },
+};
+// Default extensions for browser/runtime usage (order MUST match server)
+export function defaultExtensions() {
+  return [dateExt, fileExt, formDataExt, setExt, mapExt];
 }

@@ -16,14 +16,17 @@ Extensions:
 
 from __future__ import annotations
 
-from typing import Any, Callable, Generic, Protocol, Sequence, Tuple, TypeVar
+from typing import Any, Callable, Generic, Protocol, Sequence, TypeVar
+import datetime as dt
+from dataclasses import dataclass
 
-Primitive = int | float | str | bool
+Primitive = int | float | str | bool | None
 DataEntry = Primitive | list[int] | dict[str, int]
-Serialized = Tuple[list[list[int]], list[DataEntry]]
+Serialized = tuple[list[list[int]], list[DataEntry]]
 
 T = TypeVar("T")
 R = TypeVar("R")
+
 
 class Extension(Protocol, Generic[T]):
     @staticmethod
@@ -51,7 +54,7 @@ def serialize(data: Any, extensions: Sequence[Extension]) -> Serialized:
                 return seen_by_id[obj_id]
 
         # Primitives are stored directly
-        if isinstance(value, Primitive):
+        if value is None or isinstance(value, (int, float, str, bool)):
             idx = len(entries)
             entries.append(value)
             return idx
@@ -140,7 +143,7 @@ def deserialize(data: Serialized, extensions: Sequence[Extension]) -> Any:
             return val
 
         # Primitives
-        if isinstance(entry, Primitive):
+        if entry is None or isinstance(entry, (int, float, str, bool)):
             resolved[idx] = entry
             return entry
 
@@ -165,3 +168,131 @@ def deserialize(data: Serialized, extensions: Sequence[Extension]) -> Any:
     if not entries:
         raise ValueError("Invalid serialized data: empty entries array")
     return resolve(0)
+
+
+class DateExt:
+    @staticmethod
+    def check(value: Any) -> bool:
+        return isinstance(value, dt.datetime)
+
+    @staticmethod
+    def encode(value: dt.datetime, encode):
+        return {"t": encode("date"), "ts": encode(int(value.timestamp() * 1000))}
+
+    @staticmethod
+    def decode(entry, decode):
+        t = decode(entry["t"])  # "date"
+        if t != "date":
+            raise ValueError("invalid date payload")
+        ts = decode(entry["ts"])  # ms
+        return dt.datetime.fromtimestamp(ts / 1000.0, tz=dt.timezone.utc)
+
+
+class SetExt:
+    @staticmethod
+    def check(value: Any) -> bool:
+        return isinstance(value, set)
+
+    @staticmethod
+    def encode(value: set, encode):
+        return {"t": encode("set"), "items": encode(list(value))}
+
+    @staticmethod
+    def decode(entry, decode):
+        if decode(entry["t"]) != "set":
+            raise ValueError("invalid set payload")
+        return set(decode(entry["items"]))
+
+
+# Map not needed on server normally; kept for parity
+class MapExt(Extension[dict]):
+    @staticmethod
+    def check(value: Any) -> bool:
+        return False
+        # return isinstance(value, dict)
+
+    @staticmethod
+    def encode(value, encode):
+        raise NotImplementedError()
+
+    @staticmethod
+    def decode(entry, decode):
+        if decode(entry["t"]) != "map":
+            raise ValueError("Invalid Map payload")
+        return dict(decode(entry["entries"]))
+
+
+@dataclass
+class File:
+    name: str
+    type: str
+    size: int
+    last_modified: int
+    contents: bytes
+
+
+class FileExt(Extension[File]):
+    @staticmethod
+    def check(value: Any) -> bool:
+        return isinstance(value, File)
+
+    @staticmethod
+    def encode(value: File, encode):
+        return {
+            "t": encode("file"),
+            "n": encode(value.name),
+            "tp": encode(value.type),
+            "sz": encode(value.size),
+            "lm": encode(value.last_modified),
+            "b": value.contents,
+        }
+
+    @staticmethod
+    def decode(entry, decode) -> File:
+        t = decode(entry["t"])  # "file"
+        if t != "file":
+            raise ValueError("invalid file payload")
+        name = decode(entry["n"])  # str
+        tp = decode(entry["tp"])  # str
+        sz = decode(entry["sz"])  # int
+        lm = decode(entry["lm"])  # int
+        raw = entry.get("b", b"")
+        if isinstance(raw, memoryview):
+            raw = raw.tobytes()
+        if not isinstance(raw, (bytes, bytearray)):
+            raw = bytes()
+        return File(
+            name=name,
+            type=tp,
+            size=sz,
+            last_modified=lm,
+            contents=raw,  # pyright: ignore[reportArgumentType]
+        )
+
+
+FormData = dict[str, str | File | list[str | File]]
+
+
+class FormDataExt(Extension[FormData]):
+    @staticmethod
+    def check(value) -> bool:
+        # Server never encodes FormData; allow dict[str, Any] if tagged
+        return False
+
+    @staticmethod
+    def encode(value, encode):
+        raise NotImplementedError()
+
+    @staticmethod
+    def decode(entry, decode):
+        t = decode(entry["t"])  # "formdata"
+        if t != "formdata":
+            raise ValueError("invalid formdata payload")
+        data = decode(entry["f"])  # dict
+        # Values already decoded; return as dict[str, str|File|list[str|File]]
+        return data
+
+
+def default_extensions() -> list[Extension]:
+    # Order must match the client: [Date, File, FormData, Set, Map]
+    return [DateExt, FileExt, FormDataExt, SetExt, MapExt]

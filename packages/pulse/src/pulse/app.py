@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from pulse.serializer import stringify, parse
+from pulse.serializer_v2 import Serialized, serialize, deserialize, default_extensions
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.env import PulseMode, env
@@ -466,8 +466,10 @@ class App:
                     self._user_to_render[session.sid].append(rid)
 
             def on_message(message: ServerMessage):
-                payload = stringify(message)
-                create_task(self.sio.emit("message", payload, to=sid))
+                payload = serialize(message, default_extensions())
+                # `serialize` returns a tuple, which socket.io will mistake for multiple arguments
+                payload = list(payload)
+                create_task(self.sio.emit("message", list(payload), to=sid))
 
             render.connect(on_message)
             # Map socket sid to renderId for message routing
@@ -499,7 +501,7 @@ class App:
                 self.close_render(rid)
 
         @self.sio.event
-        def message(sid: str, data: ClientMessage):
+        def message(sid: str, data: Serialized):
             rid = self._socket_to_render.get(sid)
             if not rid:
                 return
@@ -508,11 +510,11 @@ class App:
                 return
             # Use renderId mapping to user session
             session = self.user_sessions[self._render_to_user[rid]]
+            # Deserialize the message using v2
+            msg: ClientMessage = deserialize(data, default_extensions())
             try:
 
                 def _handler():
-                    # Deserialize the message using flatted
-                    msg = parse(data)
                     if msg["type"] == "mount":
                         render.mount(msg["path"], msg["routeInfo"])
                     elif msg["type"] == "navigate":
@@ -524,7 +526,7 @@ class App:
                     elif msg["type"] == "unmount":
                         render.unmount(msg["path"])
                     elif msg["type"] == "api_result":
-                        render.handle_api_result(msg)
+                        render.handle_api_result(dict(msg))
                     else:
                         logger.warning(f"Unknown message type received: {msg}")
                     return Ok()
@@ -533,13 +535,13 @@ class App:
                     try:
                         # Run middleware within the session's reactive context
                         res = self.middleware.message(
-                            data=data,
+                            data=msg,
                             session=session.data,
                             next=_handler,
                         )
                         if isinstance(res, Deny):
                             # Report as server error for this path
-                            path = cast(str, data.get("path", "api_response"))
+                            path = cast(str, msg.get("path", "api_response"))
                             render.report_error(
                                 path,
                                 "server",

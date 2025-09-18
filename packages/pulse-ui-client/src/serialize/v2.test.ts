@@ -19,10 +19,12 @@ const DateExtension = {
 
 describe("v2 serialization format", () => {
   it("serializes primitives as direct entries and round trips", () => {
-    const data = [1, "a", true];
+    const data = [1, "a", true, null, undefined];
     const ser = serialize(data, []);
     const parsed = deserialize(ser, []);
-    expect(parsed).toEqual(data);
+    // null should be deserialized to undefined
+    const expected = data.map(x => x ?? undefined)
+    expect(parsed).toEqual(expected);
   });
 
   it("decodes nested extension values (Set of Dates) and preserves shared refs", () => {
@@ -142,8 +144,7 @@ describe("v2 serialization format", () => {
     expect(parsed.when).toBe(parsed.same);
   });
 
-  it("throws on unsupported values (undefined/function/symbol)", () => {
-    expect(() => serialize({ x: undefined } as any, [])).toThrow();
+  it("throws on unsupported values (function/symbol)", () => {
     expect(() => serialize({ x: () => {} } as any, [])).toThrow();
     expect(() => serialize({ x: Symbol("s") } as any, [])).toThrow();
   });

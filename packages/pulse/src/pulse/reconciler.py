@@ -511,11 +511,8 @@ def _flatten_children(
             # If any Node/ComponentNode yielded by this iterable lacks a key,
             # emit a single warning for this iterable.
             missing_key = False
-            for sub in item:  # type: ignore[operator]
-                if (
-                    isinstance(sub, (Node, ComponentNode))
-                    and getattr(sub, "key", None) is None
-                ):
+            for sub in item:
+                if isinstance(sub, (Node, ComponentNode)) and sub.key is None:
                     missing_key = True
                 visit(sub)
             if missing_key:
@@ -527,10 +524,9 @@ def _flatten_children(
                     ).format(parent_tag, path),
                     stacklevel=3,
                 )
-            return
-
-        # Not an iterable child: must be a Element or primitive
-        flat.append(item)
+        else:
+            # Not an iterable child: must be a Element or primitive
+            flat.append(item)
 
     for child in children:
         visit(child)

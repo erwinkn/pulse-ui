@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stringify, parse } from "./flatted";
+import { stringify, parse } from "./v1";
 
 describe("flatted serialization", () => {
   describe("primitives", () => {

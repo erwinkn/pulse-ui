@@ -478,6 +478,7 @@ class DatePickerState(ps.State):
     value: Optional[datetime] = None
 
     def set_value(self, v: datetime | None):
+        print(f"Setting value {v} (type: {type(v)})")
         self.value = v
 
 

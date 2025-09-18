@@ -1,4 +1,11 @@
-import React, { cloneElement, createElement, isValidElement, lazy, Suspense, type ComponentType } from "react";
+import React, {
+  cloneElement,
+  createElement,
+  isValidElement,
+  lazy,
+  Suspense,
+  type ComponentType,
+} from "react";
 import type { ComponentRegistry, VDOMNode, VDOMUpdate } from "./vdom";
 import {
   FRAGMENT_TAG,
@@ -64,11 +71,7 @@ export class VDOMRenderer {
       if (isMountPointNode(node)) {
         const componentKey = node.tag.slice(MOUNT_POINT_PREFIX.length);
         const Component = this.components[componentKey]!;
-        return createElement(
-          Component,
-          processedProps,
-          ...renderedChildren
-        );
+        return createElement(Component, processedProps, ...renderedChildren);
       }
 
       return createElement(
@@ -149,8 +152,25 @@ export function applyUpdates(
         case "update_props": {
           assertIsElement(node, parts, depth);
           node = node as React.ReactElement;
-          const nextProps = processPropsForCallbacks(renderer, update.data);
+          const currentProps = (node.props ?? {}) as object;
+          const nextProps: Record<string, any> = { ...currentProps };
+
+          console.log("update_props, data:", update.data);
+          const delta = update.data;
+          if (delta.remove && delta.remove.length > 0) {
+            for (const key of delta.remove) {
+              if (key in nextProps) delete nextProps[key];
+            }
+          }
+          if (delta.set) {
+            const processed = processPropsForCallbacks(renderer, delta.set);
+            for (const [k, v] of Object.entries(processed)) {
+              nextProps[k] = v;
+            }
+          }
           // Not passing children -> only update the props
+          console.log("Old props:", node.props);
+          console.log("New props:", nextProps);
           return cloneElement(node, nextProps);
         }
         case "insert": {

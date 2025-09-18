@@ -48,7 +48,13 @@ class ReplaceOperation(TypedDict):
 class UpdatePropsOperation(TypedDict):
     type: Literal["update_props"]
     path: str
-    data: Props
+    data: "UpdatePropsDelta"
+
+
+class UpdatePropsDelta(TypedDict, total=False):
+    # Only send changed/new keys under `set` and removed keys under `remove`
+    set: Props
+    remove: list[str]
 
 
 class MoveOperationData(TypedDict):
@@ -203,12 +209,31 @@ class Resolver:
                 if new_tree.props
                 else None
             )
-            # TODO: old_tree
-            if old_tree.props != new_props:
+            # Compute fine-grained props delta: send only changed/new and removed
+            old_props = cast(Props, old_tree.props or {})
+            new_props_dict = cast(Props, new_props or {})
+
+            set_changes: Props = {}
+            removed_keys: list[str] = []
+
+            # Detect new and modified keys
+            for k, v in new_props_dict.items():
+                if (k not in old_props) or (old_props.get(k) != v):
+                    set_changes[k] = v
+
+            # Detect removed keys
+            for k in old_props.keys():
+                if k not in new_props_dict:
+                    removed_keys.append(k)
+
+            if set_changes or removed_keys:
+                delta: UpdatePropsDelta = {}
+                if set_changes:
+                    delta["set"] = set_changes
+                if removed_keys:
+                    delta["remove"] = removed_keys
                 self.operations.append(
-                    UpdatePropsOperation(
-                        type="update_props", path=path, data=new_props or {}
-                    )
+                    UpdatePropsOperation(type="update_props", path=path, data=delta)
                 )
             normalized_children: list[Element] = []
             if old_tree.children or new_tree.children:

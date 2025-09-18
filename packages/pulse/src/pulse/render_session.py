@@ -6,7 +6,7 @@ import asyncio
 import traceback
 
 from pulse.context import PulseContext
-from pulse.helpers import create_future_on_loop
+from pulse.helpers import create_future_on_loop, create_task
 from pulse.messages import (
     RouteInfo,
     ServerInitMessage,
@@ -145,20 +145,7 @@ class RenderSession:
             fn, n_params = cb.fn, cb.n_args
             res = fn(*args[:n_params])
             if iscoroutine(res):
-                try:
-                    loop = asyncio.get_running_loop()
-                    task = loop.create_task(res)
-                except RuntimeError:
-                    from anyio import from_thread
-
-                    async def _schedule():
-                        loop = asyncio.get_running_loop()
-                        task = loop.create_task(res)
-                        return task
-
-                    task = from_thread.run(_schedule)
-
-                def _on_task_done(t):
+                def _on_task_done(t: asyncio.Task):
                     try:
                         t.result()
                     except Exception as e:  # noqa: BLE001 - forward all
@@ -169,7 +156,7 @@ class RenderSession:
                             {"callback": key, "async": True},
                         )
 
-                task.add_done_callback(_on_task_done)
+                create_task(res, on_done=_on_task_done)
         except Exception as e:  # noqa: BLE001 - forward all
             self.report_error(path, "callback", e, {"callback": key})
 

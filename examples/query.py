@@ -13,35 +13,35 @@ class UserApi(ps.State):
     error_calls: int = 0
 
     # Keyed query with keep_previous_data default True
-    # @ps.query
-    # async def user(self) -> dict:
-    #     await asyncio.sleep(0.3)
-    #     # Simulate API; id 13 fails to demonstrate on_error
-    #     if self.user_id == 13:
-    #         raise RuntimeError("User not found")
-    #     name = self.optimistic_name or f"User {self.user_id}"
-    #     return {"id": self.user_id, "name": name}
+    @ps.query
+    async def user(self) -> dict:
+        await asyncio.sleep(0.3)
+        # Simulate API; id 13 fails to demonstrate on_error
+        if self.user_id == 13:
+            raise RuntimeError("User not found")
+        name = self.optimistic_name or f"User {self.user_id}"
+        return {"id": self.user_id, "name": name}
 
-    # # Key for refetch on id change
-    # @user.key
-    # def _user_key(self):
-    #     return ("user", self.user_id)
+    # Key for refetch on id change
+    @user.key
+    def _user_key(self):
+        return ("user", self.user_id)
 
-    # # Provide initial data after __init__ (e.g., seeded values)
-    # @user.initial_data
-    # def _initial_user(self) -> dict:
-    #     # Pretend we had a cached snapshot
-    #     return {"id": 0, "name": "<loading>"}
+    # Provide initial data after __init__ (e.g., seeded values)
+    @user.initial_data
+    def _initial_user(self) -> dict:
+        # Pretend we had a cached snapshot
+        return {"id": 0, "name": "<loading>"}
 
-    # # Success handler (sync)
-    # @user.on_success
-    # def _on_user_success(self, data: dict):
-    #     self.success_calls += 1
+    # Success handler (sync)
+    @user.on_success
+    def _on_user_success(self, data: dict):
+        self.success_calls += 1
 
-    # # Error handler (sync)
-    # @user.on_error
-    # def _on_user_error(self, err: Exception):
-    #     self.error_calls += 1
+    # Error handler (sync)
+    @user.on_error
+    def _on_user_error(self, err: Exception):
+        self.error_calls += 1
 
     # Unkeyed query (auto-tracked) using current id
     @ps.query(keep_previous_data=False)
@@ -63,14 +63,14 @@ def QueryExample():
     def set_bad():
         s.user_id = 13
 
-    # async def optimistic_rename():
-    #     # Show optimistic change immediately
-    #     s.user.set_data({"id": s.user_id, "name": "Optimistic"})
-    #     # Persist change on server; emulate delay
-    #     await asyncio.sleep(0.4)
-    #     s.optimistic_name = "Optimistic"
-    #     # Refetch to reconcile with server
-    #     s.user.refetch()
+    async def optimistic_rename():
+        # Show optimistic change immediately
+        s.user.set_data({"id": s.user_id, "name": "Optimistic"})
+        # Persist change on server; emulate delay
+        await asyncio.sleep(0.4)
+        s.optimistic_name = "Optimistic"
+        # Refetch to reconcile with server
+        s.user.refetch()
 
     return ps.div(
         ps.h1("Full Query Demo", className="text-2xl font-bold mb-4"),
@@ -81,32 +81,32 @@ def QueryExample():
             ps.button("Make error (id=13)", onClick=set_bad, className="btn-secondary"),
             className="mb-4",
         ),
-        # ps.div(
-        #     ps.h2("Keyed user()", className="text-xl font-semibold mb-2"),
-        #     ps.p(
-        #         "Loading..." if s.user.is_loading else f"Data: {s.user.data}",
-        #         className="mb-2",
-        #     ),
-        #     ps.p(
-        #         f"error: {type(s.user.error).__name__ if s.user.is_error else '-'}",
-        #         className="text-sm text-red-600 mb-2",
-        #     ),
-        #     ps.div(
-        #         ps.button(
-        #             "Refetch", onClick=s.user.refetch, className="btn-primary mr-2"
-        #         ),
-        #         ps.button(
-        #             "Optimistic rename",
-        #             onClick=optimistic_rename,
-        #             className="btn-primary",
-        #         ),
-        #     ),
-        #     ps.p(
-        #         f"on_success calls={s.success_calls} on_error calls={s.error_calls}",
-        #         className="text-xs text-gray-600 mt-2",
-        #     ),
-        #     className="p-3 rounded bg-white shadow mb-6",
-        # ),
+        ps.div(
+            ps.h2("Keyed user()", className="text-xl font-semibold mb-2"),
+            ps.p(
+                "Loading..." if s.user.is_loading else f"Data: {s.user.data}",
+                className="mb-2",
+            ),
+            ps.p(
+                f"error: {type(s.user.error).__name__ if s.user.is_error else '-'}",
+                className="text-sm text-red-600 mb-2",
+            ),
+            ps.div(
+                ps.button(
+                    "Refetch", onClick=s.user.refetch, className="btn-primary mr-2"
+                ),
+                ps.button(
+                    "Optimistic rename",
+                    onClick=optimistic_rename,
+                    className="btn-primary",
+                ),
+            ),
+            ps.p(
+                f"on_success calls={s.success_calls} on_error calls={s.error_calls}",
+                className="text-xs text-gray-600 mt-2",
+            ),
+            className="p-3 rounded bg-white shadow mb-6",
+        ),
         ps.div(
             ps.h2(
                 "Unkeyed details() (keep_previous_data=False)",

@@ -100,11 +100,13 @@ class Codegen:
     def output_folder(self):
         return self.cfg.pulse_path
 
-    def generate_all(self, server_address: str):
+    def generate_all(
+        self, server_address: str, internal_server_address: str | None = None
+    ):
         # Keep track of all generated files
         generated_files = set(
             [
-                self.generate_layout_tsx(server_address),
+                self.generate_layout_tsx(server_address, internal_server_address),
                 self.generate_routes_ts(),
                 self.generate_routes_runtime_ts(),
                 *(
@@ -123,11 +125,15 @@ class Codegen:
                 except Exception as e:
                     logger.warning(f"Could not remove stale file {path}: {e}")
 
-    def generate_layout_tsx(self, server_address: str):
+    def generate_layout_tsx(
+        self, server_address: str, internal_server_address: str | None = None
+    ):
         """Generates the content of _layout.tsx"""
         content = str(
             LAYOUT_TEMPLATE.render_unicode(
-                server_address=server_address, lib_path=self.cfg.lib_path
+                server_address=server_address,
+                internal_server_address=internal_server_address or server_address,
+                lib_path=self.cfg.lib_path,
             )
         )
         # The underscore avoids an eventual naming conflict with a generated

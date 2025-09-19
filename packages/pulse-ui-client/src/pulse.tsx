@@ -72,7 +72,7 @@ export function PulseProvider({
 }: PulseProviderProps) {
   const [connected, setConnected] = useState(true);
   const rrNavigate = useNavigate();
-  const { renderId, views } = prerender;
+  const { renderId } = prerender;
 
   const client = useMemo(
     () => new PulseSocketIOClient(config.serverAddress, renderId, rrNavigate),

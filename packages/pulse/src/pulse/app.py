@@ -103,6 +103,7 @@ class App:
         cookie: Optional[Cookie] = None,
         session_store: Optional[SessionStore] = None,
         server_address: Optional[str] = None,
+        internal_server_address: Optional[str] = None,
         not_found="/not-found",
         # Deployment and integration options
         mode: Optional[PulseMode] = None,
@@ -123,6 +124,8 @@ class App:
         self.status = AppStatus.created
         # Persist the server address for use by sessions (API calls, etc.)
         self.server_address: Optional[str] = server_address
+        # Optional internal address used by server-side loader fetches
+        self.internal_server_address: Optional[str] = internal_server_address
 
         # Resolve and store plugins (sorted by priority, highest first)
         self.plugins: list[Plugin] = []
@@ -220,17 +223,24 @@ class App:
 
         self.middleware = MiddlewareStack(mw_stack)
 
-    def run_codegen(self, address: Optional[str] = None):
+    def run_codegen(
+        self, address: Optional[str] = None, internal_address: Optional[str] = None
+    ):
         # Allow the CLI to disable codegen in specific scenarios (e.g., prod server-only)
         if env.codegen_disabled:
             return
         if address:
             self.server_address = address
+        if internal_address:
+            self.internal_server_address = internal_address
         if not self.server_address:
             raise RuntimeError(
                 "Please provide a server address to the App constructor or the Pulse CLI."
             )
-        self.codegen.generate_all(self.server_address)
+        self.codegen.generate_all(
+            self.server_address,
+            self.internal_server_address or self.server_address,
+        )
 
     def asgi_factory(self):
         """
@@ -252,7 +262,9 @@ class App:
             protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
             server_address = f"{protocol}://{host}:{port}"
 
-        self.run_codegen(server_address)
+        # Use internal server address for server-side loader if provided; fallback to public
+        internal_address = self.internal_server_address or server_address
+        self.run_codegen(server_address, internal_address)
         self.setup(server_address)
         self.status = AppStatus.running
         return self.asgi

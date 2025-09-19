@@ -28,6 +28,8 @@ ENV_PULSE_PORT = "PULSE_PORT"
 ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_LOCK_MANAGED_BY_CLI = "PULSE_LOCK_MANAGED_BY_CLI"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
+ENV_PULSE_TELEMETRY = "PULSE_TELEMETRY"
+ENV_PULSE_TELEMETRY_SAMPLE = "PULSE_TELEMETRY_SAMPLE"
 
 
 class Env:
@@ -114,6 +116,34 @@ class Env:
     @codegen_disabled.setter
     def codegen_disabled(self, value: bool) -> None:
         self._set(ENV_PULSE_DISABLE_CODEGEN, "1" if value else None)
+
+    # Telemetry
+    @property
+    def telemetry_mode(self) -> str:
+        value = (self._get(ENV_PULSE_TELEMETRY) or "off").lower()
+        if value not in ("off", "basic", "detailed", "trace"):
+            value = "off"
+        return value
+
+    @telemetry_mode.setter
+    def telemetry_mode(self, value: str) -> None:
+        self._set(ENV_PULSE_TELEMETRY, value)
+
+    @property
+    def telemetry_sample(self) -> float:
+        try:
+            v = float(self._get(ENV_PULSE_TELEMETRY_SAMPLE) or 1.0)
+            if v <= 0:
+                return 0.0
+            if v > 1:
+                return 1.0
+            return v
+        except Exception:
+            return 1.0
+
+    @telemetry_sample.setter
+    def telemetry_sample(self, value: float) -> None:
+        self._set(ENV_PULSE_TELEMETRY_SAMPLE, str(value))
 
 
 # Singleton

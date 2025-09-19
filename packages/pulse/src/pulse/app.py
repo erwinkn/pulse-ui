@@ -21,6 +21,7 @@ import pulse.flatted as flatted
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.env import PulseMode, env
+from pulse.telemetry import Telemetry, telemetry_from_env
 from pulse.cookies import (
     CORSOptions,
     Cookie,
@@ -123,6 +124,8 @@ class App:
         self.status = AppStatus.created
         # Persist the server address for use by sessions (API calls, etc.)
         self.server_address: Optional[str] = server_address
+        # Telemetry (default to env-configured)
+        self.telemetry: Telemetry = telemetry_from_env(env.telemetry_mode, logger)
 
         # Resolve and store plugins (sorted by priority, highest first)
         self.plugins: list[Plugin] = []
@@ -363,9 +366,23 @@ class App:
                 )
 
             result = {"renderId": render_id, "views": {}}
+            tel = self.telemetry
+            from time import perf_counter
+
+            total_t0 = perf_counter()
+            server_timing_parts: list[str] = []
 
             def _prerender_one(path: str):
-                captured = render.prerender_mount_capture(path, route_info)
+                t0 = perf_counter()
+                with tel.measure("prerender.path_ms", {"path": path}):
+                    captured = render.prerender_mount_capture(path, route_info)
+                dur_ms = (perf_counter() - t0) * 1000.0
+                try:
+                    server_timing_parts.append(
+                        f'prerender;dur={dur_ms:.1f};desc="{path}"'
+                    )
+                except Exception:
+                    pass
                 t = captured.get("type") if isinstance(captured, dict) else None
                 if t == "vdom_init":
                     return Ok(captured["vdom"])
@@ -382,6 +399,7 @@ class App:
             with PulseContext.update(render=render):
                 for p in paths:
                     try:
+                        mw_t0 = perf_counter()
                         res = self.middleware.prerender(
                             path=p,
                             route_info=route_info,
@@ -389,6 +407,13 @@ class App:
                             session=session.data,
                             next=lambda p=p: _prerender_one(p),
                         )
+                        mw_ms = (perf_counter() - mw_t0) * 1000.0
+                        try:
+                            server_timing_parts.append(
+                                f'prerender-mw;dur={mw_ms:.1f};desc="{p}"'
+                            )
+                        except Exception:
+                            pass
                         if isinstance(res, Ok):
                             result["views"][p] = res.payload
                         elif isinstance(res, Redirect):
@@ -429,7 +454,17 @@ class App:
 
                 later(float(ttl), _gc_if_unadopted, render_id)
 
+            total_ms = (perf_counter() - total_t0) * 1000.0
+            try:
+                server_timing_parts.append(f"total;dur={total_ms:.1f}")
+            except Exception:
+                pass
             resp = JSONResponse(result)
+            if server_timing_parts:
+                try:
+                    resp.headers["Server-Timing"] = ", ".join(server_timing_parts)
+                except Exception:
+                    pass
             session.handle_response(resp)
             return resp
 
@@ -439,6 +474,7 @@ class App:
 
         @self.sio.event
         async def connect(sid: str, environ: dict, auth: dict | None):
+            tel = self.telemetry
             # Expect renderId during websocket auth and require a valid user session
             rid = auth.get("renderId") if auth else None
 
@@ -466,7 +502,18 @@ class App:
                     self._user_to_render[session.sid].append(rid)
 
             def on_message(message: ServerMessage):
-                payload = flatted.stringify(message)
+                # Measure stringify time and payload size
+                with tel.measure("serialize.flatted_stringify_ms"):
+                    payload = flatted.stringify(message)
+                try:
+                    size = len(payload)
+                except Exception:
+                    size = 0
+                tel.observe(
+                    "serialize.payload_bytes",
+                    float(size),
+                    {"type": message.get("type", "unknown")},
+                )  # type: ignore[arg-type]
                 create_task(self.sio.emit("message", payload, to=sid))
 
             render.connect(on_message)
@@ -500,6 +547,7 @@ class App:
 
         @self.sio.event
         def message(sid: str, data: ClientMessage):
+            tel = self.telemetry
             rid = self._socket_to_render.get(sid)
             if not rid:
                 return
@@ -508,7 +556,8 @@ class App:
                 return
             try:
                 # Deserialize the message using flatted
-                data = flatted.parse(data)
+                with tel.measure("deserialize.flatted_parse_ms"):
+                    data = flatted.parse(data)
                 # Use renderId mapping to user session
                 session = self.user_sessions[self._render_to_user[rid]]
 

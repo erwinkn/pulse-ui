@@ -4,9 +4,12 @@ from typing import Any, Callable, Optional
 import uuid
 import asyncio
 import traceback
+from time import perf_counter
+from urllib.parse import urlsplit
 
 from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop, create_task
+from pulse.telemetry import Telemetry, telemetry
 from pulse.messages import (
     RouteInfo,
     ServerInitMessage,
@@ -55,6 +58,7 @@ class RenderSession:
         # Buffer messages emitted before a connection is established
         self._message_buffer: list[ServerMessage] = []
         self._pending_api: dict[str, asyncio.Future] = {}
+        self._pending_api_meta: dict[str, tuple[float, str, str]] = {}
         # Registry of per-session global singletons (created via ps.global_state without id)
         self._global_states: dict[str, State] = {}
         # Connection state
@@ -140,11 +144,14 @@ class RenderSession:
 
     def execute_callback(self, path: str, key: str, args: list | tuple):
         mount = self.route_mounts[path]
+        tel = telemetry()
         try:
             cb = mount.root.callbacks[key]
             fn, n_params = cb.fn, cb.n_args
-            res = fn(*args[:n_params])
+            with tel.measure("callback.total_ms", {"path": path, "callback": key}):
+                res = fn(*args[:n_params])
             if iscoroutine(res):
+
                 def _on_task_done(t: asyncio.Task):
                     try:
                         t.result()
@@ -191,6 +198,7 @@ class RenderSession:
         self._pending_api[corr_id] = fut
         headers = headers or {}
         headers["x-pulse-render-id"] = self.id
+        self._pending_api_meta[corr_id] = (perf_counter(), method, url)
         self.send(
             {
                 "type": "api_call",
@@ -211,6 +219,7 @@ class RenderSession:
             return
         id_ = str(id_)
         fut = self._pending_api.pop(id_, None)
+        meta = self._pending_api_meta.pop(id_, None)
         if fut and not fut.done():
             fut.set_result(
                 {
@@ -219,6 +228,26 @@ class RenderSession:
                     "headers": data.get("headers", {}),
                     "body": data.get("body"),
                 }
+            )
+        if meta is not None:
+            t0, method, url = meta
+            duration_ms = (perf_counter() - t0) * 1000.0
+            host = ""
+            try:
+                parts = urlsplit(url)
+                host = parts.netloc
+            except Exception:
+                pass
+            tel = telemetry()
+            tel.observe(
+                "api.roundtrip_ms",
+                duration_ms,
+                {
+                    "method": method,
+                    "status": str(data.get("status", 0)),
+                    "ok": str(bool(data.get("ok", False))),
+                    "host": host,
+                },
             )
 
     def create_route_mount(self, path: str, route_info: Optional[RouteInfo] = None):
@@ -249,6 +278,8 @@ class RenderSession:
 
         captured: dict | None = None
 
+        tel = telemetry()
+
         def _capture(msg: ServerMessage):
             nonlocal captured
             # Only capture the first relevant message for this path
@@ -268,9 +299,13 @@ class RenderSession:
         try:
             self._send_message = _capture
             # Reuse normal mount flow which creates and runs the effect
-            self.mount(path, route_info or self.routes.find(path).default_route_info())
+            with tel.measure("prerender.mount_ms", {"path": path}):
+                self.mount(
+                    path, route_info or self.routes.find(path).default_route_info()
+                )
             # Flush any scheduled effects to stabilize output
-            self.flush()
+            with tel.measure("prerender.flush_ms", {"path": path}):
+                self.flush()
         finally:
             self._send_message = prev_sender
 
@@ -304,12 +339,16 @@ class RenderSession:
     def render(self, path: str, route_info: Optional[RouteInfo] = None):
         mount = self.create_route_mount(path, route_info)
         with PulseContext.update(route=mount.route):
-            return mount.root.render_vdom()
+            tel = telemetry()
+            with tel.measure("render.init_ms", {"path": path}):
+                return mount.root.render_vdom()
 
     def rerender(self, path: str):
         mount = self.get_route_mount(path)
         with PulseContext.update(route=mount.route):
-            return mount.root.render_diff()
+            tel = telemetry()
+            with tel.measure("render.diff_ms", {"path": path}):
+                return mount.root.render_diff()
 
     def mount(self, path: str, route_info: RouteInfo):
         if path in self.route_mounts:
@@ -327,19 +366,29 @@ class RenderSession:
             # Always ensure both render and route are present in context
             with PulseContext.update(session=session, render=self, route=mount.route):
                 try:
+                    tel = telemetry()
                     if mount.root.render_count == 0:
-                        vdom = mount.root.render_vdom()
-                        self.send(
-                            ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-                        )
-                    else:
-                        result = mount.root.render_diff()
-                        if result.ops:
+                        with tel.measure("render.init_ms", {"path": path}):
+                            vdom = mount.root.render_vdom()
+                        with tel.measure("serialize.vdom_init_ms", {"path": path}):
                             self.send(
-                                ServerUpdateMessage(
-                                    type="vdom_update", path=path, ops=result.ops
+                                ServerInitMessage(
+                                    type="vdom_init", path=path, vdom=vdom
                                 )
                             )
+                    else:
+                        with tel.measure("render.diff_ms", {"path": path}):
+                            result = mount.root.render_diff()
+                        if result.ops:
+                            with tel.measure(
+                                "serialize.vdom_update_ms",
+                                {"path": path, "ops": str(len(result.ops))},
+                            ):
+                                self.send(
+                                    ServerUpdateMessage(
+                                        type="vdom_update", path=path, ops=result.ops
+                                    )
+                                )
                 except RedirectInterrupt as r:
                     # Prefer client-side navigation over emitting VDOM operations
                     self.send(
@@ -366,13 +415,17 @@ class RenderSession:
         # Ensure effects (including route render effects) run with this session
         # bound on the PulseContext so hooks like ps.global_state work
         with PulseContext.update(render=self):
-            flush_effects()
+            tel = telemetry()
+            with tel.measure("effects.flush_ms"):
+                flush_effects()
 
     def navigate(self, path: str, route_info: RouteInfo):
         # Route is already mounted, we can just update the routing state
         try:
             mount = self.get_route_mount(path)
-            mount.route.update(route_info)
+            tel = telemetry()
+            with tel.measure("route.update_ms", {"path": path}):
+                mount.route.update(route_info)
         except Exception as e:  # noqa: BLE001
             self.report_error(path, "navigate", e)
 

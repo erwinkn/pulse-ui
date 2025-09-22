@@ -1,11 +1,7 @@
-import { Space, ChipGroup, Chip, AppShellHeader } from "@mantine/core";
+import { Space, FileInput, Input, NumberInput, Radio, RangeSlider, SegmentedControl, Slider, Switch, Textarea, TextInput} from "@mantine/core"
 import type { ComponentProps } from "react";
 
-Chip.Group({chi})
-ChipGroup()
-
-Space({classNames: {}})
-console.log("Hello via Bun!");
 
 
 
+TextInput({children: [], data})

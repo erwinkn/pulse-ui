@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Sequence, TypedDict, TypeVar
 
 import pulse as ps
@@ -36,7 +34,7 @@ StyleFn = ps.JsFunction[[MantineTheme, Props, Ctx], T]
 
 MantineStyle = ps.CSSProperties | ps.JsFunction[[MantineTheme], ps.CSSProperties]
 MantineStyleProp = (
-    MantineStyle | Sequence[MantineStyle] | Sequence["MantineStyleProp"] | None
+    MantineStyle | Sequence[MantineStyle] | Sequence["MantineStyleProp"] | None  
 )
 """Refers to the `style` prop of Mantine components. Not to be confused with
 `StyleProp`, which is used for the type of style props `m` (margin) or `p`

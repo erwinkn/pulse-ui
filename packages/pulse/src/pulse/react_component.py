@@ -33,6 +33,24 @@ P = ParamSpec("P")
 DEFAULT: Any = Sentinel("DEFAULT")
 
 
+# ----------------------------------------------------------------------------
+# Detection for stringified annotations (from __future__ import annotations)
+# ----------------------------------------------------------------------------
+
+
+def _function_has_string_annotations(fn: Callable[..., Any]) -> bool:
+    """Return True if any function annotations are strings.
+
+    This happens when the defining module uses `from __future__ import annotations`.
+    In that case, resolving types at runtime is fragile; we skip PropSpec building.
+    """
+    try:
+        anns = getattr(fn, "__annotations__", {}) or {}
+        return any(isinstance(v, str) for v in anns.values())
+    except Exception:
+        return False
+
+
 class Prop(Generic[T]):
     def __init__(
         self,
@@ -301,7 +319,6 @@ class ReactComponent(Generic[P], Imported):
         self.lazy = lazy
         COMPONENT_REGISTRY.get().add(self)
 
-
     def __repr__(self) -> str:
         default_part = ", default=True" if self.is_default else ""
         prop_part = f", prop='{self.prop}'" if self.prop else ""
@@ -338,6 +355,10 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
     - A prop may not be specified both explicitly and in the Unpack
     - Annotated[..., Prop(...)] on parameters is disallowed (use default Prop instead)
     """
+
+    # If annotations are stringified, skip building and allow unspecified props.
+    if _function_has_string_annotations(fn):
+        return PropSpec({}, {}, allow_unspecified=True)
 
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())
@@ -634,6 +655,9 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
     component definitions.
     """
     annotations: dict[str, Any] = getattr(typed_dict_cls, "__annotations__", {})
+    # If TypedDict annotations are stringified, skip building and allow unspecified.
+    if annotations and any(isinstance(v, str) for v in annotations.values()):
+        return PropSpec({}, {}, allow_unspecified=True)
     required_keys: set[str] | None = getattr(typed_dict_cls, "__required_keys__", None)
     is_total: bool = bool(getattr(typed_dict_cls, "__total__", True))
 
@@ -704,6 +728,9 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
     # Untyped **props -> allow all
     annot = var_kw.annotation
     if annot in (None, inspect._empty):
+        return PropSpec({}, {}, allow_unspecified=True)
+    # Stringified annotations like "Unpack[Props]" are too fragile to parse.
+    if isinstance(annot, str):
         return PropSpec({}, {}, allow_unspecified=True)
 
     # From here, we should have **props: Unpack[MyProps] where MyProps is a TypedDict

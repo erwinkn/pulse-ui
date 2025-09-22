@@ -31,7 +31,7 @@ def Link(
     # Default: undefined
     state: dict = DEFAULT,
     # Default: False
-    viewTransition=DEFAULT,
+    viewTransition: bool = DEFAULT,
     **props: Unpack[HTMLAnchorProps],
 ): ...
 

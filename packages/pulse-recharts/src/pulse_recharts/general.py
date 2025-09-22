@@ -69,7 +69,7 @@ class ResponsiveContainerProps(ps.HTMLProps, total=False):
     # HTML props
     id: str
     className: str
-    style: ps.CssStyle
+    style: ps.CSSProperties
 
     aspect: float
     """width / height. If specified, the height will be calculated by width /
@@ -192,7 +192,7 @@ class LegendProps(ps.HTMLProps, Generic[T], total=False):
     # formatter: Callable[[str, Any, int], Any]
     """The formatter function of each text in legend"""
 
-    wrapperStyle: ps.CssStyle
+    wrapperStyle: ps.CSSProperties
     """The style of legend container"""
 
     onClick: ps.EventHandler[LegendPayload[T], int]
@@ -242,16 +242,16 @@ class TooltipProps(TypedDict, total=False):
     filterNull: bool
     """When an item of the payload has value null or undefined, this item won't be displayed. Default: True"""
 
-    itemStyle: ps.CssStyle
+    itemStyle: ps.CSSProperties
     """The style of default tooltip content item which is a li element. Default: {}"""
 
-    wrapperStyle: ps.CssStyle
+    wrapperStyle: ps.CSSProperties
     """The style of tooltip wrapper which is a dom element. Default: {}"""
 
-    contentStyle: ps.CssStyle
+    contentStyle: ps.CSSProperties
     """The style of tooltip content which is a dom element. Default: {}"""
 
-    labelStyle: ps.CssStyle
+    labelStyle: ps.CSSProperties
     """The style of default tooltip label which is a p element. Default: {}"""
 
     cursor: Union[bool, dict, ps.Element]

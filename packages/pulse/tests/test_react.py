@@ -60,6 +60,21 @@ class TestReactComponent:
         assert component.tag == "TestComponent"
         assert not component.is_default
 
+    def test_component_with_import_name(self):
+        """Test ReactComponent with import_name for nested component access."""
+        component = ReactComponent(
+            tag="AppShell.Header",
+            import_path="@mantine/core",
+            import_name="AppShell",
+            is_default=False,
+        )
+
+        assert component.key == "AppShell.Header"
+        assert component.import_path == "@mantine/core"
+        assert component.tag == "AppShell.Header"
+        assert component.import_name == "AppShell"
+        assert not component.is_default
+
     def test_component_with_default_export(self):
         """Test ReactComponent with default export."""
         component = ReactComponent(
@@ -101,6 +116,26 @@ class TestDefineReactComponent:
         assert components["test"].tag == "TestComponent"
         assert components["test"].import_path == "./TestComponent"
         assert not components["test"].is_default
+
+    def test_define_component_with_import_name(self):
+        """Test defining a component with import_name for nested access."""
+        TestComponent = ReactComponent(
+            tag="AppShell.Header",
+            import_path="@mantine/core",
+            import_name="AppShell",
+            alias="aliased",
+            is_default=False,
+        )
+        # Should return a callable
+        assert callable(TestComponent)
+
+        # Component should be registered
+        components = COMPONENT_REGISTRY.get().items()
+        assert "aliased" in components
+        assert components["aliased"].tag == "AppShell.Header"
+        assert components["aliased"].import_path == "@mantine/core"
+        assert components["aliased"].import_name == "AppShell"
+        assert not components["aliased"].is_default
 
     def test_define_component_default_export(self):
         """Test defining a component with default export."""

@@ -13,8 +13,8 @@ import pytest
 from pulse.app import App
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.components import Outlet
-import pulse as ps
 from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
+import pulse as ps
 from pulse.routing import RouteTree, Route
 from pulse import div
 
@@ -57,8 +57,8 @@ class TestCodegen:
 
     def test_generate_route_page_with_components(self, tmp_path):
         """Test generating route with React components."""
-        button_comp = ReactComponent("button", "./Button", "Button", False)
-        card_comp = ReactComponent("card", "./Card", "Card", False)
+        button_comp = ReactComponent("button", "./Button", is_default=False)
+        card_comp = ReactComponent("card", "./Card", is_default=False)
         route = Route(
             "/with-components",
             Component(lambda: div()["Route with components"]),
@@ -72,10 +72,10 @@ class TestCodegen:
         assert route_page_path.exists()
         result = route_page_path.read_text()
 
-        assert 'import { button as Button } from "./Button";' in result
-        assert 'import { card as Card } from "./Card";' in result
-        assert '"Button": Button,' in result
-        assert '"Card": Card,' in result
+        assert 'import { button } from "./Button";' in result
+        assert 'import { card } from "./Card";' in result
+        assert '"button": button,' in result
+        assert '"card": card,' in result
         assert "No components needed for this route" not in result
 
     def test_generate_route_page_with_default_export_components(self, tmp_path):
@@ -96,6 +96,61 @@ class TestCodegen:
 
         assert 'import DefaultComp from "./DefaultComp";' in result
         assert '"DefaultComp": DefaultComp,' in result
+
+    def test_generate_route_page_with_import_name_components(self, tmp_path):
+        """Test generating route with import_name components (nested component access)."""
+        app_shell_header = ReactComponent("AppShell.Header", "@mantine/core")
+        app_shell_footer = ReactComponent("AppShell.Footer", "@mantine/core")
+        route = Route(
+            "/app-shell",
+            Component(lambda: div()["AppShell route"]),
+            components=[app_shell_header, app_shell_footer],
+        )
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree([route]), codegen_config)
+        codegen.generate_route(route, server_address=SERVER_ADDRESS)
+
+        route_page_path = codegen.output_folder / "routes" / "app-shell.tsx"
+        assert route_page_path.exists()
+        result = route_page_path.read_text()
+
+        # Should import AppShell only once despite having two components
+        assert 'import { AppShell } from "@mantine/core";' in result
+        assert result.count("import { AppShell }") == 1  # Only one import
+
+        # Should have components in registry
+        assert '"AppShell.Header": AppShell.Header,' in result
+        assert '"AppShell.Footer": AppShell.Footer,' in result
+        assert "No components needed for this route" not in result
+
+    def test_generate_route_page_with_duplicate_imports_different_aliases(
+        self, tmp_path
+    ):
+        """Test generating route with multiple components importing same value with different aliases."""
+        # Duplicate imports of the same symbol should deduplicate import statements
+        # and result in a single registry entry (last wins if duplicates are provided).
+        button1 = ReactComponent("button", "./Button")
+        button2 = ReactComponent("button", "./Button")
+        route = Route(
+            "/duplicate-imports",
+            Component(lambda: div()["Duplicate imports route"]),
+            components=[button1, button2],
+        )
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree([route]), codegen_config)
+        codegen.generate_route(route, server_address=SERVER_ADDRESS)
+
+        route_page_path = codegen.output_folder / "routes" / "duplicate-imports.tsx"
+        assert route_page_path.exists()
+        result = route_page_path.read_text()
+
+        # Should import button once
+        assert 'import { button } from "./Button";' in result
+        assert result.count("import { button }") == 1  # Only one import
+
+        # Should have a single registry entry for the duplicate name
+        assert result.count('"button": button,') == 1
+        assert "No components needed for this route" not in result
 
     def test_generate_routes_ts_empty(self, tmp_path):
         """Test generating config with empty routes list."""

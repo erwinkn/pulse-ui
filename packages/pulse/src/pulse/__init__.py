@@ -1,5 +1,5 @@
 from .app import App, DeploymentMode
-from .codegen import CodegenConfig
+from .codegen.codegen import CodegenConfig
 from .components import (
     Link,
     Outlet,
@@ -8,7 +8,7 @@ from .context import PulseContext
 from .cookies import Cookie, SetCookie
 from .decorators import computed, effect, query
 from .helpers import (
-    CssStyle,
+    CSSProperties,
     EventHandler,
     For,
     JsFunction,
@@ -184,7 +184,7 @@ __all__ = [
     "EventHandler",
     "For",
     "JsFunction",
-    "CssStyle",
+    "CSSProperties",
     "JsObject",
     "mode",
     "DeploymentMode",

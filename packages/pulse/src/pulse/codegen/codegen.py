@@ -4,9 +4,9 @@ from pulse.env import env
 from pathlib import Path
 from typing import Sequence
 
-from pulse.templates import (
-    LAYOUT_TEMPLATE,
-    ROUTE_TEMPLATE,
+from pulse.codegen.templates.layout import LAYOUT_TEMPLATE
+from pulse.codegen.templates.route import render_route
+from pulse.codegen.templates.routes_ts import (
     ROUTES_CONFIG_TEMPLATE,
     ROUTES_RUNTIME_TEMPLATE,
 )
@@ -195,13 +195,16 @@ class Codegen:
             output_path = self.output_folder / "layouts" / route.file_path()
         else:
             output_path = self.output_folder / "routes" / route.file_path()
-        content = str(
-            ROUTE_TEMPLATE.render_unicode(
-                route=route,
-                components=route.components or [],
-                lib_path=self.cfg.lib_path,
-                server_address=server_address,
-            )
+
+        components = route.components or []
+
+        content = render_route(
+            route=route,
+            lib_path=str(self.cfg.lib_path),
+            components=components,
+            js_functions=[],
+            external_js=[],
+            reserved_names=None,
         )
         return write_file_if_changed(output_path, content)
 

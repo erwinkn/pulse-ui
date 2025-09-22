@@ -37,7 +37,7 @@ EventHandler = (
 JsFunction = Callable[P, T]
 
 # In case we refine it later
-CssStyle = dict[str, Any]
+CSSProperties = dict[str, Any]
 
 
 # Will be replaced by a JS transpiler type

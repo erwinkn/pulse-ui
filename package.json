@@ -1,5 +1,9 @@
 {
   "name": "pulse",
   "version": "1.0.0",
-  "workspaces": ["packages/pulse-ui-client/", "examples/pulse-web/"]
+  "workspaces": [
+    "packages/pulse-ui-client/",
+    "packages/pulse-mantine/js",
+    "examples/pulse-web/"
+  ]
 }

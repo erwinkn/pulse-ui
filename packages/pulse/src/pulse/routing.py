@@ -112,8 +112,6 @@ class Route:
         self.path = normalize_path(path)
         self.segments = parse_route_path(path)
 
-        if not isinstance(render, Component):
-            render = Component(render)
         self.render = render
         self.children = children or []
         self.components = components
@@ -187,12 +185,10 @@ def replace_layout_indicator(path_list: list[str], value: str):
 class Layout:
     def __init__(
         self,
-        render: Component | Callable[[], Node],
+        render: Component,
         children: "Optional[Sequence[Route | Layout]]" = None,
         components: Optional[Sequence[ReactComponent]] = None,
     ):
-        if not isinstance(render, Component):
-            render = Component(render)
         self.render = render
         self.children = children or []
         self.components = components

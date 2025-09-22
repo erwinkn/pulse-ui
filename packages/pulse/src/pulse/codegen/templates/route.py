@@ -6,7 +6,7 @@ from ..imports import ImportStatement, Imports
 from pulse.react_component import ReactComponent
 
 
-class JsTemplate:
+class RouteTemplate:
     """
     Helper to resolve names and build import statements before rendering a route file.
 
@@ -116,7 +116,6 @@ class JsTemplate:
         }
 
 
-IMPORTS: list[ImportStatement] = []
 # Constants and functions defined in the template below. We need to avoid name conflicts with imports
 RESERVED_NAMES = [
     "externalComponents",
@@ -201,7 +200,7 @@ def render_route(
     comps = list(components or [])
     needs_render_lazy = any(getattr(c, "lazy", False) for c in comps)
 
-    jt = JsTemplate(reserved_names=reserved_names)
+    jt = RouteTemplate(reserved_names=reserved_names)
     jt.add_core_imports(lib_path=lib_path, needs_render_lazy=needs_render_lazy)
     jt.add_components(comps)
     if external_js:

@@ -14,6 +14,9 @@ from pulse.app import App
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.components import Outlet
 from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
+from pulse.codegen.templates.route import RouteTemplate
+from pulse.codegen.js import JsFunction
+from typing import cast
 import pulse as ps
 from pulse.routing import RouteTree, Route
 from pulse import div
@@ -308,6 +311,124 @@ class TestCodegen:
         assert layout1.exists(), f"missing {layout1}"
         assert layout2.exists(), f"missing {layout2}"
         assert layout1 != layout2
+
+
+class TestRouteTemplateConflicts:
+    """Unit tests for RouteTemplate name/alias conflict resolution."""
+
+    def _by_src(self, import_sources, src: str):
+        for s in import_sources:
+            if s.src == src:
+                return s
+        raise AssertionError(f"No import source for {src}")
+
+    def test_alias_named_imports_on_reserved_conflict_and_component_ssr(self):
+        rt = RouteTemplate(reserved_names=["Button", "AppShell"])
+
+        comps = [
+            ReactComponent(name="Button", src="./ui/button"),
+            ReactComponent(name="AppShell", src="@mantine/core", prop="Header"),
+        ]
+        rt.add_components(comps)
+        ctx = rt.context()
+
+        # Imports aliased due to reserved names
+        import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+        by_button = self._by_src(import_sources, "./ui/button")
+        assert len(by_button.values) == 1
+        assert by_button.values[0].name == "Button"
+        assert by_button.values[0].alias == "Button2"
+
+        by_mantine = self._by_src(import_sources, "@mantine/core")
+        assert len(by_mantine.values) == 1
+        assert by_mantine.values[0].name == "AppShell"
+        assert by_mantine.values[0].alias == "AppShell2"
+
+        # Components context uses the aliased identifiers in SSR expressions
+        components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
+        comps_ctx = {c["key"]: c for c in components_ctx}
+        assert comps_ctx["Button"]["ssr_expr"] == "Button2"
+        assert comps_ctx["Button"]["dynamic_selector"] == "({ default: m.Button })"
+        assert comps_ctx["AppShell.Header"]["ssr_expr"] == "AppShell2.Header"
+        assert (
+            comps_ctx["AppShell.Header"]["dynamic_selector"]
+            == "({ default: m.AppShell.Header })"
+        )
+
+    def test_alias_default_import_on_reserved_conflict(self):
+        rt = RouteTemplate(reserved_names=["DefaultComp"])  # force aliasing
+
+        comps = [ReactComponent(name="DefaultComp", src="./Default", is_default=True)]
+        rt.add_components(comps)
+        ctx = rt.context()
+
+        import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+        by_default = self._by_src(import_sources, "./Default")
+        # Default import is a single identifier string
+        assert by_default.default_import == "DefaultComp2"
+
+        comp_ctx = cast(list, ctx["components_ctx"])[0]  # type: ignore[index]
+        assert comp_ctx["key"] == "DefaultComp"
+        assert comp_ctx["ssr_expr"] == "DefaultComp2"
+        # Dynamic selector for default import uses m.default
+        assert comp_ctx["dynamic_selector"] == "({ default: m.default })"
+
+    def test_deduplicate_repeated_imports_of_same_symbol(self):
+        rt = RouteTemplate()
+        # Same component twice -> one import value
+        comps = [
+            ReactComponent(name="Button", src="./Button"),
+            ReactComponent(name="Button", src="./Button"),
+        ]
+        rt.add_components(comps)
+        ctx = rt.context()
+
+        import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+        by_src = self._by_src(import_sources, "./Button")
+        assert len(by_src.values) == 1
+        # Final components_ctx keeps one (last-wins on same key)
+        components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
+        assert len(components_ctx) == 1
+        assert components_ctx[0]["key"] == "Button"
+
+    def test_alias_same_named_import_from_two_sources_and_keep_both_components(self):
+        rt = RouteTemplate()
+        comps = [
+            ReactComponent(name="Stack", src="@mantine/core"),
+            # Different source and a prop so the component registry key differs
+            ReactComponent(name="Stack", src="@other/lib", prop="Item"),
+        ]
+        rt.add_components(comps)
+        ctx = rt.context()
+
+        import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+        by_core = self._by_src(import_sources, "@mantine/core")
+        by_other = self._by_src(import_sources, "@other/lib")
+        assert by_core.values[0].name == "Stack" and by_core.values[0].alias is None
+        assert (
+            by_other.values[0].name == "Stack" and by_other.values[0].alias == "Stack2"
+        )
+
+        components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
+        comps_ctx = {c["key"]: c for c in components_ctx}
+        assert comps_ctx["Stack"]["ssr_expr"] == "Stack"
+        assert comps_ctx["Stack.Item"]["ssr_expr"] == "Stack2.Item"
+
+    def test_reserve_js_function_names_with_conflicts(self):
+        rt = RouteTemplate()
+        # "path" and "RenderLazy" are in RESERVED_NAMES, should alias
+        rt.reserve_js_function_names(
+            [
+                JsFunction("path", lambda: None),
+                JsFunction("myFn", lambda: None),
+                JsFunction("RenderLazy", lambda: None),
+            ]
+        )
+        ctx = rt.context()
+        locals_map = cast(dict, ctx["local_js_names"])  # type: ignore[assignment]
+        assert locals_map["path"] == "path2"
+        assert locals_map["myFn"] == "myFn"
+        assert locals_map["RenderLazy"] == "RenderLazy2"
 
 
 if __name__ == "__main__":

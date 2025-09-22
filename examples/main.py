@@ -457,8 +457,8 @@ def dynamic_route():
 
 
 @ps.react_component(
-    tag="CustomDatePicker",
-    import_="~/components/date-picker",
+    "CustomDatePicker",
+    "~/components/date-picker",
     is_default=True,
     lazy=True,
 )

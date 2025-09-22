@@ -42,6 +42,16 @@ class ImportStatement:
     values: list[ImportMember] = field(default_factory=list)
     types: list[ImportMember] = field(default_factory=list)
     default_import: str | None = None
+    # When True, emit a side-effect import: `import "<src>";`
+    # Can be combined with named/default imports; side-effect line is emitted
+    # only when there are no named/default/type imports for the source.
+    side_effect: bool = False
+    # Optional ordering constraint: ensure this statement is emitted before
+    # any import statements whose `src` matches one of these values.
+    # Example: ImportStatement(src="@mantine/core/styles.css", side_effect=True,
+    #                          before=["@mantine/dates/styles.css"]) ensures
+    # core styles are imported before dates styles.
+    before: list[str] = field(default_factory=list)
 
 
 class Imports:
@@ -95,3 +105,87 @@ class Imports:
             # Remember mapping so future imports of the same (src, name) reuse identifier
             self._import_map[(src, name)] = imp.identifier
             return imp.identifier
+
+    def add_statement(self, stmt: ImportStatement) -> None:
+        """Merge an ImportStatement into the current Imports registry.
+
+        Ensures consistent aliasing via NameRegistry and de-duplicates
+        previously imported names from the same source.
+        """
+        existing = self.sources.get(stmt.src)
+        if not existing:
+            # Normalize names through registry to avoid later conflicts
+            if stmt.default_import:
+                stmt.default_import = self.names.register(stmt.default_import)
+            for imp in concat(stmt.values, stmt.types):
+                name = self.names.register(imp.name)
+                if name != imp.name:
+                    imp.alias = name
+                self._import_map[(stmt.src, imp.name)] = name
+            self.sources[stmt.src] = stmt
+            return
+
+        # Merge into existing statement for the same src
+        if stmt.default_import and not existing.default_import:
+            existing.default_import = self.names.register(stmt.default_import)
+
+        # Merge named imports
+        def _merge_list(dst: list[ImportMember], src_list: list[ImportMember], is_type: bool = False):
+            for imp in src_list:
+                key = (stmt.src, imp.name)
+                if key in self._import_map:
+                    continue
+                unique = self.names.register(imp.name)
+                if unique != imp.name:
+                    imp.alias = unique
+                self._import_map[key] = imp.alias or imp.name
+                dst.append(imp)
+
+        _merge_list(existing.values, stmt.values, is_type=False)
+        _merge_list(existing.types, stmt.types, is_type=True)
+        existing.side_effect = existing.side_effect or stmt.side_effect
+        # Merge ordering constraints
+        if stmt.before:
+            # Preserve order, avoid duplicates
+            seen = set(existing.before)
+            for s in stmt.before:
+                if s not in seen:
+                    existing.before.append(s)
+                    seen.add(s)
+
+    def ordered_sources(self) -> list[ImportStatement]:
+        """Return sources ordered to satisfy `before` constraints.
+
+        Uses a stable topological sort (Kahn's algorithm) where insertion order
+        is preserved among nodes with equal dependency rank. Falls back to
+        insertion order if cycles are detected.
+        """
+        # Build graph: edge u->v means u must come before v
+        keys = list(self.sources.keys())
+        index = {k: i for i, k in enumerate(keys)}  # for stability
+        indegree: dict[str, int] = {k: 0 for k in keys}
+        adj: dict[str, list[str]] = {k: [] for k in keys}
+        for u, stmt in self.sources.items():
+            for v in stmt.before:
+                if v in adj:  # only consider edges to imports present
+                    adj[u].append(v)
+                    indegree[v] += 1
+
+        # Kahn's algorithm
+        queue = [k for k, d in indegree.items() if d == 0]
+        # Stable ordering of initial nodes
+        queue.sort(key=lambda k: index[k])
+        ordered: list[str] = []
+        while queue:
+            u = queue.pop(0)
+            ordered.append(u)
+            for v in adj[u]:
+                indegree[v] -= 1
+                if indegree[v] == 0:
+                    queue.append(v)
+                    queue.sort(key=lambda k: index[k])
+
+        # If not all nodes processed, cycle detected; fall back to insertion order
+        if len(ordered) != len(keys):
+            ordered = keys
+        return [self.sources[k] for k in ordered]

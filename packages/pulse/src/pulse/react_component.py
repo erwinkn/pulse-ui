@@ -23,7 +23,7 @@ from typing import (
 from types import UnionType
 import typing
 from functools import lru_cache
-from pulse.codegen.imports import Imported
+from pulse.codegen.imports import Imported, ImportStatement
 from pulse.helpers import Sentinel
 from pulse.vdom import Child, Node, Element
 
@@ -301,6 +301,7 @@ class ReactComponent(Generic[P], Imported):
         lazy: bool = False,
         prop_spec: Optional[PropSpec] = None,
         fn_signature: Callable[P, Element] = default_signature,
+        extra_imports: Optional[tuple[ImportStatement, ...] | list[ImportStatement]] = None,
     ):
         super().__init__(name, src, is_default=is_default, prop=prop)
 
@@ -317,6 +318,8 @@ class ReactComponent(Generic[P], Imported):
 
         self.fn_signature = fn_signature
         self.lazy = lazy
+        # Additional import statements to include in route where this component is used
+        self.extra_imports: list[ImportStatement] = list(extra_imports or [])
         COMPONENT_REGISTRY.get().add(self)
 
     def __repr__(self) -> str:
@@ -337,7 +340,7 @@ class ReactComponent(Generic[P], Imported):
         real_props = self.props_spec.apply(self.name, props)
 
         return Node(
-            tag=f"$${self.name}",
+            tag=f"$${self.expr}",
             key=key,
             props=real_props,
             children=cast(tuple[Child], children),
@@ -768,6 +771,7 @@ def react_component(
     prop: str | None = None,
     is_default: bool = False,
     lazy: bool = False,
+    extra_imports: Optional[list[ImportStatement]] = None,
 ) -> Callable[[Callable[P, None] | Callable[P, Element]], ReactComponent[P]]:
     """
     Decorator to define a React component wrapper. The decorated function is
@@ -789,6 +793,7 @@ def react_component(
             is_default=is_default,
             lazy=lazy,
             fn_signature=fn,
+            extra_imports=extra_imports,
         )
 
     return decorator

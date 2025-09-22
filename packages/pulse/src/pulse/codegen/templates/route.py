@@ -77,6 +77,12 @@ class RouteTemplate:
                 "dynamic_selector": dyn_selector,
             }
 
+            # Register component-level extra imports (e.g., side-effect CSS)
+            extra_imports = getattr(comp, "extra_imports", None) or []
+            for stmt in extra_imports:
+                if isinstance(stmt, ImportStatement):
+                    self._imports.add_statement(stmt)
+
     def add_external_js(self, fns: Sequence[ExternalJsFunction]) -> None:
         for fn in fns:
             if fn.is_default:
@@ -100,8 +106,8 @@ class RouteTemplate:
         return self._lib_path
 
     def context(self) -> dict[str, object]:
-        # Deterministic order of import sources
-        import_sources = list(self._imports.sources.values())
+        # Deterministic order of import sources with ordering constraints
+        import_sources = self._imports.ordered_sources()
         return {
             "import_sources": import_sources,
             "components_ctx": list(self._components_by_key.values()),
@@ -140,6 +146,9 @@ import { ${', '.join([f"{v.name}{f' as {v.alias}' if v.alias else ''}" for v in 
 %   endif
 %   if import_source.types:
 import type { ${', '.join([f"{t.name}{f' as {t.alias}' if t.alias else ''}" for t in import_source.types])} } from "${import_source.src}";
+%   endif
+%   if (not import_source.default_import) and (not import_source.values) and (not import_source.types) and import_source.side_effect:
+import "${import_source.src}";
 %   endif
 % endfor
 % endif

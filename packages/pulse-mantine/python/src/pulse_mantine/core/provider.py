@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, Optional, TypedDict, Unpack
 
 import pulse as ps
+from pulse.codegen.imports import ImportStatement
 
 from .styles import CSSVariables
 from .theme import MantineTheme, MantineThemeOverride
@@ -46,7 +47,18 @@ class MantineProviderProps(TypedDict, total=False):
     """Environment at which the provider is used, `'test'` environment disables all transitions and portals"""
 
 
-@ps.react_component("MantineProvider", "@mantine/core")
+@ps.react_component(
+    "MantineProvider",
+    "@mantine/core",
+    extra_imports=[
+        ImportStatement(
+            src="@mantine/core/styles.css",
+            side_effect=True,
+            # Ensure core styles load before dates/charts styles if present
+            before=["@mantine/dates/styles.css", "@mantine/charts/styles.css"],
+        )
+    ],
+)
 def MantineProvider(*children: ps.Child, key: Optional[str] = None, **props): ...
 
 

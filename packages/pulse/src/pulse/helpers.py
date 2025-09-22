@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import os
 import platform
@@ -464,4 +465,43 @@ def remove_web_lock(lock_path: Path) -> None:
         Path(lock_path).unlink(missing_ok=True)
     except Exception:
         # Best-effort cleanup
+        pass
+
+
+async def trim_arguments_and_call_fn(
+    handler: Callable[..., Any], *payload_args: Any
+) -> None:
+    """
+    Call handler with a trimmed list of positional args based on its signature; await if needed.
+
+    - If the handler accepts *args, pass all payload_args.
+    - Otherwise, pass up to N positional args where N is the number of positional params.
+    - If inspection fails, pass payload_args as-is.
+    - Any exceptions raised by the handler are swallowed (best-effort callback semantics).
+    """
+    try:
+        sig = inspect.signature(handler)
+        params = list(sig.parameters.values())
+        has_var_pos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
+        if has_var_pos:
+            args_to_pass = payload_args
+        else:
+            nb_positional = 0
+            for p in params:
+                if p.kind in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                ):
+                    nb_positional += 1
+            args_to_pass = payload_args[:nb_positional]
+    except Exception:
+        # If inspection fails, default to passing the payload as-is
+        args_to_pass = payload_args
+
+    try:
+        maybe = handler(*args_to_pass)
+        if inspect.isawaitable(maybe):
+            await maybe
+    except Exception:
+        # Swallow handler exceptions to avoid breaking effect
         pass

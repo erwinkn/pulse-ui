@@ -2,7 +2,7 @@ from typing import Optional
 import pulse as ps
 
 
-@ps.react_component("Checkbox", "@mantine/core")
+@ps.react_component("Checkbox", "pulse-mantine")
 def Checkbox(key: Optional[str] = None, **props): ...
 
 

@@ -2,7 +2,7 @@ from typing import Optional
 import pulse as ps
 
 
-@ps.react_component("Chip", "@mantine/core")
+@ps.react_component("Chip", "pulse-mantine")
 def Chip(key: Optional[str] = None, **props): ...
 
 

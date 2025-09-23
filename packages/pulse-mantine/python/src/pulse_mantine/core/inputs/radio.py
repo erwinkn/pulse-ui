@@ -6,7 +6,7 @@ import pulse as ps
 def Radio(key: Optional[str] = None, **props): ...
 
 
-@ps.react_component("Radio", "@mantine/core", prop="Group")
+@ps.react_component("RadioGroup", "pulse-mantine")
 def RadioGroup(*children: ps.Child, key: Optional[str] = None, **props): ...
 
 

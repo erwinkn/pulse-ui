@@ -2,6 +2,6 @@ from typing import Optional
 import pulse as ps
 
 
-@ps.react_component("DateInput", "@mantine/dates")
+@ps.react_component("DateInput", "pulse-mantine")
 def DateInput(key: Optional[str] = None, **props): ...
 

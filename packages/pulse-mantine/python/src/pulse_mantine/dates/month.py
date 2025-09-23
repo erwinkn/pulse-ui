@@ -2,6 +2,6 @@ from typing import Optional
 import pulse as ps
 
 
-@ps.react_component("Month", "@mantine/dates")
+@ps.react_component("Month", "pulse-mantine")
 def Month(key: Optional[str] = None, **props): ...
 

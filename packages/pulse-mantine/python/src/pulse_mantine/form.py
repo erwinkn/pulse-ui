@@ -11,6 +11,7 @@ from typing import (
     cast,
 )
 import pulse as ps
+from pulse.html.elements import HTMLFormElement
 
 
 FormMode = Literal["controlled", "uncontrolled"]
@@ -30,6 +31,8 @@ class FormProps(ps.HTMLFormProps, total=False):
     # Form behavior
     onSubmitPreventDefault: bool
     debounceMs: int
+    onSubmit: ps.EventHandler2[dict[str, Any], Optional[ps.FormEvent[HTMLFormElement]]]  # pyright: ignore[reportIncompatibleVariableOverride]
+    onReset: ps.EventHandler1[ps.FormEvent[HTMLFormElement]]
 
 
 class FormPropsInternal(FormProps, total=False):
@@ -152,6 +155,315 @@ class IsNotEmptyHTML(Validator):
 
     def to_serializable(self) -> dict[str, Any]:
         return {"$kind": "isNotEmptyHTML", "error": self.error}
+
+
+class IsUrl(Validator):
+    def __init__(
+        self,
+        *,
+        protocols: Sequence[str] | None = None,
+        require_protocol: bool | None = None,
+        error: Any | None = None,
+    ) -> None:
+        self.protocols = list(protocols) if protocols is not None else None
+        self.require_protocol = require_protocol
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"$kind": "isUrl", "error": self.error}
+        if self.protocols is not None:
+            payload["protocols"] = self.protocols
+        if self.require_protocol is not None:
+            payload["requireProtocol"] = self.require_protocol
+        return payload
+
+
+class IsUUID(Validator):
+    def __init__(self, version: int | None = None, error: Any | None = None) -> None:
+        self.version = version
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"$kind": "isUUID", "error": self.error}
+        if self.version is not None:
+            payload["version"] = self.version
+        return payload
+
+
+class IsULID(Validator):
+    def __init__(self, error: Any | None = None) -> None:
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        return {"$kind": "isULID", "error": self.error}
+
+
+class IsNumber(Validator):
+    def __init__(self, error: Any | None = None) -> None:
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        return {"$kind": "isNumber", "error": self.error}
+
+
+class IsInteger(Validator):
+    def __init__(self, error: Any | None = None) -> None:
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        return {"$kind": "isInteger", "error": self.error}
+
+
+class IsDate(Validator):
+    def __init__(self, error: Any | None = None) -> None:
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        return {"$kind": "isDate", "error": self.error}
+
+
+class IsISODate(Validator):
+    def __init__(
+        self, *, with_time: bool | None = None, error: Any | None = None
+    ) -> None:
+        self.with_time = with_time
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"$kind": "isISODate", "error": self.error}
+        if self.with_time is not None:
+            payload["withTime"] = self.with_time
+        return payload
+
+
+class IsBefore(Validator):
+    def __init__(
+        self,
+        field: str | None = None,
+        *,
+        value: Any | None = None,
+        inclusive: bool | None = None,
+        error: Any | None = None,
+    ) -> None:
+        self.field = field
+        self.value = value
+        self.inclusive = inclusive
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"$kind": "isBefore", "error": self.error}
+        if self.field is not None:
+            payload["field"] = self.field
+        if self.value is not None:
+            payload["value"] = self.value
+        if self.inclusive is not None:
+            payload["inclusive"] = self.inclusive
+        return payload
+
+
+class IsAfter(Validator):
+    def __init__(
+        self,
+        field: str | None = None,
+        *,
+        value: Any | None = None,
+        inclusive: bool | None = None,
+        error: Any | None = None,
+    ) -> None:
+        self.field = field
+        self.value = value
+        self.inclusive = inclusive
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"$kind": "isAfter", "error": self.error}
+        if self.field is not None:
+            payload["field"] = self.field
+        if self.value is not None:
+            payload["value"] = self.value
+        if self.inclusive is not None:
+            payload["inclusive"] = self.inclusive
+        return payload
+
+
+class MinItems(Validator):
+    def __init__(self, count: int, error: Any | None = None) -> None:
+        self.count = count
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        return {"$kind": "minItems", "count": self.count, "error": self.error}
+
+
+class MaxItems(Validator):
+    def __init__(self, count: int, error: Any | None = None) -> None:
+        self.count = count
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        return {"$kind": "maxItems", "count": self.count, "error": self.error}
+
+
+class IsArrayNotEmpty(Validator):
+    def __init__(self, error: Any | None = None) -> None:
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        return {"$kind": "isArrayNotEmpty", "error": self.error}
+
+
+class AllowedFileTypes(Validator):
+    def __init__(
+        self,
+        *,
+        mime_types: Sequence[str] | None = None,
+        extensions: Sequence[str] | None = None,
+        error: Any | None = None,
+    ) -> None:
+        self.mime_types = list(mime_types) if mime_types is not None else None
+        self.extensions = list(extensions) if extensions is not None else None
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"$kind": "allowedFileTypes", "error": self.error}
+        if self.mime_types is not None:
+            payload["mimeTypes"] = self.mime_types
+        if self.extensions is not None:
+            payload["extensions"] = self.extensions
+        return payload
+
+
+class MaxFileSize(Validator):
+    def __init__(self, bytes: int, error: Any | None = None) -> None:
+        self.bytes = bytes
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        return {"$kind": "maxFileSize", "bytes": self.bytes, "error": self.error}
+
+
+class RequiredWhen(Validator):
+    def __init__(
+        self,
+        field: str,
+        *,
+        equals: Any | None = None,
+        not_equals: Any | None = None,
+        in_values: Sequence[Any] | None = None,
+        not_in_values: Sequence[Any] | None = None,
+        truthy: bool | None = None,
+        error: Any | None = None,
+    ) -> None:
+        self.field = field
+        self.equals = equals
+        self.not_equals = not_equals
+        self.in_values = list(in_values) if in_values is not None else None
+        self.not_in_values = list(not_in_values) if not_in_values is not None else None
+        self.truthy = truthy
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "$kind": "requiredWhen",
+            "field": self.field,
+            "error": self.error,
+        }
+        if self.equals is not None:
+            payload["equals"] = self.equals
+        if self.not_equals is not None:
+            payload["notEquals"] = self.not_equals
+        if self.in_values is not None:
+            payload["in"] = self.in_values
+        if self.not_in_values is not None:
+            payload["notIn"] = self.not_in_values
+        if self.truthy is not None:
+            payload["truthy"] = self.truthy
+        return payload
+
+
+class RequiredUnless(Validator):
+    def __init__(
+        self,
+        field: str,
+        *,
+        equals: Any | None = None,
+        not_equals: Any | None = None,
+        in_values: Sequence[Any] | None = None,
+        not_in_values: Sequence[Any] | None = None,
+        truthy: bool | None = None,
+        error: Any | None = None,
+    ) -> None:
+        self.field = field
+        self.equals = equals
+        self.not_equals = not_equals
+        self.in_values = list(in_values) if in_values is not None else None
+        self.not_in_values = list(not_in_values) if not_in_values is not None else None
+        self.truthy = truthy
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "$kind": "requiredUnless",
+            "field": self.field,
+            "error": self.error,
+        }
+        if self.equals is not None:
+            payload["equals"] = self.equals
+        if self.not_equals is not None:
+            payload["notEquals"] = self.not_equals
+        if self.in_values is not None:
+            payload["in"] = self.in_values
+        if self.not_in_values is not None:
+            payload["notIn"] = self.not_in_values
+        if self.truthy is not None:
+            payload["truthy"] = self.truthy
+        return payload
+
+
+class StartsWith(Validator):
+    def __init__(
+        self,
+        value: str,
+        *,
+        case_sensitive: bool | None = None,
+        error: Any | None = None,
+    ) -> None:
+        self.value = value
+        self.case_sensitive = case_sensitive
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "$kind": "startsWith",
+            "value": self.value,
+            "error": self.error,
+        }
+        if self.case_sensitive is not None:
+            payload["caseSensitive"] = self.case_sensitive
+        return payload
+
+
+class EndsWith(Validator):
+    def __init__(
+        self,
+        value: str,
+        *,
+        case_sensitive: bool | None = None,
+        error: Any | None = None,
+    ) -> None:
+        self.value = value
+        self.case_sensitive = case_sensitive
+        self.error = error
+
+    def to_serializable(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "$kind": "endsWith",
+            "value": self.value,
+            "error": self.error,
+        }
+        if self.case_sensitive is not None:
+            payload["caseSensitive"] = self.case_sensitive
+        return payload
 
 
 class ServerValidation(Validator):

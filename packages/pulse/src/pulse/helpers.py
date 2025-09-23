@@ -15,8 +15,6 @@ from typing import (
     Protocol,
     TypedDict,
     TypeVar,
-    TypeVarTuple,
-    Unpack,
 )
 from urllib.parse import urlsplit
 
@@ -25,16 +23,10 @@ from fastapi import Request
 
 from pulse.vdom import Element
 
-Args = TypeVarTuple("Args")
-
 T = TypeVar("T")
 P = ParamSpec("P")
-EventHandler = (
-    Callable[[], None]
-    | Callable[[], Coroutine[Any, Any, None]]
-    | Callable[[Unpack[Args]], None]
-    | Callable[[Unpack[Args]], Coroutine[Any, Any, None]]
-)
+
+
 JsFunction = Callable[P, T]
 
 # In case we refine it later

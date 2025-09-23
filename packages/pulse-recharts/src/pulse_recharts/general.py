@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import (
-    Any,
     Generic,
     Literal,
     Optional,
@@ -8,7 +7,6 @@ from typing import (
     TypedDict,
     Union,
     Unpack,
-    NotRequired,
 )
 import pulse as ps
 from pulse.html.props import HTMLSVGProps
@@ -96,7 +94,7 @@ class ResponsiveContainerProps(ps.HTMLProps, total=False):
     """If specified a positive number, debounced function will be used to handle
     the resize event. Default: 0"""
 
-    onResize: ps.EventHandler[float, float]
+    onResize: ps.EventHandler2[float, float]  # pyright: ignore[reportIncompatibleVariableOverride]
     """If specified provides a callback providing the updated chart width and
     height values."""
 
@@ -195,28 +193,28 @@ class LegendProps(ps.HTMLProps, Generic[T], total=False):
     wrapperStyle: ps.CSSProperties
     """The style of legend container"""
 
-    onClick: ps.EventHandler[LegendPayload[T], int]
+    onClick: ps.EventHandler2[LegendPayload[T], int]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The customized event handler of click on the items"""
 
-    onMouseDown: ps.EventHandler[LegendPayload[T], int]
+    onMouseDown: ps.EventHandler2[LegendPayload[T], int]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The customized event handler of mousedown on the items"""
 
-    onMouseUp: ps.EventHandler[LegendPayload[T], int]
+    onMouseUp: ps.EventHandler2[LegendPayload[T], int]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The customized event handler of mouseup on the items"""
 
-    onMouseMove: ps.EventHandler[LegendPayload[T], int]
+    onMouseMove: ps.EventHandler2[LegendPayload[T], int]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The customized event handler of mousemove on the items"""
 
-    onMouseOver: ps.EventHandler[LegendPayload[T], int]
+    onMouseOver: ps.EventHandler2[LegendPayload[T], int]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The customized event handler of mouseover on the items"""
 
-    onMouseOut: ps.EventHandler[LegendPayload[T], int]
+    onMouseOut: ps.EventHandler2[LegendPayload[T], int]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The customized event handler of mouseout on the items"""
 
-    onMouseEnter: ps.EventHandler[LegendPayload[T], int]
+    onMouseEnter: ps.EventHandler2[LegendPayload[T], int]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The customized event handler of mouseenter on the items"""
 
-    onMouseLeave: ps.EventHandler[LegendPayload[T], int]
+    onMouseLeave: ps.EventHandler2[LegendPayload[T], int]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The customized event handler of mouseleave on the items"""
 
 
@@ -385,12 +383,12 @@ LabelPosition = Literal[
 
 
 class LabelProps(HTMLSVGProps, Generic[T], total=False):
-    viewBox: ViewBox
+    viewBox: ViewBox  # pyright: ignore[reportIncompatibleVariableOverride]
     "The box of viewing area, which has the shape of {x: someVal, y: someVal, width: someVal, height: someVal}, usually calculated internally."
     # parentViewBox: ViewBox
     value: int | float | str
     "The value of label, which can be specified by this props or the children of <Label />"
-    offset: float
+    offset: float  # pyright: ignore[reportIncompatibleVariableOverride]
     'The offset to the specified "position"'
     position: LabelPosition | Dimension
     "The position of label relative to the view box. See the docs for the meaning of each option: https://recharts.org/en-US/api/Label"
@@ -429,7 +427,7 @@ class LabelListProps(ps.HTMLSVGProps, Generic[T], total=False):
     position: LabelPosition
     "The position of each label relative to it view box。"
 
-    offset: int
+    offset: int  # pyright: ignore[reportIncompatibleVariableOverride]
     'The offset to the specified "position". Default: 5'
 
     angle: float

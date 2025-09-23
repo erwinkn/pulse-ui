@@ -45,11 +45,29 @@ type RadioGroupProps = ComponentProps<typeof MantineRadio.Group> & { name?: stri
 type RadioProps = ComponentProps<typeof MantineRadio>;
 type FileInputProps = ComponentProps<typeof MantineFileInput> & { name?: string };
 
+function coerceControlledTextValue<T extends Record<string, any>>(bind: T, shouldCoerce: boolean): T {
+  if (!shouldCoerce) {
+    return bind;
+  }
+  if (!bind || typeof bind !== "object") {
+    return bind;
+  }
+  if (!Object.prototype.hasOwnProperty.call(bind, "value")) {
+    return bind;
+  }
+  const currentValue = (bind as any).value;
+  if (currentValue === undefined || currentValue === null) {
+    return { ...(bind as any), value: "" } as T;
+  }
+  return bind;
+}
+
 export function TextInput(props: TextInputProps) {
   const { name, ...rest } = props;
   const ctx = useFormContext();
   const bind = name && ctx ? ctx.getInputProps(name) : {};
-  return <MantineTextInput {...bind} {...rest} />;
+  const normalizedBind = coerceControlledTextValue(bind as Record<string, any>, Boolean(name && ctx));
+  return <MantineTextInput {...(normalizedBind as any)} {...rest} />;
 }
 
 export function NumberInput(props: NumberInputProps) {
@@ -84,7 +102,8 @@ export function Textarea(props: TextareaProps) {
   const { name, ...rest } = props;
   const ctx = useFormContext();
   const bind = name && ctx ? ctx.getInputProps(name) : {};
-  return <MantineTextarea {...bind} {...rest} />;
+  const normalizedBind = coerceControlledTextValue(bind as Record<string, any>, Boolean(name && ctx));
+  return <MantineTextarea {...(normalizedBind as any)} {...rest} />;
 }
 
 export function Switch(props: SwitchProps) {
@@ -119,28 +138,32 @@ export function PasswordInput(props: PasswordInputProps) {
   const { name, ...rest } = props;
   const ctx = useFormContext();
   const bind = name && ctx ? ctx.getInputProps(name) : {};
-  return <MantinePasswordInput {...bind} {...rest} />;
+  const normalizedBind = coerceControlledTextValue(bind as Record<string, any>, Boolean(name && ctx));
+  return <MantinePasswordInput {...(normalizedBind as any)} {...rest} />;
 }
 
 export function PinInput(props: PinInputProps) {
   const { name, ...rest } = props;
   const ctx = useFormContext();
   const bind = name && ctx ? ctx.getInputProps(name) : {};
-  return <MantinePinInput {...bind} {...rest} />;
+  const normalizedBind = coerceControlledTextValue(bind as Record<string, any>, Boolean(name && ctx));
+  return <MantinePinInput {...(normalizedBind as any)} {...rest} />;
 }
 
 export function JsonInput(props: JsonInputProps) {
   const { name, ...rest } = props;
   const ctx = useFormContext();
   const bind = name && ctx ? ctx.getInputProps(name) : {};
-  return <MantineJsonInput {...bind} {...rest} />;
+  const normalizedBind = coerceControlledTextValue(bind as Record<string, any>, Boolean(name && ctx));
+  return <MantineJsonInput {...(normalizedBind as any)} {...rest} />;
 }
 
 export function ColorInput(props: ColorInputProps) {
   const { name, ...rest } = props;
   const ctx = useFormContext();
   const bind = name && ctx ? ctx.getInputProps(name) : {};
-  return <MantineColorInput {...bind} {...rest} />;
+  const normalizedBind = coerceControlledTextValue(bind as Record<string, any>, Boolean(name && ctx));
+  return <MantineColorInput {...(normalizedBind as any)} {...rest} />;
 }
 
 export function ColorPicker(props: ColorPickerProps) {

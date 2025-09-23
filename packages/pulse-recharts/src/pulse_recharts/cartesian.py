@@ -1,7 +1,6 @@
-from re import A
 from typing import Any, Callable, Literal, Optional, Sequence, TypedDict, Union, Unpack
 import pulse as ps
-from .common import AnimationTiming, ChartOffsetInternal, DataKey, MinPointSize
+from .common import ChartOffsetInternal, DataKey, MinPointSize
 from .general import LegendType, AnimationEasing
 from .shapes import CurveProps, RectangleProps
 
@@ -170,17 +169,17 @@ class BaseAxisProps(TypedDict, total=False):
     """The HTML element's class name"""
 
 
-class XAxisProps(BaseAxisProps, ps.HTMLSVGProps, total=False):
+class XAxisProps(ps.HTMLSVGProps, BaseAxisProps, total=False):  # pyright: ignore[reportIncompatibleVariableOverride]
     xAxisId: Union[str, float]
     """The unique id of x-axis"""
 
-    height: float
+    height: float  # pyright: ignore[reportIncompatibleVariableOverride]
     """The height of axis, which need to be set by user"""
 
     mirror: bool
     """Whether to mirror the axis"""
 
-    orientation: XAxisOrientation
+    orientation: XAxisOrientation  # pyright: ignore[reportIncompatibleVariableOverride]
     """The orientation of the axis"""
 
     ticks: list[AxisTick]
@@ -210,18 +209,18 @@ class XAxisProps(BaseAxisProps, ps.HTMLSVGProps, total=False):
 def XAxis(key: Optional[str] = None, **props: Unpack[XAxisProps]): ...
 
 
-class YAxisProps(BaseAxisProps, ps.HTMLSVGProps, total=False):
+class YAxisProps(ps.HTMLSVGProps, BaseAxisProps, total=False):  # pyright: ignore[reportIncompatibleVariableOverride]
     yAxisId: Union[str, float]
     """The unique id of y-axis"""
 
-    width: Union[float, Literal["auto"]]
+    width: Union[float, Literal["auto"]]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The width of axis, which need to be set by user.
     When set to 'auto', the width will be calculated dynamically based on tick labels and axis labels."""
 
     mirror: bool
     """Whether to mirror the axis"""
 
-    orientation: YAxisOrientation
+    orientation: YAxisOrientation  # pyright: ignore[reportIncompatibleVariableOverride]
     """The orientation of the axis"""
 
     ticks: list[AxisTick]
@@ -283,11 +282,11 @@ GridLineType = (
 
 
 class CartesianGridProps(ps.HTMLSVGProps, total=False):
-    x: float
+    x: float  # pyright: ignore[reportIncompatibleVariableOverride]
     """The x-coordinate of grid.
     If left undefined, it will be computed from the chart's offset and margins."""
 
-    y: float
+    y: float  # pyright: ignore[reportIncompatibleVariableOverride]
     """The y-coordinate of grid.
     If left undefined, it will be computed from the chart's offset and margins."""
 
@@ -350,8 +349,8 @@ class CartesianGridProps(ps.HTMLSVGProps, total=False):
 
     # === Internal props (but somehow in the public docs??) ===
 
-    width: float
-    height: float
+    width: float  # pyright: ignore[reportIncompatibleVariableOverride]
+    height: float  # pyright: ignore[reportIncompatibleVariableOverride]
     horizontalCoordinatesGenerator: Callable[
         [HorizontalCoordinateProps, bool], list[float]
     ]
@@ -420,10 +419,10 @@ class LineProps(CurveProps, total=False):
     hide: bool
     """Hides the line when True (useful for toggling via legend). Default: False"""
 
-    points: list[LinePointItem]
+    points: list[LinePointItem]  # pyright: ignore[reportIncompatibleVariableOverride]
     """The coordinates of all points in the line. Usually calculated internally."""
 
-    layout: LineLayout
+    layout: LineLayout  # pyright: ignore[reportIncompatibleVariableOverride]
     """Layout of the line, usually inherited from parent chart: 'horizontal' | 'vertical'"""
 
     connectNulls: bool
@@ -432,7 +431,7 @@ class LineProps(CurveProps, total=False):
     unit: str | int
     """The unit of data. Used in tooltip."""
 
-    name: str | int
+    name: str | int  # pyright: ignore[reportIncompatibleVariableOverride]
     """The name of the data series. Used in tooltip and legend. If unset, the value of dataKey is used."""
 
     isAnimationActive: bool
@@ -470,7 +469,7 @@ class BarProps(RectangleProps, total=False):
     stackId: str | int
     barSize: str | float
     unit: str | int
-    name: str | int
+    name: str | int  # pyright: ignore[reportIncompatibleVariableOverride]
     dataKey: DataKey
     tooltipType: TooltipType
     legendType: LegendType
@@ -480,10 +479,10 @@ class BarProps(RectangleProps, total=False):
     shape: "ActiveBar"
     activeBar: "ActiveBar"
     background: "ActiveBar"
-    radius: float | tuple[float, float, float, float]
+    radius: float | tuple[float, float, float, float]  # pyright: ignore[reportIncompatibleVariableOverride]
     # NO argument event handlers
-    onAnimationStart: ps.EventHandler
-    onAnimationEnd: ps.EventHandler
+    onAnimationStart: ps.EventHandler0  # pyright: ignore[reportIncompatibleVariableOverride]
+    onAnimationEnd: ps.EventHandler0  # pyright: ignore[reportIncompatibleVariableOverride]
     # Convoluted type where I think it's better to just use Label or LabelList
     # label: bool | str | float | ??
 

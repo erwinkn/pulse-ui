@@ -9,12 +9,24 @@ from .cookies import Cookie, SetCookie
 from .decorators import computed, effect, query
 from .helpers import (
     CSSProperties,
-    EventHandler,
     For,
     JsFunction,
     JsObject,
     later,
     repeat,
+)
+from .types import (
+    EventHandler0,
+    EventHandler1,
+    EventHandler2,
+    EventHandler3,
+    EventHandler4,
+    EventHandler5,
+    EventHandler6,
+    EventHandler7,
+    EventHandler8,
+    EventHandler9,
+    EventHandler10,
 )
 from .env import PulseMode, env, mode
 from .hooks import (
@@ -180,8 +192,19 @@ __all__ = [
     "Prop",
     "prop",
     "DEFAULT",
+    # Types
+    "EventHandler0",
+    "EventHandler1",
+    "EventHandler2",
+    "EventHandler3",
+    "EventHandler4",
+    "EventHandler5",
+    "EventHandler6",
+    "EventHandler7",
+    "EventHandler8",
+    "EventHandler9",
+    "EventHandler10",
     # Helpers
-    "EventHandler",
     "For",
     "JsFunction",
     "CSSProperties",

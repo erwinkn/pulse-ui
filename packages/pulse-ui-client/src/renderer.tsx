@@ -154,8 +154,6 @@ export function applyUpdates(
           node = node as React.ReactElement;
           const currentProps = (node.props ?? {}) as object;
           const nextProps: Record<string, any> = { ...currentProps };
-
-          console.log("update_props, data:", update.data);
           const delta = update.data;
           if (delta.remove && delta.remove.length > 0) {
             for (const key of delta.remove) {
@@ -169,8 +167,7 @@ export function applyUpdates(
             }
           }
           // Not passing children -> only update the props
-          console.log("Old props:", node.props);
-          console.log("New props:", nextProps);
+          console.log(`Updating props:`, { node, nextProps });
           return cloneElement(node, nextProps);
         }
         case "insert": {

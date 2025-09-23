@@ -1,6 +1,10 @@
 {
   "name": "pulse",
   "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build:packages": "node ./scripts/build-js-packages.ts && bun upgrade"
+  },
   "workspaces": [
     "packages/pulse-ui-client/",
     "packages/pulse-mantine/js",

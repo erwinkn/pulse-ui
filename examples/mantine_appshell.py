@@ -1,33 +1,14 @@
-from pathlib import Path
 import pulse as ps
 from pulse_mantine import (
-    MantineProvider,
     AppShell,
-    AppShellHeader,
-    AppShellNavbar,
-    AppShellMain,
     AppShellAside,
     AppShellFooter,
+    AppShellHeader,
+    AppShellMain,
+    AppShellNavbar,
     Group,
-    Button,
-    Card,
-    Grid,
-    GridCol,
-    Stack,
-    TextInput,
-    Checkbox,
-    SegmentedControl,
-    Divider,
-    ScrollArea,
-    NavLink,
-    Title,
+    MantineProvider,
     Text,
-    Badge,
-)
-from pulse_mantine import DatePickerInput
-from pulse_mantine.core.layout.appshell import (
-    AppShellCollapsed,
-    AppShellNavbarConfiguration,
 )
 from pulse_mantine.core.navigation.burger import Burger
 
@@ -46,11 +27,11 @@ def Home():
         AppShell(
             header={"height": 60},
             footer={"height": 60},
-            navbar=AppShellNavbarConfiguration(
-                width=300,
-                breakpoint="sm",
-                collapsed=AppShellCollapsed(mobile=not state.opened),
-            ),
+            navbar={
+                "width": 300,
+                "breakpoint": "sm",
+                "collapsed": {"mobile": not state.opened},
+            },
             aside={
                 "width": 300,
                 "breakpoint": "md",

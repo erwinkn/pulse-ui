@@ -5,11 +5,6 @@ export type FormValidationMode = "submit" | "blur" | "change";
 
 export interface FormContextValue<TValues = any> {
   form: UseFormReturnType<TValues>;
-  /** Shortcut for list operations */
-  insertListItem: UseFormReturnType<TValues>["insertListItem"];
-  removeListItem: UseFormReturnType<TValues>["removeListItem"];
-  reorderListItem: UseFormReturnType<TValues>["reorderListItem"];
-  /** Returns props to bind a field in uncontrolled mode */
   getInputProps: UseFormReturnType<TValues>["getInputProps"];
 }
 

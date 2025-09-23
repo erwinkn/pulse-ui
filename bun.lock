@@ -13,7 +13,8 @@
         "@react-router/node": "^7.7.1",
         "@react-router/serve": "^7.7.1",
         "isbot": "^5.1.27",
-        "pulse-ui-client": "../../packages/pulse-ui-client",
+        "pulse-mantine": "workspace:*",
+        "pulse-ui-client": "workspace:*",
         "react": "^19.1.0",
         "react-datepicker": "^8.4.0",
         "react-dom": "^19.1.0",
@@ -46,6 +47,7 @@
     },
     "packages/pulse-mantine/js": {
       "name": "pulse-mantine",
+      "version": "0.1.0",
       "dependencies": {
         "@mantine/carousel": "^8.3.1",
         "@mantine/charts": "^8.3.1",
@@ -71,9 +73,14 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
+        "@types/node": "^24.2.1",
+        "@types/react": "^19.1.10",
+        "@types/react-dom": "^19.1.7",
+        "typescript": "^5",
       },
       "peerDependencies": {
-        "typescript": "^5",
+        "react": "^18 || ^19",
+        "react-dom": "^18 || ^19",
       },
     },
     "packages/pulse-ui-client": {
@@ -1265,11 +1272,7 @@
 
     "prop-types/react-is": ["react-is@16.13.1", "", {}, "sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ=="],
 
-    "pulse-ui-client/@types/bun": ["@types/bun@1.2.21", "", { "dependencies": { "bun-types": "1.2.21" } }, "sha512-NiDnvEqmbfQ6dmZ3EeUO577s4P5bf4HCTXtI6trMc6f6RzirY5IrF3aIookuSpyslFzrnvv2lmEWv5HyC1X79A=="],
-
     "pulse-web/@types/node": ["@types/node@20.19.10", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-iAFpG6DokED3roLSP0K+ybeDdIX6Bc0Vd3mLW5uDqThPWtNos3E+EqOM11mPQHKzfWHqEBuLjIlsBQQ8CsISmQ=="],
-
-    "pulse-web/pulse-ui-client": ["pulse-ui-client@file:packages/pulse-ui-client", { "dependencies": { "socket.io-client": "^4.8.1" }, "devDependencies": { "@types/bun": "latest", "@types/node": "^24.2.1", "@types/react": "^19.1.10", "@types/react-dom": "^19.1.7", "typescript": "^5" }, "peerDependencies": { "react": "^18 || ^19", "react-dom": "^18 || ^19", "react-router": "^7" } }],
 
     "react-datepicker/@floating-ui/react": ["@floating-ui/react@0.27.15", "", { "dependencies": { "@floating-ui/react-dom": "^2.1.5", "@floating-ui/utils": "^0.2.10", "tabbable": "^6.0.0" }, "peerDependencies": { "react": ">=17.0.0", "react-dom": ">=17.0.0" } }, "sha512-0LGxhBi3BB1DwuSNQAmuaSuertFzNAerlMdPbotjTVnvPtdOs7CkrHLaev5NIXemhzDXNC0tFzuseut7cWA5mw=="],
 
@@ -1315,11 +1318,7 @@
 
     "morgan/debug/ms": ["ms@2.0.0", "", {}, "sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A=="],
 
-    "pulse-ui-client/@types/bun/bun-types": ["bun-types@1.2.21", "", { "dependencies": { "@types/node": "*" }, "peerDependencies": { "@types/react": "^19" } }, "sha512-sa2Tj77Ijc/NTLS0/Odjq/qngmEPZfbfnOERi0KRUYhT9R8M4VBioWVmMWE5GrYbKMc+5lVybXygLdibHaqVqw=="],
-
     "pulse-web/@types/node/undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
-
-    "pulse-web/pulse-ui-client/@types/node": ["@types/node@24.2.1", "", { "dependencies": { "undici-types": "~7.10.0" } }, "sha512-DRh5K+ka5eJic8CjH7td8QpYEV6Zo10gfRkjHCO3weqZHWDtAaSTFtl4+VMqOJ4N5jcuhZ9/l+yy8rVgw7BQeQ=="],
 
     "react-datepicker/@floating-ui/react/@floating-ui/react-dom": ["@floating-ui/react-dom@2.1.5", "", { "dependencies": { "@floating-ui/dom": "^1.7.3" }, "peerDependencies": { "react": ">=16.8.0", "react-dom": ">=16.8.0" } }, "sha512-HDO/1/1oH9fjj4eLgegrlH3dklZpHtUYYFiVwMUwfGvk9jWDRWqkklA2/NFScknrcNSspbV868WjXORvreDX+Q=="],
 

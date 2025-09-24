@@ -167,7 +167,6 @@ export function applyUpdates(
             }
           }
           // Not passing children -> only update the props
-          console.log(`Updating props:`, { node, nextProps });
           return cloneElement(node, nextProps);
         }
         case "insert": {

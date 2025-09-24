@@ -1,9 +1,19 @@
 import asyncio
 
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Generic,
+    Optional,
+    TypeVar,
+    cast,
+)
 
 from pulse.reactive import Computed, AsyncEffect, Signal
-from pulse.helpers import trim_arguments_and_call_fn
+from pulse.helpers import call_flexible
+
 if TYPE_CHECKING:
     from pulse.state import State
 
@@ -279,12 +289,12 @@ class QueryProperty(Generic[T, TState]):
                 result._set_error(e)
                 # Invoke error handler if provided
                 if bound_on_error:
-                    await trim_arguments_and_call_fn(bound_on_error, e)
+                    await call_flexible(bound_on_error, e)
             else:
                 result._set_success(data)
                 # Invoke success handler if provided
                 if bound_on_success:
-                    await trim_arguments_and_call_fn(bound_on_success, data)
+                    await call_flexible(bound_on_success, data)
             finally:
                 inflight_key = None
 

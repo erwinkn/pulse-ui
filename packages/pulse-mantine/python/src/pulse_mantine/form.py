@@ -11,6 +11,7 @@ from typing import (
     cast,
 )
 import pulse as ps
+from pulse.form import FormData, ManualForm
 from pulse.html.elements import HTMLFormElement
 
 
@@ -29,9 +30,8 @@ class FormProps(ps.HTMLFormProps, total=False):
     validateInputOnChange: Union[bool, list[str]]
     clearInputErrorOnChange: bool
     # Form behavior
-    onSubmitPreventDefault: bool
     debounceMs: int
-    onSubmit: ps.EventHandler2[dict[str, Any], Optional[ps.FormEvent[HTMLFormElement]]]  # pyright: ignore[reportIncompatibleVariableOverride]
+    onSubmit: ps.EventHandler1[FormData]  # pyright: ignore[reportIncompatibleVariableOverride]
     onReset: ps.EventHandler1[ps.FormEvent[HTMLFormElement]]
 
 
@@ -513,6 +513,9 @@ class Form(ps.State):
     messages: list[dict[str, Any]] = []
     _validator_schema: Optional[Validation] = None
 
+    def __init__(self):
+        self._form = ManualForm()
+
     # Mount the React component, wiring messages and passing through props
     def Component(
         self, *children: ps.Child, key: Optional[str] = None, **props: Unpack[FormProps]
@@ -520,6 +523,9 @@ class Form(ps.State):
         # Capture user-provided schema with callables for server validators
         schema = props.pop("validate", None)
         internal_props = cast(dict[str, Any], props)
+        on_submit = props.pop("onSubmit", None)
+        self._form.update(on_submit)
+
         if isinstance(schema, dict):
             self._validator_schema = schema  # keep original with callables
             internal_props["validate"] = {
@@ -541,6 +547,7 @@ class Form(ps.State):
             key=key,
             messages=self.messages,
             onServerValidation=self._on_server_validation,
+            **self._form.props(),
             **internal_props,
         )
 

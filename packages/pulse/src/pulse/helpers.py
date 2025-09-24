@@ -13,6 +13,7 @@ from typing import (
     Iterable,
     ParamSpec,
     Protocol,
+    TypeVarTuple,
     TypedDict,
     TypeVar,
 )
@@ -460,9 +461,7 @@ def remove_web_lock(lock_path: Path) -> None:
         pass
 
 
-async def trim_arguments_and_call_fn(
-    handler: Callable[..., Any], *payload_args: Any
-) -> None:
+async def call_flexible(handler: Callable[..., Any], *payload_args: Any) -> None:
     """
     Call handler with a trimmed list of positional args based on its signature; await if needed.
 

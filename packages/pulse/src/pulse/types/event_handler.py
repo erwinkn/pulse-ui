@@ -2,7 +2,10 @@ from typing import (
     Any,
     Callable,
     Coroutine,
+    ParamSpec,
     TypeVar,
+    overload,
+    reveal_type,
 )
 
 EventHandlerResult = None | Coroutine[Any, Any, None]

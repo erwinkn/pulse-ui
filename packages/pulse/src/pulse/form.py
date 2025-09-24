@@ -4,49 +4,150 @@ import inspect
 import uuid
 from dataclasses import dataclass
 from typing import (
+    Any,
     Awaitable,
     Callable,
+    Never,
     Optional,
-    Unpack,
     TYPE_CHECKING,
+    TypedDict,
+    Unpack,
 )
 
-from fastapi import UploadFile
-from starlette.datastructures import FormData as StarletteFormData
+from fastapi import HTTPException, Request, Response
+from pulse.helpers import call_flexible
+from pulse.reactive import Signal
+from pulse.types.event_handler import EventHandler1
+from starlette.datastructures import FormData as StarletteFormData, UploadFile
 
 from .context import PulseContext
-from .html import HTMLFormProps, form
+from .hooks import HOOK_CONTEXT, server_address, stable
+from .html import HTMLFormProps
+from .react_component import react_component
 from .vdom import Child
 
-if TYPE_CHECKING:  # pragma: no cover - type checking only
+if TYPE_CHECKING:  # pragma: no cover
     from .app import App
+    from .user_session import UserSession
 
 
+__all__ = ["Form", "ManualForm", "FormData", "FormValue", "UploadFile", "FormRegistry"]
 FormValue = str | UploadFile
 FormData = dict[str, FormValue | list[FormValue]]
 
-__all__ = ["Form", "FormData", "UploadFile"]
+
+@react_component("PulseForm", "pulse-ui-client")
+def client_form_component(
+    *children: Child,
+    key: Optional[str] = None,
+    **props: Unpack[HTMLFormProps],
+): ...
 
 
-@dataclass(slots=True)
+@dataclass
 class FormRegistration:
-    """Internal metadata stored for each registered form."""
-
     id: str
     render_id: str
     route_path: str
     session_id: str
-    on_submit: Callable[[FormData], None | Awaitable[None]]
+    on_submit: EventHandler1[FormData]
+
+
+class FormRegistry:
+    def __init__(self, app: "App") -> None:
+        self._app = app
+        self._handlers: dict[str, FormRegistration] = {}
+        self._forms_by_render: dict[str, set[str]] = {}
+
+    def register(
+        self,
+        render_id: str,
+        route_path: str,
+        session_id: str,
+        on_submit: EventHandler1[FormData],
+    ) -> FormRegistration:
+        registration = FormRegistration(
+            uuid.uuid4().hex,
+            render_id=render_id,
+            route_path=route_path,
+            session_id=session_id,
+            on_submit=on_submit,
+        )
+        self._handlers[registration.id] = registration
+        self._forms_by_render.setdefault(registration.render_id, set()).add(
+            registration.id
+        )
+        return registration
+
+    def unregister(self, form_id: str) -> None:
+        registration = self._handlers.pop(form_id, None)
+        if registration is None:
+            return
+        bucket = self._forms_by_render.get(registration.render_id)
+        if bucket is not None:
+            bucket.discard(form_id)
+            if len(bucket) == 0:
+                self._forms_by_render.pop(registration.render_id)
+
+    def remove_render(self, render_id: str) -> None:
+        for form_id in list(self._forms_by_render.get(render_id, set())):
+            self.unregister(form_id)
+
+    async def handle_submit(
+        self,
+        form_id: str,
+        request: Request,
+        session: "UserSession",
+    ) -> Response:
+        registration = self._handlers.get(form_id)
+        if registration is None:
+            raise HTTPException(status_code=404, detail="Unknown form submission")
+
+        if registration.session_id != session.sid:
+            raise HTTPException(
+                status_code=403, detail="Form does not belong to this session"
+            )
+
+        raw_form = await request.form()
+        data = normalize_form_data(raw_form)
+
+        render = self._app.render_sessions.get(registration.render_id)
+        if render is None:
+            self.unregister(form_id)
+            raise HTTPException(
+                status_code=410, detail="Render session expired for form"
+            )
+
+        print("Registration route path:", registration.route_path)
+        print("Active mounts:", render.route_mounts.keys())
+        try:
+            mount = render.get_route_mount(registration.route_path)
+        except ValueError as exc:
+            self.unregister(form_id)
+            raise HTTPException(
+                status_code=410,
+                detail="Form route is no longer mounted",
+            ) from exc
+
+        with PulseContext.update(render=render, route=mount.route):
+            maybe = call_flexible(registration.on_submit, data)  # pyright: ignore[reportArgumentType]
+            if inspect.isawaitable(maybe):
+                await maybe
+
+        return Response(status_code=204)
 
 
 def normalize_form_data(raw: StarletteFormData) -> FormData:
-    """Convert Starlette FormData into a dict keeping UploadFiles intact."""
-
     normalized: FormData = {}
-    # multi_items() preserves duplicates while decoding percent-encoded keys
     for key, value in raw.multi_items():
         item: FormValue
+        print(f"Normalizing item {key}: {value} (type: {type(value)})")
         if isinstance(value, UploadFile):
+            print(f"UploadFile, name = {value.filename}, size = {value.size}")
+            # Form submission tends to produce empty UploadFile objects for
+            # empty file inputs
+            if not value.filename and not value.size:
+                continue
             item = value
         else:
             item = str(value)
@@ -62,69 +163,116 @@ def normalize_form_data(raw: StarletteFormData) -> FormData:
     return normalized
 
 
-class Form:
-    def __init__(self, on_submit: Callable[[FormData], None | Awaitable[None]]) -> None:
+class PulseFormProps(HTMLFormProps, total=False):
+    action: Never  # pyright: ignore[reportIncompatibleVariableOverride]
+    method: Never  # pyright: ignore[reportIncompatibleVariableOverride]
+    encType: Never  # pyright: ignore[reportIncompatibleVariableOverride]
+    onSubmit: Never  # pyright: ignore[reportIncompatibleVariableOverride]
+
+
+def Form(
+    *children: Child,
+    key: str,
+    onSubmit: EventHandler1[FormData] | None = None,
+    **props: Unpack[PulseFormProps],  # pyright: ignore[reportGeneralTypeIssues]
+):
+    if not isinstance(key, str) or not key:
+        raise ValueError("ps.Form requires a non-empty string key")
+    if not callable(onSubmit):
+        raise ValueError("ps.Form requires an onSubmit callable")
+    if "action" in props:
+        raise ValueError("ps.Form does not allow overriding the form action")
+
+    hook_state = HOOK_CONTEXT.get()
+    if hook_state is None:
+        raise RuntimeError("ps.Form can only be used within a component render")
+
+    if key in hook_state.forms:
+        raise RuntimeError(
+            f"Duplicate ps.Form id '{key}' detected within the same render"
+        )
+
+    handler = stable(f"form:{key}", onSubmit)
+    manual = hook_state.forms.get(key)
+    if manual is None:
+        manual = ManualForm(handler)
+        hook_state.forms[key] = manual
+
+    return manual(*children, key=key, **props)
+
+
+class GeneratedFormProps(TypedDict):
+    action: str
+    method: str
+    encType: str
+    onSubmit: Callable[[], None]
+
+
+class ManualForm:
+    def __init__(self, on_submit: EventHandler1[FormData] | None = None) -> None:
         ctx = PulseContext.get()
         render = ctx.render
         route = ctx.route
         session = ctx.session
-
         if render is None:
-            raise RuntimeError("ps.Form() must be created during a render pass")
+            raise RuntimeError("ManualForm must be created during a render pass")
         if route is None:
-            raise RuntimeError("ps.Form() requires an active route context")
+            raise RuntimeError("ManualForm requires an active route context")
         if session is None:
-            raise RuntimeError("ps.Form() requires an active user session")
+            raise RuntimeError("ManualForm requires an active user session")
 
-        self._app: App = ctx.app
-        self._render_id = render.id
-        self._route_path = route.pathname
-        self._session_id = session.sid
-        self._id = uuid.uuid4().hex
-        self._disposed = False
-
-        registration = FormRegistration(
-            id=self._id,
-            render_id=self._render_id,
-            route_path=self._route_path,
-            session_id=self._session_id,
-            on_submit=on_submit,
+        self._submit_signal = Signal(False)
+        self._app = ctx.app
+        self._registration = self._app.forms.register(
+            session_id=session.sid,
+            render_id=render.id,
+            route_path=route.pathname,
+            on_submit=self.wrap_on_submit(on_submit),
         )
-        self._app._register_form(registration)
+
+    def wrap_on_submit(self, on_submit: EventHandler1[FormData] | None):
+        async def on_submit_handler(data: FormData):
+            if on_submit:
+                await call_flexible(on_submit, data)
+            self._submit_signal.write(False)
+
+        return on_submit_handler
 
     @property
-    def id(self) -> str:
-        return self._id
+    def is_submitting(self):
+        return self._submit_signal.read()
+
+    @property
+    def registration(self):
+        if self._registration is None:
+            raise ValueError("This form has been disposed")
+        return self._registration
+
+    def _start_submit(self):
+        self._submit_signal.write(True)
+
+    def props(self) -> GeneratedFormProps:
+        return {
+            "action": f"{server_address()}/pulse/forms/{self.registration.id}",
+            "method": "POST",
+            "encType": "multipart/form-data",
+            "onSubmit": self._start_submit,
+        }
 
     def __call__(
         self,
         *children: Child,
         key: Optional[str] = None,
-        **props: Unpack[HTMLFormProps],
+        **props: Unpack[PulseFormProps],
     ):
-        props = props | self.props()
-        return form(*children, key=key, **props)
-
-    def props(self) -> HTMLFormProps:
-        if self._disposed:
-            raise RuntimeError("Cannot access props on a disposed form")
-        self._app._mark_form_used(self._render_id, self._route_path, self._id)
-        return {
-            "action": f"/pulse/forms/{self._id}",
-            "method": "POST",
-            "encType": "multipart/form-data",
-        }
+        props.update(self.props())  # pyright: ignore
+        return client_form_component(*children, key=key, **props)
 
     def dispose(self) -> None:
-        if self._disposed:
+        if self._registration is None:
             return
-        self._disposed = True
-        self._app._unregister_form(self._id)
+        self._app.forms.unregister(self._registration.id)
+        self._registration = None
 
-
-async def call_form_handler(handler: Callable[[FormData], None | Awaitable[None]], data: FormData):
-    """Invoke the form handler, awaiting if necessary."""
-
-    maybe = handler(data)
-    if inspect.isawaitable(maybe):
-        await maybe
+    def update(self, on_submit: EventHandler1[FormData] | None) -> None:
+        self.registration.on_submit = self.wrap_on_submit(on_submit)

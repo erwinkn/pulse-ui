@@ -69,7 +69,7 @@ function createConnectedField<P extends { name?: string; onChange?: ChangeHandle
           {...(bindRest as P)}
           {...(rest as P)}
           name={name}
-          {...(isControlled ? ({ value: normalizedValue } as Partial<P>) : {})}
+          {...(isControlled ? ({ value: normalizedValue } as unknown as Partial<P>) : {})}
           onChange={handleChange as any}
         />
       );

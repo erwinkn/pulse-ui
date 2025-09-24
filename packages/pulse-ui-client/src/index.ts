@@ -29,6 +29,10 @@ export {
   RenderLazy,
 } from "./renderer";
 
+// Form helpers
+export { PulseForm, submitForm } from "./form";
+export type { PulseFormProps } from "./form";
+
 // Messages (types only)
 export type {
   ServerMessage,
@@ -61,4 +65,4 @@ export {
   decodeFromWire,
   cleanForSerialization,
 } from "./serialize/clean";
-export { stringify, parse } from "./serialize/v1";
+export { serialize, deserialize } from "./serialize/v2"

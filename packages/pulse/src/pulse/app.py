@@ -59,7 +59,7 @@ from pulse.user_session import (
     UserSession,
     new_sid,
 )
-from pulse.form import FormRegistration, call_form_handler, normalize_form_data
+from pulse.form import FormRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +155,8 @@ class App:
         self.cookie = cookie or session_cookie(mode=self.deployment)
         self.cors = cors
 
-        # Form submissions registry (per render + route)
-        self._form_handlers: dict[str, FormRegistration] = {}
-        self._forms_by_render_path: dict[tuple[str, str], set[str]] = {}
-        self._forms_active_pass: dict[tuple[str, str], set[str]] = {}
+        # Form submissions registry
+        self.forms = FormRegistry(self)
 
         self._user_to_render: dict[str, list[str]] = defaultdict(list)
         self._render_to_user: dict[str, str] = {}
@@ -303,6 +301,7 @@ class App:
         # this middleware will wrap all of them.
         @self.fastapi.middleware("http")
         async def pulse_context_middleware(request: Request, call_next):
+            print(f"[START] {request.method} {request.url.path}")
             # Skip session handling for CORS preflight requests
             if request.method == "OPTIONS":
                 return await call_next(request)
@@ -362,23 +361,23 @@ class App:
 
             client_addr: str | None = get_client_address(request)
             # Optional reuse of existing RenderSession
-            reuse_id = payload.get("renderId")
-            render_id: str
-            if isinstance(reuse_id, str):
+            render_id = payload.get("renderId")
+            if isinstance(render_id, str):
                 # Validate render exists and belongs to this user session
-                existing = self.render_sessions.get(reuse_id)
+                existing = self.render_sessions.get(render_id)
                 if existing is None:
                     raise HTTPException(status_code=400, detail="Unknown renderId")
-                owner = self._render_to_user.get(reuse_id)
+                owner = self._render_to_user.get(render_id)
                 if owner != session.sid:
                     raise HTTPException(status_code=403, detail="Forbidden renderId")
                 render = existing
-                render_id = reuse_id
+                cleanup = False
             else:
                 render_id = new_sid()
                 render = self.create_render(
                     render_id, session, client_address=client_addr
                 )
+                cleanup = True
 
             result = {"renderId": render_id, "views": {}}
 
@@ -430,13 +429,8 @@ class App:
                         resp = JSONResponse({"notFound": True})
                         session.handle_response(resp)
                         return resp
-                # If we completed all paths without redirect/not-found, register for adoption
-                self.render_sessions[render_id] = render
-                self._render_to_user[render_id] = session.sid
-                if render_id not in self._user_to_render[session.sid]:
-                    self._user_to_render[session.sid].append(render_id)
 
-                # schedule TTL cleanup if never adopted
+                # schedule TTL cleanup if never connected
                 def _gc_if_unadopted(rid: str):
                     r = self.render_sessions.get(rid)
                     if r is None:
@@ -445,7 +439,8 @@ class App:
                         return
                     self.close_render(rid)
 
-                later(float(ttl), _gc_if_unadopted, render_id)
+                if cleanup:
+                    later(float(ttl), _gc_if_unadopted, render_id)
 
             resp = JSONResponse(result)
             session.handle_response(resp)
@@ -453,38 +448,11 @@ class App:
 
         @self.fastapi.post("/pulse/forms/{form_id}")
         async def handle_form_submit(form_id: str, request: Request) -> Response:
-            registration = self._form_handlers.get(form_id)
-            if registration is None:
-                raise HTTPException(status_code=404, detail="Unknown form submission")
-
             session = PulseContext.get().session
             if session is None:
                 raise RuntimeError("Internal error: couldn't resolve user session")
 
-            if registration.session_id != session.sid:
-                raise HTTPException(status_code=403, detail="Form does not belong to this session")
-
-            raw_form = await request.form()
-            data = normalize_form_data(raw_form)
-
-            render = self.render_sessions.get(registration.render_id)
-            if render is None:
-                self._unregister_form(form_id)
-                raise HTTPException(status_code=410, detail="Render session expired for form")
-
-            try:
-                mount = render.get_route_mount(registration.route_path)
-            except ValueError as exc:
-                self._unregister_form(form_id)
-                raise HTTPException(
-                    status_code=410,
-                    detail="Form route is no longer mounted",
-                ) from exc
-
-            with PulseContext.update(render=render, route=mount.route):
-                await call_form_handler(registration.on_submit, data)
-
-            return Response(status_code=204)
+            return await self.forms.handle_submit(form_id, request, session)
 
         # Call on_setup hooks after FastAPI routes/middleware are in place
         for plugin in self.plugins:
@@ -498,25 +466,27 @@ class App:
             # Parse cookies from environ and ensure a session exists
             cookie = self.cookie.get_from_socketio(environ)
             if cookie is None:
+                print("Refusing connection cause no cookie")
                 raise ConnectionRefusedError()
             session = await self.get_or_create_session(cookie)
 
             if not rid:
                 # Still refuse connections without a renderId
+                print("Refusing connection cause no render ID")
                 raise ConnectionRefusedError()
 
             # Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
-            existing = self.render_sessions.get(rid)
-            if existing is None:
+            render = self.render_sessions.get(rid)
+            if render is None:
                 render = self.create_render(
                     rid, session, client_address=get_client_address_socketio(environ)
                 )
             else:
-                render = existing
-                # Ensure mapping is set to this user (keep previous owner if any)
-                self._render_to_user[rid] = session.sid
-                if rid not in self._user_to_render[session.sid]:
-                    self._user_to_render[session.sid].append(rid)
+                owner = self._render_to_user.get(render.id)
+                if owner != session.sid:
+                    print(f"Refusing connection because render ID {render.id} matches session {owner}")
+                    print(f"But current session is {session.sid}")
+                    raise ConnectionRefusedError()
 
             def on_message(message: ServerMessage):
                 payload = serialize(message, default_extensions())
@@ -632,6 +602,7 @@ class App:
 
             # No cookie: create fresh session
             sid = new_sid()
+
             session = UserSession(sid, {}, app=self)
             session._refresh_session_cookie(self)
             self.user_sessions[sid] = session
@@ -680,6 +651,7 @@ class App:
     ):
         if rid in self.render_sessions:
             raise ValueError(f"RenderSession {rid} already exists")
+        print(f"Creating RenderSession {rid}")
         render = RenderSession(
             rid,
             self.routes,
@@ -691,15 +663,16 @@ class App:
         self._user_to_render[session.sid].append(rid)
         return render
 
-    def close_render(self, wsid: str):
-        render = self.render_sessions.pop(wsid, None)
+    def close_render(self, rid: str):
+        render = self.render_sessions.pop(rid, None)
         if not render:
             return
-        sid = self._render_to_user.pop(wsid)
+        print(f"Closing RenderSession {rid}")
+        sid = self._render_to_user.pop(rid)
         session = self.user_sessions[sid]
-        self._remove_forms_for_render(wsid)
+        self.forms.remove_render(rid)
         render.close()
-        self._user_to_render[session.sid].remove(wsid)
+        self._user_to_render[session.sid].remove(rid)
 
         if len(self._user_to_render[session.sid]) == 0:
             later(60, self.close_session_if_inactive, sid)
@@ -736,63 +709,6 @@ class App:
         # We don't want to wait for this to resolve
         create_task(render.call_api("/set-cookies", method="GET"))
         sess._scheduled_cookie_refresh = True
-
-    # ---- Form registry helpers (internal) ---------------------------------
-
-    def _form_key(self, render_id: str, path: str) -> tuple[str, str]:
-        return (render_id, path)
-
-    def _register_form(self, registration: FormRegistration) -> None:
-        self._form_handlers[registration.id] = registration
-        key = self._form_key(registration.render_id, registration.route_path)
-        forms = self._forms_by_render_path.setdefault(key, set())
-        forms.add(registration.id)
-
-    def _unregister_form(self, form_id: str) -> None:
-        registration = self._form_handlers.pop(form_id, None)
-        if registration is None:
-            return
-        key = self._form_key(registration.render_id, registration.route_path)
-        forms = self._forms_by_render_path.get(key)
-        if forms is not None:
-            forms.discard(form_id)
-            if not forms:
-                self._forms_by_render_path.pop(key, None)
-        active = self._forms_active_pass.get(key)
-        if active is not None:
-            active.discard(form_id)
-            if not active:
-                self._forms_active_pass.pop(key, None)
-
-    def _begin_form_pass(self, render_id: str, path: str) -> None:
-        key = self._form_key(render_id, path)
-        self._forms_active_pass[key] = set()
-
-    def _mark_form_used(self, render_id: str, path: str, form_id: str) -> None:
-        key = self._form_key(render_id, path)
-        active = self._forms_active_pass.setdefault(key, set())
-        active.add(form_id)
-
-    def _end_form_pass(self, render_id: str, path: str) -> None:
-        key = self._form_key(render_id, path)
-        active = self._forms_active_pass.pop(key, set())
-        existing = self._forms_by_render_path.get(key, set())
-        stale = existing - active
-        for form_id in list(stale):
-            self._unregister_form(form_id)
-        if active:
-            self._forms_by_render_path[key] = set(active)
-        else:
-            self._forms_by_render_path.pop(key, None)
-
-    def _remove_forms_for_render(self, render_id: str) -> None:
-        to_remove = [
-            form_id
-            for form_id, registration in self._form_handlers.items()
-            if registration.render_id == render_id
-        ]
-        for form_id in to_remove:
-            self._unregister_form(form_id)
 
 
 def add_react_components(

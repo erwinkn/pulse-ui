@@ -9,6 +9,7 @@ from typing import (
     Optional,
     ParamSpec,
     Protocol,
+    TYPE_CHECKING,
     TypeVar,
     TypeVarTuple,
     cast,
@@ -20,6 +21,9 @@ from pulse.reactive import Effect, EffectFn, Scope, Signal, Untrack
 from pulse.reactive_extensions import ReactiveDict
 from pulse.routing import RouteContext
 from pulse.state import State
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .form import ManualForm
 
 
 class RedirectInterrupt(Exception):
@@ -88,20 +92,6 @@ class HookCalls:
         self.effects = False
 
 
-class MountHookState:
-    def __init__(self, hooks: "HookState") -> None:
-        self.hooks = hooks
-        self._token = None
-
-    def __enter__(self):
-        self._token = HOOK_CONTEXT.set(self.hooks)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._token is not None:
-            HOOK_CONTEXT.reset(self._token)
-
-
 class StableEntry:
     def __init__(self, value: Any, wrapper: Callable):
         self.value = value
@@ -125,11 +115,30 @@ class HookState:
         self.render_count = 0
         self.stable_registry = {}
         self.pending_setup_key = MISSING
+        self.forms: dict[str, "ManualForm"] = {}
+        self._app = None
+        self._token = None
+        self._prev_forms: dict[str, "ManualForm"] = {}
 
-    def ctx(self):
-        self.called.reset()
+    def __enter__(self):
         self.render_count += 1
-        return MountHookState(self)
+        self.called.reset()
+        self._token = HOOK_CONTEXT.set(self)
+        self._app = PulseContext.get().app
+        self._prev_forms = self.forms
+        self.forms = {}
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._token is not None:
+            HOOK_CONTEXT.reset(self._token)
+            self._token = None
+
+        for key, manual in self._prev_forms.items():
+            if key in self.forms:
+                continue
+            manual.dispose()
+        self._prev_forms.clear()
 
     def unmount(self):
         for effect in self.setup.effects:
@@ -139,6 +148,13 @@ class HookState:
         for state in self.states.states:
             for effect in state.effects():
                 effect.dispose()
+        # Clean up any lingering form registrations
+        for form in self.forms.values():
+            form.dispose()
+        for form in self._prev_forms.values():
+            form.dispose()
+        self.forms.clear()
+        self._prev_forms.clear()
 
 
 HOOK_CONTEXT: ContextVar[HookState | None] = ContextVar(
@@ -447,14 +463,13 @@ def effects(
                 ctx.effects.key = key
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
+TCallable = TypeVar("TCallable", bound=Callable)
 
 
 @overload
 def stable(key: str) -> Any: ...
 @overload
-def stable(key: str, value: Callable[P, R]) -> Callable[P, R]: ...
+def stable(key: str, value: TCallable) -> TCallable: ...
 @overload
 def stable(key: str, value: T) -> Callable[[], T]: ...
 def stable(key: str, value: Any = MISSING):

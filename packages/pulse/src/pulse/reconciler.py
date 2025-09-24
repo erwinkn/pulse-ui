@@ -153,7 +153,7 @@ class RenderNode:
 
     def render(self, *args, **kwargs) -> Element:
         # Render result needs to be normalized before reassigned to self.last_render
-        with self.hooks.ctx():
+        with self.hooks:
             return self.fn(*args, **kwargs)
 
     def unmount(self):

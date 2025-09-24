@@ -16,7 +16,7 @@ from pulse.messages import (
 )
 from pulse.reactive import Effect, flush_effects
 from pulse.reconciler import RenderRoot
-from pulse.routing import Layout, Route, RouteContext, RouteTree
+from pulse.routing import Layout, Route, RouteContext, RouteTree, normalize_path
 from pulse.state import State
 from pulse.hooks import RedirectInterrupt, NotFoundInterrupt
 
@@ -244,12 +244,7 @@ class RenderSession:
             # expect initial mount. Return current tree as a full VDOM.
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                app = PulseContext.get().app
-                app._begin_form_pass(self.id, path)
-                try:
-                    vdom = mount.root.render_vdom()
-                finally:
-                    app._end_form_pass(self.id, path)
+                vdom = mount.root.render_vdom()
             return {"type": "vdom_init", "vdom": vdom}
 
         captured: dict | None = None
@@ -283,12 +278,7 @@ class RenderSession:
         if captured is None:
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                app = PulseContext.get().app
-                app._begin_form_pass(self.id, path)
-                try:
-                    vdom = mount.root.render_vdom()
-                finally:
-                    app._end_form_pass(self.id, path)
+                vdom = mount.root.render_vdom()
             return {"type": "vdom_init", "vdom": vdom}
 
         return captured
@@ -297,6 +287,7 @@ class RenderSession:
         self,
         path: str,
     ):
+        path = normalize_path(path)
         mount = self.route_mounts.get(path)
         if not mount:
             raise ValueError(f"No active route for '{path}'")
@@ -314,22 +305,12 @@ class RenderSession:
     def render(self, path: str, route_info: Optional[RouteInfo] = None):
         mount = self.create_route_mount(path, route_info)
         with PulseContext.update(route=mount.route):
-            app = PulseContext.get().app
-            app._begin_form_pass(self.id, path)
-            try:
-                return mount.root.render_vdom()
-            finally:
-                app._end_form_pass(self.id, path)
+            return mount.root.render_vdom()
 
     def rerender(self, path: str):
         mount = self.get_route_mount(path)
         with PulseContext.update(route=mount.route):
-            app = PulseContext.get().app
-            app._begin_form_pass(self.id, path)
-            try:
-                return mount.root.render_diff()
-            finally:
-                app._end_form_pass(self.id, path)
+            return mount.root.render_diff()
 
     def mount(self, path: str, route_info: RouteInfo):
         if path in self.route_mounts:
@@ -346,8 +327,6 @@ class RenderSession:
         def _render_effect():
             # Always ensure both render and route are present in context
             with PulseContext.update(session=session, render=self, route=mount.route):
-                app = PulseContext.get().app
-                app._begin_form_pass(self.id, path)
                 try:
                     if mount.root.render_count == 0:
                         vdom = mount.root.render_vdom()
@@ -376,8 +355,6 @@ class RenderSession:
                             "replace": True,
                         }
                     )
-                finally:
-                    app._end_form_pass(self.id, path)
 
         mount.effect = Effect(
             _render_effect,

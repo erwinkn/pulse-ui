@@ -22,6 +22,7 @@ import type {
   UseFormReturnType,
 } from "@mantine/form";
 import { FormProvider } from "./context";
+import { submitForm } from "pulse-ui-client";
 
 export type FormMessage =
   | { type: "setValues"; values: any }
@@ -37,43 +38,37 @@ export type FormMessage =
   | { type: "reset"; initialValues?: any };
 
 export interface MantineFormProps<TValues = any>
-  extends Omit<ComponentPropsWithoutRef<"form">, "onSubmit" | "onReset"> {
+  extends Omit<
+    ComponentPropsWithoutRef<"form">,
+    "onSubmit" | "onReset" | "action"
+  > {
   children?: React.ReactNode;
-  /** Mantine useForm validate option */
-  validate?: ValidatorSchema;
   /** Initial values/errors/dirty/touched passed to useForm */
   initialValues?: UseFormInput<TValues>["initialValues"];
   initialErrors?: UseFormInput<TValues>["initialErrors"];
   initialDirty?: UseFormInput<TValues>["initialDirty"];
   initialTouched?: UseFormInput<TValues>["initialTouched"];
-  /** Log of messages to apply imperatively on the Mantine form */
-  messages?: FormMessage[];
   /** Mantine useForm options */
   mode?: "controlled" | "uncontrolled";
   validateInputOnBlur?: boolean | string[];
   validateInputOnChange?: boolean | string[];
   clearInputErrorOnChange?: boolean;
-  /** Form element behavior */
-  onSubmitPreventDefault?:
-    | boolean
-    | "always"
-    | "never"
-    | "validation-failed";
-  /** Server validation callback */
+  /** Default debounce for server validation when validateInputOnChange is enabled */
+  debounceMs?: number;
+  /** Callback invoked when form reset event fires */
+  onReset?: (event: React.FormEvent<HTMLFormElement>) => void;
+  /** -- Internal props -- */
+  action: string;
+  onSubmit?: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
   onServerValidation?: (
     value: any,
     values: TValues,
     path: string
   ) => Promise<void>;
-  /** Default debounce for server validation when validateInputOnChange is enabled */
-  debounceMs?: number;
-  /** Callback invoked after successful validation */
-  onSubmit?: (
-    values: TValues,
-    event?: React.FormEvent<HTMLFormElement>
-  ) => void | Promise<void>;
-  /** Callback invoked when form reset event fires */
-  onReset?: (event: React.FormEvent<HTMLFormElement>) => void;
+  /** Serialized validation spec */
+  validate?: ValidatorSchema;
+  /** Log of messages to apply imperatively on the Mantine form */
+  messages?: FormMessage[];
 }
 
 // Schema support: accept a normalized validator schema coming from Python,
@@ -192,7 +187,10 @@ function getValueAtPath(source: any, path?: string): any {
   if (!source || !path) return undefined;
   return path
     .split(".")
-    .reduce((acc: any, key: string) => (acc == null ? undefined : acc[key]), source);
+    .reduce(
+      (acc: any, key: string) => (acc == null ? undefined : acc[key]),
+      source
+    );
 }
 
 function coerceNumber(value: any): number | null {
@@ -448,7 +446,9 @@ function composeSpecs(
           const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
           const dateTimeRegex =
             /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/;
-          const matches = spec.withTime ? dateTimeRegex.test(str) : dateRegex.test(str);
+          const matches = spec.withTime
+            ? dateTimeRegex.test(str)
+            : dateRegex.test(str);
           if (!matches) {
             return formatError(
               spec.error,
@@ -462,7 +462,9 @@ function composeSpecs(
       case "isBefore":
         return (value: any, values: any) => {
           const other =
-            spec.field !== undefined ? getValueAtPath(values, spec.field) : spec.value;
+            spec.field !== undefined
+              ? getValueAtPath(values, spec.field)
+              : spec.value;
           const left = coerceComparable(value);
           const right = coerceComparable(other);
           if (left === null || right === null) return null;
@@ -475,7 +477,9 @@ function composeSpecs(
       case "isAfter":
         return (value: any, values: any) => {
           const other =
-            spec.field !== undefined ? getValueAtPath(values, spec.field) : spec.value;
+            spec.field !== undefined
+              ? getValueAtPath(values, spec.field)
+              : spec.value;
           const left = coerceComparable(value);
           const right = coerceComparable(other);
           if (left === null || right === null) return null;
@@ -490,8 +494,8 @@ function composeSpecs(
           const arr = Array.isArray(value)
             ? value
             : typeof FileList !== "undefined" && value instanceof FileList
-            ? Array.from(value)
-            : null;
+              ? Array.from(value)
+              : null;
           const length = arr ? arr.length : value == null ? 0 : NaN;
           if (!arr || Number.isNaN(length) || length < spec.count) {
             return formatError(
@@ -509,8 +513,8 @@ function composeSpecs(
           const arr = Array.isArray(value)
             ? value
             : typeof FileList !== "undefined" && value instanceof FileList
-            ? Array.from(value)
-            : null;
+              ? Array.from(value)
+              : null;
           if (!arr) {
             return formatError(spec.error, "Value must be a list");
           }
@@ -527,8 +531,8 @@ function composeSpecs(
           const length = Array.isArray(value)
             ? value.length
             : typeof FileList !== "undefined" && value instanceof FileList
-            ? value.length
-            : 0;
+              ? value.length
+              : 0;
           if (length === 0) {
             return formatError(spec.error, "At least one item is required");
           }
@@ -705,6 +709,7 @@ export function Form<
   TValues extends Record<string, any> = Record<string, any>,
 >({
   children,
+  action,
   validate,
   initialValues,
   initialErrors,
@@ -715,7 +720,6 @@ export function Form<
   validateInputOnBlur,
   validateInputOnChange,
   clearInputErrorOnChange,
-  onSubmitPreventDefault,
   onServerValidation,
   debounceMs: serverValidationDebounceMs = 250,
   onSubmit: userOnSubmit,
@@ -743,12 +747,6 @@ export function Form<
     validateInputOnChange,
     serverValidationDebounceMs,
   ]);
-  const submitPrevent =
-    typeof onSubmitPreventDefault === "boolean"
-      ? onSubmitPreventDefault
-        ? "always"
-        : "never"
-      : onSubmitPreventDefault;
   const form = useForm<TValues>({
     mode,
     validate: computedValidate,
@@ -759,7 +757,7 @@ export function Form<
     validateInputOnBlur,
     validateInputOnChange,
     clearInputErrorOnChange,
-    onSubmitPreventDefault: submitPrevent,
+    onSubmitPreventDefault: "always",
   });
   formRef.current = form;
 
@@ -828,8 +826,14 @@ export function Form<
   const submitHandler = useMemo(
     () =>
       form.onSubmit((values: TValues, event) => {
-        console.log("Submitting:", values)
-        userOnSubmit?.(values, event);
+        console.log("Submitting:", {
+          values,
+          event,
+          onSubmit: userOnSubmit,
+          action,
+        });
+        event!.defaultPrevented = false;
+        submitForm({ event: event!, onSubmit: userOnSubmit, action });
       }),
     [form, userOnSubmit]
   );

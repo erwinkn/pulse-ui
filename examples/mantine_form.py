@@ -1,3 +1,4 @@
+from typing import Any
 import pulse as ps
 from pulse.components.react_router import Link
 from pulse_mantine import (
@@ -242,7 +243,6 @@ def ValidationModesPage():
                 validateInputOnBlur=blur_setting,
                 validateInputOnChange=change_setting,
                 clearInputErrorOnChange=st.clear_on_change,
-                onSubmitPreventDefault=True,
                 onSubmit=lambda data: print("Form data:", data),
             )[
                 Stack(gap="md")[
@@ -369,7 +369,6 @@ def BuiltInValidatorsPage():
             form_component(
                 initialValues=BUILT_IN_INITIAL_VALUES,
                 validate=validate,
-                onSubmitPreventDefault=True,
                 clearInputErrorOnChange=True,
                 onSubmit=lambda data: print("Submitted data:", data),
             )[
@@ -481,9 +480,8 @@ def FileUploadsPage():
             st.Form(
                 initialValues=FILE_INITIAL_VALUES,
                 validate=validate,
-                onSubmitPreventDefault=True,
                 mode="controlled",
-                onSubmit=lambda data: print("Form data:", format_json(data)),
+                onSubmit=lambda data: print("Form data:", summarize_form_payload(data)),
             )[
                 Stack(gap="md")[
                     FileInput(
@@ -560,7 +558,6 @@ def DatesPage():
                 form_component(
                     initialValues=DATE_INITIAL_VALUES,
                     validate=validate,
-                    onSubmitPreventDefault=True,
                     clearInputErrorOnChange=True,
                 )[
                     Stack(gap="md")[
@@ -613,17 +610,24 @@ def DatesPage():
     ]
 
 
-def format_json(data: dict) -> dict:
-    def process_value(value):
-        if isinstance(value, bytes):
-            return "<content>"
-        if isinstance(value, dict):
-            return {k: process_value(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [process_value(v) for v in value]
-        return value
+def summarize_form_value(value: Any) -> Any:
+    if isinstance(value, ps.UploadFile):
+        return {
+            "filename": value.filename,
+            "content_type": value.content_type,
+            "size": value.size,
+        }
+    return value
 
-    return process_value(data)  # pyright: ignore[reportReturnType]
+
+def summarize_form_payload(data: ps.FormData) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, list):
+            summary[key] = [summarize_form_value(item) for item in value]
+        else:
+            summary[key] = summarize_form_value(value)
+    return summary
 
 
 app = ps.App(

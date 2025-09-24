@@ -69,6 +69,7 @@
         "dayjs": "^1.11.18",
         "embla-carousel": "^8.5.2",
         "embla-carousel-react": "^8.5.2",
+        "pulse-ui-client": "workspace:*",
         "recharts": "^3.2.1",
       },
       "devDependencies": {
@@ -85,7 +86,7 @@
     },
     "packages/pulse-ui-client": {
       "name": "pulse-ui-client",
-      "version": "0.0.10",
+      "version": "0.0.11",
       "dependencies": {
         "socket.io-client": "^4.8.1",
       },

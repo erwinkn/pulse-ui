@@ -94,6 +94,7 @@ from .user_session import (
     SessionStore,
     UserSession,
 )
+from .serializer_v3 import serialize, deserialize
 from .vdom import (
     Child,
     Component,
@@ -229,4 +230,7 @@ __all__ = [
     # Utils,
     "later",
     "repeat",
+    # Serializer
+    "serialize",
+    "deserialize",
 ]

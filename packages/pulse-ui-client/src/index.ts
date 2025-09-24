@@ -65,4 +65,4 @@ export {
   decodeFromWire,
   cleanForSerialization,
 } from "./serialize/clean";
-export { serialize, deserialize } from "./serialize/v2"
+export { serialize, deserialize } from "./serialize/v3"

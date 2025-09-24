@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from pulse.serializer_v2 import Serialized, serialize, deserialize, default_extensions
+from pulse.serializer_v3 import Serialized, serialize, deserialize 
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.env import PulseMode, env
@@ -489,7 +489,7 @@ class App:
                     raise ConnectionRefusedError()
 
             def on_message(message: ServerMessage):
-                payload = serialize(message, default_extensions())
+                payload = serialize(message)
                 # `serialize` returns a tuple, which socket.io will mistake for multiple arguments
                 payload = list(payload)
                 create_task(self.sio.emit("message", list(payload), to=sid))
@@ -534,7 +534,7 @@ class App:
             # Use renderId mapping to user session
             session = self.user_sessions[self._render_to_user[rid]]
             # Deserialize the message using v2
-            msg: ClientMessage = deserialize(data, default_extensions())
+            msg: ClientMessage = deserialize(data)
             try:
 
                 def _handler():

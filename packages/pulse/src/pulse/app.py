@@ -59,6 +59,7 @@ from pulse.user_session import (
     UserSession,
     new_sid,
 )
+from pulse.form import FormRegistration, call_form_handler, normalize_form_data
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,11 @@ class App:
         self.session_store = session_store or CookieSessionStore()
         self.cookie = cookie or session_cookie(mode=self.deployment)
         self.cors = cors
+
+        # Form submissions registry (per render + route)
+        self._form_handlers: dict[str, FormRegistration] = {}
+        self._forms_by_render_path: dict[tuple[str, str], set[str]] = {}
+        self._forms_active_pass: dict[tuple[str, str], set[str]] = {}
 
         self._user_to_render: dict[str, list[str]] = defaultdict(list)
         self._render_to_user: dict[str, str] = {}
@@ -445,6 +451,41 @@ class App:
             session.handle_response(resp)
             return resp
 
+        @self.fastapi.post("/pulse/forms/{form_id}")
+        async def handle_form_submit(form_id: str, request: Request) -> Response:
+            registration = self._form_handlers.get(form_id)
+            if registration is None:
+                raise HTTPException(status_code=404, detail="Unknown form submission")
+
+            session = PulseContext.get().session
+            if session is None:
+                raise RuntimeError("Internal error: couldn't resolve user session")
+
+            if registration.session_id != session.sid:
+                raise HTTPException(status_code=403, detail="Form does not belong to this session")
+
+            raw_form = await request.form()
+            data = normalize_form_data(raw_form)
+
+            render = self.render_sessions.get(registration.render_id)
+            if render is None:
+                self._unregister_form(form_id)
+                raise HTTPException(status_code=410, detail="Render session expired for form")
+
+            try:
+                mount = render.get_route_mount(registration.route_path)
+            except ValueError as exc:
+                self._unregister_form(form_id)
+                raise HTTPException(
+                    status_code=410,
+                    detail="Form route is no longer mounted",
+                ) from exc
+
+            with PulseContext.update(render=render, route=mount.route):
+                await call_form_handler(registration.on_submit, data)
+
+            return Response(status_code=204)
+
         # Call on_setup hooks after FastAPI routes/middleware are in place
         for plugin in self.plugins:
             plugin.on_setup(self)
@@ -656,6 +697,7 @@ class App:
             return
         sid = self._render_to_user.pop(wsid)
         session = self.user_sessions[sid]
+        self._remove_forms_for_render(wsid)
         render.close()
         self._user_to_render[session.sid].remove(wsid)
 
@@ -694,6 +736,63 @@ class App:
         # We don't want to wait for this to resolve
         create_task(render.call_api("/set-cookies", method="GET"))
         sess._scheduled_cookie_refresh = True
+
+    # ---- Form registry helpers (internal) ---------------------------------
+
+    def _form_key(self, render_id: str, path: str) -> tuple[str, str]:
+        return (render_id, path)
+
+    def _register_form(self, registration: FormRegistration) -> None:
+        self._form_handlers[registration.id] = registration
+        key = self._form_key(registration.render_id, registration.route_path)
+        forms = self._forms_by_render_path.setdefault(key, set())
+        forms.add(registration.id)
+
+    def _unregister_form(self, form_id: str) -> None:
+        registration = self._form_handlers.pop(form_id, None)
+        if registration is None:
+            return
+        key = self._form_key(registration.render_id, registration.route_path)
+        forms = self._forms_by_render_path.get(key)
+        if forms is not None:
+            forms.discard(form_id)
+            if not forms:
+                self._forms_by_render_path.pop(key, None)
+        active = self._forms_active_pass.get(key)
+        if active is not None:
+            active.discard(form_id)
+            if not active:
+                self._forms_active_pass.pop(key, None)
+
+    def _begin_form_pass(self, render_id: str, path: str) -> None:
+        key = self._form_key(render_id, path)
+        self._forms_active_pass[key] = set()
+
+    def _mark_form_used(self, render_id: str, path: str, form_id: str) -> None:
+        key = self._form_key(render_id, path)
+        active = self._forms_active_pass.setdefault(key, set())
+        active.add(form_id)
+
+    def _end_form_pass(self, render_id: str, path: str) -> None:
+        key = self._form_key(render_id, path)
+        active = self._forms_active_pass.pop(key, set())
+        existing = self._forms_by_render_path.get(key, set())
+        stale = existing - active
+        for form_id in list(stale):
+            self._unregister_form(form_id)
+        if active:
+            self._forms_by_render_path[key] = set(active)
+        else:
+            self._forms_by_render_path.pop(key, None)
+
+    def _remove_forms_for_render(self, render_id: str) -> None:
+        to_remove = [
+            form_id
+            for form_id, registration in self._form_handlers.items()
+            if registration.render_id == render_id
+        ]
+        for form_id in to_remove:
+            self._unregister_form(form_id)
 
 
 def add_react_components(

@@ -7,6 +7,7 @@ from .components import (
 from .context import PulseContext
 from .cookies import Cookie, SetCookie
 from .decorators import computed, effect, query
+from .form import Form, FormData, UploadFile
 from .helpers import (
     CSSProperties,
     For,
@@ -178,6 +179,10 @@ __all__ = [
     "Component",
     "ComponentNode",
     "Child",
+    # Forms
+    "Form",
+    "FormData",
+    "UploadFile",
     # Codegen
     "CodegenConfig",
     # Router components

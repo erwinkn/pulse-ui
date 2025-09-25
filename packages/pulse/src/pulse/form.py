@@ -62,14 +62,14 @@ class FormRegistry:
     def register(
         self,
         render_id: str,
-        route_path: str,
+        route_id: str,
         session_id: str,
         on_submit: EventHandler1[FormData],
     ) -> FormRegistration:
         registration = FormRegistration(
             uuid.uuid4().hex,
             render_id=render_id,
-            route_path=route_path,
+            route_path=route_id,
             session_id=session_id,
             on_submit=on_submit,
         )
@@ -118,8 +118,6 @@ class FormRegistry:
                 status_code=410, detail="Render session expired for form"
             )
 
-        print("Registration route path:", registration.route_path)
-        print("Active mounts:", render.route_mounts.keys())
         try:
             mount = render.get_route_mount(registration.route_path)
         except ValueError as exc:
@@ -141,9 +139,7 @@ def normalize_form_data(raw: StarletteFormData) -> FormData:
     normalized: FormData = {}
     for key, value in raw.multi_items():
         item: FormValue
-        print(f"Normalizing item {key}: {value} (type: {type(value)})")
         if isinstance(value, UploadFile):
-            print(f"UploadFile, name = {value.filename}, size = {value.size}")
             # Form submission tends to produce empty UploadFile objects for
             # empty file inputs
             if not value.filename and not value.size:
@@ -226,7 +222,7 @@ class ManualForm:
         self._registration = self._app.forms.register(
             session_id=session.sid,
             render_id=render.id,
-            route_path=route.pathname,
+            route_id=route.pulse_route.unique_path(),
             on_submit=self.wrap_on_submit(on_submit),
         )
 

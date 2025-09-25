@@ -114,7 +114,7 @@ export class PulseSocketIOClient {
 
       // Wrap in an arrow function to avoid losing the `this` reference
       socket.on("message", (data) =>
-        this.handleServerMessage(deserialize(data))
+        this.handleServerMessage(deserialize(data, {coerceNullsToUndefined: true}))
       );
     });
   }

@@ -30,7 +30,7 @@ class RouteMount:
     ) -> None:
         self.render = render
         self.root = RenderRoot(route.render.fn)
-        self.route = RouteContext(route_info)
+        self.route = RouteContext(route_info, route)
         self.effect: Optional[Effect] = None
         self._pulse_ctx: PulseContext | None = None
 

@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from pulse.serializer_v3 import Serialized, serialize, deserialize 
+from pulse.serializer_v3 import Serialized, serialize, deserialize
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.env import PulseMode, env
@@ -301,7 +301,6 @@ class App:
         # this middleware will wrap all of them.
         @self.fastapi.middleware("http")
         async def pulse_context_middleware(request: Request, call_next):
-            print(f"[START] {request.method} {request.url.path}")
             # Skip session handling for CORS preflight requests
             if request.method == "OPTIONS":
                 return await call_next(request)
@@ -466,13 +465,11 @@ class App:
             # Parse cookies from environ and ensure a session exists
             cookie = self.cookie.get_from_socketio(environ)
             if cookie is None:
-                print("Refusing connection cause no cookie")
                 raise ConnectionRefusedError()
             session = await self.get_or_create_session(cookie)
 
             if not rid:
                 # Still refuse connections without a renderId
-                print("Refusing connection cause no render ID")
                 raise ConnectionRefusedError()
 
             # Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
@@ -484,8 +481,6 @@ class App:
             else:
                 owner = self._render_to_user.get(render.id)
                 if owner != session.sid:
-                    print(f"Refusing connection because render ID {render.id} matches session {owner}")
-                    print(f"But current session is {session.sid}")
                     raise ConnectionRefusedError()
 
             def on_message(message: ServerMessage):
@@ -651,7 +646,6 @@ class App:
     ):
         if rid in self.render_sessions:
             raise ValueError(f"RenderSession {rid} already exists")
-        print(f"Creating RenderSession {rid}")
         render = RenderSession(
             rid,
             self.routes,
@@ -667,7 +661,6 @@ class App:
         render = self.render_sessions.pop(rid, None)
         if not render:
             return
-        print(f"Closing RenderSession {rid}")
         sid = self._render_to_user.pop(rid)
         session = self.user_sessions[sid]
         self.forms.remove_render(rid)

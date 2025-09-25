@@ -307,8 +307,9 @@ class RouteInfo(TypedDict):
 
 
 class RouteContext:
-    def __init__(self, info: RouteInfo):
+    def __init__(self, info: RouteInfo, pulse_route: Route | Layout):
         self.info = cast(RouteInfo, ReactiveDict(info))
+        self.pulse_route = pulse_route
 
     def update(self, info: RouteInfo):
         self.info.update(info)

@@ -1,58 +1,53 @@
-from typing import Any
+from typing import Any, Literal, cast
+
 import pulse as ps
 from pulse.components.react_router import Link
 from pulse_mantine import (
-    MantineProvider,
-    Card,
-    Stack,
-    Title,
-    Text,
-    Group,
-    SegmentedControl,
-    Checkbox,
-    TextInput,
-    PasswordInput,
-    Select,
-    Button,
-    Divider,
-    FileInput,
-    Textarea,
-)
-from pulse_mantine import (
-    DatesProvider,
-    DatePickerInput,
-    DateTimePicker,
-    MonthPickerInput,
-    TimeInput,
-)
-from pulse_mantine import Form
-from pulse_mantine.form import (
-    Validation,
-    IsEmail,
-    IsNotEmpty,
-    HasLength,
-    Matches,
-    MatchesField,
-    IsInRange,
-    IsJSONString,
-    IsUrl,
-    IsUUID,
-    IsULID,
-    IsNumber,
-    IsInteger,
-    StartsWith,
-    EndsWith,
-    RequiredWhen,
-    RequiredUnless,
     AllowedFileTypes,
-    MaxFileSize,
-    MinItems,
-    MaxItems,
-    IsDate,
+    Button,
+    Card,
+    Checkbox,
+    DatePickerInput,
+    DatesProvider,
+    DateTimePicker,
+    EndsWith,
+    FileInput,
+    Group,
+    HasLength,
     IsAfter,
     IsBefore,
+    IsDate,
+    IsEmail,
+    IsInRange,
+    IsInteger,
+    IsJSONString,
+    IsNotEmpty,
+    IsNumber,
+    IsULID,
+    IsUrl,
+    IsUUID,
+    MantineProvider,
+    Matches,
+    MatchesField,
+    MaxFileSize,
+    MaxItems,
+    MinItems,
+    MonthPickerInput,
+    PasswordInput,
+    RequiredUnless,
+    RequiredWhen,
+    ServerValidation,
+    Select,
+    Stack,
+    StartsWith,
+    Text,
+    Textarea,
+    TextInput,
+    TimeInput,
+    Title,
+    Validation,
 )
-
+from pulse_mantine.form.form import MantineForm
 
 NAV_ITEMS = [
     {"label": "Validation modes", "to": "/"},
@@ -62,78 +57,140 @@ NAV_ITEMS = [
 ]
 
 
-def format_setting(value: object) -> str:
-    if value is True:
-        return "True"
-    if value is False:
-        return "False"
-    if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(str(v) for v in value) + "]"
-    if value is None:
-        return "None"
-    return str(value)
+class ValidationModesForm(MantineForm):
+    def __init__(self, validation_mode: Literal["submit", "blur", "change"]) -> None:
+        validate: Validation = {
+            "username": [
+                IsNotEmpty("Username is required"),
+                HasLength(min=3, max=16, error="3-16 characters"),
+                Matches(
+                    r"^[a-z0-9_]+$", error="Lowercase letters, numbers, underscore"
+                ),
+                ServerValidation(
+                    lambda value, values, path: (
+                        "This username is reserved"
+                        if str(value).strip().lower() == "admin"
+                        else None
+                    ),
+                    debounce_ms=300,
+                ),
+            ],
+            "email": [IsEmail("Enter a valid email")],
+            "password": [HasLength(min=8, error="Min 8 characters")],
+            "confirm": [MatchesField("password", "Passwords do not match")],
+            "role": [IsNotEmpty("Choose a role")],
+        }
+        super().__init__(
+            initialValues=VALIDATION_INITIAL_VALUES,
+            validate=validate,
+            mode="controlled",
+            validateInputOnBlur=validation_mode == "blur",
+            validateInputOnChange=validation_mode == "change",
+            clearInputErrorOnChange=True,
+            onSubmit=lambda data: print("Form data:", data),
+        )
 
 
-class BaseFormState(ps.State):
-    def __init__(self) -> None:
-        self._form = Form()
-
-    @property
-    def Form(self):
-        return self._form.Component
-
-    def reset(self, values: dict | None = None) -> None:
-        self._form.reset(values)
-
-    def validate_now(self) -> None:
-        self._form.validate()
-
-
-class ValidationModesState(BaseFormState):
-    blur_mode = "submit"
-    change_mode = "global"
-    clear_on_change: bool = True
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    def set_blur_mode(self, value: str) -> None:
-        self.blur_mode = value
-
-    def set_change_mode(self, value: str) -> None:
-        self.change_mode = value
-
-    def set_clear_flag(self, checked: bool) -> None:
-        self.clear_on_change = checked
-
-    @staticmethod
-    def mode_value(option: str):
-        if option == "global":
-            return True
-        if option == "email":
-            return ["email"]
-        return False
-
-
-class BuiltInValidatorsState(BaseFormState):
+class BuiltInValidatorsForm(MantineForm):
     referral_opt_in: bool = False
 
     def __init__(self) -> None:
-        super().__init__()
+        validate: Validation = {
+            "name": [IsNotEmpty("Tell us your name")],
+            "email": [IsEmail("Enter a valid email")],
+            "website": [IsUrl(error="Include http(s)://")],
+            "uuid": [IsUUID(version=4, error="Use a UUID v4 string")],
+            "ulid": [IsULID("ULID should be 26 chars")],
+            "age": [
+                IsNumber("Enter a number"),
+                IsInRange(min=18, max=120, error="18-120"),
+            ],
+            "lucky": [IsInteger("Whole number only")],
+            "json": [IsJSONString("Provide valid JSON")],
+            "slug": [Matches(r"^[a-z0-9-]+$", error="Only lowercase, numbers and -")],
+            "promo": [
+                EndsWith(
+                    "-2024", case_sensitive=False, error="Use code ending with -2024"
+                )
+            ],
+            "referral": [
+                StartsWith("REF-", case_sensitive=False, error="Codes start with REF-")
+            ],
+            "company": [
+                RequiredUnless(
+                    "employmentStatus",
+                    equals="freelancer",
+                    error="Provide a company unless you're a freelancer",
+                )
+            ],
+            "referralCode": [
+                RequiredWhen(
+                    "referralOptIn", truthy=True, error="Enter your referral code"
+                ),
+                StartsWith("RC-", error="Codes start with RC-"),
+            ],
+        }
+        super().__init__(
+            initialValues=BUILT_IN_INITIAL_VALUES,
+            validate=validate,
+            clearInputErrorOnChange=True,
+            onSubmit=lambda data: print("Submitted data:", data),
+        )
 
     def set_referral(self, checked: bool) -> None:
         self.referral_opt_in = checked
-        self._form.set_field_value("referralOptIn", checked)
+        self.set_field_value("referralOptIn", checked)
 
 
-class FileUploadsState(BaseFormState):
+class FileUploadsForm(MantineForm):
     def __init__(self) -> None:
-        super().__init__()
+        validate: Validation = {
+            "resume": [
+                IsNotEmpty("Upload at least one resume"),
+                AllowedFileTypes(
+                    extensions=["pdf", "doc", "docx"], error="PDF or Word only"
+                ),
+                MaxFileSize(5 * 1024 * 1024, error="Max 5MB"),
+            ],
+            "portfolio": [
+                MinItems(1, error="Upload at least one project"),
+                MaxItems(5, error="Up to 5 files"),
+                AllowedFileTypes(mime_types=["image/*"], error="Images only"),
+                MaxFileSize(8 * 1024 * 1024, error="Max 8MB each"),
+            ],
+        }
+        super().__init__(
+            initialValues=FILE_INITIAL_VALUES,
+            validate=validate,
+            mode="controlled",
+            onSubmit=lambda data: print("Form data:", summarize_form_payload(data)),
+        )
 
 
-class DatesState(BaseFormState):
+class DatesState(MantineForm):
     def __init__(self) -> None:
-        super().__init__()
+        validate: Validation = {
+            "start": [IsDate("Pick a start date")],
+            "end": [
+                IsDate("Pick an end date"),
+                IsAfter(
+                    "start", inclusive=True, error="End date must be on or after start"
+                ),
+            ],
+            "deadline": [
+                IsDate("Set a deadline"),
+                IsBefore("end", error="Deadline must be before the end date"),
+                IsAfter("start", error="Deadline must after the start date")
+            ],
+            "reminder": [IsNotEmpty("Choose a reminder time")],
+            "month": [IsNotEmpty("Pick a month")],
+        }
+        super().__init__(
+            initialValues=DATE_INITIAL_VALUES,
+            validate=validate,
+            clearInputErrorOnChange=True,
+            onSubmit=lambda data: print("Form data:", data),
+        )
 
 
 @ps.component
@@ -168,33 +225,22 @@ def MantineLayout():
 
 
 VALIDATION_INITIAL_VALUES = {
-    "username": "",
-    "email": "",
-    "password": "",
-    "confirm": "",
+    "username": "erwin",
+    "email": "erwin@brimstone.com",
+    "password": "hahahaha",
+    "confirm": "hahahaha",
     "role": "user",
 }
 
 
 @ps.component
 def ValidationModesPage():
-    st = ps.states(ValidationModesState)
-    blur_setting = ValidationModesState.mode_value(st.blur_mode)
-    change_setting = ValidationModesState.mode_value(st.change_mode)
-
-    validate: Validation = {
-        "username": [
-            IsNotEmpty("Username is required"),
-            HasLength(min=3, max=16, error="3-16 characters"),
-            Matches(r"^[a-z0-9_]+$", error="Lowercase letters, numbers, underscore"),
-        ],
-        "email": [IsEmail("Enter a valid email")],
-        "password": [HasLength(min=8, error="Min 8 characters")],
-        "confirm": [MatchesField("password", "Passwords do not match")],
-        "role": [IsNotEmpty("Choose a role")],
-    }
-
-    form_component = st.Form
+    raw = ps.route().pathParams.get("mode", "submit")
+    mode_str = str(raw or "submit")
+    if mode_str not in ("submit", "blur", "change"):
+        mode_str = "submit"
+    mode = cast(Literal["submit", "blur", "change"], mode_str)
+    form = ps.states(lambda: ValidationModesForm(validation_mode=mode))
 
     return Card(withBorder=True, shadow="sm", p="lg")[
         Stack(gap="lg")[
@@ -203,48 +249,13 @@ def ValidationModesPage():
                 Text(
                     "Toggle how the form validates fields globally or for specific inputs."
                 ),
+                Group(gap="xs", wrap="wrap")[
+                    Link("Submit only", to="/submit", className="text-sm"),
+                    Link("Blur everywhere", to="/blur", className="text-sm"),
+                    Link("Change everywhere", to="/change", className="text-sm"),
+                ],
             ],
-            Stack(gap="sm")[
-                Text("validateInputOnBlur"),
-                SegmentedControl(
-                    value=st.blur_mode,
-                    data=[
-                        {"label": "Submit only", "value": "submit"},
-                        {"label": "Blur everywhere", "value": "global"},
-                        {"label": "Blur email only", "value": "email"},
-                    ],
-                    onChange=lambda value: st.set_blur_mode(value),
-                ),
-                Text(format_setting(blur_setting)),
-            ],
-            Stack(gap="sm")[
-                Text("validateInputOnChange"),
-                SegmentedControl(
-                    value=st.change_mode,
-                    data=[
-                        {"label": "Off", "value": "submit"},
-                        {"label": "All fields", "value": "global"},
-                        {"label": "Email only", "value": "email"},
-                    ],
-                    onChange=lambda value: st.set_change_mode(value),
-                ),
-                Text(format_setting(change_setting)),
-            ],
-            Checkbox(
-                label="clearInputErrorOnChange",
-                checked=st.clear_on_change,
-                onChange=lambda event: st.set_clear_flag(event["target"]["checked"]),
-            ),
-            Divider(),
-            form_component(
-                initialValues=VALIDATION_INITIAL_VALUES,
-                validate=validate,
-                mode="controlled",
-                validateInputOnBlur=blur_setting,
-                validateInputOnChange=change_setting,
-                clearInputErrorOnChange=st.clear_on_change,
-                onSubmit=lambda data: print("Form data:", data),
-            )[
+            form.render(
                 Stack(gap="md")[
                     Group(gap="md")[
                         TextInput(
@@ -284,18 +295,16 @@ def ValidationModesPage():
                         ),
                     ],
                     Group(gap="sm")[
-                        Button(
-                            "Validate now", variant="light", onClick=st.validate_now
-                        ),
+                        Button("Validate now", variant="light", onClick=form.validate),
                         Button(
                             "Reset",
                             variant="default",
-                            onClick=lambda: st.reset(VALIDATION_INITIAL_VALUES),
+                            onClick=lambda: form.reset(VALIDATION_INITIAL_VALUES),
                         ),
                         Button("Submit", type="submit"),
                     ],
                 ]
-            ],
+            ),
         ]
     ]
 
@@ -321,42 +330,7 @@ BUILT_IN_INITIAL_VALUES = {
 
 @ps.component
 def BuiltInValidatorsPage():
-    st = ps.states(BuiltInValidatorsState)
-
-    validate: Validation = {
-        "name": [IsNotEmpty("Tell us your name")],
-        "email": [IsEmail("Enter a valid email")],
-        "website": [
-            IsUrl(error="Include http(s)://"),
-        ],
-        "uuid": [IsUUID(version=4, error="Use a UUID v4 string")],
-        "ulid": [IsULID("ULID should be 26 chars")],
-        "age": [IsNumber("Enter a number"), IsInRange(min=18, max=120, error="18-120")],
-        "lucky": [IsInteger("Whole number only")],
-        "json": [IsJSONString("Provide valid JSON")],
-        "slug": [Matches(r"^[a-z0-9-]+$", error="Only lowercase, numbers and -")],
-        "promo": [
-            EndsWith("-2024", case_sensitive=False, error="Use code ending with -2024")
-        ],
-        "referral": [
-            StartsWith("REF-", case_sensitive=False, error="Codes start with REF-")
-        ],
-        "company": [
-            RequiredUnless(
-                "employmentStatus",
-                equals="freelancer",
-                error="Provide a company unless you're a freelancer",
-            )
-        ],
-        "referralCode": [
-            RequiredWhen(
-                "referralOptIn", truthy=True, error="Enter your referral code"
-            ),
-            StartsWith("RC-", error="Codes start with RC-"),
-        ],
-    }
-
-    form_component = st.Form
+    form = ps.states(BuiltInValidatorsForm)
 
     return Card(withBorder=True, shadow="sm", p="lg")[
         Stack(gap="lg")[
@@ -366,12 +340,7 @@ def BuiltInValidatorsPage():
                     "Most of the Mantine client-side rules are available directly from Python."
                 ),
             ],
-            form_component(
-                initialValues=BUILT_IN_INITIAL_VALUES,
-                validate=validate,
-                clearInputErrorOnChange=True,
-                onSubmit=lambda data: print("Submitted data:", data),
-            )[
+            form.render(
                 Stack(gap="md")[
                     Group(gap="md")[
                         TextInput(name="name", label="Name", withAsterisk=True),
@@ -415,8 +384,8 @@ def BuiltInValidatorsPage():
                     Group(gap="md", align="end")[
                         Checkbox(
                             label="I have a referral code",
-                            checked=st.referral_opt_in,
-                            onChange=lambda event: st.set_referral(
+                            checked=form.referral_opt_in,
+                            onChange=lambda event: form.set_referral(
                                 event["target"]["checked"]
                             ),
                         ),
@@ -427,18 +396,16 @@ def BuiltInValidatorsPage():
                         ),
                     ],
                     Group(gap="sm")[
-                        Button(
-                            "Validate now", variant="light", onClick=st.validate_now
-                        ),
+                        Button("Validate now", variant="light", onClick=form.validate),
                         Button(
                             "Reset",
                             variant="default",
-                            onClick=lambda: st.reset(BUILT_IN_INITIAL_VALUES),
+                            onClick=lambda: form.reset(BUILT_IN_INITIAL_VALUES),
                         ),
                         Button("Submit", type="submit"),
                     ],
                 ]
-            ],
+            ),
         ]
     ]
 
@@ -451,23 +418,7 @@ FILE_INITIAL_VALUES = {
 
 @ps.component
 def FileUploadsPage():
-    st = ps.states(FileUploadsState)
-
-    validate: Validation = {
-        "resume": [
-            IsNotEmpty("Upload at least one resume"),
-            AllowedFileTypes(
-                extensions=["pdf", "doc", "docx"], error="PDF or Word only"
-            ),
-            MaxFileSize(5 * 1024 * 1024, error="Max 5MB"),
-        ],
-        "portfolio": [
-            MinItems(1, error="Upload at least one project"),
-            MaxItems(5, error="Up to 5 files"),
-            AllowedFileTypes(mime_types=["image/*"], error="Images only"),
-            MaxFileSize(8 * 1024 * 1024, error="Max 8MB each"),
-        ],
-    }
+    form = ps.states(FileUploadsForm)
 
     return Card(withBorder=True, shadow="sm", p="lg")[
         Stack(gap="lg")[
@@ -477,12 +428,7 @@ def FileUploadsPage():
                     "File inputs stay in sync with the form controller and reuse the same validators."
                 ),
             ],
-            st.Form(
-                initialValues=FILE_INITIAL_VALUES,
-                validate=validate,
-                mode="controlled",
-                onSubmit=lambda data: print("Form data:", summarize_form_payload(data)),
-            )[
+            form.render(
                 Stack(gap="md")[
                     FileInput(
                         name="resume",
@@ -499,18 +445,16 @@ def FileUploadsPage():
                         accept="image/png,image/jpeg",
                     ),
                     Group(gap="sm")[
-                        Button(
-                            "Validate now", variant="light", onClick=st.validate_now
-                        ),
+                        Button("Validate now", variant="light", onClick=form.validate),
                         Button(
                             "Reset",
                             variant="default",
-                            onClick=lambda: st.reset(FILE_INITIAL_VALUES),
+                            onClick=lambda: form.reset(FILE_INITIAL_VALUES),
                         ),
                         Button("Submit", type="submit"),
                     ],
                 ]
-            ],
+            ),
         ]
     ]
 
@@ -526,25 +470,7 @@ DATE_INITIAL_VALUES = {
 
 @ps.component
 def DatesPage():
-    st = ps.states(DatesState)
-
-    validate: Validation = {
-        "start": [IsDate("Pick a start date")],
-        "end": [
-            IsDate("Pick an end date"),
-            IsAfter(
-                "start", inclusive=True, error="End date must be on or after start"
-            ),
-        ],
-        "deadline": [
-            IsDate("Set a deadline"),
-            IsBefore("end", error="Deadline must be before the end date"),
-        ],
-        "reminder": [IsNotEmpty("Choose a reminder time")],
-        "month": [IsNotEmpty("Pick a month")],
-    }
-
-    form_component = st.Form
+    form = ps.states(DatesState)
 
     return Card(withBorder=True, shadow="sm", p="lg")[
         Stack(gap="lg")[
@@ -555,11 +481,7 @@ def DatesPage():
                 ),
             ],
             DatesProvider(settings={"locale": "en", "firstDayOfWeek": 1})[
-                form_component(
-                    initialValues=DATE_INITIAL_VALUES,
-                    validate=validate,
-                    clearInputErrorOnChange=True,
-                )[
+                form.render(
                     Stack(gap="md")[
                         Group(gap="md")[
                             DatePickerInput(
@@ -594,17 +516,17 @@ def DatesPage():
                         ),
                         Group(gap="sm")[
                             Button(
-                                "Validate now", variant="light", onClick=st.validate_now
+                                "Validate now", variant="light", onClick=form.validate
                             ),
                             Button(
                                 "Reset",
                                 variant="default",
-                                onClick=lambda: st.reset(DATE_INITIAL_VALUES),
+                                onClick=lambda: form.reset(DATE_INITIAL_VALUES),
                             ),
                             Button("Submit", type="submit"),
                         ],
                     ]
-                ]
+                )
             ],
         ]
     ]
@@ -635,7 +557,7 @@ app = ps.App(
         ps.Layout(
             MantineLayout,
             [
-                ps.Route("/", ValidationModesPage),
+                ps.Route("/:mode?", ValidationModesPage),
                 ps.Route("/validators", BuiltInValidatorsPage),
                 ps.Route("/files", FileUploadsPage),
                 ps.Route("/dates", DatesPage),

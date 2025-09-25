@@ -43,7 +43,6 @@ export async function submitForm({
 }: SubmitForm) {
   onSubmit?.(event);
   if (!force && event.defaultPrevented) {
-    console.log("Skipping submit because defaultPrevented")
     return;
   }
   const form = event.currentTarget;

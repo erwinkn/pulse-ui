@@ -3,86 +3,79 @@ export type JSON<T> = T | Array<JSON<T>> | { [K: string]: JSON<T> };
 export type PlainJSON = JSON<Primitive>;
 export type Serializable = any;
 
-export type Serialized = [
-  [refs: string[], dates: string[], sets: string[], maps: string[]],
-  PlainJSON,
-];
-
-export type Extension<T = unknown, R = unknown> = {
-  check(value: unknown): value is T;
-  encode(value: T, encode: (value: unknown) => number): R;
-  decode(entry: R, decode: (index: number) => unknown): T;
-};
-
-export function extension<T, R = unknown>(ext: Extension<T, R>) {
-  return ext;
-}
+export type Serialized = [[number[], number[], number[], number[]], PlainJSON];
 
 export function serialize(data: Serializable): Serialized {
-  // Keep track of potentially recursive objects (arrays and records)
-  const seen = new Map<any, string>();
-  const refs: string[] = [];
-  const dates: string[] = [];
-  const sets: string[] = [];
-  const maps: string[] = [];
+  const seen = new Map<any, number>();
+  const refs: number[] = [];
+  const dates: number[] = [];
+  const sets: number[] = [];
+  const maps: number[] = [];
 
-  function process(value: Serializable, path: string): PlainJSON {
+  // Single global counter - increments once per node visit
+  let globalIndex = 0;
+
+  function process(value: Serializable): PlainJSON {
     if (
-      value == null || // catch both null and undefined
+      value == null ||
       typeof value === "number" ||
       typeof value === "string" ||
       typeof value === "boolean"
     ) {
       return value;
     }
+
+    const idx = globalIndex++;
     const prevRef = seen.get(value);
     if (prevRef !== undefined) {
-      refs.push(path);
+      // Make sure to push the current index, but use the ref's index as the value!
+      refs.push(idx);
       return prevRef;
     }
 
-    // Dates, arrays, and objects are all references, whose identity should be preserved
-    seen.set(value, path);
-    // Dates
+    seen.set(value, idx);
+
     if (value instanceof Date) {
-      dates.push(path);
+      dates.push(idx);
       return value.getTime();
     }
 
-    // Arrays
     if (Array.isArray(value)) {
-      const result = [];
-      for (let i = 0; i < value.length; i++) {
-        result.push(process(value[i], path + "." + String(i)));
+      const length = value.length;
+      const result = new Array(length);
+      for (let i = 0; i < length; i++) {
+        result[i] = process(value[i]);
       }
       return result;
     }
-    // Maps -> convert to record
+
     if (value instanceof Map) {
-      maps.push(path);
+      maps.push(idx);
       const rec: Record<string, any> = {};
       for (const [key, entry] of value.entries()) {
-        rec[key] = process(entry, path + "." + key);
+        rec[String(key)] = process(entry);
       }
       return rec;
     }
 
-    // Sets -> convert to array
     if (value instanceof Set) {
-      sets.push(path);
-      const result = [];
+      sets.push(idx);
+      const size = value.size;
+      const result = new Array(size);
       let i = 0;
       for (const entry of value) {
-        result.push(process(entry, path + "." + String(i)));
+        result[i] = process(entry);
         i += 1;
       }
       return result;
     }
-    // plain object
+
     if (typeof value === "object") {
       const rec: Record<string, any> = {};
-      for (const key of Object.keys(value)) {
-        rec[key] = process(value[key], path + "." + key);
+      const keys = Object.keys(value);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        rec[key] = process(value[key]);
       }
       return rec;
     }
@@ -90,7 +83,7 @@ export function serialize(data: Serializable): Serialized {
     throw new Error(`Unsupported value in serialization: ${value}`);
   }
 
-  const payload = process(data, "");
+  const payload = process(data);
   return [[refs, dates, sets, maps], payload];
 }
 
@@ -102,29 +95,30 @@ export function deserialize<Data extends Serializable = Serializable>(
   payload: Serialized,
   options?: DeserializationOptions
 ): Data {
-  const [[refs, dates, sets, maps], data] = payload;
+  const [[refsA, datesA, setsA, mapsA], data] = payload;
 
-  // Maps to store reconstructed objects and their paths
-  const objects = new Map<string, any>();
+  const refs = new Set(refsA);
+  const dates = new Set(datesA);
+  const sets = new Set(setsA);
+  const maps = new Set(mapsA);
 
-  function reconstruct(value: PlainJSON, path: string): any {
-    // Perform custom checks BEFORE primitives, as dates and circular references
-    // are encoded as numbers and strings, respectively.
+  const objects: Array<any> = [];
 
-    // Check if this path refers to a previously created object (circular
-    // reference)
-    if (refs.includes(path)) {
-      return objects.get(value as string);
+  function reconstruct(value: PlainJSON): any {
+    const idx = objects.length;
+    if (refs.has(idx)) {
+      // We increment the counter on refs during serialization. We're never
+      // going to use this entry, so we can just push null.
+      objects.push(null);
+      return objects[value as number];
     }
 
-    // Check if this path should be a Date.
-    if (dates.includes(path)) {
+    if (dates.has(idx)) {
       const dt = new Date(value as number);
-      objects.set(path, dt);
+      objects.push(dt);
       return dt;
     }
 
-    // Handle primitives
     if (
       value == null ||
       typeof value === "number" ||
@@ -137,42 +131,43 @@ export function deserialize<Data extends Serializable = Serializable>(
       return value;
     }
 
-    // Handle arrays & sets
     if (Array.isArray(value)) {
-      // Sets special case
-      if (sets.includes(path)) {
+      if (sets.has(idx)) {
         const result = new Set();
-        objects.set(path, result);
+        objects.push(result);
         for (let i = 0; i < value.length; i++) {
-          result.add(reconstruct(value[i], path + "." + String(i)));
+          result.add(reconstruct(value[i]));
         }
         return result;
       }
-      // Arrays regular path
-      const result: any[] = [];
-      objects.set(path, result);
-      for (let i = 0; i < value.length; i++) {
-        result[i] = reconstruct(value[i], path + "." + String(i));
+
+      const length = value.length;
+      const arr = new Array(length);
+      objects.push(arr);
+      for (let i = 0; i < length; i++) {
+        arr[i] = reconstruct(value[i]);
       }
-      return result;
+      return arr;
     }
 
-    // Handle objects and maps
     if (typeof value === "object") {
-      // Maps special case
-      if (maps.includes(path)) {
+      if (maps.has(idx)) {
         const result = new Map<string, any>();
-        objects.set(path, result);
-        for (const key of Object.keys(value)) {
-          result.set(key, reconstruct(value[key], path + "." + key));
+        objects.push(result);
+        const keys = Object.keys(value);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          result.set(key, reconstruct(value[key]));
         }
         return result;
       }
-      // Plain object regular path
+
       const result: Record<string, any> = {};
-      objects.set(path, result);
-      for (const key of Object.keys(value)) {
-        result[key] = reconstruct(value[key], path + "." + key);
+      objects.push(result);
+      const keys = Object.keys(value);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        result[key] = reconstruct(value[key]);
       }
       return result;
     }
@@ -180,5 +175,5 @@ export function deserialize<Data extends Serializable = Serializable>(
     throw new Error(`Unsupported value in deserialization: ${value}`);
   }
 
-  return reconstruct(data, "");
+  return reconstruct(data);
 }

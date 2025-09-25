@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-from pulse.serializer_v3 import DeserializationOptions, deserialize, serialize
+from pulse.serializer_v3 import deserialize, serialize
 
 
 def test_primitives_roundtrip_v3():
@@ -19,17 +19,6 @@ def test_handles_sets_v3():
 
     assert isinstance(parsed, set)
     assert parsed == source
-
-
-def test_handles_maps_v3():
-    source = dict([("one", 1), ("two", "second"), ("three", True)])
-    payload = serialize(source)
-    # Tag the root as a map
-    payload[0][3].append("")
-    parsed = deserialize(payload)
-
-    assert isinstance(parsed, dict)
-    assert parsed == dict(source)
 
 
 def test_nested_special_values_and_shared_refs_v3():

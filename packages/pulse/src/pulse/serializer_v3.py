@@ -5,21 +5,25 @@ The format mirrors the TypeScript implementation in ``packages/pulse-ui-client``
 Serialized payload structure::
 
     (
-        ([refs, dates, sets, maps], payload),
+        ("refs|dates|sets|maps", payload),
     )
 
-- ``refs``  – list of paths where the stored value is a reference to another
-  object in the tree; the value at that position is the target object's path.
-- ``dates`` – list of paths that should be materialised as ``datetime`` objects,
-  the payload entry is the millisecond timestamp since the Unix epoch (UTC).
-- ``sets``  – list of paths that are ``set`` instances; payload is an array of
-  their items.
-- ``maps``  – list of paths that are ``Map`` instances; payload is an object
-  mapping string keys to child payloads.
+- The first element is a compact metadata string with four pipe-separated
+  comma-separated integer lists representing global node indices for:
+  ``refs``, ``dates``, ``sets``, ``maps``.
+- ``refs``  – indices where the payload entry is an integer pointing to a
+  previously visited node's index (shared refs/cycles).
+- ``dates`` – indices that should be materialised as ``datetime`` objects; the
+  payload entry is the millisecond timestamp since the Unix epoch (UTC).
+- ``sets``  – indices that are ``set`` instances; payload is an array of their
+  items.
+- ``maps``  – indices that are ``Map`` instances; payload is an object mapping
+  string keys to child payloads. Python reconstructs these as ``dict``.
 
-This serializer preserves shared references and cycles across nested structures
-containing primitives, lists/tuples, ``dict``/plain objects, ``set`` and ``Map``
-instances, and ``datetime`` objects.
+Nodes are assigned a single global index as they are visited (non-primitives
+only). This preserves shared references and cycles across nested structures
+containing primitives, lists/tuples, ``dict``/plain objects, ``set`` and
+``datetime`` objects.
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ from typing import Any
 
 Primitive = int | float | str | bool | None
 PlainJSON = Primitive | list["PlainJSON"] | dict[str, "PlainJSON"]
-Serialized = tuple[tuple[list[str], list[str], list[str], list[str]], PlainJSON]
+Serialized = tuple[tuple[list[int], list[int], list[int], list[int]], PlainJSON]
 
 __all__ = [
     "serialize",
@@ -41,95 +45,114 @@ __all__ = [
 
 
 def serialize(data: Any) -> Serialized:
-    seen: dict[int, str] = {}
-    refs: list[str] = []
-    dates: list[str] = []
-    sets: list[str] = []
-    maps: list[str] = []
+    # Map object id -> assigned global index
+    seen: dict[int, int] = {}
+    refs: list[int] = []
+    dates: list[int] = []
+    sets: list[int] = []
+    maps: list[int] = []
 
-    def process(value: Any, path: str) -> PlainJSON:
+    global_index = 0
+
+    def process(value: Any) -> PlainJSON:
+        nonlocal global_index
         if value is None or isinstance(value, (bool, int, float, str)):
             return value
+
+        idx = global_index
+        global_index += 1
 
         obj_id = id(value)
         prev_ref = seen.get(obj_id)
         if prev_ref is not None:
-            refs.append(path)
+            refs.append(idx)
             return prev_ref
-        seen[obj_id] = path
+        seen[obj_id] = idx
 
         if isinstance(value, dt.datetime):
-            dates.append(path)
+            dates.append(idx)
             return _datetime_to_millis(value)
 
         if isinstance(value, dict):
             result_dict: dict[str, PlainJSON] = {}
             for key, entry in value.items():
-                key = str(key)
-                result_dict[key] = process(entry, f"{path}.{key}")
+                key_str = str(key)
+                result_dict[key_str] = process(entry)
             return result_dict
 
         if isinstance(value, (list, tuple)):
             result_list: list[PlainJSON] = []
-            for index, entry in enumerate(value):
-                result_list.append(process(entry, f"{path}.{index}"))
+            for entry in value:
+                result_list.append(process(entry))
             return result_list
 
         if isinstance(value, set):
+            sets.append(idx)
             items: list[PlainJSON] = []
-            for index, entry in enumerate(value):
-                items.append(process(entry, f"{path}.{index}"))
-            sets.append(path)
+            for entry in value:
+                items.append(process(entry))
             return items
 
         if is_dataclass(value):
-            obj: dict[str, PlainJSON] = {}
+            dc_obj: dict[str, PlainJSON] = {}
             for f in fields(value):
-                obj[f.name] = process(getattr(value, f.name), f"{path}.{f.name}")
-            return obj
+                dc_obj[f.name] = process(getattr(value, f.name))
+            return dc_obj
 
         if callable(value) or isinstance(value, (type, types.ModuleType)):
             raise TypeError(f"Unsupported value in serialization: {type(value)!r}")
 
         if hasattr(value, "__dict__"):
-            obj = {}
+            inst_obj: dict[str, PlainJSON] = {}
             for key, entry in vars(value).items():
                 if key.startswith("_"):
                     continue
-                obj[key] = process(entry, f"{path}.{key}")
-            return obj
+                inst_obj[key] = process(entry)
+            return inst_obj
 
         raise TypeError(f"Unsupported value in serialization: {type(value)!r}")
 
-    payload = process(data, "")
+    payload = process(data)
+
+    # Pack metadata into single compact string: refs|dates|sets|maps
+    def _join(values: list[int]) -> str:
+        return ",".join(str(v) for v in values)
+
     return ((refs, dates, sets, maps), payload)
 
 
 def deserialize(
     payload: Serialized,
 ) -> Any:
-    # Both JS Maps and records are reconstructed as dictionaries, so we don't
-    # care about deserializing Maps
-    (refs, dates, sets_paths, _), data = payload
+    (refs, dates, sets, maps), data = payload
+    refs = set(refs)
+    dates = set(dates)
+    sets = set(sets)
+    # we don't care about maps
 
-    refs_set = set(refs)
-    dates_set = set(dates)
-    sets_set = set(sets_paths)
+    objects: list[Any] = []
 
-    objects: dict[str, Any] = {}
+    def reconstruct(value: PlainJSON) -> Any:
+        idx = len(objects)
 
-    def reconstruct(value: PlainJSON, path: str) -> Any:
-        if path in refs_set:
-            assert isinstance(value, str), "Reference payload must be a string path"
-            assert value in objects, f"Dangling reference to {value!r}"
-            return objects[value]
+        if idx in refs:
+            assert isinstance(value, (int, float)), (
+                "Reference payload must be numeric index"
+            )
+            # Placeholder to keep indices aligned
+            objects.append(None)
+            target_index = int(value)
+            assert 0 <= target_index < len(objects), (
+                f"Dangling reference to index {target_index}"
+            )
+            return objects[target_index]
 
-        if path in dates_set:
+        if idx in dates:
             assert isinstance(value, (int, float)), (
                 "Date payload must be a numeric timestamp"
             )
             dt_value = _datetime_from_millis(value)
-            objects[path] = dt_value
+            objects.append(dt_value)
             return dt_value
 
         if value is None:
@@ -139,29 +162,29 @@ def deserialize(
             return value
 
         if isinstance(value, list):
-            if path in sets_set:
+            if idx in sets:
                 result_set: set[Any] = set()
-                objects[path] = result_set
-                for index, entry in enumerate(value):
-                    result_set.add(reconstruct(entry, f"{path}.{index}"))
+                objects.append(result_set)
+                for entry in value:
+                    result_set.add(reconstruct(entry))
                 return result_set
             result_list: list[Any] = []
-            objects[path] = result_list
-            for index, entry in enumerate(value):
-                result_list.append(reconstruct(entry, f"{path}.{index}"))
+            objects.append(result_list)
+            for entry in value:
+                result_list.append(reconstruct(entry))
             return result_list
 
         if isinstance(value, dict):
-            # Both maps and records are reconstructed as dictionaries
+            # Both maps and records are reconstructed as dictionaries in Python
             result_dict: dict[str, Any] = {}
-            objects[path] = result_dict
+            objects.append(result_dict)
             for key, entry in value.items():
-                result_dict[key] = reconstruct(entry, f"{path}.{key}")
+                result_dict[str(key)] = reconstruct(entry)
             return result_dict
 
         raise TypeError(f"Unsupported value in deserialization: {type(value)!r}")
 
-    return reconstruct(data, "")
+    return reconstruct(data)
 
 
 def _datetime_to_millis(value: dt.datetime) -> int:

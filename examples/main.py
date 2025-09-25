@@ -466,7 +466,7 @@ def DatePicker(
     *children: ps.Child,
     key: Optional[str] = None,
     value: Optional[datetime] = None,
-    onChange: Optional[ps.EventHandler[datetime | None]] = None,
+    onChange: Optional[ps.EventHandler1[datetime | None]] = None,
     placeholder: str = "Select a date",
     className: str = "",
     showTimeSelect: bool = False,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { serialize, deserialize } from "./v3";
+import { serialize as serialize, deserialize as deserialize } from "./v3";
 
 describe("v3 serialization", () => {
   it("serializes primitives as direct entries and round trips", () => {
@@ -86,6 +86,28 @@ describe("v3 serialization", () => {
     expect(deepSet[0]).toBeInstanceOf(Date);
     expect(deepSet[1]).toBeInstanceOf(Date);
     expect(parsed.single).toBeInstanceOf(Date);
+  });
+
+  it("round trips Maps nested within plain objects", () => {
+    const innerMap = new Map<string, number | string>([
+      ["layer", 1],
+      ["label", "record-0-layer-1"],
+    ]);
+    const data = {
+      level: 0,
+      nested: {
+        map: innerMap,
+        info: { active: true },
+      },
+    };
+
+    const serialized = serialize(data);
+    const parsed = deserialize(serialized) as typeof data;
+
+    expect(parsed.nested.map).toBeInstanceOf(Map);
+    expect(parsed.nested.map.get("layer")).toBe(1);
+    expect(parsed.nested.map.get("label")).toBe("record-0-layer-1");
+    expect(parsed.nested.info).toEqual({ active: true });
   });
 
   it("handles arrays and objects", () => {

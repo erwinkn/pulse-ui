@@ -1,5 +1,138 @@
 # Pulse Mantine
 
+`pulse-mantine` is a wrapper around the Mantine UI library, with customizations where necessary to make it work well with Pulse.
+
+`pulse-mantine` currently implements:
+- `@mantine/core`
+- `@mantine/form` with a custom wrapper (see below)
+- `@mantine/dates`
+- `@mantine/charts`
+
+Not all components are typed in Python yet, but you can still use them exactly like in the official Mantine examples.
+
+Support for the other extensions is coming soon.
+
+## Core Mantine
+
+The `@mantine/core` components are nearly all usable as-is by calling the component and passing in the same props.
+
+You can refer to the official documentation for usage examples and the API reference: https://mantine.dev/core/package/
+
+
+
+## Forms
+Forms are the most customized area of `pulse-mantine`. There are two reasons for this:
+1. Mantine forms mostly operate through the `useForm` hook and imperative calls to JavaScript functions, not through components and props.
+2. Forms benefit heavily from fast client-side validation.
+
+`pulse-mantine` addresses both challenges by providing a custom `MantineForm` wrapper, making Mantine inputs automatically register into forms, and providing additional validation built-ins that run fully in JavaScript.
+
+### Building forms
+Forms are managed through a `MantineForm` state. You can either instantiate this state directly or inherit from it to build your own state.
+
+A form then requires three things:
+- A `MantineForm` instance
+- Calling `MantineForm.render()` to set up the form
+- Giving a name to all inputs inside the form. The name defines their path in the form's data structure.
+
+By following these steps, the input components will automatically detect they are within a form and register themselves.
+
+Let's see how Mantine's standard form example translates to Pulse.
+
+```tsx
+import { Button, Checkbox, Group, TextInput } from '@mantine/core';
+import { useForm } from '@mantine/form';
+
+function Demo() {
+  const form = useForm({
+    mode: 'uncontrolled',
+    initialValues: {
+      email: '',
+      termsOfService: false,
+    },
+
+    validate: {
+      email: (value) => (/^\S+@\S+$/.test(value) ? null : 'Invalid email'),
+    },
+  });
+
+  return (
+    <form onSubmit={form.onSubmit((values) => console.log(values))}>
+      <TextInput
+        withAsterisk
+        label="Email"
+        placeholder="your@email.com"
+        key={form.key('email')}
+        {...form.getInputProps('email')}
+      />
+
+      <Checkbox
+        mt="md"
+        label="I agree to sell my privacy"
+        key={form.key('termsOfService')}
+        {...form.getInputProps('termsOfService', { type: 'checkbox' })}
+      />
+
+      <Group justify="flex-end" mt="md">
+        <Button type="submit">Submit</Button>
+      </Group>
+    </form>
+  );
+}
+```
+
+The equivalent version with `pulse-mantine` is the following.
+```python
+import pulse as ps
+
+@ps.component
+def Demo() {
+  const form = useForm({
+    mode: 'uncontrolled',
+    initialValues: {
+      email: '',
+      termsOfService: false,
+    },
+
+    validate: {
+      email: (value) => (/^\S+@\S+$/.test(value) ? null : 'Invalid email'),
+    },
+  });
+
+  return (
+    <form onSubmit={form.onSubmit((values) => console.log(values))}>
+      <TextInput
+        withAsterisk
+        label="Email"
+        placeholder="your@email.com"
+        key={form.key('email')}
+        {...form.getInputProps('email')}
+      />
+
+      <Checkbox
+        mt="md"
+        label="I agree to sell my privacy"
+        key={form.key('termsOfService')}
+        {...form.getInputProps('termsOfService', { type: 'checkbox' })}
+      />
+
+      <Group justify="flex-end" mt="md">
+        <Button type="submit">Submit</Button>
+      </Group>
+    </form>
+  );
+}
+```
+
+
+### Validation rules
+
+### Form actions
+
+
+
+
+
 ## Core
 
 ### Layout

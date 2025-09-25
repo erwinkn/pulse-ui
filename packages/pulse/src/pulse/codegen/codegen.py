@@ -28,7 +28,7 @@ class CodegenConfig:
         pulse_path (Path): Full path to the generated app directory.
     """
 
-    web_dir: Path | str = "pulse-web"
+    web_dir: Path | str = "web"
     """Root directory for the web output."""
 
     pulse_dir: Path | str = "pulse"

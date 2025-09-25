@@ -53,21 +53,6 @@ class MantineFormProps(ps.HTMLFormProps, Generic[TForm], total=False):
 
 
 class MantineForm(ps.State, Generic[TForm]):
-    """Form controller that manages a message log consumed by the client Form.
-
-    Usage inside a component:
-
-        form = ps.states(Form)
-        return form.mount(initialValues={...})[
-            FormTextInput(name="email", label="Email"),
-            ...
-        ]
-
-        # Later within event handlers
-        form.set_field_value("email", "foo@bar.com")
-
-    """
-
     messages: list[dict[str, Any]]
 
     def __init__(
@@ -83,8 +68,6 @@ class MantineForm(ps.State, Generic[TForm]):
         clearInputErrorOnChange: bool | None = None,
         debounceMs: int | None = None,
         touchTrigger: Literal["change", "focus"] | None = None,
-        onSubmit: ps.EventHandler1[TForm] | None = None,
-        onReset: ps.EventHandler1[ps.FormEvent[ps.HTMLFormElement]] | None = None,
     ):
         self.messages = []
 
@@ -102,18 +85,16 @@ class MantineForm(ps.State, Generic[TForm]):
             "clearInputErrorOnChange": clearInputErrorOnChange,
             "debounceMs": debounceMs,
             "touchTrigger": touchTrigger,
-            "onReset": onReset,
         }
         # Filter out None values
         self._mantine_props = {
             k: v for k, v in self._mantine_props.items() if v is not None
         }
-        self._on_submit = onSubmit
 
-        check_for_reserved_keys(initialValues)
-        check_for_reserved_keys(initialErrors)
-        check_for_reserved_keys(initialDirty)
-        check_for_reserved_keys(initialTouched)
+        _check_for_reserved_keys(initialValues)
+        _check_for_reserved_keys(initialErrors)
+        _check_for_reserved_keys(initialDirty)
+        _check_for_reserved_keys(initialTouched)
 
     async def _handle_form_data(self, data: ps.FormData):
         # Expect one JSON-serialized entry under "__data__" with v3 serializer
@@ -142,12 +123,10 @@ class MantineForm(ps.State, Generic[TForm]):
         self,
         *children: ps.Child,
         key: Optional[str] = None,
-        **props: Unpack[ps.HTMLFormProps],
+        onSubmit: ps.EventHandler1[TForm] | None = None,
+        **props: Unpack[ps.HTMLFormProps],  # pyright: ignore[reportGeneralTypeIssues]
     ):
-        if props.get("onSubmit"):
-            raise ValueError(
-                "For Mantine forms, pass onSubmit to the MantineForm constructor"
-            )
+        self._on_submit = onSubmit
         merged = {**props, **self._mantine_props, **self._form.props()}
 
         return FormInternal(
@@ -251,17 +230,17 @@ class MantineForm(ps.State, Generic[TForm]):
 
 
 # Also ensure user data objects do not contain reserved keys
-def check_for_reserved_keys(obj: Any, path: str = "") -> None:
+def _check_for_reserved_keys(obj: Any, path: str = "") -> None:
     if isinstance(obj, dict):
         for k, v in obj.items():
             if k in {"$kind", "formRootRule"}:
                 raise ValueError(
                     "'$kind' and 'formRootRule' are reserved keys and cannot appear in user data"
                 )
-            check_for_reserved_keys(v, f"{path}.{k}" if path else str(k))
+            _check_for_reserved_keys(v, f"{path}.{k}" if path else str(k))
     elif isinstance(obj, list):
         for idx, v in enumerate(obj):
-            check_for_reserved_keys(v, f"{path}[{idx}]")
+            _check_for_reserved_keys(v, f"{path}[{idx}]")
 
 
 def _merge_files_into_structure(base: Any, files: dict[str, Any]) -> Any:

@@ -87,7 +87,6 @@ class ValidationModesForm(MantineForm):
             validateInputOnBlur=validation_mode == "blur",
             validateInputOnChange=validation_mode == "change",
             clearInputErrorOnChange=True,
-            onSubmit=lambda data: print("Form data:", data),
         )
 
 
@@ -134,7 +133,6 @@ class BuiltInValidatorsForm(MantineForm):
             initialValues=BUILT_IN_INITIAL_VALUES,
             validate=validate,
             clearInputErrorOnChange=True,
-            onSubmit=lambda data: print("Submitted data:", data),
         )
 
     def set_referral(self, checked: bool) -> None:
@@ -163,7 +161,6 @@ class FileUploadsForm(MantineForm):
             initialValues=FILE_INITIAL_VALUES,
             validate=validate,
             mode="controlled",
-            onSubmit=lambda data: print("Form data:", summarize_form_payload(data)),
         )
 
 
@@ -180,7 +177,7 @@ class DatesState(MantineForm):
             "deadline": [
                 IsDate("Set a deadline"),
                 IsBefore("end", error="Deadline must be before the end date"),
-                IsAfter("start", error="Deadline must after the start date")
+                IsAfter("start", error="Deadline must after the start date"),
             ],
             "reminder": [IsNotEmpty("Choose a reminder time")],
             "month": [IsNotEmpty("Pick a month")],
@@ -189,7 +186,6 @@ class DatesState(MantineForm):
             initialValues=DATE_INITIAL_VALUES,
             validate=validate,
             clearInputErrorOnChange=True,
-            onSubmit=lambda data: print("Form data:", data),
         )
 
 
@@ -225,11 +221,11 @@ def MantineLayout():
 
 
 VALIDATION_INITIAL_VALUES = {
-    "username": "erwin",
-    "email": "erwin@brimstone.com",
-    "password": "hahahaha",
-    "confirm": "hahahaha",
-    "role": "user",
+    "username": "",
+    "email": "",
+    "password": "",
+    "confirm": "",
+    "role": "",
 }
 
 
@@ -256,6 +252,8 @@ def ValidationModesPage():
                 ],
             ],
             form.render(
+                onSubmit=lambda data: print("Form data:", summarize_form_payload(data))
+            )[
                 Stack(gap="md")[
                     Group(gap="md")[
                         TextInput(
@@ -304,7 +302,7 @@ def ValidationModesPage():
                         Button("Submit", type="submit"),
                     ],
                 ]
-            ),
+            ],
         ]
     ]
 
@@ -340,7 +338,7 @@ def BuiltInValidatorsPage():
                     "Most of the Mantine client-side rules are available directly from Python."
                 ),
             ],
-            form.render(
+            form.render(onSubmit=lambda data: print("Form data:", data))[
                 Stack(gap="md")[
                     Group(gap="md")[
                         TextInput(name="name", label="Name", withAsterisk=True),
@@ -405,7 +403,7 @@ def BuiltInValidatorsPage():
                         Button("Submit", type="submit"),
                     ],
                 ]
-            ),
+            ],
         ]
     ]
 
@@ -428,7 +426,7 @@ def FileUploadsPage():
                     "File inputs stay in sync with the form controller and reuse the same validators."
                 ),
             ],
-            form.render(
+            form.render(onSubmit=lambda data: print("Form data:", data))[
                 Stack(gap="md")[
                     FileInput(
                         name="resume",
@@ -454,7 +452,7 @@ def FileUploadsPage():
                         Button("Submit", type="submit"),
                     ],
                 ]
-            ),
+            ],
         ]
     ]
 
@@ -481,7 +479,7 @@ def DatesPage():
                 ),
             ],
             DatesProvider(settings={"locale": "en", "firstDayOfWeek": 1})[
-                form.render(
+                form.render(onSubmit=lambda data: print("Form data:", data))[
                     Stack(gap="md")[
                         Group(gap="md")[
                             DatePickerInput(
@@ -526,7 +524,7 @@ def DatesPage():
                             Button("Submit", type="submit"),
                         ],
                     ]
-                )
+                ]
             ],
         ]
     ]

@@ -12,5 +12,4 @@ def Home():
 
 app = ps.App(
     [ps.Route("/", Home)],
-    codegen=ps.CodegenConfig(Path(__file__).parent / "pulse-demo"),
 )

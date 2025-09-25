@@ -229,7 +229,6 @@ app = ps.App(
         )
     ],
     middleware=[LoggingMiddleware(), AuthMiddleware()],
-    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )
 
 

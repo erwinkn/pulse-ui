@@ -28,7 +28,8 @@ export type FormMessage =
   | { type: "clearErrors"; paths?: string[] }
   | { type: "setTouched"; touched: Record<string, boolean> }
   | { type: "validate" }
-  | { type: "reset"; initialValues?: any };
+  | { type: "reset"; initialValues?: any }
+  | { type: "getFormValues"; id: string };
 
 export interface MantineFormProps<TValues = any>
   extends Omit<
@@ -48,16 +49,14 @@ export interface MantineFormProps<TValues = any>
   validateInputOnBlur?: boolean | string[];
   validateInputOnChange?: boolean | string[];
   clearInputErrorOnChange?: boolean;
+  cascadeUpdates?: boolean;
   /** Default debounce for server validation when validateInputOnChange is enabled */
   debounceMs?: number;
   /** Callback invoked when form reset event fires */
   action: string;
-  onSubmit?: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
-  onServerValidation?: (
-    value: any,
-    values: TValues,
-    path: string
-  ) => Promise<void>;
+  onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  onGetFormValues?: (id: string, values: TValues) => void;
+  onServerValidation?: (value: any, values: TValues, path: string) => void;
   onReset?: (event: FormEvent<HTMLFormElement>) => void;
   /** Log of messages to apply imperatively on the Mantine form */
   messages?: FormMessage[];
@@ -79,9 +78,11 @@ export function Form<
   validateInputOnChange,
   clearInputErrorOnChange,
   onServerValidation,
+  onGetFormValues,
   debounceMs: serverValidationDebounceMs = 250,
   onSubmit: userOnSubmit,
   onReset: userOnReset,
+  cascadeUpdates,
   ...formProps
 }: MantineFormProps<TValues>) {
   const formRef = useRef<UseFormReturnType<TValues> | null>(null);
@@ -116,6 +117,7 @@ export function Form<
     validateInputOnChange,
     clearInputErrorOnChange,
     onSubmitPreventDefault: "always",
+    cascadeUpdates,
   });
   formRef.current = form;
 
@@ -134,6 +136,7 @@ export function Form<
     const list = messages || [];
     for (let i = appliedCount.current; i < list.length; i++) {
       const msg = list[i];
+      console.log("handling message:", msg)
       switch (msg.type) {
         case "setValues":
           form.setValues(msg.values);
@@ -173,6 +176,10 @@ export function Form<
           form.resetTouched();
           form.resetDirty();
           if (msg.initialValues) form.setValues(msg.initialValues);
+          break;
+        case "getFormValues":
+          const values = form.getValues();
+          onGetFormValues?.(msg.id, values);
           break;
         default:
           break;

@@ -25,6 +25,7 @@ import typing
 from functools import lru_cache
 from pulse.codegen.imports import Imported, ImportStatement
 from pulse.helpers import Sentinel
+from pulse.reactive_extensions import unwrap
 from pulse.vdom import Child, Node, Element
 
 
@@ -338,6 +339,8 @@ class ReactComponent(Generic[P], Imported):
         # Apply optional props specification: fill defaults, enforce required,
         # run serializers, and remap keys.
         real_props = self.props_spec.apply(self.name, props)
+        if real_props:
+            real_props = {key: unwrap(value) for key, value in real_props.items()}
 
         return Node(
             tag=f"$${self.expr}",

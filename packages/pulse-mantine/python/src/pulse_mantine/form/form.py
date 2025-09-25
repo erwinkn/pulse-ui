@@ -1,3 +1,4 @@
+from asyncio import Future
 from datetime import datetime
 from typing import (
     Any,
@@ -10,11 +11,12 @@ from typing import (
     Union,
     Unpack,
 )
+from uuid import uuid4
 
 import pulse as ps
 import json
 from pulse.serializer_v3 import deserialize
-from pulse.helpers import call_flexible
+from pulse.helpers import call_flexible, create_future_on_loop
 
 from .internal import FormInternal, FormMode
 from .validators import (
@@ -40,6 +42,7 @@ class MantineFormProps(ps.HTMLFormProps, Generic[TForm], total=False):
     validateInputOnBlur: Union[bool, list[str]]
     validateInputOnChange: Union[bool, list[str]]
     clearInputErrorOnChange: bool
+    cascadeUpdates: bool
     debounceMs: int
     touchTrigger: Literal["change", "focus"]
     """touchTrigger option allows customizing events that change touched state.
@@ -70,8 +73,10 @@ class MantineForm(ps.State, Generic[TForm]):
         touchTrigger: Literal["change", "focus"] | None = None,
     ):
         self.messages = []
+        print("MantinForm instantiation, self.messages is ReactiveList:", isinstance(self.messages, ps.ReactiveList))
 
         self._form = ps.ManualForm(on_submit=self._handle_form_data)
+        self._futures: dict[str, Future] = {}
 
         self._validation = validate
         self._mantine_props = {
@@ -128,20 +133,35 @@ class MantineForm(ps.State, Generic[TForm]):
     ):
         self._on_submit = onSubmit
         merged = {**props, **self._mantine_props, **self._form.props()}
+        print("Rendering form")
 
         return FormInternal(
             *children,
             key=key,
             messages=self.messages,
             onServerValidation=self._on_server_validation,
+            onGetFormValues=self._on_get_form_values,
             **merged,
         )
 
     # Append a message helper
     def _append(self, msg: dict[str, Any]) -> None:
-        self.messages = [*self.messages, msg]
+        self.messages.append(msg)
 
     # Public API mapping to Mantine useForm actions
+    async def get_form_values(self):
+        request_id = uuid4().hex
+        fut = create_future_on_loop()
+        self._futures[request_id] = fut
+        self.messages.append({"type": "getFormValues", "id": request_id})
+        print("Sending message getFormValues")
+        return await fut
+
+    def _on_get_form_values(self, request_id: str, values: dict[str, Any]):
+        fut = self._futures.pop(request_id, None)
+        if fut and not fut.done():
+            fut.set_result(values)
+
     def set_values(self, values: dict[str, Any]):
         self._append({"type": "setValues", "values": values})
 

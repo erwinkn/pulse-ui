@@ -1,7 +1,7 @@
 from __future__ import (
     annotations,
 )  # required to use dataclasses._DataclassT in this file
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import MISSING as _DC_MISSING
 from dataclasses import dataclass as _dc_dataclass
 from dataclasses import fields as _dc_fields
@@ -12,7 +12,7 @@ from typing import Any as _Any, Optional
 from typing import Callable, Generic, TypeVar, overload, cast
 import weakref
 
-from pulse.reactive import Signal
+from pulse.reactive import Computed, Signal
 
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
@@ -258,6 +258,14 @@ class ReactiveDict(dict[T1, T2]):
         result.update(self)
         return result
 
+    def unwrap(self) -> dict[T1, _Any]:
+        """Return a plain dict while subscribing to contained signals."""
+        _ = self._structure.read()
+        result: dict[T1, _Any] = {}
+        for key in dict.__iter__(self):
+            result[key] = unwrap(self[key])
+        return result
+
 
 class ReactiveList(list[T1]):
     """A list with item-level reactivity where possible and structural change signaling.
@@ -358,6 +366,11 @@ class ReactiveList(list[T1]):
         del self._signals[index]
         self._bump_structure()
         return val
+
+    def unwrap(self) -> list[_Any]:
+        """Return a plain list while subscribing to element signals."""
+        _ = self.version
+        return [unwrap(self[i]) for i in range(len(self._signals))]
 
     def remove(self, value: _Any) -> None:  # type: ignore[override]
         idx = super().index(value)
@@ -479,6 +492,14 @@ class ReactiveSet(set[T1]):
                     to_remove.add(v)
         for v in to_remove:
             self.discard(v)
+
+    def unwrap(self) -> set[_Any]:
+        """Return a plain set while subscribing to membership signals."""
+        result: set[_Any] = set()
+        for value in set.__iter__(self):
+            _ = self.membership(value)
+            result.add(unwrap(value))
+        return result
 
 
 # ---- Reactive dataclass support ----
@@ -788,4 +809,25 @@ def reactive(value: _Any) -> _Any:
         return ReactiveSet(value)
     if isinstance(value, type) and is_dataclass(value):
         return _get_reactive_dataclass_class(value)
+    return value
+
+
+def unwrap(value: _Any) -> _Any:
+    """Recursively unwrap reactive containers into plain Python values."""
+    if isinstance(value, (Signal, Computed)):
+        return unwrap(value.unwrap())
+    if isinstance(value, ReactiveDict):
+        return value.unwrap()
+    if isinstance(value, ReactiveList):
+        return value.unwrap()
+    if isinstance(value, ReactiveSet):
+        return value.unwrap()
+    if isinstance(value, Mapping):
+        return {k: unwrap(v) for k, v in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if isinstance(value, tuple):
+            return tuple(unwrap(v) for v in value)
+        return [unwrap(v) for v in value]
+    if isinstance(value, set):
+        return {unwrap(v) for v in value}
     return value

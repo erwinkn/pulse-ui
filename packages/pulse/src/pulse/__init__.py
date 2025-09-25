@@ -70,7 +70,7 @@ from .reactive import (
     Signal,
     Untrack,
 )
-from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive
+from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive, unwrap
 from .render_session import RenderSession, RouteMount
 from .request import PulseRequest
 from .routing import Layout, Route
@@ -136,6 +136,7 @@ __all__ = [
     "ReactiveList",
     "ReactiveSet",
     "reactive",
+    "unwrap",
     # Hooks
     "states",
     "effects",

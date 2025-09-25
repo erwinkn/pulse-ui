@@ -36,6 +36,10 @@ class Signal(Generic[T]):
     def __call__(self) -> T:
         return self.read()
 
+    def unwrap(self) -> T:
+        """Return the current value while registering subscriptions."""
+        return self.read()
+
     def _add_obs(self, obs: "Computed | Effect"):
         prev = len(self.obs)
         self.obs.append(obs)
@@ -98,6 +102,10 @@ class Computed(Generic[T]):
         return self.value
 
     def __call__(self) -> T:
+        return self.read()
+
+    def unwrap(self) -> T:
+        """Return the current value while registering subscriptions."""
         return self.read()
 
     def _push_change(self):

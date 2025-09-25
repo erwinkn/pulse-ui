@@ -16,13 +16,17 @@ def Demo():
     form = ps.states(
         lambda: MantineForm(
             mode="uncontrolled",
-            initialValues={"email": "", "termsofService": False},
+            initialValues={"email": "", "termsOfService": False},
             validate={
                 # Equivalent to Mantine's built-in `isEmail` validator
                 "email": IsEmail("Invalid email")
             },
         )
     )
+
+    async def printFormValues():
+        values = await form.get_form_values()
+        print("Form values:", values)
 
     return Center(h="100vh")[
         Container(size="lg")[
@@ -45,7 +49,10 @@ def Demo():
                     mt="md",
                     label="I agree to sell my privacy",
                 ),
-                Group(justify="flex-end", mt="md")[Button("Submit", type="submit")],
+                Group(justify="flex-end", mt="md")[
+                    Button("Get form values", onClick=printFormValues),
+                    Button("Submit", type="submit"),
+                ],
             ]
         ]
     ]

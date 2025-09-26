@@ -43,7 +43,7 @@ class DynamicHouseholdForm(MantineForm):
                 ],
             },
             syncMode="onChange",
-            syncDebounceMs=120,
+            # syncDebounceMs=120,
         )
 
     # Member operations -----------------------------------------------------

@@ -1,6 +1,7 @@
 from __future__ import (
     annotations,
 )  # required to use dataclasses._DataclassT in this file
+import copy
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import MISSING as _DC_MISSING
 from dataclasses import dataclass as _dc_dataclass
@@ -12,8 +13,7 @@ from typing import Any as _Any, Optional
 from typing import Callable, Generic, TypeVar, overload, cast
 import weakref
 
-from pulse import Untrack
-from pulse.reactive import Computed, Signal
+from pulse.reactive import Computed, Signal, Untrack
 
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
@@ -235,7 +235,21 @@ class ReactiveDict(dict[T1, T2]):
 
     def copy(self):  # type: ignore[override]
         # Shallow copy preserving current values
-        return ReactiveDict({k: dict.__getitem__(self, k) for k in super().__iter__()})
+        return type(self)({k: dict.__getitem__(self, k) for k in dict.__iter__(self)})
+
+    def __copy__(self):
+        return self.copy()
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        result = type(self)()
+        memo[id(self)] = result
+        for key in dict.__iter__(self):
+            key_copy = copy.deepcopy(key, memo)
+            value_copy = copy.deepcopy(dict.__getitem__(self, key), memo)
+            result.set(key_copy, value_copy)
+        return result
 
     @classmethod
     def fromkeys(cls, iterable: Iterable[T1], value: _Any = None):  # type: ignore[override]
@@ -416,6 +430,21 @@ class ReactiveList(list[T1]):
         _ = self._structure.read()
         return super().__iter__()
 
+    def __copy__(self):
+        result = type(self)()
+        for value in super().__iter__():
+            result.append(copy.copy(value))
+        return result
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        result = type(self)()
+        memo[id(self)] = result
+        for value in super().__iter__():
+            result.append(copy.deepcopy(value, memo))
+        return result
+
 
 class ReactiveSet(set[T1]):
     """A set with per-element membership reactivity.
@@ -500,6 +529,18 @@ class ReactiveSet(set[T1]):
         for value in set.__iter__(self):
             _ = self.membership(value)
             result.add(unwrap(value))
+        return result
+
+    def __copy__(self):
+        return type(self)(list(set.__iter__(self)))
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        result = type(self)()
+        memo[id(self)] = result
+        for value in set.__iter__(self):
+            result.add(copy.deepcopy(value, memo))
         return result
 
 

@@ -10,32 +10,19 @@ import {
 import { useForm } from "@mantine/form";
 import type { UseFormInput, UseFormReturnType } from "@mantine/form";
 import { FormProvider } from "./context";
-import { submitForm, serialize } from "pulse-ui-client";
+import { submitForm, serialize, usePulseChannel } from "pulse-ui-client";
 import {
   isValidatorSchema,
   schemaToRules,
   type ValidatorSchema,
 } from "./validators";
 
-export type FormMessage =
-  | { type: "setValues"; values: any }
-  | { type: "setFieldValue"; path: string; value: any }
-  | { type: "insertListItem"; path: string; item: any; index?: number }
-  | { type: "removeListItem"; path: string; index: number }
-  | { type: "reorderListItem"; path: string; from: number; to: number }
-  | { type: "setErrors"; errors: Record<string, any> }
-  | { type: "setFieldError"; path: string; error: any }
-  | { type: "clearErrors"; paths?: string[] }
-  | { type: "setTouched"; touched: Record<string, boolean> }
-  | { type: "validate" }
-  | { type: "reset"; initialValues?: any }
-  | { type: "getFormValues"; id: string };
-
 export interface MantineFormProps<TValues = any>
   extends Omit<
     ComponentPropsWithoutRef<"form">,
     "onSubmit" | "onReset" | "action"
   > {
+  channelId: string;
   children?: ReactNode;
   /** Initial values/errors/dirty/touched passed to useForm */
   initialValues?: UseFormInput<TValues>["initialValues"];
@@ -55,11 +42,8 @@ export interface MantineFormProps<TValues = any>
   /** Callback invoked when form reset event fires */
   action: string;
   onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
-  onGetFormValues?: (id: string, values: TValues) => void;
   onServerValidation?: (value: any, values: TValues, path: string) => void;
   onReset?: (event: FormEvent<HTMLFormElement>) => void;
-  /** Log of messages to apply imperatively on the Mantine form */
-  messages?: FormMessage[];
 }
 
 export function Form<
@@ -67,18 +51,17 @@ export function Form<
 >({
   children,
   action,
+  channelId,
   validate,
   initialValues,
   initialErrors,
   initialDirty,
   initialTouched,
-  messages,
   mode = "controlled",
   validateInputOnBlur,
   validateInputOnChange,
   clearInputErrorOnChange,
   onServerValidation,
-  onGetFormValues,
   debounceMs: serverValidationDebounceMs = 250,
   onSubmit: userOnSubmit,
   onReset: userOnReset,
@@ -121,6 +104,8 @@ export function Form<
   });
   formRef.current = form;
 
+  const channel = usePulseChannel(channelId);
+
   // Cleanup outstanding timers on unmount
   useEffect(() => {
     return () => {
@@ -129,64 +114,78 @@ export function Form<
     };
   }, []);
 
-  // Apply incoming messages in order once
-  const appliedCount = useRef(0);
-
   useEffect(() => {
-    const list = messages || [];
-    for (let i = appliedCount.current; i < list.length; i++) {
-      const msg = list[i];
-      console.log("handling message:", msg)
-      switch (msg.type) {
-        case "setValues":
-          form.setValues(msg.values);
-          break;
-        case "setFieldValue":
-          form.setFieldValue(msg.path, msg.value);
-          break;
-        case "insertListItem":
-          form.insertListItem(msg.path, msg.item, msg.index);
-          break;
-        case "removeListItem":
-          form.removeListItem(msg.path, msg.index);
-          break;
-        case "reorderListItem":
-          form.reorderListItem(msg.path, { from: msg.from, to: msg.to });
-          break;
-        case "setErrors":
-          form.setErrors(msg.errors);
-          break;
-        case "setFieldError":
-          form.setFieldError(msg.path, msg.error);
-          break;
-        case "clearErrors":
-          if (msg.paths && msg.paths.length > 0) {
-            msg.paths.forEach((p) => form.clearFieldError(p));
-          } else {
-            form.clearErrors();
-          }
-          break;
-        case "setTouched":
-          form.setTouched(msg.touched);
-          break;
-        case "validate":
-          form.validate();
-          break;
-        case "reset":
+    const cleanups = [
+      channel.on("setValues", (payload: { values: TValues }) => {
+        if (payload?.values !== undefined) {
+          form.setValues(payload.values);
+        }
+      }),
+      channel.on("setFieldValue", (payload: { path: string; value: any }) => {
+        if (!payload) return;
+        form.setFieldValue(payload.path, payload.value);
+      }),
+      channel.on(
+        "insertListItem",
+        (payload: { path: string; item: any; index?: number }) => {
+          if (!payload) return;
+          form.insertListItem(payload.path, payload.item, payload.index);
+        }
+      ),
+      channel.on("removeListItem", (payload: { path: string; index: number }) => {
+        if (!payload) return;
+        form.removeListItem(payload.path, payload.index);
+      }),
+      channel.on(
+        "reorderListItem",
+        (payload: { path: string; from: number; to: number }) => {
+          if (!payload) return;
+          form.reorderListItem(payload.path, { from: payload.from, to: payload.to });
+        }
+      ),
+      channel.on("setErrors", (payload: { errors: Record<string, any> }) => {
+        if (!payload) return;
+        form.setErrors(payload.errors);
+      }),
+      channel.on("setFieldError", (payload: { path: string; error: any }) => {
+        if (!payload) return;
+        form.setFieldError(payload.path, payload.error);
+      }),
+      channel.on("clearErrors", (payload?: { paths?: string[] }) => {
+        const paths = payload?.paths;
+        if (Array.isArray(paths) && paths.length > 0) {
+          paths.forEach((p) => form.clearFieldError(p));
+        } else {
+          form.clearErrors();
+        }
+      }),
+      channel.on(
+        "setTouched",
+        (payload: { touched: Record<string, boolean> }) => {
+          if (!payload) return;
+          form.setTouched(payload.touched);
+        }
+      ),
+      channel.on("validate", () => {
+        form.validate();
+      }),
+      channel.on("reset", (payload?: { initialValues?: TValues }) => {
+        if (payload?.initialValues) {
+          // Same behavior as form.reset(), except we allow modifying the initialValues
           form.resetTouched();
           form.resetDirty();
-          if (msg.initialValues) form.setValues(msg.initialValues);
-          break;
-        case "getFormValues":
-          const values = form.getValues();
-          onGetFormValues?.(msg.id, values);
-          break;
-        default:
-          break;
-      }
-    }
-    appliedCount.current = list.length;
-  }, [messages]);
+          form.setValues(payload.initialValues);
+        } else {
+          form.reset()
+        }
+      }),
+      channel.on("getFormValues", () => form.getValues()),
+    ];
+
+    return () => {
+      for (const dispose of cleanups) dispose();
+    };
+  }, [channel, form]);
 
   const submitHandler = useMemo(
     () =>

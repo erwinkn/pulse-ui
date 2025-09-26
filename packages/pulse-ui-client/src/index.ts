@@ -3,6 +3,9 @@
 // Core React bindings
 export { PulseProvider, usePulseClient, PulseView } from "./pulse";
 export type { PulseConfig, PulseProviderProps, PulsePrerender } from "./pulse";
+export { usePulseChannel } from "./usePulseChannel";
+export { PulseChannelResetError } from "./channel";
+export type { ChannelBridge } from "./channel";
 
 // Client implementation
 export { PulseSocketIOClient } from "./client";
@@ -42,12 +45,18 @@ export type {
   ServerErrorInfo,
   ServerApiCallMessage,
   ServerNavigateToMessage,
+  ServerChannelRequestMessage,
+  ServerChannelResponseMessage,
+  ServerChannelMessage,
   ClientMessage,
   ClientCallbackMessage,
   ClientMountMessage,
   ClientNavigateMessage,
   ClientUnmountMessage,
   ClientApiResultMessage,
+  ClientChannelRequestMessage,
+  ClientChannelResponseMessage,
+  ClientChannelMessage,
 } from "./messages";
 
 // Transports

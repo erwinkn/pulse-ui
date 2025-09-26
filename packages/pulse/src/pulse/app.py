@@ -60,6 +60,7 @@ from pulse.user_session import (
     new_sid,
 )
 from pulse.form import FormRegistry
+from pulse.channel import ChannelsManager
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +158,8 @@ class App:
 
         # Form submissions registry
         self.forms = FormRegistry(self)
+        # Channel manager for Python <-> client messaging
+        self.channels = ChannelsManager(self)
 
         self._user_to_render: dict[str, list[str]] = defaultdict(list)
         self._render_to_user: dict[str, str] = {}
@@ -543,8 +546,32 @@ class App:
                         )
                     elif msg["type"] == "unmount":
                         render.unmount(msg["path"])
+                        self.channels.remove_route(rid, msg["path"])
                     elif msg["type"] == "api_result":
                         render.handle_api_result(dict(msg))
+                    elif msg["type"] == "channel_message":
+                        if msg.get("responseTo"):
+                            self.channels.handle_client_response(message=msg)
+                        else:
+                            res = self.middleware.channel(
+                                channel_id=msg.get("channel", ""),
+                                event=msg.get("event", ""),
+                                payload=msg.get("payload"),
+                                request_id=msg.get("requestId"),
+                                session=session.data,
+                                next=lambda: Ok(
+                                    self.channels.handle_client_event(
+                                        render=render, session=session, message=msg
+                                    )
+                                ),
+                            )
+                            if isinstance(res, Deny):
+                                if req_id := msg.get("requestId"):
+                                    self.channels.send_error(
+                                        str(msg.get("channel", "")), req_id, "Denied"
+                                    )
+                                return res
+                            return res
                     else:
                         logger.warning(f"Unknown message type received: {msg}")
                     return Ok()
@@ -658,6 +685,9 @@ class App:
         return render
 
     def close_render(self, rid: str):
+        render = self.render_sessions.get(rid)
+        if render is not None:
+            self.channels.remove_render(rid)
         render = self.render_sessions.pop(rid, None)
         if not render:
             return

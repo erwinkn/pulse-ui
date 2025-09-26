@@ -1,4 +1,3 @@
-from asyncio import Future
 from datetime import datetime
 from typing import (
     Any,
@@ -11,12 +10,10 @@ from typing import (
     Union,
     Unpack,
 )
-from uuid import uuid4
-
-import pulse as ps
 import json
+import pulse as ps
 from pulse.serializer_v3 import deserialize
-from pulse.helpers import call_flexible, create_future_on_loop
+from pulse.helpers import call_flexible
 
 from .internal import FormInternal, FormMode
 from .validators import (
@@ -56,8 +53,6 @@ class MantineFormProps(ps.HTMLFormProps, Generic[TForm], total=False):
 
 
 class MantineForm(ps.State, Generic[TForm]):
-    messages: list[dict[str, Any]]
-
     def __init__(
         self,
         mode: FormMode | None = None,
@@ -72,11 +67,8 @@ class MantineForm(ps.State, Generic[TForm]):
         debounceMs: int | None = None,
         touchTrigger: Literal["change", "focus"] | None = None,
     ):
-        self.messages = []
-        print("MantinForm instantiation, self.messages is ReactiveList:", isinstance(self.messages, ps.ReactiveList))
-
+        self._channel = ps.channel()
         self._form = ps.ManualForm(on_submit=self._handle_form_data)
-        self._futures: dict[str, Future] = {}
 
         self._validation = validate
         self._mantine_props = {
@@ -133,73 +125,62 @@ class MantineForm(ps.State, Generic[TForm]):
     ):
         self._on_submit = onSubmit
         merged = {**props, **self._mantine_props, **self._form.props()}
-        print("Rendering form")
-
         return FormInternal(
             *children,
             key=key,
-            messages=self.messages,
+            channelId=self._channel.id,
             onServerValidation=self._on_server_validation,
-            onGetFormValues=self._on_get_form_values,
             **merged,
         )
 
-    # Append a message helper
-    def _append(self, msg: dict[str, Any]) -> None:
-        self.messages.append(msg)
-
     # Public API mapping to Mantine useForm actions
     async def get_form_values(self):
-        request_id = uuid4().hex
-        fut = create_future_on_loop()
-        self._futures[request_id] = fut
-        self.messages.append({"type": "getFormValues", "id": request_id})
-        print("Sending message getFormValues")
-        return await fut
-
-    def _on_get_form_values(self, request_id: str, values: dict[str, Any]):
-        fut = self._futures.pop(request_id, None)
-        if fut and not fut.done():
-            fut.set_result(values)
+        return await self._channel.request("getFormValues")
 
     def set_values(self, values: dict[str, Any]):
-        self._append({"type": "setValues", "values": values})
+        self._channel.emit("setValues", {"values": values})
 
     def set_field_value(self, path: str, value: Any):
-        self._append({"type": "setFieldValue", "path": path, "value": value})
+        self._channel.emit("setFieldValue", {"path": path, "value": value})
 
     def insert_list_item(self, path: str, item: Any, index: Optional[int] = None):
-        msg: dict[str, Any] = {"type": "insertListItem", "path": path, "item": item}
+        msg: dict[str, Any] = {"path": path, "item": item}
         if index is not None:
             msg["index"] = index
-        self._append(msg)
+        self._channel.emit("insertListItem", msg)
 
     def remove_list_item(self, path: str, index: int):
-        self._append({"type": "removeListItem", "path": path, "index": index})
+        self._channel.emit("removeListItem", {"path": path, "index": index})
 
     def reorder_list_item(self, path: str, frm: int, to: int):
-        self._append({"type": "reorderListItem", "path": path, "from": frm, "to": to})
+        self._channel.emit(
+            "reorderListItem",
+            {"path": path, "from": frm, "to": to},
+        )
 
     def set_errors(self, errors: dict[str, Any]):
-        self._append({"type": "setErrors", "errors": errors})
+        self._channel.emit("setErrors", {"errors": errors})
 
     def set_field_error(self, path: str, error: Any):
-        self._append({"type": "setFieldError", "path": path, "error": error})
+        self._channel.emit("setFieldError", {"path": path, "error": error})
 
     def clear_errors(self, *paths: str):
-        self._append({"type": "clearErrors", "paths": list(paths) if paths else None})
+        if paths:
+            self._channel.emit("clearErrors", {"paths": list(paths)})
+        else:
+            self._channel.emit("clearErrors")
 
     def set_touched(self, touched: dict[str, bool]):
-        self._append({"type": "setTouched", "touched": touched})
+        self._channel.emit("setTouched", {"touched": touched})
 
     def validate(self):
-        self._append({"type": "validate"})
+        self._channel.emit("validate")
 
     def reset(self, initial_values: Optional[dict[str, Any]] = None):
-        msg: dict[str, Any] = {"type": "reset"}
         if initial_values is not None:
-            msg["initialValues"] = initial_values
-        self._append(msg)
+            self._channel.emit("reset", {"initialValues": initial_values})
+        else:
+            self._channel.emit("reset")
 
     # Internal: route server validation to the correct user-specified callable
     def _on_server_validation(

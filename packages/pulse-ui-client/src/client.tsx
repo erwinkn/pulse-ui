@@ -6,12 +6,16 @@ import { serialize, deserialize } from "./serialize/v3";
 import { io, Socket } from "socket.io-client";
 import type {
   ClientApiResultMessage,
+  ClientChannelMessage,
   ClientMessage,
   ServerApiCallMessage,
+  ServerChannelMessage,
   ServerErrorInfo,
   ServerMessage,
 } from "./messages";
 import type { NavigateFunction } from "react-router";
+import type { ChannelBridge } from "./channel";
+import { createChannelBridge, PulseChannelResetError } from "./channel";
 
 export interface MountedView {
   routeInfo: RouteInfo;
@@ -45,6 +49,7 @@ export class PulseSocketIOClient {
   private connectionListeners: Set<ConnectionStatusListener> = new Set();
   private serverErrors: Map<string, ServerErrorInfo> = new Map();
   private serverErrorListeners: Set<ServerErrorListener> = new Set();
+  private channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
 
   constructor(
     private url: string,
@@ -109,6 +114,7 @@ export class PulseSocketIOClient {
 
       socket.on("disconnect", () => {
         console.log("[SocketIOTransport] Disconnected");
+        this.handleTransportDisconnect();
         this.notifyConnectionListeners(false);
       });
 
@@ -156,6 +162,10 @@ export class PulseSocketIOClient {
     }
   }
 
+  public async sendChannelMessage(message: ClientChannelMessage): Promise<void> {
+    await this.sendMessage(message);
+  }
+
   public mountView(path: string, view: MountedView) {
     if (this.activeViews.has(path)) {
       throw new Error(`Path ${path} is already mounted`);
@@ -189,6 +199,10 @@ export class PulseSocketIOClient {
     this.activeViews.clear();
     this.serverErrors.clear();
     this.serverErrorListeners.clear();
+    for (const { bridge } of this.channels.values()) {
+      bridge.dispose(new PulseChannelResetError("Client disconnected"));
+    }
+    this.channels.clear();
   }
 
   private handleServerMessage(message: ServerMessage) {
@@ -262,6 +276,10 @@ export class PulseSocketIOClient {
         }
         break;
       }
+      case "channel_message": {
+        this.routeChannelMessage(message);
+        break;
+      }
       default: {
         console.error("Unexpected message:", message);
       }
@@ -324,6 +342,53 @@ export class PulseSocketIOClient {
       callback,
       args: args.map(extractEvent),
     });
+  }
+
+  public acquireChannel(id: string): ChannelBridge {
+    const entry = this.ensureChannelEntry(id);
+    entry.refCount += 1;
+    return entry.bridge;
+  }
+
+  public releaseChannel(id: string): void {
+    const entry = this.channels.get(id);
+    if (!entry) {
+      return;
+    }
+    entry.refCount = Math.max(0, entry.refCount - 1);
+    if (entry.refCount === 0) {
+      entry.bridge.dispose(new PulseChannelResetError("Channel released"));
+      this.channels.delete(id);
+    }
+  }
+
+  private ensureChannelEntry(id: string): {
+    bridge: ChannelBridge;
+    refCount: number;
+  } {
+    let entry = this.channels.get(id);
+    if (!entry) {
+      entry = {
+        bridge: createChannelBridge(this, id),
+        refCount: 0,
+      };
+      this.channels.set(id, entry);
+    }
+    return entry;
+  }
+
+  private routeChannelMessage(message: ServerChannelMessage): void {
+    const entry = this.ensureChannelEntry(message.channel);
+    const closed = entry.bridge.handleServerMessage(message);
+    if (closed && entry.refCount === 0) {
+      this.channels.delete(message.channel);
+    }
+  }
+
+  private handleTransportDisconnect(): void {
+    for (const entry of this.channels.values()) {
+      entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
+    }
   }
 
   // public getVDOM(path: string): VDOM | null {

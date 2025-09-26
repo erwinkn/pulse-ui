@@ -15,6 +15,7 @@ FormMode = Literal["controlled", "uncontrolled"]
 
 
 class FormInternalProps(ps.HTMLFormProps, total=False):
+    channelId: Required[str]  # pyright: ignore[reportGeneralTypeIssues]
     initialValues: dict[str, Any]
     initialErrors: dict[str, Any]
     initialDirty: dict[str, bool]
@@ -32,8 +33,6 @@ class FormInternalProps(ps.HTMLFormProps, total=False):
     onSubmit: ps.EventHandler1[ps.FormEvent[ps.HTMLFormElement]]
     onServerValidation: ps.EventHandler3[Any, dict[str, Any], str]
     onReset: ps.EventHandler1[ps.FormEvent[ps.HTMLFormElement]]
-    onGetFormValues: ps.EventHandler2[str, dict[str, Any]]
-    messages: list[dict[str, Any]]
 
 
 @ps.react_component("Form", "pulse-mantine")

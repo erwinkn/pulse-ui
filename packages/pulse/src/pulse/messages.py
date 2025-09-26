@@ -1,4 +1,4 @@
-from typing import Any, TypedDict, Literal
+from typing import Any, Literal, NotRequired, TypedDict
 
 from pulse.reconciler import VDOMOperation
 from pulse.vdom import VDOM
@@ -56,13 +56,22 @@ class ServerApiCallMessage(TypedDict):
     credentials: Literal["include", "omit"]
 
 
-ServerMessage = (
-    ServerInitMessage
-    | ServerUpdateMessage
-    | ServerErrorMessage
-    | ServerApiCallMessage
-    | ServerNavigateToMessage
-)
+class ServerChannelRequestMessage(TypedDict, total=False):
+    type: Literal["channel_message"]
+    channel: str
+    event: str
+    payload: Any
+    requestId: NotRequired[str]
+    error: NotRequired[Any]
+
+
+class ServerChannelResponseMessage(TypedDict, total=False):
+    type: Literal["channel_message"]
+    channel: str
+    event: None
+    responseTo: str
+    payload: Any
+    error: NotRequired[Any]
 
 
 # ====================
@@ -101,10 +110,41 @@ class ClientApiResultMessage(TypedDict):
     body: Any | None
 
 
+class ClientChannelRequestMessage(TypedDict, total=False):
+    type: Literal["channel_message"]
+    channel: str
+    event: str
+    payload: Any
+    requestId: NotRequired[str]
+    error: NotRequired[Any]
+
+
+class ClientChannelResponseMessage(TypedDict, total=False):
+    type: Literal["channel_message"]
+    channel: str
+    event: None
+    responseTo: str
+    payload: Any
+    error: NotRequired[Any]
+
+
+ServerMessage = (
+    ServerInitMessage
+    | ServerUpdateMessage
+    | ServerErrorMessage
+    | ServerApiCallMessage
+    | ServerNavigateToMessage
+    | ServerChannelRequestMessage
+    | ServerChannelResponseMessage
+)
+
+
 ClientMessage = (
     ClientCallbackMessage
     | ClientMountMessage
     | ClientNavigateMessage
     | ClientUnmountMessage
     | ClientApiResultMessage
+    | ClientChannelRequestMessage
+    | ClientChannelResponseMessage
 )

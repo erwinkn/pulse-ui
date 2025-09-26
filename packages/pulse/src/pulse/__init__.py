@@ -5,6 +5,7 @@ from .components import (
     Outlet,
 )
 from .context import PulseContext
+from .channel import channel, PulseChannel, PulseChannelClosed, PulseChannelTimeout
 from .cookies import Cookie, SetCookie
 from .decorators import computed, effect, query
 from .env import PulseMode, env, mode
@@ -189,6 +190,11 @@ __all__ = [
     "UploadFile",
     # Codegen
     "CodegenConfig",
+    # Channels
+    "channel",
+    "PulseChannel",
+    "PulseChannelClosed",
+    "PulseChannelTimeout",
     # Router components
     "Link",
     "Outlet",

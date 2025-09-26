@@ -14,6 +14,7 @@ import json
 import pulse as ps
 from pulse.serializer_v3 import deserialize
 from pulse.helpers import call_flexible
+from pulse.reactive_extensions import ReactiveDict
 
 from .internal import FormInternal, FormMode
 from .validators import (
@@ -50,6 +51,8 @@ class MantineFormProps(ps.HTMLFormProps, Generic[TForm], total=False):
     """
     onSubmit: ps.EventHandler1[TForm]  # pyright: ignore[reportIncompatibleVariableOverride]
     onReset: ps.EventHandler1[ps.FormEvent[ps.HTMLFormElement]]
+    syncMode: Literal["none", "onBlur", "onChange"]
+    syncDebounceMs: int
 
 
 class MantineForm(ps.State, Generic[TForm]):
@@ -66,9 +69,16 @@ class MantineForm(ps.State, Generic[TForm]):
         clearInputErrorOnChange: bool | None = None,
         debounceMs: int | None = None,
         touchTrigger: Literal["change", "focus"] | None = None,
+        syncMode: Literal["none", "onBlur", "onChange"] = "none",
+        syncDebounceMs: int | None = None,
     ):
         self._channel = ps.channel()
         self._form = ps.ManualForm(on_submit=self._handle_form_data)
+        self._sync_mode = syncMode
+        self._sync_debounce_ms = syncDebounceMs
+        self._synced_values = ReactiveDict(initialValues or {})
+        if self._sync_mode != "none":
+            self._channel.on("syncValues", self._on_sync_values)
 
         self._validation = validate
         self._mantine_props = {
@@ -82,6 +92,8 @@ class MantineForm(ps.State, Generic[TForm]):
             "clearInputErrorOnChange": clearInputErrorOnChange,
             "debounceMs": debounceMs,
             "touchTrigger": touchTrigger,
+            "syncMode": syncMode,
+            "syncDebounceMs": syncDebounceMs,
         }
         # Filter out None values
         self._mantine_props = {
@@ -181,6 +193,21 @@ class MantineForm(ps.State, Generic[TForm]):
             self._channel.emit("reset", {"initialValues": initial_values})
         else:
             self._channel.emit("reset")
+
+    @property
+    def values(self) -> ReactiveDict[str, Any]:
+        return self._synced_values
+
+    # --- internal sync handling -------------------------------------------------
+    def _on_sync_values(self, payload: dict[str, Any]) -> None:
+        values = payload.get("values")
+        if not isinstance(values, dict):
+            return
+        incoming_keys = set(values.keys())
+        for existing in list(self._synced_values.keys()):
+            if existing not in incoming_keys:
+                self._synced_values.delete(existing)
+        self._synced_values.update(values)
 
     # Internal: route server validation to the correct user-specified callable
     def _on_server_validation(

@@ -12,6 +12,7 @@ from typing import Any as _Any, Optional
 from typing import Callable, Generic, TypeVar, overload, cast
 import weakref
 
+from pulse import Untrack
 from pulse.reactive import Computed, Signal
 
 T1 = TypeVar("T1")
@@ -812,22 +813,34 @@ def reactive(value: _Any) -> _Any:
     return value
 
 
-def unwrap(value: _Any) -> _Any:
-    """Recursively unwrap reactive containers into plain Python values."""
-    if isinstance(value, (Signal, Computed)):
-        return unwrap(value.unwrap())
-    if isinstance(value, ReactiveDict):
-        return value.unwrap()
-    if isinstance(value, ReactiveList):
-        return value.unwrap()
-    if isinstance(value, ReactiveSet):
-        return value.unwrap()
-    if isinstance(value, Mapping):
-        return {k: unwrap(v) for k, v in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        if isinstance(value, tuple):
-            return tuple(unwrap(v) for v in value)
-        return [unwrap(v) for v in value]
-    if isinstance(value, set):
-        return {unwrap(v) for v in value}
-    return value
+def unwrap(value: _Any, untrack: bool = False) -> _Any:
+    """Recursively unwrap reactive containers into plain Python values.
+
+    Args:
+        value: The value to unwrap
+        untrack: Whether to not track dependencies during unwrapping. Defaults to False.
+    """
+
+    def _unwrap(v: _Any) -> _Any:
+        if isinstance(v, (Signal, Computed)):
+            return _unwrap(v.unwrap())
+        if isinstance(v, ReactiveDict):
+            return v.unwrap()
+        if isinstance(v, ReactiveList):
+            return v.unwrap()
+        if isinstance(v, ReactiveSet):
+            return v.unwrap()
+        if isinstance(v, Mapping):
+            return {k: _unwrap(val) for k, val in v.items()}
+        if isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)):
+            if isinstance(v, tuple):
+                return tuple(_unwrap(val) for val in v)
+            return [_unwrap(val) for val in v]
+        if isinstance(v, set):
+            return {_unwrap(val) for val in v}
+        return v
+
+    if untrack:
+        with Untrack():
+            return _unwrap(value)
+    return _unwrap(value)

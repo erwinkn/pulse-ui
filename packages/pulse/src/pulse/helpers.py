@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Sequence
 import inspect
 import json
 import os
@@ -16,6 +17,7 @@ from typing import (
     TypeVarTuple,
     TypedDict,
     TypeVar,
+    overload,
 )
 from urllib.parse import urlsplit
 
@@ -66,8 +68,6 @@ class Sentinel:
             return self.name
 
 
-def For(items: Iterable[T], fn: Callable[[T], Element]):
-    return [fn(item) for item in items]
 
 
 # --- Async scheduling helpers (work from loop or sync threads) ---

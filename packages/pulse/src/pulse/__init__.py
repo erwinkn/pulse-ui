@@ -1,9 +1,8 @@
 from .app import App, DeploymentMode
 from .codegen.codegen import CodegenConfig
-from .components import (
-    Link,
-    Outlet,
-)
+from .components.react_router import Link, Outlet
+from .components.for_ import For
+from .components.if_ import If
 from .context import PulseContext
 from .channel import channel, PulseChannel, PulseChannelClosed, PulseChannelTimeout
 from .cookies import Cookie, SetCookie
@@ -12,7 +11,6 @@ from .env import PulseMode, env, mode
 from .form import Form, FormData, FormValue, ManualForm, UploadFile
 from .helpers import (
     CSSProperties,
-    For,
     JsFunction,
     JsObject,
     later,
@@ -71,7 +69,13 @@ from .reactive import (
     Signal,
     Untrack,
 )
-from .reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, reactive, unwrap
+from .reactive_extensions import (
+    ReactiveDict,
+    ReactiveList,
+    ReactiveSet,
+    reactive,
+    unwrap,
+)
 from .render_session import RenderSession, RouteMount
 from .request import PulseRequest
 from .routing import Layout, Route
@@ -198,6 +202,9 @@ __all__ = [
     # Router components
     "Link",
     "Outlet",
+    # Built-in components
+    "For",
+    "If",
     # React component registry
     "ComponentRegistry",
     "COMPONENT_REGISTRY",
@@ -220,7 +227,6 @@ __all__ = [
     "EventHandler9",
     "EventHandler10",
     # Helpers
-    "For",
     "JsFunction",
     "CSSProperties",
     "JsObject",

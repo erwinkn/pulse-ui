@@ -17,6 +17,8 @@ import {
   type ValidatorSchema,
 } from "./validators";
 
+type SyncMode = "none" | "onBlur" | "onChange";
+
 export interface MantineFormProps<TValues = any>
   extends Omit<
     ComponentPropsWithoutRef<"form">,
@@ -39,6 +41,8 @@ export interface MantineFormProps<TValues = any>
   cascadeUpdates?: boolean;
   /** Default debounce for server validation when validateInputOnChange is enabled */
   debounceMs?: number;
+  syncMode?: SyncMode;
+  syncDebounceMs?: number;
   /** Callback invoked when form reset event fires */
   action: string;
   onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
@@ -63,6 +67,8 @@ export function Form<
   clearInputErrorOnChange,
   onServerValidation,
   debounceMs: serverValidationDebounceMs = 250,
+  syncMode = "none",
+  syncDebounceMs,
   onSubmit: userOnSubmit,
   onReset: userOnReset,
   cascadeUpdates,
@@ -72,6 +78,8 @@ export function Form<
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
   );
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const channel = usePulseChannel(channelId);
   const computedValidate = useMemo(() => {
     if (validate && isValidatorSchema(validate)) {
       return schemaToRules<TValues>(validate, {
@@ -89,6 +97,55 @@ export function Form<
     validateInputOnChange,
     serverValidationDebounceMs,
   ]);
+  const emitSync = useMemo(() => {
+    if (syncMode === "none") {
+      return null;
+    }
+    const debounceMs = typeof syncDebounceMs === "number" && syncDebounceMs > 0 ? syncDebounceMs : null;
+    const schedule = (payload: { reason: "change" | "blur"; path?: string; values?: TValues }) => {
+      const send = () => {
+        const sourceValues = payload.values ?? formRef.current?.getValues();
+        if (!sourceValues) return;
+        channel.emit("syncValues", {
+          reason: payload.reason,
+          path: payload.path,
+          values: sourceValues,
+        });
+      };
+      if (debounceMs) {
+        if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = setTimeout(send, debounceMs);
+      } else {
+        send();
+      }
+    };
+    return schedule;
+  }, [channel, syncMode, syncDebounceMs]);
+
+  const enhanceGetInputProps = useMemo<UseFormInput<TValues>["enhanceGetInputProps"] | undefined>(() => {
+    if (syncMode !== "onBlur" || !emitSync) {
+      return undefined;
+    }
+    return ({ inputProps, field }) => {
+      const originalBlur = inputProps.onBlur;
+      return {
+        onBlur: (event: any) => {
+          originalBlur?.(event);
+          emitSync({ reason: "blur", path: String(field) });
+        },
+      };
+    };
+  }, [emitSync, syncMode]);
+
+  const onValuesChange = useMemo<UseFormInput<TValues>["onValuesChange"] | undefined>(() => {
+    if (syncMode !== "onChange" || !emitSync) {
+      return undefined;
+    }
+    return (values: TValues) => {
+      emitSync({ reason: "change", values });
+    };
+  }, [emitSync, syncMode]);
+
   const form = useForm<TValues>({
     mode,
     validate: computedValidate,
@@ -101,16 +158,20 @@ export function Form<
     clearInputErrorOnChange,
     onSubmitPreventDefault: "always",
     cascadeUpdates,
+    enhanceGetInputProps,
+    onValuesChange,
   });
   formRef.current = form;
-
-  const channel = usePulseChannel(channelId);
 
   // Cleanup outstanding timers on unmount
   useEffect(() => {
     return () => {
       timersRef.current.forEach((t) => clearTimeout(t));
       timersRef.current.clear();
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -176,7 +237,7 @@ export function Form<
           form.resetDirty();
           form.setValues(payload.initialValues);
         } else {
-          form.reset()
+          form.reset();
         }
       }),
       channel.on("getFormValues", () => form.getValues()),

@@ -27,6 +27,8 @@ class FormInternalProps(ps.HTMLFormProps, total=False):
     validateInputOnChange: Union[bool, list[str]]
     clearInputErrorOnChange: bool
     debounceMs: int
+    syncMode: Literal["none", "onBlur", "onChange"]
+    syncDebounceMs: int
     action: Required[str]  # pyright: ignore[reportGeneralTypeIssues]
 
     # Server validation

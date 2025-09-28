@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
 from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop
+from pulse.messages import ClientChannelRequestMessage, ClientChannelResponseMessage
 from pulse.routing import normalize_path
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -227,12 +228,13 @@ class ChannelsManager:
         self._channels_by_route.pop(key, None)
 
     # ------------------------------------------------------------------
-    def handle_client_response(self, *, message: dict[str, Any]) -> None:
+    def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
         response_to = message.get("responseTo")
         if not response_to:
             return
-        if message.get("error") is not None:
-            self._resolve_pending_error(response_to, message["error"])
+        
+        if error := message.get("error") is not None:
+            self._resolve_pending_error(response_to, error)
         else:
             self._resolve_pending_success(response_to, message.get("payload"))
 
@@ -241,7 +243,7 @@ class ChannelsManager:
         *,
         render: "RenderSession",
         session: "UserSession",
-        message: dict[str, Any],
+        message: ClientChannelRequestMessage,
     ) -> None:
         channel_id = str(message.get("channel"))
         channel = self._channels.get(channel_id)
@@ -382,7 +384,7 @@ class ChannelsManager:
         self,
         *,
         channel: PulseChannel,
-        event: str,
+        event: str | None,
         payload: Any,
         request_id: str | None,
         response_to: str | None,

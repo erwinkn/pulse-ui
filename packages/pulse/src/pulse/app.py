@@ -37,7 +37,14 @@ from pulse.helpers import (
     lock_path_for_web_root,
     remove_web_lock,
 )
-from pulse.messages import ClientChannelRequestMessage, ClientMessage, ServerMessage
+from pulse.messages import (
+    ClientChannelMessage,
+    ClientChannelRequestMessage,
+    ClientChannelResponseMessage,
+    ClientMessage,
+    ClientPulseMessage,
+    ServerMessage,
+)
 from pulse.middleware import (
     Deny,
     MiddlewareStack,
@@ -536,75 +543,85 @@ class App:
             # Deserialize the message using v2
             msg: ClientMessage = deserialize(data)
             try:
-
-                def _handler():
-                    if msg["type"] == "mount":
-                        render.mount(msg["path"], msg["routeInfo"])
-                    elif msg["type"] == "navigate":
-                        render.navigate(msg["path"], msg["routeInfo"])
-                    elif msg["type"] == "callback":
-                        render.execute_callback(
-                            msg["path"], msg["callback"], msg["args"]
-                        )
-                    elif msg["type"] == "unmount":
-                        render.unmount(msg["path"])
-                        self.channels.remove_route(rid, msg["path"])
-                    elif msg["type"] == "api_result":
-                        render.handle_api_result(dict(msg))
-                    elif msg["type"] == "channel_message":
-                        if msg.get("responseTo"):
-                            self.channels.handle_client_response(message=msg)
-                        else:
-                            res = self.middleware.channel(
-                                channel_id=msg.get("channel", ""),
-                                event=msg.get("event", ""),
-                                payload=msg.get("payload"),
-                                request_id=msg.get("requestId"),
-                                session=session.data,
-                                next=lambda: Ok(
-                                    self.channels.handle_client_event(
-                                        render=render, session=session, message=msg
-                                    )
-                                ),
-                            )
-                            if isinstance(res, Deny):
-                                if req_id := msg.get("requestId"):
-                                    self.channels.send_error(
-                                        str(msg.get("channel", "")), req_id, "Denied"
-                                    )
-                                return res
-                            return res
-                    else:
-                        logger.warning(f"Unknown message type received: {msg}")
-                    return Ok()
-
-                with PulseContext.update(session=session, render=render):
-                    try:
-                        # Run middleware within the session's reactive context
-                        res = self.middleware.message(
-                            data=msg,
-                            session=session.data,
-                            next=_handler,
-                        )
-                        if isinstance(res, Deny):
-                            # Report as server error for this path
-                            path = cast(str, msg.get("path", "api_response"))
-                            render.report_error(
-                                path,
-                                "server",
-                                Exception("Request denied by server"),
-                                {"kind": "deny"},
-                            )
-                            return
-                    except Exception:
-                        logger.exception("Error in message middleware")
-
+                if msg["type"] == "channel_message":
+                    self._handle_channel_message(render, session, msg)
+                else:
+                    self._handle_pulse_message(render, session, msg)
             except Exception as e:
-                # Best effort: report error for this path if available
-                path = cast(str, data.get("path", "") if isinstance(data, dict) else "")
+                path = cast(str, msg.get("path", "")) if isinstance(msg, dict) else ""
                 render.report_error(path, "server", e)
 
         self.status = AppStatus.initialized
+
+    def _handle_pulse_message(
+        self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
+    ) -> None:
+        def _next() -> Ok[None]:
+            if msg["type"] == "mount":
+                render.mount(msg["path"], msg["routeInfo"])
+            elif msg["type"] == "navigate":
+                render.navigate(msg["path"], msg["routeInfo"])
+            elif msg["type"] == "callback":
+                render.execute_callback(msg["path"], msg["callback"], msg["args"])
+            elif msg["type"] == "unmount":
+                render.unmount(msg["path"])
+                self.channels.remove_route(render.id, msg["path"])
+            elif msg["type"] == "api_result":
+                render.handle_api_result(dict(msg))
+            else:
+                logger.warning("Unknown message type received: %s", msg)
+            return Ok()
+
+        with PulseContext.update(session=session, render=render):
+            try:
+                res = self.middleware.message(
+                    data=msg,
+                    session=session.data,
+                    next=_next,
+                )
+            except Exception:
+                logger.exception("Error in message middleware")
+                return
+
+            if isinstance(res, Deny):
+                path = cast(str, msg.get("path", "api_response"))
+                render.report_error(
+                    path,
+                    "server",
+                    Exception("Request denied by server"),
+                    {"kind": "deny"},
+                )
+
+    def _handle_channel_message(
+        self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
+    ) -> None:
+        if msg.get("responseTo"):
+            msg = cast(ClientChannelResponseMessage, msg)
+            self.channels.handle_client_response(msg)
+        else:
+            channel_id = str(msg.get("channel", ""))
+            msg = cast(ClientChannelRequestMessage, msg)
+
+            def _next() -> Ok[Any]:
+                return Ok(
+                    self.channels.handle_client_event(
+                        render=render, session=session, message=msg
+                    )
+                )
+
+            with PulseContext.update(session=session, render=render):
+                res = self.middleware.channel(
+                    channel_id=channel_id,
+                    event=msg.get("event", ""),
+                    payload=msg.get("payload"),
+                    request_id=msg.get("requestId"),
+                    session=session.data,
+                    next=_next,
+                )
+
+            if isinstance(res, Deny):
+                if req_id := msg.get("requestId"):
+                    self.channels.send_error(channel_id, req_id, "Denied")
 
     def get_route(self, path: str):
         return self.routes.find(path)

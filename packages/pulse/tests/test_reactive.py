@@ -1,4 +1,5 @@
 import asyncio
+import copy
 from typing import Any, cast, ClassVar
 from dataclasses import dataclass, field, asdict, astuple, replace, InitVar
 import pytest
@@ -1816,3 +1817,221 @@ def test_reactive_dict_setdefault_absent_subscribes_and_updates_on_write():
     ctx["k"] = 10
     flush_effects()
     assert e.runs == runs
+
+
+def test_signal_copy_isolated_graph():
+    s = Signal({"count": 1})
+    tracker = Computed(lambda: s()["count"])
+    assert tracker() == 1
+    assert tracker in s.obs
+
+    copied = copy.copy(s)
+
+    assert copied is not s
+    assert copied.value == s.value
+    assert copied.value is s.value
+    assert len(copied.obs) == 0
+    assert copied.last_change == -1
+
+    s.write({"count": 2})
+    assert s() == {"count": 2}
+    assert copied.read()["count"] == 1
+
+
+def test_signal_deepcopy_clones_value_without_dependents():
+    s = Signal({"count": 1})
+    Computed(lambda: s()["count"])()
+    deep_copied = copy.deepcopy(s)
+
+    assert deep_copied is not s
+    assert deep_copied.value == s.value
+    assert deep_copied.value is not s.value
+    assert len(deep_copied.obs) == 0
+    assert deep_copied.last_change == -1
+
+    s.write({"count": 5})
+    assert deep_copied.read()["count"] == 1
+
+
+def test_computed_copy_has_fresh_dependency_graph():
+    source = Signal(1)
+    comp = Computed(lambda: source() + 1)
+    assert comp() == 2
+    assert source in comp.deps
+
+    copied = copy.copy(comp)
+    assert copied is not comp
+    assert copied.deps == {}
+    assert copied.obs == []
+
+    assert copied() == 2
+    assert source in copied.deps
+    assert copied.deps is not comp.deps
+
+    source.write(5)
+    assert comp() == 6
+    assert copied() == 6
+
+
+def test_computed_deepcopy_is_independent():
+    source = Signal(10)
+    comp = Computed(lambda: source() * 2)
+    assert comp() == 20
+
+    deep_copied = copy.deepcopy(comp)
+    assert deep_copied is not comp
+    assert deep_copied.deps == {}
+    assert deep_copied.obs == []
+    assert deep_copied() == 20
+
+    source.write(15)
+    assert comp() == 30
+    assert deep_copied() == 30
+
+
+def test_effect_copy_and_deepcopy_create_new_effects():
+    signal = Signal(0)
+
+    def runner(label: str):
+        def _run():
+            signal()
+            return None
+
+        _run.__name__ = f"runner_{label}"
+        return _run
+
+    original = Effect(runner("original"))
+    copied = copy.copy(original)
+    deep_copied = copy.deepcopy(original)
+
+    flush_effects()
+
+    assert original.runs == 1
+    assert copied.runs == 1
+    assert deep_copied.runs == 1
+    assert original.deps is not copied.deps
+    assert original.deps is not deep_copied.deps
+
+    signal.write(1)
+    flush_effects()
+    assert original.runs == 2
+    assert copied.runs == 2
+    assert deep_copied.runs == 2
+
+    original.dispose()
+    copied.dispose()
+    deep_copied.dispose()
+
+
+def test_effect_copy_preserves_lazy_flag():
+    signal = Signal(0)
+    calls: list[str] = []
+
+    def run(label: str):
+        def _run():
+            calls.append(label)
+            signal()
+            return None
+
+        _run.__name__ = f"lazy_{label}"
+        return _run
+
+    lazy = Effect(run("orig"), lazy=True)
+    lazy_copy = copy.copy(lazy)
+    lazy_deep = copy.deepcopy(lazy)
+
+    flush_effects()
+    assert lazy.runs == 0
+    assert lazy_copy.runs == 0
+    assert lazy_deep.runs == 0
+
+    lazy.schedule()
+    lazy_copy.schedule()
+    lazy_deep.schedule()
+    flush_effects()
+
+    assert lazy.runs == 1
+    assert lazy_copy.runs == 1
+    assert lazy_deep.runs == 1
+    assert calls == ["orig", "orig", "orig"]
+
+    lazy.dispose()
+    lazy_copy.dispose()
+    lazy_deep.dispose()
+
+
+def test_reactive_dict_copy_uses_new_signals():
+    ctx = ReactiveDict({"a": 1})
+    copied = copy.copy(ctx)
+
+    assert copied is not ctx
+    assert copied._signals != ctx._signals
+    assert copied._signals["a"] is not ctx._signals["a"]
+    assert copied._structure is not ctx._structure
+
+    ctx["a"] = 2
+    assert copied["a"] == 1
+    copied["a"] = 3
+    assert ctx["a"] == 2
+
+
+def test_reactive_dict_deepcopy_clones_nested_values():
+    ctx = ReactiveDict({"a": {"x": 1}})
+    deep_copied = copy.deepcopy(ctx)
+
+    assert deep_copied is not ctx
+    assert deep_copied._signals["a"] is not ctx._signals["a"]
+
+    original_nested = ctx["a"]
+    copied_nested = deep_copied["a"]
+    assert isinstance(original_nested, ReactiveDict)
+    assert isinstance(copied_nested, ReactiveDict)
+    assert copied_nested is not original_nested
+    assert copied_nested.unwrap() == {"x": 1}
+
+    original_nested["x"] = 9
+    assert copied_nested.unwrap() == {"x": 1}
+
+
+def test_reactive_list_copy_and_deepcopy_use_new_signals():
+    items = ReactiveList([1, {"nested": 2}])
+    copied = copy.copy(items)
+    deep_copied = copy.deepcopy(items)
+
+    assert copied is not items
+    assert deep_copied is not items
+    assert copied._signals[0] is not items._signals[0]
+    assert deep_copied._signals[0] is not items._signals[0]
+
+    items[0] = 5
+    assert copied[0] == 1
+    assert deep_copied[0] == 1
+
+    nested_original = items[1]
+    nested_copy = copied[1]
+    nested_deep = deep_copied[1]
+    assert isinstance(nested_copy, dict)
+    assert isinstance(nested_deep, dict)
+    nested_original["nested"] = 7
+    assert nested_copy["nested"] == 2
+    assert nested_deep["nested"] == 2
+
+
+def test_reactive_set_copy_and_deepcopy_use_new_signals():
+    values = ReactiveSet({1, 2})
+    copied = copy.copy(values)
+    deep_copied = copy.deepcopy(values)
+
+    assert copied is not values
+    assert deep_copied is not values
+    assert copied._signals is not values._signals
+    assert deep_copied._signals is not values._signals
+
+    values.add(3)
+    assert 3 not in copied
+    assert 3 not in deep_copied
+
+    copied.add(4)
+    deep_copied.add(5)
+    assert 4 not in values
+    assert 5 not in values

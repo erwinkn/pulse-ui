@@ -3,6 +3,9 @@
 // Core React bindings
 export { PulseProvider, usePulseClient, PulseView } from "./pulse";
 export type { PulseConfig, PulseProviderProps, PulsePrerender } from "./pulse";
+export { usePulseChannel } from "./usePulseChannel";
+export { PulseChannelResetError } from "./channel";
+export type { ChannelBridge } from "./channel";
 
 // Client implementation
 export { PulseSocketIOClient } from "./client";
@@ -29,6 +32,10 @@ export {
   RenderLazy,
 } from "./renderer";
 
+// Form helpers
+export { PulseForm, submitForm } from "./form";
+export type { PulseFormProps } from "./form";
+
 // Messages (types only)
 export type {
   ServerMessage,
@@ -38,12 +45,18 @@ export type {
   ServerErrorInfo,
   ServerApiCallMessage,
   ServerNavigateToMessage,
+  ServerChannelRequestMessage,
+  ServerChannelResponseMessage,
+  ServerChannelMessage,
   ClientMessage,
   ClientCallbackMessage,
   ClientMountMessage,
   ClientNavigateMessage,
   ClientUnmountMessage,
   ClientApiResultMessage,
+  ClientChannelRequestMessage,
+  ClientChannelResponseMessage,
+  ClientChannelMessage,
 } from "./messages";
 
 // Transports
@@ -61,4 +74,7 @@ export {
   decodeFromWire,
   cleanForSerialization,
 } from "./serialize/clean";
-export { stringify, parse } from "./serialize/v1";
+export {
+  serialize as serialize,
+  deserialize as deserialize,
+} from "./serialize/v3";

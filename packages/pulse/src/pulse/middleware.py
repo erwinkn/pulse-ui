@@ -76,6 +76,18 @@ class PulseMiddleware:
         """
         return next()
 
+    def channel(
+        self,
+        *,
+        channel_id: str,
+        event: str,
+        payload: Any,
+        request_id: str | None,
+        session: dict[str, Any],
+        next: Callable[[], Ok[None]],
+    ) -> Ok[None] | Deny:
+        return next()
+
 
 class MiddlewareStack(PulseMiddleware):
     """Composable stack of `PulseMiddleware` executed in order.
@@ -152,6 +164,35 @@ class MiddlewareStack(PulseMiddleware):
 
         return dispatch(0)
 
+    def channel(
+        self,
+        *,
+        channel_id: str,
+        event: str,
+        payload: Any,
+        request_id: str | None,
+        session: dict[str, Any],
+        next: Callable[[], Ok[None]],
+    ) -> Ok[None] | Deny:
+        def dispatch(index: int) -> Ok[None] | Deny:
+            if index >= len(self._middlewares):
+                return next()
+            mw = self._middlewares[index]
+
+            def _next() -> Ok[None]:
+                return dispatch(index + 1)  # type: ignore[return-value]
+
+            return mw.channel(
+                channel_id=channel_id,
+                event=event,
+                payload=payload,
+                request_id=request_id,
+                session=session,
+                next=_next,
+            )
+
+        return dispatch(0)
+
 
 def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
     """Helper to build a middleware stack in code.
@@ -215,6 +256,19 @@ class PulseCoreMiddleware(PulseMiddleware):
         self,
         *,
         data: ClientMessage,
+        session: dict[str, Any],
+        next: Callable[[], Ok[None]],
+    ) -> Ok[None] | Deny:
+        res = next()
+        return self._normalize_message_response(res)
+
+    def channel(
+        self,
+        *,
+        channel_id: str,
+        event: str,
+        payload: Any,
+        request_id: str | None,
         session: dict[str, Any],
         next: Callable[[], Ok[None]],
     ) -> Ok[None] | Deny:

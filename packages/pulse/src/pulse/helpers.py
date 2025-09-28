@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import Sequence
+import inspect
 import json
 import os
 import platform
@@ -7,15 +9,16 @@ import time
 from pathlib import Path
 from typing import (
     Any,
+    Awaitable,
     Callable,
     Coroutine,
     Iterable,
     ParamSpec,
     Protocol,
+    TypeVarTuple,
     TypedDict,
     TypeVar,
-    TypeVarTuple,
-    Unpack,
+    overload,
 )
 from urllib.parse import urlsplit
 
@@ -24,20 +27,14 @@ from fastapi import Request
 
 from pulse.vdom import Element
 
-Args = TypeVarTuple("Args")
-
 T = TypeVar("T")
 P = ParamSpec("P")
-EventHandler = (
-    Callable[[], None]
-    | Callable[[], Coroutine[Any, Any, None]]
-    | Callable[[Unpack[Args]], None]
-    | Callable[[Unpack[Args]], Coroutine[Any, Any, None]]
-)
+
+
 JsFunction = Callable[P, T]
 
 # In case we refine it later
-CssStyle = dict[str, Any]
+CSSProperties = dict[str, Any]
 
 
 # Will be replaced by a JS transpiler type
@@ -70,10 +67,6 @@ class Sentinel:
             return f"{self.name}({self.value})"
         else:
             return self.name
-
-
-def For(items: Iterable[T], fn: Callable[[T], Element]):
-    return [fn(item) for item in items]
 
 
 # --- Async scheduling helpers (work from loop or sync threads) ---
@@ -465,3 +458,46 @@ def remove_web_lock(lock_path: Path) -> None:
     except Exception:
         # Best-effort cleanup
         pass
+
+
+@overload
+def call_flexible(
+    handler: Callable[..., Awaitable[T]], *payload_args: Any
+) -> Awaitable[T]: ...
+@overload
+def call_flexible(handler: Callable[..., T], *payload_args: Any) -> T: ...
+def call_flexible(handler: Callable[..., Any], *payload_args: Any) -> Any:
+    """
+    Call handler with a trimmed list of positional args based on its signature; await if needed.
+
+    - If the handler accepts *args, pass all payload_args.
+    - Otherwise, pass up to N positional args where N is the number of positional params.
+    - If inspection fails, pass payload_args as-is.
+    - Any exceptions raised by the handler are swallowed (best-effort callback semantics).
+    """
+    try:
+        sig = inspect.signature(handler)
+        params = list(sig.parameters.values())
+        has_var_pos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
+        if has_var_pos:
+            args_to_pass = payload_args
+        else:
+            nb_positional = 0
+            for p in params:
+                if p.kind in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                ):
+                    nb_positional += 1
+            args_to_pass = payload_args[:nb_positional]
+    except Exception:
+        # If inspection fails, default to passing the payload as-is
+        args_to_pass = payload_args
+
+    return handler(*args_to_pass)
+
+
+async def maybe_await(value: T | Awaitable[T]) -> T:
+    if inspect.isawaitable(value):
+        return await value
+    return value

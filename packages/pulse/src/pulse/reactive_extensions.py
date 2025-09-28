@@ -1,7 +1,8 @@
 from __future__ import (
     annotations,
 )  # required to use dataclasses._DataclassT in this file
-from collections.abc import Iterable, Iterator, Mapping
+import copy
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import MISSING as _DC_MISSING
 from dataclasses import dataclass as _dc_dataclass
 from dataclasses import fields as _dc_fields
@@ -12,7 +13,7 @@ from typing import Any as _Any, Optional
 from typing import Callable, Generic, TypeVar, overload, cast
 import weakref
 
-from pulse.reactive import Signal
+from pulse.reactive import Computed, Signal, Untrack
 
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
@@ -234,7 +235,21 @@ class ReactiveDict(dict[T1, T2]):
 
     def copy(self):  # type: ignore[override]
         # Shallow copy preserving current values
-        return ReactiveDict({k: dict.__getitem__(self, k) for k in super().__iter__()})
+        return type(self)({k: dict.__getitem__(self, k) for k in dict.__iter__(self)})
+
+    def __copy__(self):
+        return self.copy()
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        result = type(self)()
+        memo[id(self)] = result
+        for key in dict.__iter__(self):
+            key_copy = copy.deepcopy(key, memo)
+            value_copy = copy.deepcopy(dict.__getitem__(self, key), memo)
+            result.set(key_copy, value_copy)
+        return result
 
     @classmethod
     def fromkeys(cls, iterable: Iterable[T1], value: _Any = None):  # type: ignore[override]
@@ -256,6 +271,14 @@ class ReactiveDict(dict[T1, T2]):
     def __ror__(self, other):  # type: ignore[override]
         result = ReactiveDict(other)
         result.update(self)
+        return result
+
+    def unwrap(self) -> dict[T1, _Any]:
+        """Return a plain dict while subscribing to contained signals."""
+        _ = self._structure.read()
+        result: dict[T1, _Any] = {}
+        for key in dict.__iter__(self):
+            result[key] = unwrap(self[key])
         return result
 
 
@@ -359,6 +382,11 @@ class ReactiveList(list[T1]):
         self._bump_structure()
         return val
 
+    def unwrap(self) -> list[_Any]:
+        """Return a plain list while subscribing to element signals."""
+        _ = self.version
+        return [unwrap(self[i]) for i in range(len(self._signals))]
+
     def remove(self, value: _Any) -> None:  # type: ignore[override]
         idx = super().index(value)
         self.pop(idx)
@@ -401,6 +429,21 @@ class ReactiveList(list[T1]):
     def __iter__(self):
         _ = self._structure.read()
         return super().__iter__()
+
+    def __copy__(self):
+        result = type(self)()
+        for value in super().__iter__():
+            result.append(copy.copy(value))
+        return result
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        result = type(self)()
+        memo[id(self)] = result
+        for value in super().__iter__():
+            result.append(copy.deepcopy(value, memo))
+        return result
 
 
 class ReactiveSet(set[T1]):
@@ -479,6 +522,26 @@ class ReactiveSet(set[T1]):
                     to_remove.add(v)
         for v in to_remove:
             self.discard(v)
+
+    def unwrap(self) -> set[_Any]:
+        """Return a plain set while subscribing to membership signals."""
+        result: set[_Any] = set()
+        for value in set.__iter__(self):
+            _ = self.membership(value)
+            result.add(unwrap(value))
+        return result
+
+    def __copy__(self):
+        return type(self)(list(set.__iter__(self)))
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        result = type(self)()
+        memo[id(self)] = result
+        for value in set.__iter__(self):
+            result.add(copy.deepcopy(value, memo))
+        return result
 
 
 # ---- Reactive dataclass support ----
@@ -789,3 +852,36 @@ def reactive(value: _Any) -> _Any:
     if isinstance(value, type) and is_dataclass(value):
         return _get_reactive_dataclass_class(value)
     return value
+
+
+def unwrap(value: _Any, untrack: bool = False) -> _Any:
+    """Recursively unwrap reactive containers into plain Python values.
+
+    Args:
+        value: The value to unwrap
+        untrack: Whether to not track dependencies during unwrapping. Defaults to False.
+    """
+
+    def _unwrap(v: _Any) -> _Any:
+        if isinstance(v, (Signal, Computed)):
+            return _unwrap(v.unwrap())
+        if isinstance(v, ReactiveDict):
+            return v.unwrap()
+        if isinstance(v, ReactiveList):
+            return v.unwrap()
+        if isinstance(v, ReactiveSet):
+            return v.unwrap()
+        if isinstance(v, Mapping):
+            return {k: _unwrap(val) for k, val in v.items()}
+        if isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)):
+            if isinstance(v, tuple):
+                return tuple(_unwrap(val) for val in v)
+            return [_unwrap(val) for val in v]
+        if isinstance(v, set):
+            return {_unwrap(val) for val in v}
+        return v
+
+    if untrack:
+        with Untrack():
+            return _unwrap(value)
+    return _unwrap(value)

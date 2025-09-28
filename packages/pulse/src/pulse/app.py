@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from pulse.serializer_v2 import Serialized, serialize, deserialize, default_extensions
+from pulse.serializer_v3 import Serialized, serialize, deserialize
 from pulse.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.env import PulseMode, env
@@ -37,7 +37,7 @@ from pulse.helpers import (
     lock_path_for_web_root,
     remove_web_lock,
 )
-from pulse.messages import ClientMessage, ServerMessage
+from pulse.messages import ClientChannelRequestMessage, ClientMessage, ServerMessage
 from pulse.middleware import (
     Deny,
     MiddlewareStack,
@@ -52,13 +52,15 @@ from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
-from pulse.hooks import RedirectInterrupt, NotFoundInterrupt
+from pulse.hooks import RedirectInterrupt, NotFoundInterrupt, hooks
 from pulse.user_session import (
     CookieSessionStore,
     SessionStore,
     UserSession,
     new_sid,
 )
+from pulse.form import FormRegistry
+from pulse.channel import ChannelsManager
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +155,11 @@ class App:
         self.session_store = session_store or CookieSessionStore()
         self.cookie = cookie or session_cookie(mode=self.deployment)
         self.cors = cors
+
+        # Form submissions registry
+        self.forms = FormRegistry(self)
+        # Channel manager for Python <-> client messaging
+        self.channels = ChannelsManager(self)
 
         self._user_to_render: dict[str, list[str]] = defaultdict(list)
         self._render_to_user: dict[str, str] = {}
@@ -277,6 +284,8 @@ class App:
         self.server_address = server_address
         PULSE_CONTEXT.set(PulseContext(app=self))
 
+        hooks.lock()
+
         # Compute cookie domain from deployment/server address if not explicitly provided
         if self.cookie.domain is None:
             self.cookie.domain = compute_cookie_domain(
@@ -356,23 +365,23 @@ class App:
 
             client_addr: str | None = get_client_address(request)
             # Optional reuse of existing RenderSession
-            reuse_id = payload.get("renderId")
-            render_id: str
-            if isinstance(reuse_id, str):
+            render_id = payload.get("renderId")
+            if isinstance(render_id, str):
                 # Validate render exists and belongs to this user session
-                existing = self.render_sessions.get(reuse_id)
+                existing = self.render_sessions.get(render_id)
                 if existing is None:
                     raise HTTPException(status_code=400, detail="Unknown renderId")
-                owner = self._render_to_user.get(reuse_id)
+                owner = self._render_to_user.get(render_id)
                 if owner != session.sid:
                     raise HTTPException(status_code=403, detail="Forbidden renderId")
                 render = existing
-                render_id = reuse_id
+                cleanup = False
             else:
                 render_id = new_sid()
                 render = self.create_render(
                     render_id, session, client_address=client_addr
                 )
+                cleanup = True
 
             result = {"renderId": render_id, "views": {}}
 
@@ -424,13 +433,8 @@ class App:
                         resp = JSONResponse({"notFound": True})
                         session.handle_response(resp)
                         return resp
-                # If we completed all paths without redirect/not-found, register for adoption
-                self.render_sessions[render_id] = render
-                self._render_to_user[render_id] = session.sid
-                if render_id not in self._user_to_render[session.sid]:
-                    self._user_to_render[session.sid].append(render_id)
 
-                # schedule TTL cleanup if never adopted
+                # schedule TTL cleanup if never connected
                 def _gc_if_unadopted(rid: str):
                     r = self.render_sessions.get(rid)
                     if r is None:
@@ -439,11 +443,20 @@ class App:
                         return
                     self.close_render(rid)
 
-                later(float(ttl), _gc_if_unadopted, render_id)
+                if cleanup:
+                    later(float(ttl), _gc_if_unadopted, render_id)
 
             resp = JSONResponse(result)
             session.handle_response(resp)
             return resp
+
+        @self.fastapi.post("/pulse/forms/{form_id}")
+        async def handle_form_submit(form_id: str, request: Request) -> Response:
+            session = PulseContext.get().session
+            if session is None:
+                raise RuntimeError("Internal error: couldn't resolve user session")
+
+            return await self.forms.handle_submit(form_id, request, session)
 
         # Call on_setup hooks after FastAPI routes/middleware are in place
         for plugin in self.plugins:
@@ -465,20 +478,18 @@ class App:
                 raise ConnectionRefusedError()
 
             # Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
-            existing = self.render_sessions.get(rid)
-            if existing is None:
+            render = self.render_sessions.get(rid)
+            if render is None:
                 render = self.create_render(
                     rid, session, client_address=get_client_address_socketio(environ)
                 )
             else:
-                render = existing
-                # Ensure mapping is set to this user (keep previous owner if any)
-                self._render_to_user[rid] = session.sid
-                if rid not in self._user_to_render[session.sid]:
-                    self._user_to_render[session.sid].append(rid)
+                owner = self._render_to_user.get(render.id)
+                if owner != session.sid:
+                    raise ConnectionRefusedError()
 
             def on_message(message: ServerMessage):
-                payload = serialize(message, default_extensions())
+                payload = serialize(message)
                 # `serialize` returns a tuple, which socket.io will mistake for multiple arguments
                 payload = list(payload)
                 create_task(self.sio.emit("message", list(payload), to=sid))
@@ -523,7 +534,7 @@ class App:
             # Use renderId mapping to user session
             session = self.user_sessions[self._render_to_user[rid]]
             # Deserialize the message using v2
-            msg: ClientMessage = deserialize(data, default_extensions())
+            msg: ClientMessage = deserialize(data)
             try:
 
                 def _handler():
@@ -537,8 +548,32 @@ class App:
                         )
                     elif msg["type"] == "unmount":
                         render.unmount(msg["path"])
+                        self.channels.remove_route(rid, msg["path"])
                     elif msg["type"] == "api_result":
                         render.handle_api_result(dict(msg))
+                    elif msg["type"] == "channel_message":
+                        if msg.get("responseTo"):
+                            self.channels.handle_client_response(message=msg)
+                        else:
+                            res = self.middleware.channel(
+                                channel_id=msg.get("channel", ""),
+                                event=msg.get("event", ""),
+                                payload=msg.get("payload"),
+                                request_id=msg.get("requestId"),
+                                session=session.data,
+                                next=lambda: Ok(
+                                    self.channels.handle_client_event(
+                                        render=render, session=session, message=msg
+                                    )
+                                ),
+                            )
+                            if isinstance(res, Deny):
+                                if req_id := msg.get("requestId"):
+                                    self.channels.send_error(
+                                        str(msg.get("channel", "")), req_id, "Denied"
+                                    )
+                                return res
+                            return res
                     else:
                         logger.warning(f"Unknown message type received: {msg}")
                     return Ok()
@@ -591,6 +626,7 @@ class App:
 
             # No cookie: create fresh session
             sid = new_sid()
+
             session = UserSession(sid, {}, app=self)
             session._refresh_session_cookie(self)
             self.user_sessions[sid] = session
@@ -650,14 +686,18 @@ class App:
         self._user_to_render[session.sid].append(rid)
         return render
 
-    def close_render(self, wsid: str):
-        render = self.render_sessions.pop(wsid, None)
+    def close_render(self, rid: str):
+        render = self.render_sessions.get(rid)
+        if render is not None:
+            self.channels.remove_render(rid)
+        render = self.render_sessions.pop(rid, None)
         if not render:
             return
-        sid = self._render_to_user.pop(wsid)
+        sid = self._render_to_user.pop(rid)
         session = self.user_sessions[sid]
+        self.forms.remove_render(rid)
         render.close()
-        self._user_to_render[session.sid].remove(wsid)
+        self._user_to_render[session.sid].remove(rid)
 
         if len(self._user_to_render[session.sid]) == 0:
             later(60, self.close_session_if_inactive, sid)

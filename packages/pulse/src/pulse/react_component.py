@@ -23,17 +23,33 @@ from typing import (
 from types import UnionType
 import typing
 from functools import lru_cache
-import re
+from pulse.codegen.imports import Imported, ImportStatement
 from pulse.helpers import Sentinel
+from pulse.reactive_extensions import unwrap
 from pulse.vdom import Child, Node, Element
 
 
 T = TypeVar("T")
 P = ParamSpec("P")
-# Internal facing
-# MISSING: Any = Sentinel("MISSING")
-# User facing
 DEFAULT: Any = Sentinel("DEFAULT")
+
+
+# ----------------------------------------------------------------------------
+# Detection for stringified annotations (from __future__ import annotations)
+# ----------------------------------------------------------------------------
+
+
+def _function_has_string_annotations(fn: Callable[..., Any]) -> bool:
+    """Return True if any function annotations are strings.
+
+    This happens when the defining module uses `from __future__ import annotations`.
+    In that case, resolving types at runtime is fragile; we skip PropSpec building.
+    """
+    try:
+        anns = getattr(fn, "__annotations__", {}) or {}
+        return any(isinstance(v, str) for v in anns.values())
+    except Exception:
+        return False
 
 
 class Prop(Generic[T]):
@@ -91,7 +107,7 @@ def prop(
         default_factory=default_factory,
         serialize=serialize,
         map_to=map_to,
-    ) # type: ignore
+    )  # type: ignore
 
 
 class PropSpec:
@@ -152,7 +168,7 @@ class PropSpec:
             allow_unspecified=self.allow_unspecified or other.allow_unspecified,
         )
 
-    def apply(self, comp_key: str, props: dict[str, Any]):
+    def apply(self, comp_tag: str, props: dict[str, Any]):
         result: dict[str, Any] = {}
         known_keys = self.keys()
 
@@ -160,7 +176,7 @@ class PropSpec:
         unknown_keys = props.keys() - known_keys
         if not self.allow_unspecified and unknown_keys:
             bad = ", ".join(repr(k) for k in sorted(unknown_keys))
-            raise ValueError(f"Unexpected prop(s) for component '{comp_key}': {bad}")
+            raise ValueError(f"Unexpected prop(s) for component '{comp_tag}': {bad}")
         if self.allow_unspecified:
             for k in unknown_keys:
                 v = props[k]
@@ -246,7 +262,7 @@ class PropSpec:
                         f"Multiple props map to '{js_key}': {', '.join(py_keys)}"
                     )
             raise ValueError(
-                f"Invalid props for component '{comp_key}': {'; '.join(errors)}"
+                f"Invalid props for component '{comp_tag}': {'; '.join(errors)}"
             )
 
         return result or None
@@ -260,7 +276,7 @@ def default_fn_signature_without_children(
 ) -> Element: ...
 
 
-class ReactComponent(Generic[P]):
+class ReactComponent(Generic[P], Imported):
     """
     A React component that can be used within the UI tree.
     Returns a function that creates mount point UITreeNode instances.
@@ -270,6 +286,7 @@ class ReactComponent(Generic[P]):
         import_path: Module path to import the component from
         alias: Optional alias for the component in the registry
         is_default: True if this is a default export, else named export
+        import_name: If specified, import this name from import_path and access tag as a property of it
 
     Returns:
         A function that creates Node instances with mount point tags
@@ -277,23 +294,21 @@ class ReactComponent(Generic[P]):
 
     def __init__(
         self,
-        tag: str | Literal["default"],
-        import_path: str,
-        alias: str | None = None,
-        is_default=False,
+        name: str,
+        src: str,
         *,
+        is_default=False,
+        prop: Optional[str] = None,
         lazy: bool = False,
-        props: Optional[PropSpec] = None,
+        prop_spec: Optional[PropSpec] = None,
         fn_signature: Callable[P, Element] = default_signature,
+        extra_imports: Optional[tuple[ImportStatement, ...] | list[ImportStatement]] = None,
     ):
-        self.tag = tag
-        self.key = alias or tag
-        self.import_path = import_path
-        self.alias = alias
-        self.is_default = is_default
+        super().__init__(name, src, is_default=is_default, prop=prop)
+
         # Build props_spec from fn_signature if provided and props not provided
-        if props:
-            self.props_spec = props
+        if prop_spec:
+            self.props_spec = prop_spec
         elif fn_signature not in (
             default_signature,
             default_fn_signature_without_children,
@@ -301,25 +316,21 @@ class ReactComponent(Generic[P]):
             self.props_spec = parse_fn_signature(fn_signature)
         else:
             self.props_spec = PropSpec({}, {}, allow_unspecified=True)
-        if is_default and alias:
-            raise ValueError(
-                "A default import cannot have an alias (it uses the tag as the name)."
-            )
 
         self.fn_signature = fn_signature
         self.lazy = lazy
+        # Additional import statements to include in route where this component is used
+        self.extra_imports: list[ImportStatement] = list(extra_imports or [])
         COMPONENT_REGISTRY.get().add(self)
 
     def __repr__(self) -> str:
-        alias_part = f", alias='{self.alias}'" if self.alias else ""
         default_part = ", default=True" if self.is_default else ""
+        prop_part = f", prop='{self.prop}'" if self.prop else ""
+        lazy_part = ", lazy=True" if self.lazy else ""
         props_part = (
-            f", props={self.props_spec!r}" if self.props_spec is not None else ""
+            f", props_spec={self.props_spec!r}" if self.props_spec is not None else ""
         )
-        client_only_part = (
-            ", client_only=True" if getattr(self, "client_only", False) else ""
-        )
-        return f"ReactComponent(tag='{self.tag}', import='{self.import_path}'{alias_part}{default_part}{client_only_part}{props_part})"
+        return f"ReactComponent(name='{self.name}', src='{self.src}'{prop_part}{default_part}{lazy_part}{props_part})"
 
     def __call__(self, *children: P.args, **props: P.kwargs) -> Node:
         key = props.pop("key", None)
@@ -327,10 +338,12 @@ class ReactComponent(Generic[P]):
             raise ValueError("key must be a string or None")
         # Apply optional props specification: fill defaults, enforce required,
         # run serializers, and remap keys.
-        real_props = self.props_spec.apply(self.key, props)
+        real_props = self.props_spec.apply(self.name, props)
+        if real_props:
+            real_props = {key: unwrap(value) for key, value in real_props.items()}
 
         return Node(
-            tag=f"$${self.key}",
+            tag=f"$${self.expr}",
             key=key,
             props=real_props,
             children=cast(tuple[Child], children),
@@ -348,6 +361,10 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
     - A prop may not be specified both explicitly and in the Unpack
     - Annotated[..., Prop(...)] on parameters is disallowed (use default Prop instead)
     """
+
+    # If annotations are stringified, skip building and allow unspecified props.
+    if _function_has_string_annotations(fn):
+        return PropSpec({}, {}, allow_unspecified=True)
 
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())
@@ -470,44 +487,20 @@ class ComponentRegistry:
     """A registry for React components that can be used as a context manager."""
 
     def __init__(self):
-        self._components: dict[str, ReactComponent] = {}
+        self.components: list[ReactComponent] = []
         self._token = None
 
     def add(self, component: ReactComponent):
         """Adds a component to the registry."""
-        desired_key = component.key
-        if desired_key in self._components:
-            base_key = desired_key
-            match = re.match(r"^(.*?)(\d+)$", base_key)
-            if match:
-                base_name, suffix = match.group(1), int(match.group(2)) + 1
-            else:
-                base_name, suffix = base_key, 2
-            new_key = f"{base_name}{suffix}"
-            while new_key in self._components:
-                suffix += 1
-                new_key = f"{base_name}{suffix}"
-            component.key = new_key
-        self._components[component.key] = component
+        self.components.append(component)
 
     def clear(self):
-        self._components.clear()
+        self.components.clear()
 
     def remove(self, key: str):
         """Removes a component from the registry by its key."""
-        if key in self._components:
-            del self._components[key]
-
-    def get(self, key: str):
-        """Gets a component from the registry by its key."""
-        return self._components.get(key)
-
-    def items(self):
-        """Returns a copy of the components as a dictionary."""
-        return self._components.copy()
-
-    def list(self):
-        return list(self._components.values())
+        if key in self.components:
+            del self.components[key]
 
     def __enter__(self) -> "ComponentRegistry":
         self._token = COMPONENT_REGISTRY.set(self)
@@ -526,7 +519,7 @@ COMPONENT_REGISTRY: ContextVar[ComponentRegistry] = ContextVar(
 
 def registered_react_components():
     """Get all registered React components."""
-    return COMPONENT_REGISTRY.get().list()
+    return COMPONENT_REGISTRY.get().components
 
 
 # ----------------------------------------------------------------------------
@@ -668,6 +661,9 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
     component definitions.
     """
     annotations: dict[str, Any] = getattr(typed_dict_cls, "__annotations__", {})
+    # If TypedDict annotations are stringified, skip building and allow unspecified.
+    if annotations and any(isinstance(v, str) for v in annotations.values()):
+        return PropSpec({}, {}, allow_unspecified=True)
     required_keys: set[str] | None = getattr(typed_dict_cls, "__required_keys__", None)
     is_total: bool = bool(getattr(typed_dict_cls, "__total__", True))
 
@@ -739,6 +735,9 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
     annot = var_kw.annotation
     if annot in (None, inspect._empty):
         return PropSpec({}, {}, allow_unspecified=True)
+    # Stringified annotations like "Unpack[Props]" are too fragile to parse.
+    if isinstance(annot, str):
+        return PropSpec({}, {}, allow_unspecified=True)
 
     # From here, we should have **props: Unpack[MyProps] where MyProps is a TypedDict
     origin = get_origin(annot)
@@ -769,26 +768,35 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
 
 
 def react_component(
-    tag: str | Literal["default"],
-    import_: str,
+    name: str | Literal["default"],
+    src: str,
     *,
-    alias: str | None = None,
+    prop: str | None = None,
     is_default: bool = False,
     lazy: bool = False,
+    extra_imports: Optional[list[ImportStatement]] = None,
 ) -> Callable[[Callable[P, None] | Callable[P, Element]], ReactComponent[P]]:
     """
     Decorator to define a React component wrapper. The decorated function is
     passed to `ReactComponent`, which parses and validates its signature.
+
+    Args:
+        tag: Name of the component (or "default" for default export)
+        import_: Module path to import the component from
+        property: Optional property name to access the component from the imported object
+        is_default: True if this is a default export, else named export
+        lazy: Whether to lazy load the component
     """
 
     def decorator(fn: Callable[P, None] | Callable[P, Element]) -> ReactComponent[P]:
         return ReactComponent(
-            tag=tag,
-            import_path=import_,
-            alias=alias,
+            name=name,
+            src=src,
+            prop=prop,
             is_default=is_default,
             lazy=lazy,
             fn_signature=fn,
+            extra_imports=extra_imports,
         )
 
     return decorator

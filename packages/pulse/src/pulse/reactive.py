@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import inspect
 from contextvars import ContextVar
 from typing import (
@@ -35,6 +36,21 @@ class Signal(Generic[T]):
 
     def __call__(self) -> T:
         return self.read()
+
+    def unwrap(self) -> T:
+        """Return the current value while registering subscriptions."""
+        return self.read()
+
+    def __copy__(self):
+        return self.__class__(self.value, name=self.name)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        new_value = copy.deepcopy(self.value, memo)
+        new_signal = self.__class__(new_value, name=self.name)
+        memo[id(self)] = new_signal
+        return new_signal
 
     def _add_obs(self, obs: "Computed | Effect"):
         prev = len(self.obs)
@@ -99,6 +115,22 @@ class Computed(Generic[T]):
 
     def __call__(self) -> T:
         return self.read()
+
+    def unwrap(self) -> T:
+        """Return the current value while registering subscriptions."""
+        return self.read()
+
+    def __copy__(self):
+        return self.__class__(self.fn, name=self.name)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        fn_copy = copy.deepcopy(self.fn, memo)
+        name_copy = copy.deepcopy(self.name, memo)
+        new_computed = self.__class__(fn_copy, name=name_copy)
+        memo[id(self)] = new_computed
+        return new_computed
 
     def _push_change(self):
         if self.dirty:
@@ -221,6 +253,7 @@ class Effect:
         self.batch: Optional[Batch] = None
         self._explicit_deps: Optional[list[Signal | Computed]] = deps
         self.immediate = immediate
+        self._lazy = lazy
 
         if immediate and lazy:
             raise ValueError("An effect cannot be boht immediate and lazy")
@@ -326,6 +359,37 @@ class Effect:
         for dep in remove_deps:
             dep._remove_obs(self)
 
+    def _copy_kwargs(self):
+        deps = None
+        if self._explicit_deps is not None:
+            deps = list(self._explicit_deps)
+        return {
+            "fn": self.fn,
+            "name": self.name,
+            "immediate": self.immediate,
+            "lazy": self._lazy,
+            "on_error": self.on_error,
+            "deps": deps,
+        }
+
+    def __copy__(self):
+        kwargs = self._copy_kwargs()
+        return type(self)(**kwargs)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        kwargs = self._copy_kwargs()
+        kwargs["fn"] = copy.deepcopy(self.fn, memo)
+        kwargs["name"] = copy.deepcopy(self.name, memo)
+        kwargs["on_error"] = copy.deepcopy(self.on_error, memo)
+        deps = kwargs.get("deps")
+        if deps is not None:
+            kwargs["deps"] = list(deps)
+        new_effect = type(self)(**kwargs)
+        memo[id(self)] = new_effect
+        return new_effect
+
     def run(self):
         with Untrack():
             try:
@@ -372,6 +436,11 @@ class AsyncEffect(Effect):
     def _task_name(self) -> str:
         base = self.name or "effect"
         return f"effect:{base}"
+
+    def _copy_kwargs(self):
+        kwargs = super()._copy_kwargs()
+        kwargs.pop("immediate", None)
+        return kwargs
 
     def _execute(self) -> None:
         execution_epoch = epoch()

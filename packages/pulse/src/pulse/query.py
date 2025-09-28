@@ -1,12 +1,25 @@
 import asyncio
-import inspect
 
-from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Generic,
+    Optional,
+    TypeVar,
+    cast,
+)
 
 from pulse.reactive import Computed, AsyncEffect, Signal
+from pulse.helpers import call_flexible, maybe_await
+
+if TYPE_CHECKING:
+    from pulse.state import State
 
 
 T = TypeVar("T")
+TState = TypeVar("TState", bound="State")
 
 
 class QueryResult(Generic[T]):
@@ -126,7 +139,11 @@ class StateQuery(Generic[T]):
         self._result.set_initial_data(data)
 
 
-class QueryProperty(Generic[T]):
+OnSuccessFn = Callable[[TState], Any] | Callable[[TState, T], Any]
+OnErrorFn = Callable[[TState], Any] | Callable[[TState, Exception], Any]
+
+
+class QueryProperty(Generic[T, TState]):
     """
     Descriptor for state-bound queries.
 
@@ -143,18 +160,18 @@ class QueryProperty(Generic[T]):
     def __init__(
         self,
         name: str,
-        fetch_fn: "Callable[[Any], Awaitable[T]]",
+        fetch_fn: "Callable[[TState], Awaitable[T]]",
         keep_alive: bool = False,
         keep_previous_data: bool = True,
         initial: Optional[T] = None,
     ):
         self.name = name
         self.fetch_fn = fetch_fn
-        self.key_fn: Optional[Callable[[Any], tuple]] = None
-        self.initial_data_fn: Optional[Callable[[Any], Optional[T]]] = None
+        self.key_fn: Optional[Callable[[TState], tuple]] = None
+        self.initial_data_fn: Optional[Callable[[TState], Optional[T]]] = None
         # Single handlers; error if set more than once
-        self.on_success_fn: Optional[Callable[[Any, T], Any]] = None
-        self.on_error_fn: Optional[Callable[[Any, Exception], Any]] = None
+        self.on_success_fn: Optional[OnSuccessFn] = None
+        self.on_error_fn: Optional[OnErrorFn] = None
         self.keep_alive = keep_alive
         self.keep_previous_data = keep_previous_data
         self.initial = initial
@@ -165,7 +182,7 @@ class QueryProperty(Generic[T]):
         self._priv_initial_applied = f"__query_initial_applied_{name}"
 
     # Decorator to attach a key function
-    def key(self, fn: Callable[[Any], tuple]):
+    def key(self, fn: Callable[[TState], tuple]):
         if self.key_fn is not None:
             raise RuntimeError(
                 f"Duplicate key() decorator for query '{self.name}'. Only one is allowed."
@@ -174,7 +191,7 @@ class QueryProperty(Generic[T]):
         return fn
 
     # Decorator to attach a function providing initial data
-    def initial_data(self, fn: Callable[[Any], Optional[T]]):
+    def initial_data(self, fn: Callable[[TState], Optional[T]]):
         if self.initial_data_fn is not None:
             raise RuntimeError(
                 f"Duplicate initial_data() decorator for query '{self.name}'. Only one is allowed."
@@ -183,7 +200,7 @@ class QueryProperty(Generic[T]):
         return fn
 
     # Decorator to attach an on-success handler (sync or async)
-    def on_success(self, fn: Callable[[Any, T], Any]):
+    def on_success(self, fn: OnSuccessFn):
         if self.on_success_fn is not None:
             raise RuntimeError(
                 f"Duplicate on_success() decorator for query '{self.name}'. Only one is allowed."
@@ -192,7 +209,7 @@ class QueryProperty(Generic[T]):
         return fn
 
     # Decorator to attach an on-error handler (sync or async)
-    def on_error(self, fn: Callable[[Any, Exception], Any]):
+    def on_error(self, fn: OnErrorFn):
         if self.on_error_fn is not None:
             raise RuntimeError(
                 f"Duplicate on_error() decorator for query '{self.name}'. Only one is allowed."
@@ -262,6 +279,7 @@ class QueryProperty(Generic[T]):
 
             # Set loading immediately; optionally clear previous data
             result._set_loading(clear_data=not self.keep_previous_data)
+
             try:
                 data = await bound_fetch()
             except asyncio.CancelledError:
@@ -271,24 +289,12 @@ class QueryProperty(Generic[T]):
                 result._set_error(e)
                 # Invoke error handler if provided
                 if bound_on_error:
-                    try:
-                        maybe = bound_on_error(e)
-                        if inspect.isawaitable(maybe):
-                            await maybe
-                    except Exception:
-                        # Swallow handler exceptions; effect error is already recorded
-                        pass
+                    await maybe_await(call_flexible(bound_on_error, e))
             else:
                 result._set_success(data)
                 # Invoke success handler if provided
                 if bound_on_success:
-                    try:
-                        maybe = bound_on_success(data)
-                        if inspect.isawaitable(maybe):
-                            await maybe
-                    except Exception:
-                        # Swallow handler exceptions to avoid breaking effect
-                        pass
+                    await maybe_await(call_flexible(bound_on_success, data))
             finally:
                 inflight_key = None
 
@@ -358,7 +364,7 @@ class StateQueryNonNull(StateQuery[T]):
         return super().has_loaded
 
 
-class QueryPropertyWithInitial(QueryProperty[T]):
+class QueryPropertyWithInitial(QueryProperty[T, TState]):
     def __get__(self, obj: Any, objtype: Any = None) -> StateQueryNonNull[T]:  # type: ignore[override]
         # Reuse base initialization but narrow the return type for type-checkers
         return cast(StateQueryNonNull[T], super().__get__(obj, objtype))

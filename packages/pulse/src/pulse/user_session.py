@@ -64,6 +64,7 @@ class UserSession:
         )
 
     def dispose(self):
+        print(f"Closing session {self.sid}")
         self._effect.dispose()
 
     def handle_response(self, res: Response):

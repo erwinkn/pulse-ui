@@ -96,5 +96,4 @@ app = ps.App(
         ps.Route("/", GlobalStateDemo),
         ps.Route("/:room", GlobalStateDemo),
     ],
-    codegen=CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )

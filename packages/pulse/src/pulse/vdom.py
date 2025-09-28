@@ -9,7 +9,7 @@ from __future__ import annotations
 import functools
 from types import NoneType
 import inspect
-from collections.abc import Iterable as _Iterable
+from collections.abc import Iterable
 from typing import (
     Any,
     NamedTuple,
@@ -33,7 +33,7 @@ from typing import (
 Primitive = Union[str, int, float, None]
 Element = Union["Node", "ComponentNode", Primitive]
 # A child can be an Element or any iterable yielding children (e.g., generators)
-Child = Union[Element, _Iterable[Element]]
+Child = Union[Element, Iterable[Element]]
 Children = Sequence[Child]
 
 P = ParamSpec("P")
@@ -206,7 +206,7 @@ def _short_children(
     while i < len(children) and len(out) < max_items:
         child = children[i]
         i += 1
-        if isinstance(child, _Iterable) and not isinstance(child, str):
+        if isinstance(child, Iterable) and not isinstance(child, str):
             child = list(child)
             n_items = min(len(child), max_items - len(out))
             out.extend(_pretty_repr(c) for c in child[:n_items])

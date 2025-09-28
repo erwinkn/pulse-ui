@@ -31,7 +31,7 @@ class CartesianChartProps(TypedDict, Generic[T], total=False):
     reverseStackOrder: bool
     role: str
     stackOffset: StackOffsetType
-    style: ps.CssStyle
+    style: ps.CSSProperties
     syncId: float | str
     syncMethod: SyncMethod
     tabIndex: float
@@ -63,7 +63,7 @@ class PolarChartProps(TypedDict, Generic[T]):
     role: str
     stackOffset: StackOffsetType
     startAngle: float
-    style: ps.CssStyle
+    style: ps.CSSProperties
     syncId: float | str
     syncMethod: SyncMethod
     tabIndex: float

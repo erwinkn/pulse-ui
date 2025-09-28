@@ -35,12 +35,12 @@ class UserApi(ps.State):
 
     # Success handler (sync)
     @user.on_success
-    def _on_user_success(self, data: dict):
+    def _on_user_success(self):
         self.success_calls += 1
 
     # Error handler (sync)
     @user.on_error
-    def _on_user_error(self, err: Exception):
+    def _on_user_error(self):
         self.error_calls += 1
 
     # Unkeyed query (auto-tracked) using current id

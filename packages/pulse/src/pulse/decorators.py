@@ -176,11 +176,13 @@ def query(
     *,
     keep_alive: bool = False,  # noqa: F821
     keep_previous_data: bool = True,
-) -> QueryProperty[T]: ...
+) -> QueryProperty[T, TState]: ...
 @overload
 def query(
     fn: None = None, *, keep_alive: bool = False, keep_previous_data: bool = True
-) -> Callable[[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T]]: ...  # pyright: ignore[reportInvalidTypeVarUse]
+) -> Callable[
+    [Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T, TState]
+]: ...
 
 
 # When an initial value is provided, the resulting property narrows data to non-None
@@ -191,7 +193,7 @@ def query(
     keep_alive: bool = False,
     keep_previous_data: bool = True,
     initial: T,
-) -> QueryPropertyWithInitial[T]: ...
+) -> QueryPropertyWithInitial[T, TState]: ...
 @overload
 def query(
     fn: None = None,
@@ -200,22 +202,22 @@ def query(
     keep_previous_data: bool = True,
     initial: T,
 ) -> Callable[
-    [Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T]  # pyright: ignore[reportInvalidTypeVarUse]
+    [Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T, TState]
 ]: ...
 
 
 def query(
-    fn: Optional[Callable] = None,
+    fn: Optional[Callable[[TState], Any]] = None,
     *,
     keep_alive: bool = False,
     keep_previous_data: bool = True,
     initial: Any = None,
 ) -> (
-    QueryProperty[T]
-    | QueryPropertyWithInitial[T]
+    QueryProperty[T, TState]
+    | QueryPropertyWithInitial[T, TState]
     | Callable[
-        [Callable[[TState], Coroutine[Any, Any, T]]],  # pyright: ignore[reportInvalidTypeVarUse]
-        QueryProperty[T] | QueryPropertyWithInitial[T],
+        [Callable[[TState], Coroutine[Any, Any, T]]],
+        QueryProperty[T, TState] | QueryPropertyWithInitial[T, TState],
     ]
 ):
     def decorator(func: Callable[[TState], Coroutine[Any, Any, T]], /):

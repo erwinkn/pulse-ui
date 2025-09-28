@@ -1,18 +1,21 @@
 import type { RouteInfo } from "./helpers";
-import type { ClientMountMessage } from "./messages";
 import type { VDOM, VDOMUpdate } from "./vdom";
 import { extractEvent } from "./serialize/events";
-import { serialize, deserialize, defaultExtensions } from "./serialize/v2";
+import { serialize, deserialize } from "./serialize/v3";
 
 import { io, Socket } from "socket.io-client";
 import type {
   ClientApiResultMessage,
+  ClientChannelMessage,
   ClientMessage,
   ServerApiCallMessage,
+  ServerChannelMessage,
   ServerErrorInfo,
   ServerMessage,
 } from "./messages";
 import type { NavigateFunction } from "react-router";
+import type { ChannelBridge } from "./channel";
+import { createChannelBridge, PulseChannelResetError } from "./channel";
 
 export interface MountedView {
   routeInfo: RouteInfo;
@@ -46,6 +49,7 @@ export class PulseSocketIOClient {
   private connectionListeners: Set<ConnectionStatusListener> = new Set();
   private serverErrors: Map<string, ServerErrorInfo> = new Map();
   private serverErrorListeners: Set<ServerErrorListener> = new Set();
+  private channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
 
   constructor(
     private url: string,
@@ -77,14 +81,11 @@ export class PulseSocketIOClient {
         for (const [path, route] of this.activeViews) {
           socket.emit(
             "message",
-            serialize(
-              {
-                type: "mount",
-                path: path,
-                routeInfo: route.routeInfo,
-              } as any,
-              defaultExtensions()
-            )
+            serialize({
+              type: "mount",
+              path: path,
+              routeInfo: route.routeInfo,
+            })
           );
         }
 
@@ -97,10 +98,7 @@ export class PulseSocketIOClient {
           if (payload.type === "navigate") {
             continue;
           }
-          socket.emit(
-            "message",
-            serialize(payload as any, defaultExtensions())
-          );
+          socket.emit("message", serialize(payload));
         }
         this.messageQueue = [];
 
@@ -116,12 +114,13 @@ export class PulseSocketIOClient {
 
       socket.on("disconnect", () => {
         console.log("[SocketIOTransport] Disconnected");
+        this.handleTransportDisconnect();
         this.notifyConnectionListeners(false);
       });
 
       // Wrap in an arrow function to avoid losing the `this` reference
       socket.on("message", (data) =>
-        this.handleServerMessage(deserialize(data, defaultExtensions()) as any)
+        this.handleServerMessage(deserialize(data, {coerceNullsToUndefined: true}))
       );
     });
   }
@@ -156,14 +155,15 @@ export class PulseSocketIOClient {
   private async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
       // console.log("[SocketIOTransport] Sending:", payload);
-      this.socket!.emit(
-        "message",
-        serialize(payload as any, defaultExtensions())
-      );
+      this.socket!.emit("message", serialize(payload as any));
     } else {
       // console.log("[SocketIOTransport] Queuing message:", payload);
       this.messageQueue.push(payload);
     }
+  }
+
+  public async sendChannelMessage(message: ClientChannelMessage): Promise<void> {
+    await this.sendMessage(message);
   }
 
   public mountView(path: string, view: MountedView) {
@@ -199,6 +199,10 @@ export class PulseSocketIOClient {
     this.activeViews.clear();
     this.serverErrors.clear();
     this.serverErrorListeners.clear();
+    for (const { bridge } of this.channels.values()) {
+      bridge.dispose(new PulseChannelResetError("Client disconnected"));
+    }
+    this.channels.clear();
   }
 
   private handleServerMessage(message: ServerMessage) {
@@ -272,6 +276,10 @@ export class PulseSocketIOClient {
         }
         break;
       }
+      case "channel_message": {
+        this.routeChannelMessage(message);
+        break;
+      }
       default: {
         console.error("Unexpected message:", message);
       }
@@ -334,6 +342,53 @@ export class PulseSocketIOClient {
       callback,
       args: args.map(extractEvent),
     });
+  }
+
+  public acquireChannel(id: string): ChannelBridge {
+    const entry = this.ensureChannelEntry(id);
+    entry.refCount += 1;
+    return entry.bridge;
+  }
+
+  public releaseChannel(id: string): void {
+    const entry = this.channels.get(id);
+    if (!entry) {
+      return;
+    }
+    entry.refCount = Math.max(0, entry.refCount - 1);
+    if (entry.refCount === 0) {
+      entry.bridge.dispose(new PulseChannelResetError("Channel released"));
+      this.channels.delete(id);
+    }
+  }
+
+  private ensureChannelEntry(id: string): {
+    bridge: ChannelBridge;
+    refCount: number;
+  } {
+    let entry = this.channels.get(id);
+    if (!entry) {
+      entry = {
+        bridge: createChannelBridge(this, id),
+        refCount: 0,
+      };
+      this.channels.set(id, entry);
+    }
+    return entry;
+  }
+
+  private routeChannelMessage(message: ServerChannelMessage): void {
+    const entry = this.ensureChannelEntry(message.channel);
+    const closed = entry.bridge.handleServerMessage(message);
+    if (closed && entry.refCount === 0) {
+      this.channels.delete(message.channel);
+    }
+  }
+
+  private handleTransportDisconnect(): void {
+    for (const entry of this.channels.values()) {
+      entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
+    }
   }
 
   // public getVDOM(path: string): VDOM | null {

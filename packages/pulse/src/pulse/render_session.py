@@ -16,7 +16,7 @@ from pulse.messages import (
 )
 from pulse.reactive import Effect, flush_effects
 from pulse.reconciler import RenderRoot
-from pulse.routing import Layout, Route, RouteContext, RouteTree
+from pulse.routing import Layout, Route, RouteContext, RouteTree, normalize_path
 from pulse.state import State
 from pulse.hooks import RedirectInterrupt, NotFoundInterrupt
 
@@ -30,7 +30,7 @@ class RouteMount:
     ) -> None:
         self.render = render
         self.root = RenderRoot(route.render.fn)
-        self.route = RouteContext(route_info)
+        self.route = RouteContext(route_info, route)
         self.effect: Optional[Effect] = None
         self._pulse_ctx: PulseContext | None = None
 
@@ -287,6 +287,7 @@ class RenderSession:
         self,
         path: str,
     ):
+        path = normalize_path(path)
         mount = self.route_mounts.get(path)
         if not mount:
             raise ValueError(f"No active route for '{path}'")

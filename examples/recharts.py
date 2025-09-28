@@ -86,5 +86,4 @@ def LineChartExample():
 
 app = ps.App(
     [ps.Route("/", LineChartExample)],
-    codegen=ps.CodegenConfig(Path(__file__).parent / "pulse-demo"),
 )

@@ -41,6 +41,30 @@ export interface ServerApiCallMessage {
   credentials: "include" | "omit";
 }
 
+export interface ServerChannelRequestMessage {
+  type: "channel_message";
+  channel: string;
+  event: string;
+  payload?: any;
+  requestId?: string;
+  responseTo?: never;
+  error?: any;
+}
+
+export interface ServerChannelResponseMessage {
+  type: "channel_message";
+  channel: string;
+  event?: undefined;
+  responseTo: string;
+  payload?: any;
+  error?: any;
+  requestId?: never;
+}
+
+export type ServerChannelMessage =
+  | ServerChannelRequestMessage
+  | ServerChannelResponseMessage;
+
 export interface ServerNavigateToMessage {
   type: "navigate_to";
   path: string;
@@ -52,7 +76,9 @@ export type ServerMessage =
   | ServerUpdateMessage
   | ServerErrorMessage
   | ServerApiCallMessage
-  | ServerNavigateToMessage;
+  | ServerNavigateToMessage
+  | ServerChannelRequestMessage
+  | ServerChannelResponseMessage;
 
 export interface ClientCallbackMessage {
   type: "callback";
@@ -85,9 +111,35 @@ export interface ClientApiResultMessage {
   body: any | null;
 }
 
+export interface ClientChannelRequestMessage {
+  type: "channel_message";
+  channel: string;
+  event: string;
+  payload?: any;
+  requestId?: string;
+  responseTo?: never;
+  error?: any;
+}
+
+export interface ClientChannelResponseMessage {
+  type: "channel_message";
+  channel: string;
+  event?: undefined;
+  responseTo: string;
+  payload?: any;
+  error?: any;
+  requestId?: never;
+}
+
+export type ClientChannelMessage =
+  | ClientChannelRequestMessage
+  | ClientChannelResponseMessage;
+
 export type ClientMessage =
   | ClientMountMessage
   | ClientCallbackMessage
   | ClientNavigateMessage
   | ClientUnmountMessage
-  | ClientApiResultMessage;
+  | ClientApiResultMessage
+  | ClientChannelRequestMessage
+  | ClientChannelResponseMessage;

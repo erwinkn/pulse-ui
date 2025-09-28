@@ -224,7 +224,7 @@ def test_reconcile_props_update_between_renders():
     # Second render using previous VDOM -> update_props
     second = r1.render_diff()
     assert second.ops == [
-        {"type": "update_props", "path": "", "data": {"className": "b"}}
+        {"type": "update_props", "path": "", "data": {"set": {"className": "b"}}}
     ]
 
 
@@ -535,7 +535,9 @@ def test_props_removal_emits_empty_update_props():
 
     toggle["on"] = False
     second = root.render_diff()
-    assert second.ops == [{"type": "update_props", "path": "", "data": {}}]
+    assert second.ops == [
+        {"type": "update_props", "path": "", "data": {"remove": ["className"]}}
+    ]
 
 
 def test_keyed_component_move_preserves_state_and_no_cleanup():

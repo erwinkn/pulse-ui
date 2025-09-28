@@ -42,7 +42,7 @@ class DynamicHouseholdForm(MantineForm):
                     _new_member("River"),
                 ],
             },
-            syncMode="onChange",
+            syncMode="change",
             # syncDebounceMs=120,
         )
 

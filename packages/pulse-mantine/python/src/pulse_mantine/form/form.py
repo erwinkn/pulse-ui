@@ -51,8 +51,7 @@ class MantineFormProps(ps.HTMLFormProps, Generic[TForm], total=False):
     """
     onSubmit: ps.EventHandler1[TForm]  # pyright: ignore[reportIncompatibleVariableOverride]
     onReset: ps.EventHandler1[ps.FormEvent[ps.HTMLFormElement]]
-    syncMode: Literal["none", "onBlur", "onChange"]
-    syncDebounceMs: int
+    syncMode: Literal["none", "blur", "change"]
 
 
 class MantineForm(ps.State, Generic[TForm]):
@@ -67,18 +66,18 @@ class MantineForm(ps.State, Generic[TForm]):
         validateInputOnBlur: Union[bool, list[str]] | None = None,
         validateInputOnChange: Union[bool, list[str]] | None = None,
         clearInputErrorOnChange: bool | None = None,
-        debounceMs: int | None = None,
         touchTrigger: Literal["change", "focus"] | None = None,
-        syncMode: Literal["none", "onBlur", "onChange"] = "none",
-        syncDebounceMs: int | None = None,
+        syncMode: Literal["none", "blur", "change"] = "none",
+        debounceMs: int | None = None,
     ):
         self._channel = ps.channel()
         self._form = ps.ManualForm(on_submit=self._handle_form_data)
         self._sync_mode = syncMode
-        self._sync_debounce_ms = syncDebounceMs
         self._synced_values = ReactiveDict(initialValues or {})
         if self._sync_mode != "none":
             self._channel.on("syncValues", self._on_sync_values)
+        # Listen for server-side validation requests from the client
+        self._channel.on("serverValidate", self._on_server_validate)
 
         self._validation = validate
         self._mantine_props = {
@@ -93,7 +92,6 @@ class MantineForm(ps.State, Generic[TForm]):
             "debounceMs": debounceMs,
             "touchTrigger": touchTrigger,
             "syncMode": syncMode,
-            "syncDebounceMs": syncDebounceMs,
         }
         # Filter out None values
         self._mantine_props = {
@@ -121,6 +119,11 @@ class MantineForm(ps.State, Generic[TForm]):
         files: dict[str, Any] = {k: v for k, v in data.items() if k != "__data__"}
         result = _merge_files_into_structure(base, files)
 
+        # Run server-side validation for ALL rules before forwarding to user's onSubmit.
+        # This mirrors Mantine behavior where onSubmit is called only if the form is valid.
+        if not self._validate_all_before_submit(result):
+            return
+
         # Forward to user onSubmit if provided
         if self._on_submit is not None:
             await call_flexible(self._on_submit, result)  # pyright: ignore[reportArgumentType]
@@ -141,7 +144,6 @@ class MantineForm(ps.State, Generic[TForm]):
             *children,
             key=key,
             channelId=self._channel.id,
-            onServerValidation=self._on_server_validation,
             **merged,
         )
 
@@ -150,21 +152,92 @@ class MantineForm(ps.State, Generic[TForm]):
         return await self._channel.request("getFormValues")
 
     def set_values(self, values: dict[str, Any]):
+        # Optimistically update server state if sync is enabled
+        if self._sync_mode != "none" and isinstance(values, dict):
+            incoming_keys = set(values.keys())
+            for existing in list(self._synced_values.keys()):
+                if existing not in incoming_keys:
+                    self._synced_values.delete(existing)
+            self._synced_values.update(values)
         self._channel.emit("setValues", {"values": values})
 
     def set_field_value(self, path: str, value: Any):
+        # Optimistically update server state if sync is enabled
+        if self._sync_mode != "none" and isinstance(path, str):
+            try:
+                segments = _tokenize_path(path)
+                _set_deep(self._synced_values, segments, value)
+            except Exception:
+                pass
         self._channel.emit("setFieldValue", {"path": path, "value": value})
 
     def insert_list_item(self, path: str, item: Any, index: Optional[int] = None):
         msg: dict[str, Any] = {"path": path, "item": item}
         if index is not None:
             msg["index"] = index
+        # Optimistically update server state if sync is enabled
+        if self._sync_mode != "none" and isinstance(path, str):
+            try:
+                segments = _tokenize_path(path)
+                parent, key = _get_parent_and_key(self._synced_values, segments)
+                if isinstance(key, int) and isinstance(parent, list):
+                    insert_at = index if index is not None else len(parent)
+                    if insert_at < 0:
+                        insert_at = 0
+                    if insert_at > len(parent):
+                        insert_at = len(parent)
+                    parent.insert(insert_at, item)
+                elif isinstance(key, str) and isinstance(parent, dict):
+                    # If the target is a list under a dict key
+                    lst = parent.get(key)
+                    if isinstance(lst, list):
+                        insert_at = index if index is not None else len(lst)
+                        if insert_at < 0:
+                            insert_at = 0
+                        if insert_at > len(lst):
+                            insert_at = len(lst)
+                        lst.insert(insert_at, item)
+            except Exception:
+                pass
         self._channel.emit("insertListItem", msg)
 
     def remove_list_item(self, path: str, index: int):
+        # Optimistically update server state if sync is enabled
+        if self._sync_mode != "none" and isinstance(path, str):
+            try:
+                segments = _tokenize_path(path)
+                parent, key = _get_parent_and_key(self._synced_values, segments)
+                lst = None
+                if isinstance(key, int) and isinstance(parent, list):
+                    lst = parent
+                elif isinstance(key, str) and isinstance(parent, dict):
+                    maybe = parent.get(key)
+                    if isinstance(maybe, list):
+                        lst = maybe
+                if isinstance(lst, list) and 0 <= index < len(lst):
+                    lst.pop(index)
+            except Exception:
+                pass
         self._channel.emit("removeListItem", {"path": path, "index": index})
 
     def reorder_list_item(self, path: str, frm: int, to: int):
+        # Optimistically update server state if sync is enabled
+        if self._sync_mode != "none" and isinstance(path, str):
+            try:
+                segments = _tokenize_path(path)
+                parent, key = _get_parent_and_key(self._synced_values, segments)
+                lst = None
+                if isinstance(key, int) and isinstance(parent, list):
+                    lst = parent
+                elif isinstance(key, str) and isinstance(parent, dict):
+                    maybe = parent.get(key)
+                    if isinstance(maybe, list):
+                        lst = maybe
+                if isinstance(lst, list) and 0 <= frm < len(lst) and 0 <= to < len(lst):
+                    item = lst.pop(frm)
+                    lst.insert(to, item)
+            except Exception:
+                pass
         self._channel.emit(
             "reorderListItem",
             {"path": path, "from": frm, "to": to},
@@ -209,52 +282,121 @@ class MantineForm(ps.State, Generic[TForm]):
                 self._synced_values.delete(existing)
         self._synced_values.update(values)
 
-    # Internal: route server validation to the correct user-specified callable
-    def _on_server_validation(
-        self, value: Any, values: dict[str, Any], path: str
-    ) -> None:
-        schema = self._validation
-        if not isinstance(schema, dict):
+    # Channel handler for server validation (single entrypoint)
+    def _on_server_validate(self, payload: dict[str, Any]) -> None:
+        try:
+            value = payload.get("value")
+            values = payload.get("values")
+            path = payload.get("path")
+            if not isinstance(values, dict) or not isinstance(path, str):
+                return
+
+            schema = self._validation
+            if not isinstance(schema, dict):
+                return
+
+            # Traverse schema by path segments, skipping numeric indices
+            node: Any = schema
+            for seg in str(path).split("."):
+                if isinstance(node, dict):
+                    # Skip numeric segments (list indices)
+                    if seg.isdigit():
+                        continue
+                    nxt = node.get(seg)
+                    if nxt is None:
+                        # Try root-level rule fallback
+                        nxt = node.get("formRootRule")
+                    node = nxt
+                else:
+                    break
+
+            # Node can be a spec, a list of specs, or nested dict
+            specs: list[Validator] = []
+            if isinstance(node, dict):
+                node = node.get("formRootRule")
+            if isinstance(node, list):
+                specs = [s for s in node if isinstance(s, Validator)]
+            if isinstance(node, Validator):
+                specs = [node]
+
+            # Invoke server validators, stop on first error
+            for spec in specs:
+                if isinstance(spec, ServerValidation):
+                    fn = spec.fn
+                    try:
+                        res = fn(value, values, path)
+                        if isinstance(res, str) and res:
+                            self.set_field_error(path, res)
+                            return
+                    except Exception:
+                        # Do not crash validation on server errors; surface generic error
+                        self.set_field_error(path, "Validation failed")
+                        return
+            self.clear_errors(path)
+        except Exception:
+            # best-effort; do not crash channel
             return
 
-        # Traverse schema by path segments, skipping numeric indices
-        node: Any = schema
-        for seg in str(path).split("."):
-            if isinstance(node, dict):
-                # Skip numeric segments (list indices)
-                if seg.isdigit():
+    # Validate all rules synchronously during submit (client and server equivalents)
+    def _validate_all_before_submit(self, values: dict[str, Any]) -> bool:
+        schema = self._validation
+        if not isinstance(schema, dict):
+            return True
+
+        errors: dict[str, Any] = {}
+
+        def join(p: str, k: str) -> str:
+            return f"{p}.{k}" if p else k
+
+        def get_value_at_path(source: Any, path: str) -> Any:
+            cur = source
+            for seg in str(path).split("."):
+                if seg == "":
                     continue
-                nxt = node.get(seg)
-                if nxt is None:
-                    # Try root-level rule fallback
-                    nxt = node.get("formRootRule")
-                node = nxt
-            else:
-                break
+                if isinstance(cur, list) and seg.isdigit():
+                    idx = int(seg)
+                    if idx < 0 or idx >= len(cur):
+                        return None
+                    cur = cur[idx]
+                elif isinstance(cur, dict):
+                    cur = cur.get(seg)
+                else:
+                    return None
+            return cur
 
-        # Node can be a spec, a list of specs, or nested dict
-        specs: list[Validator] = []
-        if isinstance(node, dict):
-            node = node.get("formRootRule")
-        if isinstance(node, list):
-            specs = [s for s in node if isinstance(s, Validator)]
-        if isinstance(node, Validator):
-            specs = [node]
-
-        # Invoke server validators, stop on first error
-        for spec in specs:
-            if isinstance(spec, ServerValidation):
-                fn = spec.fn
+        def apply_node(node: Any, path: str) -> None:
+            # If nested dict contains root-level rule, apply it to current path
+            if isinstance(node, dict):
+                root = node.get("formRootRule")
+                if root is not None:
+                    apply_node(root, path)
+                for k, v in node.items():
+                    if k == "formRootRule":
+                        continue
+                    apply_node(v, join(path, k))
+                return
+            # List of specs
+            if isinstance(node, list):
+                for spec in node:
+                    apply_node(spec, path)
+                return
+            # Single validator
+            if isinstance(node, Validator):
                 try:
-                    res = fn(value, values, path)
+                    value = get_value_at_path(values, path)
+                    res = node.check(value, values, path)
                     if isinstance(res, str) and res:
-                        self.set_field_error(path, res)
-                        return
+                        errors[path] = res
                 except Exception:
-                    # Do not crash validation on server errors; surface generic error
-                    self.set_field_error(path, "Validation failed")
-                    return
-        self.clear_errors(path)
+                    errors[path] = "Validation failed"
+                return
+
+        apply_node(schema, "")
+
+        if errors:
+            self.set_errors(errors)
+            return False
+        return True
 
 
 # Also ensure user data objects do not contain reserved keys
@@ -401,3 +543,31 @@ def _set_deep(root: Any, segments: list[str], value: Any) -> None:
                     return
                 cur[seg] = child
             cur = child
+
+
+def _walk_to_parent(root: Any, segments: list[str]) -> tuple[Any, str | int]:
+    cur = root
+    for idx, raw_seg in enumerate(segments):
+        is_last = idx == len(segments) - 1
+        is_index = raw_seg.isdigit()
+        seg: int | str = int(raw_seg) if is_index else raw_seg
+        if is_last:
+            return cur, seg
+        next_is_index = segments[idx + 1].isdigit()
+        child = _ensure_container(cur, seg, next_is_index)
+        if isinstance(seg, int):
+            if not isinstance(cur, list):
+                return cur, seg
+            while len(cur) <= seg:
+                cur.append(None)
+            cur[seg] = child
+        else:
+            if not isinstance(cur, dict):
+                return cur, seg
+            cur[seg] = child
+        cur = child
+    return cur, segments[-1] if segments else ""
+
+
+def _get_parent_and_key(root: Any, segments: list[str]) -> tuple[Any, str | int]:
+    return _walk_to_parent(root, segments)

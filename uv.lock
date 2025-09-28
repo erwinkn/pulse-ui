@@ -683,6 +683,7 @@ source = { editable = "packages/pulse" }
 dependencies = [
     { name = "fastapi" },
     { name = "mako" },
+    { name = "python-dateutil" },
     { name = "python-multipart" },
     { name = "python-socketio" },
     { name = "rich" },
@@ -703,6 +704,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "mako", specifier = ">=1.3.10" },
+    { name = "python-dateutil", specifier = ">=2.9.0.post0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "python-socketio", specifier = ">=5.13.0" },
     { name = "rich", specifier = ">=13.7.1" },

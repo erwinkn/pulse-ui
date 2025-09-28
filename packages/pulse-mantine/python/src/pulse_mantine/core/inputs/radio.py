@@ -6,6 +6,7 @@ import pulse as ps
 def Radio(key: Optional[str] = None, **props): ...
 
 
+# Only Radio component that needs to be registered as a form input
 @ps.react_component("RadioGroup", "pulse-mantine")
 def RadioGroup(*children: ps.Child, key: Optional[str] = None, **props): ...
 

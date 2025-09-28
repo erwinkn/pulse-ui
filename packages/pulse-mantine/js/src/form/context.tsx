@@ -1,27 +1,28 @@
-import React, { createContext, useContext } from "react";
+import { createContext, useContext, useMemo, type PropsWithChildren } from "react";
 import type { UseFormReturnType } from "@mantine/form";
 
-export type FormValidationMode = "submit" | "blur" | "change";
+export type FormEventHandler = () => {};
 
-export interface FormContextValue<TValues = any> {
-  form: UseFormReturnType<TValues>;
-  getInputProps: UseFormReturnType<TValues>["getInputProps"];
+export interface FormContext {
+  form: UseFormReturnType<any>;
+  serverOnChange: (path: string, debounce: boolean) => void;
+  serverOnBlur: (path: string) => void;
 }
+const FormContext = createContext<FormContext | null>(null);
 
-const FormContext = createContext<FormContextValue | null>(null);
-
-export function useFormContext<TValues = any>() {
-  const ctx = useContext(FormContext as React.Context<FormContextValue<TValues> | null>);
-  return ctx;
+export function useFormContext() {
+  return useContext(FormContext);
 }
 
 export function FormProvider<TValues = any>({
-  value,
+  form,
   children,
-}: {
-  value: FormContextValue<TValues>;
-  children: React.ReactNode;
-}) {
-  return <FormContext.Provider value={value as FormContextValue}>{children}</FormContext.Provider>;
+  serverOnBlur,
+  serverOnChange,
+}: PropsWithChildren<FormContext>) {
+  const ctx = useMemo(
+    () => ({ form, serverOnChange, serverOnBlur }),
+    [form, serverOnChange, serverOnBlur]
+  );
+  return <FormContext.Provider value={ctx}>{children}</FormContext.Provider>;
 }
-

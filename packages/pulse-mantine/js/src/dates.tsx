@@ -1,4 +1,3 @@
-import React, { type ComponentProps } from "react";
 import {
   Calendar,
   CalendarHeader,
@@ -32,123 +31,26 @@ import {
   YearPicker as MantineYearPicker,
   YearPickerInput as MantineYearPickerInput,
 } from "@mantine/dates";
-import { useFormContext } from "./form/context";
 
-type ChangeHandler = (...args: any[]) => void;
+import { createConnectedField } from "./form/connect";
 
-interface ConnectedFieldOptions {
-  coerceEmptyString?: boolean;
-}
+export const DateInput = createConnectedField(MantineDateInput);
+export const DatePicker = createConnectedField(MantineDatePicker);
+export const DatePickerInput = createConnectedField(MantineDatePickerInput);
 
-function createConnectedField<
-  P extends { name?: string; onChange?: ChangeHandler },
->(Component: React.ComponentType<P>, options?: ConnectedFieldOptions) {
-  const ConnectedField = (props: P) => {
-    const name = props.name;
-    const ctx = useFormContext();
-    if (name && ctx) {
-      const mantineProps = ctx.getInputProps(name);
-      const isControlled = mantineProps.hasOwnProperty("value");
-      if (
-        isControlled &&
-        options?.coerceEmptyString &&
-        mantineProps.value == null
-      ) {
-        mantineProps.value = "";
-      }
-      return <Component {...props} {...mantineProps} />;
-    }
-    return <Component {...props} />;
-  };
-  const display =
-    (Component as any).displayName || Component.name || "Component";
-  ConnectedField.displayName = `Connected${display}`;
-  return ConnectedField;
-}
-
-export type DateInputProps = ComponentProps<typeof MantineDateInput> & {
-  name?: string;
-};
-export const DateInput = createConnectedField<DateInputProps>(
-  MantineDateInput as any
-);
-
-export type DatePickerProps = ComponentProps<typeof MantineDatePicker> & {
-  name?: string;
-};
-export const DatePicker = createConnectedField<DatePickerProps>(
-  MantineDatePicker as any
-);
-
-export type DatePickerInputProps = ComponentProps<
-  typeof MantineDatePickerInput
-> & {
-  name?: string;
-};
-export const DatePickerInput = createConnectedField<DatePickerInputProps>(
-  MantineDatePickerInput as any
-);
-
-export type DateTimePickerProps = ComponentProps<
-  typeof MantineDateTimePicker
-> & {
-  name?: string;
-};
-export const DateTimePicker = createConnectedField<DateTimePickerProps>(
-  MantineDateTimePicker as any
-);
-
-export type TimeInputProps = ComponentProps<typeof MantineTimeInput> & {
-  name?: string;
-};
-export const TimeInput = createConnectedField<TimeInputProps>(
-  MantineTimeInput as any,
-  {
-    coerceEmptyString: true,
-  }
-);
-
-export type TimePickerProps = ComponentProps<typeof MantineTimePicker> & {
-  name?: string;
-};
-export const TimePicker = createConnectedField<TimePickerProps>(
-  MantineTimePicker as any,
-  {
-    coerceEmptyString: true,
-  }
-);
-
-export type MonthPickerInputProps = ComponentProps<
-  typeof MantineMonthPickerInput
-> & {
-  name?: string;
-};
-export const MonthPickerInput = createConnectedField<MonthPickerInputProps>(
-  MantineMonthPickerInput as any
-);
-
-export type MonthPickerProps = ComponentProps<typeof MantineMonthPicker> & {
-  name?: string;
-};
-export const MonthPicker = createConnectedField<MonthPickerProps>(
-  MantineMonthPicker as any
-);
-
-export type YearPickerInputProps = ComponentProps<
-  typeof MantineYearPickerInput
-> & {
-  name?: string;
-};
-export const YearPickerInput = createConnectedField<YearPickerInputProps>(
-  MantineYearPickerInput as any
-);
-
-export type YearPickerProps = ComponentProps<typeof MantineYearPicker> & {
-  name?: string;
-};
-export const YearPicker = createConnectedField<YearPickerProps>(
-  MantineYearPicker as any
-);
+export const DateTimePicker = createConnectedField(MantineDateTimePicker);
+export const TimeInput = createConnectedField(MantineTimeInput, {
+  coerceEmptyString: true,
+  debounceOnChange: true,
+});
+export const TimePicker = createConnectedField(MantineTimePicker, {
+  coerceEmptyString: true,
+  debounceOnChange: true,
+});
+export const MonthPickerInput = createConnectedField(MantineMonthPickerInput);
+export const MonthPicker = createConnectedField(MantineMonthPicker);
+export const YearPickerInput = createConnectedField(MantineYearPickerInput);
+export const YearPicker = createConnectedField(MantineYearPicker);
 
 export {
   Calendar,

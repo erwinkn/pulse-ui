@@ -7,6 +7,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Coroutine,
     Never,
     Optional,
     TYPE_CHECKING,
@@ -15,7 +16,7 @@ from typing import (
 )
 
 from fastapi import HTTPException, Request, Response
-from pulse.helpers import call_flexible
+from pulse.helpers import call_flexible, maybe_await
 from pulse.reactive import Signal
 from pulse.types.event_handler import EventHandler1
 from starlette.datastructures import FormData as StarletteFormData, UploadFile
@@ -51,7 +52,7 @@ class FormRegistration:
     render_id: str
     route_path: str
     session_id: str
-    on_submit: EventHandler1[FormData]
+    on_submit: Callable[[FormData], Coroutine[Any, Any, None]]
 
 
 class FormRegistry:
@@ -65,7 +66,7 @@ class FormRegistry:
         render_id: str,
         route_id: str,
         session_id: str,
-        on_submit: EventHandler1[FormData],
+        on_submit: Callable[[FormData], Coroutine[Any, Any, None]],
     ) -> FormRegistration:
         registration = FormRegistration(
             uuid.uuid4().hex,
@@ -129,7 +130,7 @@ class FormRegistry:
             ) from exc
 
         with PulseContext.update(render=render, route=mount.route):
-            call_flexible(registration.on_submit, data)
+            await call_flexible(registration.on_submit, data)
 
         return Response(status_code=204)
 
@@ -224,7 +225,7 @@ class ManualForm:
     def wrap_on_submit(self, on_submit: EventHandler1[FormData] | None):
         async def on_submit_handler(data: FormData):
             if on_submit:
-                call_flexible(on_submit, data)
+                await maybe_await(call_flexible(on_submit, data))
             self._submit_signal.write(False)
 
         return on_submit_handler

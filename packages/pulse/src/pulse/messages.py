@@ -139,12 +139,12 @@ ServerMessage = (
 )
 
 
-ClientMessage = (
+ClientPulseMessage = (
     ClientCallbackMessage
     | ClientMountMessage
     | ClientNavigateMessage
     | ClientUnmountMessage
     | ClientApiResultMessage
-    | ClientChannelRequestMessage
-    | ClientChannelResponseMessage
 )
+ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
+ClientMessage = ClientPulseMessage | ClientChannelMessage

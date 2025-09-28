@@ -22,6 +22,7 @@ from starlette.datastructures import FormData as StarletteFormData, UploadFile
 
 from .context import PulseContext
 from .hooks import HOOK_CONTEXT, server_address, stable
+from .hooks.forms import internal_forms_hook
 from .html import HTMLFormProps
 from .react_component import react_component
 from .vdom import Child
@@ -128,9 +129,7 @@ class FormRegistry:
             ) from exc
 
         with PulseContext.update(render=render, route=mount.route):
-            maybe = call_flexible(registration.on_submit, data)  # pyright: ignore[reportArgumentType]
-            if inspect.isawaitable(maybe):
-                await maybe
+            call_flexible(registration.on_submit, data)
 
         return Response(status_code=204)
 
@@ -183,16 +182,12 @@ def Form(
     if hook_state is None:
         raise RuntimeError("ps.Form can only be used within a component render")
 
-    if key in hook_state.forms:
-        raise RuntimeError(
-            f"Duplicate ps.Form id '{key}' detected within the same render"
-        )
-
     handler = stable(f"form:{key}", onSubmit)
-    manual = hook_state.forms.get(key)
-    if manual is None:
-        manual = ManualForm(handler)
-        hook_state.forms[key] = manual
+    storage = internal_forms_hook()
+    manual = storage.register(
+        key,
+        lambda: ManualForm(handler),
+    )
 
     return manual(*children, key=key, **props)
 
@@ -229,7 +224,7 @@ class ManualForm:
     def wrap_on_submit(self, on_submit: EventHandler1[FormData] | None):
         async def on_submit_handler(data: FormData):
             if on_submit:
-                await call_flexible(on_submit, data)
+                call_flexible(on_submit, data)
             self._submit_signal.write(False)
 
         return on_submit_handler

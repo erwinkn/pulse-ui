@@ -52,7 +52,7 @@ from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
-from pulse.hooks import RedirectInterrupt, NotFoundInterrupt
+from pulse.hooks import RedirectInterrupt, NotFoundInterrupt, hooks
 from pulse.user_session import (
     CookieSessionStore,
     SessionStore,
@@ -283,6 +283,8 @@ class App:
 
         self.server_address = server_address
         PULSE_CONTEXT.set(PulseContext(app=self))
+
+        hooks.lock()
 
         # Compute cookie domain from deployment/server address if not explicitly provided
         if self.cookie.domain is None:

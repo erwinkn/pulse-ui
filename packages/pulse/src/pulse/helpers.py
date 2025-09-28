@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import (
     Any,
+    Awaitable,
     Callable,
     Coroutine,
     Iterable,
@@ -66,8 +67,6 @@ class Sentinel:
             return f"{self.name}({self.value})"
         else:
             return self.name
-
-
 
 
 # --- Async scheduling helpers (work from loop or sync threads) ---
@@ -461,7 +460,17 @@ def remove_web_lock(lock_path: Path) -> None:
         pass
 
 
-async def call_flexible(handler: Callable[..., Any], *payload_args: Any) -> None:
+@overload
+def call_flexible(
+    handler: Callable[..., Awaitable[T]], *payload_args: Any
+) -> Awaitable[T]: ...
+
+
+@overload
+def call_flexible(handler: Callable[..., T], *payload_args: Any) -> T: ...
+
+
+def call_flexible(handler: Callable[..., Any], *payload_args: Any) -> Any:
     """
     Call handler with a trimmed list of positional args based on its signature; await if needed.
 
@@ -489,10 +498,4 @@ async def call_flexible(handler: Callable[..., Any], *payload_args: Any) -> None
         # If inspection fails, default to passing the payload as-is
         args_to_pass = payload_args
 
-    try:
-        maybe = handler(*args_to_pass)
-        if inspect.isawaitable(maybe):
-            await maybe
-    except Exception:
-        # Swallow handler exceptions to avoid breaking effect
-        pass
+    return handler(*args_to_pass)

@@ -11,7 +11,7 @@ from typing import (
     Union,
     cast,
 )
-from pulse.hooks import HookState
+from pulse.hooks import HookContext
 from pulse.vdom import (
     VDOM,
     Callback,
@@ -138,7 +138,7 @@ class RenderRoot:
 
 class RenderNode:
     fn: Callable[..., Element]
-    hooks: HookState
+    hooks: HookContext
     last_render: Element
     key: Optional[str]
     # Absolute position in the tree
@@ -146,7 +146,7 @@ class RenderNode:
 
     def __init__(self, fn: Callable[..., Element], key: Optional[str] = None) -> None:
         self.fn = fn
-        self.hooks = HookState()
+        self.hooks = HookContext()
         self.last_render = None
         self.children = {}
         self.key = key

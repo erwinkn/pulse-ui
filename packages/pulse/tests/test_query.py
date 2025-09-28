@@ -477,7 +477,7 @@ async def test_state_query_initial_data_respected_on_refetch_when_keep_previous_
 
 
 @pytest.mark.asyncio
-async def test_state_query_on_success_handler_sync_and_async():
+async def test_state_query_on_success_sync():
     class S(ps.State):
         uid: int = 1
         ok_calls: int = 0
@@ -510,7 +510,7 @@ async def test_state_query_on_success_handler_sync_and_async():
 
 
 @pytest.mark.asyncio
-async def test_state_query_on_success_handler_async_only():
+async def test_state_query_on_success_async():
     class S(ps.State):
         uid: int = 1
         async_ok_calls: int = 0

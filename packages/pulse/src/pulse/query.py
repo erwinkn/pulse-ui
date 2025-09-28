@@ -12,7 +12,7 @@ from typing import (
 )
 
 from pulse.reactive import Computed, AsyncEffect, Signal
-from pulse.helpers import call_flexible
+from pulse.helpers import call_flexible, maybe_await
 
 if TYPE_CHECKING:
     from pulse.state import State
@@ -289,12 +289,12 @@ class QueryProperty(Generic[T, TState]):
                 result._set_error(e)
                 # Invoke error handler if provided
                 if bound_on_error:
-                    await call_flexible(bound_on_error, e)
+                    await maybe_await(call_flexible(bound_on_error, e))
             else:
                 result._set_success(data)
                 # Invoke success handler if provided
                 if bound_on_success:
-                    await call_flexible(bound_on_success, data)
+                    await maybe_await(call_flexible(bound_on_success, data))
             finally:
                 inflight_key = None
 

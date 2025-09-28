@@ -37,7 +37,7 @@ from pulse.helpers import (
     lock_path_for_web_root,
     remove_web_lock,
 )
-from pulse.messages import ClientMessage, ServerMessage
+from pulse.messages import ClientChannelRequestMessage, ClientMessage, ServerMessage
 from pulse.middleware import (
     Deny,
     MiddlewareStack,

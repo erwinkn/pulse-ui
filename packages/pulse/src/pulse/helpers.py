@@ -464,12 +464,8 @@ def remove_web_lock(lock_path: Path) -> None:
 def call_flexible(
     handler: Callable[..., Awaitable[T]], *payload_args: Any
 ) -> Awaitable[T]: ...
-
-
 @overload
 def call_flexible(handler: Callable[..., T], *payload_args: Any) -> T: ...
-
-
 def call_flexible(handler: Callable[..., Any], *payload_args: Any) -> Any:
     """
     Call handler with a trimmed list of positional args based on its signature; await if needed.
@@ -499,3 +495,9 @@ def call_flexible(handler: Callable[..., Any], *payload_args: Any) -> Any:
         args_to_pass = payload_args
 
     return handler(*args_to_pass)
+
+
+async def maybe_await(value: T | Awaitable[T]) -> T:
+    if inspect.isawaitable(value):
+        return await value
+    return value

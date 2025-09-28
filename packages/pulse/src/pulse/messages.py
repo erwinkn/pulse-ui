@@ -56,7 +56,7 @@ class ServerApiCallMessage(TypedDict):
     credentials: Literal["include", "omit"]
 
 
-class ServerChannelRequestMessage(TypedDict, total=False):
+class ServerChannelRequestMessage(TypedDict):
     type: Literal["channel_message"]
     channel: str
     event: str
@@ -65,7 +65,7 @@ class ServerChannelRequestMessage(TypedDict, total=False):
     error: NotRequired[Any]
 
 
-class ServerChannelResponseMessage(TypedDict, total=False):
+class ServerChannelResponseMessage(TypedDict):
     type: Literal["channel_message"]
     channel: str
     event: None
@@ -110,7 +110,7 @@ class ClientApiResultMessage(TypedDict):
     body: Any | None
 
 
-class ClientChannelRequestMessage(TypedDict, total=False):
+class ClientChannelRequestMessage(TypedDict):
     type: Literal["channel_message"]
     channel: str
     event: str
@@ -119,7 +119,7 @@ class ClientChannelRequestMessage(TypedDict, total=False):
     error: NotRequired[Any]
 
 
-class ClientChannelResponseMessage(TypedDict, total=False):
+class ClientChannelResponseMessage(TypedDict):
     type: Literal["channel_message"]
     channel: str
     event: None

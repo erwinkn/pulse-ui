@@ -1,3 +1,4 @@
+from inspect import isawaitable
 import json
 import re
 from abc import ABC, abstractmethod
@@ -5,6 +6,8 @@ from datetime import datetime
 from typing import (
     Any,
     Callable,
+    Awaitable,
+    Literal,
     Mapping,
     Sequence,
     TypeAlias,
@@ -23,6 +26,13 @@ class Validator(ABC):
     # Server-side check: return error message or None
     def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
         return None
+
+
+# Async-capable validator base: subclasses may override acheck to perform async checks
+class AsyncValidator(Validator):
+    async def acheck(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+        # Default bridge calls sync check for non-async validators
+        return self.check(value, values, path)
 
 
 # --- helpers mirrored from client logic ---------------------------------------
@@ -76,7 +86,7 @@ def _coerce_number(value: Any) -> float | None:
     return None
 
 
-def _coerce_comparable(value: Any) -> float | None:
+def _coerce_comparable(value: Any) -> float | str | None:
     if isinstance(value, datetime):
         return value.timestamp()
     n = _coerce_number(value)
@@ -97,7 +107,7 @@ def _coerce_comparable(value: Any) -> float | None:
             return dt.timestamp()
         except Exception:
             pass
-        return None
+        return s
     return None
 
 
@@ -167,19 +177,34 @@ class IsEmail(Validator):
 
 class Matches(Validator):
     def __init__(
-        self, pattern: str, *, flags: str | None = None, error: str | None = None
+        self,
+        pattern: str,
+        *,
+        flags: str | None = None,
+        # Optional client-specific overrides so JS can use a different regex
+        client_pattern: str | None = None,
+        client_flags: str | None = None,
+        error: str | None = None,
     ) -> None:
         self.pattern = pattern
         self.flags = flags
+        self.client_pattern = client_pattern
+        self.client_flags = client_flags
         self.error = error
 
     def serialize(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "$kind": "matches",
             "pattern": self.pattern,
-            "flags": self.flags,
             "error": self.error,
         }
+        if self.flags is not None:
+            payload["flags"] = self.flags
+        if self.client_pattern is not None:
+            payload["clientPattern"] = self.client_pattern
+        if self.client_flags is not None:
+            payload["clientFlags"] = self.client_flags
+        return payload
 
     def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
         if _is_empty_value(value):
@@ -508,11 +533,13 @@ class IsBefore(Validator):
         value: Any | None = None,
         inclusive: bool | None = None,
         error: str | None = None,
+        non_comparable_error: str | None = None,
     ) -> None:
         self.field = field
         self.value = value
         self.inclusive = inclusive
         self.error = error
+        self.non_comparable_error = non_comparable_error
 
     def serialize(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"$kind": "isBefore", "error": self.error}
@@ -533,8 +560,13 @@ class IsBefore(Validator):
         left = _coerce_comparable(value)
         right = _coerce_comparable(other)
         if left is None or right is None:
-            return None
-        ok = left <= right if self.inclusive else left < right
+            return self.non_comparable_error or "Values are not comparable"
+        left_is_str = isinstance(left, str)
+        right_is_str = isinstance(right, str)
+        if left_is_str or right_is_str:
+            left = str(left)
+            right = str(right)
+        ok = left <= right if self.inclusive else left < right  # type: ignore
         if not ok:
             return self.error or "Value must be before target"
         return None
@@ -574,7 +606,12 @@ class IsAfter(Validator):
         right = _coerce_comparable(other)
         if left is None or right is None:
             return None
-        ok = left >= right if self.inclusive else left > right
+        left_is_str = isinstance(left, str)
+        right_is_str = isinstance(right, str)
+        if left_is_str or right_is_str:
+            left = str(left)
+            right = str(right)
+        ok = left >= right if self.inclusive else left > right  # type: ignore
         if not ok:
             return self.error or "Value must be after target"
         return None
@@ -928,24 +965,32 @@ class EndsWith(Validator):
         return None
 
 
-class ServerValidation(Validator):
+class ServerValidation(AsyncValidator):
     def __init__(
         self,
-        fn: Callable[[Any, dict[str, Any], str], str | None],
+        fn: Callable[[Any, dict[str, Any], str], Awaitable[str | None] | str | None],
         debounce_ms: float | None = None,
+        run_on: Literal["change", "blur", "submit"] | None = None,
     ) -> None:
         self.fn = fn
         self.debounce_ms = debounce_ms
+        self.run_on = run_on
 
     def serialize(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"$kind": "server"}
         if self.debounce_ms is not None:
             payload["debounceMs"] = self.debounce_ms
+        if self.run_on is not None:
+            payload["runOn"] = self.run_on
         return payload
 
-    def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
+    async def acheck(self, value: Any, values: dict[str, Any], path: str) -> str | None:
         try:
-            return self.fn(value, values, path) or None
+            res = self.fn(value, values, path)
+            if isawaitable(res):
+                return await res
+            else:
+                return res
         except Exception:
             return "Validation failed"
 

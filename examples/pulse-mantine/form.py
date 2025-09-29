@@ -52,6 +52,7 @@ from pulse_mantine.form.form import MantineForm
 NAV_ITEMS = [
     {"label": "Validation modes", "to": "/"},
     {"label": "Built-in rules", "to": "/validators"},
+    {"label": "Server validation (async)", "to": "/server"},
     {"label": "File uploads", "to": "/files"},
     {"label": "Dates", "to": "/dates"},
 ]
@@ -138,6 +139,83 @@ class BuiltInValidatorsForm(MantineForm):
     def set_referral(self, checked: bool) -> None:
         self.referral_opt_in = checked
         self.set_field_value("referralOptIn", checked)
+
+
+class AsyncServerValidationForm(MantineForm):
+    def __init__(self) -> None:
+        async def username_available(
+            value: str, values: dict[str, Any], path: str
+        ) -> str | None:
+            # Simulate I/O latency
+            import asyncio
+
+            await asyncio.sleep(0.15)
+            if not isinstance(value, str):
+                return None
+            taken = {"admin", "root", "system"}
+            return (
+                "This username is reserved" if value.strip().lower() in taken else None
+            )
+
+        validate: Validation = {
+            "username": [
+                IsNotEmpty("Username is required"),
+                HasLength(min=3, max=16, error="3-16 characters"),
+                Matches(
+                    r"^[a-z0-9_]+$", error="Lowercase letters, numbers, underscore"
+                ),
+                # Async server validator runs on blur only; client runs on change
+                ServerValidation(username_available, debounce_ms=150, run_on="blur"),
+            ],
+            "email": [IsEmail("Enter a valid email")],
+        }
+        super().__init__(
+            initialValues={"username": "", "email": ""},
+            validate=validate,
+            mode="controlled",
+            validateInputOnBlur=True,
+            validateInputOnChange=True,
+            clearInputErrorOnChange=True,
+            debounceMs=200,
+        )
+
+
+@ps.component
+def ServerValidationPage():
+    form = ps.states(AsyncServerValidationForm)
+
+    return Card(withBorder=True, shadow="sm", p="lg")[
+        Stack(gap="lg")[
+            Stack(gap="xs")[
+                Title("Async server validation on blur", order=3),
+                Text(
+                    "Client validators run on change for instant feedback; server checks run on blur.",
+                ),
+            ],
+            form.render(onSubmit=lambda data: print("Form data:", data))[
+                Stack(gap="md")[
+                    Group(gap="md")[
+                        TextInput(
+                            name="username",
+                            label="Username",
+                            placeholder="lowercase letters",
+                            withAsterisk=True,
+                        ),
+                        TextInput(
+                            name="email",
+                            label="Email",
+                            placeholder="you@example.com",
+                            withAsterisk=True,
+                        ),
+                    ],
+                    Group(gap="sm")[
+                        Button("Validate now", variant="light", onClick=form.validate),
+                        Button("Submit", type="submit"),
+                    ],
+                ]
+            ],
+        ]
+    ]
 
 
 class FileUploadsForm(MantineForm):
@@ -557,6 +635,7 @@ app = ps.App(
             [
                 ps.Route("/:mode?", ValidationModesPage),
                 ps.Route("/validators", BuiltInValidatorsPage),
+                ps.Route("/server", ServerValidationPage),
                 ps.Route("/files", FileUploadsPage),
                 ps.Route("/dates", DatesPage),
             ],

@@ -14,7 +14,10 @@ import type { ReactNode } from "react";
 type RecursiveRecord<T> = T | { [key: string]: RecursiveRecord<T> };
 export type RuleFn = (value: any, values: any, path: string) => ReactNode;
 
-export type ServerValidationRule = { debounceMs?: number };
+export type ServerValidationRule = {
+  debounceMs?: number;
+  runOn?: "change" | "blur" | "submit";
+};
 export type ServerValidation = Partial<Record<string, ServerValidationRule[]>>;
 export type ClientValidation = Partial<Record<string, RecursiveRecord<RuleFn>>>;
 
@@ -28,6 +31,9 @@ export type ValidatorSpec =
       $kind: "matches";
       pattern: string;
       flags?: string | null;
+      // Optional client-specific overrides to account for JS/Python regex differences
+      clientPattern?: string | null;
+      clientFlags?: string | null;
       error?: string;
     }
   | { $kind: "isInRange"; min?: number; max?: number; error?: string }
@@ -109,7 +115,11 @@ export type ValidatorSpec =
       caseSensitive?: boolean;
       error?: string;
     }
-  | { $kind: "server"; debounceMs?: number };
+  | {
+      $kind: "server";
+      debounceMs?: number;
+      runOn?: "change" | "blur" | "submit";
+    };
 
 export type ValidatorSchema = {
   [key: string]: ValidatorSchema | ValidatorSpec[] | ValidatorSpec;
@@ -279,7 +289,9 @@ export function composeClientSpecs(specs: ValidatorSpec[]): RuleFn {
         case "isEmail":
           return isEmail(spec.error);
         case "matches": {
-          const re = new RegExp(spec.pattern, spec.flags ?? undefined);
+          const pattern = spec.clientPattern ?? spec.pattern;
+          const flags = spec.clientFlags ?? spec.flags ?? undefined;
+          const re = new RegExp(pattern, flags);
           return matchesValidator(re, spec.error);
         }
         case "isInRange": {
@@ -613,7 +625,7 @@ export function splitValidationSchema(schema: ValidatorSchema): {
       // Collect server validators for this path
       for (const spec of node) {
         if (isValidatorSpec(spec) && spec.$kind === "server") {
-          ensure(path).push({ debounceMs: spec.debounceMs });
+          ensure(path).push({ debounceMs: spec.debounceMs, runOn: spec.runOn });
         }
       }
       // Build client rule excluding server items
@@ -621,7 +633,7 @@ export function splitValidationSchema(schema: ValidatorSchema): {
     }
     if (isValidatorSpec(node)) {
       if (node.$kind === "server") {
-        ensure(path).push({ debounceMs: node.debounceMs });
+        ensure(path).push({ debounceMs: node.debounceMs, runOn: node.runOn });
       }
       return composeClientSpecs([node]);
     }

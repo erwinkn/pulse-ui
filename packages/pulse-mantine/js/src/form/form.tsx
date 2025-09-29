@@ -117,7 +117,7 @@ export function Form<
     (path: string) => {
       const v = validateInputOnChange;
       if (v === true) return true;
-      if (Array.isArray(v)) return v.includes(path as any);
+      if (Array.isArray(v)) return v.includes(path);
       return false;
     },
     [validateInputOnChange]
@@ -127,7 +127,7 @@ export function Form<
     (path: string) => {
       const v = validateInputOnBlur;
       if (v === true) return true;
-      if (Array.isArray(v)) return v.includes(path as any);
+      if (Array.isArray(v)) return v.includes(path);
       return false;
     },
     [validateInputOnBlur]
@@ -138,7 +138,6 @@ export function Form<
       console.log(`serverOnChange for ${path}`);
       const values = formRef.current?.getValues();
       if (!values) {
-        console.log("No values, ending early");
         return;
       }
 
@@ -170,7 +169,13 @@ export function Form<
       if (!hasServerValidation) return;
 
       if (shouldValidateOnChange(path)) {
-        const specified = serverRules
+        // Honor per-rule runOn option; include rules without runOn or with runOn=="change"
+        const changeEligible = serverRules.filter(
+          (r: any) => !r?.runOn || r.runOn === "change"
+        );
+        if (changeEligible.length === 0) return;
+
+        const specified = changeEligible
           .map((r) =>
             typeof r?.debounceMs === "number" ? r.debounceMs : undefined
           )
@@ -198,7 +203,7 @@ export function Form<
           setTimeout(
             () => {
               timers.delete(path);
-              const latestValues = formRef.current?.getValues() as any;
+              const latestValues = formRef.current?.getValues();
               if (!latestValues) return;
               const value = getValueAtPath(latestValues, path);
               channel.emit("serverValidate", {
@@ -242,21 +247,24 @@ export function Form<
       }
 
       // Server validation on blur (no debounce)
-      const serverRules = (serverRulesByPath as any)[path] as
-        | { debounceMs?: number }[]
-        | undefined;
+      const serverRules = serverRulesByPath[path];
       const hasServerValidation =
         Array.isArray(serverRules) && serverRules.length > 0;
       if (!hasServerValidation) return;
 
       if (shouldValidateOnBlur(path)) {
+        // Only run server rules that specify runOn=="blur" or do not specify runOn
+        const blurEligible = serverRules.filter(
+          (r) => !r?.runOn || r.runOn === "blur"
+        );
+        if (blurEligible.length === 0) return;
         const timers = serverTimersRef.current;
         const existingTimer = timers.get(path);
         if (existingTimer) {
           clearTimeout(existingTimer);
           timers.delete(path);
         }
-        const latestValues = formRef.current?.getValues() as any;
+        const latestValues = formRef.current?.getValues();
         if (!latestValues) return;
         const value = getValueAtPath(latestValues, path);
         channel.emit("serverValidate", { value, values: latestValues, path });
@@ -272,14 +280,14 @@ export function Form<
     ]
   );
 
-  const form = useForm<TValues>({
+  const form = useForm<any>({
     mode,
     touchTrigger,
-    validate: clientRules as any,
-    initialValues: initialValues as any,
-    initialErrors: initialErrors as any,
-    initialDirty: initialDirty as any,
-    initialTouched: initialTouched as any,
+    validate: clientRules,
+    initialValues: initialValues,
+    initialErrors: initialErrors,
+    initialDirty: initialDirty,
+    initialTouched: initialTouched,
     validateInputOnBlur,
     validateInputOnChange,
     clearInputErrorOnChange,
@@ -409,7 +417,7 @@ export function Form<
         submitForm({
           event: event!,
           onSubmit: userOnSubmit,
-          action: (actionUrl || "") as string,
+          action: actionUrl ?? "",
           formData,
           // Mantine will have already called event.preventDefault(), we want to ignore that
           force: true,
@@ -482,7 +490,7 @@ function extractDataAndFiles(values: any) {
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
         const childPath = path ? `${path}.${key}` : key;
-        const value = visit((node as any)[key], childPath);
+        const value = visit(node[key], childPath);
         if (value !== undefined) out[key] = value;
       }
       return out;

@@ -119,7 +119,7 @@ def extract_count_from_ctx(session: RenderSession, path: str) -> int:
     # Read latest VDOM by re-rendering from the RenderRoot and inspecting it
     mount = session.route_mounts[path]
     with ps.PulseContext.update(render=session, route=mount.route):
-        vdom = mount.root.render_vdom()
+        vdom, _ = mount.root.render_vdom()
     vdom_dict = cast(dict, vdom)
     children = cast(list, (vdom_dict.get("children", []) or []))
     span = cast(dict, children[0])
@@ -217,7 +217,7 @@ def make_global_routes() -> RouteTree:
 def extract_global_count(session: RenderSession, path: str) -> int:
     mount = session.route_mounts[path]
     with ps.PulseContext.update(render=session, route=mount.route):
-        vdom: VDOM = mount.root.render_vdom()
+        vdom, _ = mount.root.render_vdom()
     vdom_dict = cast(dict, vdom)
     children = cast(list, (vdom_dict.get("children", []) or []))
     span = cast(dict, children[0])

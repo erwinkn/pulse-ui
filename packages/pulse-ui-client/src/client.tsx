@@ -19,7 +19,7 @@ import { createChannelBridge, PulseChannelResetError } from "./channel";
 
 export interface MountedView {
   routeInfo: RouteInfo;
-  onInit: (vdom: VDOM) => void;
+  onInit: (vdom: VDOM, callbacks: string[]) => void;
   onUpdate: (ops: VDOMUpdate[]) => void;
 }
 export type ConnectionStatusListener = (connected: boolean) => void;
@@ -213,7 +213,7 @@ export class PulseSocketIOClient {
         // Ignore messages for paths that are not mounted
         if (!route) return;
         if (route) {
-          route.onInit(message.vdom);
+          route.onInit(message.vdom, message.callbacks);
         }
         // Clear any prior error for this path on successful init
         if (this.serverErrors.has(message.path)) {

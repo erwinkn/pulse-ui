@@ -396,7 +396,12 @@ class App:
                 captured = render.prerender_mount_capture(path, route_info)
                 t = captured.get("type") if isinstance(captured, dict) else None
                 if t == "vdom_init":
-                    return Ok(captured["vdom"])
+                    return Ok(
+                        {
+                            "vdom": captured["vdom"],
+                            "callbacks": captured.get("callbacks", []),
+                        }
+                    )
                 if t == "navigate_to":
                     nav_path = captured.get("path")
                     replace = bool(captured.get("replace"))

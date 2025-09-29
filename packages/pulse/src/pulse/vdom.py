@@ -122,13 +122,16 @@ class Node:
 
     @staticmethod
     def from_vdom(
-        vdom: VDOM, callbacks: Optional[Callbacks] = None
+        vdom: VDOM,
+        callbacks: Optional[Callbacks] = None,
+        *,
+        path: str = "",
     ) -> Union["Node", Primitive]:
         """Create a Node tree from a VDOM structure.
 
         - Primitive values are returned as-is
-        - Callback placeholders (values starting with "$$fn:") are stripped
-          from props since we cannot reconstruct Python callables here
+        - Callbacks can be reattached by providing both `callbacks` (the
+          callable registry) and `callback_props` (props per VDOM path)
         """
 
         if isinstance(vdom, (str, int, float, bool, NoneType)):
@@ -139,24 +142,41 @@ class Node:
         key_value = cast(Optional[str], vdom.get("key"))
 
         callbacks = callbacks or {}
-        copied = False
-        for k, v in props.items():
-            if isinstance(v, str) and v.startswith("$$fn:"):
-                callback_id = v[len("$$fn:") :]
-                callback = callbacks.get(callback_id)
+        prefix = f"{path}." if path else ""
+        prop_names: list[str] = []
+        for key in callbacks.keys():
+            if path:
+                if not key.startswith(prefix):
+                    continue
+                remainder = key[len(prefix) :]
+            else:
+                remainder = key
+            if "." in remainder:
+                continue
+            prop_names.append(remainder)
+        if prop_names:
+            props = props.copy()
+            for name in prop_names:
+                callback_key = f"{path}.{name}" if path else name
+                callback = callbacks.get(callback_key)
                 if not callback:
-                    raise ValueError(f"Missing callback '{callback_id}'")
-                if not copied:
-                    props = props.copy()
-                    copied = True
-                props[k] = callback.fn
+                    raise ValueError(f"Missing callback '{callback_key}'")
+                props[name] = callback.fn
 
         children_value: list[Element] | None = None
         raw_children = cast(Sequence[VDOMNode | Primitive] | None, vdom.get("children"))
         if raw_children is not None:
             children_value = []
-            for raw_child in raw_children:
-                children_value.append(Node.from_vdom(raw_child, callbacks=callbacks))
+            for idx, raw_child in enumerate(raw_children):
+                child_path = f"{path}.{idx}" if path else str(idx)
+                children_value.append(
+                    Node.from_vdom(
+                        raw_child,
+                        callbacks=callbacks,
+                        callback_props=callback_props,
+                        path=child_path,
+                    )
+                )
 
         return Node(
             tag=tag,

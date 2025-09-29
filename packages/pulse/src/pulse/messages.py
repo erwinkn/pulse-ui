@@ -12,6 +12,7 @@ class ServerInitMessage(TypedDict):
     type: Literal["vdom_init"]
     path: str
     vdom: VDOM
+    callbacks: list[str]
 
 
 class ServerUpdateMessage(TypedDict):

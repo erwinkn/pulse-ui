@@ -57,6 +57,17 @@ class UpdatePropsDelta(TypedDict, total=False):
     remove: list[str]
 
 
+class UpdateCallbacksDelta(TypedDict, total=False):
+    add: list[str]
+    remove: list[str]
+
+
+class UpdateCallbacksOperation(TypedDict):
+    type: Literal["update_callbacks"]
+    path: str
+    data: UpdateCallbacksDelta
+
+
 class MoveOperationData(TypedDict):
     from_index: int
     to_index: int
@@ -74,6 +85,7 @@ VDOMOperation = Union[
     ReplaceOperation,
     UpdatePropsOperation,
     MoveOperation,
+    UpdateCallbacksOperation,
 ]
 
 
@@ -81,8 +93,8 @@ VDOMOperation = Union[
 class RenderDiff:
     tree: Element
     render_count: int
-    ops: list[VDOMOperation]
     callbacks: Callbacks
+    ops: list[VDOMOperation]
 
 
 class RenderRoot:
@@ -106,15 +118,32 @@ class RenderRoot:
             render_parent=self.render_tree, old_tree=last_render, new_tree=new_tree
         )
         self.render_tree.last_render = new_tree
+        prev_keys = set(self.callbacks.keys())
+        new_keys = set(resolver.callbacks.keys())
+        added = sorted(new_keys - prev_keys)
+        removed = sorted(prev_keys - new_keys)
+        ops = list(resolver.operations)
+        if added or removed:
+            delta: UpdateCallbacksDelta = {}
+            if added:
+                delta["add"] = added
+            if removed:
+                delta["remove"] = removed
+            ops.insert(
+                0,
+                UpdateCallbacksOperation(
+                    type="update_callbacks", path="", data=delta
+                )
+            )
         self.callbacks = resolver.callbacks
         return RenderDiff(
             tree=new_tree,
             render_count=self.render_count,
             callbacks=resolver.callbacks,
-            ops=resolver.operations,
+            ops=ops,
         )
 
-    def render_vdom(self) -> VDOM:
+    def render_vdom(self) -> tuple[VDOM, list[str]]:
         """One-shot render to VDOM + callbacks, without mounting an Effect."""
         self.render_count += 1
         resolver = Resolver()
@@ -125,7 +154,7 @@ class RenderRoot:
         )
         self.render_tree.last_render = normalized
         self.callbacks = resolver.callbacks
-        return vdom
+        return vdom, self.callbacks
 
     def unmount(self) -> None:
         if self.effect is not None:
@@ -473,9 +502,9 @@ class Resolver:
             if node.key:
                 vdom_node["key"] = node.key
             if node.props:
-                vdom_node["props"] = (
-                    self._capture_callbacks(node.props, path=path) or {}
-                )
+                sanitized = self._capture_callbacks(node.props, path=path)
+                if sanitized:
+                    vdom_node["props"] = sanitized
             # Preserve lazy flag if present
             if node.lazy is not None:
                 vdom_node["lazy"] = True
@@ -509,19 +538,27 @@ class Resolver:
             return node, node
 
     def _capture_callbacks(self, props: Props, path: str) -> Props:
-        if not any(callable(v) for v in props.values()):
-            return props
-
+        # Only copy the props if a callable prop is found
+        has_callable = False
         path_prefix = (path + ".") if path else ""
-        updated_props = props.copy()
-        for k, v in props.items():
-            if callable(v):
-                callback_key = f"{path_prefix}{k}"
-                updated_props[k] = f"$$fn:{callback_key}"
+        sanitized: Props | None = None
+
+        for key, value in props.items():
+            if callable(value):
+                has_callable = True
+                if sanitized is None:
+                    sanitized = props.copy()
+                sanitized.pop(key, None)
+                callback_key = f"{path_prefix}{key}"
                 self.callbacks[callback_key] = Callback(
-                    fn=v, n_args=len(inspect.signature(v).parameters)
+                    fn=value, n_args=len(inspect.signature(value).parameters)
                 )
-        return updated_props
+            elif sanitized is not None:
+                sanitized[key] = value
+
+        if has_callable:
+            return sanitized or {}
+        return props
 
     # --- Internal helpers -----------------------------------------------------
 
@@ -572,7 +609,6 @@ def same_node(left: Element, right: Element):
         return left.fn == right.fn and left.key == right.key
 
     return False
-
 
 # Longest increasing subsequence algorithm
 def lis(seq: list[int]) -> list[int]:

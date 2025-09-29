@@ -176,7 +176,7 @@ def HouseholdFormDemo():
             ],
         ]
 
-    async def submit(values: dict[str, Any]):
+    def submit(values: dict[str, Any]):
         print("Submitted:", json.dumps(values, indent=2))
 
     return MantineProvider(withNormalizeCSS=True, withGlobalStyles=True)[

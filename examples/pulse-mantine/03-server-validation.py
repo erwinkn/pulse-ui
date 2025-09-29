@@ -36,10 +36,8 @@ class UsernameForm(MantineForm):
         super().__init__(
             initialValues={"username": "", "email": ""},
             validate=validate,
-            mode="controlled",
             # Run client-side validators on change for instant feedback
             validateInputOnChange=True,
-            clearInputErrorOnChange=True,
             debounceMs=200,
         )
 

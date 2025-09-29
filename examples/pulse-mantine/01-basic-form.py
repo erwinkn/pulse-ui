@@ -15,7 +15,6 @@ from pulse_mantine import (
 def Demo():
     form = ps.states(
         lambda: MantineForm(
-            mode="uncontrolled",
             initialValues={"email": "", "termsOfService": False},
             validate={
                 # Equivalent to Mantine's built-in `isEmail` validator

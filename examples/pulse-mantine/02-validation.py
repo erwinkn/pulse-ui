@@ -56,7 +56,6 @@ class FormState(MantineForm):
                 "deadline": None,
             },
             validate=validate,
-            clearInputErrorOnChange=True,
         )
 
 

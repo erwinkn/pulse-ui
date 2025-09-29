@@ -34,7 +34,6 @@ def _new_member(full_name: str = "") -> dict[str, object]:
 class DynamicHouseholdForm(MantineForm):
     def __init__(self) -> None:
         super().__init__(
-            mode="controlled",
             initialValues={
                 "householdName": "The Travelers",
                 "members": [
@@ -43,7 +42,7 @@ class DynamicHouseholdForm(MantineForm):
                 ],
             },
             syncMode="change",
-            # syncDebounceMs=120,
+            # debounceMs=120,
         )
 
     # Member operations -----------------------------------------------------

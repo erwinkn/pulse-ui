@@ -135,7 +135,6 @@ export function Form<
 
   const serverOnChange = useCallback(
     (path: string, debounce: boolean) => {
-      console.log(`serverOnChange for ${path}`);
       const values = formRef.current?.getValues();
       if (!values) {
         return;
@@ -150,14 +149,12 @@ export function Form<
         }
         const delay = debounce ? debounceMs : 0;
         if (delay > 0) {
-          console.log(`Scheduling onChange sync with ${delay} debounce`);
           const handle = setTimeout(() => {
             syncTimersRef.current.delete(path);
             sendSync("change", path);
           }, delay);
           syncTimersRef.current.set(path, handle);
         } else {
-          console.log(`Sending onChange sync`);
           sendSync("change", path);
         }
       }
@@ -168,54 +165,56 @@ export function Form<
         Array.isArray(serverRules) && serverRules.length > 0;
       if (!hasServerValidation) return;
 
-      if (shouldValidateOnChange(path)) {
-        // Honor per-rule runOn option; include rules without runOn or with runOn=="change"
-        const changeEligible = serverRules.filter(
-          (r: any) => !r?.runOn || r.runOn === "change"
-        );
-        if (changeEligible.length === 0) return;
+      // Override form-level gating when any rule explicitly sets runOn="change"
+      const explicitChange = serverRules.some(
+        (r: any) => r?.runOn === "change"
+      );
+      const shouldRunChange = explicitChange || shouldValidateOnChange(path);
+      if (!shouldRunChange) return;
 
-        const specified = changeEligible
-          .map((r) =>
-            typeof r?.debounceMs === "number" ? r.debounceMs : undefined
-          )
-          .filter((n): n is number => typeof n === "number");
+      // Choose eligible rules: if explicitChange, only those; else those without runOn
+      const changeEligible = explicitChange
+        ? serverRules.filter((r: any) => r?.runOn === "change")
+        : serverRules.filter((r: any) => !r?.runOn);
+      if (changeEligible.length === 0) return;
 
-        // If any rule specifies debounceMs, always use the max specified; else use component default when debounce==true
-        const ruleDelay =
-          specified.length > 0
-            ? Math.max(...specified)
-            : debounce
-              ? debounceMs
-              : 0;
+      const specified = changeEligible
+        .map((r) =>
+          typeof r?.debounceMs === "number" ? r.debounceMs : undefined
+        )
+        .filter((n): n is number => typeof n === "number");
 
-        const timers = serverTimersRef.current;
-        const existingTimer = timers.get(path);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-          timers.delete(path);
-        }
-        console.log(
-          `Scheduling server validation for ${path} with delay ${ruleDelay}`
-        );
-        timers.set(
-          path,
-          setTimeout(
-            () => {
-              timers.delete(path);
-              const latestValues = formRef.current?.getValues();
-              if (!latestValues) return;
-              const value = getValueAtPath(latestValues, path);
-              channel.emit("serverValidate", {
-                value,
-                values: latestValues,
-                path,
-              });
-            },
-            Math.max(0, ruleDelay)
-          )
-        );
+      // If any rule specifies debounceMs, use the max; else use component default when debounce==true
+      const ruleDelay =
+        specified.length > 0
+          ? Math.max(...specified)
+          : debounce
+            ? debounceMs
+            : 0;
+
+      const timers = serverTimersRef.current;
+      const existingTimer = timers.get(path);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        timers.delete(path);
       }
+      timers.set(
+        path,
+        setTimeout(
+          () => {
+            timers.delete(path);
+            const latestValues = formRef.current?.getValues();
+            if (!latestValues) return;
+            const value = getValueAtPath(latestValues, path);
+            channel.emit("serverValidate", {
+              value,
+              values: latestValues,
+              path,
+            });
+          },
+          Math.max(0, ruleDelay)
+        )
+      );
     },
     [
       debounceMs,
@@ -252,23 +251,26 @@ export function Form<
         Array.isArray(serverRules) && serverRules.length > 0;
       if (!hasServerValidation) return;
 
-      if (shouldValidateOnBlur(path)) {
-        // Only run server rules that specify runOn=="blur" or do not specify runOn
-        const blurEligible = serverRules.filter(
-          (r) => !r?.runOn || r.runOn === "blur"
-        );
-        if (blurEligible.length === 0) return;
-        const timers = serverTimersRef.current;
-        const existingTimer = timers.get(path);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-          timers.delete(path);
-        }
-        const latestValues = formRef.current?.getValues();
-        if (!latestValues) return;
-        const value = getValueAtPath(latestValues, path);
-        channel.emit("serverValidate", { value, values: latestValues, path });
+      // Override form-level gating when any rule explicitly sets runOn="blur"
+      const explicitBlur = serverRules.some((r: any) => r?.runOn === "blur");
+      const shouldRunBlur = explicitBlur || shouldValidateOnBlur(path);
+      if (!shouldRunBlur) return;
+
+      // Choose eligible rules: if explicitBlur, only those; else those without runOn
+      const blurEligible = explicitBlur
+        ? serverRules.filter((r: any) => r?.runOn === "blur")
+        : serverRules.filter((r: any) => !r?.runOn);
+      if (blurEligible.length === 0) return;
+      const timers = serverTimersRef.current;
+      const existingTimer = timers.get(path);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        timers.delete(path);
       }
+      const latestValues = formRef.current?.getValues();
+      if (!latestValues) return;
+      const value = getValueAtPath(latestValues, path);
+      channel.emit("serverValidate", { value, values: latestValues, path });
     },
     [
       getValueAtPath,
@@ -373,6 +375,7 @@ export function Form<
         }
       ),
       channel.on("validate", () => {
+        // Client-side validation of all fields. Server-side validation is triggered on Python side.
         form.validate();
       }),
       channel.on("reset", (payload?: { initialValues?: TValues }) => {

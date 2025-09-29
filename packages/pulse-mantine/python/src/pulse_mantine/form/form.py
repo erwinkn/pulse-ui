@@ -13,7 +13,7 @@ from typing import (
 import json
 import pulse as ps
 from pulse.serializer_v3 import deserialize
-from pulse.helpers import call_flexible
+from pulse.helpers import call_flexible, create_task
 from pulse.reactive_extensions import ReactiveDict
 
 from .internal import FormInternal, FormMode
@@ -73,7 +73,7 @@ class MantineForm(ps.State, Generic[TForm]):
     ):
         self._channel = ps.channel()
         self._form = ps.ManualForm(on_submit=self._handle_form_data)
-        self._sync_mode = syncMode
+        self._sync_mode: Literal["none", "blur", "change"] = syncMode
         self._synced_values = ReactiveDict(initialValues or {})
         if self._sync_mode != "none":
             self._channel.on("syncValues", self._on_sync_values)
@@ -260,7 +260,56 @@ class MantineForm(ps.State, Generic[TForm]):
         self._channel.emit("setTouched", {"touched": touched})
 
     def validate(self):
+        # Trigger client-side validation
         self._channel.emit("validate")
+        # Also run all server-side validators in the background for current values
+        create_task(self._validate_all_server_specs())
+
+    async def _validate_all_server_specs(self) -> None:
+        try:
+            # Get latest values from client
+            values: dict[str, Any] = await self._channel.request("getFormValues")
+            # Collect all paths that have at least one ServerValidation spec
+            schema = self._validation
+            if not isinstance(schema, dict):
+                return
+
+            paths: list[str] = []
+
+            def join(p: str, k: str) -> str:
+                return f"{p}.{k}" if p else k
+
+            def visit(node: Any, path: str) -> None:
+                if isinstance(node, dict):
+                    root = node.get("formRootRule")
+                    if root is not None:
+                        visit(root, path)
+                    for k, v in node.items():
+                        if k == "formRootRule":
+                            continue
+                        visit(v, join(path, k))
+                    return
+                if isinstance(node, list):
+                    has_server = any(
+                        isinstance(spec, ServerValidation) for spec in node
+                    )
+                    if has_server:
+                        paths.append(path)
+                    return
+                if isinstance(node, ServerValidation):
+                    paths.append(path)
+
+            visit(schema, "")
+
+            for path in paths:
+                payload = {
+                    "value": None,  # value will be recomputed in handler using values + path
+                    "values": values,
+                    "path": path,
+                }
+                await self._on_server_validate(payload)
+        except Exception:
+            return
 
     def reset(self, initial_values: Optional[dict[str, Any]] = None):
         if initial_values is not None:
@@ -270,6 +319,10 @@ class MantineForm(ps.State, Generic[TForm]):
 
     @property
     def values(self) -> ReactiveDict[str, Any]:
+        if self._sync_mode == "none":
+            raise ValueError(
+                'Form values are only accessible on the server when syncMode="change" or syncMode="blur"'
+            )
         return self._synced_values
 
     # --- internal sync handling -------------------------------------------------

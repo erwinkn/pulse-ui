@@ -82,6 +82,7 @@ class MantineForm(ps.State, Generic[TForm]):
 
         self._validation = validate
         self._mantine_props = {
+            "mode": mode,
             "validate": serialize_validation(validate) if validate else None,
             "initialValues": initialValues,
             "initialErrors": initialErrors,

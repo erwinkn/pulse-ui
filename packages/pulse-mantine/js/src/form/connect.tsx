@@ -62,7 +62,7 @@ export function createConnectedField<P extends InputProps>(
       merged.onBlur(...args);
       serverOnBlur(name);
     };
-    coerceControlledTextValue(props, !!options?.coerceEmptyString);
+    coerceControlledTextValue(merged, !!options?.coerceEmptyString);
 
     return <Component {...merged} onChange={onChange} onBlur={onBlur} />;
   };

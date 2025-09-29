@@ -1,13 +1,13 @@
 [project]
 name = "pulse-mantine"
-version = "0.1.0"
+version = "0.1.1"
 description = "Add your description here"
 readme = "README.md"
 authors = [
     { name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["pulse-framework==0.1.17"]
 
 [build-system]
 requires = ["uv_build>=0.8.13,<0.9.0"]

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from io import BytesIO
-import types
 from datetime import datetime, timezone
+from typing import cast
 
-import pulse as ps
-import pytest
 
 from pulse_mantine.form.validators import (
     AllowedFileTypes,
@@ -35,6 +33,7 @@ from pulse_mantine.form.validators import (
     RequiredWhen,
     ServerValidation,
     StartsWith,
+    serialize_validation,
 )
 from starlette.datastructures import Headers, UploadFile
 
@@ -208,3 +207,25 @@ def test_server_validation():
     spec = ServerValidation(lambda v, vs, p: "err" if str(v) == "bad" else None)
     assert run(spec, "bad") == "err"
     assert run(spec, "ok") is None
+
+
+def test_matches_client_overrides_serialization_and_server_behavior():
+    # Server uses server pattern/flags; client uses clientPattern/clientFlags
+    spec = Matches(
+        r"^[a-z]+$",
+        flags=None,
+        client_pattern=r"^[a-z]+$",
+        client_flags="i",
+        error="e",
+    )
+    # Server check should NOT honor client flags; 'ABC' fails on server
+    assert run(spec, "ABC") == "e"
+
+    # Serialization includes clientPattern/clientFlags
+    out = serialize_validation({"field": spec})
+    node = cast(dict, out["field"])
+    assert node["$kind"] == "matches"
+    assert node["pattern"] == r"^[a-z]+$"
+    assert "flags" not in node or node.get("flags") in (None, "")
+    assert node["clientPattern"] == r"^[a-z]+$"
+    assert node["clientFlags"] == "i"

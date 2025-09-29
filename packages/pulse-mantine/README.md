@@ -9,15 +9,17 @@
 - `@mantine/dates`
 - `@mantine/charts`
 
-Not all components are typed in Python yet, but you can still use them exactly like in the official Mantine examples.
-
 Support for the other extensions is coming soon.
 
 ## Core Mantine
 
-The `@mantine/core` components are nearly all usable as-is by calling the component and passing in the same props.
+The `@mantine/core` components are all usable as-is by calling the component and passing in the same props.
 
-You can refer to the official documentation for usage examples and the API reference: https://mantine.dev/core/package/
+You can refer to the official documentation for usage examples and the API reference: https://mantine.dev/core/package/.
+
+Not all components are typed in Python yet, but you can still use them exactly like in the official Mantine examples.
+
+If you notice any problem, please submit an issue, I have not tested all components yet.
 
 ## Forms
 
@@ -138,10 +140,97 @@ You can find this example at [`examples/pulse-mantine/01-basic-form.py`](../../e
 
 For efficiency, the form state lives on the client and is only sent to the server on submit or on server validation (see [Validation rules](#validation-rules)).
 
+### Validation
+
+Any good form requires validation. `pulse-mantine` ships with all the built-in Mantine validators:
+- `IsNotEmpty`
+- `IsEmail`
+- `Matches`
+- `IsInRange`
+- `HasLength`
+- `MatchesField` 
+- `IsJSONString`
+- `IsNotEmptyHTML`
+
+Note that `Matches` runs the RegEx both on the client and the server. Since JavaScript and Python regular expressions differ slightly, you have the option of specifying a different RegEx for the client.
+
+In addition, the following built-in validators are available:
+- `IsUrl`, `IsUUID` and `IsULID`
+- `IsNumber` and `IsInteger`
+- `StartsWith` and `EndsWith`
+- `IsDate` and `IsISODate`
+- `IsBefore` and `IsAfter` compare two values while coercing numerical or date-like strings.
+- `MinItems`, `MaxItems`, `IsArrayNotempty` for arrays.
+- `AllowedFileTypes` and `MaxFileSize` for files.
+- `RequiredWhen` and `RequiredUnless`: conditionally require a field based on another field's value. Both accept `equals`, `not_equals`, `in_values`, and `not_in_values` conditions.
+
+All validators accept an `error` argument to customize the error message (and sometimes additional error arguments, if there are multiple possible error sources).
+
+These built-in validators run both on the client, for instant feedback, and on the server on form submission, for security.
+
+You can find an example with the following validation schema in [`examples/pulse-mantine/02-validation.py`](../../examples/pulse-mantine/02-validation.py):
+```python
+validate = {
+  "username": [
+      IsNotEmpty("Username is required"),
+      HasLength(min=3, max=16, error="3-16 characters"),
+      Matches(
+          r"^[a-z0-9_]+$", error="Lowercase letters, numbers, underscore"
+      ),
+  ],
+  "email": IsEmail("Enter a valid email"),
+  "password": HasLength(min=8, error="Min 8 characters"),
+  "start": IsDate("Pick a start date"),
+  "end": [
+      IsDate("Pick an end date"),
+      IsAfter(
+          "start",
+          inclusive=True,
+          error="End date must be on or after start",
+      ),
+  ],
+  "deadline": [
+      IsDate("Set a deadline"),
+      IsBefore("end", error="Deadline must be before the end date"),
+      IsAfter("start", error="Deadline must after the start date"),
+  ],
+}
+```
+
+Contrary to Mantine, each field can accept a list of validators, they will be run in succession. 
+
+While not demonstrated here, to add validators for the root of an array, add an entry for `'formRootRule'` into a level of the validation dictionary. This is a string key, no special import is needed. See the [official documentation](https://mantine.dev/form/validation/#formrootrule) on `formRootRule` for more detail.
+
+You can decide when validation runs by passing in the regular Mantine configuration options to the `MantineForm` constructor:
+- [`validateInputOnChange`](https://mantine.dev/form/validation/#validate-fields-on-change) to validate all or specific inputs on change
+- [`validateInputonBlur`](https://mantine.dev/form/validation/#validate-fields-on-blur) to validate all or specific inputs on blur (= when the user defocuses the input)
+
+### Server validation
+
+The above validators are helpful, but you may need to check a field against your database or run more complex logic on the server. For this, Pulse introduces a `ServerValidation` validator. It can be applied to any field and accepts any synchronous or asynchronous function with this signature.
+
+```python
+def server_validation_function(value, values, path):
+  ...
+```
+
+Here, `value` refers to the field's current value, `values` to the current form values and `path` to the field's path within the form (equal to its ame).
+
+`ServerValidation` accepts two optional arguments:
+- `debounce_ms`, which is used to debounce server validation calls for change events of text inputs
+  - For example: a user is typing into a text input and a server validator is supposed to run on each change. `debounce_ms` is set to 300ms. Instead of firing a server validation call on every key stroke, the application will wait until it has been at least 300ms since the last user's key stroke before calling the server validator. 
+  - If not specified, it defaults to the `debounce_ms` passed to the `MantineForm` constructor, which has a default value of 300 ms.
+- `runs_on`, which can take a value of `submit`, `blur`, or `change`
+  - By default, a server validator runs when the field it targets is validated, according to the form's settings
+  - However, let's say you have a text input with built-in validators for minimum number of characters and disallowing special characters, plus a server validator to check for duplicates in the database. You likely want the built-in validators to run in the browser on every keystroke, but run the server validator only when the user stops typing. One option is to add a debounce delay (described above). Another option is to set `runs_on="blur"` or `runs_on="submit"` to only run the server validation when the user clicks out of the field, or when they submit the form.
+
+### Form actions
+
 Like `useForm`, `MantineForm` gives you access to methods to manipulate the form state:
+
 - `set_values(values)`
 - `set_field_value(path, values)`
-- `insert_list_item(path, item, index=None)` 
+- `insert_list_item(path, item, index=None)`
 - `remove_list_item(path, index)`
 - `reorder_list_item(path, from_index, to_index)`
 - `set_errors(errors)`
@@ -151,195 +240,28 @@ Like `useForm`, `MantineForm` gives you access to methods to manipulate the form
 - `validate()`
 - `reset(initial_values=None)`
 
-
 This is primarily useful if you're working with nested forms or dynamic forms, where you need to add or remove fields.
 
-### Validation rules
+### Client-server synchronisation
 
-### Form actions
+## Dates
 
-## Core
+The `@mantine/dates` components are all usable as-is by calling the component and passing in the same props.
 
-### Layout
+You can refer to the official documentation for usage examples and the API reference: https://mantine.dev/dates/getting-started/.
 
-[x] AppShell
-[x] AspectRatio
-[x] Center
-[x] Container
-[x] Flex
-[x] Grid
-[x] Group
-[x] SimpleGrid
-[x] Space
-[x] Stack
+Not all components are typed in Python yet, but you can still use them exactly like in the official Mantine examples.
 
-### Inputs
+If you notice any problem, please submit an issue, I have not tested all components yet.
 
-[x] AngleSlider
-[x] Checkbox
-[x] Chip
-[x] ColorInput
-[x] ColorPicker
-[x] Fieldset
-[x] FileInput
-[x] Input (shouldn't be used)
-[x] JsonInput
-[x] NativeSelect
-[x] NumberInput
-[x] PasswordInput
-[x] PinInput
-[x] Radio
-[x] RangeSlider
-[x] Rating
-[x] SegmentedControl
-[x] Slider
-[x] Switch
-[x] Textarea
-[x] TextInput
+## Charts
 
-### Combobox
+The `@mantine/charts` components are all usable as-is by calling the component and passing in the same props.
 
-[x] Autocomplete
-[x] Combobox
-[x] MultiSelect
-[x] Pill
-[x] PillsInput
-[x] Select
-[x] TagsInput
+You can refer to the official documentation for usage examples and the API reference: https://mantine.dev/dates/getting-started/.
 
-### Buttons
+Not all components are typed in Python yet, but you can still use them exactly like in the official Mantine examples.
 
-[x] ActionIcon
-[x] Button
-[x] CloseButton
-[x] CopyButton -> we'll likely need a custom version on top
-[x] FileButton
-[x] UnstyledButton
+If you notice any problem, please submit an issue, I have not tested all components yet.
 
-### Navigation
-
-[x] Anchor
-[x] Breadcrumbs
-[x] Burger
-[x] NavLink
-[x] Pagination
-[x] Stepper
-[x] TableOfContents
-[x] Tabs
-[x] Tree
-
-### Feedback
-
-[x] Alert
-[x] Loader
-[x] Notification
-[x] Progress
-[x] RingProgress
-[x] SemiCircleProgress
-[x] Skeleton
-
-### Overlays
-
-[x] Affix
-[x] Dialog
-[x] Drawer
-[x] FloatingIndicator
-[x] HoverCard
-[x] LoadingOverlay
-[x] Menu
-[x] Modal
-[x] Overlay
-[x] Popover
-[x] Tooltip
-
-### Data display
-
-[x] Accordion
-[x] Avatar
-[x] BackgroundImage
-[x] Badge
-[x] Card
-[x] ColorSwatch
-[x] Image
-[x] Indicator
-[x] Kbd
-[x] NumberFormatter
-[x] Spoiler
-[x] ThemeIcon
-[x] Timeline
-
-### Typography
-
-[x] Blockquote
-[x] Code
-[x] Highlight
-[x] List
-[x] Mark
-[x] Table
-[x] Text
-[x] Title
-[x] Typography
-
-### Miscellaneous
-
-[x] Box
-[x] Collapse
-[x] Divider
-[x] FocusTrap
-[x] Paper
-[x] Portal
-[x] ScrollArea
-[x] Transition
-[x] VisuallyHidden
-
-## Dates (extension)
-
-[x] Calendar
-[x] CalendarHeader
-[x] DateInput
-[x] DatePicker
-[x] DatePickerInput
-[x] DatesProvider
-[x] DateTimePicker
-[x] Day
-[x] DecadeLevel
-[x] DecadeLevelGroup
-[x] HiddenDatesInput
-[x] LevelsGroup
-[x] MiniCalendar
-[x] Month
-[x] MonthLevel
-[x] MonthLevelGroup
-[x] MonthPicker
-[x] MonthPickerInput
-[x] MonthsList
-[x] PickerControl
-[x] PickerInputBase
-[x] TimeGrid
-[x] TimeInput
-[x] TimePicker
-[x] TimeValue
-[x] WeekdaysRow
-[x] YearLevel
-[x] YearLevelGroup
-[x] YearPicker
-[x] YearPickerInput
-[x] YearsList
-
-## Charts (extension)
-
-[x] AreaChart
-[x] BarChart
-[x] BubbleChart
-[x] ChartLegend
-[x] ChartTooltip
-[x] CompositeChart
-[x] DonutChart
-[x] FunnelChart
-[x] Heatmap
-[x] LineChart
-[x] PieChart
-[x] RadarChart
-[x] RadialBarChart
-[x] ScatterChart
-[x] Sparkline
+Mantine charts are based on Recharts, so you can also look at [`pulse-recharts`](https://github.com/erwinkn/pulse-ui/tree/main/packages/pulse-recharts) for advanced use cases where direct Recharts usage is required.

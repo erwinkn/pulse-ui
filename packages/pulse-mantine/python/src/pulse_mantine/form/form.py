@@ -18,6 +18,7 @@ from pulse.reactive_extensions import ReactiveDict
 
 from .internal import FormInternal, FormMode
 from .validators import (
+    AsyncValidator,
     ServerValidation,
     Validation,
     Validator,
@@ -121,7 +122,7 @@ class MantineForm(ps.State, Generic[TForm]):
 
         # Run server-side validation for ALL rules before forwarding to user's onSubmit.
         # This mirrors Mantine behavior where onSubmit is called only if the form is valid.
-        if not self._validate_all_before_submit(result):
+        if not await self._validate_all_before_submit(result):
             return
 
         # Forward to user onSubmit if provided
@@ -283,7 +284,7 @@ class MantineForm(ps.State, Generic[TForm]):
         self._synced_values.update(values)
 
     # Channel handler for server validation (single entrypoint)
-    def _on_server_validate(self, payload: dict[str, Any]) -> None:
+    async def _on_server_validate(self, payload: dict[str, Any]) -> None:
         try:
             value = payload.get("value")
             values = payload.get("values")
@@ -322,9 +323,8 @@ class MantineForm(ps.State, Generic[TForm]):
             # Invoke server validators, stop on first error
             for spec in specs:
                 if isinstance(spec, ServerValidation):
-                    fn = spec.fn
                     try:
-                        res = fn(value, values, path)
+                        res = await spec.acheck(value, values, path)
                         if isinstance(res, str) and res:
                             self.set_field_error(path, res)
                             return
@@ -337,8 +337,8 @@ class MantineForm(ps.State, Generic[TForm]):
             # best-effort; do not crash channel
             return
 
-    # Validate all rules synchronously during submit (client and server equivalents)
-    def _validate_all_before_submit(self, values: dict[str, Any]) -> bool:
+    # Validate all rules during submit (client and server equivalents)
+    async def _validate_all_before_submit(self, values: dict[str, Any]) -> bool:
         schema = self._validation
         if not isinstance(schema, dict):
             return True
@@ -364,34 +364,38 @@ class MantineForm(ps.State, Generic[TForm]):
                     return None
             return cur
 
-        def apply_node(node: Any, path: str) -> None:
+        async def apply_node(node: Any, path: str) -> None:
             # If nested dict contains root-level rule, apply it to current path
             if isinstance(node, dict):
                 root = node.get("formRootRule")
                 if root is not None:
-                    apply_node(root, path)
+                    await apply_node(root, path)
                 for k, v in node.items():
                     if k == "formRootRule":
                         continue
-                    apply_node(v, join(path, k))
+                    await apply_node(v, join(path, k))
                 return
             # List of specs
             if isinstance(node, list):
                 for spec in node:
-                    apply_node(spec, path)
+                    await apply_node(spec, path)
                 return
             # Single validator
             if isinstance(node, Validator):
                 try:
                     value = get_value_at_path(values, path)
-                    res = node.check(value, values, path)
+                    # Prefer async if available
+                    if isinstance(node, AsyncValidator):
+                        res = await node.acheck(value, values, path)
+                    else:
+                        res = node.check(value, values, path)
                     if isinstance(res, str) and res:
                         errors[path] = res
                 except Exception:
                     errors[path] = "Validation failed"
                 return
 
-        apply_node(schema, "")
+        await apply_node(schema, "")
 
         if errors:
             self.set_errors(errors)

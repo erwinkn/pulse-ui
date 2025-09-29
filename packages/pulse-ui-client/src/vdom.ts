@@ -31,7 +31,8 @@ export type UpdateType =
   | "remove"
   | "replace"
   | "update_props"
-  | "move";
+  | "move"
+  | "update_callbacks";
 
 export interface VDOMUpdateBase {
   type: UpdateType;
@@ -71,12 +72,21 @@ export interface MoveUpdate extends VDOMUpdateBase {
   };
 }
 
+export interface UpdateCallbacksUpdate extends VDOMUpdateBase {
+  type: "update_callbacks";
+  data: {
+    add?: string[]; // full callback keys like "0.1.onClick"
+    remove?: string[];
+  };
+}
+
 export type VDOMUpdate =
   | InsertUpdate
   | RemoveUpdate
   | ReplaceUpdate
   | UpdatePropsUpdate
-  | MoveUpdate;
+  | MoveUpdate
+  | UpdateCallbacksUpdate;
 
 // Utility functions for working with the UI tree structure
 export function isElementNode(node: VDOMNode): node is VDOMElement {

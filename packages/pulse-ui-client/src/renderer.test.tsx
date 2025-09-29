@@ -9,10 +9,15 @@ function childrenArray(el: React.ReactElement): React.ReactNode[] {
 }
 
 describe("applyReactTreeUpdates", () => {
-  function makeRenderer() {
+  function makeRenderer(initialCallbacks: string[] = []) {
     const invokeCallback = vi.fn();
     const client: any = { invokeCallback };
-    const renderer = new VDOMRenderer(client, "/test", {});
+    const renderer = new VDOMRenderer(
+      client,
+      "/test",
+      {},
+      initialCallbacks
+    );
     return { renderer, invokeCallback };
   }
 
@@ -41,6 +46,15 @@ describe("applyReactTreeUpdates", () => {
     expect(kids[0]).toBe("B");
   });
 
+  it("hydrates callbacks from initial map", () => {
+    const { renderer, invokeCallback } = makeRenderer(["onClick"]);
+    const tree = renderer.renderNode({ tag: "button" });
+    const button = tree as React.ReactElement;
+    expect(typeof (button.props as any).onClick).toBe("function");
+    (button.props as any).onClick("value");
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+  });
+
   it("updates root props and maps callbacks", () => {
     const { renderer, invokeCallback } = makeRenderer();
     const initialVDOM: VDOMNode = { tag: "div", children: [] };
@@ -49,7 +63,12 @@ describe("applyReactTreeUpdates", () => {
       {
         type: "update_props",
         path: "",
-        data: { set: { id: "root", onClick: "$$fn:cb" } },
+        data: { set: { id: "root" } },
+      },
+      {
+        type: "update_callbacks",
+        path: "",
+        data: { add: ["onClick"] },
       },
     ];
     tree = applyUpdates(tree, ops, renderer);
@@ -57,7 +76,7 @@ describe("applyReactTreeUpdates", () => {
     expect((root.props as any).id).toBe("root");
     expect(typeof (root.props as any).onClick).toBe("function");
     (root.props as any).onClick(123);
-    expect(invokeCallback).toHaveBeenCalledWith("/test", "cb", [123]);
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", [123]);
   });
 
   it("replaces a nested child via path", () => {
@@ -85,7 +104,7 @@ describe("applyReactTreeUpdates", () => {
     expect(leafChildren[0]).toBe("B");
   });
 
-  it.only("inserts and removes children at nested parent path", () => {
+  it("inserts and removes children at nested parent path", () => {
     const { renderer } = makeRenderer();
     const initialVDOM: VDOMNode = {
       tag: "div",
@@ -163,5 +182,33 @@ describe("applyReactTreeUpdates", () => {
     const kids = childrenArray(p0) as React.ReactElement[];
     const texts = kids.map((k) => childrenArray(k)[0]);
     expect(texts).toEqual(["B", "A", "C"]);
+  });
+
+  it("applies nested callback additions via update", () => {
+    const { renderer, invokeCallback } = makeRenderer();
+    const initialVDOM: VDOMNode = {
+      tag: "div",
+      children: [
+        {
+          tag: "div",
+          children: [{ tag: "button", props: { id: "btn" }, children: ["X"] }],
+        },
+      ],
+    };
+    let tree = renderer.renderNode(initialVDOM);
+    const ops: VDOMUpdate[] = [
+      {
+        type: "update_callbacks",
+        path: "",
+        data: { add: ["0.0.onClick"] },
+      },
+    ];
+    tree = applyUpdates(tree, ops, renderer);
+    const root = tree as React.ReactElement;
+    const innerDiv = childrenArray(root)[0] as React.ReactElement;
+    const button = childrenArray(innerDiv)[0] as React.ReactElement;
+    expect(typeof (button.props as any).onClick).toBe("function");
+    (button.props as any).onClick();
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "0.0.onClick", []);
   });
 });

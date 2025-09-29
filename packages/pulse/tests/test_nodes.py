@@ -421,17 +421,16 @@ class TestFromVDOM:
             "key": "k1",
             "props": {
                 "type": "button",
-                "onClick": "$$fn:0.onClick",
             },
             "children": ["Click"],
         }
 
         onClick = lambda: None  # noqa: E731
-        callbacks = {"0.onClick": Callback(onClick, 0)}
+        callbacks = {"onClick": Callback(onClick, 0)}
 
         node = Node.from_vdom(vdom, callbacks)
         assert isinstance(node, Node)
-        # onClick placeholder should be removed
+        # onClick should be restored from callbacks registry
         assert node.props == {"type": "button", "onClick": onClick}
         assert node.key == "k1"
         assert_node_equal(

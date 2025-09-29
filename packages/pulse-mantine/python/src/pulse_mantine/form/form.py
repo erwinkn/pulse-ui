@@ -13,7 +13,7 @@ from typing import (
 import json
 import pulse as ps
 from pulse.serializer_v3 import deserialize
-from pulse.helpers import call_flexible, create_task
+from pulse.helpers import call_flexible, create_task, maybe_await
 from pulse.reactive_extensions import ReactiveDict
 
 from .internal import FormInternal, FormMode
@@ -128,7 +128,7 @@ class MantineForm(ps.State, Generic[TForm]):
 
         # Forward to user onSubmit if provided
         if self._on_submit is not None:
-            call_flexible(self._on_submit, result)  # pyright: ignore[reportArgumentType]
+            await maybe_await(call_flexible(self._on_submit, result))  # pyright: ignore[reportArgumentType]
         else:
             print("Received form data (reshaped):", result)
 

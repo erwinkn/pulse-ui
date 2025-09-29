@@ -235,7 +235,7 @@ class RenderSession:
         initial message instead of sending over a socket.
 
         Returns a dict:
-          { "type": "vdom_init", "vdom": VDOM } or
+          { "type": "vdom_init", "vdom": VDOM, "callbacks": list[str] } or
           { "type": "navigate_to", "path": str, "replace": bool }
         """
         # If already mounted (e.g., repeated prerender), do nothing special.
@@ -244,8 +244,12 @@ class RenderSession:
             # expect initial mount. Return current tree as a full VDOM.
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                vdom = mount.root.render_vdom()
-            return {"type": "vdom_init", "vdom": vdom}
+                vdom, callbacks = mount.root.render_vdom()
+            return {
+                "type": "vdom_init",
+                "vdom": vdom,
+                "callbacks": sorted(callbacks.keys()),
+            }
 
         captured: dict | None = None
 
@@ -256,7 +260,11 @@ class RenderSession:
                 return
             mtype = msg.get("type") if isinstance(msg, dict) else None
             if mtype == "vdom_init" and msg.get("path") == path:
-                captured = {"type": "vdom_init", "vdom": msg.get("vdom")}
+                captured = {
+                    "type": "vdom_init",
+                    "vdom": msg.get("vdom"),
+                    "callbacks": msg.get("callbacks", []),
+                }
             elif mtype == "navigate_to":
                 captured = {
                     "type": "navigate_to",
@@ -278,8 +286,12 @@ class RenderSession:
         if captured is None:
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                vdom = mount.root.render_vdom()
-            return {"type": "vdom_init", "vdom": vdom}
+                vdom, callbacks = mount.root.render_vdom()
+            return {
+                "type": "vdom_init",
+                "vdom": vdom,
+                "callbacks": sorted(callbacks.keys()),
+            }
 
         return captured
 
@@ -305,7 +317,8 @@ class RenderSession:
     def render(self, path: str, route_info: Optional[RouteInfo] = None):
         mount = self.create_route_mount(path, route_info)
         with PulseContext.update(route=mount.route):
-            return mount.root.render_vdom()
+            vdom, _ = mount.root.render_vdom()
+            return vdom
 
     def rerender(self, path: str):
         mount = self.get_route_mount(path)
@@ -329,9 +342,14 @@ class RenderSession:
             with PulseContext.update(session=session, render=self, route=mount.route):
                 try:
                     if mount.root.render_count == 0:
-                        vdom = mount.root.render_vdom()
+                        vdom, callbacks = mount.root.render_vdom()
                         self.send(
-                            ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+                            ServerInitMessage(
+                                type="vdom_init",
+                                path=path,
+                                vdom=vdom,
+                                callbacks=sorted(callbacks.keys()),
+                            )
                         )
                     else:
                         result = mount.root.render_diff()

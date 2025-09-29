@@ -10,6 +10,7 @@ export interface ServerInitMessage {
   type: "vdom_init";
   path: string;
   vdom: VDOM;
+  callbacks: string[];
 }
 
 export interface ServerUpdateMessage {

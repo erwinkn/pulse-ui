@@ -255,7 +255,7 @@ You can use them for:
 - Resetting the form or manually triggering validation.
 - Creating dynamic forms with lists of items that can be added, reordered, or removed.
 
-### Client-server synchronization
+### Dynamic forms
 
 Speaking of dynamic forms, we're still missing something for the most complex use cases.
 
@@ -273,7 +273,17 @@ Once this synchronization is set up, form actions like `MantineForm.insert_list_
 
 You can find a detailed example in [examples/pulse-mantine/04-dynamic-form.py](../../examples/pulse-mantine/04-dynamic-form.py).
 
-Note that client-server syncrhonization works even with the [uncontrolled mode](https://mantine.dev/form/uncontrolled/), but you will likely have to ensure your dynamic formitems have unique keys, otherwise you may see inputs getting mixed up when you add/remove/reorder form items. You may also run into the classic React error "A component is changing an uncontrolled input to be controlled." depending on your use case.
+### Uncontrolled forms
+
+For large forms, Mantine recommends to use [uncontrolled mode](https://mantine.dev/form/uncontrolled/), the default mode being _controlled_.
+
+This is difference impacts how the form works in React:
+- Controlled: the form values live in React state and are passed to the input elements using `value=...`. On every update, the React state is updated, the React components rerender, and the inputs receive new values. If your form is big and the user's computer is slow, having React rerender on every keystroke may slow down the form and degrade user experience.
+- Uncontrolled: the form values are not kept in React state and the inputs do not receive `value=...`. Blur and change events can still be handled for validation, but this avoids React rerenders and is generally much more performant.
+
+All the features described above should work for both controlled and uncontrolled forms, including client-server synchronization. 
+
+Dynamic forms will require a little special attention, as all your dynamic form items should have unique keys. Otherwise, you may see inputs getting mixed up when you add/remove/reorder form items.
 
 ## Dates
 

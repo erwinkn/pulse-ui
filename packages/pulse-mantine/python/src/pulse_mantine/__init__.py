@@ -445,6 +445,7 @@ _EXPORTS: dict[str, str] = {
     "Transition": "pulse_mantine.core.misc.transition",
     "TransitionTimingFunction": "pulse_mantine.core.layout.appshell",
     "Tree": "pulse_mantine.core.navigation.tree",
+    "TreeState": "pulse_mantine.core.navigation.tree",
     "Typography": "pulse_mantine.core.typography.typography",
     "UnstyledButton": "pulse_mantine.core.buttons.unstyled_button",
     "Validation": "pulse_mantine.form.validators",

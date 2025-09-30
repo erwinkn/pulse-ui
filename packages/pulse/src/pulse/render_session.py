@@ -145,6 +145,7 @@ class RenderSession:
             fn, n_params = cb.fn, cb.n_args
             res = fn(*args[:n_params])
             if iscoroutine(res):
+
                 def _on_task_done(t: asyncio.Task):
                     try:
                         t.result()
@@ -244,11 +245,12 @@ class RenderSession:
             # expect initial mount. Return current tree as a full VDOM.
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                vdom, callbacks = mount.root.render_vdom()
+                vdom, callbacks, render_props = mount.root.render_vdom()
             return {
                 "type": "vdom_init",
                 "vdom": vdom,
                 "callbacks": sorted(callbacks.keys()),
+                "render_props": sorted(render_props),
             }
 
         captured: dict | None = None
@@ -264,6 +266,7 @@ class RenderSession:
                     "type": "vdom_init",
                     "vdom": msg.get("vdom"),
                     "callbacks": msg.get("callbacks", []),
+                    "render_props": msg.get("render_props", []),
                 }
             elif mtype == "navigate_to":
                 captured = {
@@ -286,11 +289,12 @@ class RenderSession:
         if captured is None:
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                vdom, callbacks = mount.root.render_vdom()
+                vdom, callbacks, render_props = mount.root.render_vdom()
             return {
                 "type": "vdom_init",
                 "vdom": vdom,
                 "callbacks": sorted(callbacks.keys()),
+                "render_props": sorted(render_props),
             }
 
         return captured
@@ -317,7 +321,7 @@ class RenderSession:
     def render(self, path: str, route_info: Optional[RouteInfo] = None):
         mount = self.create_route_mount(path, route_info)
         with PulseContext.update(route=mount.route):
-            vdom, _ = mount.root.render_vdom()
+            vdom, *_ = mount.root.render_vdom()
             return vdom
 
     def rerender(self, path: str):
@@ -342,13 +346,14 @@ class RenderSession:
             with PulseContext.update(session=session, render=self, route=mount.route):
                 try:
                     if mount.root.render_count == 0:
-                        vdom, callbacks = mount.root.render_vdom()
+                        vdom, callbacks, render_props = mount.root.render_vdom()
                         self.send(
                             ServerInitMessage(
                                 type="vdom_init",
                                 path=path,
                                 vdom=vdom,
                                 callbacks=sorted(callbacks.keys()),
+                                render_props=sorted(render_props),
                             )
                         )
                     else:

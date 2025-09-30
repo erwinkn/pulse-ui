@@ -1,10 +1,21 @@
+# Problems with the current reconciler:
+# - We only have RenderNode for Pulse components. However in React, if you swap
+#   two keyed elements, no matter what they are, that include stateful children,
+#   the children's state is preserved. React properly moves around the full
+#   tree. We could introduce a RenderNode for each element in the tree, but that
+#   seems quite heavy. I think a better algorithm is needed.
+# - We have very suboptimal keyed diffing, we should implement a Vue or morphdom
+#   style longest increasing subsequence (LIS) algorithm.
+# IMO I should probably read morphdom's source code. 
 from dataclasses import dataclass
 import warnings
 import inspect
 from typing import (
+    Any,
     Callable,
     Iterable,
     Literal,
+    NamedTuple,
     Optional,
     Sequence,
     TypedDict,
@@ -68,6 +79,17 @@ class UpdateCallbacksOperation(TypedDict):
     data: UpdateCallbacksDelta
 
 
+class UpdateRenderPropsDelta(TypedDict, total=False):
+    add: list[str]
+    remove: list[str]
+
+
+class UpdateRenderPropsOperation(TypedDict):
+    type: Literal["update_render_props"]
+    path: str
+    data: UpdateRenderPropsDelta
+
+
 class MoveOperationData(TypedDict):
     from_index: int
     to_index: int
@@ -86,6 +108,7 @@ VDOMOperation = Union[
     UpdatePropsOperation,
     MoveOperation,
     UpdateCallbacksOperation,
+    UpdateRenderPropsOperation,
 ]
 
 
@@ -94,6 +117,7 @@ class RenderDiff:
     tree: Element
     render_count: int
     callbacks: Callbacks
+    render_props: set[str]
     ops: list[VDOMOperation]
 
 
@@ -101,10 +125,12 @@ class RenderRoot:
     render_tree: "RenderNode"
     render_count: int
     callbacks: Callbacks
+    render_props: set[str]
 
     def __init__(self, fn: Callable[[], Element]) -> None:
         self.render_tree = RenderNode(fn)
         self.callbacks = {}
+        self.render_props = set()
         self.effect = None
         self.render_count = 0
         pass
@@ -118,33 +144,58 @@ class RenderRoot:
             render_parent=self.render_tree, old_tree=last_render, new_tree=new_tree
         )
         self.render_tree.last_render = new_tree
-        prev_keys = set(self.callbacks.keys())
-        new_keys = set(resolver.callbacks.keys())
-        added = sorted(new_keys - prev_keys)
-        removed = sorted(prev_keys - new_keys)
+        prev_cb_keys = set(self.callbacks.keys())
+        new_cb_keys = set(resolver.callbacks.keys())
+        cb_added = sorted(new_cb_keys - prev_cb_keys)
+        cb_removed = sorted(prev_cb_keys - new_cb_keys)
+
+        prev_rp_keys = self.render_props
+        new_rp_keys = resolver.render_props
+        rp_added = sorted(new_rp_keys - prev_rp_keys)
+        rp_removed = sorted(prev_rp_keys - new_rp_keys)
+
         ops = list(resolver.operations)
-        if added or removed:
-            delta: UpdateCallbacksDelta = {}
-            if added:
-                delta["add"] = added
-            if removed:
-                delta["remove"] = removed
+
+        # Add render_props update operation BEFORE other operations
+        if rp_added or rp_removed:
+            rp_delta: UpdateRenderPropsDelta = {}
+            if rp_added:
+                rp_delta["add"] = rp_added
+            if rp_removed:
+                rp_delta["remove"] = rp_removed
+            ops.insert(
+                0,
+                UpdateRenderPropsOperation(
+                    type="update_render_props", path="", data=rp_delta
+                ),
+            )
+
+        # Add callbacks update operation
+        if cb_added or cb_removed:
+            cb_delta: UpdateCallbacksDelta = {}
+            if cb_added:
+                cb_delta["add"] = cb_added
+            if cb_removed:
+                cb_delta["remove"] = cb_removed
             ops.insert(
                 0,
                 UpdateCallbacksOperation(
-                    type="update_callbacks", path="", data=delta
-                )
+                    type="update_callbacks", path="", data=cb_delta
+                ),
             )
+
         self.callbacks = resolver.callbacks
+        self.render_props = resolver.render_props
         return RenderDiff(
             tree=new_tree,
             render_count=self.render_count,
             callbacks=resolver.callbacks,
+            render_props=resolver.render_props,
             ops=ops,
         )
 
-    def render_vdom(self) -> tuple[VDOM, list[str]]:
-        """One-shot render to VDOM + callbacks, without mounting an Effect."""
+    def render_vdom(self) -> tuple[VDOM, Callbacks, set[str]]:
+        """One-shot render to VDOM + callbacks + render_props, without mounting an Effect."""
         self.render_count += 1
         resolver = Resolver()
         # Fresh render of the root component into a VDOM tree
@@ -154,7 +205,8 @@ class RenderRoot:
         )
         self.render_tree.last_render = normalized
         self.callbacks = resolver.callbacks
-        return vdom, self.callbacks
+        self.render_props = resolver.render_props
+        return vdom, self.callbacks, self.render_props
 
     def unmount(self) -> None:
         if self.effect is not None:
@@ -191,9 +243,16 @@ class RenderNode:
             child.unmount()
 
 
+class DiffPropsResult(NamedTuple):
+    normalized: Props
+    delta_add: Props
+    delta_remove: set[str]
+
+
 class Resolver:
     def __init__(self) -> None:
         self.callbacks: Callbacks = {}
+        self.render_props: set[str] = set()
         self.operations: list[VDOMOperation] = []
 
     def reconcile_node(
@@ -232,35 +291,20 @@ class Resolver:
         # At this point, we are dealing with the same node. We need to diff its props + its children
         if isinstance(old_tree, Node):
             assert isinstance(new_tree, Node)
-            # We want to capture callbacks regardless, in case the function references have changed
-            new_props = (
-                self._capture_callbacks(new_tree.props, path=path)
-                if new_tree.props
-                else None
+            # Sanitize props (capture callbacks & render props in single pass)
+            props_diff = self.diff_props(
+                path=path,
+                old_props=old_tree.props or {},
+                new_props=new_tree.props or {},
+                render_parent=render_parent,
+                relative_path=relative_path,
             )
-            # Compute fine-grained props delta: send only changed/new and removed
-            old_props = cast(Props, old_tree.props or {})
-            new_props_dict = cast(Props, new_props or {})
-
-            set_changes: Props = {}
-            removed_keys: list[str] = []
-
-            # Detect new and modified keys
-            for k, v in new_props_dict.items():
-                if (k not in old_props) or (old_props.get(k) != v):
-                    set_changes[k] = v
-
-            # Detect removed keys
-            for k in old_props.keys():
-                if k not in new_props_dict:
-                    removed_keys.append(k)
-
-            if set_changes or removed_keys:
-                delta: UpdatePropsDelta = {}
-                if set_changes:
-                    delta["set"] = set_changes
-                if removed_keys:
-                    delta["remove"] = removed_keys
+            delta: UpdatePropsDelta = {}
+            if props_diff.delta_add:
+                delta["set"] = props_diff.delta_add
+            if props_diff.delta_remove:
+                delta["remove"] = sorted(props_diff.delta_remove)
+            if delta:
                 self.operations.append(
                     UpdatePropsOperation(type="update_props", path=path, data=delta)
                 )
@@ -288,7 +332,7 @@ class Resolver:
                 )
             return Node(
                 tag=new_tree.tag,
-                props=new_props or None,
+                props=props_diff.normalized or None,
                 children=normalized_children or None,
                 key=new_tree.key,
             )
@@ -501,12 +545,20 @@ class Resolver:
             vdom_node: VDOMNode = {"tag": node.tag}
             if node.key:
                 vdom_node["key"] = node.key
+            normalized_props = node.props
             if node.props:
-                sanitized = self._capture_callbacks(node.props, path=path)
-                if sanitized:
-                    vdom_node["props"] = sanitized
+                diff_props = self.diff_props(
+                    path=path,
+                    old_props={},
+                    new_props=node.props,
+                    render_parent=render_parent,
+                    relative_path=relative_path,
+                )
+                if diff_props.delta_add:
+                    vdom_node["props"] = diff_props.delta_add
+                normalized_props = diff_props.normalized or None
             # Preserve lazy flag if present
-            if node.lazy is not None:
+            if node.lazy:
                 vdom_node["lazy"] = True
             normalized_children: list[Element] | None = None
             if node.children:
@@ -528,37 +580,133 @@ class Resolver:
                 vdom_node["children"] = v_children
             normalized_node = Node(
                 tag=node.tag,
-                props=vdom_node.get("props") or None,
+                props=normalized_props,
                 children=normalized_children or None,
                 key=node.key,
-                lazy=vdom_node.get("lazy"),
+                lazy=node.lazy,
             )
             return vdom_node, normalized_node
         else:
             return node, node
 
-    def _capture_callbacks(self, props: Props, path: str) -> Props:
-        # Only copy the props if a callable prop is found
-        has_callable = False
-        path_prefix = (path + ".") if path else ""
-        sanitized: Props | None = None
+    def diff_props(
+        self,
+        path: str,
+        old_props: Props,
+        new_props: Props,
+        render_parent: RenderNode,
+        relative_path: str,
+    ):
+        added: Props = {}
+        normalized: Props | None = None
+        removed = set(old_props.keys()) - set(new_props.keys())
 
-        for key, value in props.items():
+        for key, value in new_props.items():
+            old_value = old_props.get(key)
+            prop_path = join_path(path, key)
+            prop_relative = join_path(relative_path, key)
+            # Callback
             if callable(value):
-                has_callable = True
-                if sanitized is None:
-                    sanitized = props.copy()
-                sanitized.pop(key, None)
-                callback_key = f"{path_prefix}{key}"
-                self.callbacks[callback_key] = Callback(
+                if normalized is None:
+                    normalized = new_props.copy()
+                normalized.pop(key)
+                self.callbacks[prop_path] = Callback(
                     fn=value, n_args=len(inspect.signature(value).parameters)
                 )
-            elif sanitized is not None:
-                sanitized[key] = value
+                continue
 
-        if has_callable:
-            return sanitized or {}
-        return props
+            # Render prop (Pulse element)
+            if isinstance(value, (Node, ComponentNode)):
+                if normalized is None:
+                    normalized = new_props.copy()
+
+                self.render_props.add(prop_path)
+                if isinstance(old_value, (Node, ComponentNode)):
+                    normalized[key] = self.reconcile_node(
+                        render_parent=render_parent,
+                        old_tree=old_value,
+                        new_tree=value,
+                        path=prop_path,
+                        relative_path=prop_relative,
+                    )
+                else:
+                    self._unmount_render_subtree(render_parent, prop_relative)
+                    vdom_value, normalized_value = self.render_tree(
+                        render_parent=render_parent,
+                        node=value,
+                        path=prop_path,
+                        relative_path=prop_relative,
+                    )
+                    normalized[key] = normalized_value
+                    added[key] = vdom_value
+                continue
+
+            # Regular prop
+            if isinstance(old_value, (Node, ComponentNode)):
+                self._unmount_render_subtree(render_parent, prop_relative)
+            if key not in old_props or value != old_props[key]:
+                added[key] = value
+            # No need to set normalized[key] = value as the value will be copied over through new_props.copy() if normalized is instantiated
+
+        for key in removed:
+            old_value = old_props.get(key)
+            if isinstance(old_value, (Node, ComponentNode)):
+                self._unmount_render_subtree(
+                    render_parent, join_path(relative_path, key)
+                )
+
+        if normalized is not None:
+            normalized_props = normalized
+        else:
+            normalized_props = new_props
+
+        return DiffPropsResult(
+            normalized=normalized_props, delta_add=added, delta_remove=removed
+        )
+
+    def _capture_callbacks(self, props: Props, path: str) -> Props:
+        if not props:
+            return props
+        sanitized: Props | None = None
+        prefix = f"{path}." if path else ""
+        for key, value in props.items():
+            if not callable(value):
+                continue
+            if sanitized is None:
+                sanitized = props.copy()
+            sanitized.pop(key, None)
+            callback_key = f"{prefix}{key}"
+            self.callbacks[callback_key] = Callback(
+                fn=value, n_args=len(inspect.signature(value).parameters)
+            )
+        if sanitized is None:
+            return props
+        return sanitized
+
+    def _values_equal(self, left: Any, right: Any) -> bool:
+        if left is right:
+            return True
+        if left is None or right is None:
+            return left == right
+        if isinstance(left, (Node, ComponentNode)) or isinstance(
+            right, (Node, ComponentNode)
+        ):
+            return False
+        return left == right
+
+    def _unmount_render_subtree(self, parent: RenderNode, prefix: str) -> None:
+        if not prefix:
+            # Defensive: never clear the whole tree from here
+            return
+        keys_to_remove = [
+            key
+            for key in list(parent.children.keys())
+            if key == prefix or key.startswith(f"{prefix}.")
+        ]
+        for key in keys_to_remove:
+            render_child = parent.children.pop(key, None)
+            if render_child is not None:
+                render_child.unmount()
 
     # --- Internal helpers -----------------------------------------------------
 
@@ -609,6 +757,7 @@ def same_node(left: Element, right: Element):
         return left.fn == right.fn and left.key == right.key
 
     return False
+
 
 # Longest increasing subsequence algorithm
 def lis(seq: list[int]) -> list[int]:

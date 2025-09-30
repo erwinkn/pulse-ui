@@ -38,15 +38,19 @@ class RouteTemplate:
 
     def add_components(self, components: Sequence[ReactComponent]) -> None:
         for comp in components:
+            print(f"Adding component {comp.name} from {comp.src}")
             # Derive base symbol and property for dotted component names if prop not explicitly given
             base_name = comp.name
             prop_name = comp.prop
             if "." in base_name and prop_name is None:
                 base_name, prop_name = base_name.split(".", 1)
 
+            is_lazy = bool(getattr(comp, "lazy", False))
+
             # For SSR-capable components, import the symbol and compute expression
+            ident: str | None = None
             ssr_expr: str | None = None
-            if not getattr(comp, "lazy", False):
+            if not is_lazy:
                 if comp.is_default:
                     ident = self._imports.import_(comp.src, base_name, is_default=True)
                 else:
@@ -68,10 +72,39 @@ class RouteTemplate:
                 else:
                     dyn_selector = f"({{ default: m.{base_name} }})"
 
-            # Last write wins for duplicate keys
-            self._components_by_key[expr_key] = {
-                "key": expr_key,
-                "lazy": bool(getattr(comp, "lazy", False)),
+            key_to_use = expr_key
+            existing_entry = self._components_by_key.get(expr_key)
+            if existing_entry:
+                same_src = existing_entry["dynamic_src"] == comp.src
+                if same_src:
+                    # Prefer non-lazy definition if we previously stored a lazy placeholder
+                    if existing_entry["lazy"] and not is_lazy:
+                        key_to_use = expr_key
+                    else:
+                        continue
+                else:
+                    alias_key: str | None = None
+                    if not is_lazy and ident:
+                        alias_key = f"{ident}.{prop_name}" if prop_name else ident
+                    if not alias_key:
+                        # Synthesise a stable alias by appending an index
+                        suffix = 2
+                        while True:
+                            candidate_base = f"{base_name}{suffix}"
+                            candidate_key = (
+                                f"{candidate_base}.{prop_name}"
+                                if prop_name
+                                else candidate_base
+                            )
+                            if candidate_key not in self._components_by_key:
+                                alias_key = candidate_key
+                                break
+                            suffix += 1
+                    key_to_use = alias_key
+
+            self._components_by_key[key_to_use] = {
+                "key": key_to_use,
+                "lazy": is_lazy,
                 "ssr_expr": ssr_expr,
                 "dynamic_src": comp.src,
                 "dynamic_selector": dyn_selector,

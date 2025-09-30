@@ -19,110 +19,132 @@ def _split_callback_key(key: str) -> tuple[str, str]:
     return "", key
 
 
-def _sanitize_vdom_with_callbacks(node):
-    callback_map: dict[str, set[str]] = defaultdict(set)
 
-    def visit(value):
+def _sanitize_vdom_with_callbacks(node):
+    callback_keys: set[str] = set()
+
+    def join_path(prefix: str, part: str | int) -> str:
+        part_str = str(part)
+        return f"{prefix}.{part_str}" if prefix else part_str
+
+    def register(path_prefix: str, entry: str) -> None:
+        if not entry:
+            return
+        if "." in entry:
+            callback_keys.add(entry)
+        else:
+            callback_keys.add(join_path(path_prefix, entry))
+
+    def visit(value, path: str):
         if isinstance(value, (str, int, float)) or value is None or isinstance(value, bool):
             return value
         if isinstance(value, list):
-            return [visit(child) for child in value]
+            return [visit(item, path) for item in value]
         if isinstance(value, dict):
-            if "tag" not in value:
-                return {k: visit(v) for k, v in value.items()}
-            sanitized: dict = {"tag": value["tag"]}
-            if "key" in value:
-                sanitized["key"] = value["key"]
-            if "lazy" in value:
-                sanitized["lazy"] = value["lazy"]
-            props = value.get("props") or {}
-            sanitized_props: dict = {}
-            for prop_key, prop_value in props.items():
-                if isinstance(prop_value, str) and prop_value.startswith("$$fn:"):
-                    callback_key = prop_value[len("$$fn:") :]
-                    path, name = _split_callback_key(callback_key)
-                    callback_map[path].add(name)
-                else:
-                    sanitized_props[prop_key] = visit(prop_value)
-            if sanitized_props:
-                sanitized["props"] = sanitized_props
-            children = value.get("children")
-            if children is not None:
-                sanitized_children = [visit(child) for child in children]
-                sanitized["children"] = sanitized_children
-            return sanitized
+            working = deepcopy(value)
+            callbacks = working.pop("__callbacks__", None)
+            if callbacks:
+                for item in callbacks:
+                    register(path, item)
+
+            if "tag" in working:
+                sanitized: dict = {"tag": working["tag"]}
+                if "key" in working:
+                    sanitized["key"] = working["key"]
+                if "lazy" in working:
+                    sanitized["lazy"] = working["lazy"]
+
+                props = working.get("props") or {}
+                sanitized_props: dict[str, object] = {}
+                for prop_key, prop_value in props.items():
+                    if isinstance(prop_value, str) and prop_value.startswith("$$fn:"):
+                        register("", prop_value[len("$$fn:") :])
+                        continue
+                    prop_path = join_path(path, prop_key)
+                    sanitized_props[prop_key] = visit(prop_value, prop_path)
+                if sanitized_props:
+                    sanitized["props"] = sanitized_props
+
+                children = working.get("children")
+                if children is not None:
+                    sanitized_children = []
+                    for idx, child in enumerate(children):
+                        child_path = join_path(path, idx)
+                        sanitized_children.append(visit(child, child_path))
+                    sanitized["children"] = sanitized_children
+                return sanitized
+
+            return {k: visit(v, path) for k, v in working.items()}
+
         return value
 
-    sanitized_vdom = visit(node)
-    callback_keys: list[str] = []
-    for path, props in sorted(callback_map.items()):
-        for prop in sorted(props):
-            callback_keys.append(f"{path}.{prop}" if path else prop)
-    return sanitized_vdom, callback_keys
+    sanitized_vdom = visit(deepcopy(node), "")
+    return sanitized_vdom, sorted(callback_keys)
 
 
-def assert_vdom_with_callbacks(actual_vdom, resolver: Resolver, expected):
-    sanitized_expected, expected_callbacks = _sanitize_vdom_with_callbacks(expected)
-    assert actual_vdom == sanitized_expected
+def assert_vdom_with_callbacks(actual_vdom, resolver: Resolver, expected, *, expected_callbacks=None):
+    actual_sanitized, _ = _sanitize_vdom_with_callbacks(actual_vdom)
+    expected_sanitized, callbacks_from_expected = _sanitize_vdom_with_callbacks(expected)
+    assert actual_sanitized == expected_sanitized
+
+    expected_callback_keys = set(callbacks_from_expected)
+    if expected_callbacks:
+        expected_callback_keys.update(expected_callbacks)
+
     actual_keys = sorted(resolver.callbacks.keys())
-    assert actual_keys == expected_callbacks
+    assert actual_keys == sorted(expected_callback_keys)
 
 
 def _transform_expected_ops(expected_ops):
     sanitized_ops: list[dict] = []
     callback_adds: set[str] = set()
     callback_removes: set[str] = set()
-    known_callbacks: dict[str, set[str]] = defaultdict(set)
 
     for op in expected_ops:
-        op_type = op["type"]
+        op_copy = deepcopy(op)
+        callback_adds.update(op_copy.pop("__callback_adds__", []))
+        callback_removes.update(op_copy.pop("__callback_removes__", []))
+
+        op_type = op_copy["type"]
         if op_type in {"replace", "insert"}:
-            sanitized_data, callback_keys = _sanitize_vdom_with_callbacks(op["data"])
-            sanitized_op = {"type": op_type, "path": op["path"], "data": sanitized_data}
+            sanitized_data, callback_keys = _sanitize_vdom_with_callbacks(op_copy["data"])
+            sanitized_op: dict[str, object] = {
+                "type": op_type,
+                "path": op_copy.get("path", ""),
+                "data": sanitized_data,
+            }
             if op_type == "insert":
-                sanitized_op["idx"] = op["idx"]
+                sanitized_op["idx"] = op_copy["idx"]
             sanitized_ops.append(sanitized_op)
-            for key in callback_keys:
-                path, prop = _split_callback_key(key)
-                callback_adds.add(key)
-                known_callbacks[path].add(prop)
+            callback_adds.update(callback_keys)
         elif op_type == "update_props":
-            data = op["data"]
+            data = op_copy["data"]
             sanitized_data: dict[str, dict | list] = {}
             if "set" in data:
-                sanitized_set: dict = {}
+                sanitized_set: dict[str, object] = {}
                 for key, value in data["set"].items():
-                    if isinstance(value, str) and value.startswith("$$fn:"):
-                        path, name = _split_callback_key(value[len("$$fn:") :])
-                        callback_adds.add(f"{path}.{name}" if path else name)
-                        known_callbacks[path].add(name)
+                    if isinstance(value, dict) and "tag" in value:
+                        sanitized_value, callback_keys = _sanitize_vdom_with_callbacks(value)
+                        sanitized_set[key] = sanitized_value
+                        callback_adds.update(callback_keys)
                     else:
                         sanitized_set[key] = value
                 if sanitized_set:
                     sanitized_data["set"] = sanitized_set
             if "remove" in data:
                 sanitized_data["remove"] = data["remove"]
-                path = op["path"] or ""
-                for key in data["remove"]:
-                    if key in known_callbacks[path]:
-                        callback_removes.add(f"{path}.{key}" if path else key)
-                        known_callbacks[path].discard(key)
             if sanitized_data:
-                sanitized_ops.append(
-                    {"type": "update_props", "path": op["path"], "data": sanitized_data}
-                )
+                sanitized_ops.append({"type": "update_props", "path": op_copy["path"], "data": sanitized_data})
         else:
-            sanitized_ops.append(deepcopy(op))
+            sanitized_ops.append(op_copy)
 
     callback_ops = []
-    adds_list = sorted(callback_adds)
-    removes_list = sorted(callback_removes)
-    if adds_list or removes_list:
+    if callback_adds or callback_removes:
         data: dict[str, list[str]] = {}
-        if adds_list:
-            data["add"] = adds_list
-        if removes_list:
-            data["remove"] = removes_list
+        if callback_adds:
+            data["add"] = sorted(callback_adds)
+        if callback_removes:
+            data["remove"] = sorted(callback_removes)
         callback_ops.append({"type": "update_callbacks", "path": "", "data": data})
 
     return sanitized_ops, callback_ops
@@ -231,7 +253,7 @@ def test_render_tree_simple_component_and_callbacks():
 
     expected = {
         "tag": "button",
-        "props": {"onClick": "$$fn:onClick"},
+        "__callbacks__": ["onClick"],
         "children": ["Go"],
     }
     assert_vdom_with_callbacks(vdom, resolver, expected)
@@ -269,7 +291,7 @@ def test_render_tree_nested_components_depth_3_callbacks_and_paths():
                 "children": [
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.0.onClick"},
+                        "__callbacks__": ["0.0.onClick"],
                         "children": ["X"],
                     }
                 ],
@@ -319,11 +341,265 @@ def test_render_tree_component_with_children_kwarg_and_nested_component():
         "tag": "div",
         "props": {"id": "w"},
         "children": [
-            {"tag": "button", "props": {"onClick": "$$fn:0.onClick"}, "children": ["X"]}
+            {"tag": "button", "__callbacks__": ["0.onClick"], "children": ["X"]}
         ],
     }
     assert_vdom_with_callbacks(vdom, resolver, expected)
     assert "0.onClick" in resolver.callbacks
+
+
+# =====================
+# Render props
+# =====================
+
+
+class _RenderPropCounter(ps.State):
+    label: str
+    n: int = 0
+
+    def __init__(self, label: str):
+        self.label = label
+
+    def inc(self):
+        self.n += 1
+
+
+@ps.component
+def _render_prop_button(label: str):
+    counter = ps.states(_RenderPropCounter(label))
+
+    def handle_click():
+        counter.inc()
+
+    return ps.button(onClick=handle_click)[f"{counter.label}:{counter.n}"]
+
+
+def test_render_prop_state_preserved_and_emits_updates():
+    @ps.component
+    def Host():
+        return ps.div(render=_render_prop_button(label="A"))
+
+    root = RenderRoot(Host)
+    first = root.render_diff()
+
+    assert_ops_with_callbacks(
+        first.ops,
+        [
+            {"type": "update_render_props", "path": "", "data": {"add": ["render"]}},
+            {
+                "type": "replace",
+                "path": "",
+                "data": {
+                    "tag": "div",
+                    "props": {
+                        "render": {
+                            "tag": "button",
+                            "__callbacks__": ["render.onClick"],
+                            "children": ["A:0"],
+                        }
+                    },
+                },
+            },
+        ],
+    )
+    assert first.render_props == {"render"}
+    assert "render.onClick" in first.callbacks
+
+    first.callbacks["render.onClick"].fn()
+    second = root.render_diff()
+
+    assert_ops_with_callbacks(
+        second.ops,
+        [
+            {"type": "replace", "path": "render.0", "data": "A:1"},
+        ],
+    )
+
+    assert second.render_props == {"render"}
+
+
+def test_nested_render_props_state_updates():
+    @ps.component
+    def Inner():
+        return _render_prop_button(label="inner")
+
+    @ps.component
+    def Middle():
+        return ps.div(inner=Inner())
+
+    @ps.component
+    def Parent():
+        return ps.div(outer=Middle())
+
+    root = RenderRoot(Parent)
+    first = root.render_diff()
+
+    assert first.render_props == {"outer", "outer.inner"}
+    assert "outer.inner.onClick" in first.callbacks
+
+    assert_ops_with_callbacks(
+        first.ops,
+        [
+            {
+                "type": "update_render_props",
+                "path": "",
+                "data": {"add": ["outer", "outer.inner"]},
+            },
+            {
+                "type": "replace",
+                "path": "",
+                "data": {
+                    "tag": "div",
+                    "props": {
+                        "outer": {
+                            "tag": "div",
+                            "props": {
+                                "inner": {
+                                    "tag": "button",
+                                    "__callbacks__": ["outer.inner.onClick"],
+                                    "children": ["inner:0"],
+                                }
+                            },
+                        }
+                    },
+                },
+            },
+        ],
+    )
+
+    first.callbacks["outer.inner.onClick"].fn()
+    second = root.render_diff()
+
+    assert_ops_with_callbacks(
+        second.ops,
+        [
+            {"type": "replace", "path": "outer.inner.0", "data": "inner:1"},
+        ],
+    )
+
+    assert second.render_props == {"outer", "outer.inner"}
+
+
+@ps.react_component("Card", "@tests/Card")
+def _react_card(*children, render, key: str | None = None):
+    return None
+
+
+def test_keyed_react_component_render_prop_preserves_state():
+    order = {"keys": ["Left", "Right"]}
+
+    @ps.component
+    def List():
+        return ps.div(
+            *[
+                _react_card(key=label.lower(), render=_render_prop_button(label=label))
+                for label in order["keys"]
+            ]
+        )
+
+    root = RenderRoot(List)
+    first = root.render_diff()
+
+    assert first.render_props == {"0.render", "1.render"}
+    assert "0.render.onClick" in first.callbacks
+
+    first.callbacks["0.render.onClick"].fn()
+    second = root.render_diff()
+
+    assert_ops_with_callbacks(
+        second.ops,
+        [
+            {"type": "replace", "path": "0.render.0", "data": "Left:1"},
+        ],
+    )
+
+    assert second.render_props == {"0.render", "1.render"}
+
+    order["keys"] = ["Right", "Left"]
+    third = root.render_diff()
+
+    assert third.render_props == {"0.render", "1.render"}
+
+    assert "1.render.onClick" in third.callbacks
+    third.callbacks["1.render.onClick"].fn()
+    fourth = root.render_diff()
+
+    assert_ops_with_callbacks(
+        fourth.ops,
+        [
+            {"type": "replace", "path": "1.render.0", "data": "Left:2"},
+        ],
+    )
+
+    assert fourth.tree.children[1].props["render"].children == ["Left:2"]
+
+
+def test_render_prop_removed_and_readded_resets_state():
+    toggle = {"render": True}
+
+    @ps.component
+    def Host():
+        if toggle["render"]:
+            return ps.div(render=_render_prop_button(label="A"))
+        return ps.div()
+
+    root = RenderRoot(Host)
+    first = root.render_diff()
+    assert first.render_props == {"render"}
+    assert "render.onClick" in first.callbacks
+
+    toggle["render"] = False
+    second = root.render_diff()
+    assert_ops_with_callbacks(
+        second.ops,
+        [
+            {
+                "type": "update_render_props",
+                "path": "",
+                "data": {"remove": ["render"]},
+                "__callback_removes__": ["render.onClick"],
+            },
+            {"type": "update_props", "path": "", "data": {"remove": ["render"]}},
+        ],
+    )
+    assert second.render_props == set()
+    assert second.render_props == set()
+
+    toggle["render"] = True
+    third = root.render_diff()
+
+    assert_ops_with_callbacks(
+        third.ops,
+        [
+            {"type": "update_render_props", "path": "", "data": {"add": ["render"]}},
+            {
+                "type": "update_props",
+                "path": "",
+                "data": {
+                    "set": {
+                        "render": {
+                            "tag": "button",
+                            "__callbacks__": ["render.onClick"],
+                            "children": ["A:0"],
+                        }
+                    }
+                },
+            },
+        ],
+    )
+    assert "render.onClick" in third.callbacks
+    render_prop = third.tree.props["render"]
+    assert render_prop.children == ["A:0"]
+    third.callbacks["render.onClick"].fn()
+    fourth = root.render_diff()
+    assert_ops_with_callbacks(
+        fourth.ops,
+        [
+            {"type": "replace", "path": "render.0", "data": "A:1"},
+        ],
+    )
+    render_prop = fourth.tree.props["render"]
+    assert render_prop.children == ["A:1"]
 
 
 # =====================
@@ -349,7 +625,7 @@ def test_reconcile_initial_insert_simple_component():
             "path": "",
             "data": {
                 "tag": "button",
-                "props": {"onClick": "$$fn:onClick"},
+                "__callbacks__": ["onClick"],
                 "children": ["Go"],
             },
         }
@@ -778,7 +1054,7 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
                     {"tag": "span", "children": ["b:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["inc"],
                     },
                 ],
@@ -789,7 +1065,7 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
                     {"tag": "span", "children": ["a:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["inc"],
                     },
                 ],
@@ -814,7 +1090,7 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
                     {"tag": "span", "children": ["b:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["inc"],
                     },
                 ],
@@ -825,7 +1101,7 @@ def test_keyed_component_move_preserves_state_and_no_cleanup():
                     {"tag": "span", "children": ["a:2"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["inc"],
                     },
                 ],
@@ -894,7 +1170,7 @@ def test_keyed_nested_components_move_preserves_nested_state():
                                 {"tag": "span", "children": ["y:0"]},
                                 {
                                     "tag": "button",
-                                    "props": {"onClick": "$$fn:0.0.1.onClick"},
+                                    "__callbacks__": ["0.0.1.onClick"],
                                     "children": ["+"],
                                 },
                             ],
@@ -910,7 +1186,7 @@ def test_keyed_nested_components_move_preserves_nested_state():
                                 {"tag": "span", "children": ["x:1"]},
                                 {
                                     "tag": "button",
-                                    "props": {"onClick": "$$fn:1.0.1.onClick"},
+                                    "__callbacks__": ["1.0.1.onClick"],
                                     "children": ["+"],
                                 },
                             ],
@@ -939,7 +1215,7 @@ def test_keyed_nested_components_move_preserves_nested_state():
                                 {"tag": "span", "children": ["y:0"]},
                                 {
                                     "tag": "button",
-                                    "props": {"onClick": "$$fn:0.0.1.onClick"},
+                                    "__callbacks__": ["0.0.1.onClick"],
                                     "children": ["+"],
                                 },
                             ],
@@ -955,7 +1231,7 @@ def test_keyed_nested_components_move_preserves_nested_state():
                                 {"tag": "span", "children": ["x:2"]},
                                 {
                                     "tag": "button",
-                                    "props": {"onClick": "$$fn:1.0.1.onClick"},
+                                    "__callbacks__": ["1.0.1.onClick"],
                                     "children": ["+"],
                                 },
                             ],
@@ -1119,7 +1395,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                         {"tag": "span", "children": ["a:0"]},
                         {
                             "tag": "button",
-                            "props": {"onClick": "$$fn:0.1.onClick"},
+                            "__callbacks__": ["0.1.onClick"],
                             "children": ["+"],
                         },
                     ],
@@ -1130,7 +1406,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                         {"tag": "span", "children": ["b:2"]},
                         {
                             "tag": "button",
-                            "props": {"onClick": "$$fn:1.1.onClick"},
+                            "__callbacks__": ["1.1.onClick"],
                             "children": ["+"],
                         },
                     ],
@@ -1141,7 +1417,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                         {"tag": "span", "children": ["c:0"]},
                         {
                             "tag": "button",
-                            "props": {"onClick": "$$fn:2.1.onClick"},
+                            "__callbacks__": ["2.1.onClick"],
                             "children": ["+"],
                         },
                     ],
@@ -1152,7 +1428,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                         {"tag": "span", "children": ["d:1"]},
                         {
                             "tag": "button",
-                            "props": {"onClick": "$$fn:3.1.onClick"},
+                            "__callbacks__": ["3.1.onClick"],
                             "children": ["+"],
                         },
                     ],
@@ -1177,7 +1453,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                         {"tag": "span", "children": ["d:1"]},
                         {
                             "tag": "button",
-                            "props": {"onClick": "$$fn:0.1.onClick"},
+                            "__callbacks__": ["0.1.onClick"],
                             "children": ["+"],
                         },
                     ],
@@ -1188,7 +1464,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                         {"tag": "span", "children": ["b:2"]},
                         {
                             "tag": "button",
-                            "props": {"onClick": "$$fn:1.1.onClick"},
+                            "__callbacks__": ["1.1.onClick"],
                             "children": ["+"],
                         },
                     ],
@@ -1199,7 +1475,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                         {"tag": "span", "children": ["e:0"]},
                         {
                             "tag": "button",
-                            "props": {"onClick": "$$fn:2.1.onClick"},
+                            "__callbacks__": ["2.1.onClick"],
                             "children": ["+"],
                         },
                     ],
@@ -1210,7 +1486,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                         {"tag": "span", "children": ["a:0"]},
                         {
                             "tag": "button",
-                            "props": {"onClick": "$$fn:3.1.onClick"},
+                            "__callbacks__": ["3.1.onClick"],
                             "children": ["+"],
                         },
                     ],
@@ -1232,17 +1508,21 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
     # bump 'a' at its new index 3
     third.callbacks["3.1.onClick"].fn()
     fourth = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, fourth.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, fourth.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["d:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1253,7 +1533,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["b:2"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1264,7 +1544,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["e:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "__callbacks__": ["2.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1275,28 +1555,33 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["a:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "__callbacks__": ["3.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
     # Reverse-ish reorder and verify states still preserved
     order["keys"] = ["a", "e", "b", "d"]
     fifth = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, fifth.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, fifth.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["a:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1307,7 +1592,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["e:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1318,7 +1603,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["b:2"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "__callbacks__": ["2.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1329,28 +1614,33 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["d:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "__callbacks__": ["3.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
     # bump 'd' at its new index 3
     fifth.callbacks["3.1.onClick"].fn()
     sixth = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, sixth.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, sixth.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["a:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1361,7 +1651,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["e:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1372,7 +1662,7 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["b:2"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "__callbacks__": ["2.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1383,13 +1673,14 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
                     {"tag": "span", "children": ["d:2"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "__callbacks__": ["3.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
 
 def test_keyed_reverse_preserves_all_states():
@@ -1424,17 +1715,21 @@ def test_keyed_reverse_preserves_all_states():
         first.callbacks["3.1.onClick"].fn()
     second = root.render_diff()
 
-    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, second.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["k1:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1445,7 +1740,7 @@ def test_keyed_reverse_preserves_all_states():
                     {"tag": "span", "children": ["k2:2"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1456,7 +1751,7 @@ def test_keyed_reverse_preserves_all_states():
                     {"tag": "span", "children": ["k3:3"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "__callbacks__": ["2.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1467,28 +1762,33 @@ def test_keyed_reverse_preserves_all_states():
                     {"tag": "span", "children": ["k4:4"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "__callbacks__": ["3.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
     # Reverse order
     order["keys"] = ["k4", "k3", "k2", "k1"]
     third = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, third.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["k4:4"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1499,7 +1799,7 @@ def test_keyed_reverse_preserves_all_states():
                     {"tag": "span", "children": ["k3:3"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1510,7 +1810,7 @@ def test_keyed_reverse_preserves_all_states():
                     {"tag": "span", "children": ["k2:2"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "__callbacks__": ["2.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1521,13 +1821,14 @@ def test_keyed_reverse_preserves_all_states():
                     {"tag": "span", "children": ["k1:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:3.1.onClick"},
+                        "__callbacks__": ["3.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
 
 def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
@@ -1568,17 +1869,21 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
     # bump 'a'
     first.callbacks["0.1.onClick"].fn()
     second = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, second.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["a:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1589,13 +1894,14 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
                     {"tag": "span", "children": ["b:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
     flush_effects()
 
     # remove 'a'
@@ -1607,17 +1913,21 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
     # re-add 'a' at end -> should reset to 0
     order["keys"] = ["b", "a"]
     third = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, third.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["b:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1628,13 +1938,14 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
                     {"tag": "span", "children": ["a:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
 
 def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
@@ -1668,17 +1979,21 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
     first.callbacks["0.1.onClick"].fn()
     first.callbacks["2.1.onClick"].fn()
     second = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, second.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["a:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1690,28 +2005,33 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
                     {"tag": "span", "children": ["b:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "__callbacks__": ["2.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
     # swap keys around the separator
     order["keys"] = ["b", "a"]
     third = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, third.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["b:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1723,13 +2043,14 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
                     {"tag": "span", "children": ["a:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:2.1.onClick"},
+                        "__callbacks__": ["2.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
 
 # =====================
@@ -1797,14 +2118,18 @@ def test_iterable_children_generator_is_flattened_in_render():
     with pytest.warns(UserWarning, match=r"Iterable children of <div>.*without 'key'"):
         vdom, _ = r.render_tree(root, View(), path="", relative_path="")
 
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {"tag": "span", "children": ["0"]},
-            {"tag": "span", "children": ["1"]},
-            {"tag": "span", "children": ["2"]},
-        ],
-    }
+    assert_vdom_with_callbacks(
+        vdom,
+        r,
+        {
+            "tag": "div",
+            "children": [
+                {"tag": "span", "children": ["0"]},
+                {"tag": "span", "children": ["1"]},
+                {"tag": "span", "children": ["2"]},
+            ],
+        },
+    )
 
 
 def test_iterable_children_list_is_flattened_in_render():
@@ -1813,15 +2138,20 @@ def test_iterable_children_list_is_flattened_in_render():
         children = [ps.span("a"), ps.span("b")]
         return ps.div()[children]
 
+    temp_resolver = Resolver()
     with pytest.warns(UserWarning, match=r"Iterable children of <div>.*without 'key'"):
-        vdom, _ = Resolver().render_tree(RenderNode(View.fn), View(), "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {"tag": "span", "children": ["a"]},
-            {"tag": "span", "children": ["b"]},
-        ],
-    }
+        vdom, _ = temp_resolver.render_tree(RenderNode(View.fn), View(), "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {"tag": "span", "children": ["a"]},
+                {"tag": "span", "children": ["b"]},
+            ],
+        },
+    )
 
 
 def test_iterable_children_missing_keys_emits_warning_once():
@@ -1863,8 +2193,13 @@ def test_string_child_is_not_treated_as_iterable():
     def View():
         return ps.div()["abc"]
 
-    vdom, _ = Resolver().render_tree(RenderNode(View.fn), View(), "", "")
-    assert vdom == {"tag": "div", "children": ["abc"]}
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(RenderNode(View.fn), View(), "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {"tag": "div", "children": ["abc"]},
+    )
 
 
 def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
@@ -1897,17 +2232,21 @@ def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
     # bump 'x' once
     first.callbacks["0.1.onClick"].fn()
     second = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, second.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, second.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["x:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1918,28 +2257,33 @@ def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
                     {"tag": "span", "children": ["y:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )
 
     # reorder: move 'x' to the end
     order["keys"] = ["y", "x"]
     third = root.render_diff()
-    vdom, _ = Resolver().render_tree(root.render_tree, third.tree, "", "")
-    assert vdom == {
-        "tag": "div",
-        "children": [
-            {
+    temp_resolver = Resolver()
+    vdom, _ = temp_resolver.render_tree(root.render_tree, third.tree, "", "")
+    assert_vdom_with_callbacks(
+        vdom,
+        temp_resolver,
+        {
+            "tag": "div",
+            "children": [
+                {
                 "tag": "div",
                 "children": [
                     {"tag": "span", "children": ["y:0"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:0.1.onClick"},
+                        "__callbacks__": ["0.1.onClick"],
                         "children": ["+"],
                     },
                 ],
@@ -1950,10 +2294,11 @@ def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
                     {"tag": "span", "children": ["x:1"]},
                     {
                         "tag": "button",
-                        "props": {"onClick": "$$fn:1.1.onClick"},
+                        "__callbacks__": ["1.1.onClick"],
                         "children": ["+"],
                     },
                 ],
-            },
-        ],
-    }
+                },
+            ],
+        },
+    )

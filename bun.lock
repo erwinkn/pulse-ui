@@ -72,7 +72,7 @@
     },
     "packages/pulse-mantine/js": {
       "name": "pulse-mantine",
-      "version": "0.1.2",
+      "version": "0.1.4",
       "dependencies": {
         "@mantine/carousel": "^8.3.1",
         "@mantine/charts": "^8.3.1",
@@ -94,6 +94,7 @@
         "dayjs": "^1.11.18",
         "embla-carousel": "^8.5.2",
         "embla-carousel-react": "^8.5.2",
+        "pulse-mantine": "^0.1.3",
         "pulse-ui-client": "workspace:*",
         "recharts": "^3.2.1",
       },
@@ -111,7 +112,7 @@
     },
     "packages/pulse-ui-client": {
       "name": "pulse-ui-client",
-      "version": "0.0.13",
+      "version": "0.0.14",
       "dependencies": {
         "socket.io-client": "^4.8.1",
       },

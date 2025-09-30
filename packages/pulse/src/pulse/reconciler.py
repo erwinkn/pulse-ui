@@ -664,35 +664,6 @@ class Resolver:
             normalized=normalized_props, delta_add=added, delta_remove=removed
         )
 
-    def _capture_callbacks(self, props: Props, path: str) -> Props:
-        if not props:
-            return props
-        sanitized: Props | None = None
-        prefix = f"{path}." if path else ""
-        for key, value in props.items():
-            if not callable(value):
-                continue
-            if sanitized is None:
-                sanitized = props.copy()
-            sanitized.pop(key, None)
-            callback_key = f"{prefix}{key}"
-            self.callbacks[callback_key] = Callback(
-                fn=value, n_args=len(inspect.signature(value).parameters)
-            )
-        if sanitized is None:
-            return props
-        return sanitized
-
-    def _values_equal(self, left: Any, right: Any) -> bool:
-        if left is right:
-            return True
-        if left is None or right is None:
-            return left == right
-        if isinstance(left, (Node, ComponentNode)) or isinstance(
-            right, (Node, ComponentNode)
-        ):
-            return False
-        return left == right
 
     def _unmount_render_subtree(self, parent: RenderNode, prefix: str) -> None:
         if not prefix:

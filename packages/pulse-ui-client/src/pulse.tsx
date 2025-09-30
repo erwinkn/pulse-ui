@@ -24,6 +24,7 @@ export interface PulseConfig {
 export type PulsePrerenderView = {
   vdom: VDOM;
   callbacks: string[];
+  render_props: string[];
 };
 
 export type PulsePrerender = {
@@ -131,10 +132,16 @@ export function PulseView({ externalComponents, path }: PulseViewProps) {
   const client = usePulseClient();
   const initialView = usePulsePrerender(path);
   const initialVDOM = initialView.vdom;
-  const initialCallbacks = initialView.callbacks;
   const renderer = useMemo(
-    () => new VDOMRenderer(client, path, externalComponents, initialCallbacks),
-    [client, path, externalComponents, initialCallbacks]
+    () =>
+      new VDOMRenderer(
+        client,
+        path,
+        externalComponents,
+        initialView.callbacks,
+        initialView.render_props
+      ),
+    [client, path, externalComponents, initialView]
   );
   const [tree, setTree] = useState<React.ReactNode>(() =>
     renderer.renderNode(initialVDOM)
@@ -166,8 +173,9 @@ export function PulseView({ externalComponents, path }: PulseViewProps) {
     if (inBrowser) {
       client.mountView(path, {
         routeInfo,
-        onInit: (vdom, callbacks) => {
+        onInit: (vdom, callbacks, renderProps) => {
           renderer.setCallbacks(callbacks);
+          renderer.setRenderProps(renderProps);
           setTree(renderer.renderNode(vdom));
         },
         onUpdate: (ops) => {

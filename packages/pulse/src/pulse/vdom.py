@@ -173,7 +173,6 @@ class Node:
                     Node.from_vdom(
                         raw_child,
                         callbacks=callbacks,
-                        callback_props=callback_props,
                         path=child_path,
                     )
                 )

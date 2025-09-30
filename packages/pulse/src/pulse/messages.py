@@ -13,6 +13,7 @@ class ServerInitMessage(TypedDict):
     path: str
     vdom: VDOM
     callbacks: list[str]
+    render_props: list[str]
 
 
 class ServerUpdateMessage(TypedDict):

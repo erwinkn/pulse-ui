@@ -400,6 +400,7 @@ class App:
                         {
                             "vdom": captured["vdom"],
                             "callbacks": captured.get("callbacks", []),
+                            "render_props": captured.get("render_props", []),
                         }
                     )
                 if t == "navigate_to":

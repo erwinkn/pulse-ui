@@ -11,6 +11,7 @@ export interface ServerInitMessage {
   path: string;
   vdom: VDOM;
   callbacks: string[];
+  render_props: string[];
 }
 
 export interface ServerUpdateMessage {

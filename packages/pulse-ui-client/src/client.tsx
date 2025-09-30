@@ -19,7 +19,7 @@ import { createChannelBridge, PulseChannelResetError } from "./channel";
 
 export interface MountedView {
   routeInfo: RouteInfo;
-  onInit: (vdom: VDOM, callbacks: string[]) => void;
+  onInit: (vdom: VDOM, callbacks: string[], renderProps: string[]) => void;
   onUpdate: (ops: VDOMUpdate[]) => void;
 }
 export type ConnectionStatusListener = (connected: boolean) => void;
@@ -49,7 +49,8 @@ export class PulseSocketIOClient {
   private connectionListeners: Set<ConnectionStatusListener> = new Set();
   private serverErrors: Map<string, ServerErrorInfo> = new Map();
   private serverErrorListeners: Set<ServerErrorListener> = new Set();
-  private channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+  private channels: Map<string, { bridge: ChannelBridge; refCount: number }> =
+    new Map();
 
   constructor(
     private url: string,
@@ -120,7 +121,9 @@ export class PulseSocketIOClient {
 
       // Wrap in an arrow function to avoid losing the `this` reference
       socket.on("message", (data) =>
-        this.handleServerMessage(deserialize(data, {coerceNullsToUndefined: true}))
+        this.handleServerMessage(
+          deserialize(data, { coerceNullsToUndefined: true })
+        )
       );
     });
   }
@@ -162,7 +165,9 @@ export class PulseSocketIOClient {
     }
   }
 
-  public async sendChannelMessage(message: ClientChannelMessage): Promise<void> {
+  public async sendChannelMessage(
+    message: ClientChannelMessage
+  ): Promise<void> {
     await this.sendMessage(message);
   }
 
@@ -213,7 +218,7 @@ export class PulseSocketIOClient {
         // Ignore messages for paths that are not mounted
         if (!route) return;
         if (route) {
-          route.onInit(message.vdom, message.callbacks);
+          route.onInit(message.vdom, message.callbacks, message.render_props);
         }
         // Clear any prior error for this path on successful init
         if (this.serverErrors.has(message.path)) {
@@ -387,7 +392,9 @@ export class PulseSocketIOClient {
 
   private handleTransportDisconnect(): void {
     for (const entry of this.channels.values()) {
-      entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
+      entry.bridge.handleDisconnect(
+        new PulseChannelResetError("Connection lost")
+      );
     }
   }
 

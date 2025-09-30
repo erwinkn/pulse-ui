@@ -391,6 +391,31 @@ class TestRouteTemplateConflicts:
         assert len(components_ctx) == 1
         assert components_ctx[0]["key"] == "Button"
 
+    def test_alias_same_named_components_from_different_sources(self):
+        COMPONENT_REGISTRY.get().clear()
+        rt = RouteTemplate()
+        comps = [
+            ReactComponent(name="Select", src="@lib/a"),
+            ReactComponent(name="Select", src="@lib/b"),
+        ]
+        rt.add_components(comps)
+        ctx = rt.context()
+
+        import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+        by_a = self._by_src(import_sources, "@lib/a")
+        by_b = self._by_src(import_sources, "@lib/b")
+        assert by_a.values[0].name == "Select"
+        assert by_a.values[0].alias is None
+        assert by_b.values[0].name == "Select"
+        assert by_b.values[0].alias == "Select2"
+
+        components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
+        comps_ctx = {c["key"]: c for c in components_ctx}
+        assert comps_ctx["Select"]["ssr_expr"] == "Select"
+        assert comps_ctx["Select"]["dynamic_src"] == "@lib/a"
+        assert comps_ctx["Select2"]["ssr_expr"] == "Select2"
+        assert comps_ctx["Select2"]["dynamic_src"] == "@lib/b"
+
     def test_alias_same_named_import_from_two_sources_and_keep_both_components(self):
         rt = RouteTemplate()
         comps = [

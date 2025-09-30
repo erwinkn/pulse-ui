@@ -6,7 +6,7 @@ import React, {
   Suspense,
   type ComponentType,
 } from "react";
-import type { ComponentRegistry, VDOMNode, VDOMUpdate } from "./vdom";
+import type { ComponentRegistry, VDOMNode, VDOMUpdate, VDOM } from "./vdom";
 import {
   FRAGMENT_TAG,
   isElementNode,
@@ -18,14 +18,17 @@ import type { PulseSocketIOClient } from "./client";
 export class VDOMRenderer {
   private callbackCache: Map<string, (...args: any[]) => void>;
   private callbackProps: Map<string, Set<string>>;
+  private renderPropKeys: Set<string>;
   constructor(
     private client: PulseSocketIOClient,
     private path: string,
     private components: ComponentRegistry,
-    initialCallbacks: string[] = []
+    initialCallbacks: string[] = [],
+    initialRenderProps: string[] = []
   ) {
     this.callbackCache = new Map();
     this.callbackProps = new Map();
+    this.renderPropKeys = new Set(initialRenderProps);
     this.setCallbacks(initialCallbacks);
   }
 
@@ -33,7 +36,7 @@ export class VDOMRenderer {
     this.callbackProps.clear();
     this.callbackCache.clear();
     for (const key of keys) {
-      const { path, prop } = this.parseCallbackKey(key);
+      const [path, prop] = this.splitPropPath(key);
       if (!this.callbackProps.has(path)) {
         this.callbackProps.set(path, new Set());
       }
@@ -41,12 +44,26 @@ export class VDOMRenderer {
     }
   }
 
-  applyCallbackDelta(delta: { add?: string[]; remove?: string[] }) {
+  applyCallbackDelta(
+    delta: { add?: string[]; remove?: string[] },
+    tree: React.ReactNode
+  ): React.ReactNode {
+    const beforeMap = new Map<string, Set<string>>();
+    const recordBefore = (path: string) => {
+      if (!beforeMap.has(path)) {
+        beforeMap.set(path, new Set(this.callbackProps.get(path) ?? []));
+      }
+    };
+
     if (delta.remove) {
       for (const key of delta.remove) {
-        const { path, prop } = this.parseCallbackKey(key);
+        const [path, prop] = this.splitPropPath(key);
+        recordBefore(path);
         const current = this.callbackProps.get(path);
-        if (!current) continue;
+        if (!current) {
+          this.callbackCache.delete(key);
+          continue;
+        }
         this.callbackCache.delete(key);
         current.delete(prop);
         if (current.size === 0) {
@@ -54,30 +71,65 @@ export class VDOMRenderer {
         }
       }
     }
+
     if (delta.add) {
       for (const key of delta.add) {
-        const { path, prop } = this.parseCallbackKey(key);
+        const [path, prop] = this.splitPropPath(key);
+        recordBefore(path);
         if (!this.callbackProps.has(path)) {
           this.callbackProps.set(path, new Set());
         }
         this.callbackProps.get(path)!.add(prop);
       }
     }
+
+    let nextTree = tree;
+    for (const [path, before] of beforeMap.entries()) {
+      const after = new Set(this.callbackProps.get(path) ?? []);
+      if (this.setsEqual(before, after)) {
+        continue;
+      }
+      const parts = path
+        ? path.split(".").filter((segment) => segment.length > 0)
+        : [];
+      nextTree = this.updateCallbacksOnTree(
+        nextTree,
+        parts,
+        0,
+        path,
+        before,
+        after
+      );
+    }
+
+    return nextTree;
+  }
+
+  setRenderProps(keys: string[]) {
+    this.renderPropKeys = new Set(keys);
+  }
+
+  applyRenderPropsDelta(delta: { add?: string[]; remove?: string[] }) {
+    if (delta.remove) {
+      for (const key of delta.remove) {
+        this.renderPropKeys.delete(key);
+      }
+    }
+    if (delta.add) {
+      for (const key of delta.add) {
+        this.renderPropKeys.add(key);
+      }
+    }
   }
 
   getCallback(path: string, prop: string) {
-    const key = this.makeCallbackKey(path, prop);
+    const key = this.propPath(path, prop);
     let fn = this.callbackCache.get(key);
     if (!fn) {
       fn = (...args: any[]) => this.client.invokeCallback(this.path, key, args);
       this.callbackCache.set(key, fn);
     }
     return fn;
-  }
-
-  peekCallback(path: string, prop: string) {
-    const key = this.makeCallbackKey(path, prop);
-    return this.callbackCache.get(key);
   }
 
   renderNode(node: VDOMNode, currentPath = ""): React.ReactNode {
@@ -96,9 +148,24 @@ export class VDOMRenderer {
       const { tag, props = {}, children = [] } = node;
 
       const processedProps: Record<string, any> = { ...(props || {}) };
+
+      // Apply callbacks
       for (const propName of this.getCallbackNames(currentPath)) {
         processedProps[propName] = this.getCallback(currentPath, propName);
       }
+
+      // Detect and render any render props (VDOM objects in props)
+      for (const [propName, propValue] of Object.entries(processedProps)) {
+        const renderPropKey = this.propPath(currentPath, propName);
+        if (this.renderPropKeys.has(renderPropKey)) {
+          // This prop is a render prop - render the VDOM to React
+          const renderPropPath = currentPath
+            ? `${currentPath}.${propName}`
+            : propName;
+          processedProps[propName] = this.renderNode(propValue, renderPropPath);
+        }
+      }
+
       if (node.key) {
         processedProps.key = node.key;
       }
@@ -132,7 +199,15 @@ export class VDOMRenderer {
     return null;
   }
 
-  private makeCallbackKey(path: string, prop: string) {
+  private splitPropPath(key: string): [path: string, prop: string] {
+    const lastDot = key.lastIndexOf(".");
+    if (lastDot === -1) {
+      return ["", key];
+    }
+    return [key.slice(0, lastDot), key.slice(lastDot + 1)];
+  }
+
+  private propPath(path: string, prop: string) {
     return path ? `${path}.${prop}` : prop;
   }
 
@@ -141,24 +216,109 @@ export class VDOMRenderer {
     return props ? Array.from(props) : [];
   }
 
-  syncCallbackProps(path: string, props: Record<string, any>) {
+  transformValue(path: string, key: string, value: any) {
     const callbacks = this.callbackProps.get(path);
-    if (callbacks) {
-      for (const name of callbacks) {
-        props[name] = this.getCallback(path, name);
-      }
+    const propPath = this.propPath(path, key);
+    if (callbacks && callbacks.size > 0 && callbacks.has(key)) {
+      return this.getCallback(path, key);
     }
+    if (this.renderPropKeys.has(propPath)) {
+      return this.renderNode(value, propPath);
+    }
+    return value;
   }
 
-  parseCallbackKey(key: string): { path: string; prop: string } {
-    const lastDot = key.lastIndexOf(".");
-    if (lastDot === -1) {
-      return { path: "", prop: key };
+  private updateCallbacksOnTree(
+    node: React.ReactNode,
+    parts: string[],
+    depth: number,
+    currentPath: string,
+    before: Set<string>,
+    after: Set<string>
+  ): React.ReactNode {
+    if (depth < parts.length) {
+      assertIsElement(node, parts, depth);
+      const element = node as React.ReactElement<Record<string, any> | null>;
+      const segment = parts[depth]!;
+      const childIdx = Number(segment);
+      const nextPath = currentPath ? `${currentPath}.${segment}` : segment;
+      if (!Number.isNaN(childIdx)) {
+        const childrenArr = ensureChildrenArray(element);
+        const child = childrenArr[childIdx];
+        const updatedChild = this.updateCallbacksOnTree(
+          child,
+          parts,
+          depth + 1,
+          nextPath,
+          before,
+          after
+        );
+        if (updatedChild === child) {
+          return node;
+        }
+        childrenArr[childIdx] = updatedChild as any;
+        return cloneElement(element, undefined, ...childrenArr);
+      } else {
+        const baseProps = (element.props ?? {}) as Record<string, any>;
+        const child = baseProps[segment];
+        const updatedChild = this.updateCallbacksOnTree(
+          child,
+          parts,
+          depth + 1,
+          nextPath,
+          before,
+          after
+        );
+        if (updatedChild === child) {
+          return node;
+        }
+        return cloneElement(element, {
+          ...baseProps,
+          [segment]: updatedChild,
+        });
+      }
     }
-    return {
-      path: key.slice(0, lastDot),
-      prop: key.slice(lastDot + 1),
-    };
+
+    if (!isValidElement(node)) {
+      return node;
+    }
+
+    const element = node as React.ReactElement<Record<string, any> | null>;
+    const currentProps = (element.props ?? {}) as Record<string, any>;
+    let changed = false;
+    const nextProps: Record<string, any> = { ...currentProps };
+
+    for (const prop of before) {
+      if (!after.has(prop) && prop in nextProps) {
+        delete nextProps[prop];
+        changed = true;
+      }
+    }
+
+    for (const prop of after) {
+      const fn = this.getCallback(currentPath, prop);
+      if (nextProps[prop] !== fn) {
+        nextProps[prop] = fn;
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return node;
+    }
+    return cloneElement(element, nextProps);
+  }
+
+  private setsEqual(left: Set<string>, right: Set<string>): boolean {
+    if (left.size !== right.size) {
+      return false;
+    }
+    for (const value of left) {
+      if (!right.has(value)) {
+        return false;
+      }
+    }
+    return true;
   }
 }
 
@@ -166,18 +326,10 @@ export class VDOMRenderer {
 // Update Functions (shallow-clone along update path)
 // =================================================================
 
-function toChildrenArrayFromElement(el: React.ReactElement): React.ReactNode[] {
+function ensureChildrenArray(el: React.ReactElement): React.ReactNode[] {
   const children = (el.props as any)?.children as React.ReactNode | undefined;
   if (children == null) return [];
   return Array.isArray(children) ? children.slice() : [children];
-}
-
-function cloneElementWithChildren(
-  el: React.ReactElement,
-  children: React.ReactNode[]
-): React.ReactElement {
-  // Preserve existing props; only override children
-  return cloneElement(el, undefined, ...children);
 }
 
 export function applyUpdates(
@@ -188,14 +340,15 @@ export function applyUpdates(
   let newTree: React.ReactNode = initialTree;
   for (const update of updates) {
     if (update.type === "update_callbacks") {
-      renderer.applyCallbackDelta(update.data);
+      newTree = renderer.applyCallbackDelta(update.data, newTree);
+      continue;
+    }
+    if (update.type === "update_render_props") {
+      renderer.applyRenderPropsDelta(update.data);
       continue;
     }
 
-    const parts = update.path
-      .split(".")
-      .filter((s) => s.length > 0)
-      .map(Number);
+    const parts = update.path.split(".").filter((s) => s.length > 0);
 
     const descend = (
       node: React.ReactNode,
@@ -204,15 +357,26 @@ export function applyUpdates(
     ): React.ReactNode => {
       if (depth < parts.length) {
         assertIsElement(node, parts, depth);
-        const element = node as React.ReactElement;
-        const childIdx = parts[depth]!;
-        const childrenArr = toChildrenArrayFromElement(element);
-        const child = childrenArr[childIdx];
-        const childPath = currentPath
-          ? `${currentPath}.${childIdx}`
-          : String(childIdx);
-        childrenArr[childIdx] = descend(child, depth + 1, childPath) as any;
-        return cloneElementWithChildren(element, childrenArr);
+        const element = node as React.ReactElement<Record<string, any> | null>;
+        const childKey = parts[depth]!;
+        const childIdx = +childKey;
+        const childPath = currentPath ? `${currentPath}.${childKey}` : childKey;
+        if (!Number.isNaN(childIdx)) {
+          // Regular child traversal
+          const childrenArr = ensureChildrenArray(element);
+          const child = childrenArr[childIdx];
+          childrenArr[childIdx] = descend(child, depth + 1, childPath) as any;
+          return cloneElement(element, undefined, ...childrenArr);
+        } else {
+          // Render prop traversal
+          const baseProps = (element.props ?? {}) as Record<string, any>;
+          const child = baseProps[childKey];
+          const props = {
+            ...baseProps,
+            [childKey]: descend(child, depth + 1, childPath),
+          };
+          return cloneElement(element, props);
+        }
       }
       switch (update.type) {
         case "replace": {
@@ -231,17 +395,16 @@ export function applyUpdates(
           }
           if (delta.set) {
             for (const [k, v] of Object.entries(delta.set)) {
-              nextProps[k] = v;
+              nextProps[k] = renderer.transformValue(currentPath, k, v);
             }
           }
-          renderer.syncCallbackProps(currentPath, nextProps);
           // Not passing children -> only update the props
           return cloneElement(element, nextProps);
         }
         case "insert": {
           assertIsElement(node, parts, depth);
           const element = node as React.ReactElement;
-          const children = toChildrenArrayFromElement(element);
+          const children = ensureChildrenArray(element);
           const childPath = currentPath
             ? `${currentPath}.${update.idx}`
             : String(update.idx);
@@ -256,7 +419,7 @@ export function applyUpdates(
         case "remove": {
           assertIsElement(node, parts, depth);
           const element = node as React.ReactElement;
-          const children = toChildrenArrayFromElement(element);
+          const children = ensureChildrenArray(element);
           children.splice(update.idx, 1);
           // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
           return cloneElement(element, null!, ...children);
@@ -264,7 +427,7 @@ export function applyUpdates(
         case "move": {
           assertIsElement(node, parts, depth);
           const element = node as React.ReactElement;
-          const children = toChildrenArrayFromElement(element);
+          const children = ensureChildrenArray(element);
           const item = children.splice(update.data.from_index, 1)[0];
           children.splice(update.data.to_index, 0, item);
           // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
@@ -300,7 +463,7 @@ export function RenderLazy(
 
 function assertIsElement(
   node: React.ReactNode,
-  parts: number[],
+  parts: string[],
   depth: number
 ): node is React.ReactElement {
   if (process.env.NODE_ENV !== "production" && !isValidElement(node)) {

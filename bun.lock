@@ -72,7 +72,7 @@
     },
     "packages/pulse-mantine/js": {
       "name": "pulse-mantine",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "dependencies": {
         "@mantine/carousel": "^8.3.1",
         "@mantine/charts": "^8.3.1",

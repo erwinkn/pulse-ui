@@ -559,9 +559,7 @@ from .core.navigation.tabs import (
     TabsTab,
 )
 
-from .core.navigation.tree import (
-    TreeInternal,
-)
+from .core.navigation.tree import Tree, TreeState
 
 from .core.overlays.affix import (
     Affix,
@@ -1363,7 +1361,8 @@ __all__ = (
     "TooltipGroup",
     "Transition",
     "TransitionTimingFunction",
-    "TreeInternal",
+    "Tree",
+    "TreeState",
     "Typography",
     "UnstyledButton",
     "Validation",

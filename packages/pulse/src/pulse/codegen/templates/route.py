@@ -38,7 +38,6 @@ class RouteTemplate:
 
     def add_components(self, components: Sequence[ReactComponent]) -> None:
         for comp in components:
-            print(f"Adding component {comp.name} from {comp.src}")
             # Derive base symbol and property for dotted component names if prop not explicitly given
             base_name = comp.name
             prop_name = comp.prop

@@ -1,5 +1,4 @@
 import json
-from collections import defaultdict
 from copy import deepcopy
 
 from pulse.reactive import flush_effects
@@ -8,15 +7,7 @@ from pulse.reconciler import RenderNode, RenderRoot
 from pulse.reconciler import lis
 import pulse as ps
 
-from pulse.vdom import Callback
 import pytest
-
-
-def _split_callback_key(key: str) -> tuple[str, str]:
-    if "." in key:
-        path, prop = key.rsplit(".", 1)
-        return path, prop
-    return "", key
 
 
 
@@ -36,7 +27,11 @@ def _sanitize_vdom_with_callbacks(node):
             callback_keys.add(join_path(path_prefix, entry))
 
     def visit(value, path: str):
-        if isinstance(value, (str, int, float)) or value is None or isinstance(value, bool):
+        if (
+            isinstance(value, (str, int, float))
+            or value is None
+            or isinstance(value, bool)
+        ):
             return value
         if isinstance(value, list):
             return [visit(item, path) for item in value]
@@ -82,9 +77,13 @@ def _sanitize_vdom_with_callbacks(node):
     return sanitized_vdom, sorted(callback_keys)
 
 
-def assert_vdom_with_callbacks(actual_vdom, resolver: Resolver, expected, *, expected_callbacks=None):
+def assert_vdom_with_callbacks(
+    actual_vdom, resolver: Resolver, expected, *, expected_callbacks=None
+):
     actual_sanitized, _ = _sanitize_vdom_with_callbacks(actual_vdom)
-    expected_sanitized, callbacks_from_expected = _sanitize_vdom_with_callbacks(expected)
+    expected_sanitized, callbacks_from_expected = _sanitize_vdom_with_callbacks(
+        expected
+    )
     assert actual_sanitized == expected_sanitized
 
     expected_callback_keys = set(callbacks_from_expected)
@@ -107,7 +106,9 @@ def _transform_expected_ops(expected_ops):
 
         op_type = op_copy["type"]
         if op_type in {"replace", "insert"}:
-            sanitized_data, callback_keys = _sanitize_vdom_with_callbacks(op_copy["data"])
+            sanitized_data, callback_keys = _sanitize_vdom_with_callbacks(
+                op_copy["data"]
+            )
             sanitized_op: dict[str, object] = {
                 "type": op_type,
                 "path": op_copy.get("path", ""),
@@ -124,7 +125,9 @@ def _transform_expected_ops(expected_ops):
                 sanitized_set: dict[str, object] = {}
                 for key, value in data["set"].items():
                     if isinstance(value, dict) and "tag" in value:
-                        sanitized_value, callback_keys = _sanitize_vdom_with_callbacks(value)
+                        sanitized_value, callback_keys = _sanitize_vdom_with_callbacks(
+                            value
+                        )
                         sanitized_set[key] = sanitized_value
                         callback_adds.update(callback_keys)
                     else:
@@ -134,7 +137,13 @@ def _transform_expected_ops(expected_ops):
             if "remove" in data:
                 sanitized_data["remove"] = data["remove"]
             if sanitized_data:
-                sanitized_ops.append({"type": "update_props", "path": op_copy["path"], "data": sanitized_data})
+                sanitized_ops.append(
+                    {
+                        "type": "update_props",
+                        "path": op_copy["path"],
+                        "data": sanitized_data,
+                    }
+                )
         else:
             sanitized_ops.append(op_copy)
 
@@ -151,7 +160,9 @@ def _transform_expected_ops(expected_ops):
 
 
 def assert_ops_with_callbacks(actual_ops, expected_ops):
-    sanitized_expected_ops, expected_callback_ops = _transform_expected_ops(expected_ops)
+    sanitized_expected_ops, expected_callback_ops = _transform_expected_ops(
+        expected_ops
+    )
     actual_vdom_ops = [op for op in actual_ops if op["type"] != "update_callbacks"]
     actual_callback_ops = [op for op in actual_ops if op["type"] == "update_callbacks"]
     assert actual_vdom_ops == sanitized_expected_ops
@@ -175,66 +186,9 @@ def assert_render_tree_vdom(render_node, tree, expected):
     return vdom
 
 
-# =================
-# Callbacks capture
-# =================
-def test_capture_callbacks_no_callbacks_returns_original_and_no_side_effects():
-    r = Resolver()
-    props = {"id": "x", "count": 1}
-
-    result = r._capture_callbacks(props, path="")
-
-    # Should return the same dict object when no callables present
-    assert result is props
-    assert r.callbacks == {}
-
-
-def test_capture_callbacks_single_with_and_without_path():
-    r = Resolver()
-
-    def cb():
-        return 1
-
-    # No path: key should be just the prop name
-    props1 = {"onClick": cb, "id": "a"}
-    out1 = r._capture_callbacks(props1, path="")
-    assert out1 is not props1
-    assert "onClick" not in out1
-    assert r.callbacks["onClick"].fn is cb
-    assert out1["id"] == "a"
-    assert set(r.callbacks.keys()) == {"onClick"}
-
-    # With path: prefix and dot should be added
-    r2 = Resolver()
-    props2 = {"onClick": cb}
-    out2 = r2._capture_callbacks(props2, path="1.child")
-    assert out2 == {}
-    assert r2.callbacks["1.child.onClick"].fn is cb
-    assert set(r2.callbacks.keys()) == {"1.child.onClick"}
-
-
-def test_capture_callbacks_multiple_callbacks_preserved_and_mapped():
-    r = Resolver()
-
-    def a():
-        return 1
-
-    def b():
-        return 2
-
-    props = {"onClick": a, "onHover": b, "label": "L"}
-    out = r._capture_callbacks(props, path="root")
-
-    assert out is not props
-    assert "onClick" not in out
-    assert "onHover" not in out
-    assert out["label"] == "L"
-
-    assert r.callbacks == {
-        "root.onClick": Callback(a, 0),
-        "root.onHover": Callback(b, 0),
-    }
-    assert set(r.callbacks.keys()) == {"root.onClick", "root.onHover"}
+# TODO: props diffing tests
+# 1) Should remove callbacks and capture them globally
+# 2) Should render element props
 
 
 # =====================
@@ -620,15 +574,15 @@ def test_reconcile_initial_insert_simple_component():
     assert_ops_with_callbacks(
         result.ops,
         [
-        {
-            "type": "replace",
-            "path": "",
-            "data": {
-                "tag": "button",
-                "__callbacks__": ["onClick"],
-                "children": ["Go"],
-            },
-        }
+            {
+                "type": "replace",
+                "path": "",
+                "data": {
+                    "tag": "button",
+                    "__callbacks__": ["onClick"],
+                    "children": ["Go"],
+                },
+            }
         ],
     )
     assert "onClick" in result.callbacks
@@ -667,9 +621,7 @@ def test_reconcile_primitive_changes_and_none():
     # Initial insert of primitive
     root = RenderRoot(P)
     first = root.render_diff()
-    assert non_callback_ops(first.ops) == [
-        {"type": "replace", "path": "", "data": "A"}
-    ]
+    assert non_callback_ops(first.ops) == [{"type": "replace", "path": "", "data": "A"}]
 
     # Change primitive -> replace
     val["text"] = "B"
@@ -716,9 +668,7 @@ def test_reconcile_conditional_children_insert_remove():
     # Remove extra child -> remove at path 1
     show_extra["flag"] = False
     third = root.render_diff()
-    assert non_callback_ops(third.ops) == [
-        {"type": "remove", "path": "", "idx": 1}
-    ]
+    assert non_callback_ops(third.ops) == [{"type": "remove", "path": "", "idx": 1}]
 
 
 def test_reconcile_deep_nested_text_replace():
@@ -774,9 +724,7 @@ def test_component_unmount_on_remove_runs_cleanup():
 
     state["on"] = False
     second = root.render_diff()
-    assert non_callback_ops(second.ops) == [
-        {"type": "remove", "path": "", "idx": 0}
-    ]
+    assert non_callback_ops(second.ops) == [{"type": "remove", "path": "", "idx": 0}]
     assert logs == ["child_cleanup"]
 
 
@@ -1517,48 +1465,48 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["d:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["b:2"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["e:0"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["2.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["a:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["3.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["d:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["b:2"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["e:0"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["2.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["a:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["3.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -1576,48 +1524,48 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["a:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["e:0"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["b:2"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["2.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["d:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["3.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["a:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["e:0"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["b:2"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["2.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["d:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["3.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -1635,48 +1583,48 @@ def test_keyed_complex_reorder_insert_remove_preserves_state_and_cleans_removed(
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["a:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["e:0"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["b:2"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["2.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["d:2"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["3.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["a:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["e:0"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["b:2"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["2.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["d:2"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["3.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -1724,48 +1672,48 @@ def test_keyed_reverse_preserves_all_states():
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["k1:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["k2:2"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["k3:3"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["2.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["k4:4"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["3.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["k1:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["k2:2"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["k3:3"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["2.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["k4:4"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["3.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -1783,48 +1731,48 @@ def test_keyed_reverse_preserves_all_states():
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["k4:4"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["k3:3"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["k2:2"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["2.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["k1:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["3.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["k4:4"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["k3:3"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["k2:2"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["2.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["k1:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["3.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -1878,26 +1826,26 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["a:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["b:0"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["a:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["b:0"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -1922,26 +1870,26 @@ def test_keyed_remove_then_readd_same_key_resets_state_and_cleans_old():
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["b:0"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["a:0"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["b:0"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["a:0"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -1988,27 +1936,27 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["a:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {"tag": "span", "children": ["sep"]},
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["b:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["2.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["a:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {"tag": "span", "children": ["sep"]},
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["b:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["2.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -2026,27 +1974,27 @@ def test_keyed_with_unkeyed_separators_reorder_preserves_component_state():
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["b:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {"tag": "span", "children": ["sep"]},
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["a:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["2.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["b:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {"tag": "span", "children": ["sep"]},
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["a:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["2.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -2241,26 +2189,26 @@ def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["x:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["y:0"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["x:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["y:0"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },
@@ -2278,26 +2226,26 @@ def test_keyed_iterable_children_reorder_preserves_state_via_flattening():
             "tag": "div",
             "children": [
                 {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["y:0"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["0.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
-            },
-            {
-                "tag": "div",
-                "children": [
-                    {"tag": "span", "children": ["x:1"]},
-                    {
-                        "tag": "button",
-                        "__callbacks__": ["1.1.onClick"],
-                        "children": ["+"],
-                    },
-                ],
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["y:0"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["0.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
+                },
+                {
+                    "tag": "div",
+                    "children": [
+                        {"tag": "span", "children": ["x:1"]},
+                        {
+                            "tag": "button",
+                            "__callbacks__": ["1.1.onClick"],
+                            "children": ["+"],
+                        },
+                    ],
                 },
             ],
         },

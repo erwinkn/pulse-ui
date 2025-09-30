@@ -560,7 +560,7 @@ from .core.navigation.tabs import (
 )
 
 from .core.navigation.tree import (
-    Tree,
+    TreeInternal,
 )
 
 from .core.overlays.affix import (
@@ -1363,7 +1363,7 @@ __all__ = (
     "TooltipGroup",
     "Transition",
     "TransitionTimingFunction",
-    "Tree",
+    "TreeInternal",
     "Typography",
     "UnstyledButton",
     "Validation",
@@ -1380,4 +1380,3 @@ __all__ = (
     "YearPickerInput",
     "YearsList",
 )
-

@@ -8,22 +8,29 @@ from pulse.codegen.utils import NameRegistry
 class Imported:
     name: str
     src: str
+    alias: str | None
     is_default: bool
     prop: Optional[str]
 
     def __init__(
-        self, name: str, src: str, is_default: bool = False, prop: Optional[str] = None
+        self,
+        name: str,
+        src: str,
+        is_default: bool = False,
+        prop: Optional[str] = None,
+        alias: str | None = None,
     ) -> None:
         self.name = name
         self.src = src
         self.is_default = is_default
         self.prop = prop
+        self.alias = alias
 
     @property
     def expr(self):
         if self.prop:
-            return f"{self.name}.{self.prop}"
-        return self.name
+            return f"{self.alias or self.name}.{self.prop}"
+        return self.alias or self.name
 
 
 @dataclass
@@ -130,7 +137,9 @@ class Imports:
             existing.default_import = self.names.register(stmt.default_import)
 
         # Merge named imports
-        def _merge_list(dst: list[ImportMember], src_list: list[ImportMember], is_type: bool = False):
+        def _merge_list(
+            dst: list[ImportMember], src_list: list[ImportMember], is_type: bool = False
+        ):
             for imp in src_list:
                 key = (stmt.src, imp.name)
                 if key in self._import_map:

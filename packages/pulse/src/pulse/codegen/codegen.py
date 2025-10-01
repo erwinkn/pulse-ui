@@ -24,7 +24,6 @@ class CodegenConfig:
     Attributes:
         web_dir (str): Root directory for the web output.
         pulse_dir (str): Name of the Pulse app directory.
-        lib_path (str): Path to the Pulse library.
         pulse_path (Path): Full path to the generated app directory.
     """
 
@@ -33,9 +32,6 @@ class CodegenConfig:
 
     pulse_dir: Path | str = "pulse"
     """Name of the Pulse app directory."""
-
-    lib_path: Path | str = "pulse-ui-client"
-    """Path to the Pulse library."""
 
     base_dir: Path | None = None
     """Directory containing the user's app file. If not provided, resolved from env."""
@@ -133,7 +129,6 @@ class Codegen:
             LAYOUT_TEMPLATE.render_unicode(
                 server_address=server_address,
                 internal_server_address=internal_server_address or server_address,
-                lib_path=self.cfg.lib_path,
             )
         )
         # The underscore avoids an eventual naming conflict with a generated
@@ -200,7 +195,6 @@ class Codegen:
 
         content = render_route(
             route=route,
-            lib_path=str(self.cfg.lib_path),
             components=components,
             js_functions=[],
             external_js=[],

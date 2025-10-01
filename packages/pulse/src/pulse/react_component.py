@@ -302,7 +302,9 @@ class ReactComponent(Generic[P], Imported):
         lazy: bool = False,
         prop_spec: Optional[PropSpec] = None,
         fn_signature: Callable[P, Element] = default_signature,
-        extra_imports: Optional[tuple[ImportStatement, ...] | list[ImportStatement]] = None,
+        extra_imports: Optional[
+            tuple[ImportStatement, ...] | list[ImportStatement]
+        ] = None,
     ):
         super().__init__(name, src, is_default=is_default, prop=prop)
 

@@ -100,10 +100,10 @@ class TestCodegen:
         assert 'import DefaultComp from "./DefaultComp";' in result
         assert '"DefaultComp": DefaultComp,' in result
 
-    def test_generate_route_page_with_import_name_components(self, tmp_path):
+    def test_generate_route_page_with_property_components(self, tmp_path):
         """Test generating route with import_name components (nested component access)."""
-        app_shell_header = ReactComponent("AppShell.Header", "@mantine/core")
-        app_shell_footer = ReactComponent("AppShell.Footer", "@mantine/core")
+        app_shell_header = ReactComponent("AppShell", "@mantine/core", prop="Header")
+        app_shell_footer = ReactComponent("AppShell", "@mantine/core", prop='Footer')
         route = Route(
             "/app-shell",
             Component(lambda: div()["AppShell route"]),
@@ -231,7 +231,6 @@ class TestCodegen:
         codegen_config = CodegenConfig(
             web_dir=str(tmp_path),
             pulse_dir="test_pulse_app",
-            lib_path="~/test-lib",
         )
         codegen = Codegen(app.routes, codegen_config)
         codegen.generate_all(server_address=SERVER_ADDRESS)
@@ -248,7 +247,7 @@ class TestCodegen:
 
         layout_content = (pulse_app_dir / "_layout.tsx").read_text()
         assert (
-            'import { extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "~/test-lib";'
+            'import { extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";'
             in layout_content
         )
         assert 'serverAddress: "http://localhost:8000"' in layout_content
@@ -270,7 +269,7 @@ class TestCodegen:
 
         home_content = (routes_dir / "index.tsx").read_text()
         assert (
-            'import { PulseView, type VDOM, type ComponentRegistry } from "~/test-lib";'
+            'import { PulseView, type VDOM, type ComponentRegistry } from "pulse-ui-client";'
             in home_content
         )
         assert 'import { Header } from "./components/Header";' in home_content
@@ -331,9 +330,10 @@ class TestRouteTemplateConflicts:
         ]
         rt.add_components(comps)
         ctx = rt.context()
+        print("Context:", ctx)
 
         # Imports aliased due to reserved names
-        import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+        import_sources = cast(list, ctx["import_sources"])  
         by_button = self._by_src(import_sources, "./ui/button")
         assert len(by_button.values) == 1
         assert by_button.values[0].name == "Button"
@@ -344,14 +344,13 @@ class TestRouteTemplateConflicts:
         assert by_mantine.values[0].name == "AppShell"
         assert by_mantine.values[0].alias == "AppShell2"
 
-        # Components context uses the aliased identifiers in SSR expressions
-        components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
+        components_ctx = cast(list, ctx["components_ctx"])  
         comps_ctx = {c["key"]: c for c in components_ctx}
-        assert comps_ctx["Button"]["ssr_expr"] == "Button2"
-        assert comps_ctx["Button"]["dynamic_selector"] == "({ default: m.Button })"
-        assert comps_ctx["AppShell.Header"]["ssr_expr"] == "AppShell2.Header"
+        assert comps_ctx["Button2"]["expr"] == "Button2"
+        assert comps_ctx["Button2"]["dynamic"] == "({ default: m.Button })"
+        assert comps_ctx["AppShell2.Header"]["expr"] == "AppShell2.Header"
         assert (
-            comps_ctx["AppShell.Header"]["dynamic_selector"]
+            comps_ctx["AppShell2.Header"]["dynamic"]
             == "({ default: m.AppShell.Header })"
         )
 
@@ -368,10 +367,10 @@ class TestRouteTemplateConflicts:
         assert by_default.default_import == "DefaultComp2"
 
         comp_ctx = cast(list, ctx["components_ctx"])[0]  # type: ignore[index]
-        assert comp_ctx["key"] == "DefaultComp"
-        assert comp_ctx["ssr_expr"] == "DefaultComp2"
+        assert comp_ctx["key"] == "DefaultComp2"
+        assert comp_ctx["expr"] == "DefaultComp2"
         # Dynamic selector for default import uses m.default
-        assert comp_ctx["dynamic_selector"] == "({ default: m.default })"
+        assert comp_ctx["dynamic"] == "({ default: m.default })"
 
     def test_deduplicate_repeated_imports_of_same_symbol(self):
         rt = RouteTemplate()
@@ -411,10 +410,15 @@ class TestRouteTemplateConflicts:
 
         components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
         comps_ctx = {c["key"]: c for c in components_ctx}
-        assert comps_ctx["Select"]["ssr_expr"] == "Select"
-        assert comps_ctx["Select"]["dynamic_src"] == "@lib/a"
-        assert comps_ctx["Select2"]["ssr_expr"] == "Select2"
-        assert comps_ctx["Select2"]["dynamic_src"] == "@lib/b"
+        assert comps_ctx["Select"]["expr"] == "Select"
+        assert comps_ctx["Select"]["src"] == "@lib/a"
+        assert comps_ctx["Select2"]["expr"] == "Select2"
+        assert comps_ctx["Select2"]["src"] == "@lib/b"
+
+        node_a = comps[0]()
+        node_b = comps[1]()
+        assert node_a.tag == "$$Select"
+        assert node_b.tag == "$$Select2"
 
     def test_alias_same_named_import_from_two_sources_and_keep_both_components(self):
         rt = RouteTemplate()
@@ -436,8 +440,8 @@ class TestRouteTemplateConflicts:
 
         components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
         comps_ctx = {c["key"]: c for c in components_ctx}
-        assert comps_ctx["Stack"]["ssr_expr"] == "Stack"
-        assert comps_ctx["Stack.Item"]["ssr_expr"] == "Stack2.Item"
+        assert comps_ctx["Stack"]["expr"] == "Stack"
+        assert comps_ctx["Stack2.Item"]["expr"] == "Stack2.Item"
 
     def test_reserve_js_function_names_with_conflicts(self):
         rt = RouteTemplate()

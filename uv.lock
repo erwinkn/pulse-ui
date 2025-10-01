@@ -734,7 +734,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse" }]
 
 [[package]]
 name = "pulse-mantine"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "packages/pulse-mantine/python" }
 dependencies = [
     { name = "pulse-framework" },

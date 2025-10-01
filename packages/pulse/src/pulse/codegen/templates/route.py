@@ -39,6 +39,7 @@ class RouteTemplate:
     def add_components(self, components: Sequence[ReactComponent]) -> None:
         for comp in components:
             if comp.lazy:
+                self.needs_render_lazy = True
                 # We still register the name as it's an easy way to guarantee a unique component key
                 ident = self.names.register(comp.name)
                 if ident != comp.name:

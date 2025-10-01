@@ -103,7 +103,7 @@ class TestCodegen:
     def test_generate_route_page_with_property_components(self, tmp_path):
         """Test generating route with import_name components (nested component access)."""
         app_shell_header = ReactComponent("AppShell", "@mantine/core", prop="Header")
-        app_shell_footer = ReactComponent("AppShell", "@mantine/core", prop='Footer')
+        app_shell_footer = ReactComponent("AppShell", "@mantine/core", prop="Footer")
         route = Route(
             "/app-shell",
             Component(lambda: div()["AppShell route"]),
@@ -154,6 +154,36 @@ class TestCodegen:
         # Should have a single registry entry for the duplicate name
         assert result.count('"button": button,') == 1
         assert "No components needed for this route" not in result
+
+    def test_generate_route_page_with_lazy_component_imports_renderlazy(self, tmp_path):
+        """Lazy components should trigger importing RenderLazy and avoid SSR imports."""
+        lazy_comp = ReactComponent("LazyThing", "./LazyThing", lazy=True)
+        route = Route(
+            "/lazy",
+            Component(lambda: div()["Lazy route"]),
+            components=[lazy_comp],
+        )
+        codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
+        codegen = Codegen(RouteTree([route]), codegen_config)
+        codegen.generate_route(route, server_address=SERVER_ADDRESS)
+
+        route_page_path = codegen.output_folder / "routes" / "lazy.tsx"
+        assert route_page_path.exists()
+        result = route_page_path.read_text()
+
+        # Should import RenderLazy from pulse-ui-client when any component is lazy
+        assert (
+            'import { PulseView, type VDOM, type ComponentRegistry, RenderLazy } from "pulse-ui-client";'
+            in result
+        )
+
+        # Should use RenderLazy dynamic import for the component and not import it statically
+        assert (
+            'RenderLazy(() => import("./LazyThing").then((m) => ({ default: m.LazyThing })))'
+            in result
+        )
+        assert 'import { LazyThing } from "./LazyThing";' not in result
+        assert 'import LazyThing from "./LazyThing";' not in result
 
     def test_generate_routes_ts_empty(self, tmp_path):
         """Test generating config with empty routes list."""
@@ -333,7 +363,7 @@ class TestRouteTemplateConflicts:
         print("Context:", ctx)
 
         # Imports aliased due to reserved names
-        import_sources = cast(list, ctx["import_sources"])  
+        import_sources = cast(list, ctx["import_sources"])
         by_button = self._by_src(import_sources, "./ui/button")
         assert len(by_button.values) == 1
         assert by_button.values[0].name == "Button"
@@ -344,7 +374,7 @@ class TestRouteTemplateConflicts:
         assert by_mantine.values[0].name == "AppShell"
         assert by_mantine.values[0].alias == "AppShell2"
 
-        components_ctx = cast(list, ctx["components_ctx"])  
+        components_ctx = cast(list, ctx["components_ctx"])
         comps_ctx = {c["key"]: c for c in components_ctx}
         assert comps_ctx["Button2"]["expr"] == "Button2"
         assert comps_ctx["Button2"]["dynamic"] == "({ default: m.Button })"

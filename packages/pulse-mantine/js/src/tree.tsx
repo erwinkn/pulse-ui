@@ -77,6 +77,55 @@ export function Tree({
       ),
       channel.on("getCheckedNodes", () => tree.getCheckedNodes()),
       channel.on("getExpandedState", () => tree.expandedState),
+      // Selection API
+      channel.on("toggleSelected", (payload: { value: string }) => {
+        if (!payload) return;
+        tree.toggleSelected(payload.value);
+      }),
+      channel.on("select", (payload: { value: string }) => {
+        if (!payload) return;
+        tree.select(payload.value);
+      }),
+      channel.on("deselect", (payload: { value: string }) => {
+        if (!payload) return;
+        tree.deselect(payload.value);
+      }),
+      channel.on("clearSelected", () => {
+        tree.clearSelected();
+      }),
+      channel.on("setSelectedState", (payload: { selectedState: string[] }) => {
+        if (!payload) return;
+        tree.setSelectedState(payload.selectedState ?? []);
+      }),
+      channel.on("getSelectedState", () => tree.selectedState),
+      channel.on("getAnchorNode", () => tree.anchorNode),
+      // Hover API
+      channel.on("setHoveredNode", (payload: { value?: string | null }) => {
+        tree.setHoveredNode(payload?.value ?? null);
+      }),
+      channel.on("getHoveredNode", () => tree.hoveredNode),
+      // Checked API
+      channel.on("checkNode", (payload: { value: string }) => {
+        if (!payload) return;
+        tree.checkNode(payload.value);
+      }),
+      channel.on("uncheckNode", (payload: { value: string }) => {
+        if (!payload) return;
+        tree.uncheckNode(payload.value);
+      }),
+      channel.on("checkAllNodes", () => tree.checkAllNodes()),
+      channel.on("uncheckAllNodes", () => tree.uncheckAllNodes()),
+      channel.on("setCheckedState", (payload: { checkedState: string[] }) => {
+        if (!payload) return;
+        tree.setCheckedState(payload.checkedState ?? []);
+      }),
+      channel.on("getCheckedState", () => tree.checkedState),
+      channel.on("isNodeChecked", (payload: { value: string }) =>
+        tree.isNodeChecked(payload?.value)
+      ),
+      channel.on("isNodeIndeterminate", (payload: { value: string }) =>
+        tree.isNodeIndeterminate(payload?.value)
+      ),
     ];
     return () => {
       for (const dispose of cleanups) dispose();

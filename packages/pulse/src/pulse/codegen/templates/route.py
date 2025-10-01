@@ -1,9 +1,19 @@
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, TypedDict
 from mako.template import Template
 from pulse.codegen.js import ExternalJsFunction, JsFunction
 from pulse.codegen.utils import NameRegistry
 from ..imports import ImportStatement, Imports
 from pulse.react_component import ReactComponent
+
+
+class ComponentInfo(TypedDict):
+    key: str
+    expr: str
+    src: str
+    name: str
+    default: bool
+    lazy: bool
+    dynamic: str
 
 
 class RouteTemplate:
@@ -16,97 +26,52 @@ class RouteTemplate:
     - Reserves identifiers for local JS functions
     """
 
-    def __init__(self, reserved_names: Iterable[str] | None = None) -> None:
+    def __init__(
+        self, reserved_names: Iterable[str] | None = None
+    ) -> None:
         initial = set(reserved_names or []).union(RESERVED_NAMES)
         self.names = NameRegistry(initial)
         self._imports = Imports([], names=self.names)
-        self._components_by_key: dict[str, dict[str, object]] = {}
+        self.components_by_key: dict[str, ComponentInfo] = {}
         self._js_local_names: dict[str, str] = {}
-        self._needs_render_lazy: bool = False
-        self._lib_path: str | None = None
-        # Core identifiers (allocated now to prevent collisions later)
-        self._ident_headers_args = self.names.register("HeadersArgs")
-        self._ident_pulse_view = self.names.register("PulseView")
-        self._ident_render_lazy = self.names.register("RenderLazy")
-        self._ident_vdom = self.names.register("VDOM")
-        self._ident_component_registry = self.names.register("ComponentRegistry")
-
-    def add_core_imports(self, *, lib_path: str, needs_render_lazy: bool) -> None:
-        # Store core info; actual core imports are rendered explicitly to preserve format
-        self._lib_path = lib_path
-        self._needs_render_lazy = needs_render_lazy
+        self.needs_render_lazy: bool = False
 
     def add_components(self, components: Sequence[ReactComponent]) -> None:
         for comp in components:
-            # Derive base symbol and property for dotted component names if prop not explicitly given
-            base_name = comp.name
-            prop_name = comp.prop
-            if "." in base_name and prop_name is None:
-                base_name, prop_name = base_name.split(".", 1)
-
-            is_lazy = bool(getattr(comp, "lazy", False))
-
-            # For SSR-capable components, import the symbol and compute expression
-            ident: str | None = None
-            ssr_expr: str | None = None
-            if not is_lazy:
-                if comp.is_default:
-                    ident = self._imports.import_(comp.src, base_name, is_default=True)
-                else:
-                    ident = self._imports.import_(comp.src, base_name)
-                ssr_expr = f"{ident}.{prop_name}" if prop_name else ident
-
-            # Compute the canonical expression string used as the registry key
-            expr_key = f"{base_name}.{prop_name}" if prop_name else base_name
-
-            # Dynamic import mapping for lazy usage on the client
-            if comp.is_default:
-                if prop_name:
-                    dyn_selector = f"({{ default: m.default.{prop_name} }})"
-                else:
-                    dyn_selector = "({ default: m.default })"
+            if comp.lazy:
+                # We still register the name as it's an easy way to guarantee a unique component key
+                ident = self.names.register(comp.name)
+                if ident != comp.name:
+                    comp.alias = ident
             else:
-                if prop_name:
-                    dyn_selector = f"({{ default: m.{base_name}.{prop_name} }})"
-                else:
-                    dyn_selector = f"({{ default: m.{base_name} }})"
+                # For SSR-capable components, import the symbol and compute expression
+                ident = self._imports.import_(
+                    comp.src, comp.name, is_default=comp.is_default
+                )
+                if ident != comp.name:
+                    comp.alias = ident
 
-            key_to_use = expr_key
-            existing_entry = self._components_by_key.get(expr_key)
-            if existing_entry:
-                same_src = existing_entry["dynamic_src"] == comp.src
-                if same_src:
-                    # Prefer non-lazy definition if we previously stored a lazy placeholder
-                    if existing_entry["lazy"] and not is_lazy:
-                        key_to_use = expr_key
-                    else:
-                        continue
-                else:
-                    alias_key: str | None = None
-                    if not is_lazy and ident:
-                        alias_key = f"{ident}.{prop_name}" if prop_name else ident
-                    if not alias_key:
-                        # Synthesise a stable alias by appending an index
-                        suffix = 2
-                        while True:
-                            candidate_base = f"{base_name}{suffix}"
-                            candidate_key = (
-                                f"{candidate_base}.{prop_name}"
-                                if prop_name
-                                else candidate_base
-                            )
-                            if candidate_key not in self._components_by_key:
-                                alias_key = candidate_key
-                                break
-                            suffix += 1
-                    key_to_use = alias_key
+            key = comp.expr
+            existing = self.components_by_key.get(key)
+            if existing:
+                same_import = (
+                    existing["src"] == comp.src
+                    and existing["name"] == comp.name
+                    and existing["default"] == comp.is_default
+                )
+                if not same_import:
+                    raise RuntimeError(
+                        "Invariant violation: two React components ended up with the same key. This is a Pulse bug, please raise an issue: https://github.com/erwinkn/pulse-ui"
+                    )
 
-            self._components_by_key[key_to_use] = {
-                "key": key_to_use,
-                "lazy": is_lazy,
-                "ssr_expr": ssr_expr,
-                "dynamic_src": comp.src,
-                "dynamic_selector": dyn_selector,
+            self.components_by_key[key] = {
+                "key": key,
+                "lazy": comp.lazy,
+                "expr": comp.expr,
+                "src": comp.src,
+                "name": comp.name,
+                "default": comp.is_default,
+                "dynamic": dynamic_selector(comp),
             }
 
             # Register component-level extra imports (e.g., side-effect CSS)
@@ -117,41 +82,30 @@ class RouteTemplate:
 
     def add_external_js(self, fns: Sequence[ExternalJsFunction]) -> None:
         for fn in fns:
-            if fn.is_default:
-                self._imports.import_(fn.src, fn.name, is_default=True)
-            else:
-                self._imports.import_(fn.src, fn.name)
+            self._imports.import_(fn.src, fn.name, is_default=True)
+        # TODO: update fn in case of aliasing
 
     def reserve_js_function_names(self, js_functions: Sequence[JsFunction]) -> None:
         for j in js_functions:
             self._js_local_names[j.name] = self.names.register(j.name)
-
-    @property
-    def needs_render_lazy(self) -> bool:
-        return self._needs_render_lazy
-
-    @property
-    def lib_path(self) -> str:
-        if self._lib_path is None:
-            # Default to pulse-ui-client if not set explicitly
-            return "pulse-ui-client"
-        return self._lib_path
+        # TODO: update fn in case of aliasing
 
     def context(self) -> dict[str, object]:
         # Deterministic order of import sources with ordering constraints
         import_sources = self._imports.ordered_sources()
         return {
             "import_sources": import_sources,
-            "components_ctx": list(self._components_by_key.values()),
+            "components_ctx": list(self.components_by_key.values()),
             "local_js_names": self._js_local_names,
-            "needs_render_lazy": self._needs_render_lazy,
-            "lib_path": self.lib_path,
-            "ident_headers_args": self._ident_headers_args,
-            "ident_pulse_view": self._ident_pulse_view,
-            "ident_render_lazy": self._ident_render_lazy,
-            "ident_vdom": self._ident_vdom,
-            "ident_component_registry": self._ident_component_registry,
+            "needs_render_lazy": self.needs_render_lazy,
         }
+
+
+def dynamic_selector(comp: ReactComponent):
+    # Dynamic import mapping for lazy usage on the client
+    attr = "default" if comp.is_default else comp.name
+    prop_accessor = f".{comp.prop}" if comp.prop else ""
+    return f"({{ default: m.{attr}{prop_accessor} }})"
 
 
 # Constants and functions defined in the template below. We need to avoid name conflicts with imports
@@ -161,11 +115,16 @@ RESERVED_NAMES = [
     "RouteComponent",
     "hasAnyHeaders",
     "headers",
+    "HeadersArgs",
+    "PulseView",
+    "VDOM",
+    "ComponentRegistry",
+    "RenderLazy",
 ]
 
 TEMPLATE = Template(
-    """import { type ${ident_headers_args} } from "react-router";
-import { ${ident_pulse_view}, type ${ident_vdom}, type ${ident_component_registry}${", " + ident_render_lazy if needs_render_lazy else ""} } from "${lib_path}";
+    """import { type HeadersArgs } from "react-router";
+import { PulseView, type VDOM, type ComponentRegistry${", " + "RenderLazy" if needs_render_lazy else ""} } from "pulse-ui-client";
 
 % if import_sources:
 // Component and helper imports
@@ -179,7 +138,7 @@ import { ${', '.join([f"{v.name}{f' as {v.alias}' if v.alias else ''}" for v in 
 %   if import_source.types:
 import type { ${', '.join([f"{t.name}{f' as {t.alias}' if t.alias else ''}" for t in import_source.types])} } from "${import_source.src}";
 %   endif
-%   if (not import_source.default_import) and (not import_source.values) and (not import_source.types) and import_source.side_effect:
+%   if import_source.side_effect and (not import_source.default_import) and (not import_source.values) and (not import_source.types):
 import "${import_source.src}";
 %   endif
 % endfor
@@ -187,25 +146,25 @@ import "${import_source.src}";
 
 // Component registry
 % if components_ctx:
-const externalComponents: ${ident_component_registry} = {
+const externalComponents: ComponentRegistry = {
 % for c in components_ctx:
 %   if c['lazy']:
-  "${c['key']}": RenderLazy(() => import("${c['dynamic_src']}").then((m) => ${c['dynamic_selector']})),
+  "${c['key']}": RenderLazy(() => import("${c['src']}").then((m) => ${c['dynamic']})),
 %   else:
-  "${c['key']}": ${c['ssr_expr']},
+  "${c['key']}": ${c['expr']},
 %   endif
 % endfor
 };
 % else:
 // No components needed for this route
-const externalComponents: ${ident_component_registry} = {};
+const externalComponents: ComponentRegistry = {};
 % endif
 
 const path = "${route.unique_path()}";
 
 export default function RouteComponent() {
   return (
-    <${ident_pulse_view} key={path} externalComponents={externalComponents} path={path} />
+    <PulseView key={path} externalComponents={externalComponents} path={path} />
   );
 }
 
@@ -217,7 +176,7 @@ function hasAnyHeaders(headers: Headers): boolean {
 export function headers({
   actionHeaders,
   loaderHeaders,
-}: ${ident_headers_args}) {
+}: HeadersArgs) {
   return hasAnyHeaders(actionHeaders)
     ? actionHeaders
     : loaderHeaders;
@@ -232,17 +191,14 @@ ROUTE_TEMPLATE = TEMPLATE
 def render_route(
     *,
     route,
-    lib_path: str,
     components: Sequence[ReactComponent] | None = None,
     js_functions: Sequence[JsFunction] | None = None,
     external_js: Sequence[ExternalJsFunction] | None = None,
     reserved_names: Iterable[str] | None = None,
 ) -> str:
     comps = list(components or [])
-    needs_render_lazy = any(getattr(c, "lazy", False) for c in comps)
 
     jt = RouteTemplate(reserved_names=reserved_names)
-    jt.add_core_imports(lib_path=lib_path, needs_render_lazy=needs_render_lazy)
     jt.add_components(comps)
     if external_js:
         jt.add_external_js(list(external_js))

@@ -21,6 +21,7 @@ Not all components are typed in Python yet, but you can still use them exactly l
 
 If you notice any problem, please submit an issue, I have not tested all components yet.
 
+
 ## Forms
 
 Forms are the most customized area of `pulse-mantine`. There are two reasons for this:

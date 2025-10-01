@@ -1,4 +1,4 @@
-from typing import Any, Optional, Unpack
+from typing import Any, Optional, Unpack, Callable
 import pulse as ps
 
 
@@ -41,6 +41,8 @@ class TreeState(ps.State):
         initialSelectedState: Optional[list[str]] = None,
         initialCheckedState: Optional[list[str]] = None,
         multiple: Optional[bool] = None,
+        onNodeExpand: Optional[Callable[[str], None]] = None,
+        onNodeCollapse: Optional[Callable[[str], None]] = None,
     ):
         self._channel = ps.channel()
         self._expanded: ExpandedState = dict(initialExpandedState or {})
@@ -48,24 +50,20 @@ class TreeState(ps.State):
         self._initial_selected = list(initialSelectedState or [])
         self._initial_checked = list(initialCheckedState or [])
         self._multiple = multiple
+        self._on_node_expand_listener = onNodeExpand
+        self._on_node_collapse_listener = onNodeCollapse
         # Client -> server per-node events
         self._channel.on("nodeExpand", self._on_node_expand)
         self._channel.on("nodeCollapse", self._on_node_collapse)
 
     # Public imperative API mirrors Mantine useTree
     def toggle_expanded(self, value: str):
-        if not isinstance(value, str):
-            return
         self._channel.emit("toggleExpanded", {"value": value})
 
     def expand(self, value: str):
-        if not isinstance(value, str):
-            return
         self._channel.emit("expand", {"value": value})
 
     def collapse(self, value: str):
-        if not isinstance(value, str):
-            return
         self._channel.emit("collapse", {"value": value})
 
     def expand_all_nodes(self):
@@ -75,8 +73,6 @@ class TreeState(ps.State):
         self._channel.emit("collapseAllNodes")
 
     def set_expanded_state(self, state: ExpandedState):
-        if not isinstance(state, dict):
-            return
         self._expanded.clear()
         self._expanded.update({k: bool(v) for k, v in state.items()})
         self._channel.emit("setExpandedState", {"expandedState": dict(self._expanded)})
@@ -89,9 +85,69 @@ class TreeState(ps.State):
             self._expanded.update({k: bool(v) for k, v in result.items()})
         return dict(self._expanded)
 
+    # Selection API
+    def toggle_selected(self, value: str):
+        self._channel.emit("toggleSelected", {"value": value})
+
+    def select(self, value: str):
+        self._channel.emit("select", {"value": value})
+
+    def deselect(self, value: str):
+        self._channel.emit("deselect", {"value": value})
+
+    def clear_selected(self):
+        self._channel.emit("clearSelected")
+
+    def set_selected_state(self, values: list[str]):
+        self._channel.emit("setSelectedState", {"selectedState": list(values or [])})
+
+    async def get_selected_state(self) -> list[str]:
+        result = await self._channel.request("getSelectedState")
+        return list(result or []) if isinstance(result, list) else []
+
+    async def get_anchor_node(self) -> Optional[str]:
+        result = await self._channel.request("getAnchorNode")
+        return str(result) if isinstance(result, str) else None
+
+    # Hover API
+    def set_hovered_node(self, value: Optional[str]):
+        self._channel.emit("setHoveredNode", {"value": value})
+
+    async def get_hovered_node(self) -> Optional[str]:
+        result = await self._channel.request("getHoveredNode")
+        return str(result) if isinstance(result, str) else None
+
+    # Checked API
+    def check_node(self, value: str):
+        self._channel.emit("checkNode", {"value": value})
+
+    def uncheck_node(self, value: str):
+        self._channel.emit("uncheckNode", {"value": value})
+
+    def check_all_nodes(self):
+        self._channel.emit("checkAllNodes")
+
+    def uncheck_all_nodes(self):
+        self._channel.emit("uncheckAllNodes")
+
+    def set_checked_state(self, values: list[str]):
+        self._channel.emit("setCheckedState", {"checkedState": list(values or [])})
+
     async def get_checked_nodes(self) -> list[dict[str, Any]]:
         result = await self._channel.request("getCheckedNodes")
         return result or []
+
+    async def get_checked_state(self) -> list[str]:
+        result = await self._channel.request("getCheckedState")
+        return list(result or []) if isinstance(result, list) else []
+
+    async def is_node_checked(self, value: str) -> bool:
+        result = await self._channel.request("isNodeChecked", {"value": value})
+        return bool(result)
+
+    async def is_node_indeterminate(self, value: str) -> bool:
+        result = await self._channel.request("isNodeIndeterminate", {"value": value})
+        return bool(result)
 
     @property
     def expanded_state(self) -> ExpandedState:
@@ -104,6 +160,13 @@ class TreeState(ps.State):
         value = payload.get("value")
         if isinstance(value, str) and value:
             self._expanded[value] = True
+            listener = self._on_node_expand_listener
+            if listener is not None:
+                try:
+                    listener(value)
+                except Exception:
+                    # Swallow listener exceptions to avoid breaking sync
+                    pass
 
     def _on_node_collapse(self, payload: dict[str, Any]) -> None:
         if not isinstance(payload, dict):
@@ -111,6 +174,13 @@ class TreeState(ps.State):
         value = payload.get("value")
         if isinstance(value, str) and value:
             self._expanded[value] = False
+            listener = self._on_node_collapse_listener
+            if listener is not None:
+                try:
+                    listener(value)
+                except Exception:
+                    # Swallow listener exceptions to avoid breaking sync
+                    pass
 
     # Render the React wrapper component
     def render(

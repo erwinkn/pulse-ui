@@ -14,10 +14,12 @@ from typing import (
 )
 
 
-from pulse.helpers import create_task, schedule_on_loop
+from pulse.helpers import create_task, schedule_on_loop, values_equal
 
 T = TypeVar("T")
 P = ParamSpec("P")
+
+
 
 
 class Signal(Generic[T]):
@@ -78,7 +80,7 @@ class Signal(Generic[T]):
         return off
 
     def write(self, value: T):
-        if value == self.value:
+        if values_equal(value, self.value):
             return
         increment_epoch()
         self.value = value
@@ -155,7 +157,7 @@ class Computed(Generic[T]):
                 )
             self.on_stack = False
             self.dirty = False
-            if prev_value != self.value:
+            if not values_equal(prev_value, self.value):
                 self.last_change = execution_epoch
 
             if len(scope.effects) > 0:

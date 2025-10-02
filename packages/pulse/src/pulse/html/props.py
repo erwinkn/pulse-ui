@@ -1,7 +1,8 @@
 # Adapted from @types/react 19.0
 # NOT the same thing as the properties in `elements.py` (but very similar)
-from typing import Any, List, Literal, Union, TypedDict
+from typing import Any, List, Literal, TypedDict, Union
 
+from pulse.css import CssReference
 from pulse.helpers import CSSProperties
 from pulse.html.elements import (  # noqa: F401
     GenericHTMLElement,
@@ -32,8 +33,8 @@ from pulse.html.elements import (  # noqa: F401
     HTMLLiElement,
     HTMLLinkElement,
     HTMLMapElement,
-    HTMLMenuElement,
     HTMLMediaElement,
+    HTMLMenuElement,
     HTMLMetaElement,
     HTMLMeterElement,
     HTMLModElement,
@@ -68,8 +69,8 @@ from pulse.html.elements import (  # noqa: F401
     HTMLVideoElement,
 )
 from pulse.html.events import (
-    DOMEvents,
     DialogDOMEvents,
+    DOMEvents,
     InputDOMEvents,
     SelectDOMEvents,
     TElement,
@@ -78,7 +79,7 @@ from pulse.html.events import (
 
 Booleanish = Literal[True, False, "true", "false"]
 CrossOrigin = Literal["anonymous", "use-credentials", ""] | None
-
+ClassName = str | CssReference
 
 class BaseHTMLProps(TypedDict, total=False):
     # React-specific Attributes
@@ -91,7 +92,7 @@ class BaseHTMLProps(TypedDict, total=False):
     accessKey: str
     autoCapitalize: Literal["off", "none", "on", "sentences", "words", "characters"]
     autoFocus: bool
-    className: str
+    className: ClassName
     contentEditable: Union[Booleanish, Literal["inherit", "plaintext-only"]]
     contextMenu: str
     dir: str

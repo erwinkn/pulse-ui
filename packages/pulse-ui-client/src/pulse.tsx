@@ -10,7 +10,7 @@ import { VDOMRenderer, applyUpdates } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry, RegistryEntry } from "./vdom";
 import { useLocation, useParams, useNavigate } from "react-router";
-import type { ServerErrorInfo } from "./messages";
+import type { ServerErrorInfo} from "./messages";
 import type { RouteInfo } from "./helpers";
 
 // =================================================================
@@ -25,6 +25,7 @@ export type PulsePrerenderView = {
   vdom: VDOM;
   callbacks: string[];
   render_props: string[];
+  css_refs: string[];
 };
 
 export type PulsePrerender = {
@@ -126,9 +127,14 @@ export function PulseProvider({
 export interface PulseViewProps {
   externalComponents: ComponentRegistry;
   path: string;
+  cssModules: Record<string, Record<string, string>>;
 }
 
-export function PulseView({ externalComponents, path }: PulseViewProps) {
+export function PulseView({
+  externalComponents,
+  path,
+  cssModules,
+}: PulseViewProps) {
   const client = usePulseClient();
   const initialView = usePulsePrerender(path);
   const initialVDOM = initialView.vdom;
@@ -138,10 +144,12 @@ export function PulseView({ externalComponents, path }: PulseViewProps) {
         client,
         path,
         externalComponents,
+        cssModules,
         initialView.callbacks,
-        initialView.render_props
+        initialView.render_props,
+        initialView.css_refs
       ),
-    [client, path, externalComponents, initialView]
+    [client, path, externalComponents, cssModules, initialView]
   );
   const [tree, setTree] = useState<React.ReactNode>(() =>
     renderer.renderNode(initialVDOM)
@@ -173,9 +181,10 @@ export function PulseView({ externalComponents, path }: PulseViewProps) {
     if (inBrowser) {
       client.mountView(path, {
         routeInfo,
-        onInit: (vdom, callbacks, renderProps) => {
+        onInit: (vdom, callbacks, renderProps, cssRefs) => {
           renderer.setCallbacks(callbacks);
           renderer.setRenderProps(renderProps);
+          renderer.setCssRefs(cssRefs);
           setTree(renderer.renderNode(vdom));
         },
         onUpdate: (ops) => {

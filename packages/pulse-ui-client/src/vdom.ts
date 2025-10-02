@@ -33,7 +33,8 @@ export type UpdateType =
   | "update_props"
   | "move"
   | "update_callbacks"
-  | "update_render_props";
+  | "update_render_props"
+  | "update_css_refs";
 
 export interface VDOMUpdateBase {
   type: UpdateType;
@@ -89,6 +90,14 @@ export interface UpdateRenderPropsUpdate extends VDOMUpdateBase {
   };
 }
 
+export interface UpdateCssRefsUpdate extends VDOMUpdateBase {
+  type: "update_css_refs";
+  data: {
+    set?: string[];
+    remove?: string[];
+  };
+}
+
 export type VDOMUpdate =
   | InsertUpdate
   | RemoveUpdate
@@ -96,7 +105,8 @@ export type VDOMUpdate =
   | UpdatePropsUpdate
   | MoveUpdate
   | UpdateCallbacksUpdate
-  | UpdateRenderPropsUpdate;
+  | UpdateRenderPropsUpdate
+  | UpdateCssRefsUpdate;
 
 // Utility functions for working with the UI tree structure
 export function isElementNode(node: VDOMNode): node is VDOMElement {

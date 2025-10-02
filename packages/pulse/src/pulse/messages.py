@@ -5,6 +5,7 @@ from pulse.vdom import VDOM
 from pulse.routing import RouteInfo
 
 
+
 # ====================
 # Server messages
 # ====================
@@ -14,6 +15,7 @@ class ServerInitMessage(TypedDict):
     vdom: VDOM
     callbacks: list[str]
     render_props: list[str]
+    css_refs: list[str]
 
 
 class ServerUpdateMessage(TypedDict):

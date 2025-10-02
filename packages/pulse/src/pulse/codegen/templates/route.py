@@ -16,6 +16,16 @@ class ComponentInfo(TypedDict):
     dynamic: str
 
 
+class CssModuleImport(TypedDict):
+    id: str
+    import_path: str
+
+
+class CssModuleCtx(TypedDict):
+    id: str
+    identifier: str
+
+
 class RouteTemplate:
     """
     Helper to resolve names and build import statements before rendering a route file.
@@ -35,6 +45,7 @@ class RouteTemplate:
         self.components_by_key: dict[str, ComponentInfo] = {}
         self._js_local_names: dict[str, str] = {}
         self.needs_render_lazy: bool = False
+        self._css_modules: dict[str, CssModuleCtx] = {}
 
     def add_components(self, components: Sequence[ReactComponent]) -> None:
         for comp in components:
@@ -81,6 +92,23 @@ class RouteTemplate:
                 if isinstance(stmt, ImportStatement):
                     self._imports.add_statement(stmt)
 
+    def add_css_modules(self, modules: Sequence[CssModuleImport]) -> None:
+        for mod in modules:
+            if mod["id"] in self._css_modules:
+                continue
+            identifier = self._imports.import_(
+                mod["import_path"], mod["id"], is_default=True
+            )
+            self._css_modules[mod["id"]] = {
+                "id": mod["id"],
+                "identifier": identifier,
+            }
+
+    def add_css_imports(self, imports: Sequence[str]) -> None:
+        for spec in imports:
+            stmt = ImportStatement(spec, side_effect=True)
+            self._imports.add_statement(stmt)
+
     def add_external_js(self, fns: Sequence[ExternalJsFunction]) -> None:
         for fn in fns:
             self._imports.import_(fn.src, fn.name, is_default=True)
@@ -99,6 +127,7 @@ class RouteTemplate:
             "components_ctx": list(self.components_by_key.values()),
             "local_js_names": self._js_local_names,
             "needs_render_lazy": self.needs_render_lazy,
+            "css_modules_ctx": list(self._css_modules.values()),
         }
 
 
@@ -121,6 +150,7 @@ RESERVED_NAMES = [
     "VDOM",
     "ComponentRegistry",
     "RenderLazy",
+    "cssModules",
 ]
 
 TEMPLATE = Template(
@@ -146,6 +176,16 @@ import "${import_source.src}";
 % endif
 
 // Component registry
+% if css_modules_ctx:
+const cssModules = {
+% for mod in css_modules_ctx:
+  "${mod['id']}": ${mod['identifier']},
+% endfor
+};
+% else:
+const cssModules = {};
+% endif
+
 % if components_ctx:
 const externalComponents: ComponentRegistry = {
 % for c in components_ctx:
@@ -165,7 +205,7 @@ const path = "${route.unique_path()}";
 
 export default function RouteComponent() {
   return (
-    <PulseView key={path} externalComponents={externalComponents} path={path} />
+    <PulseView key={path} externalComponents={externalComponents} path={path} cssModules={cssModules} />
   );
 }
 
@@ -193,6 +233,8 @@ def render_route(
     *,
     route,
     components: Sequence[ReactComponent] | None = None,
+    css_modules: Sequence[CssModuleImport] | None = None,
+    css_imports: Sequence[str] | None = None,
     js_functions: Sequence[JsFunction] | None = None,
     external_js: Sequence[ExternalJsFunction] | None = None,
     reserved_names: Iterable[str] | None = None,
@@ -201,6 +243,12 @@ def render_route(
 
     jt = RouteTemplate(reserved_names=reserved_names)
     jt.add_components(comps)
+    modules = list(css_modules or [])
+    if modules:
+        jt.add_css_modules(modules)
+    imports = list(css_imports or [])
+    if imports:
+        jt.add_css_imports(imports)
     if external_js:
         jt.add_external_js(list(external_js))
     if js_functions:

@@ -9,14 +9,21 @@ function childrenArray(el: React.ReactElement): React.ReactNode[] {
 }
 
 describe("applyReactTreeUpdates", () => {
-  function makeRenderer(initialCallbacks: string[] = []) {
+  function makeRenderer(
+    initialCallbacks: string[] = [],
+    cssModules: Record<string, Record<string, string>> = {},
+    initialCssRefs: string[] = []
+  ) {
     const invokeCallback = vi.fn();
     const client: any = { invokeCallback };
     const renderer = new VDOMRenderer(
       client,
       "/test",
       {},
-      initialCallbacks
+      cssModules,
+      initialCallbacks,
+      [],
+      initialCssRefs
     );
     return { renderer, invokeCallback };
   }
@@ -77,6 +84,68 @@ describe("applyReactTreeUpdates", () => {
     expect(typeof (root.props as any).onClick).toBe("function");
     (root.props as any).onClick(123);
     expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", [123]);
+  });
+
+  it("hydrates css refs from initial payload", () => {
+    const cssModules = { moduleA: { container: "container_hash" } };
+    const { renderer } = makeRenderer([], cssModules, ["className"]);
+    const tree = renderer.renderNode({
+      tag: "div",
+      props: {
+        className: "moduleA:container",
+      },
+    });
+    const el = tree as React.ReactElement;
+    expect((el.props as any).className).toBe("container_hash");
+  });
+
+  it("applies css ref deltas", () => {
+    const cssModules = { moduleA: { button: "button_hash" } };
+    const { renderer } = makeRenderer([], cssModules);
+    const initialVDOM: VDOMNode = { tag: "button" };
+    let tree = renderer.renderNode(initialVDOM);
+
+    tree = applyUpdates(
+      tree,
+      [
+        {
+          type: "update_css_refs",
+          path: "",
+          data: { set: ["className"] },
+        },
+        {
+          type: "update_props",
+          path: "",
+          data: {
+            set: { className: "moduleA:button" },
+          },
+        },
+      ],
+      renderer
+    );
+    const button = tree as React.ReactElement;
+    expect((button.props as any).className).toBe("button_hash");
+
+    tree = applyUpdates(
+      tree,
+      [
+        {
+          type: "update_css_refs",
+          path: "",
+          data: { remove: ["className"] },
+        },
+        {
+          type: "update_props",
+          path: "",
+          data: {
+            set: { className: "plain" },
+          },
+        },
+      ],
+      renderer
+    );
+    const updatedButton = tree as React.ReactElement;
+    expect((updatedButton.props as any).className).toBe("plain");
   });
 
   it("replaces a nested child via path", () => {
@@ -208,6 +277,9 @@ describe("applyReactTreeUpdates", () => {
     const innerDiv = childrenArray(root)[0] as React.ReactElement;
     const button = childrenArray(innerDiv)[0] as React.ReactElement;
     expect(typeof (button.props as any).onClick).toBe("function");
+    expect(
+      Array.from(((renderer as any).callbackProps as Map<string, any>).keys())
+    ).toEqual(["0.0"]);
     (button.props as any).onClick();
     expect(invokeCallback).toHaveBeenCalledWith("/test", "0.0.onClick", []);
   });

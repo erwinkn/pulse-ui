@@ -3,6 +3,8 @@ from typing import Callable, Optional, Sequence, TypedDict, cast
 from dataclasses import dataclass, field
 
 from pulse.react_component import ReactComponent
+from pulse.css import CssModule, CssImport
+from pulse.css import CssModule
 from pulse.reactive_extensions import ReactiveDict
 from pulse.vdom import Node, Component
 
@@ -108,6 +110,8 @@ class Route:
         render: Component[[]],
         children: "Optional[Sequence[Route | Layout]]" = None,
         components: Optional[Sequence[ReactComponent]] = None,
+        css_modules: Optional[Sequence[CssModule]] = None,
+        css_imports: Optional[Sequence[CssImport]] = None,
     ):
         self.path = normalize_path(path)
         self.segments = parse_route_path(path)
@@ -115,6 +119,8 @@ class Route:
         self.render = render
         self.children = children or []
         self.components = components
+        self.css_modules = css_modules
+        self.css_imports = css_imports
         self.parent: Optional[Route | Layout] = None
 
         self.is_index = self.path == ""
@@ -188,10 +194,14 @@ class Layout:
         render: Component,
         children: "Optional[Sequence[Route | Layout]]" = None,
         components: Optional[Sequence[ReactComponent]] = None,
+        css_modules: Optional[Sequence[CssModule]] = None,
+        css_imports: Optional[Sequence[CssImport]] = None,
     ):
         self.render = render
         self.children = children or []
         self.components = components
+        self.css_modules = css_modules
+        self.css_imports = css_imports
         self.parent: Optional[Route | Layout] = None
         # 1-based sibling index assigned by RouteTree at each level
         self.idx: int = 1

@@ -16,6 +16,7 @@ from .helpers import (
     later,
     repeat,
 )
+from .css import css, css_module
 from .hooks import (
     call_api,
     client_address,
@@ -261,6 +262,8 @@ __all__ = [
     # Utils,
     "later",
     "repeat",
+    "css",
+    "css_module",
     # Serializer
     "serialize",
     "deserialize",

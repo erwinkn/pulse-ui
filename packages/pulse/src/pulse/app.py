@@ -56,6 +56,12 @@ from pulse.middleware import (
 )
 from pulse.plugin import Plugin
 from pulse.react_component import ReactComponent, registered_react_components
+from pulse.css import (
+    registered_css_modules,
+    registered_css_imports,
+    CssModule,
+    CssImport,
+)
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
@@ -153,6 +159,8 @@ class App:
 
         # Auto-add React components to all routes
         add_react_components(all_routes, registered_react_components())
+        add_css_modules(all_routes, registered_css_modules())
+        add_css_imports(all_routes, registered_css_imports())
         self.routes = RouteTree(all_routes)
         self.not_found = not_found
         # Default not-found path for client-side navigation on not_found()
@@ -394,18 +402,11 @@ class App:
 
             def _prerender_one(path: str):
                 captured = render.prerender_mount_capture(path, route_info)
-                t = captured.get("type") if isinstance(captured, dict) else None
-                if t == "vdom_init":
-                    return Ok(
-                        {
-                            "vdom": captured["vdom"],
-                            "callbacks": captured.get("callbacks", []),
-                            "render_props": captured.get("render_props", []),
-                        }
-                    )
-                if t == "navigate_to":
-                    nav_path = captured.get("path")
-                    replace = bool(captured.get("replace"))
+                if captured["type"] == "vdom_init":
+                    return Ok(captured)
+                if captured["type"] == "navigate_to":
+                    nav_path = captured["path"]
+                    replace = captured["replace"]
                     # Treat navigate to not_found (replace) as NotFound
                     if replace and nav_path == self.not_found:
                         return NotFound()
@@ -767,3 +768,19 @@ def add_react_components(
             route.components = components
         if route.children:
             add_react_components(route.children, components)
+
+
+def add_css_modules(routes: Sequence[Route | Layout], modules: list[CssModule]):
+    for route in routes:
+        if route.css_modules is None:
+            route.css_modules = modules
+        if route.children:
+            add_css_modules(route.children, modules)
+
+
+def add_css_imports(routes: Sequence[Route | Layout], imports: list[CssImport]):
+    for route in routes:
+        if route.css_imports is None:
+            route.css_imports = imports
+        if route.children:
+            add_css_imports(route.children, imports)

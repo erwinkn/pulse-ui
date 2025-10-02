@@ -9,7 +9,7 @@ from ..box import BoxProps
 StackStylesNames = Literal["root"]
 StackAttributes = dict[StackStylesNames, dict[str, Any]]
 StackStyles = dict[StackStylesNames, ps.CSSProperties]
-StackClassNames = dict[StackStylesNames, str]
+StackClassNames = dict[StackStylesNames, ps.ClassName]
 
 
 class StackCSSVariables(TypedDict, total=False):

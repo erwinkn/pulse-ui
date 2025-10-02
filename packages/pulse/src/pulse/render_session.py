@@ -9,8 +9,10 @@ from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop, create_task
 from pulse.messages import (
     RouteInfo,
+    ServerApiCallMessage,
     ServerInitMessage,
     ServerMessage,
+    ServerNavigateToMessage,
     ServerUpdateMessage,
     ServerErrorMessage,
 )
@@ -193,15 +195,15 @@ class RenderSession:
         headers = headers or {}
         headers["x-pulse-render-id"] = self.id
         self.send(
-            {
-                "type": "api_call",
-                "id": corr_id,
-                "url": url,
-                "method": method,
-                "headers": headers,
-                "body": body,
-                "credentials": "include" if credentials == "include" else "omit",
-            }
+            ServerApiCallMessage(
+                type="api_call",
+                id=corr_id,
+                url=url,
+                method=method,
+                headers=headers,
+                body=body,
+                credentials="include" if credentials == "include" else "omit",
+            )
         )
         result = await fut
         return result
@@ -230,7 +232,7 @@ class RenderSession:
 
     def prerender_mount_capture(
         self, path: str, route_info: Optional[RouteInfo] = None
-    ):
+    ) -> ServerInitMessage | ServerNavigateToMessage:
         """
         Mount the route and run the render effect immediately, capturing the
         initial message instead of sending over a socket.
@@ -245,35 +247,38 @@ class RenderSession:
             # expect initial mount. Return current tree as a full VDOM.
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                vdom, callbacks, render_props = mount.root.render_vdom()
-            return {
-                "type": "vdom_init",
-                "vdom": vdom,
-                "callbacks": sorted(callbacks.keys()),
-                "render_props": sorted(render_props),
-            }
+                vdom, callbacks, render_props, css_refs = mount.root.render_vdom()
+                return ServerInitMessage(
+                    type="vdom_init",
+                    path=path,
+                    vdom=vdom,
+                    callbacks=sorted(callbacks.keys()),
+                    render_props=sorted(render_props),
+                    css_refs=sorted(css_refs),
+                )
 
-        captured: dict | None = None
+        captured: ServerInitMessage | ServerNavigateToMessage | None = None
 
         def _capture(msg: ServerMessage):
             nonlocal captured
             # Only capture the first relevant message for this path
             if captured is not None:
                 return
-            mtype = msg.get("type") if isinstance(msg, dict) else None
-            if mtype == "vdom_init" and msg.get("path") == path:
-                captured = {
-                    "type": "vdom_init",
-                    "vdom": msg.get("vdom"),
-                    "callbacks": msg.get("callbacks", []),
-                    "render_props": msg.get("render_props", []),
-                }
-            elif mtype == "navigate_to":
-                captured = {
-                    "type": "navigate_to",
-                    "path": msg.get("path"),
-                    "replace": bool(msg.get("replace")),
-                }
+            if msg["type"] == "vdom_init" and msg["path"] == path:
+                captured = ServerInitMessage(
+                    type="vdom_init",
+                    path=path,
+                    vdom=msg.get("vdom"),
+                    callbacks=msg.get("callbacks", []),
+                    render_props=msg.get("render_props", []),
+                    css_refs=msg.get("css_refs", []),
+                )
+            elif msg["type"] == "navigate_to":
+                captured = ServerNavigateToMessage(
+                    type="navigate_to",
+                    path=msg["path"],
+                    replace=msg["replace"],
+                )
 
         prev_sender = self._send_message
         try:
@@ -289,13 +294,15 @@ class RenderSession:
         if captured is None:
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                vdom, callbacks, render_props = mount.root.render_vdom()
-            return {
-                "type": "vdom_init",
-                "vdom": vdom,
-                "callbacks": sorted(callbacks.keys()),
-                "render_props": sorted(render_props),
-            }
+                vdom, callbacks, render_props, css_refs = mount.root.render_vdom()
+            return ServerInitMessage(
+                type="vdom_init",
+                path=path,
+                vdom=vdom,
+                callbacks=sorted(callbacks.keys()),
+                render_props=sorted(render_props),
+                css_refs=sorted(css_refs),
+            )
 
         return captured
 
@@ -346,7 +353,9 @@ class RenderSession:
             with PulseContext.update(session=session, render=self, route=mount.route):
                 try:
                     if mount.root.render_count == 0:
-                        vdom, callbacks, render_props = mount.root.render_vdom()
+                        vdom, callbacks, render_props, css_refs = (
+                            mount.root.render_vdom()
+                        )
                         self.send(
                             ServerInitMessage(
                                 type="vdom_init",
@@ -354,6 +363,7 @@ class RenderSession:
                                 vdom=vdom,
                                 callbacks=sorted(callbacks.keys()),
                                 render_props=sorted(render_props),
+                                css_refs=sorted(css_refs),
                             )
                         )
                     else:
@@ -367,16 +377,16 @@ class RenderSession:
                 except RedirectInterrupt as r:
                     # Prefer client-side navigation over emitting VDOM operations
                     self.send(
-                        {"type": "navigate_to", "path": r.path, "replace": r.replace}
+                        ServerNavigateToMessage(
+                            type="navigate_to", path=r.path, replace=r.replace
+                        )
                     )
                 except NotFoundInterrupt:
                     # Use app-configured not-found path; fallback to '/404'
                     self.send(
-                        {
-                            "type": "navigate_to",
-                            "path": ctx.app.not_found,
-                            "replace": True,
-                        }
+                        ServerNavigateToMessage(
+                            type="navigate_to", path=ctx.app.not_found, replace=True
+                        )
                     )
 
         mount.effect = Effect(

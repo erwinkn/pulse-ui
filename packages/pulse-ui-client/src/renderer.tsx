@@ -19,16 +19,20 @@ export class VDOMRenderer {
   private callbackCache: Map<string, (...args: any[]) => void>;
   private callbackProps: Map<string, Set<string>>;
   private renderPropKeys: Set<string>;
+  private cssProps: Set<string>;
   constructor(
     private client: PulseSocketIOClient,
     private path: string,
     private components: ComponentRegistry,
+    private cssModules: Record<string, Record<string, string>>,
     initialCallbacks: string[] = [],
-    initialRenderProps: string[] = []
+    initialRenderProps: string[] = [],
+    initialCssRefs: string[] = []
   ) {
     this.callbackCache = new Map();
     this.callbackProps = new Map();
     this.renderPropKeys = new Set(initialRenderProps);
+    this.cssProps = new Set(initialCssRefs);
     this.setCallbacks(initialCallbacks);
   }
 
@@ -96,7 +100,7 @@ export class VDOMRenderer {
         nextTree,
         parts,
         0,
-        path,
+        "",
         before,
         after
       );
@@ -109,6 +113,10 @@ export class VDOMRenderer {
     this.renderPropKeys = new Set(keys);
   }
 
+  setCssRefs(entries: string[]) {
+    this.cssProps = new Set(entries);
+  }
+
   applyRenderPropsDelta(delta: { add?: string[]; remove?: string[] }) {
     if (delta.remove) {
       for (const key of delta.remove) {
@@ -118,6 +126,19 @@ export class VDOMRenderer {
     if (delta.add) {
       for (const key of delta.add) {
         this.renderPropKeys.add(key);
+      }
+    }
+  }
+
+  applyCssRefsDelta(delta: { set?: string[]; remove?: string[] }) {
+    if (delta.set) {
+      for (const prop of delta.set) {
+        this.cssProps.add(prop);
+      }
+    }
+    if (delta.remove) {
+      for (const prop of delta.remove) {
+        this.cssProps.delete(prop);
       }
     }
   }
@@ -147,27 +168,26 @@ export class VDOMRenderer {
     if (isElementNode(node)) {
       const { tag, props = {}, children = [] } = node;
 
-      const processedProps: Record<string, any> = { ...(props || {}) };
+      const newProps = { ...props };
 
       // Apply callbacks
       for (const propName of this.getCallbackNames(currentPath)) {
-        processedProps[propName] = this.getCallback(currentPath, propName);
+        newProps[propName] = this.getCallback(currentPath, propName);
       }
 
-      // Detect and render any render props (VDOM objects in props)
-      for (const [propName, propValue] of Object.entries(processedProps)) {
-        const renderPropKey = this.propPath(currentPath, propName);
-        if (this.renderPropKeys.has(renderPropKey)) {
+      for (const [propName, propValue] of Object.entries(newProps)) {
+        const propPath = this.propPath(currentPath, propName);
+        if (this.cssProps.has(propPath)) {
+          newProps[propName] = this.resolveCssToken(propValue);
+        }
+        if (this.renderPropKeys.has(propPath)) {
           // This prop is a render prop - render the VDOM to React
-          const renderPropPath = currentPath
-            ? `${currentPath}.${propName}`
-            : propName;
-          processedProps[propName] = this.renderNode(propValue, renderPropPath);
+          newProps[propName] = this.renderNode(propValue, propPath);
         }
       }
 
       if (node.key) {
-        processedProps.key = node.key;
+        newProps.key = node.key;
       }
 
       const renderedChildren = [];
@@ -182,15 +202,17 @@ export class VDOMRenderer {
       if (isMountPointNode(node)) {
         const componentKey = node.tag.slice(MOUNT_POINT_PREFIX.length);
         const Component = this.components[componentKey]!;
-        if(!Component) {
-          throw new Error(`Could not find component ${componentKey}. This is a Pulse internal error.`)
+        if (!Component) {
+          throw new Error(
+            `Could not find component ${componentKey}. This is a Pulse internal error.`
+          );
         }
-        return createElement(Component, processedProps, ...renderedChildren);
+        return createElement(Component, newProps, ...renderedChildren);
       }
 
       return createElement(
         tag === FRAGMENT_TAG ? React.Fragment : tag,
-        processedProps,
+        newProps,
         ...renderedChildren
       );
     }
@@ -228,7 +250,35 @@ export class VDOMRenderer {
     if (this.renderPropKeys.has(propPath)) {
       return this.renderNode(value, propPath);
     }
+    if (this.cssProps.has(propPath)) {
+      return this.resolveCssToken(value);
+    }
     return value;
+  }
+
+  private resolveCssToken(token: string): string {
+    const idx = token.indexOf(":");
+    if (idx === -1) {
+      return token;
+    }
+    const moduleId = token.slice(0, idx);
+    const className = token.slice(idx + 1);
+    if (!moduleId || !className) {
+      return token;
+    }
+    const mod = this.cssModules[moduleId];
+    if (!mod) {
+      throw new Error(
+        `Received CSS reference for unknown module '${moduleId}'`
+      );
+    }
+    const resolved = mod[className];
+    if (typeof resolved !== "string") {
+      throw new Error(
+        `Received CSS reference for missing class '${className}' in module '${moduleId}'`
+      );
+    }
+    return resolved;
   }
 
   private updateCallbacksOnTree(
@@ -346,6 +396,10 @@ export function applyUpdates(
       newTree = renderer.applyCallbackDelta(update.data, newTree);
       continue;
     }
+    if (update.type === "update_css_refs") {
+      renderer.applyCssRefsDelta(update.data);
+      continue;
+    }
     if (update.type === "update_render_props") {
       renderer.applyRenderPropsDelta(update.data);
       continue;
@@ -393,7 +447,9 @@ export function applyUpdates(
           const delta = update.data;
           if (delta.remove && delta.remove.length > 0) {
             for (const key of delta.remove) {
-              if (key in nextProps) delete nextProps[key];
+              if (key in nextProps) {
+                delete nextProps[key];
+              }
             }
           }
           if (delta.set) {

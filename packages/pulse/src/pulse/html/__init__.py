@@ -97,6 +97,7 @@ from .events import (
 )
 
 from .props import (
+    ClassName,
     BaseHTMLProps,
     HTMLProps,
     HTMLAbbrProps,
@@ -459,7 +460,8 @@ __all__ = [
     "TextAreaDOMEvents",
     "SelectDOMEvents",
     "DialogDOMEvents",
-    # attributes
+    # props
+    "ClassName",
     "BaseHTMLProps",
     "HTMLProps",
     "HTMLAbbrProps",

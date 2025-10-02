@@ -4,11 +4,13 @@
 
 from typing import Literal, Optional, Union, TypedDict
 
+from pulse.css import CssReference
+
 
 class Element(TypedDict):
     # Basic properties
     id: str
-    className: str
+    className: str 
     tagName: str
     localName: str
     clientHeight: float

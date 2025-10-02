@@ -6,7 +6,7 @@
 #   seems quite heavy. I think a better algorithm is needed.
 # - We have very suboptimal keyed diffing, we should implement a Vue or morphdom
 #   style longest increasing subsequence (LIS) algorithm.
-# IMO I should probably read morphdom's source code. 
+# IMO I should probably read morphdom's source code.
 from dataclasses import dataclass
 import warnings
 import inspect
@@ -23,6 +23,10 @@ from typing import (
     cast,
 )
 from pulse.hooks import HookContext
+from pulse.css import CssReference
+
+
+from pulse.reactive import Effect
 from pulse.vdom import (
     VDOM,
     Callback,
@@ -79,6 +83,17 @@ class UpdateCallbacksOperation(TypedDict):
     data: UpdateCallbacksDelta
 
 
+class UpdateCssRefsDelta(TypedDict, total=False):
+    set: list[str]
+    remove: list[str]
+
+
+class UpdateCssRefsOperation(TypedDict):
+    type: Literal["update_css_refs"]
+    path: str
+    data: UpdateCssRefsDelta
+
+
 class UpdateRenderPropsDelta(TypedDict, total=False):
     add: list[str]
     remove: list[str]
@@ -108,6 +123,7 @@ VDOMOperation = Union[
     UpdatePropsOperation,
     MoveOperation,
     UpdateCallbacksOperation,
+    UpdateCssRefsOperation,
     UpdateRenderPropsOperation,
 ]
 
@@ -118,6 +134,7 @@ class RenderDiff:
     render_count: int
     callbacks: Callbacks
     render_props: set[str]
+    css_refs: set[str]
     ops: list[VDOMOperation]
 
 
@@ -126,11 +143,14 @@ class RenderRoot:
     render_count: int
     callbacks: Callbacks
     render_props: set[str]
+    css_refs: set[str]
+    effect: Effect | None
 
     def __init__(self, fn: Callable[[], Element]) -> None:
         self.render_tree = RenderNode(fn)
         self.callbacks = {}
         self.render_props = set()
+        self.css_refs = set()
         self.effect = None
         self.render_count = 0
         pass
@@ -144,57 +164,74 @@ class RenderRoot:
             render_parent=self.render_tree, old_tree=last_render, new_tree=new_tree
         )
         self.render_tree.last_render = new_tree
-        prev_cb_keys = set(self.callbacks.keys())
-        new_cb_keys = set(resolver.callbacks.keys())
-        cb_added = sorted(new_cb_keys - prev_cb_keys)
-        cb_removed = sorted(prev_cb_keys - new_cb_keys)
+        prev_cb = set(self.callbacks.keys())
+        new_cb = set(resolver.callbacks.keys())
+        cb_added = sorted(new_cb - prev_cb)
+        cb_removed = sorted(prev_cb - new_cb)
 
-        prev_rp_keys = self.render_props
-        new_rp_keys = resolver.render_props
-        rp_added = sorted(new_rp_keys - prev_rp_keys)
-        rp_removed = sorted(prev_rp_keys - new_rp_keys)
+        prev_rp = self.render_props
+        new_rp = resolver.render_props
+        rp_added = sorted(new_rp - prev_rp)
+        rp_removed = sorted(prev_rp - new_rp)
+
+        prev_css = self.css_refs
+        new_css = resolver.css_refs
+        css_added = sorted(new_css - prev_css)
+        css_removed = sorted(prev_css - new_css)
 
         ops = list(resolver.operations)
+        prefix_ops: list[VDOMOperation] = []
 
-        # Add render_props update operation BEFORE other operations
-        if rp_added or rp_removed:
-            rp_delta: UpdateRenderPropsDelta = {}
-            if rp_added:
-                rp_delta["add"] = rp_added
-            if rp_removed:
-                rp_delta["remove"] = rp_removed
-            ops.insert(
-                0,
-                UpdateRenderPropsOperation(
-                    type="update_render_props", path="", data=rp_delta
-                ),
+        if css_added or css_removed:
+            css_delta: UpdateCssRefsDelta = {}
+            if css_added:
+                css_delta["set"] = css_added
+            if css_removed:
+                css_delta["remove"] = css_removed
+            prefix_ops.append(
+                UpdateCssRefsOperation(type="update_css_refs", path="", data=css_delta)
             )
 
-        # Add callbacks update operation
         if cb_added or cb_removed:
             cb_delta: UpdateCallbacksDelta = {}
             if cb_added:
                 cb_delta["add"] = cb_added
             if cb_removed:
                 cb_delta["remove"] = cb_removed
-            ops.insert(
-                0,
+            prefix_ops.append(
                 UpdateCallbacksOperation(
                     type="update_callbacks", path="", data=cb_delta
-                ),
+                )
             )
+
+        if rp_added or rp_removed:
+            rp_delta: UpdateRenderPropsDelta = {}
+            if rp_added:
+                rp_delta["add"] = rp_added
+            if rp_removed:
+                rp_delta["remove"] = rp_removed
+            prefix_ops.append(
+                UpdateRenderPropsOperation(
+                    type="update_render_props", path="", data=rp_delta
+                )
+            )
+
+        if prefix_ops:
+            ops = prefix_ops + ops
 
         self.callbacks = resolver.callbacks
         self.render_props = resolver.render_props
+        self.css_refs = new_css
         return RenderDiff(
             tree=new_tree,
             render_count=self.render_count,
             callbacks=resolver.callbacks,
             render_props=resolver.render_props,
+            css_refs=new_css,
             ops=ops,
         )
 
-    def render_vdom(self) -> tuple[VDOM, Callbacks, set[str]]:
+    def render_vdom(self) -> tuple[VDOM, Callbacks, set[str], set[str]]:
         """One-shot render to VDOM + callbacks + render_props, without mounting an Effect."""
         self.render_count += 1
         resolver = Resolver()
@@ -206,7 +243,8 @@ class RenderRoot:
         self.render_tree.last_render = normalized
         self.callbacks = resolver.callbacks
         self.render_props = resolver.render_props
-        return vdom, self.callbacks, self.render_props
+        self.css_refs = resolver.css_refs
+        return vdom, self.callbacks, self.render_props, self.css_refs
 
     def unmount(self) -> None:
         if self.effect is not None:
@@ -253,6 +291,7 @@ class Resolver:
     def __init__(self) -> None:
         self.callbacks: Callbacks = {}
         self.render_props: set[str] = set()
+        self.css_refs: set[str] = set()
         self.operations: list[VDOMOperation] = []
 
     def reconcile_node(
@@ -597,7 +636,7 @@ class Resolver:
         render_parent: RenderNode,
         relative_path: str,
     ):
-        added: Props = {}
+        updated: Props = {}
         normalized: Props | None = None
         removed = set(old_props.keys()) - set(new_props.keys())
 
@@ -613,6 +652,16 @@ class Resolver:
                 self.callbacks[prop_path] = Callback(
                     fn=value, n_args=len(inspect.signature(value).parameters)
                 )
+                continue
+
+            if isinstance(value, CssReference):
+                if normalized is None:
+                    normalized = new_props.copy()
+                token = _css_ref_token(value)
+                normalized[key] = value
+                self.css_refs.add(prop_path)
+                if old_value != value:
+                    updated[key] = token
                 continue
 
             # Render prop (Pulse element)
@@ -638,14 +687,14 @@ class Resolver:
                         relative_path=prop_relative,
                     )
                     normalized[key] = normalized_value
-                    added[key] = vdom_value
+                    updated[key] = vdom_value
                 continue
 
             # Regular prop
             if isinstance(old_value, (Node, ComponentNode)):
                 self._unmount_render_subtree(render_parent, prop_relative)
             if key not in old_props or value != old_props[key]:
-                added[key] = value
+                updated[key] = value
             # No need to set normalized[key] = value as the value will be copied over through new_props.copy() if normalized is instantiated
 
         for key in removed:
@@ -661,9 +710,8 @@ class Resolver:
             normalized_props = new_props
 
         return DiffPropsResult(
-            normalized=normalized_props, delta_add=added, delta_remove=removed
+            normalized=normalized_props, delta_add=updated, delta_remove=removed
         )
-
 
     def _unmount_render_subtree(self, parent: RenderNode, prefix: str) -> None:
         if not prefix:
@@ -784,3 +832,7 @@ def join_path(prefix: str, path: str | int):
         return f"{prefix}.{path}"
     else:
         return str(path)
+
+
+def _css_ref_token(ref: CssReference) -> str:
+    return f"{ref.module.id}:{ref.name}"

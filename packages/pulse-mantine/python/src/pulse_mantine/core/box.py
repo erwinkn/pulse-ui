@@ -9,7 +9,7 @@ BoxMod = Mod | Sequence[Mod] | Sequence["BoxMod"]
 
 
 class BoxProps(MantineStyleProps, total=False):
-    className: str
+    className: ps.ClassName # str or CssReference
     "Class added to the root element, if applicable"
     style: MantineStyleProp
     "Inline style added to root component element, can subscribe to theme defined on MantineProvider"

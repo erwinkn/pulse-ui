@@ -1,17 +1,20 @@
 import logging
+import os
 from dataclasses import dataclass
 from pulse.env import env
 from pathlib import Path
 from typing import Sequence
 
 from pulse.codegen.templates.layout import LAYOUT_TEMPLATE
-from pulse.codegen.templates.route import render_route
+from pulse.codegen.templates.route import render_route, CssModuleImport
 from pulse.codegen.templates.routes_ts import (
     ROUTES_CONFIG_TEMPLATE,
     ROUTES_RUNTIME_TEMPLATE,
 )
 
 from pulse.routing import Layout, Route, RouteTree
+from pulse.css import CssModule, CssImport
+from pulse.codegen.utils import NameRegistry
 
 logger = logging.getLogger(__file__)
 
@@ -91,6 +94,10 @@ class Codegen:
     def __init__(self, routes: RouteTree, config: CodegenConfig) -> None:
         self.cfg = config
         self.routes = routes
+        self._css_module_dest: dict[str, Path] = {}
+        self._copied_css_modules: set[Path] = set()
+        self._css_name_registry = NameRegistry()
+        self._css_import_dest: dict[str, Path | str] = {}
 
     @property
     def output_folder(self):
@@ -99,6 +106,10 @@ class Codegen:
     def generate_all(
         self, server_address: str, internal_server_address: str | None = None
     ):
+        self._copied_css_modules = set()
+        self._css_module_dest = {}
+        self._css_name_registry = NameRegistry()
+        self._css_import_dest = {}
         # Keep track of all generated files
         generated_files = set(
             [
@@ -111,6 +122,7 @@ class Codegen:
                 ),
             ]
         )
+        generated_files.update(self._copied_css_modules)
 
         # Clean up any remaining files that are not part of the generated files
         for path in self.output_folder.rglob("*"):
@@ -192,10 +204,25 @@ class Codegen:
             output_path = self.output_folder / "routes" / route.file_path()
 
         components = route.components or []
+        css_modules = route.css_modules or []
+        css_side_effects = route.css_imports or []
+
+        target_dir = output_path.parent
+        css_imports: list[CssModuleImport] = []
+        for module in css_modules:
+            import_path = self._prepare_css_module(module, target_dir)
+            css_imports.append({"id": module.id, "import_path": import_path})
+
+        css_side_effect_specs: list[str] = []
+        for css_import in css_side_effects:
+            spec = self._prepare_css_import(css_import, target_dir)
+            css_side_effect_specs.append(spec)
 
         content = render_route(
             route=route,
             components=components,
+            css_modules=css_imports,
+            css_imports=css_side_effect_specs,
             js_functions=[],
             external_js=[],
             reserved_names=None,
@@ -248,3 +275,54 @@ class Codegen:
                 out.append(f"{ind}  ,")
         out.append(f"{ind}]")
         return "\n".join(out)
+
+    def _copy_css_source(self, source_path: Path) -> Path:
+        name = source_path.name
+        if name.endswith(".module.css"):
+            suffix = ".module.css"
+            base_name = name[: -len(suffix)] or "style"
+        else:
+            suffix = source_path.suffix or ".css"
+            base_name = source_path.stem or "style"
+
+        unique_name = self._css_name_registry.register(base_name)
+        dest_filename = f"{unique_name}{suffix}"
+        dest_path = self.output_folder / "css" / dest_filename
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        content = source_path.read_text()
+        write_file_if_changed(dest_path, content)
+        self._copied_css_modules.add(dest_path)
+        return dest_path
+
+    def _copy_css_module(self, module: CssModule) -> Path:
+        return self._copy_css_source(module.source_path)
+
+    def _prepare_css_import(self, css_import: CssImport, target_dir: Path) -> str:
+        existing = self._css_import_dest.get(css_import.id)
+        if existing is None:
+            if css_import.source_path is not None:
+                dest_path = self._copy_css_source(css_import.source_path)
+                existing = dest_path
+            else:
+                existing = css_import.specifier or ""
+            self._css_import_dest[css_import.id] = existing
+
+        value = self._css_import_dest[css_import.id]
+        if isinstance(value, Path):
+            rel_path = os.path.relpath(value, target_dir)
+            rel_posix = Path(rel_path).as_posix()
+            if not rel_posix.startswith("."):
+                rel_posix = f"./{rel_posix}"
+            return rel_posix
+        return value
+
+    def _prepare_css_module(self, module: CssModule, target_dir: Path) -> str:
+        dest = self._css_module_dest.get(module.id)
+        if dest is None:
+            dest = self._copy_css_module(module)
+            self._css_module_dest[module.id] = dest
+        rel_path = os.path.relpath(dest, target_dir)
+        rel_posix = Path(rel_path).as_posix()
+        if not rel_posix.startswith("."):
+            rel_posix = f"./{rel_posix}"
+        return rel_posix

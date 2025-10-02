@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Generic, TypeVar, Callable, Any, overload
 from collections.abc import Sequence
-from pulse.messages import ClientMessage, RouteInfo
+from pulse.messages import ClientMessage, RouteInfo, ServerInitMessage
 from pulse.request import PulseRequest
 from pulse.vdom import VDOM
 
@@ -32,7 +32,7 @@ class Ok(Generic[T]):
 class Deny: ...
 
 
-PrerenderResponse = Ok[VDOM] | Redirect | NotFound
+PrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
 ConnectResponse = Ok[None] | Deny
 
 

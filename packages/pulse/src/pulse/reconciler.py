@@ -7,11 +7,10 @@
 # - We have very suboptimal keyed diffing, we should implement a Vue or morphdom
 #   style longest increasing subsequence (LIS) algorithm.
 # IMO I should probably read morphdom's source code.
-from dataclasses import dataclass
-import warnings
 import inspect
+import warnings
+from dataclasses import dataclass
 from typing import (
-    Any,
     Callable,
     Iterable,
     Literal,
@@ -22,20 +21,20 @@ from typing import (
     Union,
     cast,
 )
-from pulse.hooks import HookContext
+
 from pulse.css import CssReference
-
-
+from pulse.helpers import values_equal
+from pulse.hooks import HookContext
 from pulse.reactive import Effect
 from pulse.vdom import (
     VDOM,
     Callback,
     Callbacks,
     Child,
-    ComponentNode,
-    Node,
-    Element,
     Children,
+    ComponentNode,
+    Element,
+    Node,
     Props,
     VDOMNode,
 )
@@ -693,7 +692,7 @@ class Resolver:
             # Regular prop
             if isinstance(old_value, (Node, ComponentNode)):
                 self._unmount_render_subtree(render_parent, prop_relative)
-            if key not in old_props or value != old_props[key]:
+            if key not in old_props or not values_equal(value, old_props[key]):
                 updated[key] = value
             # No need to set normalized[key] = value as the value will be copied over through new_props.copy() if normalized is instantiated
 
@@ -764,8 +763,8 @@ def _flatten_children(
 
 
 def same_node(left: Element, right: Element):
-    # Handles primitive equality
-    if left == right:
+    # Handles primitive equality safely (avoid ambiguous truthiness for array-like)
+    if values_equal(left, right):
         return True
 
     if isinstance(left, Node) and isinstance(right, Node):

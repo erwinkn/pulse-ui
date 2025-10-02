@@ -1,5 +1,4 @@
 import asyncio
-from collections.abc import Sequence
 import inspect
 import json
 import os
@@ -12,10 +11,8 @@ from typing import (
     Awaitable,
     Callable,
     Coroutine,
-    Iterable,
     ParamSpec,
     Protocol,
-    TypeVarTuple,
     TypedDict,
     TypeVar,
     overload,
@@ -25,7 +22,25 @@ from urllib.parse import urlsplit
 from anyio import from_thread
 from fastapi import Request
 
-from pulse.vdom import Element
+
+def values_equal(a: Any, b: Any) -> bool:
+    """Robust equality that avoids ambiguous truth for DataFrames/ndarrays.
+
+    Strategy:
+    - identity check fast-path
+    - try a == b / != comparison
+    - if comparison raises or returns a non-bool (e.g., array-like), fall back to False
+    """
+    if a is b:
+        return True
+    try:
+        result = a == b
+    except Exception:  # noqa: BLE001
+        return False
+    # Some libs return array-like; only accept plain bools
+    if isinstance(result, bool):
+        return result
+    return False
 
 T = TypeVar("T")
 P = ParamSpec("P")

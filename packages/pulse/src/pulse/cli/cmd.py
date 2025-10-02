@@ -195,6 +195,14 @@ def run(
         # Enable hot reload only when not explicitly disabled and not in prod mode
         if reload and app_instance.mode != "prod":
             server_command.append("--reload")
+            # Also reload on CSS changes and watch the web root directory
+            server_command.extend(["--reload-include", "*.css"])
+            try:
+                if web_root.exists():
+                    server_command.extend(["--reload-dir", str(web_root)])
+            except Exception:
+                # Best effort; uvicorn will still reload on .py changes
+                pass
 
         # Production runtime optimizations (unopinionated)
         if app_instance.mode == "prod":

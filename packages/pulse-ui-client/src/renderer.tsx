@@ -182,6 +182,9 @@ export class VDOMRenderer {
       if (isMountPointNode(node)) {
         const componentKey = node.tag.slice(MOUNT_POINT_PREFIX.length);
         const Component = this.components[componentKey]!;
+        if(!Component) {
+          throw new Error(`Could not find component ${componentKey}. This is a Pulse internal error.`)
+        }
         return createElement(Component, processedProps, ...renderedChildren);
       }
 

@@ -1,5 +1,6 @@
 from typing import Any, Optional, Unpack, Callable
 import pulse as ps
+from pulse.helpers import call_flexible, maybe_await, create_task
 
 
 ExpandedState = dict[str, bool]
@@ -41,8 +42,8 @@ class TreeState(ps.State):
         initialSelectedState: Optional[list[str]] = None,
         initialCheckedState: Optional[list[str]] = None,
         multiple: Optional[bool] = None,
-        onNodeExpand: Optional[Callable[[str], None]] = None,
-        onNodeCollapse: Optional[Callable[[str], None]] = None,
+        onNodeExpand: Optional[ps.EventHandler1[str]] = None,
+        onNodeCollapse: Optional[ps.EventHandler1[str]] = None,
     ):
         self._channel = ps.channel()
         self._expanded: ExpandedState = dict(initialExpandedState or {})
@@ -154,7 +155,7 @@ class TreeState(ps.State):
         return self._expanded
 
     # Client sync handlers
-    def _on_node_expand(self, payload: dict[str, Any]) -> None:
+    async def _on_node_expand(self, payload: dict[str, Any]) -> None:
         if not isinstance(payload, dict):
             return
         value = payload.get("value")
@@ -162,11 +163,7 @@ class TreeState(ps.State):
             self._expanded[value] = True
             listener = self._on_node_expand_listener
             if listener is not None:
-                try:
-                    listener(value)
-                except Exception:
-                    # Swallow listener exceptions to avoid breaking sync
-                    pass
+                create_task(maybe_await(call_flexible(listener, value)))
 
     def _on_node_collapse(self, payload: dict[str, Any]) -> None:
         if not isinstance(payload, dict):
@@ -176,11 +173,7 @@ class TreeState(ps.State):
             self._expanded[value] = False
             listener = self._on_node_collapse_listener
             if listener is not None:
-                try:
-                    listener(value)
-                except Exception:
-                    # Swallow listener exceptions to avoid breaking sync
-                    pass
+                create_task(maybe_await(call_flexible(listener, value)))
 
     # Render the React wrapper component
     def render(

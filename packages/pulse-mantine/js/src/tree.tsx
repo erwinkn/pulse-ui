@@ -1,5 +1,5 @@
-import { useEffect, useMemo, type ComponentPropsWithoutRef } from "react";
-import { Tree as MantineTree, useTree } from "@mantine/core";
+import { useEffect, type ComponentPropsWithoutRef } from "react";
+import { Tree as MantineTree, useTree, Button } from "@mantine/core";
 import { usePulseChannel } from "pulse-ui-client";
 
 type ExpandedState = Record<string, boolean>;

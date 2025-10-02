@@ -68,6 +68,13 @@ class Sentinel:
         else:
             return self.name
 
+def data(**attrs):
+    """Helper to pass data attributes as keyword arguments to Pulse elements.
+    
+    Example:
+        data(foo="bar") -> {"data-foo": "bar"}
+    """
+    return {f'data-{k}': v for k,v in attrs.items()}
 
 # --- Async scheduling helpers (work from loop or sync threads) ---
 

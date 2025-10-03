@@ -1,6 +1,6 @@
 [project]
 name = "pulse-framework"
-version = "0.1.22"
+version = "0.1.23"
 description = "Pulse - Full-stack framework for building real-time React applications in Python"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,7 @@ dependencies = [
     "textual>=5.2.0",
     "python-multipart>=0.0.20",
     "python-dateutil>=2.9.0.post0",
+    "watchfiles>=1.1.0",
 ]
 
 [tool.uv]

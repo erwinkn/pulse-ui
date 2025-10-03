@@ -204,7 +204,6 @@ def run(
                 print("Reload dir:", app_dir)
                 if web_root.exists():
                     server_command.extend(["--reload-dir", str(web_root)])
-                    return
             except Exception:
                 # Best effort; uvicorn will still reload on .py changes
                 pass

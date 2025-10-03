@@ -195,11 +195,16 @@ def run(
         # Enable hot reload only when not explicitly disabled and not in prod mode
         if reload and app_instance.mode != "prod":
             server_command.append("--reload")
-            # Also reload on CSS changes and watch the web root directory
+            # Also reload on CSS changes and watch both the app directory and the web root
             server_command.extend(["--reload-include", "*.css"])
             try:
+                # Prefer the directory containing the app file (what users edit most)
+                app_dir = getattr(env, "pulse_app_dir", None) or os.getcwd()
+                server_command.extend(["--reload-dir", str(Path(app_dir))])
+                print("Reload dir:", app_dir)
                 if web_root.exists():
                     server_command.extend(["--reload-dir", str(web_root)])
+                    return
             except Exception:
                 # Best effort; uvicorn will still reload on .py changes
                 pass

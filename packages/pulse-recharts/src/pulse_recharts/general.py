@@ -66,7 +66,7 @@ ViewBoxRequired = CartesianViewBoxRequired | PolarViewBoxRequired
 class ResponsiveContainerProps(ps.HTMLProps, total=False):
     # HTML props
     id: str
-    className: str
+    # className: str
     style: ps.CSSProperties
 
     aspect: float

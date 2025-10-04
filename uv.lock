@@ -752,8 +752,14 @@ source = { editable = "packages/pulse-msal" }
 
 [[package]]
 name = "pulse-recharts"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/pulse-recharts" }
+dependencies = [
+    { name = "pulse-framework" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pulse-framework", editable = "packages/pulse" }]
 
 [[package]]
 name = "pulse-workspace"

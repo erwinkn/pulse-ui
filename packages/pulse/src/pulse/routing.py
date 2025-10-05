@@ -1,12 +1,11 @@
-from contextvars import ContextVar
 import re
 from typing import Callable, Optional, Sequence, TypedDict, cast
 from dataclasses import dataclass, field
 
 from pulse.react_component import ReactComponent
-from pulse.reactive import Untrack
+from pulse.css import CssModule, CssImport
+from pulse.css import CssModule
 from pulse.reactive_extensions import ReactiveDict
-from pulse.state import State
 from pulse.vdom import Node, Component
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
@@ -109,17 +108,19 @@ class Route:
         self,
         path: str,
         render: Component[[]],
-        children: "Optional[list[Route | Layout]]" = None,
-        components: Optional[list[ReactComponent]] = None,
+        children: "Optional[Sequence[Route | Layout]]" = None,
+        components: Optional[Sequence[ReactComponent]] = None,
+        css_modules: Optional[Sequence[CssModule]] = None,
+        css_imports: Optional[Sequence[CssImport]] = None,
     ):
         self.path = normalize_path(path)
         self.segments = parse_route_path(path)
 
-        if not isinstance(render, Component):
-            render = Component(render)
         self.render = render
         self.children = children or []
         self.components = components
+        self.css_modules = css_modules
+        self.css_imports = css_imports
         self.parent: Optional[Route | Layout] = None
 
         self.is_index = self.path == ""
@@ -190,15 +191,17 @@ def replace_layout_indicator(path_list: list[str], value: str):
 class Layout:
     def __init__(
         self,
-        render: Component | Callable[[], Node],
-        children: "Optional[list[Route | Layout]]" = None,
-        components: Optional[list[ReactComponent]] = None,
+        render: Component,
+        children: "Optional[Sequence[Route | Layout]]" = None,
+        components: Optional[Sequence[ReactComponent]] = None,
+        css_modules: Optional[Sequence[CssModule]] = None,
+        css_imports: Optional[Sequence[CssImport]] = None,
     ):
-        if not isinstance(render, Component):
-            render = Component(render)
         self.render = render
         self.children = children or []
         self.components = components
+        self.css_modules = css_modules
+        self.css_imports = css_imports
         self.parent: Optional[Route | Layout] = None
         # 1-based sibling index assigned by RouteTree at each level
         self.idx: int = 1
@@ -219,10 +222,17 @@ class Layout:
 
     def file_path(self) -> str:
         path_list = self._path_list(include_layouts=True)
-        path_list = ["layout" if p == LAYOUT_INDICATOR else p for p in path_list]
-        # Convert all parent layout indicators to simply `layout`
-        path_list = path_list[:-1] + ["_layout.tsx"]
-        return "/".join(path_list)
+        # Map layout indicators (with optional numeric suffix) to directory names
+        # e.g., "<layout>" -> "layout" and "<layout>2" -> "layout2"
+        converted: list[str] = []
+        for seg in path_list:
+            if seg.startswith(LAYOUT_INDICATOR):
+                suffix = seg[len(LAYOUT_INDICATOR) :]
+                converted.append("layout" + suffix)
+            else:
+                converted.append(seg)
+        # Place file within the current layout's directory
+        return "/".join([*converted, "_layout.tsx"])
 
     def __repr__(self) -> str:
         return f"Layout(children={len(self.children)})"
@@ -307,6 +317,13 @@ class RouteInfo(TypedDict):
 
 
 class RouteContext:
+    def __init__(self, info: RouteInfo, pulse_route: Route | Layout):
+        self.info = cast(RouteInfo, ReactiveDict(info))
+        self.pulse_route = pulse_route
+
+    def update(self, info: RouteInfo):
+        self.info.update(info)
+
     @property
     def pathname(self) -> str:
         return self.info["pathname"]
@@ -331,20 +348,12 @@ class RouteContext:
     def catchall(self) -> list[str]:
         return self.info["catchall"]
 
-    def __init__(self, info: RouteInfo):
-        self.info = cast(RouteInfo, ReactiveDict(info))
+    def __str__(self) -> str:
+        return f"RouteContext(pathname='{self.pathname}', params={self.pathParams})"
 
-    def update(self, info: RouteInfo):
-        self.info.update(info)
-
-    def __enter__(self):
-        self._token = ROUTE_CONTEXT.set(self)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        ROUTE_CONTEXT.reset(self._token)
-
-
-ROUTE_CONTEXT: ContextVar[RouteContext | None] = ContextVar(
-    "pulse_route_context", default=None
-)
+    def __repr__(self) -> str:
+        return (
+            f"RouteContext(pathname='{self.pathname}', hash='{self.hash}', "
+            f"query='{self.query}', queryParams={self.queryParams}, "
+            f"pathParams={self.pathParams}, catchall={self.catchall})"
+        )

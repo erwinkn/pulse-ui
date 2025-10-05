@@ -169,3 +169,22 @@ wbr = define_self_closing_tag("wbr")
 
 # React fragment
 fragment = define_tag("$$fragment")
+
+
+# SVG tags
+svg = define_tag("svg")
+circle = define_tag("circle") 
+ellipse = define_tag("ellipse")
+g = define_tag("g")
+line = define_tag("line")
+path = define_tag("path")
+polygon = define_tag("polygon")
+polyline = define_tag("polyline")
+rect = define_tag("rect")
+text = define_tag("text")
+tspan = define_tag("tspan")
+defs = define_tag("defs")
+clipPath = define_tag("clipPath")
+mask = define_tag("mask")
+pattern = define_tag("pattern")
+use = define_tag("use")

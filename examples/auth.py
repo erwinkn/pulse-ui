@@ -17,69 +17,68 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from urllib.parse import urlparse
+import json
 
 import pulse as ps
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
-AUTH_COOKIE = "pulse_auth"
-
 
 class AuthMiddleware(ps.PulseMiddleware):
-    def _extract_user(self, *, headers: dict, cookies: dict) -> str | None:
-        # Trivial cookie read; use a signed/secure cookie or session storage for real apps
-        return cookies.get(AUTH_COOKIE)
-
-    def prerender(self, *, path, route_info, request, context, next):
-        user = self._extract_user(headers=request.headers, cookies=request.cookies)
-        # Seed session context during prerender to avoid first-paint flashes
-        if user:
-            context["user_email"] = user
+    def prerender(self, *, path, route_info, request, session, next):
+        try:
+            print("[MW prerender ctx]", {k: v for k, v in session.items()})
+        except Exception:
+            print("[MW prerender ctx] <unavailable>")
 
         # Protect /secret at prerender time
-        if path.startswith("/secret") and not user:
+        if path.startswith("/secret") and not session.get("user_email"):
             print("[Prerender] Redirecting to login")
             return ps.Redirect("/login")
 
         return next()
 
-    def connect(self, *, request, ctx, next):
-        user = self._extract_user(headers=request.headers, cookies=request.cookies)
-        if user:
-            ctx["user_email"] = user
-            return next()
-        # Allow connection for public pages in this demo
+    def connect(self, *, request, session, next):
+        # Connection context uses the same Pulse session (rebuilt from cookie for cookie-backed store)
+        try:
+            print("[MW connect ctx]", {k: v for k, v in session.items()})
+        except Exception:
+            print("[MW connect ctx] <unavailable>")
         return next()
 
-    def message(self, *, ctx, data, next):
+    def message(self, *, session, data, next):
         t = data.get("type")  # type: ignore[assignment]
         if t in {"mount", "navigate"}:
             path = data.get("path")  # type: ignore[assignment]
             if (
-                not ctx.get("user_email")
+                not session.get("user_email")
                 and isinstance(path, str)
                 and path.startswith("/secret")
             ):
                 return ps.Deny()
+        try:
+            print("[MW message ctx]", {k: v for k, v in session.items()})
+        except Exception:
+            print("[MW message ctx] <unavailable>")
         return next()
 
 
 # Simple logging/timing middleware
 class LoggingMiddleware(ps.PulseMiddleware):
-    def prerender(self, *, path, route_info, request, context, next):
+    def prerender(self, *, path, route_info, request, session, next):
         start = time.perf_counter()
         res = next()
         duration_ms = (time.perf_counter() - start) * 1000
         print(f"[MW prerender] path={path} took={duration_ms:.1f}ms")
         return res
 
-    def connect(self, *, request, ctx, next):
+    def connect(self, *, request, session, next):
         ua = request.headers.get("user-agent")
         ip = request.client[0] if request.client else None
         print(f"[MW connect] ip={ip} ua={(ua or '')[:60]}")
         return next()
 
-    def message(self, *, ctx, data, next):
+    def message(self, *, session, data, next):
         t = data.get("type") if isinstance(data, dict) else None
         if t:
             print(f"[MW message] type={t}")
@@ -144,16 +143,53 @@ def login():
 
 @ps.component
 def secret():
-    sess = ps.session_context()
+    sess = ps.session()
+    nickname = sess.get("nickname", "")
 
     async def sign_out():
         res = await ps.call_api("/api/logout", method="POST")
         if res.get("ok"):
             ps.navigate("/")
 
+    def log_session_callback():
+        print("[CB] session ctx", {k: v for k, v in ps.session().items()})
+
+    async def log_session_via_api():
+        await ps.call_api("/api/log-session", method="POST")
+
     return ps.div(
         ps.h2("Secret", className="text-2xl font-bold mb-4"),
         ps.p(f"Welcome {sess.get('user_email', '<unknown>')}"),
+        ps.div(
+            ps.label("Nickname", htmlFor="nickname", className="block mb-1 mt-4"),
+            ps.input(
+                id="nickname",
+                name="nickname",
+                type="text",
+                className="input mb-3",
+                value=nickname,
+                onChange=lambda evt: sess.update({"nickname": evt["target"]["value"]}),
+            ),
+        ),
+        ps.div(
+            ps.button(
+                "Log session on server (callback)",
+                onClick=log_session_callback,
+                className="btn mt-2 mr-2",
+            ),
+            ps.button(
+                "Log session via API",
+                onClick=log_session_via_api,
+                className="btn mt-2",
+            ),
+        ),
+        ps.div(
+            ps.h3("Session context", className="text-xl font-semibold mt-4 mb-2"),
+            ps.pre(
+                json.dumps({k: v for k, v in sess.items()}, indent=2),
+                className="bg-gray-100 p-3 rounded text-sm overflow-auto",
+            ),
+        ),
         ps.button("Sign out", onClick=sign_out, className="btn-secondary"),
         className="max-w-md mx-auto p-6",
     )
@@ -193,7 +229,6 @@ app = ps.App(
         )
     ],
     middleware=[LoggingMiddleware(), AuthMiddleware()],
-    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "pulse-demo"),
 )
 
 
@@ -204,37 +239,34 @@ app = ps.App(
 async def api_login(request: Request, response: Response):
     body = await request.json()
     email = body.get("email", "guest")
-    # Simple JSON response; Pulse app controls navigation/UI.
-    # Optionally update session server-side if the session id is provided
-    sess_id = request.headers.get("x-pulse-session-id")
-    if sess_id:
-        sess = app.sessions.get(sess_id)
-        if sess and sess.id == sess_id:
-            sess.update_context({"user_email": email})
-    resp = JSONResponse({"ok": True})
-    # Accept any email/password for demo; set HttpOnly cookie on the same response we return
-    resp.set_cookie(
-        key=AUTH_COOKIE,
-        value=email,
-        httponly=True,
-        samesite="lax",
-        secure=False,  # set True behind https
-        max_age=60 * 60 * 24 * 7,
-        path="/",
-    )
-    return resp
+    # Update Pulse session; Pulse middleware will write the cookie per configured store
+    ps.session().update({"user_email": email})
+    return JSONResponse({"ok": True})
 
 
 @app.fastapi.post("/api/logout")
 async def api_logout(request: Request, response: Response):
-    sess_id = request.headers.get("x-pulse-session-id")
-    if sess_id:
-        sess = app.sessions.get(sess_id)
-        if sess and sess.id == sess_id:
-            sess.update_context({"user_email": None})
-    resp = JSONResponse({"ok": True})
-    resp.delete_cookie(key=AUTH_COOKIE, path="/")
-    return resp
+    # Clear user info in Pulse session; middleware updates cookie accordingly
+    try:
+        s = ps.session()
+        if "user_email" in s:
+            del s["user_email"]
+        # Optionally clear other session fields here (e.g., nickname)
+    except Exception:
+        pass
+    return JSONResponse({"ok": True})
+
+
+@app.fastapi.post("/api/log-session")
+async def api_log_session(request: Request):
+    try:
+        import pulse as ps
+
+        ctx = ps.session()
+        print("[API log-session] ctx:", {k: v for k, v in ctx.items()})
+    except Exception as e:
+        print("[API log-session] failed to access session:", e)
+    return JSONResponse({"ok": True})
 
 
 def app_origin(req: Request) -> str:

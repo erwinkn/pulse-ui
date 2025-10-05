@@ -1,12 +1,25 @@
 import asyncio
 
-from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
-import uuid
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Generic,
+    Optional,
+    TypeVar,
+    cast,
+)
 
-from pulse.reactive import Computed, Effect, Signal, Untrack
+from pulse.reactive import Computed, AsyncEffect, Signal
+from pulse.helpers import call_flexible, maybe_await
+
+if TYPE_CHECKING:
+    from pulse.state import State
 
 
 T = TypeVar("T")
+TState = TypeVar("TState", bound="State")
 
 
 class QueryResult(Generic[T]):
@@ -84,8 +97,7 @@ class QueryResult(Generic[T]):
 
 
 class StateQuery(Generic[T]):
-    def __init__(self, result: QueryResult[T], effect: Effect):
-        # print("[StateQuery] create")
+    def __init__(self, result: QueryResult[T], effect: AsyncEffect):
         self._result = result
         self._effect = effect
 
@@ -112,7 +124,8 @@ class StateQuery(Generic[T]):
 
     def refetch(self) -> None:
         # print("[StateQuery] refetch -> schedule effect")
-        # If we use .schedule(), the effect may not rerun if the query key hasn't changed
+        # Cancel any in-flight run and run immediately
+        self._effect.cancel()
         self._effect.run()
 
     def dispose(self) -> None:
@@ -126,7 +139,11 @@ class StateQuery(Generic[T]):
         self._result.set_initial_data(data)
 
 
-class QueryProperty(Generic[T]):
+OnSuccessFn = Callable[[TState], Any] | Callable[[TState, T], Any]
+OnErrorFn = Callable[[TState], Any] | Callable[[TState, Exception], Any]
+
+
+class QueryProperty(Generic[T, TState]):
     """
     Descriptor for state-bound queries.
 
@@ -143,24 +160,61 @@ class QueryProperty(Generic[T]):
     def __init__(
         self,
         name: str,
-        fetch_fn: "Callable[[Any], Awaitable[T]]",
+        fetch_fn: "Callable[[TState], Awaitable[T]]",
         keep_alive: bool = False,
         keep_previous_data: bool = True,
         initial: Optional[T] = None,
     ):
         self.name = name
         self.fetch_fn = fetch_fn
-        self.key_fn: Optional[Callable[[Any], tuple]] = None
+        self.key_fn: Optional[Callable[[TState], tuple]] = None
+        self.initial_data_fn: Optional[Callable[[TState], Optional[T]]] = None
+        # Single handlers; error if set more than once
+        self.on_success_fn: Optional[OnSuccessFn] = None
+        self.on_error_fn: Optional[OnErrorFn] = None
         self.keep_alive = keep_alive
         self.keep_previous_data = keep_previous_data
         self.initial = initial
         self._priv_query = f"__query_{name}"
         self._priv_effect = f"__query_effect_{name}"
         self._priv_key_comp = f"__query_key_{name}"
+        self._priv_initial_fn = f"__query_initial_fn_{name}"
+        self._priv_initial_applied = f"__query_initial_applied_{name}"
 
     # Decorator to attach a key function
-    def key(self, fn: Callable[[Any], tuple]):
+    def key(self, fn: Callable[[TState], tuple]):
+        if self.key_fn is not None:
+            raise RuntimeError(
+                f"Duplicate key() decorator for query '{self.name}'. Only one is allowed."
+            )
         self.key_fn = fn
+        return fn
+
+    # Decorator to attach a function providing initial data
+    def initial_data(self, fn: Callable[[TState], Optional[T]]):
+        if self.initial_data_fn is not None:
+            raise RuntimeError(
+                f"Duplicate initial_data() decorator for query '{self.name}'. Only one is allowed."
+            )
+        self.initial_data_fn = fn
+        return fn
+
+    # Decorator to attach an on-success handler (sync or async)
+    def on_success(self, fn: OnSuccessFn):
+        if self.on_success_fn is not None:
+            raise RuntimeError(
+                f"Duplicate on_success() decorator for query '{self.name}'. Only one is allowed."
+            )
+        self.on_success_fn = fn
+        return fn
+
+    # Decorator to attach an on-error handler (sync or async)
+    def on_error(self, fn: OnErrorFn):
+        if self.on_error_fn is not None:
+            raise RuntimeError(
+                f"Duplicate on_error() decorator for query '{self.name}'. Only one is allowed."
+            )
+        self.on_error_fn = fn
         return fn
 
     def initialize(self, obj: Any) -> StateQuery[T]:
@@ -170,78 +224,89 @@ class QueryProperty(Generic[T]):
             # print(f"[QueryProperty:{self.name}] return cached StateQuery")
             return query
 
-        if self.key_fn is None:
-            raise RuntimeError(
-                f"State query '{self.name}' is missing a '@{self.name}.key' definition"
-            )
+        # key_fn being None means auto-tracked mode
 
         # Bind methods to this instance
         bound_fetch = self.fetch_fn.__get__(obj, obj.__class__)
-        bound_key_fn = self.key_fn.__get__(obj, obj.__class__)
-        # print(f"[QueryProperty:{self.name}] bound fetch and key functions")
+        bound_on_success = (
+            self.on_success_fn.__get__(obj, obj.__class__)
+            if self.on_success_fn
+            else None
+        )
+        bound_on_error = (
+            self.on_error_fn.__get__(obj, obj.__class__) if self.on_error_fn else None
+        )
+        bound_initial_data = (
+            self.initial_data_fn.__get__(obj, obj.__class__)
+            if self.initial_data_fn
+            else None
+        )
+        # print(f"[QueryProperty:{self.name}] bound fetch and key/handlers")
 
-        result = QueryResult[T](initial_data=self.initial)
+        # Defer evaluating initial_data provider until after user __init__ by
+        # storing it on the instance and marking it unapplied. Use constructor
+        # `initial` as the initial visible value for now.
+        setattr(obj, self._priv_initial_fn, bound_initial_data)
+        setattr(obj, self._priv_initial_applied, False)
+        initial_value: Optional[T] = self.initial
 
-        def compute_key():
-            k = bound_key_fn()
-            # print(f"[QueryProperty:{self.name}] compute key -> {k!r}")
-            return k
+        result = QueryResult[T](initial_data=initial_value)
 
-        key_computed = Computed(compute_key, name=f"query.key.{self.name}")
-        setattr(obj, self._priv_key_comp, key_computed)
+        key_computed: Optional[Computed[tuple]] = None
+        if self.key_fn:
+            bound_key_fn = self.key_fn.__get__(obj, obj.__class__)
 
-        def run_effect():
+            def compute_key():
+                k = bound_key_fn()
+                return k
+
+            key_computed = Computed(compute_key, name=f"query.key.{self.name}")
+            setattr(obj, self._priv_key_comp, key_computed)
+
+        inflight_key: Optional[tuple] = None
+
+        async def run_effect():
             # print(f"[QueryProperty:{self.name}] effect RUN")
-            key = key_computed()
-            # print(f"[QueryProperty:{self.name}] effect key={key!r}")
+            # In key mode, deduplicate same-key concurrent reruns
+            if key_computed:
+                key = key_computed()
 
-            # Start fetch in the event loop
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                # No running loop; skip fetch and mark as error for now
-                result._set_error(RuntimeError("No running event loop for query fetch"))
-                return
+                nonlocal inflight_key
+                # De-duplicate same-key concurrent reruns
+                if key is not None and inflight_key == key:
+                    return None
+                inflight_key = key
 
             # Set loading immediately; optionally clear previous data
             result._set_loading(clear_data=not self.keep_previous_data)
 
-            # Create a background task for the user async function
-            with Untrack():
-                unique_id = uuid.uuid4().hex[:8]
-                task = loop.create_task(
-                    bound_fetch(), name=f"query:{self.name}:{key}:{unique_id}"
-                )
-            # print(
-            #     f"[QueryProperty:{self.name}] scheduled task={task.get_name()} running={not task.done()}"
-            # )
+            try:
+                data = await bound_fetch()
+            except asyncio.CancelledError:
+                # Cancellation is expected during reruns; swallow
+                return None
+            except Exception as e:  # noqa: BLE001
+                result._set_error(e)
+                # Invoke error handler if provided
+                if bound_on_error:
+                    await maybe_await(call_flexible(bound_on_error, e))
+            else:
+                result._set_success(data)
+                # Invoke success handler if provided
+                if bound_on_success:
+                    await maybe_await(call_flexible(bound_on_success, data))
+            finally:
+                inflight_key = None
 
-            def on_done(fut: asyncio.Task):
-                try:
-                    data = fut.result()
-                except asyncio.CancelledError:
-                    # print(f"[QueryProperty:{self.name}] task cancelled")
-                    return
-                except Exception as e:  # noqa: BLE001
-                    # print(f"[QueryProperty:{self.name}] task error -> {e!r}")
-                    result._set_error(e)
-                else:
-                    # print(f"[QueryProperty:{self.name}] task success -> {data!r}")
-                    result._set_success(data)
-
-            task.add_done_callback(on_done)
-
-            def cleanup() -> None:
-                # print(f"[QueryProperty:{self.name}] cleanup")
-                if task and not task.done():
-                    # print(
-                    #     f"[QueryProperty:{self.name}] cleanup -> cancel task {task.get_name()}"
-                    # )
-                    task.cancel()
-
-            return cleanup
-
-        effect = Effect(run_effect, name=f"query.effect.{self.name}")
+        # In key mode, depend only on key via explicit deps
+        if key_computed is not None:
+            effect = AsyncEffect(
+                run_effect,
+                name=f"query.effect.{self.name}",
+                deps=[key_computed],
+            )
+        else:
+            effect = AsyncEffect(run_effect, name=f"query.effect.{self.name}")
         # print(f"[QueryProperty:{self.name}] created Effect name={effect.name}")
 
         # Expose the effect on the instance so State.effects() sees it
@@ -267,7 +332,26 @@ class QueryProperty(Generic[T]):
     def __get__(self, obj: Any, objtype: Any = None) -> StateQuery[T]:
         if obj is None:
             return self  # type: ignore
-        return self.initialize(obj)
+        query = self.initialize(obj)
+        # Apply initial_data provider once, after state __init__, before first load
+        try:
+            applied = bool(getattr(obj, self._priv_initial_applied, False))
+        except Exception:
+            applied = True  # fail safe: do not attempt if attribute missing
+        if not applied and not query.has_loaded:
+            bound_initial = getattr(obj, self._priv_initial_fn, None)
+            if callable(bound_initial):
+                try:
+                    value = bound_initial()
+                    if value is not None:
+                        query.set_initial_data(value)  # type: ignore[arg-type]
+                except Exception:
+                    pass
+            try:
+                setattr(obj, self._priv_initial_applied, True)
+            except Exception:
+                pass
+        return query
 
 
 class StateQueryNonNull(StateQuery[T]):
@@ -280,7 +364,7 @@ class StateQueryNonNull(StateQuery[T]):
         return super().has_loaded
 
 
-class QueryPropertyWithInitial(QueryProperty[T]):
+class QueryPropertyWithInitial(QueryProperty[T, TState]):
     def __get__(self, obj: Any, objtype: Any = None) -> StateQueryNonNull[T]:  # type: ignore[override]
         # Reuse base initialization but narrow the return type for type-checkers
         return cast(StateQueryNonNull[T], super().__get__(obj, objtype))

@@ -1,23 +1,30 @@
 # Adapted from @types/react 19.0
 # NOT the same thing as the properties in `elements.py` (but very similar)
-from typing import Any, Dict, List, Literal, Union, TypedDict
+from typing import Any, List, Literal, TypedDict, Union
 
-from pulse.helpers import CssStyle
+from pulse.css import CssReference
+from pulse.helpers import CSSProperties
 from pulse.html.elements import (  # noqa: F401
     GenericHTMLElement,
     HTMLAnchorElement,
     HTMLAreaElement,
     HTMLAudioElement,
     HTMLBaseElement,
+    HTMLBodyElement,
+    HTMLBRElement,
     HTMLButtonElement,
     HTMLCiteElement,
     HTMLDataElement,
     HTMLDetailsElement,
     HTMLDialogElement,
+    HTMLDivElement,
+    HTMLDListElement,
     HTMLEmbedElement,
     HTMLFieldSetElement,
     HTMLFormElement,
     HTMLHeadElement,
+    HTMLHeadingElement,
+    HTMLHRElement,
     HTMLHtmlElement,
     HTMLIFrameElement,
     HTMLImageElement,
@@ -26,8 +33,8 @@ from pulse.html.elements import (  # noqa: F401
     HTMLLiElement,
     HTMLLinkElement,
     HTMLMapElement,
-    HTMLMenuElement,
     HTMLMediaElement,
+    HTMLMenuElement,
     HTMLMetaElement,
     HTMLMeterElement,
     HTMLModElement,
@@ -47,6 +54,7 @@ from pulse.html.elements import (  # noqa: F401
     HTMLSourceElement,
     HTMLSpanElement,
     HTMLStyleElement,
+    HTMLTableCaptionElement,
     HTMLTableCellElement,
     HTMLTableColElement,
     HTMLTableElement,
@@ -61,8 +69,8 @@ from pulse.html.elements import (  # noqa: F401
     HTMLVideoElement,
 )
 from pulse.html.events import (
-    DOMEvents,
     DialogDOMEvents,
+    DOMEvents,
     InputDOMEvents,
     SelectDOMEvents,
     TElement,
@@ -71,7 +79,7 @@ from pulse.html.events import (
 
 Booleanish = Literal[True, False, "true", "false"]
 CrossOrigin = Literal["anonymous", "use-credentials", ""] | None
-
+ClassName = str | CssReference
 
 class BaseHTMLProps(TypedDict, total=False):
     # React-specific Attributes
@@ -84,7 +92,7 @@ class BaseHTMLProps(TypedDict, total=False):
     accessKey: str
     autoCapitalize: Literal["off", "none", "on", "sentences", "words", "characters"]
     autoFocus: bool
-    className: str
+    className: ClassName
     contentEditable: Union[Booleanish, Literal["inherit", "plaintext-only"]]
     contextMenu: str
     dir: str
@@ -96,7 +104,7 @@ class BaseHTMLProps(TypedDict, total=False):
     nonce: str
     slot: str
     spellCheck: Booleanish
-    style: CssStyle
+    style: CSSProperties
     tabIndex: int
     title: str
     translate: Literal["yes", "no"]
@@ -643,7 +651,7 @@ class HTMLSVGProps(DOMEvents[TElement], total=False):
     method: str
     min: Union[int, str]
     name: str
-    style: CssStyle
+    style: CSSProperties
     target: str
     type: str
     width: Union[int, str]
@@ -911,6 +919,321 @@ class HTMLSVGProps(DOMEvents[TElement], total=False):
     yChannelSelector: str
     z: Union[int, str]
     zoomAndPan: str
+
+
+# Basic HTML element props that inherit from HTMLElementBase
+class HTMLAbbrProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLAddressProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLArticleProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLAsideProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLBProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLBDIProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLBDOProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLBodyProps(BaseHTMLProps, DOMEvents[HTMLBodyElement], total=False):
+    pass
+
+
+class HTMLCaptionProps(BaseHTMLProps, DOMEvents[HTMLTableCaptionElement], total=False):
+    pass
+
+
+class HTMLCiteProps(BaseHTMLProps, DOMEvents[HTMLCiteElement], total=False):
+    pass
+
+
+class HTMLCodeProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLDatalistProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLDDProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLDFNProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLDivProps(BaseHTMLProps, DOMEvents[HTMLDivElement], total=False):
+    pass
+
+
+class HTMLDLProps(BaseHTMLProps, DOMEvents[HTMLDListElement], total=False):
+    pass
+
+
+class HTMLDTProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLEMProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLFigcaptionProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLFigureProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLFooterProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLH1Props(BaseHTMLProps, DOMEvents[HTMLHeadingElement], total=False):
+    pass
+
+
+class HTMLH2Props(BaseHTMLProps, DOMEvents[HTMLHeadingElement], total=False):
+    pass
+
+
+class HTMLH3Props(BaseHTMLProps, DOMEvents[HTMLHeadingElement], total=False):
+    pass
+
+
+class HTMLH4Props(BaseHTMLProps, DOMEvents[HTMLHeadingElement], total=False):
+    pass
+
+
+class HTMLH5Props(BaseHTMLProps, DOMEvents[HTMLHeadingElement], total=False):
+    pass
+
+
+class HTMLH6Props(BaseHTMLProps, DOMEvents[HTMLHeadingElement], total=False):
+    pass
+
+
+class HTMLHeadProps(BaseHTMLProps, DOMEvents[HTMLHeadElement], total=False):
+    pass
+
+
+class HTMLHeaderProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLHgroupProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLIProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLKBDProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLLegendProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLMainProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLMarkProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLNavProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLNoscriptProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLPProps(BaseHTMLProps, DOMEvents[HTMLParagraphElement], total=False):
+    pass
+
+
+class HTMLPictureProps(BaseHTMLProps, DOMEvents[HTMLPictureElement], total=False):
+    pass
+
+
+class HTMLPreProps(BaseHTMLProps, DOMEvents[HTMLPreElement], total=False):
+    pass
+
+
+class HTMLQProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLRPProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLRTProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLRubyProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLSProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLSampProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLSectionProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLSmallProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLSpanProps(BaseHTMLProps, DOMEvents[HTMLSpanElement], total=False):
+    pass
+
+
+class HTMLStrongProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLSubProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLSummaryProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLSupProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLTBODYProps(BaseHTMLProps, DOMEvents[HTMLTableSectionElement], total=False):
+    pass
+
+
+class HTMLTemplateProps(BaseHTMLProps, DOMEvents[HTMLTemplateElement], total=False):
+    pass
+
+
+class HTMLTitleProps(BaseHTMLProps, DOMEvents[HTMLTitleElement], total=False):
+    pass
+
+
+class HTMLUProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLULProps(BaseHTMLProps, DOMEvents[HTMLUListElement], total=False):
+    pass
+
+
+class HTMLVarProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+# Self-closing elements
+class HTMLBRProps(BaseHTMLProps, DOMEvents[HTMLBRElement], total=False):
+    pass
+
+
+class HTMLHRProps(BaseHTMLProps, DOMEvents[HTMLHRElement], total=False):
+    pass
+
+
+class HTMLWBRProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+# Fragment and SVG elements
+class HTMLFragmentProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLCircleProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLEllipseProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLGProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLLineProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLPathProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLPolygonProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLPolylineProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLRectProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLTextProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLTspanProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLDefsProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLClipPathProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLMaskProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLPatternProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
+
+
+class HTMLUseProps(BaseHTMLProps, DOMEvents[GenericHTMLElement], total=False):
+    pass
 
 
 class WebViewAttributes(BaseHTMLProps):

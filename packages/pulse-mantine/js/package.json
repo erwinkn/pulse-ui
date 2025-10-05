@@ -1,0 +1,60 @@
+{
+  "name": "pulse-mantine",
+  "version": "0.1.10",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/index.js",
+      "node": "./dist/index.node.js",
+      "bun": "./dist/index.bun.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun --bun scripts/build.ts && bun run build:types",
+    "build:clean": "rm -rf dist || true",
+    "build:browser": "NODE_ENV=production bun build ./src/index.ts --outdir=dist --format=esm --target=browser --minify --sourcemap=external --external react --external react-dom --external '@mantine/carousel' --external '@mantine/charts' --external '@mantine/code-highlight' --external '@mantine/core' --external '@mantine/dates' --external '@mantine/dropzone' --external '@mantine/form' --external '@mantine/hooks' --external '@mantine/modals' --external '@mantine/notifications' --external '@mantine/nprogress' --external '@mantine/spotlight' --external '@mantine/tiptap' --external '@tiptap/extension-link' --external '@tiptap/pm' --external '@tiptap/react' --external '@tiptap/starter-kit' --external dayjs --external embla-carousel --external embla-carousel-react --external recharts",
+    "build:node": "NODE_ENV=production bun build ./src/index.ts --outfile=dist/index.node.js --format=esm --target=node --minify --sourcemap=inline --define process.env.NODE_ENV=\\\"production\\\" --define __DEV__=false --external react --external react-dom --external '@mantine/carousel' --external '@mantine/charts' --external '@mantine/code-highlight' --external '@mantine/core' --external '@mantine/dates' --external '@mantine/dropzone' --external '@mantine/form' --external '@mantine/hooks' --external '@mantine/modals' --external '@mantine/notifications' --external '@mantine/nprogress' --external '@mantine/spotlight' --external '@mantine/tiptap' --external '@tiptap/extension-link' --external '@tiptap/pm' --external '@tiptap/react' --external '@tiptap/starter-kit' --external dayjs --external embla-carousel --external embla-carousel-react --external recharts",
+    "build:bun": "NODE_ENV=production bun build ./src/index.ts --outfile=dist/index.bun.js --format=esm --target=bun --minify --sourcemap=inline --define process.env.NODE_ENV=\\\"production\\\" --define __DEV__=false --external react --external react-dom --external '@mantine/carousel' --external '@mantine/charts' --external '@mantine/code-highlight' --external '@mantine/core' --external '@mantine/dates' --external '@mantine/dropzone' --external '@mantine/form' --external '@mantine/hooks' --external '@mantine/modals' --external '@mantine/notifications' --external '@mantine/nprogress' --external '@mantine/spotlight' --external '@mantine/tiptap' --external '@tiptap/extension-link' --external '@tiptap/pm' --external '@tiptap/react' --external '@tiptap/starter-kit' --external dayjs --external embla-carousel --external embla-carousel-react --external recharts",
+    "build:types": "tsc -p tsconfig.build.json",
+    "build:dev": "bun run build:clean && NODE_ENV=development bun build ./src/index.ts --outdir=dist --format=esm --target=browser --sourcemap=inline --external react --external react-dom --external '@mantine/carousel' --external '@mantine/charts' --external '@mantine/code-highlight' --external '@mantine/core' --external '@mantine/dates' --external '@mantine/dropzone' --external '@mantine/form' --external '@mantine/hooks' --external '@mantine/modals' --external '@mantine/notifications' --external '@mantine/nprogress' --external '@mantine/spotlight' --external '@mantine/tiptap' --external '@tiptap/extension-link' --external '@tiptap/pm' --external '@tiptap/react' --external '@tiptap/starter-kit' --external dayjs --external embla-carousel --external embla-carousel-react --external recharts && bun run build:types",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "pulse-ui-client": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^24.6.0",
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "@mantine/charts": "^8.3.2",
+    "@mantine/core": "^8.3.2",
+    "@mantine/dates": "^8.3.2",
+    "@mantine/form": "^8.3.2",
+    "@mantine/hooks": "^8.3.2",
+    "dayjs": "^1.11.18",
+    "recharts": "^3.2.1",
+    "typescript": "^5.9.2"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "@mantine/charts": "^8",
+    "@mantine/core": "^8",
+    "@mantine/dates": "^8",
+    "@mantine/form": "^8",
+    "@mantine/hooks": "^8",
+    "dayjs": "^1",
+    "recharts": "^3"
+  }
+}

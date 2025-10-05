@@ -1,0 +1,14 @@
+# Development notes
+## User sessions, render sessions, and prerender optimizations
+I've tried multiple ways of optimizing the current setup and failed for subtle reasons, so I wanted to write them up for future reference.
+
+- Render sessions vs. assigning a render ID to a prerendered VDOM and just maintaining a `dict[str, ActiveRoute]` in the `UserSession`: render sessions are necessary to represent a single Socket.io connection with global state shared across routes.
+- Optimizing prerendering -> mount by keeping the render session around.
+  - This can work by generating a short-lived render ID during prerender and having the client pass it back on mount. We could even have the render ID be a hash of the session ID (if set) + the VDOM and verify that the session ID of the user matches our expectation when receiving the render ID, to avoid all risk of impersonation.
+  - The only challenge is that during prerender, we have no way to determine which prerenders belong in the same tab (to my knowledeg at least). Thus, a RenderSession is created per pre-rendered path. We would need to merge these RenderSessions into a single one at mount time. The problem here is global states: during prerender, we would have instantiated one set of global states per RenderSession. Even if there have been no mutations and the actual state contents are identical, merging them is not trivial as we would need to merge the listeners. State contents being identical is also not guaranteed, with random or time-dependent values being possible.
+  - So far I don't see a solution to this, so we have to re-execute everything under one RenderSession on mount.
+  - Also: we should disallow (global) state mutations during prerender as they are likely to lead to correctness errors. Each route would have its own instances of global state.
+- The prerender + mount (= hydration) cycle will have a short glitch for anything that displays a random or time-dependent value on the page
+- Avoid creating multiple UserSession on concurrent prerenders when no cookie is set
+  - This would require a unique ID or fingerprint for a given user. We could use the User-Agent for this, but 1) it's not guaranteed to be unique and 2) I'm worried about collision risk (voluntary and involuntary). Since this applies only to unauthenticated users, the security risk seems minor / non-existent, but I'm not convinced yet.
+  - In practice, creating multiple UserSession seems fine. Only one would end up being the last to set the cookie; on socket.io connection we would see this cookie and unify everything under this session, the other ones will be disposed shortly thereafter.

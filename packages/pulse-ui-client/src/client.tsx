@@ -1,29 +1,32 @@
 import type { RouteInfo } from "./helpers";
-import type { ClientMountMessage } from "./messages";
-import { applyVDOMUpdates } from "./renderer";
+import type { VDOM, VDOMUpdate } from "./vdom";
 import { extractEvent } from "./serialize/events";
-import {
-  stringify as flattedStringify,
-  parse as flattedParse,
-} from "./serialize/flatted";
-import type { VDOM, VDOMNode } from "./vdom";
+import { serialize, deserialize } from "./serialize/v3";
 
 import { io, Socket } from "socket.io-client";
 import type {
   ClientApiResultMessage,
+  ClientChannelMessage,
   ClientMessage,
   ServerApiCallMessage,
+  ServerChannelMessage,
   ServerErrorInfo,
   ServerMessage,
 } from "./messages";
+import type { NavigateFunction } from "react-router";
+import type { ChannelBridge } from "./channel";
+import { createChannelBridge, PulseChannelResetError } from "./channel";
 
 export interface MountedView {
-  vdom: VDOM;
-  listener: VDOMListener;
   routeInfo: RouteInfo;
+  onInit: (
+    vdom: VDOM,
+    callbacks: string[],
+    renderProps: string[],
+    cssRefs: string[]
+  ) => void;
+  onUpdate: (ops: VDOMUpdate[]) => void;
 }
-
-export type VDOMListener = (node: VDOMNode) => void;
 export type ConnectionStatusListener = (connected: boolean) => void;
 export type ServerErrorListener = (
   path: string,
@@ -51,10 +54,13 @@ export class PulseSocketIOClient {
   private connectionListeners: Set<ConnectionStatusListener> = new Set();
   private serverErrors: Map<string, ServerErrorInfo> = new Map();
   private serverErrorListeners: Set<ServerErrorListener> = new Set();
+  private channels: Map<string, { bridge: ChannelBridge; refCount: number }> =
+    new Map();
 
   constructor(
     private url: string,
-    private frameworkNavigate?: (to: string) => void
+    private renderId: string,
+    private frameworkNavigate: NavigateFunction
   ) {
     this.socket = null;
     this.activeViews = new Map();
@@ -70,7 +76,8 @@ export class PulseSocketIOClient {
     }
     return new Promise((resolve, reject) => {
       const socket = io(this.url, {
-        transports: ["websocket"],
+        transports: ["websocket", "webtransport"],
+        auth: { renderId: this.renderId },
       });
       this.socket = socket;
 
@@ -80,11 +87,11 @@ export class PulseSocketIOClient {
         for (const [path, route] of this.activeViews) {
           socket.emit(
             "message",
-            flattedStringify({
+            serialize({
               type: "mount",
               path: path,
               routeInfo: route.routeInfo,
-            } satisfies ClientMountMessage)
+            })
           );
         }
 
@@ -97,7 +104,7 @@ export class PulseSocketIOClient {
           if (payload.type === "navigate") {
             continue;
           }
-          socket.emit("message", flattedStringify(payload));
+          socket.emit("message", serialize(payload));
         }
         this.messageQueue = [];
 
@@ -113,12 +120,15 @@ export class PulseSocketIOClient {
 
       socket.on("disconnect", () => {
         console.log("[SocketIOTransport] Disconnected");
+        this.handleTransportDisconnect();
         this.notifyConnectionListeners(false);
       });
 
       // Wrap in an arrow function to avoid losing the `this` reference
       socket.on("message", (data) =>
-        this.handleServerMessage(flattedParse(data) as ServerMessage)
+        this.handleServerMessage(
+          deserialize(data, { coerceNullsToUndefined: true })
+        )
       );
     });
   }
@@ -153,11 +163,17 @@ export class PulseSocketIOClient {
   private async sendMessage(payload: ClientMessage): Promise<void> {
     if (this.isConnected()) {
       // console.log("[SocketIOTransport] Sending:", payload);
-      this.socket!.emit("message", flattedStringify(payload));
+      this.socket!.emit("message", serialize(payload as any));
     } else {
       // console.log("[SocketIOTransport] Queuing message:", payload);
       this.messageQueue.push(payload);
     }
+  }
+
+  public async sendChannelMessage(
+    message: ClientChannelMessage
+  ): Promise<void> {
+    await this.sendMessage(message);
   }
 
   public mountView(path: string, view: MountedView) {
@@ -193,6 +209,10 @@ export class PulseSocketIOClient {
     this.activeViews.clear();
     this.serverErrors.clear();
     this.serverErrorListeners.clear();
+    for (const { bridge } of this.channels.values()) {
+      bridge.dispose(new PulseChannelResetError("Client disconnected"));
+    }
+    this.channels.clear();
   }
 
   private handleServerMessage(message: ServerMessage) {
@@ -200,9 +220,15 @@ export class PulseSocketIOClient {
     switch (message.type) {
       case "vdom_init": {
         const route = this.activeViews.get(message.path);
+        // Ignore messages for paths that are not mounted
+        if (!route) return;
         if (route) {
-          route.vdom = message.vdom;
-          route.listener(route.vdom);
+          route.onInit(
+            message.vdom,
+            message.callbacks,
+            message.render_props,
+            message.css_refs
+          );
         }
         // Clear any prior error for this path on successful init
         if (this.serverErrors.has(message.path)) {
@@ -213,14 +239,8 @@ export class PulseSocketIOClient {
       }
       case "vdom_update": {
         const route = this.activeViews.get(message.path);
-        if (!route || !route.vdom) {
-          console.error(
-            `[PulseClient] Received VDOM update for path ${message.path} before initial tree was set.`
-          );
-          return;
-        }
-        route.vdom = applyVDOMUpdates(route.vdom, message.ops);
-        route.listener(route.vdom);
+        if (!route) return; // Not an active path; discard
+        route.onUpdate(message.ops);
         // Clear any prior error for this path on successful update
         if (this.serverErrors.has(message.path)) {
           this.serverErrors.delete(message.path);
@@ -229,6 +249,7 @@ export class PulseSocketIOClient {
         break;
       }
       case "server_error": {
+        if (!this.activeViews.has(message.path)) return; // discard for inactive paths
         this.serverErrors.set(message.path, message.error);
         this.notifyServerError(message.path, message.error);
         break;
@@ -238,17 +259,40 @@ export class PulseSocketIOClient {
         break;
       }
       case "navigate_to": {
-        try {
-          const dest = (message as any).path as string;
-          if (this.frameworkNavigate) {
-            this.frameworkNavigate(dest);
+        // `navigate_to` is navigational; allow regardless of activeViews membership
+        const replace = !!message.replace;
+        let dest = message.path || "";
+        // Normalize protocol-relative URLs to absolute
+        if (dest.startsWith("//")) dest = `${window.location.protocol}${dest}`;
+        const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest);
+        if (hasScheme) {
+          if (dest.startsWith("http://") || dest.startsWith("https://")) {
+            try {
+              const url = new URL(dest);
+              if (url.origin === window.location.origin) {
+                const internal = `${url.pathname}${url.search}${url.hash}`;
+                this.frameworkNavigate(internal, { replace });
+              } else {
+                if (replace) window.location.replace(dest);
+                else window.location.assign(dest);
+              }
+            } catch {
+              if (replace) window.location.replace(dest);
+              else window.location.assign(dest);
+            }
           } else {
-            window.history.pushState({}, "", dest);
-            window.dispatchEvent(new PopStateEvent("popstate"));
+            // mailto:, tel:, data:, etc.
+            if (replace) window.location.replace(dest);
+            else window.location.assign(dest);
           }
-        } catch (e) {
-          console.error("Navigation error:", e);
+        } else {
+          // Relative or root-relative path → SPA navigate
+          this.frameworkNavigate(dest, { replace });
         }
+        break;
+      }
+      case "channel_message": {
+        this.routeChannelMessage(message);
         break;
       }
       default: {
@@ -313,6 +357,55 @@ export class PulseSocketIOClient {
       callback,
       args: args.map(extractEvent),
     });
+  }
+
+  public acquireChannel(id: string): ChannelBridge {
+    const entry = this.ensureChannelEntry(id);
+    entry.refCount += 1;
+    return entry.bridge;
+  }
+
+  public releaseChannel(id: string): void {
+    const entry = this.channels.get(id);
+    if (!entry) {
+      return;
+    }
+    entry.refCount = Math.max(0, entry.refCount - 1);
+    if (entry.refCount === 0) {
+      entry.bridge.dispose(new PulseChannelResetError("Channel released"));
+      this.channels.delete(id);
+    }
+  }
+
+  private ensureChannelEntry(id: string): {
+    bridge: ChannelBridge;
+    refCount: number;
+  } {
+    let entry = this.channels.get(id);
+    if (!entry) {
+      entry = {
+        bridge: createChannelBridge(this, id),
+        refCount: 0,
+      };
+      this.channels.set(id, entry);
+    }
+    return entry;
+  }
+
+  private routeChannelMessage(message: ServerChannelMessage): void {
+    const entry = this.ensureChannelEntry(message.channel);
+    const closed = entry.bridge.handleServerMessage(message);
+    if (closed && entry.refCount === 0) {
+      this.channels.delete(message.channel);
+    }
+  }
+
+  private handleTransportDisconnect(): void {
+    for (const entry of this.channels.values()) {
+      entry.bridge.handleDisconnect(
+        new PulseChannelResetError("Connection lost")
+      );
+    }
   }
 
   // public getVDOM(path: string): VDOM | null {

@@ -38,6 +38,7 @@ from pulse.react_component import (
     parse_typed_dict_props,
     parse_fn_signature,
     DEFAULT,
+    registered_react_components,
 )
 from .test_utils import assert_node_equal
 from pulse.vdom import Child, Element
@@ -49,28 +50,40 @@ class TestReactComponent:
     def test_component_creation(self):
         """Test creating ReactComponent instances."""
         component = ReactComponent(
-            tag="TestComponent",
-            import_path="./TestComponent",
-            alias="test-component",
+            name="TestComponent",
+            src="./TestComponent",
             is_default=False,
         )
 
-        assert component.key == "test-component"
-        assert component.import_path == "./TestComponent"
-        assert component.tag == "TestComponent"
+        assert component.name == "TestComponent"
+        assert component.src == "./TestComponent"
+        assert component.prop is None
+        assert not component.is_default
+
+    def test_component_with_prop(self):
+        """Test ReactComponent with prop for nested component access."""
+        component = ReactComponent(
+            name="AppShell",
+            src="@mantine/core",
+            prop="Header",
+            is_default=False,
+        )
+
+        assert component.name == "AppShell"
+        assert component.src == "@mantine/core"
+        assert component.prop == "Header"
         assert not component.is_default
 
     def test_component_with_default_export(self):
         """Test ReactComponent with default export."""
         component = ReactComponent(
-            tag="default-component",
-            import_path="./DefaultComponent",
+            name="default-component",
+            src="./DefaultComponent",
             is_default=True,
         )
 
-        assert component.key == "default-component"
-        assert component.import_path == "./DefaultComponent"
-        # For default exports, the tag is the key, and the conceptual "export name" is "default"
+        assert component.name == "default-component"
+        assert component.src == "./DefaultComponent"
         assert component.is_default
 
 
@@ -86,9 +99,8 @@ class TestDefineReactComponent:
     def test_define_component_basic(self):
         """Test defining a basic React component."""
         TestComponent = ReactComponent(
-            tag="TestComponent",
-            import_path="./TestComponent",
-            alias="test",
+            name="TestComponent",
+            src="./TestComponent",
             is_default=False,
         )
 
@@ -96,44 +108,60 @@ class TestDefineReactComponent:
         assert callable(TestComponent)
 
         # Component should be registered
-        components = COMPONENT_REGISTRY.get().items()
-        assert "test" in components
-        assert components["test"].tag == "TestComponent"
-        assert components["test"].import_path == "./TestComponent"
-        assert not components["test"].is_default
+        components = registered_react_components()
+        assert len(components) == 1
+        assert components[0].name == "TestComponent"
+        assert components[0].src == "./TestComponent"
+        assert not components[0].is_default
+
+    def test_define_component_with_prop(self):
+        """Test defining a component with prop for nested access."""
+        TestComponent = ReactComponent(
+            name="AppShell",
+            src="@mantine/core",
+            prop="Header",
+            is_default=False,
+        )
+        # Should return a callable
+        assert callable(TestComponent)
+
+        # Component should be registered
+        components = registered_react_components()
+        assert len(components) == 1
+        assert components[0].name == "AppShell"
+        assert components[0].src == "@mantine/core"
+        assert components[0].prop == "Header"
+        assert not components[0].is_default
 
     def test_define_component_default_export(self):
         """Test defining a component with default export."""
-        ReactComponent(
-            tag="default-comp", import_path="./DefaultComponent", is_default=True
-        )
+        ReactComponent(name="default-comp", src="./DefaultComponent", is_default=True)
 
-        components = COMPONENT_REGISTRY.get().items()
-        assert "default-comp" in components
-        assert components["default-comp"].is_default
+        components = registered_react_components()
+        assert len(components) == 1
+        assert components[0].name == "default-comp"
+        assert components[0].is_default
 
     def test_component_mount_point_creation(self):
         """Test that defined components create mount points."""
         TestComponent = ReactComponent(
-            tag="TestComponent",
-            import_path="./TestComponent",
-            alias="test-component",
+            name="TestComponent",
+            src="./TestComponent",
             is_default=False,
         )
 
         # Create a mount point
         mount_point = TestComponent(prop1="value1", prop2="value2")
 
-        assert mount_point.tag == "$$test-component"
+        assert mount_point.tag == "$$TestComponent"
         assert mount_point.props == {"prop1": "value1", "prop2": "value2"}
         assert mount_point.children is None
 
     def test_component_with_children(self):
         """Test creating mount points with children."""
         Container = ReactComponent(
-            tag="Container",
-            import_path="./Container",
-            alias="container",
+            name="Container",
+            src="./Container",
             is_default=False,
         )
 
@@ -142,7 +170,7 @@ class TestDefineReactComponent:
             "Text child", p()["Paragraph child"], className="container"
         )
 
-        assert mount_point.tag == "$$container"
+        assert mount_point.tag == "$$Container"
         assert mount_point.props == {"className": "container"}
         assert mount_point.children is not None
         assert len(mount_point.children) == 2
@@ -152,14 +180,12 @@ class TestDefineReactComponent:
 
     def test_component_with_indexing_syntax(self):
         """Test using indexing syntax with React components."""
-        Card = ReactComponent(
-            tag="Card", import_path="./Card", alias="card", is_default=False
-        )
+        Card = ReactComponent(name="Card", src="./Card", is_default=False)
 
         # Use indexing syntax
         mount_point = Card(title="Test Card")[p()["Card content"], "Additional text"]
 
-        assert mount_point.tag == "$$card"
+        assert mount_point.tag == "$$Card"
         assert mount_point.props == {"title": "Test Card"}
         assert mount_point.children is not None
         assert len(mount_point.children) == 2
@@ -169,32 +195,16 @@ class TestDefineReactComponent:
 
     def test_multiple_components(self):
         """Test defining multiple components."""
-        ReactComponent("Button", "./Button", "button", False)
-        ReactComponent("Input", "./Input", "input", False)
-        ReactComponent("Modal", "./Modal", "modal", False)
+        ReactComponent("Button", "./Button")
+        ReactComponent("Input", "./Input")
+        ReactComponent("Modal", "./Modal")
 
-        components = COMPONENT_REGISTRY.get().items()
+        components = registered_react_components()
 
         assert len(components) == 3
-        assert "button" in components
-        assert "input" in components
-        assert "modal" in components
+        assert {c.name for c in components} == {"Button", "Input", "Modal"}
 
-    def test_component_overwrite(self):
-        """Defining a component with the same key should auto-rename to avoid conflict."""
-        # Define first component
-        first = ReactComponent("First", "./First", "test", False)
-
-        # Define second component with same key; should be auto-renamed to 'test2'
-        second = ReactComponent("Second", "./Second", "test", False)
-
-        components = COMPONENT_REGISTRY.get().items()
-        assert "test" in components
-        assert "test2" in components
-        assert components["test"].tag == "First"
-        assert components["test2"].tag == "Second"
-        assert first.key == "test"
-        assert second.key == "test2"
+    # Alias/overwrite behavior removed in new API; no corresponding test.
 
 
 class TestComponentRegistry:
@@ -206,23 +216,21 @@ class TestComponentRegistry:
 
     def test_empty_registry(self):
         """Test empty component registry."""
-        components = COMPONENT_REGISTRY.get().items()
+        components = registered_react_components()
         assert len(components) == 0
 
-    def test_registry_isolation(self):
-        """Test that get_registered_components returns a copy."""
-        ReactComponent("Test", "./Test", "test", False)
+    def test_registry_collects_components(self):
+        """Test that the registry collects added components."""
+        ReactComponent("Test", "./Test")
 
-        components1 = COMPONENT_REGISTRY.get().items()
-        components2 = COMPONENT_REGISTRY.get().items()
+        components = registered_react_components()
+        assert len(components) == 1
+        assert components[0].name == "Test"
 
-        # Should be equal but not the same object
-        assert components1 == components2
-        assert components1 is not components2
-
-        # Modifying one shouldn't affect the other
-        components1["new"] = ReactComponent("New", "./New", "new", False)
-        assert "new" not in components2
+        ReactComponent("New", "./New")
+        components = registered_react_components()
+        assert len(components) == 2
+        assert {c.name for c in components} == {"Test", "New"}
 
 
 class TestMountPointGeneration:
@@ -234,20 +242,20 @@ class TestMountPointGeneration:
 
     def test_mount_point_tag_format(self):
         """Test that mount points have correct tag format."""
-        TestComp = ReactComponent("Test", "./Test", "test-component", False)
+        TestComp = ReactComponent("Test", "./Test")
         mount_point = TestComp()
-        assert mount_point.tag == "$$test-component"
+        assert mount_point.tag == "$$Test"
 
     def test_mount_point_serialization(self):
         """Test that mount points serialize correctly."""
-        Counter = ReactComponent("Counter", "./Counter", "counter", False)
+        Counter = ReactComponent("Counter", "./Counter")
 
         mount_point = Counter(count=5, label="Test Counter")[
             p()["Counter description"], "Additional text"
         ]
 
         expected: VDOMNode = {
-            "tag": "$$counter",
+            "tag": "$$Counter",
             "props": {"count": 5, "label": "Test Counter"},
             "children": [
                 {
@@ -264,8 +272,8 @@ class TestMountPointGeneration:
 
     def test_nested_mount_points(self):
         """Test nesting mount points within each other."""
-        Card = ReactComponent("Card", "./Card", "card", False)
-        Button = ReactComponent("Button", "./Button", "button", False)
+        Card = ReactComponent("Card", "./Card")
+        Button = ReactComponent("Button", "./Button")
 
         nested_structure = Card(title="Nested Example")[
             p()["This card contains a button:"],
@@ -274,12 +282,12 @@ class TestMountPointGeneration:
         ]
 
         expected: VDOMNode = {
-            "tag": "$$card",
+            "tag": "$$Card",
             "props": {"title": "Nested Example"},
             "children": [
                 {"tag": "p", "props": {}, "children": ["This card contains a button:"]},
                 {
-                    "tag": "$$button",
+                    "tag": "$$Button",
                     "props": {"variant": "primary"},
                     "children": ["Click me!"],
                 },
@@ -299,8 +307,8 @@ class TestComponentIntegrationWithHTML:
 
     def test_mixed_html_and_components(self):
         """Test mixing HTML elements and React components."""
-        UserCard = ReactComponent("UserCard", "./UserCard", "user-card", False)
-        Counter = ReactComponent("Counter", "./Counter", "counter", False)
+        UserCard = ReactComponent("UserCard", "./UserCard")
+        Counter = ReactComponent("Counter", "./Counter")
 
         mixed_structure = div(className="app")[
             h1()["My App"],
@@ -316,13 +324,13 @@ class TestComponentIntegrationWithHTML:
             "children": [
                 {"tag": "h1", "props": {}, "children": ["My App"]},
                 {
-                    "tag": "$$user-card",
+                    "tag": "$$UserCard",
                     "props": {"name": "John Doe", "email": "john@example.com"},
                     "children": None,
                 },
                 {"tag": "p", "props": {}, "children": ["Some regular HTML content"]},
                 {
-                    "tag": "$$counter",
+                    "tag": "$$Counter",
                     "props": {"count": 42},
                     "children": ["This counter has children"],
                 },
@@ -334,7 +342,7 @@ class TestComponentIntegrationWithHTML:
 
     def test_component_props_types(self):
         """Test that component props handle various data types."""
-        DataComponent = ReactComponent("Data", "./Data", "data", False)
+        DataComponent = ReactComponent("Data", "./Data")
 
         mount_point = DataComponent(
             stringProp="text",
@@ -579,9 +587,9 @@ def test_parse_fn_signature_builds_propspec_from_annotation_and_defaults():
 
 
 def test_react_component_decorator_explicit_props_and_children():
-    TITLE_DEFAULT: Any = prop(default="Untitled")
+    TITLE_DEFAULT = prop(default="Untitled")
 
-    @react_component(tag="Card", import_="./Card", alias="card")
+    @react_component(name="Card", src="./Card")
     def Card(
         *children: Child,
         key: Optional[str] = None,
@@ -593,12 +601,12 @@ def test_react_component_decorator_explicit_props_and_children():
     # With children and partial props (title default applies)
     node = Card(p()["Body"], disabled=True)
     assert isinstance(node, Node)
-    assert node.tag == "$$card"
+    assert node.tag == "$$Card"
     assert node.props == {"title": "Untitled", "disabled": True}
     assert node.children is not None and len(node.children) == 1
 
     # Unknown prop should be rejected since spec is closed
-    with pytest.raises(ValueError, match=r"Unexpected prop\(s\) for component 'card'"):
+    with pytest.raises(ValueError, match=r"Unexpected prop\(s\) for component 'Card'"):
         Card(unknown=1)  # type: ignore
 
 
@@ -608,7 +616,7 @@ def test_react_component_decorator_typed_dict_unpack_and_mapping():
         class_name: Annotated[str, prop(map_to="className")]
         count: NotRequired[int]
 
-    @react_component(tag="Badge", import_="./Badge")
+    @react_component(name="Badge", src="./Badge")
     def Badge(
         *children: Child,
         key: Optional[str] = None,
@@ -634,17 +642,8 @@ def test_react_component_decorator_typed_dict_unpack_and_mapping():
 
 
 def test_react_component_decorator_default_export_and_alias_rules():
-    # default export cannot have alias
-    with pytest.raises(ValueError, match=r"default import cannot have an alias"):
-
-        @react_component(
-            tag="DefaultComp", import_="./Comp", alias="x", is_default=True
-        )
-        def _Bad(*children: Child, key: Optional[str] = None) -> Element:
-            return cast(Element, None)
-
-    # default export allowed without alias
-    @react_component(tag="DefaultComp", import_="./Comp", is_default=True)
+    # default export allowed
+    @react_component(name="DefaultComp", src="./Comp", is_default=True)
     def DefaultComp(*children: Child, key: Optional[str] = None) -> Element:
         return cast(Element, None)
 
@@ -653,7 +652,7 @@ def test_react_component_decorator_default_export_and_alias_rules():
 
 
 def test_react_component_decorator_key_validation():
-    @react_component(tag="Box", import_="./Box")
+    @react_component(name="Box", src="./Box")
     def Box(*children: Child, key: Optional[str] = None) -> Element:
         return cast(Element, None)
 
@@ -668,7 +667,7 @@ def test_react_component_decorator_key_validation():
 
 
 def test_react_component_decorator_untyped_kwargs_allows_unknown():
-    @react_component(tag="Pane", import_="./Pane")
+    @react_component(name="Pane", src="./Pane")
     def Pane(
         *children: Child,
         key: Optional[str] = None,
@@ -684,7 +683,7 @@ def test_react_component_decorator_untyped_kwargs_allows_unknown():
 
 
 def test_default_sentinel_omits_explicit_prop():
-    @react_component(tag="Card", import_="./Card", alias="card-default-explicit")
+    @react_component(name="CardDefaultExplicit", src="./Card")
     def Card(
         *children: Child,
         key: Optional[str] = None,
@@ -695,7 +694,7 @@ def test_default_sentinel_omits_explicit_prop():
 
     # Passing DEFAULT should omit the prop entirely
     node = Card()
-    assert node.tag == "$$card-default-explicit"
+    assert node.tag == "$$CardDefaultExplicit"
     assert node.props == {"title": "Untitled"}
 
     # Passing None should keep the key with None value (serialize to null client-side)
@@ -711,7 +710,7 @@ def test_default_sentinel_omits_unpack_prop_and_skips_serialize():
     class Props(TypedDict):
         label: NotRequired[Annotated[str, prop(serialize=bomb)]]
 
-    @react_component(tag="Badge", import_="./Badge", alias="badge-default-unpack")
+    @react_component(name="BadgeDefaultUnpack", src="./Badge")
     def Badge(
         *children: Child,
         key: Optional[str] = None,
@@ -720,13 +719,13 @@ def test_default_sentinel_omits_unpack_prop_and_skips_serialize():
         return cast(Element, None)
 
     node = Badge()
-    assert node.tag == "$$badge-default-unpack"
+    assert node.tag == "$$BadgeDefaultUnpack"
     # Omitted entirely
     assert node.props is None
 
 
 def test_default_sentinel_omits_unknown_when_untyped_kwargs():
-    @react_component(tag="Pane", import_="./Pane", alias="pane-default-unknown")
+    @react_component(name="PaneDefaultUnknown", src="./Pane")
     def Pane(
         *children: Child,
         key: Optional[str] = None,
@@ -737,7 +736,7 @@ def test_default_sentinel_omits_unknown_when_untyped_kwargs():
 
     node = Pane(dataAttr=DEFAULT)
     # Unknowns are allowed but DEFAULT should ensure omission
-    assert node.tag == "$$pane-default-unknown"
+    assert node.tag == "$$PaneDefaultUnknown"
     assert node.props == {"disabled": False}
 
 
@@ -747,7 +746,7 @@ def test_default_sentinel_props_in_fn_and_typed_dict():
         # This one should be required, despite the DEFAULT value
         name: Annotated[str, prop(DEFAULT)]
 
-    @react_component(tag="Pane", import_="./Pane", alias="pane")
+    @react_component(name="Pane", src="./Pane")
     def Pane(
         *children: Child,
         key: Optional[str] = None,
@@ -837,7 +836,7 @@ def test_react_component_accepts_generic_like_typed_dict_props():
     class DataProps(Parent, Generic[T], total=False):
         value: T
 
-    @react_component(tag="DataBox", import_="./DataBox", alias="data-box")
+    @react_component(name="DataBox", src="./DataBox")
     def DataBox(
         *children: Child, key: Optional[str] = None, **props: Unpack[DataProps[int]]
     ) -> Element:
@@ -845,6 +844,6 @@ def test_react_component_accepts_generic_like_typed_dict_props():
 
     node = DataBox(value=123, label="n")
     assert isinstance(node, Node)
-    assert node.tag == "$$data-box"
+    assert node.tag == "$$DataBox"
     # Value typed by TypeVar should be accepted and passed through unchanged
     assert node.props == {"value": 123, "label": "n"}

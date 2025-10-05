@@ -31,7 +31,7 @@ class CartesianChartProps(TypedDict, Generic[T], total=False):
     reverseStackOrder: bool
     role: str
     stackOffset: StackOffsetType
-    style: ps.CssStyle
+    style: ps.CSSProperties
     syncId: float | str
     syncMethod: SyncMethod
     tabIndex: float
@@ -63,7 +63,7 @@ class PolarChartProps(TypedDict, Generic[T]):
     role: str
     stackOffset: StackOffsetType
     startAngle: float
-    style: ps.CssStyle
+    style: ps.CSSProperties
     syncId: float | str
     syncMethod: SyncMethod
     tabIndex: float
@@ -75,7 +75,8 @@ class PolarChartProps(TypedDict, Generic[T]):
 # TODO: All charts are <svg> elements
 
 
-class AreaChartProps(CartesianChartProps, ps.HTMLSVGProps): ...
+class AreaChartProps(ps.HTMLSVGProps, CartesianChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
+
 
 
 @ps.react_component("AreaChart", "recharts")
@@ -84,7 +85,7 @@ def AreaChart(
 ): ...
 
 
-class BarChartProps(CartesianChartProps, ps.HTMLSVGProps): ...
+class BarChartProps(ps.HTMLSVGProps, CartesianChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 @ps.react_component("BarChart", "recharts")
@@ -93,7 +94,7 @@ def BarChart(
 ): ...
 
 
-class LineChartProps(CartesianChartProps, ps.HTMLSVGProps): ...
+class LineChartProps(ps.HTMLSVGProps, CartesianChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 @ps.react_component("LineChart", "recharts")
@@ -102,7 +103,7 @@ def LineChart(
 ): ...
 
 
-class ComposedChartProps(CartesianChartProps, ps.HTMLSVGProps): ...
+class ComposedChartProps(ps.HTMLSVGProps, CartesianChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 @ps.react_component("ComposedChart", "recharts")
@@ -111,7 +112,7 @@ def ComposedChart(
 ): ...
 
 
-class PieChartProps(PolarChartProps, ps.HTMLSVGProps): ...
+class PieChartProps(ps.HTMLSVGProps, PolarChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 @ps.react_component("PieChart", "recharts")
@@ -120,7 +121,7 @@ def PieChart(
 ): ...
 
 
-class RadarChartProps(PolarChartProps, ps.HTMLSVGProps): ...
+class RadarChartProps(ps.HTMLSVGProps, PolarChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 @ps.react_component("RadarChart", "recharts")
@@ -129,7 +130,7 @@ def RadarChart(
 ): ...
 
 
-class RadialBarChartProps(PolarChartProps, ps.HTMLSVGProps): ...
+class RadialBarChartProps(ps.HTMLSVGProps, PolarChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 @ps.react_component("RadialBarChart", "recharts")
@@ -138,7 +139,7 @@ def RadialBarChart(
 ): ...
 
 
-class ScatterChartProps(CartesianChartProps, ps.HTMLSVGProps): ...
+class ScatterChartProps(ps.HTMLSVGProps, CartesianChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 @ps.react_component("ScatterChart", "recharts")
@@ -147,7 +148,7 @@ def ScatterChart(
 ): ...
 
 
-class FunnelChartProps(CartesianChartProps, ps.HTMLSVGProps): ...
+class FunnelChartProps(ps.HTMLSVGProps, CartesianChartProps): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 @ps.react_component("FunnelChart", "recharts")

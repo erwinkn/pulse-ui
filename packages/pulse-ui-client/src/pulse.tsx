@@ -6,11 +6,11 @@ import React, {
   useContext,
   type ComponentType,
 } from "react";
-import { VDOMRenderer } from "./renderer";
+import { VDOMRenderer, applyUpdates } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry, RegistryEntry } from "./vdom";
 import { useLocation, useParams, useNavigate } from "react-router";
-import type { ServerErrorInfo } from "./messages";
+import type { ServerErrorInfo} from "./messages";
 import type { RouteInfo } from "./helpers";
 
 // =================================================================
@@ -21,12 +21,24 @@ export interface PulseConfig {
   serverAddress: string;
 }
 
+export type PulsePrerenderView = {
+  vdom: VDOM;
+  callbacks: string[];
+  render_props: string[];
+  css_refs: string[];
+};
+
+export type PulsePrerender = {
+  renderId: string;
+  views: Record<string, PulsePrerenderView>;
+};
 // =================================================================
 // Context and Hooks
 // =================================================================
 
 // Context for the client, provided by PulseProvider
 const PulseClientContext = createContext<PulseSocketIOClient | null>(null);
+const PulsePrerenderContext = createContext<PulsePrerender | null>(null);
 
 export const usePulseClient = () => {
   const client = useContext(PulseClientContext);
@@ -36,22 +48,16 @@ export const usePulseClient = () => {
   return client;
 };
 
-// Context for rendering helpers, provided by PulseView
-interface PulseRenderHelpers {
-  getCallback: (key: string) => (...args: any[]) => void;
-  getComponent: (key: string) => RegistryEntry;
-}
-
-const PulseRenderContext = createContext<PulseRenderHelpers | null>(null);
-
-export const usePulseRenderHelpers = () => {
-  const context = useContext(PulseRenderContext);
-  if (!context) {
-    throw new Error(
-      "usePulseRenderHelpers must be used within a PulseRenderContext (provided by <PulseView>)"
-    );
+export const usePulsePrerender = (path: string) => {
+  const ctx = useContext(PulsePrerenderContext);
+  if (!ctx) {
+    throw new Error("usePulsePrerender must be used within a PulseProvider");
   }
-  return context;
+  const view = ctx.views[path];
+  if (!view) {
+    throw new Error(`No prerender found for '${path}'`);
+  }
+  return view;
 };
 
 // =================================================================
@@ -61,17 +67,23 @@ export const usePulseRenderHelpers = () => {
 export interface PulseProviderProps {
   children: React.ReactNode;
   config: PulseConfig;
+  prerender: PulsePrerender;
 }
 
 const inBrowser = typeof window !== "undefined";
 
-export function PulseProvider({ children, config }: PulseProviderProps) {
+export function PulseProvider({
+  children,
+  config,
+  prerender,
+}: PulseProviderProps) {
   const [connected, setConnected] = useState(true);
   const rrNavigate = useNavigate();
+  const { renderId } = prerender;
 
   const client = useMemo(
-    () => new PulseSocketIOClient(`${config.serverAddress}`, rrNavigate),
-    [config.serverAddress, rrNavigate]
+    () => new PulseSocketIOClient(config.serverAddress, renderId, rrNavigate),
+    [config.serverAddress, rrNavigate, renderId]
   );
 
   useEffect(() => client.onConnectionChange(setConnected), [client]);
@@ -85,23 +97,25 @@ export function PulseProvider({ children, config }: PulseProviderProps) {
 
   return (
     <PulseClientContext.Provider value={client}>
-      {!connected && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: "20px",
-            right: "20px",
-            backgroundColor: "red",
-            color: "white",
-            padding: "10px",
-            borderRadius: "5px",
-            zIndex: 1000,
-          }}
-        >
-          Failed to connect to the server.
-        </div>
-      )}
-      {children}
+      <PulsePrerenderContext.Provider value={prerender}>
+        {!connected && (
+          <div
+            style={{
+              position: "fixed",
+              bottom: "20px",
+              right: "20px",
+              backgroundColor: "red",
+              color: "white",
+              padding: "10px",
+              borderRadius: "5px",
+              zIndex: 1000,
+            }}
+          >
+            Failed to connect to the server.
+          </div>
+        )}
+        {children}
+      </PulsePrerenderContext.Provider>
     </PulseClientContext.Provider>
   );
 }
@@ -111,18 +125,35 @@ export function PulseProvider({ children, config }: PulseProviderProps) {
 // =================================================================
 
 export interface PulseViewProps {
-  initialVDOM: VDOM;
   externalComponents: ComponentRegistry;
   path: string;
+  cssModules: Record<string, Record<string, string>>;
 }
 
 export function PulseView({
-  initialVDOM,
   externalComponents,
   path,
+  cssModules,
 }: PulseViewProps) {
   const client = usePulseClient();
-  const [vdom, setVdom] = useState(initialVDOM);
+  const initialView = usePulsePrerender(path);
+  const initialVDOM = initialView.vdom;
+  const renderer = useMemo(
+    () =>
+      new VDOMRenderer(
+        client,
+        path,
+        externalComponents,
+        cssModules,
+        initialView.callbacks,
+        initialView.render_props,
+        initialView.css_refs
+      ),
+    [client, path, externalComponents, cssModules, initialView]
+  );
+  const [tree, setTree] = useState<React.ReactNode>(() =>
+    renderer.renderNode(initialVDOM)
+  );
   const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
 
   const location = useLocation();
@@ -149,15 +180,23 @@ export function PulseView({
   useEffect(() => {
     if (inBrowser) {
       client.mountView(path, {
-        vdom: initialVDOM,
-        listener: setVdom,
         routeInfo,
+        onInit: (vdom, callbacks, renderProps, cssRefs) => {
+          renderer.setCallbacks(callbacks);
+          renderer.setRenderProps(renderProps);
+          renderer.setCssRefs(cssRefs);
+          setTree(renderer.renderNode(vdom));
+        },
+        onUpdate: (ops) => {
+          setTree((prev) =>
+            prev == null ? prev : applyUpdates(prev, ops, renderer)
+          );
+        },
       });
       const offErr = client.onServerError((p, err) => {
         if (p === path) setServerError(err);
       });
       return () => {
-        console.log("Unmounting", path)
         offErr();
         client.unmount(path);
       };
@@ -171,38 +210,11 @@ export function PulseView({
     }
   }, [client, path, routeInfo]);
 
-  const renderHelpers = useMemo(() => {
-    const callbackCache = new Map<string, (...args: any[]) => void>();
+  if (serverError) {
+    return <ServerError error={serverError} />;
+  }
 
-    const getCallback = (key: string) => {
-      let fn = callbackCache.get(key);
-      if (!fn) {
-        fn = (...args) => client.invokeCallback(path, key, args);
-        callbackCache.set(key, fn);
-      }
-      return fn;
-    };
-
-    const getComponent = (key: string) => {
-      const component = externalComponents[key];
-      if (!component) {
-        throw new Error(`Component with key "${key}" not found.`);
-      }
-      return component;
-    };
-
-    return { getCallback, getComponent };
-  }, [client, externalComponents, path]);
-
-  return (
-    <PulseRenderContext.Provider value={renderHelpers}>
-      {serverError ? (
-        <ServerError error={serverError} />
-      ) : (
-        <VDOMRenderer node={vdom} />
-      )}
-    </PulseRenderContext.Provider>
-  );
+  return tree;
 }
 
 function ServerError({ error }: { error: ServerErrorInfo }) {

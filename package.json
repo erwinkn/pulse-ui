@@ -1,5 +1,14 @@
 {
   "name": "pulse",
   "version": "1.0.0",
-  "workspaces": ["packages/pulse-ui-client/", "examples/pulse-demo/"]
+  "type": "module",
+  "scripts": {
+    "build:packages": "node ./scripts/build-js-packages.ts && bun upgrade"
+  },
+  "workspaces": [
+    "packages/pulse-ui-client/",
+    "packages/pulse-mantine/js",
+    "examples/web/",
+    "examples/pulse-mantine/web"
+  ]
 }

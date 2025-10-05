@@ -56,7 +56,6 @@ describe("encodeForWire / decodeFromWire", () => {
     a.arr = arr;
 
     const encoded = await encodeForWire({ a, b, arr });
-    console.log(encoded);
     const asAny = encoded as any;
     // Expect top-level to be encoded as object with props
     expect(asAny.__t).toBe("object");

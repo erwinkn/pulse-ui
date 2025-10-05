@@ -4,11 +4,13 @@
 
 from typing import Literal, Optional, Union, TypedDict
 
+from pulse.css import CssReference
+
 
 class Element(TypedDict):
     # Basic properties
     id: str
-    className: str
+    className: str 
     tagName: str
     localName: str
     clientHeight: float
@@ -229,7 +231,7 @@ class HTMLFieldSetElement(HTMLElementBase):
 class HTMLFormElement(HTMLElementBase):
     """Properties specific to <form> elements."""
 
-    tagName: Literal["form"]
+    tagName: Literal["form"]  # type: ignore[misc]
 
     acceptCharset: str
     action: str

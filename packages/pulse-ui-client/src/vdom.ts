@@ -31,7 +31,10 @@ export type UpdateType =
   | "remove"
   | "replace"
   | "update_props"
-  | "move";
+  | "move"
+  | "update_callbacks"
+  | "update_render_props"
+  | "update_css_refs";
 
 export interface VDOMUpdateBase {
   type: UpdateType;
@@ -42,10 +45,12 @@ export interface VDOMUpdateBase {
 export interface InsertUpdate extends VDOMUpdateBase {
   type: "insert";
   data: VDOMNode; // The node to insert
+  idx: number;
 }
 
 export interface RemoveUpdate extends VDOMUpdateBase {
   type: "remove";
+  idx: number;
 }
 
 export interface ReplaceUpdate extends VDOMUpdateBase {
@@ -55,7 +60,10 @@ export interface ReplaceUpdate extends VDOMUpdateBase {
 
 export interface UpdatePropsUpdate extends VDOMUpdateBase {
   type: "update_props";
-  data: Record<string, any>; // The new props
+  data: {
+    set?: Record<string, any>;
+    remove?: string[];
+  };
 }
 
 export interface MoveUpdate extends VDOMUpdateBase {
@@ -63,7 +71,30 @@ export interface MoveUpdate extends VDOMUpdateBase {
   data: {
     from_index: number;
     to_index: number;
-    key: string;
+  };
+}
+
+export interface UpdateCallbacksUpdate extends VDOMUpdateBase {
+  type: "update_callbacks";
+  data: {
+    add?: string[]; // full callback keys like "0.1.onClick"
+    remove?: string[];
+  };
+}
+
+export interface UpdateRenderPropsUpdate extends VDOMUpdateBase {
+  type: "update_render_props";
+  data: {
+    add?: string[]; // render prop keys like "0.1.leftSection"
+    remove?: string[];
+  };
+}
+
+export interface UpdateCssRefsUpdate extends VDOMUpdateBase {
+  type: "update_css_refs";
+  data: {
+    set?: string[];
+    remove?: string[];
   };
 }
 
@@ -72,7 +103,10 @@ export type VDOMUpdate =
   | RemoveUpdate
   | ReplaceUpdate
   | UpdatePropsUpdate
-  | MoveUpdate;
+  | MoveUpdate
+  | UpdateCallbacksUpdate
+  | UpdateRenderPropsUpdate
+  | UpdateCssRefsUpdate;
 
 // Utility functions for working with the UI tree structure
 export function isElementNode(node: VDOMNode): node is VDOMElement {
@@ -95,11 +129,4 @@ export function isTextNode(node: VDOMNode): node is string {
 
 export function isFragment(node: VDOMNode): boolean {
   return typeof node === "object" && node !== null && node.tag === FRAGMENT_TAG;
-}
-
-export function getMountPointComponentKey(node: VDOMElement): string {
-  if (!isMountPointNode(node)) {
-    throw new Error("Node is not a mount point");
-  }
-  return node.tag.slice(MOUNT_POINT_PREFIX.length);
 }

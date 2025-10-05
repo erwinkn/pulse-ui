@@ -1,8 +1,9 @@
-from typing import Any, TypedDict, Literal
+from typing import Any, Literal, NotRequired, TypedDict
 
 from pulse.reconciler import VDOMOperation
 from pulse.vdom import VDOM
 from pulse.routing import RouteInfo
+
 
 
 # ====================
@@ -12,6 +13,9 @@ class ServerInitMessage(TypedDict):
     type: Literal["vdom_init"]
     path: str
     vdom: VDOM
+    callbacks: list[str]
+    render_props: list[str]
+    css_refs: list[str]
 
 
 class ServerUpdateMessage(TypedDict):
@@ -40,6 +44,7 @@ class ServerErrorMessage(TypedDict):
 class ServerNavigateToMessage(TypedDict):
     type: Literal["navigate_to"]
     path: str
+    replace: bool
 
 
 class ServerApiCallMessage(TypedDict):
@@ -55,13 +60,22 @@ class ServerApiCallMessage(TypedDict):
     credentials: Literal["include", "omit"]
 
 
-ServerMessage = (
-    ServerInitMessage
-    | ServerUpdateMessage
-    | ServerErrorMessage
-    | ServerApiCallMessage
-    | ServerNavigateToMessage
-)
+class ServerChannelRequestMessage(TypedDict):
+    type: Literal["channel_message"]
+    channel: str
+    event: str
+    payload: Any
+    requestId: NotRequired[str]
+    error: NotRequired[Any]
+
+
+class ServerChannelResponseMessage(TypedDict):
+    type: Literal["channel_message"]
+    channel: str
+    event: None
+    responseTo: str
+    payload: Any
+    error: NotRequired[Any]
 
 
 # ====================
@@ -100,10 +114,41 @@ class ClientApiResultMessage(TypedDict):
     body: Any | None
 
 
-ClientMessage = (
+class ClientChannelRequestMessage(TypedDict):
+    type: Literal["channel_message"]
+    channel: str
+    event: str
+    payload: Any
+    requestId: NotRequired[str]
+    error: NotRequired[Any]
+
+
+class ClientChannelResponseMessage(TypedDict):
+    type: Literal["channel_message"]
+    channel: str
+    event: None
+    responseTo: str
+    payload: Any
+    error: NotRequired[Any]
+
+
+ServerMessage = (
+    ServerInitMessage
+    | ServerUpdateMessage
+    | ServerErrorMessage
+    | ServerApiCallMessage
+    | ServerNavigateToMessage
+    | ServerChannelRequestMessage
+    | ServerChannelResponseMessage
+)
+
+
+ClientPulseMessage = (
     ClientCallbackMessage
     | ClientMountMessage
     | ClientNavigateMessage
     | ClientUnmountMessage
     | ClientApiResultMessage
 )
+ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
+ClientMessage = ClientPulseMessage | ClientChannelMessage

@@ -6,14 +6,17 @@ that enables automatic re-rendering when state changes.
 """
 
 from abc import ABC, ABCMeta
+import inspect
 from enum import IntEnum
-from typing import Any, Callable, Generic, Never, TypeVar
+from typing import Any, Callable, Generic, Iterator, Never, Optional, TypeVar
 
 from pulse.query import QueryProperty
 from pulse.reactive import (
     Computed,
-    Effect,
     Scope,
+    Signal,
+    Effect,
+    AsyncEffect,
 )
 from pulse.reactive_extensions import ReactiveProperty
 
@@ -64,18 +67,39 @@ class StateEffect(Generic[T]):
     def __init__(
         self,
         fn: "Callable[[State], T]",
+        name: Optional[str] = None,
+        immediate: bool = False,
+        lazy: bool = False,
         on_error: "Callable[[Exception], None] | None" = None,
+        deps: "list[Signal | Computed] | None" = None,
     ):
         self.fn = fn
+        self.name = name
+        self.immediate = immediate
         self.on_error = on_error
+        self.lazy = lazy
+        self.deps = deps
 
     def initialize(self, state: "State", name: str):
         bound_method = self.fn.__get__(state, state.__class__)
-        effect = Effect(
-            bound_method,
-            name=f"{state.__class__.__name__}.{name}",
-            on_error=self.on_error,
-        )
+        # Select sync/async effect type based on bound method
+        if inspect.iscoroutinefunction(bound_method):
+            effect: Effect = AsyncEffect(
+                bound_method,  # type: ignore[arg-type]
+                name=self.name or f"{state.__class__.__name__}.{name}",
+                lazy=self.lazy,
+                on_error=self.on_error,
+                deps=self.deps,
+            )
+        else:
+            effect = Effect(
+                bound_method,  # type: ignore[arg-type]
+                name=self.name or f"{state.__class__.__name__}.{name}",
+                immediate=self.immediate,
+                lazy=self.lazy,
+                on_error=self.on_error,
+                deps=self.deps,
+            )
         setattr(state, name, effect)
 
 
@@ -214,10 +238,6 @@ class State(ABC, metaclass=StateMeta):
                         continue
                     # Validate query properties have a key defined
                     if isinstance(attr, QueryProperty):
-                        if getattr(attr, "key_fn", None) is None:
-                            raise RuntimeError(
-                                f"State query '{name}' is missing a '@{name}.key' definition"
-                            )
                         # Initialize query now so Effect exists and can be managed by hooks
                         attr.initialize(self)
                     if isinstance(attr, StateEffect):
@@ -225,7 +245,7 @@ class State(ABC, metaclass=StateMeta):
 
         setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 
-    def properties(self):
+    def properties(self) -> Iterator[Signal]:
         """Iterate over the state's `Signal` instances, including base classes."""
         seen: set[str] = set()
         for cls in self.__class__.__mro__:
@@ -238,7 +258,7 @@ class State(ABC, metaclass=StateMeta):
                     seen.add(name)
                     yield prop.get_signal(self)
 
-    def computeds(self):
+    def computeds(self) -> Iterator[Computed]:
         """Iterate over the state's `Computed` instances, including base classes."""
         seen: set[str] = set()
         for cls in self.__class__.__mro__:
@@ -266,7 +286,6 @@ class State(ABC, metaclass=StateMeta):
                 value.dispose()
                 disposed.add(value)
 
-        # TODO: remove this debug check
         if len(set(self._scope.effects) - disposed) > 0:
             raise RuntimeError(
                 f"State.dispose() missed effects defined on its Scope: {[e.name for e in self._scope.effects]}"

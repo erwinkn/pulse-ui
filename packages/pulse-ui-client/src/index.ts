@@ -1,20 +1,17 @@
 // Public API surface for pulse-client
 
 // Core React bindings
-export {
-  PulseProvider,
-  usePulseClient,
-  PulseView,
-  usePulseRenderHelpers,
-} from "./pulse";
-export type { PulseConfig, PulseProviderProps } from "./pulse";
+export { PulseProvider, usePulseClient, PulseView } from "./pulse";
+export type { PulseConfig, PulseProviderProps, PulsePrerender } from "./pulse";
+export { usePulseChannel } from "./usePulseChannel";
+export { PulseChannelResetError } from "./channel";
+export type { ChannelBridge } from "./channel";
 
 // Client implementation
 export { PulseSocketIOClient } from "./client";
 export type {
   PulseClient,
   MountedView,
-  VDOMListener,
   ConnectionStatusListener,
   ServerErrorListener,
 } from "./client";
@@ -31,12 +28,13 @@ export type {
 // Renderer helpers
 export {
   VDOMRenderer,
-  createElementNode,
-  createFragment,
-  createMountPoint,
-  applyVDOMUpdates,
+  applyUpdates as applyReactTreeUpdates,
   RenderLazy,
 } from "./renderer";
+
+// Form helpers
+export { PulseForm, submitForm } from "./form";
+export type { PulseFormProps } from "./form";
 
 // Messages (types only)
 export type {
@@ -47,12 +45,18 @@ export type {
   ServerErrorInfo,
   ServerApiCallMessage,
   ServerNavigateToMessage,
+  ServerChannelRequestMessage,
+  ServerChannelResponseMessage,
+  ServerChannelMessage,
   ClientMessage,
   ClientCallbackMessage,
   ClientMountMessage,
   ClientNavigateMessage,
   ClientUnmountMessage,
   ClientApiResultMessage,
+  ClientChannelRequestMessage,
+  ClientChannelResponseMessage,
+  ClientChannelMessage,
 } from "./messages";
 
 // Transports
@@ -70,4 +74,7 @@ export {
   decodeFromWire,
   cleanForSerialization,
 } from "./serialize/clean";
-export { stringify, parse } from "./serialize/flatted";
+export {
+  serialize as serialize,
+  deserialize as deserialize,
+} from "./serialize/v3";

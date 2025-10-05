@@ -26,11 +26,9 @@ from pulse.html.elements import (
 # Generic TypeVar for the element target
 TElement = TypeVar("TElement", bound=HTMLElement)
 
-
 class DataTransferItem(TypedDict):
     kind: str
     type: str
-
 
 class DataTransfer(TypedDict):
     dropEffect: Literal["none", "copy", "link", "move"]
@@ -49,7 +47,6 @@ class DataTransfer(TypedDict):
     items: list[DataTransferItem]  # DataTransferItemList
     types: list[str]
 
-
 class Touch(TypedDict):
     target: HTMLElement
     identifier: int
@@ -59,7 +56,6 @@ class Touch(TypedDict):
     clientY: float
     pageX: float
     pageY: float
-
 
 # Base SyntheticEvent using TypedDict and Generic
 class SyntheticEvent(TypedDict, Generic[TElement]):
@@ -79,11 +75,9 @@ class SyntheticEvent(TypedDict, Generic[TElement]):
     timestamp: int
     type: str
 
-
 class UIEvent(SyntheticEvent[TElement]):
     detail: int
     # view: Any # AbstractView - Omitted
-
 
 class MouseEvent(UIEvent[TElement]):
     altKey: bool
@@ -103,18 +97,14 @@ class MouseEvent(UIEvent[TElement]):
     screenY: float
     shiftKey: bool
 
-
 class ClipboardEvent(SyntheticEvent[TElement]):
     clipboardData: DataTransfer
-
 
 class CompositionEvent(SyntheticEvent[TElement]):
     data: str
 
-
 class DragEvent(MouseEvent[TElement]):
     dataTransfer: DataTransfer
-
 
 class PointerEvent(MouseEvent[TElement]):
     pointerId: int
@@ -128,24 +118,19 @@ class PointerEvent(MouseEvent[TElement]):
     pointerType: Literal["mouse", "pen", "touch"]
     isPrimary: bool
 
-
 class FocusEvent(SyntheticEvent[TElement]):
     target: TElement
     relatedTarget: Optional[HTMLElement]
-
 
 class FormEvent(SyntheticEvent[TElement]):
     # No specific fields added here
     pass
 
-
 class InvalidEvent(SyntheticEvent[TElement]):
     target: TElement
 
-
 class ChangeEvent(SyntheticEvent[TElement]):
     target: TElement
-
 
 ModifierKey = Literal[
     "Alt",
@@ -164,7 +149,6 @@ ModifierKey = Literal[
     "SymbolLock",
 ]
 
-
 class KeyboardEvent(UIEvent[TElement]):
     altKey: bool
     # char_code: int  # deprecated
@@ -180,7 +164,6 @@ class KeyboardEvent(UIEvent[TElement]):
     shiftKey: bool
     # which: int  # deprecated
 
-
 class TouchEvent(UIEvent[TElement]):
     altKey: bool
     changedTouches: list[Touch]  # TouchList
@@ -191,30 +174,25 @@ class TouchEvent(UIEvent[TElement]):
     targetTouches: list[Touch]  # TouchList
     touches: list[Touch]  # TouchList
 
-
 class WheelEvent(MouseEvent[TElement]):
     deltaMode: int
     deltaX: float
     deltaY: float
     deltaZ: float
 
-
 class AnimationEvent(SyntheticEvent[TElement]):
     animationName: str
     elapsedTime: float
     pseudoElement: str
 
-
 class ToggleEvent(SyntheticEvent[TElement]):
     oldState: Literal["closed", "open"]
     newState: Literal["closed", "open"]
-
 
 class TransitionEvent(SyntheticEvent[TElement]):
     elapsedTime: float
     propertyName: str
     pseudoElement: str
-
 
 class DOMEvents(TypedDict, Generic[TElement], total=False):
     # Clipboard Events
@@ -419,7 +397,6 @@ class DOMEvents(TypedDict, Generic[TElement], total=False):
     onTransitionStart: EventHandler[TransitionEvent[TElement]]
     onTransitionStartCapture: EventHandler[TransitionEvent[TElement]]
 
-
 class FormControlDOMEvents(DOMEvents[TElement], total=False):
     """Specialized DOMEvents where on_change is a ChangeEvent.
 
@@ -428,18 +405,14 @@ class FormControlDOMEvents(DOMEvents[TElement], total=False):
 
     onChange: EventHandler[ChangeEvent[TElement]]
 
-
 class InputDOMEvents(FormControlDOMEvents[HTMLInputElement], total=False):
     pass
-
 
 class TextAreaDOMEvents(FormControlDOMEvents[HTMLTextAreaElement], total=False):
     pass
 
-
 class SelectDOMEvents(FormControlDOMEvents[HTMLSelectElement], total=False):
     pass
-
 
 class DialogDOMEvents(DOMEvents[HTMLDialogElement], total=False):
     onCancel: EventHandler[SyntheticEvent[HTMLDialogElement]]

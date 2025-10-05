@@ -1,4 +1,5 @@
 import React, { type ReactNode, useState } from "react";
+import { ResponsiveContainer } from "recharts";
 
 export interface CounterProps {
   count?: number;
@@ -383,29 +384,4 @@ export function ColorBox({
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// FormatterPreview: demonstrates synchronous formatter callback prop
-// ---------------------------------------------------------------------------
-
-export interface FormatterPreviewProps {
-  value?: number;
-  label?: string;
-  formatter?: (n: number) => string;
-}
-
-export function FormatterPreview({
-  value = 0,
-  label = "Formatted",
-  formatter = (n: number) => String(n),
-}: FormatterPreviewProps) {
-  console.log("Received formatter", formatter)
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4">
-      <div className="text-sm text-gray-600 mb-1">Value</div>
-      <div className="font-mono text-lg mb-3">{value}</div>
-      <div className="text-sm text-gray-600 mb-1">{label}</div>
-      <div className="font-mono text-lg">{formatter(value)}</div>
-    </div>
-  );
-}
+import { BarChart, ScatterChart, FunnelChart, AreaChart, ComposedChart, RadialBarChart, Treemap, Sankey, Bar } from "recharts";

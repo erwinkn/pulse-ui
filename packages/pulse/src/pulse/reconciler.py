@@ -1,16 +1,7 @@
 from dataclasses import dataclass
 import warnings
 import inspect
-from typing import (
-    Callable,
-    Iterable,
-    Literal,
-    Optional,
-    Sequence,
-    TypedDict,
-    Union,
-    cast,
-)
+from typing import Callable, Iterable, Literal, Optional, Sequence, TypedDict, Union, cast
 from pulse.flags import IS_PRERENDERING
 from pulse.hooks import HookState
 from pulse.vdom import (
@@ -25,8 +16,6 @@ from pulse.vdom import (
     Props,
     VDOMNode,
 )
-
-
 class InsertOperation(TypedDict):
     type: Literal["insert"]
     path: str
@@ -503,22 +492,6 @@ class Resolver:
         updated_props = props.copy()
         for k, v in props.items():
             if callable(v):
-                # If function was decorated with @javascript, emit compiled JS inline (base64)
-                js_code = getattr(v, "__pulse_js__", None)
-                if isinstance(js_code, str):
-                    try:
-                        import base64
-
-                        js_hash = getattr(v, "__pulse_js_hash__", "")
-                        js_b64 = base64.b64encode(js_code.encode("utf-8")).decode(
-                            "ascii"
-                        )
-                        updated_props[k] = f"$$jsb64:{js_hash}:{js_b64}"
-                        continue
-                    except Exception:
-                        # Fallback to server-callback path if encoding fails
-                        pass
-
                 callback_key = f"{path_prefix}{k}"
                 updated_props[k] = f"$$fn:{callback_key}"
                 self.callbacks[callback_key] = Callback(

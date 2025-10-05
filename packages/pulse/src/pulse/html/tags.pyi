@@ -243,7 +243,7 @@ def li(
 def main(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
-def map(
+def map_(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLMapProps]
 ) -> Node: ...
 def mark(
@@ -261,7 +261,7 @@ def nav(
 def noscript(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLProps]
 ) -> Node: ...
-def object(
+def object_(
     *children: Child, key: Optional[str] = None, **props: Unpack[HTMLObjectProps]
 ) -> Node: ...
 def ol(

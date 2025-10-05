@@ -4,7 +4,6 @@ import React, {
   useEffect,
   useMemo,
   useState,
-  useRef,
   type ComponentType,
 } from "react";
 import type {
@@ -39,9 +38,6 @@ function getNodeKey(node: VDOMNode, index: number): string | number {
 
 export const VDOMRenderer = ({ node }: VDOMRendererProps) => {
   const { getCallback, getComponent } = usePulseRenderHelpers();
-  // Cache compiled JS functions by hash
-  const jsFuncCache = useRef<Map<string, Function> | null>(null);
-  if (jsFuncCache.current == null) jsFuncCache.current = new Map();
 
   // 1. Handle non-renderable cases first
   if (node === null || typeof node === "boolean" || node === undefined) {
@@ -65,39 +61,15 @@ export const VDOMRenderer = ({ node }: VDOMRendererProps) => {
 
     const { tag, props = {}, children = [] } = node;
 
-    // Process props for callbacks and inline JS
+    // Process props for callbacks
     const processedProps: Record<string, any> = {};
     for (const [key, value] of Object.entries(props)) {
-      if (typeof value === "string") {
-        if (value.startsWith("$$fn:")) {
-          const callbackKey = value.substring("$$fn:".length);
-          processedProps[key] = getCallback(callbackKey);
-          continue;
-        }
-        if (value.startsWith("$$jsb64:")) {
-          try {
-            const rest = value.substring("$$jsb64:".length);
-            const colon = rest.indexOf(":");
-            if (colon > 0) {
-              const hash = rest.substring(0, colon);
-              const b64 = rest.substring(colon + 1);
-              let fn = jsFuncCache.current!.get(hash);
-              if (!fn) {
-                const code = atob(b64);
-                // Construct function; it should be a function expression
-                // eslint-disable-next-line no-new-func
-                fn = new Function(`return (${code});`)();
-                jsFuncCache.current!.set(hash, fn as Function);
-              }
-              processedProps[key] = fn;
-              continue;
-            }
-          } catch (e) {
-            console.error("Error decoding $$jsb64 function:", e);
-          }
-        }
+      if (typeof value === "string" && value.startsWith("$$fn:")) {
+        const callbackKey = value.substring("$$fn:".length);
+        processedProps[key] = getCallback(callbackKey);
+      } else {
+        processedProps[key] = value;
       }
-      processedProps[key] = value;
     }
 
     if (isMountPointNode(node)) {
@@ -107,6 +79,10 @@ export const VDOMRenderer = ({ node }: VDOMRendererProps) => {
         <VDOMRenderer key={getNodeKey(child, index)} node={child} />
       ));
       return <Component {...processedProps}>{renderedChildren}</Component>;
+      // if (node.lazy) {
+      //   return <Component {...processedProps}>{renderedChildren}</Component>;
+      // } else {
+      // }
     }
 
     if (tag === FRAGMENT_TAG) {

@@ -1640,14 +1640,12 @@ __all__ = [
 
 _AVAILABLE_ICONS = set(__all__)
 
-
 def __getattr__(name: str):
     if name in _AVAILABLE_ICONS:
         comp = ps.ReactComponent(name, "lucide-react", props=LUCIDE_PROPS_SPEC)
         globals()[name] = comp
         return comp
     raise AttributeError(f"module 'pulse_lucide' has no icon named {name!r}")
-
 
 def __dir__():
     return sorted(list(globals().keys()) + list(__all__))

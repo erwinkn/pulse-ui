@@ -29,7 +29,6 @@ from .middleware import (
     stack,
 )
 from .decorators import computed, effect, query
-from .javascript.function import javascript
 
 # Import HTML tags and other UI components
 from .vdom import (
@@ -95,13 +94,13 @@ from .html.tags import (
     legend,
     li,
     main,
-    map,
+    map_,
     mark,
     menu,
     meter,
     nav,
     noscript,
-    object,
+    object_,
     ol,
     optgroup,
     option,

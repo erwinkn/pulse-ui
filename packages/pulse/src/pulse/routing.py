@@ -89,6 +89,44 @@ def segments_are_dynamic(segments: list[PathSegment]) -> bool:
     return any(s.is_dynamic or s.is_optional or s.is_splat for s in segments)
 
 
+def _sanitize_filename(path: str) -> str:
+    """Replace Windows-invalid characters in filenames with safe alternatives."""
+    import hashlib
+
+    # Split path into segments to handle each part individually
+    segments = path.split("/")
+    sanitized_segments = []
+
+    for segment in segments:
+        if not segment:
+            continue
+
+        # Check if segment contains Windows-invalid characters
+        invalid_chars = '<>:"|?*'
+        has_invalid = any(char in segment for char in invalid_chars)
+
+        if has_invalid:
+            # Create a collision-safe filename by replacing invalid chars and adding hash
+            # Remove extension temporarily for hashing
+            name, ext = segment.rsplit(".", 1) if "." in segment else (segment, "")
+
+            # Replace invalid characters with underscores
+            sanitized_name = name
+            for char in invalid_chars:
+                sanitized_name = sanitized_name.replace(char, "_")
+
+            # Add hash of original segment to prevent collisions
+            original_hash = hashlib.md5(segment.encode()).hexdigest()[:8]
+            sanitized_name = f"{sanitized_name}_{original_hash}"
+
+            # Reattach extension
+            segment = f"{sanitized_name}.{ext}" if ext else sanitized_name
+
+        sanitized_segments.append(segment)
+
+    return "/".join(sanitized_segments)
+
+
 def route_or_ancestors_have_dynamic(node: "Route | Layout") -> bool:
     """Check whether this node or any ancestor Route contains dynamic segments."""
     current = node
@@ -145,7 +183,8 @@ class Route:
         if self.is_index:
             path += "index"
         path += ".tsx"
-        return path
+        # Replace Windows-invalid characters in filenames
+        return _sanitize_filename(path)
 
     def __repr__(self) -> str:
         return (
@@ -232,7 +271,9 @@ class Layout:
             else:
                 converted.append(seg)
         # Place file within the current layout's directory
-        return "/".join([*converted, "_layout.tsx"])
+        path = "/".join([*converted, "_layout.tsx"])
+        # Replace Windows-invalid characters in filenames
+        return _sanitize_filename(path)
 
     def __repr__(self) -> str:
         return f"Layout(children={len(self.children)})"

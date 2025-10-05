@@ -273,7 +273,7 @@ class TestCodegen:
         assert (routes_dir / "index.tsx").exists()
         assert (routes_dir / "interactive.tsx").exists()
         assert (routes_dir / "users.tsx").exists()
-        assert (routes_dir / "users" / ":id.tsx").exists()
+        assert (routes_dir / "users" / "_id_4742d9b5.tsx").exists()
 
         layout_content = (pulse_app_dir / "_layout.tsx").read_text()
         assert (
@@ -295,7 +295,7 @@ class TestCodegen:
         assert 'path: "users"' in runtime_content
         assert 'file: "test_pulse_app/routes/users.tsx"' in runtime_content
         assert 'path: ":id"' in runtime_content
-        assert 'file: "test_pulse_app/routes/users/:id.tsx"' in runtime_content
+        assert 'file: "test_pulse_app/routes/users/_id_4742d9b5.tsx"' in runtime_content
 
         home_content = (routes_dir / "index.tsx").read_text()
         assert (

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from io import BytesIO
 from datetime import datetime, timezone
 from typing import cast
@@ -35,6 +33,7 @@ from pulse_mantine.form.validators import (
     StartsWith,
     serialize_validation,
 )
+import pytest
 from starlette.datastructures import Headers, UploadFile
 
 
@@ -48,6 +47,11 @@ class DummyUpload:
 def run(spec, value, values=None, path="field"):
     values = values or {"field": value}
     return spec.check(value, values, path)
+
+
+async def arun(spec, value, values=None, path="field"):
+    values = values or {"field": value}
+    return await spec.acheck(value, values, path)
 
 
 def test_is_not_empty():
@@ -203,10 +207,11 @@ def test_starts_ends_with():
     assert run(EndsWith("BB", error="e"), "AAXX") == "e"
 
 
-def test_server_validation():
+@pytest.mark.asyncio
+async def test_server_validation():
     spec = ServerValidation(lambda v, vs, p: "err" if str(v) == "bad" else None)
-    assert run(spec, "bad") == "err"
-    assert run(spec, "ok") is None
+    assert await arun(spec, "bad") == "err"
+    assert await arun(spec, "ok") is None
 
 
 def test_matches_client_overrides_serialization_and_server_behavior():

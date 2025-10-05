@@ -72,9 +72,23 @@ def parse_app_target(target: str) -> ParsedAppTarget:
     Returns a dict describing how to import/run it.
     """
     # Split optional ":var" specifier once from the right
+    # Handle Windows drive letters by checking if the colon is followed by a path separator
     if ":" in target:
-        path_or_module, app_var = target.rsplit(":", 1)
-        app_var = app_var or "app"
+        # Check if this looks like a Windows drive letter (e.g., "C:\path" or "C:/path")
+        colon_pos = target.rfind(":")
+        if colon_pos > 0 and colon_pos < len(target) - 1:
+            char_after_colon = target[colon_pos + 1]
+            if char_after_colon in ["\\", "/"]:
+                # This is a Windows drive letter, not a variable specifier
+                path_or_module, app_var = target, "app"
+            else:
+                # This is a variable specifier
+                path_or_module, app_var = target.rsplit(":", 1)
+                app_var = app_var or "app"
+        else:
+            # Single colon at end, treat as variable specifier
+            path_or_module, app_var = target.rsplit(":", 1)
+            app_var = app_var or "app"
     else:
         path_or_module, app_var = target, "app"
 

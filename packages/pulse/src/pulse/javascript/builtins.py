@@ -826,9 +826,8 @@ def _make_fragment_fn() -> Callable[..., JSXFragment]:
 # Names exported by pulse.html.tags with suffixes for conflicts
 _tags_mod = _html_tags  # keep symbol for runtime; typing may not know attributes
 _all_tag_entries = set(name for name, _ in (_tags_mod.TAGS)) | set(  # type: ignore[attr-defined]
-    (
-        _tags_mod.SELF_CLOSING_TAGS  # type: ignore[attr-defined]
-    )
+    name
+    for name, _ in (_tags_mod.SELF_CLOSING_TAGS)  # type: ignore[attr-defined]
 )
 
 TAG_BUILTINS: dict[str, Builtin] = {}

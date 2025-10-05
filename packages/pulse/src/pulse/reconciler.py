@@ -230,7 +230,7 @@ class RenderRoot:
             ops=ops,
         )
 
-    def render_vdom(self) -> tuple[VDOM, Callbacks, set[str], set[str]]:
+    def render_vdom(self) -> tuple[VDOM, Callbacks, set[str], set[str], set[str]]:
         """One-shot render to VDOM + callbacks + render_props, without mounting an Effect."""
         self.render_count += 1
         resolver = Resolver()

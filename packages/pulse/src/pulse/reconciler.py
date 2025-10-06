@@ -647,10 +647,17 @@ class Resolver:
             if callable(value):
                 if normalized is None:
                     normalized = new_props.copy()
-                normalized.pop(key)
+                # Keep a stable placeholder in normalized props so that
+                # add/remove generate update_props deltas and the client can
+                # transform it into a real function without walking the tree.
+                normalized[key] = "$cb"
                 self.callbacks[prop_path] = Callback(
                     fn=value, n_args=len(inspect.signature(value).parameters)
                 )
+                # Emit a set delta when transitioning from non-callback (or
+                # unset) to callback so clients receive the prop update.
+                if old_value != "$cb":
+                    updated[key] = "$cb"
                 continue
 
             if isinstance(value, CssReference):

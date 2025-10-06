@@ -16,8 +16,8 @@ import {
 import type { PulseSocketIOClient } from "./client";
 
 export class VDOMRenderer {
-  private callbackCache: Map<string, (...args: any[]) => void>;
-  private callbackProps: Map<string, Set<string>>;
+  private callbacks: Set<string>;
+  private callbackCache: Map<string, Function>;
   private renderPropKeys: Set<string>;
   private cssProps: Set<string>;
   constructor(
@@ -29,84 +29,15 @@ export class VDOMRenderer {
     initialRenderProps: string[] = [],
     initialCssRefs: string[] = []
   ) {
+    this.callbacks = new Set(initialCallbacks);
     this.callbackCache = new Map();
-    this.callbackProps = new Map();
     this.renderPropKeys = new Set(initialRenderProps);
     this.cssProps = new Set(initialCssRefs);
     this.setCallbacks(initialCallbacks);
   }
 
   setCallbacks(keys: string[]) {
-    this.callbackProps.clear();
-    this.callbackCache.clear();
-    for (const key of keys) {
-      const [path, prop] = this.splitPropPath(key);
-      if (!this.callbackProps.has(path)) {
-        this.callbackProps.set(path, new Set());
-      }
-      this.callbackProps.get(path)!.add(prop);
-    }
-  }
-
-  applyCallbackDelta(
-    delta: { add?: string[]; remove?: string[] },
-    tree: React.ReactNode
-  ): React.ReactNode {
-    const beforeMap = new Map<string, Set<string>>();
-    const recordBefore = (path: string) => {
-      if (!beforeMap.has(path)) {
-        beforeMap.set(path, new Set(this.callbackProps.get(path) ?? []));
-      }
-    };
-
-    if (delta.remove) {
-      for (const key of delta.remove) {
-        const [path, prop] = this.splitPropPath(key);
-        recordBefore(path);
-        const current = this.callbackProps.get(path);
-        if (!current) {
-          this.callbackCache.delete(key);
-          continue;
-        }
-        this.callbackCache.delete(key);
-        current.delete(prop);
-        if (current.size === 0) {
-          this.callbackProps.delete(path);
-        }
-      }
-    }
-
-    if (delta.add) {
-      for (const key of delta.add) {
-        const [path, prop] = this.splitPropPath(key);
-        recordBefore(path);
-        if (!this.callbackProps.has(path)) {
-          this.callbackProps.set(path, new Set());
-        }
-        this.callbackProps.get(path)!.add(prop);
-      }
-    }
-
-    let nextTree = tree;
-    for (const [path, before] of beforeMap.entries()) {
-      const after = new Set(this.callbackProps.get(path) ?? []);
-      if (this.setsEqual(before, after)) {
-        continue;
-      }
-      const parts = path
-        ? path.split(".").filter((segment) => segment.length > 0)
-        : [];
-      nextTree = this.updateCallbacksOnTree(
-        nextTree,
-        parts,
-        0,
-        "",
-        before,
-        after
-      );
-    }
-
-    return nextTree;
+    this.callbacks = new Set(keys);
   }
 
   setRenderProps(keys: string[]) {
@@ -115,6 +46,22 @@ export class VDOMRenderer {
 
   setCssRefs(entries: string[]) {
     this.cssProps = new Set(entries);
+  }
+
+  applyCallbackDelta(delta: { add?: string[]; remove?: string[] }) {
+    // Only update the internal callback path registry and cache. We rely on
+    // accompanying update_props operations that contain the "$cb" placeholder
+    // to trigger prop updates; transformValue will resolve to functions.
+    if (delta.remove) {
+      for (const key of delta.remove) {
+        this.callbacks.delete(key);
+      }
+    }
+    if (delta.add) {
+      for (const key of delta.add) {
+        this.callbacks.add(key);
+      }
+    }
   }
 
   applyRenderPropsDelta(delta: { add?: string[]; remove?: string[] }) {
@@ -168,22 +115,13 @@ export class VDOMRenderer {
     if (isElementNode(node)) {
       const { tag, props = {}, children = [] } = node;
 
-      const newProps = { ...props };
-
-      // Apply callbacks
-      for (const propName of this.getCallbackNames(currentPath)) {
-        newProps[propName] = this.getCallback(currentPath, propName);
-      }
-
-      for (const [propName, propValue] of Object.entries(newProps)) {
-        const propPath = this.propPath(currentPath, propName);
-        if (this.cssProps.has(propPath)) {
-          newProps[propName] = this.resolveCssToken(propValue);
-        }
-        if (this.renderPropKeys.has(propPath)) {
-          // This prop is a render prop - render the VDOM to React
-          newProps[propName] = this.renderNode(propValue, propPath);
-        }
+      const newProps: Record<string, any> = {};
+      for (const [propName, propValue] of Object.entries(props)) {
+        newProps[propName] = this.transformValue(
+          currentPath,
+          propName,
+          propValue
+        );
       }
 
       if (node.key) {
@@ -224,27 +162,13 @@ export class VDOMRenderer {
     return null;
   }
 
-  private splitPropPath(key: string): [path: string, prop: string] {
-    const lastDot = key.lastIndexOf(".");
-    if (lastDot === -1) {
-      return ["", key];
-    }
-    return [key.slice(0, lastDot), key.slice(lastDot + 1)];
-  }
-
   private propPath(path: string, prop: string) {
     return path ? `${path}.${prop}` : prop;
   }
 
-  private getCallbackNames(path: string): string[] {
-    const props = this.callbackProps.get(path);
-    return props ? Array.from(props) : [];
-  }
-
   transformValue(path: string, key: string, value: any) {
-    const callbacks = this.callbackProps.get(path);
     const propPath = this.propPath(path, key);
-    if (callbacks && callbacks.size > 0 && callbacks.has(key)) {
+    if (this.callbacks.has(propPath)) {
       return this.getCallback(path, key);
     }
     if (this.renderPropKeys.has(propPath)) {
@@ -393,7 +317,7 @@ export function applyUpdates(
   let newTree: React.ReactNode = initialTree;
   for (const update of updates) {
     if (update.type === "update_callbacks") {
-      newTree = renderer.applyCallbackDelta(update.data, newTree);
+      renderer.applyCallbackDelta(update.data);
       continue;
     }
     if (update.type === "update_css_refs") {

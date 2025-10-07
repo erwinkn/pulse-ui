@@ -20,6 +20,7 @@ export class VDOMRenderer {
   private callbackCache: Map<string, Function>;
   private renderPropKeys: Set<string>;
   private cssProps: Set<string>;
+  private callbackList: string[];
   constructor(
     private client: PulseSocketIOClient,
     private path: string,
@@ -29,15 +30,38 @@ export class VDOMRenderer {
     initialRenderProps: string[] = [],
     initialCssRefs: string[] = []
   ) {
+    console.log("Creating renderer");
     this.callbacks = new Set(initialCallbacks);
     this.callbackCache = new Map();
     this.renderPropKeys = new Set(initialRenderProps);
     this.cssProps = new Set(initialCssRefs);
-    this.setCallbacks(initialCallbacks);
+    this.callbackList = [...this.callbacks].sort();
+  }
+
+  // Accessors used by update logic to determine which props need rebinding
+  hasCallbackPath(path: string) {
+    return this.callbacks.has(path);
+  }
+
+  hasRenderPropPath(path: string) {
+    return this.renderPropKeys.has(path);
+  }
+
+  hasAnyCallbackUnder(prefix: string): boolean {
+    if (prefix === "") return this.callbackList.length > 0;
+    const i = lowerBound(this.callbackList, prefix);
+    return (
+      i < this.callbackList.length && this.callbackList[i]!.startsWith(prefix)
+    );
   }
 
   setCallbacks(keys: string[]) {
     this.callbacks = new Set(keys);
+    // prune stale cached callbacks
+    for (const k of Array.from(this.callbackCache.keys())) {
+      if (!this.callbacks.has(k)) this.callbackCache.delete(k);
+    }
+    this.callbackList = [...this.callbacks].sort();
   }
 
   setRenderProps(keys: string[]) {
@@ -55,6 +79,7 @@ export class VDOMRenderer {
     if (delta.remove) {
       for (const key of delta.remove) {
         this.callbacks.delete(key);
+        this.callbackCache.delete(key);
       }
     }
     if (delta.add) {
@@ -62,6 +87,7 @@ export class VDOMRenderer {
         this.callbacks.add(key);
       }
     }
+    this.callbackList = [...this.callbacks].sort();
   }
 
   applyRenderPropsDelta(delta: { add?: string[]; remove?: string[] }) {
@@ -204,99 +230,6 @@ export class VDOMRenderer {
     }
     return resolved;
   }
-
-  private updateCallbacksOnTree(
-    node: React.ReactNode,
-    parts: string[],
-    depth: number,
-    currentPath: string,
-    before: Set<string>,
-    after: Set<string>
-  ): React.ReactNode {
-    if (depth < parts.length) {
-      assertIsElement(node, parts, depth);
-      const element = node as React.ReactElement<Record<string, any> | null>;
-      const segment = parts[depth]!;
-      const childIdx = Number(segment);
-      const nextPath = currentPath ? `${currentPath}.${segment}` : segment;
-      if (!Number.isNaN(childIdx)) {
-        const childrenArr = ensureChildrenArray(element);
-        const child = childrenArr[childIdx];
-        const updatedChild = this.updateCallbacksOnTree(
-          child,
-          parts,
-          depth + 1,
-          nextPath,
-          before,
-          after
-        );
-        if (updatedChild === child) {
-          return node;
-        }
-        childrenArr[childIdx] = updatedChild as any;
-        return cloneElement(element, undefined, ...childrenArr);
-      } else {
-        const baseProps = (element.props ?? {}) as Record<string, any>;
-        const child = baseProps[segment];
-        const updatedChild = this.updateCallbacksOnTree(
-          child,
-          parts,
-          depth + 1,
-          nextPath,
-          before,
-          after
-        );
-        if (updatedChild === child) {
-          return node;
-        }
-        return cloneElement(element, {
-          ...baseProps,
-          [segment]: updatedChild,
-        });
-      }
-    }
-
-    if (!isValidElement(node)) {
-      return node;
-    }
-
-    const element = node as React.ReactElement<Record<string, any> | null>;
-    const currentProps = (element.props ?? {}) as Record<string, any>;
-    let changed = false;
-    const nextProps: Record<string, any> = { ...currentProps };
-
-    for (const prop of before) {
-      if (!after.has(prop) && prop in nextProps) {
-        delete nextProps[prop];
-        changed = true;
-      }
-    }
-
-    for (const prop of after) {
-      const fn = this.getCallback(currentPath, prop);
-      if (nextProps[prop] !== fn) {
-        nextProps[prop] = fn;
-        changed = true;
-      }
-    }
-
-    if (!changed) {
-      return node;
-    }
-    return cloneElement(element, nextProps);
-  }
-
-  private setsEqual(left: Set<string>, right: Set<string>): boolean {
-    if (left.size !== right.size) {
-      return false;
-    }
-    for (const value of left) {
-      if (!right.has(value)) {
-        return false;
-      }
-    }
-    return true;
-  }
 }
 
 // =================================================================
@@ -413,6 +346,21 @@ export function applyUpdates(
           const children = ensureChildrenArray(element);
           const item = children.splice(update.data.from_index, 1)[0];
           children.splice(update.data.to_index, 0, item);
+
+          // Rebind callbacks for affected index range (indices whose path changed)
+          const start = Math.min(update.data.from_index, update.data.to_index);
+          const end = Math.max(update.data.from_index, update.data.to_index);
+          for (let i = start; i <= end; i++) {
+            const childPath = currentPath ? `${currentPath}.${i}` : String(i);
+            if (renderer.hasAnyCallbackUnder(childPath)) {
+              children[i] = rebindCallbacksInSubtree(
+                children[i],
+                childPath,
+                renderer
+              ) as any;
+            }
+          }
+
           // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
           return cloneElement(element, null!, ...children);
         }
@@ -454,4 +402,51 @@ function assertIsElement(
     throw new Error("Invalid node at path " + parts.slice(0, depth).join("."));
   }
   return true;
+}
+
+// Rebind callback function props within a subtree after a path-changing move
+function rebindCallbacksInSubtree(
+  node: React.ReactNode,
+  path: string,
+  renderer: VDOMRenderer
+): React.ReactNode {
+  if (!isValidElement(node)) return node;
+  const element = node as React.ReactElement<Record<string, any> | null>;
+  const baseProps = (element.props ?? {}) as Record<string, any>;
+  const nextProps: Record<string, any> = { ...baseProps };
+
+  // Rebind only callback props; CSS refs are path-agnostic and render-props
+  // are handled by the server-side renderer via explicit updates
+  for (const key of Object.keys(baseProps)) {
+    const propPath = path ? `${path}.${key}` : key;
+    if (renderer.hasCallbackPath(propPath)) {
+      nextProps[key] = renderer.getCallback(path, key);
+    }
+  }
+
+  const children = ensureChildrenArray(element).map((child, idx) => {
+    const childPath = path ? `${path}.${idx}` : String(idx);
+    if (renderer.hasAnyCallbackUnder(childPath)) {
+      return rebindCallbacksInSubtree(child, childPath, renderer);
+    } else {
+      return child;
+    }
+  });
+
+  return cloneElement(element, nextProps, ...children);
+}
+
+// Binary-search lower bound for prefix matching on sorted callback paths
+function lowerBound(arr: string[], target: string): number {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (arr[mid]! < target) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
 }

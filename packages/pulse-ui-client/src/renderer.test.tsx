@@ -55,7 +55,10 @@ describe("applyReactTreeUpdates", () => {
 
   it("hydrates callbacks from initial map", () => {
     const { renderer, invokeCallback } = makeRenderer(["onClick"]);
-    const tree = renderer.renderNode({ tag: "button" });
+    const tree = renderer.renderNode({
+      tag: "button",
+      props: { onClick: "$cb" },
+    });
     const button = tree as React.ReactElement;
     expect(typeof (button.props as any).onClick).toBe("function");
     (button.props as any).onClick("value");
@@ -76,6 +79,11 @@ describe("applyReactTreeUpdates", () => {
         type: "update_callbacks",
         path: "",
         data: { add: ["onClick"] },
+      },
+      {
+        type: "update_props",
+        path: "",
+        data: { set: { onClick: "$cb" } },
       },
     ];
     tree = applyUpdates(tree, ops, renderer);
@@ -271,16 +279,127 @@ describe("applyReactTreeUpdates", () => {
         path: "",
         data: { add: ["0.0.onClick"] },
       },
+      {
+        type: "update_props",
+        path: "0.0",
+        data: { set: { onClick: "$cb" } },
+      },
     ];
     tree = applyUpdates(tree, ops, renderer);
     const root = tree as React.ReactElement;
     const innerDiv = childrenArray(root)[0] as React.ReactElement;
     const button = childrenArray(innerDiv)[0] as React.ReactElement;
     expect(typeof (button.props as any).onClick).toBe("function");
-    expect(
-      Array.from(((renderer as any).callbackProps as Map<string, any>).keys())
-    ).toEqual(["0.0"]);
     (button.props as any).onClick();
     expect(invokeCallback).toHaveBeenCalledWith("/test", "0.0.onClick", []);
+  });
+
+  it("rebinds callbacks when moving siblings at root and updates keys", () => {
+    const { renderer, invokeCallback } = makeRenderer([
+      "0.onClick",
+      "1.onClick",
+    ]);
+    const initialVDOM: VDOMNode = {
+      tag: "div",
+      children: [
+        { tag: "button", props: { onClick: "$cb", id: "A" }, children: ["A"] },
+        { tag: "button", props: { onClick: "$cb", id: "B" }, children: ["B"] },
+      ],
+    };
+    let tree = renderer.renderNode(initialVDOM);
+    let root = tree as React.ReactElement;
+    let kids = childrenArray(root) as React.ReactElement[];
+    const beforeA = (kids[0].props as any).onClick;
+    const beforeB = (kids[1].props as any).onClick;
+
+    tree = applyUpdates(
+      tree,
+      [{ type: "move", path: "", data: { from_index: 0, to_index: 1 } }],
+      renderer
+    );
+
+    root = tree as React.ReactElement;
+    kids = childrenArray(root) as React.ReactElement[];
+
+    const afterB = (kids[0].props as any).onClick; // B moved to index 0
+    const afterA = (kids[1].props as any).onClick; // A moved to index 1
+
+    expect(afterB).not.toBe(beforeB);
+    expect(afterA).not.toBe(beforeA);
+
+    (invokeCallback as any).mockClear?.();
+    afterB("x");
+    afterA("y");
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "0.onClick", ["x"]);
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["y"]);
+  });
+
+  it("rebinds callbacks for nested move; unaffected siblings keep identity", () => {
+    const { renderer, invokeCallback } = makeRenderer([
+      "0.0.onClick",
+      "0.1.onClick",
+      "0.2.onClick",
+    ]);
+    const initialVDOM: VDOMNode = {
+      tag: "div",
+      children: [
+        {
+          tag: "div",
+          children: [
+            {
+              tag: "button",
+              props: { onClick: "$cb", id: "A" },
+              children: ["A"],
+            },
+            {
+              tag: "button",
+              props: { onClick: "$cb", id: "B" },
+              children: ["B"],
+            },
+            {
+              tag: "button",
+              props: { onClick: "$cb", id: "C" },
+              children: ["C"],
+            },
+          ],
+        },
+      ],
+    };
+    let tree = renderer.renderNode(initialVDOM);
+    let root = tree as React.ReactElement;
+    let p0 = childrenArray(root)[0] as React.ReactElement;
+    let kids = childrenArray(p0) as React.ReactElement[];
+
+    const beforeA = (kids[0].props as any).onClick;
+    const beforeB = (kids[1].props as any).onClick;
+    const beforeC = (kids[2].props as any).onClick;
+
+    tree = applyUpdates(
+      tree,
+      [{ type: "move", path: "0", data: { from_index: 0, to_index: 1 } }],
+      renderer
+    );
+
+    root = tree as React.ReactElement;
+    p0 = childrenArray(root)[0] as React.ReactElement;
+    kids = childrenArray(p0) as React.ReactElement[];
+
+    const afterB = (kids[0].props as any).onClick; // B at index 0
+    const afterA = (kids[1].props as any).onClick; // A at index 1
+    const afterC = (kids[2].props as any).onClick; // C unaffected at index 2
+
+    // moved items rebind
+    expect(afterB).not.toBe(beforeB);
+    expect(afterA).not.toBe(beforeA);
+    // unaffected item keeps identity
+    expect(afterC).toBe(beforeC);
+
+    (invokeCallback as any).mockClear?.();
+    afterB();
+    afterA();
+    afterC();
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "0.0.onClick", []);
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "0.1.onClick", []);
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "0.2.onClick", []);
   });
 });

@@ -5,7 +5,6 @@ from pulse.vdom import VDOM
 from pulse.routing import RouteInfo
 
 
-
 # ====================
 # Server messages
 # ====================

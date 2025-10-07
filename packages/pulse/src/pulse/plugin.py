@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .middleware import PulseMiddleware
-from .routing import Layout, Route
+from pulse.middleware import PulseMiddleware
+from pulse.routing import Layout, Route
 
 if TYPE_CHECKING:
-    from .app import App
+    from pulse.app import App
 
 
 class Plugin:

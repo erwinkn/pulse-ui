@@ -81,6 +81,7 @@ Booleanish = Literal[True, False, "true", "false"]
 CrossOrigin = Literal["anonymous", "use-credentials", ""] | None
 ClassName = str | CssReference
 
+
 class BaseHTMLProps(TypedDict, total=False):
     # React-specific Attributes
     defaultChecked: bool

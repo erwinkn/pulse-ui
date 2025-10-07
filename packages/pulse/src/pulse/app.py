@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from pulse.serializer_v3 import Serialized, serialize, deserialize
-from pulse.codegen import Codegen, CodegenConfig
+from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.env import PulseMode, env
 from pulse.cookies import (
@@ -65,7 +65,8 @@ from pulse.css import (
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
-from pulse.hooks import RedirectInterrupt, NotFoundInterrupt, hooks
+from pulse.hooks.runtime import RedirectInterrupt, NotFoundInterrupt
+from pulse.hooks.core import hooks
 from pulse.user_session import (
     CookieSessionStore,
     SessionStore,

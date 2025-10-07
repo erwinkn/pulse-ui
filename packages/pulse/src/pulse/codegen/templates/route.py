@@ -2,7 +2,7 @@ from typing import Iterable, Sequence, TypedDict
 from mako.template import Template
 from pulse.codegen.js import ExternalJsFunction, JsFunction
 from pulse.codegen.utils import NameRegistry
-from ..imports import ImportStatement, Imports
+from pulse.codegen.imports import ImportStatement, Imports
 from pulse.react_component import ReactComponent
 
 
@@ -36,9 +36,7 @@ class RouteTemplate:
     - Reserves identifiers for local JS functions
     """
 
-    def __init__(
-        self, reserved_names: Iterable[str] | None = None
-    ) -> None:
+    def __init__(self, reserved_names: Iterable[str] | None = None) -> None:
         initial = set(reserved_names or []).union(RESERVED_NAMES)
         self.names = NameRegistry(initial)
         self._imports = Imports([], names=self.names)

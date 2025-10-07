@@ -8,11 +8,9 @@
 #   style longest increasing subsequence (LIS) algorithm.
 # IMO I should probably read morphdom's source code.
 import inspect
-import warnings
 from dataclasses import dataclass
 from typing import (
     Callable,
-    Iterable,
     Literal,
     NamedTuple,
     Optional,
@@ -24,14 +22,12 @@ from typing import (
 
 from pulse.css import CssReference
 from pulse.helpers import values_equal
-from pulse.hooks import HookContext
+from pulse.hooks.core import HookContext
 from pulse.reactive import Effect
 from pulse.vdom import (
     VDOM,
     Callback,
     Callbacks,
-    Child,
-    Children,
     ComponentNode,
     Element,
     Node,
@@ -230,7 +226,7 @@ class RenderRoot:
             ops=ops,
         )
 
-    def render_vdom(self) -> tuple[VDOM, Callbacks, set[str], set[str], set[str]]:
+    def render_vdom(self) -> tuple[VDOM, Callbacks, set[str], set[str]]:
         """One-shot render to VDOM + callbacks + render_props, without mounting an Effect."""
         self.render_count += 1
         resolver = Resolver()
@@ -330,12 +326,16 @@ class Resolver:
         if isinstance(old_tree, Node):
             assert isinstance(new_tree, Node)
             # Sanitize props (capture callbacks & render props in single pass)
+            deferred_render_prop_reconciles: list[
+                tuple[RenderNode, Element, Element, str, str]
+            ] = []
             props_diff = self.diff_props(
                 path=path,
                 old_props=old_tree.props or {},
                 new_props=new_tree.props or {},
                 render_parent=render_parent,
                 relative_path=relative_path,
+                defer_render_prop_reconciles=deferred_render_prop_reconciles,
             )
             delta: UpdatePropsDelta = {}
             if props_diff.delta_add:
@@ -346,25 +346,30 @@ class Resolver:
                 self.operations.append(
                     UpdatePropsOperation(type="update_props", path=path, data=delta)
                 )
+            # Ensure updates to render-prop subtrees are emitted AFTER the
+            # parent's update_props so the client always has the prop present
+            # before deeper updates under that prop path.
+            if deferred_render_prop_reconciles:
+                for (
+                    rp_parent,
+                    rp_old,
+                    rp_new,
+                    rp_path,
+                    rp_rel,
+                ) in deferred_render_prop_reconciles:
+                    self.reconcile_node(
+                        render_parent=rp_parent,
+                        old_tree=rp_old,
+                        new_tree=rp_new,
+                        path=rp_path,
+                        relative_path=rp_rel,
+                    )
             normalized_children: list[Element] = []
             if old_tree.children or new_tree.children:
-                # Ensure new children are a flat list before diffing so that
-                # we can safely compute lengths and indices.
-                if new_tree.children:
-                    new_children_list = _flatten_children(
-                        cast(Children, new_tree.children),
-                        parent_tag=new_tree.tag,
-                        path=path,
-                    )
-                else:
-                    new_children_list = []
-                # old_tree.children should already be normalized Element items,
-                # but it is typed as Children; cast for the type checker.
-                old_children_list = cast(Sequence[Element], old_tree.children or [])
                 normalized_children = self.reconcile_children(
                     render_parent=render_parent,
-                    old_children=old_children_list,
-                    new_children=new_children_list,
+                    old_children=old_tree.children or [],
+                    new_children=new_tree.children or [],
                     path=path,
                     relative_path=relative_path,
                 )
@@ -595,18 +600,11 @@ class Resolver:
                 if diff_props.delta_add:
                     vdom_node["props"] = diff_props.delta_add
                 normalized_props = diff_props.normalized or None
-            # Preserve lazy flag if present
-            if node.lazy:
-                vdom_node["lazy"] = True
             normalized_children: list[Element] | None = None
             if node.children:
-                # Flatten any iterable children (e.g., generators, lists) one or more levels deep
-                flat_children = _flatten_children(
-                    node.children, parent_tag=node.tag, path=path
-                )
                 v_children: list[VDOM] = []
                 normalized_children = []
-                for i, child in enumerate(flat_children):
+                for i, child in enumerate(node.children):
                     v, norm = self.render_tree(
                         render_parent=render_parent,
                         path=join_path(path, i),
@@ -621,7 +619,6 @@ class Resolver:
                 props=normalized_props,
                 children=normalized_children or None,
                 key=node.key,
-                lazy=node.lazy,
             )
             return vdom_node, normalized_node
         else:
@@ -634,6 +631,10 @@ class Resolver:
         new_props: Props,
         render_parent: RenderNode,
         relative_path: str,
+        defer_render_prop_reconciles: list[
+            tuple[RenderNode, Element, Element, str, str]
+        ]
+        | None = None,
     ):
         updated: Props = {}
         normalized: Props | None = None
@@ -677,15 +678,29 @@ class Resolver:
 
                 self.render_props.add(prop_path)
                 if isinstance(old_value, (Node, ComponentNode)):
-                    normalized[key] = self.reconcile_node(
-                        render_parent=render_parent,
-                        old_tree=old_value,
-                        new_tree=value,
-                        path=prop_path,
-                        relative_path=prop_relative,
-                    )
+                    # Defer subtree reconciliation so that parent's
+                    # update_props (if any) is emitted before child ops
+                    if defer_render_prop_reconciles is not None:
+                        normalized[key] = value
+                        defer_render_prop_reconciles.append(
+                            (
+                                render_parent,
+                                cast(Element, old_value),
+                                cast(Element, value),
+                                prop_path,
+                                prop_relative,
+                            )
+                        )
+                    else:
+                        normalized[key] = self.reconcile_node(
+                            render_parent=render_parent,
+                            old_tree=old_value,
+                            new_tree=value,
+                            path=prop_path,
+                            relative_path=prop_relative,
+                        )
                 else:
-                    self._unmount_render_subtree(render_parent, prop_relative)
+                    self.unmount_subtree(render_parent, prop_relative)
                     vdom_value, normalized_value = self.render_tree(
                         render_parent=render_parent,
                         node=value,
@@ -698,7 +713,7 @@ class Resolver:
 
             # Regular prop
             if isinstance(old_value, (Node, ComponentNode)):
-                self._unmount_render_subtree(render_parent, prop_relative)
+                self.unmount_subtree(render_parent, prop_relative)
             if key not in old_props or not values_equal(value, old_props[key]):
                 updated[key] = value
             # No need to set normalized[key] = value as the value will be copied over through new_props.copy() if normalized is instantiated
@@ -706,9 +721,7 @@ class Resolver:
         for key in removed:
             old_value = old_props.get(key)
             if isinstance(old_value, (Node, ComponentNode)):
-                self._unmount_render_subtree(
-                    render_parent, join_path(relative_path, key)
-                )
+                self.unmount_subtree(render_parent, join_path(relative_path, key))
 
         if normalized is not None:
             normalized_props = normalized
@@ -719,7 +732,7 @@ class Resolver:
             normalized=normalized_props, delta_add=updated, delta_remove=removed
         )
 
-    def _unmount_render_subtree(self, parent: RenderNode, prefix: str) -> None:
+    def unmount_subtree(self, parent: RenderNode, prefix: str) -> None:
         if not prefix:
             # Defensive: never clear the whole tree from here
             return
@@ -734,39 +747,6 @@ class Resolver:
                 render_child.unmount()
 
     # --- Internal helpers -----------------------------------------------------
-
-
-def _flatten_children(
-    children: Children, *, parent_tag: str, path: str
-) -> list[Element]:
-    flat: list[Element] = []
-
-    def visit(item: Child) -> None:
-        if isinstance(item, Iterable) and not isinstance(item, str):
-            # If any Node/ComponentNode yielded by this iterable lacks a key,
-            # emit a single warning for this iterable.
-            missing_key = False
-            for sub in item:
-                if isinstance(sub, (Node, ComponentNode)) and sub.key is None:
-                    missing_key = True
-                visit(sub)
-            if missing_key:
-                # Warn once per iterable without keys on its elements
-                warnings.warn(
-                    (
-                        "[Pulse] Iterable children of <{}> at path '{}' contain elements without 'key'. "
-                        "Add a stable 'key' to each element inside iterables to improve reconciliation."
-                    ).format(parent_tag, path),
-                    stacklevel=3,
-                )
-        else:
-            # Not an iterable child: must be a Element or primitive
-            flat.append(item)
-
-    for child in children:
-        visit(child)
-
-    return flat
 
 
 def same_node(left: Element, right: Element):

@@ -11,7 +11,7 @@ from pulse.vdom import Component, component
 import pytest
 
 from pulse.app import App
-from pulse.codegen import Codegen, CodegenConfig
+from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.components.react_router import Outlet
 from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
 from pulse.codegen.templates.route import RouteTemplate

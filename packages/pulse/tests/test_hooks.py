@@ -1,6 +1,10 @@
 import pytest
 
-from pulse.hooks import HookContext, setup, setup_key, states, effects, stable
+from pulse.hooks.core import HookContext
+from pulse.hooks.setup import setup, setup_key
+from pulse.hooks.states import states
+from pulse.hooks.effects import effects
+from pulse.hooks.stable import stable
 from pulse.state import State
 
 

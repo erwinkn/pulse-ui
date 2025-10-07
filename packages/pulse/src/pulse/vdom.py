@@ -7,8 +7,9 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 
 from __future__ import annotations
 import functools
+import warnings
 from types import NoneType
-import inspect
+from inspect import signature, Parameter
 from collections.abc import Iterable
 from typing import (
     Any,
@@ -24,6 +25,8 @@ from typing import (
     ParamSpec,
     overload,
 )
+
+from pulse.hooks.core import HookContext
 
 
 # ============================================================================
@@ -44,8 +47,6 @@ class VDOMNode(TypedDict):
     key: NotRequired[str]
     props: NotRequired[dict[str, Any]]  # does not include callbacks
     children: "NotRequired[Sequence[VDOMNode | Primitive] | None]"
-    # Optional flag to indicate the element should be lazily loaded on the client
-    lazy: NotRequired[bool]
 
 
 class Callback(NamedTuple):
@@ -75,16 +76,19 @@ class Node:
         children: Optional[Children] = None,
         key: Optional[str] = None,
         allow_children=True,
-        *,
-        lazy: bool | None = None,
     ):
         self.tag = tag
         # Normalize to None
         self.props = props or None
-        self.children = children or None
+        self.children = (
+            _flatten_children(children, parent_name=f"<{self.tag}>")
+            if children
+            else None
+        )
         self.allow_children = allow_children
         self.key = key or None
-        self.lazy = lazy or None
+        if key is not None and not isinstance(key, str):
+            raise ValueError("key must be a string or None")
         if not self.allow_children and children:
             raise ValueError(f"{self.tag} cannot have children")
 
@@ -190,52 +194,6 @@ class Node:
 # ============================================================================
 
 
-# ----------------------------------------------------------------------------
-# Formatting helpers (internal)
-# ----------------------------------------------------------------------------
-
-
-def _short_props(
-    props: dict[str, Any] | None, max_items: int = 6
-) -> dict[str, Any] | str:
-    if not props:
-        return {}
-    items = list(props.items())
-    if len(items) <= max_items:
-        return props
-    head = dict(items[: max_items - 1])
-    return {**head, "…": f"+{len(items) - (max_items - 1)} more"}
-
-
-def _pretty_repr(node: Element):
-    if isinstance(node, Node):
-        return f"<{node.tag}>"
-    if isinstance(node, ComponentNode):
-        return f"<{node.name}"
-    return repr(node)
-
-
-def _short_children(
-    children: Sequence[Child] | None, max_items: int = 4
-) -> list[str] | str:
-    if not children:
-        return []
-    out: list[str] = []
-    i = 0
-    while i < len(children) and len(out) < max_items:
-        child = children[i]
-        i += 1
-        if isinstance(child, Iterable) and not isinstance(child, str):
-            child = list(child)
-            n_items = min(len(child), max_items - len(out))
-            out.extend(_pretty_repr(c) for c in child[:n_items])
-        else:
-            out.append(_pretty_repr(child))
-    if len(children) > (max_items - 1):
-        out.append(f"…(+{len(children) - (max_items - 1)})")
-    return out
-
-
 # --- Components ---
 
 
@@ -247,8 +205,8 @@ class Component(Generic[P]):
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> "ComponentNode":
         key = kwargs.get("key")
-        if key is not None:
-            key = str(key)
+        if key is not None and not isinstance(key, str):
+            raise ValueError("key must be a string or None")
 
         return ComponentNode(
             fn=self.fn,
@@ -282,6 +240,9 @@ class ComponentNode:
         self.key = key
         self.name = name or _infer_component_name(fn)
         self.takes_children = takes_children
+        # Used for rendering
+        self.contents: Element | None = None
+        self.hooks = HookContext()
 
     def __getitem__(self, children_arg: Union[Child, tuple[Child, ...]]):
         if not self.takes_children:
@@ -297,9 +258,13 @@ class ComponentNode:
             )
         if not isinstance(children_arg, tuple):
             children_arg = (children_arg,)
+        # Flatten children for ComponentNode as well
+        flattened_children = _flatten_children(
+            children_arg, parent_name=f"<{self.name}>"
+        )
         result = ComponentNode(
             fn=self.fn,
-            args=children_arg,
+            args=tuple(flattened_children),
             kwargs=self.kwargs,
             name=self.name,
             key=self.key,
@@ -337,6 +302,51 @@ def component(
 # ----------------------------------------------------------------------------
 # Component naming heuristics
 # ----------------------------------------------------------------------------
+
+
+def _flatten_children(children: Children, *, parent_name: str) -> Sequence[Element]:
+    """Flatten children and emit warnings for unkeyed iterables."""
+    flat: list[Element] = []
+    return_tuple = isinstance(children, tuple)
+
+    def visit(item: Child) -> None:
+        if isinstance(item, Iterable) and not isinstance(item, str):
+            # If any Node/ComponentNode yielded by this iterable lacks a key,
+            # emit a single warning for this iterable.
+            missing_key = False
+            for sub in item:
+                if isinstance(sub, (Node, ComponentNode)) and sub.key is None:
+                    missing_key = True
+                visit(sub)
+            if missing_key:
+                # Warn once per iterable without keys on its elements
+                warnings.warn(
+                    (
+                        "[Pulse] Iterable children of {} contain elements without 'key'. "
+                        "Add a stable 'key' to each element inside iterables to improve reconciliation."
+                    ).format(parent_name),
+                    stacklevel=3,
+                )
+        else:
+            # Not an iterable child: must be a Element or primitive
+            flat.append(item)
+
+    for child in children:
+        visit(child)
+
+    seen_keys: set[str] = set()
+    for child in flat:
+        if isinstance(child, (Node, ComponentNode)) and child.key is not None:
+            if child.key in seen_keys:
+                raise ValueError(
+                    (
+                        f"[Pulse] Duplicate key '{child.key}' found among children of {parent_name}. "
+                        "Keys must be unique per sibling set."
+                    )
+                )
+            seen_keys.add(child.key)
+
+    return tuple(flat) if return_tuple else flat
 
 
 def _short_args(args: tuple[Any, ...], max_items: int = 4) -> list[str] | str:
@@ -388,13 +398,64 @@ def _callable_qualname(fn: Callable[..., Any]) -> str:
 
 
 def _takes_children(fn: Callable[..., Any]) -> bool:
-    # Lightweight check: children allowed iff function has a VAR_POSITIONAL (*args)
+    # Lightweight check: children allowed if function accepts positional
+    # arguments
     try:
-        sig = inspect.signature(fn)
+        sig = signature(fn)
     except (ValueError, TypeError):
         # Builtins or callables without inspectable signature: assume no children
         return False
     for p in sig.parameters.values():
-        if p.kind == inspect.Parameter.VAR_POSITIONAL:
+        if p.kind in (
+            Parameter.VAR_POSITIONAL,
+            Parameter.POSITIONAL_ONLY,
+            Parameter.POSITIONAL_OR_KEYWORD,
+        ):
             return True
     return False
+
+
+# ----------------------------------------------------------------------------
+# Formatting helpers (internal)
+# ----------------------------------------------------------------------------
+
+
+def _pretty_repr(node: Element):
+    if isinstance(node, Node):
+        return f"<{node.tag}>"
+    if isinstance(node, ComponentNode):
+        return f"<{node.name}"
+    return repr(node)
+
+
+def _short_props(
+    props: dict[str, Any] | None, max_items: int = 6
+) -> dict[str, Any] | str:
+    if not props:
+        return {}
+    items = list(props.items())
+    if len(items) <= max_items:
+        return props
+    head = dict(items[: max_items - 1])
+    return {**head, "…": f"+{len(items) - (max_items - 1)} more"}
+
+
+def _short_children(
+    children: Sequence[Child] | None, max_items: int = 4
+) -> list[str] | str:
+    if not children:
+        return []
+    out: list[str] = []
+    i = 0
+    while i < len(children) and len(out) < max_items:
+        child = children[i]
+        i += 1
+        if isinstance(child, Iterable) and not isinstance(child, str):
+            child = list(child)
+            n_items = min(len(child), max_items - len(out))
+            out.extend(_pretty_repr(c) for c in child[:n_items])
+        else:
+            out.append(_pretty_repr(child))
+    if len(children) > (max_items - 1):
+        out.append(f"…(+{len(children) - (max_items - 1)})")
+    return out

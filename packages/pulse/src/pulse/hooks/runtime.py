@@ -19,7 +19,7 @@ from pulse.reactive_extensions import ReactiveDict
 from pulse.routing import RouteContext
 from pulse.state import State
 
-from .core import HOOK_CONTEXT
+from pulse.hooks.core import HOOK_CONTEXT
 
 
 class RedirectInterrupt(Exception):

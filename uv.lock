@@ -4,6 +4,7 @@ requires-python = ">=3.12"
 
 [manifest]
 members = [
+    "pulse-ag-grid",
     "pulse-framework",
     "pulse-lucide",
     "pulse-mantine",
@@ -677,8 +678,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pulse-ag-grid"
+version = "0.1.0"
+source = { editable = "packages/pulse-ag-grid" }
+dependencies = [
+    { name = "pulse-framework" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pulse-framework", editable = "packages/pulse" }]
+
+[[package]]
 name = "pulse-framework"
-version = "0.1.25"
+version = "0.1.26"
 source = { editable = "packages/pulse" }
 dependencies = [
     { name = "fastapi" },

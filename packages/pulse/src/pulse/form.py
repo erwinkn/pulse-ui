@@ -1,25 +1,27 @@
 from __future__ import annotations
 
-import inspect
+import json
 import uuid
 from dataclasses import dataclass
 from typing import (
+    TYPE_CHECKING,
     Any,
-    Awaitable,
     Callable,
     Coroutine,
     Never,
     Optional,
-    TYPE_CHECKING,
     TypedDict,
     Unpack,
 )
 
 from fastapi import HTTPException, Request, Response
+from starlette.datastructures import FormData as StarletteFormData
+from starlette.datastructures import UploadFile
+
 from pulse.helpers import call_flexible, maybe_await
 from pulse.reactive import Signal
+from pulse.serializer import deserialize
 from pulse.types.event_handler import EventHandler1
-from starlette.datastructures import FormData as StarletteFormData, UploadFile
 
 from .context import PulseContext
 from .hooks import HOOK_CONTEXT, server_address, stable
@@ -112,6 +114,19 @@ class FormRegistry:
 
         raw_form = await request.form()
         data = normalize_form_data(raw_form)
+
+        # Deserialize complex data from __data__ field if present
+        if "__data__" in data:
+            data_value = data["__data__"]
+            if isinstance(data_value, str):
+                serialized_data = json.loads(data_value)
+                deserialized_data = deserialize(serialized_data)
+                # Merge deserialized data into form data, excluding __data__
+                for key, value in deserialized_data.items():
+                    if key != "__data__":
+                        data[key] = value
+                # Remove the __data__ field
+                del data["__data__"]
 
         render = self._app.render_sessions.get(registration.render_id)
         if render is None:

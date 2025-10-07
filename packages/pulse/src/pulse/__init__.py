@@ -109,7 +109,7 @@ from .user_session import (
     SessionStore,
     UserSession,
 )
-from .serializer_v3 import serialize, deserialize
+from .serializer import serialize, deserialize
 from .vdom import (
     Child,
     Component,

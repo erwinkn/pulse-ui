@@ -37,4 +37,5 @@ members = [
     "packages/pulse-msal",
     "packages/pulse-recharts",
     "packages/pulse-mantine/python",
+    "packages/pulse-ag-grid",
 ]

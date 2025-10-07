@@ -77,4 +77,4 @@ export {
 export {
   serialize as serialize,
   deserialize as deserialize,
-} from "./serialize/v3";
+} from "./serialize/serializer";

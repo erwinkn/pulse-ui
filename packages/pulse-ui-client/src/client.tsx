@@ -1,7 +1,7 @@
 import type { RouteInfo } from "./helpers";
 import type { VDOM, VDOMUpdate } from "./vdom";
 import { extractEvent } from "./serialize/events";
-import { serialize, deserialize } from "./serialize/v3";
+import { serialize, deserialize } from "./serialize/serializer";
 
 import { io, Socket } from "socket.io-client";
 import type {

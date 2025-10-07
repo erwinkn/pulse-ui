@@ -1,191 +1,199 @@
-"""
-Simple object transformation for socket.io transport
-Handles Dates, circular references, and basic Python objects
+"""Pulse serializer v3 implementation (Python).
+
+The format mirrors the TypeScript implementation in ``packages/pulse-ui-client``.
+
+Serialized payload structure::
+
+    (
+        ("refs|dates|sets|maps", payload),
+    )
+
+- The first element is a compact metadata string with four pipe-separated
+  comma-separated integer lists representing global node indices for:
+  ``refs``, ``dates``, ``sets``, ``maps``.
+- ``refs``  – indices where the payload entry is an integer pointing to a
+  previously visited node's index (shared refs/cycles).
+- ``dates`` – indices that should be materialised as ``datetime`` objects; the
+  payload entry is the millisecond timestamp since the Unix epoch (UTC).
+- ``sets``  – indices that are ``set`` instances; payload is an array of their
+  items.
+- ``maps``  – indices that are ``Map`` instances; payload is an object mapping
+  string keys to child payloads. Python reconstructs these as ``dict``.
+
+Nodes are assigned a single global index as they are visited (non-primitives
+only). This preserves shared references and cycles across nested structures
+containing primitives, lists/tuples, ``dict``/plain objects, ``set`` and
+``datetime`` objects.
 """
 
-from datetime import datetime
+from __future__ import annotations
+
+from dataclasses import fields, is_dataclass
+import datetime as dt
+import types
 from typing import Any
 
+Primitive = int | float | str | bool | None
+PlainJSON = Primitive | list["PlainJSON"] | dict[str, "PlainJSON"]
+Serialized = tuple[tuple[list[int], list[int], list[int], list[int]], PlainJSON]
 
-def stringify(input_value: Any) -> Any:
-    """
-    Convert Python objects into a serializable format that handles circular references.
+__all__ = [
+    "serialize",
+    "deserialize",
+    "Serialized",
+]
 
-    Args:
-        input_value: The object to serialize
 
-    Returns:
-        A JSON-serializable object with special markers for complex types
-    """
-    seen: dict[int, int] = {}  # Map object id to assigned ID
-    next_id = 1
+def serialize(data: Any) -> Serialized:
+    # Map object id -> assigned global index
+    seen: dict[int, int] = {}
+    refs: list[int] = []
+    dates: list[int] = []
+    sets: list[int] = []
+    maps: list[int] = []
 
-    def transform(value: Any) -> Any:
-        nonlocal next_id
+    global_index = 0
 
-        # Handle primitives
-        if value is None or isinstance(value, (int, float, str, bool)):
+    def process(value: Any) -> PlainJSON:
+        nonlocal global_index
+        if value is None or isinstance(value, (bool, int, float, str)):
             return value
 
-        # Handle objects that can have circular references
-        if isinstance(value, (dict, list, datetime)) or hasattr(value, "__dict__"):
-            obj_id = id(value)
-            if obj_id in seen:
-                return {"__ref": seen[obj_id]}
+        idx = global_index
+        global_index += 1
 
-        # Special type transformations
-        if isinstance(value, datetime):
-            current_id = next_id
-            next_id += 1
-            seen[id(value)] = current_id
-            # Type checker safety: we know value is datetime here
-            dt_value: datetime = value  # type: ignore
-            return {
-                "__pulse": "date",
-                "__id": current_id,
-                "timestamp": int(
-                    dt_value.timestamp() * 1000
-                ),  # Convert to milliseconds
-            }
+        obj_id = id(value)
+        prev_ref = seen.get(obj_id)
+        if prev_ref is not None:
+            refs.append(idx)
+            return prev_ref
+        seen[obj_id] = idx
 
-        # Handle lists
-        if isinstance(value, list):
-            current_id = next_id
-            next_id += 1
-            seen[id(value)] = current_id
-            return {
-                "__pulse": "array",
-                "__id": current_id,
-                "items": [transform(item) for item in value],
-            }
+        if isinstance(value, dt.datetime):
+            dates.append(idx)
+            return _datetime_to_millis(value)
 
-        # Handle dictionaries
         if isinstance(value, dict):
-            current_id = next_id
-            next_id += 1
-            seen[id(value)] = current_id
+            result_dict: dict[str, PlainJSON] = {}
+            for key, entry in value.items():
+                key_str = str(key)
+                result_dict[key_str] = process(entry)
+            return result_dict
 
-            user_data = {}
-            for key, val in value.items():
-                if callable(val):
-                    continue  # Skip functions/methods
-                user_data[str(key)] = transform(val)
+        if isinstance(value, (list, tuple)):
+            result_list: list[PlainJSON] = []
+            for entry in value:
+                result_list.append(process(entry))
+            return result_list
 
-            return {"__pulse": "object", "__id": current_id, "__data": user_data}
+        if isinstance(value, set):
+            sets.append(idx)
+            items: list[PlainJSON] = []
+            for entry in value:
+                items.append(process(entry))
+            return items
 
-        # Handle custom objects with __dict__
+        if is_dataclass(value):
+            dc_obj: dict[str, PlainJSON] = {}
+            for f in fields(value):
+                dc_obj[f.name] = process(getattr(value, f.name))
+            return dc_obj
+
+        if callable(value) or isinstance(value, (type, types.ModuleType)):
+            raise TypeError(f"Unsupported value in serialization: {type(value)!r}")
+
         if hasattr(value, "__dict__"):
-            current_id = next_id
-            next_id += 1
-            seen[id(value)] = current_id
+            inst_obj: dict[str, PlainJSON] = {}
+            for key, entry in vars(value).items():
+                if key.startswith("_"):
+                    continue
+                inst_obj[key] = process(entry)
+            return inst_obj
 
-            user_data = {}
-            for key, val in value.__dict__.items():
-                if callable(val) or key.startswith("_"):
-                    continue  # Skip private attributes and methods
-                user_data[str(key)] = transform(val)
+        raise TypeError(f"Unsupported value in serialization: {type(value)!r}")
 
-            return {"__pulse": "object", "__id": current_id, "__data": user_data}
+    payload = process(data)
 
-        # Fallback for unknown types - convert to string
-        return str(value)
+    # Pack metadata into single compact string: refs|dates|sets|maps
+    def _join(values: list[int]) -> str:
+        return ",".join(str(v) for v in values)
 
-    return transform(input_value)
+    return ((refs, dates, sets, maps), payload)
 
 
-def parse(input_value: Any) -> Any:
-    """
-    Parse serialized objects back into Python objects, resolving circular references.
+def deserialize(
+    payload: Serialized,
+) -> Any:
+    (refs, dates, sets, maps), data = payload
+    refs = set(refs)
+    dates = set(dates)
+    sets = set(sets)
+    # we don't care about maps
 
-    Args:
-        input_value: The serialized object to parse
+    objects: list[Any] = []
 
-    Returns:
-        The reconstructed Python object
-    """
-    objects: dict[int, Any] = {}
+    def reconstruct(value: PlainJSON) -> Any:
+        idx = len(objects)
 
-    def resolve(value: Any) -> Any:
-        if value is None or isinstance(value, (int, float, str, bool)):
+        if idx in refs:
+            assert isinstance(value, (int, float)), (
+                "Reference payload must be numeric index"
+            )
+            # Placeholder to keep indices aligned
+            objects.append(None)
+            target_index = int(value)
+            assert 0 <= target_index < len(objects), (
+                f"Dangling reference to index {target_index}"
+            )
+            return objects[target_index]
+
+        if idx in dates:
+            assert isinstance(value, (int, float)), (
+                "Date payload must be a numeric timestamp"
+            )
+            dt_value = _datetime_from_millis(value)
+            objects.append(dt_value)
+            return dt_value
+
+        if value is None:
+            return None
+
+        if isinstance(value, (bool, int, float, str)):
             return value
 
         if isinstance(value, list):
-            return [resolve(item) for item in value]
+            if idx in sets:
+                result_set: set[Any] = set()
+                objects.append(result_set)
+                for entry in value:
+                    result_set.add(reconstruct(entry))
+                return result_set
+            result_list: list[Any] = []
+            objects.append(result_list)
+            for entry in value:
+                result_list.append(reconstruct(entry))
+            return result_list
 
-        if not isinstance(value, dict):
-            return value
+        if isinstance(value, dict):
+            # Both maps and records are reconstructed as dictionaries in Python
+            result_dict: dict[str, Any] = {}
+            objects.append(result_dict)
+            for key, entry in value.items():
+                result_dict[str(key)] = reconstruct(entry)
+            return result_dict
 
-        obj = value
+        raise TypeError(f"Unsupported value in deserialization: {type(value)!r}")
 
-        # Handle references
-        if "__ref" in obj:
-            ref_id = obj["__ref"]
-            return objects.get(ref_id)
+    return reconstruct(data)
 
-        # Handle special types (only if they have __pulse marker)
-        if obj.get("__pulse") == "date":
-            obj_id = obj["__id"]
-            timestamp_ms = obj["timestamp"]
-            resolved_date = datetime.fromtimestamp(timestamp_ms / 1000.0)
-            objects[obj_id] = resolved_date
-            return resolved_date
 
-        # Handle File objects serialized from the client
-        if obj.get("__pulse") == "file":
-            obj_id = obj["__id"]
-            # Resolve the underlying binary payload if present (socket.io may provide bytes directly)
-            raw_file_value = obj.get("file")
-            resolved_bytes = resolve(raw_file_value)
+def _datetime_to_millis(value: dt.datetime) -> int:
+    if value.tzinfo is None:
+        ts = value.replace(tzinfo=dt.timezone.utc).timestamp()
+    else:
+        ts = value.astimezone(dt.timezone.utc).timestamp()
+    return int(round(ts * 1000))
 
-            resolved_file = {
-                "name": obj.get("name"),
-                "type": obj.get("type"),
-                "size": obj.get("size"),
-                "last_modified": obj.get("lastModified"),
-                "contents": resolved_bytes,
-            }
-            objects[obj_id] = resolved_file
-            return resolved_file
 
-        # Handle FormData objects serialized from the client
-        if obj.get("__pulse") == "formdata":
-            obj_id = obj["__id"]
-            fields = obj.get("fields", {})
-            resolved_formdata: dict[str, Any] = {}
-            objects[obj_id] = resolved_formdata
-
-            # Fields may contain single values or arrays (for duplicate keys)
-            for key, value in fields.items():
-                if isinstance(value, list):
-                    resolved_formdata[key] = [resolve(item) for item in value]
-                else:
-                    resolved_formdata[key] = resolve(value)
-            return resolved_formdata
-
-        if obj.get("__pulse") == "array":
-            obj_id = obj["__id"]
-            resolved_list: list[Any] = []
-            objects[obj_id] = resolved_list
-
-            items = obj["items"]
-            for item in items:
-                resolved_list.append(resolve(item))
-            return resolved_list
-
-        if obj.get("__pulse") == "object":
-            obj_id = obj["__id"]
-            resolved_object: dict[str, Any] = {}
-            objects[obj_id] = resolved_object
-
-            user_data = obj["__data"]
-            for key, val in user_data.items():
-                resolved_object[key] = resolve(val)
-            return resolved_object
-
-        # Unknown object type - process properties
-        result = {}
-        for key, val in obj.items():
-            result[key] = resolve(val)
-        return result
-
-    return resolve(input_value)
+def _datetime_from_millis(value: int | float) -> dt.datetime:
+    return dt.datetime.fromtimestamp(value / 1000.0, tz=dt.timezone.utc)

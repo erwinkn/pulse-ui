@@ -1,7 +1,7 @@
 from mako.template import Template
 
 LAYOUT_TEMPLATE = Template(
-    """import { extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
+    """import { extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender, deserialize } from "pulse-ui-client";
 import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
 import { matchRoutes } from "react-router";
 import { rrPulseRouteTree } from "./routes.runtime";
@@ -35,7 +35,7 @@ export async function loader(args: LoaderFunctionArgs) {
   const body = await res.json();
   if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
   if (body.notFound) return new Response(null, { status: 404 });
-  const prerenderData = body as PulsePrerender;
+  const prerenderData = deserialize(body) as PulsePrerender;
   const setCookies =
     (res.headers.getSetCookie?.() as string[] | undefined) ??
     (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
@@ -63,7 +63,7 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
   const body = await res.json();
   if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
   if (body.notFound) return new Response(null, { status: 404 });
-  return body as PulsePrerender;
+  return deserialize(body) as PulsePrerender;
 }
 
 export default function PulseLayout() {

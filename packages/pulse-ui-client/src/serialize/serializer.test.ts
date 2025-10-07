@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { serialize as serialize, deserialize as deserialize } from "./v3";
+import {
+  serialize as serialize,
+  deserialize as deserialize,
+} from "./serializer";
 
 describe("v3 serialization", () => {
   it("serializes primitives as direct entries and round trips", () => {

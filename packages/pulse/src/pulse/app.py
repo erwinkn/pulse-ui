@@ -5,6 +5,7 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import json
 import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager

@@ -26,20 +26,9 @@ export type VDOMNode = PrimitiveNode | VDOMElement;
 
 export type VDOM = VDOMNode;
 
-export type UpdateType =
-  | "insert"
-  | "remove"
-  | "replace"
-  | "update_props"
-  | "move"
-  | "update_callbacks"
-  | "update_render_props"
-  | "update_css_refs";
-
 export interface VDOMUpdateBase {
-  type: UpdateType;
+  type: string;
   path: string; // Dot-separated path to the node
-  data?: any;
 }
 
 export interface InsertUpdate extends VDOMUpdateBase {
@@ -73,40 +62,46 @@ export interface MoveUpdate extends VDOMUpdateBase {
     to_index: number;
   };
 }
+export interface ReconciliationUpdate {
+  type: "reconciliation";
+  path: string;
+  N: number;
+  new: [number[], VDOM[]];
+  reuse: [number[], number[]];
+}
+
+export interface PathDelta {
+  add?: string[];
+  remove?: string[];
+}
 
 export interface UpdateCallbacksUpdate extends VDOMUpdateBase {
   type: "update_callbacks";
-  data: {
-    add?: string[]; // full callback keys like "0.1.onClick"
-    remove?: string[];
-  };
+  data: PathDelta;
 }
 
 export interface UpdateRenderPropsUpdate extends VDOMUpdateBase {
   type: "update_render_props";
-  data: {
-    add?: string[]; // render prop keys like "0.1.leftSection"
-    remove?: string[];
-  };
+  data: PathDelta;
 }
 
 export interface UpdateCssRefsUpdate extends VDOMUpdateBase {
   type: "update_css_refs";
-  data: {
-    set?: string[];
-    remove?: string[];
-  };
+  data: PathDelta;
 }
 
 export type VDOMUpdate =
-  | InsertUpdate
-  | RemoveUpdate
+  // | InsertUpdate
+  // | RemoveUpdate
   | ReplaceUpdate
   | UpdatePropsUpdate
-  | MoveUpdate
+  // | MoveUpdate
+  | ReconciliationUpdate
   | UpdateCallbacksUpdate
   | UpdateRenderPropsUpdate
   | UpdateCssRefsUpdate;
+
+export type UpdateType = VDOMUpdate["type"];
 
 // Utility functions for working with the UI tree structure
 export function isElementNode(node: VDOMNode): node is VDOMElement {

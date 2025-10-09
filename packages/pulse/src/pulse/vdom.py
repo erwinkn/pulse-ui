@@ -64,11 +64,6 @@ Props = dict[str, Any]
 
 
 class Node:
-    """
-    A UI tree node that matches the TypeScript UIElementNode format.
-    This directly generates the structure expected by the React frontend.
-    """
-
     def __init__(
         self,
         tag: str,

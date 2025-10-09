@@ -21,7 +21,7 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
         """Create a UITreeNode for this tag."""
         if default_props:
             props = default_props | props
-        key = props.get("key")
+        key = props.pop("key", None)
         return Node(tag=name, key=key, props=props, children=children)
 
     return create_element
@@ -44,7 +44,7 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
         """Create a self-closing UITreeNode for this tag."""
         if default_props:
             props = default_props | props
-        key = props.get("key")
+        key = props.pop("key", None)
         return Node(
             tag=name,
             key=key,

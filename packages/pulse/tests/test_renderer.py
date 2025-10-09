@@ -6,6 +6,7 @@ from pulse.html.tags import li, ul, div, span, button
 from pulse.renderer import RenderTree
 from pulse.vdom import Node, component
 import pulse as ps
+from pulse.css import CssModule, CssReference
 
 
 class TrackingHookContext(HookContext):
@@ -788,8 +789,6 @@ def test_css_references():
 
 
 def test_css_reference_add_remove_cycle():
-    from pulse.css import CssModule, CssReference
-
     css_module = CssModule("test_module", Path("/fake/path"))
     first = CssReference(css_module, "first")
     second = CssReference(css_module, "second")
@@ -808,6 +807,168 @@ def test_css_reference_add_remove_cycle():
     assert {
         "type": "update_css_refs",
         "path": "",
-        "data": {"set": ["className"]},
+        "data": {"add": ["className"]},
     } in ops
 
+
+# -----------------------------------------------------------------------------
+# Additional keyed reconciliation scenarios to exhaust code paths
+# -----------------------------------------------------------------------------
+
+
+def test_keyed_inserts_from_empty():
+    tree = RenderTree(ul())
+    tree.render()
+
+    ops = tree.diff(ul(li("A", key="a"), li("B", key="b")))
+
+    assert ops == [
+        {
+            "type": "insert",
+            "path": "",
+            "idx": 0,
+            "data": {"tag": "li", "children": ["A"]},
+        },
+        {
+            "type": "insert",
+            "path": "",
+            "idx": 1,
+            "data": {"tag": "li", "children": ["B"]},
+        },
+    ]
+
+
+def test_keyed_head_insert_single_insert():
+    tree = RenderTree(ul(li("A", key="a"), li("B", key="b")))
+    tree.render()
+
+    ops = tree.diff(ul(li("X", key="x"), li("A", key="a"), li("B", key="b")))
+
+    # Expect exactly one insert at head
+    assert ops == [
+        {
+            "type": "insert",
+            "path": "",
+            "idx": 0,
+            "data": {"tag": "li", "children": ["X"]},
+        }
+    ]
+
+
+def test_keyed_tail_insert_single_insert():
+    tree = RenderTree(ul(li("X", key="x"), li("A", key="a"), li("B", key="b")))
+    tree.render()
+
+    ops = tree.diff(
+        ul(li("X", key="x"), li("A", key="a"), li("B", key="b"), li("C", key="c"))
+    )
+
+    assert ops == [
+        {
+            "type": "insert",
+            "path": "",
+            "idx": 3,
+            "data": {"tag": "li", "children": ["C"]},
+        }
+    ]
+
+
+def test_keyed_middle_early_deletes_remove_nonpresent():
+    tree = RenderTree(
+        ul(li("X", key="x"), li("A", key="a"), li("B", key="b"), li("C", key="c"))
+    )
+    tree.render()
+
+    ops = tree.diff(ul(li("A", key="a"), li("B", key="b")))
+
+    # Early deletes should remove right->left within middle window: indices 3 then 0
+    assert ops == [
+        {"type": "remove", "path": "", "idx": 3},
+        {"type": "remove", "path": "", "idx": 0},
+    ]
+
+
+def test_keyed_insert_and_move_mix():
+    # Old: A, C, D, B  -> New: B, A, E, D
+    tree = RenderTree(
+        ul(li("A", key="a"), li("C", key="c"), li("D", key="d"), li("B", key="b"))
+    )
+    tree.render()
+
+    ops = tree.diff(
+        ul(li("B", key="b"), li("A", key="a"), li("E", key="e"), li("D", key="d"))
+    )
+
+    # Expect: remove C (idx=1), insert E at idx=2, plus at least one move
+    assert any(op["type"] == "remove" and op["idx"] == 1 for op in ops)
+    assert any(
+        op["type"] == "insert"
+        and op["idx"] == 2
+        and op["data"] == {"tag": "li", "children": ["E"]}
+        for op in ops
+    )
+    assert any(op["type"] == "move" for op in ops)
+
+
+def test_keyed_only_removals_when_new_window_exhausted():
+    # Old: A, B, C, D  -> New: A, D (head/tail match leaves only removals in middle)
+    tree = RenderTree(
+        ul(li("A", key="a"), li("B", key="b"), li("C", key="c"), li("D", key="d"))
+    )
+    tree.render()
+
+    ops = tree.diff(ul(li("A", key="a"), li("D", key="d")))
+
+    # Expect descending removals of C (idx=2) then B (idx=1)
+    assert ops == [
+        {"type": "remove", "path": "", "idx": 2},
+        {"type": "remove", "path": "", "idx": 1},
+    ]
+
+
+def test_keyed_head_only_removal():
+    # Old: X, A  -> New: A (tail sync + new exhausted -> remove head)
+    tree = RenderTree(ul(li("X", key="x"), li("A", key="a")))
+    tree.render()
+
+    ops = tree.diff(ul(li("A", key="a")))
+
+    assert ops == [{"type": "remove", "path": "", "idx": 0}]
+
+
+def test_keyed_same_key_different_tag_triggers_replace():
+    tree = RenderTree(div(li("A", key="a")))
+    tree.render()
+
+    ops = tree.diff(div(span("A", key="a")))
+
+    assert ops == [
+        {"type": "replace", "path": "0", "data": {"tag": "span", "children": ["A"]}}
+    ]
+
+
+def test_keyed_head_tail_placeholders_deep_reconcile_props_change():
+    # Old: A(class=one), C, B  -> New: A(class=two), X, B
+    tree = RenderTree(
+        ul(li("A", key="a", className="one"), li("C", key="c"), li("B", key="b"))
+    )
+    tree.render()
+
+    ops = tree.diff(
+        ul(li("A", key="a", className="two"), li("X", key="x"), li("B", key="b"))
+    )
+
+    # Expect: remove C at idx=1, insert X at idx=1, and update_props for A at path 0
+    assert any(op["type"] == "remove" and op["idx"] == 1 for op in ops)
+    assert any(
+        op["type"] == "insert"
+        and op["idx"] == 1
+        and op["data"] == {"tag": "li", "children": ["X"]}
+        for op in ops
+    )
+    assert any(
+        op["type"] == "update_props"
+        and op["path"] == "0"
+        and op["data"].get("set", {}).get("className") == "two"
+        for op in ops
+    )

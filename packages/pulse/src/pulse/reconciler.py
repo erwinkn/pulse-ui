@@ -55,19 +55,19 @@ class ReplaceOperation(TypedDict):
     data: VDOM
 
 
-class UpdatePropsOperation(TypedDict):
-    type: Literal["update_props"]
-    path: str
-    data: "UpdatePropsDelta"
-
-
 class UpdatePropsDelta(TypedDict, total=False):
     # Only send changed/new keys under `set` and removed keys under `remove`
     set: Props
     remove: list[str]
 
 
-class UpdateCallbacksDelta(TypedDict, total=False):
+class UpdatePropsOperation(TypedDict):
+    type: Literal["update_props"]
+    path: str
+    data: UpdatePropsDelta
+
+
+class PathDelta(TypedDict, total=False):
     add: list[str]
     remove: list[str]
 
@@ -75,29 +75,19 @@ class UpdateCallbacksDelta(TypedDict, total=False):
 class UpdateCallbacksOperation(TypedDict):
     type: Literal["update_callbacks"]
     path: str
-    data: UpdateCallbacksDelta
-
-
-class UpdateCssRefsDelta(TypedDict, total=False):
-    set: list[str]
-    remove: list[str]
+    data: PathDelta
 
 
 class UpdateCssRefsOperation(TypedDict):
     type: Literal["update_css_refs"]
     path: str
-    data: UpdateCssRefsDelta
-
-
-class UpdateRenderPropsDelta(TypedDict, total=False):
-    add: list[str]
-    remove: list[str]
+    data: PathDelta
 
 
 class UpdateRenderPropsOperation(TypedDict):
     type: Literal["update_render_props"]
     path: str
-    data: UpdateRenderPropsDelta
+    data: PathDelta
 
 
 class MoveOperationData(TypedDict):
@@ -178,9 +168,9 @@ class RenderRoot:
         prefix_ops: list[VDOMOperation] = []
 
         if css_added or css_removed:
-            css_delta: UpdateCssRefsDelta = {}
+            css_delta: PathDelta = {}
             if css_added:
-                css_delta["set"] = css_added
+                css_delta["add"] = css_added
             if css_removed:
                 css_delta["remove"] = css_removed
             prefix_ops.append(
@@ -188,7 +178,7 @@ class RenderRoot:
             )
 
         if cb_added or cb_removed:
-            cb_delta: UpdateCallbacksDelta = {}
+            cb_delta: PathDelta = {}
             if cb_added:
                 cb_delta["add"] = cb_added
             if cb_removed:
@@ -200,7 +190,7 @@ class RenderRoot:
             )
 
         if rp_added or rp_removed:
-            rp_delta: UpdateRenderPropsDelta = {}
+            rp_delta: PathDelta = {}
             if rp_added:
                 rp_delta["add"] = rp_added
             if rp_removed:

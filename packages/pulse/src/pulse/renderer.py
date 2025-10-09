@@ -1,26 +1,18 @@
-from __future__ import annotations
-
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, NamedTuple, Sequence, cast
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    NamedTuple,
+    Sequence,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from pulse.css import CssReference
 from pulse.helpers import values_equal
-from pulse.reconciler import (
-    InsertOperation,
-    MoveOperation,
-    RemoveOperation,
-    ReplaceOperation,
-    UpdateCallbacksDelta,
-    UpdateCallbacksOperation,
-    UpdateCssRefsDelta,
-    UpdateCssRefsOperation,
-    UpdatePropsDelta,
-    UpdatePropsOperation,
-    UpdateRenderPropsDelta,
-    UpdateRenderPropsOperation,
-    VDOMOperation,
-)
 from pulse.vdom import (
     Callback,
     Callbacks,
@@ -31,6 +23,109 @@ from pulse.vdom import (
     VDOM,
     VDOMNode,
 )
+
+
+class InsertOperation(TypedDict):
+    type: Literal["insert"]
+    path: str
+    idx: int
+    data: VDOM
+
+
+class RemoveOperation(TypedDict):
+    type: Literal["remove"]
+    idx: int
+    path: str
+
+
+class ReplaceOperation(TypedDict):
+    type: Literal["replace"]
+    path: str
+    data: VDOM
+
+
+class UpdatePropsDelta(TypedDict, total=False):
+    # Only send changed/new keys under `set` and removed keys under `remove`
+    set: Props
+    remove: list[str]
+
+
+class UpdatePropsOperation(TypedDict):
+    type: Literal["update_props"]
+    path: str
+    data: UpdatePropsDelta
+
+
+class PathDelta(TypedDict, total=False):
+    add: list[str]
+    remove: list[str]
+
+
+class UpdateCallbacksOperation(TypedDict):
+    type: Literal["update_callbacks"]
+    path: str
+    data: PathDelta
+
+
+class UpdateCssRefsOperation(TypedDict):
+    type: Literal["update_css_refs"]
+    path: str
+    data: PathDelta
+
+
+class UpdateRenderPropsOperation(TypedDict):
+    type: Literal["update_render_props"]
+    path: str
+    data: PathDelta
+
+
+class MoveOperationData(TypedDict):
+    from_index: int
+    to_index: int
+
+
+class MoveOperation(TypedDict):
+    type: Literal["move"]
+    path: str
+    data: MoveOperationData
+
+
+class ReconciliationInsert(TypedDict):
+    indices: list[int]
+    values: list[VDOM]
+
+
+class ReconciliationMoves(TypedDict):
+    src: list[int]
+    dest: list[int]
+
+
+# This payload makes it easy for the client to rebuild an array of React nodes
+# from the previous children array:
+# - Allocate array of size N
+# - For i in 0..N-1, check the following scenarios
+#   - i matches the next index in `new` -> use provided tree
+#   - i matches the next index in `reuse` -> reuse previous child
+#   - otherwise, reuse the element at the same index
+class ReconciliationOperation(TypedDict):
+    type: Literal["reconciliation"]
+    path: str
+    N: int
+    new: tuple[list[int], list[VDOM]]
+    reuse: tuple[list[int], list[int]]
+
+
+VDOMOperation = Union[
+    # InsertOperation,
+    # RemoveOperation,
+    ReplaceOperation,
+    UpdatePropsOperation,
+    # MoveOperation,
+    ReconciliationOperation,
+    UpdateCallbacksOperation,
+    UpdateCssRefsOperation,
+    UpdateRenderPropsOperation,
+]
 
 RenderPath = str
 
@@ -83,9 +178,9 @@ class RenderTree:
         prefix: list[VDOMOperation] = []
 
         if css_add or css_remove:
-            css_delta: UpdateCssRefsDelta = {}
+            css_delta: PathDelta = {}
             if css_add:
-                css_delta["set"] = css_add
+                css_delta["add"] = css_add
             if css_remove:
                 css_delta["remove"] = css_remove
             prefix.append(
@@ -93,7 +188,7 @@ class RenderTree:
             )
 
         if callback_add or callback_remove:
-            callback_delta: UpdateCallbacksDelta = {}
+            callback_delta: PathDelta = {}
             if callback_add:
                 callback_delta["add"] = callback_add
             if callback_remove:
@@ -105,7 +200,7 @@ class RenderTree:
             )
 
         if render_props_add or render_props_remove:
-            render_props_delta: UpdateRenderPropsDelta = {}
+            render_props_delta: PathDelta = {}
             if render_props_add:
                 render_props_delta["add"] = render_props_add
             if render_props_remove:
@@ -161,39 +256,35 @@ class Renderer:
     # Rendering helpers
     # ------------------------------------------------------------------
 
-    def render_tree(
-        self, node: Element, *, path: RenderPath = ""
-    ) -> tuple[VDOM, Element]:
+    def render_tree(self, node: Element, path: RenderPath = "") -> tuple[VDOM, Element]:
         if isinstance(node, ComponentNode):
-            return self._render_component(node, path=path)
+            return self._render_component(node, path)
         if isinstance(node, Node):
-            return self._render_element(node, path=path)
+            return self._render_element(node, path)
         return node, node
 
     def _render_component(
-        self, component: ComponentNode, *, path: RenderPath
+        self, component: ComponentNode, path: RenderPath
     ) -> tuple[VDOM, ComponentNode]:
         with component.hooks:
             rendered = component.fn(*component.args, **component.kwargs)
-        vdom, normalized_child = self.render_tree(rendered, path=path)
+        vdom, normalized_child = self.render_tree(rendered, path)
         component.contents = normalized_child
         return vdom, component
 
-    def _render_element(
-        self, element: Node, *, path: RenderPath
-    ) -> tuple[VDOMNode, Node]:
+    def _render_element(self, element: Node, path: RenderPath) -> tuple[VDOMNode, Node]:
         vdom_node: VDOMNode = {"tag": element.tag}
         if element.key is not None:
             vdom_node["key"] = element.key
 
         props = element.props or {}
-        props_result = self.diff_props(previous={}, current=props, path=path)
+        props_result = self.diff_props({}, props, path)
         if props_result.delta_set:
             vdom_node["props"] = props_result.delta_set
 
         for task in props_result.render_prop_reconciles:
             normalized_value = self.reconcile_tree(
-                task.previous, task.current, path=task.path
+                task.previous, task.current, task.path
             )
             props_result.normalized[task.key] = normalized_value
 
@@ -203,7 +294,7 @@ class Renderer:
         normalized_children: list[Element] = []
         for idx, child in enumerate(normalize_children(element.children)):
             child_path = join_path(path, idx)
-            child_vdom, normalized_child = self.render_tree(child, path=child_path)
+            child_vdom, normalized_child = self.render_tree(child, child_path)
             children_vdom.append(child_vdom)
             normalized_children.append(normalized_child)
 
@@ -221,22 +312,21 @@ class Renderer:
         self,
         previous: Element,
         current: Element,
-        *,
         path: RenderPath = "",
     ) -> Element:
         if not same_node(previous, current):
             unmount_element(previous)
-            new_vdom, normalized = self.render_tree(current, path=path)
+            new_vdom, normalized = self.render_tree(current, path)
             self.operations.append(
                 ReplaceOperation(type="replace", path=path, data=new_vdom)
             )
             return normalized
 
         if isinstance(previous, ComponentNode) and isinstance(current, ComponentNode):
-            return self.reconcile_component(previous, current, path=path)
+            return self.reconcile_component(previous, current, path)
 
         if isinstance(previous, Node) and isinstance(current, Node):
-            return self.reconcile_element(previous, current, path=path)
+            return self.reconcile_element(previous, current, path)
 
         return current
 
@@ -244,7 +334,6 @@ class Renderer:
         self,
         previous: ComponentNode,
         current: ComponentNode,
-        *,
         path: RenderPath,
     ) -> ComponentNode:
         current.hooks = previous.hooks
@@ -254,15 +343,13 @@ class Renderer:
             rendered = current.fn(*current.args, **current.kwargs)
 
         if current.contents is None:
-            new_vdom, normalized = self.render_tree(rendered, path=path)
+            new_vdom, normalized = self.render_tree(rendered, path)
             current.contents = normalized
             self.operations.append(
                 ReplaceOperation(type="replace", path=path, data=new_vdom)
             )
         else:
-            current.contents = self.reconcile_tree(
-                current.contents, rendered, path=path
-            )
+            current.contents = self.reconcile_tree(current.contents, rendered, path)
 
         return current
 
@@ -270,14 +357,11 @@ class Renderer:
         self,
         previous: Node,
         current: Node,
-        *,
         path: RenderPath,
     ) -> Node:
         prev_props = previous.props or {}
         new_props = current.props or {}
-        props_result = self.diff_props(
-            previous=prev_props, current=new_props, path=path
-        )
+        props_result = self.diff_props(prev_props, new_props, path)
 
         if props_result.delta_set or props_result.delta_remove:
             delta: UpdatePropsDelta = {}
@@ -291,14 +375,14 @@ class Renderer:
 
         for task in props_result.render_prop_reconciles:
             normalized_value = self.reconcile_tree(
-                task.previous, task.current, path=task.path
+                task.previous, task.current, task.path
             )
             props_result.normalized[task.key] = normalized_value
 
         prev_children = normalize_children(previous.children)
         next_children = normalize_children(current.children)
         normalized_children = self.reconcile_children(
-            prev_children, next_children, path=path
+            prev_children, next_children, path
         )
 
         # Mutate the current node to avoid allocations
@@ -308,223 +392,82 @@ class Renderer:
 
     def reconcile_children(
         self,
-        previous_children: Sequence[Element],
-        new_children: Sequence[Element],
-        *,
+        c1: list[Element],
+        c2: list[Element],
         path: RenderPath,
     ) -> list[Element]:
-        if not previous_children and not new_children:
+        if not c1 and not c2:
             return []
 
-        has_keys = any(extract_key(child) is not None for child in new_children)
-        if has_keys:
-            return self.reconcile_children_keyed(
-                previous_children, new_children, path=path
-            )
-        return self.reconcile_children_unkeyed(
-            previous_children, new_children, path=path
+        N1 = len(c1)
+        N2 = len(c2)
+        norm: list[Element] = [None] * N2
+        N = min(N1, N2)
+        i = 0
+        # Fast path: if elements haven't changed, perform a single pass
+        while i < N:
+            x1 = c1[i]
+            x2 = c2[i]
+            if not same_node(x1, x2):
+                break  # enter keyed reconciliation
+            norm[i] = self.reconcile_tree(x1, x2, join_path(path, i))
+            i += 1
+
+        # Exits if previous and current children lists are of the same size and
+        # the previous loop did not break. Also works for empty lists.
+        if i == N1 == N2:
+            return norm
+
+        # Enter keyed reconciliation. We emit the reconciliation op in advance,
+        # as further ops will use the post-reconciliation paths.
+        op = ReconciliationOperation(
+            type="reconciliation", path=path, N=len(c2), new=([], []), reuse=([], [])
         )
+        self.operations.append(op)
 
-    def reconcile_children_keyed(
-        self,
-        previous_children: Sequence[Element],
-        new_children: Sequence[Element],
-        *,
-        path: RenderPath,
-    ) -> list[Element]:
-        old_children = list(previous_children)
-        new_children_list = list(new_children)
-        old_len = len(old_children)
-        new_len = len(new_children_list)
+        # Build key index
+        keys_to_old_idx: dict[str, int] = {}
+        for j1 in range(i, N1):
+            if key := getattr(c1[j1], "key", None):
+                keys_to_old_idx[key] = j1
 
-        normalized: list[Element | None] = [None] * new_len
+        # Build the reconciliation instructions
+        reused = [False] * (N1 - i)
+        for j2 in range(i, N2):
+            x2 = c2[j2]
+            # Case 1: this is a keyed node, try to reuse it if it already existed
+            k = getattr(x2, "key", None)
+            if k is not None:
+                j1 = keys_to_old_idx.get(k)
+                if j1 is not None:
+                    x1 = c1[j1]
+                    if same_node(x1, x2):
+                        norm[j2] = self.reconcile_tree(x1, x2, join_path(path, j2))
+                        reused[j1 - i] = True
+                        if j1 != j2:
+                            op["reuse"][0].append(j2)
+                            op["reuse"][1].append(j1)
+                        continue
+            # Case 2: try to reuse the node at the same position
+            if not k and j2 < N1:
+                x1 = c1[j2]
+                if same_node(x1, x2):
+                    reused[j2 - i] = True
+                    norm[j2] = self.reconcile_tree(x1, x2, join_path(path, j2))
+                    continue
 
-        old_start = 0
-        new_start = 0
-        old_end = old_len - 1
-        new_end = new_len - 1
+            # Case 3: this is a new node, render it at the new path
+            vdom, el = self.render_tree(x2, join_path(path, j2))
+            op["new"][0].append(j2)
+            op["new"][1].append(vdom)
+            norm[j2] = el
 
-        # Head sync
-        while old_start <= old_end and new_start <= new_end:
-            old_child = old_children[old_start]
-            new_child = new_children_list[new_start]
-            if not same_node(old_child, new_child):
-                break
-            child_path = join_path(path, new_start)
-            normalized_child = self.reconcile_tree(
-                old_child, new_child, path=child_path
-            )
-            normalized[new_start] = normalized_child
-            old_start += 1
-            new_start += 1
+        # Unmount old nodes we haven't reused
+        for j1 in range(i, N1):
+            if not reused[j1 - i]:
+                self.unmount_subtree(c1[j1])
 
-        # Tail sync
-        while old_start <= old_end and new_start <= new_end:
-            old_child = old_children[old_end]
-            new_child = new_children_list[new_end]
-            if not same_node(old_child, new_child):
-                break
-            child_path = join_path(path, new_end)
-            normalized_child = self.reconcile_tree(
-                old_child, new_child, path=child_path
-            )
-            normalized[new_end] = normalized_child
-            old_end -= 1
-            new_end -= 1
-
-        # Old exhausted -> pure inserts
-        if old_start > old_end:
-            for idx in range(new_start, new_end + 1):
-                child = new_children_list[idx]
-                child_path = join_path(path, idx)
-                vdom_child, normalized_child = self.render_tree(child, path=child_path)
-                self.operations.append(
-                    InsertOperation(type="insert", path=path, idx=idx, data=vdom_child)
-                )
-                normalized[idx] = normalized_child
-            return [cast(Element, child) for child in normalized]
-
-        # New exhausted -> pure removals
-        if new_start > new_end:
-            for idx in range(old_end, old_start - 1, -1):
-                self.operations.append(
-                    RemoveOperation(type="remove", path=path, idx=idx)
-                )
-                unmount_element(old_children[idx])
-            return [cast(Element, child) for child in normalized if child is not None]
-
-        key_to_new_index: dict[str, int] = {}
-        for idx in range(new_start, new_end + 1):
-            key_to_new_index[child_key(new_children_list[idx], idx)] = idx
-
-        to_be_patched = new_end - new_start + 1
-        new_index_to_old_index = [0] * to_be_patched
-        patched = 0
-        removals: list[int] = []
-
-        # Defer reconciliation for nodes that will move; reconcile stable nodes immediately
-        pending_reconciles: list[tuple[int, Element, Element]] = []
-        for old_idx in range(old_start, old_end + 1):
-            old_child = old_children[old_idx]
-            key = child_key(old_child, old_idx)
-            new_idx = key_to_new_index.get(key)
-            if new_idx is None:
-                removals.append(old_idx)
-                continue
-
-            window_index = new_idx - new_start
-            new_index_to_old_index[window_index] = old_idx + 1
-            patched += 1
-
-            if new_idx == old_idx:
-                # Stable position -> reconcile in place now
-                child_path = join_path(path, new_idx)
-                normalized_child = self.reconcile_tree(
-                    old_child, new_children_list[new_idx], path=child_path
-                )
-                normalized[new_idx] = normalized_child
-            else:
-                # Will move -> place old child and reconcile after moves so paths are correct
-                normalized[new_idx] = old_child
-                pending_reconciles.append(
-                    (new_idx, old_child, new_children_list[new_idx])
-                )
-
-            if patched == to_be_patched:
-                for remaining in range(old_idx + 1, old_end + 1):
-                    removals.append(remaining)
-                break
-
-        dom_keys = [child_key(child, idx) for idx, child in enumerate(old_children)]
-
-        for old_idx in sorted(removals, reverse=True):
-            self.operations.append(
-                RemoveOperation(type="remove", path=path, idx=old_idx)
-            )
-            unmount_element(old_children[old_idx])
-            if 0 <= old_idx < len(dom_keys):
-                dom_keys.pop(old_idx)
-
-        for new_idx in range(new_start, new_end + 1):
-            new_child = new_children_list[new_idx]
-            identifier = child_key(new_child, new_idx)
-            mapped_value = new_index_to_old_index[new_idx - new_start]
-
-            if mapped_value == 0:
-                child_path = join_path(path, new_idx)
-                vdom_child, normalized_child = self.render_tree(
-                    new_child, path=child_path
-                )
-                self.operations.append(
-                    InsertOperation(
-                        type="insert", path=path, idx=new_idx, data=vdom_child
-                    )
-                )
-                normalized[new_idx] = normalized_child
-                dom_keys.insert(new_idx, identifier)
-                continue
-
-            try:
-                current_index = dom_keys.index(identifier)
-            except ValueError:
-                continue
-
-            if current_index == new_idx:
-                continue
-
-            self.operations.append(
-                MoveOperation(
-                    type="move",
-                    path=path,
-                    data={"from_index": current_index, "to_index": new_idx},
-                )
-            )
-            dom_keys.pop(current_index)
-            dom_keys.insert(new_idx, identifier)
-
-        # Reconcile any moved children now, so inner updates target post-move paths
-        for idx, prev_child, curr_child in pending_reconciles:
-            child_path = join_path(path, idx)
-            normalized_child = self.reconcile_tree(
-                prev_child, curr_child, path=child_path
-            )
-            normalized[idx] = normalized_child
-
-        assert all(child is not None for child in normalized)
-        return [cast(Element, child) for child in normalized]
-
-    def reconcile_children_unkeyed(
-        self,
-        previous_children: Sequence[Element],
-        new_children: Sequence[Element],
-        *,
-        path: RenderPath,
-    ) -> list[Element]:
-        normalized: list[Element] = []
-        shared = min(len(previous_children), len(new_children))
-
-        for idx in range(shared):
-            child_path = join_path(path, idx)
-            normalized_child = self.reconcile_tree(
-                previous_children[idx], new_children[idx], path=child_path
-            )
-            normalized.append(normalized_child)
-
-        for idx in range(len(previous_children) - 1, shared - 1, -1):
-            self.operations.append(RemoveOperation(type="remove", path=path, idx=idx))
-            unmount_element(previous_children[idx])
-
-        for idx in range(shared, len(new_children)):
-            child_path = join_path(path, idx)
-            vdom_child, normalized_child = self.render_tree(
-                new_children[idx], path=child_path
-            )
-            self.operations.append(
-                InsertOperation(type="insert", path=path, idx=idx, data=vdom_child)
-            )
-            normalized.append(normalized_child)
-
-        return normalized
+        return norm
 
     # ------------------------------------------------------------------
     # Prop diffing
@@ -532,7 +475,6 @@ class Renderer:
 
     def diff_props(
         self,
-        *,
         previous: Props,
         current: Props,
         path: RenderPath,
@@ -585,9 +527,7 @@ class Renderer:
                         )
                     )
                 else:
-                    vdom_value, normalized_value = self.render_tree(
-                        value, path=prop_path
-                    )
+                    vdom_value, normalized_value = self.render_tree(value, prop_path)
                     normalized[key] = normalized_value
                     updated[key] = vdom_value
                 continue

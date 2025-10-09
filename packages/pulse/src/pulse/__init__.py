@@ -579,7 +579,7 @@ from pulse.decorators import computed as computed, effect as effect, query as qu
 from pulse.request import PulseRequest as PulseRequest
 
 # Serializer
-from pulse.serializer_v3 import serialize as serialize, deserialize as deserialize
+from pulse.serializer import serialize as serialize, deserialize as deserialize
 
 # VDOM
 from pulse.vdom import (

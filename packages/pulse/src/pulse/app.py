@@ -5,7 +5,6 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
-import json
 import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -18,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from pulse.serializer_v3 import Serialized, serialize, deserialize
+from pulse.serializer import Serialized, serialize, deserialize
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.env import PulseMode, env
@@ -462,7 +461,7 @@ class App:
                 if cleanup:
                     later(float(ttl), _gc_if_unadopted, render_id)
 
-            resp = JSONResponse(result)
+            resp = JSONResponse(serialize(result))
             session.handle_response(resp)
             return resp
 

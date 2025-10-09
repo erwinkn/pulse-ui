@@ -12,7 +12,7 @@ from typing import (
 )
 import json
 import pulse as ps
-from pulse.serializer_v3 import deserialize
+from pulse.serializer import deserialize
 from pulse.helpers import call_flexible, create_task, maybe_await
 from pulse.reactive_extensions import ReactiveDict
 

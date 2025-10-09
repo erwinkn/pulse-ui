@@ -25,23 +25,25 @@ from pulse.vdom import (
 )
 
 
-class InsertOperation(TypedDict):
-    type: Literal["insert"]
-    path: str
-    idx: int
-    data: VDOM
-
-
-class RemoveOperation(TypedDict):
-    type: Literal["remove"]
-    idx: int
-    path: str
-
-
 class ReplaceOperation(TypedDict):
     type: Literal["replace"]
     path: str
     data: VDOM
+
+
+# This payload makes it easy for the client to rebuild an array of React nodes
+# from the previous children array:
+# - Allocate array of size N
+# - For i in 0..N-1, check the following scenarios
+#   - i matches the next index in `new` -> use provided tree
+#   - i matches the next index in `reuse` -> reuse previous child
+#   - otherwise, reuse the element at the same index
+class ReconciliationOperation(TypedDict):
+    type: Literal["reconciliation"]
+    path: str
+    N: int
+    new: tuple[list[int], list[VDOM]]
+    reuse: tuple[list[int], list[int]]
 
 
 class UpdatePropsDelta(TypedDict, total=False):
@@ -77,42 +79,6 @@ class UpdateRenderPropsOperation(TypedDict):
     type: Literal["update_render_props"]
     path: str
     data: PathDelta
-
-
-class MoveOperationData(TypedDict):
-    from_index: int
-    to_index: int
-
-
-class MoveOperation(TypedDict):
-    type: Literal["move"]
-    path: str
-    data: MoveOperationData
-
-
-class ReconciliationInsert(TypedDict):
-    indices: list[int]
-    values: list[VDOM]
-
-
-class ReconciliationMoves(TypedDict):
-    src: list[int]
-    dest: list[int]
-
-
-# This payload makes it easy for the client to rebuild an array of React nodes
-# from the previous children array:
-# - Allocate array of size N
-# - For i in 0..N-1, check the following scenarios
-#   - i matches the next index in `new` -> use provided tree
-#   - i matches the next index in `reuse` -> reuse previous child
-#   - otherwise, reuse the element at the same index
-class ReconciliationOperation(TypedDict):
-    type: Literal["reconciliation"]
-    path: str
-    N: int
-    new: tuple[list[int], list[VDOM]]
-    reuse: tuple[list[int], list[int]]
 
 
 VDOMOperation = Union[
@@ -258,12 +224,12 @@ class Renderer:
 
     def render_tree(self, node: Element, path: RenderPath = "") -> tuple[VDOM, Element]:
         if isinstance(node, ComponentNode):
-            return self._render_component(node, path)
+            return self.render_component(node, path)
         if isinstance(node, Node):
-            return self._render_element(node, path)
+            return self.render_node(node, path)
         return node, node
 
-    def _render_component(
+    def render_component(
         self, component: ComponentNode, path: RenderPath
     ) -> tuple[VDOM, ComponentNode]:
         with component.hooks:
@@ -272,7 +238,7 @@ class Renderer:
         component.contents = normalized_child
         return vdom, component
 
-    def _render_element(self, element: Node, path: RenderPath) -> tuple[VDOMNode, Node]:
+    def render_node(self, element: Node, path: RenderPath) -> tuple[VDOMNode, Node]:
         vdom_node: VDOMNode = {"tag": element.tag}
         if element.key is not None:
             vdom_node["key"] = element.key

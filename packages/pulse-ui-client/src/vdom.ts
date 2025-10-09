@@ -31,17 +31,6 @@ export interface VDOMUpdateBase {
   path: string; // Dot-separated path to the node
 }
 
-export interface InsertUpdate extends VDOMUpdateBase {
-  type: "insert";
-  data: VDOMNode; // The node to insert
-  idx: number;
-}
-
-export interface RemoveUpdate extends VDOMUpdateBase {
-  type: "remove";
-  idx: number;
-}
-
 export interface ReplaceUpdate extends VDOMUpdateBase {
   type: "replace";
   data: VDOMNode; // The new node
@@ -55,13 +44,6 @@ export interface UpdatePropsUpdate extends VDOMUpdateBase {
   };
 }
 
-export interface MoveUpdate extends VDOMUpdateBase {
-  type: "move";
-  data: {
-    from_index: number;
-    to_index: number;
-  };
-}
 export interface ReconciliationUpdate {
   type: "reconciliation";
   path: string;
@@ -91,11 +73,8 @@ export interface UpdateCssRefsUpdate extends VDOMUpdateBase {
 }
 
 export type VDOMUpdate =
-  // | InsertUpdate
-  // | RemoveUpdate
   | ReplaceUpdate
   | UpdatePropsUpdate
-  // | MoveUpdate
   | ReconciliationUpdate
   | UpdateCallbacksUpdate
   | UpdateRenderPropsUpdate

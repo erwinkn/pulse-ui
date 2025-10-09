@@ -5,6 +5,8 @@ import React, {
   lazy,
   Suspense,
   type ComponentType,
+  type ReactElement,
+  type ReactNode,
 } from "react";
 import type {
   ComponentRegistry,
@@ -319,56 +321,25 @@ export function applyUpdates(
               nextProps[k] = renderer.transformValue(path, k, v);
             }
           }
-          // Not passing children -> only update the props
-          return cloneElement(element, nextProps);
+
+          // If some props were removed, use `createElement` to fully override
+          // the props, as `cloneElement` shallowly merges the new props with
+          // the old ones.
+          const removedSomething = (delta.remove?.length ?? 0) > 0;
+          if (removedSomething) {
+            // Preserve key + ref
+            nextProps["key"] = element.key;
+            nextProps["ref"] = (element as any).ref;
+            return createElement(
+              element.type,
+              nextProps,
+              ...ensureChildrenArray(element)
+            );
+          } else {
+            // Don't touch children. Key and ref are transferred by cloneElement.
+            return cloneElement(element, nextProps);
+          }
         }
-        // case "insert": {
-        //   assertIsElement(node, parts, depth);
-        //   const element = node as React.ReactElement;
-        //   const children = ensureChildrenArray(element);
-        //   const childPath = currentPath
-        //     ? `${currentPath}.${update.idx}`
-        //     : String(update.idx);
-        //   children.splice(
-        //     update.idx,
-        //     0,
-        //     renderer.renderNode(update.data, childPath)
-        //   );
-        //   // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
-        //   return cloneElement(element, null!, ...children);
-        // }
-        // case "remove": {
-        //   assertIsElement(node, parts, depth);
-        //   const element = node as React.ReactElement;
-        //   const children = ensureChildrenArray(element);
-        //   children.splice(update.idx, 1);
-        //   // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
-        //   return cloneElement(element, null!, ...children);
-        // }
-        // case "move": {
-        //   assertIsElement(node, parts, depth);
-        //   const element = node as React.ReactElement;
-        //   const children = ensureChildrenArray(element);
-        //   const item = children.splice(update.data.from_index, 1)[0];
-        //   children.splice(update.data.to_index, 0, item);
-
-        //   // Rebind callbacks for affected index range (indices whose path changed)
-        //   const start = Math.min(update.data.from_index, update.data.to_index);
-        //   const end = Math.max(update.data.from_index, update.data.to_index);
-        //   for (let i = start; i <= end; i++) {
-        //     const childPath = currentPath ? `${currentPath}.${i}` : String(i);
-        //     if (renderer.hasAnyCallbackUnder(childPath)) {
-        //       children[i] = rebindCallbacksInSubtree(
-        //         children[i],
-        //         childPath,
-        //         renderer
-        //       ) as any;
-        //     }
-        //   }
-
-        //   // Only update the children (TypeScript doesn't like the `null`, but that's what the official React docs say)
-        //   return cloneElement(element, null!, ...children);
-        // }
         case "reconciliation": {
           assertIsElement(node, parts, depth);
           const element = node as React.ReactElement;

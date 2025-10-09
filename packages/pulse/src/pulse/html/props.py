@@ -4,7 +4,7 @@ from typing import Any, List, Literal, TypedDict, Union
 
 from pulse.css import CssReference
 from pulse.helpers import CSSProperties
-from pulse.html.elements import (  # noqa: F401
+from pulse.html.elements import (
     GenericHTMLElement,
     HTMLAnchorElement,
     HTMLAreaElement,

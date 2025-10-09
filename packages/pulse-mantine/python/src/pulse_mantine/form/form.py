@@ -129,8 +129,6 @@ class MantineForm(ps.State, Generic[TForm]):
         # Forward to user onSubmit if provided
         if self._on_submit is not None:
             await maybe_await(call_flexible(self._on_submit, result))  # pyright: ignore[reportArgumentType]
-        else:
-            print("Received form data (reshaped):", result)
 
     # Mount the React component, wiring messages and passing through props
     def render(

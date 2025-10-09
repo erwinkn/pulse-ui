@@ -41,8 +41,6 @@ def Counter(session_name: str, key_prefix: str):
     def inc():
         state.count = state.count + 1
 
-    print(f"Rendering counter {key_prefix}:{session_name} with count {state.count}")
-
     # Render current count + a callback
     return ps.div(key=f"{key_prefix}:{session_name}")[
         ps.span(id=f"count-{session_name}")[str(state.count)],

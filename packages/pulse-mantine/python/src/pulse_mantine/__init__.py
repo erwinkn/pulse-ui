@@ -480,7 +480,6 @@ def __getattr__(name: str) -> Any:
     # Ensure pulse-mantine Python and JS libraries match versions  
     value = getattr(module, name)
     if isinstance(value, pulse.ReactComponent) and value.src == 'pulse-mantine':
-        print(f"Setting version constraint {__version__} on component {value.name}")
         value.version = __version__
     globals()[name] = value
     return value

@@ -1,12 +1,11 @@
 import re
-from typing import Callable, Optional, Sequence, TypedDict, cast
+from typing import Optional, Sequence, TypedDict, cast
 from dataclasses import dataclass, field
 
 from pulse.react_component import ReactComponent
 from pulse.css import CssModule, CssImport
-from pulse.css import CssModule
 from pulse.reactive_extensions import ReactiveDict
-from pulse.vdom import Node, Component
+from pulse.vdom import Component
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"

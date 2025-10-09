@@ -14,7 +14,7 @@ from typing import (
     TypeVar,
 )
 
-from pulse.types import EventHandler1
+from pulse.types.event_handler import EventHandler1
 from pulse.html.elements import (
     HTMLDialogElement,
     HTMLElement,

@@ -4,7 +4,7 @@ from typing import Callable, overload, cast, TypeVar
 
 from pulse.state import State
 
-from .core import HookMetadata, HookState, hooks
+from pulse.hooks.core import HookMetadata, HookState, hooks
 
 S = TypeVar("S", bound=State)
 S1 = TypeVar("S1", bound=State)
@@ -51,7 +51,9 @@ class StatesHookState(HookState):
 
     def ensure_not_called(self) -> None:
         if self._called:
-            raise RuntimeError("`pulse.states` can only be called once per component render")
+            raise RuntimeError(
+                "`pulse.states` can only be called once per component render"
+            )
 
     def mark_called(self) -> None:
         self._called = True

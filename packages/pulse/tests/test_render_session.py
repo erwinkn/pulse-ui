@@ -116,10 +116,13 @@ def mount_with_listener(session: RenderSession, path: str):
 
 
 def extract_count_from_ctx(session: RenderSession, path: str) -> int:
-    # Read latest VDOM by re-rendering from the RenderRoot and inspecting it
+    # Read latest VDOM by re-rendering from the RenderTree and inspecting it
     mount = session.route_mounts[path]
     with ps.PulseContext.update(render=session, route=mount.route):
-        vdom, *_ = mount.root.render_vdom()
+        vdom = mount.tree.render()
+        normalized_root = getattr(mount.tree, "_normalized", None)
+        if normalized_root is not None:
+            mount.element = normalized_root
     vdom_dict = cast(dict, vdom)
     children = cast(list, (vdom_dict.get("children", []) or []))
     span = cast(dict, children[0])
@@ -217,7 +220,10 @@ def make_global_routes() -> RouteTree:
 def extract_global_count(session: RenderSession, path: str) -> int:
     mount = session.route_mounts[path]
     with ps.PulseContext.update(render=session, route=mount.route):
-        vdom, *_ = mount.root.render_vdom()
+        vdom = mount.tree.render()
+        normalized_root = getattr(mount.tree, "_normalized", None)
+        if normalized_root is not None:
+            mount.element = normalized_root
     vdom_dict = cast(dict, vdom)
     children = cast(list, (vdom_dict.get("children", []) or []))
     span = cast(dict, children[0])

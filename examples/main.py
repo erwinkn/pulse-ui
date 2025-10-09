@@ -232,16 +232,11 @@ def Leaf(label: str, key=None):
 
 @ps.component
 def Row(use_keys: bool, swapped: bool):
-    if not swapped:
-        return ps.div(className="grid grid-cols-2 gap-4")[
-            Leaf(label="Left", key="left" if use_keys else None),
-            Leaf(label="Right", key="right" if use_keys else None),
-        ]
-    else:
-        return ps.div(className="grid grid-cols-2 gap-4")[
-            Leaf(label="Right", key="right" if use_keys else None),
-            Leaf(label="Left", key="left" if use_keys else None),
-        ]
+    keys = ("Right", "Left") if swapped else ("Left", "Right")
+    return ps.div(className="grid grid-cols-2 gap-4")[
+        ps.div(Leaf(label="Left"), key=keys[0] if use_keys else None),
+        ps.div(Leaf(label="Right"), key=keys[1] if use_keys else None),
+    ]
 
 
 @ps.component

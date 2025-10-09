@@ -1,11 +1,8 @@
-from __future__ import annotations
-
 import inspect
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
-from itertools import count
-from typing import Any, Callable, Generic, Mapping, TypeVar, cast
+from typing import Any, Callable, Generic, Mapping, TypeVar
 
 from pulse.helpers import call_flexible
 

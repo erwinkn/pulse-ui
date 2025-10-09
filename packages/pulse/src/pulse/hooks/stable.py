@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, TypeVar, cast, overload
 
-from .core import HookMetadata, HookState, hooks, MISSING
+from pulse.hooks.core import HookMetadata, HookState, hooks, MISSING
 
 T = TypeVar("T")
 TCallable = TypeVar("TCallable", bound=Callable)

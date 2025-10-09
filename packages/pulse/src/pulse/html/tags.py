@@ -21,7 +21,8 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
         """Create a UITreeNode for this tag."""
         if default_props:
             props = default_props | props
-        return Node(tag=name, props=props, children=children)
+        key = props.pop("key", None)
+        return Node(tag=name, key=key, props=props, children=children)
 
     return create_element
 
@@ -43,8 +44,10 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
         """Create a self-closing UITreeNode for this tag."""
         if default_props:
             props = default_props | props
+        key = props.pop("key", None)
         return Node(
             tag=name,
+            key=key,
             props=props,
             children=(),  # Self-closing tags never have children
             allow_children=False,
@@ -173,7 +176,7 @@ fragment = define_tag("$$fragment")
 
 # SVG tags
 svg = define_tag("svg")
-circle = define_tag("circle") 
+circle = define_tag("circle")
 ellipse = define_tag("ellipse")
 g = define_tag("g")
 line = define_tag("line")

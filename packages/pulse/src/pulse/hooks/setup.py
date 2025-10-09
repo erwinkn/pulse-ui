@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, Tuple, TypeVar, cast, ParamSpec
 
 from pulse.reactive import Effect, Scope, Signal
 
-from .core import HookMetadata, HookState, hooks
+from pulse.hooks.core import HookMetadata, HookState, hooks
 
 P = ParamSpec("P")
 T = TypeVar("T")

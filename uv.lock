@@ -690,7 +690,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse" }]
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.26"
+version = "0.1.27"
 source = { editable = "packages/pulse" }
 dependencies = [
     { name = "fastapi" },

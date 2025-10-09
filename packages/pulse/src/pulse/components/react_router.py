@@ -1,7 +1,7 @@
 from typing import Literal, Optional, TypedDict, Unpack
 from pulse.html.props import HTMLAnchorProps
 from pulse.vdom import Child
-from ..react_component import DEFAULT, react_component
+from pulse.react_component import DEFAULT, react_component
 
 
 class LinkPath(TypedDict):

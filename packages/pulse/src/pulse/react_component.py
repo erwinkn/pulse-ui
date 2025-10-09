@@ -172,8 +172,8 @@ class PropSpec:
         result: dict[str, Any] = {}
         known_keys = self.keys()
 
-        # Unknown keys handling
-        unknown_keys = props.keys() - known_keys
+        # Unknown keys handling (exclude 'key' as it's special)
+        unknown_keys = props.keys() - known_keys - {"key"}
         if not self.allow_unspecified and unknown_keys:
             bad = ", ".join(repr(k) for k in sorted(unknown_keys))
             raise ValueError(f"Unexpected prop(s) for component '{comp_tag}': {bad}")
@@ -335,7 +335,7 @@ class ReactComponent(Generic[P], Imported):
         return f"ReactComponent(name='{self.name}', src='{self.src}'{prop_part}{default_part}{lazy_part}{props_part})"
 
     def __call__(self, *children: P.args, **props: P.kwargs) -> Node:
-        key = props.pop("key", None)
+        key = props.get("key")
         if key is not None and not isinstance(key, str):
             raise ValueError("key must be a string or None")
         # Apply optional props specification: fill defaults, enforce required,
@@ -349,7 +349,6 @@ class ReactComponent(Generic[P], Imported):
             key=key,
             props=real_props,
             children=cast(tuple[Child], children),
-            lazy=self.lazy,
         )
 
 

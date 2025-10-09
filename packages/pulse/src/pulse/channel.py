@@ -13,9 +13,9 @@ from pulse.messages import ClientChannelRequestMessage, ClientChannelResponseMes
 from pulse.routing import normalize_path
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .app import App
-    from .render_session import RenderSession
-    from .user_session import UserSession
+    from pulse.app import App
+    from pulse.render_session import RenderSession
+    from pulse.user_session import UserSession
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,9 @@ class PulseChannel:
         if self._closed:
             raise PulseChannelClosed(f"Channel '{self.id}' is closed")
 
-    async def _dispatch(self, event: str, payload: Any, request_id: str | None) -> Any | None:
+    async def _dispatch(
+        self, event: str, payload: Any, request_id: str | None
+    ) -> Any | None:
         handlers = list(self._handlers.get(event, ()))
         if not handlers:
             return None
@@ -158,7 +160,9 @@ class PulseChannel:
                 if asyncio.iscoroutine(result):
                     result = await result
             except Exception as exc:  # noqa: BLE001
-                logger.exception("Error in channel handler '%s' for event '%s'", self.id, event)
+                logger.exception(
+                    "Error in channel handler '%s' for event '%s'", self.id, event
+                )
                 raise exc
             if request_id is not None and result is not None:
                 return result
@@ -232,7 +236,7 @@ class ChannelsManager:
         response_to = message.get("responseTo")
         if not response_to:
             return
-        
+
         if error := message.get("error") is not None:
             self._resolve_pending_error(response_to, error)
         else:
@@ -253,7 +257,9 @@ class ChannelsManager:
             return
 
         if channel.render_id != render.id or channel.session_id != session.sid:
-            logger.warning("Ignoring channel message for mismatched context: %s", channel_id)
+            logger.warning(
+                "Ignoring channel message for mismatched context: %s", channel_id
+            )
             return
 
         event_value = message.get("event")
@@ -271,7 +277,9 @@ class ChannelsManager:
 
         async def _invoke() -> None:
             try:
-                with PulseContext.update(session=session, render=render, route=route_ctx):
+                with PulseContext.update(
+                    session=session, render=render, route=route_ctx
+                ):
                     result = await channel._dispatch(event, payload, request_id)
             except Exception as exc:  # noqa: BLE001
                 if request_id:
@@ -299,7 +307,9 @@ class ChannelsManager:
         future: "asyncio.Future[Any]",
         channel_id: str,
     ) -> None:
-        self._pending_requests[request_id] = _PendingRequest(future=future, channel_id=channel_id)
+        self._pending_requests[request_id] = _PendingRequest(
+            future=future, channel_id=channel_id
+        )
 
     def _resolve_pending_success(self, request_id: str, payload: Any) -> None:
         pending = self._pending_requests.pop(request_id, None)
@@ -320,7 +330,9 @@ class ChannelsManager:
         else:
             pending.future.set_exception(RuntimeError(str(error)))
 
-    def _send_error_response(self, channel_id: str, request_id: str, message: str) -> None:
+    def _send_error_response(
+        self, channel_id: str, request_id: str, message: str
+    ) -> None:
         channel = self._channels.get(channel_id)
         if channel is None:
             self._resolve_pending_error(request_id, PulseChannelClosed(message))

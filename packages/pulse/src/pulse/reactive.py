@@ -20,8 +20,6 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
-
-
 class Signal(Generic[T]):
     def __init__(self, value: T, name: Optional[str] = None):
         self.value = value

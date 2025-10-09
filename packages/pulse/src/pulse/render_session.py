@@ -17,10 +17,11 @@ from pulse.messages import (
     ServerErrorMessage,
 )
 from pulse.reactive import Effect, flush_effects
-from pulse.reconciler import RenderRoot
+from pulse.renderer import RenderTree
+from pulse.vdom import Element
 from pulse.routing import Layout, Route, RouteContext, RouteTree, normalize_path
 from pulse.state import State
-from pulse.hooks import RedirectInterrupt, NotFoundInterrupt
+from pulse.hooks.runtime import RedirectInterrupt, NotFoundInterrupt
 
 
 logger = logging.getLogger(__file__)
@@ -31,10 +32,12 @@ class RouteMount:
         self, render: "RenderSession", route: Route | Layout, route_info: RouteInfo
     ) -> None:
         self.render = render
-        self.root = RenderRoot(route.render.fn)
         self.route = RouteContext(route_info, route)
         self.effect: Optional[Effect] = None
         self._pulse_ctx: PulseContext | None = None
+        self.element: Element = route.render()
+        self.tree = RenderTree(self.element)
+        self.rendered: bool = False
 
 
 class RenderSession:
@@ -143,7 +146,7 @@ class RenderSession:
     def execute_callback(self, path: str, key: str, args: list | tuple):
         mount = self.route_mounts[path]
         try:
-            cb = mount.root.callbacks[key]
+            cb = mount.tree.callbacks[key]
             fn, n_params = cb.fn, cb.n_args
             res = fn(*args[:n_params])
             if iscoroutine(res):
@@ -247,14 +250,18 @@ class RenderSession:
             # expect initial mount. Return current tree as a full VDOM.
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                vdom, callbacks, render_props, css_refs = mount.root.render_vdom()
+                vdom = mount.tree.render()
+                normalized_root = getattr(mount.tree, "_normalized", None)
+                if normalized_root is not None:
+                    mount.element = normalized_root
+                mount.rendered = True
                 return ServerInitMessage(
                     type="vdom_init",
                     path=path,
                     vdom=vdom,
-                    callbacks=sorted(callbacks.keys()),
-                    render_props=sorted(render_props),
-                    css_refs=sorted(css_refs),
+                    callbacks=sorted(mount.tree.callbacks.keys()),
+                    render_props=sorted(mount.tree.render_props),
+                    css_refs=sorted(mount.tree.css_refs),
                 )
 
         captured: ServerInitMessage | ServerNavigateToMessage | None = None
@@ -294,14 +301,18 @@ class RenderSession:
         if captured is None:
             mount = self.get_route_mount(path)
             with PulseContext.update(route=mount.route):
-                vdom, callbacks, render_props, css_refs = mount.root.render_vdom()
+                vdom = mount.tree.render()
+                normalized_root = getattr(mount.tree, "_normalized", None)
+                if normalized_root is not None:
+                    mount.element = normalized_root
+                mount.rendered = True
             return ServerInitMessage(
                 type="vdom_init",
                 path=path,
                 vdom=vdom,
-                callbacks=sorted(callbacks.keys()),
-                render_props=sorted(render_props),
-                css_refs=sorted(css_refs),
+                callbacks=sorted(mount.tree.callbacks.keys()),
+                render_props=sorted(mount.tree.render_props),
+                css_refs=sorted(mount.tree.css_refs),
             )
 
         return captured
@@ -328,13 +339,21 @@ class RenderSession:
     def render(self, path: str, route_info: Optional[RouteInfo] = None):
         mount = self.create_route_mount(path, route_info)
         with PulseContext.update(route=mount.route):
-            vdom, *_ = mount.root.render_vdom()
+            vdom = mount.tree.render()
+            normalized_root = getattr(mount.tree, "_normalized", None)
+            if normalized_root is not None:
+                mount.element = normalized_root
+            mount.rendered = True
             return vdom
 
     def rerender(self, path: str):
         mount = self.get_route_mount(path)
         with PulseContext.update(route=mount.route):
-            return mount.root.render_diff()
+            ops = mount.tree.diff(mount.element)
+            normalized_root = getattr(mount.tree, "_normalized", None)
+            if normalized_root is not None:
+                mount.element = normalized_root
+            return ops
 
     def mount(self, path: str, route_info: RouteInfo):
         if path in self.route_mounts:
@@ -352,26 +371,31 @@ class RenderSession:
             # Always ensure both render and route are present in context
             with PulseContext.update(session=session, render=self, route=mount.route):
                 try:
-                    if mount.root.render_count == 0:
-                        vdom, callbacks, render_props, css_refs = (
-                            mount.root.render_vdom()
-                        )
+                    if not mount.rendered:
+                        vdom = mount.tree.render()
+                        normalized_root = getattr(mount.tree, "_normalized", None)
+                        if normalized_root is not None:
+                            mount.element = normalized_root
+                        mount.rendered = True
                         self.send(
                             ServerInitMessage(
                                 type="vdom_init",
                                 path=path,
                                 vdom=vdom,
-                                callbacks=sorted(callbacks.keys()),
-                                render_props=sorted(render_props),
-                                css_refs=sorted(css_refs),
+                                callbacks=sorted(mount.tree.callbacks.keys()),
+                                render_props=sorted(mount.tree.render_props),
+                                css_refs=sorted(mount.tree.css_refs),
                             )
                         )
                     else:
-                        result = mount.root.render_diff()
-                        if result.ops:
+                        ops = mount.tree.diff(mount.element)
+                        normalized_root = getattr(mount.tree, "_normalized", None)
+                        if normalized_root is not None:
+                            mount.element = normalized_root
+                        if ops:
                             self.send(
                                 ServerUpdateMessage(
-                                    type="vdom_update", path=path, ops=result.ops
+                                    type="vdom_update", path=path, ops=ops
                                 )
                             )
                 except RedirectInterrupt as r:
@@ -415,7 +439,7 @@ class RenderSession:
             return
         try:
             mount = self.route_mounts.pop(path)
-            mount.root.unmount()
+            mount.tree.unmount()
             if mount.effect:
                 mount.effect.dispose()
         except Exception as e:  # noqa: BLE001

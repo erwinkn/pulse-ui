@@ -1,7 +1,7 @@
 from dataclasses import KW_ONLY, dataclass
 from typing import TYPE_CHECKING, Literal, Optional, Sequence, TypedDict
 from fastapi import Request, Response
-from pulse.hooks import set_cookie
+from pulse.hooks.runtime import set_cookie
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:

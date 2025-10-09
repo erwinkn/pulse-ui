@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import TYPE_CHECKING
 
-from .routing import RouteContext
+from pulse.routing import RouteContext
 
 if TYPE_CHECKING:
-    from .app import App
-    from .render_session import RenderSession
-    from .user_session import UserSession
+    from pulse.app import App
+    from pulse.render_session import RenderSession
+    from pulse.user_session import UserSession
 
 
 @dataclass

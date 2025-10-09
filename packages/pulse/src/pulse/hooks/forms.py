@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, cast
+from typing import TYPE_CHECKING, Callable
 
-from .core import HookMetadata, HookState, hooks
+from pulse.hooks.core import HookMetadata, HookState, hooks
 
 if TYPE_CHECKING:
-    from ..form import ManualForm
+    from pulse.form import ManualForm
 
 
 class FormStorage(HookState):
@@ -68,7 +68,6 @@ internal_forms_hook = hooks.create(
         description="Internal storage for ps.Form manual forms",
     ),
 )
-
 
 
 __all__ = ["FormStorage", "internal_forms_hook"]

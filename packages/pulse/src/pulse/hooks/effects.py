@@ -4,7 +4,7 @@ from typing import Callable, cast
 
 from pulse.reactive import Effect, EffectFn, Untrack
 
-from .core import HookMetadata, HookState, hooks
+from pulse.hooks.core import HookMetadata, HookState, hooks
 
 
 class EffectsHookState(HookState):
@@ -39,7 +39,9 @@ class EffectsHookState(HookState):
 
     def ensure_not_called(self) -> None:
         if self._called:
-            raise RuntimeError("`pulse.effects` can only be called once per component render")
+            raise RuntimeError(
+                "`pulse.effects` can only be called once per component render"
+            )
 
     def mark_called(self) -> None:
         self._called = True

@@ -4,7 +4,7 @@ from typing import Any, List, Literal, TypedDict, Union
 
 from pulse.css import CssReference
 from pulse.helpers import CSSProperties
-from pulse.html.elements import (  # noqa: F401
+from pulse.html.elements import (
     GenericHTMLElement,
     HTMLAnchorElement,
     HTMLAreaElement,
@@ -80,6 +80,7 @@ from pulse.html.events import (
 Booleanish = Literal[True, False, "true", "false"]
 CrossOrigin = Literal["anonymous", "use-credentials", ""] | None
 ClassName = str | CssReference
+
 
 class BaseHTMLProps(TypedDict, total=False):
     # React-specific Attributes

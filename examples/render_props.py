@@ -57,9 +57,10 @@ def UnkeyedVsKeyedSwapSection():
     labels = ["Alpha", "Beta"]
 
     def render_item(label: str, *, use_key: bool) -> ps.Element:
-        return ps.div(className="rounded border p-3 space-y-2")[
+        return ps.div(
+            className="rounded border p-3 space-y-2", key=label if use_key else None
+        )[
             RenderPropComponent(
-                key=label if use_key else None,
                 left=RenderPropCounter(label=f"{label} left"),
             )[
                 ps.div(
@@ -91,7 +92,10 @@ def UnkeyedVsKeyedSwapSection():
                         className="btn-primary btn-sm",
                     ),
                 ],
-                *[render_item(label, use_key=False) for label in ordered(labels, state.unkeyed_swapped)],
+                *[
+                    render_item(label, use_key=False)
+                    for label in ordered(labels, state.unkeyed_swapped)
+                ],
             ],
             ps.div(className="space-y-2")[
                 ps.div(className="flex justify-between items-center")[
@@ -102,7 +106,10 @@ def UnkeyedVsKeyedSwapSection():
                         className="btn-primary btn-sm",
                     ),
                 ],
-                *[render_item(label, use_key=True) for label in ordered(labels, state.keyed_swapped)],
+                *[
+                    render_item(label, use_key=True)
+                    for label in ordered(labels, state.keyed_swapped)
+                ],
             ],
         ],
     ]
@@ -112,7 +119,9 @@ def UnkeyedVsKeyedSwapSection():
 def CounterWithControlRenderProps():
     state = ps.states(CounterState("control"))
     return ps.div(className="space-y-3")[
-        ps.h2("Buttons supplied through render props", className="text-xl font-semibold"),
+        ps.h2(
+            "Buttons supplied through render props", className="text-xl font-semibold"
+        ),
         RenderPropComponent(
             left=ps.button("−", onClick=state.decrement, className="btn-secondary"),
             right=ps.button("+", onClick=state.increment, className="btn-secondary"),
@@ -148,7 +157,10 @@ def DynamicRenderPropUpdates():
     label = state.labels[state.index]
     button_class = "btn-primary" if state.active else "btn-secondary"
     return ps.div(className="space-y-3")[
-        ps.h2("Updating props and callbacks inside render props", className="text-xl font-semibold"),
+        ps.h2(
+            "Updating props and callbacks inside render props",
+            className="text-xl font-semibold",
+        ),
         RenderPropComponent(
             left=ps.button(
                 f"Toggle ({label})",
@@ -156,7 +168,9 @@ def DynamicRenderPropUpdates():
                 onClick=state.toggle,
                 disabled=state.active and state.index == 0,
             ),
-            right=ps.button("Next label", className="btn-light btn-sm", onClick=state.cycle),
+            right=ps.button(
+                "Next label", className="btn-light btn-sm", onClick=state.cycle
+            ),
         )[
             ps.p(
                 "The button on the left lives inside a render prop and updates both its class and disabled state as local state changes.",
@@ -181,15 +195,17 @@ def NestedRenderPropsSection():
         return RenderPropComponent(
             left=RenderPropCounter(label=f"{label} inner"),
             right=ps.span(f"Nested child: {label}", className="text-xs text-slate-600"),
-        )[
-            ps.span(f"Inner payload {label}")
-        ]
+        )[ps.span(f"Inner payload {label}")]
 
-    left_label, right_label = ("Blue", "Orange") if not state.swap else ("Orange", "Blue")
+    left_label, right_label = (
+        ("Blue", "Orange") if not state.swap else ("Orange", "Blue")
+    )
 
     return ps.div(className="space-y-3")[
         ps.h2("Nested render props", className="text-xl font-semibold"),
-        ps.button("Swap inner order", onClick=state.toggle, className="btn-primary btn-sm"),
+        ps.button(
+            "Swap inner order", onClick=state.toggle, className="btn-primary btn-sm"
+        ),
         RenderPropComponent(
             left=inner(left_label),
             right=RenderPropCounter(label=f"{right_label} outer"),

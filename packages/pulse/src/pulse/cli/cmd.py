@@ -26,13 +26,13 @@ from pulse.helpers import (
     remove_web_lock,
 )
 
-from .helpers import (
+from pulse.cli.helpers import (
     find_available_port,
     install_hints_for_mkcert,
     load_app_from_target,
     parse_app_target,
 )
-from .terminal import PulseTerminalViewer
+from pulse.cli.terminal import PulseTerminalViewer
 
 cli = typer.Typer(
     name="pulse",

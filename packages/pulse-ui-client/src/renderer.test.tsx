@@ -55,7 +55,10 @@ describe("applyReactTreeUpdates", () => {
 
   it("hydrates callbacks from initial map", () => {
     const { renderer, invokeCallback } = makeRenderer(["onClick"]);
-    const tree = renderer.renderNode({ tag: "button" });
+    const tree = renderer.renderNode({
+      tag: "button",
+      props: { onClick: "$cb" },
+    });
     const button = tree as React.ReactElement;
     expect(typeof (button.props as any).onClick).toBe("function");
     (button.props as any).onClick("value");
@@ -76,6 +79,11 @@ describe("applyReactTreeUpdates", () => {
         type: "update_callbacks",
         path: "",
         data: { add: ["onClick"] },
+      },
+      {
+        type: "update_props",
+        path: "",
+        data: { set: { onClick: "$cb" } },
       },
     ];
     tree = applyUpdates(tree, ops, renderer);
@@ -111,7 +119,7 @@ describe("applyReactTreeUpdates", () => {
         {
           type: "update_css_refs",
           path: "",
-          data: { set: ["className"] },
+          data: { add: ["className"] },
         },
         {
           type: "update_props",
@@ -173,56 +181,158 @@ describe("applyReactTreeUpdates", () => {
     expect(leafChildren[0]).toBe("B");
   });
 
-  it("inserts and removes children at nested parent path", () => {
+  it("applies reconciliation with new items", () => {
     const { renderer } = makeRenderer();
     const initialVDOM: VDOMNode = {
       tag: "div",
-      children: [{ tag: "div", children: [{ tag: "span", children: ["A"] }] }],
+      children: [
+        { tag: "span", children: ["A"] },
+        { tag: "span", children: ["B"] },
+      ],
     };
     let tree = renderer.renderNode(initialVDOM);
 
-    // Insert at index 1 under parent path 0
-    tree = applyUpdates(
-      tree,
-      [
-        {
-          type: "insert",
-          path: "0",
-          idx: 1,
-          data: { tag: "span", children: ["B"] },
-        },
-      ],
-      renderer
-    );
-    let root = tree as React.ReactElement;
-    let p0 = childrenArray(root)[0] as React.ReactElement;
-    let kids = childrenArray(p0);
-    expect(kids).toHaveLength(2);
-    expect((kids[0] as React.ReactElement).type).toBe("span");
-    expect((kids[1] as React.ReactElement).type).toBe("span");
+    const ops: VDOMUpdate[] = [
+      {
+        type: "reconciliation",
+        path: "",
+        N: 3,
+        new: [[2], [{ tag: "span", children: ["C"] }]],
+        reuse: [
+          [0, 1],
+          [0, 1],
+        ],
+      },
+    ];
 
-    // Remove the first child under parent path 0 (index 0)
-    tree = applyUpdates(
-      tree,
-      [
-        {
-          type: "remove",
-          path: "0",
-          idx: 0,
-        },
-      ],
-      renderer
-    );
-    root = tree as React.ReactElement;
-    p0 = childrenArray(root)[0] as React.ReactElement;
-    kids = childrenArray(p0);
-    expect(kids).toHaveLength(1);
-    const only = kids[0] as React.ReactElement;
-    const onlyText = childrenArray(only)[0];
-    expect(onlyText).toBe("B");
+    tree = applyUpdates(tree, ops, renderer);
+    const root = tree as React.ReactElement;
+    const kids = childrenArray(root) as React.ReactElement[];
+    expect(kids).toHaveLength(3);
+    expect(childrenArray(kids[0])[0]).toBe("A");
+    expect(childrenArray(kids[1])[0]).toBe("B");
+    expect(childrenArray(kids[2])[0]).toBe("C");
   });
 
-  it("moves children within a nested parent (path points to parent)", () => {
+  it("applies reconciliation with moves", () => {
+    const { renderer } = makeRenderer();
+    const initialVDOM: VDOMNode = {
+      tag: "div",
+      children: [
+        { tag: "span", children: ["A"] },
+        { tag: "span", children: ["B"] },
+        { tag: "span", children: ["C"] },
+      ],
+    };
+    let tree = renderer.renderNode(initialVDOM);
+
+    const ops: VDOMUpdate[] = [
+      {
+        type: "reconciliation",
+        path: "",
+        N: 3,
+        new: [[], []],
+        reuse: [
+          [0, 2],
+          [2, 0],
+        ], // Move A to index 2, C to index 0
+      },
+    ];
+
+    tree = applyUpdates(tree, ops, renderer);
+    const root = tree as React.ReactElement;
+    const kids = childrenArray(root) as React.ReactElement[];
+    expect(kids).toHaveLength(3);
+    expect(childrenArray(kids[0])[0]).toBe("C");
+    expect(childrenArray(kids[1])[0]).toBe("B");
+    expect(childrenArray(kids[2])[0]).toBe("A");
+  });
+
+  it("applies reconciliation with mixed new items and moves", () => {
+    const { renderer } = makeRenderer();
+    const initialVDOM: VDOMNode = {
+      tag: "div",
+      children: [
+        { tag: "span", children: ["A"] },
+        { tag: "span", children: ["B"] },
+        { tag: "span", children: ["C"] },
+      ],
+    };
+    let tree = renderer.renderNode(initialVDOM);
+
+    const ops: VDOMUpdate[] = [
+      {
+        type: "reconciliation",
+        path: "",
+        N: 4,
+        new: [
+          [1, 3],
+          [
+            { tag: "span", children: ["D"] },
+            { tag: "span", children: ["E"] },
+          ],
+        ],
+        reuse: [
+          [0, 2],
+          [0, 2],
+        ], // Keep A at 0, C at 2
+      },
+    ];
+
+    tree = applyUpdates(tree, ops, renderer);
+    const root = tree as React.ReactElement;
+    const kids = childrenArray(root) as React.ReactElement[];
+    expect(kids).toHaveLength(4);
+    expect(childrenArray(kids[0])[0]).toBe("A");
+    expect(childrenArray(kids[1])[0]).toBe("D");
+    expect(childrenArray(kids[2])[0]).toBe("C");
+    expect(childrenArray(kids[3])[0]).toBe("E");
+  });
+
+  it("applies reconciliation with callback rebinding", () => {
+    const { renderer, invokeCallback } = makeRenderer([
+      "0.onClick",
+      "1.onClick",
+    ]);
+    const initialVDOM: VDOMNode = {
+      tag: "div",
+      children: [
+        { tag: "button", props: { onClick: "$cb" }, children: ["A"] },
+        { tag: "button", props: { onClick: "$cb" }, children: ["B"] },
+      ],
+    };
+    let tree = renderer.renderNode(initialVDOM);
+
+    const ops: VDOMUpdate[] = [
+      {
+        type: "reconciliation",
+        path: "",
+        N: 2,
+        new: [[], []],
+        reuse: [
+          [0, 1],
+          [1, 0],
+        ], // Swap positions
+      },
+    ];
+
+    tree = applyUpdates(tree, ops, renderer);
+    const root = tree as React.ReactElement;
+    const kids = childrenArray(root) as React.ReactElement[];
+
+    // Test that callbacks are properly rebound
+    (kids[0].props as any).onClick("from-B");
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "0.onClick", [
+      "from-B",
+    ]);
+
+    (kids[1].props as any).onClick("from-A");
+    expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", [
+      "from-A",
+    ]);
+  });
+
+  it("applies reconciliation with nested path", () => {
     const { renderer } = makeRenderer();
     const initialVDOM: VDOMNode = {
       tag: "div",
@@ -232,25 +342,33 @@ describe("applyReactTreeUpdates", () => {
           children: [
             { tag: "span", children: ["A"] },
             { tag: "span", children: ["B"] },
-            { tag: "span", children: ["C"] },
           ],
         },
       ],
     };
     let tree = renderer.renderNode(initialVDOM);
+
     const ops: VDOMUpdate[] = [
       {
-        type: "move",
-        path: "0", // parent path
-        data: { from_index: 0, to_index: 1 },
+        type: "reconciliation",
+        path: "0",
+        N: 3,
+        new: [[2], [{ tag: "span", children: ["C"] }]],
+        reuse: [
+          [0, 1],
+          [0, 1],
+        ],
       },
     ];
+
     tree = applyUpdates(tree, ops, renderer);
     const root = tree as React.ReactElement;
-    const p0 = childrenArray(root)[0] as React.ReactElement;
-    const kids = childrenArray(p0) as React.ReactElement[];
-    const texts = kids.map((k) => childrenArray(k)[0]);
-    expect(texts).toEqual(["B", "A", "C"]);
+    const innerDiv = childrenArray(root)[0] as React.ReactElement;
+    const kids = childrenArray(innerDiv) as React.ReactElement[];
+    expect(kids).toHaveLength(3);
+    expect(childrenArray(kids[0])[0]).toBe("A");
+    expect(childrenArray(kids[1])[0]).toBe("B");
+    expect(childrenArray(kids[2])[0]).toBe("C");
   });
 
   it("applies nested callback additions via update", () => {
@@ -271,15 +389,17 @@ describe("applyReactTreeUpdates", () => {
         path: "",
         data: { add: ["0.0.onClick"] },
       },
+      {
+        type: "update_props",
+        path: "0.0",
+        data: { set: { onClick: "$cb" } },
+      },
     ];
     tree = applyUpdates(tree, ops, renderer);
     const root = tree as React.ReactElement;
     const innerDiv = childrenArray(root)[0] as React.ReactElement;
     const button = childrenArray(innerDiv)[0] as React.ReactElement;
     expect(typeof (button.props as any).onClick).toBe("function");
-    expect(
-      Array.from(((renderer as any).callbackProps as Map<string, any>).keys())
-    ).toEqual(["0.0"]);
     (button.props as any).onClick();
     expect(invokeCallback).toHaveBeenCalledWith("/test", "0.0.onClick", []);
   });

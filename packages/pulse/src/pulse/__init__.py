@@ -25,6 +25,7 @@ from pulse.context import PulseContext as PulseContext
 
 # Environment
 from pulse.env import PulseMode as PulseMode, env as env, mode as mode
+from pulse.version import __version__ as __version__
 
 # State and routing
 from pulse.state import State as State

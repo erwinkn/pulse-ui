@@ -2035,3 +2035,27 @@ def test_reactive_set_copy_and_deepcopy_use_new_signals():
     deep_copied.add(5)
     assert 4 not in values
     assert 5 not in values
+
+
+def test_computed_exception_does_not_cause_circular_dependency():
+    """Test that exceptions in computed properties don't cause circular dependency errors."""
+    s = Signal(10, name="s")
+
+    def failing_computed():
+        if s() > 5:
+            raise ValueError("Computed failed")
+        return s() * 2
+
+    c = Computed(failing_computed, name="c")
+
+    # First access should raise the original exception
+    with pytest.raises(ValueError, match="Computed failed"):
+        c()
+
+    # Subsequent accesses should still raise the original exception, not circular dependency
+    with pytest.raises(ValueError, match="Computed failed"):
+        c()
+
+    # After fixing the condition, it should work
+    s.write(3)
+    assert c() == 6

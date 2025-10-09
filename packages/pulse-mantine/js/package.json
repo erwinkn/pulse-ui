@@ -1,6 +1,6 @@
 {
   "name": "pulse-mantine",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -37,13 +37,6 @@
     "@types/node": "^24.6.0",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
-    "@mantine/charts": "^8.3.2",
-    "@mantine/core": "^8.3.2",
-    "@mantine/dates": "^8.3.2",
-    "@mantine/form": "^8.3.2",
-    "@mantine/hooks": "^8.3.2",
-    "dayjs": "^1.11.18",
-    "recharts": "^3.2.1",
     "typescript": "^5.9.2"
   },
   "peerDependencies": {

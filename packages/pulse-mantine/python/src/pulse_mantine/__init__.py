@@ -5,6 +5,10 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
+from pulse_mantine.version import __version__ as __version__
+import pulse
+
+
 _EXPORTS: dict[str, str] = {
     "Accordion": "pulse_mantine.core.data_display.accordion",
     "AccordionChevron": "pulse_mantine.core.data_display.accordion",
@@ -465,16 +469,22 @@ _EXPORTS: dict[str, str] = {
 
 __all__ = sorted(_EXPORTS.keys())
 
+
 def __getattr__(name: str) -> Any:
     try:
         module_name = _EXPORTS[name]
     except KeyError as exc:
         raise AttributeError(f"module {__name__} has no export {name}") from exc
     module = import_module(module_name)
+
+    # Ensure pulse-mantine Python and JS libraries match versions  
     value = getattr(module, name)
+    if isinstance(value, pulse.ReactComponent) and value.src == 'pulse-mantine':
+        print(f"Setting version constraint {__version__} on component {value.name}")
+        value.version = __version__
     globals()[name] = value
     return value
 
+
 def __dir__() -> list[str]:
     return sorted(__all__)
-

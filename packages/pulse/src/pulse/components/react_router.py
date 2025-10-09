@@ -10,7 +10,7 @@ class LinkPath(TypedDict):
     hash: str
 
 
-@react_component("Link", "react-router")
+@react_component("Link", "react-router", version="^7")
 def Link(
     *children: Child,
     key: Optional[str] = None,
@@ -36,7 +36,7 @@ def Link(
 ): ...
 
 
-@react_component("Outlet", "react-router")
+@react_component("Outlet", "react-router", version="^7")
 def Outlet(key: Optional[str] = None): ...
 
 

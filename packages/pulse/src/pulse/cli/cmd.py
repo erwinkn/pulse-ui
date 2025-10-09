@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 import typer
 from rich.console import Console
@@ -19,6 +20,18 @@ from pulse.env import (
     ENV_PULSE_HOST,
     ENV_PULSE_PORT,
     env,
+)
+from pulse.version import __version__ as PULSE_PY_VERSION
+from pulse.react_component import registered_react_components
+from pulse.cli.packages import (
+    parse_install_spec,
+    parse_dependency_spec,
+    resolve_versions,
+    VersionConflict,
+    load_package_json,
+    get_pkg_spec,
+    is_workspace_spec,
+    spec_satisfies,
 )
 from pulse.helpers import (
     ensure_web_lock,
@@ -299,6 +312,98 @@ def run(
             server_env[ENV_PULSE_SECRET] = dev_secret
 
     if not server_only:
+        # Resolve and install JS dependencies required by React components
+        try:
+            components = registered_react_components()
+
+            # Collect version constraints per package name
+            constraints: dict[str, list[str | None]] = {
+                "pulse-ui-client": [PULSE_PY_VERSION],
+            }
+            for comp in components:
+                # Component base package (from src)
+                spec = parse_install_spec(comp.src)
+                if spec:
+                    name_only, ver = parse_dependency_spec(spec)
+                    constraints.setdefault(name_only, []).append(ver)
+                    # Explicit component version kwarg is an additional constraint for the same package
+                    if comp.version:
+                        constraints.setdefault(name_only, []).append(comp.version)
+                # Also consider any extra import statements declared on the component
+                for imp in comp.extra_imports:
+                    try:
+                        spec2 = parse_install_spec(imp.src)
+                        if spec2:
+                            name_only2, ver2 = parse_dependency_spec(spec2)
+                            constraints.setdefault(name_only2, []).append(ver2)
+                    except ValueError as ve:
+                        console.log(f"❌ {ve}")
+                        raise typer.Exit(1)
+
+            # Resolve and materialize install list
+            try:
+                resolved = resolve_versions(constraints)
+            except VersionConflict as e:
+                console.log(f"❌ {e}")
+                raise typer.Exit(1)
+
+            # Build desired install map from resolved versions and RR defaults
+            desired: dict[str, Optional[str]] = dict(resolved)
+            for rr in [
+                "react-router",
+                "@react-router/node",
+                "@react-router/serve",
+                "@react-router/dev",
+            ]:
+                desired.setdefault(rr, "^7")
+            print("Version requirements:", desired)
+
+            # Load existing package.json
+            pkg_json = load_package_json(web_root)
+
+            to_add: list[str] = []
+            for name, req_ver in sorted(desired.items()):
+                # Always pin pulse-ui-client to Python version
+                if name == "pulse-ui-client":
+                    req_ver = PULSE_PY_VERSION
+
+                existing = get_pkg_spec(pkg_json, name)
+                if existing is None:
+                    # Not present -> add with requested version (if any)
+                    to_add.append(f"{name}@{req_ver}" if req_ver else name)
+                    continue
+
+                if is_workspace_spec(existing):
+                    # User-managed
+                    continue
+
+                # If existing satisfies requested version, no action; else bump
+                if spec_satisfies(req_ver, existing):
+                    continue
+                to_add.append(f"{name}@{req_ver}" if req_ver else name)
+
+            # If we have additions/updates, run bun add; else run bun i
+            if to_add:
+                cmd = ["bun", "add", *to_add]
+                console.log(
+                    f"📦 Adding/updating web dependencies in {web_root} -> {' '.join(cmd)}"
+                )
+                try:
+                    subprocess.run(cmd, cwd=web_root, check=True)
+                except subprocess.CalledProcessError:
+                    console.log("❌ Failed to add/update web dependencies with Bun.")
+                    raise typer.Exit(1)
+            else:
+                # Ensure lock/node_modules are up-to-date
+                try:
+                    subprocess.run(["bun", "i"], cwd=web_root, check=True)
+                except subprocess.CalledProcessError:
+                    console.log("❌ Failed to install web dependencies with Bun.")
+                    raise typer.Exit(1)
+        except ValueError as e:
+            console.log(f"❌ {e}")
+            raise typer.Exit(1)
+
         web_command = ["bun", "run", "dev"]
         web_cwd = web_root
         web_env = os.environ.copy()

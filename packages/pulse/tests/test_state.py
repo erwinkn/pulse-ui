@@ -567,3 +567,29 @@ class TestState:
         # Changing reactive property should recompute
         s.value = 2
         assert s.view == 7
+
+    def test_computed_exception_does_not_cause_circular_dependency(self):
+        """Test that exceptions in computed properties don't cause circular dependency errors."""
+
+        class TestState(ps.State):
+            count: int = 10
+
+            @ps.computed
+            def failing_computed(self):
+                if self.count > 5:
+                    raise ValueError("Computed failed")
+                return self.count * 2
+
+        state = TestState()
+
+        # First access should raise the original exception
+        with pytest.raises(ValueError, match="Computed failed"):
+            _ = state.failing_computed
+
+        # Subsequent accesses should still raise the original exception, not circular dependency
+        with pytest.raises(ValueError, match="Computed failed"):
+            _ = state.failing_computed
+
+        # After fixing the condition, it should work
+        state.count = 3
+        assert state.failing_computed == 6

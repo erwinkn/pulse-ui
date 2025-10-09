@@ -300,6 +300,7 @@ class ReactComponent(Generic[P], Imported):
         is_default=False,
         prop: Optional[str] = None,
         lazy: bool = False,
+        version: Optional[str] = None,
         prop_spec: Optional[PropSpec] = None,
         fn_signature: Callable[P, Element] = default_signature,
         extra_imports: Optional[
@@ -321,6 +322,8 @@ class ReactComponent(Generic[P], Imported):
 
         self.fn_signature = fn_signature
         self.lazy = lazy
+        # Optional npm semver constraint for this component's package
+        self.version: Optional[str] = version
         # Additional import statements to include in route where this component is used
         self.extra_imports: list[ImportStatement] = list(extra_imports or [])
         COMPONENT_REGISTRY.get().add(self)
@@ -775,6 +778,7 @@ def react_component(
     prop: str | None = None,
     is_default: bool = False,
     lazy: bool = False,
+    version: Optional[str] = None,
     extra_imports: Optional[list[ImportStatement]] = None,
 ) -> Callable[[Callable[P, None] | Callable[P, Element]], ReactComponent[P]]:
     """
@@ -796,6 +800,7 @@ def react_component(
             prop=prop,
             is_default=is_default,
             lazy=lazy,
+            version=version,
             fn_signature=fn,
             extra_imports=extra_imports,
         )

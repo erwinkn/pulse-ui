@@ -147,22 +147,24 @@ class Computed(Generic[T]):
             if self.on_stack:
                 raise RuntimeError("Circular dependency detected")
             self.on_stack = True
-            execution_epoch = epoch()
-            self.value = self.fn()
-            if epoch() != execution_epoch:
-                raise RuntimeError(
-                    f"Detected write to a signal in computed {self.name}. Computeds should be read-only."
-                )
-            self.on_stack = False
-            self.dirty = False
-            if not values_equal(prev_value, self.value):
-                self.last_change = execution_epoch
+            try:
+                execution_epoch = epoch()
+                self.value = self.fn()
+                if epoch() != execution_epoch:
+                    raise RuntimeError(
+                        f"Detected write to a signal in computed {self.name}. Computeds should be read-only."
+                    )
+                self.dirty = False
+                if not values_equal(prev_value, self.value):
+                    self.last_change = execution_epoch
 
-            if len(scope.effects) > 0:
-                raise RuntimeError(
-                    "An effect was created within a computed variable's function. "
-                    "This behavior is not allowed, computed variables should be pure calculations."
-                )
+                if len(scope.effects) > 0:
+                    raise RuntimeError(
+                        "An effect was created within a computed variable's function. "
+                        "This behavior is not allowed, computed variables should be pure calculations."
+                    )
+            finally:
+                self.on_stack = False
 
         # Update deps and their observed versions to the values seen during this recompute
         self.deps = scope.deps

@@ -356,7 +356,6 @@ def run(
                 "@react-router/dev",
             ]:
                 desired.setdefault(rr, "^7")
-            print("Version requirements:", desired)
 
             # Load existing package.json
             pkg_json = load_package_json(web_root)
@@ -442,7 +441,6 @@ def run(
         procs: list[subprocess.Popen] = []
         try:
             if server_command:
-                print("Server command:", server_command)
                 procs.append(
                     subprocess.Popen(server_command, cwd=server_cwd, env=server_env)
                 )

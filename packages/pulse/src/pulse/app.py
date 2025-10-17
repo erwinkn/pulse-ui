@@ -13,21 +13,27 @@ from typing import Any, Literal, Optional, Sequence, TypeVar, cast
 
 import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from fastapi.middleware.cors import CORSMiddleware
-
-from pulse.serializer import Serialized, serialize, deserialize
+from pulse.channel import ChannelsManager
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
-from pulse.env import PulseMode, env
 from pulse.cookies import (
-    CORSOptions,
     Cookie,
+    CORSOptions,
+    compute_cookie_domain,
     cors_options,
     session_cookie,
-    compute_cookie_domain,
 )
+from pulse.css import (
+    CssImport,
+    CssModule,
+    registered_css_imports,
+    registered_css_modules,
+)
+from pulse.env import PulseMode, env
+from pulse.form import FormRegistry
 from pulse.helpers import (
     create_task,
     ensure_web_lock,
@@ -37,6 +43,8 @@ from pulse.helpers import (
     lock_path_for_web_root,
     remove_web_lock,
 )
+from pulse.hooks.core import hooks
+from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
     ClientChannelMessage,
     ClientChannelRequestMessage,
@@ -56,25 +64,16 @@ from pulse.middleware import (
 )
 from pulse.plugin import Plugin
 from pulse.react_component import ReactComponent, registered_react_components
-from pulse.css import (
-    registered_css_modules,
-    registered_css_imports,
-    CssModule,
-    CssImport,
-)
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteInfo, RouteTree
-from pulse.hooks.runtime import RedirectInterrupt, NotFoundInterrupt
-from pulse.hooks.core import hooks
+from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
     CookieSessionStore,
     SessionStore,
     UserSession,
     new_sid,
 )
-from pulse.form import FormRegistry
-from pulse.channel import ChannelsManager
 
 logger = logging.getLogger(__name__)
 

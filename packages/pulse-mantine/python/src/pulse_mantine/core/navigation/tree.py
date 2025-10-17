@@ -11,7 +11,7 @@ class MantineTreeProps(ps.HTMLDivProps, total=False):
     levelOffset: int
     selectOnClick: bool
     clearSelectionOnOutsideClick: bool
-    className: str
+    className: str | ps.CssReference
     classNames: dict[str, str]
     styles: dict[str, Any]
     style: dict[str, Any]

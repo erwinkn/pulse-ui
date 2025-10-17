@@ -571,7 +571,13 @@ from pulse.user_session import (
 from pulse.cookies import Cookie as Cookie, SetCookie as SetCookie
 
 # CSS
-from pulse.css import css as css, css_module as css_module
+from pulse.css import (
+    css as css,
+    css_module as css_module,
+    CssModule as CssModule,
+    CssImport as CssImport,
+    CssReference as CssReference,
+)
 
 # Decorators
 from pulse.decorators import computed as computed, effect as effect, query as query

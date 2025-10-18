@@ -7,8 +7,7 @@ export { usePulseChannel } from "./usePulseChannel";
 export { PulseChannelResetError } from "./channel";
 export type { ChannelBridge } from "./channel";
 
-// Client implementation
-export { PulseSocketIOClient } from "./client";
+// Client implementation (types only - implementation is internal)
 export type {
   PulseClient,
   MountedView,
@@ -25,9 +24,8 @@ export type {
   ComponentRegistry,
 } from "./vdom";
 
-// Renderer helpers
+// Renderer helpers (implementation is internal)
 export {
-  VDOMRenderer,
   applyUpdates as applyReactTreeUpdates,
   RenderLazy,
 } from "./renderer";
@@ -59,8 +57,7 @@ export type {
   ClientChannelMessage,
 } from "./messages";
 
-// Transports
-export { SocketIOTransport } from "./transport";
+// Transports (types only - implementation is internal)
 export type { Transport, MessageListener } from "./transport";
 
 // Server helpers

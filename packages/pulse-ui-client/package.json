@@ -13,9 +13,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/index.js",
-      "node": "./dist/index.node.js",
       "bun": "./dist/index.bun.js",
+      "node": "./dist/index.node.js",
+      "browser": {
+        "development": "./dist/index.development.js",
+        "default": "./dist/index.js"
+      },
+      "development": "./dist/index.development.js",
       "default": "./dist/index.js"
     }
   },
@@ -23,11 +27,13 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "typescript": "^5",
     "@types/bun": "latest",
     "@types/node": "^24.2.1",
     "@types/react": "^19.1.10",
-    "@types/react-dom": "^19.1.7"
+    "@types/react-dom": "^19.1.7",
+    "esbuild": "^0.25.10",
+    "terser": "^5.44.0",
+    "typescript": "^5"
   },
   "peerDependencies": {
     "react": "^18 || ^19",

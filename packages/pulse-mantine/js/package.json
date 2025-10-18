@@ -13,9 +13,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/index.js",
-      "node": "./dist/index.node.js",
       "bun": "./dist/index.bun.js",
+      "node": "./dist/index.node.js",
+      "browser": {
+        "development": "./dist/index.development.js",
+        "default": "./dist/index.js"
+      },
+      "development": "./dist/index.development.js",
       "default": "./dist/index.js"
     }
   },
@@ -29,17 +33,18 @@
     "build:dev": "bun run build:clean && NODE_ENV=development bun build ./src/index.ts --outdir=dist --format=esm --target=browser --sourcemap=inline --external react --external react-dom --external '@mantine/carousel' --external '@mantine/charts' --external '@mantine/code-highlight' --external '@mantine/core' --external '@mantine/dates' --external '@mantine/dropzone' --external '@mantine/form' --external '@mantine/hooks' --external '@mantine/modals' --external '@mantine/notifications' --external '@mantine/nprogress' --external '@mantine/spotlight' --external '@mantine/tiptap' --external '@tiptap/extension-link' --external '@tiptap/pm' --external '@tiptap/react' --external '@tiptap/starter-kit' --external dayjs --external embla-carousel --external embla-carousel-react --external recharts && bun run build:types",
     "prepublishOnly": "bun run build"
   },
-  "dependencies": {
-    "pulse-ui-client": "workspace:*"
-  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^24.6.0",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
+    "esbuild": "^0.25.10",
+    "pulse-ui-client": "workspace:*",
+    "terser": "^5.44.0",
     "typescript": "^5.9.2"
   },
   "peerDependencies": {
+    "pulse-ui-client": "^0.1.29",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "@mantine/charts": "^8",

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "willow",
+  "name": "Pulse UI Docs",
+  "colors": {
+    "primary": "#16A34A",
+    "light": "#07C983",
+    "dark": "#15803D"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": ["index", "getting-started"]
+          },
+          {
+            "group": "Tutorial",
+            "pages": [
+              "tutorial/index",
+              "tutorial/basics",
+              "tutorial/app",
+              "tutorial/state",
+              "tutorial/components",
+              "tutorial/next-steps"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/index",
+              "concepts/mental-model",
+              "concepts/reactive",
+              "concepts/states",
+              "concepts/hooks",
+              "concepts/events",
+              "concepts/components",
+              "concepts/keys",
+              "concepts/async",
+              "concepts/sessions",
+              "concepts/utilities",
+              "concepts/javascript",
+              "concepts/react"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/index",
+              "advanced/architecture",
+              "advanced/extending-the-server",
+              "advanced/custom-hooks",
+              "advanced/middleware",
+              "advanced/channels",
+              "advanced/libraries"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Extensions",
+        "pages": ["extensions/index"]
+      },
+      {
+        "tab": "API reference",
+        "pages": ["api-reference/index"]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Source",
+          "href": "https://github.com/erwinkn/pulse-ui",
+          "icon": "GitHub"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "label": "Source",
+      "href": "https://github.com/erwinkn/pulse-ui"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/erwinkn/pulse-ui"
+    }
+  }
+}

@@ -5,9 +5,13 @@ import { fileURLToPath } from "node:url";
 
 const entry = "./src/index.ts";
 const outdir = "dist";
-const define = {
+const prodDefine = {
   "process.env.NODE_ENV": '"production"',
   __DEV__: "false",
+};
+const devDefine = {
+  "process.env.NODE_ENV": '"development"',
+  __DEV__: "true",
 };
 
 const pkgPath = join(
@@ -18,7 +22,9 @@ const pkgPath = join(
 const pkgJson = await Bun.file(pkgPath).json();
 const external = [
   ...new Set([
-    ...Object.keys(pkgJson.dependencies ?? {}),
+    ...Object.keys(pkgJson.devDependencies ?? {}).filter(
+      (dep) => dep !== "@types/bun" && dep !== "@types/node" && dep !== "@types/react" && dep !== "@types/react-dom" && dep !== "typescript"
+    ),
     ...Object.keys(pkgJson.peerDependencies ?? {}),
   ]),
 ];
@@ -33,12 +39,31 @@ async function buildBrowser() {
     outdir,
     target: "browser",
     format: "esm",
-    minify: true,
+    minify: {
+      whitespace: true,
+      identifiers: true,
+      syntax: true,
+    },
     sourcemap: "external",
     external,
-    define,
+    define: prodDefine,
   });
   if (!result.success) throw new Error("Browser build failed");
+}
+
+async function buildBrowserDev() {
+  const result = await Bun.build({
+    entrypoints: [entry],
+    outdir,
+    naming: { entry: "index.development.js" },
+    target: "browser",
+    format: "esm",
+    minify: false,
+    sourcemap: "inline",
+    external,
+    define: devDefine,
+  });
+  if (!result.success) throw new Error("Browser dev build failed");
 }
 
 async function buildNode() {
@@ -48,10 +73,14 @@ async function buildNode() {
     naming: { entry: "index.node.js" },
     target: "node",
     format: "esm",
-    minify: true,
+    minify: {
+      whitespace: true,
+      identifiers: true,
+      syntax: true,
+    },
     sourcemap: "inline",
     external,
-    define,
+    define: prodDefine,
   });
   if (!result.success) throw new Error("Node build failed");
 }
@@ -63,18 +92,22 @@ async function buildBun() {
     naming: { entry: "index.bun.js" },
     target: "bun",
     format: "esm",
-    minify: true,
+    minify: {
+      whitespace: true,
+      identifiers: true,
+      syntax: true,
+    },
     sourcemap: "inline",
     external,
-    define,
+    define: prodDefine,
   });
   if (!result.success) throw new Error("Bun build failed");
 }
 
 async function main() {
   await clean();
-  // build sequentially for clearer logs
   await buildBrowser();
+  await buildBrowserDev();
   await buildNode();
   await buildBun();
 }

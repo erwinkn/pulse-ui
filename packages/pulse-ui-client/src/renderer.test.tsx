@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
-import { VDOMRenderer, applyUpdates } from "./renderer";
+import { VDOMRenderer } from "./renderer";
 
 import type { VDOMNode, VDOMUpdate } from "./vdom";
 
@@ -44,7 +44,7 @@ describe("applyReactTreeUpdates", () => {
       },
     ];
 
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     expect(root.type).toBe("div");
     expect((root.props as any).id).toBe("root");
@@ -86,7 +86,7 @@ describe("applyReactTreeUpdates", () => {
         data: { set: { onClick: "$cb" } },
       },
     ];
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     expect((root.props as any).id).toBe("root");
     expect(typeof (root.props as any).onClick).toBe("function");
@@ -113,45 +113,37 @@ describe("applyReactTreeUpdates", () => {
     const initialVDOM: VDOMNode = { tag: "button" };
     let tree = renderer.renderNode(initialVDOM);
 
-    tree = applyUpdates(
-      tree,
-      [
-        {
-          type: "update_css_refs",
-          path: "",
-          data: { add: ["className"] },
+    tree = renderer.applyUpdates(tree, [
+      {
+        type: "update_css_refs",
+        path: "",
+        data: { add: ["className"] },
+      },
+      {
+        type: "update_props",
+        path: "",
+        data: {
+          set: { className: "moduleA:button" },
         },
-        {
-          type: "update_props",
-          path: "",
-          data: {
-            set: { className: "moduleA:button" },
-          },
-        },
-      ],
-      renderer
-    );
+      },
+    ]);
     const button = tree as React.ReactElement;
     expect((button.props as any).className).toBe("button_hash");
 
-    tree = applyUpdates(
-      tree,
-      [
-        {
-          type: "update_css_refs",
-          path: "",
-          data: { remove: ["className"] },
+    tree = renderer.applyUpdates(tree, [
+      {
+        type: "update_css_refs",
+        path: "",
+        data: { remove: ["className"] },
+      },
+      {
+        type: "update_props",
+        path: "",
+        data: {
+          set: { className: "plain" },
         },
-        {
-          type: "update_props",
-          path: "",
-          data: {
-            set: { className: "plain" },
-          },
-        },
-      ],
-      renderer
-    );
+      },
+    ]);
     const updatedButton = tree as React.ReactElement;
     expect((updatedButton.props as any).className).toBe("plain");
   });
@@ -170,7 +162,7 @@ describe("applyReactTreeUpdates", () => {
         data: { tag: "span", children: ["B"] },
       },
     ];
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     const rootChildren = childrenArray(root);
     const child0 = rootChildren[0] as React.ReactElement;
@@ -205,7 +197,7 @@ describe("applyReactTreeUpdates", () => {
       },
     ];
 
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     const kids = childrenArray(root) as React.ReactElement[];
     expect(kids).toHaveLength(3);
@@ -239,7 +231,7 @@ describe("applyReactTreeUpdates", () => {
       },
     ];
 
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     const kids = childrenArray(root) as React.ReactElement[];
     expect(kids).toHaveLength(3);
@@ -279,7 +271,7 @@ describe("applyReactTreeUpdates", () => {
       },
     ];
 
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     const kids = childrenArray(root) as React.ReactElement[];
     expect(kids).toHaveLength(4);
@@ -316,7 +308,7 @@ describe("applyReactTreeUpdates", () => {
       },
     ];
 
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     const kids = childrenArray(root) as React.ReactElement[];
 
@@ -361,7 +353,7 @@ describe("applyReactTreeUpdates", () => {
       },
     ];
 
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     const innerDiv = childrenArray(root)[0] as React.ReactElement;
     const kids = childrenArray(innerDiv) as React.ReactElement[];
@@ -395,7 +387,7 @@ describe("applyReactTreeUpdates", () => {
         data: { set: { onClick: "$cb" } },
       },
     ];
-    tree = applyUpdates(tree, ops, renderer);
+    tree = renderer.applyUpdates(tree, ops);
     const root = tree as React.ReactElement;
     const innerDiv = childrenArray(root)[0] as React.ReactElement;
     const button = childrenArray(innerDiv)[0] as React.ReactElement;

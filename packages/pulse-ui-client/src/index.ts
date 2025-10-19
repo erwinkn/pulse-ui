@@ -7,8 +7,7 @@ export { usePulseChannel } from "./usePulseChannel";
 export { PulseChannelResetError } from "./channel";
 export type { ChannelBridge } from "./channel";
 
-// Client implementation
-export { PulseSocketIOClient } from "./client";
+// Client implementation (types only - implementation is internal)
 export type {
   PulseClient,
   MountedView,
@@ -25,10 +24,8 @@ export type {
   ComponentRegistry,
 } from "./vdom";
 
-// Renderer helpers
+// Renderer helpers 
 export {
-  VDOMRenderer,
-  applyUpdates as applyReactTreeUpdates,
   RenderLazy,
 } from "./renderer";
 
@@ -59,8 +56,7 @@ export type {
   ClientChannelMessage,
 } from "./messages";
 
-// Transports
-export { SocketIOTransport } from "./transport";
+// Transports (types only - implementation is internal)
 export type { Transport, MessageListener } from "./transport";
 
 // Server helpers
@@ -68,12 +64,12 @@ export { extractServerRouteInfo } from "./helpers";
 export type { RouteInfo } from "./helpers";
 
 // Serialization helpers
-export { extractEvent } from "./serialize/events";
-export {
-  encodeForWire,
-  decodeFromWire,
-  cleanForSerialization,
-} from "./serialize/clean";
+// export { extractEvent } from "./serialize/events";
+// export {
+//   encodeForWire,
+//   decodeFromWire,
+//   cleanForSerialization,
+// } from "./serialize/clean";
 export {
   serialize as serialize,
   deserialize as deserialize,

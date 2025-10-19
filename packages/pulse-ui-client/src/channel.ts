@@ -20,10 +20,15 @@ interface PendingRequest {
 }
 
 function randomId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID().replace(/-/g, "");
   }
-  return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+  return (
+    Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2)
+  );
 }
 
 function formatError(error: unknown): string {
@@ -39,7 +44,9 @@ function formatError(error: unknown): string {
 function isServerResponseMessage(
   message: ServerChannelMessage
 ): message is ServerChannelResponseMessage {
-  return typeof (message as ServerChannelResponseMessage).responseTo === "string";
+  return (
+    typeof (message as ServerChannelResponseMessage).responseTo === "string"
+  );
 }
 
 function isServerRequestMessage(
@@ -54,11 +61,14 @@ export class ChannelBridge {
   private backlog: ServerChannelRequestMessage[] = [];
   private closed = false;
 
-  constructor(private client: PulseSocketIOClient, public readonly id: string) {}
+  constructor(
+    private client: PulseSocketIOClient,
+    public readonly id: string
+  ) {}
 
   emit(event: string, payload?: any): void {
     this.ensureOpen();
-    void this.client.sendChannelMessage({
+    this.client.sendMessage({
       type: "channel_message",
       channel: this.id,
       event,
@@ -66,23 +76,18 @@ export class ChannelBridge {
     });
   }
 
-  async request(event: string, payload?: any): Promise<any> {
+  request(event: string, payload?: any): Promise<any> {
     this.ensureOpen();
     const requestId = randomId();
     return new Promise((resolve, reject) => {
       this.pending.set(requestId, { resolve, reject });
-      void this.client
-        .sendChannelMessage({
-          type: "channel_message",
-          channel: this.id,
-          event,
-          payload,
-          requestId,
-        })
-        .catch((err) => {
-          this.pending.delete(requestId);
-          reject(err);
-        });
+      this.client.sendMessage({
+        type: "channel_message",
+        channel: this.id,
+        event,
+        payload,
+        requestId,
+      });
     });
   }
 
@@ -122,9 +127,11 @@ export class ChannelBridge {
       return true;
     }
     if (message.requestId) {
-      void this.dispatchRequest(message as ServerChannelRequestMessage & {
-        requestId: string;
-      });
+      void this.dispatchRequest(
+        message as ServerChannelRequestMessage & {
+          requestId: string;
+        }
+      );
     } else {
       this.dispatchEvent(message);
     }
@@ -199,7 +206,7 @@ export class ChannelBridge {
       }
     }
     if (error) {
-      await this.client.sendChannelMessage({
+      this.client.sendMessage({
         type: "channel_message",
         channel: this.id,
         event: undefined,
@@ -208,7 +215,7 @@ export class ChannelBridge {
       });
       return;
     }
-    await this.client.sendChannelMessage({
+    this.client.sendMessage({
       type: "channel_message",
       channel: this.id,
       event: undefined,
@@ -218,7 +225,9 @@ export class ChannelBridge {
   }
 
   private resolvePending(message: ServerChannelResponseMessage): void {
-    const entry = message.responseTo ? this.pending.get(message.responseTo) : undefined;
+    const entry = message.responseTo
+      ? this.pending.get(message.responseTo)
+      : undefined;
     if (!entry) {
       return;
     }

@@ -1,0 +1,27 @@
+[tool.basedpyright]
+typeCheckingMode = "standard"
+pythonVersion = "3.11"
+pythonPlatform = "All"
+
+include = [
+    "packages/*/src",
+    "packages/*/python/src",
+    "examples"
+]
+
+exclude = [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/node_modules",
+    "**/.venv",
+    "**/dist",
+    "**/build"
+]
+
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportUnusedImport = "warning"
+reportUnusedClass = "warning"
+reportUnusedFunction = "warning"
+reportUnusedVariable = "warning"
+reportDuplicateImport = "warning"

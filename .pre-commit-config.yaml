@@ -1,0 +1,25 @@
+repos:
+  - repo: local
+    hooks:
+      - id: biome-check
+        name: Biome Check
+        entry: bun run lint:fix
+        language: system
+        types_or: [javascript, jsx, ts, tsx, json]
+        pass_filenames: false
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.1
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: basedpyright
+        name: Basedpyright Type Checker
+        entry: uv run basedpyright
+        language: system
+        types: [python]
+        pass_filenames: false

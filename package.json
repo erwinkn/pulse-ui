@@ -1,14 +1,21 @@
 {
-  "name": "pulse",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "build:packages": "node ./scripts/build-js-packages.ts && bun upgrade"
-  },
-  "workspaces": [
-    "packages/pulse-ui-client/",
-    "packages/pulse-mantine/js",
-    "examples/web/",
-    "examples/pulse-mantine/web"
-  ]
+	"name": "pulse",
+	"version": "1.0.0",
+	"type": "module",
+	"scripts": {
+		"build:packages": "node ./scripts/build-js-packages.ts && bun upgrade",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"format": "biome format --write .",
+		"format:check": "biome format ."
+	},
+	"workspaces": [
+		"packages/pulse-ui-client/",
+		"packages/pulse-mantine/js",
+		"examples/web/",
+		"examples/pulse-mantine/web"
+	],
+	"devDependencies": {
+		"@biomejs/biome": "^2.2.5"
+	}
 }

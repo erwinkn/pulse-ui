@@ -1,13 +1,19 @@
-import type { ReactElement, PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactElement } from "react";
 
 interface RenderPropComponentProps {
-  left?: ReactElement;
-  right?: ReactElement;
+	left?: ReactElement;
+	right?: ReactElement;
 }
 export function RenderPropComponent({
-  left,
-  right,
-  children,
+	left,
+	right,
+	children,
 }: React.PropsWithChildren<RenderPropComponentProps>) {
-  return <>{left}{children}{right}</>
+	return (
+		<>
+			{left}
+			{children}
+			{right}
+		</>
+	);
 }

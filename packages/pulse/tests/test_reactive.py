@@ -1,1628 +1,1627 @@
 import asyncio
 import copy
-from typing import Any, cast, ClassVar
-from dataclasses import dataclass, field, asdict, astuple, replace, InitVar
+from dataclasses import InitVar, asdict, astuple, dataclass, field, replace
+from typing import Any, ClassVar, cast
+
+import pulse as ps
 import pytest
 from pulse import (
-    Signal,
-    Computed,
-    Effect,
-    AsyncEffect,
-    computed,
-    effect,
-    Untrack,
+	AsyncEffect,
+	Computed,
+	Effect,
+	Signal,
+	Untrack,
+	computed,
+	effect,
+	reactive,
 )
-from pulse import reactive
 from pulse.reactive import Batch, flush_effects
 from pulse.reactive_extensions import (
-    ReactiveDict,
-    ReactiveList,
-    ReactiveSet,
-    reactive_dataclass,
+	ReactiveDict,
+	ReactiveList,
+	ReactiveSet,
+	reactive_dataclass,
 )
-import pulse as ps
 
 
 def test_signal_creation_and_access():
-    s = Signal(10, name="s")
-    assert s() == 10
+	s = Signal(10, name="s")
+	assert s() == 10
 
 
 def test_signal_update():
-    s = Signal(10, name="s")
-    s.write(20)
-    assert s() == 20
+	s = Signal(10, name="s")
+	s.write(20)
+	assert s() == 20
 
 
 def test_simple_computed():
-    s = Signal(10, name="s")
-    c = Computed(lambda: s() * 2, name="c")
-    assert c() == 20
-    s.write(20)
-    assert c() == 40
+	s = Signal(10, name="s")
+	c = Computed(lambda: s() * 2, name="c")
+	assert c() == 20
+	s.write(20)
+	assert c() == 40
 
 
 def test_simple_effect():
-    s = Signal(10, name="s")
-    effect_value = 0
+	s = Signal(10, name="s")
+	effect_value = 0
 
-    @effect
-    def my_effect():
-        nonlocal effect_value
-        effect_value = s()
+	@effect
+	def my_effect():
+		nonlocal effect_value
+		effect_value = s()
 
-    flush_effects()
+	flush_effects()
 
-    assert my_effect.runs == 1
-    assert effect_value == 10
+	assert my_effect.runs == 1
+	assert effect_value == 10
 
-    s.write(20)
-    flush_effects()
-    assert my_effect.runs == 2
-    assert effect_value == 20
+	s.write(20)
+	flush_effects()
+	assert my_effect.runs == 2
+	assert effect_value == 20
 
-    # Test that effect doesn't run if value is the same
-    s.write(20)
-    flush_effects()
-    assert my_effect.runs == 2
+	# Test that effect doesn't run if value is the same
+	s.write(20)
+	flush_effects()
+	assert my_effect.runs == 2
 
 
 def test_computed_chain():
-    s = Signal(2, name="s")
-    c1 = Computed(lambda: s() * 2, name="c1")
-    c2 = Computed(lambda: c1() * 2, name="c2")
+	s = Signal(2, name="s")
+	c1 = Computed(lambda: s() * 2, name="c1")
+	c2 = Computed(lambda: c1() * 2, name="c2")
 
-    assert c2() == 8
+	assert c2() == 8
 
-    s.write(3)
+	s.write(3)
 
-    assert c1() == 6
-    assert c2() == 12
+	assert c1() == 6
+	assert c2() == 12
 
 
 def test_dynamic_dependencies():
-    s1 = Signal(10, name="s1")
-    s2 = Signal(20, name="s2")
-    toggle = Signal(True, name="toggle")
+	s1 = Signal(10, name="s1")
+	s2 = Signal(20, name="s2")
+	toggle = Signal(True, name="toggle")
 
-    c = Computed(lambda: s1() if toggle() else s2(), name="c")
+	c = Computed(lambda: s1() if toggle() else s2(), name="c")
 
-    assert c() == 10
+	assert c() == 10
 
-    toggle.write(False)
-    assert c() == 20
+	toggle.write(False)
+	assert c() == 20
 
-    runs = 0
-    c_val = None
+	runs = 0
+	c_val = None
 
-    def effect_on_c():
-        nonlocal runs, c_val
-        c_val = c()
-        runs += 1
+	def effect_on_c():
+		nonlocal runs, c_val
+		c_val = c()
+		runs += 1
 
-    Effect(effect_on_c, name="effect_on_c")
-    flush_effects()
-    assert runs == 1
-    assert c_val == 20
+	Effect(effect_on_c, name="effect_on_c")
+	flush_effects()
+	assert runs == 1
+	assert c_val == 20
 
-    # Now that toggle is False, c depends on s2.
-    # Changing s1 should not cause c to recompute or the effect to run.
-    s1.write(50)
-    flush_effects()
-    assert runs == 1
+	# Now that toggle is False, c depends on s2.
+	# Changing s1 should not cause c to recompute or the effect to run.
+	s1.write(50)
+	flush_effects()
+	assert runs == 1
 
-    # Changing s2 should trigger a re-run.
-    s2.write(200)
-    flush_effects()
-    assert c_val == 200
-    assert runs == 2
+	# Changing s2 should trigger a re-run.
+	s2.write(200)
+	flush_effects()
+	assert c_val == 200
+	assert runs == 2
 
 
 def test_untrack():
-    s1 = Signal(1, name="s1")
-    s2 = Signal(10, name="s2")
+	s1 = Signal(1, name="s1")
+	s2 = Signal(10, name="s2")
 
-    runs = 0
+	runs = 0
 
-    def my_effect():
-        nonlocal runs
-        runs += 1
-        s1()  # dependency
-        with Untrack():
-            s2()  # no dependency
+	def my_effect():
+		nonlocal runs
+		runs += 1
+		s1()  # dependency
+		with Untrack():
+			s2()  # no dependency
 
-    Effect(my_effect, name="untrack_effect")
-    flush_effects()
+	Effect(my_effect, name="untrack_effect")
+	flush_effects()
 
-    assert runs == 1
+	assert runs == 1
 
-    s2.write(20)  # should not trigger effect
-    flush_effects()
-    assert runs == 1
+	s2.write(20)  # should not trigger effect
+	flush_effects()
+	assert runs == 1
 
-    s1.write(2)  # should trigger effect
-    flush_effects()
-    assert runs == 2
+	s1.write(2)  # should trigger effect
+	flush_effects()
+	assert runs == 2
 
 
 def test_batching():
-    s1 = Signal(1, name="s1")
-    s2 = Signal(10, name="s2")
+	s1 = Signal(1, name="s1")
+	s2 = Signal(10, name="s2")
 
-    c = Computed(lambda: s1() + s2(), name="c")
+	c = Computed(lambda: s1() + s2(), name="c")
 
-    @effect
-    def batching_effect():
-        c()
+	@effect
+	def batching_effect():
+		c()
 
-    flush_effects()
+	flush_effects()
 
-    assert batching_effect.runs == 1
-    assert c() == 11
+	assert batching_effect.runs == 1
+	assert c() == 11
 
-    with Batch():
-        s1.write(2)
-        s2.write(20)
+	with Batch():
+		s1.write(2)
+		s2.write(20)
 
-    assert c() == 22
-    assert batching_effect.runs == 2
+	assert c() == 22
+	assert batching_effect.runs == 2
 
 
 def test_effects_run_after_batch():
-    with Batch():
+	with Batch():
 
-        @effect(name="effect_in_batch")
-        def e(): ...
+		@effect(name="effect_in_batch")
+		def e(): ...
 
-        assert e.runs == 0
+		assert e.runs == 0
 
-    assert e.runs == 1
+	assert e.runs == 1
 
 
 def test_computed_updates_within_batch():
-    s = Signal(1)
-    double = Computed(lambda: 2 * s())
-    with Batch():
-        s.write(2)
-        # Depending on the reactive architecture chosen, this may return `2`
-        # still. To avoid surprises, Pulse favors consistency.
-        assert double() == 4
+	s = Signal(1)
+	double = Computed(lambda: 2 * s())
+	with Batch():
+		s.write(2)
+		# Depending on the reactive architecture chosen, this may return `2`
+		# still. To avoid surprises, Pulse favors consistency.
+		assert double() == 4
 
 
 def test_no_update_if_value_didnt_change():
-    s = Signal(1)
+	s = Signal(1)
 
-    @effect
-    def e():
-        s()
+	@effect
+	def e():
+		s()
 
-    flush_effects()
-    assert e.runs == 1
-    s.write(2)
-    flush_effects()
-    assert e.runs == 2
-    s.write(2)
-    flush_effects()
-    assert e.runs == 2
+	flush_effects()
+	assert e.runs == 1
+	s.write(2)
+	flush_effects()
+	assert e.runs == 2
+	s.write(2)
+	flush_effects()
+	assert e.runs == 2
 
 
 def test_cycle_detection():
-    s1 = Signal(1, name="s1")
-    c1 = Computed(lambda: s1() if s1() < 10 else c2(), name="c1")
-    c2 = Computed(lambda: c1(), name="c2")
+	s1 = Signal(1, name="s1")
+	c1 = Computed(lambda: s1() if s1() < 10 else c2(), name="c1")
+	c2 = Computed(lambda: c1(), name="c2")
 
-    # This should not raise an error
-    c2()
+	# This should not raise an error
+	c2()
 
-    s1.write(10)
+	s1.write(10)
 
-    with pytest.raises(RuntimeError, match="Circular dependency detected"):
-        c2()
+	with pytest.raises(RuntimeError, match="Circular dependency detected"):
+		c2()
 
 
 def test_unused_computed_are_not_recomputed():
-    a = Signal(1, name="a")
+	a = Signal(1, name="a")
 
-    b_runs = 0
+	b_runs = 0
 
-    def b_fn():
-        nonlocal b_runs
-        b_runs += 1
-        return a() * 2
+	def b_fn():
+		nonlocal b_runs
+		b_runs += 1
+		return a() * 2
 
-    b = Computed(b_fn, name="b")
+	b = Computed(b_fn, name="b")
 
-    c_runs = 0
+	c_runs = 0
 
-    def c_fn():
-        nonlocal c_runs
-        c_runs += 1
-        return b() * 2
+	def c_fn():
+		nonlocal c_runs
+		c_runs += 1
+		return b() * 2
 
-    c = Computed(c_fn, name="c")
+	c = Computed(c_fn, name="c")
 
-    d_runs = 0
+	d_runs = 0
 
-    def d_fn():
-        nonlocal d_runs
-        d_runs += 1
-        return c() * 2
+	def d_fn():
+		nonlocal d_runs
+		d_runs += 1
+		return c() * 2
 
-    d = Computed(d_fn, name="d")
+	d = Computed(d_fn, name="d")
 
-    effect_runs = 0
+	effect_runs = 0
 
-    def effect():
-        nonlocal effect_runs
-        effect_runs += 1
-        b()
+	def effect():
+		nonlocal effect_runs
+		effect_runs += 1
+		b()
 
-    Effect(effect, name="effect1")
-    flush_effects()
+	Effect(effect, name="effect1")
+	flush_effects()
 
-    assert b_runs == 1
-    assert c_runs == 0  # c is not used yet
-    assert d_runs == 0  # d is not used yet
-    assert effect_runs == 1
+	assert b_runs == 1
+	assert c_runs == 0  # c is not used yet
+	assert d_runs == 0  # d is not used yet
+	assert effect_runs == 1
 
-    a.write(2)
-    flush_effects()
+	a.write(2)
+	flush_effects()
 
-    assert b_runs == 2
-    assert c_runs == 0  # c is not used by the effect, so it shouldn't recompute
-    assert d_runs == 0  # d is not used by the effect, so it shouldn't recompute
-    assert effect_runs == 2
+	assert b_runs == 2
+	assert c_runs == 0  # c is not used by the effect, so it shouldn't recompute
+	assert d_runs == 0  # d is not used by the effect, so it shouldn't recompute
+	assert effect_runs == 2
 
-    # Now, let's use d in a new effect
+	# Now, let's use d in a new effect
 
-    effect2_runs = 0
+	effect2_runs = 0
 
-    def effect2():
-        nonlocal effect2_runs
-        effect2_runs += 1
-        d()
+	def effect2():
+		nonlocal effect2_runs
+		effect2_runs += 1
+		d()
 
-    Effect(effect2, name="effect2")
-    flush_effects()
+	Effect(effect2, name="effect2")
+	flush_effects()
 
-    assert b_runs == 2  # b should not recompute
-    assert c_runs == 1  # c is now used, so it computes once
-    assert d_runs == 1  # d is now used, so it computes once
-    assert effect2_runs == 1
+	assert b_runs == 2  # b should not recompute
+	assert c_runs == 1  # c is now used, so it computes once
+	assert d_runs == 1  # d is now used, so it computes once
+	assert effect2_runs == 1
 
-    a.write(3)
-    flush_effects()
-    assert b_runs == 3
-    assert c_runs == 2
-    assert d_runs == 2
-    assert effect_runs == 3
-    assert effect2_runs == 2
+	a.write(3)
+	flush_effects()
+	assert b_runs == 3
+	assert c_runs == 2
+	assert d_runs == 2
+	assert effect_runs == 3
+	assert effect2_runs == 2
 
 
 def test_diamond_problem():
-    a = Signal(1, name="a")
+	a = Signal(1, name="a")
 
-    b = Computed(lambda: a() * 2, name="b")
-    c = Computed(lambda: a() * 3, name="c")
+	b = Computed(lambda: a() * 2, name="b")
+	c = Computed(lambda: a() * 3, name="c")
 
-    d_runs = 0
+	d_runs = 0
 
-    @computed(name="d")
-    def d():
-        nonlocal d_runs
-        d_runs += 1
-        return b() + c()
+	@computed(name="d")
+	def d():
+		nonlocal d_runs
+		d_runs += 1
+		return b() + c()
 
-    assert d_runs == 0, "d should not run unless used by an effect"
+	assert d_runs == 0, "d should not run unless used by an effect"
 
-    result = 0
+	result = 0
 
-    @effect(name="diamond_effect")
-    def e():
-        nonlocal result
-        result = d()
+	@effect(name="diamond_effect")
+	def e():
+		nonlocal result
+		result = d()
 
-    flush_effects()
-    assert result == 5
-    assert d_runs == 1
+	flush_effects()
+	assert result == 5
+	assert d_runs == 1
 
-    a.write(2)
-    flush_effects()
+	a.write(2)
+	flush_effects()
 
-    assert result == 10
-    assert d_runs == 2, "d should only be recomputed once"
+	assert result == 10
+	assert d_runs == 2, "d should only be recomputed once"
 
 
 def test_glitch_avoidance():
-    a = Signal(1, name="a")
-    b = Signal(10, name="b")
+	a = Signal(1, name="a")
+	b = Signal(10, name="b")
 
-    c_values = []
-    c = Computed(lambda: a() + b(), name="c")
+	c_values = []
+	c = Computed(lambda: a() + b(), name="c")
 
-    effect_runs = 0
+	effect_runs = 0
 
-    def effect():
-        nonlocal effect_runs
-        c_values.append(c())
-        effect_runs += 1
+	def effect():
+		nonlocal effect_runs
+		c_values.append(c())
+		effect_runs += 1
 
-    Effect(effect, name="glitch_effect")
-    flush_effects()
+	Effect(effect, name="glitch_effect")
+	flush_effects()
 
-    assert effect_runs == 1
-    assert c_values == [11]
+	assert effect_runs == 1
+	assert c_values == [11]
 
-    with Batch():
-        a.write(2)
-        b.write(20)
+	with Batch():
+		a.write(2)
+		b.write(20)
 
-    assert effect_runs == 2, "Effect should only run once for a batched update"
-    assert c_values == [11, 22]
+	assert effect_runs == 2, "Effect should only run once for a batched update"
+	assert c_values == [11, 22]
 
 
 def test_effect_cleanup_on_rerun():
-    s = Signal(0, name="s")
-    cleanup_runs = 0
+	s = Signal(0, name="s")
+	cleanup_runs = 0
 
-    def my_effect():
-        s()  # depend on s
+	def my_effect():
+		s()  # depend on s
 
-        def cleanup():
-            nonlocal cleanup_runs
-            cleanup_runs += 1
+		def cleanup():
+			nonlocal cleanup_runs
+			cleanup_runs += 1
 
-        return cleanup
+		return cleanup
 
-    Effect(my_effect, name="cleanup_effect")
-    flush_effects()
+	Effect(my_effect, name="cleanup_effect")
+	flush_effects()
 
-    assert cleanup_runs == 0
-    s.write(1)
-    flush_effects()
-    assert cleanup_runs == 1
-    s.write(2)
-    flush_effects()
-    assert cleanup_runs == 2
+	assert cleanup_runs == 0
+	s.write(1)
+	flush_effects()
+	assert cleanup_runs == 1
+	s.write(2)
+	flush_effects()
+	assert cleanup_runs == 2
 
 
 def test_effect_manual_cleanup():
-    cleanup_runs = 0
+	cleanup_runs = 0
 
-    def my_effect():
-        def cleanup():
-            nonlocal cleanup_runs
-            cleanup_runs += 1
+	def my_effect():
+		def cleanup():
+			nonlocal cleanup_runs
+			cleanup_runs += 1
 
-        return cleanup
+		return cleanup
 
-    effect = Effect(my_effect, name="disposable_effect")
-    flush_effects()
+	effect = Effect(my_effect, name="disposable_effect")
+	flush_effects()
 
-    assert cleanup_runs == 0
-    effect.dispose()
-    assert cleanup_runs == 1
+	assert cleanup_runs == 0
+	effect.dispose()
+	assert cleanup_runs == 1
 
 
 def test_nested_effect_cleanup_on_rerun():
-    s = Signal(0, name="s")
-    child_cleanup_runs = 0
+	s = Signal(0, name="s")
+	child_cleanup_runs = 0
 
-    def child_effect():
-        def cleanup():
-            nonlocal child_cleanup_runs
-            child_cleanup_runs += 1
+	def child_effect():
+		def cleanup():
+			nonlocal child_cleanup_runs
+			child_cleanup_runs += 1
 
-        return cleanup
+		return cleanup
 
-    def parent_effect():
-        s()  # depend on s
-        Effect(child_effect, name="child")
+	def parent_effect():
+		s()  # depend on s
+		Effect(child_effect, name="child")
 
-    Effect(parent_effect, name="parent")
-    flush_effects()
+	Effect(parent_effect, name="parent")
+	flush_effects()
 
-    assert child_cleanup_runs == 0
-    s.write(1)
-    flush_effects()
-    assert child_cleanup_runs == 1
-    s.write(2)
-    flush_effects()
-    assert child_cleanup_runs == 2
+	assert child_cleanup_runs == 0
+	s.write(1)
+	flush_effects()
+	assert child_cleanup_runs == 1
+	s.write(2)
+	flush_effects()
+	assert child_cleanup_runs == 2
 
 
 def test_nested_effect_cleanup_on_dispose():
-    child_cleanup_runs = 0
+	child_cleanup_runs = 0
 
-    def child_effect():
-        def cleanup():
-            nonlocal child_cleanup_runs
-            child_cleanup_runs += 1
+	def child_effect():
+		def cleanup():
+			nonlocal child_cleanup_runs
+			child_cleanup_runs += 1
 
-        return cleanup
+		return cleanup
 
-    def parent_effect():
-        Effect(child_effect, name="child")
+	def parent_effect():
+		Effect(child_effect, name="child")
 
-    parent = Effect(parent_effect, name="parent")
-    flush_effects()
+	parent = Effect(parent_effect, name="parent")
+	flush_effects()
 
-    assert child_cleanup_runs == 0
-    parent.dispose()
-    assert child_cleanup_runs == 1
+	assert child_cleanup_runs == 0
+	parent.dispose()
+	assert child_cleanup_runs == 1
 
 
 @pytest.mark.asyncio
 async def test_sync_writes_are_batched():
-    a = Signal(1, "a")
-    b = Signal(2, "b")
+	a = Signal(1, "a")
+	b = Signal(2, "b")
 
-    @effect
-    def e():
-        a()
-        b()
+	@effect
+	def e():
+		a()
+		b()
 
-    assert e.runs == 0
+	assert e.runs == 0
 
-    # Give the async loop time to run the effect
-    await asyncio.sleep(0)
-    assert e.runs == 1
+	# Give the async loop time to run the effect
+	await asyncio.sleep(0)
+	assert e.runs == 1
 
-    a.write(2)
-    assert e.runs == 1
-    b.write(4)
-    assert e.runs == 1
+	a.write(2)
+	assert e.runs == 1
+	b.write(4)
+	assert e.runs == 1
 
-    # Give the async loop time to process queued tasks
-    await asyncio.sleep(0)
-    assert e.runs == 2
+	# Give the async loop time to process queued tasks
+	await asyncio.sleep(0)
+	assert e.runs == 2
 
-    a.write(3)
-    assert e.runs == 2
-    await asyncio.sleep(0)
-    assert e.runs == 3
-    b.write(6)
-    assert e.runs == 3
+	a.write(3)
+	assert e.runs == 2
+	await asyncio.sleep(0)
+	assert e.runs == 3
+	b.write(6)
+	assert e.runs == 3
 
 
 def test_immediate_effect():
-    s = Signal(1)
+	s = Signal(1)
 
-    @effect()
-    def e1():
-        s()
+	@effect()
+	def e1():
+		s()
 
-    assert e1.runs == 0
+	assert e1.runs == 0
 
-    @effect(immediate=True)
-    def e2():
-        s()
+	@effect(immediate=True)
+	def e2():
+		s()
 
-    assert e2.runs == 1
-    flush_effects()
-    assert e1.runs == 1
-    assert e2.runs == 1
+	assert e2.runs == 1
+	flush_effects()
+	assert e1.runs == 1
+	assert e2.runs == 1
 
 
 def test_immediate_effect_runs_on_schedule_and_skips_batch():
-    s = Signal(0)
+	s = Signal(0)
 
-    with Batch() as batch:
+	with Batch() as batch:
 
-        @effect(immediate=True)
-        def e():
-            s()
+		@effect(immediate=True)
+		def e():
+			s()
 
-        # Should have run immediately and not be in the batch
-        assert e.runs == 1
-        assert e.batch is None
-        # And batch should not contain it
-        assert e not in batch.effects
+		# Should have run immediately and not be in the batch
+		assert e.runs == 1
+		assert e.batch is None
+		# And batch should not contain it
+		assert e not in batch.effects
 
-    # Exiting batch should not run e again
-    assert e.runs == 1
+	# Exiting batch should not run e again
+	assert e.runs == 1
 
 
 def test_effect_flush_runs_when_scheduled_and_unschedules():
-    s = Signal(0)
+	s = Signal(0)
 
-    @effect
-    def e():
-        _ = s()
+	@effect
+	def e():
+		_ = s()
 
-    # Initially scheduled globally; flush effects to bring to first run
-    flush_effects()
-    assert e.runs == 1
+	# Initially scheduled globally; flush effects to bring to first run
+	flush_effects()
+	assert e.runs == 1
 
-    with Batch() as batch:
-        # Write to schedule rerun in this batch
-        s.write(1)
-        # Verify scheduled
-        assert e in batch.effects
-        # Now flush the single effect
-        e.flush()
-        # It should have run immediately and have been removed from batch
-        assert e.runs == 2
-        assert e not in batch.effects
+	with Batch() as batch:
+		# Write to schedule rerun in this batch
+		s.write(1)
+		# Verify scheduled
+		assert e in batch.effects
+		# Now flush the single effect
+		e.flush()
+		# It should have run immediately and have been removed from batch
+		assert e.runs == 2
+		assert e not in batch.effects
 
-    # After exiting batch, no extra run should occur
-    assert e.runs == 2
+	# After exiting batch, no extra run should occur
+	assert e.runs == 2
 
 
 @pytest.mark.asyncio
 async def test_async_effect_immediate_not_allowed():
-    with pytest.raises(ValueError):
+	with pytest.raises(ValueError):
 
-        @effect(immediate=True)
-        async def e():
-            await asyncio.sleep(0)
+		@effect(immediate=True)
+		async def e():
+			await asyncio.sleep(0)
 
 
 def test_cancel_only_on_async_effect():
-    @effect
-    def sync_e(): ...
+	@effect
+	def sync_e(): ...
 
-    # Sync effect should be instance of Effect (base) and not expose cancel
-    assert isinstance(sync_e, Effect)
-    assert not isinstance(sync_e, AsyncEffect)
-    assert not hasattr(sync_e, "cancel")
+	# Sync effect should be instance of Effect (base) and not expose cancel
+	assert isinstance(sync_e, Effect)
+	assert not isinstance(sync_e, AsyncEffect)
+	assert not hasattr(sync_e, "cancel")
 
-    @effect(lazy=True)
-    async def async_e():
-        await asyncio.sleep(0)
+	@effect(lazy=True)
+	async def async_e():
+		await asyncio.sleep(0)
 
-    assert isinstance(async_e, AsyncEffect)
-    assert hasattr(async_e, "cancel")
-    # Should be safe to call even if no task has started yet
-    async_e.cancel()
+	assert isinstance(async_e, AsyncEffect)
+	assert hasattr(async_e, "cancel")
+	# Should be safe to call even if no task has started yet
+	async_e.cancel()
 
 
 def test_disposed_effect_doesnt_rerun():
-    s = Signal(1)
+	s = Signal(1)
 
-    @effect()
-    def e():
-        s()
+	@effect()
+	def e():
+		s()
 
-    flush_effects()
-    assert e.runs == 1
+	flush_effects()
+	assert e.runs == 1
 
-    s.write(2)
-    flush_effects()
-    assert e.runs == 2
+	s.write(2)
+	flush_effects()
+	assert e.runs == 2
 
-    e.dispose()
-    s.write(3)
-    flush_effects()
-    assert e.runs == 2
+	e.dispose()
+	s.write(3)
+	flush_effects()
+	assert e.runs == 2
 
 
 def test_schedule_lazy_effect():
-    s = Signal(1)
+	s = Signal(1)
 
-    @effect(lazy=True)
-    def e():
-        s()
+	@effect(lazy=True)
+	def e():
+		s()
 
-    assert e.runs == 0
-    flush_effects()
-    assert e.runs == 0
+	assert e.runs == 0
+	flush_effects()
+	assert e.runs == 0
 
-    e.schedule()
-    flush_effects()
-    assert e.runs == 1
+	e.schedule()
+	flush_effects()
+	assert e.runs == 1
 
-    s.write(2)
-    flush_effects()
-    assert e.runs == 2
+	s.write(2)
+	flush_effects()
+	assert e.runs == 2
 
 
 def test_run_lazy_effect():
-    s = Signal(1)
+	s = Signal(1)
 
-    @effect(lazy=True)
-    def e():
-        s()
+	@effect(lazy=True)
+	def e():
+		s()
 
-    assert e.runs == 0
-    flush_effects()
-    assert e.runs == 0
+	assert e.runs == 0
+	flush_effects()
+	assert e.runs == 0
 
-    e.run()
-    assert e.runs == 1
-    flush_effects()
-    assert e.runs == 1
+	e.run()
+	assert e.runs == 1
+	flush_effects()
+	assert e.runs == 1
 
-    s.write(2)
-    flush_effects()
-    assert e.runs == 2
+	s.write(2)
+	flush_effects()
+	assert e.runs == 2
 
 
 def test_dispose_effect_removes_from_exact_batch():
-    @effect
-    def e(): ...
+	@effect
+	def e(): ...
 
-    assert e.runs == 0
+	assert e.runs == 0
 
-    with Batch():
-        e.dispose()
-    flush_effects()
-    assert e.runs == 0
+	with Batch():
+		e.dispose()
+	flush_effects()
+	assert e.runs == 0
 
 
 def test_effect_unregister_from_parent_on_disposal():
-    @effect
-    def e():
-        @effect
-        def e2(): ...
+	@effect
+	def e():
+		@effect
+		def e2(): ...
 
-    flush_effects()
-    assert len(e.children) == 1
-    child = e.children[0]
-    child.dispose()
-    assert child.children == []
+	flush_effects()
+	assert len(e.children) == 1
+	child = e.children[0]
+	child.dispose()
+	assert child.children == []
 
 
 def test_effect_unregister_from_batch_on_disposal():
-    with Batch() as batch:  # noqa: F841
+	with Batch() as batch:  # noqa: F841
 
-        @effect
-        def e(): ...
+		@effect
+		def e(): ...
 
-        assert batch.effects == [e]
-        e.dispose()
-        assert batch.effects == []
+		assert batch.effects == [e]
+		e.dispose()
+		assert batch.effects == []
 
 
 def test_effect_unset_batch_after_run():
-    with Batch() as batch:  # noqa: F841
+	with Batch() as batch:  # noqa: F841
 
-        @effect
-        def e(): ...
+		@effect
+		def e(): ...
 
-        assert e.batch == batch
-    assert e.batch is None
+		assert e.batch == batch
+	assert e.batch is None
 
 
 def test_effect_rescheduling_itself():
-    s = Signal(0)
+	s = Signal(0)
 
-    @effect
-    def e():
-        if s() < 10:
-            s.write(s() + 1)
+	@effect
+	def e():
+		if s() < 10:
+			s.write(s() + 1)
 
-    flush_effects()
-    assert s() == 10
-    assert e.runs == 11  # 10 increment runs + 1 run without a write
+	flush_effects()
+	assert s() == 10
+	assert e.runs == 11  # 10 increment runs + 1 run without a write
 
 
 def test_effect_doesnt_rerun_if_read_after_write():
-    s = Signal(0)
-    t = Signal(False)
+	s = Signal(0)
+	t = Signal(False)
 
-    @effect
-    def e():
-        if t():
-            s.write(1)
-            # read after write
-            s()
+	@effect
+	def e():
+		if t():
+			s.write(1)
+			# read after write
+			s()
 
-    flush_effects()
-    assert e.runs == 1
-    t.write(True)
+	flush_effects()
+	assert e.runs == 1
+	t.write(True)
 
-    flush_effects()
-    assert e.runs == 2
+	flush_effects()
+	assert e.runs == 2
 
 
 def test_effect_explicit_deps_disable_tracking():
-    a = Signal(0, name="a")
-    b = Signal(0, name="b")
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
 
-    runs = 0
+	runs = 0
 
-    @effect(deps=[a])
-    def e():
-        nonlocal runs
-        runs += 1
-        # Read both signals, but only `a` should be tracked
-        _ = a()
-        _ = b()
+	@effect(deps=[a])
+	def e():
+		nonlocal runs
+		runs += 1
+		# Read both signals, but only `a` should be tracked
+		_ = a()
+		_ = b()
 
-    flush_effects()
-    assert runs == 1
+	flush_effects()
+	assert runs == 1
 
-    b.write(1)
-    flush_effects()
-    # Should NOT rerun because b is not tracked
-    assert runs == 1
+	b.write(1)
+	flush_effects()
+	# Should NOT rerun because b is not tracked
+	assert runs == 1
 
-    a.write(1)
-    flush_effects()
-    # Should rerun because a is an explicit dep
-    assert runs == 2
+	a.write(1)
+	flush_effects()
+	# Should rerun because a is an explicit dep
+	assert runs == 2
 
 
 def test_effect_explicit_deps_only():
-    a = Signal(0, name="a")
-    b = Signal(0, name="b")
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
 
-    @effect(deps=[b])
-    def e():
-        # Read a dynamically; only b should matter
-        _ = a()
-        _ = b()
+	@effect(deps=[b])
+	def e():
+		# Read a dynamically; only b should matter
+		_ = a()
+		_ = b()
 
-    flush_effects()
-    assert e.runs == 1
+	flush_effects()
+	assert e.runs == 1
 
-    a.write(1)
-    flush_effects()
-    assert e.runs == 1
+	a.write(1)
+	flush_effects()
+	assert e.runs == 1
 
-    b.write(2)
-    flush_effects()
-    assert e.runs == 2
+	b.write(2)
+	flush_effects()
+	assert e.runs == 2
 
 
 @pytest.mark.asyncio
 async def test_async_effect_tracks_dependencies_across_await():
-    s1 = Signal(1, name="s1")
-    s2 = Signal(2, name="s2")
+	s1 = Signal(1, name="s1")
+	s2 = Signal(2, name="s2")
 
-    seen: list[tuple[str, int]] = []
+	seen: list[tuple[str, int]] = []
 
-    @effect
-    async def e():
-        seen.append(("s1", s1()))
-        await asyncio.sleep(0)
-        seen.append(("s2", s2()))
+	@effect
+	async def e():
+		seen.append(("s1", s1()))
+		await asyncio.sleep(0)
+		seen.append(("s2", s2()))
 
-    # Initial run
-    flush_effects()
-    await asyncio.sleep(0)  # start task
-    await asyncio.sleep(0)  # finish task
-    assert e.runs == 1
-    assert seen == [("s1", 1), ("s2", 2)]
+	# Initial run
+	flush_effects()
+	await asyncio.sleep(0)  # start task
+	await asyncio.sleep(0)  # finish task
+	assert e.runs == 1
+	assert seen == [("s1", 1), ("s2", 2)]
 
-    # Change dep observed before await -> reruns
-    s1.write(10)
-    await asyncio.sleep(0)  # schedule/flush
-    await asyncio.sleep(0)  # task to first await
-    await asyncio.sleep(0)  # task completes
-    assert e.runs == 2
-    assert seen[-2:] == [("s1", 10), ("s2", 2)]
+	# Change dep observed before await -> reruns
+	s1.write(10)
+	await asyncio.sleep(0)  # schedule/flush
+	await asyncio.sleep(0)  # task to first await
+	await asyncio.sleep(0)  # task completes
+	assert e.runs == 2
+	assert seen[-2:] == [("s1", 10), ("s2", 2)]
 
-    # Change dep observed after await -> reruns
-    s2.write(20)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 3
-    assert seen[-2:] == [("s1", 10), ("s2", 20)]
+	# Change dep observed after await -> reruns
+	s2.write(20)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 3
+	assert seen[-2:] == [("s1", 10), ("s2", 20)]
 
 
 @pytest.mark.asyncio
 async def test_async_effect_cleanup_on_rerun():
-    s = Signal(0, name="s")
-    cleanup_runs = 0
+	s = Signal(0, name="s")
+	cleanup_runs = 0
 
-    @effect
-    async def e():
-        _ = s()
-        await asyncio.sleep(0)
+	@effect
+	async def e():
+		_ = s()
+		await asyncio.sleep(0)
 
-        def cleanup():
-            nonlocal cleanup_runs
-            cleanup_runs += 1
+		def cleanup():
+			nonlocal cleanup_runs
+			cleanup_runs += 1
 
-        return cleanup
+		return cleanup
 
-    # complete first run
-    flush_effects()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 1
-    assert cleanup_runs == 0
+	# complete first run
+	flush_effects()
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 1
+	assert cleanup_runs == 0
 
-    # trigger rerun -> previous cleanup should run once
-    s.write(1)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 2
-    assert cleanup_runs == 1
+	# trigger rerun -> previous cleanup should run once
+	s.write(1)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 2
+	assert cleanup_runs == 1
 
 
 # TODO: find a way to make this pass. Effect cancellation works in practice.
 @pytest.mark.asyncio
 @pytest.mark.xfail(
-    reason="Cancellation timing is event-loop dependent; non-deterministic in CI",
-    strict=False,
+	reason="Cancellation timing is event-loop dependent; non-deterministic in CI",
+	strict=False,
 )
 async def test_async_effect_cancels_inflight_on_rerun():
-    s = Signal(0, name="s")
-    progressed_values: list[int] = []
-    loop = asyncio.get_event_loop()
-    gate0: asyncio.Future[None] = loop.create_future()
-    gate1: asyncio.Future[None] = loop.create_future()
+	s = Signal(0, name="s")
+	progressed_values: list[int] = []
+	loop = asyncio.get_event_loop()
+	gate0: asyncio.Future[None] = loop.create_future()
+	gate1: asyncio.Future[None] = loop.create_future()
 
-    @effect
-    async def e():
-        _ = s()
-        if s() == 0:
-            await gate0
-        else:
-            await gate1
-        progressed_values.append(s())
+	@effect
+	async def e():
+		_ = s()
+		if s() == 0:
+			await gate0
+		else:
+			await gate1
+		progressed_values.append(s())
 
-    # Start first run and pause at gate0
-    flush_effects()
-    await asyncio.sleep(0)
-    initial_task = getattr(e, "_task", None)
+	# Start first run and pause at gate0
+	flush_effects()
+	await asyncio.sleep(0)
+	initial_task = getattr(e, "_task", None)
 
-    # Trigger rerun -> should cancel in-flight task
-    s.write(1)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    # Wait until the effect has rerun and replaced the task, then release gate1 only
-    for _ in range(10):
-        if (
-            getattr(e, "_task", None) is not initial_task
-            and getattr(e, "_task", None) is not None
-        ):
-            break
-        await asyncio.sleep(0)
+	# Trigger rerun -> should cancel in-flight task
+	s.write(1)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	# Wait until the effect has rerun and replaced the task, then release gate1 only
+	for _ in range(10):
+		if (
+			getattr(e, "_task", None) is not initial_task
+			and getattr(e, "_task", None) is not None
+		):
+			break
+		await asyncio.sleep(0)
 
-    if not gate1.done():
-        gate1.set_result(None)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+	if not gate1.done():
+		gate1.set_result(None)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
 
-    # Only the second run should have progressed (allow a few ticks to settle)
-    for _ in range(20):
-        if progressed_values == [1]:
-            break
-        await asyncio.sleep(0)
-    assert progressed_values == [1]
+	# Only the second run should have progressed (allow a few ticks to settle)
+	for _ in range(20):
+		if progressed_values == [1]:
+			break
+		await asyncio.sleep(0)
+	assert progressed_values == [1]
 
-    # Releasing gate0 later should not allow the cancelled first run to progress
-    if not gate0.done():
-        gate0.set_result(None)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert progressed_values == [1]
-    # The second run should have completed by now (counts as first completed run)
-    assert e.runs == 1
+	# Releasing gate0 later should not allow the cancelled first run to progress
+	if not gate0.done():
+		gate0.set_result(None)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert progressed_values == [1]
+	# The second run should have completed by now (counts as first completed run)
+	assert e.runs == 1
 
 
 @pytest.mark.asyncio
 async def test_async_effect_self_reschedules_on_write():
-    s = Signal(0, name="s")
+	s = Signal(0, name="s")
 
-    @effect
-    async def e():
-        if s() == 0:
-            await asyncio.sleep(0)
-            s.write(1)
-        else:
-            await asyncio.sleep(0)
+	@effect
+	async def e():
+		if s() == 0:
+			await asyncio.sleep(0)
+			s.write(1)
+		else:
+			await asyncio.sleep(0)
 
-    # First run completes and writes -> schedules rerun
-    flush_effects()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    # Force process scheduled rerun and allow task to complete
-    flush_effects()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 2
-    assert s() == 1
+	# First run completes and writes -> schedules rerun
+	flush_effects()
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	# Force process scheduled rerun and allow task to complete
+	flush_effects()
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 2
+	assert s() == 1
 
 
 @pytest.mark.asyncio
 async def test_async_effect_dynamic_dependency_after_await():
-    toggle = Signal(False, name="toggle")
-    s1 = Signal(1, name="s1")
-    s2 = Signal(2, name="s2")
+	toggle = Signal(False, name="toggle")
+	s1 = Signal(1, name="s1")
+	s2 = Signal(2, name="s2")
 
-    reads: list[int] = []
+	reads: list[int] = []
 
-    @effect
-    async def e():
-        await asyncio.sleep(0)
-        if toggle():
-            reads.append(s1())
-        else:
-            reads.append(s2())
+	@effect
+	async def e():
+		await asyncio.sleep(0)
+		if toggle():
+			reads.append(s1())
+		else:
+			reads.append(s2())
 
-    # Initial run (toggle False -> depend on s2)
-    flush_effects()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 1
-    assert reads[-1] == 2
+	# Initial run (toggle False -> depend on s2)
+	flush_effects()
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 1
+	assert reads[-1] == 2
 
-    # Changing s1 should not rerun (not a dep yet)
-    s1.write(10)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 1
+	# Changing s1 should not rerun (not a dep yet)
+	s1.write(10)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 1
 
-    # Changing s2 should rerun
-    s2.write(20)
-    flush_effects()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 2
-    assert reads[-1] == 20
+	# Changing s2 should rerun
+	s2.write(20)
+	flush_effects()
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 2
+	assert reads[-1] == 20
 
-    # Flip toggle -> after rerun, effect should depend on s1
-    toggle.write(True)
-    flush_effects()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 3
-    assert reads[-1] == 10
+	# Flip toggle -> after rerun, effect should depend on s1
+	toggle.write(True)
+	flush_effects()
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 3
+	assert reads[-1] == 10
 
-    # Now s1 changes should rerun
-    s1.write(11)
-    flush_effects()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 4
-    assert reads[-1] == 11
+	# Now s1 changes should rerun
+	s1.write(11)
+	flush_effects()
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 4
+	assert reads[-1] == 11
 
 
 @pytest.mark.asyncio
 async def test_async_effect_retains_dependency_across_cancellations():
-    """If an async effect is cancelled repeatedly before reading a dep,
-    it should not lose previously established dependencies.
+	"""If an async effect is cancelled repeatedly before reading a dep,
+	it should not lose previously established dependencies.
 
-    Regressions here can cause unkeyed queries to lose their auto-tracked signal
-    dependencies when the key changes rapidly.
-    """
+	Regressions here can cause unkeyed queries to lose their auto-tracked signal
+	dependencies when the key changes rapidly.
+	"""
 
-    id_sig = Signal(1, name="id_sig")
-    churn = Signal(0, name="churn")
+	id_sig = Signal(1, name="id_sig")
+	churn = Signal(0, name="churn")
 
-    runs: list[int] = []
+	runs: list[int] = []
 
-    @effect
-    async def e():
-        # Simulate some pre-work before binding dep
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        # Bind dependency late
-        runs.append(id_sig())
+	@effect
+	async def e():
+		# Simulate some pre-work before binding dep
+		await asyncio.sleep(0)
+		await asyncio.sleep(0)
+		# Bind dependency late
+		runs.append(id_sig())
 
-    # Establish initial dependency by letting first run finish
-    flush_effects()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert e.runs == 1
-    assert runs[-1] == 1
+	# Establish initial dependency by letting first run finish
+	flush_effects()
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert e.runs == 1
+	assert runs[-1] == 1
 
-    # Now churn: schedule reruns and cancel them before they read the dep
-    for _ in range(5):
-        churn.write(churn() + 1)  # schedule rerun
-        await asyncio.sleep(0)  # let task start
-        # Immediately schedule again to cancel the in-flight run
-        churn.write(churn() + 1)
-        await asyncio.sleep(0)  # allow cancellation to happen
+	# Now churn: schedule reruns and cancel them before they read the dep
+	for _ in range(5):
+		churn.write(churn() + 1)  # schedule rerun
+		await asyncio.sleep(0)  # let task start
+		# Immediately schedule again to cancel the in-flight run
+		churn.write(churn() + 1)
+		await asyncio.sleep(0)  # allow cancellation to happen
 
-    # Change the dependency signal -> effect should eventually rerun and read it
-    id_sig.write(2)
-    await asyncio.sleep(0)  # schedule rerun
-    await asyncio.sleep(0)  # run to first await
-    await asyncio.sleep(0)  # run to completion
-    await asyncio.sleep(0)  # just to be sure
-    assert runs[-1] == 2
+	# Change the dependency signal -> effect should eventually rerun and read it
+	id_sig.write(2)
+	await asyncio.sleep(0)  # schedule rerun
+	await asyncio.sleep(0)  # run to first await
+	await asyncio.sleep(0)  # run to completion
+	await asyncio.sleep(0)  # just to be sure
+	assert runs[-1] == 2
 
 
 def test_reactive_dict_basic_reads_and_writes():
-    ctx = ReactiveDict({"a": 1})
-    reads = []
+	ctx = ReactiveDict({"a": 1})
+	reads = []
 
-    @effect
-    def e():
-        reads.append(ctx["a"])  # subscribe to key 'a'
+	@effect
+	def e():
+		reads.append(ctx["a"])  # subscribe to key 'a'
 
-    flush_effects()
-    assert reads == [1]
+	flush_effects()
+	assert reads == [1]
 
-    ctx["a"] = 2
-    flush_effects()
-    assert reads == [1, 2]
+	ctx["a"] = 2
+	flush_effects()
+	assert reads == [1, 2]
 
-    # setting same value should not schedule effect run
-    @effect
-    def e2():
-        _ = ctx["a"]
+	# setting same value should not schedule effect run
+	@effect
+	def e2():
+		_ = ctx["a"]
 
-    flush_effects()
-    runs = e2.runs
-    ctx["a"] = 2
-    flush_effects()
-    assert e2.runs == runs
+	flush_effects()
+	runs = e2.runs
+	ctx["a"] = 2
+	flush_effects()
+	assert e2.runs == runs
 
 
 def test_reactive_dict_per_key_isolation():
-    ctx = ReactiveDict({"a": 1, "b": 10})
+	ctx = ReactiveDict({"a": 1, "b": 10})
 
-    @effect
-    def ea():
-        _ = ctx["a"]
+	@effect
+	def ea():
+		_ = ctx["a"]
 
-    @effect
-    def eb():
-        _ = ctx["b"]
+	@effect
+	def eb():
+		_ = ctx["b"]
 
-    flush_effects()
-    assert ea.runs == 1 and eb.runs == 1
+	flush_effects()
+	assert ea.runs == 1 and eb.runs == 1
 
-    ctx["a"] = 2
-    flush_effects()
-    assert ea.runs == 2 and eb.runs == 1
+	ctx["a"] = 2
+	flush_effects()
+	assert ea.runs == 2 and eb.runs == 1
 
-    ctx["b"] = 20
-    flush_effects()
-    assert ea.runs == 2 and eb.runs == 2
+	ctx["b"] = 20
+	flush_effects()
+	assert ea.runs == 2 and eb.runs == 2
 
 
 def test_reactive_dict_delete_sets_none_preserving_subscribers():
-    ctx = ReactiveDict({"a": 1})
-    values = []
+	ctx = ReactiveDict({"a": 1})
+	values = []
 
-    @effect
-    def e():
-        values.append(ctx["a"])  # subscribe
+	@effect
+	def e():
+		values.append(ctx["a"])  # subscribe
 
-    flush_effects()
-    assert values == [1]
+	flush_effects()
+	assert values == [1]
 
-    del ctx["a"]
-    flush_effects()
-    assert values == [1, None]
+	del ctx["a"]
+	flush_effects()
+	assert values == [1, None]
 
-    # re-set should notify again
-    ctx["a"] = 3
-    flush_effects()
-    assert values == [1, None, 3]
+	# re-set should notify again
+	ctx["a"] = 3
+	flush_effects()
+	assert values == [1, None, 3]
 
 
 def test_reactive_dict_get_after_delete_uses_default_when_absent():
-    ctx = ReactiveDict({"a": 1})
+	ctx = ReactiveDict({"a": 1})
 
-    # Remove key: value signal remains but marks logical absence
-    del ctx["a"]
+	# Remove key: value signal remains but marks logical absence
+	del ctx["a"]
 
-    assert "a" in ctx._signals
+	assert "a" in ctx._signals
 
-    # Without default -> None
-    assert ctx.get("a") is None
+	# Without default -> None
+	assert ctx.get("a") is None
 
-    # With default -> provided default
-    assert ctx.get("a", 42) == 42
+	# With default -> provided default
+	assert ctx.get("a", 42) == 42
 
 
 def test_reactive_dict_get_absent_subscribes_and_updates_on_set():
-    ctx = ReactiveDict({})
+	ctx = ReactiveDict({})
 
-    reads: list[int] = []
+	reads: list[int] = []
 
-    @effect
-    def e():
-        reads.append(int(cast(Any, ctx.get("x", 0))))
+	@effect
+	def e():
+		reads.append(int(cast(Any, ctx.get("x", 0))))
 
-    flush_effects()
-    assert reads == [0]
+	flush_effects()
+	assert reads == [0]
 
-    # Setting the key should trigger a rerun and pick up the new value
-    ctx["x"] = 7
-    flush_effects()
-    assert reads == [0, 7]
+	# Setting the key should trigger a rerun and pick up the new value
+	ctx["x"] = 7
+	flush_effects()
+	assert reads == [0, 7]
 
-    # Same-value write should not rerun
-    runs = e.runs
-    ctx["x"] = 7
-    flush_effects()
-    assert e.runs == runs
+	# Same-value write should not rerun
+	runs = e.runs
+	ctx["x"] = 7
+	flush_effects()
+	assert e.runs == runs
 
-    # Deleting should write missing and cause get() to return the default again
-    del ctx["x"]
-    flush_effects()
-    assert reads[-1] == 0
+	# Deleting should write missing and cause get() to return the default again
+	del ctx["x"]
+	flush_effects()
+	assert reads[-1] == 0
 
 
 def test_reactive_list_basic_index_reactivity():
-    lst = ReactiveList([1, 2, 3])
-    assert isinstance(lst, list)
+	lst = ReactiveList([1, 2, 3])
+	assert isinstance(lst, list)
 
-    seen: list = []
+	seen: list = []
 
-    @effect
-    def e():
-        seen.append(lst[1])  # subscribe to index 1
+	@effect
+	def e():
+		seen.append(lst[1])  # subscribe to index 1
 
-    flush_effects()
-    assert e.runs == 1
-    assert seen == [2]
+	flush_effects()
+	assert e.runs == 1
+	assert seen == [2]
 
-    # mutate a different index -> no rerun
-    lst[0] = 10
-    flush_effects()
-    assert e.runs == 1
-    assert seen == [2]
+	# mutate a different index -> no rerun
+	lst[0] = 10
+	flush_effects()
+	assert e.runs == 1
+	assert seen == [2]
 
-    # mutate the observed index
-    lst[1] = 20
-    flush_effects()
-    assert e.runs == 2
-    assert seen == [2, 20]
+	# mutate the observed index
+	lst[1] = 20
+	flush_effects()
+	assert e.runs == 2
+	assert seen == [2, 20]
 
-    # setting same value should not trigger
-    lst[1] = 20
-    flush_effects()
-    assert e.runs == 2
-    assert seen == [2, 20]
+	# setting same value should not trigger
+	lst[1] = 20
+	flush_effects()
+	assert e.runs == 2
+	assert seen == [2, 20]
 
 
 def test_reactive_list_structural_changes_bump_version_and_remap_dependencies():
-    lst = ReactiveList([3, 1, 2])
+	lst = ReactiveList([3, 1, 2])
 
-    versions: list[int] = []
-    first_values: list = []
+	versions: list[int] = []
+	first_values: list = []
 
-    @effect
-    def e():
-        # depend on structural version and first item
-        versions.append(lst.version)
-        first_values.append(lst[0])
+	@effect
+	def e():
+		# depend on structural version and first item
+		versions.append(lst.version)
+		first_values.append(lst[0])
 
-    flush_effects()
-    assert versions[-1] == 0 and first_values[-1] == 3
+	flush_effects()
+	assert versions[-1] == 0 and first_values[-1] == 3
 
-    lst.append(0)
-    flush_effects()
-    assert versions[-1] == 1 and first_values[-1] == 3
+	lst.append(0)
+	flush_effects()
+	assert versions[-1] == 1 and first_values[-1] == 3
 
-    lst.pop()
-    flush_effects()
-    assert versions[-1] == 2 and first_values[-1] == 3
+	lst.pop()
+	flush_effects()
+	assert versions[-1] == 2 and first_values[-1] == 3
 
-    # sort should reorder signals and cause effect to rerun; first item changes to 1
-    lst.sort()
-    flush_effects()
-    assert versions[-1] == 3
-    assert first_values[-1] == 1
+	# sort should reorder signals and cause effect to rerun; first item changes to 1
+	lst.sort()
+	flush_effects()
+	assert versions[-1] == 3
+	assert first_values[-1] == 1
 
 
 def test_reactive_set_membership_reactivity_add_remove():
-    s = ReactiveSet({"a"})
-    assert isinstance(s, set)
+	s = ReactiveSet({"a"})
+	assert isinstance(s, set)
 
-    checks: list[bool] = []
+	checks: list[bool] = []
 
-    @effect
-    def e():
-        # subscribe to membership for "b"
-        checks.append("b" in s)
+	@effect
+	def e():
+		# subscribe to membership for "b"
+		checks.append("b" in s)
 
-    flush_effects()
-    assert checks == [False]
+	flush_effects()
+	assert checks == [False]
 
-    s.add("b")
-    flush_effects()
-    assert checks == [False, True]
+	s.add("b")
+	flush_effects()
+	assert checks == [False, True]
 
-    s.discard("b")
-    flush_effects()
-    assert checks == [False, True, False]
+	s.discard("b")
+	flush_effects()
+	assert checks == [False, True, False]
 
-    # discarding again should not change
-    runs = e.runs
-    s.discard("b")
-    flush_effects()
-    assert e.runs == runs
+	# discarding again should not change
+	runs = e.runs
+	s.discard("b")
+	flush_effects()
+	assert e.runs == runs
 
 
 def test_reactive_dataclass_fields_are_signals_and_wrapped():
-    @reactive_dataclass
-    class Model:
-        x: int = 1
-        tags: list[int] = None  # type: ignore[assignment]
+	@reactive_dataclass
+	class Model:
+		x: int = 1
+		tags: list[int] = None  # type: ignore[assignment]
 
-    m = Model()
-    m.x = 2
-    m.tags = [1, 2]
+	m = Model()
+	m.x = 2
+	m.tags = [1, 2]
 
-    # fields read/write go through signals
-    seen: list[int] = []
+	# fields read/write go through signals
+	seen: list[int] = []
 
-    @effect
-    def e():
-        seen.append(m.x)
+	@effect
+	def e():
+		seen.append(m.x)
 
-    flush_effects()
-    assert seen == [2]
+	flush_effects()
+	assert seen == [2]
 
-    m.x = 5
-    flush_effects()
-    assert seen == [2, 5]
+	m.x = 5
+	flush_effects()
+	assert seen == [2, 5]
 
-    # collections are auto-wrapped
-    assert isinstance(m.tags, ReactiveList)
-    m.tags.append(3)
-    # structural change shouldn't affect x subscribers
-    runs = e.runs
-    flush_effects()
-    assert e.runs == runs
+	# collections are auto-wrapped
+	assert isinstance(m.tags, ReactiveList)
+	m.tags.append(3)
+	# structural change shouldn't affect x subscribers
+	runs = e.runs
+	flush_effects()
+	assert e.runs == runs
 
 
 def test_nested_reactive_dict_and_list_deep_reactivity():
-    ctx: dict[str, Any] = reactive(
-        (
-            {
-                "user": {
-                    "name": "Ada",
-                    "tags": ["a", "b"],
-                }
-            }
-        )
-    )
+	ctx: dict[str, Any] = reactive(
+		{
+			"user": {
+				"name": "Ada",
+				"tags": ["a", "b"],
+			}
+		}
+	)
 
-    # ensure wrapping
-    user = ctx["user"]
-    assert isinstance(user, ReactiveDict)
-    assert isinstance(user["tags"], ReactiveList)
+	# ensure wrapping
+	user = ctx["user"]
+	assert isinstance(user, ReactiveDict)
+	assert isinstance(user["tags"], ReactiveList)
 
-    name_reads: list[str] = []
-    v_reads: list[int] = []
+	name_reads: list[str] = []
+	v_reads: list[int] = []
 
-    @effect
-    def e():
-        u = ctx["user"]  # depend on user key
-        name_reads.append(u["name"])  # and nested name key
-        v_reads.append(u["tags"].version)
+	@effect
+	def e():
+		u = ctx["user"]  # depend on user key
+		name_reads.append(u["name"])  # and nested name key
+		v_reads.append(u["tags"].version)
 
-    flush_effects()
-    assert name_reads == ["Ada"] and v_reads == [0]
+	flush_effects()
+	assert name_reads == ["Ada"] and v_reads == [0]
 
-    # Update unrelated top-level key should not rerun
-    ctx["other"] = 1
-    flush_effects()
-    assert name_reads == ["Ada"] and v_reads == [0]
+	# Update unrelated top-level key should not rerun
+	ctx["other"] = 1
+	flush_effects()
+	assert name_reads == ["Ada"] and v_reads == [0]
 
-    # Update nested name should rerun
-    u2 = ctx["user"]
-    u2["name"] = "Grace"
-    flush_effects()
-    assert name_reads == ["Ada", "Grace"]
+	# Update nested name should rerun
+	u2 = ctx["user"]
+	u2["name"] = "Grace"
+	flush_effects()
+	assert name_reads == ["Ada", "Grace"]
 
-    # Structural change to nested tags should bump version and rerun
-    u2["tags"].append("c")
-    flush_effects()
-    assert v_reads[-1] == 1
+	# Structural change to nested tags should bump version and rerun
+	u2["tags"].append("c")
+	flush_effects()
+	assert v_reads[-1] == 1
 
-    # Changing a non-watched index shouldn't change name dependency
-    len_v_reads = len(v_reads)
-    u2["tags"][1] = "bb"
-    flush_effects()
-    assert name_reads[-1] == "Grace"
-    assert len(v_reads) == len_v_reads
+	# Changing a non-watched index shouldn't change name dependency
+	len_v_reads = len(v_reads)
+	u2["tags"][1] = "bb"
+	flush_effects()
+	assert name_reads[-1] == "Grace"
+	assert len(v_reads) == len_v_reads
 
 
 def test_reactive_list_len_is_reactive_and_slice_optimization():
-    lst = ReactiveList([1, 2, 3, 4])
+	lst = ReactiveList([1, 2, 3, 4])
 
-    len_reads: list[int] = []
+	len_reads: list[int] = []
 
-    @effect
-    def e():
-        len_reads.append(len(lst))
+	@effect
+	def e():
+		len_reads.append(len(lst))
 
-    flush_effects()
-    assert len_reads == [4]
+	flush_effects()
+	assert len_reads == [4]
 
-    # In-place per-index change should not affect len-based effect
-    runs = e.runs
-    lst[1] = 20
-    flush_effects()
-    assert e.runs == runs
+	# In-place per-index change should not affect len-based effect
+	runs = e.runs
+	lst[1] = 20
+	flush_effects()
+	assert e.runs == runs
 
-    # Equal-length slice assignment: should not bump len
-    lst[1:3] = [200, 300]
-    flush_effects()
-    assert e.runs == runs
-    assert len_reads == [4]
+	# Equal-length slice assignment: should not bump len
+	lst[1:3] = [200, 300]
+	flush_effects()
+	assert e.runs == runs
+	assert len_reads == [4]
 
-    # Unequal-length slice assignment: should bump len
-    lst[0:2] = [100]
-    flush_effects()
-    assert len_reads[-1] == 3
+	# Unequal-length slice assignment: should bump len
+	lst[0:2] = [100]
+	flush_effects()
+	assert len_reads[-1] == 3
 
-    # Structural ops bump len
-    lst.append(9)
-    flush_effects()
-    assert len_reads[-1] == 4
-    lst.pop()
-    flush_effects()
-    assert len_reads[-1] == 3
+	# Structural ops bump len
+	lst.append(9)
+	flush_effects()
+	assert len_reads[-1] == 4
+	lst.pop()
+	flush_effects()
+	assert len_reads[-1] == 3
 
 
 def test_reactive_list_iter_is_reactive_to_structure_only():
-    lst = ReactiveList([1, 2, 3])
+	lst = ReactiveList([1, 2, 3])
 
-    iter_counts: list[int] = []
+	iter_counts: list[int] = []
 
-    @effect
-    def e():
-        # Depend only on iteration count, not values
-        iter_counts.append(sum(1 for _ in lst))
+	@effect
+	def e():
+		# Depend only on iteration count, not values
+		iter_counts.append(sum(1 for _ in lst))
 
-    flush_effects()
-    assert iter_counts == [3]
+	flush_effects()
+	assert iter_counts == [3]
 
-    # Change a value in place: should not rerun, since __iter__ depends on structure only
-    runs = e.runs
-    lst[0] = 10
-    flush_effects()
-    assert e.runs == runs
+	# Change a value in place: should not rerun, since __iter__ depends on structure only
+	runs = e.runs
+	lst[0] = 10
+	flush_effects()
+	assert e.runs == runs
 
-    # Structural change via append triggers rerun
-    lst.append(4)
-    flush_effects()
-    assert iter_counts[-1] == 4
+	# Structural change via append triggers rerun
+	lst.append(4)
+	flush_effects()
+	assert iter_counts[-1] == 4
 
-    # Equal-length slice replacement should not rerun
-    lst[1:3] = [20, 30]
-    flush_effects()
-    assert iter_counts[-1] == 4
+	# Equal-length slice replacement should not rerun
+	lst[1:3] = [20, 30]
+	flush_effects()
+	assert iter_counts[-1] == 4
 
-    # Unequal-length slice replacement should rerun
-    lst[0:2] = [100]
-    flush_effects()
-    assert iter_counts[-1] == 3
+	# Unequal-length slice replacement should rerun
+	lst[0:2] = [100]
+	flush_effects()
+	assert iter_counts[-1] == 3
 
 
 def test_reactive_wraps_dataclass_class_and_caches():
-    @dataclass
-    class Model:
-        x: int = 1
-        tags: list[int] | None = None
+	@dataclass
+	class Model:
+		x: int = 1
+		tags: list[int] | None = None
 
-    R1 = reactive(Model)
-    R2 = reactive(Model)
-    assert R1 is R2
-    assert getattr(R1, "__is_reactive_dataclass__", False)
-    assert getattr(R1, "__reactive_base__", None) is Model
+	R1 = reactive(Model)
+	R2 = reactive(Model)
+	assert R1 is R2
+	assert getattr(R1, "__is_reactive_dataclass__", False)
+	assert getattr(R1, "__reactive_base__", None) is Model
 
-    m = R1()
+	m = R1()
 
-    seen: list[int] = []
+	seen: list[int] = []
 
-    @effect
-    def e():
-        seen.append(m.x)
+	@effect
+	def e():
+		seen.append(m.x)
 
-    flush_effects()
-    assert seen == [1]
+	flush_effects()
+	assert seen == [1]
 
-    m.x = 2
-    flush_effects()
-    assert seen == [1, 2]
+	m.x = 2
+	flush_effects()
+	assert seen == [1, 2]
 
-    m.tags = [1, 2]
-    assert isinstance(m.tags, ReactiveList)
+	m.tags = [1, 2]
+	assert isinstance(m.tags, ReactiveList)
 
 
 def test_reactive_wraps_dataclass_instance_in_place():
-    @dataclass
-    class Item:
-        a: int = 1
-        tags: list[int] | None = None
+	@dataclass
+	class Item:
+		a: int = 1
+		tags: list[int] | None = None
 
-    i = Item()
-    original_id = id(i)
-    reactive(i)
-    assert id(i) == original_id
-    Ri = type(i)
-    assert getattr(Ri, "__is_reactive_dataclass__", False)
-    assert getattr(Ri, "__reactive_base__", None) is Item
+	i = Item()
+	original_id = id(i)
+	reactive(i)
+	assert id(i) == original_id
+	Ri = type(i)
+	assert getattr(Ri, "__is_reactive_dataclass__", False)
+	assert getattr(Ri, "__reactive_base__", None) is Item
 
-    seen: list[int] = []
+	seen: list[int] = []
 
-    @effect
-    def e():
-        seen.append(i.a)
+	@effect
+	def e():
+		seen.append(i.a)
 
-    flush_effects()
-    assert seen == [1]
+	flush_effects()
+	assert seen == [1]
 
-    i.a = 5
-    flush_effects()
-    assert seen == [1, 5]
+	i.a = 5
+	flush_effects()
+	assert seen == [1, 5]
 
-    i.tags = [10]
-    assert isinstance(i.tags, ReactiveList)
+	i.tags = [10]
+	assert isinstance(i.tags, ReactiveList)
 
 
 def test_reactive_list_wraps_dataclass_items():
-    @dataclass
-    class D:
-        v: int = 1
+	@dataclass
+	class D:
+		v: int = 1
 
-    d = D()
-    lst: ReactiveList[D] = ReactiveList([])
-    lst.append(d)
+	d = D()
+	lst: ReactiveList[D] = ReactiveList([])
+	lst.append(d)
 
-    # Item should be upgraded to reactive dataclass instance
-    assert getattr(type(lst[0]), "__is_reactive_dataclass__", False)
+	# Item should be upgraded to reactive dataclass instance
+	assert getattr(type(lst[0]), "__is_reactive_dataclass__", False)
 
-    seen: list[int] = []
+	seen: list[int] = []
 
-    @effect
-    def e():
-        item = cast(D, lst[0])
-        seen.append(item.v)
+	@effect
+	def e():
+		item = cast(D, lst[0])
+		seen.append(item.v)
 
-    flush_effects()
-    assert seen == [1]
+	flush_effects()
+	assert seen == [1]
 
-    item2 = cast(D, lst[0])
-    item2.v = 3
-    flush_effects()
-    assert seen == [1, 3]
+	item2 = cast(D, lst[0])
+	item2.v = 3
+	flush_effects()
+	assert seen == [1, 3]
 
 
 def test_reactive_dataclass_eq_order_hash_and_repr():
-    @dataclass(order=True, frozen=True)
-    class A:
-        x: int
-        y: int
+	@dataclass(order=True, frozen=True)
+	class A:
+		x: int
+		y: int
 
-    RA = reactive(A)
-    a1 = RA(1, 2)
-    a2 = RA(1, 2)
-    a3 = RA(2, 1)
+	RA = reactive(A)
+	a1 = RA(1, 2)
+	a2 = RA(1, 2)
+	a3 = RA(2, 1)
 
-    # eq
-    assert a1 == a2 and a1 != a3
-    # order
-    assert a1 < a3
-    # hash (frozen)
-    s = {a1, a2}
-    assert len(s) == 1
-    # repr contains fields
-    r = repr(a1)
-    assert "x=1" in r and "y=2" in r
+	# eq
+	assert a1 == a2 and a1 != a3
+	# order
+	assert a1 < a3
+	# hash (frozen)
+	s = {a1, a2}
+	assert len(s) == 1
+	# repr contains fields
+	r = repr(a1)
+	assert "x=1" in r and "y=2" in r
 
-    # Ensure frozen enforcement at runtime through reactive descriptors
-    with pytest.raises(Exception):
-        a1.x = 10  # type: ignore[misc]
+	# Ensure frozen enforcement at runtime through reactive descriptors
+	with pytest.raises(AttributeError):
+		a1.x = 10  # type: ignore[misc]
 
 
 def test_reactive_dataclass_asdict_astuple_replace_default_factory():
-    @dataclass
-    class B:
-        x: int = 1
-        tags: list[int] = field(default_factory=list)
+	@dataclass
+	class B:
+		x: int = 1
+		tags: list[int] = field(default_factory=list)
 
-    RB = reactive(B)
-    b = RB()
-    # default_factory should be wrapped
-    assert isinstance(b.tags, ReactiveList)
-    b.tags.append(3)
+	RB = reactive(B)
+	b = RB()
+	# default_factory should be wrapped
+	assert isinstance(b.tags, ReactiveList)
+	b.tags.append(3)
 
-    # asdict/astuple work and produce plain containers
-    d = asdict(b)
-    t = astuple(b)
-    assert d == {"x": 1, "tags": [3]}
-    assert t == (1, [3])
+	# asdict/astuple work and produce plain containers
+	d = asdict(b)
+	t = astuple(b)
+	assert d == {"x": 1, "tags": [3]}
+	assert t == (1, [3])
 
-    # replace returns a new instance with updated immutables
-    b2 = replace(b, x=9)
-    assert isinstance(b2, RB)
-    assert b2.x == 9 and b.x == 1
+	# replace returns a new instance with updated immutables
+	b2 = replace(b, x=9)
+	assert isinstance(b2, RB)
+	assert b2.x == 9 and b.x == 1
 
 
 def test_reactive_dataclass_initvar_and_classvar_excluded():
-    @dataclass
-    class C:
-        x: int
-        cfg: ClassVar[int] = 7
-        temp: InitVar[int] = 0
+	@dataclass
+	class C:
+		x: int
+		cfg: ClassVar[int] = 7
+		temp: InitVar[int] = 0
 
-        def __post_init__(self, temp: int):  # type: ignore[override]
-            # not stored
-            assert isinstance(temp, int)
+		def __post_init__(self, temp: int):  # type: ignore[override]
+			# not stored
+			assert isinstance(temp, int)
 
-    RC = reactive(C)
-    c = RC(5, 123)
+	RC = reactive(C)
+	c = RC(5, 123)
 
-    # ClassVar not a field; value accessible on class, not as reactive field
-    assert RC.cfg == 7
-    # InitVar not present as attribute
-    assert not hasattr(c, "temp")
+	# ClassVar not a field; value accessible on class, not as reactive field
+	assert RC.cfg == 7
+	# InitVar not present as attribute
+	assert not hasattr(c, "temp")
 
 
 def test_reactive_dataclass_kw_only_and_match_args():
-    @dataclass(kw_only=True)
-    class D:
-        a: int
-        b: int = 2
+	@dataclass(kw_only=True)
+	class D:
+		a: int
+		b: int = 2
 
-    RD = reactive(D)
-    with pytest.raises(TypeError):
-        RD(1)  # type: ignore[call-arg]
-    d = RD(a=1)
-    assert d.a == 1 and d.b == 2
+	RD = reactive(D)
+	with pytest.raises(TypeError):
+		RD(1)  # type: ignore[call-arg]
+	d = RD(a=1)
+	assert d.a == 1 and d.b == 2
 
-    # __match_args__ should only include positional fields (none when kw_only=True)
-    assert getattr(RD, "__match_args__", ()) == ()
+	# __match_args__ should only include positional fields (none when kw_only=True)
+	assert getattr(RD, "__match_args__", ()) == ()
 
 
 def test_reactive_dataclass_inheritance_works():
-    @dataclass
-    class Base:
-        a: int = 1
+	@dataclass
+	class Base:
+		a: int = 1
 
-    @dataclass
-    class Sub(Base):
-        b: int = 2
+	@dataclass
+	class Sub(Base):
+		b: int = 2
 
-    RSub = reactive(Sub)
-    s = RSub()
-    assert s.a == 1 and s.b == 2
-    # asdict includes inherited fields
-    assert asdict(s) == {"a": 1, "b": 2}
+	RSub = reactive(Sub)
+	s = RSub()
+	assert s.a == 1 and s.b == 2
+	# asdict includes inherited fields
+	assert asdict(s) == {"a": 1, "b": 2}
 
 
 def test_reactive_dataclass_slots_basic():
-    @dataclass(slots=True)
-    class S:
-        x: int = 1
-        y: int = 2
+	@dataclass(slots=True)
+	class S:
+		x: int = 1
+		y: int = 2
 
-    RS = reactive(S)
-    s = RS()
-    # Basic read/write through descriptor should work with slots
-    assert s.x == 1
-    s.x = 3
-    assert s.x == 3
+	RS = reactive(S)
+	s = RS()
+	# Basic read/write through descriptor should work with slots
+	assert s.x == 1
+	s.x = 3
+	assert s.x == 3
 
 
 def test_state_wraps_collection_defaults_and_sets():
-    class S(ps.State):
-        items = [1, 2]
-        flags = {"a"}
+	class S(ps.State):
+		items = [1, 2]
+		flags = {"a"}
 
-    s = S()
-    assert isinstance(s.items, ReactiveList)
-    assert isinstance(s.flags, ReactiveSet)
+	s = S()
+	assert isinstance(s.items, ReactiveList)
+	assert isinstance(s.flags, ReactiveSet)
 
-    seen = []
+	seen = []
 
-    @effect
-    def e():
-        seen.append(s.items[0])
+	@effect
+	def e():
+		seen.append(s.items[0])
 
-    flush_effects()
-    assert seen == [1]
+	flush_effects()
+	assert seen == [1]
 
-    s.items[0] = 9
-    flush_effects()
-    assert seen == [1, 9]
+	s.items[0] = 9
+	flush_effects()
+	assert seen == [1, 9]
 
-    # setting a new collection value gets wrapped
-    s.items = [7]
-    assert isinstance(s.items, ReactiveList)
-    assert s.items[0] == 7
+	# setting a new collection value gets wrapped
+	s.items = [7]
+	assert isinstance(s.items, ReactiveList)
+	assert s.items[0] == 7
 
 
 # TODO:
@@ -1631,431 +1630,431 @@ def test_state_wraps_collection_defaults_and_sets():
 
 
 def test_reactive_dict_len_and_iter_reactivity():
-    ctx = ReactiveDict({"a": 1})
+	ctx = ReactiveDict({"a": 1})
 
-    snapshots: list[tuple[int, list[str]]] = []
+	snapshots: list[tuple[int, list[str]]] = []
 
-    @effect
-    def e():
-        # Depend on structure via len() and iteration
-        snapshots.append((len(ctx), list(iter(ctx))))
+	@effect
+	def e():
+		# Depend on structure via len() and iteration
+		snapshots.append((len(ctx), list(iter(ctx))))
 
-    flush_effects()
-    assert snapshots == [(1, ["a"])]
+	flush_effects()
+	assert snapshots == [(1, ["a"])]
 
-    # Non-structural value change should not rerun
-    runs = e.runs
-    ctx["a"] = 10
-    flush_effects()
-    assert e.runs == runs
+	# Non-structural value change should not rerun
+	runs = e.runs
+	ctx["a"] = 10
+	flush_effects()
+	assert e.runs == runs
 
-    # Structural add triggers rerun
-    ctx["b"] = 2
-    flush_effects()
-    assert snapshots[-1] == (2, ["a", "b"])
+	# Structural add triggers rerun
+	ctx["b"] = 2
+	flush_effects()
+	assert snapshots[-1] == (2, ["a", "b"])
 
-    # Structural delete triggers rerun
-    del ctx["a"]
-    flush_effects()
-    assert snapshots[-1] == (1, ["b"])
+	# Structural delete triggers rerun
+	del ctx["a"]
+	flush_effects()
+	assert snapshots[-1] == (1, ["b"])
 
-    # update with new key triggers rerun
-    ctx.update({"c": 3})
-    flush_effects()
-    assert snapshots[-1] == (2, ["b", "c"])
+	# update with new key triggers rerun
+	ctx.update({"c": 3})
+	flush_effects()
+	assert snapshots[-1] == (2, ["b", "c"])
 
-    # clear triggers rerun
-    ctx.clear()
-    flush_effects()
-    assert snapshots[-1] == (0, [])
+	# clear triggers rerun
+	ctx.clear()
+	flush_effects()
+	assert snapshots[-1] == (0, [])
 
 
 def test_reactive_dict_contains_reactivity_add_delete():
-    ctx = ReactiveDict({})
+	ctx = ReactiveDict({})
 
-    checks: list[bool] = []
+	checks: list[bool] = []
 
-    @effect
-    def e():
-        # Presence check should subscribe to the key's value signal
-        checks.append("x" in ctx)
+	@effect
+	def e():
+		# Presence check should subscribe to the key's value signal
+		checks.append("x" in ctx)
 
-    flush_effects()
-    assert checks == [False]
+	flush_effects()
+	assert checks == [False]
 
-    ctx["x"] = 1
-    flush_effects()
-    assert checks[-1] is True
+	ctx["x"] = 1
+	flush_effects()
+	assert checks[-1] is True
 
-    del ctx["x"]
-    flush_effects()
-    assert checks[-1] is False
+	del ctx["x"]
+	flush_effects()
+	assert checks[-1] is False
 
 
 def test_reactive_dict_views_and_methods():
-    ctx = ReactiveDict({"a": 1, "b": 2})
+	ctx = ReactiveDict({"a": 1, "b": 2})
 
-    lens: list[tuple[int, int, int]] = []
+	lens: list[tuple[int, int, int]] = []
 
-    @effect
-    def e():
-        # keys/items/values should be reactive to structure
-        lens.append((len(ctx.keys()), len(ctx.items()), len(ctx.values())))
+	@effect
+	def e():
+		# keys/items/values should be reactive to structure
+		lens.append((len(ctx.keys()), len(ctx.items()), len(ctx.values())))
 
-    flush_effects()
-    assert lens == [(2, 2, 2)]
+	flush_effects()
+	assert lens == [(2, 2, 2)]
 
-    # Value-only change should not rerun when depending only on structure/len
-    runs = cast(Any, e).runs
-    ctx["a"] = 10
-    flush_effects()
-    assert e.runs == runs
+	# Value-only change should not rerun when depending only on structure/len
+	runs = cast(Any, e).runs
+	ctx["a"] = 10
+	flush_effects()
+	assert e.runs == runs
 
-    # pop changes structure
-    v = ctx.pop("a")
-    assert v == 10
-    flush_effects()
-    assert lens[-1] == (1, 1, 1)
+	# pop changes structure
+	v = ctx.pop("a")
+	assert v == 10
+	flush_effects()
+	assert lens[-1] == (1, 1, 1)
 
-    # setdefault adds when absent, no-op when present
-    v = ctx.setdefault("c", 3)
-    assert v == 3 and "c" in ctx
-    flush_effects()
-    assert lens[-1] == (2, 2, 2)
-    v = ctx.setdefault("c", 9)
-    assert v == 3
-    runs_after = cast(Any, e).runs
-    flush_effects()
-    assert e.runs == runs_after
+	# setdefault adds when absent, no-op when present
+	v = ctx.setdefault("c", 3)
+	assert v == 3 and "c" in ctx
+	flush_effects()
+	assert lens[-1] == (2, 2, 2)
+	v = ctx.setdefault("c", 9)
+	assert v == 3
+	runs_after = cast(Any, e).runs
+	flush_effects()
+	assert e.runs == runs_after
 
-    # popitem removes last item
-    k, _ = ctx.popitem()
-    assert k in ("b", "c")
-    flush_effects()
-    assert lens[-1] == (1, 1, 1)
+	# popitem removes last item
+	k, _ = ctx.popitem()
+	assert k in ("b", "c")
+	flush_effects()
+	assert lens[-1] == (1, 1, 1)
 
-    # copy returns ReactiveDict
-    cpy = ctx.copy()
-    assert isinstance(cpy, ReactiveDict)
+	# copy returns ReactiveDict
+	cpy = ctx.copy()
+	assert isinstance(cpy, ReactiveDict)
 
-    # fromkeys builds a ReactiveDict with given default
-    fk = ReactiveDict.fromkeys(["x", "y"], 9)
-    assert isinstance(fk, ReactiveDict)
-    assert sorted(list(fk)) == ["x", "y"]
+	# fromkeys builds a ReactiveDict with given default
+	fk = ReactiveDict.fromkeys(["x", "y"], 9)
+	assert isinstance(fk, ReactiveDict)
+	assert sorted(list(fk)) == ["x", "y"]
 
-    # Union operators
-    u = ctx | {"z": 10}
-    assert isinstance(u, ReactiveDict) and "z" in u
-    ctx |= {"m": 3}
-    assert "m" in ctx
+	# Union operators
+	u = ctx | {"z": 10}
+	assert isinstance(u, ReactiveDict) and "z" in u
+	ctx |= {"m": 3}
+	assert "m" in ctx
 
 
 def test_reactive_dict_values_reacts_to_value_changes():
-    ctx = ReactiveDict({"a": 1, "b": 2})
+	ctx = ReactiveDict({"a": 1, "b": 2})
 
-    sums: list[int] = []
+	sums: list[int] = []
 
-    @effect
-    def e():
-        # Iterating values should subscribe to each key's value signal
-        vals: list[int] = cast(list[int], list(ctx.values()))
-        sums.append(sum(vals))
+	@effect
+	def e():
+		# Iterating values should subscribe to each key's value signal
+		vals: list[int] = cast(list[int], list(ctx.values()))
+		sums.append(sum(vals))
 
-    flush_effects()
-    assert sums == [3]
+	flush_effects()
+	assert sums == [3]
 
-    # Value-only change should rerun
-    ctx["a"] = 5
-    flush_effects()
-    assert sums == [3, 7]
+	# Value-only change should rerun
+	ctx["a"] = 5
+	flush_effects()
+	assert sums == [3, 7]
 
-    # No rerun on same-value write
-    runs = e.runs
-    ctx["a"] = 5
-    flush_effects()
-    assert e.runs == runs
+	# No rerun on same-value write
+	runs = e.runs
+	ctx["a"] = 5
+	flush_effects()
+	assert e.runs == runs
 
 
 def test_reactive_dict_items_reacts_to_value_changes():
-    ctx = ReactiveDict({"a": 1, "b": 2})
+	ctx = ReactiveDict({"a": 1, "b": 2})
 
-    snapshots: list[list[tuple[str, int]]] = []
+	snapshots: list[list[tuple[str, int]]] = []
 
-    @effect
-    def e():
-        # Iterating items should subscribe to each key's value signal
-        snapshots.append(sorted((str(k), int(cast(Any, v))) for k, v in ctx.items()))
+	@effect
+	def e():
+		# Iterating items should subscribe to each key's value signal
+		snapshots.append(sorted((str(k), int(cast(Any, v))) for k, v in ctx.items()))
 
-    flush_effects()
-    assert snapshots[-1] == [("a", 1), ("b", 2)]
+	flush_effects()
+	assert snapshots[-1] == [("a", 1), ("b", 2)]
 
-    # Value-only change should rerun
-    ctx["b"] = 9
-    flush_effects()
-    assert snapshots[-1] == [("a", 1), ("b", 9)]
+	# Value-only change should rerun
+	ctx["b"] = 9
+	flush_effects()
+	assert snapshots[-1] == [("a", 1), ("b", 9)]
 
 
 def test_reactive_dict_setdefault_absent_subscribes_and_updates_on_write():
-    ctx = ReactiveDict({})
+	ctx = ReactiveDict({})
 
-    reads: list[int] = []
+	reads: list[int] = []
 
-    @effect
-    def e():
-        reads.append(int(cast(Any, ctx.setdefault("k", 9))))
+	@effect
+	def e():
+		reads.append(int(cast(Any, ctx.setdefault("k", 9))))
 
-    flush_effects()
-    assert reads == [9]
+	flush_effects()
+	assert reads == [9]
 
-    # Changing the value should rerun if setdefault subscribed properly
-    ctx["k"] = 10
-    flush_effects()
-    assert reads == [9, 10]
+	# Changing the value should rerun if setdefault subscribed properly
+	ctx["k"] = 10
+	flush_effects()
+	assert reads == [9, 10]
 
-    # Same-value write should not rerun
-    runs = e.runs
-    ctx["k"] = 10
-    flush_effects()
-    assert e.runs == runs
+	# Same-value write should not rerun
+	runs = e.runs
+	ctx["k"] = 10
+	flush_effects()
+	assert e.runs == runs
 
 
 def test_signal_copy_isolated_graph():
-    s = Signal({"count": 1})
-    tracker = Computed(lambda: s()["count"])
-    assert tracker() == 1
-    assert tracker in s.obs
+	s = Signal({"count": 1})
+	tracker = Computed(lambda: s()["count"])
+	assert tracker() == 1
+	assert tracker in s.obs
 
-    copied = copy.copy(s)
+	copied = copy.copy(s)
 
-    assert copied is not s
-    assert copied.value == s.value
-    assert copied.value is s.value
-    assert len(copied.obs) == 0
-    assert copied.last_change == -1
+	assert copied is not s
+	assert copied.value == s.value
+	assert copied.value is s.value
+	assert len(copied.obs) == 0
+	assert copied.last_change == -1
 
-    s.write({"count": 2})
-    assert s() == {"count": 2}
-    assert copied.read()["count"] == 1
+	s.write({"count": 2})
+	assert s() == {"count": 2}
+	assert copied.read()["count"] == 1
 
 
 def test_signal_deepcopy_clones_value_without_dependents():
-    s = Signal({"count": 1})
-    Computed(lambda: s()["count"])()
-    deep_copied = copy.deepcopy(s)
+	s = Signal({"count": 1})
+	Computed(lambda: s()["count"])()
+	deep_copied = copy.deepcopy(s)
 
-    assert deep_copied is not s
-    assert deep_copied.value == s.value
-    assert deep_copied.value is not s.value
-    assert len(deep_copied.obs) == 0
-    assert deep_copied.last_change == -1
+	assert deep_copied is not s
+	assert deep_copied.value == s.value
+	assert deep_copied.value is not s.value
+	assert len(deep_copied.obs) == 0
+	assert deep_copied.last_change == -1
 
-    s.write({"count": 5})
-    assert deep_copied.read()["count"] == 1
+	s.write({"count": 5})
+	assert deep_copied.read()["count"] == 1
 
 
 def test_computed_copy_has_fresh_dependency_graph():
-    source = Signal(1)
-    comp = Computed(lambda: source() + 1)
-    assert comp() == 2
-    assert source in comp.deps
+	source = Signal(1)
+	comp = Computed(lambda: source() + 1)
+	assert comp() == 2
+	assert source in comp.deps
 
-    copied = copy.copy(comp)
-    assert copied is not comp
-    assert copied.deps == {}
-    assert copied.obs == []
+	copied = copy.copy(comp)
+	assert copied is not comp
+	assert copied.deps == {}
+	assert copied.obs == []
 
-    assert copied() == 2
-    assert source in copied.deps
-    assert copied.deps is not comp.deps
+	assert copied() == 2
+	assert source in copied.deps
+	assert copied.deps is not comp.deps
 
-    source.write(5)
-    assert comp() == 6
-    assert copied() == 6
+	source.write(5)
+	assert comp() == 6
+	assert copied() == 6
 
 
 def test_computed_deepcopy_is_independent():
-    source = Signal(10)
-    comp = Computed(lambda: source() * 2)
-    assert comp() == 20
+	source = Signal(10)
+	comp = Computed(lambda: source() * 2)
+	assert comp() == 20
 
-    deep_copied = copy.deepcopy(comp)
-    assert deep_copied is not comp
-    assert deep_copied.deps == {}
-    assert deep_copied.obs == []
-    assert deep_copied() == 20
+	deep_copied = copy.deepcopy(comp)
+	assert deep_copied is not comp
+	assert deep_copied.deps == {}
+	assert deep_copied.obs == []
+	assert deep_copied() == 20
 
-    source.write(15)
-    assert comp() == 30
-    assert deep_copied() == 30
+	source.write(15)
+	assert comp() == 30
+	assert deep_copied() == 30
 
 
 def test_effect_copy_and_deepcopy_create_new_effects():
-    signal = Signal(0)
+	signal = Signal(0)
 
-    def runner(label: str):
-        def _run():
-            signal()
-            return None
+	def runner(label: str):
+		def _run():
+			signal()
+			return None
 
-        _run.__name__ = f"runner_{label}"
-        return _run
+		_run.__name__ = f"runner_{label}"
+		return _run
 
-    original = Effect(runner("original"))
-    copied = copy.copy(original)
-    deep_copied = copy.deepcopy(original)
+	original = Effect(runner("original"))
+	copied = copy.copy(original)
+	deep_copied = copy.deepcopy(original)
 
-    flush_effects()
+	flush_effects()
 
-    assert original.runs == 1
-    assert copied.runs == 1
-    assert deep_copied.runs == 1
-    assert original.deps is not copied.deps
-    assert original.deps is not deep_copied.deps
+	assert original.runs == 1
+	assert copied.runs == 1
+	assert deep_copied.runs == 1
+	assert original.deps is not copied.deps
+	assert original.deps is not deep_copied.deps
 
-    signal.write(1)
-    flush_effects()
-    assert original.runs == 2
-    assert copied.runs == 2
-    assert deep_copied.runs == 2
+	signal.write(1)
+	flush_effects()
+	assert original.runs == 2
+	assert copied.runs == 2
+	assert deep_copied.runs == 2
 
-    original.dispose()
-    copied.dispose()
-    deep_copied.dispose()
+	original.dispose()
+	copied.dispose()
+	deep_copied.dispose()
 
 
 def test_effect_copy_preserves_lazy_flag():
-    signal = Signal(0)
-    calls: list[str] = []
+	signal = Signal(0)
+	calls: list[str] = []
 
-    def run(label: str):
-        def _run():
-            calls.append(label)
-            signal()
-            return None
+	def run(label: str):
+		def _run():
+			calls.append(label)
+			signal()
+			return None
 
-        _run.__name__ = f"lazy_{label}"
-        return _run
+		_run.__name__ = f"lazy_{label}"
+		return _run
 
-    lazy = Effect(run("orig"), lazy=True)
-    lazy_copy = copy.copy(lazy)
-    lazy_deep = copy.deepcopy(lazy)
+	lazy = Effect(run("orig"), lazy=True)
+	lazy_copy = copy.copy(lazy)
+	lazy_deep = copy.deepcopy(lazy)
 
-    flush_effects()
-    assert lazy.runs == 0
-    assert lazy_copy.runs == 0
-    assert lazy_deep.runs == 0
+	flush_effects()
+	assert lazy.runs == 0
+	assert lazy_copy.runs == 0
+	assert lazy_deep.runs == 0
 
-    lazy.schedule()
-    lazy_copy.schedule()
-    lazy_deep.schedule()
-    flush_effects()
+	lazy.schedule()
+	lazy_copy.schedule()
+	lazy_deep.schedule()
+	flush_effects()
 
-    assert lazy.runs == 1
-    assert lazy_copy.runs == 1
-    assert lazy_deep.runs == 1
-    assert calls == ["orig", "orig", "orig"]
+	assert lazy.runs == 1
+	assert lazy_copy.runs == 1
+	assert lazy_deep.runs == 1
+	assert calls == ["orig", "orig", "orig"]
 
-    lazy.dispose()
-    lazy_copy.dispose()
-    lazy_deep.dispose()
+	lazy.dispose()
+	lazy_copy.dispose()
+	lazy_deep.dispose()
 
 
 def test_reactive_dict_copy_uses_new_signals():
-    ctx = ReactiveDict({"a": 1})
-    copied = copy.copy(ctx)
+	ctx = ReactiveDict({"a": 1})
+	copied = copy.copy(ctx)
 
-    assert copied is not ctx
-    assert copied._signals != ctx._signals
-    assert copied._signals["a"] is not ctx._signals["a"]
-    assert copied._structure is not ctx._structure
+	assert copied is not ctx
+	assert copied._signals != ctx._signals
+	assert copied._signals["a"] is not ctx._signals["a"]
+	assert copied._structure is not ctx._structure
 
-    ctx["a"] = 2
-    assert copied["a"] == 1
-    copied["a"] = 3
-    assert ctx["a"] == 2
+	ctx["a"] = 2
+	assert copied["a"] == 1
+	copied["a"] = 3
+	assert ctx["a"] == 2
 
 
 def test_reactive_dict_deepcopy_clones_nested_values():
-    ctx = ReactiveDict({"a": {"x": 1}})
-    deep_copied = copy.deepcopy(ctx)
+	ctx = ReactiveDict({"a": {"x": 1}})
+	deep_copied = copy.deepcopy(ctx)
 
-    assert deep_copied is not ctx
-    assert deep_copied._signals["a"] is not ctx._signals["a"]
+	assert deep_copied is not ctx
+	assert deep_copied._signals["a"] is not ctx._signals["a"]
 
-    original_nested = ctx["a"]
-    copied_nested = deep_copied["a"]
-    assert isinstance(original_nested, ReactiveDict)
-    assert isinstance(copied_nested, ReactiveDict)
-    assert copied_nested is not original_nested
-    assert copied_nested.unwrap() == {"x": 1}
+	original_nested = ctx["a"]
+	copied_nested = deep_copied["a"]
+	assert isinstance(original_nested, ReactiveDict)
+	assert isinstance(copied_nested, ReactiveDict)
+	assert copied_nested is not original_nested
+	assert copied_nested.unwrap() == {"x": 1}
 
-    original_nested["x"] = 9
-    assert copied_nested.unwrap() == {"x": 1}
+	original_nested["x"] = 9
+	assert copied_nested.unwrap() == {"x": 1}
 
 
 def test_reactive_list_copy_and_deepcopy_use_new_signals():
-    items = ReactiveList([1, {"nested": 2}])
-    copied = copy.copy(items)
-    deep_copied = copy.deepcopy(items)
+	items = ReactiveList([1, {"nested": 2}])
+	copied = copy.copy(items)
+	deep_copied = copy.deepcopy(items)
 
-    assert copied is not items
-    assert deep_copied is not items
-    assert copied._signals[0] is not items._signals[0]
-    assert deep_copied._signals[0] is not items._signals[0]
+	assert copied is not items
+	assert deep_copied is not items
+	assert copied._signals[0] is not items._signals[0]
+	assert deep_copied._signals[0] is not items._signals[0]
 
-    items[0] = 5
-    assert copied[0] == 1
-    assert deep_copied[0] == 1
+	items[0] = 5
+	assert copied[0] == 1
+	assert deep_copied[0] == 1
 
-    nested_original = items[1]
-    nested_copy = copied[1]
-    nested_deep = deep_copied[1]
-    assert isinstance(nested_copy, dict)
-    assert isinstance(nested_deep, dict)
-    nested_original["nested"] = 7
-    assert nested_copy["nested"] == 2
-    assert nested_deep["nested"] == 2
+	nested_original = items[1]
+	nested_copy = copied[1]
+	nested_deep = deep_copied[1]
+	assert isinstance(nested_copy, dict)
+	assert isinstance(nested_deep, dict)
+	nested_original["nested"] = 7
+	assert nested_copy["nested"] == 2
+	assert nested_deep["nested"] == 2
 
 
 def test_reactive_set_copy_and_deepcopy_use_new_signals():
-    values = ReactiveSet({1, 2})
-    copied = copy.copy(values)
-    deep_copied = copy.deepcopy(values)
+	values = ReactiveSet({1, 2})
+	copied = copy.copy(values)
+	deep_copied = copy.deepcopy(values)
 
-    assert copied is not values
-    assert deep_copied is not values
-    assert copied._signals is not values._signals
-    assert deep_copied._signals is not values._signals
+	assert copied is not values
+	assert deep_copied is not values
+	assert copied._signals is not values._signals
+	assert deep_copied._signals is not values._signals
 
-    values.add(3)
-    assert 3 not in copied
-    assert 3 not in deep_copied
+	values.add(3)
+	assert 3 not in copied
+	assert 3 not in deep_copied
 
-    copied.add(4)
-    deep_copied.add(5)
-    assert 4 not in values
-    assert 5 not in values
+	copied.add(4)
+	deep_copied.add(5)
+	assert 4 not in values
+	assert 5 not in values
 
 
 def test_computed_exception_does_not_cause_circular_dependency():
-    """Test that exceptions in computed properties don't cause circular dependency errors."""
-    s = Signal(10, name="s")
+	"""Test that exceptions in computed properties don't cause circular dependency errors."""
+	s = Signal(10, name="s")
 
-    def failing_computed():
-        if s() > 5:
-            raise ValueError("Computed failed")
-        return s() * 2
+	def failing_computed():
+		if s() > 5:
+			raise ValueError("Computed failed")
+		return s() * 2
 
-    c = Computed(failing_computed, name="c")
+	c = Computed(failing_computed, name="c")
 
-    # First access should raise the original exception
-    with pytest.raises(ValueError, match="Computed failed"):
-        c()
+	# First access should raise the original exception
+	with pytest.raises(ValueError, match="Computed failed"):
+		c()
 
-    # Subsequent accesses should still raise the original exception, not circular dependency
-    with pytest.raises(ValueError, match="Computed failed"):
-        c()
+	# Subsequent accesses should still raise the original exception, not circular dependency
+	with pytest.raises(ValueError, match="Computed failed"):
+		c()
 
-    # After fixing the condition, it should work
-    s.write(3)
-    assert c() == 6
+	# After fixing the condition, it should work
+	s.write(3)
+	assert c() == 6

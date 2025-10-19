@@ -1,38 +1,37 @@
 from typing import Literal
 
-
 MantineFontFamily = Literal["monospace", "text", "heading"]
 MantineTextAlign = Literal["left", "right", "center", "justify"]
 MantineFontStyle = Literal["normal", "italic", "oblique"]
 MantineTextTransform = Literal[
-    "none",
-    "capitalize",
-    "uppercase",
-    "lowercase",
-    "full-width",
-    "full-size-kana",
+	"none",
+	"capitalize",
+	"uppercase",
+	"lowercase",
+	"full-width",
+	"full-size-kana",
 ]
 MantineTextDecoration = Literal["none", "underline", "overline", "line-through"]
 MantinePosition = Literal["static", "relative", "absolute", "fixed", "sticky"]
 
 DefaultMantineColor = (
-    Literal[
-        "dark",
-        "gray",
-        "red",
-        "pink",
-        "grape",
-        "violet",
-        "indigo",
-        "blue",
-        "cyan",
-        "green",
-        "lime",
-        "yellow",
-        "orange",
-        "teal",
-    ]
-    | str
+	Literal[
+		"dark",
+		"gray",
+		"red",
+		"pink",
+		"grape",
+		"violet",
+		"indigo",
+		"blue",
+		"cyan",
+		"green",
+		"lime",
+		"yellow",
+		"orange",
+		"teal",
+	]
+	| str
 )
 MantineColor = str | DefaultMantineColor
 MantineColorShade = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]

@@ -1,7 +1,5 @@
-from typing import Optional
 import pulse as ps
 
 
 @ps.react_component("ThemeIcon", "@mantine/core")
-def ThemeIcon(*children: ps.Child, key: Optional[str] = None, **props): ...
-
+def ThemeIcon(*children: ps.Child, key: str | None = None, **props): ...

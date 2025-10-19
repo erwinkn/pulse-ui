@@ -1,11 +1,7 @@
+from collections.abc import Callable, Coroutine
 from typing import (
-    Any,
-    Callable,
-    Coroutine,
-    ParamSpec,
-    TypeVar,
-    overload,
-    reveal_type,
+	Any,
+	TypeVar,
 )
 
 EventHandlerResult = None | Coroutine[Any, Any, None]
@@ -27,28 +23,28 @@ EventHandler1 = EventHandler0 | Callable[[T1], EventHandlerResult]
 EventHandler2 = EventHandler1[T1] | Callable[[T1, T2], EventHandlerResult]
 EventHandler3 = EventHandler2[T1, T2] | Callable[[T1, T2, T3], EventHandlerResult]
 EventHandler4 = (
-    EventHandler3[T1, T2, T3] | Callable[[T1, T2, T3, T4], EventHandlerResult]
+	EventHandler3[T1, T2, T3] | Callable[[T1, T2, T3, T4], EventHandlerResult]
 )
 EventHandler5 = (
-    EventHandler4[T1, T2, T3, T4] | Callable[[T1, T2, T3, T4, T5], EventHandlerResult]
+	EventHandler4[T1, T2, T3, T4] | Callable[[T1, T2, T3, T4, T5], EventHandlerResult]
 )
 EventHandler6 = (
-    EventHandler5[T1, T2, T3, T4, T5]
-    | Callable[[T1, T2, T3, T4, T5, T6], EventHandlerResult]
+	EventHandler5[T1, T2, T3, T4, T5]
+	| Callable[[T1, T2, T3, T4, T5, T6], EventHandlerResult]
 )
 EventHandler7 = (
-    EventHandler6[T1, T2, T3, T4, T5, T6]
-    | Callable[[T1, T2, T3, T4, T5, T6, T7], EventHandlerResult]
+	EventHandler6[T1, T2, T3, T4, T5, T6]
+	| Callable[[T1, T2, T3, T4, T5, T6, T7], EventHandlerResult]
 )
 EventHandler8 = (
-    EventHandler7[T1, T2, T3, T4, T5, T6, T7]
-    | Callable[[T1, T2, T3, T4, T5, T6, T7, T8], EventHandlerResult]
+	EventHandler7[T1, T2, T3, T4, T5, T6, T7]
+	| Callable[[T1, T2, T3, T4, T5, T6, T7, T8], EventHandlerResult]
 )
 EventHandler9 = (
-    EventHandler8[T1, T2, T3, T4, T5, T6, T7, T8]
-    | Callable[[T1, T2, T3, T4, T5, T6, T7, T8, T9], EventHandlerResult]
+	EventHandler8[T1, T2, T3, T4, T5, T6, T7, T8]
+	| Callable[[T1, T2, T3, T4, T5, T6, T7, T8, T9], EventHandlerResult]
 )
 EventHandler10 = (
-    EventHandler9[T1, T2, T3, T4, T5, T6, T7, T8, T9]
-    | Callable[[T1, T2, T3, T4, T5, T6, T7, T8, T9, T10], EventHandlerResult]
+	EventHandler9[T1, T2, T3, T4, T5, T6, T7, T8, T9]
+	| Callable[[T1, T2, T3, T4, T5, T6, T7, T8, T9, T10], EventHandlerResult]
 )

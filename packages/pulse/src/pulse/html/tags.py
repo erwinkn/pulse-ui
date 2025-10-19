@@ -1,59 +1,59 @@
 from typing import Any, ParamSpec
-from pulse.vdom import Node, Element
 
+from pulse.vdom import Element, Node
 
 P = ParamSpec("P")
 
 
 def define_tag(name: str, default_props: dict[str, Any] | None = None):
-    """
-    Define a standard HTML tag that creates UITreeNode instances.
+	"""
+	Define a standard HTML tag that creates UITreeNode instances.
 
-    Args:
-        name: The tag name (e.g., "div", "span")
-        default_props: Default props to apply to all instances
+	Args:
+	    name: The tag name (e.g., "div", "span")
+	    default_props: Default props to apply to all instances
 
-    Returns:
-        A function that creates UITreeNode instances
-    """
+	Returns:
+	    A function that creates UITreeNode instances
+	"""
 
-    def create_element(*children: Element, **props: Any) -> Node:
-        """Create a UITreeNode for this tag."""
-        if default_props:
-            props = default_props | props
-        key = props.pop("key", None)
-        return Node(tag=name, key=key, props=props, children=children)
+	def create_element(*children: Element, **props: Any) -> Node:
+		"""Create a UITreeNode for this tag."""
+		if default_props:
+			props = default_props | props
+		key = props.pop("key", None)
+		return Node(tag=name, key=key, props=props, children=children)
 
-    return create_element
+	return create_element
 
 
 def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = None):
-    """
-    Define a self-closing HTML tag that creates UITreeNode instances.
+	"""
+	Define a self-closing HTML tag that creates UITreeNode instances.
 
-    Args:
-        name: The tag name (e.g., "br", "img")
-        default_props: Default props to apply to all instances
+	Args:
+	    name: The tag name (e.g., "br", "img")
+	    default_props: Default props to apply to all instances
 
-    Returns:
-        A function that creates UITreeNode instances (no children allowed)
-    """
-    default_props = default_props
+	Returns:
+	    A function that creates UITreeNode instances (no children allowed)
+	"""
+	default_props = default_props
 
-    def create_element(**props: Any) -> Node:
-        """Create a self-closing UITreeNode for this tag."""
-        if default_props:
-            props = default_props | props
-        key = props.pop("key", None)
-        return Node(
-            tag=name,
-            key=key,
-            props=props,
-            children=(),  # Self-closing tags never have children
-            allow_children=False,
-        )
+	def create_element(**props: Any) -> Node:
+		"""Create a self-closing UITreeNode for this tag."""
+		if default_props:
+			props = default_props | props
+		key = props.pop("key", None)
+		return Node(
+			tag=name,
+			key=key,
+			props=props,
+			children=(),  # Self-closing tags never have children
+			allow_children=False,
+		)
 
-    return create_element
+	return create_element
 
 
 a = define_tag("a")

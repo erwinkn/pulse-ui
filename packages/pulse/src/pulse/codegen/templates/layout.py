@@ -1,7 +1,7 @@
 from mako.template import Template
 
 LAYOUT_TEMPLATE = Template(
-    """import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
+	"""import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
 import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
 import { matchRoutes } from "react-router";
 import { rrPulseRouteTree } from "./routes.runtime";

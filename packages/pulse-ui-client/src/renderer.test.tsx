@@ -1,5 +1,5 @@
 import React from "react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "bun:test";
 import { VDOMRenderer } from "./renderer";
 
 import type { VDOMNode, VDOMUpdate } from "./vdom";

@@ -23,24 +23,23 @@
       "default": "./dist/index.js"
     }
   },
-  "dependencies": {
-    "socket.io-client": "^4.8.1"
-  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^24.2.1",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "esbuild": "^0.25.10",
+    "socket.io-client": "^4.8.1",
     "typescript": "^5"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
-    "react-router": "^7"
+    "react-router": "^7",
+    "socket.io-client": "^4"
   },
   "scripts": {
-    "build": "bun ../../scripts/build-js-packages.ts",
+    "build": "bun --bun scripts/build.ts && bun run build:types",
     "build:types": "tsc -p tsconfig.build.json",
     "prepublishOnly": "bun run build"
   }

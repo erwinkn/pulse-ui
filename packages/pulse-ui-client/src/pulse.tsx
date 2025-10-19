@@ -6,11 +6,11 @@ import React, {
   useContext,
   type ComponentType,
 } from "react";
-import { VDOMRenderer, applyUpdates } from "./renderer";
+import { VDOMRenderer } from "./renderer";
 import { PulseSocketIOClient } from "./client";
 import type { VDOM, ComponentRegistry, RegistryEntry } from "./vdom";
 import { useLocation, useParams, useNavigate } from "react-router";
-import type { ServerErrorInfo} from "./messages";
+import type { ServerErrorInfo } from "./messages";
 import type { RouteInfo } from "./helpers";
 
 // =================================================================
@@ -152,7 +152,12 @@ export function PulseView({
     [client, path, externalComponents, cssModules, initialView]
   );
   const [tree, setTree] = useState<React.ReactNode>(() =>
-    renderer.renderNode(initialVDOM)
+    renderer.init(
+      initialVDOM,
+      initialView.callbacks,
+      initialView.render_props,
+      initialView.css_refs
+    )
   );
   const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
 
@@ -182,14 +187,11 @@ export function PulseView({
       client.mountView(path, {
         routeInfo,
         onInit: (vdom, callbacks, renderProps, cssRefs) => {
-          renderer.setCallbacks(callbacks);
-          renderer.setRenderProps(renderProps);
-          renderer.setCssRefs(cssRefs);
-          setTree(renderer.renderNode(vdom));
+          setTree(renderer.init(vdom, callbacks, renderProps, cssRefs));
         },
         onUpdate: (ops) => {
           setTree((prev) =>
-            prev == null ? prev : applyUpdates(prev, ops, renderer)
+            prev == null ? prev : renderer.applyUpdates(prev, ops)
           );
         },
       });

@@ -10,6 +10,9 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -29,14 +32,12 @@
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "esbuild": "^0.25.10",
-    "socket.io-client": "^4.8.1",
     "typescript": "^5"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
-    "react-router": "^7",
-    "socket.io-client": "^4"
+    "react-router": "^7"
   },
   "scripts": {
     "build": "bun --bun scripts/build.ts && bun run build:types",

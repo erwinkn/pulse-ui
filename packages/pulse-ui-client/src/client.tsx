@@ -126,13 +126,13 @@ export class PulseSocketIOClient {
 
       socket.on("disconnect", () => {
         console.log("[SocketIOTransport] Disconnected");
-        this.handleTransportDisconnect();
+        this.#handleTransportDisconnect();
         this.notifyConnectionListeners(false);
       });
 
       // Wrap in an arrow function to avoid losing the `this` reference
       socket.on("message", (data) =>
-        this.handleServerMessage(
+        this.#handleServerMessage(
           deserialize(data, { coerceNullsToUndefined: true })
         )
       );
@@ -166,7 +166,7 @@ export class PulseSocketIOClient {
     for (const listener of this.#serverErrorListeners) listener(path, error);
   }
 
-  private async sendMessage(payload: ClientMessage): Promise<void> {
+  public sendMessage(payload: ClientMessage) {
     if (this.isConnected()) {
       // console.log("[SocketIOTransport] Sending:", payload);
       this.#socket!.emit("message", serialize(payload as any));
@@ -174,12 +174,6 @@ export class PulseSocketIOClient {
       // console.log("[SocketIOTransport] Queuing message:", payload);
       this.#messageQueue.push(payload);
     }
-  }
-
-  public async sendChannelMessage(
-    message: ClientChannelMessage
-  ): Promise<void> {
-    await this.sendMessage(message);
   }
 
   public mountView(path: string, view: MountedView) {
@@ -221,7 +215,7 @@ export class PulseSocketIOClient {
     this.#channels.clear();
   }
 
-  private handleServerMessage(message: ServerMessage) {
+  #handleServerMessage(message: ServerMessage) {
     // console.log("[PulseClient] Received message:", message);
     switch (message.type) {
       case "vdom_init": {
@@ -261,7 +255,7 @@ export class PulseSocketIOClient {
         break;
       }
       case "api_call": {
-        void this.performApiCall(message);
+        void this.#performApiCall(message);
         break;
       }
       case "navigate_to": {
@@ -298,7 +292,7 @@ export class PulseSocketIOClient {
         break;
       }
       case "channel_message": {
-        this.routeChannelMessage(message);
+        this.#routeChannelMessage(message);
         break;
       }
       default: {
@@ -307,7 +301,7 @@ export class PulseSocketIOClient {
     }
   }
 
-  private async performApiCall(msg: ServerApiCallMessage) {
+  async #performApiCall(msg: ServerApiCallMessage) {
     try {
       const res = await fetch(msg.url, {
         method: msg.method || "GET",
@@ -366,7 +360,7 @@ export class PulseSocketIOClient {
   }
 
   public acquireChannel(id: string): ChannelBridge {
-    const entry = this.ensureChannelEntry(id);
+    const entry = this.#ensureChannelEntry(id);
     entry.refCount += 1;
     return entry.bridge;
   }
@@ -383,7 +377,7 @@ export class PulseSocketIOClient {
     }
   }
 
-  private ensureChannelEntry(id: string): {
+  #ensureChannelEntry(id: string): {
     bridge: ChannelBridge;
     refCount: number;
   } {
@@ -398,23 +392,19 @@ export class PulseSocketIOClient {
     return entry;
   }
 
-  private routeChannelMessage(message: ServerChannelMessage): void {
-    const entry = this.ensureChannelEntry(message.channel);
+  #routeChannelMessage(message: ServerChannelMessage): void {
+    const entry = this.#ensureChannelEntry(message.channel);
     const closed = entry.bridge.handleServerMessage(message);
     if (closed && entry.refCount === 0) {
       this.#channels.delete(message.channel);
     }
   }
 
-  private handleTransportDisconnect(): void {
+  #handleTransportDisconnect(): void {
     for (const entry of this.#channels.values()) {
       entry.bridge.handleDisconnect(
         new PulseChannelResetError("Connection lost")
       );
     }
   }
-
-  // public getVDOM(path: string): VDOM | null {
-  //   return this.activeViews.get(path)?.vdom ?? null;
-  // }
 }

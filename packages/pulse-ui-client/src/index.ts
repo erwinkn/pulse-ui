@@ -24,9 +24,8 @@ export type {
   ComponentRegistry,
 } from "./vdom";
 
-// Renderer helpers (implementation is internal)
+// Renderer helpers 
 export {
-  applyUpdates as applyReactTreeUpdates,
   RenderLazy,
 } from "./renderer";
 
@@ -65,12 +64,12 @@ export { extractServerRouteInfo } from "./helpers";
 export type { RouteInfo } from "./helpers";
 
 // Serialization helpers
-export { extractEvent } from "./serialize/events";
-export {
-  encodeForWire,
-  decodeFromWire,
-  cleanForSerialization,
-} from "./serialize/clean";
+// export { extractEvent } from "./serialize/events";
+// export {
+//   encodeForWire,
+//   decodeFromWire,
+//   cleanForSerialization,
+// } from "./serialize/clean";
 export {
   serialize as serialize,
   deserialize as deserialize,

@@ -5,12 +5,12 @@ import { createChannelBridge, PulseChannelResetError } from "./channel";
 
 function makeClient() {
   const sent: ClientChannelMessage[] = [];
-  const sendChannelMessage = vi.fn(async (message: ClientChannelMessage) => {
+  const sendMessage = vi.fn(async (message: ClientChannelMessage) => {
     sent.push(message);
   });
-  const client = { sendChannelMessage } as any;
+  const client = { sendMessage } as any;
   const bridge = createChannelBridge(client, "chan-1");
-  return { bridge, sent, sendChannelMessage };
+  return { bridge, sent, sendMessage };
 }
 
 describe("ChannelBridge", () => {
@@ -42,7 +42,7 @@ describe("ChannelBridge", () => {
   });
 
   it("responds to server requests", async () => {
-    const { bridge, sendChannelMessage } = makeClient();
+    const { bridge, sendMessage } = makeClient();
     bridge.on("compute", () => 99);
     bridge.handleServerMessage({
       type: "channel_message",
@@ -52,8 +52,12 @@ describe("ChannelBridge", () => {
       payload: {},
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(sendChannelMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ responseTo: "req-1", payload: 99, event: undefined })
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responseTo: "req-1",
+        payload: 99,
+        event: undefined,
+      })
     );
   });
 

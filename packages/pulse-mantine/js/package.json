@@ -40,7 +40,6 @@
     "@types/react-dom": "^19.1.9",
     "esbuild": "^0.25.10",
     "pulse-ui-client": "workspace:*",
-    "terser": "^5.44.0",
     "typescript": "^5.9.2"
   },
   "peerDependencies": {

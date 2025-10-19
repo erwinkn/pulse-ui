@@ -24,59 +24,68 @@ import {
 import type { PulseSocketIOClient } from "./client";
 
 export class VDOMRenderer {
-  private callbacks: Set<string>;
-  private callbackCache: Map<string, Function>;
-  private renderPropKeys: Set<string>;
-  private cssProps: Set<string>;
-  private callbackList: string[];
+  #callbacks: Set<string>;
+  #callbackCache: Map<string, Function>;
+  #renderPropKeys: Set<string>;
+  #cssProps: Set<string>;
+  #callbackList: string[];
+  #client: PulseSocketIOClient;
+  #path: string;
+  #components: ComponentRegistry;
+  #cssModules: Record<string, Record<string, string>>;
+  
   constructor(
-    private client: PulseSocketIOClient,
-    private path: string,
-    private components: ComponentRegistry,
-    private cssModules: Record<string, Record<string, string>>,
+    client: PulseSocketIOClient,
+    path: string,
+    components: ComponentRegistry,
+    cssModules: Record<string, Record<string, string>>,
     initialCallbacks: string[] = [],
     initialRenderProps: string[] = [],
     initialCssRefs: string[] = []
   ) {
-    this.callbacks = new Set(initialCallbacks);
-    this.callbackCache = new Map();
-    this.renderPropKeys = new Set(initialRenderProps);
-    this.cssProps = new Set(initialCssRefs);
-    this.callbackList = [...this.callbacks].sort();
+    this.#client = client;
+    this.#path = path;
+    this.#components = components;
+    this.#cssModules = cssModules;
+    this.#callbacks = new Set(initialCallbacks);
+    this.#callbackCache = new Map();
+    this.#renderPropKeys = new Set(initialRenderProps);
+    this.#cssProps = new Set(initialCssRefs);
+    this.#callbackList = [...this.#callbacks].sort();
   }
 
   // Accessors used by update logic to determine which props need rebinding
   hasCallbackPath(path: string) {
-    return this.callbacks.has(path);
+    return this.#callbacks.has(path);
   }
 
   hasRenderPropPath(path: string) {
-    return this.renderPropKeys.has(path);
+    return this.#renderPropKeys.has(path);
   }
 
   hasAnyCallbackUnder(prefix: string): boolean {
-    if (prefix === "") return this.callbackList.length > 0;
-    const i = lowerBound(this.callbackList, prefix);
+    if (prefix === "") return this.#callbackList.length > 0;
+    const i = lowerBound(this.#callbackList, prefix);
     return (
-      i < this.callbackList.length && this.callbackList[i]!.startsWith(prefix)
+      i < this.#callbackList.length && this.#callbackList[i]!.startsWith(prefix)
     );
   }
 
   setCallbacks(keys: string[]) {
-    this.callbacks = new Set(keys);
+    this.#callbacks = new Set(keys);
     // prune stale cached callbacks
-    for (const k of Array.from(this.callbackCache.keys())) {
-      if (!this.callbacks.has(k)) this.callbackCache.delete(k);
+    for (const k of Array.from(this.#callbackCache.keys())) {
+      if (!this.#callbacks.has(k)) this.#callbackCache.delete(k);
     }
-    this.callbackList = [...this.callbacks].sort();
+    this.#callbackList = [...this.#callbacks].sort();
   }
 
   setRenderProps(keys: string[]) {
-    this.renderPropKeys = new Set(keys);
+    this.#renderPropKeys = new Set(keys);
   }
 
   setCssRefs(entries: string[]) {
-    this.cssProps = new Set(entries);
+    this.#cssProps = new Set(entries);
   }
 
   applyCallbackDelta(delta: PathDelta) {
@@ -85,27 +94,27 @@ export class VDOMRenderer {
     // to trigger prop updates; transformValue will resolve to functions.
     if (delta.remove) {
       for (const key of delta.remove) {
-        this.callbacks.delete(key);
-        this.callbackCache.delete(key);
+        this.#callbacks.delete(key);
+        this.#callbackCache.delete(key);
       }
     }
     if (delta.add) {
       for (const key of delta.add) {
-        this.callbacks.add(key);
+        this.#callbacks.add(key);
       }
     }
-    this.callbackList = [...this.callbacks].sort();
+    this.#callbackList = [...this.#callbacks].sort();
   }
 
   applyRenderPropsDelta(delta: PathDelta) {
     if (delta.remove) {
       for (const key of delta.remove) {
-        this.renderPropKeys.delete(key);
+        this.#renderPropKeys.delete(key);
       }
     }
     if (delta.add) {
       for (const key of delta.add) {
-        this.renderPropKeys.add(key);
+        this.#renderPropKeys.add(key);
       }
     }
   }
@@ -113,22 +122,22 @@ export class VDOMRenderer {
   applyCssRefsDelta(delta: PathDelta) {
     if (delta.remove) {
       for (const prop of delta.remove) {
-        this.cssProps.delete(prop);
+        this.#cssProps.delete(prop);
       }
     }
     if (delta.add) {
       for (const prop of delta.add) {
-        this.cssProps.add(prop);
+        this.#cssProps.add(prop);
       }
     }
   }
 
   getCallback(path: string, prop: string) {
     const key = this.propPath(path, prop);
-    let fn = this.callbackCache.get(key);
+    let fn = this.#callbackCache.get(key);
     if (!fn) {
-      fn = (...args: any[]) => this.client.invokeCallback(this.path, key, args);
-      this.callbackCache.set(key, fn);
+      fn = (...args: any[]) => this.#client.invokeCallback(this.#path, key, args);
+      this.#callbackCache.set(key, fn);
     }
     return fn;
   }
@@ -172,7 +181,7 @@ export class VDOMRenderer {
 
       if (isMountPointNode(node)) {
         const componentKey = node.tag.slice(MOUNT_POINT_PREFIX.length);
-        const Component = this.components[componentKey]!;
+        const Component = this.#components[componentKey]!;
         if (!Component) {
           throw new Error(
             `Could not find component ${componentKey}. This is a Pulse internal error.`
@@ -201,13 +210,13 @@ export class VDOMRenderer {
 
   transformValue(path: string, key: string, value: any) {
     const propPath = this.propPath(path, key);
-    if (this.callbacks.has(propPath)) {
+    if (this.#callbacks.has(propPath)) {
       return this.getCallback(path, key);
     }
-    if (this.renderPropKeys.has(propPath)) {
+    if (this.#renderPropKeys.has(propPath)) {
       return this.renderNode(value, propPath);
     }
-    if (this.cssProps.has(propPath)) {
+    if (this.#cssProps.has(propPath)) {
       return this.resolveCssToken(value);
     }
     return value;
@@ -223,7 +232,7 @@ export class VDOMRenderer {
     if (!moduleId || !className) {
       return token;
     }
-    const mod = this.cssModules[moduleId];
+    const mod = this.#cssModules[moduleId];
     if (!mod) {
       throw new Error(
         `Received CSS reference for unknown module '${moduleId}'`

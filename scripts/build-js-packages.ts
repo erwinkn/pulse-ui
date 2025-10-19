@@ -1,84 +1,145 @@
 #!/usr/bin/env node
-import { readdir } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
-import { access } from "node:fs/promises";
-import { constants } from "node:fs";
-import { spawn } from "node:child_process";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { $ } from "bun";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packagesRoot = join(__dirname, "..", "packages");
-const ignoreDirs = new Set(["node_modules", "dist", "build", ".git"]);
 
-async function hasPackageJson(dir: string) {
-  try {
-    await access(join(dir, "package.json"), constants.R_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
+const BUILD_ORDER = [
+  "pulse-ui-client",
+  "pulse-mantine/js",
+];
 
-async function findPackageDirs(dir: string) {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const packages: string[] = [];
-  const hasPkg = await hasPackageJson(dir);
-  if (hasPkg) {
-    packages.push(dir);
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (ignoreDirs.has(entry.name) || entry.name.startsWith(".")) continue;
-    const nested = await findPackageDirs(join(dir, entry.name));
-    packages.push(...nested);
-  }
-  return packages;
-}
+const prodDefine = {
+  "process.env.NODE_ENV": '"production"',
+  __DEV__: "false",
+};
 
-async function readPackageJson(dir: string) {
-  const data = await readFile(join(dir, "package.json"), "utf8");
+const devDefine = {
+  "process.env.NODE_ENV": '"development"',
+  __DEV__: "true",
+};
+
+async function readPackageJson(packagePath: string) {
+  const data = await readFile(join(packagesRoot, packagePath, "package.json"), "utf8");
   return JSON.parse(data);
 }
 
-function runBuild(dir: string) {
-  return new Promise<void>((resolve, reject) => {
-    const proc = spawn("bun", ["run", "build"], {
-      cwd: dir,
-      stdio: "inherit",
-    });
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`Build failed for ${dir} with exit code ${code}`));
-      }
-    });
-    proc.on("error", reject);
-  });
+function getExternals(pkg: any): string[] {
+  return [
+    ...new Set([
+      ...Object.keys(pkg.devDependencies ?? {}).filter(
+        (dep) => !dep.startsWith("@types/") && dep !== "typescript" && dep !== "esbuild"
+      ),
+      ...Object.keys(pkg.peerDependencies ?? {}),
+    ]),
+  ];
 }
 
-async function main() {
-  const packageDirs = await findPackageDirs(packagesRoot);
-  if (packageDirs.length === 0) {
-    console.log("No packages found under packages/");
+async function buildPackage(packagePath: string) {
+  const pkg = await readPackageJson(packagePath);
+  const name = pkg.name || packagePath;
+  
+  if (!pkg.scripts || !pkg.scripts.build) {
+    console.log(`⏭️  Skipping ${name} (no build script)`);
     return;
   }
 
-  for (const dir of packageDirs) {
-    const pkg = await readPackageJson(dir);
-    if (!pkg.scripts || !pkg.scripts.build) {
-      continue;
-    }
-    const name = pkg.name || relative(packagesRoot, dir);
-    console.log(`\n▶ Building ${name} (${relative(packagesRoot, dir)})`);
-    await runBuild(dir);
+  console.log(`\n▶ Building ${name}`);
+  
+  const packageDir = join(packagesRoot, packagePath);
+  const entry = "./src/index.ts";
+  const outdir = "dist";
+  const external = getExternals(pkg);
+
+  await $`cd ${packageDir} && rm -rf ${outdir}`.quiet();
+
+  console.log(`  📦 Building browser bundle...`);
+  const browserResult = await Bun.build({
+    entrypoints: [join(packageDir, entry)],
+    outdir: join(packageDir, outdir),
+    target: "browser",
+    format: "esm",
+    minify: {
+      whitespace: true,
+      identifiers: true,
+      syntax: true,
+    },
+    sourcemap: "external",
+    external,
+    define: prodDefine,
+  });
+  if (!browserResult.success) throw new Error(`Browser build failed for ${name}`);
+
+  console.log(`  🔧 Building browser dev bundle...`);
+  const browserDevResult = await Bun.build({
+    entrypoints: [join(packageDir, entry)],
+    outdir: join(packageDir, outdir),
+    naming: { entry: "index.development.js" },
+    target: "browser",
+    format: "esm",
+    minify: false,
+    sourcemap: "inline",
+    external,
+    define: devDefine,
+  });
+  if (!browserDevResult.success) throw new Error(`Browser dev build failed for ${name}`);
+
+  console.log(`  🟢 Building node bundle...`);
+  const nodeResult = await Bun.build({
+    entrypoints: [join(packageDir, entry)],
+    outdir: join(packageDir, outdir),
+    naming: { entry: "index.node.js" },
+    target: "node",
+    format: "esm",
+    minify: {
+      whitespace: true,
+      identifiers: true,
+      syntax: true,
+    },
+    sourcemap: "inline",
+    external,
+    define: prodDefine,
+  });
+  if (!nodeResult.success) throw new Error(`Node build failed for ${name}`);
+
+  console.log(`  🥟 Building bun bundle...`);
+  const bunResult = await Bun.build({
+    entrypoints: [join(packageDir, entry)],
+    outdir: join(packageDir, outdir),
+    naming: { entry: "index.bun.js" },
+    target: "bun",
+    format: "esm",
+    minify: {
+      whitespace: true,
+      identifiers: true,
+      syntax: true,
+    },
+    sourcemap: "inline",
+    external,
+    define: prodDefine,
+  });
+  if (!bunResult.success) throw new Error(`Bun build failed for ${name}`);
+
+  console.log(`  📝 Building types...`);
+  await $`cd ${packageDir} && bun run build:types`.quiet();
+
+  console.log(`  ✅ ${name} built successfully`);
+}
+
+async function main() {
+  console.log("🏗️  Building JS packages in order...\n");
+  
+  for (const packagePath of BUILD_ORDER) {
+    await buildPackage(packagePath);
   }
 
-  console.log("\n✅ Finished building JS packages");
+  console.log("\n✅ Finished building all JS packages");
 }
 
 main().catch((err) => {
-  console.error(err.message);
+  console.error("\n❌ Build failed:", err.message);
   process.exitCode = 1;
 });

@@ -40,13 +40,8 @@
     "react-router": "^7"
   },
   "scripts": {
-    "build": "bun --bun scripts/build.ts && bun run build:types",
-    "build:clean": "rm -rf dist || true",
-    "build:browser": "NODE_ENV=production bun build ./src/index.ts --outdir=dist --format=esm --target=browser --minify --sourcemap=external --external react --external react-dom --external react-router --external socket.io-client",
-    "build:node": "NODE_ENV=production bun build ./src/index.ts --outfile=dist/index.node.js --format=esm --target=node --minify --sourcemap=inline --define process.env.NODE_ENV=\\\"production\\\" --define __DEV__=false --external react --external react-dom --external react-router --external socket.io-client",
-    "build:bun": "NODE_ENV=production bun build ./src/index.ts --outfile=dist/index.bun.js --format=esm --target=bun --minify --sourcemap=inline --define process.env.NODE_ENV=\\\"production\\\" --define __DEV__=false --external react --external react-dom --external react-router --external socket.io-client",
+    "build": "bun ../../scripts/build-js-packages.ts",
     "build:types": "tsc -p tsconfig.build.json",
-    "build:dev": "bun run build:clean && NODE_ENV=development bun build ./src/index.ts --outdir=dist --format=esm --target=browser --sourcemap=inline --external react --external react-dom --external react-router --external socket.io-client && bun run build:types",
     "prepublishOnly": "bun run build"
   }
 }

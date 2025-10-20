@@ -1,6 +1,6 @@
 [project]
 name = "pulse-lucide"
-version = "0.541.0.a"
+version = "0.546.0.a"
 description = "Lucide icons for the Pulse framework"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]

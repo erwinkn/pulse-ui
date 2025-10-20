@@ -25,7 +25,7 @@ from .validators import (
 )
 
 FieldValue = str | int | float | bool | datetime | ps.UploadFile
-FormValues = Mapping[str, FieldValue | Sequence[FieldValue] | "FormValues"]
+FormValues = Mapping[str, "FieldValue | Sequence[FieldValue] | FormValues"]
 
 TForm = TypeVar("TForm", bound=FormValues)
 

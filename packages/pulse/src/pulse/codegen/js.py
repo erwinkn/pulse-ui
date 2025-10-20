@@ -11,6 +11,7 @@ R = TypeVar("R")
 
 class JsFunction(Generic[*Args, R]):
 	"A transpiled JS function"
+
 	name: str
 	hint: Callable[[*Args], R]
 
@@ -27,6 +28,7 @@ class JsFunction(Generic[*Args, R]):
 
 class ExternalJsFunction(Generic[*Args, R], Imported):
 	"An imported JS function"
+
 	hint: Callable[[*Args], R]
 
 	def __init__(

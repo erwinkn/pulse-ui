@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 from typing import (
 	Any,
@@ -7,6 +7,7 @@ from typing import (
 	Literal,
 	TypeVar,
 	Unpack,
+	cast,
 )
 
 import pulse as ps
@@ -186,6 +187,7 @@ class MantineForm(ps.State, Generic[TForm]):
 				segments = _tokenize_path(path)
 				parent, key = _get_parent_and_key(self._synced_values, segments)
 				if isinstance(key, int) and isinstance(parent, list):
+					parent = cast(list[Any], parent)
 					insert_at = index if index is not None else len(parent)
 					if insert_at < 0:
 						insert_at = 0
@@ -196,6 +198,7 @@ class MantineForm(ps.State, Generic[TForm]):
 					# If the target is a list under a dict key
 					lst = parent.get(key)
 					if isinstance(lst, list):
+						lst = cast(list[Any], lst)
 						insert_at = index if index is not None else len(lst)
 						if insert_at < 0:
 							insert_at = 0
@@ -212,14 +215,14 @@ class MantineForm(ps.State, Generic[TForm]):
 			try:
 				segments = _tokenize_path(path)
 				parent, key = _get_parent_and_key(self._synced_values, segments)
-				lst = None
+				lst: list[Any] | None = None
 				if isinstance(key, int) and isinstance(parent, list):
 					lst = parent
 				elif isinstance(key, str) and isinstance(parent, dict):
 					maybe = parent.get(key)
 					if isinstance(maybe, list):
 						lst = maybe
-				if isinstance(lst, list) and 0 <= index < len(lst):
+				if lst is not None and 0 <= index < len(lst):
 					lst.pop(index)
 			except Exception:
 				pass
@@ -231,14 +234,14 @@ class MantineForm(ps.State, Generic[TForm]):
 			try:
 				segments = _tokenize_path(path)
 				parent, key = _get_parent_and_key(self._synced_values, segments)
-				lst = None
+				lst: list[Any] | None = None
 				if isinstance(key, int) and isinstance(parent, list):
 					lst = parent
 				elif isinstance(key, str) and isinstance(parent, dict):
 					maybe = parent.get(key)
 					if isinstance(maybe, list):
 						lst = maybe
-				if isinstance(lst, list) and 0 <= frm < len(lst) and 0 <= to < len(lst):
+				if lst is not None and 0 <= frm < len(lst) and 0 <= to < len(lst):
 					item = lst.pop(frm)
 					lst.insert(to, item)
 			except Exception:
@@ -289,6 +292,8 @@ class MantineForm(ps.State, Generic[TForm]):
 					if root is not None:
 						visit(root, path)
 					for k, v in node.items():
+						if not isinstance(k, str):
+							continue
 						if k == "formRootRule":
 							continue
 						visit(v, join(path, k))
@@ -334,6 +339,7 @@ class MantineForm(ps.State, Generic[TForm]):
 		values = payload.get("values")
 		if not isinstance(values, dict):
 			return
+		values = cast(dict[str, Any], values)
 		incoming_keys = set(values.keys())
 		for existing in list(self._synced_values.keys()):
 			if existing not in incoming_keys:
@@ -348,6 +354,8 @@ class MantineForm(ps.State, Generic[TForm]):
 			path = payload.get("path")
 			if not isinstance(values, dict) or not isinstance(path, str):
 				return
+
+			values = cast(dict[str, Any], values)
 
 			schema = self._validation
 			if not isinstance(schema, dict):
@@ -369,13 +377,15 @@ class MantineForm(ps.State, Generic[TForm]):
 					break
 
 			# Node can be a spec, a list of specs, or nested dict
-			specs: list[Validator] = []
 			if isinstance(node, dict):
 				node = node.get("formRootRule")
+			specs: list[Validator] = []
 			if isinstance(node, list):
-				specs = [s for s in node if isinstance(s, Validator)]
-			if isinstance(node, Validator):
-				specs = [node]
+				for candidate in node:
+					if isinstance(candidate, Validator):
+						specs.append(candidate)
+			elif isinstance(node, Validator):
+				specs.append(node)
 
 			# Invoke server validators, stop on first error
 			for spec in specs:
@@ -411,11 +421,13 @@ class MantineForm(ps.State, Generic[TForm]):
 				if seg == "":
 					continue
 				if isinstance(cur, list) and seg.isdigit():
+					cur = cast(list[Any], cur)
 					idx = int(seg)
 					if idx < 0 or idx >= len(cur):
 						return None
 					cur = cur[idx]
 				elif isinstance(cur, dict):
+					cur = cast(dict[str, Any], cur)
 					cur = cur.get(seg)
 				else:
 					return None
@@ -428,6 +440,8 @@ class MantineForm(ps.State, Generic[TForm]):
 				if root is not None:
 					await apply_node(root, path)
 				for k, v in node.items():
+					if not isinstance(k, str):
+						continue
 					if k == "formRootRule":
 						continue
 					await apply_node(v, join(path, k))
@@ -464,13 +478,15 @@ class MantineForm(ps.State, Generic[TForm]):
 def _check_for_reserved_keys(obj: Any, path: str = "") -> None:
 	if isinstance(obj, dict):
 		for k, v in obj.items():
+			if not isinstance(k, str):
+				continue
 			if k in {"$kind", "formRootRule"}:
 				raise ValueError(
 					"'$kind' and 'formRootRule' are reserved keys and cannot appear in user data"
 				)
 			_check_for_reserved_keys(v, f"{path}.{k}" if path else str(k))
 	elif isinstance(obj, list):
-		for idx, v in enumerate(obj):
+		for idx, v in enumerate(cast(list[Any], obj)):
 			_check_for_reserved_keys(v, f"{path}[{idx}]")
 
 
@@ -478,9 +494,10 @@ def _merge_files_into_structure(base: Any, files: dict[str, Any]) -> Any:
 	result = _deep_copy(base)
 
 	# Expand lists of files into multiple insert operations
-	def iter_entries():
+	def iter_entries() -> Iterator[tuple[str, Any]]:
 		for path, value in files.items():
 			if isinstance(value, list):
+				value = cast(list[Any], value)
 				for item in value:
 					yield (path, item)
 			else:
@@ -534,12 +551,13 @@ def _tokenize_path(path: str) -> list[str]:
 	return [seg for seg in out if seg]
 
 
-def _ensure_container(parent: Any, key: str | int, next_is_index: bool):
+def _ensure_container(parent: Any, key: str | int, next_is_index: bool) -> Any:
 	if isinstance(key, int):
 		# Parent must be a list
 		if not isinstance(parent, list):
 			return []
 		# Ensure capacity
+		parent = cast(list[Any], parent)
 		while len(parent) <= key:
 			parent.append(None)
 		child = parent[key]
@@ -550,6 +568,7 @@ def _ensure_container(parent: Any, key: str | int, next_is_index: bool):
 	else:
 		if not isinstance(parent, dict):
 			return {}
+		parent = cast(dict[str, Any], parent)
 		child = parent.get(key)
 		if child is None:
 			parent[key] = [] if next_is_index else {}
@@ -568,6 +587,7 @@ def _set_deep(root: Any, segments: list[str], value: Any) -> None:
 			if isinstance(seg, int):
 				if not isinstance(cur, list):
 					return
+				cur = cast(list[Any], cur)
 				while len(cur) <= seg:
 					cur.append(None)
 				existing = cur[seg]
@@ -575,17 +595,20 @@ def _set_deep(root: Any, segments: list[str], value: Any) -> None:
 					cur[seg] = value
 				else:
 					if isinstance(existing, list):
+						existing = cast(list[Any], existing)
 						existing.append(value)
 					else:
 						cur[seg] = [existing, value]
 			else:
 				if not isinstance(cur, dict):
 					return
+				cur = cast(dict[str, Any], cur)
 				existing = cur.get(seg)
 				if existing is None:
 					cur[seg] = value
 				else:
 					if isinstance(existing, list):
+						existing = cast(list[Any], existing)
 						existing.append(value)
 					else:
 						cur[seg] = [existing, value]
@@ -596,12 +619,14 @@ def _set_deep(root: Any, segments: list[str], value: Any) -> None:
 			if isinstance(seg, int):
 				if not isinstance(cur, list):
 					return
+				cur = cast(list[Any], cur)
 				while len(cur) <= seg:
 					cur.append(None)
 				cur[seg] = child
 			else:
 				if not isinstance(cur, dict):
 					return
+				cur = cast(dict[str, Any], cur)
 				cur[seg] = child
 			cur = child
 
@@ -619,12 +644,14 @@ def _walk_to_parent(root: Any, segments: list[str]) -> tuple[Any, str | int]:
 		if isinstance(seg, int):
 			if not isinstance(cur, list):
 				return cur, seg
+			cur = cast(list[Any], cur)
 			while len(cur) <= seg:
 				cur.append(None)
 			cur[seg] = child
 		else:
 			if not isinstance(cur, dict):
 				return cur, seg
+			cur = cast(dict[str, Any], cur)
 			cur[seg] = child
 		cur = child
 	return cur, segments[-1] if segments else ""

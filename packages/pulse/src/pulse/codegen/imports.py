@@ -88,7 +88,9 @@ class Imports:
 
 			self.sources[stmt.src] = stmt
 
-	def import_(self, src: str, name: str, is_type: bool = False, is_default: bool = False) -> str:
+	def import_(
+		self, src: str, name: str, is_type: bool = False, is_default: bool = False
+	) -> str:
 		stmt = self.sources.get(src)
 		if not stmt:
 			stmt = ImportStatement(src)

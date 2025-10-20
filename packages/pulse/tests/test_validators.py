@@ -47,12 +47,16 @@ class DummyUpload:
 		self.size = size
 
 
-def run(spec: Any, value: Any, values: dict[str, Any] | None = None, path: str = "field"):
+def run(
+	spec: Any, value: Any, values: dict[str, Any] | None = None, path: str = "field"
+):
 	values = values or {"field": value}
 	return spec.check(value, values, path)
 
 
-async def arun(spec: Any, value: Any, values: dict[str, Any] | None = None, path: str = "field"):
+async def arun(
+	spec: Any, value: Any, values: dict[str, Any] | None = None, path: str = "field"
+):
 	values = values or {"field": value}
 	return await spec.acheck(value, values, path)
 

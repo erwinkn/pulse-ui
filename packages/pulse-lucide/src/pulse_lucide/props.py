@@ -1,6 +1,6 @@
 import pulse as ps
-from pulse.html.types import GenericHTMLElement
-from pulse.react_component import _propspec_from_typeddict
+from pulse.html.elements import GenericHTMLElement
+from pulse.react_component import prop_spec_from_typeddict
 
 
 class LucideProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
@@ -8,4 +8,4 @@ class LucideProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	absoluteStrokeWidth: bool
 
 
-LUCIDE_PROPS_SPEC = _propspec_from_typeddict(LucideProps)
+LUCIDE_PROPS_SPEC = prop_spec_from_typeddict(LucideProps)

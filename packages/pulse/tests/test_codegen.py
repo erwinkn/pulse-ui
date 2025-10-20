@@ -153,7 +153,9 @@ class TestCodegen:
 		assert result.count('"button": button,') == 1
 		assert "No components needed for this route" not in result
 
-	def test_generate_route_page_with_lazy_component_imports_renderlazy(self, tmp_path: Path):
+	def test_generate_route_page_with_lazy_component_imports_renderlazy(
+		self, tmp_path: Path
+	):
 		"""Lazy components should trigger importing RenderLazy and avoid SSR imports."""
 		lazy_comp = ReactComponent("LazyThing", "./LazyThing", lazy=True)
 		route = Route(

@@ -135,7 +135,7 @@ class HookNamespace(Generic[T]):
 		for key, state in self.states.items():
 			try:
 				state.dispose()
-			except Exception:  
+			except Exception:
 				logger.exception(
 					"Error disposing hook '%s' (key=%r)",
 					self.hook.name,

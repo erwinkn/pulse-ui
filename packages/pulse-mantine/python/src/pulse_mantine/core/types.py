@@ -1,4 +1,4 @@
-from typing import Literal, Any
+from typing import Literal
 
 MantineFontFamily = Literal["monospace", "text", "heading"]
 MantineTextAlign = Literal["left", "right", "center", "justify"]

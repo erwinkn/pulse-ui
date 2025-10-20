@@ -280,7 +280,7 @@ class RedisTokenCacheStore:
 		ttl_seconds: int | None = None,
 	) -> None:
 		try:
-			import redis  # noqa: I001  # pyright: ignore[reportMissingImports]
+			import redis  # noqa: I001
 		except Exception as exc:
 			raise RuntimeError(
 				"RedisTokenCacheStore requires the 'redis' package. Install it to use this store."

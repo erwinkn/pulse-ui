@@ -1236,7 +1236,7 @@ def test_reactive_dataclass_fields_are_signals_and_wrapped():
 	@reactive_dataclass
 	class Model:
 		x: int = 1
-		tags: list[int] = None    # pyright: ignore[reportAssignmentType]
+		tags: list[int] = None  # pyright: ignore[reportAssignmentType]
 
 	m = Model()
 	m.x = 2

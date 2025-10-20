@@ -466,7 +466,7 @@ _EXPORTS: dict[str, str] = {
 	"YearsList": "pulse_mantine.dates.years_list",
 }
 
-__all__ = sorted(_EXPORTS.keys())
+__all__ = sorted(_EXPORTS.keys())  # pyright: ignore[reportUnsupportedDunderAll]
 
 
 def __getattr__(name: str) -> Any:

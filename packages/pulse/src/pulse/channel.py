@@ -274,7 +274,7 @@ class ChannelsManager:
 				channel=channel,
 				msg=msg,
 			)
-		except Exception:  
+		except Exception:
 			logger.debug("Failed to send close notification for channel %s", channel.id)
 
 	def send_to_client(
@@ -389,7 +389,7 @@ class Channel:
 			if timeout is None:
 				return await fut
 			return await asyncio.wait_for(fut, timeout=timeout)
-		except TimeoutError as exc:  
+		except TimeoutError as exc:
 			self._manager.resolve_pending_error(
 				request_id,
 				ChannelTimeout("Channel request timed out"),

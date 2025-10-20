@@ -47,7 +47,9 @@ def ComboboxEventsTarget(*children: ps.Child, key: str | None = None, **props: A
 
 
 @ps.react_component("Combobox", "@mantine/core", prop="DropdownTarget")
-def ComboboxDropdownTarget(*children: ps.Child, key: str | None = None, **props: Any): ...
+def ComboboxDropdownTarget(
+	*children: ps.Child, key: str | None = None, **props: Any
+): ...
 
 
 @ps.react_component("Combobox", "@mantine/core", prop="Group")

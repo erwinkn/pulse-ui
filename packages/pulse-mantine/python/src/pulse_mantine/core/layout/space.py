@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Unpack, Any
+from typing import Unpack
 
 import pulse as ps
 
-from ..box import BoxProps
+from pulse_mantine.core.box import BoxProps
 
 
 class SpaceProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[reportIncompatibleVariableOverride]

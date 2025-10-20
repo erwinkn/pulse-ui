@@ -3,4414 +3,4919 @@ from typing import Unpack
 
 import pulse as ps
 
-from .props import LucideProps
+from pulse_lucide.props import LucideProps
 
 def AArrowDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AArrowUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ALargeSmall(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Accessibility(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Activity(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AirVent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Airplay(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlarmClock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlarmClockCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlarmClockMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlarmClockOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlarmClockPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlarmSmoke(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Album(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def AlignCenter(
-	key: str | None = None, **props: Unpack[LucideProps]
+def Album(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignCenterHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignCenterVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignEndHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignEndVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignHorizontalDistributeCenter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignHorizontalDistributeEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignHorizontalDistributeStart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignHorizontalJustifyCenter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignHorizontalJustifyEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignHorizontalJustifyStart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignHorizontalSpaceAround(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignHorizontalSpaceBetween(
-	key: str | None = None, **props: Unpack[LucideProps]
-) -> ps.ComponentNode: ...
-def AlignJustify(
-	key: str | None = None, **props: Unpack[LucideProps]
-) -> ps.ComponentNode: ...
-def AlignLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
-) -> ps.ComponentNode: ...
-def AlignRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignStartHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignStartVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignVerticalDistributeCenter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignVerticalDistributeEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignVerticalDistributeStart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignVerticalJustifyCenter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignVerticalJustifyEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignVerticalJustifyStart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignVerticalSpaceAround(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AlignVerticalSpaceBetween(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Ambulance(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Ampersand(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Ampersands(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Amphora(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Anchor(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Angry(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Angry(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Annoyed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Antenna(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Anvil(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Anvil(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Aperture(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AppWindow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AppWindowMac(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Apple(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Apple(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Archive(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArchiveRestore(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArchiveX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Armchair(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowBigDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowBigDownDash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowBigLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowBigLeftDash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowBigRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowBigRightDash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowBigUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowBigUpDash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDown01(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDown10(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownAZ(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownFromLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownNarrowWide(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownToDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownToLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownWideNarrow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowDownZA(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowLeftFromLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowLeftRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowLeftToLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowRightFromLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowRightLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowRightToLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUp01(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUp10(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpAZ(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpFromDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpFromLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpNarrowWide(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpToLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpWideNarrow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowUpZA(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ArrowsUpFromLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Asterisk(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AtSign(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Atom(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Atom(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def AudioLines(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def AudioWaveform(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Award(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Axe(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Award(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Axe(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Axis3d(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Baby(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Baby(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Backpack(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Badge(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Badge(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BadgeAlert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeCent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeDollarSign(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeEuro(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeIndianRupee(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeInfo(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeJapaneseYen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgePercent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgePoundSterling(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeQuestionMark(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeRussianRuble(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeSwissFranc(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeTurkishLira(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BadgeX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BaggageClaim(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Ban(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Ban(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Banana(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Bandage(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Banknote(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BanknoteArrowDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BanknoteArrowUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BanknoteX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Barcode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Barrel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Baseline(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bath(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bath(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Battery(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BatteryCharging(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BatteryFull(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BatteryLow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BatteryMedium(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BatteryPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BatteryWarning(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Beaker(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bean(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bean(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BeanOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bed(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bed(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BedDouble(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BedSingle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Beef(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Beer(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Beef(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Beer(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BeerOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bell(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bell(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BellDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BellElectric(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BellMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BellOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BellPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BellRing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BetweenHorizontalEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BetweenHorizontalStart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BetweenVerticalEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BetweenVerticalStart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BicepsFlexed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bike(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bike(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Binary(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Binoculars(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Biohazard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bird(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bird(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Bitcoin(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Blend(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Blend(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Blinds(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Blocks(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Bluetooth(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BluetoothConnected(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BluetoothOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BluetoothSearching(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bold(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Bolt(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Bomb(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Bone(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Book(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def BookA(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bold(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Bolt(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Bomb(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Bone(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Book(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def BookA(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BookAlert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookAudio(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookCopy(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookHeadphones(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookHeart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookImage(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookKey(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookLock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookMarked(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookOpenCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookOpenText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookType(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookUp2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookUser(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def BookX(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def BookX(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Bookmark(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookmarkCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookmarkMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookmarkPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BookmarkX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BoomBox(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bot(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bot(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BotMessageSquare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BotOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BottleWine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BowArrow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Box(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Boxes(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Box(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Boxes(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Braces(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Brackets(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Brain(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Brain(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BrainCircuit(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BrainCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BrickWall(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BrickWallFire(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BrickWallShield(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Briefcase(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BriefcaseBusiness(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BriefcaseConveyorBelt(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BriefcaseMedical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BringToFront(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Brush(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Brush(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BrushCleaning(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Bubbles(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bug(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bug(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BugOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def BugPlay(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Building(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Building2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Bus(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Bus(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def BusFront(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Cable(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Cable(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CableCar(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Cake(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Cake(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CakeSlice(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Calculator(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Calendar(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Calendar1(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarArrowDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarArrowUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarCheck2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarClock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarDays(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarFold(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarHeart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarMinus2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarPlus2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarRange(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarSync(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CalendarX2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Camera(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CameraOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Candy(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Candy(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CandyCane(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CandyOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Cannabis(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Captions(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CaptionsOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Car(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Car(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CarFront(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CarTaxiFront(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Caravan(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CardSim(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Carrot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CaseLower(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CaseSensitive(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CaseUpper(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CassetteTape(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Cast(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Cast(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Castle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Cat(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Cctv(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Cat(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Cctv(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def ChartArea(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartBar(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartBarBig(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartBarDecreasing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartBarIncreasing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartBarStacked(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartCandlestick(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartColumn(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartColumnBig(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartColumnDecreasing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartColumnIncreasing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartColumnStacked(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartGantt(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartNetwork(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartNoAxesColumn(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartNoAxesColumnDecreasing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartNoAxesColumnIncreasing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartNoAxesCombined(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartNoAxesGantt(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartPie(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartScatter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChartSpline(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Check(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Check(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CheckCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CheckLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChefHat(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Cherry(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronFirst(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronLast(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsDownUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsLeftRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsLeftRightEllipsis(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsRightLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ChevronsUpDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Chromium(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Church(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Cigarette(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CigaretteOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Circle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleAlert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleArrowDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleArrowLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleArrowOutDownLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleArrowOutDownRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleArrowOutUpLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleArrowOutUpRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleArrowRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleArrowUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleCheckBig(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleChevronDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleChevronLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleChevronRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleChevronUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleDivide(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleDollarSign(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleDotDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleEllipsis(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleEqual(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleFadingArrowUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleFadingPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleGauge(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleParking(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleParkingOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CirclePause(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CirclePercent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CirclePlay(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CirclePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CirclePoundSterling(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CirclePower(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleQuestionMark(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleSlash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleSlash2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleSmall(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleStar(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleStop(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleUser(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleUserRound(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircleX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CircuitBoard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Citrus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clapperboard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clipboard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardClock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardCopy(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardList(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardPaste(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardPen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardPenLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardType(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClipboardX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Clock(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Clock(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Clock1(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock10(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock11(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock12(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock3(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock4(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock5(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock6(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock7(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock8(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clock9(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClockAlert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClockArrowDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClockArrowUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClockFading(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClockPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ClosedCaption(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Cloud(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Cloud(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CloudAlert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudDownload(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudDrizzle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudFog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudHail(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudLightning(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudMoon(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudMoonRain(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudRain(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudRainWind(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudSnow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudSun(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudSunRain(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CloudUpload(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Cloudy(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Clover(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Club(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Code(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Club(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Code(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CodeXml(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Codepen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Codesandbox(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Coffee(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Cog(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Coins(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Cog(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Coins(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Columns2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Columns3(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Columns3Cog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Columns4(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Combine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Command(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Compass(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Component(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Computer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ConciergeBell(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Cone(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Cone(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Construction(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Contact(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ContactRound(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Container(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Contrast(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Cookie(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CookingPot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Copy(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Copy(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CopyCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CopyMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CopyPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CopySlash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def CopyX(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def CopyX(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Copyleft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Copyright(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CornerDownLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CornerDownRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CornerLeftDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CornerLeftUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CornerRightDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CornerRightUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CornerUpLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CornerUpRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Cpu(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Cpu(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def CreativeCommons(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CreditCard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Croissant(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Crop(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Cross(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Crop(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Cross(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Crosshair(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Crown(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Crown(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Cuboid(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def CupSoda(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Currency(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Cylinder(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Dam(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Dam(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Database(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DatabaseBackup(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DatabaseZap(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DecimalsArrowLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DecimalsArrowRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Delete(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Dessert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Diameter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Diamond(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DiamondMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DiamondPercent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DiamondPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Dice1(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Dice2(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Dice3(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Dice4(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Dice5(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Dice6(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Dices(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Diff(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Disc(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Disc2(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Disc3(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Dice1(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Dice2(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Dice3(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Dice4(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Dice5(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Dice6(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Dices(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Diff(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Disc(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Disc2(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Disc3(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def DiscAlbum(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Divide(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Dna(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Dna(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def DnaOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Dock(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Dog(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Dock(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Dog(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def DollarSign(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Donut(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Donut(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def DoorClosed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DoorClosedLocked(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DoorOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Dot(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Dot(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Download(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DraftingCompass(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Drama(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Drama(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Dribbble(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Drill(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Drone(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Drill(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Drone(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Droplet(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def DropletOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Droplets(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Drum(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Drum(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Drumstick(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Dumbbell(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Ear(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Ear(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def EarOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Earth(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Earth(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def EarthLock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Eclipse(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Egg(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Egg(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def EggFried(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def EggOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Ellipsis(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def EllipsisVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Equal(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Equal(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def EqualApproximately(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def EqualNot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Eraser(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def EthernetPort(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Euro(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Euro(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def EvCharger(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Expand(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ExternalLink(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Eye(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Eye(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def EyeClosed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def EyeOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Facebook(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Factory(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Fan(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Fan(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def FastForward(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Feather(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Fence(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Fence(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def FerrisWheel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Figma(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def File(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Figma(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def File(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def FileArchive(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileAudio(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileAudio2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileAxis3d(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileBadge(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileBadge2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileBox(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileChartColumn(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileChartColumnIncreasing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileChartLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileChartPie(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileCheck2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileClock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileCode2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileDiff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileDigit(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileHeart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileImage(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileInput(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileJson(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileJson2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileKey(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileKey2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileLock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileLock2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileMinus2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileMusic(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileOutput(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FilePen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FilePenLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FilePlay(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FilePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FilePlus2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileQuestionMark(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileScan(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileSearch2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileSliders(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileSpreadsheet(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileStack(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileSymlink(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileTerminal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileType(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileType2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileUser(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileVideoCamera(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileVolume(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileVolume2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FileWarning(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def FileX(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def FileX(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def FileX2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Files(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Film(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Files(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Film(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Fingerprint(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FireExtinguisher(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Fish(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Fish(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def FishOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FishSymbol(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Flag(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Flag(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def FlagOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlagTriangleLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlagTriangleRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Flame(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Flame(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def FlameKindling(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Flashlight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlashlightOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlaskConical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlaskConicalOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlaskRound(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlipHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlipHorizontal2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlipVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FlipVertical2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Flower(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Flower2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Focus(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Focus(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def FoldHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FoldVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Folder(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderArchive(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderClock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderClosed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderGit(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderGit2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderHeart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderInput(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderKanban(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderKey(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderLock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderOpenDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderOutput(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderPen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderRoot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderSearch2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderSymlink(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderSync(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderTree(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FolderX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Folders(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Footprints(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Forklift(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Forward(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Frame(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Frame(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Framer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Frown(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Fuel(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Frown(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Fuel(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Fullscreen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Funnel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FunnelPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def FunnelX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GalleryHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GalleryHorizontalEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GalleryThumbnails(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GalleryVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GalleryVerticalEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Gamepad(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Gamepad2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Gauge(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Gavel(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Gem(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Gauge(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Gavel(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Gem(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def GeorgianLari(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Ghost(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Gift(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Ghost(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Gift(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def GitBranch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitBranchPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitCommitHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitCommitVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitCompare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitCompareArrows(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitFork(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitGraph(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitMerge(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitPullRequest(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitPullRequestArrow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitPullRequestClosed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitPullRequestCreate(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitPullRequestCreateArrow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GitPullRequestDraft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Github(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Gitlab(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GlassWater(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Glasses(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Globe(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Globe(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def GlobeLock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Goal(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Gpu(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Goal(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Gpu(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def GraduationCap(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Grape(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Grape(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Grid2x2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Grid2x2Check(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Grid2x2Plus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Grid2x2X(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Grid3x2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Grid3x3(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Grip(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Grip(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def GripHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def GripVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Group(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Group(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Guitar(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Ham(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Ham(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Hamburger(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Hammer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Hand(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Hand(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def HandCoins(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HandFist(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HandGrab(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HandHeart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HandHelping(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HandMetal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HandPlatter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Handbag(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Handshake(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HardDrive(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HardDriveDownload(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HardDriveUpload(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HardHat(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Hash(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Hash(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def HatGlasses(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Haze(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Haze(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def HdmiPort(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Heading(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Heading1(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Heading2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Heading3(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Heading4(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Heading5(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Heading6(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HeadphoneOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Headphones(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Headset(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Heart(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Heart(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def HeartCrack(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HeartHandshake(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HeartMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HeartOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HeartPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HeartPulse(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Heater(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Hexagon(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Highlighter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def History(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Hop(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Hop(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def HopOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Hospital(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Hotel(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Hotel(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Hourglass(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def House(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def House(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def HouseHeart(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def HousePlug(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HousePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def HouseWifi(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def IceCreamBowl(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def IceCreamCone(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def IdCard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def IdCardLanyard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Image(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Image(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def ImageDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ImageMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ImageOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ImagePlay(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ImagePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ImageUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ImageUpscale(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Images(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Import(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Inbox(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def IndentDecrease(
-	key: str | None = None, **props: Unpack[LucideProps]
-) -> ps.ComponentNode: ...
-def IndentIncrease(
-	key: str | None = None, **props: Unpack[LucideProps]
+def Inbox(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def IndianRupee(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Infinity(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Info(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Info(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def InspectionPanel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Instagram(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Italic(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def IterationCcw(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def IterationCw(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def JapaneseYen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Joystick(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Kanban(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Kayak(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Key(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Kayak(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Key(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def KeyRound(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def KeySquare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Keyboard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def KeyboardMusic(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def KeyboardOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Lamp(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Lamp(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def LampCeiling(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LampDesk(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LampFloor(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LampWallDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LampWallUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LandPlot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Landmark(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Languages(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Laptop(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LaptopMinimal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LaptopMinimalCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Lasso(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Lasso(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def LassoSelect(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Laugh(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Laugh(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Layers(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Layers2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LayoutDashboard(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LayoutGrid(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LayoutList(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LayoutPanelLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LayoutPanelTop(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LayoutTemplate(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Leaf(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Leaf(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def LeafyGreen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Lectern(
-	key: str | None = None, **props: Unpack[LucideProps]
-) -> ps.ComponentNode: ...
-def LetterText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Library(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LibraryBig(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LifeBuoy(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Ligature(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Lightbulb(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LightbulbOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LineSquiggle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Link(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Link2(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Link(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Link2(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Link2Off(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Linkedin(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def List(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def List(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def ListCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListChecks(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def ListChevronsDownUp(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def ListChevronsUpDown(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListCollapse(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListEnd(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListFilter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListFilterPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def ListIndentDecrease(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def ListIndentIncrease(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListMusic(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListOrdered(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListRestart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListStart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListTodo(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListTree(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ListVideo(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def ListX(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def ListX(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Loader(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LoaderCircle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LoaderPinwheel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Locate(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LocateFixed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LocateOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Lock(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Lock(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def LockKeyhole(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LockKeyholeOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def LockOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def LogIn(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def LogIn(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def LogOut(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Logs(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Logs(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Lollipop(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Luggage(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Magnet(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Mail(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Mail(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MailCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MailMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MailOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MailPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MailQuestionMark(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MailSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MailWarning(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def MailX(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def MailX(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Mailbox(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Mails(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Map(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Mails(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Map(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MapMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPin(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinCheckInside(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinHouse(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinMinusInside(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinPen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinPlusInside(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinXInside(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPinned(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MapPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Mars(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Mars(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MarsStroke(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Martini(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Maximize(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Maximize2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Medal(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Medal(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Megaphone(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MegaphoneOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Meh(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Meh(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MemoryStick(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Menu(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Merge(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Menu(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Merge(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MessageCircle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleHeart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleMore(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCirclePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleQuestionMark(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleReply(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleWarning(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageCircleX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareDiff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareHeart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareLock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareMore(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquarePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareQuote(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareReply(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareShare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareWarning(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessageSquareX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MessagesSquare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Mic(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Mic(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MicOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MicVocal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Microchip(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Microscope(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Microwave(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Milestone(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Milk(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Milk(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MilkOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Minimize(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Minimize2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Minus(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Minus(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Monitor(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def MonitorCloud(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorPause(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorPlay(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorSmartphone(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorSpeaker(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorStop(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MonitorX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Moon(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Moon(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MoonStar(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Motorbike(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Mountain(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MountainSnow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Mouse(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Mouse(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def MouseOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MousePointer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MousePointer2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MousePointerBan(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MousePointerClick(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Move(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Move(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Move3d(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveDiagonal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveDiagonal2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveDownLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveDownRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveUpLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveUpRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def MoveVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Music(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Music(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Music2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Music3(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Music4(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Navigation(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Navigation2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Navigation2Off(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def NavigationOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Network(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Newspaper(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Nfc(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Nfc(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def NonBinary(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Notebook(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def NotebookPen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def NotebookTabs(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def NotebookText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def NotepadText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def NotepadTextDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Nut(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Nut(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def NutOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Octagon(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def OctagonAlert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def OctagonMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def OctagonPause(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def OctagonX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Omega(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Omega(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Option(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Orbit(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Orbit(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Origami(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Package(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Package2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PackageCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PackageMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PackageOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PackagePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PackageSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PackageX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PaintBucket(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PaintRoller(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Paintbrush(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PaintbrushVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Palette(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Panda(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Panda(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PanelBottom(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelBottomClose(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelBottomDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelBottomOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelLeftClose(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelLeftDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelLeftOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelLeftRightDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelRightClose(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelRightDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelRightOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelTop(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelTopBottomDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelTopClose(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelTopDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelTopOpen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelsLeftBottom(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelsRightBottom(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PanelsTopLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Paperclip(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Parentheses(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ParkingMeter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PartyPopper(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Pause(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Pause(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PawPrint(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PcCase(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Pen(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Pen(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PenLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PenOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PenTool(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Pencil(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PencilLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PencilOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PencilRuler(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Pentagon(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Percent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PersonStanding(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PhilippinePeso(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Phone(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Phone(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PhoneCall(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PhoneForwarded(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PhoneIncoming(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PhoneMissed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PhoneOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PhoneOutgoing(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Pi(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Piano(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Pi(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Piano(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Pickaxe(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PictureInPicture(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PictureInPicture2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PiggyBank(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Pilcrow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PilcrowLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PilcrowRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Pill(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Pill(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PillBottle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Pin(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Pin(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PinOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Pipette(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Pizza(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Plane(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Pizza(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Plane(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PlaneLanding(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PlaneTakeoff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Play(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Plug(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Plug2(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Play(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Plug(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Plug2(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PlugZap(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Plus(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Plus(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Pocket(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PocketKnife(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Podcast(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Pointer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PointerOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Popcorn(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Popsicle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PoundSterling(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Power(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Power(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def PowerOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Presentation(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Printer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def PrinterCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Projector(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Proportions(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Puzzle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Pyramid(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def QrCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Quote(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Quote(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Rabbit(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Radar(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Radar(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Radiation(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Radical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Radio(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Radio(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def RadioReceiver(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RadioTower(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Radius(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RailSymbol(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Rainbow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Rat(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Ratio(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Rat(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Ratio(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Receipt(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptCent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptEuro(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptIndianRupee(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptJapaneseYen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptPoundSterling(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptRussianRuble(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptSwissFranc(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReceiptTurkishLira(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RectangleCircle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RectangleEllipsis(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RectangleGoggles(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RectangleHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RectangleVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Recycle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Redo(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Redo2(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Redo(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Redo2(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def RedoDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RefreshCcw(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RefreshCcwDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RefreshCw(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RefreshCwOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Refrigerator(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Regex(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Regex(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def RemoveFormatting(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Repeat(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Repeat1(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Repeat2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Replace(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ReplaceAll(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Reply(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Reply(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def ReplyAll(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Rewind(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Ribbon(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Rocket(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RockingChair(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RollerCoaster(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Rose(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Rose(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Rotate3d(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RotateCcw(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RotateCcwKey(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RotateCcwSquare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RotateCw(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RotateCwSquare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Route(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Route(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def RouteOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Router(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Rows2(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Rows3(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Rows4(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Rss(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Ruler(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Rows2(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Rows3(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Rows4(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Rss(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Ruler(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def RulerDimensionLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def RussianRuble(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Sailboat(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Salad(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Salad(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Sandwich(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Satellite(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SatelliteDish(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SaudiRiyal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Save(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Save(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def SaveAll(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SaveOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Scale(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Scale(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Scale3d(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Scaling(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Scan(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Scan(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def ScanBarcode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScanEye(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScanFace(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScanHeart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScanLine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScanQrCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScanSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScanText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def School(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Scissors(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScissorsLineDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScreenShare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScreenShareOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Scroll(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ScrollText(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Search(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SearchCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SearchCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SearchSlash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SearchX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Section(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Send(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Send(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def SendHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SendToBack(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SeparatorHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SeparatorVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Server(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ServerCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ServerCrash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ServerOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Settings(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Settings2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Shapes(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Share(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Share(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Share2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Sheet(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Shell(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Sheet(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Shell(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Shield(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldAlert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldBan(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldEllipsis(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldHalf(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldQuestionMark(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldUser(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShieldX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Ship(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Ship(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def ShipWheel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Shirt(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Shirt(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def ShoppingBag(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShoppingBasket(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShoppingCart(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Shovel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ShowerHead(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Shredder(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Shrimp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Shrink(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Shrub(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Shrub(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Shuffle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Sigma(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Sigma(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Signal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SignalHigh(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SignalLow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SignalMedium(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SignalZero(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Signature(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Signpost(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SignpostBig(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Siren(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Siren(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def SkipBack(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SkipForward(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Skull(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Slack(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Slash(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Slice(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Skull(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Slack(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Slash(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Slice(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def SlidersHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SlidersVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Smartphone(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SmartphoneCharging(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SmartphoneNfc(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Smile(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Smile(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def SmilePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Snail(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Snail(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Snowflake(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SoapDispenserDroplet(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Sofa(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Soup(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Space(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Spade(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Sofa(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Soup(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Space(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Spade(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Sparkle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Sparkles(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Speaker(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Speech(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SpellCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SpellCheck2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Spline(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SplinePointer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Split(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Spool(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Split(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Spool(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Spotlight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SprayCan(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Sprout(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Square(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareActivity(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowDownLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowDownRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowOutDownLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowOutDownRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowOutUpLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowOutUpRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowUpLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareArrowUpRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareAsterisk(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareBottomDashedScissors(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareChartGantt(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareCheckBig(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareChevronDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareChevronLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareChevronRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareChevronUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareDashedBottom(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareDashedBottomCode(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareDashedKanban(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareDashedMousePointer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareDashedTopSolid(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareDivide(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareEqual(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareFunction(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareKanban(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareLibrary(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareM(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareMenu(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareMousePointer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareParking(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareParkingOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquarePause(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquarePen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquarePercent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquarePi(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquarePilcrow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquarePlay(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquarePlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquarePower(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareRadical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareRoundCorner(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareScissors(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareSigma(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareSlash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareSplitHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareSplitVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareSquare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareStack(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareStar(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareStop(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareTerminal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareUser(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareUserRound(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquareX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquaresExclude(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquaresIntersect(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquaresSubtract(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquaresUnite(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Squircle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SquircleDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Squirrel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Stamp(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Star(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Stamp(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Star(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def StarHalf(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def StarOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def StepBack(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def StepForward(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Stethoscope(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Sticker(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def StickyNote(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Store(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Store(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def StretchHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def StretchVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Strikethrough(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Subscript(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Sun(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Sun(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def SunDim(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SunMedium(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SunMoon(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SunSnow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Sunrise(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Sunset(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Superscript(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SwatchBook(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SwissFranc(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def SwitchCamera(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Sword(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Sword(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Swords(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Syringe(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Table(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Table(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Table2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TableCellsMerge(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TableCellsSplit(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TableColumnsSplit(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TableOfContents(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TableProperties(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TableRowsSplit(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tablet(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TabletSmartphone(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tablets(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Tag(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Tags(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Tag(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Tags(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Tally1(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tally2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tally3(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tally4(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tally5(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tangent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Target(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Telescope(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Tent(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Tent(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def TentTree(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Terminal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TestTube(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TestTubeDiagonal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TestTubes(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Text(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def TextAlignCenter(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def TextAlignEnd(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def TextAlignJustify(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def TextAlignStart(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def TextCursor(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TextCursorInput(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def TextInitial(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TextQuote(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TextSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TextSelect(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def TextWrap(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Theater(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Thermometer(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ThermometerSnowflake(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ThermometerSun(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ThumbsDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ThumbsUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Ticket(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TicketCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TicketMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TicketPercent(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TicketPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TicketSlash(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TicketX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tickets(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TicketsPlane(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Timer(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Timer(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def TimerOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TimerReset(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ToggleLeft(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ToggleRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Toilet(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ToolCase(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tornado(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Torus(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Torus(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Touchpad(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TouchpadOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TowerControl(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ToyBrick(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Tractor(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TrafficCone(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TrainFront(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TrainFrontTunnel(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TrainTrack(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TramFront(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Transgender(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Trash(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Trash(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Trash2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TreeDeciduous(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TreePalm(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TreePine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Trees(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Trees(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Trello(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TrendingDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TrendingUp(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TrendingUpDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Triangle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TriangleAlert(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TriangleDashed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TriangleRight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Trophy(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Truck(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Truck(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def TruckElectric(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TurkishLira(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Turntable(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Turtle(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Tv(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Tv(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def TvMinimal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def TvMinimalPlay(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Twitch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Twitter(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Type(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Type(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def TypeOutline(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Umbrella(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UmbrellaOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Underline(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Undo(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Undo2(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Undo(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Undo2(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def UndoDot(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UnfoldHorizontal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UnfoldVertical(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Ungroup(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def University(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Unlink(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Unlink2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Unplug(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Upload(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Usb(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def User(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Usb(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def User(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def UserCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserLock(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserPen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserRound(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserRoundCheck(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserRoundCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserRoundMinus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserRoundPen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserRoundPlus(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserRoundSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserRoundX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserSearch(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UserStar(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def UserX(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Users(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def UserX(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Users(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def UsersRound(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Utensils(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UtensilsCrossed(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def UtilityPole(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Variable(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Vault(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Vault(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def VectorSquare(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Vegan(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Vegan(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def VenetianMask(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Venus(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Venus(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def VenusAndMars(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Vibrate(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def VibrateOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Video(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Video(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def VideoOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Videotape(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def View(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def View(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Voicemail(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Volleyball(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Volume(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Volume1(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Volume2(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def VolumeOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def VolumeX(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Vote(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Vote(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Wallet(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WalletCards(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WalletMinimal(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Wallpaper(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Wand(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Wand(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def WandSparkles(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Warehouse(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WashingMachine(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Watch(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def Waves(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Watch(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
+def Waves(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def WavesLadder(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Waypoints(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Webcam(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Webhook(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WebhookOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Weight(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Wheat(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Wheat(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def WheatOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WholeWord(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Wifi(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Wifi(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def WifiCog(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WifiHigh(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WifiLow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WifiOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WifiPen(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WifiSync(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def WifiZero(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Wind(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Wind(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def WindArrowDown(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Wine(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Wine(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def WineOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Workflow(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Worm(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
-def WrapText(
-	key: str | None = None, **props: Unpack[LucideProps]
+def Worm(
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def Wrench(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def X(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def X(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def Youtube(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
-def Zap(key: str | None = None, **props: Unpack[LucideProps]) -> ps.ComponentNode: ...
+def Zap(
+    key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.ComponentNode: ...
 def ZapOff(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ZoomIn(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...
 def ZoomOut(
-	key: str | None = None, **props: Unpack[LucideProps]
+    key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.ComponentNode: ...

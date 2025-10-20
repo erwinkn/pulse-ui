@@ -681,7 +681,7 @@ def _typed_dict_bases(typed_dict_cls: type) -> list[type]:
 
 
 @cache
-def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
+def prop_spec_from_typeddict(typed_dict_cls: type) -> PropSpec:
 	"""Build and cache a Props spec from a TypedDict class tree.
 
 	Caches by the TypedDict class object (stable and hashable). This speeds up
@@ -698,7 +698,7 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
 	# 1) Merge cached specs from TypedDict base classes (preserve insertion order)
 	merged: dict[str, Prop[Any]] = {}
 	for base in _typed_dict_bases(typed_dict_cls):
-		base_spec = _propspec_from_typeddict(base)
+		base_spec = prop_spec_from_typeddict(base)
 		for k, p in base_spec.as_dict().items():
 			merged[k] = _clone_prop(p)
 
@@ -789,7 +789,7 @@ def parse_typed_dict_props(var_kw: Parameter | None) -> PropSpec:
 
 	# NOTE: For TypedDicts, the annotations contain the fields of all classes in
 	# the hierarchy, we don't need to walk the MRO. Use cached builder.
-	return _propspec_from_typeddict(origin_td)
+	return prop_spec_from_typeddict(origin_td)
 
 
 # ----------------------------------------------------------------------------

@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Switch", "pulse-mantine")
-def Switch(key: Optional[str] = None, **props): ...
+def Switch(key: str | None = None, **props: Any): ...

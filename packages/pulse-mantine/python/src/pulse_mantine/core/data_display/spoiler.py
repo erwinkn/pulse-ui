@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Spoiler", "@mantine/core")
-def Spoiler(*children: ps.Child, key: Optional[str] = None, **props): ...
-
+def Spoiler(*children: ps.Child, key: str | None = None, **props: Any): ...

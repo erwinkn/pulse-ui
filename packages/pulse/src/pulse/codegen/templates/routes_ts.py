@@ -2,7 +2,7 @@ from mako.template import Template
 
 # Mako template for routes configuration
 ROUTES_CONFIG_TEMPLATE = Template(
-    """import {
+	"""import {
   type RouteConfig,
   route,
   layout,
@@ -28,7 +28,7 @@ export const routes = [
 
 # Runtime route tree for matching (used by main layout loader)
 ROUTES_RUNTIME_TEMPLATE = Template(
-    """import type { RouteObject } from "react-router";
+	"""import type { RouteObject } from "react-router";
 
 export type RRRouteObject = RouteObject & {
   id: string;

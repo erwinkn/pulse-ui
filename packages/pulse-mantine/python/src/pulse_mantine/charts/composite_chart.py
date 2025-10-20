@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("CompositeChart", "@mantine/charts")
-def CompositeChart(key: Optional[str] = None, **props): ...
-
+def CompositeChart(key: str | None = None, **props: Any): ...

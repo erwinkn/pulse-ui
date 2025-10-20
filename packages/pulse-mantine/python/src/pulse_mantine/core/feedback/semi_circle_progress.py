@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("SemiCircleProgress", "@mantine/core")
-def SemiCircleProgress(key: Optional[str] = None, **props): ...
-
+def SemiCircleProgress(key: str | None = None, **props: Any): ...

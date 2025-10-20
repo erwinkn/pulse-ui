@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("MonthPicker", "pulse-mantine")
-def MonthPicker(key: Optional[str] = None, **props): ...
-
+def MonthPicker(key: str | None = None, **props: Any): ...

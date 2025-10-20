@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("LevelsGroup", "pulse-mantine")
-def LevelsGroup(key: Optional[str] = None, **props): ...
-
+def LevelsGroup(key: str | None = None, **props: Any): ...

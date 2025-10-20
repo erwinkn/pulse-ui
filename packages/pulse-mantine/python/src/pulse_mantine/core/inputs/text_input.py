@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("TextInput", "pulse-mantine")
-def TextInput(*children: ps.Child, key: Optional[str] = None, **props): ...
+def TextInput(*children: ps.Child, key: str | None = None, **props: Any): ...

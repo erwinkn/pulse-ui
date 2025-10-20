@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Portal", "@mantine/core")
-def Portal(*children: ps.Child, key: Optional[str] = None, **props): ...
-
+def Portal(*children: ps.Child, key: str | None = None, **props: Any): ...

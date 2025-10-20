@@ -3,12 +3,19 @@ name = "pulse-msal"
 version = "0.1.2"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }
-]
+authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
 requires-python = ">=3.12"
 dependencies = []
+
+[project.optional-dependencies]
+redis = ["redis"]
+
+[tool.uv]
+package = true
 
 [build-system]
 requires = ["uv_build>=0.8.13,<0.9.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["redis>=6.4.0"]

@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Blockquote", "@mantine/core")
-def Blockquote(*children: ps.Child, key: Optional[str] = None, **props): ...
-
+def Blockquote(*children: ps.Child, key: str | None = None, **props: Any): ...

@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("DonutChart", "@mantine/charts")
-def DonutChart(key: Optional[str] = None, **props): ...
-
+def DonutChart(key: str | None = None, **props: Any): ...

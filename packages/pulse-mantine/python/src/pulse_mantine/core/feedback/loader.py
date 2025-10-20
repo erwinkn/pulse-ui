@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Loader", "@mantine/core")
-def Loader(*children: ps.Child, key: Optional[str] = None, **props): ...
-
+def Loader(*children: ps.Child, key: str | None = None, **props: Any): ...

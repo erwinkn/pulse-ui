@@ -156,15 +156,14 @@ RESERVED_NAMES = [
 	"headers",
 	"HeadersArgs",
 	"PulseView",
-	"VDOM",
 	"ComponentRegistry",
 	"RenderLazy",
 	"cssModules",
 ]
 
 TEMPLATE = Template(
-	"""import { type HeadersArgs } from "react-router";
-import { PulseView, type VDOM, type ComponentRegistry${", " + "RenderLazy" if needs_render_lazy else ""} } from "pulse-ui-client";
+	"""import { PulseView, type ComponentRegistry${", " + "RenderLazy" if needs_render_lazy else ""} } from "pulse-ui-client";
+import type { HeadersArgs } from "react-router";
 
 % if import_sources:
 // Component and helper imports

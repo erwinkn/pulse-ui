@@ -1,5 +1,6 @@
-import pulse as ps
 from typing import Any
+
+import pulse as ps
 from pulse.codegen.imports import ImportStatement
 
 

@@ -14,27 +14,27 @@ help:
 lint:
 	@echo "Running Ruff linter..."
 	@uv run ruff check .
-	# @echo "Running Biome linter..."
-	# @bun run lint
+	@echo "Running Biome linter..."
+	@bunx biome lint
 
 lint-fix:
 	@echo "Running Ruff linter with auto-fix..."
 	@uv run ruff check --fix .
-	# @echo "Running Biome linter with auto-fix..."
-	# @bun run lint:fix
+	@echo "Running Biome linter with auto-fix..."
+	@bunx biome check --write
 
 # Formatting
 format:
 	@echo "Formatting with Ruff..."
 	@uv run ruff format .
-	# @echo "Formatting with Biome..."
-	# @bun run format
+	@echo "Formatting with Biome..."
+	@bunx biome format --write
 
 format-check:
 	@echo "Checking Ruff formatting..."
 	@uv run ruff format --check .
-	# @echo "Checking Biome formatting..."
-	# @bun run format:check
+	@echo "Checking Biome formatting..."
+	@bunx biome check
 
 # Type checking
 typecheck:

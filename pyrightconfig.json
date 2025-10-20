@@ -9,7 +9,11 @@
     "packages/pulse-recharts/src"
   ],
   "pythonVersion": "3.12",
-  "allowedUntypedLibraries": ["socketio", "msal", "mako.template"],
+  "allowedUntypedLibraries": [
+    "socketio",
+    "msal",
+    "mako.template"
+  ],
   // Framework code often has to use Any.
   "reportAny": "none",
   "reportExplicitAny": "none",
@@ -29,5 +33,5 @@
   "reportUnusedCallResult": "none",
   // Makes Pulse's context setup impossible and I don't want to put everything
   // into a single giant file.
-  "reportImportCycles": "none",
+  "reportImportCycles": "none"
 }

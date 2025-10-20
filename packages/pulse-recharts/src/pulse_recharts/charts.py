@@ -104,9 +104,9 @@ def LineChart(
 ): ...
 
 
-class ComposedChartProps( # pyright: ignore[reportIncompatibleVariableOverride]
+class ComposedChartProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 	ps.HTMLSVGProps[GenericHTMLElement], CartesianChartProps[Any]
-): ...  
+): ...
 
 
 @ps.react_component("ComposedChart", "recharts")

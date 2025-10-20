@@ -160,7 +160,7 @@ def test_nested_keyed_reorder_in_subtree():
 	final_order = _apply_reconciliation(dom_order, recon_ops[0])
 	assert final_order == expected_final
 
-	normalized_root = tree.normalized  
+	normalized_root = tree.normalized
 	assert isinstance(normalized_root, Node)
 	outer = normalized_root.children
 	assert isinstance(outer, list)
@@ -419,7 +419,7 @@ def test_render_tree_unmount_clears_state_and_unmounts_children():
 	assert tree.callbacks == {}
 	assert tree.render_props == set()
 	assert tree.css_refs == set()
-	assert tree.normalized is None  
+	assert tree.normalized is None
 
 
 def test_diff_updates_props():
@@ -448,7 +448,7 @@ def test_keyed_move_preserves_component_nodes():
 	tree.render()
 
 	# Verify initial order
-	normalized_root = tree.normalized  
+	normalized_root = tree.normalized
 	assert isinstance(normalized_root, Node)
 	assert isinstance(normalized_root.children, list)
 	assert len(normalized_root.children) == 2
@@ -467,7 +467,7 @@ def test_keyed_move_preserves_component_nodes():
 	assert len(recon_ops) == 1
 
 	# Verify labels moved correctly after reordering
-	updated_root = tree.normalized  
+	updated_root = tree.normalized
 	assert isinstance(updated_root, Node)
 	assert isinstance(updated_root.children, list)
 	assert len(updated_root.children) == 2
@@ -558,7 +558,7 @@ def test_keyed_component_state_preservation():
 	assert len(recon_ops) == 1
 
 	# Verify state is preserved - A should still have count 1
-	normalized_root = tree.normalized  
+	normalized_root = tree.normalized
 	assert isinstance(normalized_root, Node)
 	assert isinstance(normalized_root.children, list)
 	# A is now at index 1
@@ -612,7 +612,7 @@ def test_keyed_parent_node_move_preserves_child_state():
 	assert len(recon_ops) == 1
 
 	# Verify the component state is preserved - A should still have count 1
-	normalized_root = tree.normalized  
+	normalized_root = tree.normalized
 	assert isinstance(normalized_root, Node)
 	assert isinstance(normalized_root.children, list)
 	# Parent A is now at index 1

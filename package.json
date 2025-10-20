@@ -1,17 +1,17 @@
 {
-  "name": "pulse",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "build": "bun ./scripts/build-js-packages.ts && bun upgrade"
-  },
-  "workspaces": [
-    "packages/pulse-ui-client/",
-    "packages/pulse-mantine/js",
-    "examples/web/",
-    "examples/pulse-mantine/web"
-  ],
-  "devDependencies": {
-    "@biomejs/biome": "2.2.5"
-  }
+	"name": "pulse",
+	"version": "1.0.0",
+	"type": "module",
+	"scripts": {
+		"build": "bun ./scripts/build-js-packages.ts && bun upgrade"
+	},
+	"workspaces": [
+		"packages/pulse-ui-client/",
+		"packages/pulse-mantine/js",
+		"examples/web/",
+		"examples/pulse-mantine/web"
+	],
+	"devDependencies": {
+		"@biomejs/biome": "2.2.5"
+	}
 }

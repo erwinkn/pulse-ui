@@ -1,52 +1,52 @@
 {
-  "name": "pulse-mantine",
-  "version": "0.1.12",
-  "license": "MIT",
-  "type": "module",
-  "sideEffects": false,
-  "files": [
-    "dist"
-  ],
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "bun": "./dist/index.bun.js",
-      "node": "./dist/index.node.js",
-      "browser": {
-        "development": "./dist/index.development.js",
-        "default": "./dist/index.js"
-      },
-      "development": "./dist/index.development.js",
-      "default": "./dist/index.js"
-    }
-  },
-  "scripts": {
-    "build": "bun --bun scripts/build.ts && bun run build:types",
-    "build:types": "tsc -p tsconfig.build.json",
-    "prepublishOnly": "bun run build"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "@types/node": "^24.6.0",
-    "@types/react": "^19.1.16",
-    "@types/react-dom": "^19.1.9",
-    "esbuild": "^0.25.10",
-    "pulse-ui-client": "workspace:*",
-    "typescript": "^5.9.2"
-  },
-  "peerDependencies": {
-    "pulse-ui-client": "^0.1.29",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "@mantine/charts": "^8",
-    "@mantine/core": "^8",
-    "@mantine/dates": "^8",
-    "@mantine/form": "^8",
-    "@mantine/hooks": "^8",
-    "dayjs": "^1",
-    "recharts": "^3"
-  }
+	"name": "pulse-mantine",
+	"version": "0.1.12",
+	"license": "MIT",
+	"type": "module",
+	"sideEffects": false,
+	"files": [
+		"dist"
+	],
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"bun": "./dist/index.bun.js",
+			"node": "./dist/index.node.js",
+			"browser": {
+				"development": "./dist/index.development.js",
+				"default": "./dist/index.js"
+			},
+			"development": "./dist/index.development.js",
+			"default": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "bun --bun scripts/build.ts && bun run build:types",
+		"build:types": "tsc -p tsconfig.build.json",
+		"prepublishOnly": "bun run build"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@types/node": "^24.6.0",
+		"@types/react": "^19.1.16",
+		"@types/react-dom": "^19.1.9",
+		"esbuild": "^0.25.10",
+		"pulse-ui-client": "workspace:*",
+		"typescript": "^5.9.2"
+	},
+	"peerDependencies": {
+		"pulse-ui-client": "^0.1.29",
+		"react": "^19.1.1",
+		"react-dom": "^19.1.1",
+		"@mantine/charts": "^8",
+		"@mantine/core": "^8",
+		"@mantine/dates": "^8",
+		"@mantine/form": "^8",
+		"@mantine/hooks": "^8",
+		"dayjs": "^1",
+		"recharts": "^3"
+	}
 }

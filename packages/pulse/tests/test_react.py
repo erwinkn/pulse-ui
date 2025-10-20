@@ -385,7 +385,7 @@ def test_parse_typed_dict_props_unpack_must_wrap_typeddict():
 	class NotTD:
 		a: int  # pyright: ignore[reportUninitializedInstanceVariable]
 
-	def fn(*children: Child, key: str | None = None, **props: Unpack[NotTD]):  # pyright: ignore[reportGeneralTypeIssues, reportUnknownParameterType, reportUnusedParameter]
+	def fn(*children: Child, key: str | None = None, **props: Unpack[NotTD]):  # pyright: ignore[reportGeneralTypeIssues, reportUnknownParameterType]
 		return cast(Element, None)
 
 	var_kw = list(inspect.signature(fn).parameters.values())[-1]  # pyright: ignore[reportUnknownArgumentType]

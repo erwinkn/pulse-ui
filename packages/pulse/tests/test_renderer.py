@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pulse as ps
 import pytest
@@ -44,7 +44,7 @@ def _apply_reconciliation(prev: list[str], op: dict[str, Any]) -> list[str]:
 						isinstance(first_child, dict)
 						and first_child.get("tag") == "span"
 						and isinstance(first_child.get("children"), list)
-						and len(first_child["children"]) > 0
+						and len(first_child["children"]) > 0  # pyright: ignore[reportUnknownArgumentType]
 					):
 						# Extract the label from "E:0" -> "e"
 						span_text = first_child["children"][0]
@@ -62,7 +62,7 @@ def _apply_reconciliation(prev: list[str], op: dict[str, Any]) -> list[str]:
 						s = next((c for c in v["children"] if isinstance(c, str)), None)
 						next_list[i] = s if s is not None else v.get("tag", "?")
 			else:
-				next_list[i] = str(v)
+				next_list[i] = str(v)  # pyright: ignore[reportUnknownArgumentType]
 		elif i in reuse_map:
 			next_list[i] = prev[reuse_map[i]]
 		else:
@@ -85,7 +85,8 @@ class TrackingHookContext(HookContext):
 		super().__init__()
 		self.did_unmount = False
 
-	def unmount(self) -> None:  # type: ignore[override]
+	@override
+	def unmount(self) -> None:
 		self.did_unmount = True
 		super().unmount()
 
@@ -112,7 +113,7 @@ def test_keyed_reorder_applies_operations_in_correct_order():
 
 	ops = tree.diff(ul(*reordered_children))
 
-	normalized_root = tree._normalized  # type: ignore[attr-defined]
+	normalized_root = tree.normalized
 	assert isinstance(normalized_root, Node)
 	assert isinstance(normalized_root.children, list)
 	current_order = [cast(Node, child).key for child in normalized_root.children]
@@ -159,7 +160,7 @@ def test_nested_keyed_reorder_in_subtree():
 	final_order = _apply_reconciliation(dom_order, recon_ops[0])
 	assert final_order == expected_final
 
-	normalized_root = tree._normalized  # type: ignore[attr-defined]
+	normalized_root = tree.normalized  
 	assert isinstance(normalized_root, Node)
 	outer = normalized_root.children
 	assert isinstance(outer, list)
@@ -219,7 +220,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_callback():
 	child = Child()
 	child.hooks = TrackingHookContext()
 
-	tree = RenderTree(div(render=child))  # pyright: ignore[reportCallIssue]
+	tree = RenderTree(div(render=child))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	tree.render()
 
 	assert isinstance(child.hooks, TrackingHookContext)
@@ -228,7 +229,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_callback():
 	def handle_click() -> None:
 		pass
 
-	tree.diff(div(render=handle_click))  # pyright: ignore[reportCallIssue]
+	tree.diff(div(render=handle_click))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 
 	assert child.hooks.did_unmount is True
 
@@ -241,7 +242,7 @@ def test_diff_props_unmounts_render_prop_when_removed():
 	child = Child()
 	child.hooks = TrackingHookContext()
 
-	tree = RenderTree(div(render=child))  # pyright: ignore[reportCallIssue]
+	tree = RenderTree(div(render=child))  # pyright: ignore[reportUnknownArgumentType, reportCallIssue]
 	tree.render()
 
 	assert isinstance(child.hooks, TrackingHookContext)
@@ -262,7 +263,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_css_reference():
 	child = Child()
 	child.hooks = TrackingHookContext()
 
-	tree = RenderTree(div(render=child))  # pyright: ignore[reportCallIssue]
+	tree = RenderTree(div(render=child))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	tree.render()
 
 	assert isinstance(child.hooks, TrackingHookContext)
@@ -271,7 +272,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_css_reference():
 	css_module = CssModule("test", Path("/fake.css"))
 	css_ref = CssReference(css_module, "foo")
 
-	tree.diff(div(render=css_ref))  # pyright: ignore[reportCallIssue]
+	tree.diff(div(render=css_ref))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 
 	assert child.hooks.did_unmount is True
 
@@ -321,7 +322,7 @@ def test_render_prop_removal_emits_update_render_props_delta():
 	def Child() -> Node:
 		return span("child")
 
-	tree = RenderTree(div(render=Child()))  # pyright: ignore[reportCallIssue]
+	tree = RenderTree(div(render=Child()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	tree.render()
 
 	ops = tree.diff(div())
@@ -343,7 +344,7 @@ def test_callback_render_prop_churn_updates_deltas():
 	tree = RenderTree(div(button(onClick=handle_click)["Click"]))
 	tree.render()
 
-	ops = tree.diff(div(render=Child()))  # pyright: ignore[reportCallIssue]
+	ops = tree.diff(div(render=Child()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	assert any(
 		op
 		== {"type": "update_callbacks", "path": "", "data": {"remove": ["0.onClick"]}}
@@ -381,7 +382,7 @@ def test_render_prop_nested_components_unmount_on_type_change():
 	outer = Wrapper()
 	outer.hooks = TrackingHookContext()
 
-	tree = RenderTree(div(render=outer))  # pyright: ignore[reportCallIssue]
+	tree = RenderTree(div(render=outer))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	tree.render()
 
 	assert isinstance(inner.hooks, TrackingHookContext)
@@ -418,7 +419,7 @@ def test_render_tree_unmount_clears_state_and_unmounts_children():
 	assert tree.callbacks == {}
 	assert tree.render_props == set()
 	assert tree.css_refs == set()
-	assert tree._normalized is None  # type: ignore[attr-defined]
+	assert tree.normalized is None  
 
 
 def test_diff_updates_props():
@@ -447,7 +448,7 @@ def test_keyed_move_preserves_component_nodes():
 	tree.render()
 
 	# Verify initial order
-	normalized_root = tree._normalized  # type: ignore[attr-defined]
+	normalized_root = tree.normalized  
 	assert isinstance(normalized_root, Node)
 	assert isinstance(normalized_root.children, list)
 	assert len(normalized_root.children) == 2
@@ -466,7 +467,7 @@ def test_keyed_move_preserves_component_nodes():
 	assert len(recon_ops) == 1
 
 	# Verify labels moved correctly after reordering
-	updated_root = tree._normalized  # type: ignore[attr-defined]
+	updated_root = tree.normalized  
 	assert isinstance(updated_root, Node)
 	assert isinstance(updated_root.children, list)
 	assert len(updated_root.children) == 2
@@ -557,7 +558,7 @@ def test_keyed_component_state_preservation():
 	assert len(recon_ops) == 1
 
 	# Verify state is preserved - A should still have count 1
-	normalized_root = tree._normalized
+	normalized_root = tree.normalized  
 	assert isinstance(normalized_root, Node)
 	assert isinstance(normalized_root.children, list)
 	# A is now at index 1
@@ -611,7 +612,7 @@ def test_keyed_parent_node_move_preserves_child_state():
 	assert len(recon_ops) == 1
 
 	# Verify the component state is preserved - A should still have count 1
-	normalized_root = tree._normalized
+	normalized_root = tree.normalized  
 	assert isinstance(normalized_root, Node)
 	assert isinstance(normalized_root.children, list)
 	# Parent A is now at index 1
@@ -812,7 +813,7 @@ def test_render_props():
 		return span("child")
 
 	# Create a div with render prop
-	tree = RenderTree(div(render=ChildComponent()))  # pyright: ignore[reportCallIssue]
+	tree = RenderTree(div(render=ChildComponent()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	tree.render()
 
 	assert tree.render_props == {"render"}
@@ -822,7 +823,7 @@ def test_render_props():
 	def NewChildComponent() -> Node:
 		return span("new child")
 
-	ops = tree.diff(div(render=NewChildComponent()))  # pyright: ignore[reportCallIssue]
+	ops = tree.diff(div(render=NewChildComponent()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	assert ops == [
 		{
 			"type": "replace",
@@ -1016,7 +1017,7 @@ def test_keyed_head_tail_placeholders_deep_reconcile_props_change():
 	# Expect: reconciliation with a new at idx=1, and update_props for A at path 0
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
-	new_indices, new_values = recon_ops[0]["new"]
+	new_indices, _new_values = recon_ops[0]["new"]
 	assert 1 in new_indices
 	assert any(
 		op["type"] == "update_props"

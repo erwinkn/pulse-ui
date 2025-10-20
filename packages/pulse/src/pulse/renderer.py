@@ -106,7 +106,7 @@ class RenderTree:
 		self.callbacks = {}
 		self.render_props = set()
 		self.css_refs = set()
-		self._normalized: Element | None = None
+		self.normalized: Element | None = None
 
 	def render(self) -> VDOM:
 		renderer = Renderer()
@@ -115,15 +115,15 @@ class RenderTree:
 		self.callbacks = renderer.callbacks
 		self.render_props = renderer.render_props
 		self.css_refs = renderer.css_refs
-		self._normalized = normalized
+		self.normalized = normalized
 		return vdom
 
 	def diff(self, new_tree: Element) -> list[VDOMOperation]:
-		if self._normalized is None:
+		if self.normalized is None:
 			raise RuntimeError("RenderTree.render must be called before diff")
 
 		renderer = Renderer()
-		normalized = renderer.reconcile_tree(self._normalized, new_tree, path="")
+		normalized = renderer.reconcile_tree(self.normalized, new_tree, path="")
 
 		callback_prev = set(self.callbacks.keys())
 		callback_next = set(renderer.callbacks.keys())
@@ -181,15 +181,15 @@ class RenderTree:
 		self.callbacks = renderer.callbacks
 		self.render_props = renderer.render_props
 		self.css_refs = renderer.css_refs
-		self._normalized = normalized
+		self.normalized = normalized
 		self.root = normalized
 
 		return ops
 
 	def unmount(self) -> None:
-		if self._normalized is not None:
-			unmount_element(self._normalized)
-			self._normalized = None
+		if self.normalized is not None:
+			unmount_element(self.normalized)
+			self.normalized = None
 		self.callbacks.clear()
 		self.render_props.clear()
 		self.css_refs.clear()

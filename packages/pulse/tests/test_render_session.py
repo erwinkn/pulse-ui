@@ -6,20 +6,17 @@ Each session mounts both routes and mutates state via callbacks. We assert
 that updates from one session do not leak into the other.
 """
 
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pulse as ps
 import pytest
-from pulse.messages import (
-	RouteInfo,
-	ServerMessage,
-)
+from pulse.messages import ServerMessage
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteTree
+from pulse.routing import Route, RouteInfo, RouteTree
 
 
 @pytest.fixture(autouse=True)
-def _pulse_context():
+def _pulse_context():  # pyright: ignore[reportUnusedFunction]
 	app = ps.App()
 	ctx = ps.PulseContext(app=app)
 	with ctx:
@@ -70,12 +67,12 @@ def mount_with_listener(session: RenderSession, path: str):
 	listened: set[str] | None = getattr(session, "_test_listened_paths", None)
 	if listened is None:
 		listened = set()
-		session._test_listened_paths = listened
+		session._test_listened_paths = listened  # pyright: ignore[reportAttributeAccessIssue]
 
 	log: list[ServerMessage] | None = getattr(session, "_test_message_log", None)
 	if log is None:
 		log = []
-		session._test_message_log = log
+		session._test_message_log = log  # pyright: ignore[reportAttributeAccessIssue]
 
 		def on_message(msg: ServerMessage):
 			if msg.get("type") == "api_call":
@@ -84,8 +81,8 @@ def mount_with_listener(session: RenderSession, path: str):
 			if not isinstance(p, str):
 				return
 			# Only record messages for paths we're currently listening to
-			if p in getattr(session, "_test_listened_paths", set()):
-				session._test_message_log.append(msg)
+			if p in getattr(session, "_test_listened_paths", set()):  # pyright: ignore[reportUnknownArgumentType]
+				session._test_message_log.append(msg)  # pyright: ignore[reportAttributeAccessIssue]
 
 		session.connect(on_message)
 
@@ -105,7 +102,7 @@ def mount_with_listener(session: RenderSession, path: str):
 
 	def disconnect():
 		# Stop listening for this path; messages are still in the shared log
-		lst = getattr(session, "_test_listened_paths", set())
+		lst = getattr(session, "_test_listened_paths", set())  # pyright: ignore[reportUnknownArgumentType]
 		if isinstance(lst, set):
 			lst.discard(path)
 
@@ -120,7 +117,7 @@ def extract_count_from_ctx(session: RenderSession, path: str) -> int:
 		normalized_root = getattr(mount.tree, "_normalized", None)
 		if normalized_root is not None:
 			mount.element = normalized_root
-	vdom_dict = cast(dict[str, Any], vdom)
+	vdom_dict = cast(dict[str, Any], cast(object, vdom))
 	children = cast(list[Any], (vdom_dict.get("children", []) or []))
 	span = cast(dict[str, Any], children[0])
 	text_children = cast(list[Any], span.get("children", [0]))
@@ -221,7 +218,7 @@ def extract_global_count(session: RenderSession, path: str) -> int:
 		normalized_root = getattr(mount.tree, "_normalized", None)
 		if normalized_root is not None:
 			mount.element = normalized_root
-	vdom_dict = cast(dict[str, Any], vdom)
+	vdom_dict = cast(dict[str, Any], cast(object, vdom))
 	children = cast(list[Any], (vdom_dict.get("children", []) or []))
 	span = cast(dict[str, Any], children[0])
 	text_children = cast(list[Any], span.get("children", [0]))
@@ -291,6 +288,7 @@ def test_global_state_disposed_on_session_close():
 	class Disposable(ps.State):
 		count: int = 0
 
+		@override
 		def dispose(self):
 			disposed.append("ok")
 			super().dispose()

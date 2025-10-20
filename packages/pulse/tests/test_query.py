@@ -742,7 +742,7 @@ async def test_state_query_dispose_cancels_inflight_and_stops_updates():
 	from pulse.reactive import AsyncEffect  # local import for typing
 
 	assert isinstance(eff, AsyncEffect)
-	assert eff._task is None or eff._task.cancelled() or eff._task.done()
+	assert eff._task is None or eff._task.cancelled() or eff._task.done()  # pyright: ignore[reportPrivateUsage]
 	# No further updates should be scheduled by this effect after dispose
 	prev_finished = s.finished
 	flush_effects()

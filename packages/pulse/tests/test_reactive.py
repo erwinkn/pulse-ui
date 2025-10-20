@@ -209,8 +209,8 @@ def test_no_update_if_value_didnt_change():
 
 def test_cycle_detection():
 	s1 = Signal(1, name="s1")
-	c1 = Computed(lambda: s1() if s1() < 10 else c2(), name="c1")
-	c2 = Computed(lambda: c1(), name="c2")
+	c1 = Computed(lambda: s1() if s1() < 10 else c2(), name="c1")  # pyright: ignore[reportUnknownLambdaType]
+	c2 = Computed(lambda: c1(), name="c2")  # pyright: ignore[reportUnknownLambdaType]
 
 	# This should not raise an error
 	c2()
@@ -319,7 +319,7 @@ def test_diamond_problem():
 	result = 0
 
 	@effect(name="diamond_effect")
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		nonlocal result
 		result = d()
 
@@ -555,7 +555,7 @@ async def test_async_effect_immediate_not_allowed():
 	with pytest.raises(ValueError):
 
 		@effect(immediate=True)
-		async def e():
+		async def e():  # pyright: ignore[reportUnusedFunction]
 			await asyncio.sleep(0)
 
 
@@ -655,7 +655,8 @@ def test_effect_unregister_from_parent_on_disposal():
 	@effect
 	def e():
 		@effect
-		def e2(): ...
+		def e2():  # pyright: ignore[reportUnusedFunction]
+			...
 
 	flush_effects()
 	assert len(e.children) == 1
@@ -724,7 +725,7 @@ def test_effect_explicit_deps_disable_tracking():
 	runs = 0
 
 	@effect(deps=[a])
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		nonlocal runs
 		runs += 1
 		# Read both signals, but only `a` should be tracked
@@ -1030,7 +1031,7 @@ def test_reactive_dict_basic_reads_and_writes():
 	reads = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		reads.append(ctx["a"])  # subscribe to key 'a'
 
 	flush_effects()
@@ -1080,7 +1081,7 @@ def test_reactive_dict_delete_sets_none_preserving_subscribers():
 	values = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		values.append(ctx["a"])  # subscribe
 
 	flush_effects()
@@ -1102,7 +1103,7 @@ def test_reactive_dict_get_after_delete_uses_default_when_absent():
 	# Remove key: value signal remains but marks logical absence
 	del ctx["a"]
 
-	assert "a" in ctx._signals
+	assert "a" in ctx._signals  # pyright: ignore[reportPrivateUsage]
 
 	# Without default -> None
 	assert ctx.get("a") is None
@@ -1148,7 +1149,7 @@ def test_reactive_list_basic_index_reactivity():
 
 	@effect
 	def e():
-		seen.append(lst[1])  # subscribe to index 1
+		seen.append(lst[1])  # pyright: ignore[reportUnknownArgumentType]  # subscribe to index 1
 
 	flush_effects()
 	assert e.runs == 1
@@ -1180,10 +1181,10 @@ def test_reactive_list_structural_changes_bump_version_and_remap_dependencies():
 	first_values: list[int] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		# depend on structural version and first item
 		versions.append(lst.version)
-		first_values.append(lst[0])
+		first_values.append(lst[0])  # pyright: ignore[reportUnknownArgumentType]
 
 	flush_effects()
 	assert versions[-1] == 0 and first_values[-1] == 3
@@ -1284,7 +1285,7 @@ def test_nested_reactive_dict_and_list_deep_reactivity():
 	v_reads: list[int] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		u = ctx["user"]  # depend on user key
 		name_reads.append(u["name"])  # and nested name key
 		v_reads.append(u["tags"].version)
@@ -1323,7 +1324,7 @@ def test_reactive_list_len_is_reactive_and_slice_optimization():
 
 	@effect
 	def e():
-		len_reads.append(len(lst))
+		len_reads.append(len(lst))  # pyright: ignore[reportUnknownArgumentType]
 
 	flush_effects()
 	assert len_reads == [4]
@@ -1406,7 +1407,7 @@ def test_reactive_wraps_dataclass_class_and_caches():
 	seen: list[int] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		seen.append(m.x)
 
 	flush_effects()
@@ -1437,7 +1438,7 @@ def test_reactive_wraps_dataclass_instance_in_place():
 	seen: list[int] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		seen.append(i.a)
 
 	flush_effects()
@@ -1466,14 +1467,14 @@ def test_reactive_list_wraps_dataclass_items():
 	seen: list[int] = []
 
 	@effect
-	def e():
-		item = cast(D, lst[0])
+	def e():  # pyright: ignore[reportUnusedFunction]
+		item = lst[0]
 		seen.append(item.v)
 
 	flush_effects()
 	assert seen == [1]
 
-	item2 = cast(D, lst[0])
+	item2 = lst[0]
 	item2.v = 3
 	flush_effects()
 	assert seen == [1, 3]
@@ -1503,7 +1504,7 @@ def test_reactive_dataclass_eq_order_hash_and_repr():
 
 	# Ensure frozen enforcement at runtime through reactive descriptors
 	with pytest.raises(AttributeError):
-		a1.x = 10  # type: ignore[misc]
+		a1.x = 10  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_reactive_dataclass_asdict_astuple_replace_default_factory():
@@ -1558,7 +1559,7 @@ def test_reactive_dataclass_kw_only_and_match_args():
 
 	RD = reactive(D)
 	with pytest.raises(TypeError):
-		RD(1)  # type: ignore[call-arg]
+		RD(1)  # pyright: ignore[reportCallIssue]
 	d = RD(a=1)
 	assert d.a == 1 and d.b == 2
 
@@ -1610,7 +1611,7 @@ def test_state_wraps_collection_defaults_and_sets():
 	seen = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		seen.append(s.items[0])
 
 	flush_effects()
@@ -1677,7 +1678,7 @@ def test_reactive_dict_contains_reactivity_add_delete():
 	checks: list[bool] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		# Presence check should subscribe to the key's value signal
 		checks.append("x" in ctx)
 
@@ -1759,7 +1760,7 @@ def test_reactive_dict_values_reacts_to_value_changes():
 	@effect
 	def e():
 		# Iterating values should subscribe to each key's value signal
-		vals: list[int] = cast(list[int], list(ctx.values()))
+		vals: list[int] = list(ctx.values())
 		sums.append(sum(vals))
 
 	flush_effects()
@@ -1783,7 +1784,7 @@ def test_reactive_dict_items_reacts_to_value_changes():
 	snapshots: list[list[tuple[str, int]]] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		# Iterating items should subscribe to each key's value signal
 		snapshots.append(sorted((str(k), int(cast(Any, v))) for k, v in ctx.items()))
 
@@ -1966,9 +1967,9 @@ def test_reactive_dict_copy_uses_new_signals():
 	copied = copy.copy(ctx)
 
 	assert copied is not ctx
-	assert copied._signals != ctx._signals
-	assert copied._signals["a"] is not ctx._signals["a"]
-	assert copied._structure is not ctx._structure
+	assert copied._signals != ctx._signals  # pyright: ignore[reportPrivateUsage]
+	assert copied._signals["a"] is not ctx._signals["a"]  # pyright: ignore[reportPrivateUsage]
+	assert copied._structure is not ctx._structure  # pyright: ignore[reportPrivateUsage]
 
 	ctx["a"] = 2
 	assert copied["a"] == 1
@@ -1981,7 +1982,7 @@ def test_reactive_dict_deepcopy_clones_nested_values():
 	deep_copied = copy.deepcopy(ctx)
 
 	assert deep_copied is not ctx
-	assert deep_copied._signals["a"] is not ctx._signals["a"]
+	assert deep_copied._signals["a"] is not ctx._signals["a"]  # pyright: ignore[reportPrivateUsage]
 
 	original_nested = ctx["a"]
 	copied_nested = deep_copied["a"]
@@ -1996,13 +1997,13 @@ def test_reactive_dict_deepcopy_clones_nested_values():
 
 def test_reactive_list_copy_and_deepcopy_use_new_signals():
 	items = ReactiveList([1, {"nested": 2}])
-	copied = copy.copy(items)
-	deep_copied = copy.deepcopy(items)
+	copied = copy.copy(items)  # pyright: ignore[reportUnknownArgumentType]
+	deep_copied = copy.deepcopy(items)  # pyright: ignore[reportUnknownArgumentType]
 
 	assert copied is not items
 	assert deep_copied is not items
-	assert copied._signals[0] is not items._signals[0]
-	assert deep_copied._signals[0] is not items._signals[0]
+	assert copied._signals[0] is not items._signals[0]  # pyright: ignore[reportPrivateUsage]
+	assert deep_copied._signals[0] is not items._signals[0]  # pyright: ignore[reportPrivateUsage]
 
 	items[0] = 5
 	assert copied[0] == 1
@@ -2025,8 +2026,8 @@ def test_reactive_set_copy_and_deepcopy_use_new_signals():
 
 	assert copied is not values
 	assert deep_copied is not values
-	assert copied._signals is not values._signals
-	assert deep_copied._signals is not values._signals
+	assert copied._signals is not values._signals  # pyright: ignore[reportPrivateUsage]
+	assert deep_copied._signals is not values._signals  # pyright: ignore[reportPrivateUsage]
 
 	values.add(3)
 	assert 3 not in copied

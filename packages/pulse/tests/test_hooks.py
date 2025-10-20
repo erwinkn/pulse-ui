@@ -1,3 +1,5 @@
+from typing import override
+
 import pytest
 from pulse.hooks.core import HookContext
 from pulse.hooks.effects import effects
@@ -14,6 +16,7 @@ class DummyState(State):
 		self._dispose_calls = 0
 		super().__init__()
 
+	@override
 	def dispose(self):
 		self._dispose_calls += 1
 		super().dispose()

@@ -2,7 +2,7 @@
 Tests for the State class and computed properties.
 """
 
-from typing import cast
+from typing import Any, cast
 
 import pulse as ps
 import pytest
@@ -318,7 +318,7 @@ class TestState:
 
 	def test_nested_structures_wrapped_and_reactive(self):
 		class S(ps.State):
-			data: dict
+			data: dict[str, Any]
 			data = {
 				"user": {"name": "Ada", "friends": ["b"]},
 				"ids": [1, 2],
@@ -338,7 +338,7 @@ class TestState:
 		set_checks = []
 
 		@ps.effect
-		def track():
+		def track():  # pyright: ignore[reportUnusedFunction]
 			name_reads.append(s.data["user"]["name"])  # reactive path user.name
 			ids_versions.append(s.data["ids"].version)  # structural version
 			set_checks.append("x" in s.data["set"])  # membership signal
@@ -401,9 +401,9 @@ class TestState:
 		state.__very_private = "also ok"
 		state._internal_counter = 42
 
-		assert state._private == "ok"  # type: ignore
-		assert state.__very_private == "also ok"  # type: ignore
-		assert state._internal_counter == 42  # type: ignore
+		assert state._private == "ok"  # pyright: ignore[reportAttributeAccessIssue]
+		assert state.__very_private == "also ok"  # pyright: ignore[reportAttributeAccessIssue]
+		assert state._internal_counter == 42  # pyright: ignore[reportAttributeAccessIssue]
 
 	def test_special_state_attributes_allowed(self):
 		"""Test that special State attributes can be set"""
@@ -417,8 +417,8 @@ class TestState:
 		from pulse.reactive import Scope
 
 		new_scope = Scope()
-		state._scope = new_scope
-		assert state._scope is new_scope
+		state._scope = new_scope  # pyright: ignore[reportPrivateUsage]
+		assert state._scope is new_scope  # pyright: ignore[reportPrivateUsage]
 
 	def test_assignment_to_private_property(self):
 		"""Test that properties can be assigned during custom __init__ before full initialization"""
@@ -432,9 +432,9 @@ class TestState:
 				self._private = "private"
 
 		state = MyState()
-		assert state._private == "private"
-		state._private = "updated"
-		assert state._private == "updated"
+		assert state._private == "private"  # pyright: ignore[reportPrivateUsage]
+		state._private = "updated"  # pyright: ignore[reportPrivateUsage]
+		assert state._private == "updated"  # pyright: ignore[reportPrivateUsage]
 
 	def test_descriptors_still_work(self):
 		"""Test that computed properties and other descriptors still work correctly"""
@@ -508,7 +508,7 @@ class TestState:
 		state.track_count.schedule()
 		state.track_name.schedule()
 		flush_effects()
-		assert len(effect_runs) == 2
+		assert len(effect_runs) == 2  # pyright: ignore[reportUnknownArgumentType]
 		assert "count=5" in effect_runs
 		assert "name=initial" in effect_runs
 
@@ -544,7 +544,7 @@ class TestState:
 		assert s.total == 3
 
 		# Changing non-reactive underscore property should not invalidate computed
-		s._x = 10
+		s._x = 10  # pyright: ignore[reportPrivateUsage]
 		assert s.total == 3
 
 		# Changing reactive property should invalidate and recompute
@@ -553,7 +553,7 @@ class TestState:
 
 	def test_underscore_unannotated_properties_are_non_reactive(self):
 		class S(ps.State):
-			_data: dict
+			_data: dict[str, int]
 			_data = {"a": 1}
 			value: int = 1
 
@@ -565,11 +565,11 @@ class TestState:
 		s = S()
 
 		# _data should not be wrapped in a ReactiveDict
-		assert not isinstance(s._data, ReactiveDict)
+		assert not isinstance(s._data, ReactiveDict)  # pyright: ignore[reportPrivateUsage]
 
 		# Changing underscore data should not affect computed caching
 		assert s.view == 2
-		s._data["a"] = 5
+		s._data["a"] = 5  # pyright: ignore[reportPrivateUsage]
 		assert s.view == 2
 
 		# Changing reactive property should recompute

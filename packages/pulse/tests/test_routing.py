@@ -1,3 +1,5 @@
+from typing import cast
+
 import pulse as ps
 import pytest
 from pulse.routing import (
@@ -7,7 +9,7 @@ from pulse.routing import (
 	Route,
 	RouteTree,
 )
-from pulse.vdom import Node, component
+from pulse.vdom import Component, Node, component
 
 # --- PathSegment Tests ---
 
@@ -137,10 +139,11 @@ def test_route_tree_consecutive_layouts():
 	def render():
 		return ps.div()
 
+	render_component = cast(Component, render)  # pyright: ignore[reportMissingTypeArgument]
 	route_tree = RouteTree(
 		[
-			Layout(render, [Route("counter", render)]),
-			Layout(render, [Route("/counter-2", render)]),
+			Layout(render_component, [Route("counter", render_component)]),
+			Layout(render_component, [Route("/counter-2", render_component)]),
 		]
 	)
 	route = route_tree.find("counter-2")
@@ -151,10 +154,14 @@ def test_route_tree_nested_layouts():
 	def render():
 		return ps.div()
 
+	render_component = cast(Component, render)  # pyright: ignore[reportMissingTypeArgument]
 	route_tree = RouteTree(
 		[
-			Layout(render, [Route("/counter-2", render)]),
-			Layout(render, [Layout(render, [Route("/counter", render)])]),
+			Layout(render_component, [Route("/counter-2", render_component)]),
+			Layout(
+				render_component,
+				[Layout(render_component, [Route("/counter", render_component)])],
+			),
 		]
 	)
 	route = route_tree.find("counter")

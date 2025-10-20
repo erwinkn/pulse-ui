@@ -43,9 +43,9 @@ class TestCodegen:
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		assert 'import { type HeadersArgs } from "react-router";' in result
+		assert 'import type { HeadersArgs } from "react-router";' in result
 		assert (
-			'import { PulseView, type VDOM, type ComponentRegistry } from "pulse-ui-client";'
+			'import { PulseView, type ComponentRegistry } from "pulse-ui-client";'
 			in result
 		)
 		assert "// No components needed for this route" in result
@@ -173,7 +173,7 @@ class TestCodegen:
 
 		# Should import RenderLazy from pulse-ui-client when any component is lazy
 		assert (
-			'import { PulseView, type VDOM, type ComponentRegistry, RenderLazy } from "pulse-ui-client";'
+			'import { PulseView, type ComponentRegistry, RenderLazy } from "pulse-ui-client";'
 			in result
 		)
 
@@ -299,7 +299,7 @@ class TestCodegen:
 
 		home_content = (routes_dir / "index.tsx").read_text()
 		assert (
-			'import { PulseView, type VDOM, type ComponentRegistry } from "pulse-ui-client";'
+			'import { PulseView, type ComponentRegistry } from "pulse-ui-client";'
 			in home_content
 		)
 		assert 'import { Header } from "./components/Header";' in home_content

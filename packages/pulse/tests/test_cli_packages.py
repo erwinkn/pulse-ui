@@ -21,7 +21,7 @@ from pulse.cli.packages import (
 		("react/jsx-runtime", False),
 	],
 )
-def test_is_relative_source(src, expected):
+def test_is_relative_source(src: str, expected: bool):
 	assert is_relative_source(src) is expected
 
 
@@ -33,7 +33,7 @@ def test_is_relative_source(src, expected):
 		("react", False),
 	],
 )
-def test_is_alias_source(src, expected):
+def test_is_alias_source(src: str, expected: bool):
 	assert is_alias_source(src) is expected
 
 
@@ -46,7 +46,7 @@ def test_is_alias_source(src, expected):
 		("react", False),
 	],
 )
-def test_is_url_or_absolute(src, expected):
+def test_is_url_or_absolute(src: str, expected: bool):
 	assert is_url_or_absolute(src) is expected
 
 
@@ -66,7 +66,7 @@ def test_is_url_or_absolute(src, expected):
 		("/abs/path", None),
 	],
 )
-def test_parse_install_spec(spec, expect):
+def test_parse_install_spec(spec: str, expect: str | None):
 	if spec.startswith("./") or spec.startswith("../"):
 		with pytest.raises(ValueError):
 			parse_install_spec(spec)
@@ -125,5 +125,5 @@ def test_resolve_versions_conflict_on_different_exact_versions():
 		(None, None, True),
 	],
 )
-def test_spec_satisfies(required, existing, ok):
+def test_spec_satisfies(required: str | None, existing: str | None, ok: bool):
 	assert spec_satisfies(required, existing) is ok

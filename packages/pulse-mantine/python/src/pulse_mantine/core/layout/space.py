@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Unpack
+from typing import Unpack, Any
 
 import pulse as ps
 

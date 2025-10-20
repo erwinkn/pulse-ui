@@ -6,7 +6,7 @@ through TypeScript code generation and React component integration.
 """
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pulse as ps
 import pytest
@@ -30,7 +30,7 @@ class TestCodegen:
 		"""Clear the component registry before each test."""
 		COMPONENT_REGISTRY.get().clear()
 
-	def test_generate_route_page_no_components(self, tmp_path):
+	def test_generate_route_page_no_components(self, tmp_path: Path):
 		"""Test generating a single route page with no components."""
 		route = Route(
 			"/simple", ps.component(lambda: div()["Simple route"]), components=[]
@@ -56,7 +56,7 @@ class TestCodegen:
 		assert "externalComponents={externalComponents}" in result
 		assert "path={path}" in result
 
-	def test_generate_route_page_with_components(self, tmp_path):
+	def test_generate_route_page_with_components(self, tmp_path: Path):
 		"""Test generating route with React components."""
 		button_comp = ReactComponent("button", "./Button", is_default=False)
 		card_comp = ReactComponent("card", "./Card", is_default=False)
@@ -79,7 +79,7 @@ class TestCodegen:
 		assert '"card": card,' in result
 		assert "No components needed for this route" not in result
 
-	def test_generate_route_page_with_default_export_components(self, tmp_path):
+	def test_generate_route_page_with_default_export_components(self, tmp_path: Path):
 		"""Test generating route with default export components."""
 		default_comp = ReactComponent("DefaultComp", "./DefaultComp", is_default=True)
 		route = Route(
@@ -98,7 +98,7 @@ class TestCodegen:
 		assert 'import DefaultComp from "./DefaultComp";' in result
 		assert '"DefaultComp": DefaultComp,' in result
 
-	def test_generate_route_page_with_property_components(self, tmp_path):
+	def test_generate_route_page_with_property_components(self, tmp_path: Path):
 		"""Test generating route with import_name components (nested component access)."""
 		app_shell_header = ReactComponent("AppShell", "@mantine/core", prop="Header")
 		app_shell_footer = ReactComponent("AppShell", "@mantine/core", prop="Footer")
@@ -125,7 +125,7 @@ class TestCodegen:
 		assert "No components needed for this route" not in result
 
 	def test_generate_route_page_with_duplicate_imports_different_aliases(
-		self, tmp_path
+		self, tmp_path: Path
 	):
 		"""Test generating route with multiple components importing same value with different aliases."""
 		# Duplicate imports of the same symbol should deduplicate import statements
@@ -153,7 +153,7 @@ class TestCodegen:
 		assert result.count('"button": button,') == 1
 		assert "No components needed for this route" not in result
 
-	def test_generate_route_page_with_lazy_component_imports_renderlazy(self, tmp_path):
+	def test_generate_route_page_with_lazy_component_imports_renderlazy(self, tmp_path: Path):
 		"""Lazy components should trigger importing RenderLazy and avoid SSR imports."""
 		lazy_comp = ReactComponent("LazyThing", "./LazyThing", lazy=True)
 		route = Route(
@@ -183,7 +183,7 @@ class TestCodegen:
 		assert 'import { LazyThing } from "./LazyThing";' not in result
 		assert 'import LazyThing from "./LazyThing";' not in result
 
-	def test_generate_routes_ts_empty(self, tmp_path):
+	def test_generate_routes_ts_empty(self, tmp_path: Path):
 		"""Test generating config with empty routes list."""
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([]), codegen_config)
@@ -197,7 +197,7 @@ class TestCodegen:
 		assert "] satisfies RouteConfig;" in result
 		assert 'layout("pulse/_layout.tsx"' in result
 
-	def test_generate_routes_ts_single_root_route(self, tmp_path):
+	def test_generate_routes_ts_single_root_route(self, tmp_path: Path):
 		"""Test generating config with single root route."""
 		home_route = Route("/", Component(lambda: div()), components=[])
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
@@ -211,7 +211,7 @@ class TestCodegen:
 		assert "function toDevRoute(" in result
 		assert 'layout("pulse/_layout.tsx", rrPulseRouteTree.map(toDevRoute))' in result
 
-	def test_generate_routes_ts_multiple_routes(self, tmp_path):
+	def test_generate_routes_ts_multiple_routes(self, tmp_path: Path):
 		"""Test generating config with multiple routes."""
 		routes = [
 			Route("/", Component(lambda: div()), components=[]),
@@ -228,7 +228,7 @@ class TestCodegen:
 		assert "function toDevRoute(" in result
 		assert "rrPulseRouteTree.map(toDevRoute)" in result
 
-	def test_full_app_generation(self, tmp_path):
+	def test_full_app_generation(self, tmp_path: Path):
 		"""Test generating all files for a simple app."""
 		Header = ReactComponent("Header", "./components/Header")
 		Footer = ReactComponent("Footer", "./components/Footer")
@@ -314,7 +314,7 @@ class TestCodegen:
 		assert "externalComponents={externalComponents}" in interactive_content
 		assert "path={path}" in interactive_content
 
-	def test_sibling_layouts_get_distinct_files(self, tmp_path):
+	def test_sibling_layouts_get_distinct_files(self, tmp_path: Path):
 		"""Ensure sibling layouts generate distinct file paths and avoid collisions."""
 
 		@component
@@ -343,7 +343,7 @@ class TestCodegen:
 class TestRouteTemplateConflicts:
 	"""Unit tests for RouteTemplate name/alias conflict resolution."""
 
-	def _by_src(self, import_sources, src: str):
+	def _by_src(self, import_sources: list[Any], src: str):
 		for s in import_sources:
 			if s.src == src:
 				return s
@@ -361,7 +361,7 @@ class TestRouteTemplateConflicts:
 		print("Context:", ctx)
 
 		# Imports aliased due to reserved names
-		import_sources = cast(list, ctx["import_sources"])
+		import_sources = cast(list[Any], ctx["import_sources"])
 		by_button = self._by_src(import_sources, "./ui/button")
 		assert len(by_button.values) == 1
 		assert by_button.values[0].name == "Button"
@@ -372,7 +372,7 @@ class TestRouteTemplateConflicts:
 		assert by_mantine.values[0].name == "AppShell"
 		assert by_mantine.values[0].alias == "AppShell2"
 
-		components_ctx = cast(list, ctx["components_ctx"])
+		components_ctx = cast(list[Any], ctx["components_ctx"])
 		comps_ctx = {c["key"]: c for c in components_ctx}
 		assert comps_ctx["Button2"]["expr"] == "Button2"
 		assert comps_ctx["Button2"]["dynamic"] == "({ default: m.Button })"
@@ -389,12 +389,12 @@ class TestRouteTemplateConflicts:
 		rt.add_components(comps)
 		ctx = rt.context()
 
-		import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+		import_sources = cast(list[Any], ctx["import_sources"])
 		by_default = self._by_src(import_sources, "./Default")
 		# Default import is a single identifier string
 		assert by_default.default_import == "DefaultComp2"
 
-		comp_ctx = cast(list, ctx["components_ctx"])[0]  # type: ignore[index]
+		comp_ctx = cast(list[Any], ctx["components_ctx"])[0]
 		assert comp_ctx["key"] == "DefaultComp2"
 		assert comp_ctx["expr"] == "DefaultComp2"
 		# Dynamic selector for default import uses m.default
@@ -410,11 +410,11 @@ class TestRouteTemplateConflicts:
 		rt.add_components(comps)
 		ctx = rt.context()
 
-		import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+		import_sources = cast(list[Any], ctx["import_sources"])
 		by_src = self._by_src(import_sources, "./Button")
 		assert len(by_src.values) == 1
 		# Final components_ctx keeps one (last-wins on same key)
-		components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
+		components_ctx = cast(list[Any], ctx["components_ctx"])
 		assert len(components_ctx) == 1
 		assert components_ctx[0]["key"] == "Button"
 
@@ -428,7 +428,7 @@ class TestRouteTemplateConflicts:
 		rt.add_components(comps)
 		ctx = rt.context()
 
-		import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+		import_sources = cast(list[Any], ctx["import_sources"])
 		by_a = self._by_src(import_sources, "@lib/a")
 		by_b = self._by_src(import_sources, "@lib/b")
 		assert by_a.values[0].name == "Select"
@@ -436,7 +436,7 @@ class TestRouteTemplateConflicts:
 		assert by_b.values[0].name == "Select"
 		assert by_b.values[0].alias == "Select2"
 
-		components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
+		components_ctx = cast(list[Any], ctx["components_ctx"])
 		comps_ctx = {c["key"]: c for c in components_ctx}
 		assert comps_ctx["Select"]["expr"] == "Select"
 		assert comps_ctx["Select"]["src"] == "@lib/a"
@@ -458,7 +458,7 @@ class TestRouteTemplateConflicts:
 		rt.add_components(comps)
 		ctx = rt.context()
 
-		import_sources = cast(list, ctx["import_sources"])  # type: ignore[assignment]
+		import_sources = cast(list[Any], ctx["import_sources"])
 		by_core = self._by_src(import_sources, "@mantine/core")
 		by_other = self._by_src(import_sources, "@other/lib")
 		assert by_core.values[0].name == "Stack" and by_core.values[0].alias is None
@@ -466,7 +466,7 @@ class TestRouteTemplateConflicts:
 			by_other.values[0].name == "Stack" and by_other.values[0].alias == "Stack2"
 		)
 
-		components_ctx = cast(list, ctx["components_ctx"])  # type: ignore[assignment]
+		components_ctx = cast(list[Any], ctx["components_ctx"])
 		comps_ctx = {c["key"]: c for c in components_ctx}
 		assert comps_ctx["Stack"]["expr"] == "Stack"
 		assert comps_ctx["Stack2.Item"]["expr"] == "Stack2.Item"
@@ -482,7 +482,7 @@ class TestRouteTemplateConflicts:
 			]
 		)
 		ctx = rt.context()
-		locals_map = cast(dict, ctx["local_js_names"])  # type: ignore[assignment]
+		locals_map = cast(dict[str, Any], ctx["local_js_names"])
 		assert locals_map["path"] == "path2"
 		assert locals_map["myFn"] == "myFn"
 		assert locals_map["RenderLazy"] == "RenderLazy2"

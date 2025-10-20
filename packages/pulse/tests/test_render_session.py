@@ -6,7 +6,7 @@ Each session mounts both routes and mutates state via callbacks. We assert
 that updates from one session do not leak into the other.
 """
 
-from typing import cast
+from typing import Any, cast
 
 import pulse as ps
 import pytest
@@ -120,10 +120,10 @@ def extract_count_from_ctx(session: RenderSession, path: str) -> int:
 		normalized_root = getattr(mount.tree, "_normalized", None)
 		if normalized_root is not None:
 			mount.element = normalized_root
-	vdom_dict = cast(dict, vdom)
-	children = cast(list, (vdom_dict.get("children", []) or []))
-	span = cast(dict, children[0])
-	text_children = cast(list, span.get("children", [0]))
+	vdom_dict = cast(dict[str, Any], vdom)
+	children = cast(list[Any], (vdom_dict.get("children", []) or []))
+	span = cast(dict[str, Any], children[0])
+	text_children = cast(list[Any], span.get("children", [0]))
 	text = text_children[0]
 	return int(text)  # type: ignore[arg-type]
 
@@ -221,10 +221,10 @@ def extract_global_count(session: RenderSession, path: str) -> int:
 		normalized_root = getattr(mount.tree, "_normalized", None)
 		if normalized_root is not None:
 			mount.element = normalized_root
-	vdom_dict = cast(dict, vdom)
-	children = cast(list, (vdom_dict.get("children", []) or []))
-	span = cast(dict, children[0])
-	text_children = cast(list, span.get("children", [0]))
+	vdom_dict = cast(dict[str, Any], vdom)
+	children = cast(list[Any], (vdom_dict.get("children", []) or []))
+	span = cast(dict[str, Any], children[0])
+	text_children = cast(list[Any], span.get("children", [0]))
 	text = text_children[0]
 	return int(text)  # type: ignore[arg-type]
 

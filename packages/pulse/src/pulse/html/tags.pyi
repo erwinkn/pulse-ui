@@ -1,5 +1,6 @@
 from typing import Any, Protocol, Unpack
 
+from pulse.html.elements import GenericHTMLElement
 from pulse.html.props import (
 	HTMLAnchorProps,
 	HTMLAreaProps,
@@ -54,7 +55,7 @@ from pulse.html.props import (
 from pulse.vdom import Child, Node
 
 class Tag(Protocol):
-	def __call__(self, *children: Child, **props) -> Node: ...
+	def __call__(self, *children: Child, **props: Any) -> Node: ...
 
 def define_tag(
 	name: str,
@@ -384,50 +385,50 @@ def fragment(*children: Child, key: str | None = None) -> Node: ...
 
 # -- SVG --
 def svg(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def circle(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def ellipse(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def g(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def line(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def path(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def polygon(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def polyline(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def rect(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def text(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def tspan(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def defs(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def clipPath(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def mask(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def pattern(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...
 def use(
-	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps]
+	*children: Child, key: str | None = None, **props: Unpack[HTMLSVGProps[GenericHTMLElement]]
 ) -> Node: ...

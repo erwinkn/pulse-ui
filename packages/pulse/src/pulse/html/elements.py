@@ -2,7 +2,7 @@
 # Note: Similar to events, we can only serialize data attributes, not methods or
 # complex objects like NodeList.
 
-from typing import Literal, TypedDict, Union
+from typing import Literal, TypeAlias, TypedDict
 
 
 class Element(TypedDict):
@@ -64,7 +64,7 @@ class GenericHTMLElement(HTMLElementBase): ...
 class HTMLAnchorElement(HTMLElementBase):
 	"""Properties specific to <a> elements."""
 
-	tagName: Literal["a"]
+	tagName: Literal["a"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	hash: str
 	host: str
@@ -102,7 +102,7 @@ class HTMLAnchorElement(HTMLElementBase):
 class HTMLAreaElement(HTMLElementBase):
 	"""Properties specific to <area> elements."""
 
-	tagName: Literal["area"]
+	tagName: Literal["area"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	alt: str
 	coords: str
@@ -167,13 +167,13 @@ class HTMLMediaElement(HTMLElementBase):
 class HTMLAudioElement(HTMLMediaElement):
 	"""Specifies <audio> elements. Currently no differing properties from HTMLMediaElement in this subset."""
 
-	tagName: Literal["audio"]
+	tagName: Literal["audio"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 class HTMLButtonElement(HTMLElementBase):
 	"""Properties specific to <button> elements."""
 
-	tagName: Literal["button"]
+	tagName: Literal["button"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	disabled: bool
 	name: str
@@ -192,7 +192,7 @@ class HTMLButtonElement(HTMLElementBase):
 class HTMLDataElement(HTMLElementBase):
 	"""Properties specific to <data> elements."""
 
-	tagName: Literal["data"]
+	tagName: Literal["data"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	value: str
 
@@ -200,7 +200,7 @@ class HTMLDataElement(HTMLElementBase):
 class HTMLEmbedElement(HTMLElementBase):
 	"""Properties specific to <embed> elements."""
 
-	tagName: Literal["embed"]
+	tagName: Literal["embed"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	height: str
 	src: str
@@ -215,7 +215,7 @@ class HTMLEmbedElement(HTMLElementBase):
 class HTMLFieldSetElement(HTMLElementBase):
 	"""Properties specific to <fieldset> elements."""
 
-	tagName: Literal["fieldset"]
+	tagName: Literal["fieldset"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	disabled: bool
 	name: str
@@ -229,7 +229,7 @@ class HTMLFieldSetElement(HTMLElementBase):
 class HTMLFormElement(HTMLElementBase):
 	"""Properties specific to <form> elements."""
 
-	tagName: Literal["form"]  # type: ignore[misc]
+	tagName: Literal["form"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	acceptCharset: str
 	action: str
@@ -251,7 +251,7 @@ class HTMLFormElement(HTMLElementBase):
 class HTMLIFrameElement(HTMLElementBase):
 	"""Properties specific to <iframe> elements."""
 
-	tagName: Literal["iframe"]
+	tagName: Literal["iframe"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	allow: str
 	allowFullscreen: bool
@@ -284,7 +284,7 @@ class HTMLIFrameElement(HTMLElementBase):
 class HTMLImageElement(HTMLElementBase):
 	"""Properties specific to <img> elements."""
 
-	tagName: Literal["img"]
+	tagName: Literal["img"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	alt: str
 	crossOrigin: Literal["anonymous", "use-credentials"] | None
@@ -327,7 +327,7 @@ class HTMLImageElement(HTMLElementBase):
 class HTMLInputElement(HTMLElementBase):
 	"""Properties specific to <input> elements."""
 
-	tagName: Literal["input"]
+	tagName: Literal["input"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	accept: str
 	alt: str
@@ -377,7 +377,7 @@ class HTMLInputElement(HTMLElementBase):
 class HTMLLabelElement(HTMLElementBase):
 	"""Properties specific to <label> elements."""
 
-	tagName: Literal["label"]
+	tagName: Literal["label"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	htmlFor: str  # Corresponds to 'for' attribute
 
@@ -385,7 +385,7 @@ class HTMLLabelElement(HTMLElementBase):
 class HTMLLiElement(HTMLElementBase):
 	"""Properties specific to <li> elements."""
 
-	tagName: Literal["li"]
+	tagName: Literal["li"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	value: int  # Only valid if parent is <ol>
 	type: str
@@ -394,7 +394,7 @@ class HTMLLiElement(HTMLElementBase):
 class HTMLLinkElement(HTMLElementBase):
 	"""Properties specific to <link> elements."""
 
-	tagName: Literal["link"]
+	tagName: Literal["link"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	as_: str  # Corresponds to 'as' attribute
 	crossOrigin: Literal["anonymous", "use-credentials"] | None
@@ -429,7 +429,7 @@ class HTMLLinkElement(HTMLElementBase):
 class HTMLMapElement(HTMLElementBase):
 	"""Properties specific to <map> elements."""
 
-	tagName: Literal["map"]
+	tagName: Literal["map"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	name: str
 
@@ -437,7 +437,7 @@ class HTMLMapElement(HTMLElementBase):
 class HTMLMeterElement(HTMLElementBase):
 	"""Properties specific to <meter> elements."""
 
-	tagName: Literal["meter"]
+	tagName: Literal["meter"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	high: float
 	low: float
@@ -450,7 +450,7 @@ class HTMLMeterElement(HTMLElementBase):
 class HTMLModElement(HTMLElementBase):
 	"""Properties specific to <ins> and <del> elements."""
 
-	tagName: Literal["ins", "del"]
+	tagName: Literal["ins", "del"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	cite: str
 	dateTime: str  # Corresponds to 'datetime' attribute
@@ -459,7 +459,7 @@ class HTMLModElement(HTMLElementBase):
 class HTMLOListElement(HTMLElementBase):
 	"""Properties specific to <ol> elements."""
 
-	tagName: Literal["ol"]
+	tagName: Literal["ol"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	reversed: bool
 	start: int
@@ -470,7 +470,7 @@ class HTMLOListElement(HTMLElementBase):
 class HTMLObjectElement(HTMLElementBase):
 	"""Properties specific to <object> elements."""
 
-	tagName: Literal["object"]
+	tagName: Literal["object"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	data: str
 	# disabled: bool
@@ -498,7 +498,7 @@ class HTMLObjectElement(HTMLElementBase):
 class HTMLOptGroupElement(HTMLElementBase):
 	"""Properties specific to <optgroup> elements."""
 
-	tagName: Literal["optgroup"]
+	tagName: Literal["optgroup"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	disabled: bool
 	label: str
@@ -507,7 +507,7 @@ class HTMLOptGroupElement(HTMLElementBase):
 class HTMLOptionElement(HTMLElementBase):
 	"""Properties specific to <option> elements."""
 
-	tagName: Literal["option"]
+	tagName: Literal["option"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	defaultSelected: bool
 	disabled: bool
@@ -521,7 +521,7 @@ class HTMLOptionElement(HTMLElementBase):
 class HTMLOutputElement(HTMLElementBase):
 	"""Properties specific to <output> elements."""
 
-	tagName: Literal["output"]
+	tagName: Literal["output"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	defaultValue: str
 	name: str
@@ -537,7 +537,7 @@ class HTMLOutputElement(HTMLElementBase):
 class HTMLProgressElement(HTMLElementBase):
 	"""Properties specific to <progress> elements."""
 
-	tagName: Literal["progress"]
+	tagName: Literal["progress"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	max: float
 	position: float  # Read-only, -1 if indeterminate
@@ -547,7 +547,7 @@ class HTMLProgressElement(HTMLElementBase):
 class HTMLQuoteElement(HTMLElementBase):
 	"""Properties specific to <q> and <blockquote> elements."""
 
-	tagName: Literal["q", "blockquote"]
+	tagName: Literal["q", "blockquote"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	cite: str
 
@@ -555,13 +555,13 @@ class HTMLQuoteElement(HTMLElementBase):
 class HTMLCiteElement(HTMLElementBase):
 	"""Properties specific to <cite> elements."""
 
-	tagName: Literal["cite"]
+	tagName: Literal["cite"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 class HTMLScriptElement(HTMLElementBase):
 	"""Properties specific to <script> elements."""
 
-	tagName: Literal["script"]
+	tagName: Literal["script"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	async_: bool  # Corresponds to 'async' attribute
 	crossOrigin: Literal["anonymous", "use-credentials"] | None
@@ -593,7 +593,7 @@ class HTMLScriptElement(HTMLElementBase):
 class HTMLSelectElement(HTMLElementBase):
 	"""Properties specific to <select> elements."""
 
-	tagName: Literal["select"]
+	tagName: Literal["select"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	autocomplete: str
 	disabled: bool
@@ -614,7 +614,7 @@ class HTMLSelectElement(HTMLElementBase):
 class HTMLSlotElement(HTMLElementBase):
 	"""Properties specific to <slot> elements."""
 
-	tagName: Literal["slot"]
+	tagName: Literal["slot"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	name: str
 
@@ -622,7 +622,7 @@ class HTMLSlotElement(HTMLElementBase):
 class HTMLSourceElement(HTMLElementBase):
 	"""Properties specific to <source> elements."""
 
-	tagName: Literal["source"]
+	tagName: Literal["source"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	height: int
 	media: str
@@ -636,14 +636,14 @@ class HTMLSourceElement(HTMLElementBase):
 class HTMLTableCaptionElement(HTMLElementBase):
 	"""Properties specific to <caption> elements."""
 
-	tagName: Literal["caption"]
+	tagName: Literal["caption"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	align: str
 
 
 class HTMLTableCellElement(HTMLElementBase):
 	"""Properties specific to <td> and <th> elements."""
 
-	tagName: Literal["td", "th"]
+	tagName: Literal["td", "th"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	abbr: str
 	cellIndex: int  # Read-only
@@ -667,7 +667,7 @@ class HTMLTableCellElement(HTMLElementBase):
 class HTMLTableColElement(HTMLElementBase):
 	"""Properties specific to <col> and <colgroup> elements."""
 
-	tagName: Literal["col", "colgroup"]
+	tagName: Literal["col", "colgroup"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	span: int
 
@@ -682,7 +682,7 @@ class HTMLTableColElement(HTMLElementBase):
 class HTMLTableElement(HTMLElementBase):
 	"""Properties specific to <table> elements."""
 
-	tagName: Literal["table"]
+	tagName: Literal["table"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	# caption: Optional[HTMLTableCaptionElement]  # Reference, might be tricky
 	# t_head: Optional[HTMLTableSectionElement] # Reference
@@ -705,7 +705,7 @@ class HTMLTableElement(HTMLElementBase):
 class HTMLTableRowElement(HTMLElementBase):
 	"""Properties specific to <tr> elements."""
 
-	tagName: Literal["tr"]
+	tagName: Literal["tr"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	# cells: HTMLCollection # Cannot serialize
 	rowIndex: int  # Read-only
@@ -722,7 +722,7 @@ class HTMLTableRowElement(HTMLElementBase):
 class HTMLTableSectionElement(HTMLElementBase):
 	"""Properties specific to <thead>, <tbody>, <tfoot> elements."""
 
-	tagName: Literal["thead", "tbody", "tfoot"]
+	tagName: Literal["thead", "tbody", "tfoot"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	# rows: HTMLCollection # Cannot serialize
 	# Added deprecated properties
@@ -735,7 +735,7 @@ class HTMLTableSectionElement(HTMLElementBase):
 class HTMLTemplateElement(HTMLElementBase):
 	"""Properties specific to <template> elements."""
 
-	tagName: Literal["template"]
+	tagName: Literal["template"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	# content: DocumentFragment # Cannot serialize
 	pass
@@ -744,7 +744,7 @@ class HTMLTemplateElement(HTMLElementBase):
 class HTMLTextAreaElement(HTMLElementBase):
 	"""Properties specific to <textarea> elements."""
 
-	tagName: Literal["textarea"]
+	tagName: Literal["textarea"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	autocomplete: str
 	cols: int
@@ -773,7 +773,7 @@ class HTMLTextAreaElement(HTMLElementBase):
 class HTMLTimeElement(HTMLElementBase):
 	"""Properties specific to <time> elements."""
 
-	tagName: Literal["time"]
+	tagName: Literal["time"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	datetime: str  # Corresponds to 'dateTime' attribute
 
@@ -781,7 +781,7 @@ class HTMLTimeElement(HTMLElementBase):
 class HTMLTrackElement(HTMLElementBase):
 	"""Properties specific to <track> elements."""
 
-	tagName: Literal["track"]
+	tagName: Literal["track"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	default: bool
 	kind: Literal["subtitles", "captions", "descriptions", "chapters", "metadata"]
@@ -795,7 +795,7 @@ class HTMLTrackElement(HTMLElementBase):
 class HTMLVideoElement(HTMLMediaElement):
 	"""Properties specific to <video> elements."""
 
-	tagName: Literal["video"]
+	tagName: Literal["video"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 	height: int
 	poster: str
@@ -808,14 +808,14 @@ class HTMLVideoElement(HTMLMediaElement):
 class HTMLBRElement(HTMLElementBase):
 	"""Properties specific to <br> elements."""
 
-	tagName: Literal["br"]
+	tagName: Literal["br"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	clear: str
 
 
 class HTMLBaseElement(HTMLElementBase):
 	"""Properties specific to <base> elements."""
 
-	tagName: Literal["base"]
+	tagName: Literal["base"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	href: str
 	target: str
 
@@ -823,7 +823,7 @@ class HTMLBaseElement(HTMLElementBase):
 class HTMLBodyElement(HTMLElementBase):
 	"""Properties specific to <body> elements."""
 
-	tagName: Literal["body"]
+	tagName: Literal["body"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	aLink: str
 	background: str
 	bgColor: str
@@ -835,21 +835,21 @@ class HTMLBodyElement(HTMLElementBase):
 class HTMLDListElement(HTMLElementBase):
 	"""Properties specific to <dl> elements."""
 
-	tagName: Literal["dl"]
+	tagName: Literal["dl"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	compact: bool
 
 
 class HTMLDetailsElement(HTMLElementBase):
 	"""Properties specific to <details> elements."""
 
-	tagName: Literal["details"]
+	tagName: Literal["details"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	open: bool
 
 
 class HTMLDialogElement(HTMLElementBase):
 	"""Properties specific to <dialog> elements."""
 
-	tagName: Literal["dialog"]
+	tagName: Literal["dialog"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	open: bool
 	returnValue: str
 
@@ -857,27 +857,27 @@ class HTMLDialogElement(HTMLElementBase):
 class HTMLDivElement(HTMLElementBase):
 	"""Properties specific to <div> elements."""
 
-	tagName: Literal["div"]
+	tagName: Literal["div"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	align: str
 
 
 class HTMLHeadElement(HTMLElementBase):
 	"""Properties specific to <head> elements."""
 
-	tagName: Literal["head"]
+	tagName: Literal["head"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 class HTMLHeadingElement(HTMLElementBase):
 	"""Properties specific to <h1> through <h6> elements."""
 
-	tagName: Literal["h1", "h2", "h3", "h4", "h5", "h6"]
+	tagName: Literal["h1", "h2", "h3", "h4", "h5", "h6"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	align: str
 
 
 class HTMLHRElement(HTMLElementBase):
 	"""Properties specific to <hr> elements."""
 
-	tagName: Literal["hr"]
+	tagName: Literal["hr"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	align: str
 	color: str
 	noShade: bool
@@ -888,20 +888,20 @@ class HTMLHRElement(HTMLElementBase):
 class HTMLHtmlElement(HTMLElementBase):
 	"""Properties specific to <html> elements."""
 
-	tagName: Literal["html"]
+	tagName: Literal["html"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	version: str
 
 
 class HTMLMenuElement(HTMLElementBase):
 	"""Properties specific to <menu> elements."""
 
-	tagName: Literal["menu"]
+	tagName: Literal["menu"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 class HTMLMetaElement(HTMLElementBase):
 	"""Properties specific to <meta> elements."""
 
-	tagName: Literal["meta"]
+	tagName: Literal["meta"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	content: str
 	httpEquiv: str
 	name: str
@@ -911,34 +911,34 @@ class HTMLMetaElement(HTMLElementBase):
 class HTMLParagraphElement(HTMLElementBase):
 	"""Properties specific to <p> elements."""
 
-	tagName: Literal["p"]
+	tagName: Literal["p"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	align: str
 
 
 class HTMLPictureElement(HTMLElementBase):
 	"""Properties specific to <picture> elements."""
 
-	tagName: Literal["picture"]
+	tagName: Literal["picture"]  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
 class HTMLPreElement(HTMLElementBase):
 	"""Properties specific to <pre> elements."""
 
-	tagName: Literal["pre"]
+	tagName: Literal["pre"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	width: int
 
 
 class HTMLSpanElement(HTMLElementBase):
 	"""Properties specific to <span> elements."""
 
-	tagName: Literal["span"]
+	tagName: Literal["span"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	# No additional properties
 
 
 class HTMLStyleElement(HTMLElementBase):
 	"""Properties specific to <style> elements."""
 
-	tagName: Literal["style"]
+	tagName: Literal["style"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	media: str
 	type: str
 	disabled: bool
@@ -947,78 +947,78 @@ class HTMLStyleElement(HTMLElementBase):
 class HTMLTitleElement(HTMLElementBase):
 	"""Properties specific to <title> elements."""
 
-	tagName: Literal["title"]
+	tagName: Literal["title"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	text: str
 
 
 class HTMLUListElement(HTMLElementBase):
 	"""Properties specific to <ul> elements."""
 
-	tagName: Literal["ul"]
+	tagName: Literal["ul"]  # pyright: ignore[reportIncompatibleVariableOverride]
 	compact: bool
 	type: str
 
 
-HTMLElement = Union[
-	GenericHTMLElement,
-	HTMLAnchorElement,
-	HTMLAreaElement,
-	HTMLAudioElement,
-	HTMLBaseElement,
-	HTMLBodyElement,
-	HTMLBRElement,
-	HTMLButtonElement,
-	HTMLCiteElement,
-	HTMLDataElement,
-	HTMLDetailsElement,
-	HTMLDialogElement,
-	HTMLDivElement,
-	HTMLDListElement,
-	HTMLEmbedElement,
-	HTMLFieldSetElement,
-	HTMLFormElement,
-	HTMLHeadElement,
-	HTMLHeadingElement,
-	HTMLHRElement,
-	HTMLHtmlElement,
-	HTMLIFrameElement,
-	HTMLImageElement,
-	HTMLInputElement,
-	HTMLLabelElement,
-	HTMLLiElement,
-	HTMLLinkElement,
-	HTMLMapElement,
-	HTMLMenuElement,
-	HTMLMetaElement,
-	HTMLMeterElement,
-	HTMLModElement,
-	HTMLOListElement,
-	HTMLObjectElement,
-	HTMLOptGroupElement,
-	HTMLOptionElement,
-	HTMLOutputElement,
-	HTMLParagraphElement,
-	HTMLPictureElement,
-	HTMLPreElement,
-	HTMLProgressElement,
-	HTMLQuoteElement,
-	HTMLScriptElement,
-	HTMLSelectElement,
-	HTMLSlotElement,
-	HTMLSourceElement,
-	HTMLSpanElement,
-	HTMLStyleElement,
-	HTMLTableCaptionElement,
-	HTMLTableCellElement,
-	HTMLTableColElement,
-	HTMLTableElement,
-	HTMLTableRowElement,
-	HTMLTableSectionElement,
-	HTMLTemplateElement,
-	HTMLTextAreaElement,
-	HTMLTimeElement,
-	HTMLTitleElement,
-	HTMLTrackElement,
-	HTMLUListElement,
-	HTMLVideoElement,
-]
+HTMLElement: TypeAlias = (
+	GenericHTMLElement
+	| HTMLAnchorElement
+	| HTMLAreaElement
+	| HTMLAudioElement
+	| HTMLBaseElement
+	| HTMLBodyElement
+	| HTMLBRElement
+	| HTMLButtonElement
+	| HTMLCiteElement
+	| HTMLDataElement
+	| HTMLDetailsElement
+	| HTMLDialogElement
+	| HTMLDivElement
+	| HTMLDListElement
+	| HTMLEmbedElement
+	| HTMLFieldSetElement
+	| HTMLFormElement
+	| HTMLHeadElement
+	| HTMLHeadingElement
+	| HTMLHRElement
+	| HTMLHtmlElement
+	| HTMLIFrameElement
+	| HTMLImageElement
+	| HTMLInputElement
+	| HTMLLabelElement
+	| HTMLLiElement
+	| HTMLLinkElement
+	| HTMLMapElement
+	| HTMLMenuElement
+	| HTMLMetaElement
+	| HTMLMeterElement
+	| HTMLModElement
+	| HTMLOListElement
+	| HTMLObjectElement
+	| HTMLOptGroupElement
+	| HTMLOptionElement
+	| HTMLOutputElement
+	| HTMLParagraphElement
+	| HTMLPictureElement
+	| HTMLPreElement
+	| HTMLProgressElement
+	| HTMLQuoteElement
+	| HTMLScriptElement
+	| HTMLSelectElement
+	| HTMLSlotElement
+	| HTMLSourceElement
+	| HTMLSpanElement
+	| HTMLStyleElement
+	| HTMLTableCaptionElement
+	| HTMLTableCellElement
+	| HTMLTableColElement
+	| HTMLTableElement
+	| HTMLTableRowElement
+	| HTMLTableSectionElement
+	| HTMLTemplateElement
+	| HTMLTextAreaElement
+	| HTMLTimeElement
+	| HTMLTitleElement
+	| HTMLTrackElement
+	| HTMLUListElement
+	| HTMLVideoElement
+)

@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pulse.reactive import Computed, Signal
 from pulse.vdom import Element
@@ -8,7 +8,7 @@ T1 = TypeVar("T1", bound=Element | Iterable[Element])
 T2 = TypeVar("T2", bound=Element | Iterable[Element] | None)
 
 
-def _is_truthy(value) -> bool:
+def _is_truthy(value: Any) -> bool:
 	if isinstance(value, bool):
 		return value
 	if value is None:

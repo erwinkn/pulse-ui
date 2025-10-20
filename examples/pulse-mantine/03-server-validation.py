@@ -43,7 +43,7 @@ class UsernameForm(MantineForm):
 
 	async def username_available(
 		self, value: str, values: dict[str, Any], path: str
-	) -> str | None:  # noqa: ARG001
+	) -> str | None:
 		# Simulate I/O latency (e.g., database lookup)
 
 		await asyncio.sleep(0.15)

@@ -1,7 +1,7 @@
 import inspect
 import logging
 from collections.abc import Callable, Mapping
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
@@ -40,6 +40,8 @@ class HookMetadata:
 class HookState:
 	"""Base class returned by hook factories."""
 
+	render_cycle: int
+
 	def __init__(self) -> None:
 		self.render_cycle = 0
 
@@ -48,9 +50,11 @@ class HookState:
 
 	def on_render_end(self, render_cycle: int) -> None:
 		"""Called after the component render has completed."""
+		...
 
 	def dispose(self) -> None:
 		"""Called when the hook instance is discarded."""
+		...
 
 
 T = TypeVar("T", bound=HookState)
@@ -86,7 +90,8 @@ DEFAULT_HOOK_KEY = object()
 
 
 class HookNamespace(Generic[T]):
-	__slots__ = ("hook", "states")
+	__slots__: tuple[str, ...] = ("hook", "states")
+	hook: Hook[T]
 
 	def __init__(self, hook: Hook[T]) -> None:
 		self.hook = hook
@@ -115,7 +120,7 @@ class HookNamespace(Generic[T]):
 			if inspect.isawaitable(created):
 				raise HookError(
 					f"Hook factory '{self.hook.name}' returned an awaitable; "
-					"async factories are not supported"
+					+ "async factories are not supported"
 				)
 			if not isinstance(created, HookState):
 				raise HookError(
@@ -130,7 +135,7 @@ class HookNamespace(Generic[T]):
 		for key, state in self.states.items():
 			try:
 				state.dispose()
-			except Exception:  # pragma: no cover
+			except Exception:  
 				logger.exception(
 					"Error disposing hook '%s' (key=%r)",
 					self.hook.name,
@@ -141,7 +146,8 @@ class HookNamespace(Generic[T]):
 
 class HookContext:
 	render_cycle: int
-	namespaces: dict[str, HookNamespace]
+	namespaces: dict[str, HookNamespace[Any]]
+	_token: "Token[HookContext | None] | None"
 
 	def __init__(self) -> None:
 		self.render_cycle = 0
@@ -165,7 +171,12 @@ class HookContext:
 			namespace.on_render_start(self.render_cycle)
 		return self
 
-	def __exit__(self, exc_type, exc_val, exc_tb):
+	def __exit__(
+		self,
+		exc_type: type[BaseException] | None,
+		exc_val: BaseException | None,
+		exc_tb: Any,
+	):
 		if self._token is not None:
 			HOOK_CONTEXT.reset(self._token)
 			self._token = None
@@ -192,6 +203,8 @@ HOOK_CONTEXT: ContextVar[HookContext | None] = ContextVar(
 
 
 class HookRegistry:
+	_locked: bool
+
 	def __init__(self) -> None:
 		self.hooks: dict[str, Hook[Any]] = {}
 		self._locked = False
@@ -253,13 +266,15 @@ HOOK_REGISTRY: HookRegistry = HookRegistry()
 
 
 class HooksAPI:
-	__slots__ = ()
+	__slots__: tuple[()] = ()
 
-	State = HookState
-	Metadata = HookMetadata
-	AlreadyRegisteredError = HookAlreadyRegisteredError
-	NotFoundError = HookNotFoundError
-	RenameCollisionError = HookRenameCollisionError
+	State: type[HookState] = HookState
+	Metadata: type[HookMetadata] = HookMetadata
+	AlreadyRegisteredError: type[HookAlreadyRegisteredError] = (
+		HookAlreadyRegisteredError
+	)
+	NotFoundError: type[HookNotFoundError] = HookNotFoundError
+	RenameCollisionError: type[HookRenameCollisionError] = HookRenameCollisionError
 
 	def create(
 		self,

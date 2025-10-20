@@ -665,7 +665,7 @@ def test_effect_unregister_from_parent_on_disposal():
 
 
 def test_effect_unregister_from_batch_on_disposal():
-	with Batch() as batch:  # noqa: F841
+	with Batch() as batch:
 
 		@effect
 		def e(): ...
@@ -676,7 +676,7 @@ def test_effect_unregister_from_batch_on_disposal():
 
 
 def test_effect_unset_batch_after_run():
-	with Batch() as batch:  # noqa: F841
+	with Batch() as batch:
 
 		@effect
 		def e(): ...
@@ -1144,7 +1144,7 @@ def test_reactive_list_basic_index_reactivity():
 	lst = ReactiveList([1, 2, 3])
 	assert isinstance(lst, list)
 
-	seen: list = []
+	seen: list[int] = []
 
 	@effect
 	def e():
@@ -1177,7 +1177,7 @@ def test_reactive_list_structural_changes_bump_version_and_remap_dependencies():
 	lst = ReactiveList([3, 1, 2])
 
 	versions: list[int] = []
-	first_values: list = []
+	first_values: list[int] = []
 
 	@effect
 	def e():
@@ -1236,7 +1236,7 @@ def test_reactive_dataclass_fields_are_signals_and_wrapped():
 	@reactive_dataclass
 	class Model:
 		x: int = 1
-		tags: list[int] = None  # type: ignore[assignment]
+		tags: list[int] = None    # pyright: ignore[reportAssignmentType]
 
 	m = Model()
 	m.x = 2
@@ -1598,6 +1598,8 @@ def test_reactive_dataclass_slots_basic():
 
 def test_state_wraps_collection_defaults_and_sets():
 	class S(ps.State):
+		items: list[int]
+		flags: set[str]
 		items = [1, 2]
 		flags = {"a"}
 

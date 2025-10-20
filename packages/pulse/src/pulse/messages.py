@@ -23,13 +23,18 @@ class ServerUpdateMessage(TypedDict):
 	ops: list[VDOMOperation]
 
 
+ServerErrorPhase = Literal[
+	"render", "callback", "mount", "unmount", "navigate", "server", "effect", "connect"
+]
+
+
 class ServerErrorInfo(TypedDict, total=False):
 	# High-level human message
 	message: str
 	# Full stack trace string (server formatted)
 	stack: str
 	# Which phase failed
-	phase: Literal["render", "callback", "mount", "unmount", "navigate", "server"]
+	phase: ServerErrorPhase
 	# Optional extra details (callback key, etc.)
 	details: dict[str, Any]
 
@@ -131,14 +136,14 @@ class ClientChannelResponseMessage(TypedDict):
 	error: NotRequired[Any]
 
 
+ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage
 ServerMessage = (
 	ServerInitMessage
 	| ServerUpdateMessage
 	| ServerErrorMessage
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
-	| ServerChannelRequestMessage
-	| ServerChannelResponseMessage
+	| ServerChannelMessage
 )
 
 

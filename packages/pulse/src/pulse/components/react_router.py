@@ -30,7 +30,7 @@ def Link(
 	# Default: False
 	replace: bool = DEFAULT,
 	# Default: undefined
-	state: dict = DEFAULT,
+	state: dict[str, object] = DEFAULT,
 	# Default: False
 	viewTransition: bool = DEFAULT,
 	**props: Unpack[HTMLAnchorProps],

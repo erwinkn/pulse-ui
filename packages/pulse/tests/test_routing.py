@@ -89,13 +89,13 @@ def route_tree():
 	)
 
 
-def test_route_tree_find_root(route_tree):
+def test_route_tree_find_root(route_tree: RouteTree):
 	route = route_tree.find("")
 	assert isinstance(route, Route)
 	assert route.path == ""
 
 
-def test_route_tree_find_nested_route(route_tree):
+def test_route_tree_find_nested_route(route_tree: RouteTree):
 	route = route_tree.find("about")
 	assert isinstance(route, Route)
 	assert route.path == "about"
@@ -103,30 +103,30 @@ def test_route_tree_find_nested_route(route_tree):
 	assert route.parent.path == ""
 
 
-def test_route_tree_find_layout(route_tree):
+def test_route_tree_find_layout(route_tree: RouteTree):
 	layout = route_tree.find("<layout>")
 	assert isinstance(layout, Layout)
 
 
-def test_route_tree_find_route_in_layout(route_tree):
+def test_route_tree_find_route_in_layout(route_tree: RouteTree):
 	route = route_tree.find("dashboard")
 	assert isinstance(route, Route)
 	assert route.path == "dashboard"
 	assert isinstance(route.parent, Layout)
 
 
-def test_route_tree_find_top_level_route(route_tree):
+def test_route_tree_find_top_level_route(route_tree: RouteTree):
 	route = route_tree.find("users")
 	assert isinstance(route, Route)
 	assert route.path == "users"
 
 
-def test_route_tree_find_non_existent(route_tree):
+def test_route_tree_find_non_existent(route_tree: RouteTree):
 	with pytest.raises(ValueError, match="No route found for path 'nonexistent'"):
 		route_tree.find("nonexistent")
 
 
-def test_route_tree_find_non_existent_in_layout(route_tree):
+def test_route_tree_find_non_existent_in_layout(route_tree: RouteTree):
 	with pytest.raises(
 		ValueError, match="No route found for path '<layout>|nonexistent'"
 	):

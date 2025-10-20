@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, ParamSpec, TypeVar, cast, override
 
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.reactive import Effect, Scope, Signal
@@ -11,7 +11,7 @@ T = TypeVar("T")
 
 
 class SetupHookState(HookState):
-	__slots__ = (
+	__slots__: tuple[str, ...] = (
 		"value",
 		"initialized",
 		"args",
@@ -21,18 +21,21 @@ class SetupHookState(HookState):
 		"_called",
 		"_pending_key",
 	)
+	initialized: bool
+	_called: bool
 
 	def __init__(self) -> None:
 		super().__init__()
 		self.value: Any = None
 		self.initialized = False
-		self.args: list[Signal] = []
-		self.kwargs: dict[str, Signal] = {}
+		self.args: list[Signal[Any]] = []
+		self.kwargs: dict[str, Signal[Any]] = {}
 		self.effects: list[Effect] = []
 		self.key: str | None = None
 		self._called = False
 		self._pending_key: str | None = None
 
+	@override
 	def on_render_start(self, render_cycle: int) -> None:
 		super().on_render_start(render_cycle)
 		self._called = False
@@ -63,17 +66,17 @@ class SetupHookState(HookState):
 		if len(args) != len(self.args):
 			raise RuntimeError(
 				"Number of positional arguments passed to `pulse.setup` changed. "
-				"Make sure you always call `pulse.setup` with the same number of positional "
-				"arguments and the same keyword arguments."
+				+ "Make sure you always call `pulse.setup` with the same number of positional "
+				+ "arguments and the same keyword arguments."
 			)
 		if kwargs.keys() != self.kwargs.keys():
 			new_keys = kwargs.keys() - self.kwargs.keys()
 			missing_keys = self.kwargs.keys() - kwargs.keys()
 			raise RuntimeError(
 				"Keyword arguments passed to `pulse.setup` changed. "
-				f"New arguments: {list(new_keys)}. Missing arguments: {list(missing_keys)}. "
-				"Make sure you always call `pulse.setup` with the same number of positional "
-				"arguments and the same keyword arguments."
+				+ f"New arguments: {list(new_keys)}. Missing arguments: {list(missing_keys)}. "
+				+ "Make sure you always call `pulse.setup` with the same number of positional "
+				+ "arguments and the same keyword arguments."
 			)
 
 	def update_args(
@@ -91,6 +94,7 @@ class SetupHookState(HookState):
 			effect.dispose()
 		self.effects = []
 
+	@override
 	def dispose(self) -> None:
 		self.dispose_effects()
 		self.args = []
@@ -137,7 +141,7 @@ _setup_hook = hooks.create(
 
 
 def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-	state = cast(SetupHookState, _setup_hook())
+	state = _setup_hook()
 	state.ensure_not_called()
 
 	key = state.consume_pending_key()
@@ -164,7 +168,7 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 def setup_key(key: str) -> None:
 	if not isinstance(key, str):
 		raise TypeError("setup_key() requires a string key")
-	state = cast(SetupHookState, _setup_hook())
+	state = _setup_hook()
 	if state.called_this_render:
 		raise RuntimeError("setup_key() must be called before setup() in a render")
 	state.set_pending_key(key)

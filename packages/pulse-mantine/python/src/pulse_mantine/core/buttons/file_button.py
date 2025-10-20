@@ -1,5 +1,6 @@
 import pulse as ps
+from typing import Any
 
 
 @ps.react_component("FileButton", "@mantine/core")
-def FileButton(*children: ps.Child, key: str | None = None, **props): ...
+def FileButton(*children: ps.Child, key: str | None = None, **props: Any): ...

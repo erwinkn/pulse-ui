@@ -1,8 +1,9 @@
 import pulse as ps
+from pulse.html.types import GenericHTMLElement
 from pulse.react_component import _propspec_from_typeddict
 
 
-class LucideProps(ps.HTMLSVGProps, total=False):
+class LucideProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	size: str | int
 	absoluteStrokeWidth: bool
 

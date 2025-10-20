@@ -8,9 +8,9 @@ from pulse.codegen.utils import NameRegistry
 class Imported:
 	name: str
 	src: str
-	alias: str | None
 	is_default: bool
 	prop: str | None
+	alias: str | None
 
 	def __init__(
 		self,
@@ -62,6 +62,8 @@ class ImportStatement:
 
 
 class Imports:
+	names: NameRegistry
+
 	def __init__(
 		self,
 		imports: Iterable[ImportStatement | Imported],
@@ -86,7 +88,7 @@ class Imports:
 
 			self.sources[stmt.src] = stmt
 
-	def import_(self, src: str, name: str, is_type=False, is_default=False) -> str:
+	def import_(self, src: str, name: str, is_type: bool = False, is_default: bool = False) -> str:
 		stmt = self.sources.get(src)
 		if not stmt:
 			stmt = ImportStatement(src)

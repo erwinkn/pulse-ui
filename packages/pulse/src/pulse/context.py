@@ -1,4 +1,4 @@
-# This is more for documentation than actually importing from here
+# pyright: reportImportCycles=false
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from types import TracebackType

@@ -11,7 +11,7 @@ class UserApi(ps.State):
 
 	# Keyed query with keep_previous_data default True
 	@ps.query
-	async def user(self) -> dict:
+	async def user(self):
 		await asyncio.sleep(0.3)
 		# Simulate API; id 13 fails to demonstrate on_error
 		if self.user_id == 13:
@@ -26,7 +26,7 @@ class UserApi(ps.State):
 
 	# Provide initial data after __init__ (e.g., seeded values)
 	@user.initial_data
-	def _initial_user(self) -> dict:
+	def _initial_user(self):
 		# Pretend we had a cached snapshot
 		return {"id": 0, "name": "<loading>"}
 
@@ -42,7 +42,7 @@ class UserApi(ps.State):
 
 	# Unkeyed query (auto-tracked) using current id
 	@ps.query(keep_previous_data=False)
-	async def details(self) -> dict:
+	async def details(self):
 		await asyncio.sleep(0.8)
 		return {"uppercase": str(self.user_id).upper()}
 

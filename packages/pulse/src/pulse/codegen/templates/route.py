@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Sequence
-from typing import TypedDict
+from typing import TypedDict, TypeVarTuple
 
 from mako.template import Template
 
@@ -7,6 +7,9 @@ from pulse.codegen.imports import Imports, ImportStatement
 from pulse.codegen.js import ExternalJsFunction, JsFunction
 from pulse.codegen.utils import NameRegistry
 from pulse.react_component import ReactComponent
+from pulse.routing import Layout, Route
+
+Args = TypeVarTuple("Args")
 
 
 class ComponentInfo(TypedDict):
@@ -39,6 +42,9 @@ class RouteTemplate:
 	- Reserves identifiers for local JS functions
 	"""
 
+	names: NameRegistry
+	_imports: Imports
+
 	def __init__(self, reserved_names: Iterable[str] | None = None) -> None:
 		initial = set(reserved_names or []).union(RESERVED_NAMES)
 		self.names = NameRegistry(initial)
@@ -48,7 +54,7 @@ class RouteTemplate:
 		self.needs_render_lazy: bool = False
 		self._css_modules: dict[str, CssModuleCtx] = {}
 
-	def add_components(self, components: Sequence[ReactComponent]) -> None:
+	def add_components(self, components: "Sequence[ReactComponent[...]]") -> None:
 		for comp in components:
 			if comp.lazy:
 				self.needs_render_lazy = True
@@ -110,12 +116,14 @@ class RouteTemplate:
 			stmt = ImportStatement(spec, side_effect=True)
 			self._imports.add_statement(stmt)
 
-	def add_external_js(self, fns: Sequence[ExternalJsFunction]) -> None:
+	def add_external_js(self, fns: Sequence[ExternalJsFunction[*Args, object]]) -> None:
 		for fn in fns:
 			self._imports.import_(fn.src, fn.name, is_default=True)
 		# TODO: update fn in case of aliasing
 
-	def reserve_js_function_names(self, js_functions: Sequence[JsFunction]) -> None:
+	def reserve_js_function_names(
+		self, js_functions: Sequence[JsFunction[*Args, object]]
+	) -> None:
 		for j in js_functions:
 			self._js_local_names[j.name] = self.names.register(j.name)
 		# TODO: update fn in case of aliasing
@@ -132,7 +140,7 @@ class RouteTemplate:
 		}
 
 
-def dynamic_selector(comp: ReactComponent):
+def dynamic_selector(comp: "ReactComponent[...]"):
 	# Dynamic import mapping for lazy usage on the client
 	attr = "default" if comp.is_default else comp.name
 	prop_accessor = f".{comp.prop}" if comp.prop else ""
@@ -232,12 +240,12 @@ ROUTE_TEMPLATE = TEMPLATE
 
 def render_route(
 	*,
-	route,
-	components: Sequence[ReactComponent] | None = None,
+	route: Route | Layout,
+	components: Sequence[ReactComponent[...]] | None = None,
 	css_modules: Sequence[CssModuleImport] | None = None,
 	css_imports: Sequence[str] | None = None,
-	js_functions: Sequence[JsFunction] | None = None,
-	external_js: Sequence[ExternalJsFunction] | None = None,
+	js_functions: Sequence[JsFunction[*Args, object]] | None = None,
+	external_js: Sequence[ExternalJsFunction[*Args, object]] | None = None,
 	reserved_names: Iterable[str] | None = None,
 ) -> str:
 	comps = list(components or [])

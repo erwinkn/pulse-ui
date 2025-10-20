@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import uuid
 from collections.abc import Callable, Coroutine
@@ -10,6 +8,7 @@ from typing import (
 	Never,
 	TypedDict,
 	Unpack,
+	override,
 )
 
 from fastapi import HTTPException, Request, Response
@@ -18,8 +17,7 @@ from starlette.datastructures import UploadFile
 
 from pulse.context import PulseContext
 from pulse.helpers import call_flexible, maybe_await
-from pulse.hooks.core import HOOK_CONTEXT
-from pulse.hooks.forms import internal_forms_hook
+from pulse.hooks.core import HOOK_CONTEXT, HookMetadata, HookState, hooks
 from pulse.hooks.runtime import server_address
 from pulse.hooks.stable import stable
 from pulse.html.props import HTMLFormProps
@@ -29,12 +27,21 @@ from pulse.serializer import deserialize
 from pulse.types.event_handler import EventHandler1
 from pulse.vdom import Child
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
 	from pulse.app import App
 	from pulse.user_session import UserSession
 
 
-__all__ = ["Form", "ManualForm", "FormData", "FormValue", "UploadFile", "FormRegistry"]
+__all__ = [
+	"Form",
+	"ManualForm",
+	"FormData",
+	"FormValue",
+	"UploadFile",
+	"FormRegistry",
+	"FormStorage",
+	"internal_forms_hook",
+]
 FormValue = str | UploadFile
 FormData = dict[str, FormValue | list[FormValue]]
 
@@ -57,8 +64,8 @@ class FormRegistration:
 
 
 class FormRegistry:
-	def __init__(self, app: App) -> None:
-		self._app = app
+	def __init__(self, app: "App") -> None:
+		self._app: "App" = app
 		self._handlers: dict[str, FormRegistration] = {}
 		self._forms_by_render: dict[str, set[str]] = {}
 
@@ -100,7 +107,7 @@ class FormRegistry:
 		self,
 		form_id: str,
 		request: Request,
-		session: UserSession,
+		session: "UserSession",
 	) -> Response:
 		registration = self._handlers.get(form_id)
 		if registration is None:
@@ -215,6 +222,10 @@ class GeneratedFormProps(TypedDict):
 
 
 class ManualForm:
+	_submit_signal: Signal[bool]
+	_app: "App"
+	_registration: FormRegistration | None
+
 	def __init__(self, on_submit: EventHandler1[FormData] | None = None) -> None:
 		ctx = PulseContext.get()
 		render = ctx.render
@@ -271,7 +282,7 @@ class ManualForm:
 		key: str | None = None,
 		**props: Unpack[PulseFormProps],
 	):
-		props.update(self.props())  # pyright: ignore
+		props.update(self.props())  # pyright: ignore[reportCallIssue, reportArgumentType]
 		return client_form_component(*children, key=key, **props)
 
 	def dispose(self) -> None:
@@ -282,3 +293,69 @@ class ManualForm:
 
 	def update(self, on_submit: EventHandler1[FormData] | None) -> None:
 		self.registration.on_submit = self.wrap_on_submit(on_submit)
+
+
+class FormStorage(HookState):
+	__slots__: tuple[str, ...] = ("forms", "prev_forms", "render_mark")
+	render_mark: int
+
+	def __init__(self) -> None:
+		super().__init__()
+		self.forms: dict[str, ManualForm] = {}
+		self.prev_forms: dict[str, ManualForm] = {}
+		self.render_mark = 0
+
+	@override
+	def on_render_start(self, render_cycle: int) -> None:
+		super().on_render_start(render_cycle)
+		if self.render_mark == render_cycle:
+			return
+		self.prev_forms = self.forms
+		self.forms = {}
+		self.render_mark = render_cycle
+
+	@override
+	def on_render_end(self, render_cycle: int) -> None:
+		if not self.prev_forms:
+			return
+		for form in self.prev_forms.values():
+			form.dispose()
+		self.prev_forms.clear()
+
+	def register(
+		self,
+		key: str,
+		factory: Callable[[], ManualForm],
+	) -> ManualForm:
+		if key in self.forms:
+			raise RuntimeError(
+				f"Duplicate ps.Form id '{key}' detected within the same render"
+			)
+		form = self.prev_forms.pop(key, None)
+		if form is None:
+			form = factory()
+		self.forms[key] = form
+		return form
+
+	@override
+	def dispose(self) -> None:
+		for form in self.forms.values():
+			form.dispose()
+		for form in self.prev_forms.values():
+			form.dispose()
+		self.forms.clear()
+		self.prev_forms.clear()
+
+
+def _forms_factory():
+	return FormStorage()
+
+
+internal_forms_hook = hooks.create(
+	"pulse:core.forms",
+	_forms_factory,
+	metadata=HookMetadata(
+		owner="pulse.core",
+		description="Internal storage for ps.Form manual forms",
+	),
+)

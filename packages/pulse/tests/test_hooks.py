@@ -8,6 +8,8 @@ from pulse.state import State
 
 
 class DummyState(State):
+	_dispose_calls: int
+
 	def __init__(self):
 		self._dispose_calls = 0
 		super().__init__()

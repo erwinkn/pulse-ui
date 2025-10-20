@@ -1,4 +1,5 @@
 import pulse as ps
+from typing import Any
 from pulse.codegen.imports import ImportStatement
 
 
@@ -7,4 +8,4 @@ from pulse.codegen.imports import ImportStatement
 	"@mantine/charts",
 	extra_imports=[ImportStatement(src="@mantine/charts/styles.css", side_effect=True)],
 )
-def ChartTooltip(key: str | None = None, **props): ...
+def ChartTooltip(key: str | None = None, **props: Any): ...

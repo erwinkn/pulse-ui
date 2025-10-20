@@ -1,5 +1,6 @@
 import pulse as ps
+from typing import Any
 
 
 @ps.react_component("Mark", "@mantine/core")
-def Mark(*children: ps.Child, key: str | None = None, **props): ...
+def Mark(*children: ps.Child, key: str | None = None, **props: Any): ...

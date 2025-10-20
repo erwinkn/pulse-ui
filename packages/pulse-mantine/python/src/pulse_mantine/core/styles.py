@@ -21,15 +21,14 @@ from .types import (
 )
 
 T = TypeVar("T")
+Props = TypeVar("Props")
+Ctx = TypeVar("Ctx")
 
 StyleProp = T | dict[str | MantineBreakpoint, T]
 """Wrapper for the type of Mantine style props like `m` (margin) or `p`
 (padding). Not to be confused with MantineStyleProp, which is used for the
 `style` prop."""
 
-T = TypeVar("T")
-Props = TypeVar("Props")
-Ctx = TypeVar("Ctx")
 StyleFn = ps.JsFunction[[MantineTheme, Props, Ctx], T]
 "(theme: MantineTheme, props, ctx) => styles payload"
 

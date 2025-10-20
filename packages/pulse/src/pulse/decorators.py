@@ -36,9 +36,9 @@ def computed(
 ) -> Callable[[Callable[[], T]], Computed[T]]: ...
 
 
-def computed(fn: Callable | None = None, *, name: str | None = None):
+def computed(fn: Callable[..., Any] | None = None, *, name: str | None = None):
 	# The type checker is not happy if I don't specify the `/` here.
-	def decorator(fn: Callable, /):
+	def decorator(fn: Callable[..., Any], /):
 		sig = inspect.signature(fn)
 		params = list(sig.parameters.values())
 		# Check if it's a method with exactly one argument called 'self'
@@ -63,11 +63,12 @@ AsyncStateEffectFn = Callable[[TState], Coroutine[Any, Any, EffectCleanup | None
 
 class EffectBuilder(Protocol):
 	@overload
-	def __call__(self, fn: EffectFn | StateEffectFn) -> Effect: ...
+	def __call__(self, fn: EffectFn | StateEffectFn[Any]) -> Effect: ...
 	@overload
-	def __call__(self, fn: AsyncEffectFn | AsyncStateEffectFn) -> AsyncEffect: ...
+	def __call__(self, fn: AsyncEffectFn | AsyncStateEffectFn[Any]) -> AsyncEffect: ...
 	def __call__(
-		self, fn: EffectFn | StateEffectFn | AsyncEffectFn | AsyncStateEffectFn
+		self,
+		fn: EffectFn | StateEffectFn[Any] | AsyncEffectFn | AsyncStateEffectFn[Any],
 	) -> Effect | AsyncEffect: ...
 
 
@@ -79,7 +80,7 @@ def effect(
 	immediate: bool = False,
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
-	deps: list[Signal | Computed] | None = None,
+	deps: list[Signal[Any] | Computed[Any]] | None = None,
 ) -> Effect: ...
 
 
@@ -91,14 +92,14 @@ def effect(
 	immediate: bool = False,
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
-	deps: list[Signal | Computed] | None = None,
+	deps: list[Signal[Any] | Computed[Any]] | None = None,
 ) -> AsyncEffect: ...
 # In practice this overload returns a StateEffect, but it gets converted into an
 # Effect at state instantiation.
 @overload
-def effect(fn: StateEffectFn) -> Effect: ...
+def effect(fn: StateEffectFn[Any]) -> Effect: ...
 @overload
-def effect(fn: AsyncStateEffectFn) -> AsyncEffect: ...
+def effect(fn: AsyncStateEffectFn[Any]) -> AsyncEffect: ...
 @overload
 def effect(
 	fn: None = None,
@@ -107,21 +108,21 @@ def effect(
 	immediate: bool = False,
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
-	deps: list[Signal | Computed] | None = None,
+	deps: list[Signal[Any] | Computed[Any]] | None = None,
 ) -> EffectBuilder: ...
 
 
 def effect(
-	fn: Callable | None = None,
+	fn: Callable[..., Any] | None = None,
 	*,
 	name: str | None = None,
 	immediate: bool = False,
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
-	deps: list[Signal | Computed] | None = None,
+	deps: list[Signal[Any] | Computed[Any]] | None = None,
 ):
 	# The type checker is not happy if I don't specify the `/` here.
-	def decorator(func: Callable, /):
+	def decorator(func: Callable[..., Any], /):
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())
 
@@ -174,7 +175,7 @@ def effect(
 def query(
 	fn: Callable[[TState], Coroutine[Any, Any, T]],
 	*,
-	keep_alive: bool = False,  # noqa: F821
+	keep_alive: bool = False,
 	keep_previous_data: bool = True,
 ) -> QueryProperty[T, TState]: ...
 @overload

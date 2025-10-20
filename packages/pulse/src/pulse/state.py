@@ -6,12 +6,11 @@ that enables automatic re-rendering when state changes.
 """
 
 import inspect
-from abc import ABC, ABCMeta
+from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import Callable, Iterator
 from enum import IntEnum
-from typing import Any, Generic, Never, TypeVar
+from typing import Any, Generic, Never, TypeVar, override
 
-from pulse.query import QueryProperty
 from pulse.reactive import (
 	AsyncEffect,
 	Computed,
@@ -24,8 +23,13 @@ from pulse.reactive_extensions import ReactiveProperty
 T = TypeVar("T")
 
 
-class StateProperty(ReactiveProperty):
+class StateProperty(ReactiveProperty[Any]):
 	pass
+
+
+class InitializableProperty(ABC):
+	@abstractmethod
+	def initialize(self, state: "State", name: str) -> Any: ...
 
 
 class ComputedProperty(Generic[T]):
@@ -33,13 +37,17 @@ class ComputedProperty(Generic[T]):
 	Descriptor for computed properties on State classes.
 	"""
 
+	name: str
+	private_name: str
+	fn: "Callable[[State], T]"
+
 	def __init__(self, name: str, fn: "Callable[[State], T]"):
 		self.name = name
 		self.private_name = f"__computed_{name}"
 		# The computed_template holds the original method
 		self.fn = fn
 
-	def get_computed(self, obj) -> Computed[T]:
+	def get_computed(self, obj: Any) -> Computed[T]:
 		if not isinstance(obj, State):
 			raise ValueError(
 				f"Computed property {self.name} defined on a non-State class"
@@ -56,7 +64,7 @@ class ComputedProperty(Generic[T]):
 
 	def __get__(self, obj: Any, objtype: Any = None) -> T:
 		if obj is None:
-			return self  # type: ignore
+			return self  # pyright: ignore[reportReturnType]
 
 		return self.get_computed(obj).read()
 
@@ -64,7 +72,14 @@ class ComputedProperty(Generic[T]):
 		raise AttributeError(f"Cannot set computed property '{self.name}'")
 
 
-class StateEffect(Generic[T]):
+class StateEffect(Generic[T], InitializableProperty):
+	fn: "Callable[[State], T]"
+	name: str | None
+	immediate: bool
+	on_error: "Callable[[Exception], None] | None"
+	lazy: bool
+	deps: "list[Signal[Any] | Computed[Any]] | None"
+
 	def __init__(
 		self,
 		fn: "Callable[[State], T]",
@@ -72,7 +87,7 @@ class StateEffect(Generic[T]):
 		immediate: bool = False,
 		lazy: bool = False,
 		on_error: "Callable[[Exception], None] | None" = None,
-		deps: "list[Signal | Computed] | None" = None,
+		deps: "list[Signal[Any] | Computed[Any]] | None" = None,
 	):
 		self.fn = fn
 		self.name = name
@@ -81,6 +96,7 @@ class StateEffect(Generic[T]):
 		self.lazy = lazy
 		self.deps = deps
 
+	@override
 	def initialize(self, state: "State", name: str):
 		bound_method = self.fn.__get__(state, state.__class__)
 		# Select sync/async effect type based on bound method
@@ -109,7 +125,13 @@ class StateMeta(ABCMeta):
 	Metaclass that automatically converts annotated attributes into reactive properties.
 	"""
 
-	def __new__(mcs, name: str, bases: tuple, namespace: dict, **kwargs):
+	def __new__(
+		mcs,
+		name: str,
+		bases: tuple[type, ...],
+		namespace: dict[str, Any],
+		**kwargs: Any,
+	):
 		annotations = namespace.get("__annotations__", {})
 
 		# 1) Turn annotated fields into StateProperty descriptors
@@ -127,7 +149,8 @@ class StateMeta(ABCMeta):
 				continue
 			# Skip if already set as a descriptor we care about
 			if isinstance(
-				value, (StateProperty, ComputedProperty, StateEffect, QueryProperty)
+				value,
+				(StateProperty, ComputedProperty, StateEffect, InitializableProperty),
 			):
 				continue
 			# Skip common callables and descriptors
@@ -140,7 +163,8 @@ class StateMeta(ABCMeta):
 
 		return super().__new__(mcs, name, bases, namespace)
 
-	def __call__(cls, *args, **kwargs):
+	@override
+	def __call__(cls, *args: Any, **kwargs: Any):
 		# Create the instance (runs __new__ and the class' __init__)
 		instance = super().__call__(*args, **kwargs)
 		# Ensure state effects are initialized even if user __init__ skipped super().__init__
@@ -184,10 +208,7 @@ class State(ABC, metaclass=StateMeta):
 	Properties will automatically trigger re-renders when changed.
 	"""
 
-	def __init__(self):
-		"""Initializes the state and registers effects."""
-		self._initialize()
-
+	@override
 	def __setattr__(self, name: str, value: Any) -> None:
 		if (
 			# Allow writing private/internal attributes
@@ -210,11 +231,23 @@ class State(ABC, metaclass=StateMeta):
 
 		# Reject all other public writes
 		raise AttributeError(
-			f"Cannot set non-reactive property '{name}' on {self.__class__.__name__}. "
-			f"To make '{name}' reactive, declare it with a type annotation at the class level: "
-			f"'{name}: <type> = <default_value>'"
-			f"Otherwise, make it private with an underscore: 'self._{name} = <value>'"
+			"Cannot set non-reactive property '"
+			+ name
+			+ "' on "
+			+ self.__class__.__name__
+			+ ". "
+			+ "To make '"
+			+ name
+			+ "' reactive, declare it with a type annotation at the class level: "
+			+ "'"
+			+ name
+			+ ": <type> = <default_value>'"
+			+ "Otherwise, make it private with an underscore: 'self._"
+			+ name
+			+ " = <value>'"
 		)
+
+	_scope: Scope
 
 	def _initialize(self):
 		# Idempotent: avoid double-initialization when subclass calls super().__init__
@@ -237,16 +270,13 @@ class State(ABC, metaclass=StateMeta):
 					# If the attribute is shadowed in a subclass with a non-StateEffect, skip
 					if getattr(self.__class__, name, attr) is not attr:
 						continue
-					# Validate query properties have a key defined
-					if isinstance(attr, QueryProperty):
-						# Initialize query now so Effect exists and can be managed by hooks
-						attr.initialize(self)
-					if isinstance(attr, StateEffect):
+					if isinstance(attr, InitializableProperty):
+						# Initialize properties like state effects or queries
 						attr.initialize(self, name)
 
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 
-	def properties(self) -> Iterator[Signal]:
+	def properties(self) -> Iterator[Signal[Any]]:
 		"""Iterate over the state's `Signal` instances, including base classes."""
 		seen: set[str] = set()
 		for cls in self.__class__.__mro__:
@@ -259,7 +289,7 @@ class State(ABC, metaclass=StateMeta):
 					seen.add(name)
 					yield prop.get_signal(self)
 
-	def computeds(self) -> Iterator[Computed]:
+	def computeds(self) -> Iterator[Computed[Any]]:
 		"""Iterate over the state's `Computed` instances, including base classes."""
 		seen: set[str] = set()
 		for cls in self.__class__.__mro__:
@@ -292,6 +322,7 @@ class State(ABC, metaclass=StateMeta):
 				f"State.dispose() missed effects defined on its Scope: {[e.name for e in self._scope.effects]}"
 			)
 
+	@override
 	def __repr__(self) -> str:
 		"""Return a developer-friendly representation of the state."""
 		props: list[str] = []
@@ -324,6 +355,7 @@ class State(ABC, metaclass=StateMeta):
 
 		return f"<{self.__class__.__name__} {' '.join(props)}>"
 
+	@override
 	def __str__(self) -> str:
 		"""Return a user-friendly representation of the state."""
 		return self.__repr__()

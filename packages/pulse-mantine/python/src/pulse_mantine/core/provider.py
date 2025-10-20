@@ -59,7 +59,7 @@ class MantineProviderProps(TypedDict, total=False):
 		)
 	],
 )
-def MantineProvider(*children: ps.Child, key: str | None = None, **props): ...
+def MantineProvider(*children: ps.Child, key: str | None = None, **props: Any): ...
 
 
 class MantineStylesTransform(TypedDict, total=False):

@@ -5,7 +5,7 @@ class GlobalCounter(ps.State):
 	count: int = 0
 
 	def __init__(self, label: str):
-		self._label = label
+		self._label: str = label
 
 	def inc(self):
 		self.count += 1

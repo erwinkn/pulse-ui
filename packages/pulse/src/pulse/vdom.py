@@ -5,8 +5,6 @@ This library provides a Python API for building UI trees that match
 the TypeScript UINode format exactly, eliminating the need for translation.
 """
 
-from __future__ import annotations
-
 import functools
 import warnings
 from collections.abc import Callable, Iterable, Sequence
@@ -18,10 +16,10 @@ from typing import (
 	NamedTuple,
 	NotRequired,
 	ParamSpec,
+	TypeAlias,
 	TypedDict,
-	Union,
-	cast,
 	overload,
+	override,
 )
 
 from pulse.hooks.core import HookContext
@@ -30,44 +28,37 @@ from pulse.hooks.core import HookContext
 # Core VDOM
 # ============================================================================
 
-Primitive = Union[str, int, float, None]
-Element = Union["Node", "ComponentNode", Primitive]
-# A child can be an Element or any iterable yielding children (e.g., generators)
-Child = Union[Element, Iterable[Element]]
-Children = Sequence[Child]
-
-P = ParamSpec("P")
-
 
 class VDOMNode(TypedDict):
 	tag: str
 	key: NotRequired[str]
 	props: NotRequired[dict[str, Any]]  # does not include callbacks
-	children: NotRequired[Sequence[VDOMNode | Primitive] | None]
+	children: "NotRequired[Sequence[VDOMNode | Primitive] | None]"
 
 
 class Callback(NamedTuple):
-	fn: Callable
+	fn: Callable[..., Any]
 	n_args: int
 
 
-def NOOP(*_args):
+def NOOP(*_args: Any):
 	return None
 
 
-Callbacks = dict[str, Callback]
-VDOM = Union[VDOMNode, Primitive]
-Props = dict[str, Any]
-
-
 class Node:
+	tag: str
+	props: dict[str, Any] | None
+	children: "Sequence[Element] | None"
+	allow_children: bool
+	key: str | None
+
 	def __init__(
 		self,
 		tag: str,
 		props: dict[str, Any] | None | None = None,
-		children: Children | None = None,
+		children: "Children | None" = None,
 		key: str | None = None,
-		allow_children=True,
+		allow_children: bool = True,
 	):
 		self.tag = tag
 		# Normalize to None
@@ -85,7 +76,8 @@ class Node:
 			raise ValueError(f"{self.tag} cannot have children")
 
 	# --- Pretty printing helpers -------------------------------------------------
-	def __repr__(self) -> str:  # pragma: no cover - trivial formatting
+	@override
+	def __repr__(self) -> str:
 		return (
 			f"Node(tag={self.tag!r}, key={self.key!r}, props={_short_props(self.props)}, "
 			f"children={_short_children(self.children)})"
@@ -93,7 +85,7 @@ class Node:
 
 	def __getitem__(
 		self,
-		children_arg: Child | tuple[Child, ...],
+		children_arg: "Child | tuple[Child, ...]",
 	):
 		"""Support indexing syntax: div()[children] or div()["text"]
 
@@ -104,7 +96,7 @@ class Node:
 			raise ValueError(f"Node already has children: {self.children}")
 
 		if isinstance(children_arg, tuple):
-			new_children = cast(list[Child], list(children_arg))
+			new_children = list(children_arg)
 		else:
 			new_children = [children_arg]
 
@@ -118,11 +110,11 @@ class Node:
 
 	@staticmethod
 	def from_vdom(
-		vdom: VDOM,
-		callbacks: Callbacks | None = None,
+		vdom: "VDOM",
+		callbacks: "Callbacks | None" = None,
 		*,
 		path: str = "",
-	) -> Node | Primitive:
+	) -> "Node | Primitive":
 		"""Create a Node tree from a VDOM structure.
 
 		- Primitive values are returned as-is
@@ -133,9 +125,9 @@ class Node:
 		if isinstance(vdom, (str, int, float, bool, NoneType)):
 			return vdom
 
-		tag = cast(str, vdom.get("tag"))
-		props = cast(dict[str, Any] | None, vdom.get("props")) or {}
-		key_value = cast(str | None, vdom.get("key"))
+		tag = vdom.get("tag")
+		props = vdom.get("props") or {}
+		key_value = vdom.get("key")
 
 		callbacks = callbacks or {}
 		prefix = f"{path}." if path else ""
@@ -160,7 +152,7 @@ class Node:
 				props[name] = callback.fn
 
 		children_value: list[Element] | None = None
-		raw_children = cast(Sequence[VDOMNode | Primitive] | None, vdom.get("children"))
+		raw_children = vdom.get("children")
 		if raw_children is not None:
 			children_value = []
 			for idx, raw_child in enumerate(raw_children):
@@ -188,14 +180,20 @@ class Node:
 
 # --- Components ---
 
+P = ParamSpec("P")
+
 
 class Component(Generic[P]):
-	def __init__(self, fn: Callable[P, Element], name: str | None = None) -> None:
+	fn: "Callable[P, Element]"
+	name: str
+	_takes_children: bool
+
+	def __init__(self, fn: "Callable[P, Element]", name: str | None = None) -> None:
 		self.fn = fn
 		self.name = name or _infer_component_name(fn)
 		self._takes_children = _takes_children(fn)
 
-	def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ComponentNode:
+	def __call__(self, *args: P.args, **kwargs: P.kwargs) -> "ComponentNode":
 		key = kwargs.get("key")
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")
@@ -209,19 +207,29 @@ class Component(Generic[P]):
 			takes_children=self._takes_children,
 		)
 
-	def __repr__(self) -> str:  # pragma: no cover - trivial formatting
+	@override
+	def __repr__(self) -> str:
 		return f"Component(name={self.name!r}, fn={_callable_qualname(self.fn)!r})"
 
-	def __str__(self) -> str:  # pragma: no cover - trivial formatting
+	@override
+	def __str__(self) -> str:
 		return self.name
 
 
 class ComponentNode:
+	fn: Callable[..., Any]
+	args: tuple[Any, ...]
+	kwargs: dict[str, Any]
+	key: str | None
+	name: str
+	takes_children: bool
+	hooks: HookContext
+
 	def __init__(
 		self,
-		fn: Callable,
-		args: tuple,
-		kwargs: dict,
+		fn: Callable[..., Any],
+		args: tuple[Any, ...],
+		kwargs: dict[str, Any],
 		name: str | None = None,
 		key: str | None = None,
 		takes_children: bool = True,
@@ -236,11 +244,11 @@ class ComponentNode:
 		self.contents: Element | None = None
 		self.hooks = HookContext()
 
-	def __getitem__(self, children_arg: Child | tuple[Child, ...]):
+	def __getitem__(self, children_arg: "Child | tuple[Child, ...]"):
 		if not self.takes_children:
 			raise TypeError(
 				f"Component {self.name} does not accept children. "
-				"Update the component signature to include '*children' to allow children."
+				+ "Update the component signature to include '*children' to allow children."
 			)
 		if self.args:
 			raise ValueError(
@@ -262,6 +270,7 @@ class ComponentNode:
 		)
 		return result
 
+	@override
 	def __repr__(self) -> str:
 		return (
 			f"ComponentNode(name={self.name!r}, key={self.key!r}, "
@@ -270,17 +279,17 @@ class ComponentNode:
 
 
 @overload
-def component(fn: Callable[P, Element]) -> Component[P]: ...
+def component(fn: "Callable[P, Element]") -> Component[P]: ...
 @overload
 def component(
 	fn: None = None, *, name: str | None = None
-) -> Callable[[Callable[P, Element]], Component[P]]: ...
+) -> "Callable[[Callable[P, Element]], Component[P]]": ...
 
 
 # The explicit return type is necessary for the type checker to be happy
 def component(
-	fn: Callable[P, Element] | None = None, *, name: str | None = None
-) -> Component[P] | Callable[[Callable[P, Element]], Component[P]]:
+	fn: "Callable[P, Element] | None" = None, *, name: str | None = None
+) -> "Component[P] | Callable[[Callable[P, Element]], Component[P]]":
 	def decorator(fn: Callable[P, Element]):
 		return Component(fn, name)
 
@@ -288,6 +297,16 @@ def component(
 		return decorator(fn)
 	return decorator
 
+
+Primitive = str | int | float | None
+Element = Node | ComponentNode | Primitive
+# A child can be an Element or any iterable yielding children (e.g., generators)
+Child: TypeAlias = Element | Iterable[Element]
+Children: TypeAlias = Sequence[Child]
+
+Callbacks = dict[str, Callback]
+VDOM: TypeAlias = VDOMNode | Primitive
+Props = dict[str, Any]
 
 # ----------------------------------------------------------------------------
 # Component naming heuristics
@@ -330,7 +349,7 @@ def _flatten_children(children: Children, *, parent_name: str) -> Sequence[Eleme
 			if child.key in seen_keys:
 				raise ValueError(
 					f"[Pulse] Duplicate key '{child.key}' found among children of {parent_name}. "
-					"Keys must be unique per sibling set."
+					+ "Keys must be unique per sibling set."
 				)
 			seen_keys.add(child.key)
 

@@ -2,11 +2,14 @@
 Command-line interface for Pulse UI.
 This module provides the CLI commands for running the server and generating routes.
 """
+# typer relies on function calls used as default values
+# pyright: reportCallInDefaultInitializer=false
 
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console
@@ -33,6 +36,7 @@ from pulse.env import (
 	ENV_PULSE_LOCK_MANAGED_BY_CLI,
 	ENV_PULSE_PORT,
 	ENV_PULSE_SECRET,
+	PulseMode,
 	env,
 )
 from pulse.helpers import (
@@ -92,7 +96,7 @@ def run(
 		)
 		raise typer.Exit(1)
 	if len(mode_flags) == 1:
-		env.pulse_mode = mode_flags[0]  # type: ignore
+		env.pulse_mode = cast(PulseMode, mode_flags[0])
 
 	if server_only and web_only:
 		typer.echo("❌ Cannot use --server-only and --web-only at the same time.")
@@ -367,7 +371,7 @@ def run(
 		finally:
 			remove_web_lock(lock_path)
 	else:
-		procs: list[subprocess.Popen] = []
+		procs: list[subprocess.Popen[bytes]] = []
 		try:
 			if server_command:
 				procs.append(
@@ -376,7 +380,7 @@ def run(
 			if web_command:
 				procs.append(subprocess.Popen(web_command, cwd=web_cwd, env=web_env))
 			# Wait for first to exit, then terminate the other if any
-			exit_codes = [p.wait() for p in procs if p is not None]
+			exit_codes = [p.wait() for p in procs]
 			code = max(exit_codes) if exit_codes else 0
 			raise typer.Exit(code)
 		finally:
@@ -410,7 +414,7 @@ def generate(
 		typer.echo("❌ Please specify only one of --dev, --ci, or --prod.")
 		raise typer.Exit(1)
 	if len(mode_flags) == 1:
-		env.pulse_mode = mode_flags[0]  # type: ignore
+		env.pulse_mode = cast(PulseMode, mode_flags[0])
 
 	console.log(f"📁 Loading routes from: {app_file}")
 	# Ensure codegen isn't disabled for generate

@@ -376,7 +376,7 @@ class HTMLInputProps(BaseHTMLProps, InputDOMEvents, total=False):
 	src: str
 	step: int | str
 	type: HTMLInputType
-	value: str | list[str] | int
+	value: "str | list[str] | int"
 	width: int | str
 
 

@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import TypeVar, overload
+from typing import TypeVar, overload, override
 
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.state import State
@@ -20,7 +18,9 @@ S10 = TypeVar("S10", bound=State)
 
 
 class StatesHookState(HookState):
-	__slots__ = ("initialized", "states", "key", "_called")
+	__slots__: tuple[str, ...] = ("initialized", "states", "key", "_called")
+	initialized: bool
+	_called: bool
 
 	def __init__(self) -> None:
 		super().__init__()
@@ -29,6 +29,7 @@ class StatesHookState(HookState):
 		self.key: str | None = None
 		self._called = False
 
+	@override
 	def on_render_start(self, render_cycle: int) -> None:
 		super().on_render_start(render_cycle)
 		self._called = False
@@ -46,6 +47,7 @@ class StatesHookState(HookState):
 		self.initialized = False
 		self.key = None
 
+	@override
 	def dispose(self) -> None:
 		self.dispose_states()
 

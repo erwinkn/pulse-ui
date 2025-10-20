@@ -1,0 +1,33 @@
+{
+  "include": [
+    "packages/pulse/src",
+    // "packages/pulse/tests",
+    "packages/pulse-ag-grid/src",
+    "packages/pulse-lucide/src",
+    "packages/pulse-mantine/python",
+    "packages/pulse-msal/src",
+    "packages/pulse-recharts/src"
+  ],
+  "pythonVersion": "3.12",
+  "allowedUntypedLibraries": ["socketio", "msal", "mako.template"],
+  // Framework code often has to use Any.
+  "reportAny": "none",
+  "reportExplicitAny": "none",
+  // Pyright is especially annoying about unknown types. Maybe we'll remove this
+  // in the future, but it often requires a lot of type casting.
+  "reportUnknownVariableType": "none",
+  "reportUnknownMemberType": "none",
+  // unused parameters happen all the time for React component definitions,
+  // method overrides, or handler functions provided to a framework like FastAPI
+  // or socket.io
+  "reportUnusedParameter": "none",
+  // This is sometimes required for resiliency beyond the explicit types
+  "reportUnnecessaryIsInstance": "none",
+  "reportUnreachable": "none",
+  // This rule is annoying, I don't want to write `_ = ...` for every unused
+  // call result
+  "reportUnusedCallResult": "none",
+  // Makes Pulse's context setup impossible and I don't want to put everything
+  // into a single giant file.
+  "reportImportCycles": "none",
+}

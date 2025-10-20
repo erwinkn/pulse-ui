@@ -2,13 +2,14 @@ import asyncio
 import copy
 import inspect
 from collections.abc import Callable, Coroutine
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from typing import (
 	Any,
 	Generic,
 	ParamSpec,
 	TypeVar,
 	cast,
+	override,
 )
 
 from pulse.helpers import create_task, schedule_on_loop, values_equal
@@ -18,10 +19,14 @@ P = ParamSpec("P")
 
 
 class Signal(Generic[T]):
+	value: T
+	name: str | None
+	last_change: int
+
 	def __init__(self, value: T, name: str | None = None):
 		self.value = value
 		self.name = name
-		self.obs: list[Computed | Effect] = []
+		self.obs: list[Computed[Any] | Effect] = []
 		self._obs_change_listeners: list[Callable[[int], None]] = []
 		self.last_change = -1
 
@@ -41,7 +46,7 @@ class Signal(Generic[T]):
 	def __copy__(self):
 		return self.__class__(self.value, name=self.name)
 
-	def __deepcopy__(self, memo):
+	def __deepcopy__(self, memo: dict[int, Any]):
 		if id(self) in memo:
 			return memo[id(self)]
 		new_value = copy.deepcopy(self.value, memo)
@@ -49,14 +54,14 @@ class Signal(Generic[T]):
 		memo[id(self)] = new_signal
 		return new_signal
 
-	def _add_obs(self, obs: "Computed | Effect"):
+	def add_obs(self, obs: "Computed[Any] | Effect"):
 		prev = len(self.obs)
 		self.obs.append(obs)
 		if prev == 0 and len(self.obs) == 1:
 			for cb in list(self._obs_change_listeners):
 				cb(len(self.obs))
 
-	def _remove_obs(self, obs: "Computed | Effect"):
+	def remove_obs(self, obs: "Computed[Any] | Effect"):
 		if obs in self.obs:
 			self.obs.remove(obs)
 			if len(self.obs) == 0:
@@ -81,20 +86,25 @@ class Signal(Generic[T]):
 		self.value = value
 		self.last_change = epoch()
 		for obs in self.obs:
-			obs._push_change()
+			obs.push_change()
 
 
 class Computed(Generic[T]):
+	fn: Callable[..., T]
+	name: str | None
+	dirty: bool
+	on_stack: bool
+
 	def __init__(self, fn: Callable[..., T], name: str | None = None):
 		self.fn = fn
-		self.value: T = None  # type: ignore
+		self.value: T = None  # pyright: ignore[reportAttributeAccessIssue]
 		self.name = name
 		self.dirty = False
 		self.on_stack = False
 		self.last_change: int = -1
 		# Dep -> last_change
-		self.deps: dict[Signal | Computed, int] = {}
-		self.obs: list[Computed | Effect] = []
+		self.deps: dict[Signal[Any] | Computed[Any], int] = {}
+		self.obs: list[Computed[Any] | Effect] = []
 		self._obs_change_listeners: list[Callable[[int], None]] = []
 
 	def read(self) -> T:
@@ -103,7 +113,7 @@ class Computed(Generic[T]):
 
 		rc = REACTIVE_CONTEXT.get()
 		# Ensure this computed is up-to-date before registering as a dep
-		self._recompute_if_necessary()
+		self.recompute_if_necessary()
 		if rc.scope is not None:
 			# Register after potential recompute so the scope records the
 			# latest observed version for this computed
@@ -120,7 +130,7 @@ class Computed(Generic[T]):
 	def __copy__(self):
 		return self.__class__(self.fn, name=self.name)
 
-	def __deepcopy__(self, memo):
+	def __deepcopy__(self, memo: dict[int, Any]):
 		if id(self) in memo:
 			return memo[id(self)]
 		fn_copy = copy.deepcopy(self.fn, memo)
@@ -129,13 +139,13 @@ class Computed(Generic[T]):
 		memo[id(self)] = new_computed
 		return new_computed
 
-	def _push_change(self):
+	def push_change(self):
 		if self.dirty:
 			return
 
 		self.dirty = True
 		for obs in self.obs:
-			obs._push_change()
+			obs.push_change()
 
 	def _recompute(self):
 		prev_value = self.value
@@ -158,7 +168,7 @@ class Computed(Generic[T]):
 				if len(scope.effects) > 0:
 					raise RuntimeError(
 						"An effect was created within a computed variable's function. "
-						"This behavior is not allowed, computed variables should be pure calculations."
+						+ "This behavior is not allowed, computed variables should be pure calculations."
 					)
 			finally:
 				self.on_stack = False
@@ -169,11 +179,11 @@ class Computed(Generic[T]):
 		add_deps = new_deps - prev_deps
 		remove_deps = prev_deps - new_deps
 		for dep in add_deps:
-			dep._add_obs(self)
+			dep.add_obs(self)
 		for dep in remove_deps:
-			dep._remove_obs(self)
+			dep.remove_obs(self)
 
-	def _recompute_if_necessary(self):
+	def recompute_if_necessary(self):
 		if self.last_change < 0:
 			self._recompute()
 			return
@@ -182,7 +192,7 @@ class Computed(Generic[T]):
 
 		for dep in self.deps:
 			if isinstance(dep, Computed):
-				dep._recompute_if_necessary()
+				dep.recompute_if_necessary()
 			# Only recompute if a dependency has changed beyond the version
 			# we last observed during our previous recompute
 			last_seen = self.deps.get(dep, -1)
@@ -192,14 +202,14 @@ class Computed(Generic[T]):
 
 		self.dirty = False
 
-	def _add_obs(self, obs: "Computed | Effect"):
+	def add_obs(self, obs: "Computed[Any] | Effect"):
 		prev = len(self.obs)
 		self.obs.append(obs)
 		if prev == 0 and len(self.obs) == 1:
 			for cb in list(self._obs_change_listeners):
 				cb(len(self.obs))
 
-	def _remove_obs(self, obs: "Computed | Effect"):
+	def remove_obs(self, obs: "Computed[Any] | Effect"):
 		if obs in self.obs:
 			self.obs.remove(obs)
 			if len(self.obs) == 0:
@@ -230,6 +240,15 @@ class Effect:
 	Both are isinstance(Effect).
 	"""
 
+	fn: EffectFn
+	name: str | None
+	on_error: Callable[[Exception], None] | None
+	runs: int
+	last_run: int
+	immediate: bool
+	_lazy: bool
+	batch: "Batch | None"
+
 	def __init__(
 		self,
 		fn: EffectFn,
@@ -237,20 +256,20 @@ class Effect:
 		immediate: bool = False,
 		lazy: bool = False,
 		on_error: Callable[[Exception], None] | None = None,
-		deps: list[Signal | Computed] | None = None,
+		deps: list[Signal[Any] | Computed[Any]] | None = None,
 	):
 		self.fn = fn  # type: ignore[assignment]
 		self.name = name
 		self.on_error = on_error
 		self.cleanup_fn: EffectCleanup | None = None
-		self.deps: dict[Signal | Computed, int] = {}
+		self.deps: dict[Signal[Any] | Computed[Any], int] = {}
 		self.children: list[Effect] = []
 		self.parent: Effect | None = None
 		self.runs = 0
 		self.last_run = -1
 		self.scope: Scope | None = None
-		self.batch: Batch | None = None
-		self._explicit_deps: list[Signal | Computed] | None = deps
+		self.batch = None
+		self._explicit_deps: list[Signal[Any] | Computed[Any]] | None = deps
 		self.immediate = immediate
 		self._lazy = lazy
 
@@ -298,16 +317,16 @@ class Effect:
 			self.batch.effects.remove(self)
 			self.batch = None
 
-	def _push_change(self):
+	def push_change(self):
 		self.schedule()
 
-	def _should_run(self):
+	def should_run(self):
 		return self.runs == 0 or self._deps_changed_since_last_run()
 
 	def _deps_changed_since_last_run(self):
 		for dep in self.deps:
 			if isinstance(dep, Computed):
-				dep._recompute_if_necessary()
+				dep.recompute_if_necessary()
 			last_seen = self.deps.get(dep, -1)
 			if dep.last_change > last_seen:
 				return True
@@ -324,7 +343,7 @@ class Effect:
 			# Run now (respects IS_PRERENDERING and error handling)
 			self.run()
 
-	def _handle_error(self, exc: Exception) -> None:
+	def handle_error(self, exc: Exception) -> None:
 		if callable(self.on_error):
 			self.on_error(exc)
 			return
@@ -348,7 +367,7 @@ class Effect:
 		add_deps = new_deps - prev_deps
 		remove_deps = prev_deps - new_deps
 		for dep in add_deps:
-			dep._add_obs(self)
+			dep.add_obs(self)
 			is_dirty = isinstance(dep, Computed) and dep.dirty
 			has_changed = isinstance(dep, Signal) and dep.last_change > self.deps.get(
 				dep, -1
@@ -356,9 +375,9 @@ class Effect:
 			if is_dirty or has_changed:
 				self.schedule()
 		for dep in remove_deps:
-			dep._remove_obs(self)
+			dep.remove_obs(self)
 
-	def _copy_kwargs(self):
+	def _copy_kwargs(self) -> dict[str, Any]:
 		deps = None
 		if self._explicit_deps is not None:
 			deps = list(self._explicit_deps)
@@ -375,7 +394,7 @@ class Effect:
 		kwargs = self._copy_kwargs()
 		return type(self)(**kwargs)
 
-	def __deepcopy__(self, memo):
+	def __deepcopy__(self, memo: dict[int, Any]):
 		if id(self) in memo:
 			return memo[id(self)]
 		kwargs = self._copy_kwargs()
@@ -394,7 +413,7 @@ class Effect:
 			try:
 				self._cleanup_before_run()
 			except Exception as e:
-				self._handle_error(e)
+				self.handle_error(e)
 		self._execute()
 
 	def _execute(self) -> None:
@@ -406,23 +425,25 @@ class Effect:
 			try:
 				self.cleanup_fn = self.fn()
 			except Exception as e:
-				self._handle_error(e)
+				self.handle_error(e)
 			self.runs += 1
 			self.last_run = execution_epoch
 		self._apply_scope_results(scope)
 
 
 class AsyncEffect(Effect):
+	batch: "Batch | None"
+
 	def __init__(
 		self,
 		fn: AsyncEffectFn,
 		name: str | None = None,
 		lazy: bool = False,
 		on_error: Callable[[Exception], None] | None = None,
-		deps: list[Signal | Computed] | None = None,
+		deps: list[Signal[Any] | Computed[Any]] | None = None,
 	):
 		super().__init__(
-			fn=fn,  # type: ignore[arg-type]
+			fn=fn,  # pyright: ignore[reportArgumentType]
 			name=name,
 			immediate=False,
 			lazy=lazy,
@@ -430,17 +451,19 @@ class AsyncEffect(Effect):
 			deps=deps,
 		)
 		# Track an async task when running async effects
-		self._task: asyncio.Task | None = None
+		self._task: asyncio.Task[Any] | None = None
 
 	def _task_name(self) -> str:
 		base = self.name or "effect"
 		return f"effect:{base}"
 
+	@override
 	def _copy_kwargs(self):
 		kwargs = super()._copy_kwargs()
 		kwargs.pop("immediate", None)
 		return kwargs
 
+	@override
 	def _execute(self) -> None:
 		execution_epoch = epoch()
 
@@ -464,8 +487,8 @@ class AsyncEffect(Effect):
 				except asyncio.CancelledError:
 					# Swallow cancellation
 					return
-				except Exception as e:  # noqa: BLE001
-					self._handle_error(e)
+				except Exception as e:
+					self.handle_error(e)
 				self.runs += 1
 				self.last_run = execution_epoch
 			self._apply_scope_results(scope)
@@ -477,6 +500,7 @@ class AsyncEffect(Effect):
 		if self._task and not self._task.done():
 			self._task.cancel()
 
+	@override
 	def dispose(self):
 		# Run children cleanups first, then cancel in-flight task
 		self.unschedule()
@@ -493,11 +517,14 @@ class AsyncEffect(Effect):
 
 
 class Batch:
+	name: str | None
+
 	def __init__(
 		self, effects: list[Effect] | None = None, name: str | None = None
 	) -> None:
 		self.effects: list[Effect] = effects or []
 		self.name = name
+		self._token: "Token[ReactiveContext] | None" = None
 
 	def register_effect(self, effect: Effect):
 		if effect not in self.effects:
@@ -516,7 +543,7 @@ class Batch:
 			if iters > MAX_ITERS:
 				raise RuntimeError(
 					f"Pulse's reactive system registered more than {MAX_ITERS} iterations. There is likely an update cycle in your application.\n"
-					"This is most often caused through a state update during rerender or in an effect that ends up triggering the same rerender or effect."
+					+ "This is most often caused through a state update during rerender or in an effect that ends up triggering the same rerender or effect."
 				)
 
 			# This ensures the epoch is incremented *after* all the signal
@@ -527,12 +554,12 @@ class Batch:
 
 			for effect in current_effects:
 				effect.batch = None
-				if not effect._should_run():
+				if not effect.should_run():
 					continue
 				try:
 					effect.run()
 				except Exception as exc:
-					effect._handle_error(exc)
+					effect.handle_error(exc)
 
 			iters += 1
 
@@ -547,23 +574,33 @@ class Batch:
 		)
 		return self
 
-	def __exit__(self, exc_type, exc_value, exc_traceback):
+	def __exit__(
+		self,
+		exc_type: type[BaseException] | None,
+		exc_value: BaseException | None,
+		exc_traceback: Any,
+	):
 		self.flush()
 		# Restore previous reactive context
-		REACTIVE_CONTEXT.reset(self._token)
+		if self._token:
+			REACTIVE_CONTEXT.reset(self._token)
 
 
 class GlobalBatch(Batch):
+	is_scheduled: bool
+
 	def __init__(self) -> None:
 		self.is_scheduled = False
 		super().__init__()
 
+	@override
 	def register_effect(self, effect: Effect):
 		if not self.is_scheduled:
 			schedule_on_loop(self.flush)
 			self.is_scheduled = True
 		return super().register_effect(effect)
 
+	@override
 	def flush(self):
 		super().flush()
 		self.is_scheduled = False
@@ -575,16 +612,20 @@ class IgnoreBatch(Batch):
 	Used during State initialization to prevent effects from running during setup.
 	"""
 
+	@override
 	def register_effect(self, effect: Effect):
 		# Silently ignore effect registrations during initialization
 		pass
 
+	@override
 	def flush(self):
 		# No-op: don't run any effects
 		pass
 
 
 class Epoch:
+	current: int
+
 	def __init__(self, current: int = 0) -> None:
 		self.current = current
 
@@ -594,14 +635,15 @@ class Epoch:
 class Scope:
 	def __init__(self):
 		# Dict preserves insertion order. Maps dependency -> last_change
-		self.deps: dict[Signal | Computed, int] = {}
+		self.deps: dict[Signal[Any] | Computed[Any], int] = {}
 		self.effects: list[Effect] = []
+		self._token: "Token[ReactiveContext] | None" = None
 
 	def register_effect(self, effect: "Effect"):
 		if effect not in self.effects:
 			self.effects.append(effect)
 
-	def register_dep(self, value: "Signal | Computed"):
+	def register_dep(self, value: "Signal[Any] | Computed[Any]"):
 		self.deps[value] = value.last_change
 
 	def __enter__(self):
@@ -612,9 +654,15 @@ class Scope:
 		)
 		return self
 
-	def __exit__(self, exc_type, exc_value, exc_traceback):
+	def __exit__(
+		self,
+		exc_type: type[BaseException] | None,
+		exc_value: BaseException | None,
+		exc_traceback: Any,
+	):
 		# Restore previous reactive context
-		REACTIVE_CONTEXT.reset(self._token)
+		if self._token:
+			REACTIVE_CONTEXT.reset(self._token)
 
 
 class Untrack(Scope): ...
@@ -622,6 +670,12 @@ class Untrack(Scope): ...
 
 # --- Reactive Context (composite of epoch, batch, scope) ---
 class ReactiveContext:
+	epoch: Epoch
+	batch: Batch
+	scope: Scope | None
+	on_effect_error: Callable[[Effect, Exception], None] | None
+	_tokens: list[Any]
+
 	def __init__(
 		self,
 		epoch: Epoch | None = None,
@@ -646,7 +700,12 @@ class ReactiveContext:
 		self._tokens.append(REACTIVE_CONTEXT.set(self))
 		return self
 
-	def __exit__(self, exc_type, exc_value, exc_tb):
+	def __exit__(
+		self,
+		exc_type: type[BaseException] | None,
+		exc_value: BaseException | None,
+		exc_tb: Any,
+	):
 		REACTIVE_CONTEXT.reset(self._tokens.pop())
 
 

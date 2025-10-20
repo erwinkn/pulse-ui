@@ -1,19 +1,34 @@
 import asyncio
 import os
 import pty
-from typing import override
+from pathlib import Path
+from typing import Any, ClassVar, override
 
 from rich.text import Text
 from textual.app import App as TextualApp
 from textual.app import ComposeResult
+from textual.binding import BindingType
 from textual.containers import Container
+from textual.events import Key
 from textual.widgets import RichLog
 
 
 class Terminal(RichLog):
 	"""A widget that runs a command in a pseudo-terminal."""
 
-	def __init__(self, command, cwd, env=None, **kwargs):
+	command: list[str]
+	cwd: Path | str | None
+	env: dict[str, str] | None
+	pid: int | None
+	fd: int | None
+
+	def __init__(
+		self,
+		command: list[str],
+		cwd: Path | str | None,
+		env: dict[str, str] | None = None,
+		**kwargs: Any,
+	):
 		super().__init__(highlight=True, markup=True, wrap=False, **kwargs)
 		self.command = command
 		self.cwd = cwd
@@ -27,7 +42,8 @@ class Terminal(RichLog):
 		self.pid, self.fd = pty.fork()
 
 		if self.pid == 0:  # Child process
-			os.chdir(self.cwd)
+			if self.cwd:
+				os.chdir(self.cwd)
 			env = os.environ.copy()
 			if self.env:
 				env.update(self.env)
@@ -55,9 +71,8 @@ class Terminal(RichLog):
 			os.close(self.fd)
 			self.fd = None
 		self.write("\n\n[b red]PROCESS EXITED[/b red]")
-		self.border_style = "red"
 
-	async def on_key(self, event) -> None:
+	async def on_key(self, event: Key) -> None:
 		if self.fd:
 			if event.key == "ctrl+c":
 				os.write(self.fd, b"\x03")
@@ -73,10 +88,10 @@ class Terminal(RichLog):
 				pass
 
 
-class PulseTerminalViewer(TextualApp):
+class PulseTerminalViewer(TextualApp[None]):
 	"""A Textual app to view Pulse server logs in interactive terminals."""
 
-	CSS = """
+	CSS: ClassVar[str] = """
     Screen {
         background: transparent;
     }
@@ -101,17 +116,27 @@ class PulseTerminalViewer(TextualApp):
     }
     """
 
-	BINDINGS = [("q", "quit", "Quit"), ("ctrl+c", "quit", "Quit")]
+	BINDINGS: ClassVar[list[BindingType]] = [
+		("q", "quit", "Quit"),
+		("ctrl+c", "quit", "Quit"),
+	]
+
+	server_command: list[str] | None
+	server_cwd: str | Path | None
+	server_env: dict[str, str] | None
+	web_command: list[str] | None
+	web_cwd: str | Path | None
+	web_env: dict[str, str] | None
 
 	def __init__(
 		self,
-		server_command=None,
-		server_cwd=None,
-		server_env=None,
-		web_command=None,
-		web_cwd=None,
-		web_env=None,
-		**kwargs,
+		server_command: list[str] | None = None,
+		server_cwd: str | Path | None = None,
+		server_env: dict[str, str] | None = None,
+		web_command: list[str] | None = None,
+		web_cwd: str | Path | None = None,
+		web_env: dict[str, str] | None = None,
+		**kwargs: Any,
 	):
 		super().__init__(**kwargs)
 		self.server_command = server_command
@@ -121,6 +146,7 @@ class PulseTerminalViewer(TextualApp):
 		self.web_cwd = web_cwd
 		self.web_env = web_env
 
+	@override
 	def compose(self) -> ComposeResult:
 		with Container(id="main_container"):
 			if self.server_command:

@@ -10,8 +10,7 @@ if TYPE_CHECKING:
 
 
 class Plugin:
-	# Optional: priority to order plugins; higher first or vice-versa
-	priority = 0
+	priority: int = 0
 
 	# Optional: return a sequence; return None or [] if not contributing
 	def routes(self) -> list[Route | Layout]:

@@ -8,7 +8,8 @@ from typing import (
 	Any,
 	Literal,
 	TypeAlias,
-	Union,
+	cast,
+	override,
 )
 from urllib.parse import urlparse
 
@@ -21,13 +22,13 @@ class Validator(ABC):
 	def serialize(self) -> dict[str, Any]: ...
 
 	# Server-side check: return error message or None
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		return None
 
 
 # Async-capable validator base: subclasses may override acheck to perform async checks
-class AsyncValidator(Validator):
-	async def acheck(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+class AsyncValidator(Validator, ABC):
+	async def acheck(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		# Default bridge calls sync check for non-async validators
 		return self.check(value, values, path)
 
@@ -41,7 +42,7 @@ def _is_empty_value(value: Any) -> bool:
 	if isinstance(value, str):
 		return len(value.strip()) == 0
 	if isinstance(value, list):
-		return len(value) == 0
+		return len(cast(list[Any], value)) == 0
 	return False
 
 
@@ -54,7 +55,7 @@ def _get_value_at_path(source: Any, path: str) -> Any:
 			continue
 		if isinstance(cur, list) and seg.isdigit():
 			idx = int(seg)
-			if idx < 0 or idx >= len(cur):
+			if idx < 0 or idx >= len(cast(list[Any], cur)):
 				return None
 			cur = cur[idx]
 		elif isinstance(cur, dict):
@@ -142,26 +143,34 @@ def _to_upload_list(value: Any) -> list[Any]:
 
 
 class IsNotEmpty(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isNotEmpty", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return self.error or "Required"
 		return None
 
 
 class IsEmail(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isEmail", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		s = str(value).strip()
@@ -173,6 +182,12 @@ class IsEmail(Validator):
 
 
 class Matches(Validator):
+	pattern: str
+	flags: str | None
+	client_pattern: str | None
+	client_flags: str | None
+	error: str | None
+
 	def __init__(
 		self,
 		pattern: str,
@@ -189,6 +204,7 @@ class Matches(Validator):
 		self.client_flags = client_flags
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {
 			"$kind": "matches",
@@ -203,7 +219,8 @@ class Matches(Validator):
 			payload["clientFlags"] = self.client_flags
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		f = 0
@@ -226,6 +243,10 @@ class Matches(Validator):
 
 
 class IsInRange(Validator):
+	min: float | None
+	max: float | None
+	error: str | None
+
 	def __init__(
 		self,
 		*,
@@ -237,6 +258,7 @@ class IsInRange(Validator):
 		self.max = max
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "isInRange", "error": self.error}
 		if self.min is not None:
@@ -245,7 +267,8 @@ class IsInRange(Validator):
 			payload["max"] = self.max
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		num = _coerce_number(value)
@@ -259,6 +282,11 @@ class IsInRange(Validator):
 
 
 class HasLength(Validator):
+	min: int | None
+	max: int | None
+	exact: int | None
+	error: str | None
+
 	def __init__(
 		self,
 		*,
@@ -272,6 +300,7 @@ class HasLength(Validator):
 		self.exact = exact
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "hasLength", "error": self.error}
 		if self.exact is not None:
@@ -282,7 +311,8 @@ class HasLength(Validator):
 			payload["max"] = self.max
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		s = str(value)
@@ -299,13 +329,18 @@ class HasLength(Validator):
 
 
 class MatchesField(Validator):
+	field: str
+	error: str | None
+
 	def __init__(self, field: str, error: str | None = None) -> None:
 		self.field = field
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "matchesField", "field": self.field, "error": self.error}
 
+	@override
 	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		other = _get_value_at_path(values, self.field)
 		if other is None:
@@ -316,13 +351,17 @@ class MatchesField(Validator):
 
 
 class IsJSONString(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isJSONString", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		try:
@@ -333,13 +372,17 @@ class IsJSONString(Validator):
 
 
 class IsNotEmptyHTML(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isNotEmptyHTML", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if value is None:
 			return self.error or "Required"
 		s = str(value)
@@ -351,6 +394,10 @@ class IsNotEmptyHTML(Validator):
 
 
 class IsUrl(Validator):
+	protocols: list[str] | None
+	require_protocol: bool | None
+	error: str | None
+
 	def __init__(
 		self,
 		*,
@@ -362,6 +409,7 @@ class IsUrl(Validator):
 		self.require_protocol = require_protocol
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "isUrl", "error": self.error}
 		if self.protocols is not None:
@@ -370,7 +418,8 @@ class IsUrl(Validator):
 			payload["requireProtocol"] = self.require_protocol
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		s = str(value).strip()
@@ -393,17 +442,22 @@ class IsUrl(Validator):
 
 
 class IsUUID(Validator):
+	version: int | None
+	error: str | None
+
 	def __init__(self, version: int | None = None, error: str | None = None) -> None:
 		self.version = version
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "isUUID", "error": self.error}
 		if self.version is not None:
 			payload["version"] = self.version
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		s = str(value).strip()
@@ -426,13 +480,17 @@ class IsUUID(Validator):
 
 
 class IsULID(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isULID", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		s = str(value).strip().upper()
@@ -442,13 +500,17 @@ class IsULID(Validator):
 
 
 class IsNumber(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isNumber", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		num = _coerce_number(value)
@@ -458,13 +520,17 @@ class IsNumber(Validator):
 
 
 class IsInteger(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isInteger", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		num = _coerce_number(value)
@@ -474,13 +540,17 @@ class IsInteger(Validator):
 
 
 class IsDate(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isDate", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		ts = _coerce_date(value)
@@ -490,19 +560,24 @@ class IsDate(Validator):
 
 
 class IsISODate(Validator):
+	with_time: bool | None
+	error: str | None
+
 	def __init__(
 		self, *, with_time: bool | None = None, error: str | None = None
 	) -> None:
 		self.with_time = with_time
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "isISODate", "error": self.error}
 		if self.with_time is not None:
 			payload["withTime"] = self.with_time
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		if isinstance(value, datetime):
@@ -523,6 +598,12 @@ class IsISODate(Validator):
 
 
 class IsBefore(Validator):
+	field: str | None
+	value: Any | None
+	inclusive: bool | None
+	error: str | None
+	non_comparable_error: str | None
+
 	def __init__(
 		self,
 		field: str | None = None,
@@ -538,6 +619,7 @@ class IsBefore(Validator):
 		self.error = error
 		self.non_comparable_error = non_comparable_error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "isBefore", "error": self.error}
 		if self.field is not None:
@@ -548,6 +630,7 @@ class IsBefore(Validator):
 			payload["inclusive"] = self.inclusive
 		return payload
 
+	@override
 	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		other = (
 			_get_value_at_path(values, self.field)
@@ -563,13 +646,19 @@ class IsBefore(Validator):
 		if left_is_str or right_is_str:
 			left = str(left)
 			right = str(right)
-		ok = left <= right if self.inclusive else left < right  # type: ignore
+		# Pyright is not able to understand that left and right are either two numbers or two strings here
+		ok = left <= right if self.inclusive else left < right  # pyright: ignore[reportOperatorIssue]
 		if not ok:
 			return self.error or "Value must be before target"
 		return None
 
 
 class IsAfter(Validator):
+	field: str | None
+	value: Any | None
+	inclusive: bool | None
+	error: str | None
+
 	def __init__(
 		self,
 		field: str | None = None,
@@ -583,6 +672,7 @@ class IsAfter(Validator):
 		self.inclusive = inclusive
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "isAfter", "error": self.error}
 		if self.field is not None:
@@ -593,6 +683,7 @@ class IsAfter(Validator):
 			payload["inclusive"] = self.inclusive
 		return payload
 
+	@override
 	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		other = (
 			_get_value_at_path(values, self.field)
@@ -608,25 +699,31 @@ class IsAfter(Validator):
 		if left_is_str or right_is_str:
 			left = str(left)
 			right = str(right)
-		ok = left >= right if self.inclusive else left > right  # type: ignore
+		# Pyright is not able to understand that left and right are either two numbers or two strings here
+		ok = left >= right if self.inclusive else left > right  # pyright: ignore[reportOperatorIssue]
 		if not ok:
 			return self.error or "Value must be after target"
 		return None
 
 
 class MinItems(Validator):
+	count: int
+	error: str | None
+
 	def __init__(self, count: int, error: str | None = None) -> None:
 		self.count = count
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "minItems", "count": self.count, "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if value is None:
 			length = 0
 		elif isinstance(value, list):
-			length = len(value)
+			length = len(cast(list[Any], value))
 		else:
 			files = _to_upload_list(value)
 			length = len(files)
@@ -638,18 +735,23 @@ class MinItems(Validator):
 
 
 class MaxItems(Validator):
+	count: int
+	error: str | None
+
 	def __init__(self, count: int, error: str | None = None) -> None:
 		self.count = count
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "maxItems", "count": self.count, "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if value is None:
 			return None
 		if isinstance(value, list):
-			length = len(value)
+			length = len(cast(list[Any], value))
 		else:
 			files = _to_upload_list(value)
 			length = len(files)
@@ -662,14 +764,18 @@ class MaxItems(Validator):
 
 
 class IsArrayNotEmpty(Validator):
+	error: str | None
+
 	def __init__(self, error: str | None = None) -> None:
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "isArrayNotEmpty", "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
-		if isinstance(value, list) and len(value) > 0:
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
+		if isinstance(value, list) and len(cast(list[Any], value)) > 0:
 			return None
 		files = _to_upload_list(value)
 		if len(files) > 0:
@@ -678,6 +784,10 @@ class IsArrayNotEmpty(Validator):
 
 
 class AllowedFileTypes(Validator):
+	mime_types: list[str] | None
+	extensions: list[str] | None
+	error: str | None
+
 	def __init__(
 		self,
 		*,
@@ -689,6 +799,7 @@ class AllowedFileTypes(Validator):
 		self.extensions = list(extensions) if extensions is not None else None
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "allowedFileTypes", "error": self.error}
 		if self.mime_types is not None:
@@ -697,7 +808,8 @@ class AllowedFileTypes(Validator):
 			payload["extensions"] = self.extensions
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		files = _to_upload_list(value)
 		if not files:
 			return None
@@ -727,14 +839,19 @@ class AllowedFileTypes(Validator):
 
 
 class MaxFileSize(Validator):
+	bytes: int
+	error: str | None
+
 	def __init__(self, bytes: int, error: str | None = None) -> None:
 		self.bytes = bytes
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		return {"$kind": "maxFileSize", "bytes": self.bytes, "error": self.error}
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		for f in _to_upload_list(value):
 			try:
 				if int(f.size) > int(self.bytes):
@@ -745,6 +862,14 @@ class MaxFileSize(Validator):
 
 
 class RequiredWhen(Validator):
+	field: str
+	equals: Any | None
+	not_equals: Any | None
+	in_values: list[Any] | None
+	not_in_values: list[Any] | None
+	truthy: bool | None
+	error: str | None
+
 	def __init__(
 		self,
 		field: str,
@@ -764,6 +889,7 @@ class RequiredWhen(Validator):
 		self.truthy = truthy
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {
 			"$kind": "requiredWhen",
@@ -808,6 +934,7 @@ class RequiredWhen(Validator):
 				return False
 		return True
 
+	@override
 	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		other = _get_value_at_path(values, self.field)
 		if not self._eval_condition(other):
@@ -818,6 +945,14 @@ class RequiredWhen(Validator):
 
 
 class RequiredUnless(Validator):
+	field: str
+	equals: Any | None
+	not_equals: Any | None
+	in_values: list[Any] | None
+	not_in_values: list[Any] | None
+	truthy: bool | None
+	error: str | None
+
 	def __init__(
 		self,
 		field: str,
@@ -837,6 +972,7 @@ class RequiredUnless(Validator):
 		self.truthy = truthy
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {
 			"$kind": "requiredUnless",
@@ -881,6 +1017,7 @@ class RequiredUnless(Validator):
 				return False
 		return True
 
+	@override
 	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		other = _get_value_at_path(values, self.field)
 		if self._eval_condition(other):
@@ -891,6 +1028,10 @@ class RequiredUnless(Validator):
 
 
 class StartsWith(Validator):
+	value: str
+	case_sensitive: bool | None
+	error: str | None
+
 	def __init__(
 		self,
 		value: str,
@@ -902,6 +1043,7 @@ class StartsWith(Validator):
 		self.case_sensitive = case_sensitive
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {
 			"$kind": "startsWith",
@@ -912,7 +1054,8 @@ class StartsWith(Validator):
 			payload["caseSensitive"] = self.case_sensitive
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		subj = str(value)
@@ -927,6 +1070,10 @@ class StartsWith(Validator):
 
 
 class EndsWith(Validator):
+	value: str
+	case_sensitive: bool | None
+	error: str | None
+
 	def __init__(
 		self,
 		value: str,
@@ -938,6 +1085,7 @@ class EndsWith(Validator):
 		self.case_sensitive = case_sensitive
 		self.error = error
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {
 			"$kind": "endsWith",
@@ -948,7 +1096,8 @@ class EndsWith(Validator):
 			payload["caseSensitive"] = self.case_sensitive
 		return payload
 
-	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:  # noqa: ARG002
+	@override
+	def check(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		if _is_empty_value(value):
 			return None
 		subj = str(value)
@@ -963,6 +1112,10 @@ class EndsWith(Validator):
 
 
 class ServerValidation(AsyncValidator):
+	fn: Callable[[Any, dict[str, Any], str], Awaitable[str | None] | str | None]
+	debounce_ms: float | None
+	run_on: Literal["change", "blur", "submit"] | None
+
 	def __init__(
 		self,
 		fn: Callable[[Any, dict[str, Any], str], Awaitable[str | None] | str | None],
@@ -973,6 +1126,7 @@ class ServerValidation(AsyncValidator):
 		self.debounce_ms = debounce_ms
 		self.run_on = run_on
 
+	@override
 	def serialize(self) -> dict[str, Any]:
 		payload: dict[str, Any] = {"$kind": "server"}
 		if self.debounce_ms is not None:
@@ -981,6 +1135,7 @@ class ServerValidation(AsyncValidator):
 			payload["runOn"] = self.run_on
 		return payload
 
+	@override
 	async def acheck(self, value: Any, values: dict[str, Any], path: str) -> str | None:
 		try:
 			res = self.fn(value, values, path)
@@ -997,14 +1152,15 @@ ValidationNode: TypeAlias = (
 )
 Validation: TypeAlias = Mapping[str, ValidationNode]
 
-SerializedValidationNode = Union[
-	dict[str, str], list[dict[str, str]], "dict[str, SerializedValidation]"
-]
+SerializedValidationNode: TypeAlias = (
+	"dict[str, str] | list[dict[str, str]] | dict[str, SerializedValidation]"
+)
+
 
 SerializedValidation = dict[str, SerializedValidationNode]
 
 
-def serialize_validation_node(node: ValidationNode) -> SerializedValidationNode:
+def serialize_validation_node(node: ValidationNode) -> "SerializedValidationNode":
 	# Convert classes to serializable dicts using $kind and drop server fn
 	if isinstance(node, Validator):
 		return node.serialize()

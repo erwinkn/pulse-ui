@@ -8,6 +8,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from contextvars import ContextVar
 from functools import cache
+from inspect import Parameter
 from types import UnionType
 from typing import (
 	Annotated,
@@ -16,11 +17,11 @@ from typing import (
 	Literal,
 	ParamSpec,
 	TypeVar,
-	Union,
 	Unpack,
 	cast,
 	get_args,
 	get_origin,
+	override,
 )
 
 from pulse.codegen.imports import Imported, ImportStatement
@@ -51,7 +52,22 @@ def _function_has_string_annotations(fn: Callable[..., Any]) -> bool:
 		return False
 
 
+def _is_any_annotation(annotation: object) -> bool:
+	"""Return True when an annotation is effectively `typing.Any`."""
+	try:
+		return annotation is Any or annotation == Any
+	except TypeError:
+		return False
+
+
 class Prop(Generic[T]):
+	default: T | None
+	required: bool
+	default_factory: Callable[[], T] | None
+	serialize: Callable[[T], Any] | None
+	map_to: str | None
+	typ_: type | tuple[type, ...] | None
+
 	def __init__(
 		self,
 		default: T | None = DEFAULT,
@@ -60,15 +76,16 @@ class Prop(Generic[T]):
 		default_factory: Callable[[], T] | None = None,
 		serialize: Callable[[T], Any] | None = None,
 		map_to: str | None = None,
-		_type: type | tuple[type, ...] | None = None,
+		typ_: type | tuple[type, ...] | None = None,
 	) -> None:
 		self.default = default
 		self.required = required
 		self.default_factory = default_factory
 		self.serialize = serialize
 		self.map_to = map_to
-		self._type = _type
+		self.typ_ = typ_
 
+	@override
 	def __repr__(self) -> str:
 		def _callable_name(fn: Callable[..., Any] | None) -> str:
 			if fn is None:
@@ -76,9 +93,9 @@ class Prop(Generic[T]):
 			return getattr(fn, "__name__", fn.__class__.__name__)
 
 		parts: list[str] = []
-		if self._type:
-			parts.append(f"type={_format_runtime_type(self._type)}")
-		if self.required is not None:
+		if self.typ_:
+			parts.append(f"type={_format_runtime_type(self.typ_)}")
+		if self.required is not DEFAULT:
 			parts.append(f"required={self.required}")
 		if self.default is not None:
 			parts.append(f"default={self.default!r}")
@@ -101,27 +118,29 @@ def prop(
 	"""
 	Convenience constructor for Prop to be used inside TypedDict defaults.
 	"""
-	return Prop(
+	return Prop(  # pyright: ignore[reportReturnType]
 		default=default,
 		default_factory=default_factory,
 		serialize=serialize,
 		map_to=map_to,
-	)  # type: ignore
+	)
 
 
 class PropSpec:
+	allow_unspecified: bool
+
 	def __init__(
 		self,
-		required: dict[str, Prop],
-		optional: dict[str, Prop],
+		required: dict[str, Prop[Any]],
+		optional: dict[str, Prop[Any]],
 		allow_unspecified: bool = False,
 	) -> None:
 		if "key" in required or "key" in optional:
 			raise ValueError(
 				"'key' is a reserved prop, please use another name (like 'id', 'label', or even 'key_')"
 			)
-		self.required: dict[str, Prop] = required
-		self.optional: dict[str, Prop] = optional
+		self.required: dict[str, Prop[Any]] = required
+		self.optional: dict[str, Prop[Any]] = optional
 		self.allow_unspecified = allow_unspecified
 		# Precompute optional keys that provide defaults so we can apply them
 		# without scanning all optional props on every apply call.
@@ -131,6 +150,7 @@ class PropSpec:
 			if (p.default is not DEFAULT) or (p.default_factory is not None)
 		)
 
+	@override
 	def __repr__(self) -> str:
 		keys_list = list(self.keys())
 		keys_preview = ", ".join(keys_list[:5])
@@ -138,11 +158,11 @@ class PropSpec:
 			keys_preview += ", ..."
 		return f"Props(keys=[{keys_preview}])"
 
-	def as_dict(self) -> dict[str, Prop]:
+	def as_dict(self) -> dict[str, Prop[Any]]:
 		"""Return a merged dict of required and optional props."""
 		return self.required | self.optional
 
-	def __getitem__(self, key: str) -> Prop:
+	def __getitem__(self, key: str) -> Prop[Any]:
 		if key in self.required:
 			return self.required[key]
 		if key in self.optional:
@@ -187,7 +207,7 @@ class PropSpec:
 
 		# 1) Apply required props (including their defaults if provided)
 		for py_key, prop in self.required.items():
-			p = prop if isinstance(prop, Prop) else Prop(_type=prop)
+			p = prop if isinstance(prop, Prop) else Prop(typ_=prop)
 			if py_key in props:
 				value = props[py_key]
 			elif p.default_factory is not None:
@@ -212,7 +232,7 @@ class PropSpec:
 		provided_known_optional = props.keys() & self.optional.keys()
 		for py_key in provided_known_optional:
 			prop = self.optional[py_key]
-			p = prop if isinstance(prop, Prop) else Prop(_type=prop)
+			p = prop if isinstance(prop, Prop) else Prop(typ_=prop)
 			value = props[py_key]
 
 			if value is DEFAULT:
@@ -233,7 +253,7 @@ class PropSpec:
 			if py_key in props:
 				continue
 			prop = self.optional[py_key]
-			p = prop if isinstance(prop, Prop) else Prop(_type=prop)
+			p = prop if isinstance(prop, Prop) else Prop(typ_=prop)
 			if p.default_factory is not None:
 				value = p.default_factory()
 			else:
@@ -252,7 +272,7 @@ class PropSpec:
 			result[js_key] = value
 
 		if missing_props or overlaps:
-			errors = []
+			errors: list[str] = []
 			if missing_props:
 				errors.append(f"Missing required props: {', '.join(missing_props)}")
 			if overlaps:
@@ -267,9 +287,11 @@ class PropSpec:
 		return result or None
 
 
-def default_signature(*children: Child, key: str | None = None, **props) -> Element: ...
+def default_signature(
+	*children: Child, key: str | None = None, **props: Any
+) -> Element: ...
 def default_fn_signature_without_children(
-	key: str | None = None, **props
+	key: str | None = None, **props: Any
 ) -> Element: ...
 
 
@@ -289,12 +311,16 @@ class ReactComponent(Generic[P], Imported):
 	    A function that creates Node instances with mount point tags
 	"""
 
+	props_spec: PropSpec
+	fn_signature: Callable[P, Element]
+	lazy: bool
+
 	def __init__(
 		self,
 		name: str,
 		src: str,
 		*,
-		is_default=False,
+		is_default: bool = False,
 		prop: str | None = None,
 		lazy: bool = False,
 		version: str | None = None,
@@ -325,13 +351,12 @@ class ReactComponent(Generic[P], Imported):
 		self.extra_imports: list[ImportStatement] = list(extra_imports or [])
 		COMPONENT_REGISTRY.get().add(self)
 
+	@override
 	def __repr__(self) -> str:
 		default_part = ", default=True" if self.is_default else ""
 		prop_part = f", prop='{self.prop}'" if self.prop else ""
 		lazy_part = ", lazy=True" if self.lazy else ""
-		props_part = (
-			f", props_spec={self.props_spec!r}" if self.props_spec is not None else ""
-		)
+		props_part = f", props_spec={self.props_spec!r}"
 		return f"ReactComponent(name='{self.name}', src='{self.src}'{prop_part}{default_part}{lazy_part}{props_part})"
 
 	def __call__(self, *children: P.args, **props: P.kwargs) -> Node:
@@ -370,29 +395,29 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
 	sig = inspect.signature(fn)
 	params = list(sig.parameters.values())
 
-	explicit_required: dict[str, Prop] = {}
-	explicit_optional: dict[str, Prop] = {}
+	explicit_required: dict[str, Prop[Any]] = {}
+	explicit_optional: dict[str, Prop[Any]] = {}
 	explicit_order: list[str] = []
 	explicit_spec: PropSpec
 	unpack_spec: PropSpec
 
-	var_positional: inspect.Parameter | None = None
-	var_kw: inspect.Parameter | None = None
-	key: inspect.Parameter | None = None
+	var_positional: Parameter | None = None
+	var_kw: Parameter | None = None
+	key: Parameter | None = None
 
 	# One pass: collect structure and build explicit spec as we go
 	for p in params:
 		# Disallow positional-only parameters
-		if p.kind is inspect.Parameter.POSITIONAL_ONLY:
+		if p.kind is Parameter.POSITIONAL_ONLY:
 			raise ValueError(
 				"Function must not declare positional-only parameters besides *children",
 			)
 
-		if p.kind is inspect.Parameter.VAR_POSITIONAL:
+		if p.kind is Parameter.VAR_POSITIONAL:
 			var_positional = p
 			continue
 
-		if p.kind is inspect.Parameter.VAR_KEYWORD:
+		if p.kind is Parameter.VAR_KEYWORD:
 			var_kw = p
 			continue
 
@@ -401,22 +426,19 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
 			continue
 
 		# For regular params, forbid additional required positionals
-		if (
-			p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
-			and p.default is inspect._empty
-		):
+		if p.kind is Parameter.POSITIONAL_OR_KEYWORD and p.default is Parameter.empty:
 			raise ValueError(
 				"Function signature must not declare additional required positional parameters; only *children is allowed for positionals",
 			)
 
 		if p.kind not in (
-			inspect.Parameter.POSITIONAL_OR_KEYWORD,
-			inspect.Parameter.KEYWORD_ONLY,
+			Parameter.POSITIONAL_OR_KEYWORD,
+			Parameter.KEYWORD_ONLY,
 		):
 			continue
 
 		# Build explicit spec (skip 'key' handled above)
-		annotation = p.annotation if p.annotation is not inspect._empty else Any
+		annotation = p.annotation if p.annotation is not Parameter.empty else Any
 		origin = get_origin(annotation)
 		annotation_args = get_args(annotation)
 
@@ -438,17 +460,17 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
 
 		if isinstance(p.default, Prop):
 			prop = p.default
-			if prop._type is None:
-				prop._type = runtime_type
+			if prop.typ_ is None:
+				prop.typ_ = runtime_type
 			# Has default via Prop -> optional
 			explicit_optional[p.name] = prop
 			explicit_order.append(p.name)
-		elif p.default is not inspect._empty:
-			prop = Prop(default=p.default, required=False, _type=runtime_type)
+		elif p.default is not Parameter.empty:
+			prop = Prop(default=p.default, required=False, typ_=runtime_type)
 			explicit_optional[p.name] = prop
 			explicit_order.append(p.name)
 		else:
-			prop = Prop(_type=runtime_type)
+			prop = Prop(typ_=runtime_type)
 			# No default -> required
 			prop.required = True
 			explicit_required[p.name] = prop
@@ -462,7 +484,11 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
 	# Validate *children annotation if present
 	if var_positional is not None:
 		annotation = var_positional.annotation
-		if annotation is not inspect._empty and annotation is not Child:
+		if (
+			annotation is not Parameter.empty
+			and annotation is not Child
+			and not _is_any_annotation(annotation)
+		):
 			raise TypeError(
 				f"*{var_positional.name} must be annotated as `*{var_positional.name}: ps.Child`"
 			)
@@ -473,8 +499,8 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
 	if key.default is not None:
 		raise ValueError("'key' parameter must default to None")
 	if key.kind not in (
-		inspect.Parameter.KEYWORD_ONLY,
-		inspect.Parameter.POSITIONAL_OR_KEYWORD,
+		Parameter.KEYWORD_ONLY,
+		Parameter.POSITIONAL_OR_KEYWORD,
 	):
 		raise ValueError("'key' parameter must be a keyword argument")
 
@@ -487,27 +513,29 @@ def parse_fn_signature(fn: Callable[..., Any]) -> PropSpec:
 class ComponentRegistry:
 	"""A registry for React components that can be used as a context manager."""
 
+	_token: Any
+
 	def __init__(self):
-		self.components: list[ReactComponent] = []
+		self.components: list[ReactComponent[...]] = []
 		self._token = None
 
-	def add(self, component: ReactComponent):
+	def add(self, component: ReactComponent[...]):
 		"""Adds a component to the registry."""
 		self.components.append(component)
 
 	def clear(self):
 		self.components.clear()
 
-	def remove(self, key: str):
-		"""Removes a component from the registry by its key."""
-		if key in self.components:
-			del self.components[key]
-
 	def __enter__(self) -> "ComponentRegistry":
 		self._token = COMPONENT_REGISTRY.set(self)
 		return self
 
-	def __exit__(self, exc_type, exc_val, exc_tb):
+	def __exit__(
+		self,
+		exc_type: type[BaseException] | None,
+		exc_val: BaseException | None,
+		exc_tb: Any,
+	):
 		if self._token:
 			COMPONENT_REGISTRY.reset(self._token)
 			self._token = None
@@ -574,10 +602,8 @@ def _annotation_to_runtime_type(annotation: Any) -> type | tuple[type, ...]:
 	if origin is Annotated and args:
 		return _annotation_to_runtime_type(args[0])
 
-	# Optional[T] / Union[...]
-	if origin in (Union, UnionType) or (
-		origin is None and getattr(annotation, "__origin__", None) is Union
-	):
+	# Optional[T] / Union[...] / X | Y
+	if origin is UnionType:
 		# Fallback for some Python versions where get_origin may be odd
 		union_args = args or getattr(annotation, "__args__", ())
 		runtime_types: list[type] = []
@@ -596,7 +622,7 @@ def _annotation_to_runtime_type(annotation: Any) -> type | tuple[type, ...]:
 
 	# Literal[...] -> base types of provided literals
 	if origin is Literal:
-		literal_types = {type(v) for v in args}
+		literal_types: set[type] = {type(v) for v in args}
 		# None appears as NoneType
 		if len(literal_types) == 0:
 			return object
@@ -644,7 +670,7 @@ def _clone_prop(p: Prop[Any]) -> Prop[Any]:
 		default_factory=p.default_factory,
 		serialize=p.serialize,
 		map_to=p.map_to,
-		_type=p._type,
+		typ_=p.typ_,
 	)
 
 
@@ -670,7 +696,7 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
 	is_total: bool = bool(getattr(typed_dict_cls, "__total__", True))
 
 	# 1) Merge cached specs from TypedDict base classes (preserve insertion order)
-	merged: dict[str, Prop] = {}
+	merged: dict[str, Prop[Any]] = {}
 	for base in _typed_dict_bases(typed_dict_cls):
 		base_spec = _propspec_from_typeddict(base)
 		for k, p in base_spec.as_dict().items():
@@ -691,7 +717,7 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
 			raise TypeError(
 				"Use total=True + NotRequired[T] or total=False + Required[T] to define required and optional props within a TypedDict"
 			)
-		prop._type = runtime_type
+		prop.typ_ = runtime_type
 		merged[key] = prop
 
 	# 3) Finalize required flags per this class's semantics
@@ -710,8 +736,8 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
 			p.required = is_total
 
 	# Split into required/optional
-	required: dict[str, Prop] = {}
-	optional: dict[str, Prop] = {}
+	required: dict[str, Prop[Any]] = {}
+	optional: dict[str, Prop[Any]] = {}
 	for k, p in merged.items():
 		if p.required is True:
 			required[k] = p
@@ -721,7 +747,7 @@ def _propspec_from_typeddict(typed_dict_cls: type) -> PropSpec:
 	return PropSpec(required, optional)
 
 
-def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
+def parse_typed_dict_props(var_kw: Parameter | None) -> PropSpec:
 	"""
 	Build a Props spec from a TypedDict class.
 
@@ -735,7 +761,9 @@ def parse_typed_dict_props(var_kw: inspect.Parameter | None) -> PropSpec:
 
 	# Untyped **props -> allow all
 	annot = var_kw.annotation
-	if annot in (None, inspect._empty):
+	if annot in (None, Parameter.empty):
+		return PropSpec({}, {}, allow_unspecified=True)
+	if _is_any_annotation(annot):
 		return PropSpec({}, {}, allow_unspecified=True)
 	# Stringified annotations like "Unpack[Props]" are too fragile to parse.
 	if isinstance(annot, str):

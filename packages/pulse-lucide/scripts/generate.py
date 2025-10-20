@@ -4,6 +4,7 @@ import re
 import sys
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 GITHUB_API = "https://api.github.com"
 OWNER = "lucide-icons"
@@ -12,14 +13,14 @@ REPO = "lucide"
 THIS_PROJECT = Path(__file__).parent.parent
 
 
-def http_get(url: str, headers: dict) -> dict:
+def http_get(url: str, headers: dict[str, str]) -> dict[str, Any]:
 	req = urllib.request.Request(url, headers=headers)
 	with urllib.request.urlopen(req) as resp:
 		data = resp.read()
 		return json.loads(data.decode("utf-8"))
 
 
-def fetch_repo_tree(owner: str, repo: str, ref: str = "main") -> list:
+def fetch_repo_tree(owner: str, repo: str, ref: str = "main") -> list[Any]:
 	token = os.environ.get("GITHUB_TOKEN")
 	headers = {
 		"Accept": "application/vnd.github+json",
@@ -43,7 +44,7 @@ def fetch_repo_tree(owner: str, repo: str, ref: str = "main") -> list:
 	raise RuntimeError(f"Failed to fetch git tree for {owner}/{repo}: {last_err}")
 
 
-def list_icon_files(owner: str = OWNER, repo: str = REPO, icon_dirs=("icons",)) -> list:
+def list_icon_files(owner: str = OWNER, repo: str = REPO, icon_dirs=("icons",)) -> list[str]:
 	tree = fetch_repo_tree(owner, repo)
 	results = []
 	icon_dir_prefixes = tuple(f"{d.rstrip('/')}/" for d in icon_dirs)
@@ -68,14 +69,14 @@ def kebab_to_pascal(kebab_name: str) -> str:
 	return "".join(p[:1].upper() + p[1:] for p in parts)
 
 
-def http_get_text(url: str, headers: dict) -> str:
+def http_get_text(url: str, headers: dict[str, str]) -> str:
 	req = urllib.request.Request(url, headers=headers)
 	with urllib.request.urlopen(req) as resp:
 		data = resp.read()
 		return data.decode("utf-8")
 
 
-def fetch_lucide_react_export_map(ref: str = "main") -> dict:
+def fetch_lucide_react_export_map(ref: str = "main") -> dict[str, str]:
 	token = os.environ.get("GITHUB_TOKEN")
 	headers = {
 		"Accept": "application/vnd.github.v3.raw",

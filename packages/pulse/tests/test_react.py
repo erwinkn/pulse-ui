@@ -364,9 +364,6 @@ class TestComponentIntegrationWithHTML:
 
 
 def test_parse_typed_dict_props_no_var_kw():
-	def fn(*children: Child, key: str | None = None):
-		return cast(Element, None)
-
 	var_kw = None
 	spec = parse_typed_dict_props(var_kw)
 	assert isinstance(spec, PropSpec)
@@ -374,7 +371,7 @@ def test_parse_typed_dict_props_no_var_kw():
 
 
 def test_parse_typed_dict_props_untyped_kwargs_all_allowed():
-	def fn(*children: Child, key: str | None = None, **props):
+	def fn(*children: Child, key: str | None = None, **props: Any):
 		return cast(Element, None)
 
 	var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -384,25 +381,14 @@ def test_parse_typed_dict_props_untyped_kwargs_all_allowed():
 	assert spec.allow_unspecified is True
 
 
-def test_parse_typed_dict_props_non_unpack_annotation_raises():
-	def fn(*children: Child, key: str | None = None, **props: Any):
-		return cast(Element, None)
-
-	var_kw = list(inspect.signature(fn).parameters.values())[-1]
-	with pytest.raises(
-		TypeError, match=r"\*\*props must be annotated as typing.Unpack\[Props\]"
-	):
-		parse_typed_dict_props(var_kw)
-
-
 def test_parse_typed_dict_props_unpack_must_wrap_typeddict():
 	class NotTD:
-		a: int
+		a: int  # pyright: ignore[reportUninitializedInstanceVariable]
 
-	def fn(*children: Child, key: str | None = None, **props: Unpack[NotTD]):  # type: ignore
+	def fn(*children: Child, key: str | None = None, **props: Unpack[NotTD]):  # pyright: ignore[reportGeneralTypeIssues, reportUnknownParameterType, reportUnusedParameter]
 		return cast(Element, None)
 
-	var_kw = list(inspect.signature(fn).parameters.values())[-1]
+	var_kw = list(inspect.signature(fn).parameters.values())[-1]  # pyright: ignore[reportUnknownArgumentType]
 	with pytest.raises(TypeError, match=r"Unpack must wrap a TypedDict class"):
 		parse_typed_dict_props(var_kw)
 
@@ -418,12 +404,12 @@ def test_parse_typed_dict_props_required_and_optional_inference():
 	var_kw = list(inspect.signature(fn).parameters.values())[-1]
 	spec = parse_typed_dict_props(var_kw)
 	assert set(spec.keys()) == {"a", "b"}
-	a = cast(Prop, spec["a"])
-	b = cast(Prop, spec["b"])
+	a = cast(Prop[int], spec["a"])
+	b = cast(Prop[str], spec["b"])
 	assert a.required is True
 	assert b.required is False
-	assert a._type is int
-	assert b._type is str
+	assert a.typ_ is int
+	assert b.typ_ is str
 
 
 def test_total_false_with_required_wrapper():
@@ -436,8 +422,8 @@ def test_total_false_with_required_wrapper():
 
 	var_kw = list(inspect.signature(fn).parameters.values())[-1]
 	spec = parse_typed_dict_props(var_kw)
-	a = cast(Prop, spec["a"])
-	b = cast(Prop, spec["b"])
+	a = cast(Prop[int], spec["a"])
+	b = cast(Prop[str], spec["b"])
 	assert a.required is True
 	assert b.required is False
 
@@ -455,9 +441,9 @@ def test_parse_typed_dict_props_annotated_with_prop_metadata_and_default():
 
 	var_kw = list(inspect.signature(fn).parameters.values())[-1]
 	spec = parse_typed_dict_props(var_kw)
-	a = cast(Prop, spec["a"])
+	a = cast(Prop[int], spec["a"])
 	assert a.required is True
-	assert a._type is int
+	assert a.typ_ is int
 	assert callable(a.default_factory)
 	assert callable(a.serialize)
 
@@ -478,7 +464,7 @@ def test_parse_typed_dict_props_annotated_prop_cannot_set_required():
 
 
 def test_parse_fn_signature_no_children_annotation():
-	def ok(*children, key: str | None = None): ...
+	def ok(*children: Any, key: str | None = None): ...
 
 	# Should not raise
 	parse_fn_signature(ok)
@@ -501,7 +487,7 @@ def test_parse_fn_signature_key_must_default_to_none():
 
 
 def test_parse_fn_signature_disallow_positional_only_params():
-	def bad(a, /, *children: Child, key: str | None = None):
+	def bad(a: Any, /, *children: Child, key: str | None = None):
 		return cast(Element, None)
 
 	with pytest.raises(
@@ -521,7 +507,7 @@ def test_parse_fn_signature_children_annotation_must_be_child():
 
 
 def test_parse_fn_signature_additional_required_positional_is_disallowed():
-	def bad(x, *children: Child, key: str | None = None):
+	def bad(x: Any, *children: Child, key: str | None = None):
 		return cast(Element, None)
 
 	with pytest.raises(
@@ -550,7 +536,7 @@ def test_parse_fn_signature_explicit_and_unpack_overlap_raises():
 		*children: Child,
 		key: str | None = None,
 		title: str = "t",
-		**props: Unpack[P],  # type: ignore
+		**props: Unpack[P],  # pyright: ignore[reportGeneralTypeIssues]
 	):
 		return cast(Element, None)
 
@@ -575,14 +561,14 @@ def test_parse_fn_signature_builds_propspec_from_annotation_and_defaults():
 
 	spec = parse_fn_signature(good)
 	assert set(spec.keys()) == {"title", "disabled", "count"}
-	title = cast(Prop, spec["title"])
-	disabled = cast(Prop, spec["disabled"])
-	count = cast(Prop, spec["count"])
-	assert title._type is str
+	title = cast(Prop[str], spec["title"])
+	disabled = cast(Prop[bool], spec["disabled"])
+	count = cast(Prop[int], spec["count"])
+	assert title.typ_ is str
 	assert title.default == "Untitled"
-	assert disabled._type is bool
+	assert disabled.typ_ is bool
 	assert disabled.default is False
-	assert count._type is int
+	assert count.typ_ is int
 	assert count.required is True
 
 
@@ -607,7 +593,7 @@ def test_react_component_decorator_explicit_props_and_children():
 
 	# Unknown prop should be rejected since spec is closed
 	with pytest.raises(ValueError, match=r"Unexpected prop\(s\) for component 'Card'"):
-		Card(unknown=1)  # type: ignore
+		Card(unknown=1)  # pyright: ignore[reportCallIssue]
 
 
 def test_react_component_decorator_typed_dict_unpack_and_mapping():
@@ -627,7 +613,7 @@ def test_react_component_decorator_typed_dict_unpack_and_mapping():
 
 	# Missing required label -> error
 	with pytest.raises(ValueError, match=r"Missing required props: label"):
-		Badge()  # type: ignore
+		Badge()  # pyright: ignore[reportCallIssue]
 
 	node = Badge("txt", label="New", class_name="pill", count=2, disabled=True)
 	assert node.tag == "$$Badge"
@@ -658,7 +644,7 @@ def test_react_component_decorator_key_validation():
 
 	# Non-string key should raise
 	with pytest.raises(ValueError, match=r"key must be a string or None"):
-		Box(key=123)  # type: ignore[arg-type]
+		Box(key=123)  # pyright: ignore[reportArgumentType]
 
 	# String key accepted
 	node = Box(key="k1")
@@ -672,7 +658,7 @@ def test_react_component_decorator_untyped_kwargs_allows_unknown():
 		*children: Child,
 		key: str | None = None,
 		disabled: bool = False,
-		**props,
+		**props: Any,
 	) -> Element:
 		return cast(Element, None)
 
@@ -730,7 +716,7 @@ def test_default_sentinel_omits_unknown_when_untyped_kwargs():
 		*children: Child,
 		key: str | None = None,
 		disabled: bool = False,
-		**props,
+		**props: Any,
 	) -> Element:
 		return cast(Element, None)
 
@@ -782,11 +768,11 @@ def test_parse_typed_dict_props_inheritance_two_levels():
 
 	a, b, c, d, e = [spec[k] for k in keys]
 
-	assert a.required is True and a._type is int
-	assert b.required is False and b._type is str
-	assert c.required is True and c._type is bool
-	assert d.required is False and d._type is float
-	assert e.required is False and e._type is int and e.map_to == "ee"
+	assert a.required is True and a.typ_ is int
+	assert b.required is False and b.typ_ is str
+	assert c.required is True and c.typ_ is bool
+	assert d.required is False and d.typ_ is float
+	assert e.required is False and e.typ_ is int and e.map_to == "ee"
 
 	# Apply should accept only requireds and map e->ee when provided
 	applied_min = spec.apply("Final", {"a": 1, "c": False})
@@ -803,7 +789,9 @@ def test_parse_typed_dict_props_generic_like_typed_dict_with_typevars():
 		required: T
 		optional: NotRequired[list[T]]
 
-	def fn(*children: Child, key: str | None = None, **props: Unpack[GenericLikeProps]):
+	def fn(
+		*children: Child, key: str | None = None, **props: Unpack[GenericLikeProps[Any]]
+	):
 		return cast(Element, None)
 
 	var_kw = list(inspect.signature(fn).parameters.values())[-1]
@@ -811,16 +799,16 @@ def test_parse_typed_dict_props_generic_like_typed_dict_with_typevars():
 
 	# Keys and required/optional inference
 	assert set(spec.keys()) == {"required", "optional"}
-	required_prop = cast(Prop, spec["required"])
-	optional_prop = cast(Prop, spec["optional"])
+	required_prop = spec["required"]
+	optional_prop = spec["optional"]
 
 	# total=True by default: required is required, optional is NotRequired
 	assert required_prop.required is True
 	assert optional_prop.required is False
 
 	# Runtime types: TypeVar collapses to object, parametrized containers map to their origin
-	assert required_prop._type is object
-	assert optional_prop._type is list
+	assert required_prop.typ_ is object
+	assert optional_prop.typ_ is list
 
 
 def test_react_component_accepts_generic_like_typed_dict_props():

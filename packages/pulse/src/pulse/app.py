@@ -7,10 +7,10 @@ to define routes and configure their Pulse application.
 
 import logging
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from enum import IntEnum
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Callable, Literal, NotRequired, TypedDict, TypeVar, cast
 
 import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -52,6 +52,7 @@ from pulse.messages import (
 	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
+	ServerInitMessage,
 	ServerMessage,
 )
 from pulse.middleware import (
@@ -91,6 +92,18 @@ class AppStatus(IntEnum):
 DeploymentMode = Literal["dev", "same_host", "subdomains"]
 
 
+class PrerenderPayload(TypedDict):
+	paths: list[str]
+	routeInfo: RouteInfo
+	ttlSeconds: NotRequired[float | int]
+	renderId: NotRequired[str]
+
+
+class PrerenderResult(TypedDict):
+	renderId: str
+	views: dict[str, ServerInitMessage | None]
+
+
 class App:
 	"""
 	Pulse UI Application - the main entry point for defining your app.
@@ -109,6 +122,31 @@ class App:
 	    ```
 	"""
 
+	mode: PulseMode
+	deployment: DeploymentMode
+	status: AppStatus
+	server_address: str | None
+	internal_server_address: str | None
+	plugins: list[Plugin]
+	routes: RouteTree
+	not_found: str
+	user_sessions: dict[str, UserSession]
+	render_sessions: dict[str, RenderSession]
+	session_store: SessionStore | CookieSessionStore
+	cookie: Cookie
+	cors: CORSOptions | None
+	forms: FormRegistry
+	channels: ChannelsManager
+	codegen: Codegen
+	fastapi: FastAPI
+	sio: socketio.AsyncServer  # type: ignore
+	asgi: socketio.ASGIApp  # type: ignore
+	middleware: MiddlewareStack
+	_user_to_render: dict[str, list[str]]
+	_render_to_user: dict[str, str]
+	_sessions_in_request: dict[str, int]
+	_socket_to_render: dict[str, str]
+
 	def __init__(
 		self,
 		routes: Sequence[Route | Layout] | None = None,
@@ -120,7 +158,7 @@ class App:
 		session_store: SessionStore | None = None,
 		server_address: str | None = None,
 		internal_server_address: str | None = None,
-		not_found="/not-found",
+		not_found: str = "/not-found",
 		# Deployment and integration options
 		mode: PulseMode | None = None,
 		deployment: DeploymentMode = "subdomains",
@@ -135,16 +173,16 @@ class App:
 		    codegen: Optional codegen configuration.
 		"""
 		# Resolve mode from environment and expose on the app instance
-		self.mode: PulseMode = mode or env.pulse_mode
-		self.deployment: DeploymentMode = "dev" if self.mode == "dev" else deployment
+		self.mode = mode or env.pulse_mode
+		self.deployment = "dev" if self.mode == "dev" else deployment
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.)
-		self.server_address: str | None = server_address
+		self.server_address = server_address
 		# Optional internal address used by server-side loader fetches
-		self.internal_server_address: str | None = internal_server_address
+		self.internal_server_address = internal_server_address
 
 		# Resolve and store plugins (sorted by priority, highest first)
-		self.plugins: list[Plugin] = []
+		self.plugins = []
 		if plugins:
 			self.plugins = sorted(
 				list(plugins), key=lambda p: getattr(p, "priority", 0), reverse=True
@@ -166,8 +204,8 @@ class App:
 		self.not_found = not_found
 		# Default not-found path for client-side navigation on not_found()
 		# Users can override via App(..., not_found_path="/my-404") in future
-		self.user_sessions: dict[str, UserSession] = {}
-		self.render_sessions: dict[str, RenderSession] = {}
+		self.user_sessions = {}
+		self.render_sessions = {}
 		self.session_store = session_store or CookieSessionStore()
 		self.cookie = cookie or session_cookie(mode=self.deployment)
 		self.cors = cors
@@ -177,11 +215,11 @@ class App:
 		# Channel manager for Python <-> client messaging
 		self.channels = ChannelsManager(self)
 
-		self._user_to_render: dict[str, list[str]] = defaultdict(list)
-		self._render_to_user: dict[str, str] = {}
-		self._sessions_in_request: dict[str, int] = {}
+		self._user_to_render = defaultdict(list)
+		self._render_to_user = {}
+		self._sessions_in_request = {}
 		# Map websocket sid -> renderId for message routing
-		self._socket_to_render: dict[str, str] = {}
+		self._socket_to_render = {}
 
 		self.codegen = Codegen(
 			self.routes,
@@ -201,7 +239,7 @@ class App:
 				if not env.lock_managed_by_cli:
 					try:
 						lock_path = lock_path_for_web_root(self.codegen.cfg.web_root)
-						ensure_web_lock(lock_path, owner="server")
+						__ = ensure_web_lock(lock_path, owner="server")
 					except RuntimeError as e:
 						logger.error(str(e))
 						raise
@@ -321,7 +359,9 @@ class App:
 		# routes / middleware should be added at the module-level, which means
 		# this middleware will wrap all of them.
 		@self.fastapi.middleware("http")
-		async def pulse_context_middleware(request: Request, call_next):
+		async def session_middleware(  # pyright: ignore[reportUnusedFunction]
+			request: Request, call_next: Callable[[Request], Awaitable[Response]]
+		):
 			# Skip session handling for CORS preflight requests
 			if request.method == "OPTIONS":
 				return await call_next(request)
@@ -347,16 +387,16 @@ class App:
 			return res
 
 		@self.fastapi.get("/health")
-		def healthcheck():
+		def healthcheck():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Pulse server is running"}
 
 		@self.fastapi.get("/set-cookies")
-		def set_cookies():
+		def set_cookies():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Cookies updated"}
 
 		# RouteInfo is the request body
 		@self.fastapi.post("/prerender")
-		async def prerender(payload: dict, request: Request):
+		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
 			Body: { paths: string[], routeInfo: RouteInfo, ttlSeconds?: number, renderId?: string }
@@ -366,15 +406,11 @@ class App:
 			if session is None:
 				raise RuntimeError("Internal error: couldn't resolve user session")
 			paths = payload.get("paths") or []
-			if not isinstance(paths, list) or len(paths) == 0:
+			if len(paths) == 0:
 				raise HTTPException(
 					status_code=400, detail="'paths' must be a non-empty list"
 				)
-			route_info: RouteInfo = payload.get("routeInfo")  # type: ignore
-			if not isinstance(route_info, dict):
-				raise HTTPException(
-					status_code=400, detail="'routeInfo' must be an object"
-				)
+			route_info = payload.get("routeInfo")
 			ttl = payload.get("ttlSeconds")
 			if not isinstance(ttl, (int, float)):
 				ttl = 15
@@ -399,7 +435,7 @@ class App:
 				)
 				cleanup = True
 
-			result = {"renderId": render_id, "views": {}}
+			result: PrerenderResult = {"renderId": render_id, "views": {}}
 
 			def _prerender_one(path: str):
 				captured = render.prerender_mount_capture(path, route_info)
@@ -466,7 +502,7 @@ class App:
 			return resp
 
 		@self.fastapi.post("/pulse/forms/{form_id}")
-		async def handle_form_submit(form_id: str, request: Request) -> Response:
+		async def handle_form_submit(form_id: str, request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
 			session = PulseContext.get().session
 			if session is None:
 				raise RuntimeError("Internal error: couldn't resolve user session")
@@ -478,7 +514,9 @@ class App:
 			plugin.on_setup(self)
 
 		@self.sio.event
-		async def connect(sid: str, environ: dict, auth: dict | None):
+		async def connect(  # pyright: ignore[reportUnusedFunction]
+			sid: str, environ: dict[str, Any], auth: dict[str, str] | None
+		):
 			# Expect renderId during websocket auth and require a valid user session
 			rid = auth.get("renderId") if auth else None
 
@@ -532,14 +570,14 @@ class App:
 					self.close_render(rid)
 
 		@self.sio.event
-		def disconnect(sid: str):
+		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
 			rid = self._socket_to_render.pop(sid, None)
 			if rid is not None:
 				# Close the RenderSession entirely to avoid lingering effects/tasks
 				self.close_render(rid)
 
 		@self.sio.event
-		def message(sid: str, data: Serialized):
+		def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
 			rid = self._socket_to_render.get(sid)
 			if not rid:
 				return
@@ -548,15 +586,15 @@ class App:
 				return
 			# Use renderId mapping to user session
 			session = self.user_sessions[self._render_to_user[rid]]
-			# Deserialize the message using v2
-			msg: ClientMessage = deserialize(data)
+			# Make sure to properly deserialize the message contents
+			msg = cast(ClientMessage, deserialize(data))
 			try:
 				if msg["type"] == "channel_message":
 					self._handle_channel_message(render, session, msg)
 				else:
 					self._handle_pulse_message(render, session, msg)
 			except Exception as e:
-				path = cast(str, msg.get("path", "")) if isinstance(msg, dict) else ""
+				path = msg.get("path", "")
 				render.report_error(path, "server", e)
 
 		self.status = AppStatus.initialized
@@ -653,7 +691,7 @@ class App:
 			sid = new_sid()
 
 			session = UserSession(sid, {}, app=self)
-			session._refresh_session_cookie(self)
+			session.refresh_session_cookie(self)
 			self.user_sessions[sid] = session
 			return session
 
@@ -758,11 +796,12 @@ class App:
 
 		# We don't want to wait for this to resolve
 		create_task(render.call_api("/set-cookies", method="GET"))
-		sess._scheduled_cookie_refresh = True
+		sess.scheduled_cookie_refresh = True
 
 
 def add_react_components(
-	routes: Sequence[Route | Layout], components: list[ReactComponent]
+	routes: Sequence[Route | Layout],
+	components: list[ReactComponent[Any]],
 ):
 	for route in routes:
 		if route.components is None:

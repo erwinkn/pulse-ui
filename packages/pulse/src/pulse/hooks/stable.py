@@ -1,16 +1,16 @@
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import Any, TypeVar, cast, overload
+from typing import Any, TypeVar, overload
 
 from pulse.hooks.core import MISSING, HookMetadata, HookState, hooks
 
 T = TypeVar("T")
-TCallable = TypeVar("TCallable", bound=Callable)
+TCallable = TypeVar("TCallable", bound=Callable[..., Any])
 
 
 class StableEntry:
-	__slots__ = ("value", "wrapper")
+	__slots__: tuple[str, ...] = ("value", "wrapper")
+	value: Any
+	wrapper: Callable[..., Any]
 
 	def __init__(self, value: Any) -> None:
 		self.value = value
@@ -25,7 +25,7 @@ class StableEntry:
 
 
 class StableRegistry(HookState):
-	__slots__ = ("entries",)
+	__slots__: tuple[str, ...] = ("entries",)
 
 	def __init__(self) -> None:
 		super().__init__()
@@ -62,7 +62,7 @@ def stable(key: str, value: Any = MISSING):
 	if not key:
 		raise ValueError("stable() requires a non-empty string key")
 
-	registry = cast(StableRegistry, _stable_hook())
+	registry = _stable_hook()
 	entry = registry.entries.get(key)
 
 	if value is not MISSING:

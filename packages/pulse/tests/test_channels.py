@@ -4,15 +4,18 @@ from typing import Any
 
 import pulse as ps
 import pytest
-from pulse.channel import PulseChannelClosed
+from pulse.channel import ChannelClosed
 
 
 class DummyRender:
+	id: str
+	sent: list[dict[str, Any]]
+
 	def __init__(self, rid: str = "render-1") -> None:
 		self.id = rid
-		self.sent: list[dict] = []
+		self.sent: list[dict[str, Any]] = []
 
-	def send(self, message):
+	def send(self, message: dict[str, Any]):
 		self.sent.append(message)
 
 
@@ -114,5 +117,5 @@ async def test_channel_pending_cancelled_on_render_close():
 		pending = asyncio.create_task(channel.request("get", None))
 
 	app.channels.remove_render(render.id)
-	with pytest.raises(PulseChannelClosed):
+	with pytest.raises(ChannelClosed):
 		await pending

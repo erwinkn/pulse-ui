@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 
 import pulse as ps
 import pytest
@@ -23,7 +24,7 @@ async def test_state_query_success():
 		uid: int = 1
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			nonlocal query_running
 			query_running = True
 			await asyncio.sleep(0)
@@ -59,7 +60,7 @@ async def test_state_query_refetch():
 		calls: int = 0
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			self.calls += 1
 			await asyncio.sleep(0)
 			return {"id": self.uid}
@@ -199,7 +200,7 @@ async def test_state_query_keep_previous_data_on_refetch_default():
 		uid: int = 1
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
@@ -236,7 +237,7 @@ async def test_state_query_keep_previous_data_can_be_disabled():
 		uid: int = 1
 
 		@ps.query(keep_previous_data=False)
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
@@ -273,7 +274,7 @@ async def test_state_query_manual_set_data():
 		uid: int = 1
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
@@ -315,7 +316,7 @@ async def test_state_query_with_initial_value_narrows_and_preserves():
 		uid: int = 1
 
 		@ps.query(initial={"id": 0})
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
@@ -377,7 +378,7 @@ async def test_state_query_set_initial_data_before_first_load_and_ignore_after()
 			self.user.set_initial_data({"id": 123})
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
@@ -409,7 +410,7 @@ async def test_state_query_set_initial_data_before_first_load_and_ignore_after()
 async def test_state_query_initial_data_decorator_uses_value_after_init_and_updates():
 	class S(ps.State):
 		uid: int = 1
-		seed: dict | None = None
+		seed: dict[str, Any] | None = None
 
 		def __init__(self):
 			super().__init__()
@@ -417,12 +418,12 @@ async def test_state_query_initial_data_decorator_uses_value_after_init_and_upda
 			self.seed = {"id": 999}
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
 		@user.initial_data
-		def _user_initial(self) -> dict:
+		def _user_initial(self) -> dict[str, Any]:
 			# test ensures seed is set before decorator runs; cast for typing
 			return self.seed or {"id": -999}
 
@@ -447,7 +448,7 @@ async def test_state_query_initial_data_respected_on_refetch_when_keep_previous_
 		uid: int = 1
 
 		@ps.query(keep_previous_data=False)
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
@@ -481,15 +482,15 @@ async def test_state_query_on_success_sync():
 	class S(ps.State):
 		uid: int = 1
 		ok_calls: int = 0
-		last: dict | None = None
+		last: dict[str, Any] | None = None
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
 		@user.on_success
-		def _on_success(self, data: dict):
+		def _on_success(self, data: dict[str, Any]):
 			self.ok_calls += 1
 			self.last = data
 
@@ -514,15 +515,15 @@ async def test_state_query_on_success_async():
 	class S(ps.State):
 		uid: int = 1
 		async_ok_calls: int = 0
-		last: dict | None = None
+		last: dict[str, Any] | None = None
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
 		@user.on_success
-		async def _on_success_async(self, data: dict):
+		async def _on_success_async(self, data: dict[str, Any]):
 			await asyncio.sleep(0)
 			self.async_ok_calls += 1
 			self.last = data
@@ -557,12 +558,12 @@ async def test_state_query_on_success_handler_reads_are_untracked():
 			return self.count * 2
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
 
 		@user.on_success
-		def _on_success(self, data: dict):
+		def _on_success(self, data: dict[str, Any]):
 			# read a signal and a computed; should not bind as deps
 			_ = self.count
 			_ = self.doubled
@@ -711,7 +712,7 @@ async def test_state_query_dispose_cancels_inflight_and_stops_updates():
 		finished: bool = False
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			self.started = True
 			# simulate in-flight
 			await asyncio.sleep(0)
@@ -757,7 +758,7 @@ async def test_state_query_no_refetch_after_state_dispose():
 		calls: int = 0
 
 		@ps.query
-		async def user(self) -> dict:
+		async def user(self) -> dict[str, Any]:
 			self.calls += 1
 			await asyncio.sleep(0)
 			return {"id": self.uid}

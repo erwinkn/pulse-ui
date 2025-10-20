@@ -1,4 +1,5 @@
 import pulse as ps
+from typing import Any
 from pulse.codegen.imports import ImportStatement
 
 
@@ -7,4 +8,4 @@ from pulse.codegen.imports import ImportStatement
 	"pulse-mantine",
 	extra_imports=[ImportStatement(src="@mantine/dates/styles.css", side_effect=True)],
 )
-def DatesProvider(*children: ps.Child, key: str | None = None, **props): ...
+def DatesProvider(*children: ps.Child, key: str | None = None, **props: Any): ...

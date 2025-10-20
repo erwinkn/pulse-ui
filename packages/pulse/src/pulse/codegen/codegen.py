@@ -90,6 +90,10 @@ def write_file_if_changed(path: Path, content: str) -> Path:
 
 
 class Codegen:
+	cfg: CodegenConfig
+	routes: RouteTree
+	_css_name_registry: NameRegistry
+
 	def __init__(self, routes: RouteTree, config: CodegenConfig) -> None:
 		self.cfg = config
 		self.routes = routes
@@ -170,7 +174,7 @@ class Codegen:
 	def _render_routes_ts(
 		self, routes: Sequence[Route | Layout], indent_level: int
 	) -> str:
-		lines = []
+		lines: list[str] = []
 		indent_str = "  " * indent_level
 		for route in routes:
 			if isinstance(route, Layout):

@@ -76,7 +76,7 @@ def serialize(data: Any) -> Serialized:
 		if isinstance(value, dict):
 			result_dict: dict[str, PlainJSON] = {}
 			for key, entry in value.items():
-				key_str = str(key)
+				key_str = str(key)  # pyright: ignore[reportUnknownArgumentType]
 				result_dict[key_str] = process(entry)
 			return result_dict
 
@@ -114,17 +114,13 @@ def serialize(data: Any) -> Serialized:
 
 	payload = process(data)
 
-	# Pack metadata into single compact string: refs|dates|sets|maps
-	def _join(values: list[int]) -> str:
-		return ",".join(str(v) for v in values)
-
 	return ((refs, dates, sets, maps), payload)
 
 
 def deserialize(
 	payload: Serialized,
 ) -> Any:
-	(refs, dates, sets, maps), data = payload
+	(refs, dates, sets, _maps), data = payload
 	refs = set(refs)
 	dates = set(dates)
 	sets = set(sets)

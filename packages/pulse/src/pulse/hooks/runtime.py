@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable, Mapping
 from typing import (
 	Any,
@@ -20,6 +18,9 @@ from pulse.state import State
 
 
 class RedirectInterrupt(Exception):
+	path: str
+	replace: bool
+
 	def __init__(self, path: str, *, replace: bool = False):
 		super().__init__(path)
 		self.path = path
@@ -69,7 +70,7 @@ async def call_api(
 	credentials: str = "include",
 ) -> dict[str, Any]:
 	ctx = PulseContext.get()
-	if ctx is None or ctx.render is None:
+	if ctx.render is None:
 		raise RuntimeError("call_api() must be invoked inside a Pulse callback context")
 
 	return await ctx.render.call_api(
@@ -104,7 +105,7 @@ async def set_cookie(
 
 def navigate(path: str, *, replace: bool = False) -> None:
 	ctx = PulseContext.get()
-	if ctx is None or ctx.render is None:
+	if ctx.render is None:
 		raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
 	ctx.render.send({"type": "navigate_to", "path": path, "replace": replace})
 
@@ -125,7 +126,7 @@ def not_found() -> NoReturn:
 
 def server_address() -> str:
 	ctx = PulseContext.get()
-	if ctx is None or ctx.render is None:
+	if ctx.render is None:
 		raise RuntimeError(
 			"server_address() must be called inside a Pulse render/callback context"
 		)
@@ -186,10 +187,10 @@ def global_state(
 			if inst is None:
 				inst = mk(*args, **kwargs)
 				GLOBAL_STATES[shared_key] = inst
-			return cast(S, inst)
+			return inst
 
 		ctx = PulseContext.get()
-		if ctx is None or ctx.render is None:
+		if ctx.render is None:
 			raise RuntimeError(
 				"ps.global_state must be called inside a Pulse render/callback context"
 			)

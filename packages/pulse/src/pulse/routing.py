@@ -1,7 +1,7 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TypedDict, cast
+from typing import TypedDict, cast, override
 
 from pulse.css import CssImport, CssModule
 from pulse.react_component import ReactComponent
@@ -23,6 +23,11 @@ class PathParameters:
 
 
 class PathSegment:
+	is_splat: bool
+	is_optional: bool
+	is_dynamic: bool
+	name: str
+
 	def __init__(self, part: str):
 		if not part:
 			raise InvalidRouteError("Route path segment cannot be empty.")
@@ -40,6 +45,7 @@ class PathSegment:
 				f"Path segment '{part}' contains invalid characters."
 			)
 
+	@override
 	def __repr__(self) -> str:
 		return f"PathSegment('{self.name}', dynamic={self.is_dynamic}, optional={self.is_optional}, splat={self.is_splat})"
 
@@ -95,7 +101,7 @@ def _sanitize_filename(path: str) -> str:
 
 	# Split path into segments to handle each part individually
 	segments = path.split("/")
-	sanitized_segments = []
+	sanitized_segments: list[str] = []
 
 	for segment in segments:
 		if not segment:
@@ -142,12 +148,22 @@ class Route:
 	Represents a route definition with its component dependencies.
 	"""
 
+	path: str
+	segments: list[PathSegment]
+	render: Component[[]]
+	children: Sequence["Route | Layout"]
+	components: Sequence[ReactComponent[...]] | None
+	css_modules: Sequence[CssModule] | None
+	css_imports: Sequence[CssImport] | None
+	is_index: bool
+	is_dynamic: bool
+
 	def __init__(
 		self,
 		path: str,
 		render: Component[[]],
 		children: "Sequence[Route | Layout] | None" = None,
-		components: Sequence[ReactComponent] | None = None,
+		components: "Sequence[ReactComponent[...]] | None" = None,
 		css_modules: Sequence[CssModule] | None = None,
 		css_imports: Sequence[CssImport] | None = None,
 	):
@@ -166,12 +182,12 @@ class Route:
 			seg.is_dynamic or seg.is_optional for seg in self.segments
 		)
 
-	def _path_list(self, include_layouts=False) -> list[str]:
+	def _path_list(self, include_layouts: bool = False) -> list[str]:
 		# Question marks cause problems for the URL of our prerendering requests +
 		# React-Router file loading
 		path = self.path.replace("?", "^")
 		if self.parent:
-			return [*self.parent._path_list(include_layouts=include_layouts), path]
+			return [*self.parent._path_list(include_layouts=include_layouts), path]  # pyright: ignore[reportPrivateUsage]
 		return [path]
 
 	def unique_path(self):
@@ -186,6 +202,7 @@ class Route:
 		# Replace Windows-invalid characters in filenames
 		return _sanitize_filename(path)
 
+	@override
 	def __repr__(self) -> str:
 		return (
 			f"Route(path='{self.path or ''}'"
@@ -228,11 +245,17 @@ def replace_layout_indicator(path_list: list[str], value: str):
 
 
 class Layout:
+	render: Component[...]
+	children: Sequence["Route | Layout"]
+	components: Sequence[ReactComponent[...]] | None
+	css_modules: Sequence[CssModule] | None
+	css_imports: Sequence[CssImport] | None
+
 	def __init__(
 		self,
-		render: Component,
+		render: "Component[...]",
 		children: "Sequence[Route | Layout] | None" = None,
-		components: Sequence[ReactComponent] | None = None,
+		components: "Sequence[ReactComponent[...]] | None" = None,
 		css_modules: Sequence[CssModule] | None = None,
 		css_imports: Sequence[CssImport] | None = None,
 	):
@@ -245,7 +268,7 @@ class Layout:
 		# 1-based sibling index assigned by RouteTree at each level
 		self.idx: int = 1
 
-	def _path_list(self, include_layouts=False) -> list[str]:
+	def _path_list(self, include_layouts: bool = False) -> list[str]:
 		path_list = (
 			self.parent._path_list(include_layouts=include_layouts)
 			if self.parent
@@ -275,6 +298,7 @@ class Layout:
 		# Replace Windows-invalid characters in filenames
 		return _sanitize_filename(path)
 
+	@override
 	def __repr__(self) -> str:
 		return f"Layout(children={len(self.children)})"
 
@@ -310,6 +334,7 @@ class InvalidRouteError(Exception): ...
 
 
 class RouteTree:
+	tree: list[Route | Layout]
 	flat_tree: dict[str, Route | Layout]
 
 	def __init__(self, routes: Sequence[Route | Layout]) -> None:
@@ -358,8 +383,11 @@ class RouteInfo(TypedDict):
 
 
 class RouteContext:
+	info: RouteInfo
+	pulse_route: Route | Layout
+
 	def __init__(self, info: RouteInfo, pulse_route: Route | Layout):
-		self.info = cast(RouteInfo, ReactiveDict(info))
+		self.info = cast(RouteInfo, cast(object, ReactiveDict(info)))
 		self.pulse_route = pulse_route
 
 	def update(self, info: RouteInfo):
@@ -389,9 +417,11 @@ class RouteContext:
 	def catchall(self) -> list[str]:
 		return self.info["catchall"]
 
+	@override
 	def __str__(self) -> str:
 		return f"RouteContext(pathname='{self.pathname}', params={self.pathParams})"
 
+	@override
 	def __repr__(self) -> str:
 		return (
 			f"RouteContext(pathname='{self.pathname}', hash='{self.hash}', "

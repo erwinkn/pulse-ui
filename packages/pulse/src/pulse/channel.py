@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import logging
 import uuid
@@ -10,10 +8,16 @@ from typing import TYPE_CHECKING, Any
 
 from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop
-from pulse.messages import ClientChannelRequestMessage, ClientChannelResponseMessage
+from pulse.messages import (
+	ClientChannelRequestMessage,
+	ClientChannelResponseMessage,
+	ServerChannelMessage,
+	ServerChannelRequestMessage,
+	ServerChannelResponseMessage,
+)
 from pulse.routing import normalize_path
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
 	from pulse.app import App
 	from pulse.render_session import RenderSession
 	from pulse.user_session import UserSession
@@ -24,22 +28,277 @@ logger = logging.getLogger(__name__)
 ChannelHandler = Callable[[Any], Any | Awaitable[Any]]
 
 
-class PulseChannelClosed(RuntimeError):
+class ChannelClosed(RuntimeError):
 	"""Raised when interacting with a channel that has been closed."""
 
 
-class PulseChannelTimeout(asyncio.TimeoutError):
+class ChannelTimeout(asyncio.TimeoutError):
 	"""Raised when a channel request times out waiting for a response."""
 
 
 @dataclass(slots=True)
-class _PendingRequest:
+class PendingRequest:
 	future: asyncio.Future[Any]
 	channel_id: str
 
 
-class PulseChannel:
+class ChannelsManager:
+	"""Coordinates creation, routing, and cleanup of Pulse channels."""
+
+	_app: "App"
+	_channels: dict[str, "Channel"]
+	_channels_by_render: dict[str, set[str]]
+	_channels_by_route: dict[tuple[str, str], set[str]]
+	pending_requests: dict[str, PendingRequest]
+
+	def __init__(self, app: "App") -> None:
+		self._app = app
+		self._channels = {}
+		self._channels_by_render = defaultdict(set)
+		self._channels_by_route = defaultdict(set)
+		self.pending_requests = {}
+
+	# ------------------------------------------------------------------
+	def create(self, identifier: str | None = None) -> "Channel":
+		ctx = PulseContext.get()
+		render = ctx.render
+		session = ctx.session
+		if render is None or session is None:
+			raise RuntimeError("Channels require an active render and session")
+
+		channel_id = identifier or uuid.uuid4().hex
+		if channel_id in self._channels:
+			raise ValueError(f"Channel id '{channel_id}' is already in use")
+
+		route_path: str | None = None
+		if ctx.route is not None:
+			route_path = normalize_path(ctx.route.pulse_route.unique_path())
+
+		channel = Channel(
+			self,
+			channel_id,
+			render_id=render.id,
+			session_id=session.sid,
+			route_path=route_path,
+		)
+		self._channels[channel_id] = channel
+		self._channels_by_render[render.id].add(channel_id)
+		if route_path is not None:
+			self._channels_by_route[(render.id, route_path)].add(channel_id)
+		return channel
+
+	# ------------------------------------------------------------------
+	def remove_render(self, render_id: str) -> None:
+		ids = list(self._channels_by_render.get(render_id, set()))
+		for channel_id in ids:
+			channel = self._channels.get(channel_id)
+			if channel is None:
+				continue
+			channel.closed = True
+			self.dispose_channel(channel)
+		self._channels_by_render.pop(render_id, None)
+
+	def remove_route(self, render_id: str, route_path: str) -> None:
+		key = (render_id, normalize_path(route_path))
+		for channel_id in list(self._channels_by_route.get(key, set())):
+			channel = self._channels.get(channel_id)
+			if channel is None:
+				continue
+			channel.closed = True
+			self.dispose_channel(channel)
+		self._channels_by_route.pop(key, None)
+
+	# ------------------------------------------------------------------
+	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
+		response_to = message.get("responseTo")
+		if not response_to:
+			return
+
+		if error := message.get("error") is not None:
+			self.resolve_pending_error(response_to, error)
+		else:
+			self._resolve_pending_success(response_to, message.get("payload"))
+
+	def handle_client_event(
+		self,
+		*,
+		render: "RenderSession",
+		session: "UserSession",
+		message: ClientChannelRequestMessage,
+	) -> None:
+		channel_id = str(message.get("channel"))
+		channel = self._channels.get(channel_id)
+		if channel is None:
+			if request_id := message.get("requestId"):
+				self._send_error_response(channel_id, request_id, "Channel closed")
+			return
+
+		if channel.render_id != render.id or channel.session_id != session.sid:
+			logger.warning(
+				"Ignoring channel message for mismatched context: %s", channel_id
+			)
+			return
+
+		event = message["event"]
+		payload = message.get("payload")
+		request_id = message.get("requestId")
+
+		route_ctx = None
+		if channel.route_path is not None:
+			try:
+				mount = render.get_route_mount(channel.route_path)
+				route_ctx = mount.route
+			except Exception:
+				route_ctx = None
+
+		async def _invoke() -> None:
+			try:
+				with PulseContext.update(
+					session=session, render=render, route=route_ctx
+				):
+					result = await channel.dispatch(event, payload, request_id)
+			except Exception as exc:
+				if request_id:
+					self._send_error_response(channel.id, request_id, str(exc))
+				else:
+					logger.exception("Unhandled error in channel handler")
+				return
+
+			if request_id:
+				msg = ServerChannelResponseMessage(
+					type="channel_message",
+					channel=channel.id,
+					event=None,
+					responseTo=request_id,
+					payload=result,
+				)
+				self.send_to_client(
+					channel=channel,
+					msg=msg,
+				)
+
+		asyncio.create_task(_invoke())
+
+	# ------------------------------------------------------------------
+	def register_pending(
+		self,
+		request_id: str,
+		future: asyncio.Future[Any],
+		channel_id: str,
+	) -> None:
+		self.pending_requests[request_id] = PendingRequest(
+			future=future, channel_id=channel_id
+		)
+
+	def _resolve_pending_success(self, request_id: str, payload: Any) -> None:
+		pending = self.pending_requests.pop(request_id, None)
+		if not pending:
+			return
+		if pending.future.done():
+			return
+		pending.future.set_result(payload)
+
+	def resolve_pending_error(self, request_id: str, error: Any) -> None:
+		pending = self.pending_requests.pop(request_id, None)
+		if not pending:
+			return
+		if pending.future.done():
+			return
+		if isinstance(error, Exception):
+			pending.future.set_exception(error)
+		else:
+			pending.future.set_exception(RuntimeError(str(error)))
+
+	def _send_error_response(
+		self, channel_id: str, request_id: str, message: str
+	) -> None:
+		channel = self._channels.get(channel_id)
+		if channel is None:
+			self.resolve_pending_error(request_id, ChannelClosed(message))
+			return
+		try:
+			msg = ServerChannelResponseMessage(
+				type="channel_message",
+				channel=channel.id,
+				event=None,
+				responseTo=request_id,
+				payload=None,
+				error=message,
+			)
+			self.send_to_client(
+				channel=channel,
+				msg=msg,
+			)
+		except ChannelClosed:
+			self.resolve_pending_error(request_id, ChannelClosed(message))
+
+	def send_error(self, channel_id: str, request_id: str, message: str) -> None:
+		self._send_error_response(channel_id, request_id, message)
+
+	def _cancel_pending_for_channel(self, channel_id: str) -> None:
+		for key, pending in list(self.pending_requests.items()):
+			if pending.channel_id != channel_id:
+				continue
+			if not pending.future.done():
+				pending.future.set_exception(ChannelClosed("Channel closed"))
+			self.pending_requests.pop(key, None)
+
+	# ------------------------------------------------------------------
+	def _cleanup_channel_refs(self, channel: "Channel") -> None:
+		render_bucket = self._channels_by_render.get(channel.render_id)
+		if render_bucket is not None:
+			render_bucket.discard(channel.id)
+			if not render_bucket:
+				self._channels_by_render.pop(channel.render_id, None)
+		if channel.route_path is not None:
+			key = (channel.render_id, channel.route_path)
+			route_bucket = self._channels_by_route.get(key)
+			if route_bucket is not None:
+				route_bucket.discard(channel.id)
+				if not route_bucket:
+					self._channels_by_route.pop(key, None)
+
+	def dispose_channel(self, channel: "Channel") -> None:
+		self._cleanup_channel_refs(channel)
+		self._cancel_pending_for_channel(channel.id)
+		self._channels.pop(channel.id, None)
+		# Notify client that the channel has been closed
+		try:
+			msg = ServerChannelRequestMessage(
+				type="channel_message",
+				channel=channel.id,
+				event="__close__",
+				payload=None,
+			)
+			self.send_to_client(
+				channel=channel,
+				msg=msg,
+			)
+		except Exception:  
+			logger.debug("Failed to send close notification for channel %s", channel.id)
+
+	def send_to_client(
+		self,
+		*,
+		channel: "Channel",
+		msg: ServerChannelMessage,
+	) -> None:
+		render = self._app.render_sessions.get(channel.render_id)
+		if render is None:
+			raise ChannelClosed(f"Render session {channel.render_id} is closed")
+		render.send(msg)
+
+
+class Channel:
 	"""Bidirectional communication channel bound to a render session."""
+
+	_manager: ChannelsManager
+	id: str
+	render_id: str
+	session_id: str
+	route_path: str | None
+	_handlers: dict[str, list[ChannelHandler]]
+	closed: bool
 
 	def __init__(
 		self,
@@ -55,8 +314,8 @@ class PulseChannel:
 		self.render_id = render_id
 		self.session_id = session_id
 		self.route_path = route_path
-		self._handlers: dict[str, list[ChannelHandler]] = defaultdict(list)
-		self._closed = False
+		self._handlers = defaultdict(list)
+		self.closed = False
 
 	# ---------------------------------------------------------------------
 	# Registration
@@ -91,13 +350,15 @@ class PulseChannel:
 		"""Send a fire-and-forget event to the client."""
 
 		self._ensure_open()
-		self._manager._send_to_client(
-			channel=self,
+		msg = ServerChannelRequestMessage(
+			type="channel_message",
+			channel=self.id,
 			event=event,
 			payload=payload,
-			request_id=None,
-			response_to=None,
-			error=None,
+		)
+		self._manager.send_to_client(
+			channel=self,
+			msg=msg,
 		)
 
 	async def request(
@@ -112,42 +373,45 @@ class PulseChannel:
 		self._ensure_open()
 		request_id = uuid.uuid4().hex
 		fut = create_future_on_loop()
-		self._manager._register_pending(request_id, fut, self.id)
-		self._manager._send_to_client(
-			channel=self,
+		self._manager.register_pending(request_id, fut, self.id)
+		msg = ServerChannelRequestMessage(
+			type="channel_message",
+			channel=self.id,
 			event=event,
 			payload=payload,
-			request_id=request_id,
-			response_to=None,
-			error=None,
+			requestId=request_id,
+		)
+		self._manager.send_to_client(
+			channel=self,
+			msg=msg,
 		)
 		try:
 			if timeout is None:
 				return await fut
 			return await asyncio.wait_for(fut, timeout=timeout)
-		except TimeoutError as exc:  # pragma: no cover - safety
-			self._manager._resolve_pending_error(
+		except TimeoutError as exc:  
+			self._manager.resolve_pending_error(
 				request_id,
-				PulseChannelTimeout("Channel request timed out"),
+				ChannelTimeout("Channel request timed out"),
 			)
-			raise PulseChannelTimeout("Channel request timed out") from exc
+			raise ChannelTimeout("Channel request timed out") from exc
 		finally:
-			self._manager._pending_requests.pop(request_id, None)
+			self._manager.pending_requests.pop(request_id, None)
 
 	# ---------------------------------------------------------------------
 	def close(self) -> None:
-		if self._closed:
+		if self.closed:
 			return
-		self._closed = True
+		self.closed = True
 		self._handlers.clear()
-		self._manager._dispose_channel(self)
+		self._manager.dispose_channel(self)
 
 	# ---------------------------------------------------------------------
 	def _ensure_open(self) -> None:
-		if self._closed:
-			raise PulseChannelClosed(f"Channel '{self.id}' is closed")
+		if self.closed:
+			raise ChannelClosed(f"Channel '{self.id}' is closed")
 
-	async def _dispatch(
+	async def dispatch(
 		self, event: str, payload: Any, request_id: str | None
 	) -> Any | None:
 		handlers = list(self._handlers.get(event, ()))
@@ -160,7 +424,7 @@ class PulseChannel:
 				result = handler(payload)
 				if asyncio.iscoroutine(result):
 					result = await result
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				logger.exception(
 					"Error in channel handler '%s' for event '%s'", self.id, event
 				)
@@ -172,256 +436,7 @@ class PulseChannel:
 		return last_result
 
 
-class ChannelsManager:
-	"""Coordinates creation, routing, and cleanup of Pulse channels."""
-
-	def __init__(self, app: App) -> None:
-		self._app = app
-		self._channels: dict[str, PulseChannel] = {}
-		self._channels_by_render: dict[str, set[str]] = defaultdict(set)
-		self._channels_by_route: dict[tuple[str, str], set[str]] = defaultdict(set)
-		self._pending_requests: dict[str, _PendingRequest] = {}
-
-	# ------------------------------------------------------------------
-	def create(self, identifier: str | None = None) -> PulseChannel:
-		ctx = PulseContext.get()
-		render = ctx.render
-		session = ctx.session
-		if render is None or session is None:
-			raise RuntimeError("Channels require an active render and session")
-
-		channel_id = identifier or uuid.uuid4().hex
-		if channel_id in self._channels:
-			raise ValueError(f"Channel id '{channel_id}' is already in use")
-
-		route_path: str | None = None
-		if ctx.route is not None:
-			route_path = normalize_path(ctx.route.pulse_route.unique_path())
-
-		channel = PulseChannel(
-			self,
-			channel_id,
-			render_id=render.id,
-			session_id=session.sid,
-			route_path=route_path,
-		)
-		self._channels[channel_id] = channel
-		self._channels_by_render[render.id].add(channel_id)
-		if route_path is not None:
-			self._channels_by_route[(render.id, route_path)].add(channel_id)
-		return channel
-
-	# ------------------------------------------------------------------
-	def remove_render(self, render_id: str) -> None:
-		ids = list(self._channels_by_render.get(render_id, set()))
-		for channel_id in ids:
-			channel = self._channels.get(channel_id)
-			if channel is None:
-				continue
-			channel._closed = True
-			self._dispose_channel(channel)
-		self._channels_by_render.pop(render_id, None)
-
-	def remove_route(self, render_id: str, route_path: str) -> None:
-		key = (render_id, normalize_path(route_path))
-		for channel_id in list(self._channels_by_route.get(key, set())):
-			channel = self._channels.get(channel_id)
-			if channel is None:
-				continue
-			channel._closed = True
-			self._dispose_channel(channel)
-		self._channels_by_route.pop(key, None)
-
-	# ------------------------------------------------------------------
-	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
-		response_to = message.get("responseTo")
-		if not response_to:
-			return
-
-		if error := message.get("error") is not None:
-			self._resolve_pending_error(response_to, error)
-		else:
-			self._resolve_pending_success(response_to, message.get("payload"))
-
-	def handle_client_event(
-		self,
-		*,
-		render: RenderSession,
-		session: UserSession,
-		message: ClientChannelRequestMessage,
-	) -> None:
-		channel_id = str(message.get("channel"))
-		channel = self._channels.get(channel_id)
-		if channel is None:
-			if request_id := message.get("requestId"):
-				self._send_error_response(channel_id, request_id, "Channel closed")
-			return
-
-		if channel.render_id != render.id or channel.session_id != session.sid:
-			logger.warning(
-				"Ignoring channel message for mismatched context: %s", channel_id
-			)
-			return
-
-		event_value = message.get("event")
-		event = str(event_value) if event_value is not None else ""
-		payload = message.get("payload")
-		request_id = message.get("requestId")
-
-		route_ctx = None
-		if channel.route_path is not None:
-			try:
-				mount = render.get_route_mount(channel.route_path)
-				route_ctx = mount.route
-			except Exception:  # noqa: BLE001
-				route_ctx = None
-
-		async def _invoke() -> None:
-			try:
-				with PulseContext.update(
-					session=session, render=render, route=route_ctx
-				):
-					result = await channel._dispatch(event, payload, request_id)
-			except Exception as exc:  # noqa: BLE001
-				if request_id:
-					self._send_error_response(channel.id, request_id, str(exc))
-				else:
-					logger.exception("Unhandled error in channel handler")
-				return
-
-			if request_id:
-				self._send_to_client(
-					channel=channel,
-					event=None,
-					payload=result,
-					request_id=None,
-					response_to=request_id,
-					error=None,
-				)
-
-		asyncio.create_task(_invoke())
-
-	# ------------------------------------------------------------------
-	def _register_pending(
-		self,
-		request_id: str,
-		future: asyncio.Future[Any],
-		channel_id: str,
-	) -> None:
-		self._pending_requests[request_id] = _PendingRequest(
-			future=future, channel_id=channel_id
-		)
-
-	def _resolve_pending_success(self, request_id: str, payload: Any) -> None:
-		pending = self._pending_requests.pop(request_id, None)
-		if not pending:
-			return
-		if pending.future.done():
-			return
-		pending.future.set_result(payload)
-
-	def _resolve_pending_error(self, request_id: str, error: Any) -> None:
-		pending = self._pending_requests.pop(request_id, None)
-		if not pending:
-			return
-		if pending.future.done():
-			return
-		if isinstance(error, Exception):
-			pending.future.set_exception(error)
-		else:
-			pending.future.set_exception(RuntimeError(str(error)))
-
-	def _send_error_response(
-		self, channel_id: str, request_id: str, message: str
-	) -> None:
-		channel = self._channels.get(channel_id)
-		if channel is None:
-			self._resolve_pending_error(request_id, PulseChannelClosed(message))
-			return
-		try:
-			self._send_to_client(
-				channel=channel,
-				event=None,
-				payload=None,
-				request_id=None,
-				response_to=request_id,
-				error=message,
-			)
-		except PulseChannelClosed:
-			self._resolve_pending_error(request_id, PulseChannelClosed(message))
-
-	def send_error(self, channel_id: str, request_id: str, message: str) -> None:
-		self._send_error_response(channel_id, request_id, message)
-
-	def _cancel_pending_for_channel(self, channel_id: str) -> None:
-		for key, pending in list(self._pending_requests.items()):
-			if pending.channel_id != channel_id:
-				continue
-			if not pending.future.done():
-				pending.future.set_exception(PulseChannelClosed("Channel closed"))
-			self._pending_requests.pop(key, None)
-
-	# ------------------------------------------------------------------
-	def _cleanup_channel_refs(self, channel: PulseChannel) -> None:
-		render_bucket = self._channels_by_render.get(channel.render_id)
-		if render_bucket is not None:
-			render_bucket.discard(channel.id)
-			if not render_bucket:
-				self._channels_by_render.pop(channel.render_id, None)
-		if channel.route_path is not None:
-			key = (channel.render_id, channel.route_path)
-			route_bucket = self._channels_by_route.get(key)
-			if route_bucket is not None:
-				route_bucket.discard(channel.id)
-				if not route_bucket:
-					self._channels_by_route.pop(key, None)
-
-	def _dispose_channel(self, channel: PulseChannel) -> None:
-		self._cleanup_channel_refs(channel)
-		self._cancel_pending_for_channel(channel.id)
-		self._channels.pop(channel.id, None)
-		# Notify client that the channel has been closed
-		try:
-			self._send_to_client(
-				channel=channel,
-				event="__close__",
-				payload=None,
-				request_id=None,
-				response_to=None,
-				error=None,
-			)
-		except Exception:  # pragma: no cover - best effort
-			logger.debug("Failed to send close notification for channel %s", channel.id)
-
-	def _send_to_client(
-		self,
-		*,
-		channel: PulseChannel,
-		event: str | None,
-		payload: Any,
-		request_id: str | None,
-		response_to: str | None,
-		error: Any,
-	) -> None:
-		render = self._app.render_sessions.get(channel.render_id)
-		if render is None:
-			raise PulseChannelClosed(f"Render session {channel.render_id} is closed")
-		message = {
-			"type": "channel_message",
-			"channel": channel.id,
-			"event": event,
-			"payload": payload,
-		}
-		if request_id is not None:
-			message["requestId"] = request_id
-		if response_to is not None:
-			message["responseTo"] = response_to
-		if error is not None:
-			message["error"] = error
-		render.send(message)  # type: ignore[arg-type]
-
-
-def channel(identifier: str | None = None) -> PulseChannel:
+def channel(identifier: str | None = None) -> Channel:
 	"""Convenience helper to create a channel using the active PulseContext."""
 
 	ctx = PulseContext.get()
@@ -430,8 +445,8 @@ def channel(identifier: str | None = None) -> PulseChannel:
 
 __all__ = [
 	"ChannelsManager",
-	"PulseChannel",
-	"PulseChannelClosed",
-	"PulseChannelTimeout",
+	"Channel",
+	"ChannelClosed",
+	"ChannelTimeout",
 	"channel",
 ]

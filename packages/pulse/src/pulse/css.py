@@ -3,6 +3,7 @@ import inspect
 from collections.abc import Iterable, Iterator, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import override
 
 _CSS_MODULES: MutableMapping[Path, "CssModule"] = {}
 _CSS_IMPORTS: dict[str, "CssImport"] = {}
@@ -34,7 +35,7 @@ def css_module(path: str | Path, *, relative: bool = False) -> "CssModule":
 		raise FileNotFoundError(f"CSS module '{source}' not found")
 	module = _CSS_MODULES.get(source)
 	if not module:
-		module = CssModule._create(source)
+		module = CssModule.create(source)
 		_CSS_MODULES[source] = module
 	return module
 
@@ -80,7 +81,7 @@ class CssModule:
 	source_path: Path
 
 	@staticmethod
-	def _create(path: Path) -> "CssModule":
+	def create(path: Path) -> "CssModule":
 		module_id = _module_id(path)
 		return CssModule(module_id, path)
 
@@ -106,25 +107,27 @@ class CssReference:
 		if not self.name:
 			raise ValueError("CSS class name cannot be empty")
 
-	def __bool__(self) -> bool:  # pragma: no cover - predictable error
+	def __bool__(self) -> bool:
 		raise TypeError("CssReference objects cannot be coerced to bool")
 
-	def __int__(self) -> int:  # pragma: no cover - predictable error
+	def __int__(self) -> int:
 		raise TypeError("CssReference objects cannot be converted to int")
 
-	def __float__(self) -> float:  # pragma: no cover - predictable error
+	def __float__(self) -> float:
 		raise TypeError("CssReference objects cannot be converted to float")
 
-	def __str__(self) -> str:  # pragma: no cover - predictable error
+	@override
+	def __str__(self) -> str:
 		raise TypeError("CssReference objects cannot be converted to str")
 
-	def __repr__(self) -> str:  # pragma: no cover - debugging helper
+	@override
+	def __repr__(self) -> str:
 		return f"CssReference(module={self.module.id!r}, name={self.name!r})"
 
 
 def _module_id(path: Path) -> str:
 	data = str(path).encode("utf-8")
-	digest = hashlib.sha1(data).hexdigest()  # noqa: S303 - deterministic hash
+	digest = hashlib.sha1(data).hexdigest()
 	return f"css_{digest[:12]}"
 
 
@@ -137,7 +140,7 @@ class CssImport:
 
 def _import_id(value: str) -> str:
 	data = value.encode("utf-8")
-	digest = hashlib.sha1(data).hexdigest()  # noqa: S303 - deterministic hash
+	digest = hashlib.sha1(data).hexdigest()
 	return f"css_import_{digest[:12]}"
 
 

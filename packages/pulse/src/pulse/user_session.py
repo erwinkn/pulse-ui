@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 import base64
-import hashlib
 import hmac
 import json
 import logging
@@ -9,7 +6,7 @@ import secrets
 import uuid
 import zlib
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast, override
 
 from fastapi import Response
 
@@ -29,17 +26,22 @@ logger = logging.getLogger(__name__)
 class UserSession:
 	sid: str
 	data: Session
+	app: "App"
+	is_cookie_session: bool
+	_queued_cookies: dict[str, SetCookie]
+	scheduled_cookie_refresh: bool
+	_effect: Effect | AsyncEffect
 
-	def __init__(self, sid: str, data: dict[str, Any], app: App) -> None:
+	def __init__(self, sid: str, data: dict[str, Any], app: "App") -> None:
 		self.sid = sid
 		self.data = reactive(data)
-		self._scheduled_cookie_refresh = False
-		self._queued_cookies: dict[str, SetCookie] = {}
+		self.scheduled_cookie_refresh = False
+		self._queued_cookies = {}
 		self.app = app
 		self.is_cookie_session = isinstance(app.session_store, CookieSessionStore)
 		if isinstance(app.session_store, CookieSessionStore):
 			self._effect = Effect(
-				lambda: self._refresh_session_cookie(app),
+				lambda: self.refresh_session_cookie(app),
 				name=f"save_cookie_session:{self.sid}",
 			)
 		else:
@@ -51,7 +53,7 @@ class UserSession:
 		assert isinstance(self.app.session_store, SessionStore)
 		await self.app.session_store.save(self.sid, self.data)
 
-	def _refresh_session_cookie(self, app):
+	def refresh_session_cookie(self, app: "App"):
 		assert isinstance(app.session_store, CookieSessionStore)
 		signed_cookie = app.session_store.encode(self.sid, self.data)
 		self.set_cookie(
@@ -74,7 +76,7 @@ class UserSession:
 		for cookie in self._queued_cookies.values():
 			cookie.set_on_fastapi(res, cookie.value)
 		self._queued_cookies.clear()
-		self._scheduled_cookie_refresh = False
+		self.scheduled_cookie_refresh = False
 
 	def set_cookie(
 		self,
@@ -94,9 +96,9 @@ class UserSession:
 			max_age_seconds=max_age_seconds,
 		)
 		self._queued_cookies[name] = cookie
-		if not self._scheduled_cookie_refresh:
+		if not self.scheduled_cookie_refresh:
 			self.app.refresh_cookies(self.sid)
-			self._scheduled_cookie_refresh = True
+			self.scheduled_cookie_refresh = True
 
 
 class SessionStore(ABC):
@@ -139,20 +141,29 @@ class InMemorySessionStore(SessionStore):
 	def __init__(self) -> None:
 		self._sessions: dict[str, dict[str, Any]] = {}
 
+	@override
 	async def get(self, sid: str) -> dict[str, Any] | None:
 		return self._sessions.get(sid)
 
+	@override
 	async def create(self, sid: str) -> dict[str, Any]:
 		session: Session = ReactiveDict()
 		self._sessions[sid] = session
 		return session
 
+	@override
 	async def save(self, sid: str, session: dict[str, Any]):
 		# Should not matter as the session ReactiveDict is normally mutated directly
 		self._sessions[sid] = session
 
+	@override
 	async def delete(self, sid: str) -> None:
-		self._sessions.pop(sid, None)
+		_ = self._sessions.pop(sid, None)
+
+
+class SessionCookiePayload(TypedDict):
+	sid: str
+	data: dict[str, Any]
 
 
 class CookieSessionStore:
@@ -161,6 +172,11 @@ class CookieSessionStore:
 	The cookie stores a compact JSON of the session and is signed using
 	HMAC-SHA256 to prevent tampering. Keep the session small (<4KB).
 	"""
+
+	digestmod: str
+	secret: bytes
+	salt: bytes
+	max_cookie_bytes: int
 
 	def __init__(
 		self,
@@ -181,19 +197,19 @@ class CookieSessionStore:
 					)
 				# In dev, use an ephemeral secret silently
 				secret = secrets.token_urlsafe(32)
-		self._secret = secret.encode("utf-8")
-		self._salt = salt.encode("utf-8")
-		self._digest = getattr(hashlib, digestmod)
-		self._max_cookie_bytes = max_cookie_bytes
+		self.secret = secret.encode("utf-8")
+		self.salt = salt.encode("utf-8")
+		self.digestmod = digestmod
+		self.max_cookie_bytes = max_cookie_bytes
 
 	def encode(self, sid: str, session: dict[str, Any]) -> str:
 		# Encode the entire session into the cookie (compressed v1)
 		try:
-			data = {"sid": sid, "data": dict(session)}
+			data = SessionCookiePayload(sid=sid, data=dict(session))
 			payload_json = json.dumps(data, separators=(",", ":")).encode("utf-8")
 			compressed = zlib.compress(payload_json, level=6)
 			signed = self._sign(compressed)
-			if len(signed) > self._max_cookie_bytes:
+			if len(signed) > self.max_cookie_bytes:
 				logging.warning("Session cookie too large, truncating")
 				session.clear()
 				return self.encode(sid, session)
@@ -214,7 +230,7 @@ class CookieSessionStore:
 
 		try:
 			payload_json = zlib.decompress(raw).decode("utf-8")
-			data = json.loads(payload_json)
+			data = cast(SessionCookiePayload, json.loads(payload_json))
 			return data["sid"], ReactiveDict(data["data"])
 		except Exception:
 			return None
@@ -222,7 +238,7 @@ class CookieSessionStore:
 	# --- signing helpers ---
 	def _mac(self, payload: bytes) -> bytes:
 		return hmac.new(
-			self._secret + b"|" + self._salt, payload, self._digest
+			self.secret + b"|" + self.salt, payload, self.digestmod
 		).digest()
 
 	def _sign(self, payload: bytes) -> str:

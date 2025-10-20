@@ -17,7 +17,7 @@ import os
 import secrets
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, cast, override
 from urllib.parse import quote
 
 import msal
@@ -59,12 +59,12 @@ def _json_clean(value: Any) -> Any:
 	if isinstance(value, list):
 		return [_json_clean(v) for v in value]
 	if isinstance(value, dict):
-		return {str(k): _json_clean(v) for k, v in value.items()}
+		return {str(cast(object, k)): _json_clean(v) for k, v in value.items()}
 	# Fallback: string representation
 	return str(value)
 
 
-def auth(session_key=SESSION_KEY) -> dict[str, Any] | None:
+def auth(session_key: str = SESSION_KEY) -> dict[str, Any] | None:
 	return cast(dict[str, Any] | None, ps.session().get(session_key, {}).get("auth"))
 
 
@@ -80,6 +80,14 @@ def logout():
 
 
 class MSALPlugin(ps.Plugin):
+	client_id: str
+	client_secret: str
+	tenant_id: str
+	authority: str
+	session_key: str
+	claims_mapper: ClaimsMapper
+	token_cache_store: TokenCacheStore | None
+
 	def __init__(
 		self,
 		*,
@@ -109,6 +117,7 @@ class MSALPlugin(ps.Plugin):
 			token_cache=cache,
 		)
 
+	@override
 	def on_setup(self, app: "ps.App") -> None:
 		# Default selection:
 		# - If using CookieSessionStore (cookie-backed), we cannot store MSAL cache in the cookie.
@@ -126,7 +135,7 @@ class MSALPlugin(ps.Plugin):
 				self.token_cache_store = FileTokenCacheStore(base_dir)
 
 		@app.fastapi.get("/auth/login")
-		def auth_login(request: Request):
+		def auth_login(request: Request):  # pyright: ignore[reportUnusedFunction]
 			sess = ps.session()
 			ctx = sess.setdefault(self.session_key, {})
 			if self.token_cache_store:
@@ -142,7 +151,7 @@ class MSALPlugin(ps.Plugin):
 			cca = self.cca(cache)
 			redirect_uri = f"{app.server_address}/auth/callback"
 
-			flow = cca.initiate_auth_code_flow(
+			flow: dict[str, Any] = cca.initiate_auth_code_flow(
 				scopes=self.scopes,
 				redirect_uri=redirect_uri,
 				prompt="select_account",
@@ -154,9 +163,9 @@ class MSALPlugin(ps.Plugin):
 			return RedirectResponse(url=flow["auth_uri"])  # type: ignore[index]
 
 		@app.fastapi.get("/auth/callback")
-		def auth_callback(request: Request):
+		def auth_callback(request: Request):  # pyright: ignore[reportUnusedFunction]
 			sess = ps.session()
-			ctx: dict = sess.setdefault(self.session_key, {})
+			ctx: dict[str, Any] = sess.setdefault(self.session_key, {})
 			if self.token_cache_store:
 				cache = self.token_cache_store.load(request, ctx)
 			else:
@@ -183,7 +192,7 @@ class MSALPlugin(ps.Plugin):
 				return HTMLResponse(content=body, status_code=400)
 
 			# Save user claims (mapped) and token cache back into session
-			claims = result.get("id_token_claims") or {}
+			claims = cast(dict[str, Any], result.get("id_token_claims") or {})
 			user = self.claims_mapper(claims) if claims else {}
 			user = _json_clean(user)
 
@@ -205,6 +214,8 @@ class MSALPlugin(ps.Plugin):
 
 
 class FileTokenCacheStore:
+	base_dir: Path
+
 	def __init__(self, base_dir: Path) -> None:
 		self.base_dir = Path(base_dir)
 		try:
@@ -254,6 +265,10 @@ class FileTokenCacheStore:
 
 
 class RedisTokenCacheStore:
+	client: Any
+	prefix: str
+	ttl_seconds: int | None
+
 	def __init__(
 		self,
 		*,
@@ -265,7 +280,7 @@ class RedisTokenCacheStore:
 		ttl_seconds: int | None = None,
 	) -> None:
 		try:
-			import redis  # type: ignore
+			import redis  # noqa: I001  # pyright: ignore[reportMissingImports]
 		except Exception as exc:
 			raise RuntimeError(
 				"RedisTokenCacheStore requires the 'redis' package. Install it to use this store."

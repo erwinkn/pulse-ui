@@ -1,4 +1,4 @@
-from typing import Any, Unpack
+from typing import Any, Unpack, cast
 
 import pulse as ps
 from pulse.helpers import call_flexible, create_task, maybe_await
@@ -33,6 +33,14 @@ def TreeInternal(
 
 
 class TreeState(ps.State):
+	_channel: ps.Channel
+	_auto_sync: bool
+	_initial_selected: list[str]
+	_initial_checked: list[str]
+	_multiple: bool | None
+	_on_node_expand_listener: ps.EventHandler1[str] | None
+	_on_node_collapse_listener: ps.EventHandler1[str] | None
+
 	def __init__(
 		self,
 		*,
@@ -82,6 +90,7 @@ class TreeState(ps.State):
 		result = await self._channel.request("getExpandedState")
 		if isinstance(result, dict):
 			# Update local cache with the result
+			result = cast(dict[str, Any], result)
 			self._expanded.clear()
 			self._expanded.update({k: bool(v) for k, v in result.items()})
 		return dict(self._expanded)
@@ -104,7 +113,7 @@ class TreeState(ps.State):
 
 	async def get_selected_state(self) -> list[str]:
 		result = await self._channel.request("getSelectedState")
-		return list(result or []) if isinstance(result, list) else []
+		return result if isinstance(result, list) else []
 
 	async def get_anchor_node(self) -> str | None:
 		result = await self._channel.request("getAnchorNode")
@@ -140,7 +149,7 @@ class TreeState(ps.State):
 
 	async def get_checked_state(self) -> list[str]:
 		result = await self._channel.request("getCheckedState")
-		return list(result or []) if isinstance(result, list) else []
+		return result if isinstance(result, list) else []
 
 	async def is_node_checked(self, value: str) -> bool:
 		result = await self._channel.request("isNodeChecked", {"value": value})

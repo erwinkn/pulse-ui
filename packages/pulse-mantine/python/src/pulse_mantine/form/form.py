@@ -6,7 +6,6 @@ from typing import (
 	Generic,
 	Literal,
 	TypeVar,
-	Union,
 	Unpack,
 )
 
@@ -25,7 +24,7 @@ from .validators import (
 )
 
 FieldValue = str | int | float | bool | datetime | ps.UploadFile
-FormValues = Mapping[str, Union[FieldValue, Sequence[FieldValue], "FormValues"]]
+FormValues = Mapping[str, FieldValue | Sequence[FieldValue] | "FormValues"]
 
 TForm = TypeVar("TForm", bound=FormValues)
 
@@ -55,6 +54,13 @@ class MantineFormProps(ps.HTMLFormProps, Generic[TForm], total=False):
 
 
 class MantineForm(ps.State, Generic[TForm]):
+	_channel: ps.Channel
+	_form: ps.ManualForm
+	_synced_values: ReactiveDict[str, Any]
+	_validation: "Validation | None"
+	_mantine_props: dict[str, Any]
+	_on_submit: ps.EventHandler1[TForm] | None
+
 	def __init__(
 		self,
 		mode: FormMode | None = None,
@@ -127,7 +133,7 @@ class MantineForm(ps.State, Generic[TForm]):
 
 		# Forward to user onSubmit if provided
 		if self._on_submit is not None:
-			await maybe_await(call_flexible(self._on_submit, result))  # pyright: ignore[reportArgumentType]
+			await maybe_await(call_flexible(self._on_submit, result))
 
 	# Mount the React component, wiring messages and passing through props
 	def render(
@@ -138,7 +144,7 @@ class MantineForm(ps.State, Generic[TForm]):
 		**props: Unpack[ps.HTMLFormProps],  # pyright: ignore[reportGeneralTypeIssues]
 	):
 		self._on_submit = onSubmit
-		merged = {**props, **self._mantine_props, **self._form.props()}
+		merged: dict[str, Any] = {**props, **self._mantine_props, **self._form.props()}
 		return FormInternal(
 			*children,
 			key=key,

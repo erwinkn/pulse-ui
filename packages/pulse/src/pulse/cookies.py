@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import KW_ONLY, dataclass
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from urllib.parse import urlparse
 
 from fastapi import Request, Response
@@ -26,7 +26,7 @@ class Cookie:
 		cookies = parse_cookie_header(header)
 		return cookies.get(self.name)
 
-	def get_from_socketio(self, environ: dict) -> str | None:
+	def get_from_socketio(self, environ: dict[str, Any]) -> str | None:
 		"""Extract sid from a socket.io environ mapping."""
 		raw = environ.get("HTTP_COOKIE") or environ.get("COOKIE")
 		cookies = parse_cookie_header(raw)

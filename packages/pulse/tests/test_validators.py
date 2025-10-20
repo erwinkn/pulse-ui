@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from io import BytesIO
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from pulse_mantine.form.validators import (
@@ -37,18 +37,22 @@ from starlette.datastructures import Headers, UploadFile
 
 
 class DummyUpload:
+	filename: str
+	content_type: str
+	size: int
+
 	def __init__(self, filename: str, content_type: str, size: int) -> None:
 		self.filename = filename
 		self.content_type = content_type
 		self.size = size
 
 
-def run(spec, value, values=None, path="field"):
+def run(spec: Any, value: Any, values: dict[str, Any] | None = None, path: str = "field"):
 	values = values or {"field": value}
 	return spec.check(value, values, path)
 
 
-async def arun(spec, value, values=None, path="field"):
+async def arun(spec: Any, value: Any, values: dict[str, Any] | None = None, path: str = "field"):
 	values = values or {"field": value}
 	return await spec.acheck(value, values, path)
 
@@ -227,7 +231,7 @@ def test_matches_client_overrides_serialization_and_server_behavior():
 
 	# Serialization includes clientPattern/clientFlags
 	out = serialize_validation({"field": spec})
-	node = cast(dict, out["field"])
+	node = cast(dict[str, Any], out["field"])
 	assert node["$kind"] == "matches"
 	assert node["pattern"] == r"^[a-z]+$"
 	assert "flags" not in node or node.get("flags") in (None, "")

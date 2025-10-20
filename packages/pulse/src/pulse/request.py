@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
 from http.cookies import SimpleCookie
-from typing import Any
+from typing import Any, cast
 
 
 def _bytes_kv_to_str(headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
@@ -28,6 +28,16 @@ class PulseRequest:
 	  - raw: underlying request/scope/environ for advanced users
 	"""
 
+	headers: dict[str, str]
+	cookies: dict[str, str]
+	scheme: str
+	method: str
+	path: str
+	query_string: str
+	client: tuple[str, int] | None
+	auth: Any | None
+	raw: Any | None
+
 	def __init__(
 		self,
 		*,
@@ -41,10 +51,8 @@ class PulseRequest:
 		auth: Any | None = None,
 		raw: Any | None = None,
 	) -> None:
-		self.headers: dict[str, str] = {
-			k.lower(): v for k, v in (headers or {}).items()
-		}
-		self.cookies: dict[str, str] = dict(cookies or {})
+		self.headers = {k.lower(): v for k, v in (headers or {}).items()}
+		self.cookies = dict(cookies or {})
 		self.scheme = scheme or ""
 		self.method = method or ""
 		self.path = path or ""
@@ -87,7 +95,7 @@ class PulseRequest:
 		environ: MutableMapping[str, Any], auth: Any | None
 	) -> PulseRequest:
 		# python-socketio passes a WSGI/ASGI-like environ. Try to detect ASGI scope first.
-		scope = environ.get("asgi.scope") or environ
+		scope: MutableMapping[str, Any] = environ.get("asgi.scope") or environ
 
 		headers: dict[str, str] = {}
 		cookies: dict[str, str] = {}
@@ -106,7 +114,9 @@ class PulseRequest:
 				query_string = raw_qs.decode("latin1")
 			except Exception:
 				query_string = ""
-			asgi_headers = scope.get("headers", []) or []
+			asgi_headers = cast(
+				list[tuple[bytes, bytes]], scope.get("headers", []) or []
+			)
 			headers = _bytes_kv_to_str(asgi_headers)
 			# Cookies from header if present
 			cookie_header = headers.get("cookie")
@@ -114,11 +124,9 @@ class PulseRequest:
 				sc = SimpleCookie()
 				sc.load(cookie_header)
 				cookies = {k: v.value for k, v in sc.items()}
-			client = (
-				tuple(scope.get("client", (None, None)))
-				if scope.get("client")
-				else None
-			)  # type: ignore
+			scope_client = scope.get("client")
+			if scope_client:
+				client = tuple(scope_client)
 		else:
 			# WSGI-like environ
 			scheme = scope.get("wsgi.url_scheme", "") or scope.get("scheme", "")

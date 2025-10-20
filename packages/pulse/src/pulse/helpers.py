@@ -14,6 +14,7 @@ from typing import (
 	TypedDict,
 	TypeVar,
 	overload,
+	override,
 )
 from urllib.parse import urlsplit
 
@@ -33,7 +34,7 @@ def values_equal(a: Any, b: Any) -> bool:
 		return True
 	try:
 		result = a == b
-	except Exception:  # noqa: BLE001
+	except Exception:
 		return False
 	# Some libs return array-like; only accept plain bools
 	if isinstance(result, bool):
@@ -69,13 +70,17 @@ class File(TypedDict):
 
 
 class Sentinel:
-	def __init__(self, name: str, value=MISSING) -> None:
+	name: str
+	value: Any
+
+	def __init__(self, name: str, value: Any = MISSING) -> None:
 		self.name = name
 		self.value = value
 
-	def __call__(self, value):
+	def __call__(self, value: Any):
 		return Sentinel(self.name, value)
 
+	@override
 	def __repr__(self) -> str:
 		if self.value is not MISSING:
 			return f"{self.name}({self.value})"
@@ -83,7 +88,7 @@ class Sentinel:
 			return self.name
 
 
-def data(**attrs):
+def data(**attrs: Any):
 	"""Helper to pass data attributes as keyword arguments to Pulse elements.
 
 	Example:
@@ -151,11 +156,11 @@ def create_task(
 			return from_thread.run(_runner)
 		except RuntimeError:
 			if _running_under_pytest():
-				return None  # type: ignore
+				return None  # pyright: ignore[reportReturnType]
 			raise
 
 
-def create_future_on_loop() -> asyncio.Future:
+def create_future_on_loop() -> asyncio.Future[Any]:
 	"""Create an asyncio Future on the main event loop from any thread."""
 	try:
 		return asyncio.get_running_loop().create_future()
@@ -214,8 +219,11 @@ def later(
 
 
 class RepeatHandle:
+	task: asyncio.Task[None] | None
+	cancelled: bool
+
 	def __init__(self) -> None:
-		self.task: asyncio.Task[None] | None = None
+		self.task = None
 		self.cancelled = False
 
 	def cancel(self):
@@ -327,7 +335,7 @@ def get_client_address(request: Request) -> str | None:
 		return None
 
 
-def get_client_address_socketio(environ: dict) -> str | None:
+def get_client_address_socketio(environ: dict[str, Any]) -> str | None:
 	"""Best-effort client origin/address from a WS environ mapping.
 
 	Preference order mirrors HTTP variant using environ keys.
@@ -412,7 +420,7 @@ def write_gitignore_for_lock(lock_path: Path) -> None:
 		pass
 
 
-def _read_lock(lock_path: Path) -> dict | None:
+def _read_lock(lock_path: Path) -> dict[str, Any] | None:
 	try:
 		data = json.loads(lock_path.read_text())
 		if isinstance(data, dict):

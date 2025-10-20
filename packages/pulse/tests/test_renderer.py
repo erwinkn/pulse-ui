@@ -12,7 +12,7 @@ from pulse.vdom import Node, component
 
 
 # Helpers for reconciliation-based updates
-def _apply_reconciliation(prev: list[str], op: dict) -> list[str]:
+def _apply_reconciliation(prev: list[str], op: dict[str, Any]) -> list[str]:
 	N = op["N"]
 	new_indices, new_values = op["new"]
 	reuse_indices, reuse_sources = op["reuse"]
@@ -79,6 +79,8 @@ def _get_reconciliation_ops(ops: Sequence[Any], path: str = "") -> list[dict[str
 
 
 class TrackingHookContext(HookContext):
+	did_unmount: bool
+
 	def __init__(self) -> None:
 		super().__init__()
 		self.did_unmount = False

@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from typing import Literal, Unpack
 
 import pulse as ps
+from pulse.html.elements import GenericHTMLElement
 
 from .common import AnimationTiming, LayoutType, NullableCoordinate
 
@@ -26,7 +27,7 @@ CurveType = Literal[
 
 
 # TODO: SVG <path> props
-class CurveProps(ps.HTMLSVGProps, total=False):
+class CurveProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	type: CurveType  # pyright: ignore[reportIncompatibleVariableOverride]
 	"The interpolation type of the curve. Default: 'linear'"
 	layout: LayoutType
@@ -42,7 +43,7 @@ def Curve(key: str | None = None, **props: Unpack[CurveProps]): ...
 
 
 # TODO: SVG <rect>
-class RectangleProps(ps.HTMLSVGProps, total=False):
+class RectangleProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	className: str
 	x: float  # pyright: ignore[reportIncompatibleVariableOverride]
 	y: float  # pyright: ignore[reportIncompatibleVariableOverride]

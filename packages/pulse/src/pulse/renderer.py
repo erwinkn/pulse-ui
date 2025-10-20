@@ -5,8 +5,8 @@ from typing import (
 	Any,
 	Literal,
 	NamedTuple,
+	TypeAlias,
 	TypedDict,
-	Union,
 	cast,
 )
 
@@ -80,19 +80,19 @@ class UpdateRenderPropsOperation(TypedDict):
 	data: PathDelta
 
 
-VDOMOperation = Union[
+VDOMOperation: TypeAlias = (
 	# InsertOperation,
 	# RemoveOperation,
-	ReplaceOperation,
-	UpdatePropsOperation,
-	# MoveOperation,
-	ReconciliationOperation,
-	UpdateCallbacksOperation,
-	UpdateCssRefsOperation,
-	UpdateRenderPropsOperation,
-]
+	ReplaceOperation
+	| UpdatePropsOperation
+	# | MoveOperation,
+	| ReconciliationOperation
+	| UpdateCallbacksOperation
+	| UpdateCssRefsOperation
+	| UpdateRenderPropsOperation
+)
 
-RenderPath = str
+RenderPath: TypeAlias = str
 
 
 class RenderTree:

@@ -83,7 +83,7 @@ class MouseHandlerDataParam(ps.JsObject):
 	"""Exactly the same as activeTooltipIndex - this was also duplicated in recharts@2 so let's keep both properties for better backwards compatibility."""
 
 	activeLabel: str | None
-	activeDataKey: DataKey | None
+	activeDataKey: DataKey[Any] | None
 	activeCoordinate: Coordinate | None
 
 

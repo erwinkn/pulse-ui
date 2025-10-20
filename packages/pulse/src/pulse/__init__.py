@@ -19,13 +19,13 @@
 from pulse.app import App as App
 from pulse.app import DeploymentMode as DeploymentMode
 from pulse.channel import (
-	PulseChannel as PulseChannel,
+	Channel as Channel,
 )
 from pulse.channel import (
-	PulseChannelClosed as PulseChannelClosed,
+	ChannelClosed as ChannelClosed,
 )
 from pulse.channel import (
-	PulseChannelTimeout as PulseChannelTimeout,
+	ChannelTimeout as ChannelTimeout,
 )
 
 # Channels

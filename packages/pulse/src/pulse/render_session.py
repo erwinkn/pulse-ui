@@ -10,9 +10,9 @@ from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop, create_task
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
-	RouteInfo,
 	ServerApiCallMessage,
 	ServerErrorMessage,
+	ServerErrorPhase,
 	ServerInitMessage,
 	ServerMessage,
 	ServerNavigateToMessage,
@@ -20,7 +20,14 @@ from pulse.messages import (
 )
 from pulse.reactive import Effect, flush_effects
 from pulse.renderer import RenderTree
-from pulse.routing import Layout, Route, RouteContext, RouteTree, normalize_path
+from pulse.routing import (
+	Layout,
+	Route,
+	RouteContext,
+	RouteInfo,
+	RouteTree,
+	normalize_path,
+)
 from pulse.state import State
 from pulse.vdom import Element
 
@@ -28,6 +35,10 @@ logger = logging.getLogger(__file__)
 
 
 class RouteMount:
+	render: "RenderSession"
+	route: RouteContext
+	tree: RenderTree
+
 	def __init__(
 		self, render: "RenderSession", route: Route | Layout, route_info: RouteInfo
 	) -> None:
@@ -41,6 +52,9 @@ class RouteMount:
 
 
 class RenderSession:
+	id: str
+	routes: RouteTree
+
 	def __init__(
 		self,
 		id: str,
@@ -59,7 +73,7 @@ class RenderSession:
 		self._send_message: Callable[[ServerMessage], Any] | None = None
 		# Buffer messages emitted before a connection is established
 		self._message_buffer: list[ServerMessage] = []
-		self._pending_api: dict[str, asyncio.Future] = {}
+		self._pending_api: dict[str, asyncio.Future[dict[str, Any]]] = {}
 		# Registry of per-session global singletons (created via ps.global_state without id)
 		self._global_states: dict[str, State] = {}
 		# Connection state
@@ -78,7 +92,7 @@ class RenderSession:
 		return self._client_address
 
 	# Effect error handler (batch-level) to surface runtime errors
-	def _on_effect_error(self, effect, exc: Exception):
+	def _on_effect_error(self, effect: Any, exc: Exception):
 		# TODO: wirte into effects created within a Render
 
 		# We don't want to couple effects to routing; broadcast to all active paths
@@ -106,7 +120,7 @@ class RenderSession:
 	def report_error(
 		self,
 		path: str,
-		phase: str,
+		phase: ServerErrorPhase,
 		exc: Exception,
 		details: dict[str, Any] | None = None,
 	):
@@ -116,7 +130,7 @@ class RenderSession:
 			"error": {
 				"message": str(exc),
 				"stack": traceback.format_exc(),
-				"phase": phase,  # type: ignore
+				"phase": phase,
 				"details": details or {},
 			},
 		}
@@ -143,7 +157,7 @@ class RenderSession:
 		self._message_buffer.clear()
 		self.connected = False
 
-	def execute_callback(self, path: str, key: str, args: list | tuple):
+	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		mount = self.route_mounts[path]
 		try:
 			cb = mount.tree.callbacks[key]
@@ -151,10 +165,10 @@ class RenderSession:
 			res = fn(*args[:n_params])
 			if iscoroutine(res):
 
-				def _on_task_done(t: asyncio.Task):
+				def _on_task_done(t: asyncio.Task[Any]):
 					try:
 						t.result()
-					except Exception as e:  # noqa: BLE001 - forward all
+					except Exception as e:
 						self.report_error(
 							path,
 							"callback",
@@ -163,7 +177,7 @@ class RenderSession:
 						)
 
 				create_task(res, on_done=_on_task_done)
-		except Exception as e:  # noqa: BLE001 - forward all
+		except Exception as e:
 			self.report_error(path, "callback", e, {"callback": key})
 
 	async def call_api(
@@ -431,7 +445,7 @@ class RenderSession:
 		try:
 			mount = self.get_route_mount(path)
 			mount.route.update(route_info)
-		except Exception as e:  # noqa: BLE001
+		except Exception as e:
 			self.report_error(path, "navigate", e)
 
 	def unmount(self, path: str):
@@ -442,5 +456,5 @@ class RenderSession:
 			mount.tree.unmount()
 			if mount.effect:
 				mount.effect.dispose()
-		except Exception as e:  # noqa: BLE001
+		except Exception as e:
 			self.report_error(path, "unmount", e)

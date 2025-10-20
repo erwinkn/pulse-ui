@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import (
+	Any,
 	Generic,
 	Literal,
 	TypedDict,
@@ -8,6 +9,7 @@ from typing import (
 )
 
 import pulse as ps
+from pulse.html.elements import GenericHTMLElement
 from pulse.html.props import HTMLSVGProps
 
 from .common import DataKey
@@ -221,7 +223,7 @@ class LegendProps(ps.HTMLProps, Generic[T], total=False):
 @ps.react_component("Legend", "recharts")
 def Legend(
 	key: str | None = None,
-	**props: Unpack[LegendProps],
+	**props: Unpack[LegendProps[Any]],
 ): ...
 
 
@@ -252,7 +254,7 @@ class TooltipProps(TypedDict, total=False):
 	labelStyle: ps.CSSProperties
 	"""The style of default tooltip label which is a p element. Default: {}"""
 
-	cursor: bool | dict | ps.Element
+	cursor: bool | dict[str, Any] | ps.Element
 	"""If set false, no cursor will be drawn when tooltip is active. If set a
     object, the option is the configuration of cursor. If set a React element,
     the option is the custom react element of drawing cursor. Default: True"""
@@ -267,13 +269,13 @@ class TooltipProps(TypedDict, total=False):
 	active: bool
 	"""If set true, the tooltip is displayed. If set false, the tooltip is hidden, usually calculated internally. Default: False"""
 
-	position: dict
+	position: dict[str, Any]
 	"""If this field is set, the tooltip position will be fixed and will not move anymore."""
 
-	coordinate: dict
+	coordinate: dict[str, Any]
 	"""The coordinate of tooltip position, usually calculated internally. Default: { x: 0, y: 0 }"""
 
-	payload: list
+	payload: list[Any]
 	"""The source data of the content to be displayed in the tooltip, always calculated internally and cannot be user set. Default: []"""
 
 	label: str | int
@@ -382,7 +384,7 @@ LabelPosition = Literal[
 ]
 
 
-class LabelProps(HTMLSVGProps, Generic[T], total=False):
+class LabelProps(HTMLSVGProps[GenericHTMLElement], Generic[T], total=False):
 	viewBox: ViewBox  # pyright: ignore[reportIncompatibleVariableOverride]
 	"The box of viewing area, which has the shape of {x: someVal, y: someVal, width: someVal, height: someVal}, usually calculated internally."
 	# parentViewBox: ViewBox
@@ -404,11 +406,11 @@ class LabelProps(HTMLSVGProps, Generic[T], total=False):
 @ps.react_component("Label", "recharts")
 def Label(
 	key: str | None = None,
-	**props: Unpack[LabelProps],
+	**props: Unpack[LabelProps[Any]],
 ): ...
 
 
-class LabelListProps(ps.HTMLSVGProps, Generic[T], total=False):
+class LabelListProps(ps.HTMLSVGProps[GenericHTMLElement], Generic[T], total=False):
 	id: str
 	"The unique id of this component, which will be used to generate unique clip path id internally. This props is suggested to be set in SSR."
 
@@ -446,7 +448,7 @@ Examples:
 @ps.react_component("LabelList", "recharts")
 def LabelList(
 	key: str | None = None,
-	**props: Unpack[LabelListProps],
+	**props: Unpack[LabelListProps[Any]],
 ): ...
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 # Helpers for parsing JavaScript package specifiers used by Pulse's CLI.
 #
@@ -143,7 +144,7 @@ def resolve_versions(
 # ----------------------------- package.json utils ----------------------------
 
 
-def load_package_json(web_root: Path) -> dict:
+def load_package_json(web_root: Path) -> dict[str, Any]:
 	pkg_path = web_root / "package.json"
 	try:
 		data = json.loads(pkg_path.read_text())
@@ -154,7 +155,7 @@ def load_package_json(web_root: Path) -> dict:
 	return {}
 
 
-def get_pkg_spec(pkg_json: dict, name: str) -> str | None:
+def get_pkg_spec(pkg_json: dict[str, Any], name: str) -> str | None:
 	for field in ("dependencies", "devDependencies"):
 		section = pkg_json.get(field)
 		if isinstance(section, dict) and name in section:

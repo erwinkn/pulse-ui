@@ -1,11 +1,12 @@
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, TypedDict, Union, Unpack
+from typing import Any, Literal, TypedDict, Unpack
 
 import pulse as ps
+from pulse.html.elements import GenericHTMLElement
 
-from .common import ChartOffsetInternal, DataKey, MinPointSize
-from .general import AnimationEasing, LegendType
-from .shapes import CurveProps, RectangleProps
+from pulse_recharts.common import ChartOffsetInternal, DataKey, MinPointSize
+from pulse_recharts.general import AnimationEasing, LegendType
+from pulse_recharts.shapes import CurveProps, RectangleProps
 
 # Placeholder for TooltipType until a concrete definition is provided
 TooltipType = Any
@@ -16,7 +17,7 @@ class XAxisPaddingDict(TypedDict, total=False):
 	right: float
 
 
-XAxisPadding = Union[XAxisPaddingDict, Literal["gap", "no-gap"]]
+XAxisPadding = XAxisPaddingDict | Literal["gap", "no-gap"]
 
 
 class YAxisPaddingDict(TypedDict, total=False):
@@ -24,20 +25,25 @@ class YAxisPaddingDict(TypedDict, total=False):
 	bottom: float
 
 
-YAxisPadding = Union[YAxisPaddingDict, Literal["gap", "no-gap"]]
+YAxisPadding = YAxisPaddingDict | Literal["gap", "no-gap"]
 
 XAxisOrientation = Literal["top", "bottom"]
 YAxisOrientation = Literal["left", "right"]
 # TODO: SVGProps<SVGTextElement>.
 # THe elements have to be SVG elements
-TickProp = ps.HTMLSVGProps | ps.Element | ps.JsFunction[[Any], ps.Element] | bool
+TickProp = (
+	ps.HTMLSVGProps[GenericHTMLElement]
+	| ps.Element
+	| ps.JsFunction[[Any], ps.Element]
+	| bool
+)
 
-AxisInterval = Union[
-	float,
-	Literal[
+AxisInterval = (
+	float
+	| Literal[
 		"preserveStart", "preserveEnd", "preserveStartEnd", "equidistantPreserveStart"
-	],
-]
+	]
+)
 """Defines how ticks are placed and whether / how tick collisions are handled.
 
 'preserveStart' keeps the left tick on collision and ensures that the first tick is always shown.
@@ -46,7 +52,7 @@ AxisInterval = Union[
 'equidistantPreserveStart' selects a number N such that every nTh tick will be shown without collision.
 """
 
-AxisTick = Union[float, str]
+AxisTick = float | str
 """Ticks can be any type when the axis is the type of category.
 
 Ticks must be numbers when the axis is the type of number.
@@ -103,7 +109,7 @@ class BaseAxisProps(TypedDict, total=False):
 	type: AxisDomainType
 	"""The type of axis"""
 
-	dataKey: DataKey
+	dataKey: DataKey[Any]
 	"""The key of data displayed in the axis"""
 
 	hide: bool
@@ -119,11 +125,11 @@ class BaseAxisProps(TypedDict, total=False):
 	"""The count of ticks"""
 
 	# TODO: This is SVGProps<SVGLineElement>
-	axisLine: bool | ps.HTMLSVGProps
+	axisLine: bool | ps.HTMLSVGProps[GenericHTMLElement]
 	"""The option for axisLine"""
 
 	# TODO: This is SVGProps<SVGLineElement>
-	tickLine: bool | ps.HTMLSVGProps
+	tickLine: bool | ps.HTMLSVGProps[GenericHTMLElement]
 	"""The option for tickLine"""
 
 	tickSize: float
@@ -165,14 +171,14 @@ class BaseAxisProps(TypedDict, total=False):
 	AxisComp: Any
 	"""axis react component"""
 
-	label: str | int | ps.Element | dict
+	label: str | int | ps.Element | dict[str, Any]
 	"""Needed to allow usage of the label prop on the X and Y axis"""
 
 	className: str
 	"""The HTML element's class name"""
 
 
-class XAxisProps(ps.HTMLSVGProps, BaseAxisProps, total=False):  # pyright: ignore[reportIncompatibleVariableOverride]
+class XAxisProps(ps.HTMLSVGProps[GenericHTMLElement], BaseAxisProps, total=False):  # pyright: ignore[reportIncompatibleVariableOverride]
 	xAxisId: str | float
 	"""The unique id of x-axis"""
 
@@ -212,7 +218,7 @@ class XAxisProps(ps.HTMLSVGProps, BaseAxisProps, total=False):  # pyright: ignor
 def XAxis(key: str | None = None, **props: Unpack[XAxisProps]): ...
 
 
-class YAxisProps(ps.HTMLSVGProps, BaseAxisProps, total=False):  # pyright: ignore[reportIncompatibleVariableOverride]
+class YAxisProps(ps.HTMLSVGProps[GenericHTMLElement], BaseAxisProps, total=False):  # pyright: ignore[reportIncompatibleVariableOverride]
 	yAxisId: str | float
 	"""The unique id of y-axis"""
 
@@ -277,14 +283,14 @@ class GridLineTypeFunctionProps(ps.JsObject): ...
 
 # SVGLineElementProps in practice
 GridLineType = (
-	ps.HTMLSVGProps
+	ps.HTMLSVGProps[GenericHTMLElement]
 	| ps.Element
 	| bool
 	| Callable[[GridLineTypeFunctionProps], ps.Element]
 )
 
 
-class CartesianGridProps(ps.HTMLSVGProps, total=False):
+class CartesianGridProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	x: float  # pyright: ignore[reportIncompatibleVariableOverride]
 	"""The x-coordinate of grid.
     If left undefined, it will be computed from the chart's offset and margins."""
@@ -377,14 +383,19 @@ class LinePointItem(ps.JsObject):
 
 
 # Visual dot configuration used for points and active points
-ActiveDotType = ps.HTMLSVGProps | ps.Element | bool | ps.JsFunction[[Any], ps.Element]
+ActiveDotType = (
+	ps.HTMLSVGProps[GenericHTMLElement]
+	| ps.Element
+	| bool
+	| ps.JsFunction[[Any], ps.Element]
+)
 
 
 LineLayout = Literal["horizontal", "vertical"]
 
 
 class LineProps(CurveProps, total=False):
-	dataKey: DataKey
+	dataKey: DataKey[Any]
 	"""The key or getter of a group of data which should be unique in a LineChart."""
 
 	xAxisId: str | int
@@ -410,14 +421,14 @@ class LineProps(CurveProps, total=False):
 	"""Controls rendering of the active dot when tooltip is active.
     Same options as 'dot'. Default: True"""
 
-	label: bool | dict | ps.Element | ps.JsFunction[[Any], ps.Element]
+	label: bool | dict[str, Any] | ps.Element | ps.JsFunction[[Any], ps.Element]
 	"""Controls rendering of labels on the line points.
-    - False: no labels
-    - True: default labels
-    - Object: merges with internally calculated props
-    - Element: custom label element
-    - Function: called to render a customized label
-    Default: False"""
+	- False: no labels
+	- True: default labels
+	- Object: merges with internally calculated props
+	- Element: custom label element
+	- Function: called to render a customized label
+	Default: False"""
 
 	hide: bool
 	"""Hides the line when True (useful for toggling via legend). Default: False"""
@@ -473,7 +484,7 @@ class BarProps(RectangleProps, total=False):
 	barSize: str | float
 	unit: str | int
 	name: str | int  # pyright: ignore[reportIncompatibleVariableOverride]
-	dataKey: DataKey
+	dataKey: DataKey[Any]
 	tooltipType: TooltipType
 	legendType: LegendType
 	minPointSize: MinPointSize

@@ -36,6 +36,7 @@ class TestState:
 
 	def test_unannotated_property_becomes_signal(self):
 		class MyState(ps.State):
+			count: int
 			count = 1  # no annotation
 
 			@ps.computed
@@ -203,9 +204,11 @@ class TestState:
 
 	def test_subclass_overrides_unannotated_property_default(self):
 		class Base(ps.State):
+			count: int
 			count = 1
 
 		class Child(Base):
+			count: int
 			count = 7
 
 		s = Child()
@@ -266,6 +269,7 @@ class TestState:
 
 	def test_do_not_wrap_callables_or_descriptors(self):
 		class MyState(ps.State):
+			count: int
 			count = 1
 
 			def regular(self, x: int) -> int:
@@ -314,6 +318,7 @@ class TestState:
 
 	def test_nested_structures_wrapped_and_reactive(self):
 		class S(ps.State):
+			data: dict
 			data = {
 				"user": {"name": "Ada", "friends": ["b"]},
 				"ids": [1, 2],
@@ -420,6 +425,7 @@ class TestState:
 
 		class MyState(ps.State):
 			count: int = 0
+			_private: str
 
 			def __init__(self):
 				# This should work - we're not fully initialized yet
@@ -547,6 +553,7 @@ class TestState:
 
 	def test_underscore_unannotated_properties_are_non_reactive(self):
 		class S(ps.State):
+			_data: dict
 			_data = {"a": 1}
 			value: int = 1
 

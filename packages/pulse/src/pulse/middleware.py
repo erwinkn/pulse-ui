@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any, Generic, TypeVar, overload
+from typing import Any, Generic, TypeVar, overload, override
 
-from pulse.messages import ClientMessage, RouteInfo, ServerInitMessage
+from pulse.messages import ClientMessage, ServerInitMessage
 from pulse.request import PulseRequest
+from pulse.routing import RouteInfo
 
 T = TypeVar("T")
 
@@ -20,6 +21,8 @@ class NotFound: ...
 
 
 class Ok(Generic[T]):
+	payload: T | None
+
 	@overload
 	def __init__(self, payload: T) -> None: ...
 	@overload
@@ -98,6 +101,7 @@ class MiddlewareStack(PulseMiddleware):
 	def __init__(self, middlewares: Sequence[PulseMiddleware]):
 		self._middlewares: list[PulseMiddleware] = list(middlewares)
 
+	@override
 	def prerender(
 		self,
 		*,
@@ -125,6 +129,7 @@ class MiddlewareStack(PulseMiddleware):
 
 		return dispatch(0)
 
+	@override
 	def connect(
 		self,
 		*,
@@ -144,6 +149,7 @@ class MiddlewareStack(PulseMiddleware):
 
 		return dispatch(0)
 
+	@override
 	def message(
 		self,
 		*,
@@ -157,12 +163,13 @@ class MiddlewareStack(PulseMiddleware):
 			mw = self._middlewares[index]
 
 			def _next() -> Ok[None]:
-				return dispatch(index + 1)  # type: ignore[return-value]
+				return dispatch(index + 1)  # pyright: ignore[reportReturnType]
 
 			return mw.message(session=session, data=data, next=_next)
 
 		return dispatch(0)
 
+	@override
 	def channel(
 		self,
 		*,
@@ -179,7 +186,7 @@ class MiddlewareStack(PulseMiddleware):
 			mw = self._middlewares[index]
 
 			def _next() -> Ok[None]:
-				return dispatch(index + 1)  # type: ignore[return-value]
+				return dispatch(index + 1)  # pyright: ignore[reportReturnType]
 
 			return mw.channel(
 				channel_id=channel_id,
@@ -228,6 +235,7 @@ class PulseCoreMiddleware(PulseMiddleware):
 		# Treat any other value as allow
 		return Ok(None)
 
+	@override
 	def prerender(
 		self,
 		*,
@@ -241,6 +249,7 @@ class PulseCoreMiddleware(PulseMiddleware):
 		res = next()
 		return self._normalize_prerender_response(res)
 
+	@override
 	def connect(
 		self,
 		*,
@@ -251,6 +260,7 @@ class PulseCoreMiddleware(PulseMiddleware):
 		res = next()
 		return self._normalize_connect_response(res)
 
+	@override
 	def message(
 		self,
 		*,
@@ -261,6 +271,7 @@ class PulseCoreMiddleware(PulseMiddleware):
 		res = next()
 		return self._normalize_message_response(res)
 
+	@override
 	def channel(
 		self,
 		*,

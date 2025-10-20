@@ -13,7 +13,7 @@ FormMode = Literal["controlled", "uncontrolled"]
 
 
 class FormInternalProps(ps.HTMLFormProps, total=False):
-	channelId: Required[str]  # pyright: ignore[reportGeneralTypeIssues]
+	channelId: Required[str]
 	initialValues: dict[str, Any]
 	initialErrors: dict[str, Any]
 	initialDirty: dict[str, bool]

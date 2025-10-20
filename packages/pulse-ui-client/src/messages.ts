@@ -2,148 +2,143 @@
 // Message Types
 // =================================================================
 
-import type { VDOM, VDOMUpdate } from "./vdom";
 import type { RouteInfo } from "./helpers";
-
+import type { VDOM, VDOMUpdate } from "./vdom";
 
 // Based on pulse/messages.py
 export interface ServerInitMessage {
-  type: "vdom_init";
-  path: string;
-  vdom: VDOM;
-  callbacks: string[];
-  render_props: string[];
-  css_refs: string[];
+	type: "vdom_init";
+	path: string;
+	vdom: VDOM;
+	callbacks: string[];
+	render_props: string[];
+	css_refs: string[];
 }
 
 export interface ServerUpdateMessage {
-  type: "vdom_update";
-  path: string;
-  ops: VDOMUpdate[];
+	type: "vdom_update";
+	path: string;
+	ops: VDOMUpdate[];
 }
 
 export interface ServerErrorInfo {
-  message: string;
-  stack?: string;
-  phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
-  details?: Record<string, any>;
+	message: string;
+	stack?: string;
+	phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
+	details?: Record<string, any>;
 }
 
 export interface ServerErrorMessage {
-  type: "server_error";
-  path: string;
-  error: ServerErrorInfo;
+	type: "server_error";
+	path: string;
+	error: ServerErrorInfo;
 }
 
 export interface ServerApiCallMessage {
-  type: "api_call";
-  id: string;
-  url: string; // absolute or relative
-  method: string;
-  headers: Record<string, string>;
-  body: any | null;
-  credentials: "include" | "omit";
+	type: "api_call";
+	id: string;
+	url: string; // absolute or relative
+	method: string;
+	headers: Record<string, string>;
+	body: any | null;
+	credentials: "include" | "omit";
 }
 
 export interface ServerChannelRequestMessage {
-  type: "channel_message";
-  channel: string;
-  event: string;
-  payload?: any;
-  requestId?: string;
-  responseTo?: never;
-  error?: any;
+	type: "channel_message";
+	channel: string;
+	event: string;
+	payload?: any;
+	requestId?: string;
+	responseTo?: never;
+	error?: any;
 }
 
 export interface ServerChannelResponseMessage {
-  type: "channel_message";
-  channel: string;
-  event?: undefined;
-  responseTo: string;
-  payload?: any;
-  error?: any;
-  requestId?: never;
+	type: "channel_message";
+	channel: string;
+	event?: undefined;
+	responseTo: string;
+	payload?: any;
+	error?: any;
+	requestId?: never;
 }
 
-export type ServerChannelMessage =
-  | ServerChannelRequestMessage
-  | ServerChannelResponseMessage;
+export type ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage;
 
 export interface ServerNavigateToMessage {
-  type: "navigate_to";
-  path: string;
-  replace: boolean;
+	type: "navigate_to";
+	path: string;
+	replace: boolean;
 }
 
 export type ServerMessage =
-  | ServerInitMessage
-  | ServerUpdateMessage
-  | ServerErrorMessage
-  | ServerApiCallMessage
-  | ServerNavigateToMessage
-  | ServerChannelRequestMessage
-  | ServerChannelResponseMessage;
+	| ServerInitMessage
+	| ServerUpdateMessage
+	| ServerErrorMessage
+	| ServerApiCallMessage
+	| ServerNavigateToMessage
+	| ServerChannelRequestMessage
+	| ServerChannelResponseMessage;
 
 export interface ClientCallbackMessage {
-  type: "callback";
-  path: string;
-  callback: string;
-  args: any[];
+	type: "callback";
+	path: string;
+	callback: string;
+	args: any[];
 }
 
 export interface ClientMountMessage {
-  type: "mount";
-  path: string;
-  routeInfo: RouteInfo;
+	type: "mount";
+	path: string;
+	routeInfo: RouteInfo;
 }
 export interface ClientNavigateMessage {
-  type: "navigate";
-  path: string;
-  routeInfo: RouteInfo;
+	type: "navigate";
+	path: string;
+	routeInfo: RouteInfo;
 }
 export interface ClientUnmountMessage {
-  type: "unmount";
-  path: string;
+	type: "unmount";
+	path: string;
 }
 
 export interface ClientApiResultMessage {
-  type: "api_result";
-  id: string;
-  ok: boolean;
-  status: number;
-  headers: Record<string, string>;
-  body: any | null;
+	type: "api_result";
+	id: string;
+	ok: boolean;
+	status: number;
+	headers: Record<string, string>;
+	body: any | null;
 }
 
 export interface ClientChannelRequestMessage {
-  type: "channel_message";
-  channel: string;
-  event: string;
-  payload?: any;
-  requestId?: string;
-  responseTo?: never;
-  error?: any;
+	type: "channel_message";
+	channel: string;
+	event: string;
+	payload?: any;
+	requestId?: string;
+	responseTo?: never;
+	error?: any;
 }
 
 export interface ClientChannelResponseMessage {
-  type: "channel_message";
-  channel: string;
-  event?: undefined;
-  responseTo: string;
-  payload?: any;
-  error?: any;
-  requestId?: never;
+	type: "channel_message";
+	channel: string;
+	event?: undefined;
+	responseTo: string;
+	payload?: any;
+	error?: any;
+	requestId?: never;
 }
 
-export type ClientChannelMessage =
-  | ClientChannelRequestMessage
-  | ClientChannelResponseMessage;
+export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
 
 export type ClientMessage =
-  | ClientMountMessage
-  | ClientCallbackMessage
-  | ClientNavigateMessage
-  | ClientUnmountMessage
-  | ClientApiResultMessage
-  | ClientChannelRequestMessage
-  | ClientChannelResponseMessage;
+	| ClientMountMessage
+	| ClientCallbackMessage
+	| ClientNavigateMessage
+	| ClientUnmountMessage
+	| ClientApiResultMessage
+	| ClientChannelRequestMessage
+	| ClientChannelResponseMessage;

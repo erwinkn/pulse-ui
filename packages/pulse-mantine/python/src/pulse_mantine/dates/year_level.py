@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("YearLevel", "pulse-mantine")
-def YearLevel(key: Optional[str] = None, **props): ...
-
+def YearLevel(key: str | None = None, **props: Any): ...

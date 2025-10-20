@@ -1,15 +1,17 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("ActionIcon", "@mantine/core")
-def ActionIcon(*children: ps.Child, key: Optional[str] = None, **props): ...
+def ActionIcon(*children: ps.Child, key: str | None = None, **props: Any): ...
 
 
 @ps.react_component("ActionIcon", "@mantine/core", prop="Group")
-def ActionIconGroup(*children: ps.Child, key: Optional[str] = None, **props): ...
+def ActionIconGroup(*children: ps.Child, key: str | None = None, **props: Any): ...
 
 
 @ps.react_component("ActionIcon", "@mantine/core", prop="GroupSection")
-def ActionIconGroupSection(*children: ps.Child, key: Optional[str] = None, **props): ...
-
+def ActionIconGroupSection(
+	*children: ps.Child, key: str | None = None, **props: Any
+): ...

@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("MultiSelect", "@mantine/core")
-def MultiSelect(key: Optional[str] = None, **props): ...
-
+def MultiSelect(key: str | None = None, **props: Any): ...

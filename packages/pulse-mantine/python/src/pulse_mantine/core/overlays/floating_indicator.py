@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("FloatingIndicator", "@mantine/core")
-def FloatingIndicator(key: Optional[str] = None, **props): ...
-
+def FloatingIndicator(key: str | None = None, **props: Any): ...

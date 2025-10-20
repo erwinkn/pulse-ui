@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("TimeInput", "pulse-mantine")
-def TimeInput(key: Optional[str] = None, **props): ...
-
+def TimeInput(key: str | None = None, **props: Any): ...

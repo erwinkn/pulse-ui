@@ -1,68 +1,47 @@
 // Public API surface for pulse-client
 
-// Core React bindings
-export { PulseProvider, usePulseClient, PulseView } from "./pulse";
-export type { PulseConfig, PulseProviderProps, PulsePrerender } from "./pulse";
-export { usePulseChannel } from "./usePulseChannel";
-export { PulseChannelResetError } from "./channel";
 export type { ChannelBridge } from "./channel";
-
+export { PulseChannelResetError } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {
-  PulseClient,
-  MountedView,
-  ConnectionStatusListener,
-  ServerErrorListener,
+	ConnectionStatusListener,
+	MountedView,
+	PulseClient,
+	ServerErrorListener,
 } from "./client";
-
-// VDOM types and helpers
-export type {
-  VDOM,
-  VDOMNode,
-  VDOMElement,
-  VDOMUpdate,
-  ComponentRegistry,
-} from "./vdom";
-
-// Renderer helpers 
-export {
-  RenderLazy,
-} from "./renderer";
-
+export type { PulseFormProps } from "./form";
 // Form helpers
 export { PulseForm, submitForm } from "./form";
-export type { PulseFormProps } from "./form";
-
-// Messages (types only)
-export type {
-  ServerMessage,
-  ServerInitMessage,
-  ServerUpdateMessage,
-  ServerErrorMessage,
-  ServerErrorInfo,
-  ServerApiCallMessage,
-  ServerNavigateToMessage,
-  ServerChannelRequestMessage,
-  ServerChannelResponseMessage,
-  ServerChannelMessage,
-  ClientMessage,
-  ClientCallbackMessage,
-  ClientMountMessage,
-  ClientNavigateMessage,
-  ClientUnmountMessage,
-  ClientApiResultMessage,
-  ClientChannelRequestMessage,
-  ClientChannelResponseMessage,
-  ClientChannelMessage,
-} from "./messages";
-
-// Transports (types only - implementation is internal)
-export type { Transport, MessageListener } from "./transport";
-
+export type { RouteInfo } from "./helpers";
 // Server helpers
 export { extractServerRouteInfo } from "./helpers";
-export type { RouteInfo } from "./helpers";
-
+// Messages (types only)
+export type {
+	ClientApiResultMessage,
+	ClientCallbackMessage,
+	ClientChannelMessage,
+	ClientChannelRequestMessage,
+	ClientChannelResponseMessage,
+	ClientMessage,
+	ClientMountMessage,
+	ClientNavigateMessage,
+	ClientUnmountMessage,
+	ServerApiCallMessage,
+	ServerChannelMessage,
+	ServerChannelRequestMessage,
+	ServerChannelResponseMessage,
+	ServerErrorInfo,
+	ServerErrorMessage,
+	ServerInitMessage,
+	ServerMessage,
+	ServerNavigateToMessage,
+	ServerUpdateMessage,
+} from "./messages";
+export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
+// Core React bindings
+export { PulseProvider, PulseView, usePulseClient } from "./pulse";
+// Renderer helpers
+export { RenderLazy } from "./renderer";
 // Serialization helpers
 // export { extractEvent } from "./serialize/events";
 // export {
@@ -71,6 +50,17 @@ export type { RouteInfo } from "./helpers";
 //   cleanForSerialization,
 // } from "./serialize/clean";
 export {
-  serialize as serialize,
-  deserialize as deserialize,
+	deserialize,
+	serialize,
 } from "./serialize/serializer";
+// Transports (types only - implementation is internal)
+export type { MessageListener, Transport } from "./transport";
+export { usePulseChannel } from "./usePulseChannel";
+// VDOM types and helpers
+export type {
+	ComponentRegistry,
+	VDOM,
+	VDOMElement,
+	VDOMNode,
+	VDOMUpdate,
+} from "./vdom";

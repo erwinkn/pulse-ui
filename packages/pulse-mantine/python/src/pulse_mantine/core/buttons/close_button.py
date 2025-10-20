@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("CloseButton", "@mantine/core")
-def CloseButton(key: Optional[str] = None, **props): ...
-
+def CloseButton(key: str | None = None, **props: Any): ...

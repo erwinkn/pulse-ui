@@ -1,15 +1,15 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Button", "@mantine/core")
-def Button(*children: ps.Child, key: Optional[str] = None, **props): ...
+def Button(*children: ps.Child, key: str | None = None, **props: Any): ...
 
 
 @ps.react_component("Button", "@mantine/core", prop="Group")
-def ButtonGroup(*children: ps.Child, key: Optional[str] = None, **props): ...
+def ButtonGroup(*children: ps.Child, key: str | None = None, **props: Any): ...
 
 
 @ps.react_component("Button", "@mantine/core", prop="GroupSection")
-def ButtonGroupSection(*children: ps.Child, key: Optional[str] = None, **props): ...
-
+def ButtonGroupSection(*children: ps.Child, key: str | None = None, **props: Any): ...

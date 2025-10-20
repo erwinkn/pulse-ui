@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Highlight", "@mantine/core")
-def Highlight(key: Optional[str] = None, **props): ...
-
+def Highlight(key: str | None = None, **props: Any): ...

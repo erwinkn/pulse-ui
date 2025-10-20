@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("LoadingOverlay", "@mantine/core")
-def LoadingOverlay(key: Optional[str] = None, **props): ...
-
+def LoadingOverlay(key: str | None = None, **props: Any): ...

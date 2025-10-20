@@ -9,11 +9,11 @@ export type RegistryEntry = ComponentType<any>;
 export type ComponentRegistry = Record<string, ComponentType<any>>;
 
 export interface VDOMElement {
-  tag: string;
-  props?: Record<string, any>;
-  children?: VDOMNode[];
-  key?: string;
-  lazy?: boolean;
+	tag: string;
+	props?: Record<string, any>;
+	children?: VDOMNode[];
+	key?: string;
+	lazy?: boolean;
 }
 
 // Primitive nodes that can be rendered
@@ -27,80 +27,80 @@ export type VDOMNode = PrimitiveNode | VDOMElement;
 export type VDOM = VDOMNode;
 
 export interface VDOMUpdateBase {
-  type: string;
-  path: string; // Dot-separated path to the node
+	type: string;
+	path: string; // Dot-separated path to the node
 }
 
 export interface ReplaceUpdate extends VDOMUpdateBase {
-  type: "replace";
-  data: VDOMNode; // The new node
+	type: "replace";
+	data: VDOMNode; // The new node
 }
 
 export interface UpdatePropsUpdate extends VDOMUpdateBase {
-  type: "update_props";
-  data: {
-    set?: Record<string, any>;
-    remove?: string[];
-  };
+	type: "update_props";
+	data: {
+		set?: Record<string, any>;
+		remove?: string[];
+	};
 }
 
 export interface ReconciliationUpdate {
-  type: "reconciliation";
-  path: string;
-  N: number;
-  new: [number[], VDOM[]];
-  reuse: [number[], number[]];
+	type: "reconciliation";
+	path: string;
+	N: number;
+	new: [number[], VDOM[]];
+	reuse: [number[], number[]];
 }
 
 export interface PathDelta {
-  add?: string[];
-  remove?: string[];
+	add?: string[];
+	remove?: string[];
 }
 
 export interface UpdateCallbacksUpdate extends VDOMUpdateBase {
-  type: "update_callbacks";
-  data: PathDelta;
+	type: "update_callbacks";
+	data: PathDelta;
 }
 
 export interface UpdateRenderPropsUpdate extends VDOMUpdateBase {
-  type: "update_render_props";
-  data: PathDelta;
+	type: "update_render_props";
+	data: PathDelta;
 }
 
 export interface UpdateCssRefsUpdate extends VDOMUpdateBase {
-  type: "update_css_refs";
-  data: PathDelta;
+	type: "update_css_refs";
+	data: PathDelta;
 }
 
 export type VDOMUpdate =
-  | ReplaceUpdate
-  | UpdatePropsUpdate
-  | ReconciliationUpdate
-  | UpdateCallbacksUpdate
-  | UpdateRenderPropsUpdate
-  | UpdateCssRefsUpdate;
+	| ReplaceUpdate
+	| UpdatePropsUpdate
+	| ReconciliationUpdate
+	| UpdateCallbacksUpdate
+	| UpdateRenderPropsUpdate
+	| UpdateCssRefsUpdate;
 
 export type UpdateType = VDOMUpdate["type"];
 
 // Utility functions for working with the UI tree structure
 export function isElementNode(node: VDOMNode): node is VDOMElement {
-  // Matches all non-text nodes
-  return typeof node === "object" && node !== null;
+	// Matches all non-text nodes
+	return typeof node === "object" && node !== null;
 }
 
 export function isMountPointNode(node: VDOMNode): node is VDOMElement {
-  return (
-    typeof node === "object" &&
-    node !== null &&
-    node.tag.startsWith(MOUNT_POINT_PREFIX) &&
-    node.tag !== FRAGMENT_TAG
-  );
+	return (
+		typeof node === "object" &&
+		node !== null &&
+		node.tag.startsWith(MOUNT_POINT_PREFIX) &&
+		node.tag !== FRAGMENT_TAG
+	);
 }
 
 export function isTextNode(node: VDOMNode): node is string {
-  return typeof node === "string";
+	return typeof node === "string";
 }
 
 export function isFragment(node: VDOMNode): boolean {
-  return typeof node === "object" && node !== null && node.tag === FRAGMENT_TAG;
+	return typeof node === "object" && node !== null && node.tag === FRAGMENT_TAG;
 }

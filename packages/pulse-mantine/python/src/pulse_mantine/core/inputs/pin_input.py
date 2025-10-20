@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("PinInput", "pulse-mantine")
-def PinInput(key: Optional[str] = None, **props): ...
+def PinInput(key: str | None = None, **props: Any): ...

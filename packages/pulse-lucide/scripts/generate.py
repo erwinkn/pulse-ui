@@ -1,9 +1,11 @@
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import urllib.request
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 GITHUB_API = "https://api.github.com"
 OWNER = "lucide-icons"
@@ -12,165 +14,168 @@ REPO = "lucide"
 THIS_PROJECT = Path(__file__).parent.parent
 
 
-def http_get(url: str, headers: dict) -> dict:
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req) as resp:
-        data = resp.read()
-        return json.loads(data.decode("utf-8"))
+def http_get(url: str, headers: dict[str, str]) -> dict[str, Any]:
+	req = urllib.request.Request(url, headers=headers)
+	with urllib.request.urlopen(req) as resp:
+		data = resp.read()
+		return json.loads(data.decode("utf-8"))
 
 
-def fetch_repo_tree(owner: str, repo: str, ref: str = "main") -> list:
-    token = os.environ.get("GITHUB_TOKEN")
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "pulse-lucide-script",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+def fetch_repo_tree(owner: str, repo: str, ref: str = "main") -> list[Any]:
+	token = os.environ.get("GITHUB_TOKEN")
+	headers = {
+		"Accept": "application/vnd.github+json",
+		"User-Agent": "pulse-lucide-script",
+	}
+	if token:
+		headers["Authorization"] = f"Bearer {token}"
 
-    # Try the provided ref, fall back to HEAD if needed
-    last_err = None
-    for tree_ref in (ref, "HEAD"):
-        url = f"{GITHUB_API}/repos/{owner}/{repo}/git/trees/{tree_ref}?recursive=1"
-        try:
-            payload = http_get(url, headers)
-            if "tree" in payload:
-                return payload["tree"]
-        except Exception as e:
-            last_err = e
-            continue
+	# Try the provided ref, fall back to HEAD if needed
+	last_err = None
+	for tree_ref in (ref, "HEAD"):
+		url = f"{GITHUB_API}/repos/{owner}/{repo}/git/trees/{tree_ref}?recursive=1"
+		try:
+			payload = http_get(url, headers)
+			if "tree" in payload:
+				return payload["tree"]
+		except Exception as e:
+			last_err = e
+			continue
 
-    raise RuntimeError(f"Failed to fetch git tree for {owner}/{repo}: {last_err}")
+	raise RuntimeError(f"Failed to fetch git tree for {owner}/{repo}: {last_err}")
 
 
-def list_icon_files(owner: str = OWNER, repo: str = REPO, icon_dirs=("icons",)) -> list:
-    tree = fetch_repo_tree(owner, repo)
-    results = []
-    icon_dir_prefixes = tuple(f"{d.rstrip('/')}/" for d in icon_dirs)
-    for entry in tree:
-        if entry.get("type") != "blob":
-            continue
-        path = entry.get("path", "")
-        if not path.endswith(".svg"):
-            continue
-        if not path.startswith(icon_dir_prefixes):
-            continue
-        results.append(path.split("/")[-1])
-    results.sort()
-    return results
+def list_icon_files(
+	owner: str = OWNER, repo: str = REPO, icon_dirs: Sequence[str] = ("icons",)
+) -> list[str]:
+	tree = fetch_repo_tree(owner, repo)
+	results = []
+	icon_dir_prefixes = tuple(f"{d.rstrip('/')}/" for d in icon_dirs)
+	for entry in tree:
+		if entry.get("type") != "blob":
+			continue
+		path = entry.get("path", "")
+		if not path.endswith(".svg"):
+			continue
+		if not path.startswith(icon_dir_prefixes):
+			continue
+		results.append(path.split("/")[-1])
+	results.sort()
+	return results
 
 
 def kebab_to_pascal(kebab_name: str) -> str:
-    # Remove extension if present
-    if kebab_name.endswith(".svg"):
-        kebab_name = kebab_name[:-4]
-    parts = [p for p in kebab_name.split("-") if p]
-    return "".join(p[:1].upper() + p[1:] for p in parts)
+	# Remove extension if present
+	if kebab_name.endswith(".svg"):
+		kebab_name = kebab_name[:-4]
+	parts = [p for p in kebab_name.split("-") if p]
+	return "".join(p[:1].upper() + p[1:] for p in parts)
 
 
-def http_get_text(url: str, headers: dict) -> str:
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req) as resp:
-        data = resp.read()
-        return data.decode("utf-8")
+def http_get_text(url: str, headers: dict[str, str]) -> str:
+	req = urllib.request.Request(url, headers=headers)
+	with urllib.request.urlopen(req) as resp:
+		data = resp.read()
+		return data.decode("utf-8")
 
 
-def fetch_lucide_react_export_map(ref: str = "main") -> dict:
-    token = os.environ.get("GITHUB_TOKEN")
-    headers = {
-        "Accept": "application/vnd.github.v3.raw",
-        "User-Agent": "pulse-lucide-script",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+def fetch_lucide_react_export_map(ref: str = "main") -> dict[str, str]:
+	token = os.environ.get("GITHUB_TOKEN")
+	headers = {
+		"Accept": "application/vnd.github.v3.raw",
+		"User-Agent": "pulse-lucide-script",
+	}
+	if token:
+		headers["Authorization"] = f"Bearer {token}"
 
-    # lucide-react index re-exports: export { default as AArrowDown } from './a-arrow-down';
-    path = "packages/lucide-react/src/icons/index.ts"
-    url = f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/{path}?ref={ref}"
-    try:
-        source = http_get_text(url, headers)
-    except Exception:
-        url = f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/{path}?ref=HEAD"
-        source = http_get_text(url, headers)
+	# lucide-react index re-exports: export { default as AArrowDown } from './a-arrow-down';
+	path = "packages/lucide-react/src/icons/index.ts"
+	url = f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/{path}?ref={ref}"
+	try:
+		source = http_get_text(url, headers)
+	except Exception:
+		url = f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/{path}?ref=HEAD"
+		source = http_get_text(url, headers)
 
-    export_map: dict[str, str] = {}
-    pattern = re.compile(
-        r"export\\s*\\{\\s*default\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\}\\s*from\\s*'\\./([^']+)'\\s*;"
-    )
-    for line in source.splitlines():
-        m = pattern.search(line)
-        if not m:
-            continue
-        export_name = m.group(1)
-        file_stem = m.group(2)
-        export_map[file_stem] = export_name
-    return export_map
+	export_map: dict[str, str] = {}
+	pattern = re.compile(
+		r"export\\s*\\{\\s*default\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\}\\s*from\\s*'\\./([^']+)'\\s*;"
+	)
+	for line in source.splitlines():
+		m = pattern.search(line)
+		if not m:
+			continue
+		export_name = m.group(1)
+		file_stem = m.group(2)
+		export_map[file_stem] = export_name
+	return export_map
 
 
 def write_icons_impl_py(component_names: list[str], out_path: Path) -> None:
-    with open(out_path, "w") as f:
-        f.write("# Auto-generated by generate.py. Do not edit manually.\n")
-        f.write("import pulse as ps\n")
-        f.write("from .props import LUCIDE_PROPS_SPEC\n\n")
-        # Exported icon names for introspection and star-imports
-        f.write("__all__ = [\n")
-        for name in component_names:
-            f.write(f'    "{name}",\n')
-        f.write("]\n\n")
+	with open(out_path, "w") as f:
+		f.write("# Auto-generated by generate.py. Do not edit manually.\n")
+		f.write("# pyright: reportUnsupportedDunderAll=false\n")
+		f.write("import pulse as ps\n\n")
+		f.write("from pulse_lucide.props import LUCIDE_PROPS_SPEC\n\n")
+		# Exported icon names for introspection and star-imports
+		f.write("__all__ = [\n")
+		for name in component_names:
+			f.write(f'    "{name}",\n')
+		f.write("]\n\n")
 
-        f.write("_AVAILABLE_ICONS = set(__all__)\n\n")
+		f.write("_AVAILABLE_ICONS = set(__all__)\n\n")
 
-        # Lazily create ReactComponent objects only when accessed/imported
-        f.write("def __getattr__(name: str):\n")
-        f.write("    if name in _AVAILABLE_ICONS:\n")
-        f.write(
-            '        comp = ps.ReactComponent(name, "lucide-react", props=LUCIDE_PROPS_SPEC)\n'
-        )
-        f.write("        globals()[name] = comp\n")
-        f.write("        return comp\n")
-        f.write(
-            "    raise AttributeError(f\"module 'pulse_lucide' has no icon named {name!r}\")\n\n"
-        )
+		# Lazily create ReactComponent objects only when accessed/imported
+		f.write("def __getattr__(name: str):\n")
+		f.write("    if name in _AVAILABLE_ICONS:\n")
+		f.write(
+			'        comp = ps.ReactComponent(name, "lucide-react", prop_spec=LUCIDE_PROPS_SPEC)\n'
+		)
+		f.write("        globals()[name] = comp\n")
+		f.write("        return comp\n")
+		f.write(
+			"    raise AttributeError(f\"module 'pulse_lucide' has no icon named {name!r}\")\n\n"
+		)
 
-        # Keep dir() helpful in REPLs and IDEs
-        f.write("def __dir__():\n")
-        f.write("    return sorted(list(globals().keys()) + list(__all__))\n")
+		# Keep dir() helpful in REPLs and IDEs
+		f.write("def __dir__():\n")
+		f.write("    return sorted(list(globals().keys()) + list(__all__))\n")
 
 
 def write_icons_stub_pyi(component_names: list[str], out_path: Path) -> None:
-    with open(out_path, "w") as f:
-        f.write("# Auto-generated by generate.py. Do not edit manually.\n")
-        f.write("from typing import Optional, Unpack\n")
-        f.write("import pulse as ps\n")
-        f.write("from .props import LucideProps\n\n")
-        for name in component_names:
-            f.write(f"def {name}(\n")
-            f.write("    key: Optional[str] = None, **props: Unpack[LucideProps]\n")
-            f.write(") -> ps.ComponentNode: ...\n")
+	with open(out_path, "w") as f:
+		f.write("# Auto-generated by generate.py. Do not edit manually.\n")
+		f.write("from typing import Unpack\n\n")
+		f.write("import pulse as ps\n\n")
+		f.write("from pulse_lucide.props import LucideProps\n\n")
+		for name in component_names:
+			f.write(f"def {name}(\n")
+			f.write("    key: str | None = None, **props: Unpack[LucideProps]\n")
+			f.write(") -> ps.ComponentNode: ...\n")
 
 
 def main():
-    # Default to top-level 'icons' dir. You can add more dirs if Lucide moves.
-    icon_files = list_icon_files(icon_dirs=("icons",))
+	# Default to top-level 'icons' dir. You can add more dirs if Lucide moves.
+	icon_files = list_icon_files(icon_dirs=("icons",))
 
-    if not icon_files:
-        print(
-            "No icons found. If Lucide moved icons, update icon_dirs.", file=sys.stderr
-        )
-        sys.exit(1)
+	if not icon_files:
+		print(
+			"No icons found. If Lucide moved icons, update icon_dirs.", file=sys.stderr
+		)
+		sys.exit(1)
 
-    # Build PascalCase component names directly from filenames
-    component_names = sorted({kebab_to_pascal(file_name) for file_name in icon_files})
+	# Build PascalCase component names directly from filenames
+	component_names = sorted({kebab_to_pascal(file_name) for file_name in icon_files})
 
-    # Write implementation and stub files
-    icons_py_path = THIS_PROJECT / "src" / "pulse_lucide" / "__init__.py"
-    write_icons_impl_py(component_names, icons_py_path)
-    print(f"Wrote {len(component_names)} component bindings to {icons_py_path}")
+	# Write implementation and stub files
+	icons_py_path = THIS_PROJECT / "src" / "pulse_lucide" / "__init__.py"
+	write_icons_impl_py(component_names, icons_py_path)
+	print(f"Wrote {len(component_names)} component bindings to {icons_py_path}")
 
-    icons_pyi_path = THIS_PROJECT / "src" / "pulse_lucide" / "__init__.pyi"
-    write_icons_stub_pyi(component_names, icons_pyi_path)
-    print(f"Wrote {len(component_names)} stubs to {icons_pyi_path}")
+	icons_pyi_path = THIS_PROJECT / "src" / "pulse_lucide" / "__init__.pyi"
+	write_icons_stub_pyi(component_names, icons_pyi_path)
+	print(f"Wrote {len(component_names)} stubs to {icons_pyi_path}")
 
 
 if __name__ == "__main__":
-    main()
+	main()

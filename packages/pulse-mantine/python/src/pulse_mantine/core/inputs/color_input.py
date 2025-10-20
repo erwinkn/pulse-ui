@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("ColorInput", "pulse-mantine")
-def ColorInput(key: Optional[str] = None, **props): ...
+def ColorInput(key: str | None = None, **props: Any): ...

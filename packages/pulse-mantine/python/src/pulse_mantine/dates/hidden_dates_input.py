@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("HiddenDatesInput", "pulse-mantine")
-def HiddenDatesInput(key: Optional[str] = None, **props): ...
-
+def HiddenDatesInput(key: str | None = None, **props: Any): ...

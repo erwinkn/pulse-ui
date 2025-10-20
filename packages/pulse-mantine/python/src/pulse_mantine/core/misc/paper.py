@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Paper", "@mantine/core")
-def Paper(*children: ps.Child, key: Optional[str] = None, **props): ...
-
+def Paper(*children: ps.Child, key: str | None = None, **props: Any): ...

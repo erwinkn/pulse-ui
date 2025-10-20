@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Chip", "pulse-mantine")
-def Chip(key: Optional[str] = None, **props): ...
+def Chip(key: str | None = None, **props: Any): ...
 
 
 @ps.react_component("Chip", "@mantine/core", prop="Group")
-def ChipGroup(*children: ps.Child, key: Optional[str] = None, **props): ...
+def ChipGroup(*children: ps.Child, key: str | None = None, **props: Any): ...

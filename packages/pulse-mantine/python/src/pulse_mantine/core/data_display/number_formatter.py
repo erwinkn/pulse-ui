@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("NumberFormatter", "@mantine/core")
-def NumberFormatter(key: Optional[str] = None, **props): ...
-
+def NumberFormatter(key: str | None = None, **props: Any): ...

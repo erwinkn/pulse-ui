@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("RadialBarChart", "@mantine/charts")
-def RadialBarChart(key: Optional[str] = None, **props): ...
-
+def RadialBarChart(key: str | None = None, **props: Any): ...

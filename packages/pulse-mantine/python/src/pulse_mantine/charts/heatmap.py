@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("Heatmap", "@mantine/charts")
-def Heatmap(key: Optional[str] = None, **props): ...
-
+def Heatmap(key: str | None = None, **props: Any): ...

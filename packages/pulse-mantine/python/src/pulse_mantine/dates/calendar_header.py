@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any
+
 import pulse as ps
 
 
 @ps.react_component("CalendarHeader", "pulse-mantine")
-def CalendarHeader(key: Optional[str] = None, **props): ...
-
+def CalendarHeader(key: str | None = None, **props: Any): ...

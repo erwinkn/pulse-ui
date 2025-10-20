@@ -34,12 +34,16 @@ format-check:
 	@echo "Checking Ruff formatting..."
 	@uv run ruff format --check .
 	@echo "Checking Biome formatting..."
-	@bunx biome check
+	@bunx biome format
 
 # Type checking
 typecheck:
-	@echo "Running Basedpyright type checker..."
+	@echo "Running basedpyright..."
 	@uv run basedpyright
+	@echo "Running TypeScript for pulse-ui-client..."
+	@bunx tsc --noEmit -p packages/pulse-ui-client/tsconfig.json
+	@echo "Running TypeScript for pulse-mantine..."
+	@bunx tsc --noEmit -p packages/pulse-mantine/js/tsconfig.json
 
 # Testing
 test:

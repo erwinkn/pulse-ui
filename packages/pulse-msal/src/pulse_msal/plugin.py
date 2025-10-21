@@ -27,6 +27,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pulse.helpers import get_client_address
 
 if TYPE_CHECKING:
+	# The dynamic redis import happens in RedisTokenCacheStore
 	import redis  # noqa: F401
 
 SESSION_KEY = os.getenv("MSAL_SESSION_KEY", "msal")

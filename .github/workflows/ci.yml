@@ -9,7 +9,7 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
           bun-version: latest
 
       - name: Install Python dependencies
-        run: uv sync --dev
+        run: uv sync --dev --all-packages
 
       - name: Install JavaScript dependencies
         run: bun install

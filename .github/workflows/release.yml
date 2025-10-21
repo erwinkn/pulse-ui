@@ -152,7 +152,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.js_matrix != '[]'
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ github.event_name == 'push' && 'release' || 'release-dry-run' }}
     strategy:
       matrix:
         package: ${{ fromJson(needs.detect.outputs.js_matrix) }}
@@ -184,7 +184,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.python_matrix != '[]'
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ github.event_name == 'push' && 'release' || 'release-dry-run' }}
     permissions:
       id-token: write
       contents: read

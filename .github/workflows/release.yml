@@ -202,18 +202,17 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Clear dist/ folder
+        run: rm -rf dist
+
       - name: Build Python package
         working-directory: ${{ matrix.package }}
-        run: |
-          rm -rf dist
-          uv build
+        run: uv build
 
       - name: Inspect build output
         if: github.event_name != 'push'
-        working-directory: ${{ matrix.package }}
         run: ls -R dist
 
       - name: Publish Python package
         if: github.event_name == 'push'
-        working-directory: ${{ matrix.package }}
         run: uv publish

@@ -94,6 +94,68 @@ app = ps.App([ps.Route("/", TodoApp)])
 
 ```
 
+## Development Setup
+
+### Prerequisites
+
+- Python 3.11 or higher
+- [uv](https://docs.astral.sh/uv/) for Python package management
+- [Bun](https://bun.sh/) for JavaScript package management
+
+### Getting Started
+
+1. Clone the repository and install dependencies:
+
+```bash
+# Install Python dependencies
+uv sync --dev
+
+# Install JavaScript dependencies
+bun install
+```
+
+2. Set up pre-commit hooks (recommended):
+
+```bash
+uv run prek install
+```
+
+This will automatically format and lint your code before each commit.
+
+### Available Commands
+
+All development commands are available through the Makefile:
+
+```bash
+make format        # Format all code (Biome for JS/TS, Ruff for Python)
+make format-check  # Check formatting without modifying files
+make lint          # Run all linters
+make lint-fix      # Run linters with auto-fix
+make typecheck     # Run type checking (Basedpyright + TypeScript)
+make test          # Run all tests (pytest + bun test)
+make all           # Run format, lint, typecheck, and test
+```
+
+### Pre-commit Hooks
+
+Pre-commit hooks run formatting and linting on staged files only, keeping your commits clean. They're fast (~1-3 seconds) and will auto-fix most issues.
+
+To run hooks manually on all files:
+
+```bash
+uv run prek run --all-files
+```
+
+### Continuous Integration
+
+All PRs must pass CI checks before merging. The CI pipeline runs:
+- Format checking
+- Linting
+- Type checking
+- All tests
+
+You can run the same checks locally with `make all` before pushing.
+
 ## Comparisons
 
 It may be easier to understand Pulse by comparing it to frameworks you already know:

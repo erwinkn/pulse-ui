@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Python dependencies
+        run: uv sync --dev
+
+      - name: Install JavaScript dependencies
+        run: bun install
+
+      - name: Check formatting
+        run: make format-check
+
+      - name: Run linters
+        run: make lint
+
+      - name: Run type checking
+        run: make typecheck
+
+      - name: Run tests
+        run: make test

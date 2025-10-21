@@ -171,7 +171,7 @@ jobs:
       - name: Publish JavaScript package (dry run)
         if: github.event_name != 'push'
         working-directory: ${{ matrix.package }}
-        run: bun publish --access public --dry-run
+        run: bun publish --dry-run
 
       - name: Publish JavaScript package
         if: github.event_name == 'push'
@@ -203,14 +203,17 @@ jobs:
           enable-cache: true
 
       - name: Build Python package
+        working-directory: ${{ matrix.package }}
         run: |
           rm -rf dist
-          uv build --package ${{ matrix.package }}
+          uv build
 
       - name: Inspect build output
         if: github.event_name != 'push'
-        run: ls -R ${{ matrix.package }}/dist
+        working-directory: ${{ matrix.package }}
+        run: ls -R dist
 
       - name: Publish Python package
         if: github.event_name == 'push'
+        working-directory: ${{ matrix.package }}
         run: uv publish

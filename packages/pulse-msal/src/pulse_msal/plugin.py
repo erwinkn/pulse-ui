@@ -17,7 +17,7 @@ import os
 import secrets
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 from urllib.parse import quote
 
 import msal
@@ -25,6 +25,9 @@ import pulse as ps
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pulse.helpers import get_client_address
+
+if TYPE_CHECKING:
+	import redis  # noqa: F401
 
 SESSION_KEY = os.getenv("MSAL_SESSION_KEY", "msal")
 

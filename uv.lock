@@ -864,6 +864,7 @@ dev = [
     { name = "pulse-recharts" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "redis" },
     { name = "ruff" },
 ]
 
@@ -884,6 +885,7 @@ dev = [
     { name = "pulse-recharts", editable = "packages/pulse-recharts" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-asyncio", specifier = ">=1.1.0" },
+    { name = "redis", specifier = ">=6.4.0" },
     { name = "ruff", specifier = ">=0.14.1" },
 ]
 

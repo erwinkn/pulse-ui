@@ -17,7 +17,6 @@
 		"@react-router/node": "^7.7.1",
 		"@react-router/serve": "^7.7.1",
 		"dayjs": "^1.11.18",
-		"isbot": "^5.1.27",
 		"pulse-mantine": "workspace:*",
 		"pulse-ui-client": "workspace:*",
 		"react": "^19.1.0",

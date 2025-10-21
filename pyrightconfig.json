@@ -12,7 +12,8 @@
   "allowedUntypedLibraries": [
     "socketio",
     "msal",
-    "mako.template"
+    "mako.template",
+    "redis"
   ],
   // Framework code often has to use Any.
   "reportAny": "none",

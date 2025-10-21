@@ -5,11 +5,11 @@ import { gzipSync } from "node:zlib";
 import {
 	deserialize as deserializeV2,
 	serialize as serializeV2,
-} from "../packages/pulse-ui-client/src/serialize/v2";
+} from "../packages/pulse/js/src/serialize/v2";
 import {
 	deserialize as deserializeV3,
 	serialize as serializeV3,
-} from "../packages/pulse-ui-client/src/serialize/v3";
+} from "../packages/pulse/js/src/serialize/v3";
 
 const WARMUP_RUNS = 5;
 const MEASURED_RUNS = Number.parseInt(process.argv[2] ?? "20", 10);
@@ -196,7 +196,9 @@ function loadPayloadFromFile(filePath: string) {
 		return { payload, payloadSize, payloadGzipSize };
 	} catch (error) {
 		throw new Error(
-			`Failed to load JSON file "${filePath}": ${error instanceof Error ? error.message : String(error)}`,
+			`Failed to load JSON file "${filePath}": ${
+				error instanceof Error ? error.message : String(error)
+			}`,
 		);
 	}
 }

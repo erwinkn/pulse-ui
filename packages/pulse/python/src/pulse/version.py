@@ -21,14 +21,16 @@ __all__ = ["__version__"]
 def _read_local_pyproject_version() -> str | None:
 	"""Best-effort read of version from a local pyproject.toml (dev/editable).
 
-	Searches upwards from this file to find `packages/pulse/pyproject.toml` and
+	Searches upwards from this file to find `packages/pulse/python/pyproject.toml` and
 	parses the minimal `version = "x.y.z"` line without importing tomllib to
 	avoid unnecessary dependency at runtime.
 	"""
 
 	try:
 		here = Path(__file__).resolve()
-		root = here.parent.parent.parent  # packages/pulse/src/pulse -> packages/pulse
+		root = (
+			here.parent.parent.parent
+		)  # packages/pulse/python/src/pulse -> packages/pulse/python
 		pyproject = root / "pyproject.toml"
 		if not pyproject.exists():
 			return None

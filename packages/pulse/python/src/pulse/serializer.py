@@ -1,6 +1,6 @@
 """Pulse serializer v3 implementation (Python).
 
-The format mirrors the TypeScript implementation in ``packages/pulse-ui-client``.
+The format mirrors the TypeScript implementation in ``packages/pulse/js``.
 
 Serialized payload structure::
 

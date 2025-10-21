@@ -90,7 +90,7 @@ You can run the same checks locally with `make all` before pushing.
 This is a monorepo containing multiple packages:
 
 ### Python Packages
-- `packages/pulse/` - Core Pulse framework
+- `packages/pulse/python` - Core Pulse framework
 - `packages/pulse-ag-grid/` - AG Grid integration
 - `packages/pulse-lucide/` - Lucide icons
 - `packages/pulse-mantine/python/` - Mantine components (Python)
@@ -98,7 +98,7 @@ This is a monorepo containing multiple packages:
 - `packages/pulse-recharts/` - Recharts integration
 
 ### JavaScript Packages
-- `packages/pulse-ui-client/` - Client-side JavaScript runtime
+- `packages/pulse/js` - Client-side JavaScript runtime
 - `packages/pulse-mantine/js/` - Mantine components (JavaScript)
 
 ### Examples and Documentation

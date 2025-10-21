@@ -1,4 +1,4 @@
-name: Publish Packages
+name: Release
 
 on:
   push:
@@ -152,7 +152,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.js_matrix != '[]'
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ github.event_name == 'push' && 'release' || 'release-dry-run' }}
     strategy:
       matrix:
         package: ${{ fromJson(needs.detect.outputs.js_matrix) }}
@@ -171,7 +171,7 @@ jobs:
       - name: Publish JavaScript package (dry run)
         if: github.event_name != 'push'
         working-directory: ${{ matrix.package }}
-        run: bun publish --access public --dry-run
+        run: bun pm pack --dry-run --quiet
 
       - name: Publish JavaScript package
         if: github.event_name == 'push'
@@ -184,7 +184,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.python_matrix != '[]'
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ github.event_name == 'push' && 'release' || 'release-dry-run' }}
     permissions:
       id-token: write
       contents: read
@@ -202,14 +202,16 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Clear dist/ folder
+        run: rm -rf dist
+
       - name: Build Python package
-        run: |
-          rm -rf dist
-          uv build --package ${{ matrix.package }}
+        working-directory: ${{ matrix.package }}
+        run: uv build
 
       - name: Inspect build output
         if: github.event_name != 'push'
-        run: ls -R ${{ matrix.package }}/dist
+        run: ls -R dist
 
       - name: Publish Python package
         if: github.event_name == 'push'

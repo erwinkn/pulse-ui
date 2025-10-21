@@ -13,10 +13,10 @@ repos:
         types_or: [ python, pyi ]
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.5.11
+    rev: 0.9.4
     hooks:
       - id: uv-lock
-        
+
   # Local hook to reuse the Biome version installed as dev dependency
   - repo: local
     hooks:
@@ -30,6 +30,6 @@ repos:
         name: Update bun lockfile
         entry: bun install
         language: system
-        files: ^(package\.json|bun\.lockb)$
+        files: ^(package\.json|bun\.lock)$
         pass_filenames: false
 

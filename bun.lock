@@ -90,7 +90,7 @@
         "recharts": "^3",
       },
     },
-    "packages/pulse-ui-client": {
+    "packages/pulse/js": {
       "name": "pulse-ui-client",
       "version": "0.1.31",
       "dependencies": {
@@ -781,7 +781,7 @@
 
     "pulse-mantine": ["pulse-mantine@workspace:packages/pulse-mantine/js"],
 
-    "pulse-ui-client": ["pulse-ui-client@workspace:packages/pulse-ui-client"],
+    "pulse-ui-client": ["pulse-ui-client@workspace:packages/pulse/js"],
 
     "pulse-web": ["pulse-web@workspace:examples/web"],
 

@@ -37,7 +37,7 @@ pulse-recharts = { workspace = true }
 
 [tool.uv.workspace]
 members = [
-    "packages/pulse",
+    "packages/pulse/python",
     "packages/pulse-ag-grid",
     "packages/pulse-lucide",
     "packages/pulse-mantine/python",

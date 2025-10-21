@@ -393,7 +393,7 @@ class SupportsDunderGT(Protocol[_T_contra]):
 SupportsRichComparison: TypeAlias = SupportsDunderLT[_Any] | SupportsDunderGT[_Any]
 SupportsRichComparisonT = TypeVar(
 	"SupportsRichComparisonT", bound=SupportsRichComparison
-)  # noqa: Y001
+)
 # ====
 
 

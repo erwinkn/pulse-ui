@@ -1,0 +1,207 @@
+name: Publish Packages
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      python-packages: ${{ steps.detect.outputs.python-packages }}
+      js-packages: ${{ steps.detect.outputs.js-packages }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect version changes
+        id: detect
+        run: |
+          # Initialize arrays for changed packages
+          python_packages=()
+          js_packages=()
+          
+          # Python packages to check (path:package-name)
+          declare -A python_map=(
+            ["packages/pulse/pyproject.toml"]="pulse-framework"
+            ["packages/pulse-ag-grid/pyproject.toml"]="pulse-ag-grid"
+            ["packages/pulse-lucide/pyproject.toml"]="pulse-lucide"
+            ["packages/pulse-mantine/python/pyproject.toml"]="pulse-mantine"
+            ["packages/pulse-msal/pyproject.toml"]="pulse-msal"
+            ["packages/pulse-recharts/pyproject.toml"]="pulse-recharts"
+          )
+          
+          # JavaScript packages to check (path:package-name)
+          declare -A js_map=(
+            ["packages/pulse-ui-client/package.json"]="pulse-ui-client"
+            ["packages/pulse-mantine/js/package.json"]="pulse-mantine"
+          )
+          
+          echo "Checking for version changes..."
+          
+          # Check Python packages
+          for file in "${!python_map[@]}"; do
+            package_name="${python_map[$file]}"
+            
+            # Get version from line 3 of pyproject.toml
+            old_version=$(git show HEAD~1:"$file" 2>/dev/null | sed -n '3p' | grep -oP 'version = "\K[^"]+' || echo "")
+            new_version=$(sed -n '3p' "$file" | grep -oP 'version = "\K[^"]+' || echo "")
+            
+            if [ -n "$old_version" ] && [ -n "$new_version" ] && [ "$old_version" != "$new_version" ]; then
+              echo "Python package $package_name version changed: $old_version -> $new_version"
+              python_packages+=("$package_name")
+            fi
+          done
+          
+          # Check JavaScript packages
+          for file in "${!js_map[@]}"; do
+            package_name="${js_map[$file]}"
+            
+            # Get version from line 3 of package.json
+            old_version=$(git show HEAD~1:"$file" 2>/dev/null | sed -n '3p' | grep -oP '"version": "\K[^"]+' || echo "")
+            new_version=$(sed -n '3p' "$file" | grep -oP '"version": "\K[^"]+' || echo "")
+            
+            if [ -n "$old_version" ] && [ -n "$new_version" ] && [ "$old_version" != "$new_version" ]; then
+              echo "JavaScript package $package_name version changed: $old_version -> $new_version"
+              js_packages+=("$package_name")
+            fi
+          done
+          
+          # Convert arrays to JSON format for matrix
+          if [ ${#python_packages[@]} -gt 0 ]; then
+            python_json=$(printf '%s\n' "${python_packages[@]}" | jq -R . | jq -s -c .)
+            echo "python-packages=$python_json" >> $GITHUB_OUTPUT
+            echo "Python packages to publish: $python_json"
+          else
+            echo "python-packages=" >> $GITHUB_OUTPUT
+            echo "No Python packages to publish"
+          fi
+          
+          if [ ${#js_packages[@]} -gt 0 ]; then
+            js_json=$(printf '%s\n' "${js_packages[@]}" | jq -R . | jq -s -c .)
+            echo "js-packages=$js_json" >> $GITHUB_OUTPUT
+            echo "JavaScript packages to publish: $js_json"
+          else
+            echo "js-packages=" >> $GITHUB_OUTPUT
+            echo "No JavaScript packages to publish"
+          fi
+
+  publish-python:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.python-packages != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.detect-changes.outputs.python-packages) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev --all-packages
+
+      - name: Build package
+        run: uv build --package ${{ matrix.package }}
+        continue-on-error: false
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv publish --package ${{ matrix.package }}
+        continue-on-error: false
+
+      - name: Report success
+        if: success()
+        run: echo "✅ Successfully published ${{ matrix.package }} to PyPI"
+
+      - name: Report failure
+        if: failure()
+        run: echo "❌ Failed to publish ${{ matrix.package }} to PyPI"
+
+  publish-js:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.js-packages != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Setup NPM authentication
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+
+      - name: Publish packages in order
+        run: |
+          # Parse the packages JSON array
+          packages='${{ needs.detect-changes.outputs.js-packages }}'
+          
+          # Define the correct build order
+          build_order=("pulse-ui-client" "pulse-mantine")
+          
+          # Track success/failure
+          failed_packages=()
+          successful_packages=()
+          
+          # Publish packages in the correct order
+          for package in "${build_order[@]}"; do
+            # Check if this package needs to be published
+            if echo "$packages" | jq -e --arg pkg "$package" 'index($pkg) != null' > /dev/null; then
+              echo "Publishing $package..."
+              
+              # Determine the package directory
+              if [ "$package" = "pulse-ui-client" ]; then
+                package_dir="packages/pulse-ui-client"
+              elif [ "$package" = "pulse-mantine" ]; then
+                package_dir="packages/pulse-mantine/js"
+              fi
+              
+              # Change to package directory and publish
+              cd "$package_dir"
+              
+              # The prepublishOnly script will handle the build
+              if bun publish --access public; then
+                echo "✅ Successfully published $package to NPM"
+                successful_packages+=("$package")
+              else
+                echo "❌ Failed to publish $package to NPM"
+                failed_packages+=("$package")
+              fi
+              
+              # Return to root directory
+              cd "$GITHUB_WORKSPACE"
+            fi
+          done
+          
+          # Report results
+          echo ""
+          echo "=== Publication Summary ==="
+          if [ ${#successful_packages[@]} -gt 0 ]; then
+            echo "✅ Successfully published: ${successful_packages[*]}"
+          fi
+          if [ ${#failed_packages[@]} -gt 0 ]; then
+            echo "❌ Failed to publish: ${failed_packages[*]}"
+            exit 1
+          fi
+          
+          echo "All JavaScript packages published successfully!"

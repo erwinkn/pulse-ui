@@ -1,6 +1,6 @@
-from pathlib import Path
-import pulse as ps
 import asyncio
+
+import pulse as ps
 
 
 class QueryDemoState(ps.State):

@@ -44,7 +44,7 @@ describe("encodeForWire / decodeFromWire", () => {
 		}
 	});
 
-	it.only("handles circular references with refs", async () => {
+	it("handles circular references with refs", async () => {
 		const a: any = { name: "a" };
 		const b: any = { name: "b", a };
 		a.b = b;

@@ -1,0 +1,24 @@
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.14.1
+    hooks:
+      # Run the linter (.py, .pyi only)
+      - id: ruff-check
+        types_or: [ python, pyi ]
+        args: [ --fix ]
+      # Run the formatter (.py, .pyi only)
+      - id: ruff-format
+        types_or: [ python, pyi ]
+        
+  # Local hook to reuse the Biome version installed as dev dependency
+  - repo: local
+    hooks:
+      - id: biome-check
+        name: biome check
+        entry: bunx --bun @biomejs/biome check --write --files-ignore-unknown=true --no-errors-on-unmatched
+        language: system
+        types: [text]
+        files: "\\.(jsx?|tsx?|c(js|ts)|m(js|ts)|d\\.(ts|cts|mts)|jsonc?)$"
+

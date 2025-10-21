@@ -12,6 +12,7 @@
 		"allowImportingTsExtensions": true,
 		"verbatimModuleSyntax": true,
 		"noEmit": true,
+		"customConditions": ["@pulse/source"],
 		// Best practices
 		"strict": true,
 		"skipLibCheck": true,

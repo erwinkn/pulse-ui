@@ -15,6 +15,7 @@
 	},
 	"exports": {
 		".": {
+			"@pulse/source": "./src/index.ts",
 			"types": "./dist/index.d.ts",
 			"bun": "./dist/index.bun.js",
 			"node": "./dist/index.node.js",

@@ -94,6 +94,10 @@ app = ps.App([ps.Route("/", TodoApp)])
 
 ```
 
+## Contributing
+
+Interested in contributing? Check out [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and workflow guidelines.
+
 ## Comparisons
 
 It may be easier to understand Pulse by comparing it to frameworks you already know:

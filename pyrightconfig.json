@@ -1,7 +1,7 @@
 {
   "include": [
-    "packages/pulse/src",
-    "packages/pulse/tests",
+    "packages/pulse/python/src",
+    "packages/pulse/python/tests",
     "packages/pulse-ag-grid/src",
     "packages/pulse-lucide/src",
     "packages/pulse-mantine/python",

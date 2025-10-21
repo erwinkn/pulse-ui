@@ -1,6 +1,6 @@
 import pulse as ps
 
-# This example exercises all keyed reconciliation code paths in packages/pulse/src/pulse/renderer.py
+# This example exercises all keyed reconciliation code paths in packages/pulse/python/src/pulse/renderer.py
 # The scenarios are driven by a stateful stepper that transforms a keyed child list through
 # sequences that force each branch:
 #   - Step 0 → 1: empty → keyed inserts (n_old=0)

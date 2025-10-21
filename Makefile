@@ -41,7 +41,7 @@ typecheck:
 	@echo "Running basedpyright..."
 	@uv run basedpyright
 	@echo "Running TypeScript for pulse-ui-client..."
-	@bunx tsc --noEmit -p packages/pulse-ui-client/tsconfig.json
+	@bunx tsc --noEmit -p packages/pulse/js/tsconfig.json
 	@echo "Running TypeScript for pulse-mantine..."
 	@bunx tsc --noEmit -p packages/pulse-mantine/js/tsconfig.json
 

@@ -439,7 +439,7 @@ As mentioned above, `stable` works especially well with functions, as it's the m
 
 ### 4.6. Custom hooks
 
-TODO. Pulse has a core hook system that is used to define all the hooks described above. It can also be leveraged by the user to implement their own hooks. The hook system and implementations can be found in [`packages/pulse/src/pulse/hooks`](https://github.com/erwinkn/pulse-ui/tree/main/packages/pulse/src/pulse/hooks).
+TODO. Pulse has a core hook system that is used to define all the hooks described above. It can also be leveraged by the user to implement their own hooks. The hook system and implementations can be found in [`packages/pulse/python/src/pulse/hooks`](https://github.com/erwinkn/pulse-ui/tree/main/packages/pulse/python/src/pulse/hooks).
 
 ## 5. State (part II)
 

@@ -11,6 +11,11 @@ repos:
       # Run the formatter (.py, .pyi only)
       - id: ruff-format
         types_or: [ python, pyi ]
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.5.11
+    hooks:
+      - id: uv-lock
         
   # Local hook to reuse the Biome version installed as dev dependency
   - repo: local
@@ -21,4 +26,10 @@ repos:
         language: system
         types: [text]
         files: "\\.(jsx?|tsx?|c(js|ts)|m(js|ts)|d\\.(ts|cts|mts)|jsonc?)$"
+      - id: bun-install
+        name: Update bun lockfile
+        entry: bun install
+        language: system
+        files: ^(package\.json|bun\.lockb)$
+        pass_filenames: false
 

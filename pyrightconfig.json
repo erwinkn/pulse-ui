@@ -12,7 +12,7 @@
   "allowedUntypedLibraries": [
     "socketio",
     "msal",
-    "mako.template"
+    "mako.template",
   ],
   // Framework code often has to use Any.
   "reportAny": "none",
@@ -33,5 +33,7 @@
   "reportUnusedCallResult": "none",
   // Makes Pulse's context setup impossible and I don't want to put everything
   // into a single giant file.
-  "reportImportCycles": "none"
+  "reportImportCycles": "none",
+  // TYPE_CHECKING imports are intentionally unused at runtime
+  "reportUnusedImport": "none"
 }

@@ -20,6 +20,7 @@ dev = [
     "mypy>=1.17.0",
     "pytest>=8.3.4",
     "pytest-asyncio>=1.1.0",
+    "redis>=6.4.0",
     "ruff>=0.14.1",
     "basedpyright>=1.31.7",
     "prek>=0.2.10",

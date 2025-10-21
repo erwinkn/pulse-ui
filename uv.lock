@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 
 [manifest]
@@ -744,7 +744,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse" }]
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.30"
+version = "0.1.31"
 source = { editable = "packages/pulse" }
 dependencies = [
     { name = "fastapi" },
@@ -802,7 +802,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse" }]
 
 [[package]]
 name = "pulse-mantine"
-version = "0.1.14"
+version = "0.1.15"
 source = { editable = "packages/pulse-mantine/python" }
 dependencies = [
     { name = "pulse-framework" },

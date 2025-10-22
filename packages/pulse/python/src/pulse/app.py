@@ -498,9 +498,9 @@ class App:
 			return resp
 
 		@self.fastapi.post("/pulse/forms/{render_id}/{form_id}")
-		async def handle_form_submit(
+		async def handle_form_submit(  # pyright: ignore[reportUnusedFunction]
 			render_id: str, form_id: str, request: Request
-		) -> Response:  # pyright: ignore[reportUnusedFunction]
+		) -> Response:
 			session = PulseContext.get().session
 			if session is None:
 				raise RuntimeError("Internal error: couldn't resolve user session")

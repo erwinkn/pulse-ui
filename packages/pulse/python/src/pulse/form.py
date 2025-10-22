@@ -28,7 +28,7 @@ from pulse.types.event_handler import EventHandler1
 from pulse.vdom import Child
 
 if TYPE_CHECKING:
-	from pulse.app import App
+	from pulse.render_session import RenderSession
 	from pulse.user_session import UserSession
 
 
@@ -64,10 +64,9 @@ class FormRegistration:
 
 
 class FormRegistry:
-	def __init__(self, app: "App") -> None:
-		self._app: "App" = app
+	def __init__(self, render: "RenderSession") -> None:
+		self._render: "RenderSession" = render
 		self._handlers: dict[str, FormRegistration] = {}
-		self._forms_by_render: dict[str, set[str]] = {}
 
 	def register(
 		self,
@@ -84,23 +83,13 @@ class FormRegistry:
 			on_submit=on_submit,
 		)
 		self._handlers[registration.id] = registration
-		self._forms_by_render.setdefault(registration.render_id, set()).add(
-			registration.id
-		)
 		return registration
 
 	def unregister(self, form_id: str) -> None:
-		registration = self._handlers.pop(form_id, None)
-		if registration is None:
-			return
-		bucket = self._forms_by_render.get(registration.render_id)
-		if bucket is not None:
-			bucket.discard(form_id)
-			if len(bucket) == 0:
-				self._forms_by_render.pop(registration.render_id)
+		self._handlers.pop(form_id, None)
 
-	def remove_render(self, render_id: str) -> None:
-		for form_id in list(self._forms_by_render.get(render_id, set())):
+	def dispose(self) -> None:
+		for form_id in list(self._handlers.keys()):
 			self.unregister(form_id)
 
 	async def handle_submit(
@@ -134,15 +123,8 @@ class FormRegistry:
 				# Remove the __data__ field
 				del data["__data__"]
 
-		render = self._app.render_sessions.get(registration.render_id)
-		if render is None:
-			self.unregister(form_id)
-			raise HTTPException(
-				status_code=410, detail="Render session expired for form"
-			)
-
 		try:
-			mount = render.get_route_mount(registration.route_path)
+			mount = self._render.get_route_mount(registration.route_path)
 		except ValueError as exc:
 			self.unregister(form_id)
 			raise HTTPException(
@@ -150,7 +132,7 @@ class FormRegistry:
 				detail="Form route is no longer mounted",
 			) from exc
 
-		with PulseContext.update(render=render, route=mount.route):
+		with PulseContext.update(render=self._render, route=mount.route):
 			await call_flexible(registration.on_submit, data)
 
 		return Response(status_code=204)
@@ -223,7 +205,7 @@ class GeneratedFormProps(TypedDict):
 
 class ManualForm:
 	_submit_signal: Signal[bool]
-	_app: "App"
+	_render: "RenderSession"
 	_registration: FormRegistration | None
 
 	def __init__(self, on_submit: EventHandler1[FormData] | None = None) -> None:
@@ -239,8 +221,8 @@ class ManualForm:
 			raise RuntimeError("ManualForm requires an active user session")
 
 		self._submit_signal = Signal(False)
-		self._app = ctx.app
-		self._registration = self._app.forms.register(
+		self._render = render
+		self._registration = render.forms.register(
 			session_id=session.sid,
 			render_id=render.id,
 			route_id=route.pulse_route.unique_path(),
@@ -270,7 +252,7 @@ class ManualForm:
 
 	def props(self) -> GeneratedFormProps:
 		return {
-			"action": f"{server_address()}/pulse/forms/{self.registration.id}",
+			"action": f"{server_address()}/pulse/forms/{self._render.id}/{self.registration.id}",
 			"method": "POST",
 			"encType": "multipart/form-data",
 			"onSubmit": self._start_submit,
@@ -288,7 +270,7 @@ class ManualForm:
 	def dispose(self) -> None:
 		if self._registration is None:
 			return
-		self._app.forms.unregister(self._registration.id)
+		self._render.forms.unregister(self._registration.id)
 		self._registration = None
 
 	def update(self, on_submit: EventHandler1[FormData] | None) -> None:

@@ -358,7 +358,7 @@ def run(
 		elif server_command:
 			server_command.extend(extra_flags)
 
-	def run_with_pty():
+	def run_with_pty() -> int:
 		"""Run server and web processes with PTY-based interleaved output."""
 		import fcntl
 		import select
@@ -394,7 +394,7 @@ def run(
 					fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
 					procs.append(("web", pid, fd))
 
-			fds = {fd: tag for tag, pid, fd in procs}
+			fds: dict[int, str] = {fd: tag for tag, _pid, fd in procs}
 			buffers = {fd: b"" for fd in fds}
 
 			while procs:
@@ -444,7 +444,7 @@ def run(
 					except OSError:
 						continue
 
-			exit_codes = []
+			exit_codes: list[int] = []
 			for _tag, pid, fd in procs:
 				try:
 					_, status = os.waitpid(pid, 0)

@@ -199,7 +199,7 @@ async def test_state_query_keep_previous_data_on_refetch_default():
 	class S(ps.State):
 		uid: int = 1
 
-		@ps.query
+		@ps.query(keep_previous_data=True)
 		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
@@ -273,7 +273,7 @@ async def test_state_query_manual_set_data():
 	class S(ps.State):
 		uid: int = 1
 
-		@ps.query
+		@ps.query(keep_previous_data=True)
 		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
@@ -315,7 +315,7 @@ async def test_state_query_with_initial_value_narrows_and_preserves():
 	class S(ps.State):
 		uid: int = 1
 
-		@ps.query(initial={"id": 0})
+		@ps.query(initial={"id": 0}, keep_previous_data=True)
 		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
@@ -790,3 +790,117 @@ async def test_state_query_no_refetch_after_state_dispose():
 	# Calls count unchanged, and data not updated to new id
 	assert s.calls == 1
 	assert q.data == {"id": 1}
+
+
+@pytest.mark.asyncio
+async def test_query_resets_data_on_key_change_when_keep_previous_false():
+	"""
+	Regression test: when keep_previous_data=False, changing the query key
+	should immediately reset data to None and set is_loading to True,
+	synchronously, before the new query runs. This prevents showing stale
+	data for one render.
+	"""
+
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(keep_previous_data=False)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await run_query()
+	assert q.data == {"id": 1}
+	assert q.is_loading is False
+
+	# Change key - this should synchronously reset data immediately
+	s.uid = 2
+
+	# Check state IMMEDIATELY after running effects, before async effects have the
+	# time to start. This is where the bug manifests: old data is still visible.
+	# Expected: data should be None, is_loading should be True
+	# Actual (buggy): data is still {"id": 1}, is_loading is still False
+	flush_effects()  # Schedule the effect to re-run
+
+	# CRITICAL: Check the query result state right after flush_effects(),
+	# but BEFORE any async tasks run. This represents what a render would see.
+	# With the bug, this will show stale data. After the fix, it should be cleared.
+	assert q.is_loading is True, (
+		f"Query should be loading immediately after key change, but is_loading={q.is_loading}, data={q.data}"
+	)
+	assert q.data is None, (
+		f"Query data should be cleared immediately after key change, but got {q.data}"
+	)
+
+	# Now complete the new query
+	await asyncio.sleep(0)  # Start query task
+	await asyncio.sleep(0)  # Complete query
+	await asyncio.sleep(0)  # Execute callbacks
+
+	# After fetch completes, new data should be present
+	assert q.is_loading is False
+	assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+async def test_query_preserves_data_on_key_change_when_keep_previous_true():
+	"""
+	Regression test: when keep_previous_data=True, changing the query key
+	should set is_loading to True but preserve the previous data,
+	synchronously, before the new query runs. This allows showing the old
+	data while the new data loads.
+	"""
+
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(keep_previous_data=True)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await run_query()
+	assert q.data == {"id": 1}
+	assert q.is_loading is False
+
+	# Change key - this should synchronously set loading but preserve data
+	s.uid = 2
+
+	# Check state IMMEDIATELY after running effects, before async effects have the
+	# time to start. With keep_previous_data=True, the old data should still be visible.
+	flush_effects()  # Schedule the effect to re-run
+
+	# CRITICAL: Check the query result state right after flush_effects(),
+	# but BEFORE any async tasks run. This represents what a render would see.
+	# With keep_previous_data=True, should show loading state with old data.
+	assert q.is_loading is True, (
+		f"Query should be loading immediately after key change, but is_loading={q.is_loading}, data={q.data}"
+	)
+	assert q.data == {"id": 1}, (
+		f"Query data should be preserved when keep_previous_data=True, but got {q.data}"
+	)
+
+	# Now complete the new query
+	await asyncio.sleep(0)  # Start query task
+	await asyncio.sleep(0)  # Complete query
+	await asyncio.sleep(0)  # Execute callbacks
+
+	# After fetch completes, new data should be present and loading should be false
+	assert q.is_loading is False
+	assert q.data == {"id": 2}

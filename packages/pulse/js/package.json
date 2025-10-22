@@ -10,21 +10,21 @@
 	"main": "./dist/index.js",
 	"module": "./dist/index.js",
 	"types": "./dist/index.d.ts",
-	"dependencies": {
-		"socket.io-client": "^4.8.1"
-	},
 	"exports": {
 		".": {
 			"@pulse/source": "./src/index.ts",
-			"types": "./dist/index.d.ts",
-			"node": "./dist/index.node.js",
-			"browser": {
-				"development": "./dist/index.browser.development.js",
-				"default": "./dist/index.js"
-			},
-			"development": "./dist/index.neutral.development.js",
-			"default": "./dist/index.neutral.js"
-		}
+			"default": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"build:dev": "tsdown --env development",
+		"build:watch": "tsdown --watch",
+		"prepublishOnly": "tsdown"
+	},
+	"dependencies": {
+		"socket.io-client": "^4.8.1"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",
@@ -39,10 +39,10 @@
 		"react-dom": "^18 || ^19",
 		"react-router": "^7"
 	},
-	"scripts": {
-		"build": "tsdown",
-		"build:dev": "tsdown --env development",
-		"build:watch": "tsdown --watch",
-		"prepublishOnly": "bun run build"
+	"publishConfig": {
+		"exports": {
+			".": "./dist/index.js",
+			"./package.json": "./package.json"
+		}
 	}
 }

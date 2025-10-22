@@ -1,79 +1,11 @@
 import { defineConfig } from "tsdown";
 
-export default [
-	defineConfig({
-		entry: ["src/index.ts"],
-		format: ["esm"],
-		platform: "browser",
-		outDir: "dist",
-		dts: true,
-		clean: true,
-		minify: true,
-		sourcemap: true,
-		autoExternal: true,
-		define: {
-			"process.env.NODE_ENV": '"production"',
-			__DEV__: "false",
-		},
-	}),
-	defineConfig({
-		entry: { "index.browser.development": "src/index.ts" },
-		format: ["esm"],
-		platform: "browser",
-		outDir: "dist",
-		dts: false,
-		clean: false,
-		minify: false,
-		sourcemap: "inline",
-		autoExternal: true,
-		define: {
-			"process.env.NODE_ENV": '"development"',
-			__DEV__: "true",
-		},
-	}),
-	defineConfig({
-		entry: { "index.node": "src/index.ts" },
-		format: ["esm"],
-		platform: "node",
-		outDir: "dist",
-		dts: false,
-		clean: false,
-		minify: true,
-		sourcemap: "inline",
-		autoExternal: true,
-		define: {
-			"process.env.NODE_ENV": '"production"',
-			__DEV__: "false",
-		},
-	}),
-	defineConfig({
-		entry: { "index.neutral": "src/index.ts" },
-		format: ["esm"],
-		platform: "neutral",
-		outDir: "dist",
-		dts: false,
-		clean: false,
-		minify: true,
-		sourcemap: "inline",
-		autoExternal: true,
-		define: {
-			"process.env.NODE_ENV": '"production"',
-			__DEV__: "false",
-		},
-	}),
-	defineConfig({
-		entry: { "index.neutral.development": "src/index.ts" },
-		format: ["esm"],
-		platform: "neutral",
-		outDir: "dist",
-		dts: false,
-		clean: false,
-		minify: false,
-		sourcemap: "inline",
-		autoExternal: true,
-		define: {
-			"process.env.NODE_ENV": '"development"',
-			__DEV__: "true",
-		},
-	}),
-];
+export default defineConfig({
+	entry: ["src/index.ts"],
+	platform: "neutral",
+	target: "esnext",
+	dts: true,
+	minify: true,
+	sourcemap: true,
+	exports: { devExports: "@pulse/source" },
+});

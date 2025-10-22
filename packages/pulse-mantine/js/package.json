@@ -12,21 +12,16 @@
 	"types": "./dist/index.d.ts",
 	"exports": {
 		".": {
-			"types": "./dist/index.d.ts",
-			"node": "./dist/index.node.js",
-			"browser": {
-				"development": "./dist/index.browser.development.js",
-				"default": "./dist/index.js"
-			},
-			"development": "./dist/index.neutral.development.js",
-			"default": "./dist/index.neutral.js"
-		}
+			"@pulse/source": "./src/index.ts",
+			"default": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
 	},
 	"scripts": {
 		"build": "tsdown",
 		"build:dev": "tsdown --env development",
 		"build:watch": "tsdown --watch",
-		"prepublishOnly": "bun run build"
+		"prepublishOnly": "tsdown"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",
@@ -48,5 +43,11 @@
 		"@mantine/hooks": "^8",
 		"dayjs": "^1",
 		"recharts": "^3"
+	},
+	"publishConfig": {
+		"exports": {
+			".": "./dist/index.js",
+			"./package.json": "./package.json"
+		}
 	}
 }

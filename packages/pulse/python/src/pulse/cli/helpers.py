@@ -195,6 +195,7 @@ def load_app_from_target(target: str) -> App:
 				typer.echo(f"❌ Could not load module from: {file_path}")
 				raise typer.Exit(1)
 			module = importlib.util.module_from_spec(spec)
+			sys.modules[spec.name] = module
 			spec.loader.exec_module(module)
 		except Exception:
 			console = Console()

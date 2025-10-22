@@ -4,7 +4,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop
@@ -18,7 +18,6 @@ from pulse.messages import (
 from pulse.routing import normalize_path
 
 if TYPE_CHECKING:
-	from pulse.app import App
 	from pulse.render_session import RenderSession
 	from pulse.user_session import UserSession
 
@@ -45,16 +44,14 @@ class PendingRequest:
 class ChannelsManager:
 	"""Coordinates creation, routing, and cleanup of Pulse channels."""
 
-	_app: "App"
+	_render_session: "RenderSession"
 	_channels: dict[str, "Channel"]
-	_channels_by_render: dict[str, set[str]]
-	_channels_by_route: dict[tuple[str, str], set[str]]
+	_channels_by_route: dict[str, set[str]]
 	pending_requests: dict[str, PendingRequest]
 
-	def __init__(self, app: "App") -> None:
-		self._app = app
+	def __init__(self, render_session: "RenderSession") -> None:
+		self._render_session = render_session
 		self._channels = {}
-		self._channels_by_render = defaultdict(set)
 		self._channels_by_route = defaultdict(set)
 		self.pending_requests = {}
 
@@ -82,30 +79,22 @@ class ChannelsManager:
 			route_path=route_path,
 		)
 		self._channels[channel_id] = channel
-		self._channels_by_render[render.id].add(channel_id)
 		if route_path is not None:
-			self._channels_by_route[(render.id, route_path)].add(channel_id)
+			self._channels_by_route[route_path].add(channel_id)
 		return channel
 
 	# ------------------------------------------------------------------
-	def remove_render(self, render_id: str) -> None:
-		ids = list(self._channels_by_render.get(render_id, set()))
-		for channel_id in ids:
+	def remove_route(self, route_path: str) -> None:
+		key = normalize_path(route_path)
+		route_channels = list(self._channels_by_route.get(key, set()))
+		# if route_channels:
+		# 	print(f"Disposing {len(route_channels)} channel(s) for route {key}")
+		for channel_id in route_channels:
 			channel = self._channels.get(channel_id)
 			if channel is None:
 				continue
 			channel.closed = True
-			self.dispose_channel(channel)
-		self._channels_by_render.pop(render_id, None)
-
-	def remove_route(self, render_id: str, route_path: str) -> None:
-		key = (render_id, normalize_path(route_path))
-		for channel_id in list(self._channels_by_route.get(key, set())):
-			channel = self._channels.get(channel_id)
-			if channel is None:
-				continue
-			channel.closed = True
-			self.dispose_channel(channel)
+			self.dispose_channel(channel, reason="route.unmount")
 		self._channels_by_route.pop(key, None)
 
 	# ------------------------------------------------------------------
@@ -142,6 +131,17 @@ class ChannelsManager:
 		event = message["event"]
 		payload = message.get("payload")
 		request_id = message.get("requestId")
+
+		if event == "__close__":
+			reason: str | None = None
+			if isinstance(payload, str):
+				reason = payload
+			elif isinstance(payload, dict):
+				raw_reason = cast(Any, payload.get("reason"))
+				if raw_reason is not None:
+					reason = str(raw_reason)
+			self.release_channel(channel.id, reason=reason)
+			return
 
 		route_ctx = None
 		if channel.route_path is not None:
@@ -244,21 +244,45 @@ class ChannelsManager:
 			self.pending_requests.pop(key, None)
 
 	# ------------------------------------------------------------------
+	def release_channel(
+		self,
+		channel_id: str,
+		*,
+		reason: str | None = None,
+	) -> bool:
+		channel = self._channels.get(channel_id)
+		if channel is None:
+			return False
+		if channel.closed:
+			# Already closed but still tracked; ensure cleanup completes.
+			self.dispose_channel(channel, reason=reason or "client.close")
+			return True
+
+		channel.closed = True
+		self.dispose_channel(channel, reason=reason or "client.close")
+		return True
+
+	# ------------------------------------------------------------------
 	def _cleanup_channel_refs(self, channel: "Channel") -> None:
-		render_bucket = self._channels_by_render.get(channel.render_id)
-		if render_bucket is not None:
-			render_bucket.discard(channel.id)
-			if not render_bucket:
-				self._channels_by_render.pop(channel.render_id, None)
 		if channel.route_path is not None:
-			key = (channel.render_id, channel.route_path)
-			route_bucket = self._channels_by_route.get(key)
+			route_bucket = self._channels_by_route.get(channel.route_path)
 			if route_bucket is not None:
 				route_bucket.discard(channel.id)
 				if not route_bucket:
-					self._channels_by_route.pop(key, None)
+					self._channels_by_route.pop(channel.route_path, None)
 
-	def dispose_channel(self, channel: "Channel") -> None:
+	def dispose_channel(
+		self,
+		channel: "Channel",
+		*,
+		reason: str | None = None,
+	) -> None:
+		# pending = sum(
+		# 	1
+		# 	for pending in self.pending_requests.values()
+		# 	if pending.channel_id == channel.id
+		# )
+		# print(f"Disposing channel id={channel.id} render={channel.render_id} session={channel.session_id} route={channel.route_path} reason={reason or 'unspecified'} pending={pending}")
 		self._cleanup_channel_refs(channel)
 		self._cancel_pending_for_channel(channel.id)
 		self._channels.pop(channel.id, None)
@@ -275,7 +299,7 @@ class ChannelsManager:
 				msg=msg,
 			)
 		except Exception:
-			logger.debug("Failed to send close notification for channel %s", channel.id)
+			print(f"Failed to send close notification for channel {channel.id}")
 
 	def send_to_client(
 		self,
@@ -283,10 +307,7 @@ class ChannelsManager:
 		channel: "Channel",
 		msg: ServerChannelMessage,
 	) -> None:
-		render = self._app.render_sessions.get(channel.render_id)
-		if render is None:
-			raise ChannelClosed(f"Render session {channel.render_id} is closed")
-		render.send(msg)
+		self._render_session.send(msg)
 
 
 class Channel:
@@ -404,7 +425,7 @@ class Channel:
 			return
 		self.closed = True
 		self._handlers.clear()
-		self._manager.dispose_channel(self)
+		self._manager.dispose_channel(self, reason="channel.close")
 
 	# ---------------------------------------------------------------------
 	def _ensure_open(self) -> None:
@@ -440,7 +461,9 @@ def channel(identifier: str | None = None) -> Channel:
 	"""Convenience helper to create a channel using the active PulseContext."""
 
 	ctx = PulseContext.get()
-	return ctx.app.channels.create(identifier)
+	if ctx.render is None:
+		raise RuntimeError("Channels require an active render session")
+	return ctx.render.channels.create(identifier)
 
 
 __all__ = [

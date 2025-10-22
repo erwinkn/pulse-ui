@@ -17,7 +17,6 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from pulse.channel import ChannelsManager
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.cookies import (
@@ -134,7 +133,6 @@ class App:
 	session_store: SessionStore | CookieSessionStore
 	cookie: Cookie
 	cors: CORSOptions | None
-	channels: ChannelsManager
 	codegen: Codegen
 	fastapi: FastAPI
 	sio: socketio.AsyncServer  # type: ignore
@@ -207,9 +205,6 @@ class App:
 		self.session_store = session_store or CookieSessionStore()
 		self.cookie = cookie or session_cookie(mode=self.deployment)
 		self.cors = cors
-
-		# Channel manager for Python <-> client messaging
-		self.channels = ChannelsManager(self)
 
 		self._user_to_render = defaultdict(list)
 		self._render_to_user = {}
@@ -613,7 +608,7 @@ class App:
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
 			elif msg["type"] == "unmount":
 				render.unmount(msg["path"])
-				self.channels.remove_route(render.id, msg["path"])
+				render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			else:
@@ -645,14 +640,14 @@ class App:
 	) -> None:
 		if msg.get("responseTo"):
 			msg = cast(ClientChannelResponseMessage, msg)
-			self.channels.handle_client_response(msg)
+			render.channels.handle_client_response(msg)
 		else:
 			channel_id = str(msg.get("channel", ""))
 			msg = cast(ClientChannelRequestMessage, msg)
 
 			def _next() -> Ok[Any]:
 				return Ok(
-					self.channels.handle_client_event(
+					render.channels.handle_client_event(
 						render=render, session=session, message=msg
 					)
 				)
@@ -669,7 +664,7 @@ class App:
 
 			if isinstance(res, Deny):
 				if req_id := msg.get("requestId"):
-					self.channels.send_error(channel_id, req_id, "Denied")
+					render.channels.send_error(channel_id, req_id, "Denied")
 
 	def get_route(self, path: str):
 		return self.routes.find(path)
@@ -752,9 +747,6 @@ class App:
 		return render
 
 	def close_render(self, rid: str):
-		render = self.render_sessions.get(rid)
-		if render is not None:
-			self.channels.remove_render(rid)
 		render = self.render_sessions.pop(rid, None)
 		if not render:
 			return

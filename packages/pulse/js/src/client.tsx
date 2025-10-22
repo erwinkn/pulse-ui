@@ -353,6 +353,12 @@ export class PulseSocketIOClient {
 		entry.refCount = Math.max(0, entry.refCount - 1);
 		if (entry.refCount === 0) {
 			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
+			this.sendMessage({
+				type: "channel_message",
+				channel: id,
+				event: "__close__",
+				payload: { reason: "refcount_zero" },
+			});
 			this.#channels.delete(id);
 		}
 	}

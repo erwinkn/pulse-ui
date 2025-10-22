@@ -8,16 +8,10 @@ updates the corresponding package.json files to match.
 
 import json
 import sys
+import tomllib
 from pathlib import Path
-from typing import List, Tuple
 
-try:
-	import tomllib
-except ImportError:
-	import tomli as tomllib  # type: ignore
-
-
-PACKAGE_PAIRS: List[Tuple[str, str]] = [
+PACKAGE_PAIRS: list[tuple[str, str]] = [
 	(
 		"packages/pulse/python/pyproject.toml",
 		"packages/pulse/js/package.json",

@@ -10,7 +10,7 @@ class UserApi(ps.State):
 	error_calls: int = 0
 
 	# Keyed query with keep_previous_data default True
-	@ps.query
+	@ps.query(keep_previous_data=True)
 	async def user(self):
 		await asyncio.sleep(0.3)
 		# Simulate API; id 13 fails to demonstrate on_error

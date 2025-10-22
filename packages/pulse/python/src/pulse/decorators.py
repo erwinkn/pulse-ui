@@ -176,11 +176,11 @@ def query(
 	fn: Callable[[TState], Coroutine[Any, Any, T]],
 	*,
 	keep_alive: bool = False,
-	keep_previous_data: bool = True,
+	keep_previous_data: bool = False,
 ) -> QueryProperty[T, TState]: ...
 @overload
 def query(
-	fn: None = None, *, keep_alive: bool = False, keep_previous_data: bool = True
+	fn: None = None, *, keep_alive: bool = False, keep_previous_data: bool = False
 ) -> Callable[
 	[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T, TState]
 ]: ...
@@ -192,7 +192,7 @@ def query(
 	fn: Callable[[TState], Coroutine[Any, Any, T]],
 	*,
 	keep_alive: bool = False,
-	keep_previous_data: bool = True,
+	keep_previous_data: bool = False,
 	initial: T,
 ) -> QueryPropertyWithInitial[T, TState]: ...
 @overload
@@ -200,7 +200,7 @@ def query(
 	fn: None = None,
 	*,
 	keep_alive: bool = False,
-	keep_previous_data: bool = True,
+	keep_previous_data: bool = False,
 	initial: T,
 ) -> Callable[
 	[Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T, TState]
@@ -211,7 +211,7 @@ def query(
 	fn: Callable[[TState], Any] | None = None,
 	*,
 	keep_alive: bool = False,
-	keep_previous_data: bool = True,
+	keep_previous_data: bool = False,
 	initial: Any = None,
 ) -> (
 	QueryProperty[T, TState]

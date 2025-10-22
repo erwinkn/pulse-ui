@@ -4,7 +4,7 @@
     "packages/pulse/python/tests",
     "packages/pulse-ag-grid/src",
     "packages/pulse-lucide/src",
-    "packages/pulse-mantine/python",
+    "packages/pulse-mantine/python/src",
     "packages/pulse-msal/src",
     "packages/pulse-recharts/src"
   ],

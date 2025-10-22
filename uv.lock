@@ -744,7 +744,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.31"
+version = "0.1.32"
 source = { editable = "packages/pulse/python" }
 dependencies = [
     { name = "fastapi" },

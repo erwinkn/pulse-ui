@@ -28,6 +28,5 @@
 
 		// Use custom export conditions to import from source
 		"customConditions": ["@pulse/source"]
-	},
-	"exclude": ["tsdown.config.ts", "scripts"]
+	}
 }

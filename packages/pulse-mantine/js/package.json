@@ -21,7 +21,7 @@
 		"build": "tsdown",
 		"build:dev": "tsdown --env development",
 		"build:watch": "tsdown --watch",
-		"prepublishOnly": "tsdown"
+		"prepublishOnly": "bun run tsdown"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",

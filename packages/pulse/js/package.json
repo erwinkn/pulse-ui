@@ -1,6 +1,6 @@
 {
 	"name": "pulse-ui-client",
-	"version": "0.1.32",
+	"version": "0.1.33",
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,
@@ -10,22 +10,21 @@
 	"main": "./dist/index.js",
 	"module": "./dist/index.js",
 	"types": "./dist/index.d.ts",
-	"dependencies": {
-		"socket.io-client": "^4.8.1"
-	},
 	"exports": {
 		".": {
 			"@pulse/source": "./src/index.ts",
-			"types": "./dist/index.d.ts",
-			"bun": "./dist/index.bun.js",
-			"node": "./dist/index.node.js",
-			"browser": {
-				"development": "./dist/index.development.js",
-				"default": "./dist/index.js"
-			},
-			"development": "./dist/index.development.js",
 			"default": "./dist/index.js"
-		}
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"build:dev": "tsdown --env development",
+		"build:watch": "tsdown --watch",
+		"prepublishOnly": "tsdown"
+	},
+	"dependencies": {
+		"socket.io-client": "^4.8.1"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",
@@ -33,6 +32,7 @@
 		"@types/react": "^19.1.10",
 		"@types/react-dom": "^19.1.7",
 		"esbuild": "^0.25.10",
+		"tsdown": "^0.15.7",
 		"typescript": "^5"
 	},
 	"peerDependencies": {
@@ -40,9 +40,10 @@
 		"react-dom": "^18 || ^19",
 		"react-router": "^7"
 	},
-	"scripts": {
-		"build": "bun --bun scripts/build.ts && bun run build:types",
-		"build:types": "tsc -p tsconfig.build.json",
-		"prepublishOnly": "bun run build"
+	"publishConfig": {
+		"exports": {
+			".": "./dist/index.js",
+			"./package.json": "./package.json"
+		}
 	}
 }

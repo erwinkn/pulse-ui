@@ -34,7 +34,6 @@ from pulse.css import (
 	registered_css_modules,
 )
 from pulse.env import PulseMode, env
-from pulse.form import FormRegistry
 from pulse.helpers import (
 	create_task,
 	ensure_web_lock,
@@ -135,7 +134,6 @@ class App:
 	session_store: SessionStore | CookieSessionStore
 	cookie: Cookie
 	cors: CORSOptions | None
-	forms: FormRegistry
 	channels: ChannelsManager
 	codegen: Codegen
 	fastapi: FastAPI
@@ -146,6 +144,7 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
+	_form_to_render: dict[str, str]
 
 	def __init__(
 		self,
@@ -210,8 +209,6 @@ class App:
 		self.cookie = cookie or session_cookie(mode=self.deployment)
 		self.cors = cors
 
-		# Form submissions registry
-		self.forms = FormRegistry(self)
 		# Channel manager for Python <-> client messaging
 		self.channels = ChannelsManager(self)
 
@@ -220,6 +217,7 @@ class App:
 		self._sessions_in_request = {}
 		# Map websocket sid -> renderId for message routing
 		self._socket_to_render = {}
+		self._form_to_render = {}
 
 		self.codegen = Codegen(
 			self.routes,
@@ -507,7 +505,15 @@ class App:
 			if session is None:
 				raise RuntimeError("Internal error: couldn't resolve user session")
 
-			return await self.forms.handle_submit(form_id, request, session)
+			render_id = self._form_to_render.get(form_id)
+			if not render_id:
+				raise HTTPException(status_code=404, detail="Unknown form submission")
+
+			render = self.render_sessions.get(render_id)
+			if not render:
+				raise HTTPException(status_code=410, detail="Render session expired")
+
+			return await render.forms.handle_submit(form_id, request, session)
 
 		# Call on_setup hooks after FastAPI routes/middleware are in place
 		for plugin in self.plugins:
@@ -741,6 +747,7 @@ class App:
 		render = RenderSession(
 			rid,
 			self.routes,
+			app=self,
 			server_address=self.server_address,
 			client_address=client_address,
 		)
@@ -758,7 +765,6 @@ class App:
 			return
 		sid = self._render_to_user.pop(rid)
 		session = self.user_sessions[sid]
-		self.forms.remove_render(rid)
 		render.close()
 		self._user_to_render[session.sid].remove(rid)
 

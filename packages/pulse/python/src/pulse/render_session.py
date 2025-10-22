@@ -4,7 +4,7 @@ import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop, create_task
@@ -30,9 +30,6 @@ from pulse.routing import (
 )
 from pulse.state import State
 from pulse.vdom import Element
-
-if TYPE_CHECKING:
-	from pulse.app import App
 
 logger = logging.getLogger(__file__)
 
@@ -63,7 +60,6 @@ class RenderSession:
 		id: str,
 		routes: RouteTree,
 		*,
-		app: "App | None" = None,
 		server_address: str | None = None,
 		client_address: str | None = None,
 	) -> None:
@@ -84,7 +80,7 @@ class RenderSession:
 		self._global_states: dict[str, State] = {}
 		# Connection state
 		self.connected: bool = False
-		self.forms: FormRegistry = FormRegistry(self, app)
+		self.forms: FormRegistry = FormRegistry(self)
 
 	@property
 	def server_address(self) -> str:

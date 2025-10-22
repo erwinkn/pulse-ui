@@ -144,7 +144,6 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
-	_form_to_render: dict[str, str]
 
 	def __init__(
 		self,
@@ -217,7 +216,6 @@ class App:
 		self._sessions_in_request = {}
 		# Map websocket sid -> renderId for message routing
 		self._socket_to_render = {}
-		self._form_to_render = {}
 
 		self.codegen = Codegen(
 			self.routes,
@@ -499,15 +497,13 @@ class App:
 			session.handle_response(resp)
 			return resp
 
-		@self.fastapi.post("/pulse/forms/{form_id}")
-		async def handle_form_submit(form_id: str, request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
+		@self.fastapi.post("/pulse/forms/{render_id}/{form_id}")
+		async def handle_form_submit(
+			render_id: str, form_id: str, request: Request
+		) -> Response:  # pyright: ignore[reportUnusedFunction]
 			session = PulseContext.get().session
 			if session is None:
 				raise RuntimeError("Internal error: couldn't resolve user session")
-
-			render_id = self._form_to_render.get(form_id)
-			if not render_id:
-				raise HTTPException(status_code=404, detail="Unknown form submission")
 
 			render = self.render_sessions.get(render_id)
 			if not render:
@@ -747,7 +743,6 @@ class App:
 		render = RenderSession(
 			rid,
 			self.routes,
-			app=self,
 			server_address=self.server_address,
 			client_address=client_address,
 		)

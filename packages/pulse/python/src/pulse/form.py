@@ -28,7 +28,6 @@ from pulse.types.event_handler import EventHandler1
 from pulse.vdom import Child
 
 if TYPE_CHECKING:
-	from pulse.app import App
 	from pulse.render_session import RenderSession
 	from pulse.user_session import UserSession
 
@@ -65,9 +64,8 @@ class FormRegistration:
 
 
 class FormRegistry:
-	def __init__(self, render: "RenderSession", app: "App | None" = None) -> None:
+	def __init__(self, render: "RenderSession") -> None:
 		self._render: "RenderSession" = render
-		self._app: "App | None" = app
 		self._handlers: dict[str, FormRegistration] = {}
 
 	def register(
@@ -85,14 +83,10 @@ class FormRegistry:
 			on_submit=on_submit,
 		)
 		self._handlers[registration.id] = registration
-		if self._app is not None:
-			self._app._form_to_render[registration.id] = render_id  # pyright: ignore[reportPrivateUsage]
 		return registration
 
 	def unregister(self, form_id: str) -> None:
 		self._handlers.pop(form_id, None)
-		if self._app is not None:
-			self._app._form_to_render.pop(form_id, None)  # pyright: ignore[reportPrivateUsage]
 
 	def dispose(self) -> None:
 		for form_id in list(self._handlers.keys()):
@@ -258,7 +252,7 @@ class ManualForm:
 
 	def props(self) -> GeneratedFormProps:
 		return {
-			"action": f"{server_address()}/pulse/forms/{self.registration.id}",
+			"action": f"{server_address()}/pulse/forms/{self._render.id}/{self.registration.id}",
 			"method": "POST",
 			"encType": "multipart/form-data",
 			"onSubmit": self._start_submit,

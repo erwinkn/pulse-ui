@@ -6,6 +6,7 @@ This module provides the CLI commands for running the server and generating rout
 # pyright: reportCallInDefaultInitializer=false
 
 import os
+import pty as pty_module
 import subprocess
 import sys
 from pathlib import Path
@@ -29,7 +30,6 @@ from pulse.cli.packages import (
 	resolve_versions,
 	spec_satisfies,
 )
-from pulse.cli.terminal import PulseTerminalViewer
 from pulse.env import (
 	ENV_PULSE_DISABLE_CODEGEN,
 	ENV_PULSE_HOST,
@@ -231,6 +231,7 @@ def run(
 		server_env.update(
 			{
 				"FORCE_COLOR": "1",
+				"PYTHONUNBUFFERED": "1",
 				# Signal that the CLI manages the dev lock lifecycle
 				ENV_PULSE_LOCK_MANAGED_BY_CLI: "1",
 				# Communicate bind host/port to the server for dev codegen
@@ -342,6 +343,7 @@ def run(
 		web_env.update(
 			{
 				"FORCE_COLOR": "1",
+				"PYTHONUNBUFFERED": "1",
 				# Keep web env consistent as child tools may also look at this
 				ENV_PULSE_LOCK_MANAGED_BY_CLI: "1",
 			}
@@ -356,40 +358,131 @@ def run(
 		elif server_command:
 			server_command.extend(extra_flags)
 
-	# In dev, use terminal viewer. In prod/ci, run directly.
-	if env.pulse_mode == "dev":
-		app = PulseTerminalViewer(
-			server_command=server_command,
-			server_cwd=server_cwd,
-			server_env=server_env,
-			web_command=web_command,
-			web_cwd=web_cwd,
-			web_env=web_env,
-		)
-		try:
-			app.run()
-		finally:
-			remove_web_lock(lock_path)
-	else:
-		procs: list[subprocess.Popen[bytes]] = []
+	def run_with_pty():
+		"""Run server and web processes with PTY-based interleaved output."""
+		import fcntl
+		import select
+		import signal
+
+		colors = {
+			"server": "cyan",
+			"web": "orange1",
+		}
+
+		procs: list[tuple[str, int, int]] = []
+
 		try:
 			if server_command:
-				procs.append(
-					subprocess.Popen(server_command, cwd=server_cwd, env=server_env)
-				)
+				pid, fd = pty_module.fork()
+				if pid == 0:
+					if server_cwd:
+						os.chdir(server_cwd)
+					env = server_env or os.environ.copy()
+					os.execvpe(server_command[0], server_command, env)
+				else:
+					fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
+					procs.append(("server", pid, fd))
+
 			if web_command:
-				procs.append(subprocess.Popen(web_command, cwd=web_cwd, env=web_env))
-			# Wait for first to exit, then terminate the other if any
-			exit_codes = [p.wait() for p in procs]
-			code = max(exit_codes) if exit_codes else 0
-			raise typer.Exit(code)
-		finally:
-			for p in procs:
+				pid, fd = pty_module.fork()
+				if pid == 0:
+					if web_cwd:
+						os.chdir(web_cwd)
+					env = web_env or os.environ.copy()
+					os.execvpe(web_command[0], web_command, env)
+				else:
+					fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
+					procs.append(("web", pid, fd))
+
+			fds = {fd: tag for tag, pid, fd in procs}
+			buffers = {fd: b"" for fd in fds}
+
+			while procs:
+				for tag, pid, fd in list(procs):
+					try:
+						wpid, status = os.waitpid(pid, os.WNOHANG)
+						if wpid == pid:
+							procs.remove((tag, pid, fd))
+							try:
+								os.close(fd)
+							except Exception:
+								pass
+					except ChildProcessError:
+						procs.remove((tag, pid, fd))
+						try:
+							os.close(fd)
+						except Exception:
+							pass
+
+				if not procs:
+					break
+
+				readable_fds = [fd for _, _, fd in procs]
 				try:
-					p.terminate()
+					ready, _, _ = select.select(readable_fds, [], [], 0.1)
+				except (OSError, ValueError):
+					break
+
+				for fd in ready:
+					try:
+						data = os.read(fd, 4096)
+						if not data:
+							continue
+
+						tag = fds[fd]
+						color = colors[tag]
+						buffers[fd] += data
+
+						while b"\n" in buffers[fd]:
+							line, buffers[fd] = buffers[fd].split(b"\n", 1)
+							decoded = line.decode(errors="replace")
+							if decoded:
+								sys.stdout.write(
+									f"\033[{('36' if color == 'cyan' else '38;5;208')}m[{tag}]\033[0m {decoded}\n"
+								)
+								sys.stdout.flush()
+					except OSError:
+						continue
+
+			exit_codes = []
+			for _tag, pid, fd in procs:
+				try:
+					_, status = os.waitpid(pid, 0)
+					exit_codes.append(
+						os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+					)
 				except Exception:
 					pass
-			remove_web_lock(lock_path)
+				try:
+					os.close(fd)
+				except Exception:
+					pass
+
+			return max(exit_codes) if exit_codes else 0
+
+		except KeyboardInterrupt:
+			for _tag, pid, _fd in procs:
+				try:
+					os.kill(pid, signal.SIGTERM)
+				except Exception:
+					pass
+			return 130
+		finally:
+			for _tag, pid, fd in procs:
+				try:
+					os.kill(pid, signal.SIGKILL)
+				except Exception:
+					pass
+				try:
+					os.close(fd)
+				except Exception:
+					pass
+
+	try:
+		code = run_with_pty()
+		raise typer.Exit(code)
+	finally:
+		remove_web_lock(lock_path)
 
 
 @cli.command("generate")

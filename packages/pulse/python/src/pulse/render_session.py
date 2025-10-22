@@ -4,7 +4,7 @@ import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop, create_task
@@ -31,6 +31,9 @@ from pulse.routing import (
 from pulse.state import State
 from pulse.vdom import Element
 
+if TYPE_CHECKING:
+	from pulse.channel import ChannelsManager
+
 logger = logging.getLogger(__file__)
 
 
@@ -54,6 +57,7 @@ class RouteMount:
 class RenderSession:
 	id: str
 	routes: RouteTree
+	channels: "ChannelsManager"
 
 	def __init__(
 		self,
@@ -63,6 +67,8 @@ class RenderSession:
 		server_address: str | None = None,
 		client_address: str | None = None,
 	) -> None:
+		from pulse.channel import ChannelsManager
+
 		self.id = id
 		self.routes = routes
 		self.route_mounts: dict[str, RouteMount] = {}
@@ -78,6 +84,7 @@ class RenderSession:
 		self._global_states: dict[str, State] = {}
 		# Connection state
 		self.connected: bool = False
+		self.channels = ChannelsManager(self)
 
 	@property
 	def server_address(self) -> str:
@@ -151,6 +158,12 @@ class RenderSession:
 		for value in self._global_states.values():
 			value.dispose()
 		self._global_states.clear()
+		# Dispose all channels for this render session
+		for channel_id in list(self.channels._channels.keys()):
+			channel = self.channels._channels.get(channel_id)
+			if channel:
+				channel.closed = True
+				self.channels.dispose_channel(channel)
 		# The effect will be garbage collected, and with it the dependencies
 		self._send_message = None
 		# Discard any buffered messages on close

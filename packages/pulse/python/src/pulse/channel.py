@@ -18,7 +18,6 @@ from pulse.messages import (
 from pulse.routing import normalize_path
 
 if TYPE_CHECKING:
-	from pulse.app import App
 	from pulse.render_session import RenderSession
 	from pulse.user_session import UserSession
 
@@ -45,16 +44,14 @@ class PendingRequest:
 class ChannelsManager:
 	"""Coordinates creation, routing, and cleanup of Pulse channels."""
 
-	_app: "App"
+	_render_session: "RenderSession"
 	_channels: dict[str, "Channel"]
-	_channels_by_render: dict[str, set[str]]
-	_channels_by_route: dict[tuple[str, str], set[str]]
+	_channels_by_route: dict[str, set[str]]
 	pending_requests: dict[str, PendingRequest]
 
-	def __init__(self, app: "App") -> None:
-		self._app = app
+	def __init__(self, render_session: "RenderSession") -> None:
+		self._render_session = render_session
 		self._channels = {}
-		self._channels_by_render = defaultdict(set)
 		self._channels_by_route = defaultdict(set)
 		self.pending_requests = {}
 
@@ -82,24 +79,13 @@ class ChannelsManager:
 			route_path=route_path,
 		)
 		self._channels[channel_id] = channel
-		self._channels_by_render[render.id].add(channel_id)
 		if route_path is not None:
-			self._channels_by_route[(render.id, route_path)].add(channel_id)
+			self._channels_by_route[route_path].add(channel_id)
 		return channel
 
 	# ------------------------------------------------------------------
-	def remove_render(self, render_id: str) -> None:
-		ids = list(self._channels_by_render.get(render_id, set()))
-		for channel_id in ids:
-			channel = self._channels.get(channel_id)
-			if channel is None:
-				continue
-			channel.closed = True
-			self.dispose_channel(channel)
-		self._channels_by_render.pop(render_id, None)
-
-	def remove_route(self, render_id: str, route_path: str) -> None:
-		key = (render_id, normalize_path(route_path))
+	def remove_route(self, route_path: str) -> None:
+		key = normalize_path(route_path)
 		for channel_id in list(self._channels_by_route.get(key, set())):
 			channel = self._channels.get(channel_id)
 			if channel is None:
@@ -245,18 +231,12 @@ class ChannelsManager:
 
 	# ------------------------------------------------------------------
 	def _cleanup_channel_refs(self, channel: "Channel") -> None:
-		render_bucket = self._channels_by_render.get(channel.render_id)
-		if render_bucket is not None:
-			render_bucket.discard(channel.id)
-			if not render_bucket:
-				self._channels_by_render.pop(channel.render_id, None)
 		if channel.route_path is not None:
-			key = (channel.render_id, channel.route_path)
-			route_bucket = self._channels_by_route.get(key)
+			route_bucket = self._channels_by_route.get(channel.route_path)
 			if route_bucket is not None:
 				route_bucket.discard(channel.id)
 				if not route_bucket:
-					self._channels_by_route.pop(key, None)
+					self._channels_by_route.pop(channel.route_path, None)
 
 	def dispose_channel(self, channel: "Channel") -> None:
 		self._cleanup_channel_refs(channel)
@@ -283,10 +263,7 @@ class ChannelsManager:
 		channel: "Channel",
 		msg: ServerChannelMessage,
 	) -> None:
-		render = self._app.render_sessions.get(channel.render_id)
-		if render is None:
-			raise ChannelClosed(f"Render session {channel.render_id} is closed")
-		render.send(msg)
+		self._render_session.send(msg)
 
 
 class Channel:
@@ -440,7 +417,7 @@ def channel(identifier: str | None = None) -> Channel:
 	"""Convenience helper to create a channel using the active PulseContext."""
 
 	ctx = PulseContext.get()
-	return ctx.app.channels.create(identifier)
+	return ctx.render.channels.create(identifier)
 
 
 __all__ = [

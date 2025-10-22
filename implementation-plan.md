@@ -1,4 +1,4 @@
-# Implementation Plan: Single-Server Deployment (Option 1 - Reverse Proxy)
+# Implementation Plan: Single-Server Deployment
 
 ## Executive Summary
 

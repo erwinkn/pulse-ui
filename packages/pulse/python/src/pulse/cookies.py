@@ -77,7 +77,7 @@ def session_cookie(
 	name: str = "pulse.sid",
 	max_age_seconds: int = 7 * 24 * 3600,
 ):
-	if mode == "dev":
+	if mode == "dev" or mode == "single-server":
 		return Cookie(
 			name,
 			domain=None,
@@ -139,7 +139,7 @@ def _base_domain(host: str) -> str:
 
 def compute_cookie_domain(mode: "DeploymentMode", server_address: str) -> str | None:
 	host = _parse_host(server_address)
-	if mode == "dev" or not host:
+	if mode == "dev" or mode == "single-server" or not host:
 		return None
 	if mode == "same_host":
 		return host

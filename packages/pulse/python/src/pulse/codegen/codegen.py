@@ -107,7 +107,10 @@ class Codegen:
 		return self.cfg.pulse_path
 
 	def generate_all(
-		self, server_address: str, internal_server_address: str | None = None
+		self,
+		server_address: str,
+		internal_server_address: str | None = None,
+		api_prefix: str = "",
 	):
 		self._copied_css_modules = set()
 		self._css_module_dest = {}
@@ -116,7 +119,9 @@ class Codegen:
 		# Keep track of all generated files
 		generated_files = set(
 			[
-				self.generate_layout_tsx(server_address, internal_server_address),
+				self.generate_layout_tsx(
+					server_address, internal_server_address, api_prefix
+				),
 				self.generate_routes_ts(),
 				self.generate_routes_runtime_ts(),
 				*(
@@ -137,13 +142,17 @@ class Codegen:
 					logger.warning(f"Could not remove stale file {path}: {e}")
 
 	def generate_layout_tsx(
-		self, server_address: str, internal_server_address: str | None = None
+		self,
+		server_address: str,
+		internal_server_address: str | None = None,
+		api_prefix: str = "",
 	):
 		"""Generates the content of _layout.tsx"""
 		content = str(
 			LAYOUT_TEMPLATE.render_unicode(
 				server_address=server_address,
 				internal_server_address=internal_server_address or server_address,
+				api_prefix=api_prefix,
 			)
 		)
 		# The underscore avoids an eventual naming conflict with a generated

@@ -87,7 +87,7 @@ class AppStatus(IntEnum):
 	stopped = 3
 
 
-DeploymentMode = Literal["dev", "same_host", "subdomains"]
+DeploymentMode = Literal["dev", "same_host", "subdomains", "single-server"]
 
 
 class PrerenderPayload(TypedDict):
@@ -125,6 +125,7 @@ class App:
 	status: AppStatus
 	server_address: str | None
 	internal_server_address: str | None
+	api_prefix: str
 	plugins: list[Plugin]
 	routes: RouteTree
 	not_found: str
@@ -158,6 +159,7 @@ class App:
 		# Deployment and integration options
 		mode: PulseMode | None = None,
 		deployment: DeploymentMode = "subdomains",
+		api_prefix: str | None = None,
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 	):
@@ -176,6 +178,12 @@ class App:
 		self.server_address = server_address
 		# Optional internal address used by server-side loader fetches
 		self.internal_server_address = internal_server_address
+
+		# Store API prefix (default based on deployment mode)
+		if api_prefix is None:
+			self.api_prefix = "/api/pulse" if deployment == "single-server" else ""
+		else:
+			self.api_prefix = api_prefix
 
 		# Resolve and store plugins (sorted by priority, highest first)
 		self.plugins = []
@@ -292,6 +300,7 @@ class App:
 		self.codegen.generate_all(
 			self.server_address,
 			self.internal_server_address or self.server_address,
+			self.api_prefix,
 		)
 
 	def asgi_factory(self):
@@ -341,10 +350,23 @@ class App:
 		if self.cors is not None:
 			self.fastapi.add_middleware(CORSMiddleware, **self.cors)
 		else:
-			self.fastapi.add_middleware(
-				CORSMiddleware,
-				**cors_options(self.deployment, self.server_address),
-			)
+			# In single-server mode, CORS is simpler (same origin)
+			if self.deployment == "single-server":
+				# Secure by default - only allow the known server origin
+				# Users can override by passing custom self.cors if needed
+				self.fastapi.add_middleware(
+					CORSMiddleware,
+					allow_origins=[self.server_address],
+					allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+					allow_headers=["*"],
+					allow_credentials=True,
+				)
+			else:
+				# Use deployment-specific CORS settings
+				self.fastapi.add_middleware(
+					CORSMiddleware,
+					**cors_options(self.deployment, self.server_address),
+				)
 
 		# Mount PulseContext for all FastAPI routes (no route info). Other API
 		# routes / middleware should be added at the module-level, which means
@@ -377,16 +399,19 @@ class App:
 
 			return res
 
-		@self.fastapi.get("/health")
+		# Apply prefix to all routes
+		prefix = self.api_prefix
+
+		@self.fastapi.get(f"{prefix}/health")
 		def healthcheck():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Pulse server is running"}
 
-		@self.fastapi.get("/set-cookies")
+		@self.fastapi.get(f"{prefix}/set-cookies")
 		def set_cookies():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Cookies updated"}
 
 		# RouteInfo is the request body
-		@self.fastapi.post("/prerender")
+		@self.fastapi.post(f"{prefix}/prerender")
 		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
@@ -492,7 +517,7 @@ class App:
 			session.handle_response(resp)
 			return resp
 
-		@self.fastapi.post("/pulse/forms/{render_id}/{form_id}")
+		@self.fastapi.post(f"{prefix}/forms/{{render_id}}/{{form_id}}")
 		async def handle_form_submit(  # pyright: ignore[reportUnusedFunction]
 			render_id: str, form_id: str, request: Request
 		) -> Response:

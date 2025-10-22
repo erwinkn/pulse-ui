@@ -33,7 +33,6 @@ from pulse.css import (
 	registered_css_modules,
 )
 from pulse.env import PulseMode, env
-from pulse.form import FormRegistry
 from pulse.helpers import (
 	create_task,
 	ensure_web_lock,
@@ -134,7 +133,6 @@ class App:
 	session_store: SessionStore | CookieSessionStore
 	cookie: Cookie
 	cors: CORSOptions | None
-	forms: FormRegistry
 	codegen: Codegen
 	fastapi: FastAPI
 	sio: socketio.AsyncServer  # type: ignore
@@ -207,9 +205,6 @@ class App:
 		self.session_store = session_store or CookieSessionStore()
 		self.cookie = cookie or session_cookie(mode=self.deployment)
 		self.cors = cors
-
-		# Form submissions registry
-		self.forms = FormRegistry(self)
 
 		self._user_to_render = defaultdict(list)
 		self._render_to_user = {}

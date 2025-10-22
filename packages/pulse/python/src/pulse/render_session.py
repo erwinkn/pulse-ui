@@ -88,7 +88,7 @@ class RenderSession:
 		# Connection state
 		self.connected: bool = False
 		self.channels = ChannelsManager(self)
-		self.forms: FormRegistry = FormRegistry(self)
+		self.forms = FormRegistry(self)
 
 	@property
 	def server_address(self) -> str:
@@ -164,8 +164,8 @@ class RenderSession:
 			value.dispose()
 		self._global_states.clear()
 		# Dispose all channels for this render session
-		for channel_id in list(self.channels._channels.keys()):
-			channel = self.channels._channels.get(channel_id)
+		for channel_id in list(self.channels._channels.keys()):  # pyright: ignore[reportPrivateUsage]
+			channel = self.channels._channels.get(channel_id)  # pyright: ignore[reportPrivateUsage]
 			if channel:
 				channel.closed = True
 				self.channels.dispose_channel(channel)

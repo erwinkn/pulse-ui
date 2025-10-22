@@ -29,7 +29,7 @@ async def test_channel_emit_sends_message():
 	real_render = ps.RenderSession(render.id, app.routes)
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
-	app.render_sessions[render.id] = real_render  # pyright: ignore[reportArgumentType]
+	app.render_sessions[render.id] = real_render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
 	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
 
@@ -58,7 +58,7 @@ async def test_channel_request_resolves_on_response():
 	real_render = ps.RenderSession(render.id, app.routes)
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
-	app.render_sessions[render.id] = real_render  # pyright: ignore[reportArgumentType]
+	app.render_sessions[render.id] = real_render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
 	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
 
@@ -104,7 +104,7 @@ async def test_channel_event_dispatch():
 	real_render = ps.RenderSession(render.id, app.routes)
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
-	app.render_sessions[render.id] = real_render  # pyright: ignore[reportArgumentType]
+	app.render_sessions[render.id] = real_render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
 	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
 
@@ -147,7 +147,7 @@ async def test_channel_pending_cancelled_on_render_close():
 	real_render = ps.RenderSession(render.id, app.routes)
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
-	app.render_sessions[render.id] = real_render  # pyright: ignore[reportArgumentType]
+	app.render_sessions[render.id] = real_render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
 	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
 

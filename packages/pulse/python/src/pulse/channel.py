@@ -417,6 +417,8 @@ def channel(identifier: str | None = None) -> Channel:
 	"""Convenience helper to create a channel using the active PulseContext."""
 
 	ctx = PulseContext.get()
+	if ctx.render is None:
+		raise RuntimeError("Channels require an active render session")
 	return ctx.render.channels.create(identifier)
 
 

@@ -32,6 +32,7 @@
 		"@types/react": "^19.1.10",
 		"@types/react-dom": "^19.1.7",
 		"esbuild": "^0.25.10",
+		"tsdown": "^0.15.7",
 		"typescript": "^5"
 	},
 	"peerDependencies": {

@@ -20,6 +20,12 @@ repos:
   # Local hook to reuse the Biome version installed as dev dependency
   - repo: local
     hooks:
+      - id: sync-versions
+        name: Sync Python to JS package versions
+        entry: python scripts/sync_versions.py
+        language: system
+        files: ^packages/.*/python/pyproject\.toml$
+        pass_filenames: false
       - id: biome-check
         name: biome check
         entry: bunx --bun @biomejs/biome check --write --files-ignore-unknown=true --no-errors-on-unmatched

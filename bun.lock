@@ -5,7 +5,6 @@
       "name": "pulse",
       "devDependencies": {
         "@biomejs/biome": "2.2.5",
-        "tsdown": "^0.15.7",
       },
     },
     "examples/pulse-mantine/web": {
@@ -69,7 +68,7 @@
     },
     "packages/pulse-mantine/js": {
       "name": "pulse-mantine",
-      "version": "0.1.15",
+      "version": "0.1.16",
       "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^24.6.0",
@@ -77,6 +76,7 @@
         "@types/react-dom": "^19.1.9",
         "esbuild": "^0.25.10",
         "pulse-ui-client": "workspace:*",
+        "tsdown": "^0.15.7",
         "typescript": "^5.9.2",
       },
       "peerDependencies": {
@@ -94,7 +94,7 @@
     },
     "packages/pulse/js": {
       "name": "pulse-ui-client",
-      "version": "0.1.32",
+      "version": "0.1.33",
       "dependencies": {
         "socket.io-client": "^4.8.1",
       },
@@ -104,6 +104,7 @@
         "@types/react": "^19.1.10",
         "@types/react-dom": "^19.1.7",
         "esbuild": "^0.25.10",
+        "tsdown": "^0.15.7",
         "typescript": "^5",
       },
       "peerDependencies": {

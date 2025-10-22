@@ -1,6 +1,6 @@
 {
 	"name": "pulse-mantine",
-	"version": "0.1.15",
+	"version": "0.1.16",
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,
@@ -12,21 +12,16 @@
 	"types": "./dist/index.d.ts",
 	"exports": {
 		".": {
-			"types": "./dist/index.d.ts",
-			"bun": "./dist/index.bun.js",
-			"node": "./dist/index.node.js",
-			"browser": {
-				"development": "./dist/index.development.js",
-				"default": "./dist/index.js"
-			},
-			"development": "./dist/index.development.js",
+			"@pulse/source": "./src/index.ts",
 			"default": "./dist/index.js"
-		}
+		},
+		"./package.json": "./package.json"
 	},
 	"scripts": {
-		"build": "bun --bun scripts/build.ts && bun run build:types",
-		"build:types": "tsc -p tsconfig.build.json",
-		"prepublishOnly": "bun run build"
+		"build": "tsdown",
+		"build:dev": "tsdown --env development",
+		"build:watch": "tsdown --watch",
+		"prepublishOnly": "tsdown"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",
@@ -48,5 +43,11 @@
 		"@mantine/hooks": "^8",
 		"dayjs": "^1",
 		"recharts": "^3"
+	},
+	"publishConfig": {
+		"exports": {
+			".": "./dist/index.js",
+			"./package.json": "./package.json"
+		}
 	}
 }

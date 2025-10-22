@@ -33,6 +33,7 @@ from pulse.vdom import Element
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
+	from pulse.form import FormRegistry
 
 logger = logging.getLogger(__file__)
 
@@ -58,6 +59,7 @@ class RenderSession:
 	id: str
 	routes: RouteTree
 	channels: "ChannelsManager"
+	forms: "FormRegistry"
 
 	def __init__(
 		self,
@@ -68,6 +70,7 @@ class RenderSession:
 		client_address: str | None = None,
 	) -> None:
 		from pulse.channel import ChannelsManager
+		from pulse.form import FormRegistry
 
 		self.id = id
 		self.routes = routes
@@ -85,6 +88,7 @@ class RenderSession:
 		# Connection state
 		self.connected: bool = False
 		self.channels = ChannelsManager(self)
+		self.forms: FormRegistry = FormRegistry(self)
 
 	@property
 	def server_address(self) -> str:
@@ -151,6 +155,7 @@ class RenderSession:
 		)
 
 	def close(self):
+		self.forms.dispose()
 		for path in list(self.route_mounts.keys()):
 			self.unmount(path)
 		self.route_mounts.clear()

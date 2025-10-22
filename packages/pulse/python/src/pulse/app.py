@@ -497,13 +497,19 @@ class App:
 			session.handle_response(resp)
 			return resp
 
-		@self.fastapi.post("/pulse/forms/{form_id}")
-		async def handle_form_submit(form_id: str, request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
+		@self.fastapi.post("/pulse/forms/{render_id}/{form_id}")
+		async def handle_form_submit(  # pyright: ignore[reportUnusedFunction]
+			render_id: str, form_id: str, request: Request
+		) -> Response:
 			session = PulseContext.get().session
 			if session is None:
 				raise RuntimeError("Internal error: couldn't resolve user session")
 
-			return await self.forms.handle_submit(form_id, request, session)
+			render = self.render_sessions.get(render_id)
+			if not render:
+				raise HTTPException(status_code=410, detail="Render session expired")
+
+			return await render.forms.handle_submit(form_id, request, session)
 
 		# Call on_setup hooks after FastAPI routes/middleware are in place
 		for plugin in self.plugins:
@@ -751,7 +757,6 @@ class App:
 			return
 		sid = self._render_to_user.pop(rid)
 		session = self.user_sessions[sid]
-		self.forms.remove_render(rid)
 		render.close()
 		self._user_to_render[session.sid].remove(rid)
 

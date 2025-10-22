@@ -168,7 +168,7 @@ class RenderSession:
 			channel = self.channels._channels.get(channel_id)  # pyright: ignore[reportPrivateUsage]
 			if channel:
 				channel.closed = True
-				self.channels.dispose_channel(channel)
+				self.channels.dispose_channel(channel, reason="render.close")
 		# The effect will be garbage collected, and with it the dependencies
 		self._send_message = None
 		# Discard any buffered messages on close

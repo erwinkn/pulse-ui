@@ -4,7 +4,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop
@@ -86,12 +86,15 @@ class ChannelsManager:
 	# ------------------------------------------------------------------
 	def remove_route(self, route_path: str) -> None:
 		key = normalize_path(route_path)
-		for channel_id in list(self._channels_by_route.get(key, set())):
+		route_channels = list(self._channels_by_route.get(key, set()))
+		# if route_channels:
+		# 	print(f"Disposing {len(route_channels)} channel(s) for route {key}")
+		for channel_id in route_channels:
 			channel = self._channels.get(channel_id)
 			if channel is None:
 				continue
 			channel.closed = True
-			self.dispose_channel(channel)
+			self.dispose_channel(channel, reason="route.unmount")
 		self._channels_by_route.pop(key, None)
 
 	# ------------------------------------------------------------------
@@ -128,6 +131,17 @@ class ChannelsManager:
 		event = message["event"]
 		payload = message.get("payload")
 		request_id = message.get("requestId")
+
+		if event == "__close__":
+			reason: str | None = None
+			if isinstance(payload, str):
+				reason = payload
+			elif isinstance(payload, dict):
+				raw_reason = cast(Any, payload.get("reason"))
+				if raw_reason is not None:
+					reason = str(raw_reason)
+			self.release_channel(channel.id, reason=reason)
+			return
 
 		route_ctx = None
 		if channel.route_path is not None:
@@ -230,6 +244,25 @@ class ChannelsManager:
 			self.pending_requests.pop(key, None)
 
 	# ------------------------------------------------------------------
+	def release_channel(
+		self,
+		channel_id: str,
+		*,
+		reason: str | None = None,
+	) -> bool:
+		channel = self._channels.get(channel_id)
+		if channel is None:
+			return False
+		if channel.closed:
+			# Already closed but still tracked; ensure cleanup completes.
+			self.dispose_channel(channel, reason=reason or "client.close")
+			return True
+
+		channel.closed = True
+		self.dispose_channel(channel, reason=reason or "client.close")
+		return True
+
+	# ------------------------------------------------------------------
 	def _cleanup_channel_refs(self, channel: "Channel") -> None:
 		if channel.route_path is not None:
 			route_bucket = self._channels_by_route.get(channel.route_path)
@@ -238,7 +271,18 @@ class ChannelsManager:
 				if not route_bucket:
 					self._channels_by_route.pop(channel.route_path, None)
 
-	def dispose_channel(self, channel: "Channel") -> None:
+	def dispose_channel(
+		self,
+		channel: "Channel",
+		*,
+		reason: str | None = None,
+	) -> None:
+		# pending = sum(
+		# 	1
+		# 	for pending in self.pending_requests.values()
+		# 	if pending.channel_id == channel.id
+		# )
+		# print(f"Disposing channel id={channel.id} render={channel.render_id} session={channel.session_id} route={channel.route_path} reason={reason or 'unspecified'} pending={pending}")
 		self._cleanup_channel_refs(channel)
 		self._cancel_pending_for_channel(channel.id)
 		self._channels.pop(channel.id, None)
@@ -255,7 +299,7 @@ class ChannelsManager:
 				msg=msg,
 			)
 		except Exception:
-			logger.debug("Failed to send close notification for channel %s", channel.id)
+			print(f"Failed to send close notification for channel {channel.id}")
 
 	def send_to_client(
 		self,
@@ -381,7 +425,7 @@ class Channel:
 			return
 		self.closed = True
 		self._handlers.clear()
-		self._manager.dispose_channel(self)
+		self._manager.dispose_channel(self, reason="channel.close")
 
 	# ---------------------------------------------------------------------
 	def _ensure_open(self) -> None:

@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import (
 	Any,
 	Generic,
@@ -10,13 +10,45 @@ from typing import (
 )
 
 from pulse.helpers import call_flexible, maybe_await
-from pulse.reactive import AsyncEffect, Computed, Signal
+from pulse.reactive import AsyncEffect, Computed, EffectCleanup, Signal
 from pulse.state import InitializableProperty, State
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound="State")
 Args = TypeVarTuple("Args")
 R = TypeVar("R")
+
+# Type alias matching AsyncEffectFn from reactive.py
+AsyncEffectFn = Callable[[], Coroutine[Any, Any, EffectCleanup | None]]
+
+
+class QueryAsyncEffect(AsyncEffect):
+	"""
+	Specialized AsyncEffect for queries that synchronously clears query data
+	when rescheduled (if keep_previous_data is False).
+	"""
+
+	_result: "QueryResult[Any]"
+	_keep_previous_data: bool
+
+	def __init__(
+		self,
+		fn: AsyncEffectFn,
+		result: "QueryResult[Any]",
+		keep_previous_data: bool,
+		name: str | None = None,
+		deps: list[Signal[Any] | Computed[Any]] | None = None,
+	):
+		super().__init__(fn, name=name, deps=deps)
+		self._result = result
+		self._keep_previous_data = keep_previous_data
+
+	@override
+	def push_change(self):
+		# Synchronously clear data before scheduling the effect to run.
+		# This ensures renders see the loading state immediately, not stale data.
+		self._result._set_loading(clear_data=not self._keep_previous_data)  # pyright: ignore[reportPrivateUsage]
+		super().push_change()
 
 
 class QueryResult(Generic[T]):
@@ -161,7 +193,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		name: str,
 		fetch_fn: "Callable[[TState], Awaitable[T]]",
 		keep_alive: bool = False,
-		keep_previous_data: bool = True,
+		keep_previous_data: bool = False,
 		initial: T | None = None,
 	):
 		self.name = name
@@ -291,13 +323,20 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 
 		# In key mode, depend only on key via explicit deps
 		if key_computed is not None:
-			effect = AsyncEffect(
+			effect = QueryAsyncEffect(
 				run_effect,
+				result=result,
+				keep_previous_data=self._keep_previous_data,
 				name=f"query.effect.{self.name}",
 				deps=[key_computed],
 			)
 		else:
-			effect = AsyncEffect(run_effect, name=f"query.effect.{self.name}")
+			effect = QueryAsyncEffect(
+				run_effect,
+				result=result,
+				keep_previous_data=self._keep_previous_data,
+				name=f"query.effect.{self.name}",
+			)
 		# print(f"[QueryProperty:{self.name}] created Effect name={effect.name}")
 
 		# Expose the effect on the instance so State.effects() sees it

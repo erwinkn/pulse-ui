@@ -7,14 +7,14 @@ class QueryDemoState(ps.State):
 	user_id: int = 1
 
 	# Unkeyed mode (default), auto-tracks dependencies
-	@ps.query
+	@ps.query(keep_previous_data=True)
 	async def user_unkeyed(self) -> dict:
 		# Simulate async work
 		await asyncio.sleep(1)
 		return {"id": self.user_id, "name": f"User {self.user_id}"}
 
 	# Keyed mode, uses explicit dependencies to know when to rerun. This is useful
-	@ps.query
+	@ps.query(keep_previous_data=True)
 	async def user_keyed(self) -> dict:
 		# Simulate async work
 		await asyncio.sleep(1)

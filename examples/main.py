@@ -350,7 +350,7 @@ class QueryDemoState(ps.State):
 	keyed_calls: int = 0
 	unkeyed_calls: int = 0
 
-	@ps.query
+	@ps.query(keep_previous_data=True)
 	async def user_keyed(self) -> dict:
 		self.keyed_calls += 1
 		# Simulate async work
@@ -362,7 +362,7 @@ class QueryDemoState(ps.State):
 		return ("user", self.user_id)
 
 	# Unkeyed (auto-tracked) query variant
-	@ps.query
+	@ps.query(keep_previous_data=True)
 	async def user_unkeyed(self) -> dict:
 		with ps.Untrack():
 			self.unkeyed_calls += 1

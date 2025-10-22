@@ -20,7 +20,7 @@
 			"node": "./dist/index.node.js",
 			"browser": {
 				"development": "./dist/index.browser.development.js",
-				"default": "./dist/index.browser.js"
+				"default": "./dist/index.js"
 			},
 			"development": "./dist/index.neutral.development.js",
 			"default": "./dist/index.neutral.js"
@@ -40,7 +40,7 @@
 		"react-router": "^7"
 	},
 	"scripts": {
-		"build": "tsdown && bun scripts/post-build.ts",
+		"build": "tsdown",
 		"build:dev": "tsdown --env development",
 		"build:watch": "tsdown --watch",
 		"prepublishOnly": "bun run build"

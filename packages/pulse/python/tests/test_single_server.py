@@ -12,15 +12,9 @@ def test_api_prefix_in_single_server_mode():
 
 
 def test_api_prefix_in_subdomains_mode():
-	"""Test that subdomains mode has no prefix."""
+	"""Test that subdomains mode defaults to /api/pulse prefix."""
 	app = App(routes=[], deployment="subdomains")
-	assert app.api_prefix == ""
-
-
-def test_api_prefix_in_same_host_mode():
-	"""Test that same_host mode has no prefix."""
-	app = App(routes=[], deployment="same_host")
-	assert app.api_prefix == ""
+	assert app.api_prefix == "/api/pulse"
 
 
 def test_custom_api_prefix():
@@ -35,8 +29,8 @@ def test_custom_api_prefix_with_subdomains():
 	assert app.api_prefix == "/api/v1"
 
 
-def test_deployment_mode_dev_defaults_to_no_prefix():
-	"""Test that dev mode deployment defaults to no prefix."""
-	app = App(routes=[], mode="dev")
-	assert app.deployment == "dev"
-	assert app.api_prefix == ""
+def test_deployment_mode_defaults_to_subdomains():
+	"""Test that deployment defaults to subdomains."""
+	app = App(routes=[])
+	assert app.deployment == "subdomains"
+	assert app.api_prefix == "/api/pulse"

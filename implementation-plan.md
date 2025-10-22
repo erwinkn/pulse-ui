@@ -8,6 +8,31 @@
 
 ---
 
+## Clean-up Changes (Post Phase 1)
+
+**Date**: Phase 1 completion
+
+**Changes Made**:
+1. **Removed `"same_host"` deployment mode**: Removed from `DeploymentMode` type literal in `app.py`
+2. **Unified API prefix**: All deployment modes now use `/api/pulse` prefix by default (previously only `single-server` mode used it)
+3. **Updated cookie configuration**: Removed `same_host` from `session_cookie()` function
+4. **Updated CORS configuration**: 
+   - Removed `same_host` case from `cors_options()` function
+   - Simplified CORS middleware logic in `App.setup()` to use `cors_options()` for all non-custom CORS configs
+   - Added explicit `single-server` case in `cors_options()` with same-origin only
+5. **Updated tests**: 
+   - Removed `test_api_prefix_in_same_host_mode()`
+   - Updated test expectations to reflect `/api/pulse` prefix for all modes
+6. **Cleaned up cookie domain logic**: Removed `same_host` case from `compute_cookie_domain()`
+
+**Rationale**: The `same_host` deployment mode was never fully implemented and added unnecessary complexity. All modes now consistently use `/api/pulse` prefix, simplifying the codebase.
+
+**Additional Changes**:
+7. **Removed `"dev"` deployment mode**: This was redundant with `single-server` and only added confusion between `mode` (dev/ci/prod) and `deployment` (subdomains/single-server)
+8. **Simplified deployment logic**: Removed automatic `deployment="dev"` override when `mode="dev"`, making the two concepts independent
+
+---
+
 ## Current Setup Analysis
 
 ### Architecture Overview

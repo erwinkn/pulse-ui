@@ -87,7 +87,7 @@ class AppStatus(IntEnum):
 	stopped = 3
 
 
-DeploymentMode = Literal["dev", "same_host", "subdomains", "single-server"]
+DeploymentMode = Literal["subdomains", "single-server"]
 
 
 class PrerenderPayload(TypedDict):
@@ -172,16 +172,16 @@ class App:
 		"""
 		# Resolve mode from environment and expose on the app instance
 		self.mode = mode or env.pulse_mode
-		self.deployment = "dev" if self.mode == "dev" else deployment
+		self.deployment = deployment
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.)
 		self.server_address = server_address
 		# Optional internal address used by server-side loader fetches
 		self.internal_server_address = internal_server_address
 
-		# Store API prefix (default based on deployment mode)
+		# Store API prefix (always use /api/pulse regardless of deployment mode)
 		if api_prefix is None:
-			self.api_prefix = "/api/pulse" if deployment == "single-server" else ""
+			self.api_prefix = "/api/pulse"
 		else:
 			self.api_prefix = api_prefix
 
@@ -350,23 +350,11 @@ class App:
 		if self.cors is not None:
 			self.fastapi.add_middleware(CORSMiddleware, **self.cors)
 		else:
-			# In single-server mode, CORS is simpler (same origin)
-			if self.deployment == "single-server":
-				# Secure by default - only allow the known server origin
-				# Users can override by passing custom self.cors if needed
-				self.fastapi.add_middleware(
-					CORSMiddleware,
-					allow_origins=[self.server_address],
-					allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-					allow_headers=["*"],
-					allow_credentials=True,
-				)
-			else:
-				# Use deployment-specific CORS settings
-				self.fastapi.add_middleware(
-					CORSMiddleware,
-					**cors_options(self.deployment, self.server_address),
-				)
+			# Use deployment-specific CORS settings
+			self.fastapi.add_middleware(
+				CORSMiddleware,
+				**cors_options(self.deployment, self.server_address),
+			)
 
 		# Mount PulseContext for all FastAPI routes (no route info). Other API
 		# routes / middleware should be added at the module-level, which means

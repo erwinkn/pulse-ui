@@ -77,7 +77,7 @@ def session_cookie(
 	name: str = "pulse.sid",
 	max_age_seconds: int = 7 * 24 * 3600,
 ):
-	if mode == "dev" or mode == "single-server":
+	if mode == "single-server":
 		return Cookie(
 			name,
 			domain=None,
@@ -85,7 +85,7 @@ def session_cookie(
 			samesite="lax",
 			max_age_seconds=max_age_seconds,
 		)
-	elif mode == "same_host" or mode == "subdomains":
+	elif mode == "subdomains":
 		return Cookie(
 			name,
 			domain=None,  # to be set later
@@ -139,10 +139,8 @@ def _base_domain(host: str) -> str:
 
 def compute_cookie_domain(mode: "DeploymentMode", server_address: str) -> str | None:
 	host = _parse_host(server_address)
-	if mode == "dev" or mode == "single-server" or not host:
+	if mode == "single-server" or not host:
 		return None
-	if mode == "same_host":
-		return host
 	if mode == "subdomains":
 		return "." + _base_domain(host)
 	return None
@@ -155,15 +153,13 @@ def cors_options(mode: "DeploymentMode", server_address: str) -> CORSOptions:
 		"allow_methods": ["*"],
 		"allow_headers": ["*"],
 	}
-	if mode == "dev":
-		opts["allow_origin_regex"] = ".*"
-		return opts
-	elif mode == "same_host":
-		opts["allow_origin_regex"] = rf"^https?://{host}(:\\d+)?$"
-		return opts
-	elif mode == "subdomains":
+	if mode == "subdomains":
 		base = _base_domain(host)
 		opts["allow_origin_regex"] = rf"^https?://([a-z0-9-]+\\.)?{base}(:\\d+)?$"
+		return opts
+	elif mode == "single-server":
+		# For single-server mode, allow same origin
+		opts["allow_origin_regex"] = rf"^https?://{host}(:\\d+)?$"
 		return opts
 	else:
 		raise ValueError(f"Unsupported deployment mode '{mode}'")

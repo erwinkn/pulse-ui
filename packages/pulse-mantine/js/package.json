@@ -13,19 +13,19 @@
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
-			"bun": "./dist/index.bun.js",
 			"node": "./dist/index.node.js",
 			"browser": {
-				"development": "./dist/index.development.js",
-				"default": "./dist/index.js"
+				"development": "./dist/index.browser.development.js",
+				"default": "./dist/index.browser.js"
 			},
-			"development": "./dist/index.development.js",
-			"default": "./dist/index.js"
+			"development": "./dist/index.neutral.development.js",
+			"default": "./dist/index.neutral.js"
 		}
 	},
 	"scripts": {
-		"build": "bun --bun scripts/build.ts && bun run build:types",
-		"build:types": "tsc -p tsconfig.build.json",
+		"build": "tsdown && bun scripts/post-build.ts",
+		"build:dev": "tsdown --env development",
+		"build:watch": "tsdown --watch",
 		"prepublishOnly": "bun run build"
 	},
 	"devDependencies": {

@@ -7,8 +7,10 @@ that enables automatic re-rendering when state changes.
 
 import inspect
 from abc import ABC, ABCMeta, abstractmethod
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
-from enum import IntEnum
+from dataclasses import dataclass
+from enum import Enum, IntEnum
 from typing import Any, Generic, Never, TypeVar, override
 
 from pulse.reactive import (
@@ -18,7 +20,7 @@ from pulse.reactive import (
 	Scope,
 	Signal,
 )
-from pulse.reactive_extensions import ReactiveProperty
+from pulse.reactive_extensions import MISSING, ReactiveProperty
 
 T = TypeVar("T")
 
@@ -120,6 +122,64 @@ class StateEffect(Generic[T], InitializableProperty):
 		setattr(state, name, effect)
 
 
+def _is_private(name: str) -> bool:
+	return name.startswith("_") and not name.startswith("__")
+
+
+def _is_plain_state_attribute(value: Any) -> bool:
+	return not callable(value) and not isinstance(
+		value,
+		(
+			staticmethod,
+			classmethod,
+			property,
+			StateProperty,
+			ComputedProperty,
+			InitializableProperty,
+		),
+	)
+
+
+class StateFieldKind(str, Enum):
+	SIGNAL = "signal"
+	QUERY = "query"
+	PRIVATE = "private"
+
+
+@dataclass
+class StateFieldMetadata:
+	name: str
+	kind: StateFieldKind
+	drain: bool
+	has_default: bool
+	default: Any = None
+	descriptor: Any | None = None
+	defined_on: type[Any] | None = None
+	preserve: bool | None = None
+
+	def clone(self) -> "StateFieldMetadata":
+		return StateFieldMetadata(
+			name=self.name,
+			kind=self.kind,
+			drain=self.drain,
+			has_default=self.has_default,
+			default=self.default,
+			descriptor=self.descriptor,
+			defined_on=self.defined_on,
+			preserve=self.preserve,
+		)
+
+
+@dataclass
+class StateMetadata:
+	fields: "OrderedDict[str, StateFieldMetadata]"
+
+	def clone(self) -> "StateMetadata":
+		return StateMetadata(
+			OrderedDict((name, meta.clone()) for name, meta in self.fields.items())
+		)
+
+
 class StateMeta(ABCMeta):
 	"""
 	Metaclass that automatically converts annotated attributes into reactive properties.
@@ -133,47 +193,130 @@ class StateMeta(ABCMeta):
 		**kwargs: Any,
 	):
 		annotations = namespace.get("__annotations__", {})
+		defaults: dict[str, Any] = {}
+		kinds: dict[str, str] = {}
 
-		# 1) Turn annotated fields into StateProperty descriptors
+		# 1) Turn annotated fields into StateProperty descriptors (skipping private)
 		for attr_name in annotations:
-			# Do not wrap private/dunder attributes as reactive
-			if attr_name.startswith("_"):
+			if attr_name.startswith("__") and attr_name.endswith("__"):
 				continue
-			default_value = namespace.get(attr_name)
-			namespace[attr_name] = StateProperty(attr_name, default_value)
+			if _is_private(attr_name):
+				defaults[attr_name] = (
+					namespace[attr_name] if attr_name in namespace else MISSING
+				)
+				kinds[attr_name] = "private"
+			else:
+				has_default = attr_name in namespace
+				default_value = namespace[attr_name] if has_default else None
+				raw_default = default_value if has_default else MISSING
+				defaults[attr_name] = raw_default
+				kinds[attr_name] = "signal"
+				namespace[attr_name] = StateProperty(attr_name, default_value)
 
-		# 2) Turn non-annotated plain values into StateProperty descriptors
+		# 2) Inspect remaining attributes for queries, private data, and plain values
 		for attr_name, value in list(namespace.items()):
-			# Do not wrap private/dunder attributes as reactive
-			if attr_name.startswith("_"):
+			if attr_name.startswith("__") and attr_name.endswith("__"):
 				continue
-			# Skip if already set as a descriptor we care about
-			if isinstance(
-				value,
-				(StateProperty, ComputedProperty, StateEffect, InitializableProperty),
-			):
+			if _is_private(attr_name):
+				if _is_plain_state_attribute(value):
+					defaults[attr_name] = value
+				elif attr_name not in defaults:
+					defaults[attr_name] = MISSING
+				kinds[attr_name] = "private"
 				continue
-			# Skip common callables and descriptors
-			if callable(value) or isinstance(
-				value, (staticmethod, classmethod, property)
-			):
+			if kinds.get(attr_name) == "signal":
 				continue
-			# Convert plain class var into a StateProperty
+			if getattr(value, "__pulse_kind__", None) == "query":
+				kinds[attr_name] = "query"
+				continue
+			if not _is_plain_state_attribute(value):
+				continue
+			defaults[attr_name] = value
+			kinds[attr_name] = "signal"
 			namespace[attr_name] = StateProperty(attr_name, value)
 
-		return super().__new__(mcs, name, bases, namespace)
+		cls = super().__new__(mcs, name, bases, namespace)
+		mcs._build_state_metadata(
+			cls,
+			defaults,
+			kinds,
+		)
+		return cls
 
 	@override
 	def __call__(cls, *args: Any, **kwargs: Any):
 		# Create the instance (runs __new__ and the class' __init__)
 		instance = super().__call__(*args, **kwargs)
+		post_init = getattr(instance, "__post_init__", None)
+		if callable(post_init):
+			post_init()
 		# Ensure state effects are initialized even if user __init__ skipped super().__init__
 		try:
-			initializer = instance._initialize
+			instance._initialize()
 		except AttributeError:
-			return instance
-		initializer()
+			...
 		return instance
+
+	@staticmethod
+	def _build_state_metadata(
+		cls: type,  # pyright: ignore[reportSelfClsParameterName]
+		defaults: dict[str, Any],
+		kinds: dict[str, str],
+	) -> None:
+		fields: "OrderedDict[str, StateFieldMetadata]" = OrderedDict()
+
+		for base in reversed(cls.__mro__[1:]):
+			if base in (ABC, object):
+				continue
+			base_meta: StateMetadata | None = getattr(base, "__state_metadata__", None)
+			if base_meta is None:
+				continue
+			for name, meta in base_meta.fields.items():
+				fields[name] = meta.clone()
+
+		for attr_name, kind in kinds.items():
+			if kind == "signal":
+				descriptor = getattr(cls, attr_name, None)
+				if not isinstance(descriptor, StateProperty):
+					continue
+				default = defaults.get(attr_name, None)
+				has_default = attr_name in defaults
+				fields[attr_name] = StateFieldMetadata(
+					name=attr_name,
+					kind=StateFieldKind.SIGNAL,
+					drain=True,
+					has_default=has_default,
+					default=default,
+					descriptor=descriptor,
+					defined_on=cls,
+				)
+			elif kind == "query":
+				attr = getattr(cls, attr_name, None)
+				preserve = bool(getattr(attr, "preserve", False))
+				fields[attr_name] = StateFieldMetadata(
+					name=attr_name,
+					kind=StateFieldKind.QUERY,
+					drain=preserve,
+					has_default=False,
+					default=None,
+					descriptor=attr,
+					defined_on=cls,
+					preserve=preserve,
+				)
+			elif kind == "private":
+				default = defaults.get(attr_name, None)
+				has_default = attr_name in defaults
+				fields[attr_name] = StateFieldMetadata(
+					name=attr_name,
+					kind=StateFieldKind.PRIVATE,
+					drain=False,
+					has_default=has_default,
+					default=default,
+					descriptor=None,
+					defined_on=cls,
+				)
+
+		cls.__state_metadata__ = StateMetadata(fields)
 
 
 class StateStatus(IntEnum):
@@ -207,6 +350,19 @@ class State(ABC, metaclass=StateMeta):
 
 	Properties will automatically trigger re-renders when changed.
 	"""
+
+	__version__: int = 1
+
+	@classmethod
+	def __migrate__(
+		cls,
+		start_version: int,
+		target_version: int,
+		values: dict[str, Any],
+	) -> dict[str, Any]:
+		raise NotImplementedError(
+			f"{cls.__name__} must override __migrate__ to handle state migrations"
+		)
 
 	@override
 	def __setattr__(self, name: str, value: Any) -> None:

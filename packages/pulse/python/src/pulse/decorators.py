@@ -177,10 +177,15 @@ def query(
 	*,
 	keep_alive: bool = False,
 	keep_previous_data: bool = False,
+	preserve: bool = False,
 ) -> QueryProperty[T, TState]: ...
 @overload
 def query(
-	fn: None = None, *, keep_alive: bool = False, keep_previous_data: bool = False
+	fn: None = None,
+	*,
+	keep_alive: bool = False,
+	keep_previous_data: bool = False,
+	preserve: bool = False,
 ) -> Callable[
 	[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T, TState]
 ]: ...
@@ -194,6 +199,7 @@ def query(
 	keep_alive: bool = False,
 	keep_previous_data: bool = False,
 	initial: T,
+	preserve: bool = False,
 ) -> QueryPropertyWithInitial[T, TState]: ...
 @overload
 def query(
@@ -202,6 +208,7 @@ def query(
 	keep_alive: bool = False,
 	keep_previous_data: bool = False,
 	initial: T,
+	preserve: bool = False,
 ) -> Callable[
 	[Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T, TState]
 ]: ...
@@ -213,6 +220,7 @@ def query(
 	keep_alive: bool = False,
 	keep_previous_data: bool = False,
 	initial: Any = None,
+	preserve: bool = False,
 ) -> (
 	QueryProperty[T, TState]
 	| QueryPropertyWithInitial[T, TState]
@@ -234,12 +242,14 @@ def query(
 				keep_alive=keep_alive,
 				keep_previous_data=keep_previous_data,
 				initial=initial,
+				preserve=preserve,
 			)
 		return QueryProperty(
 			func.__name__,
 			func,
 			keep_alive=keep_alive,
 			keep_previous_data=keep_previous_data,
+			preserve=preserve,
 		)
 
 	if fn:

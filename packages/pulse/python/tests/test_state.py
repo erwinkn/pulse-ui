@@ -8,6 +8,7 @@ import pulse as ps
 import pytest
 from pulse.reactive import flush_effects
 from pulse.reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet
+from pulse.state import StateFieldKind
 
 
 class TestState:
@@ -601,3 +602,128 @@ class TestState:
 		# After fixing the condition, it should work
 		state.count = 3
 		assert state.failing_computed == 6
+
+	def test_state_metadata_captures_signals_queries_private(self):
+		class Base(ps.State):
+			count: int = 1
+			message: str
+			_secret_value: int = 3
+
+			@ps.query(preserve=True)
+			async def user(self):
+				return {"name": "pulse"}
+
+		meta = Base.__state_metadata__
+		fields = meta.fields
+
+		count_meta = fields["count"]
+		assert count_meta.kind is StateFieldKind.SIGNAL
+		assert count_meta.has_default is True
+		assert count_meta.default == 1
+		assert count_meta.drain is True
+		assert count_meta.defined_on is Base
+
+		message_meta = fields["message"]
+		assert message_meta.kind is StateFieldKind.SIGNAL
+		assert message_meta.has_default is False
+		assert message_meta.default is None
+
+		query_meta = fields["user"]
+		assert query_meta.kind is StateFieldKind.QUERY
+		assert query_meta.drain is True
+		assert query_meta.preserve is True
+		assert query_meta.descriptor is Base.__dict__["user"]
+		assert query_meta.defined_on is Base
+
+		secret_meta = fields["_secret_value"]
+		assert secret_meta.kind is StateFieldKind.PRIVATE
+		assert secret_meta.has_default is True
+		assert secret_meta.default == 3
+		assert secret_meta.drain is False
+		assert secret_meta.defined_on is Base
+
+	def test_state_metadata_inheritance_clone(self):
+		class Parent(ps.State):
+			alpha: int = 1
+
+			@ps.query()
+			async def fetch(self):
+				return 1
+
+		class Child(Parent):
+			beta: str = "hi"
+			_hidden: int
+
+		parent_meta = Parent.__state_metadata__
+		child_meta = Child.__state_metadata__
+
+		assert child_meta.fields is not parent_meta.fields
+
+		alpha_parent = parent_meta.fields["alpha"]
+		alpha_child = child_meta.fields["alpha"]
+		assert alpha_child is not alpha_parent
+		assert alpha_child.defined_on is Parent
+
+		beta_meta = child_meta.fields["beta"]
+		assert beta_meta.kind is StateFieldKind.SIGNAL
+		assert beta_meta.defined_on is Child
+		assert beta_meta.has_default is True
+		assert beta_meta.default == "hi"
+
+		hidden_meta = child_meta.fields["_hidden"]
+		assert hidden_meta.kind is StateFieldKind.PRIVATE
+		assert hidden_meta.has_default is False
+		assert hidden_meta.default is None
+		assert hidden_meta.defined_on is Child
+
+		query_meta = child_meta.fields["fetch"]
+		assert query_meta.kind is StateFieldKind.QUERY
+		assert query_meta.preserve is False
+		assert query_meta.defined_on is Parent
+
+	def test_state_version_defaults_and_migrate_override(self):
+		class VersionBase(ps.State):
+			__version__ = 5
+
+			@classmethod
+			def __migrate__(
+				cls, start_version: int, target_version: int, values: dict[str, Any]
+			) -> dict[str, Any]:
+				assert start_version == 4
+				assert target_version == 5
+				return {"upgraded": True, **values}
+
+		class VersionChild(VersionBase):
+			__version__ = 6
+
+		class Fresh(ps.State):
+			pass
+
+		assert Fresh.__version__ == 1
+
+		with pytest.raises(NotImplementedError):
+			Fresh.__migrate__(1, 2, {})
+
+		assert VersionBase.__version__ == 5
+		assert VersionChild.__version__ == 6
+
+		result = VersionChild.__migrate__(4, 5, {"count": 1})
+		assert result["upgraded"] is True
+		assert result["count"] == 1
+
+	def test_state_post_init_runs(self):
+		class PostInitState(ps.State):
+			counter: int = 0
+
+			def __init__(self):
+				self._init_flag = True
+				super().__init__()
+
+			def __post_init__(self):
+				self._post_init_flag = True
+				self.counter = 10
+
+		state = PostInitState()
+		assert getattr(state, "_init_flag", False) is True
+		assert getattr(state, "_post_init_flag", False) is True
+		assert state.counter == 10

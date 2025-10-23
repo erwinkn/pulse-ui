@@ -35,7 +35,7 @@ S = TypeVar("S")
 KT = TypeVar
 
 
-_MISSING = object()
+MISSING = object()
 
 
 class SupportsKeysAndGetItem(Protocol[T1, T2_co]):
@@ -105,11 +105,11 @@ class ReactiveDict(dict[T1, T2]):
 	def __getitem__(self, key: T1) -> T2:
 		if key not in self._signals:
 			# Lazily create missing key with sentinel so it can be reactive
-			self._signals[key] = Signal(_MISSING)
+			self._signals[key] = Signal(MISSING)
 		val = self._signals[key].read()
 		# Preserve dict.__getitem__ typing by casting. Semantics: return None
 		# only if the stored value is explicitly None; otherwise unwrap sentinel.
-		return cast(T2, None) if val is _MISSING else cast(T2, val)
+		return cast(T2, None) if val is MISSING else cast(T2, val)
 
 	@override
 	def __setitem__(self, key: T1, value: T2) -> None:
@@ -119,9 +119,9 @@ class ReactiveDict(dict[T1, T2]):
 	def __delitem__(self, key: T1) -> None:
 		# Remove from mapping but preserve signal object for subscribers
 		if key not in self._signals:
-			self._signals[key] = Signal(_MISSING)
+			self._signals[key] = Signal(MISSING)
 		else:
-			self._signals[key].write(_MISSING)
+			self._signals[key].write(MISSING)
 		if super().__contains__(key):
 			super().__delitem__(key)
 			self._bump_structure()
@@ -137,10 +137,10 @@ class ReactiveDict(dict[T1, T2]):
 		# Ensure a per-key signal exists so get() can subscribe even when absent
 		sig = self._signals.get(key)
 		if sig is None:
-			sig = cast(Signal[T2], Signal(_MISSING))
+			sig = cast(Signal[T2], Signal(MISSING))
 			self._signals[key] = sig
 		val = sig.read()
-		return default if val is _MISSING else val
+		return default if val is MISSING else val
 
 	@override
 	def __iter__(self) -> Iterator[T1]:
@@ -159,7 +159,7 @@ class ReactiveDict(dict[T1, T2]):
 		# Subscribe to the per-key value signal so presence checks are reactive
 		sig = self._signals.get(key)
 		if sig is None:
-			sig = Signal(_MISSING)
+			sig = Signal(MISSING)
 			self._signals[key] = sig
 		sig.read()
 		return dict.__contains__(self, key)
@@ -220,7 +220,7 @@ class ReactiveDict(dict[T1, T2]):
 	def delete(self, key: T1) -> None:
 		if key in self._signals:
 			# Preserve signal and mark as not present; do not raise
-			self._signals[key].write(_MISSING)
+			self._signals[key].write(MISSING)
 			if super().__contains__(key):
 				super().__delitem__(key)
 				self._bump_structure()
@@ -251,12 +251,12 @@ class ReactiveDict(dict[T1, T2]):
 	def pop(self, key: T1, default: T3, /) -> T2 | T3: ...
 
 	@override
-	def pop(self, key: T1, default: T3 = _MISSING) -> T2 | T3:
+	def pop(self, key: T1, default: T3 = MISSING) -> T2 | T3:
 		if super().__contains__(key):
 			val = cast(T2, dict.__getitem__(self, key))
 			self.__delitem__(key)
 			return val
-		if default is _MISSING:
+		if default is MISSING:
 			raise KeyError(key)
 		return default
 
@@ -268,9 +268,9 @@ class ReactiveDict(dict[T1, T2]):
 		# Preserve and update reactive metadata
 		sig = self._signals.get(k)
 		if sig is None:
-			self._signals[k] = Signal(_MISSING)
+			self._signals[k] = Signal(MISSING)
 		else:
-			sig.write(_MISSING)
+			sig.write(MISSING)
 		self._bump_structure()
 		return k, v
 
@@ -284,7 +284,7 @@ class ReactiveDict(dict[T1, T2]):
 		if super().__contains__(key):
 			# Return current value without structural change
 			if key not in self._signals:
-				self._signals[key] = Signal(_MISSING)
+				self._signals[key] = Signal(MISSING)
 			return self._signals[key].read()
 		# Insert default
 		self.set(key, default)  # pyright: ignore[reportArgumentType]
@@ -294,7 +294,7 @@ class ReactiveDict(dict[T1, T2]):
 		self._structure.read()
 		sig = self._signals.get(key)
 		if sig is None:
-			sig = cast(Signal[T2], Signal(_MISSING))
+			sig = cast(Signal[T2], Signal(MISSING))
 			self._signals[key] = sig
 		return sig.read()
 
@@ -836,11 +836,11 @@ class ReactiveProperty(Generic[T1]):
 	owner_name: str | None
 	default: T1 | _Any
 
-	def __init__(self, name: str | None = None, default: T1 | None = _MISSING):
+	def __init__(self, name: str | None = None, default: T1 | None = MISSING):
 		self.name = name
 		self.private_name = None
 		self.owner_name = None
-		self.default = reactive(default) if default is not _MISSING else _MISSING
+		self.default = reactive(default) if default is not MISSING else MISSING
 
 	def __set_name__(self, owner: type[_Any], name: str):
 		self.name = self.name or name
@@ -862,7 +862,7 @@ class ReactiveProperty(Generic[T1]):
 				sig = per_obj.get(priv)
 
 		if sig is None:
-			init_value = None if self.default is _MISSING else self.default
+			init_value = None if self.default is MISSING else self.default
 			sig = Signal(init_value, name=f"{self.owner_name}.{self.name}")
 			# Try to attach to the instance; if that fails (e.g., __slots__), use fallback store
 			try:
@@ -894,7 +894,7 @@ class ReactiveProperty(Generic[T1]):
 		# If there is no signal yet and there was no default, mirror normal attribute error
 		priv = cast(str, self.private_name)
 		sig = getattr(obj, priv, None)
-		if sig is None and self.default is _MISSING:
+		if sig is None and self.default is MISSING:
 			owner = self.owner_name or obj.__class__.__name__
 			raise AttributeError(
 				f"Reactive property '{owner}.{self.name}' accessed before initialization"
@@ -914,7 +914,7 @@ class ReactiveProperty(Generic[T1]):
 class DataclassReactiveProperty(ReactiveProperty[T1]):
 	"""Reactive descriptor for dataclass fields with frozen enforcement."""
 
-	def __init__(self, name: str | None = None, default: T1 | None = _MISSING):
+	def __init__(self, name: str | None = None, default: T1 | None = MISSING):
 		super().__init__(name, default)
 		self.owner_cls: type | None = None
 
@@ -972,7 +972,7 @@ def reactive_dataclass(
 		# Replace fields with DataclassReactiveProperty descriptors
 		for f in _dc_fields(klass):
 			# Skip ClassVars or InitVars implicitly as dataclasses excludes them from fields()
-			default_val = f.default if f.default is not _DC_MISSING else _MISSING
+			default_val = f.default if f.default is not _DC_MISSING else MISSING
 			rp = DataclassReactiveProperty(f.name, default_val)
 			setattr(klass, f.name, rp)
 			# When assigning descriptors post-class-creation, __set_name__ is not called automatically

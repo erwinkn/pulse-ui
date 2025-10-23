@@ -187,6 +187,8 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	_priv_key_comp: str
 	_priv_initial_fn: str
 	_priv_initial_applied: str
+	preserve: bool
+	__pulse_kind__ = "query"
 
 	def __init__(
 		self,
@@ -195,6 +197,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		keep_alive: bool = False,
 		keep_previous_data: bool = False,
 		initial: T | None = None,
+		preserve: bool = False,
 	):
 		self.name = name
 		self._fetch_fn = fetch_fn
@@ -211,6 +214,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		self._priv_key_comp = f"__query_key_{name}"
 		self._priv_initial_fn = f"__query_initial_fn_{name}"
 		self._priv_initial_applied = f"__query_initial_applied_{name}"
+		self.preserve = preserve
 
 	# Decorator to attach a key function
 	def key(self, fn: Callable[[TState], tuple[Any, ...]]):

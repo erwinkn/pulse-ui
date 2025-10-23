@@ -60,6 +60,14 @@ class RenderSession:
 	routes: RouteTree
 	channels: "ChannelsManager"
 	forms: "FormRegistry"
+	connected: bool
+	route_mounts: dict[str, RouteMount]
+	message_buffer: list[ServerMessage]
+	global_states: dict[str, State]
+	pending_api: dict[str, asyncio.Future[dict[str, Any]]]
+	_server_address: str | None
+	_client_address: str | None
+	_send_message: Callable[[ServerMessage], Any] | None
 
 	def __init__(
 		self,
@@ -74,19 +82,19 @@ class RenderSession:
 
 		self.id = id
 		self.routes = routes
-		self.route_mounts: dict[str, RouteMount] = {}
+		self.route_mounts = {}
 		# Base server address for building absolute API URLs (e.g., http://localhost:8000)
-		self._server_address: str | None = server_address
+		self._server_address = server_address
 		# Best-effort client address, captured at prerender or socket connect time
-		self._client_address: str | None = client_address
-		self._send_message: Callable[[ServerMessage], Any] | None = None
+		self._client_address = client_address
+		self._send_message = None
 		# Buffer messages emitted before a connection is established
-		self._message_buffer: list[ServerMessage] = []
-		self._pending_api: dict[str, asyncio.Future[dict[str, Any]]] = {}
+		self.message_buffer = []
+		self.pending_api = {}
 		# Registry of per-session global singletons (created via ps.global_state without id)
-		self._global_states: dict[str, State] = {}
+		self.global_states = {}
 		# Connection state
-		self.connected: bool = False
+		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
 
@@ -115,10 +123,10 @@ class RenderSession:
 		self._send_message = send_message
 		self.connected = True
 		# Flush any buffered messages now that we can send
-		if self._message_buffer:
-			for msg in self._message_buffer:
+		if self.message_buffer:
+			for msg in self.message_buffer:
 				self._send_message(msg)
-			self._message_buffer.clear()
+			self.message_buffer.clear()
 
 	def send(self, message: ServerMessage):
 		# If a sender is available (connected or during prerender capture), send immediately.
@@ -126,7 +134,7 @@ class RenderSession:
 		if self._send_message:
 			self._send_message(message)
 		else:
-			self._message_buffer.append(message)
+			self.message_buffer.append(message)
 
 	def report_error(
 		self,
@@ -160,9 +168,9 @@ class RenderSession:
 			self.unmount(path)
 		self.route_mounts.clear()
 		# Dispose per-session global singletons if they expose dispose()
-		for value in self._global_states.values():
+		for value in self.global_states.values():
 			value.dispose()
-		self._global_states.clear()
+		self.global_states.clear()
 		# Dispose all channels for this render session
 		for channel_id in list(self.channels._channels.keys()):  # pyright: ignore[reportPrivateUsage]
 			channel = self.channels._channels.get(channel_id)  # pyright: ignore[reportPrivateUsage]
@@ -172,7 +180,7 @@ class RenderSession:
 		# The effect will be garbage collected, and with it the dependencies
 		self._send_message = None
 		# Discard any buffered messages on close
-		self._message_buffer.clear()
+		self.message_buffer.clear()
 		self.connected = False
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
@@ -226,7 +234,7 @@ class RenderSession:
 			url = f"{base}{path}"
 		corr_id = uuid.uuid4().hex
 		fut = create_future_on_loop()
-		self._pending_api[corr_id] = fut
+		self.pending_api[corr_id] = fut
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id
 		self.send(
@@ -248,7 +256,7 @@ class RenderSession:
 		if id_ is None:
 			return
 		id_ = str(id_)
-		fut = self._pending_api.pop(id_, None)
+		fut = self.pending_api.pop(id_, None)
 		if fut and not fut.done():
 			fut.set_result(
 				{
@@ -362,10 +370,10 @@ class RenderSession:
 	# ---- Session-local global state registry ----
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
 		"""Return a per-session singleton for the provided key."""
-		inst = self._global_states.get(key)
+		inst = self.global_states.get(key)
 		if inst is None:
 			inst = factory()
-			self._global_states[key] = inst
+			self.global_states[key] = inst
 		return inst
 
 	def render(self, path: str, route_info: RouteInfo | None = None):

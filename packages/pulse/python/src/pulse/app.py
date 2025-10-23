@@ -126,25 +126,28 @@ class App:
 	    ```
 	"""
 
+	# == Config ==
 	env: PulseEnv
 	mode: PulseMode
 	status: AppStatus
 	server_address: str | None
 	internal_server_address: str | None
 	api_prefix: str
-	plugins: list[Plugin]
-	routes: RouteTree
 	not_found: str
-	user_sessions: dict[str, UserSession]
-	render_sessions: dict[str, RenderSession]
-	session_store: SessionStore | CookieSessionStore
+	plugins: list[Plugin]
 	cookie: Cookie
 	cors: CORSOptions | None
+	# Instances
+	routes: RouteTree
 	codegen: Codegen
+	session_store: SessionStore | CookieSessionStore
 	fastapi: FastAPI
 	sio: socketio.AsyncServer
 	asgi: ASGIApp
 	middleware: MiddlewareStack
+	# == Data ==
+	user_sessions: dict[str, UserSession]
+	render_sessions: dict[str, RenderSession]
 	_user_to_render: dict[str, list[str]]
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]

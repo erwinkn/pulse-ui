@@ -1,21 +1,8 @@
 import asyncio
 import inspect
-import json
 import os
-import platform
-import socket
-import time
 from collections.abc import Awaitable, Callable, Coroutine
-from pathlib import Path
-from typing import (
-	Any,
-	ParamSpec,
-	Protocol,
-	TypedDict,
-	TypeVar,
-	overload,
-	override,
-)
+from typing import Any, ParamSpec, Protocol, TypedDict, TypeVar, overload, override
 from urllib.parse import urlsplit
 
 from anyio import from_thread
@@ -380,115 +367,8 @@ def get_client_address_socketio(environ: dict[str, Any]) -> str | None:
 		return None
 
 
-# --- Runtime lock helpers (prevent multiple dev instances per web root) ---
-
-
-def _is_process_alive(pid: int) -> bool:
-	try:
-		# On POSIX, signal 0 checks for existence without killing
-		os.kill(pid, 0)
-	except ProcessLookupError:
-		return False
-	except PermissionError:
-		# Process exists but we may not have permission
-		return True
-	except Exception:
-		# Best-effort: assume alive if uncertain
-		return True
-	return True
-
-
-def lock_path_for_web_root(web_root: Path, filename: str = ".pulse.lock") -> Path:
-	return Path(web_root) / filename
-
-
-def write_gitignore_for_lock(lock_path: Path) -> None:
-	try:
-		gitignore_path = lock_path.parent / ".gitignore"
-		pattern = f"\n{lock_path.name}\n"
-		if gitignore_path.exists():
-			try:
-				content = gitignore_path.read_text()
-			except Exception:
-				content = ""
-			if lock_path.name not in content.split():
-				gitignore_path.write_text(content + pattern)
-		else:
-			gitignore_path.write_text(pattern.lstrip("\n"))
-	except Exception:
-		# Non-fatal
-		pass
-
-
-def _read_lock(lock_path: Path) -> dict[str, Any] | None:
-	try:
-		data = json.loads(lock_path.read_text())
-		if isinstance(data, dict):
-			return data
-	except Exception:
-		return None
-	return None
-
-
-def ensure_web_lock(lock_path: Path, *, owner: str = "server") -> tuple[Path, bool]:
-	"""Create a lock file or raise if an active one exists.
-
-	Returns (lock_path, created_now)
-	"""
-	lock_path = Path(lock_path)
-	write_gitignore_for_lock(lock_path)
-
-	if lock_path.exists():
-		info = _read_lock(lock_path) or {}
-		pid = int(info.get("pid", 0) or 0)
-		if pid and _is_process_alive(pid):
-			raise RuntimeError(
-				f"Another Pulse dev instance appears to be running (pid={pid}) for {lock_path.parent}."
-			)
-		# Stale lock; continue to overwrite
-
-	payload = {
-		"pid": os.getpid(),
-		"owner": owner,
-		"created_at": int(time.time()),
-		"hostname": socket.gethostname(),
-		"platform": platform.platform(),
-		"python": platform.python_version(),
-		"cwd": os.getcwd(),
-	}
-	try:
-		lock_path.parent.mkdir(parents=True, exist_ok=True)
-		lock_path.write_text(json.dumps(payload))
-	except Exception as exc:
-		raise RuntimeError(f"Failed to create lock file at {lock_path}: {exc}") from exc
-	return lock_path, True
-
-
-def validate_existing_lock(lock_path: Path) -> bool:
-	"""Validate an existing lock. Returns True if an active other instance exists.
-
-	If the file is missing or stale, returns False. If an active other instance is
-	detected, raises RuntimeError.
-	"""
-	lock_path = Path(lock_path)
-	if not lock_path.exists():
-		return False
-	info = _read_lock(lock_path) or {}
-	pid = int(info.get("pid", 0) or 0)
-	if pid and _is_process_alive(pid):
-		# Active lock
-		raise RuntimeError(
-			f"Another Pulse dev instance appears to be running (pid={pid}) for {lock_path.parent}."
-		)
-	return False
-
-
-def remove_web_lock(lock_path: Path) -> None:
-	try:
-		Path(lock_path).unlink(missing_ok=True)
-	except Exception:
-		# Best-effort cleanup
-		pass
+# --- Runtime lock helpers moved to pulse.cli.web_lock ---
+# Use WebLock context manager for idempotent lock management
 
 
 @overload

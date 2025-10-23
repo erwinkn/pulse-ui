@@ -26,7 +26,6 @@ ENV_PULSE_APP_DIR = "PULSE_APP_DIR"
 ENV_PULSE_HOST = "PULSE_HOST"
 ENV_PULSE_PORT = "PULSE_PORT"
 ENV_PULSE_SECRET = "PULSE_SECRET"
-ENV_PULSE_LOCK_MANAGED_BY_CLI = "PULSE_LOCK_MANAGED_BY_CLI"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
 
 
@@ -99,14 +98,6 @@ class Env:
 		self._set(ENV_PULSE_SECRET, value)
 
 	# Flags
-	@property
-	def lock_managed_by_cli(self) -> bool:
-		return self._get(ENV_PULSE_LOCK_MANAGED_BY_CLI) == "1"
-
-	@lock_managed_by_cli.setter
-	def lock_managed_by_cli(self, value: bool) -> None:
-		self._set(ENV_PULSE_LOCK_MANAGED_BY_CLI, "1" if value else None)
-
 	@property
 	def codegen_disabled(self) -> bool:
 		return self._get(ENV_PULSE_DISABLE_CODEGEN) == "1"

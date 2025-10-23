@@ -15,6 +15,7 @@ from typing import cast
 import typer
 from rich.console import Console
 
+from pulse.cli.folder_lock import FolderLock
 from pulse.cli.helpers import (
 	find_available_port,
 	load_app_from_target,
@@ -33,16 +34,10 @@ from pulse.cli.packages import (
 from pulse.env import (
 	ENV_PULSE_DISABLE_CODEGEN,
 	ENV_PULSE_HOST,
-	ENV_PULSE_LOCK_MANAGED_BY_CLI,
 	ENV_PULSE_PORT,
 	ENV_PULSE_SECRET,
 	PulseMode,
 	env,
-)
-from pulse.helpers import (
-	ensure_web_lock,
-	lock_path_for_web_root,
-	remove_web_lock,
 )
 from pulse.react_component import registered_react_components
 from pulse.version import __version__ as PULSE_PY_VERSION
@@ -111,6 +106,13 @@ def run(
 	parsed = parse_app_target(app_file)
 	app_instance = load_app_from_target(app_file)
 
+	# Check if app uses single-server deployment
+	is_single_server = app_instance.deployment == "single-server"
+	if is_single_server:
+		console.log(
+			"🔧 [cyan]Single-server mode:[/cyan] Python will manage React Router server internally"
+		)
+
 	web_root = app_instance.codegen.cfg.web_root
 	if not web_root.exists() and not server_only:
 		console.log(f"❌ Directory not found: {web_root.absolute()}")
@@ -118,14 +120,6 @@ def run(
 
 	server_command, server_cwd, server_env = None, None, None
 	web_command, web_cwd, web_env = None, None, None
-
-	# Create a dev-instance lock in the web root to prevent concurrent runs
-	lock_path = lock_path_for_web_root(web_root)
-	try:
-		ensure_web_lock(lock_path, owner="cli")
-	except RuntimeError as e:
-		console.log(f"❌ {e}")
-		raise typer.Exit(1) from None
 
 	# In dev, provide a stable PULSE_SECRET persisted in a git-ignored .pulse/secret file
 	dev_secret: str | None = None
@@ -203,7 +197,6 @@ def run(
 				# Prefer the directory containing the app file (what users edit most)
 				app_dir = getattr(env, "pulse_app_dir", None) or os.getcwd()
 				server_command.extend(["--reload-dir", str(Path(app_dir))])
-				print("Reload dir:", app_dir)
 				if web_root.exists():
 					server_command.extend(["--reload-dir", str(web_root)])
 			except Exception:
@@ -232,8 +225,6 @@ def run(
 			{
 				"FORCE_COLOR": "1",
 				"PYTHONUNBUFFERED": "1",
-				# Signal that the CLI manages the dev lock lifecycle
-				ENV_PULSE_LOCK_MANAGED_BY_CLI: "1",
 				# Communicate bind host/port to the server for dev codegen
 				ENV_PULSE_HOST: address,
 				ENV_PULSE_PORT: str(port),
@@ -245,6 +236,8 @@ def run(
 		if dev_secret:
 			server_env[ENV_PULSE_SECRET] = dev_secret
 
+	# Install web dependencies for both single-server and subdomains mode
+	# But only start the web server from CLI in subdomains mode
 	if not server_only:
 		# Resolve and install JS dependencies required by React components
 		try:
@@ -337,17 +330,18 @@ def run(
 			console.log(f"❌ {e}")
 			raise typer.Exit(1) from None
 
-		web_command = ["bun", "run", "dev"]
-		web_cwd = web_root
-		web_env = os.environ.copy()
-		web_env.update(
-			{
-				"FORCE_COLOR": "1",
-				"PYTHONUNBUFFERED": "1",
-				# Keep web env consistent as child tools may also look at this
-				ENV_PULSE_LOCK_MANAGED_BY_CLI: "1",
-			}
-		)
+		# Only start web server from CLI in subdomains mode
+		# In single-server mode, Python server manages it internally
+		if not is_single_server:
+			web_command = ["bun", "run", "dev"]
+			web_cwd = web_root
+			web_env = os.environ.copy()
+			web_env.update(
+				{
+					"FORCE_COLOR": "1",
+					"PYTHONUNBUFFERED": "1",
+				}
+			)
 
 	# Pass the extra flags to the web command if it's web only, else pass it to
 	# the server (if running both or server-only)
@@ -382,6 +376,19 @@ def run(
 				else:
 					fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
 					procs.append(("server", pid, fd))
+
+					# Show URL for single-server mode
+					if is_single_server:
+						protocol = (
+							"http" if address in ("127.0.0.1", "localhost") else "https"
+						)
+						server_url = f"{protocol}://{address}:{port}"
+						console.log("")
+						console.log(
+							f"✨ [bold green]Server running at:[/bold green] [bold cyan][link={server_url}]{server_url}[/link][/bold cyan]"
+						)
+						console.log(f"   [dim]API: {server_url}/_pulse/...[/dim]")
+						console.log("")
 
 			if web_command:
 				pid, fd = pty_module.fork()
@@ -478,11 +485,14 @@ def run(
 				except Exception:
 					pass
 
-	try:
-		code = run_with_pty()
-		raise typer.Exit(code)
-	finally:
-		remove_web_lock(lock_path)
+	# Use FolderLock to prevent multiple dev instances
+	with FolderLock(web_root):
+		try:
+			code = run_with_pty()
+			raise typer.Exit(code)
+		except RuntimeError as e:
+			console.log(f"❌ {e}")
+			raise typer.Exit(1) from None
 
 
 @cli.command("generate")

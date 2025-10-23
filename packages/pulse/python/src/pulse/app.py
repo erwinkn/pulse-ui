@@ -5,17 +5,22 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import asyncio
 import logging
+import os
+import subprocess
 from collections import defaultdict
 from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from enum import IntEnum
+from pathlib import Path
 from typing import Any, Callable, Literal, NotRequired, TypedDict, TypeVar, cast
 
 import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp
 
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
@@ -35,12 +40,9 @@ from pulse.css import (
 from pulse.env import PulseMode, env
 from pulse.helpers import (
 	create_task,
-	ensure_web_lock,
 	get_client_address,
 	get_client_address_socketio,
 	later,
-	lock_path_for_web_root,
-	remove_web_lock,
 )
 from pulse.hooks.core import hooks
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
@@ -63,6 +65,7 @@ from pulse.middleware import (
 	Redirect,
 )
 from pulse.plugin import Plugin
+from pulse.proxy import PulseProxy
 from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
@@ -136,8 +139,8 @@ class App:
 	cors: CORSOptions | None
 	codegen: Codegen
 	fastapi: FastAPI
-	sio: socketio.AsyncServer  # type: ignore
-	asgi: socketio.ASGIApp  # type: ignore
+	sio: socketio.AsyncServer
+	asgi: ASGIApp
 	middleware: MiddlewareStack
 	_user_to_render: dict[str, list[str]]
 	_render_to_user: dict[str, str]
@@ -158,8 +161,8 @@ class App:
 		not_found: str = "/not-found",
 		# Deployment and integration options
 		mode: PulseMode | None = None,
-		deployment: DeploymentMode = "subdomains",
-		api_prefix: str | None = None,
+		deployment: DeploymentMode = "single-server",
+		api_prefix: str = "/_pulse",
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 	):
@@ -179,11 +182,7 @@ class App:
 		# Optional internal address used by server-side loader fetches
 		self.internal_server_address = internal_server_address
 
-		# Store API prefix (always use /api/pulse regardless of deployment mode)
-		if api_prefix is None:
-			self.api_prefix = "/api/pulse"
-		else:
-			self.api_prefix = api_prefix
+		self.api_prefix = api_prefix
 
 		# Resolve and store plugins (sorted by priority, highest first)
 		self.plugins = []
@@ -220,56 +219,27 @@ class App:
 		# Map websocket sid -> renderId for message routing
 		self._socket_to_render = {}
 
+		# Subprocess management for single-server mode
+		self.web_server_proc: subprocess.Popen[str] | None = None
+		self.web_server_port: int | None = None
+
 		self.codegen = Codegen(
 			self.routes,
 			config=codegen or CodegenConfig(),
 		)
 
-		@asynccontextmanager
-		async def lifespan(_: FastAPI):
-			try:
-				if isinstance(self.session_store, SessionStore):
-					await self.session_store.init()
-			except Exception:
-				logger.exception("Error during SessionStore.init()")
-			# Create a lock file in the web project (unless the CLI manages it)
-			lock_path = None
-			try:
-				if not env.lock_managed_by_cli:
-					try:
-						lock_path = lock_path_for_web_root(self.codegen.cfg.web_root)
-						__ = ensure_web_lock(lock_path, owner="server")
-					except RuntimeError as e:
-						logger.error(str(e))
-						raise
-			except Exception:
-				logger.exception("Failed to create Pulse dev lock file")
-				raise
-			# Call plugin on_startup hooks before serving
-			for plugin in self.plugins:
-				plugin.on_startup(self)
-			try:
-				yield
-			finally:
-				try:
-					if isinstance(self.session_store, SessionStore):
-						await self.session_store.close()
-				except Exception:
-					logger.exception("Error during SessionStore.close()")
-				# Remove lock if we created it
-				try:
-					if not env.lock_managed_by_cli and lock_path:
-						remove_web_lock(lock_path)
-				except Exception:
-					# Best-effort
-					pass
-
 		self.fastapi = FastAPI(
 			title="Pulse UI Server",
-			lifespan=lifespan,
+			lifespan=self.fastapi_lifespan,
 		)
 		self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 		self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
+		# In single-server mode, wrap with proxy ASGI app
+		if self.deployment == "single-server":
+			self.asgi = PulseProxy(
+				self.asgi, lambda: self.web_server_port, self.api_prefix
+			)
+
 		if middleware is None:
 			mw_stack: list[PulseMiddleware] = [PulseCoreMiddleware()]
 		elif isinstance(middleware, PulseMiddleware):
@@ -282,6 +252,114 @@ class App:
 			mw_stack.extend(plugin.middleware())
 
 		self.middleware = MiddlewareStack(mw_stack)
+
+	@asynccontextmanager
+	async def fastapi_lifespan(self, _: FastAPI):
+		try:
+			if isinstance(self.session_store, SessionStore):
+				await self.session_store.init()
+		except Exception:
+			logger.exception("Error during SessionStore.init()")
+
+		# Call plugin on_startup hooks before serving
+		for plugin in self.plugins:
+			plugin.on_startup(self)
+
+		# Start React Router server in single-server mode
+		logger.info(f"Deployment mode: {self.deployment}")
+		if self.deployment == "single-server":
+			logger.info("Starting React Router server in single-server mode...")
+			try:
+				web_root = self.codegen.cfg.web_root
+				logger.info(f"Web root: {web_root}")
+				port = await self.start_web_server(web_root, self.mode)
+				logger.info(
+					f"Single-server mode: React Router running on internal port {port}"
+				)
+			except Exception:
+				logger.exception("Failed to start React Router server")
+				raise
+
+		try:
+			yield
+		finally:
+			# Stop React Router server in single-server mode
+			if self.deployment == "single-server":
+				try:
+					# Close proxy HTTP client if it's a PulseProxy
+					if isinstance(self.asgi, PulseProxy):
+						await self.asgi.close()
+					self.stop_web_server()
+				except Exception:
+					logger.exception("Error stopping React Router server")
+
+			try:
+				if isinstance(self.session_store, SessionStore):
+					await self.session_store.close()
+			except Exception:
+				logger.exception("Error during SessionStore.close()")
+
+	async def start_web_server(self, web_root: Path, mode: str) -> int:
+		"""Start React Router server as subprocess and return its port."""
+		from pulse.cli.helpers import find_available_port
+
+		# Find available port
+		port = find_available_port(5173)
+
+		# Build command based on mode
+		if mode == "prod":
+			# Check if build exists
+			build_server = web_root / "build" / "server" / "index.js"
+			if not build_server.exists():
+				raise RuntimeError(
+					f"Production build not found at {build_server}. Run 'bun run build' in the web directory first."
+				)
+			# Production: use built server
+			cmd = ["bun", "run", "start", "--port", str(port)]
+		else:
+			# Development: use dev server
+			cmd = ["bun", "run", "dev", "--port", str(port)]
+
+		logger.info(f"Starting React Router server: {' '.join(cmd)}")
+
+		proc = subprocess.Popen(
+			cmd,
+			cwd=web_root,
+			stdout=subprocess.PIPE,
+			stderr=subprocess.STDOUT,
+			env=os.environ.copy(),
+			text=True,
+		)
+
+		# Wait for server to be ready
+		await asyncio.sleep(2.0 if mode == "prod" else 1.0)
+
+		# Check if process is still running
+		if proc.poll() is not None:
+			output = proc.stdout.read() if proc.stdout else ""
+			raise RuntimeError(f"React Router server failed to start: {output}")
+
+		self.web_server_proc = proc
+		self.web_server_port = port
+
+		logger.info(f"React Router server started on port {port}")
+		return port
+
+	def stop_web_server(self):
+		"""Stop the React Router subprocess."""
+		if self.web_server_proc:
+			logger.info("Stopping React Router server...")
+			self.web_server_proc.terminate()
+			try:
+				self.web_server_proc.wait(timeout=5)
+			except subprocess.TimeoutExpired:
+				logger.warning(
+					"React Router server did not stop gracefully, killing..."
+				)
+				self.web_server_proc.kill()
+				self.web_server_proc.wait()
+			self.web_server_proc = None
+			self.web_server_port = None
 
 	def run_codegen(
 		self, address: str | None = None, internal_address: str | None = None

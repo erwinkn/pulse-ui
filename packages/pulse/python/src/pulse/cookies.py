@@ -8,7 +8,7 @@ from fastapi import Request, Response
 from pulse.hooks.runtime import set_cookie
 
 if TYPE_CHECKING:
-	from pulse.app import DeploymentMode
+	from pulse.app import PulseMode
 
 
 @dataclass
@@ -73,11 +73,11 @@ class SetCookie(Cookie):
 
 
 def session_cookie(
-	mode: "DeploymentMode",
+	mode: "PulseMode",
 	name: str = "pulse.sid",
 	max_age_seconds: int = 7 * 24 * 3600,
 ):
-	if mode == "dev":
+	if mode == "single-server":
 		return Cookie(
 			name,
 			domain=None,
@@ -85,7 +85,7 @@ def session_cookie(
 			samesite="lax",
 			max_age_seconds=max_age_seconds,
 		)
-	elif mode == "same_host" or mode == "subdomains":
+	elif mode == "subdomains":
 		return Cookie(
 			name,
 			domain=None,  # to be set later
@@ -137,33 +137,29 @@ def _base_domain(host: str) -> str:
 	return host[i + 1 :] if i != -1 else host
 
 
-def compute_cookie_domain(mode: "DeploymentMode", server_address: str) -> str | None:
+def compute_cookie_domain(mode: "PulseMode", server_address: str) -> str | None:
 	host = _parse_host(server_address)
-	if mode == "dev" or not host:
+	if mode == "single-server" or not host:
 		return None
-	if mode == "same_host":
-		return host
 	if mode == "subdomains":
 		return "." + _base_domain(host)
 	return None
 
 
-def cors_options(mode: "DeploymentMode", server_address: str) -> CORSOptions:
+def cors_options(mode: "PulseMode", server_address: str) -> CORSOptions:
 	host = _parse_host(server_address) or "localhost"
 	opts: CORSOptions = {
 		"allow_credentials": True,
 		"allow_methods": ["*"],
 		"allow_headers": ["*"],
 	}
-	if mode == "dev":
-		opts["allow_origin_regex"] = ".*"
-		return opts
-	elif mode == "same_host":
-		opts["allow_origin_regex"] = rf"^https?://{host}(:\\d+)?$"
-		return opts
-	elif mode == "subdomains":
+	if mode == "subdomains":
 		base = _base_domain(host)
 		opts["allow_origin_regex"] = rf"^https?://([a-z0-9-]+\\.)?{base}(:\\d+)?$"
+		return opts
+	elif mode == "single-server":
+		# For single-server mode, allow same origin
+		opts["allow_origin_regex"] = rf"^https?://{host}(:\\d+)?$"
 		return opts
 	else:
 		raise ValueError(f"Unsupported deployment mode '{mode}'")

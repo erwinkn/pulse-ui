@@ -562,7 +562,7 @@ app = ps.App(
 			],
 		)
 	],
-	session_store=InMemorySessionStore() if ps.env.pulse_mode == "prod" else None,
+	session_store=InMemorySessionStore() if ps.env.pulse_env == "prod" else None,
 )
 
 

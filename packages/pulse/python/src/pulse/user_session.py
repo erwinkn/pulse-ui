@@ -189,8 +189,8 @@ class CookieSessionStore:
 		if not secret:
 			secret = env.pulse_secret or ""
 			if not secret:
-				mode = env.pulse_mode
-				if mode == "prod":
+				pulse_env = env.pulse_env
+				if pulse_env == "prod":
 					# In CI/production, require an explicit secret
 					raise RuntimeError(
 						"PULSE_SECRET must be set when using CookieSessionStore in production.\nCookieSessionStore is the default way of storing sessions in Pulse. Providing a secret is necessary to not invalidate all sessions on reload."

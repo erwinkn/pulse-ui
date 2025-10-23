@@ -1,10 +1,11 @@
-import pulse as ps
 import pytest
+from pulse.app import App
+from pulse.context import PulseContext
 
 
 @pytest.fixture(autouse=True)
 def _pulse_context():  # pyright: ignore[reportUnusedFunction]
-	app = ps.App()
-	ctx = ps.PulseContext(app=app)
+	app = App()
+	ctx = PulseContext(app=app)
 	with ctx:
 		yield

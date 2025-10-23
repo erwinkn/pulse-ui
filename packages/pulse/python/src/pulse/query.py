@@ -188,7 +188,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	_priv_initial_fn: str
 	_priv_initial_applied: str
 	preserve: bool
-	__pulse_kind__ = "query"
+	__pulse_kind__: str = "query"
 
 	def __init__(
 		self,

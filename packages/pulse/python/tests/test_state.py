@@ -2,7 +2,7 @@
 Tests for the State class and computed properties.
 """
 
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pulse as ps
 import pytest
@@ -683,8 +683,9 @@ class TestState:
 
 	def test_state_version_defaults_and_migrate_override(self):
 		class VersionBase(ps.State):
-			__version__ = 5
+			__version__: int = 5
 
+			@override
 			@classmethod
 			def __migrate__(
 				cls, start_version: int, target_version: int, values: dict[str, Any]
@@ -694,7 +695,7 @@ class TestState:
 				return {"upgraded": True, **values}
 
 		class VersionChild(VersionBase):
-			__version__ = 6
+			__version__: int = 6
 
 		class Fresh(ps.State):
 			pass
@@ -714,6 +715,8 @@ class TestState:
 	def test_state_post_init_runs(self):
 		class PostInitState(ps.State):
 			counter: int = 0
+			_init_flag: bool
+			_post_init_flag: bool
 
 			def __init__(self):
 				self._init_flag = True
@@ -727,3 +730,55 @@ class TestState:
 		assert getattr(state, "_init_flag", False) is True
 		assert getattr(state, "_post_init_flag", False) is True
 		assert state.counter == 10
+
+	def test_state_drain_payload(self):
+		class DrainState(ps.State):
+			numbers: list[int]
+			config: dict[str, int] = {"a": 1}
+			_internal: str = "secret"
+
+			@ps.query(preserve=True)
+			async def preserved(self):
+				return {"value": 1}
+
+			@ps.query()
+			async def ephemeral(self):
+				return {"value": 2}
+
+		state = DrainState()
+		state.numbers = [1, 2]
+		state.config["b"] = 2
+
+		# Seed query results manually to avoid running asynchronous effects
+		state.preserved.set_success({"value": 99})
+		state.ephemeral.set_success({"value": -1})
+
+		payload = state.drain()
+
+		assert payload["__version__"] == DrainState.__version__
+		values = payload["values"]
+		assert isinstance(values, dict)
+
+		assert "numbers" in values
+		assert values["numbers"] == [1, 2]
+		assert not isinstance(values["numbers"], ReactiveList)
+
+		assert "config" in values
+		assert values["config"] == {"a": 1, "b": 2}
+		assert not isinstance(values["config"], ReactiveDict)
+
+		assert "_internal" not in values
+		assert "ephemeral" not in values
+
+		assert "preserved" in values
+		preserved_snapshot = values["preserved"]
+		assert preserved_snapshot["data"] == {"value": 99}
+		assert preserved_snapshot["has_loaded"] is True
+		assert preserved_snapshot["is_loading"] is False
+		assert preserved_snapshot["is_error"] is False
+		assert preserved_snapshot["error"] is None
+
+		assert state.__getstate__() == payload
+
+		cloudpickle = pytest.importorskip("cloudpickle")
+		cloudpickle.dumps(payload)

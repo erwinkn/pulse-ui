@@ -7,11 +7,10 @@ that enables automatic re-rendering when state changes.
 
 import inspect
 from abc import ABC, ABCMeta, abstractmethod
-from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import Enum, IntEnum
-from typing import Any, Generic, Never, TypeVar, override
+from typing import TYPE_CHECKING, Any, Generic, Never, TypeVar, cast, override
 
 from pulse.reactive import (
 	AsyncEffect,
@@ -20,7 +19,10 @@ from pulse.reactive import (
 	Scope,
 	Signal,
 )
-from pulse.reactive_extensions import MISSING, ReactiveProperty
+from pulse.reactive_extensions import ReactiveProperty, unwrap
+
+if TYPE_CHECKING:
+	from pulse.query import QueryResult
 
 T = TypeVar("T")
 
@@ -172,12 +174,10 @@ class StateFieldMetadata:
 
 @dataclass
 class StateMetadata:
-	fields: "OrderedDict[str, StateFieldMetadata]"
+	fields: "dict[str, StateFieldMetadata]"
 
 	def clone(self) -> "StateMetadata":
-		return StateMetadata(
-			OrderedDict((name, meta.clone()) for name, meta in self.fields.items())
-		)
+		return StateMetadata({name: meta.clone() for name, meta in self.fields.items()})
 
 
 class StateMeta(ABCMeta):
@@ -201,17 +201,16 @@ class StateMeta(ABCMeta):
 			if attr_name.startswith("__") and attr_name.endswith("__"):
 				continue
 			if _is_private(attr_name):
-				defaults[attr_name] = (
-					namespace[attr_name] if attr_name in namespace else MISSING
-				)
+				if attr_name in namespace:
+					defaults[attr_name] = namespace[attr_name]
 				kinds[attr_name] = "private"
 			else:
-				has_default = attr_name in namespace
-				default_value = namespace[attr_name] if has_default else None
-				raw_default = default_value if has_default else MISSING
-				defaults[attr_name] = raw_default
+				if attr_name in namespace:
+					defaults[attr_name] = namespace[attr_name]
 				kinds[attr_name] = "signal"
-				namespace[attr_name] = StateProperty(attr_name, default_value)
+				namespace[attr_name] = StateProperty(
+					attr_name, namespace.get(attr_name)
+				)
 
 		# 2) Inspect remaining attributes for queries, private data, and plain values
 		for attr_name, value in list(namespace.items()):
@@ -220,8 +219,6 @@ class StateMeta(ABCMeta):
 			if _is_private(attr_name):
 				if _is_plain_state_attribute(value):
 					defaults[attr_name] = value
-				elif attr_name not in defaults:
-					defaults[attr_name] = MISSING
 				kinds[attr_name] = "private"
 				continue
 			if kinds.get(attr_name) == "signal":
@@ -263,7 +260,7 @@ class StateMeta(ABCMeta):
 		defaults: dict[str, Any],
 		kinds: dict[str, str],
 	) -> None:
-		fields: "OrderedDict[str, StateFieldMetadata]" = OrderedDict()
+		fields: "dict[str, StateFieldMetadata]" = {}
 
 		for base in reversed(cls.__mro__[1:]):
 			if base in (ABC, object):
@@ -352,6 +349,7 @@ class State(ABC, metaclass=StateMeta):
 	"""
 
 	__version__: int = 1
+	__state_metadata__: StateMetadata
 
 	@classmethod
 	def __migrate__(
@@ -515,3 +513,48 @@ class State(ABC, metaclass=StateMeta):
 	def __str__(self) -> str:
 		"""Return a user-friendly representation of the state."""
 		return self.__repr__()
+
+	def drain(self) -> dict[str, Any]:
+		"""
+		Drain the state into a serializable payload capturing drainable fields.
+
+		The payload structure mirrors the plan requirements, returning the class
+		version alongside a mapping of field values so the result can be
+		persisted or pickled safely.
+		"""
+		meta: StateMetadata = self.__class__.__state_metadata__
+		values: dict[str, Any] = {}
+		for name, field_meta in meta.fields.items():
+			if not field_meta.drain:
+				continue
+			try:
+				value = getattr(self, name)
+			except AttributeError:
+				continue
+			if field_meta.kind is StateFieldKind.QUERY:
+				query_value = cast("QueryResult[Any]", value)
+				values[name] = self._drain_query_snapshot(query_value)
+				continue
+			values[name] = unwrap(value, untrack=True)
+		return {
+			"__version__": getattr(self.__class__, "__version__", 1),
+			"values": values,
+		}
+
+	@override
+	def __getstate__(self) -> dict[str, Any]:
+		"""Delegate pickling to drain so Python tooling uses Pulse semantics."""
+		return self.drain()
+
+	@staticmethod
+	def _drain_query_snapshot(query_value: "QueryResult[Any]") -> dict[str, Any]:
+		"""
+		Create a serializable snapshot of a preserved query result.
+		"""
+		return {
+			"data": unwrap(query_value.data, untrack=True),
+			"is_loading": bool(query_value.is_loading),
+			"is_error": bool(query_value.is_error),
+			"error": query_value.error,
+			"has_loaded": bool(query_value.has_loaded),
+		}

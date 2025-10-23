@@ -69,6 +69,6 @@ Artifacts such as sample drained payloads or failure traces should be captured h
 
 Expose three overridable hooks on `State`: `drain(self) -> dict[str, Any]`, `hydrate(cls, payload: dict[str, Any]) -> State`, and a no-argument `__post_init__(self)` that runs after both ordinary construction and hydration. `State.__getstate__` and `State.__setstate__` should delegate to those hooks so integration with Python’s pickling protocol remains seamless while Pulse retains control over versioning and migrations. Provide class attributes `__version__: int` (defaulting to `1`) alongside an overridable `__migrate__(start_version: int, target_version: int, values: dict[str, Any]) -> dict[str, Any]` helper to coordinate upgrades. Query definitions gain a `preserve: bool = False` option controlling whether their cached values participate in drainage. The `App` constructor gains a `strict` parameter defaulting to `True`. The Python package now depends on `cloudpickle`, and runtime code must import it wherever picklability checks are performed.
 
----
+--  -
 
 Initial version authored on 2025-10-23 to capture the draining, hydration, and strict-mode roadmap.

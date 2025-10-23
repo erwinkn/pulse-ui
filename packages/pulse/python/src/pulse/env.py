@@ -17,7 +17,7 @@ import os
 from typing import Literal
 
 # Types
-PulseMode = Literal["dev", "ci", "prod"]
+PulseEnv = Literal["dev", "ci", "prod"]
 
 # Keys
 ENV_PULSE_MODE = "PULSE_MODE"
@@ -29,7 +29,7 @@ ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
 
 
-class Env:
+class EnvVars:
 	def _get(self, key: str) -> str | None:
 		return os.environ.get(key)
 
@@ -41,14 +41,14 @@ class Env:
 
 	# Pulse mode
 	@property
-	def pulse_mode(self) -> PulseMode:
+	def pulse_env(self) -> PulseEnv:
 		value = (self._get(ENV_PULSE_MODE) or "dev").lower()
 		if value not in ("dev", "ci", "prod"):
 			value = "dev"
 		return value  # type: ignore[return-value]
 
-	@pulse_mode.setter
-	def pulse_mode(self, value: PulseMode) -> None:
+	@pulse_env.setter
+	def pulse_env(self, value: PulseEnv) -> None:
 		self._set(ENV_PULSE_MODE, value)
 
 	# App file/dir
@@ -108,9 +108,9 @@ class Env:
 
 
 # Singleton
-env = Env()
+env = EnvVars()
 
 
 # Commonly used helpesr
 def mode():
-	return env.pulse_mode
+	return env.pulse_env

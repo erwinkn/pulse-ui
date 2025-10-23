@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, NotRequired, TypedDict, TypeVar, cast
 
 import socketio
+import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -37,9 +38,11 @@ from pulse.css import (
 	registered_css_imports,
 	registered_css_modules,
 )
-from pulse.env import PulseMode, env
+from pulse.env import PulseEnv
+from pulse.env import env as envvars
 from pulse.helpers import (
 	create_task,
+	find_available_port,
 	get_client_address,
 	get_client_address_socketio,
 	later,
@@ -90,7 +93,7 @@ class AppStatus(IntEnum):
 	stopped = 3
 
 
-DeploymentMode = Literal["subdomains", "single-server"]
+PulseMode = Literal["subdomains", "single-server"]
 
 
 class PrerenderPayload(TypedDict):
@@ -123,8 +126,8 @@ class App:
 	    ```
 	"""
 
+	env: PulseEnv
 	mode: PulseMode
-	deployment: DeploymentMode
 	status: AppStatus
 	server_address: str | None
 	internal_server_address: str | None
@@ -160,8 +163,8 @@ class App:
 		internal_server_address: str | None = None,
 		not_found: str = "/not-found",
 		# Deployment and integration options
-		mode: PulseMode | None = None,
-		deployment: DeploymentMode = "single-server",
+		env: PulseEnv | None = None,
+		mode: PulseMode = "single-server",
 		api_prefix: str = "/_pulse",
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
@@ -174,8 +177,8 @@ class App:
 		    codegen: Optional codegen configuration.
 		"""
 		# Resolve mode from environment and expose on the app instance
-		self.mode = mode or env.pulse_mode
-		self.deployment = deployment
+		self.env = env or envvars.pulse_env
+		self.mode = mode
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.)
 		self.server_address = server_address
@@ -196,7 +199,7 @@ class App:
 		# Add plugin routes after user-defined routes
 		for plugin in self.plugins:
 			all_routes.extend(plugin.routes())
-			if self.mode == "dev":
+			if self.env == "dev":
 				all_routes.extend(plugin.dev_routes())
 
 		# Auto-add React components to all routes
@@ -210,7 +213,7 @@ class App:
 		self.user_sessions = {}
 		self.render_sessions = {}
 		self.session_store = session_store or CookieSessionStore()
-		self.cookie = cookie or session_cookie(mode=self.deployment)
+		self.cookie = cookie or session_cookie(mode=self.mode)
 		self.cors = cors
 
 		self._user_to_render = defaultdict(list)
@@ -235,7 +238,7 @@ class App:
 		self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 		self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
 		# In single-server mode, wrap with proxy ASGI app
-		if self.deployment == "single-server":
+		if self.mode == "single-server":
 			self.asgi = PulseProxy(
 				self.asgi, lambda: self.web_server_port, self.api_prefix
 			)
@@ -266,13 +269,13 @@ class App:
 			plugin.on_startup(self)
 
 		# Start React Router server in single-server mode
-		logger.info(f"Deployment mode: {self.deployment}")
-		if self.deployment == "single-server":
+		logger.info(f"Deployment mode: {self.mode}")
+		if self.mode == "single-server":
 			logger.info("Starting React Router server in single-server mode...")
 			try:
 				web_root = self.codegen.cfg.web_root
 				logger.info(f"Web root: {web_root}")
-				port = await self.start_web_server(web_root, self.mode)
+				port = await self.start_web_server(web_root, self.env)
 				logger.info(
 					f"Single-server mode: React Router running on internal port {port}"
 				)
@@ -284,7 +287,7 @@ class App:
 			yield
 		finally:
 			# Stop React Router server in single-server mode
-			if self.deployment == "single-server":
+			if self.mode == "single-server":
 				try:
 					# Close proxy HTTP client if it's a PulseProxy
 					if isinstance(self.asgi, PulseProxy):
@@ -301,7 +304,6 @@ class App:
 
 	async def start_web_server(self, web_root: Path, mode: str) -> int:
 		"""Start React Router server as subprocess and return its port."""
-		from pulse.cli.helpers import find_available_port
 
 		# Find available port
 		port = find_available_port(5173)
@@ -365,7 +367,7 @@ class App:
 		self, address: str | None = None, internal_address: str | None = None
 	):
 		# Allow the CLI to disable codegen in specific scenarios (e.g., prod server-only)
-		if env.codegen_disabled:
+		if envvars.codegen_disabled:
 			return
 		if address:
 			self.server_address = address
@@ -389,15 +391,15 @@ class App:
 		# In prod, prefer the public server address passed to App(...).
 		# In dev/ci, derive from environment variables which the CLI populates
 		# based on the actual bind host/port.
-		if self.mode == "prod":
+		if self.env == "prod":
 			if not self.server_address:
 				raise RuntimeError(
 					"In prod, please provide an explicit server_address to App(...)."
 				)
 			server_address = self.server_address
 		else:
-			host = env.pulse_host  # defaults to "localhost"
-			port = env.pulse_port  # defaults to 8000
+			host = envvars.pulse_host  # defaults to "localhost"
+			port = envvars.pulse_port  # defaults to 8000
 			protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
 			server_address = f"{protocol}://{host}:{port}"
 
@@ -407,6 +409,18 @@ class App:
 		self.setup(server_address)
 		self.status = AppStatus.running
 		return self.asgi
+
+	def run(
+		self,
+		address: str = "localhost",
+		port: int = 8000,
+		find_port: bool = True,
+		reload: bool = True,
+	):
+		if find_port:
+			port = find_available_port(port)
+
+		uvicorn.run(self.asgi_factory, reload=reload)
 
 	def setup(self, server_address: str):
 		if self.status >= AppStatus.initialized:
@@ -420,9 +434,7 @@ class App:
 
 		# Compute cookie domain from deployment/server address if not explicitly provided
 		if self.cookie.domain is None:
-			self.cookie.domain = compute_cookie_domain(
-				self.deployment, self.server_address
-			)
+			self.cookie.domain = compute_cookie_domain(self.mode, self.server_address)
 
 		# Add CORS middleware (configurable/overridable)
 		if self.cors is not None:
@@ -431,7 +443,7 @@ class App:
 			# Use deployment-specific CORS settings
 			self.fastapi.add_middleware(
 				CORSMiddleware,
-				**cors_options(self.deployment, self.server_address),
+				**cors_options(self.mode, self.server_address),
 			)
 
 		# Mount PulseContext for all FastAPI routes (no route info). Other API

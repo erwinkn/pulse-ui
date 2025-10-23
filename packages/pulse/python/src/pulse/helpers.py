@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import os
+import socket
 from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any, ParamSpec, Protocol, TypedDict, TypeVar, overload, override
 from urllib.parse import urlsplit
@@ -412,3 +413,17 @@ async def maybe_await(value: T | Awaitable[T]) -> T:
 	if inspect.isawaitable(value):
 		return await value
 	return value
+
+
+def find_available_port(start_port: int = 8000, max_attempts: int = 100) -> int:
+	"""Find an available port starting from start_port."""
+	for port in range(start_port, start_port + max_attempts):
+		try:
+			with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+				s.bind(("localhost", port))
+				return port
+		except OSError:
+			continue
+	raise RuntimeError(
+		f"Could not find an available port after {max_attempts} attempts starting from {start_port}"
+	)

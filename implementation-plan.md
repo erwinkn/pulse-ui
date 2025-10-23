@@ -4,7 +4,7 @@
 
 **Goal**: Run React Router server as a subprocess managed by Python, with FastAPI proxying all non-API requests to it. This exposes a single host/port to end users while maintaining the development experience benefits of React Router's dev server.
 
-**Approach**: Reverse proxy pattern where Python FastAPI routes are prefixed with `/api/pulse/*` and all other requests are proxied to the React Router server running on an internal port.
+**Approach**: Reverse proxy pattern where Python FastAPI routes are prefixed with `/_pulse/*` and all other requests are proxied to the React Router server running on an internal port.
 
 ---
 
@@ -13,23 +13,22 @@
 **Date**: Phase 1 completion
 
 **Changes Made**:
+
 1. **Removed `"same_host"` deployment mode**: Removed from `DeploymentMode` type literal in `app.py`
-2. **Unified API prefix**: All deployment modes now use `/api/pulse` prefix by default (previously only `single-server` mode used it)
+2. **Unified API prefix**: All deployment modes now use `/_pulse` prefix by default (previously only `single-server` mode used it)
 3. **Updated cookie configuration**: Removed `same_host` from `session_cookie()` function
-4. **Updated CORS configuration**: 
+4. **Updated CORS configuration**:
    - Removed `same_host` case from `cors_options()` function
    - Simplified CORS middleware logic in `App.setup()` to use `cors_options()` for all non-custom CORS configs
    - Added explicit `single-server` case in `cors_options()` with same-origin only
-5. **Updated tests**: 
+5. **Updated tests**:
    - Removed `test_api_prefix_in_same_host_mode()`
-   - Updated test expectations to reflect `/api/pulse` prefix for all modes
+   - Updated test expectations to reflect `/_pulse` prefix for all modes
 6. **Cleaned up cookie domain logic**: Removed `same_host` case from `compute_cookie_domain()`
 
-**Rationale**: The `same_host` deployment mode was never fully implemented and added unnecessary complexity. All modes now consistently use `/api/pulse` prefix, simplifying the codebase.
+**Rationale**: The `same_host` deployment mode was never fully implemented and added unnecessary complexity. All modes now consistently use `/_pulse` prefix, simplifying the codebase.
 
-**Additional Changes**:
-7. **Removed `"dev"` deployment mode**: This was redundant with `single-server` and only added confusion between `mode` (dev/ci/prod) and `deployment` (subdomains/single-server)
-8. **Simplified deployment logic**: Removed automatic `deployment="dev"` override when `mode="dev"`, making the two concepts independent
+**Additional Changes**: 7. **Removed `"dev"` deployment mode**: This was redundant with `single-server` and only added confusion between `mode` (dev/ci/prod) and `deployment` (subdomains/single-server) 8. **Simplified deployment logic**: Removed automatic `deployment="dev"` override when `mode="dev"`, making the two concepts independent
 
 ---
 
@@ -38,6 +37,7 @@
 ### Architecture Overview
 
 **Development Mode (`pulse run`):**
+
 ```
 User Browser
     │
@@ -50,6 +50,7 @@ User Browser
 ```
 
 **Production Mode (current):**
+
 ```
 User Browser
     │
@@ -64,7 +65,9 @@ User Browser
 ### Key Files and Components
 
 #### 1. CLI Entry Point
+
 **File**: `packages/pulse/python/src/pulse/cli/cmd.py`
+
 - **Function**: `run()` (lines 57-246)
 - **Purpose**: Orchestrates starting both Python and React Router servers
 - **Current Behavior**:
@@ -73,7 +76,9 @@ User Browser
   - Lines 361-539: Runs both processes with PTY-based output interleaving
 
 #### 2. Python Server (FastAPI)
+
 **File**: `packages/pulse/python/src/pulse/app.py`
+
 - **Class**: `App.__init__()` (lines 146-276)
 - **Routes Defined** (in `App.setup()`, lines 324-597):
   - `GET /health` (line 380)
@@ -83,7 +88,9 @@ User Browser
   - WebSocket via socket.io (lines 513-596)
 
 #### 3. Code Generation
+
 **File**: `packages/pulse/python/src/pulse/codegen/templates/layout.py`
+
 - **Template**: `LAYOUT_TEMPLATE` (lines 3-82)
 - **Current Behavior**:
   - Line 29: Server loader calls `${internal_server_address}/prerender`
@@ -91,14 +98,18 @@ User Browser
 - **Impact**: These URLs need to change to `/api/pulse/prerender`
 
 #### 4. React Router Configuration
+
 **File**: `examples/web/package.json`
+
 - **Scripts**:
   - `dev`: `react-router dev` (starts dev server, default port 5173)
   - `build`: `react-router build` (builds for production)
   - `start`: `react-router-serve ./build/server/index.js` (production server)
 
 #### 5. Environment Variables
+
 **File**: `packages/pulse/python/src/pulse/env.py`
+
 - **Relevant Vars**:
   - `ENV_PULSE_HOST`: Host for Python server
   - `ENV_PULSE_PORT`: Port for Python server
@@ -114,15 +125,16 @@ User Browser
 ### New Architecture
 
 **Single-Server Mode - Development:**
+
 ```
 User Browser
     │
     └─> http://localhost:8000 (Python FastAPI - single entry point)
         │
-        ├─> /api/pulse/*     → FastAPI routes (Python handlers)
-        │   ├─> /api/pulse/prerender
-        │   ├─> /api/pulse/health
-        │   ├─> /api/pulse/forms/{render_id}/{form_id}
+        ├─> /_pulse/*        → FastAPI routes (Python handlers)
+        │   ├─> /_pulse/prerender
+        │   ├─> /_pulse/health
+        │   ├─> /_pulse/forms/{render_id}/{form_id}
         │   └─> WebSocket on /socket.io
         │
         └─> /*               → Proxy to React Router (internal)
@@ -131,12 +143,13 @@ User Browser
 ```
 
 **Single-Server Mode - Production:**
+
 ```
 User Browser
     │
     └─> https://example.com (Python FastAPI - single entry point)
         │
-        ├─> /api/pulse/*     → FastAPI routes
+        ├─> /_pulse/*        → FastAPI routes
         │
         └─> /*               → Proxy to React Router production server
             └─> http://localhost:<internal_port>
@@ -144,6 +157,7 @@ User Browser
 ```
 
 **Subdomains Mode - Development:**
+
 ```
 User Browser
     │
@@ -156,6 +170,7 @@ User Browser
 ```
 
 **Subdomains Mode - Production:**
+
 ```
 User Browser
     │
@@ -170,14 +185,16 @@ User Browser
 ### Key Changes
 
 **For Single-Server Mode:**
-1. **All Python routes prefixed** with `/api/pulse/`
+
+1. **All Python routes prefixed** with `/_pulse/`
 2. **React Router server** started as subprocess by Python (not by CLI) in both dev and prod
 3. **Proxy middleware** in FastAPI forwards non-API requests to React Router
 4. **Single port** exposed to users
 5. **Internal port** for React Router (not exposed, auto-assigned)
 
-**For Subdomains Mode (unchanged):**
-1. No route prefix
+**For Subdomains Mode:**
+
+1. Uses same `/_pulse` route prefix as single-server mode
 2. React Router runs independently on separate port in dev
 3. No proxying
 4. Two separate servers/ports
@@ -188,7 +205,7 @@ User Browser
 
 ### Phase 1: Add Route Prefix Support (Non-Breaking)
 
-**Goal**: Allow Python routes to work with `/api/pulse/` prefix while maintaining backward compatibility.
+**Goal**: Allow Python routes to work with `/_pulse/` prefix while maintaining backward compatibility.
 
 **Changes Required**:
 
@@ -199,6 +216,7 @@ User Browser
 **Location**: `App.__init__()` method
 
 **Changes**:
+
 ```python
 def __init__(
     self,
@@ -208,10 +226,10 @@ def __init__(
     # ... rest of params ...
 ):
     # ... existing code ...
-    
-    # Store API prefix (default based on deployment mode)
+
+    # Store API prefix (always use /_pulse regardless of deployment mode)
     if api_prefix is None:
-        self.api_prefix = "/api/pulse" if deployment == "single-server" else ""
+        self.api_prefix = "/_pulse"
     else:
         self.api_prefix = api_prefix
 ```
@@ -223,16 +241,17 @@ def __init__(
 **Location**: `setup()` method, around line 334-347
 
 **Changes**:
+
 ```python
 def setup(self, server_address: str):
     # ... existing setup code ...
-    
+
     # Compute cookie domain from deployment/server address if not explicitly provided
     if self.cookie.domain is None:
         self.cookie.domain = compute_cookie_domain(
             self.deployment, self.server_address
         )
-    
+
     # Add CORS middleware (configurable/overridable)
     if self.cors is not None:
         self.fastapi.add_middleware(CORSMiddleware, **self.cors)
@@ -261,6 +280,7 @@ def setup(self, server_address: str):
 **Location**: `session_cookie()` function (lines 75-97)
 
 **Changes**:
+
 ```python
 def session_cookie(
     mode: "DeploymentMode",
@@ -292,6 +312,7 @@ def session_cookie(
 **Location**: `compute_cookie_domain()` function (lines 140-148)
 
 **Changes**:
+
 ```python
 def compute_cookie_domain(mode: "DeploymentMode", server_address: str) -> str | None:
     host = _parse_host(server_address)
@@ -309,37 +330,39 @@ def compute_cookie_domain(mode: "DeploymentMode", server_address: str) -> str | 
 **Location**: `App.setup()` method (lines 380-511)
 
 **Changes**:
+
 ```python
 def setup(self, server_address: str):
     # ... existing setup code ...
-    
+
     # Apply prefix to all routes
     prefix = self.api_prefix
-    
+
     @self.fastapi.get(f"{prefix}/health")
     def healthcheck():
         return {"health": "ok", "message": "Pulse server is running"}
-    
+
     @self.fastapi.get(f"{prefix}/set-cookies")
     def set_cookies():
         return {"health": "ok", "message": "Cookies updated"}
-    
+
     @self.fastapi.post(f"{prefix}/prerender")
     async def prerender(payload: PrerenderPayload, request: Request):
         # ... existing code ...
-    
+
     @self.fastapi.post(f"{prefix}/pulse/forms/{{render_id}}/{{form_id}}")
     async def handle_form_submit(render_id: str, form_id: str, request: Request):
         # ... existing code ...
 ```
 
-**Note**: The `/pulse/forms` path is already nested, so it becomes `/api/pulse/pulse/forms` which we should simplify to `/api/pulse/forms` in the route definition.
+**Note**: The `/pulse/forms` path is already nested, so it becomes `/_pulse/pulse/forms` which we should simplify to `/_pulse/forms` in the route definition.
 
 #### 1.3. Update codegen templates
 
 **File**: `packages/pulse/python/src/pulse/codegen/templates/layout.py`
 
 **Changes**:
+
 ```python
 LAYOUT_TEMPLATE = Template(
 """import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
@@ -359,7 +382,7 @@ export async function loader(args: LoaderFunctionArgs) {
   // ... rest ...
 }
 
-// Client loader  
+// Client loader
 export async function clientLoader(args: ClientLoaderFunctionArgs) {
   // ... existing code ...
   const res = await fetch("${server_address}${api_prefix}/prerender", {  // CHANGED
@@ -378,6 +401,7 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
 **Location**: `generate_layout_tsx()` method (lines 139-151)
 
 **Changes**:
+
 ```python
 def generate_layout_tsx(
     self, server_address: str, internal_server_address: str | None = None, api_prefix: str = ""
@@ -398,6 +422,7 @@ def generate_layout_tsx(
 **Location**: `generate_all()` method
 
 **Changes**:
+
 ```python
 def generate_all(self, server_address: str, internal_server_address: str | None = None, api_prefix: str = ""):
     # ... existing code ...
@@ -410,6 +435,7 @@ def generate_all(self, server_address: str, internal_server_address: str | None 
 **Location**: `run_codegen()` and `asgi_factory()` methods
 
 **Changes**:
+
 ```python
 def run_codegen(self, address: str | None = None, internal_address: str | None = None):
     # ... existing code ...
@@ -421,10 +447,11 @@ def run_codegen(self, address: str | None = None, internal_address: str | None =
 ```
 
 **Testing Phase 1**:
-1. Run `pulse run` with default settings → Should work as before (no prefix)
-2. Create test app with `deployment="single-server"` → Routes should have `/api/pulse` prefix
-3. Verify `/api/pulse/health` returns OK
-4. Verify `/api/pulse/prerender` works from React Router loader
+
+1. Run `pulse run` with any deployment mode → Routes should have `/_pulse` prefix
+2. Create test app with `deployment="single-server"` → Routes should have `/_pulse` prefix
+3. Verify `/_pulse/health` returns OK
+4. Verify `/_pulse/prerender` works from React Router loader
 5. Verify cookies have no domain restriction (check browser DevTools → Application → Cookies)
 6. Verify CORS headers only allow server origin (check Network tab → Response Headers)
    - `Access-Control-Allow-Origin` should be `http://localhost:8000` (or whatever server_address is)
@@ -445,6 +472,7 @@ def run_codegen(self, address: str | None = None, internal_address: str | None =
 **File**: `packages/pulse/python/src/pulse/app.py`
 
 **New imports**:
+
 ```python
 import asyncio
 import subprocess
@@ -452,20 +480,21 @@ from pathlib import Path
 ```
 
 **Add new class attributes and methods**:
+
 ```python
 class App:
     def __init__(self, ...):
         # ... existing code ...
         self.web_server_proc: subprocess.Popen | None = None
         self.web_server_port: int | None = None
-    
+
     async def start_web_server(self, web_root: Path, mode: str) -> int:
         """Start React Router server as subprocess and return its port."""
         from pulse.cli.helpers import find_available_port
-        
+
         # Find available port
         port = find_available_port(5173)
-        
+
         # Build command based on mode
         if mode == "prod":
             # Production: use built server
@@ -473,7 +502,7 @@ class App:
         else:
             # Development: use dev server
             cmd = ["bun", "run", "dev", "--port", str(port)]
-        
+
         # Start subprocess
         proc = subprocess.Popen(
             cmd,
@@ -482,15 +511,15 @@ class App:
             stderr=subprocess.PIPE,
             env=os.environ.copy(),
         )
-        
+
         # Wait for server to be ready (simple approach: wait for port to be listening)
         await asyncio.sleep(1.0)  # Give server time to start
-        
+
         self.web_server_proc = proc
         self.web_server_port = port
-        
+
         return port
-    
+
     def stop_web_server(self):
         """Stop the React Router subprocess."""
         if self.web_server_proc:
@@ -510,12 +539,13 @@ class App:
 **Location**: Inside `__init__`, the `lifespan` context manager (lines 220-257)
 
 **Changes**:
+
 ```python
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
         # ... existing startup code ...
-        
+
         # Start React Router server if in single-server mode
         if self.deployment == "single-server":
             web_root = self.codegen.cfg.web_root
@@ -523,14 +553,14 @@ async def lifespan(_: FastAPI):
                 logger.info(f"Starting React Router server from {web_root}")
                 port = await self.start_web_server(web_root, self.mode)
                 logger.info(f"React Router server started on port {port}")
-        
+
         # ... existing plugin hooks ...
-        
+
         try:
             yield
         finally:
             # ... existing shutdown code ...
-            
+
             # Stop React Router server
             if self.deployment == "single-server":
                 logger.info("Stopping React Router server")
@@ -542,11 +572,13 @@ async def lifespan(_: FastAPI):
 **File**: `packages/pulse/python/src/pulse/env.py`
 
 **Add new constant**:
+
 ```python
 ENV_PULSE_WEB_PORT = "PULSE_WEB_PORT"
 ```
 
 **Add new property**:
+
 ```python
 @property
 def pulse_web_port(self) -> int | None:
@@ -562,6 +594,7 @@ def pulse_web_port(self, value: int | None) -> None:
 ```
 
 **Testing Phase 2**:
+
 1. Start app with `deployment="single-server"` → Should start React Router subprocess
 2. Check logs for "React Router server started on port XXXX"
 3. Verify subprocess is running: `ps aux | grep bun`
@@ -580,6 +613,7 @@ def pulse_web_port(self, value: int | None) -> None:
 **File**: `packages/pulse/python/pyproject.toml`
 
 **Add to dependencies**:
+
 ```toml
 dependencies = [
     # ... existing deps ...
@@ -588,6 +622,7 @@ dependencies = [
 ```
 
 **Why aiohttp?**
+
 - **Lower dependency burden**: Fewer transitive dependencies than httpx
 - **Slightly faster**: Marginally better performance for local requests (~0.1ms)
 - **Simpler**: No extra abstractions, direct asyncio integration
@@ -602,16 +637,18 @@ For our use case (local proxy), aiohttp is the simpler and faster choice.
 **File**: `packages/pulse/python/src/pulse/app.py`
 
 **New imports**:
+
 ```python
 import aiohttp
 from starlette.responses import StreamingResponse
 ```
 
 **Add proxy middleware in `setup()` method**:
+
 ```python
 def setup(self, server_address: str):
     # ... existing setup code before routes ...
-    
+
     # Add proxy middleware for single-server mode
     if self.deployment == "single-server" and self.web_server_port:
         @self.fastapi.middleware("http")
@@ -619,16 +656,16 @@ def setup(self, server_address: str):
             # Skip API routes - let them pass through to FastAPI handlers
             if request.url.path.startswith(self.api_prefix):
                 return await call_next(request)
-            
+
             # Skip WebSocket upgrade requests
             if request.headers.get("upgrade") == "websocket":
                 return await call_next(request)
-            
+
             # Proxy everything else to React Router server
             target_url = f"http://localhost:{self.web_server_port}{request.url.path}"
             if request.url.query:
                 target_url += f"?{request.url.query}"
-            
+
             # Forward the request with streaming
             async with aiohttp.ClientSession() as session:
                 try:
@@ -644,12 +681,12 @@ def setup(self, server_address: str):
                         # Remove hop-by-hop headers
                         for header in ["connection", "keep-alive", "transfer-encoding"]:
                             headers.pop(header, None)
-                        
+
                         # Stream the response
                         async def stream_content():
                             async for chunk in proxy_response.content.iter_chunked(8192):
                                 yield chunk
-                        
+
                         return StreamingResponse(
                             stream_content(),
                             status_code=proxy_response.status,
@@ -661,14 +698,15 @@ def setup(self, server_address: str):
                         content=f"Proxy error: {e}",
                         status_code=502,
                     )
-    
+
     # ... existing route definitions ...
 ```
 
 **Testing Phase 3**:
+
 1. Start app with `deployment="single-server"`
 2. Access `http://localhost:8000/` → Should proxy to React Router, show homepage
-3. Access `http://localhost:8000/api/pulse/health` → Should hit Python directly
+3. Access `http://localhost:8000/_pulse/health` → Should hit Python directly
 4. Open browser DevTools → Network tab → Verify requests go to single origin
 5. Test HMR → Change a React component → Should hot reload
 6. Test large responses → Should stream progressively (use Network tab to check timing)
@@ -688,17 +726,18 @@ def setup(self, server_address: str):
 **Location**: `run()` function, around line 112
 
 **Changes**:
+
 ```python
 def run(...):
     # ... existing code ...
-    
+
     console.log(f"📁 Loading app from: {app_file}")
     parsed = parse_app_target(app_file)
     app_instance = load_app_from_target(app_file)
-    
+
     # Check if app uses single-server deployment
     is_single_server = app_instance.deployment == "single-server"
-    
+
     # In single-server mode, Python manages the web server
     # Don't start it separately from CLI
     if is_single_server:
@@ -717,10 +756,11 @@ def run(...):
 **Location**: After starting the server processes (around line 470)
 
 **Changes**:
+
 ```python
 def run(...):
     # ... existing code to start servers ...
-    
+
     # Output server URL for easy access
     if is_single_server:
         # Single server mode - show single URL
@@ -731,7 +771,7 @@ def run(...):
         console.log(f"")
         console.log(f"   → [bold cyan][link={server_url}]{server_url}[/link][/bold cyan]")
         console.log(f"")
-        console.log(f"   API endpoints: {server_url}/api/pulse/...")
+        console.log(f"   API endpoints: {server_url}/_pulse/...")
         console.log(f"")
     else:
         # Subdomains mode - show both URLs
@@ -746,7 +786,7 @@ def run(...):
             web_url = f"http://localhost:5173"
             console.log(f"   React:   [bold cyan][link={web_url}]{web_url}[/link][/bold cyan]")
         console.log(f"")
-    
+
     # ... continue with existing code ...
 ```
 
@@ -755,16 +795,19 @@ def run(...):
 **Changes to CLI behavior**:
 
 **For `single-server` mode during dev**:
+
 - Run React Router server behind FastAPI as reverse proxy
 - Only expose Python server port to user
 - Don't show React Router subprocess output
 
 **For `subdomains` mode during dev**:
+
 - Keep current setup: run two servers on separate ports
 - No proxying
 - Show both server URLs
 
 **Testing Phase 4**:
+
 1. Run `pulse run` with `deployment="single-server"` → Should only show Python server output
 2. Should see "✨ Pulse server running in single-server mode" with clickable URL
 3. Ctrl+Click URL → Should open in browser
@@ -786,13 +829,14 @@ def run(...):
 **Location**: `start_web_server()` method
 
 **Enhanced logic**:
+
 ```python
 async def start_web_server(self, web_root: Path, mode: str) -> int:
     """Start React Router server as subprocess and return its port."""
     from pulse.cli.helpers import find_available_port
-    
+
     port = find_available_port(5173)
-    
+
     if mode == "prod":
         # Check if build exists
         build_server = web_root / "build" / "server" / "index.js"
@@ -806,9 +850,9 @@ async def start_web_server(self, web_root: Path, mode: str) -> int:
     else:
         # Development: use dev server
         cmd = ["bun", "run", "dev", "--port", str(port)]
-    
+
     logger.info(f"Starting React Router server: {' '.join(cmd)}")
-    
+
     proc = subprocess.Popen(
         cmd,
         cwd=web_root,
@@ -817,22 +861,23 @@ async def start_web_server(self, web_root: Path, mode: str) -> int:
         env=os.environ.copy(),
         text=True,
     )
-    
+
     # Wait for server to be ready
     await asyncio.sleep(2.0 if mode == "prod" else 1.0)
-    
+
     # Check if process is still running
     if proc.poll() is not None:
         output = proc.stdout.read() if proc.stdout else ""
         raise RuntimeError(f"React Router server failed to start: {output}")
-    
+
     self.web_server_proc = proc
     self.web_server_port = port
-    
+
     return port
 ```
 
 **Testing Phase 5**:
+
 1. Build app: `cd examples/web && bun run build`
 2. Start app with `mode="prod"` and `deployment="single_server"`
 3. Verify production React Router server starts
@@ -852,11 +897,11 @@ from pulse import App, Route
 
 def test_api_prefix_in_single_server_mode():
     app = App(routes=[], deployment="single-server")
-    assert app.api_prefix == "/api/pulse"
+    assert app.api_prefix == "/_pulse"
 
 def test_api_prefix_in_subdomains_mode():
     app = App(routes=[], deployment="subdomains")
-    assert app.api_prefix == ""
+    assert app.api_prefix == "/_pulse"
 
 def test_custom_api_prefix():
     app = App(routes=[], api_prefix="/custom/api")
@@ -901,7 +946,7 @@ app = App(
     mode="dev",
 )
 '''
-    
+
     with tempfile.NamedTemporaryFile(
         mode='w',
         suffix='.py',
@@ -922,34 +967,34 @@ def pulse_server(pulse_app_file):
         stderr=subprocess.PIPE,
         text=True,
     )
-    
+
     # Wait for server to start (check for "running" message or port listening)
     time.sleep(3)
-    
+
     # Check if process is still running
     if proc.poll() is not None:
         stdout, stderr = proc.communicate()
         raise RuntimeError(f"Server failed to start:\nSTDOUT: {stdout}\nSTDERR: {stderr}")
-    
+
     server_url = "http://localhost:9999"
-    
+
     yield server_url
-    
+
     # Cleanup: stop server
     proc.terminate()
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
-    
+
     # Cleanup: remove temp file
     pulse_app_file.unlink()
 
 
 def test_single_server_api_endpoint(pulse_server):
-    """Test that API endpoints are accessible at /api/pulse/* prefix."""
-    response = httpx.get(f"{pulse_server}/api/pulse/health")
-    
+    """Test that API endpoints are accessible at /_pulse/* prefix."""
+    response = httpx.get(f"{pulse_server}/_pulse/health")
+
     assert response.status_code == 200
     data = response.json()
     assert data["health"] == "ok"
@@ -959,7 +1004,7 @@ def test_single_server_api_endpoint(pulse_server):
 def test_single_server_root_route(pulse_server):
     """Test that root route is proxied to React Router."""
     response = httpx.get(pulse_server)
-    
+
     assert response.status_code == 200
     assert "text/html" in response.headers.get("content-type", "")
     # Verify it's React Router content (contains expected elements)
@@ -969,16 +1014,16 @@ def test_single_server_root_route(pulse_server):
 def test_single_server_cors_headers(pulse_server):
     """Test that CORS headers only allow the server's own origin."""
     response = httpx.options(
-        f"{pulse_server}/api/pulse/health",
+        f"{pulse_server}/_pulse/health",
         headers={"Origin": pulse_server}
     )
-    
+
     # Should allow the server's own origin
     assert response.headers.get("access-control-allow-origin") == pulse_server
-    
+
     # Test with different origin - should not be allowed
     response_other = httpx.options(
-        f"{pulse_server}/api/pulse/health",
+        f"{pulse_server}/_pulse/health",
         headers={"Origin": "https://evil.com"}
     )
     # CORS middleware will still add header, but browser will block
@@ -988,7 +1033,7 @@ def test_single_server_cors_headers(pulse_server):
 
 
 def test_single_server_prerender_endpoint(pulse_server):
-    """Test that /api/pulse/prerender endpoint works."""
+    """Test that /_pulse/prerender endpoint works."""
     payload = {
         "route": {
             "path": "/",
@@ -1001,12 +1046,12 @@ def test_single_server_prerender_endpoint(pulse_server):
             "headers": {},
         },
     }
-    
+
     response = httpx.post(
-        f"{pulse_server}/api/pulse/prerender",
+        f"{pulse_server}/_pulse/prerender",
         json=payload,
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     # Verify prerender response structure
@@ -1018,7 +1063,7 @@ def test_single_server_static_assets(pulse_server):
     # Try to fetch a common asset (React Router typically has these)
     # This might be /assets/* or /build/*
     response = httpx.get(f"{pulse_server}/assets/", allow_redirects=False)
-    
+
     # Should either return the asset or 404 from React Router (not 502 proxy error)
     assert response.status_code in [200, 404]
     assert response.status_code != 502  # No proxy error
@@ -1027,7 +1072,7 @@ def test_single_server_static_assets(pulse_server):
 def test_single_server_cookie_settings(pulse_server):
     """Test that cookies are set without domain restrictions."""
     response = httpx.get(pulse_server)
-    
+
     # Check Set-Cookie headers (if any)
     cookies = response.cookies
     # In single-server mode, cookies should not have domain restrictions
@@ -1041,7 +1086,7 @@ def test_single_port_serving(pulse_server):
     # The main server should be accessible
     main_response = httpx.get(pulse_server)
     assert main_response.status_code == 200
-    
+
     # The old React Router port (5173) should NOT be accessible
     try:
         react_response = httpx.get("http://localhost:5173", timeout=1.0)
@@ -1057,12 +1102,14 @@ if __name__ == "__main__":
 ```
 
 **Running the test**:
+
 ```bash
 cd packages/pulse/python
 pytest tests/integration/test_single_server_mode.py -v
 ```
 
 **Test 2: Manual Single-Server Development Mode**
+
 ```bash
 # Start app in single-server mode
 cd examples
@@ -1070,7 +1117,7 @@ pulse run app.py
 
 # In another terminal:
 # Test API endpoint
-curl http://localhost:8000/api/pulse/health
+curl http://localhost:8000/_pulse/health
 # Expected: {"health": "ok", ...}
 
 # Test proxied route
@@ -1083,6 +1130,7 @@ curl http://localhost:8000/
 ```
 
 **Test 3: Single-Server Production Mode**
+
 ```bash
 # Build frontend
 cd examples/web
@@ -1093,11 +1141,12 @@ cd ..
 pulse run app.py --prod
 
 # Test endpoints
-curl http://localhost:8000/api/pulse/health
+curl http://localhost:8000/_pulse/health
 curl http://localhost:8000/
 ```
 
 **Test 4: Subdomains Mode**
+
 ```bash
 # Create app with deployment="subdomains"
 # Start servers
@@ -1111,6 +1160,7 @@ pulse run app.py
 ### Performance Tests
 
 **Test 4: Proxy Latency**
+
 ```python
 # Use the benchmark scripts
 python docs/architecture/benchmark_http_server_latency.py
@@ -1121,9 +1171,10 @@ python docs/architecture/benchmark_http_server_latency.py
 ### End-to-End Tests
 
 **Test 5: Full Application Flow**
+
 1. Start single-server app
 2. Navigate to homepage
-3. Submit a form
+3. Submit a for m
 4. Verify WebSocket connection works
 5. Test navigation between routes
 6. Verify sessions persist
@@ -1135,18 +1186,21 @@ python docs/architecture/benchmark_http_server_latency.py
 ## Rollout Strategy
 
 ### Phase 1 Release (v0.x)
+
 - ✅ Add route prefix support
 - ✅ Make it opt-in via `deployment="single-server"`
 - ✅ Keep `deployment="subdomains"` available
 - ✅ Document new mode in migration guide
 
 ### Phase 2 Release (v0.x+1)
+
 - ✅ Production testing and bug fixes
 - ✅ Performance optimization
 - ✅ Update examples to use single-server mode
 - ✅ Community feedback
 
 ### Phase 3 Release (v1.0)
+
 - ✅ Make `deployment="single-server"` the default
 - ✅ Keep `deployment="subdomains"` available (optional)
 - ✅ Update all documentation
@@ -1158,6 +1212,7 @@ python docs/architecture/benchmark_http_server_latency.py
 ### Upgrading to Single-Server Mode
 
 **Step 1: Update App Configuration**
+
 ```python
 # Before
 app = App(
@@ -1174,15 +1229,17 @@ app = App(
 ```
 
 **Step 2: Update API Calls (if any custom code)**
+
 ```javascript
 // Before
 fetch("https://api.example.com/prerender", ...)
 
 // After
-fetch("/api/pulse/prerender", ...)  // Relative URL
+fetch("/_pulse/prerender", ...)  // Relative URL
 ```
 
 **Step 3: Update Deployment**
+
 ```bash
 # Before: Deploy two servers
 # - api.example.com → Python server
@@ -1227,6 +1284,7 @@ By default, single-server mode only allows the server's own origin for security.
 ### Rollback Plan
 
 If issues arise:
+
 1. Users can revert to `deployment="subdomains"`
 2. CLI still supports `--server-only` and `--web-only` flags
 3. No database migrations needed

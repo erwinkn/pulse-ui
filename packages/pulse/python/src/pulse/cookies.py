@@ -8,7 +8,7 @@ from fastapi import Request, Response
 from pulse.hooks.runtime import set_cookie
 
 if TYPE_CHECKING:
-	from pulse.app import DeploymentMode
+	from pulse.app import PulseMode
 
 
 @dataclass
@@ -73,7 +73,7 @@ class SetCookie(Cookie):
 
 
 def session_cookie(
-	mode: "DeploymentMode",
+	mode: "PulseMode",
 	name: str = "pulse.sid",
 	max_age_seconds: int = 7 * 24 * 3600,
 ):
@@ -137,7 +137,7 @@ def _base_domain(host: str) -> str:
 	return host[i + 1 :] if i != -1 else host
 
 
-def compute_cookie_domain(mode: "DeploymentMode", server_address: str) -> str | None:
+def compute_cookie_domain(mode: "PulseMode", server_address: str) -> str | None:
 	host = _parse_host(server_address)
 	if mode == "single-server" or not host:
 		return None
@@ -146,7 +146,7 @@ def compute_cookie_domain(mode: "DeploymentMode", server_address: str) -> str | 
 	return None
 
 
-def cors_options(mode: "DeploymentMode", server_address: str) -> CORSOptions:
+def cors_options(mode: "PulseMode", server_address: str) -> CORSOptions:
 	host = _parse_host(server_address) or "localhost"
 	opts: CORSOptions = {
 		"allow_credentials": True,

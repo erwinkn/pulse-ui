@@ -131,7 +131,7 @@ class MSALPlugin(ps.Plugin):
 		#   the cache into the session by default.
 		if self.token_cache_store is None:
 			if isinstance(app.session_store, ps.CookieSessionStore):
-				if app.mode == "prod":
+				if app.env == "prod":
 					raise RuntimeError(
 						"MSALPlugin requires a token_cache_store in production when using CookieSessionStore."
 					)

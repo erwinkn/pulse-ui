@@ -3,10 +3,12 @@ Proxy ASGI app for forwarding requests to React Router server in single-server m
 """
 
 import logging
-from typing import Callable
+from collections.abc import Iterable
+from typing import Callable, cast
 
 import httpx
 from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +22,10 @@ class PulseProxy:
 	"""
 
 	def __init__(
-		self, app, get_web_port: Callable[[], int | None], api_prefix: str = "/_pulse"
+		self,
+		app: ASGIApp,
+		get_web_port: Callable[[], int | None],
+		api_prefix: str = "/_pulse",
 	):
 		"""
 		Initialize proxy ASGI app.
@@ -30,9 +35,9 @@ class PulseProxy:
 		    get_web_port: Callable that returns the React Router port (or None if not started)
 		    api_prefix: Prefix for API routes that should NOT be proxied (default: "/_pulse")
 		"""
-		self.app = app
-		self.get_web_port = get_web_port
-		self.api_prefix = api_prefix
+		self.app: ASGIApp = app
+		self.get_web_port: Callable[[], int | None] = get_web_port
+		self.api_prefix: str = api_prefix
 		self._client: httpx.AsyncClient | None = None
 
 	@property
@@ -45,7 +50,7 @@ class PulseProxy:
 			)
 		return self._client
 
-	async def __call__(self, scope, receive, send):
+	async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
 		"""
 		ASGI application handler.
 
@@ -75,7 +80,7 @@ class PulseProxy:
 		# Proxy to React Router server
 		await self._proxy_request(scope, receive, send)
 
-	async def _proxy_request(self, scope, receive, send):
+	async def _proxy_request(self, scope: Scope, receive: Receive, send: Send) -> None:
 		"""
 		Forward HTTP request to React Router server and stream response back.
 		"""
@@ -107,26 +112,24 @@ class PulseProxy:
 			target_path += f"?{query_string}"
 
 		# Extract headers
-		headers = {}
-		for name, value in scope["headers"]:
-			name_str = name.decode("latin1")
-			value_str = value.decode("latin1")
+		headers: dict[str, str] = {}
+		for name, value in cast(Iterable[tuple[bytes, bytes]], scope["headers"]):
+			name = name.decode("latin1")
+			value = value.decode("latin1")
 
 			# Skip host header (will be set by httpx)
-			if name_str.lower() == "host":
+			if name.lower() == "host":
 				continue
 
 			# Collect headers (handle multiple values)
-			if name_str in headers:
-				if isinstance(headers[name_str], list):
-					headers[name_str].append(value_str)
-				else:
-					headers[name_str] = [headers[name_str], value_str]
+			existing = headers.get(name)
+			if existing:
+				headers[name] = f"{existing},{value}"
 			else:
-				headers[name_str] = value_str
+				headers[name] = value
 
 		# Read request body
-		body_parts = []
+		body_parts: list[bytes] = []
 		while True:
 			message = await receive()
 			if message["type"] == "http.request":

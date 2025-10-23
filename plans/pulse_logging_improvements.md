@@ -5,6 +5,7 @@
 - Highlight the “Pulse running at …” announcement with intentional indentation while keeping all other output flush-left.
 - Encode both the source and severity level (debug/info/warning/error/critical) in every rendered line so it reads like `[server] INFO …`.
 - Offer an ergonomic API for app authors to emit colored logs (and optionally auto-upgrade plain `print` usage) that show up under the `[user]` tag via a callable `ps.log`.
+- Expose a logging configuration on `App` that lets users opt into timestamps and override the per-source color palette.
 
 ## Current Pain Points
 - `packages/pulse/python/src/pulse/cli/cmd.py` uses `rich.Console.log`, which injects timestamps and varies indentation.
@@ -22,7 +23,7 @@
 - Replace the direct `python -m uvicorn` invocation with a thin Pulse-managed entrypoint that:
   - Applies the shared logging configuration (covering uvicorn loggers, `pulse.*`, and user interceptors) before delegating to uvicorn.
   - Installs the stdout/stderr interceptor so user `print` calls (and other writes) appear as `[user]`.
-- Extend `execute_commands` so it defers to the shared formatter, supports the new `[framework]`/`[user]` tags, and keeps child-process logs left-aligned even when ANSI codes are present.
+- Extend `execute_commands` so it defers to the shared formatter, supports the new `[framework]`/`[user]` tags.
 
 ## Implementation Steps
 1. **Inventory & acceptance criteria**
@@ -39,11 +40,14 @@
    - Rework `_write_tagged_line` in `packages/pulse/python/src/pulse/cli/processes.py` to use the shared formatter and expand the color map to `{server, framework, user}`.
    - Ensure PTY and non-PTY flows both normalize whitespace (strip trailing `\r`, collapse multi-line chunks) without reintroducing timestamps.
 5. **Server entrypoint & uvicorn integration**
-   - Introduce `packages/pulse/python/src/pulse/cli/server_runner.py` that prepares logging, installs stdout interception, then invokes `uvicorn.main.main()`.
-   - Update `build_uvicorn_command` to launch this module (`python -m pulse.cli.server_runner`) while preserving all flags (reload, extra args, env).
+   - Keep `pulse run` in a single process: perform Pulse logging setup inside `cmd.py` immediately before invoking uvicorn programmatically.
+   - Replace the external `python -m uvicorn` subprocess with a call to `uvicorn.main.main()` (or `uvicorn.run`) after initialization so we still support reload and extra args.
    - Patch the uvicorn logging configuration so uvicorn access/error logs map to `[server]`, while `logging.getLogger("pulse")` and children map to `[framework]`.
    - Ensure framework loggers emit directly to the configured handler (bypassing `StdStreamInterceptor`) so intercepted stdout/stderr is reserved for user output.
-6. **Framework adoption**
+   - Feed server-wide logging preferences from the app configuration (colors, optional timestamps) into the setup routine.
+6. **Framework adoption & configurability**
+- Add a logging configuration to `pulse.app.App` (e.g. `logging=PulseLoggingConfig(...)`) with defaults that disable timestamps and set color overrides for server/framework/user.
+- Propagate the config through the logging setup so CLI and server runners respect per-app preferences.
 - Replace plain `logging.getLogger(__name__)` calls in Pulse modules with the new logger factory so they default to the `[framework]` tag while emitting level metadata.
 - Evaluate existing `print` calls (e.g. `user_session.py`) and convert them to explicit framework or user log calls as appropriate.
 7. **User experience polish**

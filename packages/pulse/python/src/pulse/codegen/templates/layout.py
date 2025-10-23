@@ -10,6 +10,7 @@ import { useLoaderData } from "react-router";
 // This config is used to initialize the client
 export const config: PulseConfig = {
   serverAddress: "${server_address}",
+  apiPrefix: "${api_prefix}",
 };
 
 
@@ -26,7 +27,7 @@ export async function loader(args: LoaderFunctionArgs) {
   if (cookie) fwd.set("cookie", cookie);
   if (authorization) fwd.set("authorization", authorization);
   fwd.set("content-type", "application/json");
-  const res = await fetch("${internal_server_address}/prerender", {
+  const res = await fetch("${internal_server_address}${api_prefix}/prerender", {
     method: "POST",
     headers: fwd,
     body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
@@ -53,7 +54,7 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
     typeof window !== "undefined" && typeof sessionStorage !== "undefined"
       ? (sessionStorage.getItem("__PULSE_RENDER_ID") ?? undefined) 
       : undefined;
-  const res = await fetch("${server_address}/prerender", {
+  const res = await fetch("${server_address}${api_prefix}/prerender", {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",

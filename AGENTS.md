@@ -1,6 +1,9 @@
 # AGENTS.md
 
 ## Development Commands
+### Running code
+- Run Python code: `uv run path/to/script.py`
+- Run JavaScript / TypeScript code: `bun path/to/file.ts`
 
 ### Formatting
 - Format all code: `make format`

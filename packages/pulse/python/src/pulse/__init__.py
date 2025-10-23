@@ -17,7 +17,7 @@
 
 # Core app/session
 from pulse.app import App as App
-from pulse.app import DeploymentMode as DeploymentMode
+from pulse.app import PulseMode as PulseMode
 from pulse.channel import (
 	Channel as Channel,
 )
@@ -72,7 +72,7 @@ from pulse.decorators import effect as effect
 from pulse.decorators import query as query
 
 # Environment
-from pulse.env import PulseMode as PulseMode
+from pulse.env import PulseEnv as PulseEnv
 from pulse.env import env as env
 from pulse.env import mode as mode
 

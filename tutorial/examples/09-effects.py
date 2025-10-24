@@ -3,6 +3,7 @@ import pulse as ps
 
 class ToggleState(ps.State):
 	enabled: bool = True
+	_label: str
 
 	def __init__(self, label: str):
 		self._label = label

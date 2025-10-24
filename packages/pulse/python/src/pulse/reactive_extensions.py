@@ -372,6 +372,30 @@ class ReactiveDict(dict[T1, T2]):
 			result[key] = unwrap(self[key])
 		return result
 
+	# ---- Pickle protocol ----
+	@override
+	def __reduce__(self):
+		return (type(self), (), self.__getstate__())
+
+	@override
+	def __getstate__(self) -> dict[str, _Any]:
+		with Untrack():
+			data = {
+				key: unwrap(dict.__getitem__(self, key), untrack=True)  # pyright: ignore[reportUnknownArgumentType]
+				for key in dict.__iter__(self)
+			}
+		return {"data": data}
+
+	def __setstate__(self, state: dict[str, _Any]) -> None:
+		data = cast(dict[T1, _Any], state.get("data", {}))
+		super().clear()
+		self._signals = {}
+		self._structure = Signal(0)
+		for key, value in data.items():
+			wrapped = reactive(value)
+			super().__setitem__(key, wrapped)  # pyright: ignore[reportUnknownArgumentType]
+			self._signals[key] = Signal(wrapped)  # pyright: ignore[reportUnknownArgumentType]
+
 
 # Copied from the built-in types
 # =====
@@ -619,6 +643,27 @@ class ReactiveList(list[T1]):
 		self._structure.read()
 		return super().__iter__()
 
+	# ---- Pickle protocol ----
+	@override
+	def __reduce__(self):
+		return (type(self), (), self.__getstate__())
+
+	@override
+	def __getstate__(self) -> dict[str, _Any]:
+		with Untrack():
+			data = [unwrap(v, untrack=True) for v in list.__iter__(self)]
+		return {"data": data}
+
+	def __setstate__(self, state: dict[str, _Any]) -> None:
+		data = cast(list[_Any], state.get("data", []))
+		super().clear()
+		self._signals = []
+		self._structure = Signal(0)
+		for value in data:
+			wrapped = reactive(value)
+			super().append(wrapped)  # pyright: ignore[reportUnknownArgumentType]
+			self._signals.append(Signal(wrapped))  # pyright: ignore[reportUnknownArgumentType]
+
 	def __copy__(self):
 		result = type(self)()
 		for value in super().__iter__():
@@ -731,6 +776,26 @@ class ReactiveSet(set[T1]):
 		for value in set.__iter__(self):
 			result.add(copy.deepcopy(cast(T1, value), memo))
 		return result
+
+	# ---- Pickle protocol ----
+	@override
+	def __reduce__(self):
+		return (type(self), (), self.__getstate__())
+
+	@override
+	def __getstate__(self) -> dict[str, _Any]:
+		with Untrack():
+			data = [unwrap(value, untrack=True) for value in set.__iter__(self)]
+		return {"data": data}
+
+	def __setstate__(self, state: dict[str, _Any]) -> None:
+		values = cast(list[_Any], state.get("data", []))
+		super().clear()
+		self._signals = {}
+		for value in values:
+			wrapped = reactive(value)
+			super().add(wrapped)  # pyright: ignore[reportUnknownArgumentType]
+			self._signals[wrapped] = Signal(True)
 
 
 # ---- Reactive dataclass support ----

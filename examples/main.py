@@ -1,6 +1,7 @@
 import asyncio
 import time
 from datetime import datetime
+from typing import TypedDict
 
 import pulse as ps
 from pulse.middleware import Deny, NotFound, Ok, Redirect
@@ -14,7 +15,8 @@ from pulse.user_session import InMemorySessionStore
 class CounterState(ps.State):
 	count: int = 0
 	count2: int = 0
-	ticking = False
+	ticking: bool = False
+	_name: str
 
 	def __init__(self, name: str):
 		self._name = name
@@ -114,6 +116,7 @@ class LayoutState(ps.State):
 # ----------------------------
 class LeafState(ps.State):
 	count: int = 0
+	_label: str
 
 	def __init__(self, label: str):
 		self._label = label
@@ -196,16 +199,16 @@ def about():
 
 def setup_counter(count: int):
 	@ps.effect
-	def log_count():
+	def log_count():  # pyright: ignore[reportUnusedFunction]
 		print(f"Logging count from setup: {count}")
 
 
 @ps.component
-def Leaf(label: str, key=None):
+def Leaf(label: str, key: str | None = None):
 	# setup: called once per component instance; captures mount-only effect
 	def _init(lbl: str):
 		@ps.effect
-		def on_mount():
+		def on_mount():  # pyright: ignore[reportUnusedFunction]
 			print(f"[Leaf mount] {lbl}")
 
 		return {"label": lbl}
@@ -345,13 +348,18 @@ def counter_details():
 	)
 
 
+class User(TypedDict):
+	id: int
+	name: str
+
+
 class QueryDemoState(ps.State):
 	user_id: int = 1
 	keyed_calls: int = 0
 	unkeyed_calls: int = 0
 
 	@ps.query(keep_previous_data=True)
-	async def user_keyed(self) -> dict:
+	async def user_keyed(self) -> User:
 		self.keyed_calls += 1
 		# Simulate async work
 		await asyncio.sleep(1)
@@ -363,7 +371,7 @@ class QueryDemoState(ps.State):
 
 	# Unkeyed (auto-tracked) query variant
 	@ps.query(keep_previous_data=True)
-	async def user_unkeyed(self) -> dict:
+	async def user_unkeyed(self) -> User:
 		with ps.Untrack():
 			self.unkeyed_calls += 1
 		# Simulate async work

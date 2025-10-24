@@ -3,6 +3,7 @@ import copy
 from dataclasses import InitVar, asdict, astuple, dataclass, field, replace
 from typing import Any, ClassVar, cast
 
+import cloudpickle
 import pulse as ps
 import pytest
 from pulse import (
@@ -2037,6 +2038,51 @@ def test_reactive_set_copy_and_deepcopy_use_new_signals():
 	deep_copied.add(5)
 	assert 4 not in values
 	assert 5 not in values
+
+
+def test_reactive_dict_pickle_round_trip():
+	ctx: ReactiveDict[str, Any] = ReactiveDict({"a": 1, "nested": {"x": 2}})
+	ctx["items"] = ReactiveList([1, {"y": 3}])
+
+	payload = cloudpickle.dumps(ctx)
+	reloaded = cloudpickle.loads(payload)
+
+	assert isinstance(reloaded, ReactiveDict)
+	assert reloaded.unwrap() == {"a": 1, "nested": {"x": 2}, "items": [1, {"y": 3}]}
+	assert isinstance(reloaded["nested"], ReactiveDict)
+	assert isinstance(reloaded["items"], ReactiveList)
+
+	ctx["a"] = 99
+	assert reloaded["a"] == 1
+
+
+def test_reactive_list_pickle_round_trip():
+	items = ReactiveList([1, {"x": 2}])
+	items.append(ReactiveSet({"alpha"}))
+
+	reloaded = cloudpickle.loads(cloudpickle.dumps(items))
+
+	assert isinstance(reloaded, ReactiveList)
+	assert reloaded[0] == 1
+	assert isinstance(reloaded[1], ReactiveDict)
+	assert reloaded[1]["x"] == 2
+	assert isinstance(reloaded[2], ReactiveSet)
+	assert "alpha" in reloaded[2]
+
+	items[1]["x"] = 5
+	assert reloaded[1]["x"] == 2
+
+
+def test_reactive_set_pickle_round_trip():
+	values = ReactiveSet({"alpha", "beta"})
+	reloaded = cloudpickle.loads(cloudpickle.dumps(values))
+
+	assert isinstance(reloaded, ReactiveSet)
+	assert "alpha" in reloaded
+	assert "beta" in reloaded
+
+	values.add("gamma")
+	assert "gamma" not in reloaded
 
 
 def test_computed_exception_does_not_cause_circular_dependency():

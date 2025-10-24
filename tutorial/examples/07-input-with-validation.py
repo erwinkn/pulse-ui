@@ -1,5 +1,7 @@
 "examples/06-input-with-validation.py"
 
+from collections.abc import Callable
+
 import pulse as ps
 
 
@@ -7,8 +9,12 @@ class ValidatedInputState(ps.State):
 	value: str = ""
 	submitted: bool = False
 	error: str | None = None
+	_validate: Callable[[str], str | None]
+	_onValid: Callable[[str], None]
 
-	def __init__(self, validate, onValid):
+	def __init__(
+		self, validate: Callable[[str], str | None], onValid: Callable[[str], None]
+	):
 		self._validate = validate
 		self._onValid = onValid
 
@@ -26,7 +32,9 @@ class ValidatedInputState(ps.State):
 
 
 @ps.component
-def ValidatedInput(label: str, validate, onValid):
+def ValidatedInput(
+	label: str, validate: Callable[[str], str | None], onValid: Callable[[str], None]
+):
 	# Warning: the state will not update if `validate` or `onValid` change here!
 	state = ps.states(ValidatedInputState(validate, onValid))
 

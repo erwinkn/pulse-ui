@@ -112,7 +112,7 @@ class RenderSession:
 
 	# Effect error handler (batch-level) to surface runtime errors
 	def _on_effect_error(self, effect: Any, exc: Exception):
-		# TODO: wirte into effects created within a Render
+		# TODO: wire into effects created within a Render
 
 		# We don't want to couple effects to routing; broadcast to all active paths
 		details = {"effect": getattr(effect, "name", "<unnamed>")}

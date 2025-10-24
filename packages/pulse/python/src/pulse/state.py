@@ -10,7 +10,7 @@ from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import Enum, IntEnum
-from typing import TYPE_CHECKING, Any, Generic, Never, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, Generic, Never, Self, TypeVar, cast, override
 
 from pulse.reactive import (
 	AsyncEffect,
@@ -246,7 +246,11 @@ class StateMeta(ABCMeta):
 		instance = super().__call__(*args, **kwargs)
 		post_init = getattr(instance, "__post_init__", None)
 		if callable(post_init):
-			post_init()
+			object.__setattr__(instance, STATE_POST_INIT_FIELD, True)
+			try:
+				post_init()
+			finally:
+				object.__setattr__(instance, STATE_POST_INIT_FIELD, False)
 		# Ensure state effects are initialized even if user __init__ skipped super().__init__
 		try:
 			instance._initialize()
@@ -323,6 +327,12 @@ class StateStatus(IntEnum):
 
 
 STATE_STATUS_FIELD = "__pulse_status__"
+STATE_POST_INIT_FIELD = "__pulse_in_post_init__"
+_INTERNAL_PRIVATE_NAMES = {
+	STATE_STATUS_FIELD,
+	"_scope",
+	STATE_POST_INIT_FIELD,
+}
 
 
 class State(ABC, metaclass=StateMeta):
@@ -362,13 +372,38 @@ class State(ABC, metaclass=StateMeta):
 			f"{cls.__name__} must override __migrate__ to handle state migrations"
 		)
 
+	def __post_init__(self): ...
+
 	@override
 	def __setattr__(self, name: str, value: Any) -> None:
+		if name.startswith("_"):
+			if name.startswith("__") or name in _INTERNAL_PRIVATE_NAMES:
+				super().__setattr__(name, value)
+				return
+
+			meta: StateMetadata | None = getattr(
+				self.__class__, "__state_metadata__", None
+			)
+			field_meta = meta.fields.get(name) if meta else None
+
+			status = getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
+			in_post_init = bool(getattr(self, STATE_POST_INIT_FIELD, False))
+
+			if (
+				status == StateStatus.UNINITIALIZED
+				and not in_post_init
+				and field_meta is None
+			):
+				raise AttributeError(
+					f"Cannot set undeclared private attribute '{name}' during __init__. "
+					+ "Declare it on the class or assign it in __post_init__."
+				)
+
+			super().__setattr__(name, value)
+			return
+
 		if (
-			# Allow writing private/internal attributes
-			name.startswith("_")
-			# Allow writing during initialization
-			or getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
+			getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
 			== StateStatus.INITIALIZING
 		):
 			super().__setattr__(name, value)
@@ -558,3 +593,156 @@ class State(ABC, metaclass=StateMeta):
 			"error": query_value.error,
 			"has_loaded": bool(query_value.has_loaded),
 		}
+
+	def hydrate(self, state: dict[str, Any]) -> Self:
+		"""
+		Rehydrate a state from a previously drained payload, applying migrations,
+		defaults, and preserved query snapshots as necessary.
+		"""
+		if not isinstance(state, dict):
+			raise TypeError(
+				f"{self.__class__.__name__}.hydrate expected payload to be a dict, "
+				+ f"got {type(state).__name__!s}"
+			)
+
+		if "__version__" not in state:
+			raise ValueError(
+				f"{self.__class__.__name__}.hydrate payload missing '__version__' entry"
+			)
+
+		raw_version = state["__version__"]
+		try:
+			start_version = int(raw_version)
+		except (TypeError, ValueError) as exc:
+			raise ValueError(
+				f"{self.__class__.__name__}.hydrate received non-integer '__version__': {raw_version!r}"
+			) from exc
+
+		try:
+			values = state["values"]
+		except Exception as exc:
+			raise ValueError(
+				f"{self.__class__.__name__}.hydrate payload access failed for 'values': {exc}"
+			) from exc
+
+		if not isinstance(values, dict):
+			raise ValueError(
+				f"{self.__class__.__name__}.hydrate expected 'values' to be a dict, "
+				+ f"got {type(values).__name__!s}"
+			)
+
+		values = cast(dict[str, Any], values).copy()
+
+		target_version = self.__version__
+		if start_version > target_version:
+			raise ValueError(
+				f"{self.__class__.__name__} cannot down-hydrate from version "
+				+ f"{start_version} into older schema {target_version}"
+			)
+
+		if start_version != target_version:
+			try:
+				values = self.__migrate__(start_version, target_version, dict(values))
+			except NotImplementedError as exc:
+				raise RuntimeError(
+					f"{self.__class__.__name__} is missing migration coverage for payload "
+					+ f"version {start_version} -> {target_version}"
+				) from exc
+			if not isinstance(values, dict):
+				raise TypeError(
+					f"{self.__class__.__name__}.__migrate__ must return a dict, got "
+					+ f"{type(values).__name__!s}"
+				)
+
+		meta: StateMetadata = self.__state_metadata__
+		preserved_query_snapshots: dict[str, dict[str, Any]] = {}
+		missing_required: list[str] = []
+
+		for name, field_meta in meta.fields.items():
+			# Queries
+			if field_meta.kind is StateFieldKind.QUERY:
+				# We ignore preserved queries without a snapshot
+				if field_meta.drain and name in values:
+					snapshot = values.pop(name)
+					if not isinstance(snapshot, dict):
+						raise ValueError(
+							f"{self.__class__.__name__}.hydrate expected preserved query '{name}' "
+							+ f"to supply a dict snapshot, got {type(snapshot).__name__!s}"
+						)
+					preserved_query_snapshots[name] = snapshot
+				continue
+
+			if field_meta.kind is StateFieldKind.SIGNAL:
+				if name in values:
+					value = values.pop(name)
+					setattr(self, name, value)
+				elif field_meta.has_default:
+					setattr(self, name, field_meta.default)
+				else:
+					missing_required.append(name)
+				continue
+
+			if field_meta.kind is StateFieldKind.PRIVATE:
+				if name in values:
+					value = values.pop(name)
+					setattr(self, name, value)
+				elif field_meta.has_default:
+					setattr(self, name, field_meta.default)
+				continue
+
+		if missing_required:
+			field_list = ", ".join(sorted(missing_required))
+			raise ValueError(
+				f"{self.__class__.__name__}.hydrate missing values for fields without defaults: "
+				+ f"{field_list}. Provide defaults or supply values via __migrate__."
+			)
+
+		# Run the post-init hook to mirror normal construction.
+		object.__setattr__(self, STATE_POST_INIT_FIELD, True)
+		try:
+			self.__post_init__()
+		finally:
+			object.__setattr__(self, STATE_POST_INIT_FIELD, False)
+
+		# _initialize() will populate queries and scope/effects.
+		self._initialize()
+
+		# Rehydrate preserved query snapshots after queries have been initialized.
+		for name, snapshot in preserved_query_snapshots.items():
+			data = snapshot.get("data", None)
+			is_loading = bool(snapshot.get("is_loading", False))
+			is_error = bool(snapshot.get("is_error", False))
+			error = snapshot.get("error", None)
+			has_loaded = bool(snapshot.get("has_loaded", False))
+			query_result = getattr(self, name)
+
+			# Interact with QueryResult internals directly to avoid scheduling fetches.
+			try:
+				query_result._data.write(data)
+				query_result._initial_data = data
+				query_result._is_loading.write(is_loading)
+				query_result._is_error.write(is_error)
+				query_result._error.write(error)
+				query_result._has_loaded.write(has_loaded)
+			except AttributeError as e:
+				raise TypeError(
+					"Preserved query hydration expected a QueryResult-compatible object."
+				) from e
+
+		missing_private_after_init: list[str] = []
+		for name, field_meta in meta.fields.items():
+			if field_meta.kind is StateFieldKind.PRIVATE and not hasattr(self, name):
+				missing_private_after_init.append(name)
+
+		if missing_private_after_init:
+			field_list = ", ".join(sorted(missing_private_after_init))
+			raise ValueError(
+				f"{self.__class__.__name__}.hydrate missing private fields after initialization: "
+				+ f"{field_list}. Ensure __post_init__ assigns these attributes or provide defaults."
+			)
+
+		return self
+
+	def __setstate__(self, state: dict[str, Any]) -> None:
+		"""Support Python pickling by delegating to hydrate."""
+		self.hydrate(state)

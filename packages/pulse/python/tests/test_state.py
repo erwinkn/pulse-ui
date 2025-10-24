@@ -2,13 +2,20 @@
 Tests for the State class and computed properties.
 """
 
-from typing import Any, cast, override
+from typing import Any, TypeVar, cast, override
 
 import pulse as ps
 import pytest
 from pulse.reactive import flush_effects
-from pulse.reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet
+from pulse.reactive_extensions import ReactiveDict, ReactiveList, ReactiveSet, unwrap
 from pulse.state import StateFieldKind
+
+TState = TypeVar("TState", bound=ps.State)
+
+
+def hydrate_new(cls: type[TState], payload: dict[str, Any]) -> TState:
+	instance = cls.__new__(cls)
+	return instance.hydrate(payload)
 
 
 class TestState:
@@ -437,6 +444,25 @@ class TestState:
 		state._private = "updated"  # pyright: ignore[reportPrivateUsage]
 		assert state._private == "updated"  # pyright: ignore[reportPrivateUsage]
 
+	def test_undeclared_private_attribute_disallowed_in_init(self):
+		class BadPrivate(ps.State):
+			def __init__(self):
+				self._temp = "nope"  # pyright: ignore[reportAttributeAccessIssue]
+
+		with pytest.raises(
+			AttributeError,
+			match=r"Cannot set undeclared private attribute '_temp' during __init__",
+		):
+			BadPrivate()
+
+	def test_undeclared_private_attribute_allowed_in_post_init(self):
+		class GoodPrivate(ps.State):
+			def __post_init__(self):
+				self._temp = "ok"  # pyright: ignore[reportAttributeAccessIssue]
+
+		state = GoodPrivate()
+		assert state._temp == "ok"  # pyright: ignore[reportAttributeAccessIssue]
+
 	def test_descriptors_still_work(self):
 		"""Test that computed properties and other descriptors still work correctly"""
 
@@ -782,3 +808,125 @@ class TestState:
 
 		cloudpickle = pytest.importorskip("cloudpickle")
 		cloudpickle.dumps(payload)
+
+	def test_state_hydrate_round_trip(self):
+		class HydrateState(ps.State):
+			value: int = 1
+			config: dict[str, int] = {"a": 1}
+			secret: str = "visible"
+			_secret: str = "secret"
+			_post_hook_ran: bool = False
+
+			@ps.query(preserve=True)
+			async def preserved(self):
+				return {"value": 0}
+
+			@ps.query()
+			async def ephemeral(self):
+				return {"value": -1}
+
+			def __post_init__(self):
+				self._post_hook_ran = True
+
+		state = HydrateState()
+		state.value = 42
+		state.config["b"] = 2
+		state.secret = "changed"
+		state._secret = "altered"  # pyright: ignore[reportPrivateUsage]
+
+		preserved_query = state.preserved
+		ephemeral_query = state.ephemeral
+		preserved_query.set_success({"value": 99})
+		ephemeral_query.set_success({"value": -99})
+
+		payload = state.drain()
+
+		rehydrated = hydrate_new(HydrateState, payload)
+
+		assert isinstance(rehydrated, HydrateState)
+		assert rehydrated.value == 42
+		assert isinstance(rehydrated.config, ReactiveDict)
+		assert rehydrated.config.unwrap() == {"a": 1, "b": 2}
+		assert rehydrated.secret == "changed"
+		assert rehydrated._secret == "secret"  # pyright: ignore[reportPrivateUsage]
+		assert rehydrated._post_hook_ran is True  # pyright: ignore[reportPrivateUsage]
+
+		preserved_after = rehydrated.preserved
+		assert preserved_after.data == {"value": 99}
+		assert preserved_after.is_loading is False
+		assert preserved_after.is_error is False
+		assert preserved_after.has_loaded is True
+
+		ephemeral_after = rehydrated.ephemeral
+		assert ephemeral_after.has_loaded is False
+		assert ephemeral_after.is_loading is True
+
+		def quick_compare(state_obj: HydrateState) -> dict[str, Any]:
+			return {
+				"value": state_obj.value,
+				"config": unwrap(state_obj.config),
+				"secret": state_obj.secret,
+				"_secret": state_obj._secret,  # pyright: ignore[reportPrivateUsage]
+			}
+
+		assert quick_compare(rehydrated) == quick_compare(
+			hydrate_new(HydrateState, payload)
+		)
+
+		def build_from_setstate() -> HydrateState:
+			target = HydrateState.__new__(HydrateState)
+			target.__setstate__(payload)
+			return target
+
+		from_setstate = build_from_setstate()
+		assert quick_compare(from_setstate) == quick_compare(rehydrated)
+		assert getattr(from_setstate, "_post_hook_ran", False) is True
+
+	def test_state_hydrate_requires_migration(self):
+		class NeedsMigration(ps.State):
+			__version__: int = 2
+			value: int = 0
+
+		with pytest.raises(RuntimeError, match=r"missing migration coverage"):
+			hydrate_new(NeedsMigration, {"__version__": 1, "values": {"value": 5}})
+
+	def test_state_hydrate_missing_required_field(self):
+		class MissingValue(ps.State):
+			name: str
+
+		with pytest.raises(
+			ValueError, match=r"missing values for fields without defaults: name"
+		):
+			hydrate_new(MissingValue, {"__version__": 1, "values": {}})
+
+	def test_state_hydrate_migration_applies_defaults(self):
+		class Migrating(ps.State):
+			__version__: int = 3
+			count: int
+			label: str = "ready"
+
+			@override
+			@classmethod
+			def __migrate__(
+				cls, start_version: int, target_version: int, values: dict[str, Any]
+			) -> dict[str, Any]:
+				assert start_version == 1
+				assert target_version == 3
+				updated = dict(values)
+				updated.setdefault("count", 7)
+				return updated
+
+		payload: dict[str, Any] = {"__version__": 1, "values": {}}
+		state = hydrate_new(Migrating, payload)
+		assert state.count == 7
+		assert state.label == "ready"
+
+	def test_state_hydrate_requires_private_fields(self):
+		class PrivateState(ps.State):
+			value: int = 1
+			_token: str
+
+		with pytest.raises(
+			ValueError, match=r"missing private fields after initialization: _token"
+		):
+			hydrate_new(PrivateState, {"__version__": 1, "values": {"value": 9}})

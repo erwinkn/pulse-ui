@@ -64,6 +64,10 @@ class PulseContext:
 			self._token = None
 
 
+def strict_mode() -> bool:
+	return PulseContext.get().app.strict
+
+
 PULSE_CONTEXT: ContextVar["PulseContext | None"] = ContextVar(
 	"pulse_context", default=None
 )

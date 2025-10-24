@@ -128,6 +128,7 @@ class App:
 
 	# == Config ==
 	env: PulseEnv
+	strict: bool
 	mode: PulseMode
 	status: AppStatus
 	server_address: str | None
@@ -167,6 +168,7 @@ class App:
 		not_found: str = "/not-found",
 		# Deployment and integration options
 		env: PulseEnv | None = None,
+		strict: bool = True,
 		mode: PulseMode = "single-server",
 		api_prefix: str = "/_pulse",
 		cors: CORSOptions | None = None,
@@ -181,6 +183,7 @@ class App:
 		"""
 		# Resolve mode from environment and expose on the app instance
 		self.env = env or envvars.pulse_env
+		self.strict = strict
 		self.mode = mode
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.)

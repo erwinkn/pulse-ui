@@ -392,26 +392,47 @@ class TestState:
 		# Setting non-reactive property should fail
 		with pytest.raises(
 			AttributeError,
-			match=r"Cannot set non-reactive property 'dynamic_prop'",
+			match=r"Strict mode forbids setting undeclared attribute 'dynamic_prop'",
 		):
 			state.dynamic_prop = "should fail"
 
-	def test_private_attributes_allowed(self):
-		"""Test that private attributes can be set even after initialization"""
+	def test_strict_mode_blocks_undeclared_private_attributes(self):
+		"""Strict mode should reject undeclared private attribute assignments"""
 
 		class MyState(ps.State):
 			count: int = 0
 
 		state = MyState()
 
-		# Private attributes should be allowed
-		state._private = "ok"
-		state.__very_private = "also ok"
-		state._internal_counter = 42
+		with pytest.raises(
+			AttributeError, match=r"Strict mode forbids setting undeclared attribute"
+		):
+			state._private = "ok"
+		with pytest.raises(
+			AttributeError, match=r"Strict mode forbids setting undeclared attribute"
+		):
+			state.__very_private = "also ok"
+		with pytest.raises(
+			AttributeError, match=r"Strict mode forbids setting undeclared attribute"
+		):
+			state._internal_counter = 42
 
-		assert state._private == "ok"  # pyright: ignore[reportAttributeAccessIssue]
-		assert state.__very_private == "also ok"  # pyright: ignore[reportAttributeAccessIssue]
-		assert state._internal_counter == 42  # pyright: ignore[reportAttributeAccessIssue]
+	def test_non_strict_mode_allows_private_attributes(self):
+		"""Non-strict mode retains permissive private attribute behavior"""
+
+		class MyState(ps.State):
+			count: int = 0
+
+		app = ps.App(strict=False)
+		with ps.PulseContext(app=app):
+			state = MyState()
+			state._private = "ok"
+			state.__very_private = "also ok"
+			state._internal_counter = 42
+
+			assert state._private == "ok"  # pyright: ignore[reportAttributeAccessIssue]
+			assert state.__very_private == "also ok"  # pyright: ignore[reportAttributeAccessIssue]
+			assert state._internal_counter == 42  # pyright: ignore[reportAttributeAccessIssue]
 
 	def test_special_state_attributes_allowed(self):
 		"""Test that special State attributes can be set"""
@@ -447,21 +468,33 @@ class TestState:
 	def test_undeclared_private_attribute_disallowed_in_init(self):
 		class BadPrivate(ps.State):
 			def __init__(self):
-				self._temp = "nope"  # pyright: ignore[reportAttributeAccessIssue]
+				self._temp: str = "nope"
 
 		with pytest.raises(
 			AttributeError,
-			match=r"Cannot set undeclared private attribute '_temp' during __init__",
+			match=r"Strict mode forbids setting undeclared attribute '_temp'",
 		):
 			BadPrivate()
 
-	def test_undeclared_private_attribute_allowed_in_post_init(self):
+	def test_post_init_allows_declared_private_attribute(self):
 		class GoodPrivate(ps.State):
+			_temp: str
+
 			def __post_init__(self):
-				self._temp = "ok"  # pyright: ignore[reportAttributeAccessIssue]
+				self._temp = "ok"
 
 		state = GoodPrivate()
-		assert state._temp == "ok"  # pyright: ignore[reportAttributeAccessIssue]
+		assert state._temp == "ok"  # pyright: ignore[reportPrivateUsage]
+
+	def test_strict_mode_blocks_post_init_undeclared_private(self):
+		class BadPrivate(ps.State):
+			def __post_init__(self):
+				self._temp: str = "nope"
+
+		with pytest.raises(
+			AttributeError, match=r"Strict mode forbids setting undeclared attribute"
+		):
+			BadPrivate()
 
 	def test_descriptors_still_work(self):
 		"""Test that computed properties and other descriptors still work correctly"""
@@ -495,15 +528,47 @@ class TestState:
 
 		state = MyState()
 
-		try:
+		with pytest.raises(AttributeError) as excinfo:
 			state.user_name = "john"
-			raise AssertionError("Should have raised AttributeError")
-		except AttributeError as e:
-			error_msg = str(e)
-			assert "Cannot set non-reactive property 'user_name'" in error_msg
-			assert "MyState" in error_msg
-			assert "declare it with a type annotation at the class level" in error_msg
-			assert "'user_name: <type> = <default_value>'" in error_msg
+
+		error_msg = str(excinfo.value)
+		assert "Strict mode forbids setting undeclared attribute" in error_msg
+		assert "MyState" in error_msg
+		assert "App(strict=False)" in error_msg
+
+	def test_helpful_error_message_non_strict_mode(self):
+		class MyState(ps.State):
+			count: int = 0
+
+		app = ps.App(strict=False)
+		with ps.PulseContext(app=app):
+			state = MyState()
+			with pytest.raises(AttributeError) as excinfo:
+				state.user_name = "john"
+
+		error_msg = str(excinfo.value)
+		assert "Cannot set non-reactive property 'user_name'" in error_msg
+		assert "declare it with a type annotation at the class level" in error_msg
+
+	def test_strict_mode_enforces_picklable_values(self):
+		class MyState(ps.State):
+			count: int = 0
+
+		state = MyState()
+		with open(__file__, "rb") as handle:
+			with pytest.raises(TypeError, match=r"cloudpickle-serializable"):
+				state.count = handle  # pyright: ignore[reportAttributeAccessIssue]
+
+	def test_non_strict_allows_non_picklable_values(self):
+		class MyState(ps.State):
+			count: int = 0
+
+		app = ps.App(strict=False)
+		with ps.PulseContext(app=app):
+			state = MyState()
+			with open(__file__, "rb") as handle:
+				state.count = handle  # pyright: ignore[reportAttributeAccessIssue]
+				assert state.count is handle
 
 	def test_effects_dont_run_during_initialization(self):
 		"""Test that effects don't trigger during State initialization"""

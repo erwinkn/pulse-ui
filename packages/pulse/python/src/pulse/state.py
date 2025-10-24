@@ -6,12 +6,16 @@ that enables automatic re-rendering when state changes.
 """
 
 import inspect
+import pickle
 from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import TYPE_CHECKING, Any, Generic, Never, Self, TypeVar, cast, override
 
+import cloudpickle
+
+from pulse.context import strict_mode
 from pulse.reactive import (
 	AsyncEffect,
 	Computed,
@@ -332,6 +336,7 @@ _INTERNAL_PRIVATE_NAMES = {
 	STATE_STATUS_FIELD,
 	"_scope",
 	STATE_POST_INIT_FIELD,
+	"_post_initialized",
 }
 
 
@@ -360,6 +365,7 @@ class State(ABC, metaclass=StateMeta):
 
 	__version__: int = 1
 	__state_metadata__: StateMetadata
+	_scope: Scope
 
 	@classmethod
 	def __migrate__(
@@ -374,20 +380,36 @@ class State(ABC, metaclass=StateMeta):
 
 	def __post_init__(self): ...
 
+	def _ensure_picklable(self, name: str, value: Any) -> None:
+		try:
+			cloudpickle.dumps(value)
+		except (pickle.PicklingError, TypeError, AttributeError) as exc:
+			raise TypeError(
+				f"Strict mode requires attribute '{name}' on {self.__class__.__name__} "
+				+ "to be cloudpickle-serializable; received "
+				+ f"{type(value).__name__} which failed with: {exc}"
+			) from exc
+
 	@override
 	def __setattr__(self, name: str, value: Any) -> None:
+		strict = strict_mode()
+		meta: StateMetadata | None = self.__state_metadata__
+		fields = meta.fields if meta else {}
+		field_meta = fields.get(name)
+		status = getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
+		in_post_init = bool(getattr(self, STATE_POST_INIT_FIELD, False))
+
 		if name.startswith("_"):
 			if name.startswith("__") or name in _INTERNAL_PRIVATE_NAMES:
 				super().__setattr__(name, value)
 				return
 
-			meta: StateMetadata | None = getattr(
-				self.__class__, "__state_metadata__", None
-			)
-			field_meta = meta.fields.get(name) if meta else None
-
-			status = getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
-			in_post_init = bool(getattr(self, STATE_POST_INIT_FIELD, False))
+			if strict and field_meta is None:
+				raise AttributeError(
+					"Strict mode forbids setting undeclared attribute "
+					+ f"'{name}' on {self.__class__.__name__}. "
+					+ "Declare the attribute on the class or disable strict mode via App(strict=False)."
+				)
 
 			if (
 				status == StateStatus.UNINITIALIZED
@@ -399,24 +421,32 @@ class State(ABC, metaclass=StateMeta):
 					+ "Declare it on the class or assign it in __post_init__."
 				)
 
+			if strict:
+				self._ensure_picklable(name, value)
 			super().__setattr__(name, value)
 			return
 
-		if (
-			getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
-			== StateStatus.INITIALIZING
-		):
+		if status == StateStatus.INITIALIZING:
 			super().__setattr__(name, value)
 			return
 
 		# Route reactive properties through their descriptor
 		cls_attr = getattr(self.__class__, name, None)
 		if isinstance(cls_attr, ReactiveProperty):
+			if strict:
+				self._ensure_picklable(name, value)
 			cls_attr.__set__(self, value)
 			return
 
 		if isinstance(cls_attr, ComputedProperty):
 			raise AttributeError(f"Cannot set computed property '{name}'")
+
+		if strict:
+			raise AttributeError(
+				"Strict mode forbids setting undeclared attribute "
+				+ f"'{name}' on {self.__class__.__name__}. "
+				+ "Declare it on the class or disable strict mode via App(strict=False)."
+			)
 
 		# Reject all other public writes
 		raise AttributeError(
@@ -435,8 +465,6 @@ class State(ABC, metaclass=StateMeta):
 			+ name
 			+ " = <value>'"
 		)
-
-	_scope: Scope
 
 	def _initialize(self):
 		# Idempotent: avoid double-initialization when subclass calls super().__init__

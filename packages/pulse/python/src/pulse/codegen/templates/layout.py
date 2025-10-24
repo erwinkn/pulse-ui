@@ -34,6 +34,7 @@ export async function loader(args: LoaderFunctionArgs) {
   });
   if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
   const body = await res.json();
+  console.log("Body:", body);
   if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
   if (body.notFound) return new Response(null, { status: 404 });
   const prerenderData = deserialize(body) as PulsePrerender;

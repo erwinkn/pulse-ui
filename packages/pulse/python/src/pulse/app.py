@@ -506,7 +506,9 @@ class App:
 			if session is None:
 				raise RuntimeError("Internal error: couldn't resolve user session")
 			paths = payload.get("paths") or []
+			print("Prerendering payload:", payload)
 			if len(paths) == 0:
+				print("Paths must be non-empty")
 				raise HTTPException(
 					status_code=400, detail="'paths' must be a non-empty list"
 				)
@@ -522,9 +524,11 @@ class App:
 				# Validate render exists and belongs to this user session
 				existing = self.render_sessions.get(render_id)
 				if existing is None:
+					print("Unknown renderId")
 					raise HTTPException(status_code=400, detail="Unknown renderId")
 				owner = self._render_to_user.get(render_id)
 				if owner != session.sid:
+					print("Forbidden renderId")
 					raise HTTPException(status_code=403, detail="Forbidden renderId")
 				render = existing
 				cleanup = False
@@ -534,16 +538,18 @@ class App:
 					render_id, session, client_address=client_addr
 				)
 				cleanup = True
+			if client_addr is not None:
+				render.set_client_address(client_addr)
 
 			result: PrerenderResult = {"renderId": render_id, "views": {}}
 
 			def _prerender_one(path: str):
-				captured = render.prerender_mount_capture(path, route_info)
-				if captured["type"] == "vdom_init":
-					return Ok(captured)
-				if captured["type"] == "navigate_to":
-					nav_path = captured["path"]
-					replace = captured["replace"]
+				message = render.render_route(path, route_info, mode="prerender")
+				if message["type"] == "vdom_init":
+					return Ok(message)
+				if message["type"] == "navigate_to":
+					nav_path = message["path"]
+					replace = message["replace"]
 					# Treat navigate to not_found (replace) as NotFound
 					if replace and nav_path == self.not_found:
 						return NotFound()
@@ -567,21 +573,25 @@ class App:
 							# Abort immediately with JSON redirect signal
 							location = res.path or "/"
 							resp = JSONResponse({"redirect": location})
+							print(f"Redirecting to {location}")
 							session.handle_response(resp)
 							return resp
 						elif isinstance(res, NotFound):
 							# Abort immediately with JSON notFound signal
 							resp = JSONResponse({"notFound": True})
+							print("NOT FOUND")
 							session.handle_response(resp)
 							return resp
 						else:
 							raise ValueError("Unexpected prerender response:", res)
 					except RedirectInterrupt as r:
 						resp = JSONResponse({"redirect": r.path})
+						print(f"Redirecting to {r.path}")
 						session.handle_response(resp)
 						return resp
 					except NotFoundInterrupt:
 						resp = JSONResponse({"notFound": True})
+						print("NOT FOUND")
 						session.handle_response(resp)
 						return resp
 
@@ -599,6 +609,7 @@ class App:
 
 			resp = JSONResponse(serialize(result))
 			session.handle_response(resp)
+			print("Returning prerender:", result)
 			return resp
 
 		@self.fastapi.post(f"{prefix}/forms/{{render_id}}/{{form_id}}")
@@ -637,15 +648,16 @@ class App:
 				raise ConnectionRefusedError()
 
 			# Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
+			client_addr = get_client_address_socketio(environ)
 			render = self.render_sessions.get(rid)
 			if render is None:
-				render = self.create_render(
-					rid, session, client_address=get_client_address_socketio(environ)
-				)
+				render = self.create_render(rid, session, client_address=client_addr)
 			else:
 				owner = self._render_to_user.get(render.id)
 				if owner != session.sid:
 					raise ConnectionRefusedError()
+			if client_addr is not None:
+				render.set_client_address(client_addr)
 
 			def on_message(message: ServerMessage):
 				payload = serialize(message)
@@ -709,19 +721,7 @@ class App:
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
 		def _next() -> Ok[None]:
-			if msg["type"] == "mount":
-				render.mount(msg["path"], msg["routeInfo"])
-			elif msg["type"] == "navigate":
-				render.navigate(msg["path"], msg["routeInfo"])
-			elif msg["type"] == "callback":
-				render.execute_callback(msg["path"], msg["callback"], msg["args"])
-			elif msg["type"] == "unmount":
-				render.unmount(msg["path"])
-				render.channels.remove_route(msg["path"])
-			elif msg["type"] == "api_result":
-				render.handle_api_result(dict(msg))
-			else:
-				logger.warning("Unknown message type received: %s", msg)
+			render.receive(msg)
 			return Ok()
 
 		with PulseContext.update(session=session, render=render):
@@ -847,7 +847,7 @@ class App:
 		render = RenderSession(
 			rid,
 			self.routes,
-			server_address=self.server_address,
+			app=self,
 			client_address=client_address,
 		)
 		self.render_sessions[rid] = render

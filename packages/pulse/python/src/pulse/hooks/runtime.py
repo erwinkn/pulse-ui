@@ -126,15 +126,12 @@ def not_found() -> NoReturn:
 
 def server_address() -> str:
 	ctx = PulseContext.get()
-	if ctx.render is None:
-		raise RuntimeError(
-			"server_address() must be called inside a Pulse render/callback context"
-		)
-	if not ctx.render.server_address:
+	address = ctx.app.server_address
+	if not address:
 		raise RuntimeError(
 			"Server address unavailable. Ensure App.run_codegen/asgi_factory configured server_address."
 		)
-	return ctx.render.server_address
+	return address
 
 
 def client_address() -> str:
@@ -142,10 +139,6 @@ def client_address() -> str:
 	if ctx.render is None:
 		raise RuntimeError(
 			"client_address() must be called inside a Pulse render/callback context"
-		)
-	if not ctx.render.client_address:
-		raise RuntimeError(
-			"Client address unavailable. It is set during prerender or socket connect."
 		)
 	return ctx.render.client_address
 

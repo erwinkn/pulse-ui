@@ -98,7 +98,13 @@ def mount_with_listener(session: RenderSession, path: str):
 	# Ensure RenderSession is present in PulseContext when mounting so the
 	# captured context for the render effect includes it
 	with ps.PulseContext.update(render=session):
-		session.mount(path, make_route_info(path))
+		session.receive(
+			{
+				"type": "mount",
+				"path": path,
+				"routeInfo": make_route_info(path),
+			}
+		)
 
 	def disconnect():
 		# Stop listening for this path; messages are still in the shared log
@@ -143,7 +149,14 @@ def test_two_sessions_two_routes_are_isolated():
 	assert extract_count_from_ctx(s2, "b") == 0
 
 	# Click a button in session 1 route a (button is second child, index 1)
-	s1.execute_callback("a", "1.onClick", [])
+	s1.receive(
+		{
+			"type": "callback",
+			"path": "a",
+			"callback": "1.onClick",
+			"args": [],
+		}
+	)
 	s1.flush()
 	s2.flush()
 
@@ -160,7 +173,14 @@ def test_two_sessions_two_routes_are_isolated():
 	assert len([m for m in msgs_s2_b if m["type"] == "vdom_update"]) == 0
 
 	# Click a button in session 2 route a (button is second child, index 1)
-	s2.execute_callback("a", "1.onClick", [])
+	s2.receive(
+		{
+			"type": "callback",
+			"path": "a",
+			"callback": "1.onClick",
+			"args": [],
+		}
+	)
 	s1.flush()
 	s2.flush()
 
@@ -244,7 +264,14 @@ def test_global_state_shared_within_session_and_isolated_across_sessions():
 	assert extract_global_count(s2, "b") == 0
 
 	# Increment in s1 on route a
-	s1.execute_callback("a", "1.onClick", [])
+	s1.receive(
+		{
+			"type": "callback",
+			"path": "a",
+			"callback": "1.onClick",
+			"args": [],
+		}
+	)
 	s1.flush()
 	s2.flush()
 
@@ -263,7 +290,14 @@ def test_global_state_shared_within_session_and_isolated_across_sessions():
 	assert len([m for m in msgs_s2_b if m["type"] == "vdom_update"]) == 0
 
 	# Increment in s2 on route b
-	s2.execute_callback("b", "1.onClick", [])
+	s2.receive(
+		{
+			"type": "callback",
+			"path": "b",
+			"callback": "1.onClick",
+			"args": [],
+		}
+	)
 	s1.flush()
 	s2.flush()
 

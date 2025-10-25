@@ -462,9 +462,9 @@ class App:
 			self._sessions_in_request[session.sid] = (
 				self._sessions_in_request.get(session.sid, 0) + 1
 			)
-			header_sid = request.headers.get("x-pulse-render-id")
-			if header_sid:
-				render = self.render_sessions.get(header_sid)
+			render_id = request.headers.get("x-pulse-render-id")
+			if render_id:
+				render = self.render_sessions.get(render_id)
 			else:
 				render = None
 			with PulseContext.update(session=session, render=render):

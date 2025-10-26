@@ -12,14 +12,17 @@ After completing this work, a Pulse developer can push a new application version
 
 - [x] (2025-10-24 21:40Z) Authored the initial ExecPlan derived from `plans/aws-ecs-deployment.md` and `.agent/PLANS.md`.
 - [x] (2025-10-24 22:15Z) Updated the ExecPlan to reflect the simplified deployment API (App `deploy` kwarg, `Deployment` base class, single `python deploy.py` command, minimal health/drain responses, code-first configuration).
+- [x] (2025-10-25 17:41Z) Implemented Phase 1.1: added the CDK `BaselineStack`, app scaffolding, and `ensure_baseline_stack` helper plus tests that cache CloudFormation outputs under `.pulse/<env>/baseline.json`.
+- [x] (2025-10-26 12:21Z) Upgraded the `BaselineStack` to mint ACM certificates automatically (when no ARN is provided), emit DNS validation records via CloudFormation outputs, and added CDK assertions to guarantee the new behavior.
 
 ## Surprises & Discoveries
 
-- None yet; implementation has not started, so no unexpected behavior has been observed.
+- We can rely on CloudFormation to mint ACM certs at deploy time, so `BaselineStack` now only needs domain names (the ARN path remains available for bring-your-own certs).
+- ACM’s CloudFormation resource doesn’t surface DNS validation records directly, so we introduced a lightweight `AwsCustomResource` that calls `DescribeCertificate` after creation and publishes the required CNAMEs via `CertificateValidationRecords` output.
 
 ## Decision Log
 
-No decisions recorded yet; once implementation is underway, document significant choices here with rationale and timestamps so future contributors understand the context behind adjustments.
+- (2025-10-25 17:41Z) `ensure_baseline_stack` shells out to the CDK CLI (bootstrap → synth → deploy) instead of re-implementing deployment logic; `aws-cdk-lib`/`constructs` are now regular workspace dependencies so `uv run cdk ...` works everywhere, and baseline outputs are persisted as structured JSON for later helpers.
 
 ## Outcomes & Retrospective
 
@@ -38,7 +41,7 @@ The repository root contains `examples/main.py` plus other sample apps that can 
 ### Phase 1 – Baseline infrastructure
 
 **1.1 CDK stack + deployment helper**  
-Build `infra/aws/cdk/baseline.py` with a `BaselineStack` that provisions the shared VPC (two AZs), public/private subnets, routing tables, security groups, ALB with HTTPS listener and ACM certificate import, CloudWatch log group, ECS cluster, execution/task IAM roles, and ECR repository. Implement a Python helper `ensure_baseline_stack(env_name, region, account)` that synthesizes the stack, auto-runs `cdk bootstrap` if missing, deploys `pulse-<env>-baseline`, waits for CloudFormation success, and writes the outputs (listener ARN, subnet IDs, security groups, cluster name, log group, ECR repo URL) to `.pulse/<env>/baseline.json`. Re-running the helper must be idempotent; add tests/mocks to prove it short-circuits when the stack is already healthy.
+Build `packages/pulse-aws/cdk/baseline.py` with a `BaselineStack` that provisions the shared VPC (two AZs), public/private subnets, routing tables, security groups, ALB with HTTPS listener (import an existing ACM certificate or request a new DNS-validated one automatically), CloudWatch log group, ECS cluster, execution/task IAM roles, and ECR repository. Implement a Python helper `ensure_baseline_stack(env_name, region, account)` inside `packages/pulse-aws/src/pulse_aws/baseline.py` that synthesizes the stack, auto-runs `cdk bootstrap` if missing, deploys `pulse-<env>-baseline`, waits for CloudFormation success, and writes the outputs (listener ARN, subnet IDs, security groups, cluster name, log group, ECR repo URL, certificate ARN/validation records) to `.pulse/<env>/baseline.json`. Re-running the helper must be idempotent; add tests/mocks to prove it short-circuits when the stack is already healthy.
 
 **1.2 Baseline teardown helper**  
 Write `teardown_baseline_stack(env_name, region)` that deletes `pulse-<env>-baseline`, watches the stack to completion, and removes cached artifacts. Protect the command with confirmations plus runtime checks that no active Pulse services exist. Include tests covering failure modes (e.g., stack in `UPDATE_ROLLBACK_FAILED`) to ensure we surface actionable errors.
@@ -241,11 +244,11 @@ Update this section with real outputs, CloudWatch links, and screenshots once AW
 Expose the following interfaces so that all moving parts are explicit:
 
 - In `packages/pulse/python/src/pulse/app.py`, extend `AppStatus` with `draining = 3` / `stopped = 4`, add helpers such as `set_draining()`, `is_draining()`, and `await wait_for_drain_completion()`, and block WebSocket connections / new RenderSessions once draining starts. The FastAPI health route should emit `{"version": ..., "draining": bool}` and return HTTP 503 once the active session count hits zero.
-- Provide `AWSECSPlugin(secret: str | Callable[[], str])` in `packages/pulse/python/src/pulse/deploy/aws/plugin.py`. The plugin registers the `/_pulse/admin/drain` endpoint, injects prerender directives (`X-Pulse-Render-Affinity`, `X-Pulse-Render-Id`), and exposes middleware hooks so other deployment recipes can piggyback on the same mechanism.
-- Implement the async helpers described in Phase 2 (`generate_deployment_id`, `deploy_baseline`, `deploy_app`, `wait_until_healthy`, `drain_previous_deployments`, `cleanup`) under `packages/pulse/python/src/pulse/deploy/aws/helpers.py`. Each helper should accept explicit parameters (deployment name, deployment ID, dockerfile path, baseline outputs) and rely only on data supplied by the caller, making them easy to compose inside custom scripts.
+- Provide `AWSECSPlugin(secret: str | Callable[[], str])` in `packages/pulse-aws/src/pulse_aws/plugin.py`. The plugin registers the `/_pulse/admin/drain` endpoint, injects prerender directives (`X-Pulse-Render-Affinity`, `X-Pulse-Render-Id`), and exposes middleware hooks so other deployment recipes can piggyback on the same mechanism.
+- Implement the async helpers described in Phase 2 (`generate_deployment_id`, `deploy_baseline`, `deploy_app`, `wait_until_healthy`, `drain_previous_deployments`, `cleanup`) under `packages/pulse-aws/src/pulse_aws/helpers.py`. Each helper should accept explicit parameters (deployment name, deployment ID, dockerfile path, baseline outputs) and rely only on data supplied by the caller, making them easy to compose inside custom scripts.
 - On the client side (see `packages/pulse/js/src/serialize/serializer.ts` and `packages/pulse/js/src/client.tsx`), persist the prerender `directives`, attach their headers to every HTTP fetch, and include them in Socket.IO auth/query params so ALB header rules keep each tab pinned to the correct version.
 
-The CDK app lives under `infra/aws/cdk/` and exposes a `BaselineStack` whose CloudFormation outputs map one-to-one with the values the helpers expect (listener ARN, subnet IDs, security groups, cluster name, log group, ECR repo URL). Store the most recent outputs in `.pulse/<deployment_name>/baseline.json` so deployment scripts can read them without rerunning `cdk synth`. Document the mapping in `docs/deployment/aws-ecs.md`, and note that we will later publish a Terraform equivalent for teams that prefer a different tooling stack.
+The CDK app lives under `packages/pulse-aws/src/pulse_aws/cdk/` and exposes a `BaselineStack` whose CloudFormation outputs map one-to-one with the values the helpers expect (listener ARN, subnet IDs, security groups, cluster name, log group, ECR repo URL, certificate ARN, DNS validation records). Store the most recent outputs in `.pulse/<deployment_name>/baseline.json` so deployment scripts can read them without rerunning `cdk synth`. Document the mapping in `docs/deployment/aws-ecs.md`, and note that we will later publish a Terraform equivalent for teams that prefer a different tooling stack.
 
 Update `packages/pulse/python/pyproject.toml` dependencies with `boto3>=1.35.0,<2.0`, `botocore>=1.35.0,<2.0`, and `docker>=7.1.0` so the deployment helpers can interact with AWS and build images; retain `httpx` for drain calls. No new environment variables are introduced because all deployment configuration is code-first via the `AWSECS` plugin, and secrets can be retrieved lazily in code (e.g., `lambda: secretsmanager.get_secret_value(...)`).
 

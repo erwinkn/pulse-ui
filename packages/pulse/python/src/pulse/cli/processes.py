@@ -35,7 +35,11 @@ def execute_commands(
 
 	color_lookup = dict(tag_colors or {})
 
-	if os_family() == "windows" or not hasattr(pty, "fork"):
+	# Avoid pty.fork() in multi-threaded environments (like pytest) to prevent
+	# "DeprecationWarning: This process is multi-threaded, use of forkpty() may lead to deadlocks"
+	# Also skip pty on Windows or if fork is unavailable
+	in_pytest = "pytest" in sys.modules
+	if os_family() == "windows" or not hasattr(pty, "fork") or in_pytest:
 		return _run_without_pty(commands, console=console, colors=color_lookup)
 
 	return _run_with_pty(commands, console=console, colors=color_lookup)

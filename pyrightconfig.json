@@ -13,6 +13,8 @@
     "socketio",
     "msal",
     "mako.template",
+    "boto3",
+    "botocore.exceptions"
   ],
   // Framework code often has to use Any.
   "reportAny": "none",

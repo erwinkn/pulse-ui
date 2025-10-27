@@ -2,15 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence, cast
+from typing import Any, cast
 
 import boto3
 from botocore.exceptions import ClientError
 
-STACK_NAME_TEMPLATE = "pulse-{env}-baseline"
+from pulse_aws.certificate import (
+	AcmCertificate,
+	DnsConfiguration,
+	DnsRecord,
+	check_domain_dns,
+	ensure_acm_certificate,
+)
+
+STACK_NAME_TEMPLATE = "{env}-baseline"
 TOOLKIT_STACK_NAME = "CDKToolkit"
+BASELINE_STACK_VERSION = "1.1.0"  # Bump when baseline stack changes
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CDK_APP_DIR = PACKAGE_ROOT / "src" / "pulse_aws" / "cdk"
 STACK_SUCCEEDED = {
@@ -25,6 +35,10 @@ STACK_FAILED = {
 	"DELETE_FAILED",
 	"UPDATE_ROLLBACK_FAILED",
 }
+STACK_DELETING = {
+	"DELETE_IN_PROGRESS",
+}
+STACK_DELETE_COMPLETE = "DELETE_COMPLETE"
 
 
 class BaselineStackError(RuntimeError):
@@ -33,7 +47,7 @@ class BaselineStackError(RuntimeError):
 
 @dataclass(slots=True)
 class BaselineStackOutputs:
-	env_name: str
+	deployment_name: str
 	region: str
 	account: str
 	stack_name: str
@@ -48,36 +62,64 @@ class BaselineStackOutputs:
 	log_group_name: str
 	ecr_repository_uri: str
 	vpc_id: str
-	custom_domain_name: str | None = None
+	execution_role_arn: str
+	task_role_arn: str
 
 	def to_dict(self) -> dict[str, Any]:
 		return asdict(self)
 
 
 async def ensure_baseline_stack(
-	env_name: str,
+	deployment_name: str,
 	*,
-	certificate_arn: str | None = None,
-	domains: str | Sequence[str] | None = None,
+	certificate_arn: str,
 	allowed_ingress_cidrs: Sequence[str] | None = None,
 	cdk_bin: str = "cdk",
 	workdir: Path | str | None = None,
 	poll_interval: float = 5.0,
+	force_bootstrap: bool = False,
 ) -> BaselineStackOutputs:
-	"""Ensure the shared AWS resources exist and return their identifiers."""
+	"""Ensure the shared AWS resources exist and return their identifiers.
 
-	if not env_name:
-		msg = "env_name is required"
+	IMPORTANT: This function requires an ISSUED ACM certificate.
+	The certificate must be created and validated BEFORE running this function.
+	AWS will reject CloudFormation deployments that try to attach a PENDING_VALIDATION
+	certificate to an ALB listener. Use ensure_acm_certificate() first and wait for
+	validation to complete.
+
+	Requires a certificate ARN. Use ensure_acm_certificate() to mint one:
+
+	Args:
+		deployment_name: Name for this deployment (e.g., "prod", "staging")
+		certificate_arn: ARN of ACM certificate for HTTPS
+		allowed_ingress_cidrs: Optional list of CIDR blocks for ALB access
+		cdk_bin: Path to CDK binary (default: "cdk")
+		workdir: Working directory for CDK commands
+		poll_interval: How often to check stack status (seconds)
+		force_bootstrap: Force re-running CDK bootstrap even if already bootstrapped
+		skip_bootstrap_check: Skip bootstrap check entirely (faster but risky if not bootstrapped)
+
+	Example::
+
+		cert = await ensure_acm_certificate(["api.example.com"])
+		if cert.dns_configuration:
+			print(cert.dns_configuration.format_for_display())
+
+		outputs = await ensure_baseline_stack(
+			"prod",
+			certificate_arn=cert.arn,
+		)
+	"""
+
+	if not deployment_name:
+		msg = "deployment_name is required"
 		raise ValueError(msg)
 
-	stack_name = STACK_NAME_TEMPLATE.format(env=env_name)
+	if not certificate_arn:
+		msg = "certificate_arn is required"
+		raise ValueError(msg)
 
-	domains_list: list[str] = []
-	if domains is not None:
-		if isinstance(domains, str):
-			domains_list = [domains]
-		else:
-			domains_list = list(domains)
+	stack_name = STACK_NAME_TEMPLATE.format(env=deployment_name)
 
 	sts = boto3.client("sts")
 	region = cast(str, sts.meta.region_name)
@@ -85,34 +127,44 @@ async def ensure_baseline_stack(
 
 	cfn = boto3.client("cloudformation", region_name=region)
 	stack = describe_stack(cfn, stack_name)
-	if stack and is_stack_healthy(stack):
-		return extract_stack_outputs(
-			env_name,
-			region,
-			account,
-			stack_name,
-			stack,
-		)
 
-	_ensure_bootstrap(cfn, cdk_bin, account, region, workdir)
+	# Check if stack exists and is up-to-date
+	if stack and is_stack_healthy(stack):
+		current_version = get_stack_version(stack)
+		if current_version == BASELINE_STACK_VERSION:
+			# Stack exists and is current version, return outputs
+			return extract_stack_outputs(
+				deployment_name,
+				region,
+				account,
+				stack_name,
+				stack,
+			)
+		else:
+			# Stack exists but is outdated, will update below
+			print(
+				f"📦 Updating stack ({current_version} -> {BASELINE_STACK_VERSION})",
+			)
+
+	_ensure_bootstrap(cfn, cdk_bin, account, region, workdir, force=force_bootstrap)
 
 	context = {
-		"env": env_name,
+		"deployment_name": deployment_name,
+		"certificate_arn": certificate_arn,
 	}
-	if certificate_arn:
-		context["certificate_arn"] = certificate_arn
-	if domains_list:
-		context["domains"] = ",".join(domains_list)
 	if allowed_ingress_cidrs:
 		context["allowed_ingress_cidrs"] = ",".join(allowed_ingress_cidrs)
 
+	# Add version tag to track baseline stack version
+	tags = {"pulse-cf-version": BASELINE_STACK_VERSION}
+
 	cdk_run(cdk_bin, "synth", context, workdir)
-	cdk_run(cdk_bin, "deploy", context, workdir, stack_name=stack_name)
+	cdk_run(cdk_bin, "deploy", context, workdir, stack_name=stack_name, tags=tags)
 
 	return await wait_for_stack_outputs(
 		cfn,
 		stack_name,
-		env_name,
+		deployment_name,
 		region,
 		account,
 		poll_interval=poll_interval,
@@ -125,10 +177,23 @@ def _ensure_bootstrap(
 	account: str,
 	region: str,
 	workdir: Path | str | None,
+	*,
+	force: bool = False,
 ) -> None:
-	stack = describe_stack(cfn, TOOLKIT_STACK_NAME)
-	if stack and is_stack_healthy(stack):
-		return
+	"""Ensure CDK is bootstrapped in the target account/region.
+
+	Args:
+		cfn: CloudFormation client
+		cdk_bin: Path to CDK binary
+		account: AWS account ID
+		region: AWS region
+		workdir: Working directory for CDK commands
+		force: Force re-running bootstrap even if already bootstrapped
+	"""
+	if not force:
+		stack = describe_stack(cfn, TOOLKIT_STACK_NAME)
+		if stack and is_stack_healthy(stack):
+			return
 
 	target = f"aws://{account}/{region}"
 	cdk_run(cdk_bin, "bootstrap", {}, workdir, stack_name=target)
@@ -140,7 +205,24 @@ def cdk_run(
 	context: Mapping[str, str],
 	workdir: Path | str | None,
 	stack_name: str | None = None,
+	tags: Mapping[str, str] | None = None,
 ) -> None:
+	# Bootstrap doesn't need the CDK app, so run it from anywhere
+	if command == "bootstrap":
+		args = [cdk_bin, command]
+		if stack_name:
+			args.append(stack_name)
+		try:
+			subprocess.run(args, check=True)
+		except FileNotFoundError as exc:
+			msg = f"Unable to execute '{cdk_bin}'. Install AWS CDK CLI and try again."
+			raise BaselineStackError(msg) from exc
+		except subprocess.CalledProcessError as exc:
+			msg = f"'{' '.join(args)}' exited with code {exc.returncode}"
+			raise BaselineStackError(msg) from exc
+		return
+
+	# Other commands need to run from the CDK app directory
 	cwd = Path(workdir) if workdir is not None else DEFAULT_CDK_APP_DIR
 	if not cwd.exists():
 		msg = f"CDK app directory '{cwd}' does not exist"
@@ -152,6 +234,10 @@ def cdk_run(
 		args.extend(["-c", f"{key}={value}"])
 	if command == "deploy":
 		args.extend(["--require-approval", "never"])
+		# Add tags for version tracking
+		if tags:
+			for key, value in tags.items():
+				args.extend(["--tags", f"{key}={value}"])
 	try:
 		subprocess.run(
 			args,
@@ -169,7 +255,7 @@ def cdk_run(
 async def wait_for_stack_outputs(
 	cfn: Any,
 	stack_name: str,
-	env_name: str,
+	deployment_name: str,
 	region: str,
 	account: str,
 	*,
@@ -184,7 +270,7 @@ async def wait_for_stack_outputs(
 		status = stack["StackStatus"]
 		if status in STACK_SUCCEEDED:
 			return extract_stack_outputs(
-				env_name,
+				deployment_name,
 				region,
 				account,
 				stack_name,
@@ -197,7 +283,7 @@ async def wait_for_stack_outputs(
 
 
 def extract_stack_outputs(
-	env_name: str,
+	deployment_name: str,
 	region: str,
 	account: str,
 	stack_name: str,
@@ -214,7 +300,7 @@ def extract_stack_outputs(
 		return outputs[key]
 
 	return BaselineStackOutputs(
-		env_name=env_name,
+		deployment_name=deployment_name,
 		region=region,
 		account=account,
 		stack_name=stack_name,
@@ -229,7 +315,8 @@ def extract_stack_outputs(
 		log_group_name=require("LogGroupName"),
 		ecr_repository_uri=require("EcrRepositoryUri"),
 		vpc_id=require("VpcId"),
-		custom_domain_name=outputs.get("CustomDomainName"),
+		execution_role_arn=require("ExecutionRoleArn"),
+		task_role_arn=require("TaskRoleArn"),
 	)
 
 
@@ -254,4 +341,29 @@ def is_stack_healthy(stack: Mapping[str, Any]) -> bool:
 	return stack.get("StackStatus") in STACK_SUCCEEDED
 
 
-__all__ = ["BaselineStackError", "BaselineStackOutputs", "ensure_baseline_stack"]
+def get_stack_version(stack: Mapping[str, Any]) -> str | None:
+	"""Extract the baseline version from stack tags."""
+	tags = stack.get("Tags", [])
+	for tag in tags:
+		if tag.get("Key") == "pulse-cf-version":
+			return tag.get("Value")
+	return None
+
+
+__all__ = [
+	"AcmCertificate",
+	"BASELINE_STACK_VERSION",
+	"BaselineStackError",
+	"BaselineStackOutputs",
+	"DnsConfiguration",
+	"DnsRecord",
+	"STACK_DELETE_COMPLETE",
+	"STACK_DELETING",
+	"STACK_FAILED",
+	"STACK_NAME_TEMPLATE",
+	"STACK_SUCCEEDED",
+	"check_domain_dns",
+	"describe_stack",
+	"ensure_acm_certificate",
+	"ensure_baseline_stack",
+]

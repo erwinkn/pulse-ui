@@ -3,15 +3,14 @@ name = "pulse-aws"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }
-]
+authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
     "aws-cdk-lib>=2.160.0,<3.0",
     "constructs>=10.0.0,<11.0.0",
     "boto3>=1.35.0,<2.0.0",
     "botocore>=1.35.0,<2.0.0",
+    "httpx>=0.27.0,<1.0.0",
 ]
 
 [tool.uv]

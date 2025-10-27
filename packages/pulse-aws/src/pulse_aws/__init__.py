@@ -22,5 +22,47 @@ from .baseline import (
 	BaselineStackOutputs as BaselineStackOutputs,
 )
 from .baseline import (
+	check_domain_dns as check_domain_dns,
+)
+from .baseline import (
 	ensure_baseline_stack as ensure_baseline_stack,
+)
+from .certificate import (
+	AcmCertificate as AcmCertificate,
+)
+from .certificate import (
+	CertificateError as CertificateError,
+)
+from .certificate import (
+	DnsConfiguration as DnsConfiguration,
+)
+from .certificate import (
+	DnsRecord as DnsRecord,
+)
+from .certificate import (
+	ensure_acm_certificate as ensure_acm_certificate,
+)
+from .deployment import (
+	DeploymentError as DeploymentError,
+)
+from .deployment import (
+	build_and_push_image as build_and_push_image,
+)
+from .deployment import (
+	create_service_and_target_group as create_service_and_target_group,
+)
+from .deployment import (
+	generate_deployment_id as generate_deployment_id,
+)
+from .deployment import (
+	install_listener_rules_and_switch_traffic as install_listener_rules_and_switch_traffic,
+)
+from .deployment import (
+	register_task_definition as register_task_definition,
+)
+from .deployment import (
+	wait_for_healthy_targets as wait_for_healthy_targets,
+)
+from .teardown import (
+	teardown_baseline_stack as teardown_baseline_stack,
 )

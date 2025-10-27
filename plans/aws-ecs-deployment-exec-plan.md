@@ -14,15 +14,21 @@ After completing this work, a Pulse developer can push a new application version
 - [x] (2025-10-24 22:15Z) Updated the ExecPlan to reflect the simplified deployment API (App `deploy` kwarg, `Deployment` base class, single `python deploy.py` command, minimal health/drain responses, code-first configuration).
 - [x] (2025-10-25 17:41Z) Implemented Phase 1.1: added the CDK `BaselineStack`, app scaffolding, and `ensure_baseline_stack` helper plus tests that cache CloudFormation outputs under `.pulse/<env>/baseline.json`.
 - [x] (2025-10-26 12:21Z) Upgraded the `BaselineStack` to mint ACM certificates automatically (when no ARN is provided), emit DNS validation records via CloudFormation outputs, and added CDK assertions to guarantee the new behavior.
+- [x] (2025-10-27) Implemented Phase 1.2: added `teardown_baseline_stack` helper that safely deletes baseline CloudFormation stacks with checks for active ECS services, handles various stack states (DELETE_IN_PROGRESS, failed states), supports forced deletion, and includes comprehensive test coverage for all failure modes.
+- [x] (2025-10-27) Implemented Phase 2.1: created minimal FastAPI server (`aws_minimal_server.py`) with deployment info endpoint, health check, and authenticated drain endpoint, plus Dockerfile for containerization. Verified all endpoints work correctly via local Docker testing.
+- [x] (2025-10-27) Implemented Phase 2.2: created deployment helpers in `pulse_aws/helpers.py` including `generate_deployment_id`, `build_and_push_image`, `register_task_definition`, `create_service_and_target_group`, and `install_listener_rules_and_switch_traffic`. All helpers are async-friendly, include proper error handling for duplicate deployments, and support the full ECS deployment workflow with header-based ALB routing for sticky sessions.
 
 ## Surprises & Discoveries
 
 - We can rely on CloudFormation to mint ACM certs at deploy time, so `BaselineStack` now only needs domain names (the ARN path remains available for bring-your-own certs).
-- ACM’s CloudFormation resource doesn’t surface DNS validation records directly, so we introduced a lightweight `AwsCustomResource` that calls `DescribeCertificate` after creation and publishes the required CNAMEs via `CertificateValidationRecords` output.
+- ACM's CloudFormation resource doesn't surface DNS validation records directly, so we introduced a lightweight `AwsCustomResource` that calls `DescribeCertificate` after creation and publishes the required CNAMEs via `CertificateValidationRecords` output.
+- Terminology has been standardized throughout the codebase: `deployment_name` is used consistently to refer to the stable environment identifier (e.g., `"prod"`, `"dev"`), avoiding confusion between the environment slug and the per-version deployment ID.
+- Naming convention: deployment IDs use the pattern `{deployment_name}-{timestamp}` (e.g., `prod-20251027-183000Z`) with no "pulse-" prefix, keeping resource names clean and organization-specific.
 
 ## Decision Log
 
 - (2025-10-25 17:41Z) `ensure_baseline_stack` shells out to the CDK CLI (bootstrap → synth → deploy) instead of re-implementing deployment logic; `aws-cdk-lib`/`constructs` are now regular workspace dependencies so `uv run cdk ...` works everywhere, and baseline outputs are persisted as structured JSON for later helpers.
+- (2025-10-26 16:00Z) Standardized on `deployment_name` terminology throughout `packages/pulse-aws` to align with the higher-level orchestration API and reduce confusion between the environment identifier and version-specific deployment IDs.
 
 ## Outcomes & Retrospective
 
@@ -41,55 +47,109 @@ The repository root contains `examples/main.py` plus other sample apps that can 
 ### Phase 1 – Baseline infrastructure
 
 **1.1 CDK stack + deployment helper**  
-Build `packages/pulse-aws/cdk/baseline.py` with a `BaselineStack` that provisions the shared VPC (two AZs), public/private subnets, routing tables, security groups, ALB with HTTPS listener (import an existing ACM certificate or request a new DNS-validated one automatically), CloudWatch log group, ECS cluster, execution/task IAM roles, and ECR repository. Implement a Python helper `ensure_baseline_stack(env_name, region, account)` inside `packages/pulse-aws/src/pulse_aws/baseline.py` that synthesizes the stack, auto-runs `cdk bootstrap` if missing, deploys `pulse-<env>-baseline`, waits for CloudFormation success, and writes the outputs (listener ARN, subnet IDs, security groups, cluster name, log group, ECR repo URL, certificate ARN/validation records) to `.pulse/<env>/baseline.json`. Re-running the helper must be idempotent; add tests/mocks to prove it short-circuits when the stack is already healthy.
+Build `packages/pulse-aws/cdk/baseline.py` with a `BaselineStack` that provisions the shared VPC (two AZs), public/private subnets, routing tables, security groups, ALB with HTTPS listener (import an existing ACM certificate or request a new DNS-validated one automatically), CloudWatch log group, ECS cluster, execution/task IAM roles, and ECR repository. Implement a Python helper `ensure_baseline_stack(deployment_name, region, account)` inside `packages/pulse-aws/src/pulse_aws/baseline.py` that synthesizes the stack, auto-runs `cdk bootstrap` if missing, deploys `pulse-<deployment_name>-baseline`, waits for CloudFormation success, and writes the outputs (listener ARN, subnet IDs, security groups, cluster name, log group, ECR repo URL, certificate ARN/validation records) to `.pulse/<deployment_name>/baseline.json`. Re-running the helper must be idempotent; add tests/mocks to prove it short-circuits when the stack is already healthy.
 
 **1.2 Baseline teardown helper**  
-Write `teardown_baseline_stack(env_name, region)` that deletes `pulse-<env>-baseline`, watches the stack to completion, and removes cached artifacts. Protect the command with confirmations plus runtime checks that no active Pulse services exist. Include tests covering failure modes (e.g., stack in `UPDATE_ROLLBACK_FAILED`) to ensure we surface actionable errors.
+Write `teardown_baseline_stack(deployment_name, region)` that deletes `pulse-<deployment_name>-baseline`, watches the stack to completion, and removes cached artifacts. Protect the command with confirmations plus runtime checks that no active Pulse services exist. Include tests covering failure modes (e.g., stack in `UPDATE_ROLLBACK_FAILED`) to ensure we surface actionable errors.
 
 **1.3 Baseline helpers for deployment scripts**  
 Expose async utilities `deploy_baseline(deployment_name: str)` and `teardown_baseline(deployment_name: str)` that wrap the CDK helpers and emit structured logs. These functions are imported inside a standalone `deploy.py` script (run via `python deploy.py <deployment_name>`) instead of a CLI command so users can compose workflows freely. Document how the helpers accept optional AWS profile/region kwargs and cache outputs under `.pulse/<deployment_name>/baseline.json`.
 
-### Phase 2 – Pulse deployment workflow
+### Phase 2 – AWS deployment workflow (minimal non-Pulse server)
 
-**2.1 Container image**  
-Create `docker/aws-ecs/Dockerfile` that installs the repo and sets `ENTRYPOINT ["uv", "run", "pulse", "run"]` with `CMD ["examples.main:app", "--host", "0.0.0.0", "--port", "8000"]`. No `entrypoint.sh` is needed—the deployment script can override app targets/ports via additional args. Validate locally with `docker run` to ensure logs land on stdout/stderr and the server binds to all interfaces.
+Goal: Prove the full ECS deployment path (build → push → task definition → target group → service → ALB rule/traffic switch) and header-based stickiness using a minimal Python server. No Pulse dependencies, and no cleanup of old deployments yet.
 
-**2.2 Client directives**  
-Add a `directives` object to the prerender payload (and Socket.IO handshake) that can carry `headers` and `wsAuth` instructions. `AWSECS` will supply a unique deployment ID per release by registering a prerender middleware that injects `{"headers": {"X-Pulse-Render-Affinity": deployment_id}}` into the outgoing payload, and the serializer will merge it into the JSON sent to the browser. Update `packages/pulse/python/src/pulse/codegen/templates/layout.py` so the generated `clientLoader` reads `directives.headers` from `sessionStorage` (persisted alongside `renderId`) and attaches them to every fetch call; do the same in `packages/pulse/js/src/client.tsx` so the `PulseClient` always sets those headers and Socket.IO auth params when connecting. Replace bespoke `renderId` handling: the prerender route now inspects the `X-Pulse-Render-Id` header (populated by the loader via directives) to look up existing sessions through `session_middleware`, and renderId travels via the directives mechanism instead of being embedded in request bodies.
+**2.1 Minimal server + container image**
 
-**2.3 Deployment helpers**  
-Ship the primitives that user-land `deploy.py` scripts compose:
-- `AWSECSPlugin(secret: str | Callable[[], str])` registers the authenticated `/_pulse/admin/drain` endpoint and exposes middleware hooks so prerender directives (affinity header + render id) are always present.
-- `generate_deployment_id(deployment_name: str, app: App) -> str` returns a monotonically increasing or timestamped identifier (e.g., `pulse-prod-v124-20241105-1830Z`). The helper should pull any app-level version metadata but never rely on it, ensuring each run produces a fresh ID.
-- `deploy_app(deployment_name: str, deployment_id: str, dockerfile_path: Path, baseline: BaselineOutputs)` builds/tags the Docker image, pushes it to the baseline’s ECR repo, registers an ECS task definition, creates a target group + service named after `deployment_id`, and installs the ALB listener rule keyed off `X-Pulse-Render-Affinity`. If the deployment ID already exists (healthy or draining), raise an error instructing the operator to choose a new ID. All helpers are async so they can be orchestrated with `asyncio.run` inside `deploy.py`.
+- Add `packages/pulse-aws/examples/aws_minimal_server.py`: a tiny FastAPI app that reads a `DEPLOYMENT_ID` at startup (from env or injected at build time). It exposes:
+  - `GET /` → returns `{ "deployment_id": <id>, "ok": true }` and sets `X-Pulse-Render-Affinity: <id>` in the response headers.
+  - `GET /_health` → returns 200 `{ "status": "ok" }` for ECS/ALB target health.
+- - `POST /drain` → requires `Authorization: Bearer <secret>` where `<secret>` is set via `DRAIN_SECRET` at build/runtime; on first call, marks the server as draining and after 120 seconds (configurable via `DRAIN_HEALTH_FAIL_AFTER_SECONDS`) `/_health` begins returning HTTP 503 to simulate graceful drain before termination.
+- Create `packages/pulse-aws/examples/Dockerfile` that installs `uv`, copies the minimal server, sets `ARG DEPLOYMENT_ID` and `ENV DEPLOYMENT_ID=$DEPLOYMENT_ID`, and runs `uv run uvicorn examples.aws_minimal_server:app --host 0.0.0.0 --port 8000`.
+  - Also set `ARG DRAIN_SECRET` and `ENV DRAIN_SECRET=$DRAIN_SECRET`; optionally set `ENV DRAIN_HEALTH_FAIL_AFTER_SECONDS=120` (overridable at runtime).
 
-**2.4 Draining + health coordination**  
-Enhance the `App` class so draining forbids new WebSocket connections and RenderSessions and flips health to HTTP 503 once sessions hit zero. Build async orchestration helpers:
-- `wait_until_healthy(deployment_name: str, deployment_id: str)` polls ELB/ECS/health endpoints until the new service reports healthy and the `/ _pulse/health` route returns 200 with `draining=false`.
-- `drain_previous_deployments(deployment_name: str, deployment_id: str)` enumerates older services/target groups, issues HTTP POSTs to their drain endpoint (no SIGTERM), watches for each to return HTTP 503, and then sets listener weights to zero / lowers ECS desired counts.
+**2.2 Baseline-driven deploy helpers (non-Pulse)**  
+Implement new helpers in `packages/pulse-aws/src/pulse_aws/helpers.py`:
 
-These functions guarantee new connections land on the latest version while sticky tabs keep working until they disconnect.
+- `generate_deployment_id(deployment_name: str) -> str`: timestamped ID (e.g., `pulse-prod-20251027-183000Z`).
+- `build_and_push_image(dockerfile_path: Path, deployment_id: str, baseline: BaselineOutputs) -> str`: builds and pushes to the baseline ECR repo with the deployment ID as the tag.
+- `register_task_definition(image_uri: str, deployment_id: str, baseline: BaselineOutputs) -> str`: Fargate task def with container env `DEPLOYMENT_ID` and port 8000.
+- `create_service_and_target_group(deployment_name: str, deployment_id: str, task_def_arn: str, baseline: BaselineOutputs) -> tuple[str, str]`: creates a dedicated target group and ECS service for this ID.
+- `install_listener_rules_and_switch_traffic(deployment_name: str, deployment_id: str, target_group_arn: str, baseline: BaselineOutputs)`: adds a header-based rule `X-Pulse-Render-Affinity == <deployment_id>` for sticky requests and sets the listener default action to forward 100% to the new target group. Existing header rules for prior deployments remain so clients sending the old header keep landing on the old version.
 
-**2.5 Cleanup of drained versions**  
-Implement `cleanup(deployment_name: str)` that loads the cached baseline outputs for the given deployment, inspects the AWS account for ECS services/target groups tied to that name, detects which are idle (desired/running count zero and no registered targets), and removes their ALB listener rules, target groups, and services. Run this helper at the end of every `python deploy.py` invocation so CI/CD pipelines automatically garbage-collect stale resources. Emit logs whenever cleanup occurs so operators can trace what was removed.
+All helpers are async-friendly so a single `deploy.py` can orchestrate them.
+They should fail with an informative error if a deployment with this ID already
+exists.
 
-**2.6 Deployment script orchestration**  
-Provide a reference `deploy.py` that composes the helpers in this order:
-1. `deployment_name = os.environ["PULSE_DEPLOYMENT"]`; `deployment_id = generate_deployment_id(deployment_name, app)`.
-2. `baseline = await deploy_baseline(deployment_name)`.
-3. `await deploy_app(deployment_name, deployment_id, dockerfile_path, baseline)`.
-4. `await wait_until_healthy(deployment_name, deployment_id)`.
-5. `await drain_previous_deployments(deployment_name, deployment_id)`.
-6. `await cleanup(deployment_name)`.
+**2.3 Programmatic verification**  
+Add a verification step that:
 
-CI runs `python deploy.py --deployment pulse-prod --dockerfile docker/aws-ecs/Dockerfile` (plus AWS profile/region flags). Because the workflow is purely script-based, we can evolve the API without touching the CLI; once the API stabilizes we can add optional Typer commands that simply call into these helpers.
+- Issues a request to the ALB DNS name with no header and asserts the JSON `deployment_id` equals the new ID.
+- Issues a request with header `X-Pulse-Render-Affinity: <old_id>` (if any old service exists) and asserts the response still returns `<old_id>`.
+- Calls `POST /drain` on the prior deployment with the correct bearer token and waits (≤3 minutes) for `/_health` to flip to HTTP 503.
 
-### Phase 3 – Runtime guarantees, docs, and example app
+**2.4. Automated cleanup**
+Add a helper:
 
-Update `packages/pulse/python/src/pulse/app.py` so `AppStatus` adds `draining = 3` and shifts `stopped` to 4. Expose optional constructor kwargs `version: str | None` and `deploy: Deployment | None`, backing them with helpers such as `set_draining` and `is_draining` that flip a boolean flag and timestamp when draining begins. Ensure `create_render`, `/prerender`, and the Socket.IO `connect` handler refuse to create new render sessions after draining starts while still serving existing connections. Simplify the FastAPI health endpoint to respond with only `{"version": <str>, "draining": <bool>}` and switch to HTTP 503 once all sessions close to signal ECS/ALB. This failing health check is what ultimately causes ECS to terminate tasks for drained versions, so the runtime must be deterministic here and should include instrumentation so we can later add an inactivity timeout for stubborn sessions. Implement a `Deployment` base class (a plugin with an async `deploy(app, version)` method) plus a `DeployToECS` plugin that contributes the authenticated `/_pulse/admin/drain` endpoint returning `{ "status": "ok" }` or `{ "status": "already_draining" }`. The plugin should accept either a raw token string or a callable that fetches the secret from services like AWS Secrets Manager, Vault, or Doppler so teams stay flexible in how credentials are issued. Create unit tests (`packages/pulse/python/tests/test_app_draining.py`, `test_deploy_plugin.py`) to cover the new behaviors and keep manual validation instructions limited to the simple health and drain responses.
+- `cleanup_inactive_deployments(deployment_name) -> None` that finds all
+  deployments with no active services, deletes them and their corresponding ALB
+  rule.
 
-Author `docs/deployment/aws-ecs.md` detailing prerequisites, the CDK bootstrap flow baked into `python deploy.py`, configuring `ps.App(..., plugins=[AWSECSPlugin(...)])`, and running `python deploy.py --deployment pulse-prod --app examples/aws_ecs_app.py`. Provide `examples/aws_ecs_app.py` showing a realistic configuration (environment name, cluster identifiers, secrets, desired counts) entirely in code. Capture validation evidence (command transcripts, AWS CLI snippets) in the `Artifacts and Notes` section as phases complete, and refresh `README.md` with a pointer to the deployment guide. Call out that an optional Terraform package will ship later for teams that want to provision the baseline stack outside these helpers. This phase also codifies the verification steps: local drain/health testing, CDK stack outputs, `python deploy.py` success, and CloudWatch log checks.
+**Out of scope for Phase 2**  
+No Pulse integration or runtime changes
 
+### Phase 3 – Pulse integration (draining, plugin, simple Pulse app)
+
+Integrate the runtime and add a deployment plugin while keeping the demo minimal.
+
+**3.1 Draining in Pulse runtime**
+
+- In `packages/pulse/python/src/pulse/app.py`, add `AppStatus.draining = 3` and shift `stopped = 4`.
+- Add `set_draining()` / `is_draining()` helpers; forbid new WebSocket connections and new RenderSessions once draining starts while serving existing ones.
+- Health endpoint returns `{ "version": <str>, "draining": <bool> }` and flips to HTTP 503 once active sessions reach zero.
+
+**3.2 AWSECSPlugin**
+
+- Provide `AWSECSPlugin(secret: str | Callable[[], str])` in `packages/pulse-aws/src/pulse_aws/plugin.py`.
+- Registers `POST /_pulse/admin/drain` with bearer auth; returns `{ "status": "ok" }` or `{ "status": "already_draining" }`.
+- Injects response header `X-Pulse-Render-Affinity: <deployment_id>` for prerender and attaches the same to client fetches/WebSocket auth in later enhancements.
+
+**3.3 Simple Pulse app demo**
+
+- Add `examples/aws_ecs_pulse_app.py`: a trivial Pulse app that reads `DEPLOYMENT_ID` from env and displays it. No complex pages.
+- Reuse the Phase 2 deploy path to ship this app; header stickiness should continue to work unchanged.
+
+**3.4 Tests and docs**
+
+- Unit tests: `packages/pulse/python/tests/test_app_draining.py`, `packages/pulse/python/tests/test_deploy_plugin.py`.
+- Author `docs/deployment/aws-ecs.md` covering bootstrap, configuring `ps.App(..., plugins=[AWSECSPlugin(...)])`, and deploying the sample app.
+
+Out of scope for Phase 3: cleanup of old deployments.
+
+### Phase 4 – Finalization and cleanup
+
+Wrap up operational concerns and polish the API.
+
+**4.1 Cleanup of drained/idle versions**  
+Implement `cleanup(deployment_name: str)` that finds services/target groups with zero desired/running tasks and no registered targets; remove their listener rules, target groups, and services.
+
+**4.2 Official deploy script for pulse-aws**  
+Ship a cohesive `deploy.py` supporting:
+
+- Certificate provisioning
+- Baseline provisioning
+- Pulse app deployment
+- Cleanup of drained/idle versions
+
+**4.2 Official teardown script for pulse-aws**  
+Ship a cohesive `teardown.py` that can perform:
+
+- Teardown of a single deployment
+- Teardown of all deployments
+- Teardown of all deployments + baseline infrastructure
+
+**4.3 API and docs polish**  
+Stabilize helper signatures, error messages, and logging. Refresh `README.md` and the deployment guide, and ensure `make all` passes.
 
 ## Example End-State APIs
 
@@ -167,7 +227,7 @@ Regenerate locks and enforce formatting whenever dependencies or code generation
 
 Test the container locally before publishing to ECR to make sure stdout/stderr logging behaves as expected:
 
-    docker build -f docker/aws-ecs/Dockerfile -t pulse-app:test .
+    docker build -f packages/pulse-aws/examples/Dockerfile -t pulse-app:test .
     docker run --rm -p 8000:8000 pulse-app:test uv run uvicorn examples.main:app --host 0.0.0.0 --port 8000
 
 Prime the CDK baseline (or refresh it independently of an application deploy):

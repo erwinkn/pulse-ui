@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from botocore.exceptions import ClientError
 from pulse_aws.baseline import (
 	DEFAULT_CDK_APP_DIR,
+	BaselineStackError,
 	BaselineStackOutputs,
 	ensure_baseline_stack,
 )
+from pulse_aws.teardown import teardown_baseline_stack
 
 DUMMY_OUTPUTS = {
 	"ListenerArn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/pulse-dev/abc/def",
@@ -22,7 +25,6 @@ DUMMY_OUTPUTS = {
 	"LogGroupName": "/aws/pulse/dev/app",
 	"EcrRepositoryUri": "123456789012.dkr.ecr.us-east-1.amazonaws.com/pulse-dev",
 	"VpcId": "vpc-123",
-	"CustomDomainName": "pulse.example.com",
 }
 
 
@@ -46,6 +48,7 @@ class FakeCloudFormationClient:
 	def __init__(self, responses: dict[str, list[Exception | dict]]) -> None:
 		self._responses = {key: list(value) for key, value in responses.items()}
 		self.calls: list[str] = []
+		self.delete_calls: list[str] = []
 
 	def describe_stacks(self, *, StackName: str) -> dict:
 		self.calls.append(StackName)
@@ -56,6 +59,10 @@ class FakeCloudFormationClient:
 		if isinstance(response, Exception):
 			raise response
 		return response
+
+	def delete_stack(self, *, StackName: str) -> dict:
+		self.delete_calls.append(StackName)
+		return {"ResponseMetadata": {"HTTPStatusCode": 200}}
 
 
 class FakeRun:
@@ -73,7 +80,7 @@ async def test_ensure_baseline_stack_short_circuits_when_stack_is_healthy(
 ):
 	cfn = FakeCloudFormationClient(
 		{
-			"pulse-dev-baseline": [_stack_response("CREATE_COMPLETE", DUMMY_OUTPUTS)],
+			"dev-baseline": [_stack_response("CREATE_COMPLETE", DUMMY_OUTPUTS)],
 		},
 	)
 	sts = FakeStsClient()
@@ -98,8 +105,8 @@ async def test_ensure_baseline_stack_short_circuits_when_stack_is_healthy(
 @pytest.mark.asyncio
 async def test_ensure_baseline_stack_runs_cdk_when_stack_missing(tmp_path, monkeypatch):
 	responses = {
-		"pulse-dev-baseline": [
-			_stack_not_found("pulse-dev-baseline"),
+		"dev-baseline": [
+			_stack_not_found("dev-baseline"),
 			_stack_response("CREATE_COMPLETE", DUMMY_OUTPUTS),
 		],
 		"CDKToolkit": [
@@ -114,23 +121,26 @@ async def test_ensure_baseline_stack_runs_cdk_when_stack_missing(tmp_path, monke
 	)
 	run = FakeRun()
 	monkeypatch.setattr("pulse_aws.baseline.subprocess.run", run)
-	monkeypatch.setattr("pulse_aws.baseline.asyncio.sleep", lambda _seconds: None)
+
+	async def fake_sleep(_seconds):
+		pass
+
+	monkeypatch.setattr("pulse_aws.baseline.asyncio.sleep", fake_sleep)
 
 	await ensure_baseline_stack(
 		"dev",
-		domains=["pulse.example.com", "www.pulse.example.com"],
+		certificate_arn="arn:aws:acm:us-east-1:123456789012:certificate/abc",
 		allowed_ingress_cidrs=["203.0.113.0/24"],
 		workdir=str(DEFAULT_CDK_APP_DIR),
 	)
 
 	assert any(call[:2] == ["cdk", "synth"] for call in run.calls)
-	assert any(
-		call[:3] == ["cdk", "deploy", "pulse-dev-baseline"] for call in run.calls
-	)
+	assert any(call[:3] == ["cdk", "deploy", "dev-baseline"] for call in run.calls)
 	deploy_call = next(call for call in run.calls if call[1] == "deploy")
 	assert (
 		"-c" in deploy_call
-		and "domains=pulse.example.com,www.pulse.example.com" in deploy_call
+		and "certificate_arn=arn:aws:acm:us-east-1:123456789012:certificate/abc"
+		in deploy_call
 	)
 
 
@@ -144,6 +154,7 @@ def _stack_response(status: str, outputs: dict[str, str] | None = None) -> dict:
 					{"OutputKey": key, "OutputValue": value}
 					for key, value in outputs.items()
 				],
+				"Tags": [{"Key": "pulse-cf-version", "Value": "1.0.0"}],
 			},
 		],
 	}
@@ -159,3 +170,217 @@ def _stack_not_found(name: str) -> ClientError:
 		},
 		"DescribeStacks",
 	)
+
+
+class FakeEcsClient:
+	def __init__(self, services: list[dict[str, Any]] | None = None) -> None:
+		self.services = services or []
+
+	def list_services(self, *, cluster: str, maxResults: int = 10) -> dict[str, Any]:
+		if not self.services:
+			return {"serviceArns": []}
+		return {"serviceArns": [svc["serviceArn"] for svc in self.services]}
+
+	def describe_services(self, *, cluster: str, services: list[str]) -> dict[str, Any]:
+		return {"services": self.services}
+
+
+# Teardown tests
+
+
+@pytest.mark.asyncio
+async def test_teardown_baseline_stack_when_stack_does_not_exist(monkeypatch):
+	cfn = FakeCloudFormationClient(
+		{
+			"dev-baseline": [_stack_not_found("dev-baseline")],
+		},
+	)
+	sts = FakeStsClient()
+	monkeypatch.setattr(
+		"pulse_aws.baseline.boto3.client",
+		ClientFactory({"cloudformation": cfn, "sts": sts}),
+	)
+
+	# Should complete without error
+	await teardown_baseline_stack("dev")
+	assert len(cfn.delete_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_teardown_baseline_stack_deletes_stack_when_no_services(monkeypatch):
+	cfn = FakeCloudFormationClient(
+		{
+			"dev-baseline": [
+				_stack_response("CREATE_COMPLETE", DUMMY_OUTPUTS),
+				_stack_response("DELETE_IN_PROGRESS"),
+				_stack_not_found("dev-baseline"),
+			],
+		},
+	)
+	sts = FakeStsClient()
+	ecs = FakeEcsClient(services=[])
+	monkeypatch.setattr(
+		"pulse_aws.baseline.boto3.client",
+		ClientFactory({"cloudformation": cfn, "sts": sts, "ecs": ecs}),
+	)
+
+	async def fake_sleep(_seconds):
+		pass
+
+	monkeypatch.setattr("pulse_aws.baseline.asyncio.sleep", fake_sleep)
+
+	await teardown_baseline_stack("dev")
+	assert "dev-baseline" in cfn.delete_calls
+
+
+@pytest.mark.asyncio
+async def test_teardown_baseline_stack_fails_when_active_services_exist(monkeypatch):
+	# _check_for_active_services needs two describe_stacks calls:
+	# one in teardown_baseline_stack, one in _check_for_active_services
+	cfn = FakeCloudFormationClient(
+		{
+			"dev-baseline": [
+				_stack_response("CREATE_COMPLETE", DUMMY_OUTPUTS),
+				_stack_response("CREATE_COMPLETE", DUMMY_OUTPUTS),
+			],
+		},
+	)
+	sts = FakeStsClient()
+	ecs = FakeEcsClient(
+		services=[
+			{
+				"serviceArn": "arn:aws:ecs:us-east-1:123456789012:service/dev/pulse-app-v1",
+				"serviceName": "pulse-app-v1",
+				"status": "ACTIVE",
+				"desiredCount": 2,
+			},
+		],
+	)
+	monkeypatch.setattr(
+		"pulse_aws.baseline.boto3.client",
+		ClientFactory({"cloudformation": cfn, "sts": sts, "ecs": ecs}),
+	)
+
+	with pytest.raises(BaselineStackError) as exc_info:
+		await teardown_baseline_stack("dev")
+
+	assert "active Pulse service(s) found" in str(exc_info.value)
+	assert "pulse-app-v1" in str(exc_info.value)
+	assert len(cfn.delete_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_teardown_baseline_stack_force_bypasses_service_check(monkeypatch):
+	cfn = FakeCloudFormationClient(
+		{
+			"dev-baseline": [
+				_stack_response("CREATE_COMPLETE", DUMMY_OUTPUTS),
+				_stack_response("DELETE_IN_PROGRESS"),
+				_stack_not_found("dev-baseline"),
+			],
+		},
+	)
+	sts = FakeStsClient()
+	ecs = FakeEcsClient(
+		services=[
+			{
+				"serviceArn": "arn:aws:ecs:us-east-1:123456789012:service/dev/pulse-app-v1",
+				"serviceName": "pulse-app-v1",
+				"status": "ACTIVE",
+				"desiredCount": 2,
+			},
+		],
+	)
+	monkeypatch.setattr(
+		"pulse_aws.baseline.boto3.client",
+		ClientFactory({"cloudformation": cfn, "sts": sts, "ecs": ecs}),
+	)
+
+	async def fake_sleep(_seconds):
+		pass
+
+	monkeypatch.setattr("pulse_aws.baseline.asyncio.sleep", fake_sleep)
+
+	# Should succeed despite active services
+	await teardown_baseline_stack("dev", force=True)
+	assert "dev-baseline" in cfn.delete_calls
+
+
+@pytest.mark.asyncio
+async def test_teardown_baseline_stack_fails_on_failed_stack_state(monkeypatch):
+	cfn = FakeCloudFormationClient(
+		{
+			"dev-baseline": [
+				_stack_response("UPDATE_ROLLBACK_FAILED"),
+			],
+		},
+	)
+	sts = FakeStsClient()
+	monkeypatch.setattr(
+		"pulse_aws.baseline.boto3.client",
+		ClientFactory({"cloudformation": cfn, "sts": sts}),
+	)
+
+	with pytest.raises(BaselineStackError) as exc_info:
+		await teardown_baseline_stack("dev")
+
+	assert "failed state" in str(exc_info.value)
+	assert "UPDATE_ROLLBACK_FAILED" in str(exc_info.value)
+	assert len(cfn.delete_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_teardown_baseline_stack_waits_if_already_deleting(monkeypatch):
+	cfn = FakeCloudFormationClient(
+		{
+			"dev-baseline": [
+				_stack_response("DELETE_IN_PROGRESS"),
+				_stack_response("DELETE_IN_PROGRESS"),
+				_stack_not_found("dev-baseline"),
+			],
+		},
+	)
+	sts = FakeStsClient()
+	monkeypatch.setattr(
+		"pulse_aws.baseline.boto3.client",
+		ClientFactory({"cloudformation": cfn, "sts": sts}),
+	)
+
+	async def fake_sleep(_seconds):
+		pass
+
+	monkeypatch.setattr("pulse_aws.baseline.asyncio.sleep", fake_sleep)
+
+	await teardown_baseline_stack("dev")
+	# Should not call delete_stack since it's already deleting
+	assert len(cfn.delete_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_teardown_baseline_stack_handles_delete_failure(monkeypatch):
+	cfn = FakeCloudFormationClient(
+		{
+			"dev-baseline": [
+				_stack_response("CREATE_COMPLETE", DUMMY_OUTPUTS),
+				_stack_response("DELETE_IN_PROGRESS"),
+				_stack_response("DELETE_FAILED"),
+			],
+		},
+	)
+	sts = FakeStsClient()
+	ecs = FakeEcsClient(services=[])
+	monkeypatch.setattr(
+		"pulse_aws.baseline.boto3.client",
+		ClientFactory({"cloudformation": cfn, "sts": sts, "ecs": ecs}),
+	)
+
+	async def fake_sleep(_seconds):
+		pass
+
+	monkeypatch.setattr("pulse_aws.baseline.asyncio.sleep", fake_sleep)
+
+	with pytest.raises(BaselineStackError) as exc_info:
+		await teardown_baseline_stack("dev")
+
+	assert "deletion failed" in str(exc_info.value)
+	assert "DELETE_FAILED" in str(exc_info.value)

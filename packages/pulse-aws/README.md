@@ -78,6 +78,7 @@ if dns_config:
 Automatically checks if your domain resolves to the ALB:
 
 - ✅ **Already configured**: Silent success
+- ✅ **Proxied through Cloudflare**: Treated as configured once records point to Cloudflare
 - ⚠️ **Not configured**: Shows exact DNS record to add
 
 Example output:

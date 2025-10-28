@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import socket
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import boto3
+
+from pulse_aws.reporting import DeploymentContext, Reporter, create_context
 
 
 class CertificateError(RuntimeError):
@@ -61,6 +63,97 @@ class AcmCertificate:
 	arn: str
 	status: str  # PENDING_VALIDATION, ISSUED, FAILED, etc.
 	dns_configuration: DnsConfiguration | None = None
+
+
+def _prepare_context(
+	context: DeploymentContext | None,
+	reporter: Reporter | None,
+) -> DeploymentContext:
+	"""Normalize context and reporter inputs."""
+	if context is None:
+		return create_context(reporter=reporter)
+	if reporter is not None:
+		context.reporter = reporter
+	return context
+
+
+def _emit_dns_instructions(config: DnsConfiguration, reporter: Reporter) -> None:
+	"""Display DNS instructions using the configured reporter."""
+	for line in config.format_for_display().splitlines():
+		if line:
+			reporter.info(line)
+		else:
+			reporter.blank()
+
+
+def _resolve_ip_addresses(host: str) -> set[str]:
+	"""Resolve a hostname to all associated IPv4/IPv6 addresses."""
+	addresses: set[str] = set()
+	try:
+		results = socket.getaddrinfo(host, None)
+	except (socket.gaierror, socket.herror):
+		return addresses
+
+	for result in results:
+		sockaddr = result[4]
+		if sockaddr:
+			addresses.add(sockaddr[0])
+	return addresses
+
+
+_CLOUDFLARE_IPV4_RANGES = tuple(
+	ipaddress.ip_network(cidr)
+	for cidr in [
+		"173.245.48.0/20",
+		"103.21.244.0/22",
+		"103.22.200.0/22",
+		"103.31.4.0/22",
+		"141.101.64.0/18",
+		"108.162.192.0/18",
+		"190.93.240.0/20",
+		"188.114.96.0/20",
+		"197.234.240.0/22",
+		"198.41.128.0/17",
+		"162.158.0.0/15",
+		"104.16.0.0/13",
+		"104.24.0.0/14",
+		"172.64.0.0/13",
+		"131.0.72.0/22",
+	]
+)
+_CLOUDFLARE_IPV6_RANGES = tuple(
+	ipaddress.ip_network(cidr)
+	for cidr in [
+		"2400:cb00::/32",
+		"2606:4700::/32",
+		"2803:f800::/32",
+		"2405:b500::/32",
+		"2405:8100::/32",
+		"2a06:98c0::/29",
+		"2c0f:f248::/32",
+	]
+)
+
+
+def _is_cloudflare_ip(address: str) -> bool:
+	"""Check if an IP address belongs to Cloudflare's anycast network."""
+	try:
+		ip = ipaddress.ip_address(address)
+	except ValueError:
+		return False
+
+	networks = _CLOUDFLARE_IPV6_RANGES if ip.version == 6 else _CLOUDFLARE_IPV4_RANGES
+	return any(ip in network for network in networks)
+
+
+def domain_uses_cloudflare_proxy(
+	domain: str, *, resolved_ips: set[str] | None = None
+) -> bool:
+	"""Return True if all resolved IPs map to Cloudflare's proxy network."""
+	ips = resolved_ips if resolved_ips is not None else _resolve_ip_addresses(domain)
+	if not ips:
+		return False
+	return all(_is_cloudflare_ip(ip) for ip in ips)
 
 
 def parse_acm_validation_records(
@@ -117,6 +210,9 @@ async def ensure_acm_certificate(
 	wait: bool = True,
 	poll_interval: float = 5.0,
 	timeout: float | None = None,
+	announce: bool = True,
+	context: DeploymentContext | None = None,
+	reporter: Reporter | None = None,
 ) -> AcmCertificate:
 	"""Mint an ACM certificate for the given domains with DNS validation.
 
@@ -151,6 +247,9 @@ async def ensure_acm_certificate(
 	            # Or wait for issuance:
 	            cert = await ensure_acm_certificate(["api.example.com"], wait=True)
 	            # (after DNS records are added)
+	    context: Optional deployment context to control reporting behaviour
+	    reporter: Optional reporter override (defaults to CLI/CI auto-detection)
+
 	"""
 	if not domains:
 		msg = "At least one domain is required"
@@ -177,6 +276,9 @@ async def ensure_acm_certificate(
 
 	primary_domain = domains[0]
 
+	context = _prepare_context(context, reporter)
+	reporter = context.reporter
+
 	# Check if a certificate already exists for this domain
 	response = acm_client.list_certificates(
 		CertificateStatuses=["PENDING_VALIDATION", "ISSUED"],
@@ -192,10 +294,10 @@ async def ensure_acm_certificate(
 			validation_records = cert.get("DomainValidationOptions", [])
 
 			# Always inform the user about the existing certificate and its status
-			print(
-				f"ℹ️ Using existing ACM certificate for {primary_domain}: {cert_summary['CertificateArn']} (status: {cert['Status']})",
-				file=sys.stderr,
-			)
+			if announce:
+				reporter.info(
+					f"ℹ️ Using existing ACM certificate for {primary_domain}: {cert_summary['CertificateArn']} (status: {cert['Status']})"
+				)
 
 			dns_config = None
 			if validation_records:
@@ -211,18 +313,20 @@ async def ensure_acm_certificate(
 			)
 
 			# If certificate is pending validation, show DNS instructions before any waiting
-			if cert["Status"] == "PENDING_VALIDATION" and dns_config:
-				print()
-				print(dns_config.format_for_display())
-				print()
-				print(f"✅ Certificate ARN: {cert_summary['CertificateArn']}")
-				print()
+			if announce and cert["Status"] == "PENDING_VALIDATION" and dns_config:
+				reporter.blank()
+				_emit_dns_instructions(dns_config, reporter)
+				reporter.blank()
+				reporter.success(f"Certificate ARN: {cert_summary['CertificateArn']}")
+				reporter.blank()
 
 			if wait and cert["Status"] != "ISSUED":
 				return await _wait_for_certificate_issuance(
 					acm_client,
 					result.arn,
 					poll_interval,
+					announce=announce,
+					reporter=reporter if announce else None,
 				)
 
 			return result
@@ -240,10 +344,10 @@ async def ensure_acm_certificate(
 	certificate_arn = cert_response["CertificateArn"]
 
 	# Inform that a new certificate request was created
-	print(
-		f"✅ Requested ACM certificate for {primary_domain}: {certificate_arn}",
-		file=sys.stderr,
-	)
+	if announce:
+		reporter.success(
+			f"Requested ACM certificate for {primary_domain}: {certificate_arn}"
+		)
 
 	# Get validation records - may need to wait for ResourceRecord to be populated (silent)
 	start_time = asyncio.get_event_loop().time()
@@ -278,11 +382,12 @@ async def ensure_acm_certificate(
 	)
 
 	# Print DNS instructions by default for new certificates
-	print()
-	print(dns_config.format_for_display())
-	print()
-	print(f"✅ Certificate ARN: {certificate_arn}")
-	print()
+	if announce:
+		reporter.blank()
+		_emit_dns_instructions(dns_config, reporter)
+		reporter.blank()
+		reporter.success(f"Certificate ARN: {certificate_arn}")
+		reporter.blank()
 
 	result = AcmCertificate(
 		arn=certificate_arn,
@@ -296,6 +401,8 @@ async def ensure_acm_certificate(
 			certificate_arn,
 			poll_interval,
 			timeout,
+			announce=announce,
+			reporter=reporter if announce else None,
 		)
 
 	return result
@@ -306,13 +413,15 @@ async def _wait_for_certificate_issuance(
 	certificate_arn: str,
 	poll_interval: float,
 	timeout: float | None = None,
+	announce: bool = True,
+	reporter: Reporter | None = None,
 ) -> AcmCertificate:
 	"""Wait for an ACM certificate to transition from PENDING_VALIDATION to ISSUED."""
-	print(
-		"⏳ Waiting for certificate validation (add DNS records in your provider)...",
-		file=sys.stderr,
-	)
-	print()
+	if announce and reporter is not None:
+		reporter.info(
+			"⏳ Waiting for certificate validation (add DNS records in your provider)..."
+		)
+		reporter.blank()
 
 	start_time = asyncio.get_event_loop().time()
 	while True:
@@ -321,7 +430,8 @@ async def _wait_for_certificate_issuance(
 		status = cert["Status"]
 
 		if status == "ISSUED":
-			print("✅ Certificate issued!", file=sys.stderr)
+			if announce and reporter is not None:
+				reporter.success("Certificate issued!")
 			return AcmCertificate(arn=certificate_arn, status="ISSUED")
 
 		if status == "FAILED":
@@ -353,18 +463,13 @@ def check_domain_dns(domain: str, expected_target: str) -> DnsConfiguration | No
 	Returns:
 	    DnsConfiguration if DNS needs to be configured, None if already correct
 	"""
-	# Resolve the expected target to get its IPs
-	try:
-		expected_ips = set(socket.gethostbyname_ex(expected_target)[2])
-	except (socket.gaierror, socket.herror):
+	expected_ips = _resolve_ip_addresses(expected_target)
+	if not expected_ips:
 		# Can't resolve expected target - probably temporary issue, don't block deployment
 		return None
 
-	# Resolve the domain to see what it currently points to
-	try:
-		domain_ips = set(socket.gethostbyname_ex(domain)[2])
-	except (socket.gaierror, socket.herror):
-		# Domain doesn't resolve - needs DNS configuration
+	domain_ips = _resolve_ip_addresses(domain)
+	if not domain_ips:
 		return DnsConfiguration(
 			domain_name=domain,
 			records=[
@@ -382,7 +487,10 @@ def check_domain_dns(domain: str, expected_target: str) -> DnsConfiguration | No
 		# Domain resolves to the correct target
 		return None
 
-	# Domain resolves but to the wrong target
+	# Domain resolves but to the wrong target; handle Cloudflare proxy scenario gracefully
+	if domain_uses_cloudflare_proxy(domain, resolved_ips=domain_ips):
+		return None
+
 	return DnsConfiguration(
 		domain_name=domain,
 		records=[
@@ -402,6 +510,7 @@ __all__ = [
 	"DnsConfiguration",
 	"DnsRecord",
 	"check_domain_dns",
+	"domain_uses_cloudflare_proxy",
 	"ensure_acm_certificate",
 	"parse_acm_validation_records",
 ]

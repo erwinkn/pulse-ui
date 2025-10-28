@@ -20,7 +20,7 @@ from pulse_aws.certificate import (
 
 STACK_NAME_TEMPLATE = "{env}-baseline"
 TOOLKIT_STACK_NAME = "CDKToolkit"
-BASELINE_STACK_VERSION = "1.1.0"  # Bump when baseline stack changes
+BASELINE_STACK_VERSION = "1.2.0"  # Bump when baseline stack changes
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CDK_APP_DIR = PACKAGE_ROOT / "src" / "pulse_aws" / "cdk"
 STACK_SUCCEEDED = {

@@ -12,8 +12,11 @@ This script:
 from __future__ import annotations
 
 import asyncio
+import json
+import secrets
 import sys
 import warnings
+from pathlib import Path
 
 import boto3
 import httpx
@@ -21,6 +24,43 @@ from pulse_aws.baseline import BaselineStackOutputs, describe_stack
 
 # Suppress SSL warnings when using verify=False
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+
+
+def get_or_create_drain_secret(deployment_name: str) -> str:
+	"""Get or create a stable drain secret for this deployment environment.
+
+	The drain secret is cached in .pulse/<deployment_name>/secrets.json
+	and is shared across all deployments in the same environment.
+
+	Args:
+	    deployment_name: The deployment environment name (e.g., "prod", "dev")
+
+	Returns:
+	    The drain secret (32-byte URL-safe token)
+	"""
+
+	secrets_dir = Path.cwd() / ".pulse" / deployment_name
+	secrets_file = secrets_dir / "secrets.json"
+
+	# Try to load existing secrets
+	if secrets_file.exists():
+		try:
+			with secrets_file.open() as f:
+				data = json.load(f)
+				if drain_secret := data.get("drain_secret"):
+					return str(drain_secret)
+		except (json.JSONDecodeError, OSError):
+			pass  # Will regenerate below
+
+	# Generate new secret
+	drain_secret = secrets.token_urlsafe(32)
+
+	# Save to file
+	secrets_dir.mkdir(parents=True, exist_ok=True)
+	with secrets_file.open("w") as f:
+		json.dump({"drain_secret": drain_secret}, f, indent=2)
+
+	return drain_secret
 
 
 async def main() -> None:

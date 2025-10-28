@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -12,10 +13,90 @@ import boto3
 from botocore.exceptions import ClientError
 
 from pulse_aws.baseline import BaselineStackOutputs
+from pulse_aws.certificate import (
+	CertificateError,
+	DnsConfiguration,
+	check_domain_dns,
+	domain_uses_cloudflare_proxy,
+	ensure_acm_certificate,
+)
+from pulse_aws.reporting import DeploymentContext, Reporter, create_context
 
 
 class DeploymentError(RuntimeError):
 	"""Raised when deployment operations fail."""
+
+
+@dataclass
+class DockerBuild:
+	"""Docker build configuration.
+
+	Attributes:
+	    dockerfile_path: Path to the Dockerfile
+	    context_path: Path to the Docker build context directory
+	    build_args: Additional build arguments to pass to docker build
+	"""
+
+	dockerfile_path: Path
+	context_path: Path
+	build_args: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class TaskConfig:
+	"""ECS task configuration.
+
+	Attributes:
+	    cpu: CPU units (256, 512, 1024, etc.)
+	    memory: Memory in MB (512, 1024, 2048, etc.)
+	    desired_count: Number of tasks to run
+	    env_vars: Environment variables for the task
+	"""
+
+	cpu: str = "256"
+	memory: str = "512"
+	desired_count: int = 2
+	env_vars: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class HealthCheckConfig:
+	"""ALB health check configuration.
+
+	Attributes:
+	    path: Path for ALB health checks
+	    interval_seconds: Seconds between health checks
+	    timeout_seconds: Health check timeout in seconds
+	    healthy_threshold: Consecutive successes to be healthy
+	    unhealthy_threshold: Consecutive failures to be unhealthy
+	    wait_for_health: Wait for targets to be healthy before switching traffic
+	    min_healthy_targets: Minimum healthy targets required before switching
+	"""
+
+	path: str = "/_health"
+	interval_seconds: int = 30
+	timeout_seconds: int = 5
+	healthy_threshold: int = 2
+	unhealthy_threshold: int = 3
+	wait_for_health: bool = True
+	min_healthy_targets: int = 2
+
+
+@dataclass
+class DrainConfig:
+	"""Drain and cleanup configuration.
+
+	Attributes:
+	    drain_secret: Secret for drain endpoint (auto-generated if None)
+	    timeout_seconds: Maximum time to wait for draining (unused, kept for compatibility)
+	    poll_interval: Seconds between drain health checks (unused, kept for compatibility)
+	    cleanup_inactive: Whether to clean up inactive deployments after draining
+	"""
+
+	drain_secret: str | None = None
+	timeout_seconds: float = 180
+	poll_interval: float = 10
+	cleanup_inactive: bool = True
 
 
 def generate_deployment_id(deployment_name: str) -> str:
@@ -36,6 +117,214 @@ def generate_deployment_id(deployment_name: str) -> str:
 	return f"{deployment_name}-{timestamp}"
 
 
+def _resolve_reporter(reporter: Reporter | None) -> Reporter:
+	if reporter is None:
+		return create_context().reporter
+	return reporter
+
+
+async def _wait_for_confirmation(
+	context: DeploymentContext,
+	message: str,
+) -> None:
+	"""Prompt the user to confirm before continuing; abort on cancel."""
+	if not context.interactive:
+		return
+
+	context.reporter.info(message)
+	context.reporter.detail("Press Enter to continue or type 'cancel' to abort.")
+	try:
+		response = await asyncio.to_thread(input, "> ")
+	except EOFError:
+		response = ""
+	except KeyboardInterrupt as exc:
+		raise DeploymentError("Deployment cancelled by user") from exc
+
+	if response.strip().lower() in {"cancel", "c", "quit", "q"}:
+		raise DeploymentError("Deployment cancelled by user")
+
+
+async def _prompt_retry(
+	context: DeploymentContext,
+	message: str,
+) -> bool:
+	"""Ask the user whether to retry waiting; returns False to skip further checks."""
+	if not context.interactive:
+		return False
+
+	context.reporter.info(message)
+	context.reporter.detail(
+		"Press Enter to retry, type 'skip' to continue without waiting, or 'cancel' to abort."
+	)
+	try:
+		response = await asyncio.to_thread(input, "> ")
+	except EOFError:
+		response = ""
+	except KeyboardInterrupt as exc:
+		raise DeploymentError("Deployment cancelled by user") from exc
+
+	response = response.strip().lower()
+	if response in {"cancel", "c", "quit", "q"}:
+		raise DeploymentError("Deployment cancelled by user")
+	if response == "skip":
+		return False
+	return True
+
+
+def _prepare_context(
+	context: DeploymentContext | None,
+	reporter: Reporter | None,
+) -> DeploymentContext:
+	"""Normalize context/reporter configuration."""
+	if context is None:
+		return create_context(reporter=reporter)
+	if reporter is not None:
+		context.reporter = reporter
+	return context
+
+
+def _emit_dns_instructions(config: DnsConfiguration, reporter: Reporter) -> None:
+	"""Print DNS instructions via the reporter."""
+	instructions = config.format_for_display()
+	for line in instructions.splitlines():
+		reporter.info(line)
+
+
+async def _ensure_certificate_ready(
+	domain: str,
+	provided_arn: str | None,
+	context: DeploymentContext,
+) -> str:
+	"""Ensure an ISSUED ACM certificate exists for the deployment domain."""
+	reporter = context.reporter
+
+	if provided_arn:
+		reporter.info(f"Using provided ACM certificate: {provided_arn}")
+		return provided_arn
+
+	reporter.info(f"Ensuring ACM certificate for {domain}...")
+	try:
+		cert = await ensure_acm_certificate(
+			domain,
+			wait=False,
+			announce=False,
+		)
+	except CertificateError as exc:
+		raise DeploymentError(str(exc)) from exc
+
+	if not cert.arn:
+		raise DeploymentError("No certificate ARN available")
+
+	if cert.dns_configuration:
+		reporter.blank()
+		_emit_dns_instructions(cert.dns_configuration, reporter)
+		reporter.blank()
+
+	if cert.status == "ISSUED":
+		reporter.success(f"Certificate ready: {cert.arn}")
+		return cert.arn
+
+	message = (
+		f"Certificate for {domain} is pending DNS validation. "
+		"Add the required DNS records before continuing."
+	)
+
+	if context.ci:
+		reporter.warning(message)
+		raise DeploymentError(
+			f"{message} Configure the DNS records shown above and rerun the deployment."
+		)
+
+	reporter.warning(message)
+	await _wait_for_confirmation(
+		context,
+		"Press Enter once the DNS validation records have been created.",
+	)
+
+	try:
+		cert = await ensure_acm_certificate(
+			domain,
+			wait=True,
+			announce=False,
+		)
+	except CertificateError as exc:
+		raise DeploymentError(str(exc)) from exc
+
+	if cert.status != "ISSUED":
+		raise DeploymentError(
+			f"Certificate for {domain} did not become ISSUED (status: {cert.status})"
+		)
+
+	reporter.success(f"Certificate issued: {cert.arn}")
+	return cert.arn
+
+
+async def _ensure_domain_routing(
+	domain: str,
+	baseline: BaselineStackOutputs,
+	context: DeploymentContext,
+) -> tuple[bool, bool]:
+	"""Ensure the custom domain resolves to the ALB, prompting the user if needed.
+
+	Returns:
+	    Tuple of (is_ready, is_proxied)
+	"""
+	reporter = context.reporter
+	config = check_domain_dns(domain, baseline.alb_dns_name)
+
+	if config is None:
+		proxied = domain_uses_cloudflare_proxy(domain)
+		if proxied:
+			reporter.info(
+				f"{domain} appears to be served through Cloudflare; skipping direct ALB IP verification."
+			)
+			return True, True
+		reporter.success(f"{domain} resolves to {baseline.alb_dns_name}; DNS is ready.")
+		return True, False
+
+	reporter.warning(
+		f"{domain} does not yet resolve to the load balancer ({baseline.alb_dns_name})."
+	)
+	reporter.blank()
+	_emit_dns_instructions(config, reporter)
+	reporter.blank()
+
+	if context.ci:
+		reporter.warning(
+			"DNS propagation cannot be confirmed in CI. Update the record and rerun verification."
+		)
+		return False, False
+
+	while True:
+		should_retry = await _prompt_retry(
+			context,
+			f"Update the DNS record for {domain}. Press Enter to re-check once propagation should be complete.",
+		)
+		if not should_retry:
+			reporter.warning(
+				f"Skipping DNS wait. Ensure {domain} points to {baseline.alb_dns_name} before going live."
+			)
+			return False, False
+
+		config = check_domain_dns(domain, baseline.alb_dns_name)
+		if config is None:
+			proxied = domain_uses_cloudflare_proxy(domain)
+			if proxied:
+				reporter.info(
+					f"{domain} appears to be served through Cloudflare; skipping direct ALB IP verification."
+				)
+				return True, True
+			reporter.success(f"{domain} now resolves to {baseline.alb_dns_name}.")
+			return True, False
+
+		reporter.warning(
+			f"{domain} still does not resolve to the load balancer. DNS changes can take a few minutes."
+		)
+		reporter.blank()
+		_emit_dns_instructions(config, reporter)
+		reporter.blank()
+
+
 async def build_and_push_image(
 	dockerfile_path: Path,
 	deployment_id: str,
@@ -44,6 +333,7 @@ async def build_and_push_image(
 	drain_secret: str,
 	context_path: Path,
 	build_args: dict[str, str] | None = None,
+	reporter: Reporter | None = None,
 ) -> str:
 	"""Build a Docker image and push it to the baseline ECR repository.
 
@@ -61,6 +351,8 @@ async def build_and_push_image(
 	Raises:
 	    DeploymentError: If build or push fails
 	"""
+	reporter = _resolve_reporter(reporter)
+
 	if not dockerfile_path.exists():
 		msg = f"Dockerfile not found: {dockerfile_path}"
 		raise DeploymentError(msg)
@@ -73,11 +365,11 @@ async def build_and_push_image(
 	image_uri = f"{ecr_repo}:{deployment_id}"
 
 	# Authenticate Docker with ECR
-	print("🔐 Authenticating Docker with ECR...")
+	reporter.info("Authenticating Docker with ECR...")
 	await _ecr_login(baseline.region)
 
 	# Build the image
-	print(f"🏗️  Building image {image_uri}...")
+	reporter.info(f"Building image: {image_uri}")
 	all_build_args = {
 		"DEPLOYMENT_ID": deployment_id,
 		"DRAIN_SECRET": drain_secret,
@@ -117,7 +409,7 @@ async def build_and_push_image(
 		raise DeploymentError(msg) from exc
 
 	# Push the image
-	print("📤 Pushing image to ECR...")
+	reporter.info("Pushing image to ECR...")
 	push_cmd = ["docker", "push", image_uri]
 	try:
 		proc = await asyncio.create_subprocess_exec(
@@ -134,7 +426,7 @@ async def build_and_push_image(
 		msg = "Docker is not installed or not in PATH"
 		raise DeploymentError(msg) from exc
 
-	print(f"✓ Image pushed: {image_uri}")
+	reporter.success(f"Image pushed: {image_uri}")
 	return image_uri
 
 
@@ -182,6 +474,7 @@ async def register_task_definition(
 	cpu: str = "256",
 	memory: str = "512",
 	env_vars: dict[str, str] | None = None,
+	reporter: Reporter | None = None,
 ) -> str:
 	"""Register an ECS Fargate task definition.
 
@@ -199,6 +492,8 @@ async def register_task_definition(
 	Raises:
 	    DeploymentError: If registration fails
 	"""
+	reporter = _resolve_reporter(reporter)
+
 	ecs = boto3.client("ecs", region_name=baseline.region)
 
 	family = f"{baseline.deployment_name}-app"
@@ -246,11 +541,11 @@ async def register_task_definition(
 		],
 	}
 
-	print(f"📋 Registering task definition {family}...")
+	reporter.info(f"Registering task definition: {family}")
 	try:
 		response = ecs.register_task_definition(**task_def)
 		task_def_arn = response["taskDefinition"]["taskDefinitionArn"]
-		print(f"✓ Task definition registered: {task_def_arn}")
+		reporter.success(f"Task definition registered: {task_def_arn}")
 		return cast(str, task_def_arn)
 	except ClientError as exc:
 		msg = f"Failed to register task definition: {exc}"
@@ -269,6 +564,7 @@ async def create_service_and_target_group(
 	health_check_timeout: int = 5,
 	healthy_threshold: int = 2,
 	unhealthy_threshold: int = 3,
+	reporter: Reporter | None = None,
 ) -> tuple[str, str]:
 	"""Create an ALB target group and ECS service for a deployment.
 
@@ -290,6 +586,8 @@ async def create_service_and_target_group(
 	Raises:
 	    DeploymentError: If a service with this deployment_id already exists or creation fails
 	"""
+	reporter = _resolve_reporter(reporter)
+
 	ecs = boto3.client("ecs", region_name=baseline.region)
 	elbv2 = boto3.client("elbv2", region_name=baseline.region)
 
@@ -313,7 +611,7 @@ async def create_service_and_target_group(
 		pass  # Service doesn't exist, continue
 
 	# Create target group
-	print(f"🎯 Creating target group {tg_name}...")
+	reporter.info(f"Creating target group {tg_name}...")
 	try:
 		tg_response = elbv2.create_target_group(
 			Name=tg_name,
@@ -334,7 +632,7 @@ async def create_service_and_target_group(
 			],
 		)
 		target_group_arn = tg_response["TargetGroups"][0]["TargetGroupArn"]
-		print(f"✓ Target group created: {target_group_arn}")
+		reporter.success(f"Target group created: {target_group_arn}")
 	except ClientError as exc:
 		if exc.response["Error"]["Code"] == "DuplicateTargetGroupName":
 			msg = (
@@ -348,7 +646,7 @@ async def create_service_and_target_group(
 
 	# Attach target group to listener with a temporary rule
 	# AWS requires target groups to be associated with a listener before creating an ECS service
-	print("🔗 Attaching target group to listener...")
+	reporter.info("Attaching target group to HTTPS listener...")
 	try:
 		# Find the next available priority
 		rules_response = elbv2.describe_rules(ListenerArn=baseline.listener_arn)
@@ -388,7 +686,9 @@ async def create_service_and_target_group(
 				{"Key": "deployment-name", "Value": deployment_name},
 			],
 		)
-		print(f"✓ Target group attached with routing rule (priority {next_priority})")
+		reporter.success(
+			f"Target group attached with routing rule (priority {next_priority})"
+		)
 	except ClientError as exc:
 		# Clean up target group if listener rule creation fails
 		try:
@@ -399,7 +699,7 @@ async def create_service_and_target_group(
 		raise DeploymentError(msg) from exc
 
 	# Create ECS service
-	print(f"🚀 Creating ECS service {service_name}...")
+	reporter.info(f"Creating ECS service {service_name}...")
 	try:
 		service_response = ecs.create_service(
 			cluster=baseline.cluster_name,
@@ -428,7 +728,7 @@ async def create_service_and_target_group(
 			],
 		)
 		service_arn = service_response["service"]["serviceArn"]
-		print(f"✓ ECS service created: {service_arn}")
+		reporter.success(f"ECS service created: {service_arn}")
 		return cast(str, service_arn), cast(str, target_group_arn)
 	except ClientError as exc:
 		# Clean up the target group if service creation fails
@@ -447,6 +747,7 @@ async def wait_for_healthy_targets(
 	min_healthy_targets: int = 1,
 	timeout_seconds: float = 300,
 	poll_interval: float = 10,
+	reporter: Reporter | None = None,
 ) -> None:
 	"""Wait for target group to have healthy targets.
 
@@ -460,10 +761,12 @@ async def wait_for_healthy_targets(
 	Raises:
 	    DeploymentError: If timeout is reached before targets become healthy
 	"""
+	reporter = _resolve_reporter(reporter)
+
 	elbv2 = boto3.client("elbv2", region_name=baseline.region)
 	start_time = asyncio.get_event_loop().time()
 
-	print(f"⏳ Waiting for {min_healthy_targets} healthy target(s)...")
+	reporter.info(f"Waiting for {min_healthy_targets} healthy target(s)...")
 
 	while True:
 		elapsed = asyncio.get_event_loop().time() - start_time
@@ -483,7 +786,7 @@ async def wait_for_healthy_targets(
 			total_count = len(targets)
 
 			if healthy_count >= min_healthy_targets:
-				print(f"✓ {healthy_count}/{total_count} target(s) healthy")
+				reporter.success(f"{healthy_count}/{total_count} target(s) healthy")
 				return
 
 			# Show progress
@@ -495,9 +798,11 @@ async def wait_for_healthy_targets(
 				status = ", ".join(
 					f"{count} {state}" for state, count in states.items()
 				)
-				print(f"  Waiting... ({status}) [{elapsed:.0f}s elapsed]")
+				reporter.detail(f"Waiting... ({status}) [{elapsed:.0f}s elapsed]")
 			else:
-				print(f"  Waiting for targets to register... [{elapsed:.0f}s elapsed]")
+				reporter.detail(
+					f"Waiting for targets to register... [{elapsed:.0f}s elapsed]"
+				)
 
 		except ClientError as exc:
 			msg = f"Failed to check target health: {exc}"
@@ -515,6 +820,7 @@ async def install_listener_rules_and_switch_traffic(
 	priority_start: int = 100,
 	wait_for_health: bool = True,
 	min_healthy_targets: int = 2,
+	reporter: Reporter | None = None,
 ) -> None:
 	"""Wait for deployment health then switch default traffic to the new deployment.
 
@@ -538,19 +844,22 @@ async def install_listener_rules_and_switch_traffic(
 	Raises:
 	    DeploymentError: If health checks or traffic switching fail
 	"""
+	reporter = _resolve_reporter(reporter)
+
 	# Wait for targets to become healthy before switching traffic
 	if wait_for_health:
 		await wait_for_healthy_targets(
 			target_group_arn=target_group_arn,
 			baseline=baseline,
 			min_healthy_targets=min_healthy_targets,
+			reporter=reporter,
 		)
-		print()
+		reporter.blank()
 
 	elbv2 = boto3.client("elbv2", region_name=baseline.region)
 
 	# Switch default traffic to new target group (100% weight)
-	print(f"🔄 Switching default traffic to {deployment_id}...")
+	reporter.info(f"Switching default traffic to {deployment_id}...")
 	try:
 		elbv2.modify_listener(
 			ListenerArn=baseline.listener_arn,
@@ -561,16 +870,513 @@ async def install_listener_rules_and_switch_traffic(
 				}
 			],
 		)
-		print(f"✓ Default traffic now routes to {deployment_id}")
+		reporter.success(f"Default traffic now routes to {deployment_id}")
 	except ClientError as exc:
 		msg = f"Failed to modify listener default action: {exc}"
 		raise DeploymentError(msg) from exc
 
 
+async def drain_previous_deployments(
+	current_deployment_id: str,
+	baseline: BaselineStackOutputs,
+	drain_secret: str,
+	*,
+	timeout_seconds: float = 180,
+	poll_interval: float = 10,
+	reporter: Reporter | None = None,
+) -> list[str]:
+	"""Drain all previous deployments by calling their /drain endpoint.
+
+	This function finds all active ECS services (excluding the current one)
+	and calls the /drain endpoint on each. It does not wait for health checks
+	to fail; the deployments will drain asynchronously.
+
+	Args:
+	    current_deployment_id: The deployment ID that should NOT be drained
+	    baseline: Baseline stack outputs
+	    drain_secret: Secret for authenticating drain requests
+	    timeout_seconds: Unused, kept for API compatibility
+	    poll_interval: Unused, kept for API compatibility
+
+	Returns:
+	    List of deployment IDs that were successfully drained
+
+	Raises:
+	    DeploymentError: If listing services or making drain requests fail
+	"""
+	import httpx
+
+	reporter = _resolve_reporter(reporter)
+
+	ecs = boto3.client("ecs", region_name=baseline.region)
+
+	# Find all active services except the current one
+	reporter.info("Finding previous deployments to drain...")
+	try:
+		response = ecs.list_services(cluster=baseline.cluster_name)
+		service_arns = response.get("serviceArns", [])
+
+		if not service_arns:
+			reporter.info("No previous deployments found")
+			return []
+
+		# Get service details
+		services_detail = ecs.describe_services(
+			cluster=baseline.cluster_name,
+			services=service_arns,
+		)
+
+		# Filter for active services with running tasks, excluding current
+		previous_deployments = [
+			svc["serviceName"]
+			for svc in services_detail.get("services", [])
+			if svc.get("status") == "ACTIVE"
+			and svc.get("runningCount", 0) > 0
+			and svc["serviceName"] != current_deployment_id
+		]
+
+		if not previous_deployments:
+			reporter.info("No previous deployments with running tasks found")
+			return []
+
+		reporter.info(f"Found {len(previous_deployments)} deployment(s) to drain:")
+
+	except ClientError as exc:
+		msg = f"Failed to list services: {exc}"
+		raise DeploymentError(msg) from exc
+
+	# Call /drain endpoint for each previous deployment
+	base_url = f"https://{baseline.alb_dns_name}"
+	drained_deployments = []
+
+	async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+		for dep_id in previous_deployments:
+			reporter.detail(f"Draining {dep_id}...")
+			try:
+				# Use affinity header to route to specific deployment
+				response = await client.post(
+					f"{base_url}/drain",
+					headers={
+						"Authorization": f"Bearer {drain_secret}",
+						"X-Pulse-Render-Affinity": dep_id,
+					},
+				)
+
+				if response.status_code == 200:
+					data = response.json()
+					status = data.get("status", "unknown")
+					if status == "ok":
+						reporter.success(f"Drain initiated for {dep_id}")
+						drained_deployments.append(dep_id)
+					elif status == "already_draining":
+						reporter.detail(f"{dep_id} was already draining")
+						drained_deployments.append(dep_id)
+					else:
+						reporter.warning(
+							f"Unexpected drain status for {dep_id}: {status}"
+						)
+				else:
+					reporter.warning(
+						f"Drain request failed with status {response.status_code}"
+					)
+					reporter.detail(f"Response: {response.text}")
+
+			except Exception as exc:
+				reporter.warning(f"Failed to drain {dep_id}: {exc}")
+
+	if not drained_deployments:
+		reporter.info("No deployments were successfully drained")
+		return []
+
+	return drained_deployments
+
+
+async def cleanup_inactive_deployments(
+	deployment_name: str,
+	baseline: BaselineStackOutputs,
+	*,
+	dry_run: bool = False,
+	reporter: Reporter | None = None,
+) -> list[str]:
+	"""Clean up deployments with no running tasks or unhealthy targets.
+
+	This function finds ECS services that have 0 running tasks or target groups
+	with no healthy targets, then deletes the service, target group, and listener rule.
+
+	Args:
+	    deployment_name: The deployment environment name
+	    baseline: Baseline stack outputs
+	    dry_run: If True, only report what would be deleted without deleting
+
+	Returns:
+	    List of deployment IDs that were cleaned up (or would be in dry_run mode)
+
+	Raises:
+	    DeploymentError: If cleanup operations fail
+	"""
+	reporter = _resolve_reporter(reporter)
+
+	ecs = boto3.client("ecs", region_name=baseline.region)
+	elbv2 = boto3.client("elbv2", region_name=baseline.region)
+
+	reporter.info("Looking for inactive deployments to clean up...")
+
+	# Find all services
+	try:
+		response = ecs.list_services(cluster=baseline.cluster_name)
+		service_arns = response.get("serviceArns", [])
+
+		if not service_arns:
+			reporter.info("No services found")
+			return []
+
+		# Get service details
+		services_detail = ecs.describe_services(
+			cluster=baseline.cluster_name,
+			services=service_arns,
+		)
+
+		# Find services with 0 running tasks
+		inactive_services = [
+			svc
+			for svc in services_detail.get("services", [])
+			if svc.get("status") == "ACTIVE" and svc.get("runningCount", 0) == 0
+		]
+
+		if not inactive_services:
+			reporter.info("No inactive deployments found")
+			return []
+
+		reporter.info(f"Found {len(inactive_services)} inactive deployment(s):")
+		for svc in inactive_services:
+			reporter.detail(svc["serviceName"])
+		reporter.blank()
+
+	except ClientError as exc:
+		msg = f"Failed to list services: {exc}"
+		raise DeploymentError(msg) from exc
+
+	# Get listener rules to find target groups and rules to delete
+	try:
+		rules_response = elbv2.describe_rules(ListenerArn=baseline.listener_arn)
+		rules_map = {}
+
+		for rule in rules_response["Rules"]:
+			# Skip default rule
+			if rule.get("Priority") == "default":
+				continue
+
+			# Check if this is a header-based affinity rule
+			for condition in rule.get("Conditions", []):
+				if condition.get("Field") == "http-header":
+					header_config = condition.get("HttpHeaderConfig", {})
+					if header_config.get("HttpHeaderName") == "X-Pulse-Render-Affinity":
+						values = header_config.get("Values", [])
+						if values:
+							dep_id = values[0]
+							rules_map[dep_id] = {
+								"rule_arn": rule["RuleArn"],
+								"target_group_arn": rule["Actions"][0].get(
+									"TargetGroupArn"
+								)
+								if rule.get("Actions")
+								else None,
+							}
+
+	except ClientError as exc:
+		msg = f"Failed to describe listener rules: {exc}"
+		raise DeploymentError(msg) from exc
+
+	# Clean up each inactive service
+	cleaned_up = []
+
+	for svc in inactive_services:
+		deployment_id = svc["serviceName"]
+		service_arn = svc["serviceArn"]
+		desired_count = svc.get("desiredCount", 0)
+
+		if dry_run:
+			reporter.detail(f"[DRY RUN] Would clean up {deployment_id}")
+			cleaned_up.append(deployment_id)
+			continue
+
+		reporter.info(f"Cleaning up {deployment_id}...")
+
+		# Scale service to 0 before deleting (if not already)
+		if desired_count > 0:
+			try:
+				ecs.update_service(
+					cluster=baseline.cluster_name,
+					service=service_arn,
+					desiredCount=0,
+				)
+				reporter.detail("Scaled service to 0 tasks")
+			except ClientError as exc:
+				reporter.warning(f"Failed to scale service to 0: {exc}")
+				continue
+
+		# Delete ECS service
+		try:
+			ecs.delete_service(cluster=baseline.cluster_name, service=service_arn)
+			reporter.detail("Deleted ECS service")
+		except ClientError as exc:
+			reporter.warning(f"Failed to delete service: {exc}")
+			continue
+
+		# Delete listener rule and target group
+		rule_info = rules_map.get(deployment_id)
+		if rule_info:
+			# Delete listener rule first
+			try:
+				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
+				reporter.detail("Deleted listener rule")
+			except ClientError as exc:
+				reporter.warning(f"Failed to delete listener rule: {exc}")
+
+			# Delete target group
+			if rule_info["target_group_arn"]:
+				try:
+					elbv2.delete_target_group(
+						TargetGroupArn=rule_info["target_group_arn"]
+					)
+					reporter.detail("Deleted target group")
+				except ClientError as exc:
+					reporter.warning(f"Failed to delete target group: {exc}")
+
+		cleaned_up.append(deployment_id)
+
+	reporter.blank()
+	if cleaned_up:
+		if dry_run:
+			reporter.info(f"Would clean up {len(cleaned_up)} deployment(s) (dry run)")
+		else:
+			reporter.info(f"Cleaned up {len(cleaned_up)} deployment(s)")
+	else:
+		reporter.info("No deployments were cleaned up")
+
+	return cleaned_up
+
+
+async def deploy(
+	*,
+	domain: str,
+	deployment_name: str,
+	docker: DockerBuild,
+	task: TaskConfig | None = None,
+	health_check: HealthCheckConfig | None = None,
+	drain: DrainConfig | None = None,
+	certificate_arn: str | None = None,
+	context: DeploymentContext | None = None,
+	reporter: Reporter | None = None,
+) -> dict[str, str]:
+	"""Deploy an application to AWS ECS with full blue-green deployment workflow.
+
+	This function orchestrates the complete deployment:
+	1. Ensure ACM certificate exists and is validated
+	2. Ensure baseline infrastructure exists
+	3. Build and push Docker image
+	4. Register ECS task definition
+	5. Create ECS service and ALB target group
+	6. Install listener rules for header-based routing
+	7. Switch default traffic to the new deployment
+	8. Drain previous deployments
+	9. Clean up inactive deployments
+
+	Args:
+	    domain: Domain name for the deployment (e.g., "app.example.com")
+	    deployment_name: Environment name (e.g., "prod", "staging")
+	    docker: Docker build configuration
+	    task: ECS task configuration (uses defaults if None)
+	    health_check: ALB health check configuration (uses defaults if None)
+	    drain: Drain and cleanup configuration (uses defaults if None)
+	    certificate_arn: ACM certificate ARN (looked up if not provided)
+	    context: Optional deployment execution context (auto-detected if omitted)
+	    reporter: Optional reporter to override logging behaviour
+
+	Returns:
+	    Dictionary with deployment information:
+	        - deployment_id: The deployment ID
+	        - service_arn: ECS service ARN
+	        - target_group_arn: ALB target group ARN
+	        - task_def_arn: Task definition ARN
+	        - image_uri: Docker image URI
+	        - cluster_name: ECS cluster name
+	        - alb_dns_name: ALB DNS name
+	        - drain_secret: The drain secret used
+	        - drained_count: Number of deployments drained
+	        - cleaned_count: Number of deployments cleaned up
+	        - certificate_arn: ACM certificate ARN used
+	        - domain_ready: Whether the custom domain resolves to the ALB ("True"/"False")
+
+	Raises:
+	    DeploymentError: If any deployment step fails
+
+	Example::
+
+	    result = await deploy(
+	        domain="app.example.com",
+	        deployment_name="prod",
+	        docker=DockerBuild(
+	            dockerfile_path=Path("Dockerfile"),
+	            context_path=Path("."),
+	            build_args={"VERSION": "1.0.0"},
+	        ),
+	        task=TaskConfig(cpu="512", memory="1024", desired_count=3),
+	        health_check=HealthCheckConfig(path="/health"),
+	    )
+	"""
+	from pulse_aws.baseline import ensure_baseline_stack
+
+	context = _prepare_context(context, reporter)
+	reporter = context.reporter
+
+	reporter.section(f"Deploy {deployment_name}")
+
+	# Use defaults for optional configs
+	task = task or TaskConfig()
+	health_check = health_check or HealthCheckConfig()
+	drain = drain or DrainConfig()
+
+	# Ensure certificate
+	reporter.section("ACM Certificate")
+	cert_arn = await _ensure_certificate_ready(domain, certificate_arn, context)
+
+	# Ensure baseline infrastructure
+	reporter.section("Baseline Infrastructure")
+	baseline = await ensure_baseline_stack(
+		deployment_name,
+		certificate_arn=cert_arn,
+	)
+	reporter.success("Baseline stack ready")
+	reporter.detail(f"ALB DNS: {baseline.alb_dns_name}")
+
+	# Generate deployment ID
+	deployment_id = generate_deployment_id(deployment_name)
+	reporter.section("Container Image")
+
+	# Generate drain secret if not provided
+	if not drain.drain_secret:
+		import secrets as secrets_module
+
+		drain.drain_secret = secrets_module.token_urlsafe(32)
+		reporter.detail("Generated drain secret for this deployment")
+	else:
+		reporter.detail("Using existing drain secret")
+
+	# Build and push image
+	image_uri = await build_and_push_image(
+		dockerfile_path=docker.dockerfile_path,
+		deployment_id=deployment_id,
+		baseline=baseline,
+		drain_secret=drain.drain_secret,
+		context_path=docker.context_path,
+		build_args=docker.build_args or None,
+		reporter=reporter,
+	)
+
+	# Register task definition
+	reporter.section("ECS Service")
+	task_def_arn = await register_task_definition(
+		image_uri=image_uri,
+		deployment_id=deployment_id,
+		baseline=baseline,
+		cpu=task.cpu,
+		memory=task.memory,
+		env_vars=task.env_vars or None,
+		reporter=reporter,
+	)
+
+	# Create service and target group
+	service_arn, target_group_arn = await create_service_and_target_group(
+		deployment_name=deployment_name,
+		deployment_id=deployment_id,
+		task_def_arn=task_def_arn,
+		baseline=baseline,
+		desired_count=task.desired_count,
+		health_check_path=health_check.path,
+		health_check_interval=health_check.interval_seconds,
+		health_check_timeout=health_check.timeout_seconds,
+		healthy_threshold=health_check.healthy_threshold,
+		unhealthy_threshold=health_check.unhealthy_threshold,
+		reporter=reporter,
+	)
+
+	# Install listener rules and switch traffic
+	await install_listener_rules_and_switch_traffic(
+		deployment_name=deployment_name,
+		deployment_id=deployment_id,
+		target_group_arn=target_group_arn,
+		baseline=baseline,
+		wait_for_health=health_check.wait_for_health,
+		min_healthy_targets=health_check.min_healthy_targets,
+		reporter=reporter,
+	)
+
+	# Drain previous deployments
+	reporter.section("Post-Deployment")
+	drained = await drain_previous_deployments(
+		current_deployment_id=deployment_id,
+		baseline=baseline,
+		drain_secret=drain.drain_secret,
+		timeout_seconds=drain.timeout_seconds,
+		poll_interval=drain.poll_interval,
+		reporter=reporter,
+	)
+
+	# Clean up inactive deployments
+	cleaned: list[str] = []
+	if drain.cleanup_inactive:
+		cleaned = await cleanup_inactive_deployments(
+			deployment_name=deployment_name,
+			baseline=baseline,
+			reporter=reporter,
+		)
+
+		# Verify DNS routing to the load balancer
+		domain_ready, domain_proxied = await _ensure_domain_routing(
+			domain,
+			baseline,
+			context,
+		)
+
+		reporter.section("Summary")
+		reporter.success(f"Deployment {deployment_id} complete")
+		reporter.detail(f"Service ARN: {service_arn}")
+		reporter.detail(f"Target Group: {target_group_arn}")
+		reporter.detail(f"Image URI: {image_uri}")
+		if domain_proxied:
+			reporter.detail(
+				f"{domain} is served via Cloudflare proxy; ALB IP verification skipped."
+			)
+
+		return {
+			"deployment_id": deployment_id,
+			"service_arn": service_arn,
+			"target_group_arn": target_group_arn,
+			"task_def_arn": task_def_arn,
+			"image_uri": image_uri,
+			"cluster_name": baseline.cluster_name,
+			"alb_dns_name": baseline.alb_dns_name,
+			"drain_secret": drain.drain_secret,
+			"drained_count": str(len(drained)),
+			"cleaned_count": str(len(cleaned)),
+			"certificate_arn": cert_arn,
+			"domain_ready": str(domain_ready),
+			"domain_proxied": str(domain_proxied),
+		}
+
+
 __all__ = [
 	"DeploymentError",
+	"DockerBuild",
+	"TaskConfig",
+	"HealthCheckConfig",
+	"DrainConfig",
 	"build_and_push_image",
+	"cleanup_inactive_deployments",
 	"create_service_and_target_group",
+	"deploy",
+	"drain_previous_deployments",
 	"generate_deployment_id",
 	"install_listener_rules_and_switch_traffic",
 	"register_task_definition",

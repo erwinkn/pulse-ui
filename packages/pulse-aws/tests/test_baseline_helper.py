@@ -6,11 +6,13 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError
 from pulse_aws.baseline import (
+	BASELINE_STACK_VERSION,
 	DEFAULT_CDK_APP_DIR,
 	BaselineStackError,
 	BaselineStackOutputs,
 	ensure_baseline_stack,
 )
+from pulse_aws.certificate import check_domain_dns
 from pulse_aws.teardown import teardown_baseline_stack
 
 DUMMY_OUTPUTS = {
@@ -25,6 +27,8 @@ DUMMY_OUTPUTS = {
 	"LogGroupName": "/aws/pulse/dev/app",
 	"EcrRepositoryUri": "123456789012.dkr.ecr.us-east-1.amazonaws.com/pulse-dev",
 	"VpcId": "vpc-123",
+	"ExecutionRoleArn": "arn:aws:iam::123456789012:role/pulse-dev-execution",
+	"TaskRoleArn": "arn:aws:iam::123456789012:role/pulse-dev-task",
 }
 
 
@@ -154,7 +158,7 @@ def _stack_response(status: str, outputs: dict[str, str] | None = None) -> dict:
 					{"OutputKey": key, "OutputValue": value}
 					for key, value in outputs.items()
 				],
-				"Tags": [{"Key": "pulse-cf-version", "Value": "1.0.0"}],
+				"Tags": [{"Key": "pulse-cf-version", "Value": BASELINE_STACK_VERSION}],
 			},
 		],
 	}
@@ -231,6 +235,52 @@ async def test_teardown_baseline_stack_deletes_stack_when_no_services(monkeypatc
 
 	await teardown_baseline_stack("dev")
 	assert "dev-baseline" in cfn.delete_calls
+
+
+def test_check_domain_dns_handles_cloudflare_proxy(monkeypatch):
+	domain = "app.example.com"
+	target = "alb.example.com"
+
+	domain_ips = {"104.16.0.1"}
+	target_ips = {"203.0.113.10"}
+
+	def fake_resolve(host: str) -> set[str]:
+		if host == domain:
+			return set(domain_ips)
+		if host == target:
+			return set(target_ips)
+		return set()
+
+	monkeypatch.setattr(
+		"pulse_aws.certificate._resolve_ip_addresses",
+		fake_resolve,
+	)
+
+	result = check_domain_dns(domain, target)
+	assert result is None
+
+
+def test_check_domain_dns_detects_mismatch(monkeypatch):
+	domain = "app.example.com"
+	target = "alb.example.com"
+
+	domain_ips = {"198.51.100.10"}
+	target_ips = {"203.0.113.10"}
+
+	def fake_resolve(host: str) -> set[str]:
+		if host == domain:
+			return set(domain_ips)
+		if host == target:
+			return set(target_ips)
+		return set()
+
+	monkeypatch.setattr(
+		"pulse_aws.certificate._resolve_ip_addresses",
+		fake_resolve,
+	)
+
+	result = check_domain_dns(domain, target)
+	assert result is not None
 
 
 @pytest.mark.asyncio

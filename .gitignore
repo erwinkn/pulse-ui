@@ -178,3 +178,9 @@ cython_debug/
 # CDK
 cdk.out
 cdk.context.json
+
+# AWS deployment secrets
+.pulse/
+
+# Mac
+.DS_Store

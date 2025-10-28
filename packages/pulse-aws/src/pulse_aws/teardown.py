@@ -16,6 +16,19 @@ from pulse_aws.baseline import (
 	BaselineStackError,
 	describe_stack,
 )
+from pulse_aws.reporting import DeploymentContext, Reporter, create_context
+
+
+def _prepare_context(
+	context: DeploymentContext | None,
+	reporter: Reporter | None,
+) -> DeploymentContext:
+	"""Normalize context/reporting configuration."""
+	if context is None:
+		return create_context(reporter=reporter)
+	if reporter is not None:
+		context.reporter = reporter
+	return context
 
 
 async def teardown_baseline_stack(
@@ -24,6 +37,8 @@ async def teardown_baseline_stack(
 	region: str | None = None,
 	poll_interval: float = 5.0,
 	force: bool = False,
+	context: DeploymentContext | None = None,
+	reporter: Reporter | None = None,
 ) -> None:
 	"""Delete the baseline CloudFormation stack and wait for completion.
 
@@ -38,6 +53,8 @@ async def teardown_baseline_stack(
 		region: AWS region (default: use current session region)
 		poll_interval: How often to check stack status (seconds)
 		force: Skip service existence checks and force deletion
+		context: Optional deployment context controlling reporting behaviour
+		reporter: Optional reporter override
 
 	Raises:
 		BaselineStackError: If deletion fails or active services exist
@@ -61,8 +78,11 @@ async def teardown_baseline_stack(
 	cfn = boto3.client("cloudformation", region_name=region)
 	stack = describe_stack(cfn, stack_name)
 
+	context = _prepare_context(context, reporter)
+	reporter = context.reporter
+
 	if not stack:
-		print(f"✓ Stack {stack_name} does not exist, nothing to teardown")
+		reporter.success(f"Stack {stack_name} does not exist, nothing to teardown")
 		return
 
 	status = stack["StackStatus"]
@@ -76,16 +96,18 @@ async def teardown_baseline_stack(
 		raise BaselineStackError(msg)
 
 	if status in STACK_DELETING:
-		print(f"⏳ Stack {stack_name} is already deleting, waiting for completion...")
+		reporter.info(
+			f"⏳ Stack {stack_name} is already deleting, waiting for completion..."
+		)
 		await _wait_for_stack_deletion(cfn, stack_name, poll_interval)
 		return
 
 	# Check for active ECS services unless force is specified
 	if not force:
-		_check_for_active_services(deployment_name, region)
+		_check_for_active_services(deployment_name, region, reporter)
 
 	# Delete the stack
-	print(f"🗑️  Deleting stack {stack_name}...")
+	reporter.info(f"🗑️  Deleting stack {stack_name}...")
 	try:
 		cfn.delete_stack(StackName=stack_name)
 	except ClientError as exc:
@@ -94,8 +116,8 @@ async def teardown_baseline_stack(
 
 	# Wait for deletion to complete
 	await _wait_for_stack_deletion(cfn, stack_name, poll_interval)
-	print(f"✓ Stack {stack_name} deleted successfully")
-	print("⏳ Stack resources may take a few minutes to be deleted...")
+	reporter.success(f"Stack {stack_name} deleted successfully")
+	reporter.info("⏳ Stack resources may take a few minutes to be deleted...")
 
 
 async def _wait_for_stack_deletion(
@@ -120,7 +142,11 @@ async def _wait_for_stack_deletion(
 		await asyncio.sleep(max(poll_interval, 1.0))
 
 
-def _check_for_active_services(deployment_name: str, region: str) -> None:
+def _check_for_active_services(
+	deployment_name: str,
+	region: str,
+	reporter: Reporter,
+) -> None:
 	"""Check if any active Pulse ECS services exist for this deployment.
 
 	Raises BaselineStackError if active services are found.
@@ -179,7 +205,7 @@ def _check_for_active_services(deployment_name: str, region: str) -> None:
 
 	except ClientError as exc:
 		# If we can't check for services, warn but don't block
-		print(f"⚠️  Warning: Could not verify service status: {exc}")
+		reporter.warning(f"⚠️  Warning: Could not verify service status: {exc}")
 
 
 __all__ = [

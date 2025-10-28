@@ -16,7 +16,9 @@ After completing this work, a Pulse developer can push a new application version
 - [x] (2025-10-26 12:21Z) Upgraded the `BaselineStack` to mint ACM certificates automatically (when no ARN is provided), emit DNS validation records via CloudFormation outputs, and added CDK assertions to guarantee the new behavior.
 - [x] (2025-10-27) Implemented Phase 1.2: added `teardown_baseline_stack` helper that safely deletes baseline CloudFormation stacks with checks for active ECS services, handles various stack states (DELETE_IN_PROGRESS, failed states), supports forced deletion, and includes comprehensive test coverage for all failure modes.
 - [x] (2025-10-27) Implemented Phase 2.1: created minimal FastAPI server (`aws_minimal_server.py`) with deployment info endpoint, health check, and authenticated drain endpoint, plus Dockerfile for containerization. Verified all endpoints work correctly via local Docker testing.
-- [x] (2025-10-27) Implemented Phase 2.2: created deployment helpers in `pulse_aws/helpers.py` including `generate_deployment_id`, `build_and_push_image`, `register_task_definition`, `create_service_and_target_group`, and `install_listener_rules_and_switch_traffic`. All helpers are async-friendly, include proper error handling for duplicate deployments, and support the full ECS deployment workflow with header-based ALB routing for sticky sessions.
+- [x] (2025-10-27) Implemented Phase 2.2: created deployment helpers in `pulse_aws/deployment.py` including `generate_deployment_id`, `build_and_push_image`, `register_task_definition`, `create_service_and_target_group`, and `install_listener_rules_and_switch_traffic`. All helpers are async-friendly, include proper error handling for duplicate deployments, and support the full ECS deployment workflow with header-based ALB routing for sticky sessions.
+- [x] (2025-10-27) Implemented Phase 2.3 & 2.4: added `drain_previous_deployments` helper that calls the /drain endpoint on all previous deployments using header-based affinity, waits for targets to become unhealthy (with configurable timeout), and tracks drain status. Added `cleanup_inactive_deployments` helper that finds services with 0 running tasks, scales them to 0, and deletes the ECS service, listener rule, and target group. Integrated both functions into deploy.py for zero-downtime deployments with automatic cleanup.
+- [x] (2025-10-27) Implemented stable drain secret caching at the script level: added `get_or_create_drain_secret()` function in deploy.py and verify.py that generates and caches drain secrets in `.pulse/<deployment_name>/secrets.json`. This keeps drain secret management as operational logic (script-level) rather than infrastructure logic (library-level). Added `.pulse/` to .gitignore to prevent committing secrets.
 
 ## Surprises & Discoveries
 
@@ -24,11 +26,13 @@ After completing this work, a Pulse developer can push a new application version
 - ACM's CloudFormation resource doesn't surface DNS validation records directly, so we introduced a lightweight `AwsCustomResource` that calls `DescribeCertificate` after creation and publishes the required CNAMEs via `CertificateValidationRecords` output.
 - Terminology has been standardized throughout the codebase: `deployment_name` is used consistently to refer to the stable environment identifier (e.g., `"prod"`, `"dev"`), avoiding confusion between the environment slug and the per-version deployment ID.
 - Naming convention: deployment IDs use the pattern `{deployment_name}-{timestamp}` (e.g., `prod-20251027-183000Z`) with no "pulse-" prefix, keeping resource names clean and organization-specific.
+- The drain secret is shared across all deployments in an environment, allowing new deployments to drain old ones. This simplifies the workflow since we don't need to persist per-deployment secrets. The deploy script generates a new secret for each deployment and uses it to drain previous deployments before they scale down.
 
 ## Decision Log
 
 - (2025-10-25 17:41Z) `ensure_baseline_stack` shells out to the CDK CLI (bootstrap → synth → deploy) instead of re-implementing deployment logic; `aws-cdk-lib`/`constructs` are now regular workspace dependencies so `uv run cdk ...` works everywhere, and baseline outputs are persisted as structured JSON for later helpers.
 - (2025-10-26 16:00Z) Standardized on `deployment_name` terminology throughout `packages/pulse-aws` to align with the higher-level orchestration API and reduce confusion between the environment identifier and version-specific deployment IDs.
+- (2025-10-27) Moved drain secret caching from library (`baseline.py`) to script level (`deploy.py`/`verify.py`) because secret management is operational/deployment logic rather than infrastructure logic. This keeps the library focused on AWS resource provisioning while scripts handle operational concerns like secrets.
 
 ## Outcomes & Retrospective
 

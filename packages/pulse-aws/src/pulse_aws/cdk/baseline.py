@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from aws_cdk import CfnOutput, RemovalPolicy, Stack, Token
 from aws_cdk import aws_certificatemanager as acm
@@ -24,15 +25,17 @@ class BaselineStack(Stack):
 		deployment_name: str,
 		certificate_arn: str,
 		allowed_ingress_cidrs: Sequence[str] | None = None,
-		**kwargs,
+		**kwargs: Any,
 	) -> None:
 		super().__init__(scope, construct_id, **kwargs)
 
-		self.deployment_name = deployment_name
-		self.allowed_ingress_cidrs = allowed_ingress_cidrs or ["0.0.0.0/0"]
-		self.certificate_arn = certificate_arn
+		self.deployment_name: str = deployment_name
+		self.allowed_ingress_cidrs: Sequence[str] = allowed_ingress_cidrs or [
+			"0.0.0.0/0"
+		]
+		self.certificate_arn: str = certificate_arn
 
-		self.vpc = ec2.Vpc(
+		self.vpc: ec2.Vpc = ec2.Vpc(
 			self,
 			"PulseVpc",
 			max_azs=2,
@@ -49,7 +52,7 @@ class BaselineStack(Stack):
 			],
 		)
 
-		self.alb_security_group = ec2.SecurityGroup(
+		self.alb_security_group: ec2.SecurityGroup = ec2.SecurityGroup(
 			self,
 			"AlbSecurityGroup",
 			vpc=self.vpc,
@@ -68,7 +71,7 @@ class BaselineStack(Stack):
 				"Allow HTTPS",
 			)
 
-		self.service_security_group = ec2.SecurityGroup(
+		self.service_security_group: ec2.SecurityGroup = ec2.SecurityGroup(
 			self,
 			"ServiceSecurityGroup",
 			vpc=self.vpc,
@@ -91,13 +94,15 @@ class BaselineStack(Stack):
 			"Allow Pulse default app port",
 		)
 
-		self.load_balancer = elbv2.ApplicationLoadBalancer(
-			self,
-			"PulseAlb",
-			vpc=self.vpc,
-			security_group=self.alb_security_group,
-			internet_facing=True,
-			load_balancer_name=f"{deployment_name}-alb",
+		self.load_balancer: elbv2.ApplicationLoadBalancer = (
+			elbv2.ApplicationLoadBalancer(
+				self,
+				"PulseAlb",
+				vpc=self.vpc,
+				security_group=self.alb_security_group,
+				internet_facing=True,
+				load_balancer_name=f"{deployment_name}-alb",
+			)
 		)
 
 		acm_certificate = acm.Certificate.from_certificate_arn(
@@ -106,7 +111,7 @@ class BaselineStack(Stack):
 			certificate_arn,
 		)
 
-		self.listener = self.load_balancer.add_listener(
+		self.listener: elbv2.ApplicationListener = self.load_balancer.add_listener(
 			"HttpsListener",
 			port=443,
 			certificates=[acm_certificate],
@@ -118,7 +123,7 @@ class BaselineStack(Stack):
 			),
 		)
 
-		self.log_group = logs.LogGroup(
+		self.log_group: logs.LogGroup = logs.LogGroup(
 			self,
 			"PulseLogGroup",
 			log_group_name=f"/aws/pulse/{deployment_name}/app",
@@ -126,14 +131,14 @@ class BaselineStack(Stack):
 			removal_policy=RemovalPolicy.RETAIN,
 		)
 
-		self.repository = ecr.Repository(
+		self.repository: ecr.Repository = ecr.Repository(
 			self,
 			"PulseEcrRepository",
 			repository_name=f"{deployment_name}",
 			removal_policy=RemovalPolicy.RETAIN,
 		)
 
-		self.execution_role = iam.Role(
+		self.execution_role: iam.Role = iam.Role(
 			self,
 			"PulseExecutionRole",
 			assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),  # pyright: ignore[reportArgumentType]
@@ -145,14 +150,14 @@ class BaselineStack(Stack):
 			),
 		)
 
-		self.task_role = iam.Role(
+		self.task_role: iam.Role = iam.Role(
 			self,
 			"PulseTaskRole",
 			assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),  # pyright: ignore[reportArgumentType]
 			description="Task role for Pulse ECS tasks",
 		)
 
-		self.cluster = ecs.Cluster(
+		self.cluster: ecs.Cluster = ecs.Cluster(
 			self,
 			"PulseCluster",
 			vpc=self.vpc,

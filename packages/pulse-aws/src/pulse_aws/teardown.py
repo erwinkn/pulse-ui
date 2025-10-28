@@ -190,8 +190,8 @@ def _check_for_active_services(
 				if active_services:
 					msg = (
 						f"Cannot delete baseline stack {stack_name}: "
-						f"{len(active_services)} active Pulse service(s) found: "
-						f"{', '.join(active_services)}. "
+						f"{len(active_services)} active Pulse service(s) found: "  # pyright: ignore[reportUnknownArgumentType]
+						f"{', '.join(active_services)}. "  # pyright: ignore[reportUnknownArgumentType]
 						f"Drain and remove all services first, or use force=True to override."
 					)
 					raise BaselineStackError(msg)

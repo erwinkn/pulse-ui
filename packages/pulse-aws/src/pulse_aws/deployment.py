@@ -7,7 +7,7 @@ import base64
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -436,11 +436,11 @@ async def _ecr_login(region: str) -> None:
 
 	try:
 		response = ecr.get_authorization_token()
-		auth_data = response["authorizationData"][0]
-		auth_token = str(auth_data["authorizationToken"])
+		auth_data = cast(dict[str, str], response["authorizationData"][0])
+		auth_token = auth_data["authorizationToken"]
 		token = base64.b64decode(auth_token).decode()
 		username, password = token.split(":", 1)
-		registry = str(auth_data["proxyEndpoint"])
+		registry = auth_data["proxyEndpoint"]
 
 		# Login to Docker
 		login_cmd: list[str] = [
@@ -656,7 +656,7 @@ async def create_service_and_target_group(
 			rule_priority = rule.get("Priority")
 			if rule_priority != "default":
 				try:
-					priority = int(str(rule_priority))
+					priority = int(str(rule_priority))  # pyright: ignore[reportUnknownArgumentType]
 					max_priority = max(max_priority, priority)
 				except ValueError:
 					pass
@@ -774,41 +774,37 @@ async def wait_for_healthy_targets(
 			msg = f"Timeout waiting for healthy targets after {timeout_seconds:.0f}s"
 			raise DeploymentError(msg)
 
-		try:
-			response = elbv2.describe_target_health(TargetGroupArn=target_group_arn)
-			targets = response.get("TargetHealthDescriptions", [])
+	try:
+		response = elbv2.describe_target_health(TargetGroupArn=target_group_arn)
+		targets = response.get("TargetHealthDescriptions", [])
 
-			healthy_count = sum(
-				1
-				for t in targets
-				if t.get("TargetHealth", {}).get("State") == "healthy"
+		healthy_count = sum(
+			1 for t in targets if t.get("TargetHealth", {}).get("State") == "healthy"
+		)
+		total_count = len(targets)
+
+		if healthy_count >= min_healthy_targets:
+			reporter.success(f"{healthy_count}/{total_count} target(s) healthy")
+			return
+
+		# Show progress
+		if total_count > 0:
+			states = {}
+			for t in targets:
+				state = t.get("TargetHealth", {}).get("State", "unknown")
+				states[state] = states.get(state, 0) + 1
+			status = ", ".join(f"{count} {state}" for state, count in states.items())
+			reporter.detail(f"Waiting... ({status}) [{elapsed:.0f}s elapsed]")
+		else:
+			reporter.detail(
+				f"Waiting for targets to register... [{elapsed:.0f}s elapsed]"
 			)
-			total_count = len(targets)
 
-			if healthy_count >= min_healthy_targets:
-				reporter.success(f"{healthy_count}/{total_count} target(s) healthy")
-				return
+	except ClientError as exc:
+		msg = f"Failed to check target health: {exc}"
+		raise DeploymentError(msg) from exc
 
-			# Show progress
-			if total_count > 0:
-				states = {}
-				for t in targets:
-					state = t.get("TargetHealth", {}).get("State", "unknown")
-					states[state] = states.get(state, 0) + 1
-				status = ", ".join(
-					f"{count} {state}" for state, count in states.items()
-				)
-				reporter.detail(f"Waiting... ({status}) [{elapsed:.0f}s elapsed]")
-			else:
-				reporter.detail(
-					f"Waiting for targets to register... [{elapsed:.0f}s elapsed]"
-				)
-
-		except ClientError as exc:
-			msg = f"Failed to check target health: {exc}"
-			raise DeploymentError(msg) from exc
-
-		await asyncio.sleep(poll_interval)
+	await asyncio.sleep(poll_interval)
 
 
 async def install_listener_rules_and_switch_traffic(
@@ -927,7 +923,7 @@ async def drain_previous_deployments(
 		)
 
 		# Filter for active services with running tasks, excluding current
-		previous_deployments = [
+		previous_deployments: list[str] = [
 			svc["serviceName"]
 			for svc in services_detail.get("services", [])
 			if svc.get("status") == "ACTIVE"
@@ -1037,7 +1033,7 @@ async def cleanup_inactive_deployments(
 		)
 
 		# Find services with 0 running tasks
-		inactive_services = [
+		inactive_services: list[dict[str, Any]] = [
 			svc
 			for svc in services_detail.get("services", [])
 			if svc.get("status") == "ACTIVE" and svc.get("runningCount", 0) == 0
@@ -1088,7 +1084,7 @@ async def cleanup_inactive_deployments(
 		raise DeploymentError(msg) from exc
 
 	# Clean up each inactive service
-	cleaned_up = []
+	cleaned_up: list[str] = []
 
 	for svc in inactive_services:
 		deployment_id = svc["serviceName"]
@@ -1332,38 +1328,38 @@ async def deploy(
 			reporter=reporter,
 		)
 
-		# Verify DNS routing to the load balancer
-		domain_ready, domain_proxied = await _ensure_domain_routing(
-			domain,
-			baseline,
-			context,
+	# Verify DNS routing to the load balancer
+	domain_ready, domain_proxied = await _ensure_domain_routing(
+		domain,
+		baseline,
+		context,
+	)
+
+	reporter.section("Summary")
+	reporter.success(f"Deployment {deployment_id} complete")
+	reporter.detail(f"Service ARN: {service_arn}")
+	reporter.detail(f"Target Group: {target_group_arn}")
+	reporter.detail(f"Image URI: {image_uri}")
+	if domain_proxied:
+		reporter.detail(
+			f"{domain} is served via Cloudflare proxy; ALB IP verification skipped."
 		)
 
-		reporter.section("Summary")
-		reporter.success(f"Deployment {deployment_id} complete")
-		reporter.detail(f"Service ARN: {service_arn}")
-		reporter.detail(f"Target Group: {target_group_arn}")
-		reporter.detail(f"Image URI: {image_uri}")
-		if domain_proxied:
-			reporter.detail(
-				f"{domain} is served via Cloudflare proxy; ALB IP verification skipped."
-			)
-
-		return {
-			"deployment_id": deployment_id,
-			"service_arn": service_arn,
-			"target_group_arn": target_group_arn,
-			"task_def_arn": task_def_arn,
-			"image_uri": image_uri,
-			"cluster_name": baseline.cluster_name,
-			"alb_dns_name": baseline.alb_dns_name,
-			"drain_secret": drain.drain_secret,
-			"drained_count": str(len(drained)),
-			"cleaned_count": str(len(cleaned)),
-			"certificate_arn": cert_arn,
-			"domain_ready": str(domain_ready),
-			"domain_proxied": str(domain_proxied),
-		}
+	return {
+		"deployment_id": deployment_id,
+		"service_arn": service_arn,
+		"target_group_arn": target_group_arn,
+		"task_def_arn": task_def_arn,
+		"image_uri": image_uri,
+		"cluster_name": baseline.cluster_name,
+		"alb_dns_name": baseline.alb_dns_name,
+		"drain_secret": drain.drain_secret,
+		"drained_count": str(len(drained)),
+		"cleaned_count": str(len(cleaned)),
+		"certificate_arn": cert_arn,
+		"domain_ready": str(domain_ready),
+		"domain_proxied": str(domain_proxied),
+	}
 
 
 __all__ = [

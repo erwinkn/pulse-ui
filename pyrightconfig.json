@@ -6,7 +6,8 @@
     "packages/pulse-lucide/src",
     "packages/pulse-mantine/python/src",
     "packages/pulse-msal/src",
-    "packages/pulse-recharts/src"
+    "packages/pulse-recharts/src",
+    "packages/pulse-aws/src",
   ],
   "pythonVersion": "3.12",
   "allowedUntypedLibraries": [

@@ -6,7 +6,7 @@ import json
 import socket
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import boto3
 
@@ -96,7 +96,7 @@ def _resolve_ip_addresses(host: str) -> set[str]:
 
 	for result in results:
 		sockaddr = result[4]
-		if sockaddr:
+		if sockaddr and isinstance(sockaddr[0], str):
 			addresses.add(sockaddr[0])
 	return addresses
 
@@ -261,7 +261,7 @@ async def ensure_acm_certificate(
 		domains = list(domains)
 
 	sts = boto3.client("sts")
-	region = sts.meta.region_name
+	region = cast(str | None, sts.meta.region_name)
 
 	if not region or region == "aws-global":
 		msg = (
@@ -307,8 +307,8 @@ async def ensure_acm_certificate(
 				)
 
 			result = AcmCertificate(
-				arn=cert_summary["CertificateArn"],
-				status=cert["Status"],
+				arn=cert_summary["CertificateArn"],  # pyright: ignore[reportUnknownArgumentType]
+				status=cert["Status"],  # pyright: ignore[reportUnknownArgumentType]
 				dns_configuration=dns_config,
 			)
 
@@ -390,7 +390,7 @@ async def ensure_acm_certificate(
 		reporter.blank()
 
 	result = AcmCertificate(
-		arn=certificate_arn,
+		arn=certificate_arn,  # pyright: ignore[reportUnknownArgumentType]
 		status="PENDING_VALIDATION",
 		dns_configuration=dns_config,
 	)
@@ -398,7 +398,7 @@ async def ensure_acm_certificate(
 	if wait:
 		return await _wait_for_certificate_issuance(
 			acm_client,
-			certificate_arn,
+			certificate_arn,  # pyright: ignore[reportUnknownArgumentType]
 			poll_interval,
 			timeout,
 			announce=announce,

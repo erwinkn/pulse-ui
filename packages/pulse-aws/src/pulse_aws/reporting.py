@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import IO, Literal, Protocol
 
 
 class Reporter(Protocol):
@@ -26,9 +26,9 @@ class Reporter(Protocol):
 class CliReporter:
 	"""Human-friendly reporter for interactive CLI runs."""
 
-	def __init__(self, stream=None) -> None:
-		self._stream = stream or sys.stdout
-		self._is_first_section = True
+	def __init__(self, stream: IO[str] | None = None) -> None:
+		self._stream: IO[str] = stream or sys.stdout
+		self._is_first_section: bool = True
 
 	def section(self, title: str) -> None:
 		if not self._is_first_section:
@@ -55,9 +55,9 @@ class CliReporter:
 class CiReporter:
 	"""Minimal reporter suitable for CI logs."""
 
-	def __init__(self, stream=None) -> None:
-		self._stream = stream or sys.stdout
-		self._is_first_section = True
+	def __init__(self, stream: IO[str] | None = None) -> None:
+		self._stream: IO[str] = stream or sys.stdout
+		self._is_first_section: bool = True
 
 	def section(self, title: str) -> None:
 		if not self._is_first_section:

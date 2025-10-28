@@ -29,6 +29,11 @@ class BaselineStack(Stack):
 		deployment_name: str,
 		certificate_arn: str,
 		allowed_ingress_cidrs: Sequence[str] | None = None,
+		reaper_schedule_minutes: int = 1,
+		reaper_consecutive_periods: int = 2,
+		reaper_period_seconds: int = 60,
+		reaper_min_age_seconds: int = 60,
+		reaper_max_age_hours: float = 1.0,
 		**kwargs: Any,
 	) -> None:
 		super().__init__(scope, construct_id, **kwargs)
@@ -38,6 +43,11 @@ class BaselineStack(Stack):
 			"0.0.0.0/0"
 		]
 		self.certificate_arn: str = certificate_arn
+		self.reaper_schedule_minutes: int = reaper_schedule_minutes
+		self.reaper_consecutive_periods: int = reaper_consecutive_periods
+		self.reaper_period_seconds: int = reaper_period_seconds
+		self.reaper_min_age_seconds: int = reaper_min_age_seconds
+		self.reaper_max_age_hours: float = reaper_max_age_hours
 
 		self.vpc: ec2.Vpc = ec2.Vpc(
 			self,
@@ -265,18 +275,20 @@ class BaselineStack(Stack):
 				"CLUSTER": self.cluster.cluster_name,
 				"DEPLOYMENT_NAME": self.deployment_name,
 				"LISTENER_ARN": self.listener.listener_arn,
-				"CONSEC": "2",  # testing: 2, production: 3
-				"PERIOD": "60",  # testing: 60s, production: 300s
-				"MIN_AGE_SEC": "60",  # testing: 60s, production: 120s
-				"MAX_AGE_HR": "1.0",  # 1 hour
+				"CONSEC": str(self.reaper_consecutive_periods),
+				"PERIOD": str(self.reaper_period_seconds),
+				"MIN_AGE_SEC": str(self.reaper_min_age_seconds),
+				"MAX_AGE_HR": str(self.reaper_max_age_hours),
 			},
 		)
 
-		# EventBridge schedule (every 1 minute for testing, 5 for production)
+		# EventBridge schedule
 		events.Rule(
 			self,
 			"ReaperSchedule",
-			schedule=events.Schedule.rate(Duration.minutes(1)),
+			schedule=events.Schedule.rate(
+				Duration.minutes(self.reaper_schedule_minutes)
+			),
 			enabled=True,
 			targets=[targets.LambdaFunction(self.reaper_function)],  # pyright: ignore[reportArgumentType]
 		)

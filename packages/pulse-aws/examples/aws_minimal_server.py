@@ -4,9 +4,8 @@ Minimal FastAPI server for proving ECS deployment workflow.
 This server reads DEPLOYMENT_ID from environment and exposes:
 - GET / → returns deployment info with affinity header
 - GET /_health → health check for ECS/ALB
-- POST /drain → authenticated endpoint to trigger graceful drain
 
-For Phase 2 of the reaper plan, this server:
+For the reaper-based deployment workflow, this server:
 - Discovers its ECS task ID from the metadata endpoint
 - Polls SSM Parameter Store for deployment state
 - Emits CloudWatch EMF metrics (ShutdownReady) to stdout
@@ -19,10 +18,9 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Annotated
 
 import requests
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
 
@@ -50,10 +48,6 @@ app = FastAPI(lifespan=lifespan)
 # Read configuration from environment
 DEPLOYMENT_NAME = os.environ.get("DEPLOYMENT_NAME", "unknown")
 DEPLOYMENT_ID = os.environ.get("DEPLOYMENT_ID", "unknown")
-DRAIN_SECRET = os.environ.get("DRAIN_SECRET", "")
-# Validate authorization
-if not DRAIN_SECRET:
-	raise HTTPException(status_code=500, detail="DRAIN_SECRET not configured on server")
 DRAIN_HEALTH_FAIL_AFTER_SECONDS = int(
 	os.environ.get("DRAIN_HEALTH_FAIL_AFTER_SECONDS", "120")
 )
@@ -72,16 +66,22 @@ def _discover_task_id() -> str:
 	meta_uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
 	if not meta_uri:
 		# Not running in ECS, use fallback
-		return os.getenv("TASK_ID", "local-unknown")
+		raise RuntimeError(
+			"ECS_CONTAINER_METADATA_URI_V4 not set and TASK_ID not provided"
+		)
 
-	try:
-		task_resp = requests.get(f"{meta_uri}/task", timeout=2).json()
-		task_arn = task_resp["TaskARN"]
-		# Extract task ID from ARN (format: arn:aws:ecs:region:account:task/cluster/task-id)
-		return task_arn.split("/")[-1]
-	except Exception as e:
-		print(f"⚠️  Failed to discover task ID: {e}", flush=True)
-		return "unknown"
+	for attempt in range(3):
+		try:
+			task_resp = requests.get(f"{meta_uri}/task", timeout=2).json()
+			task_arn = task_resp["TaskARN"]
+			# Extract task ID from ARN (format: arn:aws:ecs:region:account:task/cluster/task-id)
+			return task_arn.split("/")[-1]
+		except Exception as e:
+			if attempt == 2:
+				raise RuntimeError(
+					f"Failed to discover task ID after 3 attempts: {e}"
+				) from e
+	raise RuntimeError("Failed to discover task ID (this code should be unreachable)")
 
 
 def _emit_emf(shutdown_ready_value: int) -> None:
@@ -202,34 +202,3 @@ async def health() -> JSONResponse:
 			)
 
 	return JSONResponse(status_code=200, content={"status": "ok"})
-
-
-@app.post("/drain")
-async def drain(
-	authorization: Annotated[str | None, Header()] = None,
-) -> dict[str, str]:
-	"""
-	Authenticated drain endpoint.
-
-	Requires 'Authorization: Bearer <DRAIN_SECRET>' header.
-	On first call, marks the server as draining. After DRAIN_HEALTH_FAIL_AFTER_SECONDS,
-	/_health will return 503 to simulate graceful drain.
-	"""
-	global _draining, _drain_started_at
-
-	if not authorization or not authorization.startswith("Bearer "):
-		raise HTTPException(
-			status_code=401, detail="Missing or invalid Authorization header"
-		)
-
-	token = authorization.replace("Bearer ", "", 1)
-	if token != DRAIN_SECRET:
-		raise HTTPException(status_code=403, detail="Invalid drain secret")
-
-	# Mark as draining
-	if _draining:
-		return {"status": "already_draining"}
-
-	_draining = True
-	_drain_started_at = time.time()
-	return {"status": "ok"}

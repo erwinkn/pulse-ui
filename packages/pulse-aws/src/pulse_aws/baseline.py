@@ -17,6 +17,7 @@ from pulse_aws.certificate import (
 	check_domain_dns,
 	ensure_acm_certificate,
 )
+from pulse_aws.config import ReaperConfig
 
 STACK_NAME_TEMPLATE = "{env}-baseline"
 TOOLKIT_STACK_NAME = "CDKToolkit"
@@ -74,6 +75,7 @@ async def ensure_baseline_stack(
 	*,
 	certificate_arn: str,
 	allowed_ingress_cidrs: Sequence[str] | None = None,
+	reaper_config: ReaperConfig | None = None,
 	cdk_bin: str = "cdk",
 	workdir: Path | str | None = None,
 	poll_interval: float = 5.0,
@@ -93,6 +95,7 @@ async def ensure_baseline_stack(
 		deployment_name: Name for this deployment (e.g., "prod", "staging")
 		certificate_arn: ARN of ACM certificate for HTTPS
 		allowed_ingress_cidrs: Optional list of CIDR blocks for ALB access
+		reaper_config: Optional reaper configuration (ReaperConfig instance)
 		cdk_bin: Path to CDK binary (default: "cdk")
 		workdir: Working directory for CDK commands
 		poll_interval: How often to check stack status (seconds)
@@ -154,6 +157,14 @@ async def ensure_baseline_stack(
 	}
 	if allowed_ingress_cidrs:
 		context["allowed_ingress_cidrs"] = ",".join(allowed_ingress_cidrs)
+
+	# Add reaper config if provided
+	if reaper_config:
+		context["reaper_schedule_minutes"] = str(reaper_config.schedule_minutes)
+		context["reaper_consecutive_periods"] = str(reaper_config.consecutive_periods)
+		context["reaper_period_seconds"] = str(reaper_config.period_seconds)
+		context["reaper_min_age_seconds"] = str(reaper_config.min_age_seconds)
+		context["reaper_max_age_hours"] = str(reaper_config.max_age_hours)
 
 	# Add version tag to track baseline stack version
 	tags = {"pulse-cf-version": BASELINE_STACK_VERSION}

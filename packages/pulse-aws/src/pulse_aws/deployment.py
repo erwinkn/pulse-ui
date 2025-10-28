@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -20,81 +19,17 @@ from pulse_aws.certificate import (
 	domain_uses_cloudflare_proxy,
 	ensure_acm_certificate,
 )
+from pulse_aws.config import (
+	DockerBuild,
+	HealthCheckConfig,
+	ReaperConfig,
+	TaskConfig,
+)
 from pulse_aws.reporting import DeploymentContext, Reporter, create_context
 
 
 class DeploymentError(RuntimeError):
 	"""Raised when deployment operations fail."""
-
-
-@dataclass
-class DockerBuild:
-	"""Docker build configuration.
-
-	Attributes:
-	    dockerfile_path: Path to the Dockerfile
-	    context_path: Path to the Docker build context directory
-	    build_args: Additional build arguments to pass to docker build
-	"""
-
-	dockerfile_path: Path
-	context_path: Path
-	build_args: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class TaskConfig:
-	"""ECS task configuration.
-
-	Attributes:
-	    cpu: CPU units (256, 512, 1024, etc.)
-	    memory: Memory in MB (512, 1024, 2048, etc.)
-	    desired_count: Number of tasks to run
-	    env_vars: Environment variables for the task
-	"""
-
-	cpu: str = "256"
-	memory: str = "512"
-	desired_count: int = 2
-	env_vars: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class HealthCheckConfig:
-	"""ALB health check configuration.
-
-	Attributes:
-	    path: Path for ALB health checks
-	    interval_seconds: Seconds between health checks
-	    timeout_seconds: Health check timeout in seconds
-	    healthy_threshold: Consecutive successes to be healthy
-	    unhealthy_threshold: Consecutive failures to be unhealthy
-	    wait_for_health: Wait for targets to be healthy before switching traffic
-	    min_healthy_targets: Minimum healthy targets required before switching
-	"""
-
-	path: str = "/_health"
-	interval_seconds: int = 30
-	timeout_seconds: int = 5
-	healthy_threshold: int = 2
-	unhealthy_threshold: int = 3
-	wait_for_health: bool = True
-	min_healthy_targets: int = 2
-
-
-@dataclass
-class DrainConfig:
-	"""Drain configuration.
-
-	Attributes:
-	    drain_secret: Secret for drain endpoint (auto-generated if None)
-	    timeout_seconds: Maximum time to wait for draining (unused, kept for compatibility)
-	    poll_interval: Seconds between drain health checks (unused, kept for compatibility)
-	"""
-
-	drain_secret: str | None = None
-	timeout_seconds: float = 180
-	poll_interval: float = 10
 
 
 def generate_deployment_id(deployment_name: str) -> str:
@@ -328,7 +263,6 @@ async def build_and_push_image(
 	deployment_id: str,
 	baseline: BaselineStackOutputs,
 	*,
-	drain_secret: str,
 	context_path: Path,
 	build_args: dict[str, str] | None = None,
 	reporter: Reporter | None = None,
@@ -339,7 +273,6 @@ async def build_and_push_image(
 	    dockerfile_path: Path to the Dockerfile
 	    deployment_id: Unique deployment ID to use as the image tag
 	    baseline: Baseline stack outputs containing ECR repository URI
-	    drain_secret: Secret for the drain endpoint
 	    context_path: Path to the Docker build context directory
 	    build_args: Additional build arguments to pass to docker build
 
@@ -370,7 +303,6 @@ async def build_and_push_image(
 	reporter.info(f"Building image: {image_uri}")
 	all_build_args = {
 		"DEPLOYMENT_ID": deployment_id,
-		"DRAIN_SECRET": drain_secret,
 		**(build_args or {}),
 	}
 
@@ -472,6 +404,9 @@ async def register_task_definition(
 	cpu: str = "256",
 	memory: str = "512",
 	env_vars: dict[str, str] | None = None,
+	drain_poll_seconds: int = 5,
+	drain_grace_seconds: int = 20,
+	drain_health_fail_after_seconds: int = 120,
 	reporter: Reporter | None = None,
 ) -> str:
 	"""Register an ECS Fargate task definition.
@@ -483,6 +418,9 @@ async def register_task_definition(
 	    cpu: CPU units (256, 512, 1024, etc.)
 	    memory: Memory in MB (512, 1024, 2048, etc.)
 	    env_vars: Additional environment variables
+	    drain_poll_seconds: Seconds between SSM state polling
+	    drain_grace_seconds: Grace period before ShutdownReady=1
+	    drain_health_fail_after_seconds: Seconds before health fails when draining
 
 	Returns:
 	    The ARN of the registered task definition
@@ -501,6 +439,12 @@ async def register_task_definition(
 	environment = [
 		{"name": "DEPLOYMENT_NAME", "value": baseline.deployment_name},
 		{"name": "DEPLOYMENT_ID", "value": deployment_id},
+		{"name": "DRAIN_POLL_SECONDS", "value": str(drain_poll_seconds)},
+		{"name": "DRAIN_GRACE_SECONDS", "value": str(drain_grace_seconds)},
+		{
+			"name": "DRAIN_HEALTH_FAIL_AFTER_SECONDS",
+			"value": str(drain_health_fail_after_seconds),
+		},
 		*[{"name": k, "value": v} for k, v in (env_vars or {}).items()],
 	]
 
@@ -1201,7 +1145,7 @@ async def deploy(
 	docker: DockerBuild,
 	task: TaskConfig | None = None,
 	health_check: HealthCheckConfig | None = None,
-	drain: DrainConfig | None = None,
+	reaper: ReaperConfig | None = None,
 	certificate_arn: str | None = None,
 	context: DeploymentContext | None = None,
 	reporter: Reporter | None = None,
@@ -1212,24 +1156,24 @@ async def deploy(
 	1. Ensure ACM certificate exists and is validated
 	2. Ensure baseline infrastructure exists (includes reaper Lambda)
 	3. Build and push Docker image
-	4. Register ECS task definition
+	4. Register ECS task definition with draining configuration
 	5. Create ECS service and ALB target group
 	6. Mark deployment as active in SSM
 	7. Install listener rules for header-based routing
 	8. Switch default traffic to the new deployment
-	9. Mark previous deployments as draining
-	10. Call drain endpoint on previous deployments
+	9. Mark previous deployments as draining in SSM and service tags
 
 	Note: Cleanup of old deployments is handled automatically by the reaper Lambda
-	which runs every 1-5 minutes and removes draining services with runningCount==0.
+	which monitors CloudWatch metrics, sets desiredCount=0 when ready, and removes
+	inactive services.
 
 	Args:
 	    domain: Domain name for the deployment (e.g., "app.example.com")
 	    deployment_name: Environment name (e.g., "prod", "staging")
 	    docker: Docker build configuration
-	    task: ECS task configuration (uses defaults if None)
+	    task: ECS task configuration including draining parameters (uses defaults if None)
 	    health_check: ALB health check configuration (uses defaults if None)
-	    drain: Drain and cleanup configuration (uses defaults if None)
+	    reaper: Reaper Lambda configuration (uses defaults if None)
 	    certificate_arn: ACM certificate ARN (looked up if not provided)
 	    context: Optional deployment execution context (auto-detected if omitted)
 	    reporter: Optional reporter to override logging behaviour
@@ -1243,8 +1187,7 @@ async def deploy(
 	        - image_uri: Docker image URI
 	        - cluster_name: ECS cluster name
 	        - alb_dns_name: ALB DNS name
-	        - drain_secret: The drain secret used
-	        - drained_count: Number of deployments drained (cleanup by reaper)
+	        - marked_draining_count: Number of deployments marked as draining
 	        - certificate_arn: ACM certificate ARN used
 	        - domain_ready: Whether the custom domain resolves to the ALB ("True"/"False")
 
@@ -1261,8 +1204,18 @@ async def deploy(
 	            context_path=Path("."),
 	            build_args={"VERSION": "1.0.0"},
 	        ),
-	        task=TaskConfig(cpu="512", memory="1024", desired_count=3),
+	        task=TaskConfig(
+	            cpu="512",
+	            memory="1024",
+	            desired_count=3,
+	            drain_poll_seconds=5,
+	            drain_grace_seconds=30,
+	        ),
 	        health_check=HealthCheckConfig(path="/health"),
+	        reaper=ReaperConfig(
+	            schedule_minutes=5,
+	            max_age_hours=48.0,
+	        ),
 	    )
 	"""
 	from pulse_aws.baseline import ensure_baseline_stack
@@ -1275,17 +1228,18 @@ async def deploy(
 	# Use defaults for optional configs
 	task = task or TaskConfig()
 	health_check = health_check or HealthCheckConfig()
-	drain = drain or DrainConfig()
+	reaper = reaper or ReaperConfig()
 
 	# Ensure certificate
 	reporter.section("ACM Certificate")
 	cert_arn = await _ensure_certificate_ready(domain, certificate_arn, context)
 
-	# Ensure baseline infrastructure
+	# Ensure baseline infrastructure (with reaper configuration)
 	reporter.section("Baseline Infrastructure")
 	baseline = await ensure_baseline_stack(
 		deployment_name,
 		certificate_arn=cert_arn,
+		reaper_config=reaper,
 	)
 	reporter.success("Baseline stack ready")
 	reporter.detail(f"ALB DNS: {baseline.alb_dns_name}")
@@ -1294,21 +1248,11 @@ async def deploy(
 	deployment_id = generate_deployment_id(deployment_name)
 	reporter.section("Container Image")
 
-	# Generate drain secret if not provided
-	if not drain.drain_secret:
-		import secrets as secrets_module
-
-		drain.drain_secret = secrets_module.token_urlsafe(32)
-		reporter.detail("Generated drain secret for this deployment")
-	else:
-		reporter.detail("Using existing drain secret")
-
 	# Build and push image
 	image_uri = await build_and_push_image(
 		dockerfile_path=docker.dockerfile_path,
 		deployment_id=deployment_id,
 		baseline=baseline,
-		drain_secret=drain.drain_secret,
 		context_path=docker.context_path,
 		build_args=docker.build_args or None,
 		reporter=reporter,
@@ -1323,6 +1267,9 @@ async def deploy(
 		cpu=task.cpu,
 		memory=task.memory,
 		env_vars=task.env_vars or None,
+		drain_poll_seconds=task.drain_poll_seconds,
+		drain_grace_seconds=task.drain_grace_seconds,
+		drain_health_fail_after_seconds=task.drain_health_fail_after_seconds,
 		reporter=reporter,
 	)
 
@@ -1362,28 +1309,20 @@ async def deploy(
 	)
 
 	# Mark previous deployments as draining in SSM and service tags
-	reporter.blank()
-	await mark_previous_deployments_as_draining(
+	reporter.section("Post-Deployment")
+	marked_draining = await mark_previous_deployments_as_draining(
 		deployment_name=deployment_name,
 		current_deployment_id=deployment_id,
 		baseline=baseline,
 		reporter=reporter,
 	)
 
-	# Drain previous deployments
-	reporter.section("Post-Deployment")
-	drained = await drain_previous_deployments(
-		current_deployment_id=deployment_id,
-		baseline=baseline,
-		drain_secret=drain.drain_secret,
-		timeout_seconds=drain.timeout_seconds,
-		poll_interval=drain.poll_interval,
-		reporter=reporter,
-	)
-
-	# Note: Cleanup of inactive deployments is now handled by the reaper Lambda
-	# which runs every minute and automatically removes draining services with
-	# runningCount==0. No need to clean up during deployment.
+	# Note: The reaper Lambda handles all cleanup automatically:
+	# 1. Monitors CloudWatch metrics for ShutdownReady=1
+	# 2. Sets desiredCount=0 when tasks are ready
+	# 3. Deletes services with runningCount==0
+	# 4. Cleans up target groups and listener rules
+	# Runs every 1-5 minutes with MIN_AGE and MAX_AGE backstops.
 
 	# Verify DNS routing to the load balancer
 	domain_ready, domain_proxied = await _ensure_domain_routing(
@@ -1401,6 +1340,10 @@ async def deploy(
 		reporter.detail(
 			f"{domain} is served via Cloudflare proxy; ALB IP verification skipped."
 		)
+	if marked_draining:
+		reporter.detail(
+			f"Marked {len(marked_draining)} previous deployment(s) as draining"
+		)
 
 	return {
 		"deployment_id": deployment_id,
@@ -1410,8 +1353,7 @@ async def deploy(
 		"image_uri": image_uri,
 		"cluster_name": baseline.cluster_name,
 		"alb_dns_name": baseline.alb_dns_name,
-		"drain_secret": drain.drain_secret,
-		"drained_count": str(len(drained)),
+		"marked_draining_count": str(len(marked_draining)),
 		"certificate_arn": cert_arn,
 		"domain_ready": str(domain_ready),
 		"domain_proxied": str(domain_proxied),
@@ -1420,10 +1362,6 @@ async def deploy(
 
 __all__ = [
 	"DeploymentError",
-	"DockerBuild",
-	"TaskConfig",
-	"HealthCheckConfig",
-	"DrainConfig",
 	"build_and_push_image",
 	"cleanup_inactive_deployments",
 	"create_service_and_target_group",

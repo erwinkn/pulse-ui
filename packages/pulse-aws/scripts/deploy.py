@@ -7,58 +7,25 @@ This script orchestrates the full deployment workflow:
 3. Build and push Docker image to ECR
 4. Register ECS task definition
 5. Create ECS service and ALB target group
-6. Install listener rules for header-based routing
-7. Switch default traffic to the new deployment
+6. Mark deployment as active in SSM and previous deployments as draining
+7. Install listener rules for header-based routing
+8. Switch default traffic to the new deployment
 
-The deployment uses header-based affinity (X-Pulse-Render-Affinity) to support
-multiple concurrent versions with sticky sessions.
+The deployment uses:
+- Header-based affinity (X-Pulse-Render-Affinity) for sticky sessions
+- SSM Parameter Store for deployment state management
+- CloudWatch EMF metrics for graceful draining orchestration
+- Reaper Lambda for automated cleanup of drained deployments
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
-import secrets
 import sys
 from pathlib import Path
 
-from pulse_aws.deployment import DockerBuild, DrainConfig, deploy
-
-
-def get_or_create_drain_secret(deployment_name: str) -> str:
-	"""Get or create a stable drain secret for this deployment environment.
-
-	The drain secret is cached in .pulse/<deployment_name>/secrets.json
-	and is shared across all deployments in the same environment.
-
-	Args:
-	    deployment_name: The deployment environment name (e.g., "prod", "dev")
-
-	Returns:
-	    The drain secret (32-byte URL-safe token)
-	"""
-	secrets_dir = Path.cwd() / ".pulse" / deployment_name
-	secrets_file = secrets_dir / "secrets.json"
-
-	# Try to load existing secrets
-	if secrets_file.exists():
-		try:
-			with secrets_file.open() as f:
-				data = json.load(f)
-				if drain_secret := data.get("drain_secret"):
-					return str(drain_secret)
-		except (json.JSONDecodeError, OSError):
-			pass  # Will regenerate below
-
-	# Generate new secret
-	drain_secret = secrets.token_urlsafe(32)
-
-	# Save to file
-	secrets_dir.mkdir(parents=True, exist_ok=True)
-	with secrets_file.open("w") as f:
-		json.dump({"drain_secret": drain_secret}, f, indent=2)
-
-	return drain_secret
+from pulse_aws.config import DockerBuild
+from pulse_aws.deployment import deploy
 
 
 async def main() -> None:
@@ -78,12 +45,6 @@ async def main() -> None:
 	print(f"   Domain: {domain}")
 	print()
 
-	# Get or create cached drain secret
-	drain_secret = get_or_create_drain_secret(deployment_name)
-	print(f"🔐 Drain secret: {drain_secret}")
-	print(f"   (Cached in .pulse/{deployment_name}/secrets.json)")
-	print()
-
 	# Deploy!
 	print("=" * 60)
 	print("Starting Deployment")
@@ -97,7 +58,6 @@ async def main() -> None:
 			dockerfile_path=dockerfile_path,
 			context_path=repo_root,
 		),
-		drain=DrainConfig(drain_secret=drain_secret),
 	)
 
 	# Success!
@@ -110,8 +70,10 @@ async def main() -> None:
 	print(f"Target Group:  {result['target_group_arn']}")
 	print(f"Image URI:     {result['image_uri']}")
 	print()
-	if int(result["drained_count"]) > 0:
-		print(f"Drained {result['drained_count']} previous deployment(s)")
+	if int(result.get("marked_draining_count", 0)) > 0:
+		print(
+			f"Marked {result['marked_draining_count']} previous deployment(s) as draining"
+		)
 		print("(Reaper will clean them up automatically within 1-5 minutes)")
 	print()
 	print("✅ Deployment is live and healthy!")
@@ -123,7 +85,10 @@ async def main() -> None:
 	print("2. Access your application:")
 	print(f"   https://{domain}/")
 	print()
-	print("3. Monitor reaper cleanup in CloudWatch Logs:")
+	print("3. Monitor deployment state in SSM:")
+	print(f"   Parameter: /apps/{deployment_name}/{result['deployment_id']}/state")
+	print()
+	print("4. Monitor reaper cleanup in CloudWatch Logs:")
 	print(f"   Log group: /aws/lambda/{deployment_name}-baseline-ReaperFunction*")
 	print()
 

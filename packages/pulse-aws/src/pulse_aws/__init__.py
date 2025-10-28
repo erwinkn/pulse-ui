@@ -45,6 +45,18 @@ from .certificate import (
 from .certificate import (
 	ensure_acm_certificate as ensure_acm_certificate,
 )
+from .config import (
+	DockerBuild as DockerBuild,
+)
+from .config import (
+	HealthCheckConfig as HealthCheckConfig,
+)
+from .config import (
+	ReaperConfig as ReaperConfig,
+)
+from .config import (
+	TaskConfig as TaskConfig,
+)
 from .deployment import (
 	DeploymentError as DeploymentError,
 )

@@ -5,9 +5,12 @@
 ### What this phase delivers
 
 - For each deployment, writes `/apps/<deployment_name>/<deployment_id>/state` in **SSM Parameter Store** to `active` for the new deployment and `draining` for all previous ones.
-- (Optional but recommended) Tag ECS services: `deployment_name`, `deployment_id`, `state`.
+- Tag ECS services: `deployment_name`, `deployment_id`, `state`.
+- Removed drain secret infrastructure since tasks discover draining state via SSM polling.
 
 **Status: ✅ Complete** (2025-10-28)
+
+**Note:** The original plan included a drain secret and `/drain` endpoint for marking services as draining. This was replaced with a simpler SSM-based approach where tasks poll their state parameter directly, eliminating the need for authenticated HTTP endpoints and secret management.
 
 ### Inputs
 

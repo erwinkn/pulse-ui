@@ -112,8 +112,7 @@ async def main() -> None:
 	print()
 	if int(result["drained_count"]) > 0:
 		print(f"Drained {result['drained_count']} previous deployment(s)")
-	if int(result["cleaned_count"]) > 0:
-		print(f"Cleaned up {result['cleaned_count']} inactive deployment(s)")
+		print("(Reaper will clean them up automatically within 1-5 minutes)")
 	print()
 	print("✅ Deployment is live and healthy!")
 	print()
@@ -124,9 +123,8 @@ async def main() -> None:
 	print("2. Access your application:")
 	print(f"   https://{domain}/")
 	print()
-	print("3. To drain this deployment later:")
-	print(f"   curl -X POST -H 'Authorization: Bearer {result['drain_secret']}' \\")
-	print(f"     https://{domain}/drain")
+	print("3. Monitor reaper cleanup in CloudWatch Logs:")
+	print(f"   Log group: /aws/lambda/{deployment_name}-baseline-ReaperFunction*")
 	print()
 
 

@@ -7,7 +7,7 @@ import base64
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -84,19 +84,17 @@ class HealthCheckConfig:
 
 @dataclass
 class DrainConfig:
-	"""Drain and cleanup configuration.
+	"""Drain configuration.
 
 	Attributes:
 	    drain_secret: Secret for drain endpoint (auto-generated if None)
 	    timeout_seconds: Maximum time to wait for draining (unused, kept for compatibility)
 	    poll_interval: Seconds between drain health checks (unused, kept for compatibility)
-	    cleanup_inactive: Whether to clean up inactive deployments after draining
 	"""
 
 	drain_secret: str | None = None
 	timeout_seconds: float = 180
 	poll_interval: float = 10
-	cleanup_inactive: bool = True
 
 
 def generate_deployment_id(deployment_name: str) -> str:
@@ -501,6 +499,7 @@ async def register_task_definition(
 
 	# Build environment variables
 	environment = [
+		{"name": "DEPLOYMENT_NAME", "value": baseline.deployment_name},
 		{"name": "DEPLOYMENT_ID", "value": deployment_id},
 		*[{"name": k, "value": v} for k, v in (env_vars or {}).items()],
 	]
@@ -550,6 +549,145 @@ async def register_task_definition(
 	except ClientError as exc:
 		msg = f"Failed to register task definition: {exc}"
 		raise DeploymentError(msg) from exc
+
+
+async def set_deployment_state(
+	deployment_name: str,
+	deployment_id: str,
+	state: str,
+	*,
+	region: str,
+	reporter: Reporter | None = None,
+) -> None:
+	"""Set the deployment state in SSM Parameter Store.
+
+	Args:
+	    deployment_name: The deployment environment name (e.g., "prod", "dev")
+	    deployment_id: Unique deployment ID
+	    state: Deployment state ("active" or "draining")
+	    region: AWS region
+	    reporter: Optional reporter for logging
+
+	Raises:
+	    DeploymentError: If SSM parameter update fails
+	"""
+	reporter = _resolve_reporter(reporter)
+
+	ssm = boto3.client("ssm", region_name=region)
+	param_name = f"/apps/{deployment_name}/{deployment_id}/state"
+
+	try:
+		ssm.put_parameter(
+			Name=param_name,
+			Value=state,
+			Type="String",
+			Overwrite=True,
+		)
+		reporter.detail(f"Set SSM parameter {param_name} = {state}")
+	except ClientError as exc:
+		msg = f"Failed to set deployment state in SSM: {exc}"
+		raise DeploymentError(msg) from exc
+
+
+async def mark_previous_deployments_as_draining(
+	deployment_name: str,
+	current_deployment_id: str,
+	baseline: BaselineStackOutputs,
+	*,
+	reporter: Reporter | None = None,
+) -> list[str]:
+	"""Mark all previous deployments as draining in SSM and update service tags.
+
+	For each deployment that is not the current one:
+	1. Set SSM parameter `/apps/<deployment_name>/<deployment_id>/state` to "draining"
+	2. Tag the ECS service with `state=draining`
+
+	Args:
+	    deployment_name: The deployment environment name
+	    current_deployment_id: The current deployment ID (should NOT be marked as draining)
+	    baseline: Baseline stack outputs
+	    reporter: Optional reporter for logging
+
+	Returns:
+	    List of deployment IDs that were marked as draining
+
+	Raises:
+	    DeploymentError: If listing services or updating state fails
+	"""
+	reporter = _resolve_reporter(reporter)
+
+	ecs = boto3.client("ecs", region_name=baseline.region)
+
+	reporter.info("Marking previous deployments as draining...")
+
+	# Find all active services except the current one
+	try:
+		response = ecs.list_services(cluster=baseline.cluster_name)
+		service_arns = response.get("serviceArns", [])
+
+		if not service_arns:
+			reporter.info("No previous deployments found")
+			return []
+
+		# Get service details
+		services_detail = ecs.describe_services(
+			cluster=baseline.cluster_name,
+			services=service_arns,
+		)
+
+		# Filter for active services, excluding current
+		previous_services = [
+			svc
+			for svc in services_detail.get("services", [])
+			if svc.get("status") == "ACTIVE"
+			and svc["serviceName"] != current_deployment_id
+		]
+
+		if not previous_services:
+			reporter.info("No previous deployments to mark as draining")
+			return []
+
+	except ClientError as exc:
+		msg = f"Failed to list services: {exc}"
+		raise DeploymentError(msg) from exc
+
+	# Mark each previous deployment as draining
+	drained_ids = []
+
+	for svc in previous_services:
+		old_deployment_id = svc["serviceName"]
+		service_arn = svc["serviceArn"]
+
+		reporter.detail(f"Marking {old_deployment_id} as draining...")
+
+		# Set SSM parameter
+		await set_deployment_state(
+			deployment_name=deployment_name,
+			deployment_id=old_deployment_id,
+			state="draining",
+			region=baseline.region,
+			reporter=reporter,
+		)
+
+		# Update service tags
+		try:
+			ecs.tag_resource(
+				resourceArn=service_arn,
+				tags=[
+					{"key": "deployment_name", "value": deployment_name},
+					{"key": "deployment_id", "value": old_deployment_id},
+					{"key": "state", "value": "draining"},
+				],
+			)
+		except ClientError as exc:
+			reporter.warning(f"Failed to tag service {old_deployment_id}: {exc}")
+
+		drained_ids.append(old_deployment_id)
+
+	if drained_ids:
+		reporter.success(f"Marked {len(drained_ids)} deployment(s) as draining")
+
+	return drained_ids
 
 
 async def create_service_and_target_group(
@@ -723,8 +861,9 @@ async def create_service_and_target_group(
 			],
 			healthCheckGracePeriodSeconds=60,
 			tags=[
-				{"key": "deployment-id", "value": deployment_id},
-				{"key": "deployment-name", "value": deployment_name},
+				{"key": "deployment_id", "value": deployment_id},
+				{"key": "deployment_name", "value": deployment_name},
+				{"key": "state", "value": "active"},
 			],
 		)
 		service_arn = service_response["service"]["serviceArn"]
@@ -774,37 +913,41 @@ async def wait_for_healthy_targets(
 			msg = f"Timeout waiting for healthy targets after {timeout_seconds:.0f}s"
 			raise DeploymentError(msg)
 
-	try:
-		response = elbv2.describe_target_health(TargetGroupArn=target_group_arn)
-		targets = response.get("TargetHealthDescriptions", [])
+		try:
+			response = elbv2.describe_target_health(TargetGroupArn=target_group_arn)
+			targets = response.get("TargetHealthDescriptions", [])
 
-		healthy_count = sum(
-			1 for t in targets if t.get("TargetHealth", {}).get("State") == "healthy"
-		)
-		total_count = len(targets)
-
-		if healthy_count >= min_healthy_targets:
-			reporter.success(f"{healthy_count}/{total_count} target(s) healthy")
-			return
-
-		# Show progress
-		if total_count > 0:
-			states = {}
-			for t in targets:
-				state = t.get("TargetHealth", {}).get("State", "unknown")
-				states[state] = states.get(state, 0) + 1
-			status = ", ".join(f"{count} {state}" for state, count in states.items())
-			reporter.detail(f"Waiting... ({status}) [{elapsed:.0f}s elapsed]")
-		else:
-			reporter.detail(
-				f"Waiting for targets to register... [{elapsed:.0f}s elapsed]"
+			healthy_count = sum(
+				1
+				for t in targets
+				if t.get("TargetHealth", {}).get("State") == "healthy"
 			)
+			total_count = len(targets)
 
-	except ClientError as exc:
-		msg = f"Failed to check target health: {exc}"
-		raise DeploymentError(msg) from exc
+			if healthy_count >= min_healthy_targets:
+				reporter.success(f"{healthy_count}/{total_count} target(s) healthy")
+				return
 
-	await asyncio.sleep(poll_interval)
+			# Show progress
+			if total_count > 0:
+				states = {}
+				for t in targets:
+					state = t.get("TargetHealth", {}).get("State", "unknown")
+					states[state] = states.get(state, 0) + 1
+				status = ", ".join(
+					f"{count} {state}" for state, count in states.items()
+				)
+				reporter.detail(f"Waiting... ({status}) [{elapsed:.0f}s elapsed]")
+			else:
+				reporter.detail(
+					f"Waiting for targets to register... [{elapsed:.0f}s elapsed]"
+				)
+
+		except ClientError as exc:
+			msg = f"Failed to check target health: {exc}"
+			raise DeploymentError(msg) from exc
+
+		await asyncio.sleep(poll_interval)
 
 
 async def install_listener_rules_and_switch_traffic(
@@ -994,10 +1137,11 @@ async def cleanup_inactive_deployments(
 	dry_run: bool = False,
 	reporter: Reporter | None = None,
 ) -> list[str]:
-	"""Clean up deployments with no running tasks or unhealthy targets.
+	"""Clean up deployments with no running tasks that are marked as draining.
 
-	This function finds ECS services that have 0 running tasks or target groups
-	with no healthy targets, then deletes the service, target group, and listener rule.
+	This is a wrapper around the reaper's cleanup logic for manual cleanup.
+	The reaper Lambda handles automated cleanup, but this function can be
+	called manually if needed.
 
 	Args:
 	    deployment_name: The deployment environment name
@@ -1010,147 +1154,44 @@ async def cleanup_inactive_deployments(
 	Raises:
 	    DeploymentError: If cleanup operations fail
 	"""
+	# Import cleanup logic from reaper
+	from pulse_aws import reaper_lambda
+
 	reporter = _resolve_reporter(reporter)
 
-	ecs = boto3.client("ecs", region_name=baseline.region)
-	elbv2 = boto3.client("elbv2", region_name=baseline.region)
+	if dry_run:
+		reporter.warning(
+			"Dry run mode not supported when using reaper cleanup logic. Skipping cleanup."
+		)
+		return []
 
 	reporter.info("Looking for inactive deployments to clean up...")
 
-	# Find all services
+	# Create AWS clients
+	ecs = boto3.client("ecs", region_name=baseline.region)
+	elbv2 = boto3.client("elbv2", region_name=baseline.region)
+
+	# Call the reaper's cleanup function
 	try:
-		response = ecs.list_services(cluster=baseline.cluster_name)
-		service_arns = response.get("serviceArns", [])
-
-		if not service_arns:
-			reporter.info("No services found")
-			return []
-
-		# Get service details
-		services_detail = ecs.describe_services(
+		cleaned_count = reaper_lambda.cleanup_inactive_services(
 			cluster=baseline.cluster_name,
-			services=service_arns,
+			listener_arn=baseline.listener_arn,
+			ecs=ecs,
+			elbv2=elbv2,
 		)
 
-		# Find services with 0 running tasks
-		inactive_services: list[dict[str, Any]] = [
-			svc
-			for svc in services_detail.get("services", [])
-			if svc.get("status") == "ACTIVE" and svc.get("runningCount", 0) == 0
-		]
-
-		if not inactive_services:
-			reporter.info("No inactive deployments found")
-			return []
-
-		reporter.info(f"Found {len(inactive_services)} inactive deployment(s):")
-		for svc in inactive_services:
-			reporter.detail(svc["serviceName"])
-		reporter.blank()
-
-	except ClientError as exc:
-		msg = f"Failed to list services: {exc}"
-		raise DeploymentError(msg) from exc
-
-	# Get listener rules to find target groups and rules to delete
-	try:
-		rules_response = elbv2.describe_rules(ListenerArn=baseline.listener_arn)
-		rules_map = {}
-
-		for rule in rules_response["Rules"]:
-			# Skip default rule
-			if rule.get("Priority") == "default":
-				continue
-
-			# Check if this is a header-based affinity rule
-			for condition in rule.get("Conditions", []):
-				if condition.get("Field") == "http-header":
-					header_config = condition.get("HttpHeaderConfig", {})
-					if header_config.get("HttpHeaderName") == "X-Pulse-Render-Affinity":
-						values = header_config.get("Values", [])
-						if values:
-							dep_id = values[0]
-							rules_map[dep_id] = {
-								"rule_arn": rule["RuleArn"],
-								"target_group_arn": rule["Actions"][0].get(
-									"TargetGroupArn"
-								)
-								if rule.get("Actions")
-								else None,
-							}
-
-	except ClientError as exc:
-		msg = f"Failed to describe listener rules: {exc}"
-		raise DeploymentError(msg) from exc
-
-	# Clean up each inactive service
-	cleaned_up: list[str] = []
-
-	for svc in inactive_services:
-		deployment_id = svc["serviceName"]
-		service_arn = svc["serviceArn"]
-		desired_count = svc.get("desiredCount", 0)
-
-		if dry_run:
-			reporter.detail(f"[DRY RUN] Would clean up {deployment_id}")
-			cleaned_up.append(deployment_id)
-			continue
-
-		reporter.info(f"Cleaning up {deployment_id}...")
-
-		# Scale service to 0 before deleting (if not already)
-		if desired_count > 0:
-			try:
-				ecs.update_service(
-					cluster=baseline.cluster_name,
-					service=service_arn,
-					desiredCount=0,
-				)
-				reporter.detail("Scaled service to 0 tasks")
-			except ClientError as exc:
-				reporter.warning(f"Failed to scale service to 0: {exc}")
-				continue
-
-		# Delete ECS service
-		try:
-			ecs.delete_service(cluster=baseline.cluster_name, service=service_arn)
-			reporter.detail("Deleted ECS service")
-		except ClientError as exc:
-			reporter.warning(f"Failed to delete service: {exc}")
-			continue
-
-		# Delete listener rule and target group
-		rule_info = rules_map.get(deployment_id)
-		if rule_info:
-			# Delete listener rule first
-			try:
-				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
-				reporter.detail("Deleted listener rule")
-			except ClientError as exc:
-				reporter.warning(f"Failed to delete listener rule: {exc}")
-
-			# Delete target group
-			if rule_info["target_group_arn"]:
-				try:
-					elbv2.delete_target_group(
-						TargetGroupArn=rule_info["target_group_arn"]
-					)
-					reporter.detail("Deleted target group")
-				except ClientError as exc:
-					reporter.warning(f"Failed to delete target group: {exc}")
-
-		cleaned_up.append(deployment_id)
-
-	reporter.blank()
-	if cleaned_up:
-		if dry_run:
-			reporter.info(f"Would clean up {len(cleaned_up)} deployment(s) (dry run)")
+		if cleaned_count > 0:
+			reporter.info(f"Cleaned up {cleaned_count} deployment(s)")
 		else:
-			reporter.info(f"Cleaned up {len(cleaned_up)} deployment(s)")
-	else:
-		reporter.info("No deployments were cleaned up")
+			reporter.info("No inactive deployments found")
 
-	return cleaned_up
+		# Return empty list since we don't track individual deployment IDs
+		# (the reaper logs them to stdout)
+		return []
+
+	except Exception as exc:
+		msg = f"Failed to clean up inactive deployments: {exc}"
+		raise DeploymentError(msg) from exc
 
 
 async def deploy(
@@ -1169,14 +1210,18 @@ async def deploy(
 
 	This function orchestrates the complete deployment:
 	1. Ensure ACM certificate exists and is validated
-	2. Ensure baseline infrastructure exists
+	2. Ensure baseline infrastructure exists (includes reaper Lambda)
 	3. Build and push Docker image
 	4. Register ECS task definition
 	5. Create ECS service and ALB target group
-	6. Install listener rules for header-based routing
-	7. Switch default traffic to the new deployment
-	8. Drain previous deployments
-	9. Clean up inactive deployments
+	6. Mark deployment as active in SSM
+	7. Install listener rules for header-based routing
+	8. Switch default traffic to the new deployment
+	9. Mark previous deployments as draining
+	10. Call drain endpoint on previous deployments
+
+	Note: Cleanup of old deployments is handled automatically by the reaper Lambda
+	which runs every 1-5 minutes and removes draining services with runningCount==0.
 
 	Args:
 	    domain: Domain name for the deployment (e.g., "app.example.com")
@@ -1199,8 +1244,7 @@ async def deploy(
 	        - cluster_name: ECS cluster name
 	        - alb_dns_name: ALB DNS name
 	        - drain_secret: The drain secret used
-	        - drained_count: Number of deployments drained
-	        - cleaned_count: Number of deployments cleaned up
+	        - drained_count: Number of deployments drained (cleanup by reaper)
 	        - certificate_arn: ACM certificate ARN used
 	        - domain_ready: Whether the custom domain resolves to the ALB ("True"/"False")
 
@@ -1297,6 +1341,15 @@ async def deploy(
 		reporter=reporter,
 	)
 
+	# Mark this deployment as active in SSM
+	await set_deployment_state(
+		deployment_name=deployment_name,
+		deployment_id=deployment_id,
+		state="active",
+		region=baseline.region,
+		reporter=reporter,
+	)
+
 	# Install listener rules and switch traffic
 	await install_listener_rules_and_switch_traffic(
 		deployment_name=deployment_name,
@@ -1305,6 +1358,15 @@ async def deploy(
 		baseline=baseline,
 		wait_for_health=health_check.wait_for_health,
 		min_healthy_targets=health_check.min_healthy_targets,
+		reporter=reporter,
+	)
+
+	# Mark previous deployments as draining in SSM and service tags
+	reporter.blank()
+	await mark_previous_deployments_as_draining(
+		deployment_name=deployment_name,
+		current_deployment_id=deployment_id,
+		baseline=baseline,
 		reporter=reporter,
 	)
 
@@ -1319,14 +1381,9 @@ async def deploy(
 		reporter=reporter,
 	)
 
-	# Clean up inactive deployments
-	cleaned: list[str] = []
-	if drain.cleanup_inactive:
-		cleaned = await cleanup_inactive_deployments(
-			deployment_name=deployment_name,
-			baseline=baseline,
-			reporter=reporter,
-		)
+	# Note: Cleanup of inactive deployments is now handled by the reaper Lambda
+	# which runs every minute and automatically removes draining services with
+	# runningCount==0. No need to clean up during deployment.
 
 	# Verify DNS routing to the load balancer
 	domain_ready, domain_proxied = await _ensure_domain_routing(
@@ -1355,7 +1412,6 @@ async def deploy(
 		"alb_dns_name": baseline.alb_dns_name,
 		"drain_secret": drain.drain_secret,
 		"drained_count": str(len(drained)),
-		"cleaned_count": str(len(cleaned)),
 		"certificate_arn": cert_arn,
 		"domain_ready": str(domain_ready),
 		"domain_proxied": str(domain_proxied),
@@ -1375,6 +1431,8 @@ __all__ = [
 	"drain_previous_deployments",
 	"generate_deployment_id",
 	"install_listener_rules_and_switch_traffic",
+	"mark_previous_deployments_as_draining",
 	"register_task_definition",
+	"set_deployment_state",
 	"wait_for_healthy_targets",
 ]

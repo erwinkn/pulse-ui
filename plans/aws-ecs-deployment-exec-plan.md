@@ -19,14 +19,20 @@ After completing this work, a Pulse developer can push a new application version
 - [x] (2025-10-27) Implemented Phase 2.2: created deployment helpers in `pulse_aws/deployment.py` including `generate_deployment_id`, `build_and_push_image`, `register_task_definition`, `create_service_and_target_group`, and `install_listener_rules_and_switch_traffic`. All helpers are async-friendly, include proper error handling for duplicate deployments, and support the full ECS deployment workflow with header-based ALB routing for sticky sessions.
 - [x] (2025-10-27) Implemented Phase 2.3 & 2.4: added `drain_previous_deployments` helper that calls the /drain endpoint on all previous deployments using header-based affinity, waits for targets to become unhealthy (with configurable timeout), and tracks drain status. Added `cleanup_inactive_deployments` helper that finds services with 0 running tasks, scales them to 0, and deletes the ECS service, listener rule, and target group. Integrated both functions into deploy.py for zero-downtime deployments with automatic cleanup.
 - [x] (2025-10-27) Implemented stable drain secret caching at the script level: added `get_or_create_drain_secret()` function in deploy.py and verify.py that generates and caches drain secrets in `.pulse/<deployment_name>/secrets.json`. This keeps drain secret management as operational logic (script-level) rather than infrastructure logic (library-level). Added `.pulse/` to .gitignore to prevent committing secrets.
+- [x] (2025-10-28) Implemented Phase 1 of the reaper plan: added `set_deployment_state()` helper to write deployment state to SSM Parameter Store (`/apps/<deployment_name>/<deployment_id>/state`), added `mark_previous_deployments_as_draining()` to mark all previous deployments as "draining" in SSM and service tags, integrated state management into the deploy workflow so new deployments are marked as "active" and previous ones as "draining", and updated the baseline task role to grant SSM:GetParameter permissions for reading deployment state.
+- [x] (2025-10-28) Implemented Phase 2 of the reaper plan: updated `aws_minimal_server.py` to discover task ID from ECS metadata endpoint, poll SSM parameter state every N seconds (configurable via `DRAIN_POLL_SECONDS`), emit CloudWatch EMF metrics (`App/Drain:ShutdownReady` with dimensions `deployment_name`, `deployment_id`, `task_id`), and set `ShutdownReady=1` after a configurable grace period (`DRAIN_GRACE_SECONDS`) when marked as draining. Updated Dockerfile to install boto3 and requests, and updated `register_task_definition()` to pass `DEPLOYMENT_NAME` environment variable. Replaced deprecated FastAPI `on_event` with lifespan context manager.
+- [x] (2025-10-28) Implemented Phase 3 of the reaper plan: created Lambda function (`reaper_lambda.py`) that processes draining services, checks CloudWatch metrics for ShutdownReady=1, and cleans up inactive services. Integrated reaper into `BaselineStack` (instead of separate stack) via `_create_reaper()` method that creates Lambda, IAM role (ECS/ALB/CloudWatch permissions), and EventBridge schedule. Set MAX_AGE_HR to 1.0 hour to enable cleanup of older deployments without Phase 2 logic. Reaper runs every 1 minute (configurable) and enforces MIN_AGE (60s) and MAX_AGE (1 hour) backstops. Reaper is now permanent infrastructure deployed alongside VPC/ALB/ECS cluster.
+- [x] (2025-10-28) Fixed critical reaper bug: reaper was cleaning up ANY service with runningCount==0, including brand new services that were still spinning up. Updated both `reaper_lambda.py` and `deployment.py` cleanup functions to ONLY clean up services tagged with `state=draining`. Active services are now safe from premature cleanup. Bumped baseline version to 1.3.1.
+- [x] (2025-10-28) Refactored reaper_lambda.py to accept AWS clients as function parameters instead of using global variables, making it importable and testable. Updated deployment.py to import and reuse cleanup_inactive_services() from reaper_lambda.py, eliminating code duplication. The reaper remains a single self-contained file that can be inlined in the Lambda while also being importable for manual cleanup operations. Bumped baseline version to 1.3.2.
 
 ## Surprises & Discoveries
 
 - We can rely on CloudFormation to mint ACM certs at deploy time, so `BaselineStack` now only needs domain names (the ARN path remains available for bring-your-own certs).
 - ACM's CloudFormation resource doesn't surface DNS validation records directly, so we introduced a lightweight `AwsCustomResource` that calls `DescribeCertificate` after creation and publishes the required CNAMEs via `CertificateValidationRecords` output.
 - Terminology has been standardized throughout the codebase: `deployment_name` is used consistently to refer to the stable environment identifier (e.g., `"prod"`, `"dev"`), avoiding confusion between the environment slug and the per-version deployment ID.
-- Naming convention: deployment IDs use the pattern `{deployment_name}-{timestamp}` (e.g., `prod-20251027-183000Z`) with no "pulse-" prefix, keeping resource names clean and organization-specific.
+- Naming convention: `deployment_name` is a stable identifier (e.g., `prod`, `myapp`) and `deployment_id` is just the timestamp+hash (e.g., `20251027-183000Z`). Resources combine them as needed (e.g., service `svc-{deployment_name}-{deployment_id}`), avoiding redundancy in hierarchical structures like SSM parameters.
 - The drain secret is shared across all deployments in an environment, allowing new deployments to drain old ones. This simplifies the workflow since we don't need to persist per-deployment secrets. The deploy script generates a new secret for each deployment and uses it to drain previous deployments before they scale down.
+- The reaper must ONLY clean up services tagged with `state=draining`, not all services with `runningCount==0`. New services take time to spin up their first task, and cleaning them up prematurely causes deployment failures. This was a critical bug caught during testing.
 
 ## Decision Log
 
@@ -75,7 +81,7 @@ Goal: Prove the full ECS deployment path (build → push → task definition →
 **2.2 Baseline-driven deploy helpers (non-Pulse)**  
 Implement new helpers in `packages/pulse-aws/src/pulse_aws/helpers.py`:
 
-- `generate_deployment_id(deployment_name: str) -> str`: timestamped ID (e.g., `pulse-prod-20251027-183000Z`).
+- `generate_deployment_id() -> str`: timestamped ID (e.g., `20251027-183000Z`).
 - `build_and_push_image(dockerfile_path: Path, deployment_id: str, baseline: BaselineOutputs) -> str`: builds and pushes to the baseline ECR repo with the deployment ID as the tag.
 - `register_task_definition(image_uri: str, deployment_id: str, baseline: BaselineOutputs) -> str`: Fargate task def with container env `DEPLOYMENT_ID` and port 8000.
 - `create_service_and_target_group(deployment_name: str, deployment_id: str, task_def_arn: str, baseline: BaselineOutputs) -> tuple[str, str]`: creates a dedicated target group and ECS service for this ID.
@@ -167,7 +173,7 @@ Rather than asking every team to provision networking/ALB/ECS ahead of time, `py
 
 Because the stack name is deterministic, rerunning `python deploy.py` only updates resources whose definitions change—CloudFormation provides idempotence, rollback, and drift detection. The script reads the CloudFormation outputs (listener ARN, subnet IDs, security groups, cluster name, log group, ECR repo URL) and passes them directly into the helper functions. For teams who prefer to manage infrastructure separately, we will still publish an equivalent Terraform package once the CDK path is solid; consuming it will simply mean disabling the auto-provision step and supplying the outputs manually.
 
-The ALB portion of the CDK stack exposes listener ARNs and security groups but leaves per-version routing up to the deployment helpers; `AWSECS` will create (and later delete) header-based rules of the form `X-Pulse-Render-Version = v124` that forward directly to the matching target group.
+The ALB portion of the CDK stack exposes listener ARNs and security groups but leaves per-version routing up to the deployment helpers; `AWSECS` will create (and later delete) header-based rules of the form `X-Pulse-Render-Affinity = 20251027-183000Z` that forward directly to the matching target group.
 
 ### GitHub Actions deployment workflow
 
@@ -216,7 +222,7 @@ The workflow delegates all environment-specific knowledge to the `AWSECS` deploy
 
 ### Header-based RenderSession affinity
 
-Pulse cannot rely on ALB cookies because they are shared across browser tabs. Instead, the JavaScript runtime tracks affinity per RenderSession (and therefore per tab). During the first render handshake, the server returns `app.version` and a `render_session_affinity` token. The client stores this data in `sessionStorage` (scoped to the tab) and includes it on every HTTP/WebSocket request via a custom header (e.g., `X-Pulse-Render-Version`) and Socket.IO query param. `AWSECS.deploy` installs one listener rule per active version that matches this header value and forwards traffic to that version’s dedicated target group, ensuring reconnects for that tab keep hitting the original service even after newer versions ship. The listener’s default action (no header present) uses weighted forwarding so that any tab without an affinity token – i.e., a fresh tab – lands on the newest deployment automatically. This mirrors how static assets behave on the web: old tabs continue running old JavaScript, while new tabs immediately receive upgraded code.
+Pulse cannot rely on ALB cookies because they are shared across browser tabs. Instead, the JavaScript runtime tracks affinity per RenderSession (and therefore per tab). During the first render handshake, the server returns the `deployment_id` and a `render_session_affinity` token. The client stores this data in `sessionStorage` (scoped to the tab) and includes it on every HTTP/WebSocket request via a custom header (e.g., `X-Pulse-Render-Affinity: 20251027-183000Z`) and Socket.IO query param. The deployment process installs one listener rule per active deployment that matches this header value and forwards traffic to that deployment's dedicated target group, ensuring reconnects for that tab keep hitting the original service even after newer deployments ship. The listener's default action (no header present) uses weighted forwarding so that any tab without an affinity token – i.e., a fresh tab – lands on the newest deployment automatically. This mirrors how static assets behave on the web: old tabs continue running old JavaScript, while new tabs immediately receive upgraded code.
 
 ## Concrete Steps
 
@@ -246,7 +252,7 @@ Deploy a new version by loading the app and letting the deployment helpers drive
 
 Verify the rollout via AWS CLI once the script returns:
 
-    aws ecs describe-services --cluster pulse-prod --services pulse-app-v124
+    aws ecs describe-services --cluster pulse-prod --services svc-prod-20251027-183000Z
     aws elbv2 describe-listeners --listener-arns arn:aws:elasticloadbalancing:...
 
 Guard the codebase with the standard quality bar:
@@ -263,7 +269,7 @@ Infrastructure validation (AWS) requires confirming that the `pulse-<env>-baseli
 
 Deployment validation is a single script invocation: `python deploy.py --deployment pulse-prod --app examples/aws_ecs_app.py`. Success is demonstrated by AWS CLI output that shows the new ECS service in steady state, ALB listener weights pointing at the new version, and CloudWatch Logs receiving stdout/stderr from the running tasks. Sticky sessions should keep existing browser tabs on their original version even after the new rollout completes.
 
-Drain validation consists of calling the deployment-provided drain endpoint (via a simple `curl -X POST -H "Authorization: Bearer <token>" https://<alb>/_pulse/admin/drain`) and repeatedly checking `/_pulse/health` until it responds with HTTP 503 and `{"version":"v124","draining":true}`. ECS should then scale the drained service down automatically.
+Drain validation consists of calling the deployment-provided drain endpoint (via a simple `curl -X POST -H "Authorization: Bearer <token>" https://<alb>/_pulse/admin/drain`) and repeatedly checking `/_pulse/health` until it responds with HTTP 503 and `{"version":"20251027-183000Z","draining":true}`. ECS should then scale the drained service down automatically.
 
 Teardown validation runs `python deploy.py --deployment pulse-dev --teardown --force` after ensuring no services remain, then checks that the CloudFormation stack disappears and cached `.pulse/` outputs are removed.
 
@@ -279,7 +285,7 @@ Record evidence snippets here as work progresses. Examples to capture:
 
     $ curl -s https://pulse.example.com/_pulse/health | jq
     {
-      "version": "v124",
+      "version": "20251027-183000Z",
       "status": "draining"
     }
 
@@ -289,13 +295,13 @@ Record evidence snippets here as work progresses. Examples to capture:
     }
 
     $ python deploy.py --deployment pulse-prod --app examples/aws_ecs_app.py
-    -> Building docker/aws-ecs/Dockerfile as 123456789012.dkr.ecr.us-east-1.amazonaws.com/pulse-app:v125
+    -> Building docker/aws-ecs/Dockerfile as 123456789012.dkr.ecr.us-east-1.amazonaws.com/pulse-app:20251027-183000Z
     -> Pushing image...
-    -> Creating target group pulse-prod-v125
-    -> Updating listener arn:aws:elasticloadbalancing:... weights (v125=100, v124=0)
-    -> Service pulse-app-v125 reached steady state
+    -> Creating target group tg-prod-20251027-183000Z
+    -> Updating listener arn:aws:elasticloadbalancing:... weights (20251027-183000Z=100, 20251027-120000Z=0)
+    -> Service svc-prod-20251027-183000Z reached steady state
 
-    $ aws ecs describe-services --cluster pulse-prod --services pulse-app-v125 | jq '.services[0].events[0]'
+    $ aws ecs describe-services --cluster pulse-prod --services svc-prod-20251027-183000Z | jq '.services[0].events[0]'
     {
       "message": "steady state reached",
       "createdAt": "2025-10-24T22:10:14Z"

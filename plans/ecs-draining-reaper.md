@@ -1,399 +1,370 @@
-# ECS Draining + Reaper — Implementation Plan
+# ECS Draining + Reaper — Implementation plan
 
-## 0) Goals (what this delivers)
+## Phase 1 — Deployment script sets SSM params ✅
 
-* Allow **multiple deployments** to run concurrently.
-* New traffic (no affinity header) always goes to the **newest deployment**.
-* Older deployments are **marked “draining”** by CI.
-* Each task **knows** it’s draining (shorten TTL, stop minting cookies).
-* A small **Lambda reaper** periodically retires drained deployments once they hit **zero traffic/sessions**, and cleans up LB/TG cruft.
-* Guardrails: **max lifetime** and **max history** of old deployments.
+### What this phase delivers
 
----
+- For each deployment, writes `/apps/<deployment_name>/<deployment_id>/state` in **SSM Parameter Store** to `active` for the new deployment and `draining` for all previous ones.
+- (Optional but recommended) Tag ECS services: `deployment_name`, `deployment_id`, `state`.
 
-## 1) Architecture (high level)
+**Status: ✅ Complete** (2025-10-28)
 
-* **One ECS Service per deployment**
-  Naming: `svc-<app>-<deploy_id>`
-* **One Target Group per service**
-  Naming: `tg-<app>-<deploy_id>`
-* **ALB Listener** routes:
+### Inputs
 
-  * No affinity header → newest TG (weight 100)
-  * With affinity header → routed by your ALB logic to the correct TG
-* **State signal:** SSM Parameter per deployment
-  `/apps/<app>/<deploy_id>/state = active|draining`
-* **CI**:
+- `deployment_name` (e.g., `myapp`, `prod`) — stable environment identifier
+- `deployment_id` (e.g., `20251028-183000-abc1234`) — unique timestamp + hash (no deployment_name prefix)
+- `REGION`, `ACCOUNT_ID`
+- ECS cluster/service naming: `svc-<deployment_name>-<deployment_id>`
 
-  * Creates new service/TG, points listener weights to it
-  * Marks all older deployments `draining` (SSM + ECS tag)
-* **Lambda reaper (EventBridge 5 min)**:
+### Example Script (Python) — idempotent
 
-  * Lists services tagged `state=draining`
-  * Checks “zero activity” for their TG (or app metric)
-  * Scales to 0 → deletes service/TG/listener rule
-  * Enforces max lifetime and “keep last N” cap
-
----
-
-## 2) Naming, tags & conventions
-
-* `deploy_id`: monotonically increasing unique id (e.g., `YYYYMMDD-HHMM-<sha7>`)
-* ECS Service: `svc-<app>-<deploy_id>`
-* TG: `tg-<app>-<deploy_id>`
-* ECS tags:
-
-  * `app=<app>`
-  * `deploy_id=<deploy_id>`
-  * `state=active|draining`
-* SSM parameter: `/apps/<app>/<deploy_id>/state`
-
----
-
-## 3) IAM (scoped)
-
-### Task Role (app containers)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": ["ssm:GetParameter"],
-    "Resource": "arn:aws:ssm:<region>:<acct>:parameter/apps/<app>/*"
-  }]
-}
-```
-
-### CI Role
-
-* `ecs:*` (Create/Update/Delete service; Describe; Tag)
-* `elasticloadbalancing:*` (TG create/attach; listener rules modify)
-* `ssm:PutParameter`
-* Scope to ARNs for your cluster, ALB, and parameter path.
-
-### Reaper Lambda Role
-
-* ECS: `ListServices`, `DescribeServices`, `ListTagsForResource`, `UpdateService`, `DeleteService`
-* ELBv2: `Describe*`, `ModifyListener`, `DeleteTargetGroup`, `DeregisterTargets`
-* CloudWatch: `GetMetricData`
-* (Optional) `tag:GetResources` if you discover via Tagging API
-
----
-
-## 4) CI/CD pipeline changes (GitHub Actions example)
-
-```yaml
-name: deploy
-on: [push]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: eu-west-1
-          role-to-assume: arn:aws:iam::<acct>:role/gha-deployer
-      - name: Build & push image
-        run: |
-          # build/push image...
-      - name: Create TG & Service for new deployment
-        run: |
-          APP=myapp
-          DEPLOY_ID=$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}
-          CLUSTER=mycluster
-          ALB_ARN=<alb-arn>
-          LISTENER_ARN=<listener-arn>
-          VPC_ID=<vpc-id>
-
-          # Create TG
-          TG_ARN=$(aws elbv2 create-target-group \
-            --name tg-${APP}-${DEPLOY_ID} \
-            --protocol HTTP --port 80 \
-            --vpc-id ${VPC_ID} \
-            --target-type ip \
-            --query 'TargetGroups[0].TargetGroupArn' --output text)
-
-          # Create/Update ECS Service
-          aws ecs create-service \
-            --cluster ${CLUSTER} \
-            --service-name svc-${APP}-${DEPLOY_ID} \
-            --task-definition ${APP} \
-            --desired-count 3 \
-            --load-balancers targetGroupArn=${TG_ARN},containerName=${APP},containerPort=80 \
-            --tags key=app,value=${APP} key=deploy_id,value=${DEPLOY_ID} key=state,value=active
-
-          # Listener rule for newest (no-affinity path, or weight to newest)
-          # (Implement your header-based routing here; example below sets weight 100 to newest)
-          # aws elbv2 modify-listener --listener-arn ${LISTENER_ARN} --default-actions ...
-          
-          # SSM param for new deployment = active
-          aws ssm put-parameter \
-            --name "/apps/${APP}/${DEPLOY_ID}/state" \
-            --type String --overwrite --value "active"
-
-          echo "APP=${APP}" >> $GITHUB_ENV
-          echo "DEPLOY_ID=${DEPLOY_ID}" >> $GITHUB_ENV
-      - name: Mark all previous deployments draining
-        run: |
-          APP=${APP}
-          CLUSTER=mycluster
-
-          NEW_SVC=svc-${APP}-${DEPLOY_ID}
-          # tag older ECS services as draining
-          aws ecs list-services --cluster ${CLUSTER} --query 'serviceArns[]' --output text | tr '\t' '\n' | while read -r ARN; do
-            NAME=${ARN##*/}
-            if [[ "$NAME" == svc-${APP}-* && "$NAME" != "$NEW_SVC" ]]; then
-              aws ecs tag-resource --resource-arn "$ARN" --tags Key=state,Value=draining
-              OLD_DEPLOY_ID=${NAME#svc-${APP}-}
-              aws ssm put-parameter \
-                --name "/apps/${APP}/${OLD_DEPLOY_ID}/state" \
-                --type String --overwrite --value "draining"
-            fi
-          done
-```
-
-> Implement your ALB listener rules to:
->
-> 1. Route new, non-affinity traffic to **TG of `DEPLOY_ID`** (weight 100).
-> 2. Keep header/cookie routing for stickiness per your app.
-
----
-
-## 5) App integration (drain-aware behavior)
-
-### Task Definition env vars
-
-* `APP_NAME=<app>`
-* `DEPLOY_ID=<deploy_id>`
-* `DRAIN_PARAM=/apps/<app>/<deploy_id>/state`
-* (Optional) `DRAIN_POLL_SECONDS=60`
-
-### Minimal polling (Node.js)
-
-```js
-import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
-
-const ssm = new SSMClient({});
-const PARAM = process.env.DRAIN_PARAM;
-const POLL_MS = (process.env.DRAIN_POLL_SECONDS ? Number(process.env.DRAIN_POLL_SECONDS) : 60) * 1000;
-
-let draining = false;
-
-async function refreshDrainFlag() {
-  try {
-    const out = await ssm.send(new GetParameterCommand({ Name: PARAM }));
-    const v = out.Parameter?.Value;
-    draining = (v === "draining");
-  } catch (_) {}
-}
-setInterval(refreshDrainFlag, POLL_MS);
-refreshDrainFlag();
-
-// hooks
-export function shouldMintAffinity() { return !draining; }
-export function sessionTtlSeconds() { return draining ? 300 : 3600; } // tune as needed
-export function requestHeadersAdjust(res) {
-  if (draining) res.setHeader("Connection", "close");
-}
-```
-
-> Keep health checks **passing** while draining so ECS doesn’t restart tasks.
-
----
-
-## 6) Reaper Lambda (EventBridge: rate 5 minutes)
-
-### Logic
-
-1. List ECS services with `tag state=draining AND tag app=<app>`.
-2. For each:
-
-   * Find its Target Group ARN (from service LB config).
-   * Query CloudWatch **ApplicationELB** metrics on that TG:
-
-     * `RequestCount` (Sum) == 0
-     * `ActiveConnectionCount` (Max or Average) == 0
-     * For **N consecutive periods** (e.g., 3×5m).
-   * Check **min age** (e.g., >= 1 hour since deployment) and **max lifetime** backstop (e.g., 48h).
-3. If empty & age-ok:
-
-   * `UpdateService(desiredCount=0)`
-   * Wait until running tasks == 0
-   * Remove listener rule/backend reference
-   * `DeleteTargetGroup`
-   * `DeleteService`
-
-### Handler (Python, abridged)
+In practice, integrate the logic into the existing code.
 
 ```python
-import os, time, boto3, datetime as dt
+# phase1_set_ssm.py
+import boto3, os, re
 
-ecs = boto3.client('ecs'); elb = boto3.client('elbv2'); cw = boto3.client('cloudwatch')
+REGION          = os.environ.get("AWS_REGION", "eu-west-1")
+CLUSTER         = os.environ["CLUSTER"]
+DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
+DEPLOYMENT_ID   = os.environ["DEPLOYMENT_ID"]
 
-CLUSTER = os.environ['CLUSTER']
-CONSEC = int(os.environ.get('CONSEC', '3'))
-PERIOD = int(os.environ.get('PERIOD', '300'))  # 5m
-MIN_AGE_MIN = int(os.environ.get('MIN_AGE_MIN', '60'))
-MAX_AGE_HR = int(os.environ.get('MAX_AGE_HR', '48'))
+ecs = boto3.client("ecs", region_name=REGION)
+ssm = boto3.client("ssm", region_name=REGION)
 
-def zero_traffic(tg_arn):
-    end = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
-    start = end - dt.timedelta(seconds=PERIOD*CONSEC)
-    def q(metric, stat):
-        resp = cw.get_metric_statistics(
-            Namespace='AWS/ApplicationELB',
-            MetricName=metric,
-            Dimensions=[{'Name':'TargetGroup','Value':tg_arn.split('/')[-1]},
-                        {'Name':'LoadBalancer','Value':'*'}],  # LB dim can be wildcarded via GetMetricData in prod
-            StartTime=start, EndTime=end, Period=PERIOD, Statistics=[stat]
-        )
-        # build per-period values; if any missing treat as 0
-        vals = [p['Sum' if stat=='Sum' else stat] for p in sorted(resp['Datapoints'], key=lambda x: x['Timestamp'])]
-        return vals + [0]*(CONSEC-len(vals))
-    reqs = q('RequestCount','Sum')
-    conns = q('ActiveConnectionCount','Average')
-    return all(v == 0 for v in reqs[-CONSEC:]) and all(v == 0 for v in conns[-CONSEC:])
+def put_state(deployment_id, state):
+    ssm.put_parameter(
+        Name=f"/apps/{DEPLOYMENT_NAME}/{deployment_id}/state",
+        Value=state,
+        Type="String",
+        Overwrite=True,
+    )
 
-def service_age_minutes(svc):
-    created = svc.get('createdAt') or svc.get('createdAt', dt.datetime.utcnow())
-    return (dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc) - created).total_seconds() / 60
+# 1) Mark new deployment active
+put_state(DEPLOYMENT_ID, "active")
 
-def handler(event, context):
-    arns = ecs.list_services(cluster=CLUSTER)['serviceArns']
-    if not arns: return
-    # could use Tagging API; for brevity, Describe + filter
-    for batch in [arns[i:i+10] for i in range(0,len(arns),10)]:
-        desc = ecs.describe_services(cluster=CLUSTER, services=batch)['services']
-        for svc in desc:
-            tags = ecs.list_tags_for_resource(resourceArn=svc['serviceArn']).get('tags', [])
-            tagmap = {t['key']: t['value'] for t in tags}
-            if tagmap.get('state') != 'draining': continue
-
-            if service_age_minutes(svc) < MIN_AGE_MIN: continue
-            # backstop by deployment time tag if you add one; omitted for brevity
-            tg_arn = svc['loadBalancers'][0]['targetGroupArn']
-
-            if zero_traffic(tg_arn):
-                # scale down
-                ecs.update_service(cluster=CLUSTER, service=svc['serviceName'], desiredCount=0)
-                # wait
-                while True:
-                    cur = ecs.describe_services(cluster=CLUSTER, services=[svc['serviceName']])['services'][0]
-                    if cur['runningCount'] == 0: break
-                    time.sleep(15)
-                # TODO: remove listener rule(s) referencing tg_arn here
-                elb.delete_target_group(TargetGroupArn=tg_arn)
-                ecs.delete_service(cluster=CLUSTER, service=svc['serviceName'], force=True)
+# 2) Flip older services of this deployment_name to draining
+arns = ecs.list_services(cluster=CLUSTER)["serviceArns"]
+for i in range(0, len(arns), 10):
+    desc = ecs.describe_services(cluster=CLUSTER, services=arns[i:i+10])["services"]
+    for svc in desc:
+        name = svc["serviceName"]
+        # Services are named svc-{deployment_name}-{deployment_id}
+        if not name.startswith(f"svc-{DEPLOYMENT_NAME}-"):
+            continue
+        old_deployment_id = name.split(f"svc-{DEPLOYMENT_NAME}-", 1)[1]
+        if old_deployment_id == DEPLOYMENT_ID:
+            # keep active tag on the newest
+            ecs.tag_resource(resourceArn=svc["serviceArn"], tags=[
+                {"key":"deployment_name","value":DEPLOYMENT_NAME},
+                {"key":"deployment_id","value":DEPLOYMENT_ID},
+                {"key":"state","value":"active"},
+            ])
+            continue
+        put_state(old_deployment_id, "draining")
+        ecs.tag_resource(resourceArn=svc["serviceArn"], tags=[{"key":"state","value":"draining"}])
 ```
 
-> Productionize: switch to `GetMetricData` with explicit LB dimension, handle multiple LB entries, and delete/modify listener rules before deleting the TG.
+**IAM needed for the deployer**
 
-### EventBridge rule
-
-* `rate(5 minutes)`
-* Environment vars: `CLUSTER`, `CONSEC=3`, `PERIOD=300`, `MIN_AGE_MIN=60`, `MAX_AGE_HR=48`
+- `ssm:PutParameter` on `arn:aws:ssm:<region>:<acct>:parameter/apps/<deployment_name>/*`
+- `ecs:ListServices`, `ecs:DescribeServices`, `ecs:TagResource` on your cluster resources
 
 ---
 
-## 7) ALB Listener & rules
+## Phase 2 — App changes: poll SSM + emit EMF "ShutdownReady" ✅
 
-* Keep a rule (or the default action) that:
+**Status: ✅ Complete** (2025-10-28)
 
-  * Sends **new traffic** (no affinity header) to the **newest TG** with weight 100.
-* Keep header/cookie routing for sticky users to the correct TG.
-* When retiring a deployment, the reaper must:
+### Behavior
 
-  * Remove any rule/action entries referencing its TG **before** deleting the TG.
+- On startup, discover **task ID** from ECS metadata endpoint (`ECS_CONTAINER_METADATA_URI_V4`).
+- Each task polls its **own** param `/apps/<deployment_name>/<deployment_id>/state` every N seconds (configurable).
+- When it first sees `draining`, start a grace timer; when timer expires, emit `ShutdownReady=1`.
+  Until then, emit `ShutdownReady=0`.
+- Emit EMF with dimensions: `deployment_name`, `deployment_id`, **`task_id`** (unique per running task).
+- Keep health checks **passing** (ECS must not restart it).
 
-> Implementation detail depends on your current ALB rule set. Prefer deterministic priorities (e.g., priority = epoch of deploy) so cleanup is easy.
+### Environment variables to add to the **task definition**
+
+- `DEPLOYMENT_NAME` = `<deployment_name>` (e.g., `myapp`, `prod`)
+- `DEPLOYMENT_ID` = `<deployment_id>` (e.g., `20251028-183000-abc1234`)
+- `DRAIN_PARAM` = `/apps/<deployment_name>/<deployment_id>/state`
+- `ECS_CONTAINER_METADATA_URI_V4` = _auto-provided by ECS_
+- (Optional) `DRAIN_POLL_SECONDS` = `5` (for testing; production: `5-15`)
+- (Optional) `DRAIN_GRACE_SECONDS` = `20` (for testing; production: `30-120`)
+
+### Task Role policy (CloudFormation)
+
+```yaml
+AppTaskRolePolicy:
+  Type: AWS::IAM::Policy
+  Properties:
+    PolicyName: !Sub "${DeploymentName}-drain-ssm-read"
+    Roles: [!Ref AppTaskRole] # your existing task role
+    PolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Action: ["ssm:GetParameter"]
+          Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/apps/${DeploymentName}/*"
+```
+
+### Example Python helper (drop-in module)
+
+In practice, integrate the logic into the existing code.
+
+```python
+# drain_flag.py
+import os, time, json, threading, requests
+import boto3
+from datetime import datetime
+
+PARAM = os.environ["DRAIN_PARAM"]
+POLL = int(os.getenv("DRAIN_POLL_SECONDS", "5"))
+GRACE = int(os.getenv("DRAIN_GRACE_SECONDS", "30"))
+
+# Discover task ID from ECS metadata endpoint
+def _get_task_id():
+    meta_uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
+    if meta_uri:
+        task_resp = requests.get(f"{meta_uri}/task", timeout=2).json()
+        task_arn = task_resp["TaskARN"]
+        return task_arn.split("/")[-1]  # extract task ID from ARN
+    return os.getenv("TASK_ID", "unknown")  # fallback
+
+TASK_ID = _get_task_id()
+
+ssm = boto3.client("ssm")
+draining = False
+t0 = None  # when draining first observed
+shutdown_ready = 0
+
+def _emit_emf(shutdown_ready_value: int):
+    # Embedded Metric Format single-line JSON to stdout
+    payload = {
+        "_aws": {
+            "Timestamp": int(datetime.utcnow().timestamp()*1000),
+            "CloudWatchMetrics": [{
+                "Namespace": "App/Drain",
+                "Dimensions": [["deployment_name","deployment_id","task_id"]],
+                "Metrics": [{"Name": "ShutdownReady", "Unit": "Count"}]
+            }]
+        },
+        "deployment_name": os.environ["DEPLOYMENT_NAME"],
+        "deployment_id": os.environ["DEPLOYMENT_ID"],
+        "task_id": TASK_ID,
+        "ShutdownReady": shutdown_ready_value
+    }
+    print(json.dumps(payload), flush=True)
+
+def _poll():
+    global draining, t0, shutdown_ready
+    while True:
+        try:
+            v = ssm.get_parameter(Name=PARAM)["Parameter"]["Value"]
+            now = time.time()
+            if v == "draining":
+                if not draining:
+                    draining = True
+                    t0 = now
+                # after GRACE seconds of draining, signal ready
+                shutdown_ready = 1 if (now - t0) >= GRACE else 0
+            else:
+                draining = False
+                t0 = None
+                shutdown_ready = 0
+            _emit_emf(shutdown_ready)
+        except Exception:
+            # best-effort; keep previous state
+            pass
+        time.sleep(POLL)
+
+def start_background_polling():
+    threading.Thread(target=_poll, daemon=True).start()
+
+def is_draining() -> bool:
+    return draining
+
+def is_shutdown_ready() -> bool:
+    return shutdown_ready == 1
+```
+
+**Use in your app startup**
+
+```python
+from drain_flag import start_background_polling, is_draining, is_shutdown_ready
+start_background_polling()
+
+# in request path/policy:
+# - stop minting new affinity cookies when is_draining()
+# - optionally shorten TTLs
+```
+
+> EMF goes via stdout to CloudWatch Logs; CloudWatch auto-creates metric `App/Drain:ShutdownReady{deployment_name=myapp,deployment_id=20251028-183000-abc1234,task_id=<tid>}` **per task**.
 
 ---
 
-## 8) Observability
+## Phase 3 — Reaper (Lambda + EventBridge, via CDK) ✅
 
-* **CloudWatch Dash**:
+**Status: ✅ Complete** (2025-10-28)
 
-  * Per TG: `RequestCount`, `ActiveConnectionCount`
-  * Reaper logs (success/decisions)
-* **(Optional) EMF Metric from app**: `App/Session ActiveSessions{app,deploy_id}` once/min
-  Switch the reaper to use this for precise session emptiness.
+### Behavior
 
----
+- Every N minutes (configurable; 1 minute for testing, 5 minutes for production):
 
-## 9) Guardrails
+  1. Enumerate **ECS services** tagged `state=draining` (and `deployment_name=<name>` if set).
+  2. For each draining service:
 
-* **Max lifetime**: reaper force-retires any draining deployment older than 48h.
-* **Max history**: keep only last N (e.g., 10) draining deployments per app.
-* **Idempotent cleanup**: TG/Rules may already be partially removed—handle “NotFound” gracefully.
+     - List all **running tasks** (`ListTasks` + `DescribeTasks` → extract `task_id`s).
+     - For **each task**, read **CloudWatch metric**
+       `Namespace=App/Drain, MetricName=ShutdownReady, Dimensions={deployment_name,deployment_id,task_id}`
+     - If **ALL tasks** report `ShutdownReady == 1` for K consecutive periods OR service has `runningCount==0`, **mark for cleanup**:
 
----
+       - `UpdateService(desiredCount=0)` (if not already 0)
+       - **Continue immediately** — don't wait for tasks to drain
 
-## 10) Testing plan
+  3. Clean up **any service** with `runningCount==0` (regardless of draining state):
 
-1. **Unit-test app drain flag**
+     - Delete ALB listener rules referencing its TG
+     - Delete TG
+     - `DeleteService(force=True)`
 
-   * Flip SSM param; verify `shouldMintAffinity()` changes within 60–120s.
-2. **Deploy two versions**
+  4. Backstops:
 
-   * Generate traffic with/without affinity header.
-   * Mark old as draining; observe TTL reduction and no new cookies.
-3. **Reaper dry-run**
+     - **MinAge** (e.g., don't retire in the first 2 minutes)
+     - **MaxLifetime** (force retire after X hours even if metric never flips; **set to 1 hour** for testing old deployments)
 
-   * Run reaper in “log-only” mode (no deletes). Confirm it identifies zero-traffic TGs correctly.
-4. **Full retire**
+### CDK Implementation (permanent infra)
 
-   * Enable deletes; verify service scales to 0, TG removed, rules cleaned, app remains healthy while draining.
-5. **Backstop**
+Implemented in `packages/pulse-aws/src/pulse_aws/`:
 
-   * Leave a draining deployment with trickle traffic; confirm it remains.
-   * After max lifetime, confirm forced retirement.
+- **`reaper_lambda.py`** - Lambda handler code with all reaper logic
+- **`cdk/baseline.py`** - Reaper is now part of the `BaselineStack` (created in `_create_reaper()` method):
+  - Lambda function with Python 3.12 runtime
+  - IAM role with ECS, ALB, and CloudWatch permissions
+  - EventBridge rule for scheduled invocation
 
----
+**Why part of baseline?** The reaper is permanent infrastructure needed for the deployment environment to function properly, so it makes sense to deploy it alongside the VPC, ALB, and ECS cluster rather than as a separate stack.
 
-## 11) Rollout
+**Environment variables** (set via CDK):
 
-* Ship **app polling** first (no reaper).
-* Update **CI** to write SSM + tag ECS.
-* Validate manual retire procedure.
-* Deploy **reaper** in log-only; inspect decisions for a day.
-* Enable retire actions (scale→delete).
-* Add alarms on Lambda errors and ALB metric anomalies.
+- `CLUSTER` - ECS cluster name (from baseline)
+- `DEPLOYMENT_NAME` - Deployment environment name
+- `LISTENER_ARN` - ALB listener ARN (from baseline)
+- `CONSEC: "2"` - consecutive periods with ShutdownReady==1 (testing: 2; production: 3)
+- `PERIOD: "60"` - period duration in seconds (testing: 60s; production: 300s)
+- `MIN_AGE_SEC: "60"` - min service age before retirement (testing: 60s; production: 120s)
+- `MAX_AGE_HR: "1.0"` - **max age in hours (1 hour for testing old deployments; production: 48)**
 
----
-
-## 12) Costs (ballpark, very low)
-
-* **SSM Parameter reads**: one per task per minute → pennies/month.
-* **CloudWatch GetMetricData** every 5 min → pennies/month.
-* **Lambda**: a few seconds every 5 min → pennies/month.
-* **Logs**: minimal if you keep them lean.
+**Schedule**: Every 1 minute for testing (configurable, 5 minutes for production)
 
 ---
 
-## 13) Nice-to-haves (later)
+## Testing (via deployment script; no unit tests)
 
-* Replace ALB metric heuristic with **app EMF `ActiveSessions`**.
-* Emit **deployment_started_at** tag; reaper uses it for age math.
-* Terraform modules for:
+### Testing Configuration
 
-  * Service+TG+Rule creation
-  * Reaper (Lambda, IAM, EventBridge)
-* Canary tests to validate stickiness per deployment.
+Use shorter timeouts for faster iteration:
+
+- `DRAIN_POLL_SECONDS` = 30 (task polls SSM every 30s)
+- `DRAIN_GRACE_SECONDS` = 20 (20s from draining → ShutdownReady)
+- Reaper schedule = 1 minute
+- `PERIOD` = 60 (1-minute CloudWatch periods)
+- `CONSEC` = 2 (2 consecutive periods = 2 minutes)
+- `MIN_AGE_SEC` = 60 (services must be at least 1 minute old)
+
+### Phase 1: Test with ShutdownReady logic
+
+1. **Deploy version A**
+
+   - Run `packages/pulse-aws/scripts/deploy.py` once
+   - Verify service `svc-test-<deployment_id>` is created and healthy
+   - Verify EMF metric `App/Drain:ShutdownReady{deployment_name=test,deployment_id=<id>,task_id=<tid>}` exists for each task and shows `0`
+
+2. **Deploy version B**
+
+   - Run `deploy.py` again (new deployment_id)
+   - Observe that version A is tagged `state=draining`
+   - Within ~20s, verify EMF shows `1` for **all task IDs** of version A
+
+3. **Watch reaper clean up A**
+
+   - Reaper runs every 1 minute
+   - After 2 consecutive periods (2 minutes), reaper sets A's `desiredCount=0`
+   - Next reaper run (1 minute later) sees `runningCount==0` and cleans up:
+     - Deletes ALB listener rules
+     - Deletes target group
+     - Deletes ECS service
+   - Total time: ~3-4 minutes from deployment B → cleanup of A
+
+4. **Deploy version C and verify**
+
+   - Run `deploy.py` again
+   - Verify B is drained and cleaned up within ~3-4 minutes
+   - Verify C is active and healthy
+
+### Phase 2: Test MAX_AGE forced cleanup
+
+**Configuration for 1 hour MAX_AGE**:
+
+- `MAX_AGE_HR` = `1.0` (1 hour)
+- Old deployments without Phase 2 logic won't emit `ShutdownReady=1`
+
+1. **Initial state**
+
+   - You have older deployments (without Phase 2 SSM polling) running
+   - These deployments are marked `state=draining` when new deployment happens
+   - They won't emit `ShutdownReady=1` because they don't have the polling logic
+
+2. **Deploy a new version**
+
+   - Run `deploy.py` once (this marks old deployments as draining)
+   - Old deployments are now tagged `state=draining`
+
+3. **Verify forced cleanup**
+
+   - Wait for deployments to reach 1 hour age
+   - Reaper should force-retire them via `MAX_AGE_HR` backstop
+   - Even without `ShutdownReady=1`, services get cleaned up after 1 hour
+   - Check CloudWatch Logs for reaper invocations showing "MAX_AGE exceeded"
+
+4. **Monitor progress**
+
+   - Every 1 minute, reaper checks ages
+   - When deployment age >= 1 hour, sets `desiredCount=0`
+   - Next reaper run (1 minute later) sees `runningCount==0` and cleans up
+
+### Success Criteria
+
+- ✅ Multiple deploys work correctly
+- ✅ Old deployments are tagged `state=draining`
+- ✅ Tasks emit `ShutdownReady=1` after grace period
+- ✅ Reaper sets `desiredCount=0` when all tasks ready
+- ✅ Reaper cleans up services with `runningCount==0`
+- ✅ No dangling target groups or listener rules
+- ✅ MAX_AGE backstop works without ShutdownReady
 
 ---
 
-## 14) Acceptance criteria
+## Notes & gotchas
 
-* When a new deployment is live:
-
-  * CI sets `/apps/<app>/<deploy_id>/state=active` (new), and flips all previous to `draining`.
-  * Old tasks read `draining=true` within ≤120s; stop minting new affinity cookies; TTL shortens.
-  * Reaper retires an old deployment within ≤20 min of last request (given `3×5m` config).
-  * No replacement/restarts of retired services.
-  * ALB has **no** dangling rules/TGs for retired deployments.
+- **Per-task metrics**: Each running task emits its own `ShutdownReady` with a unique `task_id` dimension. The reaper checks **all** tasks.
+- **Task ID discovery**: Tasks discover their ID from the ECS metadata endpoint (`ECS_CONTAINER_METADATA_URI_V4`).
+- **EMF creation delay**: first metric datapoint appears only after the log hits CW; give it ~1–2 minutes on cold start.
+- **Two-step cleanup**: Reaper sets `desiredCount=0` when ready, then cleans up on next run when `runningCount==0`. This keeps invocations fast.
+- **Granularity**: With testing config (PERIOD=60, CONSEC=2), retirement takes ~3-4 minutes. With production config (PERIOD=300, CONSEC=3), it takes ~15-20 minutes.
+- **Listener cleanup**: the sample deletes rules referencing the TG; adapt to your header-based routing structure.
+- **CW metric limit**: GetMetricData is limited to 500 queries; if you have >500 tasks, batch or sum differently.
 
 ---
 
-> Ping if you want this wrapped as **Terraform** (reaper + IAM + EventBridge + ALB rule helpers) or need a **delete-listener-rules** function for your ALB setup.
+## Done criteria
+
+- Each task discovers its unique ID and sets `ShutdownReady=1` after grace period (20s for testing, configurable).
+- Reaper sets `desiredCount=0` when all tasks report ready or MAX_AGE exceeded.
+- Reaper cleans up services with `runningCount==0` efficiently (no waiting).
+- Testing: Multiple `deploy.py` runs result in old deployments being cleaned up within ~3-4 minutes.
+- Phase 2 testing: MAX_AGE backstop works even without ShutdownReady.
+- No dangling TGs or listener rules.
+- CloudFormation owns all **permanent** bits (Lambda, IAM, EventBridge).

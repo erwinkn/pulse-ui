@@ -27,8 +27,8 @@ WORKDIR /app
 # Copy the minimal server
 COPY packages/pulse-aws/examples/aws_minimal_server.py ./server.py
 
-# Install dependencies (fastapi, uvicorn)
-RUN uv pip install --system fastapi uvicorn[standard]
+# Install dependencies (fastapi, uvicorn, boto3, requests)
+RUN uv pip install --system fastapi uvicorn[standard] boto3 requests
 
 # Build-time arguments
 ARG DEPLOYMENT_ID
@@ -38,6 +38,8 @@ ARG DRAIN_SECRET
 ENV DEPLOYMENT_ID=${DEPLOYMENT_ID}
 ENV DRAIN_SECRET=${DRAIN_SECRET}
 ENV DRAIN_HEALTH_FAIL_AFTER_SECONDS=120
+ENV DRAIN_POLL_SECONDS=5
+ENV DRAIN_GRACE_SECONDS=20
 
 # Expose port
 EXPOSE 8000

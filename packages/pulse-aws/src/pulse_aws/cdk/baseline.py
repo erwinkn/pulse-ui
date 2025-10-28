@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
-from aws_cdk import CfnOutput, RemovalPolicy, Stack, Token
+from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack, Token
 from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
@@ -157,6 +161,17 @@ class BaselineStack(Stack):
 			description="Task role for Pulse ECS tasks",
 		)
 
+		# Grant SSM permissions for reading deployment state parameters
+		self.task_role.add_to_policy(
+			iam.PolicyStatement(
+				effect=iam.Effect.ALLOW,
+				actions=["ssm:GetParameter"],
+				resources=[
+					f"arn:aws:ssm:{self.region}:{self.account}:parameter/apps/{deployment_name}/*"
+				],
+			)
+		)
+
 		self.cluster: ecs.Cluster = ecs.Cluster(
 			self,
 			"PulseCluster",
@@ -165,7 +180,106 @@ class BaselineStack(Stack):
 		)
 		self.cluster.connections.add_security_group(self.service_security_group)
 
+		# Reaper Lambda for automated cleanup of draining deployments
+		self._create_reaper()
+
 		self._emit_outputs()
+
+	def _create_reaper(self) -> None:
+		"""Create the reaper Lambda for automated cleanup of draining deployments."""
+		# IAM role for Lambda
+		reaper_role = iam.Role(
+			self,
+			"ReaperRole",
+			assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),  # pyright: ignore[reportArgumentType]
+			description=f"Reaper role for {self.deployment_name}",
+			managed_policies=[
+				iam.ManagedPolicy.from_aws_managed_policy_name(
+					"service-role/AWSLambdaBasicExecutionRole"
+				)
+			],
+		)
+
+		# Grant ECS permissions
+		reaper_role.add_to_policy(
+			iam.PolicyStatement(
+				effect=iam.Effect.ALLOW,
+				actions=[
+					"ecs:ListServices",
+					"ecs:DescribeServices",
+					"ecs:ListTagsForResource",
+					"ecs:ListTasks",
+					"ecs:DescribeTasks",
+					"ecs:UpdateService",
+					"ecs:DeleteService",
+				],
+				resources=["*"],
+			)
+		)
+
+		# Grant ALB permissions
+		reaper_role.add_to_policy(
+			iam.PolicyStatement(
+				effect=iam.Effect.ALLOW,
+				actions=[
+					"elasticloadbalancing:Describe*",
+					"elasticloadbalancing:DeleteRule",
+					"elasticloadbalancing:DeleteTargetGroup",
+					"elasticloadbalancing:DeregisterTargets",
+				],
+				resources=["*"],
+			)
+		)
+
+		# Grant CloudWatch metrics permissions
+		reaper_role.add_to_policy(
+			iam.PolicyStatement(
+				effect=iam.Effect.ALLOW,
+				actions=[
+					"cloudwatch:GetMetricData",
+					"cloudwatch:GetMetricStatistics",
+				],
+				resources=["*"],
+			)
+		)
+
+		# Find the reaper Lambda code
+		lambda_code_path = (Path(__file__).parent.parent / "reaper_lambda.py").resolve()
+
+		if not lambda_code_path.exists():
+			raise FileNotFoundError(f"Reaper Lambda code not found: {lambda_code_path}")
+
+		# Read the Lambda code
+		lambda_code = lambda_code_path.read_text()
+
+		# Lambda function
+		self.reaper_function: lambda_.Function = lambda_.Function(
+			self,
+			"ReaperFunction",
+			runtime=lambda_.Runtime.PYTHON_3_12,
+			handler="index.handler",
+			code=lambda_.Code.from_inline(lambda_code),
+			role=reaper_role,  # pyright: ignore[reportArgumentType]
+			timeout=Duration.seconds(180),
+			environment={
+				"CLUSTER": self.cluster.cluster_name,
+				"DEPLOYMENT_NAME": self.deployment_name,
+				"LISTENER_ARN": self.listener.listener_arn,
+				"CONSEC": "2",  # testing: 2, production: 3
+				"PERIOD": "60",  # testing: 60s, production: 300s
+				"MIN_AGE_SEC": "60",  # testing: 60s, production: 120s
+				"MAX_AGE_HR": "1.0",  # 1 hour
+			},
+		)
+
+		# EventBridge schedule (every 1 minute for testing, 5 for production)
+		events.Rule(
+			self,
+			"ReaperSchedule",
+			schedule=events.Schedule.rate(Duration.minutes(1)),
+			enabled=True,
+			targets=[targets.LambdaFunction(self.reaper_function)],  # pyright: ignore[reportArgumentType]
+		)
 
 	def _emit_outputs(self) -> None:
 		private_subnet_ids = ",".join(

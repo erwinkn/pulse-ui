@@ -25,6 +25,8 @@ After completing this work, a Pulse developer can push a new application version
 - [x] (2025-10-28) Implemented Phase 3 of the reaper plan: created Lambda function (`reaper_lambda.py`) that processes draining services, checks CloudWatch metrics for ShutdownReady=1, and cleans up inactive services. Integrated reaper into `BaselineStack` (instead of separate stack) via `_create_reaper()` method that creates Lambda, IAM role (ECS/ALB/CloudWatch permissions), and EventBridge schedule. Set MAX_AGE_HR to 1.0 hour to enable cleanup of older deployments without Phase 2 logic. Reaper runs every 1 minute (configurable) and enforces MIN_AGE (60s) and MAX_AGE (1 hour) backstops. Reaper is now permanent infrastructure deployed alongside VPC/ALB/ECS cluster.
 - [x] (2025-10-28) Fixed critical reaper bug: reaper was cleaning up ANY service with runningCount==0, including brand new services that were still spinning up. Updated both `reaper_lambda.py` and `deployment.py` cleanup functions to ONLY clean up services tagged with `state=draining`. Active services are now safe from premature cleanup. Bumped baseline version to 1.3.1.
 - [x] (2025-10-28) Refactored reaper_lambda.py to accept AWS clients as function parameters instead of using global variables, making it importable and testable. Updated deployment.py to import and reuse cleanup_inactive_services() from reaper_lambda.py, eliminating code duplication. The reaper remains a single self-contained file that can be inlined in the Lambda while also being importable for manual cleanup operations. Bumped baseline version to 1.3.2.
+- [x] (2025-10-29) Completed Phase 3.1: added `packages/pulse-aws/examples/Dockerfile.pulse` that multi-stage builds the Pulse Python environment, compiles the React Router frontend with Bun, wires workspace dependencies (`pulse-framework`, `pulse-ui-client`), and ships a runtime image that runs `pulse run examples/main.py --prod` without re-installing dependencies at startup. The image now exposes build args/env for deployment metadata and keeps Bun available for the single-server proxy.
+- [ ] (2025-10-29) Continue Phase 3: adapt `deploy.py` for Pulse apps, add directive-based affinity plumbing in the Pulse runtime and client, implement `AWSECSPlugin`, and validate end-to-end multi-version deployments with graceful draining before landing.
 
 ## Surprises & Discoveries
 
@@ -110,33 +112,68 @@ Add a helper:
 **Out of scope for Phase 2**  
 No Pulse integration or runtime changes
 
-### Phase 3 – Pulse integration (draining, plugin, simple Pulse app)
+### Phase 3 – Pulse integration (Dockerfile, deployment, runtime affinity, plugin)
 
-Integrate the runtime and add a deployment plugin while keeping the demo minimal.
+Integrate Pulse apps with the ECS deployment workflow, implement header-based affinity for RenderSession stickiness, and add AWS plugin for graceful draining.
 
-**3.1 Draining in Pulse runtime**
+**3.1 Pulse app Dockerfile**
 
-- In `packages/pulse/python/src/pulse/app.py`, add `AppStatus.draining = 3` and shift `stopped = 4`.
-- Add `set_draining()` / `is_draining()` helpers; forbid new WebSocket connections and new RenderSessions once draining starts while serving existing ones.
-- Health endpoint returns `{ "version": <str>, "draining": <bool> }` and flips to HTTP 503 once active sessions reach zero.
+- Create `packages/pulse-aws/examples/Dockerfile.pulse` that:
+  - Installs `uv` for Python dependency management
+  - Installs `bun` for JavaScript tooling
+  - Copies the Pulse app Python file (e.g., `examples/main.py`)
+  - Copies the React Router web project (`examples/web/`)
+  - Installs Python dependencies via `uv sync`
+  - Installs JavaScript dependencies via `bun install`
+  - Accepts build args: `DEPLOYMENT_ID`, `DEPLOYMENT_NAME`, `DRAIN_POLL_SECONDS`, `DRAIN_GRACE_SECONDS`
+  - Sets environment variables from build args
+  - Runs `uv run pulse run <app_file>` in single-server mode
+- Verify locally: build image, run container, fetch a page to confirm the Pulse app works
 
-**3.2 AWSECSPlugin**
+**3.2 Adapt deploy.py for Pulse apps**
 
-- Provide `AWSECSPlugin(secret: str | Callable[[], str])` in `packages/pulse-aws/src/pulse_aws/plugin.py`.
-- Registers `POST /_pulse/admin/drain` with bearer auth; returns `{ "status": "ok" }` or `{ "status": "already_draining" }`.
-- Injects response header `X-Pulse-Render-Affinity: <deployment_id>` for prerender and attaches the same to client fetches/WebSocket auth in later enhancements.
+- Update `packages/pulse-aws/scripts/deploy.py` to accept a `--pulse-app` flag pointing to a Pulse app file
+- When `--pulse-app` is provided, use `Dockerfile.pulse` instead of the minimal server Dockerfile
+- Pass `DEPLOYMENT_NAME` and `DEPLOYMENT_ID` as build args
+- Pass drain configuration (`DRAIN_POLL_SECONDS`, `DRAIN_GRACE_SECONDS`) as build args
+- Run a single deploy and verify the Pulse app is accessible at the ALB URL
 
-**3.3 Simple Pulse app demo**
+**3.3 Pulse runtime changes for affinity and draining**
 
-- Add `examples/aws_ecs_pulse_app.py`: a trivial Pulse app that reads `DEPLOYMENT_ID` from env and displays it. No complex pages.
-- Reuse the Phase 2 deploy path to ship this app; header stickiness should continue to work unchanged.
+Implement general-purpose header/auth propagation mechanism:
 
-**3.4 Tests and docs**
+- In `packages/pulse/python/src/pulse/app.py`, add a `directives` field to prerender responses that can specify arbitrary headers and Socket.IO auth values to attach to subsequent requests
+- Update the layout template (`packages/pulse/python/src/pulse/codegen/templates/layout.py`) to:
+  - Store `directives` from prerender response in `sessionStorage` (similar to how `renderId` is stored)
+  - In `clientLoader`, read directives from `sessionStorage` and apply them as headers to the prerender fetch
+- Update `packages/pulse/js/src/client.tsx` to read `directives` from `sessionStorage` and attach them to Socket.IO connections
+- Replace the current special-case render ID with this general mechanism (renderId becomes part of directives)
 
-- Unit tests: `packages/pulse/python/tests/test_app_draining.py`, `packages/pulse/python/tests/test_deploy_plugin.py`.
-- Author `docs/deployment/aws-ecs.md` covering bootstrap, configuring `ps.App(..., plugins=[AWSECSPlugin(...)])`, and deploying the sample app.
+Implement AWSECSPlugin:
 
-Out of scope for Phase 3: cleanup of old deployments.
+- Create `packages/pulse-aws/src/pulse_aws/plugin.py` with `AWSECSPlugin(deployment_name: str, deployment_id: str)`
+- Plugin behavior:
+  - Discovers task ID from ECS metadata endpoint (`ECS_CONTAINER_METADATA_URI_V4`)
+  - Polls SSM parameter `/apps/<deployment_name>/<deployment_id>/state` every N seconds (configurable via `DRAIN_POLL_SECONDS`)
+  - When state changes to `draining`:
+    - Blocks new RenderSession creation (returns error/redirect for prerender requests without a valid renderId)
+    - Does NOT block WebSocket connections (existing sessions can reconnect)
+    - Starts a grace period timer (configurable via `DRAIN_GRACE_SECONDS`)
+  - Periodically checks `len(app.render_sessions)` to count active sessions
+  - After grace period expires AND active sessions reach zero, emits CloudWatch EMF metric `App/Drain:ShutdownReady=1` with dimensions `deployment_name`, `deployment_id`, `task_id`
+  - Until shutdown ready, emits `App/Drain:ShutdownReady=0`
+- Injects `X-Pulse-Render-Affinity: <deployment_id>` header into the prerender `directives` so client includes it on all subsequent requests and WebSocket connections
+- Keeps health checks passing throughout drain process; reaper handles cleanup based on metrics
+
+**3.4 End-to-end deployment verification**
+
+- Deploy the Pulse app once, verify `X-Pulse-Render-Affinity` header is present in requests
+- Deploy a second version with a visual change
+- Open a new browser tab, confirm it lands on the new version
+- In the original tab (old version), navigate around and confirm affinity is maintained
+- Close the old tab, wait for grace period + drain detection
+- Verify old deployment emits `ShutdownReady=1` and is cleaned up by reaper
+- Confirm no dangling target groups or listener rules remain
 
 ### Phase 4 – Finalization and cleanup
 

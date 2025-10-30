@@ -16,6 +16,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from pulse.cli.helpers import ensure_gitignore_has
+
 
 def is_process_alive(pid: int) -> bool:
 	"""Check if a process with the given PID is running."""
@@ -46,18 +48,8 @@ def _read_lock(lock_path: Path) -> dict[str, Any] | None:
 
 def _write_gitignore_for_lock(lock_path: Path) -> None:
 	"""Add lock file to .gitignore if not already present."""
-	try:
-		gitignore_path = lock_path.parent / ".gitignore"
-		pattern = f"\n{lock_path.name}\n"
-		if gitignore_path.exists():
-			content = gitignore_path.read_text()
-			if lock_path.name not in content.split():
-				gitignore_path.write_text(content + pattern)
-		else:
-			gitignore_path.write_text(pattern.lstrip("\n"))
-	except Exception:
-		# Non-fatal
-		pass
+
+	ensure_gitignore_has(lock_path.parent, lock_path.name)
 
 
 def _create_lock_file(lock_path: Path) -> None:

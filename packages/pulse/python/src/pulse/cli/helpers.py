@@ -8,7 +8,6 @@ from typing import Literal, TypedDict
 import typer
 from rich.console import Console
 
-from pulse.app import App
 from pulse.cli.models import AppLoadResult
 
 
@@ -113,6 +112,9 @@ def parse_app_target(target: str) -> ParsedAppTarget:
 
 def load_app_from_file(file_path: str | Path) -> AppLoadResult:
 	"""Load routes from a Python file and return app context details."""
+	# Avoid circular import
+	from pulse.app import App
+
 	file_path = Path(file_path)
 
 	if not file_path.exists():
@@ -165,6 +167,10 @@ def load_app_from_file(file_path: str | Path) -> AppLoadResult:
 
 def load_app_from_target(target: str) -> AppLoadResult:
 	"""Load an App instance from either a file path (with optional :var) or a module path (uvicorn style)."""
+
+	# Avoid circulart import
+	from pulse.app import App
+
 	parsed = parse_app_target(target)
 
 	module_name = parsed["module_name"]
@@ -237,6 +243,39 @@ def load_app_from_target(target: str) -> AppLoadResult:
 		app_dir=app_dir,
 		server_cwd=parsed["server_cwd"],
 	)
+
+
+def ensure_gitignore_has(root: Path, *patterns: str) -> None:
+	"""
+	Ensure .gitignore in root contains the specified patterns.
+	Non-fatal: silently ignores errors.
+
+	Args:
+	    root: Directory containing (or to contain) .gitignore
+	    *patterns: Patterns to ensure are in .gitignore
+	"""
+	if not patterns:
+		return
+
+	try:
+		gitignore_path = root / ".gitignore"
+
+		if gitignore_path.exists():
+			content = gitignore_path.read_text()
+			# Parse existing entries (split on whitespace to handle various formats)
+			existing = set(content.split())
+			missing = [p for p in patterns if p not in existing]
+
+			if missing:
+				# Add missing patterns
+				additions = "\n".join(missing)
+				gitignore_path.write_text(f"{content.rstrip()}\n{additions}\n")
+		else:
+			# Create new .gitignore with all patterns
+			gitignore_path.write_text("\n".join(patterns) + "\n")
+	except Exception:
+		# Non-fatal; ignore gitignore failures
+		pass
 
 
 def install_hints_for_mkcert() -> list[str]:

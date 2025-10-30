@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from pulse.cli.helpers import ensure_gitignore_has
 from pulse.codegen.templates.layout import LAYOUT_TEMPLATE
 from pulse.codegen.templates.route import CssModuleImport, render_route
 from pulse.codegen.templates.routes_ts import (
@@ -112,6 +113,9 @@ class Codegen:
 		internal_server_address: str | None = None,
 		api_prefix: str = "",
 	):
+		# Ensure generated files are gitignored
+		ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
+
 		self._copied_css_modules = set()
 		self._css_module_dest = {}
 		self._css_name_registry = NameRegistry()

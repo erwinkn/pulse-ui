@@ -24,7 +24,7 @@ class PulseProxy:
 	def __init__(
 		self,
 		app: ASGIApp,
-		get_web_port: Callable[[], int | None],
+		get_react_server_address: Callable[[], str | None],
 		api_prefix: str = "/_pulse",
 	):
 		"""
@@ -32,11 +32,13 @@ class PulseProxy:
 
 		Args:
 		    app: The ASGI application to wrap (socketio.ASGIApp)
-		    get_web_port: Callable that returns the React Router port (or None if not started)
+		    get_react_server_address: Callable that returns the React Router server full URL (or None if not started)
 		    api_prefix: Prefix for API routes that should NOT be proxied (default: "/_pulse")
 		"""
 		self.app: ASGIApp = app
-		self.get_web_port: Callable[[], int | None] = get_web_port
+		self.get_react_server_address: Callable[[], str | None] = (
+			get_react_server_address
+		)
 		self.api_prefix: str = api_prefix
 		self._client: httpx.AsyncClient | None = None
 
@@ -84,10 +86,10 @@ class PulseProxy:
 		"""
 		Forward HTTP request to React Router server and stream response back.
 		"""
-		# Get the web server port
-		port = self.get_web_port()
-		if port is None:
-			# Web server not started yet, return error
+		# Get the React server address
+		react_server_address = self.get_react_server_address()
+		if react_server_address is None:
+			# React server not started yet, return error
 			await send(
 				{
 					"type": "http.response.start",
@@ -98,7 +100,7 @@ class PulseProxy:
 			await send(
 				{
 					"type": "http.response.body",
-					"body": b"Service Unavailable: Web server not ready",
+					"body": b"Service Unavailable: React server not ready",
 				}
 			)
 			return
@@ -106,8 +108,9 @@ class PulseProxy:
 		# Build target URL
 		path = scope["path"]
 		query_string = scope.get("query_string", b"").decode("utf-8")
-		target_url = f"http://localhost:{port}"
-		target_path = f"{target_url}{path}"
+		# Ensure react_server_address doesn't end with /
+		base_url = react_server_address.rstrip("/")
+		target_path = f"{base_url}{path}"
 		if query_string:
 			target_path += f"?{query_string}"
 

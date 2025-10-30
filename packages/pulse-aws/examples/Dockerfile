@@ -48,5 +48,5 @@ ENV DRAIN_GRACE_SECONDS=20
 EXPOSE 8000
 
 # Run the server
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+# CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
 

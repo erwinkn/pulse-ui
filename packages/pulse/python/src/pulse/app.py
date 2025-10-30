@@ -5,15 +5,12 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
-import asyncio
 import logging
 import os
-import subprocess
 from collections import defaultdict
 from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from enum import IntEnum
-from pathlib import Path
 from typing import Any, Callable, Literal, NotRequired, TypedDict, TypeVar, cast
 
 import socketio
@@ -38,7 +35,11 @@ from pulse.css import (
 	registered_css_imports,
 	registered_css_modules,
 )
-from pulse.env import PulseEnv
+from pulse.env import (
+	ENV_PULSE_HOST,
+	ENV_PULSE_PORT,
+	PulseEnv,
+)
 from pulse.env import env as envvars
 from pulse.helpers import (
 	create_task,
@@ -130,6 +131,7 @@ class App:
 	mode: PulseMode
 	status: AppStatus
 	server_address: str | None
+	dev_server_address: str
 	internal_server_address: str | None
 	api_prefix: str
 	plugins: list[Plugin]
@@ -160,10 +162,10 @@ class App:
 		cookie: Cookie | None = None,
 		session_store: SessionStore | None = None,
 		server_address: str | None = None,
+		dev_server_address: str = "http://localhost:8000",
 		internal_server_address: str | None = None,
 		not_found: str = "/not-found",
 		# Deployment and integration options
-		env: PulseEnv | None = None,
 		mode: PulseMode = "single-server",
 		api_prefix: str = "/_pulse",
 		cors: CORSOptions | None = None,
@@ -177,11 +179,13 @@ class App:
 		    codegen: Optional codegen configuration.
 		"""
 		# Resolve mode from environment and expose on the app instance
-		self.env = env or envvars.pulse_env
+		self.env = envvars.pulse_env
 		self.mode = mode
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.)
 		self.server_address = server_address
+		# Development server address (used in dev mode)
+		self.dev_server_address = dev_server_address
 		# Optional internal address used by server-side loader fetches
 		self.internal_server_address = internal_server_address
 
@@ -222,10 +226,6 @@ class App:
 		# Map websocket sid -> renderId for message routing
 		self._socket_to_render = {}
 
-		# Subprocess management for single-server mode
-		self.web_server_proc: subprocess.Popen[str] | None = None
-		self.web_server_port: int | None = None
-
 		self.codegen = Codegen(
 			self.routes,
 			config=codegen or CodegenConfig(),
@@ -237,11 +237,6 @@ class App:
 		)
 		self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 		self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
-		# In single-server mode, wrap with proxy ASGI app
-		if self.mode == "single-server":
-			self.asgi = PulseProxy(
-				self.asgi, lambda: self.web_server_port, self.api_prefix
-			)
 
 		if middleware is None:
 			mw_stack: list[PulseMiddleware] = [PulseCoreMiddleware()]
@@ -268,100 +263,25 @@ class App:
 		for plugin in self.plugins:
 			plugin.on_startup(self)
 
-		# Start React Router server in single-server mode
-		logger.info(f"Deployment mode: {self.mode}")
 		if self.mode == "single-server":
-			logger.info("Starting React Router server in single-server mode...")
-			try:
-				web_root = self.codegen.cfg.web_root
-				logger.info(f"Web root: {web_root}")
-				port = await self.start_web_server(web_root, self.env)
+			react_server_address = envvars.react_server_address
+			if react_server_address:
 				logger.info(
-					f"Single-server mode: React Router running on internal port {port}"
+					f"Single-server mode: React Router running at {react_server_address}"
 				)
-			except Exception:
-				logger.exception("Failed to start React Router server")
-				raise
+			else:
+				logger.warning(
+					"Single-server mode: PULSE_REACT_SERVER_ADDRESS not set."
+				)
 
 		try:
 			yield
 		finally:
-			# Stop React Router server in single-server mode
-			if self.mode == "single-server":
-				try:
-					# Close proxy HTTP client if it's a PulseProxy
-					if isinstance(self.asgi, PulseProxy):
-						await self.asgi.close()
-					self.stop_web_server()
-				except Exception:
-					logger.exception("Error stopping React Router server")
-
 			try:
 				if isinstance(self.session_store, SessionStore):
 					await self.session_store.close()
 			except Exception:
 				logger.exception("Error during SessionStore.close()")
-
-	async def start_web_server(self, web_root: Path, mode: str) -> int:
-		"""Start React Router server as subprocess and return its port."""
-
-		# Find available port
-		port = find_available_port(5173)
-
-		# Build command based on mode
-		if mode == "prod":
-			# Check if build exists
-			build_server = web_root / "build" / "server" / "index.js"
-			if not build_server.exists():
-				raise RuntimeError(
-					f"Production build not found at {build_server}. Run 'bun run build' in the web directory first."
-				)
-			# Production: use built server
-			cmd = ["bun", "run", "start", "--port", str(port)]
-		else:
-			# Development: use dev server
-			cmd = ["bun", "run", "dev", "--port", str(port)]
-
-		logger.info(f"Starting React Router server: {' '.join(cmd)}")
-
-		proc = subprocess.Popen(
-			cmd,
-			cwd=web_root,
-			stdout=subprocess.PIPE,
-			stderr=subprocess.STDOUT,
-			env=os.environ.copy(),
-			text=True,
-		)
-
-		# Wait for server to be ready
-		await asyncio.sleep(2.0 if mode == "prod" else 1.0)
-
-		# Check if process is still running
-		if proc.poll() is not None:
-			output = proc.stdout.read() if proc.stdout else ""
-			raise RuntimeError(f"React Router server failed to start: {output}")
-
-		self.web_server_proc = proc
-		self.web_server_port = port
-
-		logger.info(f"React Router server started on port {port}")
-		return port
-
-	def stop_web_server(self):
-		"""Stop the React Router subprocess."""
-		if self.web_server_proc:
-			logger.info("Stopping React Router server...")
-			self.web_server_proc.terminate()
-			try:
-				self.web_server_proc.wait(timeout=5)
-			except subprocess.TimeoutExpired:
-				logger.warning(
-					"React Router server did not stop gracefully, killing..."
-				)
-				self.web_server_proc.kill()
-				self.web_server_proc.wait()
-			self.web_server_proc = None
-			self.web_server_port = None
 
 	def run_codegen(
 		self, address: str | None = None, internal_address: str | None = None
@@ -388,26 +308,36 @@ class App:
 		ASGI factory for uvicorn. This is called on every reload.
 		"""
 
-		# In prod, prefer the public server address passed to App(...).
-		# In dev/ci, derive from environment variables which the CLI populates
-		# based on the actual bind host/port.
-		if self.env == "prod":
+		# In prod/ci, use the server_address provided to App(...).
+		if self.env in ("prod", "ci"):
 			if not self.server_address:
 				raise RuntimeError(
-					"In prod, please provide an explicit server_address to App(...)."
+					f"In {self.env}, please provide an explicit server_address to App(...)."
 				)
 			server_address = self.server_address
+		# In dev, prefer env vars set by CLI (--address/--port), otherwise use dev_server_address.
 		else:
-			host = envvars.pulse_host  # defaults to "localhost"
-			port = envvars.pulse_port  # defaults to 8000
-			protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
-			server_address = f"{protocol}://{host}:{port}"
+			# In dev mode, check if CLI set PULSE_HOST/PULSE_PORT env vars
+			# If env vars were explicitly set (not just defaults), use them
+			host = os.environ.get(ENV_PULSE_HOST)
+			port = os.environ.get(ENV_PULSE_PORT)
+			if host is not None and port is not None:
+				protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
+				server_address = f"{protocol}://{host}:{port}"
+			else:
+				server_address = self.dev_server_address
 
 		# Use internal server address for server-side loader if provided; fallback to public
 		internal_address = self.internal_server_address or server_address
 		self.run_codegen(server_address, internal_address)
 		self.setup(server_address)
 		self.status = AppStatus.running
+
+		# In single-server mode, the Pulse server acts as reverse proxy to the React server
+		if self.mode == "single-server":
+			return PulseProxy(
+				self.asgi, lambda: envvars.react_server_address, self.api_prefix
+			)
 		return self.asgi
 
 	def run(
@@ -441,10 +371,34 @@ class App:
 			self.fastapi.add_middleware(CORSMiddleware, **self.cors)
 		else:
 			# Use deployment-specific CORS settings
+			cors_config = cors_options(self.mode, self.server_address)
+			print(f"CORS config: {cors_config}")
 			self.fastapi.add_middleware(
 				CORSMiddleware,
-				**cors_options(self.mode, self.server_address),
+				**cors_config,
 			)
+
+		# Debug middleware to log CORS-related request details
+		# @self.fastapi.middleware("http")
+		# async def cors_debug_middleware(  # pyright: ignore[reportUnusedFunction]
+		# 	request: Request, call_next: Callable[[Request], Awaitable[Response]]
+		# ):
+		# 	origin = request.headers.get("origin")
+		# 	method = request.method
+		# 	path = request.url.path
+		# 	print(
+		# 		f"[CORS Debug] {method} {path} | Origin: {origin} | "
+		# 		+ f"Mode: {self.mode} | Server: {self.server_address}"
+		# 	)
+		# 	response = await call_next(request)
+		# 	allow_origin = response.headers.get("access-control-allow-origin")
+		# 	if allow_origin:
+		# 		print(f"[CORS Debug] Response allows origin: {allow_origin}")
+		# 	elif origin:
+		# 		logger.warning(
+		# 			f"[CORS Debug] Origin {origin} present but no Access-Control-Allow-Origin header set"
+		# 		)
+		# 	return response
 
 		# Mount PulseContext for all FastAPI routes (no route info). Other API
 		# routes / middleware should be added at the module-level, which means

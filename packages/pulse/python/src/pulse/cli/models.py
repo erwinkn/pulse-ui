@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
-from pulse.app import App
+if TYPE_CHECKING:
+	from pulse.app import App
 
 
 @dataclass(slots=True)

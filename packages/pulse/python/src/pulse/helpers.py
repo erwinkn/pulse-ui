@@ -420,6 +420,8 @@ def find_available_port(start_port: int = 8000, max_attempts: int = 100) -> int:
 	for port in range(start_port, start_port + max_attempts):
 		try:
 			with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+				# Allow reuse of addresses in TIME_WAIT state (matches uvicorn behavior)
+				s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 				s.bind(("localhost", port))
 				return port
 		except OSError:

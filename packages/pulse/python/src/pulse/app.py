@@ -107,6 +107,7 @@ class PrerenderPayload(TypedDict):
 class PrerenderResult(TypedDict):
 	renderId: str
 	views: dict[str, ServerInitMessage | None]
+	directives: NotRequired[dict[str, Any]]
 
 
 class App:
@@ -436,6 +437,23 @@ class App:
 
 		@self.fastapi.get(f"{prefix}/health")
 		def healthcheck():  # pyright: ignore[reportUnusedFunction]
+			# Check if any plugin reports draining state
+			draining = False
+			for plugin in self.plugins:
+				if hasattr(plugin, "is_draining"):
+					method = getattr(plugin, "is_draining")
+					if method():  # type: ignore[misc]
+						draining = True
+						break
+
+			if draining:
+				# Return 503 when draining to signal ALB to stop sending new traffic
+				# Note: We still allow health checks to pass until sessions are drained
+				return JSONResponse(
+					status_code=503,
+					content={"health": "draining", "message": "Service is draining"},
+				)
+
 			return {"health": "ok", "message": "Pulse server is running"}
 
 		@self.fastapi.get(f"{prefix}/set-cookies")
@@ -466,6 +484,8 @@ class App:
 			client_addr: str | None = get_client_address(request)
 			# Optional reuse of existing RenderSession
 			render_id = payload.get("renderId")
+
+			# Check if any plugin wants to block new session creation when draining
 			if isinstance(render_id, str):
 				# Validate render exists and belongs to this user session
 				existing = self.render_sessions.get(render_id)
@@ -477,6 +497,16 @@ class App:
 				render = existing
 				cleanup = False
 			else:
+				# Check if draining and should block new sessions
+				for plugin in self.plugins:
+					if hasattr(plugin, "should_block_new_session"):
+						method = getattr(plugin, "should_block_new_session")
+						if method(None):  # type: ignore[misc]
+							raise HTTPException(
+								status_code=503,
+								detail="Service is draining, new sessions are not available",
+							)
+
 				render_id = new_sid()
 				render = self.create_render(
 					render_id, session, client_address=client_addr
@@ -544,6 +574,19 @@ class App:
 
 				if cleanup:
 					later(float(ttl), _gc_if_unadopted, render_id)
+
+			# Collect directives from session (set by middleware)
+			directives: dict[str, Any] = {}
+			# Directives are stored in session under __pulse_directives key
+			session_directives = session.data.get("__pulse_directives")
+			if isinstance(session_directives, dict):
+				# Merge directives from session
+				for key, value in session_directives.items():
+					if isinstance(key, str):
+						directives[key] = value
+
+			if directives:
+				result["directives"] = directives
 
 			resp = JSONResponse(serialize(result))
 			session.handle_response(resp)

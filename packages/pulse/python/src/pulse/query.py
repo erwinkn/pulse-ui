@@ -44,10 +44,13 @@ class QueryAsyncEffect(AsyncEffect):
 		self._keep_previous_data = keep_previous_data
 
 	@override
-	def push_change(self):
+	def push_change(self, *, keep_previous_data: bool | None = None):
 		# Synchronously clear data before scheduling the effect to run.
 		# This ensures renders see the loading state immediately, not stale data.
-		self._result._set_loading(clear_data=not self._keep_previous_data)  # pyright: ignore[reportPrivateUsage]
+		effective_keep_previous_data = (
+			keep_previous_data if keep_previous_data is not None else self._keep_previous_data
+		)
+		self._result._set_loading(clear_data=not effective_keep_previous_data)  # pyright: ignore[reportPrivateUsage]
 		super().push_change()
 
 
@@ -63,7 +66,7 @@ class QueryResult(Generic[T]):
 		# Tracks whether at least one load cycle completed (success or error)
 		self._has_loaded: Signal[bool] = Signal(False, name="query.has_loaded")
 		# Effect driving this query (attached by QueryProperty)
-		self._effect: AsyncEffect | None = None
+		self._effect: QueryAsyncEffect | None = None
 
 	@property
 	def is_loading(self) -> bool:
@@ -89,14 +92,13 @@ class QueryResult(Generic[T]):
 	def has_loaded(self) -> bool:
 		return self._has_loaded.read()
 
-	def attach_effect(self, effect: AsyncEffect) -> None:
+	def attach_effect(self, effect: QueryAsyncEffect) -> None:
 		self._effect = effect
 
-	def refetch(self) -> None:
+	def refetch(self, *, keep_previous_data: bool | None = None) -> None:
 		if self._effect is None:
 			return
-		self._effect.cancel()
-		self._effect.run()
+		self._effect.push_change(keep_previous_data=keep_previous_data)
 
 	def dispose(self) -> None:
 		if self._effect is None:

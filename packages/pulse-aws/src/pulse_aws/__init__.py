@@ -96,6 +96,9 @@ from .reporting import (
 from .reporting import (
 	create_context as create_context,
 )
+from .plugin import (
+	AWSECSPlugin as AWSECSPlugin,
+)
 from .teardown import (
 	teardown_baseline_stack as teardown_baseline_stack,
 )

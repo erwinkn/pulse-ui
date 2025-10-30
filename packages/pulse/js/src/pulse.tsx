@@ -1,4 +1,11 @@
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
@@ -11,19 +18,23 @@ import type { ComponentRegistry, VDOM } from "./vdom";
 // =================================================================
 
 export interface PulseConfig {
-	serverAddress: string;
+  serverAddress: string;
 }
 
 export type PulsePrerenderView = {
-	vdom: VDOM;
-	callbacks: string[];
-	render_props: string[];
-	css_refs: string[];
+  vdom: VDOM;
+  callbacks: string[];
+  render_props: string[];
+  css_refs: string[];
 };
 
 export type PulsePrerender = {
-	renderId: string;
-	views: Record<string, PulsePrerenderView>;
+  renderId: string;
+  views: Record<string, PulsePrerenderView>;
+  directives?: {
+    headers?: Record<string, string>;
+    socketAuth?: Record<string, string>;
+  };
 };
 // =================================================================
 // Context and Hooks
@@ -34,23 +45,23 @@ const PulseClientContext = createContext<PulseSocketIOClient | null>(null);
 const PulsePrerenderContext = createContext<PulsePrerender | null>(null);
 
 export const usePulseClient = () => {
-	const client = useContext(PulseClientContext);
-	if (!client) {
-		throw new Error("usePulseClient must be used within a PulseProvider");
-	}
-	return client;
+  const client = useContext(PulseClientContext);
+  if (!client) {
+    throw new Error("usePulseClient must be used within a PulseProvider");
+  }
+  return client;
 };
 
 export const usePulsePrerender = (path: string) => {
-	const ctx = useContext(PulsePrerenderContext);
-	if (!ctx) {
-		throw new Error("usePulsePrerender must be used within a PulseProvider");
-	}
-	const view = ctx.views[path];
-	if (!view) {
-		throw new Error(`No prerender found for '${path}'`);
-	}
-	return view;
+  const ctx = useContext(PulsePrerenderContext);
+  if (!ctx) {
+    throw new Error("usePulsePrerender must be used within a PulseProvider");
+  }
+  const view = ctx.views[path];
+  if (!view) {
+    throw new Error(`No prerender found for '${path}'`);
+  }
+  return view;
 };
 
 // =================================================================
@@ -58,55 +69,59 @@ export const usePulsePrerender = (path: string) => {
 // =================================================================
 
 export interface PulseProviderProps {
-	children: ReactNode;
-	config: PulseConfig;
-	prerender: PulsePrerender;
+  children: ReactNode;
+  config: PulseConfig;
+  prerender: PulsePrerender;
 }
 
 const inBrowser = typeof window !== "undefined";
 
-export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
-	const [connected, setConnected] = useState(true);
-	const rrNavigate = useNavigate();
-	const { renderId } = prerender;
+export function PulseProvider({
+  children,
+  config,
+  prerender,
+}: PulseProviderProps) {
+  const [connected, setConnected] = useState(true);
+  const rrNavigate = useNavigate();
+  const { renderId } = prerender;
 
-	const client = useMemo(
-		() => new PulseSocketIOClient(config.serverAddress, renderId, rrNavigate),
-		[config.serverAddress, rrNavigate, renderId],
-	);
+  const client = useMemo(
+    () => new PulseSocketIOClient(config.serverAddress, renderId, rrNavigate),
+    [config.serverAddress, rrNavigate, renderId]
+  );
 
-	useEffect(() => client.onConnectionChange(setConnected), [client]);
+  useEffect(() => client.onConnectionChange(setConnected), [client]);
 
-	useEffect(() => {
-		if (inBrowser) {
-			client.connect();
-			return () => client.disconnect();
-		}
-	}, [client]);
+  useEffect(() => {
+    if (inBrowser) {
+      client.connect();
+      return () => client.disconnect();
+    }
+  }, [client]);
 
-	return (
-		<PulseClientContext.Provider value={client}>
-			<PulsePrerenderContext.Provider value={prerender}>
-				{!connected && (
-					<div
-						style={{
-							position: "fixed",
-							bottom: "20px",
-							right: "20px",
-							backgroundColor: "red",
-							color: "white",
-							padding: "10px",
-							borderRadius: "5px",
-							zIndex: 1000,
-						}}
-					>
-						Failed to connect to the server.
-					</div>
-				)}
-				{children}
-			</PulsePrerenderContext.Provider>
-		</PulseClientContext.Provider>
-	);
+  return (
+    <PulseClientContext.Provider value={client}>
+      <PulsePrerenderContext.Provider value={prerender}>
+        {!connected && (
+          <div
+            style={{
+              position: "fixed",
+              bottom: "20px",
+              right: "20px",
+              backgroundColor: "red",
+              color: "white",
+              padding: "10px",
+              borderRadius: "5px",
+              zIndex: 1000,
+            }}
+          >
+            Failed to connect to the server.
+          </div>
+        )}
+        {children}
+      </PulsePrerenderContext.Provider>
+    </PulseClientContext.Provider>
+  );
 }
 
 // =================================================================
@@ -114,111 +129,124 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 // =================================================================
 
 export interface PulseViewProps {
-	externalComponents: ComponentRegistry;
-	path: string;
-	cssModules: Record<string, Record<string, string>>;
+  externalComponents: ComponentRegistry;
+  path: string;
+  cssModules: Record<string, Record<string, string>>;
 }
 
-export function PulseView({ externalComponents, path, cssModules }: PulseViewProps) {
-	const client = usePulseClient();
-	const initialView = usePulsePrerender(path);
-	const initialVDOM = initialView.vdom;
-	const renderer = useMemo(
-		() =>
-			new VDOMRenderer(
-				client,
-				path,
-				externalComponents,
-				cssModules,
-				initialView.callbacks,
-				initialView.render_props,
-				initialView.css_refs,
-			),
-		[client, path, externalComponents, cssModules, initialView],
-	);
-	const [tree, setTree] = useState<ReactNode>(() =>
-		renderer.init(
-			initialVDOM,
-			initialView.callbacks,
-			initialView.render_props,
-			initialView.css_refs,
-		),
-	);
-	const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
+export function PulseView({
+  externalComponents,
+  path,
+  cssModules,
+}: PulseViewProps) {
+  const client = usePulseClient();
+  const initialView = usePulsePrerender(path);
+  const initialVDOM = initialView.vdom;
+  const renderer = useMemo(
+    () =>
+      new VDOMRenderer(
+        client,
+        path,
+        externalComponents,
+        cssModules,
+        initialView.callbacks,
+        initialView.render_props,
+        initialView.css_refs
+      ),
+    [client, path, externalComponents, cssModules, initialView]
+  );
+  const [tree, setTree] = useState<ReactNode>(() =>
+    renderer.init(
+      initialVDOM,
+      initialView.callbacks,
+      initialView.render_props,
+      initialView.css_refs
+    )
+  );
+  const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
 
-	const location = useLocation();
-	const params = useParams();
+  const location = useLocation();
+  const params = useParams();
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: using hacky deep equality for params
-	const routeInfo = useMemo(() => {
-		const { "*": catchall = "", ...pathParams } = params;
-		const queryParams = new URLSearchParams(location.search);
-		return {
-			hash: location.hash,
-			pathname: location.pathname,
-			query: location.search,
-			queryParams: Object.fromEntries(queryParams.entries()),
-			pathParams,
-			catchall: catchall.length > 0 ? catchall.split("/") : [],
-		} satisfies RouteInfo;
-	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: using hacky deep equality for params
+  const routeInfo = useMemo(() => {
+    const { "*": catchall = "", ...pathParams } = params;
+    const queryParams = new URLSearchParams(location.search);
+    return {
+      hash: location.hash,
+      pathname: location.pathname,
+      query: location.search,
+      queryParams: Object.fromEntries(queryParams.entries()),
+      pathParams,
+      catchall: catchall.length > 0 ? catchall.split("/") : [],
+    } satisfies RouteInfo;
+  }, [
+    location.hash,
+    location.pathname,
+    location.search,
+    JSON.stringify(params),
+  ]);
 
-	useEffect(() => {
-		if (inBrowser) {
-			client.mountView(path, {
-				routeInfo,
-				onInit: (vdom, callbacks, renderProps, cssRefs) => {
-					setTree(renderer.init(vdom, callbacks, renderProps, cssRefs));
-				},
-				onUpdate: (ops) => {
-					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
-				},
-			});
-			const offErr = client.onServerError((p, err) => {
-				if (p === path) setServerError(err);
-			});
-			return () => {
-				offErr();
-				client.unmount(path);
-			};
-		}
-		// routeInfo is NOT included here on purpose
-	}, [client, renderer, path, routeInfo]);
+  useEffect(() => {
+    if (inBrowser) {
+      client.mountView(path, {
+        routeInfo,
+        onInit: (vdom, callbacks, renderProps, cssRefs) => {
+          setTree(renderer.init(vdom, callbacks, renderProps, cssRefs));
+        },
+        onUpdate: (ops) => {
+          setTree((prev) =>
+            prev == null ? prev : renderer.applyUpdates(prev, ops)
+          );
+        },
+      });
+      const offErr = client.onServerError((p, err) => {
+        if (p === path) setServerError(err);
+      });
+      return () => {
+        offErr();
+        client.unmount(path);
+      };
+    }
+    // routeInfo is NOT included here on purpose
+  }, [client, renderer, path, routeInfo]);
 
-	useEffect(() => {
-		if (inBrowser) {
-			client.navigate(path, routeInfo);
-		}
-	}, [client, path, routeInfo]);
+  useEffect(() => {
+    if (inBrowser) {
+      client.navigate(path, routeInfo);
+    }
+  }, [client, path, routeInfo]);
 
-	if (serverError) {
-		return <ServerError error={serverError} />;
-	}
+  if (serverError) {
+    return <ServerError error={serverError} />;
+  }
 
-	return tree;
+  return tree;
 }
 
 function ServerError({ error }: { error: ServerErrorInfo }) {
-	return (
-		<div
-			style={{
-				padding: 16,
-				border: "1px solid #e00",
-				background: "#fff5f5",
-				color: "#900",
-				fontFamily:
-					'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-				whiteSpace: "pre-wrap",
-			}}
-		>
-			<div style={{ fontWeight: 700, marginBottom: 8 }}>Server Error during {error.phase}</div>
-			{error.message && <div>{error.message}</div>}
-			{error.stack && (
-				<details open style={{ marginTop: 8 }}>
-					<summary>Stack trace</summary>
-					<pre style={{ margin: 0 }}>{error.stack}</pre>
-				</details>
-			)}
-		</div>
-	);
+  return (
+    <div
+      style={{
+        padding: 16,
+        border: "1px solid #e00",
+        background: "#fff5f5",
+        color: "#900",
+        fontFamily:
+          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        whiteSpace: "pre-wrap",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>
+        Server Error during {error.phase}
+      </div>
+      {error.message && <div>{error.message}</div>}
+      {error.stack && (
+        <details open style={{ marginTop: 8 }}>
+          <summary>Stack trace</summary>
+          <pre style={{ margin: 0 }}>{error.stack}</pre>
+        </details>
+      )}
+    </div>
+  );
 }

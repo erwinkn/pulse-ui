@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy a minimal server to AWS ECS with baseline infrastructure.
+"""Deploy a Pulse app to AWS ECS with baseline infrastructure.
 
 This script orchestrates the full deployment workflow:
 1. Ensure ACM certificate exists and is validated
@@ -24,26 +24,80 @@ import asyncio
 import sys
 from pathlib import Path
 
-from pulse_aws.config import DockerBuild
+from pulse_aws.config import DockerBuild, HealthCheckConfig, TaskConfig
 from pulse_aws.deployment import deploy
+
+# ============================================================================
+# Configuration - Edit these variables for your deployment
+# ============================================================================
+
+# Deployment configuration
+DOMAIN = "test.stoneware.rocks"
+DEPLOYMENT_NAME = "test"
+
+# Docker configuration
+# Path to Dockerfile (relative to repo root or absolute)
+DOCKERFILE_PATH = "examples/aws-ecs/Dockerfile"
+# Docker build context path (relative to repo root or absolute)
+CONTEXT_PATH = "examples/aws-ecs"
+
+# Drain configuration
+DRAIN_POLL_SECONDS = 5
+DRAIN_GRACE_SECONDS = 20
+
+# Health check configuration
+HEALTH_CHECK_PATH = "/_pulse/health"
+
+# ============================================================================
 
 
 async def main() -> None:
-	"""Deploy the minimal server to AWS ECS."""
-	domain = "test.stoneware.rocks"
-	deployment_name = "test"
-
-	# Path to Dockerfile (relative to repo root)
+	"""Deploy a Pulse app to AWS ECS."""
 	repo_root = Path(__file__).parent.parent.parent.parent
-	dockerfile_path = repo_root / "packages/pulse-aws/examples/Dockerfile"
+
+	# Resolve Dockerfile path
+	dockerfile_path = Path(DOCKERFILE_PATH)
+	if not dockerfile_path.is_absolute():
+		dockerfile_path = repo_root / dockerfile_path
+
+	# Resolve context path
+	context_path = Path(CONTEXT_PATH)
+	if not context_path.is_absolute():
+		context_path = repo_root / context_path
 
 	if not dockerfile_path.exists():
 		print(f"❌ Dockerfile not found: {dockerfile_path}")
 		sys.exit(1)
 
-	print(f"🚀 Deploying to {deployment_name} environment")
-	print(f"   Domain: {domain}")
+	if not context_path.exists():
+		print(f"❌ Context path not found: {context_path}")
+		sys.exit(1)
+
+	print(f"🚀 Deploying to {DEPLOYMENT_NAME} environment")
+	print(f"   Domain: {DOMAIN}")
+	print(f"   Dockerfile: {dockerfile_path}")
+	print(f"   Context: {context_path}")
 	print()
+
+	# Prepare build args (DEPLOYMENT_ID is added automatically by build_and_push_image)
+	build_args = {
+		"DEPLOYMENT_NAME": DEPLOYMENT_NAME,
+		"DRAIN_POLL_SECONDS": str(DRAIN_POLL_SECONDS),
+		"DRAIN_GRACE_SECONDS": str(DRAIN_GRACE_SECONDS),
+		"PULSE_SERVER_ADDRESS": f"https://{DOMAIN}",
+	}
+
+	# Prepare task config with drain settings
+	task_config = TaskConfig(
+		drain_poll_seconds=DRAIN_POLL_SECONDS,
+		drain_grace_seconds=DRAIN_GRACE_SECONDS,
+		env_vars={
+			"PULSE_SERVER_ADDRESS": f"https://{DOMAIN}",
+		},
+	)
+
+	# Health check configuration
+	health_check_config = HealthCheckConfig(path=HEALTH_CHECK_PATH)
 
 	# Deploy!
 	print("=" * 60)
@@ -52,12 +106,15 @@ async def main() -> None:
 	print()
 
 	result = await deploy(
-		domain=domain,
-		deployment_name=deployment_name,
+		domain=DOMAIN,
+		deployment_name=DEPLOYMENT_NAME,
 		docker=DockerBuild(
 			dockerfile_path=dockerfile_path,
-			context_path=repo_root,
+			context_path=context_path,
+			build_args=build_args,
 		),
+		task=task_config,
+		health_check=health_check_config,
 	)
 
 	# Success!
@@ -83,13 +140,13 @@ async def main() -> None:
 	print("   AWS_PROFILE=your-profile uv run packages/pulse-aws/scripts/verify.py")
 	print()
 	print("2. Access your application:")
-	print(f"   https://{domain}/")
+	print(f"   https://{DOMAIN}/")
 	print()
 	print("3. Monitor deployment state in SSM:")
-	print(f"   Parameter: /apps/{deployment_name}/{result['deployment_id']}/state")
+	print(f"   Parameter: /apps/{DEPLOYMENT_NAME}/{result['deployment_id']}/state")
 	print()
 	print("4. Monitor reaper cleanup in CloudWatch Logs:")
-	print(f"   Log group: /aws/lambda/{deployment_name}-baseline-ReaperFunction*")
+	print(f"   Log group: /aws/lambda/{DEPLOYMENT_NAME}-baseline-ReaperFunction*")
 	print()
 
 

@@ -75,6 +75,7 @@ class HealthCheckConfig:
 	    unhealthy_threshold: Consecutive failures to be unhealthy
 	    wait_for_health: Wait for targets to be healthy before switching traffic
 	    min_healthy_targets: Minimum healthy targets required before switching
+	    task_grace_period_seconds: Grace period per task after exiting initial state (default: 60)
 	"""
 
 	path: str = "/_health"
@@ -84,6 +85,7 @@ class HealthCheckConfig:
 	unhealthy_threshold: int = 3
 	wait_for_health: bool = True
 	min_healthy_targets: int = 2
+	task_grace_period_seconds: int = 60
 
 
 __all__ = [

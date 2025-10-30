@@ -25,7 +25,7 @@ After completing this work, a Pulse developer can push a new application version
 - [x] (2025-10-28) Implemented Phase 3 of the reaper plan: created Lambda function (`reaper_lambda.py`) that processes draining services, checks CloudWatch metrics for ShutdownReady=1, and cleans up inactive services. Integrated reaper into `BaselineStack` (instead of separate stack) via `_create_reaper()` method that creates Lambda, IAM role (ECS/ALB/CloudWatch permissions), and EventBridge schedule. Set MAX_AGE_HR to 1.0 hour to enable cleanup of older deployments without Phase 2 logic. Reaper runs every 1 minute (configurable) and enforces MIN_AGE (60s) and MAX_AGE (1 hour) backstops. Reaper is now permanent infrastructure deployed alongside VPC/ALB/ECS cluster.
 - [x] (2025-10-28) Fixed critical reaper bug: reaper was cleaning up ANY service with runningCount==0, including brand new services that were still spinning up. Updated both `reaper_lambda.py` and `deployment.py` cleanup functions to ONLY clean up services tagged with `state=draining`. Active services are now safe from premature cleanup. Bumped baseline version to 1.3.1.
 - [x] (2025-10-28) Refactored reaper_lambda.py to accept AWS clients as function parameters instead of using global variables, making it importable and testable. Updated deployment.py to import and reuse cleanup_inactive_services() from reaper_lambda.py, eliminating code duplication. The reaper remains a single self-contained file that can be inlined in the Lambda while also being importable for manual cleanup operations. Bumped baseline version to 1.3.2.
-- [x] (2025-10-29) Completed Phase 3.1: added `packages/pulse-aws/examples/Dockerfile.pulse` that multi-stage builds the Pulse Python environment, compiles the React Router frontend with Bun, wires workspace dependencies (`pulse-framework`, `pulse-ui-client`), and ships a runtime image that runs `pulse run examples/main.py --prod` without re-installing dependencies at startup. The image now exposes build args/env for deployment metadata and keeps Bun available for the single-server proxy.
+- [x] (2025-10-29) Completed Phase 3.1: added `examples/aws-ecs/Dockerfile` that multi-stage builds the Pulse Python environment using uv, compiles the React Router frontend with Bun, wires workspace dependencies, and ships a runtime image that runs `pulse run main.py --prod --address 0.0.0.0` without re-installing dependencies at startup. The Dockerfile includes a validation stage that runs `pulse check` to ensure web dependencies are in sync, separates dev and prod JS dependencies, and keeps Bun available for the single-server proxy. The example app (`examples/aws-ecs/main.py`) is a full Pulse application demonstrating state management, routing, and React Router integration.
 - [ ] (2025-10-29) Continue Phase 3: adapt `deploy.py` for Pulse apps, add directive-based affinity plumbing in the Pulse runtime and client, implement `AWSECSPlugin`, and validate end-to-end multi-version deployments with graceful draining before landing.
 
 ## Surprises & Discoveries
@@ -118,7 +118,7 @@ Integrate Pulse apps with the ECS deployment workflow, implement header-based af
 
 **3.1 Pulse app Dockerfile**
 
-- Create `packages/pulse-aws/examples/Dockerfile.pulse` that:
+- Create an example Dockerfile that:
   - Installs `uv` for Python dependency management
   - Installs `bun` for JavaScript tooling
   - Copies the Pulse app Python file (e.g., `examples/main.py`)
@@ -133,7 +133,7 @@ Integrate Pulse apps with the ECS deployment workflow, implement header-based af
 **3.2 Adapt deploy.py for Pulse apps**
 
 - Update `packages/pulse-aws/scripts/deploy.py` to accept a `--pulse-app` flag pointing to a Pulse app file
-- When `--pulse-app` is provided, use `Dockerfile.pulse` instead of the minimal server Dockerfile
+- When `--pulse-app` is provided, use the provided Dockerfile instead of the minimal server Dockerfile
 - Pass `DEPLOYMENT_NAME` and `DEPLOYMENT_ID` as build args
 - Pass drain configuration (`DRAIN_POLL_SECONDS`, `DRAIN_GRACE_SECONDS`) as build args
 - Run a single deploy and verify the Pulse app is accessible at the ALB URL

@@ -148,14 +148,14 @@ async def _ensure_certificate_ready(
 	if not cert.arn:
 		raise DeploymentError("No certificate ARN available")
 
+	if cert.status == "ISSUED":
+		reporter.success(f"Certificate ready: {cert.arn}")
+		return cert.arn
+
 	if cert.dns_configuration:
 		reporter.blank()
 		_emit_dns_instructions(cert.dns_configuration, reporter)
 		reporter.blank()
-
-	if cert.status == "ISSUED":
-		reporter.success(f"Certificate ready: {cert.arn}")
-		return cert.arn
 
 	message = (
 		f"Certificate for {domain} is pending DNS validation. "
@@ -308,6 +308,7 @@ async def build_and_push_image(
 
 	build_cmd = [
 		"docker",
+		"buildx",
 		"build",
 		"--platform",
 		"linux/amd64",
@@ -315,6 +316,7 @@ async def build_and_push_image(
 		str(dockerfile_path),
 		"-t",
 		image_uri,
+		"--load",
 	]
 
 	for key, value in all_build_args.items():
@@ -823,6 +825,57 @@ async def create_service_and_target_group(
 		raise DeploymentError(msg) from exc
 
 
+async def _cleanup_failed_deployment(
+	service_arn: str,
+	target_group_arn: str,
+	deployment_id: str,
+	baseline: BaselineStackOutputs,
+	reporter: Reporter,
+) -> None:
+	"""Clean up a failed deployment by deleting the service and target group."""
+	reporter.warning(f"Cleaning up failed deployment {deployment_id}...")
+
+	ecs = boto3.client("ecs", region_name=baseline.region)
+	elbv2 = boto3.client("elbv2", region_name=baseline.region)
+
+	# Delete service (this will also stop all tasks)
+	try:
+		ecs.update_service(
+			cluster=baseline.cluster_name,
+			service=deployment_id,
+			desiredCount=0,
+		)
+		# Wait a bit for tasks to stop
+		await asyncio.sleep(5)
+		ecs.delete_service(
+			cluster=baseline.cluster_name,
+			service=deployment_id,
+			force=True,
+		)
+		reporter.detail(f"Deleted service {deployment_id}")
+	except ClientError as exc:
+		reporter.warning(f"Failed to delete service: {exc}")
+
+	# Delete target group
+	try:
+		# First, remove listener rules that reference this target group
+		rules_response = elbv2.describe_rules(ListenerArn=baseline.listener_arn)
+		for rule in rules_response.get("Rules", []):
+			actions = rule.get("Actions", [])
+			for action in actions:
+				if action.get("TargetGroupArn") == target_group_arn:
+					try:
+						elbv2.delete_rule(RuleArn=rule["RuleArn"])
+						reporter.detail(f"Deleted listener rule {rule['RuleArn']}")
+					except ClientError:
+						pass  # Best effort
+
+		elbv2.delete_target_group(TargetGroupArn=target_group_arn)
+		reporter.detail(f"Deleted target group {target_group_arn}")
+	except ClientError as exc:
+		reporter.warning(f"Failed to delete target group: {exc}")
+
+
 async def wait_for_healthy_targets(
 	target_group_arn: str,
 	baseline: BaselineStackOutputs,
@@ -830,6 +883,9 @@ async def wait_for_healthy_targets(
 	min_healthy_targets: int = 1,
 	timeout_seconds: float = 300,
 	poll_interval: float = 10,
+	task_grace_period_seconds: float = 60,
+	service_arn: str | None = None,
+	deployment_id: str | None = None,
 	reporter: Reporter | None = None,
 ) -> None:
 	"""Wait for target group to have healthy targets.
@@ -840,35 +896,140 @@ async def wait_for_healthy_targets(
 	    min_healthy_targets: Minimum number of healthy targets required
 	    timeout_seconds: Maximum time to wait (default: 5 minutes)
 	    poll_interval: Seconds between health checks (default: 10)
+	    task_grace_period_seconds: Grace period per task after exiting initial state (default: 60)
+	    service_arn: Optional service ARN for cleanup on failure
+	    deployment_id: Optional deployment ID for cleanup on failure
 
 	Raises:
-	    DeploymentError: If timeout is reached before targets become healthy
+	    DeploymentError: If timeout is reached before targets become healthy or if unhealthy targets are detected
 	"""
 	reporter = _resolve_reporter(reporter)
 
 	elbv2 = boto3.client("elbv2", region_name=baseline.region)
 	start_time = asyncio.get_event_loop().time()
+	# Track when each task exits initial state
+	task_exit_initial_time: dict[str, float] = {}
 
 	reporter.info(f"Waiting for {min_healthy_targets} healthy target(s)...")
+	reporter.detail(
+		f"Task grace period: {task_grace_period_seconds}s after exiting initial state"
+	)
 
 	while True:
 		elapsed = asyncio.get_event_loop().time() - start_time
 		if elapsed >= timeout_seconds:
 			msg = f"Timeout waiting for healthy targets after {timeout_seconds:.0f}s"
+			if service_arn and deployment_id:
+				await _cleanup_failed_deployment(
+					service_arn, target_group_arn, deployment_id, baseline, reporter
+				)
 			raise DeploymentError(msg)
 
 		try:
 			response = elbv2.describe_target_health(TargetGroupArn=target_group_arn)
 			targets = response.get("TargetHealthDescriptions", [])
+			current_time = asyncio.get_event_loop().time()
 
 			healthy_count = sum(
 				1
 				for t in targets
 				if t.get("TargetHealth", {}).get("State") == "healthy"
 			)
+			unhealthy_count = sum(
+				1
+				for t in targets
+				if t.get("TargetHealth", {}).get("State") == "unhealthy"
+			)
 			total_count = len(targets)
 
+			# Track when tasks exit initial state and check grace periods
+			tasks_failed_grace_period = []
+			for t in targets:
+				target = t.get("Target", {})
+				target_id = target.get("Id", "")
+				health = t.get("TargetHealth", {})
+				state = health.get("State", "unknown")
+
+				# Track when task exits initial state
+				if (
+					state != "initial"
+					and target_id
+					and target_id not in task_exit_initial_time
+				):
+					task_exit_initial_time[target_id] = current_time
+
+				# Check if task exceeded grace period and is not healthy
+				if (
+					target_id
+					and target_id in task_exit_initial_time
+					and state != "healthy"
+				):
+					time_since_exit_initial = (
+						current_time - task_exit_initial_time[target_id]
+					)
+					if time_since_exit_initial >= task_grace_period_seconds:
+						reason = health.get("Reason", "unknown")
+						description = health.get("Description", "")
+						tasks_failed_grace_period.append(
+							{
+								"target_id": target_id,
+								"state": state,
+								"reason": reason,
+								"description": description,
+								"time_since_exit_initial": time_since_exit_initial,
+							}
+						)
+
+			# Abort if any task exceeded grace period
+			if tasks_failed_grace_period:
+				failed_details = []
+				for task_info in tasks_failed_grace_period:
+					detail = (
+						f"  Target {task_info['target_id']}: {task_info['state']} "
+						f"({task_info['reason']}"
+					)
+					if task_info["description"]:
+						detail += f" - {task_info['description']}"
+					detail += f") - exceeded {task_grace_period_seconds}s grace period"
+					failed_details.append(detail)
+
+				msg_lines = (
+					[
+						f"Deployment aborted: {len(tasks_failed_grace_period)} task(s) failed to become healthy within grace period",
+						"",
+						"Failed task details:",
+					]
+					+ failed_details
+					+ [
+						"",
+						"Cleaning up failed deployment...",
+					]
+				)
+				msg = "\n".join(msg_lines)
+
+				if service_arn and deployment_id:
+					await _cleanup_failed_deployment(
+						service_arn, target_group_arn, deployment_id, baseline, reporter
+					)
+
+				raise DeploymentError(msg)
+
 			if healthy_count >= min_healthy_targets:
+				# Final check: ensure no unhealthy targets before success
+				if unhealthy_count > 0:
+					msg = (
+						f"Deployment aborted: {unhealthy_count} unhealthy target(s) "
+						f"detected even though {healthy_count} healthy target(s) exist"
+					)
+					if service_arn and deployment_id:
+						await _cleanup_failed_deployment(
+							service_arn,
+							target_group_arn,
+							deployment_id,
+							baseline,
+							reporter,
+						)
+					raise DeploymentError(msg)
 				reporter.success(f"{healthy_count}/{total_count} target(s) healthy")
 				return
 
@@ -889,6 +1050,10 @@ async def wait_for_healthy_targets(
 
 		except ClientError as exc:
 			msg = f"Failed to check target health: {exc}"
+			if service_arn and deployment_id:
+				await _cleanup_failed_deployment(
+					service_arn, target_group_arn, deployment_id, baseline, reporter
+				)
 			raise DeploymentError(msg) from exc
 
 		await asyncio.sleep(poll_interval)
@@ -903,6 +1068,8 @@ async def install_listener_rules_and_switch_traffic(
 	priority_start: int = 100,
 	wait_for_health: bool = True,
 	min_healthy_targets: int = 2,
+	task_grace_period_seconds: float = 60,
+	service_arn: str | None = None,
 	reporter: Reporter | None = None,
 ) -> None:
 	"""Wait for deployment health then switch default traffic to the new deployment.
@@ -923,6 +1090,8 @@ async def install_listener_rules_and_switch_traffic(
 	    priority_start: Unused, kept for API compatibility
 	    wait_for_health: Wait for targets to be healthy before switching (default: True)
 	    min_healthy_targets: Minimum healthy targets required (default: 2)
+	    task_grace_period_seconds: Grace period per task after exiting initial state (default: 60)
+	    service_arn: Optional service ARN for cleanup on failure
 
 	Raises:
 	    DeploymentError: If health checks or traffic switching fail
@@ -935,6 +1104,9 @@ async def install_listener_rules_and_switch_traffic(
 			target_group_arn=target_group_arn,
 			baseline=baseline,
 			min_healthy_targets=min_healthy_targets,
+			task_grace_period_seconds=task_grace_period_seconds,
+			service_arn=service_arn,
+			deployment_id=deployment_id,
 			reporter=reporter,
 		)
 		reporter.blank()
@@ -1305,6 +1477,8 @@ async def deploy(
 		baseline=baseline,
 		wait_for_health=health_check.wait_for_health,
 		min_healthy_targets=health_check.min_healthy_targets,
+		task_grace_period_seconds=health_check.task_grace_period_seconds,
+		service_arn=service_arn,
 		reporter=reporter,
 	)
 

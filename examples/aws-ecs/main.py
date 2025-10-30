@@ -22,7 +22,7 @@ class CounterState(ps.State):
 		self._name: str = name
 
 	def increment(self):
-		self.count += 1
+		self.count += 2
 
 	async def increment_with_delay(self):
 		await asyncio.sleep(1)

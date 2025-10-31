@@ -21,7 +21,7 @@ from pulse_aws.config import ReaperConfig
 
 STACK_NAME_TEMPLATE = "{env}-baseline"
 TOOLKIT_STACK_NAME = "CDKToolkit"
-BASELINE_STACK_VERSION = "1.3.1"  # Bump when baseline stack changes
+BASELINE_STACK_VERSION = "1.3.2"  # Bump when baseline stack changes
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CDK_APP_DIR = PACKAGE_ROOT / "src" / "pulse_aws" / "cdk"
 STACK_SUCCEEDED = {
@@ -161,10 +161,8 @@ async def ensure_baseline_stack(
 	# Add reaper config if provided
 	if reaper_config:
 		context["reaper_schedule_minutes"] = str(reaper_config.schedule_minutes)
-		context["reaper_consecutive_periods"] = str(reaper_config.consecutive_periods)
-		context["reaper_period_seconds"] = str(reaper_config.period_seconds)
-		context["reaper_min_age_seconds"] = str(reaper_config.min_age_seconds)
 		context["reaper_max_age_hours"] = str(reaper_config.max_age_hours)
+		context["reaper_deployment_timeout"] = str(reaper_config.deployment_timeout)
 
 	# Add version tag to track baseline stack version
 	tags = {"pulse-cf-version": BASELINE_STACK_VERSION}

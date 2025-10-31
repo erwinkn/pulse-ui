@@ -215,8 +215,12 @@ def _run_without_pty(
 
 
 def _write_tagged_line(name: str, message: str, colors: Mapping[str, str]) -> None:
-	color = ANSI_CODES.get(colors.get(name, ""), ANSI_CODES["default"])
-	sys.stdout.write(f"{color}[{name}]\033[0m {message}\n")
+	# Only add tags if colors dict is not empty (i.e., tagging is enabled)
+	if colors:
+		color = ANSI_CODES.get(colors.get(name, ""), ANSI_CODES["default"])
+		sys.stdout.write(f"{color}[{name}]\033[0m {message}\n")
+	else:
+		sys.stdout.write(f"{message}\n")
 	sys.stdout.flush()
 
 

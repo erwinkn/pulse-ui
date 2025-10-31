@@ -204,7 +204,10 @@ def run(
 			)
 		)
 
-	tag_colors = {"server": "cyan", "web": "orange1"}
+	# Only add tags in dev mode to avoid breaking structured output (e.g., CloudWatch EMF metrics)
+	tag_colors = (
+		{"server": "cyan", "web": "orange1"} if env.pulse_env == "dev" else None
+	)
 
 	with FolderLock(web_root):
 		try:

@@ -3,35 +3,32 @@ ECS Reaper Lambda — Automated cleanup of draining deployments.
 
 This Lambda runs on a schedule (EventBridge) and:
 1. Finds ECS services tagged state=draining
-2. Checks if all tasks have ShutdownReady=1 (via CloudWatch metrics)
+2. Checks if all tasks have readiness="ready" in SSM Parameter Store
 3. Sets desiredCount=0 when ready OR max age exceeded
 4. Cleans up services with runningCount=0 (service, target group, listener rule)
+5. Cleans up stuck deployments in "deploying" state that exceed max age
 
 Environment variables:
-- CLUSTER: ECS cluster name
-- DEPLOYMENT_NAME: Deployment environment name (e.g., "test", "prod")
-- CONSEC: Consecutive periods with ShutdownReady=1 required (default: 2)
-- PERIOD: CloudWatch metric period in seconds (default: 60)
-- MIN_AGE_SEC: Minimum service age before retirement (default: 60)
-- MAX_AGE_HR: Maximum service age in hours (force retire, default: 1.0)
-- LISTENER_ARN: ALB listener ARN for rule cleanup
+- PULSE_AWS_CLUSTER: ECS cluster name
+- PULSE_AWS_DEPLOYMENT_NAME: Deployment environment name (e.g., "test", "prod")
+- PULSE_AWS_REAPER_MAX_AGE_HR: Maximum service age in hours (force retire, default: 1.0)
+- PULSE_AWS_REAPER_DEPLOYMENT_TIMEOUT: Maximum deployment time in hours before cleanup (default: 1.0)
+- PULSE_AWS_LISTENER_ARN: ALB listener ARN for rule cleanup
 """
 
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import boto3
 
 # Configuration from environment (only used by Lambda handler)
-CLUSTER = os.environ.get("CLUSTER", "")
-DEPLOYMENT_NAME = os.environ.get("DEPLOYMENT_NAME", "")
-LISTENER_ARN = os.environ.get("LISTENER_ARN", "")
-CONSEC = int(os.getenv("CONSEC", "2"))
-PERIOD = int(os.getenv("PERIOD", "60"))
-MIN_AGE_SEC = int(os.getenv("MIN_AGE_SEC", "60"))
-MAX_AGE_HR = float(os.getenv("MAX_AGE_HR", "1.0"))
+CLUSTER = os.environ.get("PULSE_AWS_CLUSTER", "")
+DEPLOYMENT_NAME = os.environ.get("PULSE_AWS_DEPLOYMENT_NAME", "")
+LISTENER_ARN = os.environ.get("PULSE_AWS_LISTENER_ARN", "")
+MAX_AGE_HR = float(os.getenv("PULSE_AWS_REAPER_MAX_AGE_HR", "1.0"))
+DEPLOYMENT_TIMEOUT = float(os.getenv("PULSE_AWS_REAPER_DEPLOYMENT_TIMEOUT", "1.0"))
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -39,23 +36,29 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 	# Create AWS clients for this invocation
 	ecs = boto3.client("ecs")
 	elbv2 = boto3.client("elbv2")
-	cloudwatch = boto3.client("cloudwatch")
 
 	print(f"🔄 Reaper invoked for cluster={CLUSTER}, deployment={DEPLOYMENT_NAME}")
 
 	# Step 1: Find draining services and scale them to 0 if ready
+	ssm = boto3.client("ssm")
 	drained_count = process_draining_services(
 		cluster=CLUSTER,
 		deployment_name=DEPLOYMENT_NAME,
 		ecs=ecs,
-		cloudwatch_client=cloudwatch,
-		consec=CONSEC,
-		period=PERIOD,
-		min_age_sec=MIN_AGE_SEC,
+		ssm_client=ssm,
 		max_age_hr=MAX_AGE_HR,
 	)
 
-	# Step 2: Clean up services with runningCount=0
+	# Step 2: Clean up stuck deploying services
+	stuck_deploying_count = cleanup_stuck_deploying_services(
+		cluster=CLUSTER,
+		listener_arn=LISTENER_ARN,
+		max_age_hr=DEPLOYMENT_TIMEOUT,
+		ecs=ecs,
+		elbv2=elbv2,
+	)
+
+	# Step 3: Clean up services with runningCount=0
 	cleaned_count = cleanup_inactive_services(
 		cluster=CLUSTER,
 		listener_arn=LISTENER_ARN,
@@ -65,6 +68,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 	result = {
 		"drained": drained_count,
+		"stuck_deploying_cleaned": stuck_deploying_count,
 		"cleaned": cleaned_count,
 		"timestamp": datetime.now(timezone.utc).isoformat(),
 	}
@@ -77,10 +81,7 @@ def process_draining_services(
 	cluster: str,
 	deployment_name: str,
 	ecs: Any,
-	cloudwatch_client: Any,
-	consec: int = 2,
-	period: int = 60,
-	min_age_sec: int = 60,
+	ssm_client: Any,
 	max_age_hr: float = 1.0,
 ) -> int:
 	"""Find draining services and set desiredCount=0 if ready.
@@ -89,10 +90,7 @@ def process_draining_services(
 	    cluster: ECS cluster name
 	    deployment_name: Deployment environment name
 	    ecs: boto3 ECS client
-	    cloudwatch_client: boto3 CloudWatch client
-	    consec: Consecutive periods with ShutdownReady==1 required
-	    period: CloudWatch metric period in seconds
-	    min_age_sec: Minimum service age before retirement
+	    ssm_client: boto3 SSM client
 	    max_age_hr: Maximum service age in hours (force retire)
 
 	Returns:
@@ -117,7 +115,7 @@ def process_draining_services(
 		response = ecs.describe_services(cluster=cluster, services=batch)
 		services.extend(response.get("services", []))
 
-	# Filter for ACTIVE services with state=draining tag
+	# Filter for ACTIVE services with state=draining tag (skip deploying)
 	draining_services = []
 	for svc in services:
 		if svc.get("status") != "ACTIVE":
@@ -165,13 +163,6 @@ def process_draining_services(
 
 		age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
 
-		# Enforce minimum age
-		if age_seconds < min_age_sec:
-			print(
-				f"  ⏭️  {deployment_id}: too young ({age_seconds:.0f}s < {min_age_sec}s)"
-			)
-			continue
-
 		# Check if max age exceeded (force retire)
 		max_age_seconds = max_age_hr * 3600
 		force_retire = age_seconds >= max_age_seconds
@@ -207,108 +198,61 @@ def process_draining_services(
 
 		print(f"  📊 {deployment_id}: checking {len(task_ids)} task(s)")
 
-		# Check CloudWatch metrics for each task
+		# Check SSM parameters for each task
 		all_ready = check_all_tasks_ready(
-			cloudwatch_client=cloudwatch_client,
+			ssm_client=ssm_client,
 			deployment_name=item["deployment_name"] or deployment_name,
 			deployment_id=deployment_id,
 			task_ids=task_ids,
-			consec=consec,
-			period=period,
 		)
 
 		if all_ready:
-			print(f"  ✅ {deployment_id}: all tasks ready, scaling to 0")
+			print(f"  ✅ {deployment_id}: all tasks draining, scaling to 0")
 			scale_service_to_zero(ecs, cluster, svc["serviceArn"], deployment_id)
 			drained_count += 1
 		else:
-			print(f"  ⏳ {deployment_id}: tasks not ready yet")
+			print(f"  ⏳ {deployment_id}: tasks not draining yet")
 
 	return drained_count
 
 
 def check_all_tasks_ready(
-	cloudwatch_client: Any,
+	ssm_client: Any,
 	deployment_name: str,
 	deployment_id: str,
 	task_ids: list[str],
-	consec: int,
-	period: int,
 ) -> bool:
-	"""Check if all tasks have ShutdownReady=1 for CONSEC consecutive periods.
+	"""Check if all tasks have state="draining" in SSM.
 
 	Args:
-	    cloudwatch_client: boto3 CloudWatch client
+	    ssm_client: boto3 SSM client
 	    deployment_name: Deployment environment name
 	    deployment_id: Deployment ID
 	    task_ids: List of task IDs to check
-	    consec: Consecutive periods with ShutdownReady==1 required
-	    period: CloudWatch metric period in seconds
 
 	Returns:
-	    True if all tasks are ready for shutdown, False otherwise
+	    True if all tasks are draining (ready for shutdown), False otherwise
 	"""
-	# Query CloudWatch metrics for each task
-	end_time = datetime.now(timezone.utc)
-	start_time = end_time - timedelta(seconds=period * consec)
-
-	# Build metric queries
-	metric_queries = []
-	for idx, task_id in enumerate(task_ids):
-		metric_queries.append(
-			{
-				"Id": f"m{idx}",
-				"MetricStat": {
-					"Metric": {
-						"Namespace": "App/Drain",
-						"MetricName": "ShutdownReady",
-						"Dimensions": [
-							{"Name": "deployment_name", "Value": deployment_name},
-							{"Name": "deployment_id", "Value": deployment_id},
-							{"Name": "task_id", "Value": task_id},
-						],
-					},
-					"Period": period,
-					"Stat": "Maximum",
-				},
-			}
-		)
-
-	if not metric_queries:
+	if not task_ids:
 		return False
 
-	# CloudWatch GetMetricData has a limit of 500 queries
-	if len(metric_queries) > 500:
-		print(
-			f"  ⚠️  Too many tasks ({len(task_ids)}), checking first 500 only (CW limit)"
-		)
-		metric_queries = metric_queries[:500]
+	# Check SSM parameters for each task
+	for task_id in task_ids:
+		param_name = f"/apps/{deployment_name}/{deployment_id}/tasks/{task_id}"
 
-	try:
-		response = cloudwatch_client.get_metric_data(
-			MetricDataQueries=metric_queries,
-			StartTime=start_time,
-			EndTime=end_time,
-		)
-
-		# Check if all tasks have ShutdownReady=1 for all periods
-		for result in response.get("MetricDataResults", []):
-			values = result.get("Values", [])
-
-			# Need at least CONSEC datapoints
-			if len(values) < consec:
+		try:
+			response = ssm_client.get_parameter(Name=param_name)
+			value = response["Parameter"]["Value"]
+			if value != "draining":
 				return False
+		except ssm_client.exceptions.ParameterNotFound:
+			# Parameter doesn't exist, task not ready (assume healthy, not draining)
+			return False
+		except Exception as e:
+			print(f"  ⚠️  Failed to check task {task_id} state: {e}")
+			return False
 
-			# Check if last CONSEC values are all 1
-			recent_values = values[-consec:]
-			if not all(v == 1 for v in recent_values):
-				return False
-
-		return True
-
-	except Exception as e:
-		print(f"  ⚠️  CloudWatch metric check failed: {e}")
-		return False
+	return True
 
 
 def scale_service_to_zero(
@@ -345,6 +289,145 @@ def is_service_draining(ecs: Any, service_arn: str) -> bool:
 		return tag_dict.get("state") == "draining"
 	except Exception:
 		return False
+
+
+def is_service_deploying(ecs: Any, service_arn: str) -> bool:
+	"""Check if a service is tagged with state=deploying.
+
+	Args:
+	    ecs: boto3 ECS client
+	    service_arn: ARN of the ECS service to check
+
+	Returns:
+	    True if service is tagged state=deploying, False otherwise
+	"""
+	try:
+		tags = ecs.list_tags_for_resource(resourceArn=service_arn).get("tags", [])
+		tag_dict = {tag["key"]: tag["value"] for tag in tags}
+		return tag_dict.get("state") == "deploying"
+	except Exception:
+		return False
+
+
+def cleanup_stuck_deploying_services(
+	cluster: str,
+	listener_arn: str,
+	max_age_hr: float,
+	ecs: Any,
+	elbv2: Any,
+) -> int:
+	"""Clean up services stuck in deploying state that exceed max age.
+
+	Args:
+	    cluster: ECS cluster name
+	    listener_arn: ALB listener ARN for rule cleanup
+	    max_age_hr: Maximum age in hours before cleanup
+	    ecs: boto3 ECS client
+	    elbv2: boto3 ELBv2 client
+
+	Returns:
+	    Number of services that were cleaned up
+	"""
+	print("🔍 Looking for stuck deploying services...")
+
+	# Find all services
+	service_arns = []
+	paginator = ecs.get_paginator("list_services")
+	for page in paginator.paginate(cluster=cluster):
+		service_arns.extend(page.get("serviceArns", []))
+
+	if not service_arns:
+		print("  No services found")
+		return 0
+
+	# Get service details
+	services = []
+	for i in range(0, len(service_arns), 10):
+		batch = service_arns[i : i + 10]
+		response = ecs.describe_services(cluster=cluster, services=batch)
+		services.extend(response.get("services", []))
+
+	# Filter for ACTIVE services with state=deploying that exceed max age
+	max_age_seconds = max_age_hr * 3600
+	stuck_services = []
+	for svc in services:
+		if svc.get("status") != "ACTIVE":
+			continue
+
+		if not is_service_deploying(ecs, svc["serviceArn"]):
+			continue
+
+		# Check age
+		created_at = svc.get("createdAt")
+		if not created_at:
+			continue
+
+		age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
+		if age_seconds >= max_age_seconds:
+			stuck_services.append(svc)
+
+	if not stuck_services:
+		print("  No stuck deploying services found")
+		return 0
+
+	print(f"  Found {len(stuck_services)} stuck deploying service(s)")
+
+	# Get listener rules to find target groups
+	rules_map = get_listener_rules_map(elbv2, listener_arn)
+
+	# Clean up each stuck service
+	cleaned_count = 0
+	for svc in stuck_services:
+		deployment_id = svc["serviceName"]
+		service_arn = svc["serviceArn"]
+		created_at = svc.get("createdAt")
+		age_hours = (
+			(datetime.now(timezone.utc) - created_at).total_seconds() / 3600
+			if created_at
+			else 0
+		)
+
+		print(
+			f"  🧹 {deployment_id}: cleaning up stuck deployment (age: {age_hours:.1f}h)..."
+		)
+
+		# Scale to 0 first
+		if svc.get("desiredCount", 0) > 0:
+			try:
+				ecs.update_service(cluster=cluster, service=service_arn, desiredCount=0)
+				print("    ✅ Scaled to desiredCount=0")
+			except Exception as e:
+				print(f"    ⚠️  Failed to scale to 0: {e}")
+
+		# Delete listener rule and target group
+		rule_info = rules_map.get(deployment_id)
+		if rule_info:
+			# Delete rule first
+			try:
+				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
+				print("    ✅ Deleted listener rule")
+			except Exception as e:
+				print(f"    ⚠️  Failed to delete listener rule: {e}")
+
+			# Delete target group
+			if rule_info.get("target_group_arn"):
+				try:
+					elbv2.delete_target_group(
+						TargetGroupArn=rule_info["target_group_arn"]
+					)
+					print("    ✅ Deleted target group")
+				except Exception as e:
+					print(f"    ⚠️  Failed to delete target group: {e}")
+
+		# Delete ECS service
+		try:
+			ecs.delete_service(cluster=cluster, service=service_arn, force=True)
+			print("    ✅ Deleted ECS service")
+			cleaned_count += 1
+		except Exception as e:
+			print(f"    ❌ Failed to delete service: {e}")
+
+	return cleaned_count
 
 
 def cleanup_inactive_services(
@@ -384,13 +467,14 @@ def cleanup_inactive_services(
 		services.extend(response.get("services", []))
 
 	# Filter for ACTIVE services with runningCount=0 that are tagged as draining
-	# We ONLY clean up draining services, not active ones (which might just be spinning up)
+	# We ONLY clean up draining services, not active or deploying ones
 	inactive_services = [
 		svc
 		for svc in services
 		if svc.get("status") == "ACTIVE"
 		and svc.get("runningCount", 0) == 0
 		and is_service_draining(ecs, svc["serviceArn"])
+		and not is_service_deploying(ecs, svc["serviceArn"])
 	]
 
 	if not inactive_services:

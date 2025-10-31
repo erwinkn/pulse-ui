@@ -7,6 +7,7 @@ from typing import TypedDict, override
 import pulse as ps
 from pulse.middleware import Deny, NotFound, Ok, Redirect
 from pulse.user_session import InMemorySessionStore
+from pulse_aws import AWSECSPlugin
 
 
 # State Management
@@ -22,7 +23,7 @@ class CounterState(ps.State):
 		self._name: str = name
 
 	def increment(self):
-		self.count += 1
+		self.count += 4
 
 	async def increment_with_delay(self):
 		await asyncio.sleep(1)
@@ -42,6 +43,10 @@ class CounterState(ps.State):
 
 	def stop_ticking(self):
 		self.ticking = False
+
+	@override
+	def on_dispose(self) -> None:
+		self.stop_ticking()
 
 	def decrement(self):
 		self.count -= 1
@@ -509,7 +514,7 @@ def app_layout():
 	return ps.div(
 		ps.header(
 			ps.div(
-				ps.h1("Pulse Demo 2.0", className="text-2xl font-bold"),
+				ps.h1("Pulse Demo 4.0", className="text-2xl font-bold"),
 				ps.div(
 					ps.span(f"Shared Counter: {state.shared_count}", className="mr-4"),
 					ps.button(
@@ -569,6 +574,7 @@ app = ps.App(
 			],
 		)
 	],
+	plugins=[AWSECSPlugin()],
 	session_store=InMemorySessionStore() if ps.mode() == "prod" else None,
 	server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
 )

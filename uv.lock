@@ -910,7 +910,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-aws"
-version = "0.1.0"
+version = "0.1.5"
 source = { editable = "packages/pulse-aws" }
 dependencies = [
     { name = "aws-cdk-lib" },
@@ -918,6 +918,7 @@ dependencies = [
     { name = "botocore" },
     { name = "constructs" },
     { name = "httpx" },
+    { name = "requests" },
 ]
 
 [package.metadata]
@@ -927,11 +928,12 @@ requires-dist = [
     { name = "botocore", specifier = ">=1.35.0,<2.0.0" },
     { name = "constructs", specifier = ">=10.0.0,<11.0.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
+    { name = "requests", specifier = ">=2.32.5" },
 ]
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.38a7"
+version = "0.1.38a9"
 source = { editable = "packages/pulse/python" }
 dependencies = [
     { name = "fastapi" },

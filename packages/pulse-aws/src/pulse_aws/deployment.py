@@ -260,6 +260,7 @@ async def _ensure_domain_routing(
 
 async def build_and_push_image(
 	dockerfile_path: Path,
+	deployment_name: str,
 	deployment_id: str,
 	baseline: BaselineStackOutputs,
 	*,
@@ -271,10 +272,12 @@ async def build_and_push_image(
 
 	Args:
 	    dockerfile_path: Path to the Dockerfile
+	    deployment_name: Deployment environment name (e.g., "prod", "dev")
 	    deployment_id: Unique deployment ID to use as the image tag
 	    baseline: Baseline stack outputs containing ECR repository URI
 	    context_path: Path to the Docker build context directory
 	    build_args: Additional build arguments to pass to docker build
+	        (DEPLOYMENT_NAME and DEPLOYMENT_ID are automatically added)
 
 	Returns:
 	    The full image URI with tag (e.g., "123.dkr.ecr.us-east-1.amazonaws.com/repo:tag")
@@ -302,6 +305,7 @@ async def build_and_push_image(
 	# Build the image
 	reporter.info(f"Building image: {image_uri}")
 	all_build_args = {
+		"DEPLOYMENT_NAME": deployment_name,
 		"DEPLOYMENT_ID": deployment_id,
 		**(build_args or {}),
 	}
@@ -408,7 +412,6 @@ async def register_task_definition(
 	env_vars: dict[str, str] | None = None,
 	drain_poll_seconds: int = 5,
 	drain_grace_seconds: int = 20,
-	drain_health_fail_after_seconds: int = 120,
 	reporter: Reporter | None = None,
 ) -> str:
 	"""Register an ECS Fargate task definition.
@@ -421,8 +424,7 @@ async def register_task_definition(
 	    memory: Memory in MB (512, 1024, 2048, etc.)
 	    env_vars: Additional environment variables
 	    drain_poll_seconds: Seconds between SSM state polling
-	    drain_grace_seconds: Grace period before ShutdownReady=1
-	    drain_health_fail_after_seconds: Seconds before health fails when draining
+	    drain_grace_seconds: Grace period before marking task as draining
 
 	Returns:
 	    The ARN of the registered task definition
@@ -439,14 +441,10 @@ async def register_task_definition(
 
 	# Build environment variables
 	environment = [
-		{"name": "DEPLOYMENT_NAME", "value": baseline.deployment_name},
-		{"name": "DEPLOYMENT_ID", "value": deployment_id},
-		{"name": "DRAIN_POLL_SECONDS", "value": str(drain_poll_seconds)},
-		{"name": "DRAIN_GRACE_SECONDS", "value": str(drain_grace_seconds)},
-		{
-			"name": "DRAIN_HEALTH_FAIL_AFTER_SECONDS",
-			"value": str(drain_health_fail_after_seconds),
-		},
+		{"name": "PULSE_AWS_DEPLOYMENT_NAME", "value": baseline.deployment_name},
+		{"name": "PULSE_AWS_DEPLOYMENT_ID", "value": deployment_id},
+		{"name": "PULSE_AWS_DRAIN_POLL_SECONDS", "value": str(drain_poll_seconds)},
+		{"name": "PULSE_AWS_DRAIN_GRACE_SECONDS", "value": str(drain_grace_seconds)},
 		*[{"name": k, "value": v} for k, v in (env_vars or {}).items()],
 	]
 
@@ -510,7 +508,7 @@ async def set_deployment_state(
 	Args:
 	    deployment_name: The deployment environment name (e.g., "prod", "dev")
 	    deployment_id: Unique deployment ID
-	    state: Deployment state ("active" or "draining")
+	    state: Deployment state ("deploying", "active", or "draining")
 	    region: AWS region
 	    reporter: Optional reporter for logging
 
@@ -532,6 +530,47 @@ async def set_deployment_state(
 		reporter.detail(f"Set SSM parameter {param_name} = {state}")
 	except ClientError as exc:
 		msg = f"Failed to set deployment state in SSM: {exc}"
+		raise DeploymentError(msg) from exc
+
+
+async def update_service_state_tag(
+	service_arn: str,
+	deployment_name: str,
+	deployment_id: str,
+	state: str,
+	*,
+	region: str,
+	reporter: Reporter | None = None,
+) -> None:
+	"""Update the state tag on an ECS service.
+
+	Args:
+	    service_arn: ARN of the ECS service
+	    deployment_name: The deployment environment name
+	    deployment_id: Unique deployment ID
+	    state: Deployment state ("deploying", "active", or "draining")
+	    region: AWS region
+	    reporter: Optional reporter for logging
+
+	Raises:
+	    DeploymentError: If tag update fails
+	"""
+	reporter = _resolve_reporter(reporter)
+
+	ecs = boto3.client("ecs", region_name=region)
+
+	try:
+		ecs.tag_resource(
+			resourceArn=service_arn,
+			tags=[
+				{"key": "deployment_name", "value": deployment_name},
+				{"key": "deployment_id", "value": deployment_id},
+				{"key": "state", "value": state},
+			],
+		)
+		reporter.detail(f"Updated service tag state = {state}")
+	except ClientError as exc:
+		msg = f"Failed to update service state tag: {exc}"
 		raise DeploymentError(msg) from exc
 
 
@@ -809,7 +848,7 @@ async def create_service_and_target_group(
 			tags=[
 				{"key": "deployment_id", "value": deployment_id},
 				{"key": "deployment_name", "value": deployment_name},
-				{"key": "state", "value": "active"},
+				{"key": "state", "value": "deploying"},
 			],
 		)
 		service_arn = service_response["service"]["serviceArn"]
@@ -1423,6 +1462,7 @@ async def deploy(
 	# Build and push image
 	image_uri = await build_and_push_image(
 		dockerfile_path=docker.dockerfile_path,
+		deployment_name=deployment_name,
 		deployment_id=deployment_id,
 		baseline=baseline,
 		context_path=docker.context_path,
@@ -1441,7 +1481,6 @@ async def deploy(
 		env_vars=task.env_vars or None,
 		drain_poll_seconds=task.drain_poll_seconds,
 		drain_grace_seconds=task.drain_grace_seconds,
-		drain_health_fail_after_seconds=task.drain_health_fail_after_seconds,
 		reporter=reporter,
 	)
 
@@ -1460,16 +1499,16 @@ async def deploy(
 		reporter=reporter,
 	)
 
-	# Mark this deployment as active in SSM
+	# Mark this deployment as deploying in SSM (to prevent reaper from cleaning it up)
 	await set_deployment_state(
 		deployment_name=deployment_name,
 		deployment_id=deployment_id,
-		state="active",
+		state="deploying",
 		region=baseline.region,
 		reporter=reporter,
 	)
 
-	# Install listener rules and switch traffic
+	# Install listener rules and switch traffic (waits for health confirmation)
 	await install_listener_rules_and_switch_traffic(
 		deployment_name=deployment_name,
 		deployment_id=deployment_id,
@@ -1479,6 +1518,23 @@ async def deploy(
 		min_healthy_targets=health_check.min_healthy_targets,
 		task_grace_period_seconds=health_check.task_grace_period_seconds,
 		service_arn=service_arn,
+		reporter=reporter,
+	)
+
+	# Mark this deployment as active in SSM and update service tag (only after health confirmed and traffic switched)
+	await set_deployment_state(
+		deployment_name=deployment_name,
+		deployment_id=deployment_id,
+		state="active",
+		region=baseline.region,
+		reporter=reporter,
+	)
+	await update_service_state_tag(
+		service_arn=service_arn,
+		deployment_name=deployment_name,
+		deployment_id=deployment_id,
+		state="active",
+		region=baseline.region,
 		reporter=reporter,
 	)
 
@@ -1546,5 +1602,6 @@ __all__ = [
 	"mark_previous_deployments_as_draining",
 	"register_task_definition",
 	"set_deployment_state",
+	"update_service_state_tag",
 	"wait_for_healthy_targets",
 ]

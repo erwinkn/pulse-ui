@@ -31,8 +31,7 @@ class TaskConfig:
 	    desired_count: Number of tasks to run
 	    env_vars: Additional environment variables for the task
 	    drain_poll_seconds: Seconds between SSM state polling (default: 5)
-	    drain_grace_seconds: Grace period before ShutdownReady=1 (default: 20)
-	    drain_health_fail_after_seconds: Seconds before health fails when draining (default: 120)
+	    drain_grace_seconds: Grace period before marking task as draining (default: 20)
 	"""
 
 	cpu: str = "256"
@@ -41,7 +40,6 @@ class TaskConfig:
 	env_vars: dict[str, str] = field(default_factory=dict)
 	drain_poll_seconds: int = 5
 	drain_grace_seconds: int = 20
-	drain_health_fail_after_seconds: int = 120
 
 
 @dataclass
@@ -50,17 +48,13 @@ class ReaperConfig:
 
 	Attributes:
 	    schedule_minutes: How often the reaper runs (default: 1 for testing, 5 for production)
-	    consecutive_periods: Consecutive periods with ShutdownReady=1 before cleanup (default: 2)
-	    period_seconds: CloudWatch metric period duration in seconds (default: 60)
-	    min_age_seconds: Minimum service age before cleanup (default: 60)
 	    max_age_hours: Maximum service age before forced cleanup (default: 1.0)
+	    deployment_timeout: Maximum deployment time in hours before cleanup (default: 1.0)
 	"""
 
 	schedule_minutes: int = 1
-	consecutive_periods: int = 2
-	period_seconds: int = 60
-	min_age_seconds: int = 60
 	max_age_hours: float = 1.0
+	deployment_timeout: float = 1.0
 
 
 @dataclass

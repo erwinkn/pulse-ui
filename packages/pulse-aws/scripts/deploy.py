@@ -13,8 +13,7 @@ This script orchestrates the full deployment workflow:
 
 The deployment uses:
 - Header-based affinity (X-Pulse-Render-Affinity) for sticky sessions
-- SSM Parameter Store for deployment state management
-- CloudWatch EMF metrics for graceful draining orchestration
+- SSM Parameter Store for deployment and task state management
 - Reaper Lambda for automated cleanup of drained deployments
 """
 
@@ -79,13 +78,14 @@ async def main() -> None:
 	print(f"   Context: {context_path}")
 	print()
 
-	# Prepare build args (DEPLOYMENT_ID is added automatically by build_and_push_image)
-	build_args = {
-		"DEPLOYMENT_NAME": DEPLOYMENT_NAME,
-		"DRAIN_POLL_SECONDS": str(DRAIN_POLL_SECONDS),
-		"DRAIN_GRACE_SECONDS": str(DRAIN_GRACE_SECONDS),
-		"PULSE_SERVER_ADDRESS": f"https://{DOMAIN}",
-	}
+	# Prepare build args (DEPLOYMENT_NAME and DEPLOYMENT_ID are added automatically by build_and_push_image)
+	docker = DockerBuild(
+		dockerfile_path=dockerfile_path,
+		context_path=context_path,
+		build_args={
+			"PULSE_SERVER_ADDRESS": f"https://{DOMAIN}",
+		},
+	)
 
 	# Prepare task config with drain settings
 	task_config = TaskConfig(
@@ -108,11 +108,7 @@ async def main() -> None:
 	result = await deploy(
 		domain=DOMAIN,
 		deployment_name=DEPLOYMENT_NAME,
-		docker=DockerBuild(
-			dockerfile_path=dockerfile_path,
-			context_path=context_path,
-			build_args=build_args,
-		),
+		docker=docker,
 		task=task_config,
 		health_check=health_check_config,
 	)

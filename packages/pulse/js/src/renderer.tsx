@@ -12,7 +12,8 @@ import {
 	Suspense,
 } from "react";
 import type { PulseSocketIOClient } from "./client";
-import type { ComponentRegistry, PathDelta, VDOM, VDOMNode, VDOMUpdate } from "./vdom";
+import type { PulsePrerenderView } from "./pulse";
+import type { ComponentRegistry, PathDelta, VDOMNode, VDOMUpdate } from "./vdom";
 import { FRAGMENT_TAG, isElementNode, isMountPointNode, MOUNT_POINT_PREFIX } from "./vdom";
 
 export class VDOMRenderer {
@@ -208,9 +209,9 @@ export class VDOMRenderer {
 		return resolved;
 	}
 
-	init(vdom: VDOM, callbacks: string[], renderProps: string[], cssRefs: string[]): ReactNode {
+	init(view: PulsePrerenderView): ReactNode {
 		// Set callbacks
-		this.#callbacks = new Set(callbacks);
+		this.#callbacks = new Set(view.callbacks);
 		// prune stale cached callbacks
 		for (const k of Array.from(this.#callbackCache.keys())) {
 			if (!this.#callbacks.has(k)) this.#callbackCache.delete(k);
@@ -218,12 +219,12 @@ export class VDOMRenderer {
 		this.#callbackList = [...this.#callbacks].sort();
 
 		// Set render props
-		this.#renderPropKeys = new Set(renderProps);
+		this.#renderPropKeys = new Set(view.render_props);
 
 		// Set CSS refs
-		this.#cssProps = new Set(cssRefs);
+		this.#cssProps = new Set(view.css_refs);
 
-		return this.renderNode(vdom);
+		return this.renderNode(view.vdom);
 	}
 
 	#ensureChildrenArray(el: ReactElement): ReactNode[] {

@@ -8,13 +8,11 @@ export function usePulseChannel(channelId: string): ChannelBridge {
 		if (!channelId) {
 			throw new Error("usePulseChannel requires a non-empty channelId");
 		}
-		console.log(`Acquiring channel ${channelId}`);
 		return client.acquireChannel(channelId);
 	}, [client, channelId]);
 
 	useEffect(() => {
 		return () => {
-			console.log(`Releasing channel ${channelId}`);
 			client.releaseChannel(channelId);
 		};
 	}, [client, channelId]);

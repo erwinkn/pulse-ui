@@ -7,5 +7,6 @@
 	},
 	"tailwindCSS.includeLanguages": {
 		"python": "javascript"
-	}
+	},
+	"makefile.configureOnOpen": false
 }

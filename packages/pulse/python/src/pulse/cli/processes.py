@@ -35,7 +35,11 @@ def execute_commands(
 
 	color_lookup = dict(tag_colors or {})
 
-	if os_family() == "windows" or not hasattr(pty, "fork"):
+	# Avoid pty.fork() in multi-threaded environments (like pytest) to prevent
+	# "DeprecationWarning: This process is multi-threaded, use of forkpty() may lead to deadlocks"
+	# Also skip pty on Windows or if fork is unavailable
+	in_pytest = "pytest" in sys.modules
+	if os_family() == "windows" or not hasattr(pty, "fork") or in_pytest:
 		return _run_without_pty(commands, console=console, colors=color_lookup)
 
 	return _run_with_pty(commands, console=console, colors=color_lookup)
@@ -211,8 +215,12 @@ def _run_without_pty(
 
 
 def _write_tagged_line(name: str, message: str, colors: Mapping[str, str]) -> None:
-	color = ANSI_CODES.get(colors.get(name, ""), ANSI_CODES["default"])
-	sys.stdout.write(f"{color}[{name}]\033[0m {message}\n")
+	# Only add tags if colors dict is not empty (i.e., tagging is enabled)
+	if colors:
+		color = ANSI_CODES.get(colors.get(name, ""), ANSI_CODES["default"])
+		sys.stdout.write(f"{color}[{name}]\033[0m {message}\n")
+	else:
+		sys.stdout.write(f"{message}\n")
 	sys.stdout.flush()
 
 

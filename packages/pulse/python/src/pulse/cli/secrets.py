@@ -3,6 +3,8 @@ from __future__ import annotations
 import secrets
 from pathlib import Path
 
+from pulse.cli.helpers import ensure_gitignore_has
+
 
 def resolve_dev_secret(app_path: Path | None) -> str | None:
 	"""Return or create a persisted development secret for the given app path."""
@@ -30,17 +32,7 @@ def resolve_dev_secret(app_path: Path | None) -> str | None:
 			# Best effort; secret still returned for current session
 			pass
 
-		_gitignore = root / ".gitignore"
-		try:
-			if _gitignore.exists():
-				content = _gitignore.read_text()
-				if ".pulse/" not in content:
-					_gitignore.write_text(f"{content.rstrip()}\n.pulse/\n")
-			else:
-				_gitignore.write_text(".pulse/\n")
-		except Exception:
-			# Non-fatal; ignore gitignore failures
-			pass
+		ensure_gitignore_has(root, ".pulse/")
 
 		return secret_value
 	except Exception:

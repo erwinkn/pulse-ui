@@ -1300,6 +1300,10 @@ from pulse.html.tags import (
 from pulse.html.tags import (
 	wbr as wbr,
 )
+from pulse.messages import Directives as Directives
+from pulse.messages import PrerenderPayload as PrerenderPayload
+from pulse.messages import PrerenderResult as PrerenderResult
+from pulse.messages import SocketIODirectives as SocketIODirectives
 
 # Middleware
 from pulse.middleware import (

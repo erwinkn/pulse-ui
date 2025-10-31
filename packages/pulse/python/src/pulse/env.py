@@ -25,6 +25,7 @@ ENV_PULSE_APP_FILE = "PULSE_APP_FILE"
 ENV_PULSE_APP_DIR = "PULSE_APP_DIR"
 ENV_PULSE_HOST = "PULSE_HOST"
 ENV_PULSE_PORT = "PULSE_PORT"
+ENV_PULSE_REACT_SERVER_ADDRESS = "PULSE_REACT_SERVER_ADDRESS"
 ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
 
@@ -39,13 +40,12 @@ class EnvVars:
 		else:
 			os.environ[key] = value
 
-	# Pulse mode
 	@property
 	def pulse_env(self) -> PulseEnv:
 		value = (self._get(ENV_PULSE_MODE) or "dev").lower()
 		if value not in ("dev", "ci", "prod"):
 			value = "dev"
-		return value  # type: ignore[return-value]
+		return value
 
 	@pulse_env.setter
 	def pulse_env(self, value: PulseEnv) -> None:
@@ -87,6 +87,14 @@ class EnvVars:
 	@pulse_port.setter
 	def pulse_port(self, value: int) -> None:
 		self._set(ENV_PULSE_PORT, str(value))
+
+	@property
+	def react_server_address(self) -> str | None:
+		return self._get(ENV_PULSE_REACT_SERVER_ADDRESS)
+
+	@react_server_address.setter
+	def react_server_address(self, value: str | None) -> None:
+		self._set(ENV_PULSE_REACT_SERVER_ADDRESS, value)
 
 	# Secrets
 	@property

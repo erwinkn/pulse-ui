@@ -12,6 +12,7 @@
 		"paths": {
 			"~/*": ["./app/*"]
 		},
+		"customConditions": ["@pulse/source"],
 		"esModuleInterop": true,
 		"verbatimModuleSyntax": true,
 		"noEmit": true,

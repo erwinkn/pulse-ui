@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any, Generic, TypeVar, overload, override
 
-from pulse.messages import ClientMessage, ServerInitMessage
+from pulse.messages import (
+	ClientMessage,
+	PrerenderPayload,
+	PrerenderResult,
+	ServerInitMessage,
+)
 from pulse.request import PulseRequest
 from pulse.routing import RouteInfo
 
@@ -46,6 +51,22 @@ class PulseMiddleware:
 	"""
 
 	def prerender(
+		self,
+		*,
+		payload: "PrerenderPayload",
+		result: "PrerenderResult",
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], "PrerenderResult"],
+	) -> "PrerenderResult":
+		"""Handle batch prerender at the top level.
+
+		Receives the full PrerenderPayload and can modify the PrerenderResult
+		(views and directives) before it's returned to the client.
+		"""
+		return next()
+
+	def prerender_route(
 		self,
 		*,
 		path: str,
@@ -105,6 +126,34 @@ class MiddlewareStack(PulseMiddleware):
 	def prerender(
 		self,
 		*,
+		payload: "PrerenderPayload",
+		result: "PrerenderResult",
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], "PrerenderResult"],
+	) -> "PrerenderResult":
+		def dispatch(index: int) -> "PrerenderResult":
+			if index >= len(self._middlewares):
+				return next()
+			mw = self._middlewares[index]
+
+			def _next() -> "PrerenderResult":
+				return dispatch(index + 1)
+
+			return mw.prerender(
+				payload=payload,
+				result=result,
+				request=request,
+				session=session,
+				next=_next,
+			)
+
+		return dispatch(0)
+
+	@override
+	def prerender_route(
+		self,
+		*,
 		path: str,
 		request: PulseRequest,
 		route_info: RouteInfo,
@@ -119,7 +168,7 @@ class MiddlewareStack(PulseMiddleware):
 			def _next() -> PrerenderResponse:
 				return dispatch(index + 1)
 
-			return mw.prerender(
+			return mw.prerender_route(
 				path=path,
 				route_info=route_info,
 				request=request,
@@ -216,6 +265,20 @@ class PulseCoreMiddleware(PulseMiddleware):
 	run, and finally returns their response unchanged.
 	"""
 
+	@override
+	def prerender(
+		self,
+		*,
+		payload: "PrerenderPayload",
+		result: "PrerenderResult",
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], "PrerenderResult"],
+	) -> "PrerenderResult":
+		res = next()
+		# Return the result as-is (no normalization needed)
+		return res
+
 	# --- Normalization helpers -------------------------------------------------
 	def _normalize_prerender_response(self, res: Any) -> PrerenderResponse:
 		if isinstance(res, (Ok, Redirect, NotFound)):
@@ -236,7 +299,7 @@ class PulseCoreMiddleware(PulseMiddleware):
 		return Ok(None)
 
 	@override
-	def prerender(
+	def prerender_route(
 		self,
 		*,
 		path: str,

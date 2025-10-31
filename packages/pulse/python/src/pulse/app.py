@@ -8,13 +8,11 @@ to define routes and configure their Pulse application.
 import asyncio
 import logging
 import os
-import subprocess
 from collections import defaultdict
 from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from enum import IntEnum
-from pathlib import Path
-from typing import Any, Callable, Literal, NotRequired, TypedDict, TypeVar, cast
+from typing import Any, Callable, Literal, TypeVar, cast
 
 import socketio
 import uvicorn
@@ -38,7 +36,11 @@ from pulse.css import (
 	registered_css_imports,
 	registered_css_modules,
 )
-from pulse.env import PulseEnv
+from pulse.env import (
+	ENV_PULSE_HOST,
+	ENV_PULSE_PORT,
+	PulseEnv,
+)
 from pulse.env import env as envvars
 from pulse.helpers import (
 	create_task,
@@ -55,7 +57,8 @@ from pulse.messages import (
 	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
-	ServerInitMessage,
+	PrerenderPayload,
+	PrerenderResult,
 	ServerMessage,
 )
 from pulse.middleware import (
@@ -72,7 +75,7 @@ from pulse.proxy import PulseProxy
 from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
-from pulse.routing import Layout, Route, RouteInfo, RouteTree
+from pulse.routing import Layout, Route, RouteTree
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -90,22 +93,11 @@ class AppStatus(IntEnum):
 	created = 0
 	initialized = 1
 	running = 2
-	stopped = 3
+	draining = 3
+	stopped = 4
 
 
 PulseMode = Literal["subdomains", "single-server"]
-
-
-class PrerenderPayload(TypedDict):
-	paths: list[str]
-	routeInfo: RouteInfo
-	ttlSeconds: NotRequired[float | int]
-	renderId: NotRequired[str]
-
-
-class PrerenderResult(TypedDict):
-	renderId: str
-	views: dict[str, ServerInitMessage | None]
 
 
 class App:
@@ -130,6 +122,7 @@ class App:
 	mode: PulseMode
 	status: AppStatus
 	server_address: str | None
+	dev_server_address: str
 	internal_server_address: str | None
 	api_prefix: str
 	plugins: list[Plugin]
@@ -149,6 +142,8 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
+	_render_cleanups: dict[str, asyncio.TimerHandle]
+	session_timeout: float
 
 	def __init__(
 		self,
@@ -160,14 +155,15 @@ class App:
 		cookie: Cookie | None = None,
 		session_store: SessionStore | None = None,
 		server_address: str | None = None,
+		dev_server_address: str = "http://localhost:8000",
 		internal_server_address: str | None = None,
 		not_found: str = "/not-found",
 		# Deployment and integration options
-		env: PulseEnv | None = None,
 		mode: PulseMode = "single-server",
 		api_prefix: str = "/_pulse",
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
+		session_timeout: float = 60.0,
 	):
 		"""
 		Initialize a new Pulse App.
@@ -177,11 +173,13 @@ class App:
 		    codegen: Optional codegen configuration.
 		"""
 		# Resolve mode from environment and expose on the app instance
-		self.env = env or envvars.pulse_env
+		self.env = envvars.pulse_env
 		self.mode = mode
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.)
 		self.server_address = server_address
+		# Development server address (used in dev mode)
+		self.dev_server_address = dev_server_address
 		# Optional internal address used by server-side loader fetches
 		self.internal_server_address = internal_server_address
 
@@ -221,10 +219,9 @@ class App:
 		self._sessions_in_request = {}
 		# Map websocket sid -> renderId for message routing
 		self._socket_to_render = {}
-
-		# Subprocess management for single-server mode
-		self.web_server_proc: subprocess.Popen[str] | None = None
-		self.web_server_port: int | None = None
+		# Map render_id -> cleanup timer handle for timeout-based expiry
+		self._render_cleanups = {}
+		self.session_timeout = session_timeout
 
 		self.codegen = Codegen(
 			self.routes,
@@ -237,11 +234,6 @@ class App:
 		)
 		self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 		self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
-		# In single-server mode, wrap with proxy ASGI app
-		if self.mode == "single-server":
-			self.asgi = PulseProxy(
-				self.asgi, lambda: self.web_server_port, self.api_prefix
-			)
 
 		if middleware is None:
 			mw_stack: list[PulseMiddleware] = [PulseCoreMiddleware()]
@@ -268,100 +260,30 @@ class App:
 		for plugin in self.plugins:
 			plugin.on_startup(self)
 
-		# Start React Router server in single-server mode
-		logger.info(f"Deployment mode: {self.mode}")
 		if self.mode == "single-server":
-			logger.info("Starting React Router server in single-server mode...")
-			try:
-				web_root = self.codegen.cfg.web_root
-				logger.info(f"Web root: {web_root}")
-				port = await self.start_web_server(web_root, self.env)
+			react_server_address = envvars.react_server_address
+			if react_server_address:
 				logger.info(
-					f"Single-server mode: React Router running on internal port {port}"
+					f"Single-server mode: React Router running at {react_server_address}"
 				)
-			except Exception:
-				logger.exception("Failed to start React Router server")
-				raise
+			else:
+				logger.warning(
+					"Single-server mode: PULSE_REACT_SERVER_ADDRESS not set."
+				)
 
 		try:
 			yield
 		finally:
-			# Stop React Router server in single-server mode
-			if self.mode == "single-server":
-				try:
-					# Close proxy HTTP client if it's a PulseProxy
-					if isinstance(self.asgi, PulseProxy):
-						await self.asgi.close()
-					self.stop_web_server()
-				except Exception:
-					logger.exception("Error stopping React Router server")
+			try:
+				await self.close()
+			except Exception:
+				logger.exception("Error during App.close()")
 
 			try:
 				if isinstance(self.session_store, SessionStore):
 					await self.session_store.close()
 			except Exception:
 				logger.exception("Error during SessionStore.close()")
-
-	async def start_web_server(self, web_root: Path, mode: str) -> int:
-		"""Start React Router server as subprocess and return its port."""
-
-		# Find available port
-		port = find_available_port(5173)
-
-		# Build command based on mode
-		if mode == "prod":
-			# Check if build exists
-			build_server = web_root / "build" / "server" / "index.js"
-			if not build_server.exists():
-				raise RuntimeError(
-					f"Production build not found at {build_server}. Run 'bun run build' in the web directory first."
-				)
-			# Production: use built server
-			cmd = ["bun", "run", "start", "--port", str(port)]
-		else:
-			# Development: use dev server
-			cmd = ["bun", "run", "dev", "--port", str(port)]
-
-		logger.info(f"Starting React Router server: {' '.join(cmd)}")
-
-		proc = subprocess.Popen(
-			cmd,
-			cwd=web_root,
-			stdout=subprocess.PIPE,
-			stderr=subprocess.STDOUT,
-			env=os.environ.copy(),
-			text=True,
-		)
-
-		# Wait for server to be ready
-		await asyncio.sleep(2.0 if mode == "prod" else 1.0)
-
-		# Check if process is still running
-		if proc.poll() is not None:
-			output = proc.stdout.read() if proc.stdout else ""
-			raise RuntimeError(f"React Router server failed to start: {output}")
-
-		self.web_server_proc = proc
-		self.web_server_port = port
-
-		logger.info(f"React Router server started on port {port}")
-		return port
-
-	def stop_web_server(self):
-		"""Stop the React Router subprocess."""
-		if self.web_server_proc:
-			logger.info("Stopping React Router server...")
-			self.web_server_proc.terminate()
-			try:
-				self.web_server_proc.wait(timeout=5)
-			except subprocess.TimeoutExpired:
-				logger.warning(
-					"React Router server did not stop gracefully, killing..."
-				)
-				self.web_server_proc.kill()
-				self.web_server_proc.wait()
-			self.web_server_proc = None
-			self.web_server_port = None
 
 	def run_codegen(
 		self, address: str | None = None, internal_address: str | None = None
@@ -388,26 +310,36 @@ class App:
 		ASGI factory for uvicorn. This is called on every reload.
 		"""
 
-		# In prod, prefer the public server address passed to App(...).
-		# In dev/ci, derive from environment variables which the CLI populates
-		# based on the actual bind host/port.
-		if self.env == "prod":
+		# In prod/ci, use the server_address provided to App(...).
+		if self.env in ("prod", "ci"):
 			if not self.server_address:
 				raise RuntimeError(
-					"In prod, please provide an explicit server_address to App(...)."
+					f"In {self.env}, please provide an explicit server_address to App(...)."
 				)
 			server_address = self.server_address
+		# In dev, prefer env vars set by CLI (--address/--port), otherwise use dev_server_address.
 		else:
-			host = envvars.pulse_host  # defaults to "localhost"
-			port = envvars.pulse_port  # defaults to 8000
-			protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
-			server_address = f"{protocol}://{host}:{port}"
+			# In dev mode, check if CLI set PULSE_HOST/PULSE_PORT env vars
+			# If env vars were explicitly set (not just defaults), use them
+			host = os.environ.get(ENV_PULSE_HOST)
+			port = os.environ.get(ENV_PULSE_PORT)
+			if host is not None and port is not None:
+				protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
+				server_address = f"{protocol}://{host}:{port}"
+			else:
+				server_address = self.dev_server_address
 
 		# Use internal server address for server-side loader if provided; fallback to public
 		internal_address = self.internal_server_address or server_address
 		self.run_codegen(server_address, internal_address)
 		self.setup(server_address)
 		self.status = AppStatus.running
+
+		# In single-server mode, the Pulse server acts as reverse proxy to the React server
+		if self.mode == "single-server":
+			return PulseProxy(
+				self.asgi, lambda: envvars.react_server_address, self.api_prefix
+			)
 		return self.asgi
 
 	def run(
@@ -441,10 +373,33 @@ class App:
 			self.fastapi.add_middleware(CORSMiddleware, **self.cors)
 		else:
 			# Use deployment-specific CORS settings
+			cors_config = cors_options(self.mode, self.server_address)
 			self.fastapi.add_middleware(
 				CORSMiddleware,
-				**cors_options(self.mode, self.server_address),
+				**cors_config,
 			)
+
+		# Debug middleware to log CORS-related request details
+		# @self.fastapi.middleware("http")
+		# async def cors_debug_middleware(
+		# 	request: Request, call_next: Callable[[Request], Awaitable[Response]]
+		# ):
+		# 	origin = request.headers.get("origin")
+		# 	method = request.method
+		# 	path = request.url.path
+		# 	print(
+		# 		f"[CORS Debug] {method} {path} | Origin: {origin} | "
+		# 		+ f"Mode: {self.mode} | Server: {self.server_address}"
+		# 	)
+		# 	response = await call_next(request)
+		# 	allow_origin = response.headers.get("access-control-allow-origin")
+		# 	if allow_origin:
+		# 		print(f"[CORS Debug] Response allows origin: {allow_origin}")
+		# 	elif origin:
+		# 		logger.warning(
+		# 			f"[CORS Debug] Origin {origin} present but no Access-Control-Allow-Origin header set"
+		# 		)
+		# 	return response
 
 		# Mount PulseContext for all FastAPI routes (no route info). Other API
 		# routes / middleware should be added at the module-level, which means
@@ -463,10 +418,9 @@ class App:
 				self._sessions_in_request.get(session.sid, 0) + 1
 			)
 			render_id = request.headers.get("x-pulse-render-id")
-			if render_id:
-				render = self.render_sessions.get(render_id)
-			else:
-				render = None
+			render = self._get_render_for_session(render_id, session)
+			if render:
+				print(f"Reusing render session {render_id}")
 			with PulseContext.update(session=session, render=render):
 				res: Response = await call_next(request)
 			session.handle_response(res)
@@ -493,7 +447,8 @@ class App:
 		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
-			Body: { paths: string[], routeInfo: RouteInfo, ttlSeconds?: number, renderId?: string }
+			Body: { paths: string[], routeInfo: RouteInfo, ttlSeconds?: number }
+			Headers: X-Pulse-Render-Id (optional, for render session reuse)
 			Returns: { renderId: string, <path>: VDOM, ... }
 			"""
 			session = PulseContext.get().session
@@ -505,31 +460,29 @@ class App:
 					status_code=400, detail="'paths' must be a non-empty list"
 				)
 			route_info = payload.get("routeInfo")
-			ttl = payload.get("ttlSeconds")
-			if not isinstance(ttl, (int, float)):
-				ttl = 15
 
 			client_addr: str | None = get_client_address(request)
-			# Optional reuse of existing RenderSession
-			render_id = payload.get("renderId")
-			if isinstance(render_id, str):
-				# Validate render exists and belongs to this user session
-				existing = self.render_sessions.get(render_id)
-				if existing is None:
-					raise HTTPException(status_code=400, detail="Unknown renderId")
-				owner = self._render_to_user.get(render_id)
-				if owner != session.sid:
-					raise HTTPException(status_code=403, detail="Forbidden renderId")
-				render = existing
-				cleanup = False
+			# Reuse render session from header (set by middleware) or create new one
+			render = PulseContext.get().render
+			if render is not None:
+				render_id = render.id
 			else:
+				# Create new render session
 				render_id = new_sid()
 				render = self.create_render(
 					render_id, session, client_address=client_addr
 				)
-				cleanup = True
 
-			result: PrerenderResult = {"renderId": render_id, "views": {}}
+			# Schedule cleanup timeout (will cancel/reschedule on activity)
+			self._schedule_render_cleanup(render_id)
+
+			initial_result: PrerenderResult = {
+				"views": {},
+				"directives": {
+					"headers": {"X-Pulse-Render-Id": render_id},
+					"socketio": {"auth": {"render_id": render_id}, "headers": {}},
+				},
+			}
 
 			def _prerender_one(path: str):
 				captured = render.prerender_mount_capture(path, route_info)
@@ -545,10 +498,12 @@ class App:
 				# Fallback: shouldn't happen, return not found to be safe
 				return NotFound()
 
+			result = initial_result.copy()
+
 			with PulseContext.update(render=render):
 				for p in paths:
 					try:
-						res = self.middleware.prerender(
+						res = self.middleware.prerender_route(
 							path=p,
 							route_info=route_info,
 							request=PulseRequest.from_fastapi(request),
@@ -579,19 +534,19 @@ class App:
 						session.handle_response(resp)
 						return resp
 
-				# schedule TTL cleanup if never connected
-				def _gc_if_unadopted(rid: str):
-					r = self.render_sessions.get(rid)
-					if r is None:
-						return
-					if r.connected:
-						return
-					self.close_render(rid)
+			# Call top-level batch prerender middleware to modify final result
+			def _return_result() -> PrerenderResult:
+				return result
 
-				if cleanup:
-					later(float(ttl), _gc_if_unadopted, render_id)
+			final_result = self.middleware.prerender(
+				payload=payload,
+				result=result,
+				request=PulseRequest.from_fastapi(request),
+				session=session.data,
+				next=_return_result,
+			)
 
-			resp = JSONResponse(serialize(result))
+			resp = JSONResponse(serialize(final_result))
 			session.handle_response(resp)
 			return resp
 
@@ -618,7 +573,7 @@ class App:
 			sid: str, environ: dict[str, Any], auth: dict[str, str] | None
 		):
 			# Expect renderId during websocket auth and require a valid user session
-			rid = auth.get("renderId") if auth else None
+			rid = auth.get("render_id") if auth else None
 
 			# Parse cookies from environ and ensure a session exists
 			cookie = self.cookie.get_from_socketio(environ)
@@ -651,6 +606,9 @@ class App:
 			# Map socket sid to renderId for message routing
 			self._socket_to_render[sid] = rid
 
+			# Cancel any pending cleanup since session is now connected
+			self._cancel_render_cleanup(rid)
+
 			with PulseContext.update(session=session, render=render):
 
 				def _next():
@@ -666,6 +624,7 @@ class App:
 					render.report_error("/", "connect", exc)
 					res = Ok(None)
 				if isinstance(res, Deny):
+					print(f"Denying connection, closing RenderSession {rid}")
 					# Tear down the created session if denied
 					self.close_render(rid)
 
@@ -673,8 +632,12 @@ class App:
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
 			rid = self._socket_to_render.pop(sid, None)
 			if rid is not None:
-				# Close the RenderSession entirely to avoid lingering effects/tasks
-				self.close_render(rid)
+				print(f"Disconnecting WebSocket for RenderSession {rid}")
+				render = self.render_sessions.get(rid)
+				if render:
+					render.connected = False
+					# Schedule cleanup after timeout (will keep session alive for reuse)
+					self._schedule_render_cleanup(rid)
 
 		@self.sio.event
 		def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
@@ -684,6 +647,8 @@ class App:
 			render = self.render_sessions.get(rid)
 			if render is None:
 				return
+			# Cancel any pending cleanup for active sessions (connected sessions stay alive)
+			self._cancel_render_cleanup(rid)
 			# Use renderId mapping to user session
 			session = self.user_sessions[self._render_to_user[rid]]
 			# Make sure to properly deserialize the message contents
@@ -698,6 +663,39 @@ class App:
 				render.report_error(path, "server", e)
 
 		self.status = AppStatus.initialized
+
+	def _cancel_render_cleanup(self, rid: str):
+		"""Cancel any pending cleanup task for a render session."""
+		cleanup_handle = self._render_cleanups.pop(rid, None)
+		if cleanup_handle and not cleanup_handle.cancelled():
+			cleanup_handle.cancel()
+
+	def _schedule_render_cleanup(self, rid: str):
+		"""Schedule cleanup of a RenderSession after the configured timeout."""
+		render = self.render_sessions.get(rid)
+		if render is None:
+			return
+		# Don't schedule cleanup for connected sessions (they stay alive)
+		if render.connected:
+			return
+
+		# Cancel any existing cleanup task for this render session
+		self._cancel_render_cleanup(rid)
+
+		# Schedule new cleanup task
+		def _cleanup():
+			render = self.render_sessions.get(rid)
+			if render is None:
+				return
+			# Only cleanup if not connected (if connected, keep it alive)
+			if not render.connected:
+				logger.info(
+					f"RenderSession {rid} expired after {self.session_timeout}s timeout"
+				)
+				self.close_render(rid)
+
+		handle = later(self.session_timeout, _cleanup)
+		self._render_cleanups[rid] = handle
 
 	def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
@@ -833,11 +831,29 @@ class App:
 		self.user_sessions[sid] = session
 		return session
 
+	def _get_render_for_session(
+		self, render_id: str | None, session: UserSession
+	) -> RenderSession | None:
+		"""
+		Get an existing render session for the given session, validating ownership.
+		Returns None if render_id is None, render doesn't exist, or doesn't belong to session.
+		"""
+		if not render_id:
+			return None
+		render = self.render_sessions.get(render_id)
+		if render is None:
+			return None
+		owner = self._render_to_user.get(render_id)
+		if owner != session.sid:
+			return None
+		return render
+
 	def create_render(
 		self, rid: str, session: UserSession, *, client_address: str | None = None
 	):
 		if rid in self.render_sessions:
 			raise ValueError(f"RenderSession {rid} already exists")
+		print(f"Creating RenderSession {rid}")
 		render = RenderSession(
 			rid,
 			self.routes,
@@ -850,9 +866,13 @@ class App:
 		return render
 
 	def close_render(self, rid: str):
+		# Cancel any pending cleanup task
+		self._cancel_render_cleanup(rid)
+
 		render = self.render_sessions.pop(rid, None)
 		if not render:
 			return
+		print(f"Closing RenderSession {rid}")
 		sid = self._render_to_user.pop(rid)
 		session = self.user_sessions[sid]
 		render.close()
@@ -870,6 +890,34 @@ class App:
 	def close_session_if_inactive(self, sid: str):
 		if len(self._user_to_render[sid]) == 0:
 			self.close_session(sid)
+
+	async def close(self):
+		"""
+		Close the app and clean up all sessions.
+		This method is called automatically during shutdown.
+		"""
+
+		# Cancel all pending cleanup tasks
+		for rid in list(self._render_cleanups.keys()):
+			self._cancel_render_cleanup(rid)
+
+		# Close all render sessions
+		print("Closing app")
+		for rid in list(self.render_sessions.keys()):
+			self.close_render(rid)
+
+		# Close all user sessions
+		for sid in list(self.user_sessions.keys()):
+			self.close_session(sid)
+
+		# Update status
+		self.status = AppStatus.stopped
+		# Call plugin on_shutdown hooks before closing
+		for plugin in self.plugins:
+			try:
+				plugin.on_shutdown(self)
+			except Exception:
+				logger.exception("Error during plugin.on_shutdown()")
 
 	def refresh_cookies(self, sid: str):
 		# If the session is currently inside an HTTP request, we don't need to schedule
@@ -891,7 +939,7 @@ class App:
 			return  # no active render for this user session
 
 		# We don't want to wait for this to resolve
-		create_task(render.call_api("/set-cookies", method="GET"))
+		create_task(render.call_api(f"{self.api_prefix}/set-cookies", method="GET"))
 		sess.scheduled_cookie_refresh = True
 
 

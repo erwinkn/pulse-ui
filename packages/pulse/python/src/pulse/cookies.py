@@ -155,10 +155,15 @@ def cors_options(mode: "PulseMode", server_address: str) -> CORSOptions:
 	}
 	if mode == "subdomains":
 		base = _base_domain(host)
+		# Escape dots in base domain for regex (doesn't affect localhost since it has no dots)
+		base = base.replace(".", r"\.")
+		# Allow any subdomain and any port for the base domain
 		opts["allow_origin_regex"] = rf"^https?://([a-z0-9-]+\\.)?{base}(:\\d+)?$"
 		return opts
 	elif mode == "single-server":
 		# For single-server mode, allow same origin
+		# Escape dots in host for regex (doesn't affect localhost since it has no dots)
+		host = host.replace(".", r"\.")
 		opts["allow_origin_regex"] = rf"^https?://{host}(:\\d+)?$"
 		return opts
 	else:

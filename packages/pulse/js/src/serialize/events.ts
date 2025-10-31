@@ -1,13 +1,12 @@
 /* === IMPORTANT === */
 
-import { extractHTMLElement } from "./elements";
+import { extractElement } from "./elements";
 import { createExtractor } from "./extractor";
 
 // Reusable computed mappers (helps bundlers/minifiers share references)
-const mapTarget = (e: { target: EventTarget | null }) =>
-	extractHTMLElement(e.target as HTMLElement);
+const mapTarget = (e: { target: EventTarget | null }) => extractElement(e.target as Element);
 const mapRelated = (e: { relatedTarget: EventTarget | null }) =>
-	e.relatedTarget ? extractHTMLElement(e.relatedTarget as HTMLElement) : null;
+	e.relatedTarget ? extractElement(e.relatedTarget as Element) : null;
 
 function makeExtractor<K extends readonly any[]>(
 	keys: K,
@@ -154,7 +153,7 @@ const transitionExtractor = makeExtractor([
 
 function mapTouchList(list: any): any[] {
 	return Array.from(list as ArrayLike<any>).map((touch: any) => ({
-		target: extractHTMLElement(touch.target as HTMLElement),
+		target: extractElement(touch.target as Element),
 		identifier: touch.identifier,
 		screenX: touch.screenX,
 		screenY: touch.screenY,

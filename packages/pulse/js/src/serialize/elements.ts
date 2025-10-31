@@ -49,7 +49,7 @@ const HTML_ELEMENT_BASE_KEYS = [
 	"inputMode",
 ] as const satisfies readonly (keyof HTMLElement)[];
 
-const extractElement = createExtractor<Element>()(ELEMENT_KEYS, {
+const extractElementBase = createExtractor<Element>()(ELEMENT_KEYS, {
 	tagName: lowerTagName,
 });
 
@@ -59,7 +59,7 @@ const extractHTMLElementBaseOnly = createExtractor<HTMLElement>()(HTML_ELEMENT_B
 
 function extractHTMLElementBase(elt: HTMLElement) {
 	return {
-		...extractElement(elt),
+		...extractElementBase(elt),
 		...extractHTMLOrSVGElement(elt as HTMLOrSVGElement),
 		...extractHTMLElementBaseOnly(elt),
 	};
@@ -655,6 +655,169 @@ const titleExtractor = withBase<HTMLTitleElement>(HTML_TITLE_KEYS);
 const HTML_UL_KEYS = ["compact", "type"] as const satisfies readonly (keyof HTMLUListElement)[];
 const ulistExtractor = withBase<HTMLUListElement>(HTML_UL_KEYS);
 
+// SVG element extractors
+function extractSVGElementBase(elt: SVGElement) {
+	return {
+		...extractElementBase(elt),
+		...extractHTMLOrSVGElement(elt as HTMLOrSVGElement),
+	};
+}
+
+// Helper to compose per-SVG-element extractors with the shared base
+function withSVGBase<T extends SVGElement>(
+	keys: readonly (keyof T)[],
+	computed?: Partial<Record<string, (src: T) => any>>,
+) {
+	const only = createExtractor<T>()(keys, computed as any);
+	return (elt: T) => ({ ...extractSVGElementBase(elt), ...only(elt) });
+}
+
+const SVG_SVG_KEYS = [
+	"x",
+	"y",
+	"width",
+	"height",
+	"currentScale",
+	"currentTranslate",
+] as const satisfies readonly (keyof SVGSVGElement)[];
+const svgExtractor = withSVGBase<SVGSVGElement>(SVG_SVG_KEYS);
+
+const SVG_CIRCLE_KEYS = ["cx", "cy", "r"] as const satisfies readonly (keyof SVGCircleElement)[];
+const circleExtractor = withSVGBase<SVGCircleElement>(SVG_CIRCLE_KEYS);
+
+const SVG_ELLIPSE_KEYS = [
+	"cx",
+	"cy",
+	"rx",
+	"ry",
+] as const satisfies readonly (keyof SVGEllipseElement)[];
+const ellipseExtractor = withSVGBase<SVGEllipseElement>(SVG_ELLIPSE_KEYS);
+
+const SVG_LINE_KEYS = ["x1", "y1", "x2", "y2"] as const satisfies readonly (keyof SVGLineElement)[];
+const lineExtractor = withSVGBase<SVGLineElement>(SVG_LINE_KEYS);
+
+const SVG_PATH_KEYS = ["pathLength"] as const satisfies readonly (keyof SVGPathElement)[];
+const pathExtractor = withSVGBase<SVGPathElement>(SVG_PATH_KEYS);
+
+const SVG_RECT_KEYS = [
+	"x",
+	"y",
+	"width",
+	"height",
+	"rx",
+	"ry",
+] as const satisfies readonly (keyof SVGRectElement)[];
+const rectExtractor = withSVGBase<SVGRectElement>(SVG_RECT_KEYS);
+
+const SVG_POLYGON_KEYS = ["points"] as const satisfies readonly (keyof SVGPolygonElement)[];
+const polygonExtractor = withSVGBase<SVGPolygonElement>(SVG_POLYGON_KEYS);
+
+const SVG_POLYLINE_KEYS = ["points"] as const satisfies readonly (keyof SVGPolylineElement)[];
+const polylineExtractor = withSVGBase<SVGPolylineElement>(SVG_POLYLINE_KEYS);
+
+const SVG_TEXT_KEYS = [
+	"x",
+	"y",
+	"dx",
+	"dy",
+	"rotate",
+	"textLength",
+	"lengthAdjust",
+] as const satisfies readonly (keyof SVGTextElement)[];
+const textExtractor = withSVGBase<SVGTextElement>(SVG_TEXT_KEYS);
+
+const SVG_TSPAN_KEYS = [
+	"x",
+	"y",
+	"dx",
+	"dy",
+	"rotate",
+	"textLength",
+	"lengthAdjust",
+] as const satisfies readonly (keyof SVGTSpanElement)[];
+const tspanExtractor = withSVGBase<SVGTSpanElement>(SVG_TSPAN_KEYS);
+
+const SVG_IMAGE_KEYS = [
+	"x",
+	"y",
+	"width",
+	"height",
+	"href",
+	"preserveAspectRatio",
+	"crossOrigin",
+] as const satisfies readonly (keyof SVGImageElement)[];
+const svgImageExtractor = withSVGBase<SVGImageElement>(SVG_IMAGE_KEYS);
+
+const SVG_USE_KEYS = [
+	"x",
+	"y",
+	"width",
+	"height",
+	"href",
+] as const satisfies readonly (keyof SVGUseElement)[];
+const useExtractor = withSVGBase<SVGUseElement>(SVG_USE_KEYS);
+
+const SVG_DEFS_KEYS = [] as const satisfies readonly (keyof SVGDefsElement)[];
+const defsExtractor = withSVGBase<SVGDefsElement>(SVG_DEFS_KEYS);
+
+const SVG_GROUP_KEYS = [] as const satisfies readonly (keyof SVGGElement)[];
+const gExtractor = withSVGBase<SVGGElement>(SVG_GROUP_KEYS);
+
+const SVG_LINEAR_GRADIENT_KEYS = [
+	"x1",
+	"y1",
+	"x2",
+	"y2",
+	"gradientUnits",
+	"gradientTransform",
+	"spreadMethod",
+] as const satisfies readonly (keyof SVGLinearGradientElement)[];
+const linearGradientExtractor = withSVGBase<SVGLinearGradientElement>(SVG_LINEAR_GRADIENT_KEYS);
+
+const SVG_RADIAL_GRADIENT_KEYS = [
+	"cx",
+	"cy",
+	"r",
+	"fx",
+	"fy",
+	"fr",
+	"gradientUnits",
+	"gradientTransform",
+	"spreadMethod",
+] as const satisfies readonly (keyof SVGRadialGradientElement)[];
+const radialGradientExtractor = withSVGBase<SVGRadialGradientElement>(SVG_RADIAL_GRADIENT_KEYS);
+
+const SVG_STOP_KEYS = ["offset"] as const satisfies readonly (keyof SVGStopElement)[];
+const stopExtractor = withSVGBase<SVGStopElement>(SVG_STOP_KEYS);
+
+const SVG_PATTERN_KEYS = [
+	"x",
+	"y",
+	"width",
+	"height",
+	"patternUnits",
+	"patternContentUnits",
+	"patternTransform",
+	"preserveAspectRatio",
+	"href",
+] as const satisfies readonly (keyof SVGPatternElement)[];
+const patternExtractor = withSVGBase<SVGPatternElement>(SVG_PATTERN_KEYS);
+
+const SVG_CLIP_PATH_KEYS = [
+	"clipPathUnits",
+] as const satisfies readonly (keyof SVGClipPathElement)[];
+const clipPathExtractor = withSVGBase<SVGClipPathElement>(SVG_CLIP_PATH_KEYS);
+
+const SVG_MASK_KEYS = [
+	"x",
+	"y",
+	"width",
+	"height",
+	"maskUnits",
+	"maskContentUnits",
+] as const satisfies readonly (keyof SVGMaskElement)[];
+const maskExtractor = withSVGBase<SVGMaskElement>(SVG_MASK_KEYS);
+
 // Map of tagName -> extractor (concise, like events.ts)
 const elementExtractors: Record<string, (elt: any) => object> = {
 	A: anchorExtractor,
@@ -729,6 +892,27 @@ const elementExtractors: Record<string, (elt: any) => object> = {
 	TRACK: trackExtractor,
 	UL: ulistExtractor,
 	VIDEO: videoExtractor,
+	// SVG elements
+	SVG: svgExtractor,
+	CIRCLE: circleExtractor,
+	ELLIPSE: ellipseExtractor,
+	LINE: lineExtractor,
+	PATH: pathExtractor,
+	RECT: rectExtractor,
+	POLYGON: polygonExtractor,
+	POLYLINE: polylineExtractor,
+	TEXT: textExtractor,
+	TSPAN: tspanExtractor,
+	IMAGE: svgImageExtractor,
+	USE: useExtractor,
+	DEFS: defsExtractor,
+	G: gExtractor,
+	LINEARGRADIENT: linearGradientExtractor,
+	RADIALGRADIENT: radialGradientExtractor,
+	STOP: stopExtractor,
+	PATTERN: patternExtractor,
+	CLIPPATH: clipPathExtractor,
+	MASK: maskExtractor,
 };
 
 export function extractHTMLElement(elt: HTMLElement): object {
@@ -739,4 +923,26 @@ export function extractHTMLElement(elt: HTMLElement): object {
 		return extractor(elt);
 	}
 	throw new Error(`Unexpected HTML element tag: ${elt.tagName} (update .web/custom/serialize.ts)`);
+}
+
+export function extractSVGElement(elt: SVGElement): object {
+	const tagName = elt.tagName.toUpperCase();
+
+	const extractor = elementExtractors[tagName];
+	if (extractor) {
+		return extractor(elt);
+	}
+	// Fallback to base SVG element extractor for unknown SVG elements
+	return extractSVGElementBase(elt);
+}
+
+export function extractElement(elt: Element): object {
+	if (elt instanceof HTMLElement) {
+		return extractHTMLElement(elt);
+	}
+	if (elt instanceof SVGElement) {
+		return extractSVGElement(elt);
+	}
+	// Fallback for other Element types - use base element extractor
+	return extractElementBase(elt);
 }

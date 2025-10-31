@@ -5,6 +5,7 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import asyncio
 import logging
 import os
 from collections import defaultdict
@@ -141,6 +142,8 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
+	_render_cleanups: dict[str, asyncio.TimerHandle]
+	session_timeout: float
 
 	def __init__(
 		self,
@@ -160,6 +163,7 @@ class App:
 		api_prefix: str = "/_pulse",
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
+		session_timeout: float = 60.0,
 	):
 		"""
 		Initialize a new Pulse App.
@@ -215,6 +219,9 @@ class App:
 		self._sessions_in_request = {}
 		# Map websocket sid -> renderId for message routing
 		self._socket_to_render = {}
+		# Map render_id -> cleanup timer handle for timeout-based expiry
+		self._render_cleanups = {}
+		self.session_timeout = session_timeout
 
 		self.codegen = Codegen(
 			self.routes,
@@ -367,7 +374,6 @@ class App:
 		else:
 			# Use deployment-specific CORS settings
 			cors_config = cors_options(self.mode, self.server_address)
-			print(f"CORS config: {cors_config}")
 			self.fastapi.add_middleware(
 				CORSMiddleware,
 				**cors_config,
@@ -412,10 +418,9 @@ class App:
 				self._sessions_in_request.get(session.sid, 0) + 1
 			)
 			render_id = request.headers.get("x-pulse-render-id")
-			if render_id:
-				render = self.render_sessions.get(render_id)
-			else:
-				render = None
+			render = self._get_render_for_session(render_id, session)
+			if render:
+				print(f"Reusing render session {render_id}")
 			with PulseContext.update(session=session, render=render):
 				res: Response = await call_next(request)
 			session.handle_response(res)
@@ -442,7 +447,8 @@ class App:
 		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
-			Body: { paths: string[], routeInfo: RouteInfo, ttlSeconds?: number, renderId?: string }
+			Body: { paths: string[], routeInfo: RouteInfo, ttlSeconds?: number }
+			Headers: X-Pulse-Render-Id (optional, for render session reuse)
 			Returns: { renderId: string, <path>: VDOM, ... }
 			"""
 			session = PulseContext.get().session
@@ -454,29 +460,21 @@ class App:
 					status_code=400, detail="'paths' must be a non-empty list"
 				)
 			route_info = payload.get("routeInfo")
-			ttl = payload.get("ttlSeconds")
-			if not isinstance(ttl, (int, float)):
-				ttl = 15
 
 			client_addr: str | None = get_client_address(request)
-			# Optional reuse of existing RenderSession
-			render_id = payload.get("renderId")
-			if isinstance(render_id, str):
-				# Validate render exists and belongs to this user session
-				existing = self.render_sessions.get(render_id)
-				if existing is None:
-					raise HTTPException(status_code=400, detail="Unknown renderId")
-				owner = self._render_to_user.get(render_id)
-				if owner != session.sid:
-					raise HTTPException(status_code=403, detail="Forbidden renderId")
-				render = existing
-				cleanup = False
+			# Reuse render session from header (set by middleware) or create new one
+			render = PulseContext.get().render
+			if render is not None:
+				render_id = render.id
 			else:
+				# Create new render session
 				render_id = new_sid()
 				render = self.create_render(
 					render_id, session, client_address=client_addr
 				)
-				cleanup = True
+
+			# Schedule cleanup timeout (will cancel/reschedule on activity)
+			self._schedule_render_cleanup(render_id)
 
 			initial_result: PrerenderResult = {
 				"views": {},
@@ -535,18 +533,6 @@ class App:
 						resp = JSONResponse({"notFound": True})
 						session.handle_response(resp)
 						return resp
-
-				# schedule TTL cleanup if never connected
-				def _gc_if_unadopted(rid: str):
-					r = self.render_sessions.get(rid)
-					if r is None:
-						return
-					if r.connected:
-						return
-					self.close_render(rid)
-
-				if cleanup:
-					later(float(ttl), _gc_if_unadopted, render_id)
 
 			# Call top-level batch prerender middleware to modify final result
 			def _return_result() -> PrerenderResult:
@@ -620,6 +606,9 @@ class App:
 			# Map socket sid to renderId for message routing
 			self._socket_to_render[sid] = rid
 
+			# Cancel any pending cleanup since session is now connected
+			self._cancel_render_cleanup(rid)
+
 			with PulseContext.update(session=session, render=render):
 
 				def _next():
@@ -635,6 +624,7 @@ class App:
 					render.report_error("/", "connect", exc)
 					res = Ok(None)
 				if isinstance(res, Deny):
+					print(f"Denying connection, closing RenderSession {rid}")
 					# Tear down the created session if denied
 					self.close_render(rid)
 
@@ -642,8 +632,12 @@ class App:
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
 			rid = self._socket_to_render.pop(sid, None)
 			if rid is not None:
-				# Close the RenderSession entirely to avoid lingering effects/tasks
-				self.close_render(rid)
+				print(f"Disconnecting WebSocket for RenderSession {rid}")
+				render = self.render_sessions.get(rid)
+				if render:
+					render.connected = False
+					# Schedule cleanup after timeout (will keep session alive for reuse)
+					self._schedule_render_cleanup(rid)
 
 		@self.sio.event
 		def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
@@ -653,6 +647,8 @@ class App:
 			render = self.render_sessions.get(rid)
 			if render is None:
 				return
+			# Cancel any pending cleanup for active sessions (connected sessions stay alive)
+			self._cancel_render_cleanup(rid)
 			# Use renderId mapping to user session
 			session = self.user_sessions[self._render_to_user[rid]]
 			# Make sure to properly deserialize the message contents
@@ -667,6 +663,39 @@ class App:
 				render.report_error(path, "server", e)
 
 		self.status = AppStatus.initialized
+
+	def _cancel_render_cleanup(self, rid: str):
+		"""Cancel any pending cleanup task for a render session."""
+		cleanup_handle = self._render_cleanups.pop(rid, None)
+		if cleanup_handle and not cleanup_handle.cancelled():
+			cleanup_handle.cancel()
+
+	def _schedule_render_cleanup(self, rid: str):
+		"""Schedule cleanup of a RenderSession after the configured timeout."""
+		render = self.render_sessions.get(rid)
+		if render is None:
+			return
+		# Don't schedule cleanup for connected sessions (they stay alive)
+		if render.connected:
+			return
+
+		# Cancel any existing cleanup task for this render session
+		self._cancel_render_cleanup(rid)
+
+		# Schedule new cleanup task
+		def _cleanup():
+			render = self.render_sessions.get(rid)
+			if render is None:
+				return
+			# Only cleanup if not connected (if connected, keep it alive)
+			if not render.connected:
+				logger.info(
+					f"RenderSession {rid} expired after {self.session_timeout}s timeout"
+				)
+				self.close_render(rid)
+
+		handle = later(self.session_timeout, _cleanup)
+		self._render_cleanups[rid] = handle
 
 	def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
@@ -802,11 +831,29 @@ class App:
 		self.user_sessions[sid] = session
 		return session
 
+	def _get_render_for_session(
+		self, render_id: str | None, session: UserSession
+	) -> RenderSession | None:
+		"""
+		Get an existing render session for the given session, validating ownership.
+		Returns None if render_id is None, render doesn't exist, or doesn't belong to session.
+		"""
+		if not render_id:
+			return None
+		render = self.render_sessions.get(render_id)
+		if render is None:
+			return None
+		owner = self._render_to_user.get(render_id)
+		if owner != session.sid:
+			return None
+		return render
+
 	def create_render(
 		self, rid: str, session: UserSession, *, client_address: str | None = None
 	):
 		if rid in self.render_sessions:
 			raise ValueError(f"RenderSession {rid} already exists")
+		print(f"Creating RenderSession {rid}")
 		render = RenderSession(
 			rid,
 			self.routes,
@@ -819,9 +866,13 @@ class App:
 		return render
 
 	def close_render(self, rid: str):
+		# Cancel any pending cleanup task
+		self._cancel_render_cleanup(rid)
+
 		render = self.render_sessions.pop(rid, None)
 		if not render:
 			return
+		print(f"Closing RenderSession {rid}")
 		sid = self._render_to_user.pop(rid)
 		session = self.user_sessions[sid]
 		render.close()
@@ -846,7 +897,12 @@ class App:
 		This method is called automatically during shutdown.
 		"""
 
+		# Cancel all pending cleanup tasks
+		for rid in list(self._render_cleanups.keys()):
+			self._cancel_render_cleanup(rid)
+
 		# Close all render sessions
+		print("Closing app")
 		for rid in list(self.render_sessions.keys()):
 			self.close_render(rid)
 
@@ -883,7 +939,7 @@ class App:
 			return  # no active render for this user session
 
 		# We don't want to wait for this to resolve
-		create_task(render.call_api("/set-cookies", method="GET"))
+		create_task(render.call_api(f"/{self.api_prefix}/set-cookies", method="GET"))
 		sess.scheduled_cookie_refresh = True
 
 

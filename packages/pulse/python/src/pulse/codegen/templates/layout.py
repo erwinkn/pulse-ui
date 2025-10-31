@@ -85,9 +85,7 @@ export default function PulseLayout() {
   const data = useLoaderData<typeof loader>();
   if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
     sessionStorage.setItem("__PULSE_RENDER_ID", data.renderId);
-    if (data.directives) {
-      sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(data.directives));
-    }
+    sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(data.directives));
   }
   return (
     <PulseProvider config={config} prerender={data}>

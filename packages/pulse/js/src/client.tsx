@@ -11,9 +11,10 @@ import type {
 	ServerErrorInfo,
 	ServerMessage,
 } from "./messages";
+import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
-import type { VDOM, VDOMUpdate } from "./vdom";
+import type { VDOMUpdate } from "./vdom";
 
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
@@ -25,7 +26,7 @@ export interface Directives {
 }
 export interface MountedView {
 	routeInfo: RouteInfo;
-	onInit: (vdom: VDOM, callbacks: string[], renderProps: string[], cssRefs: string[]) => void;
+	onInit: (view: PulsePrerenderView) => void;
 	onUpdate: (ops: VDOMUpdate[]) => void;
 }
 export type ConnectionStatusListener = (connected: boolean) => void;
@@ -75,6 +76,9 @@ export class PulseSocketIOClient {
 				}
 			}
 		}
+	}
+	public setDirectives(directives: Directives) {
+		this.#directives = directives;
 	}
 	public isConnected(): boolean {
 		return this.#socket?.connected ?? false;
@@ -144,7 +148,11 @@ export class PulseSocketIOClient {
 
 	onConnectionChange(listener: ConnectionStatusListener): () => void {
 		this.#connectionListeners.add(listener);
-		listener(this.isConnected());
+		// Only notify immediately if we've attempted connection (socket exists)
+		// This prevents showing error before first connection attempt
+		if (this.#socket !== null) {
+			listener(this.isConnected());
+		}
 		return () => {
 			this.#connectionListeners.delete(listener);
 		};
@@ -191,8 +199,8 @@ export class PulseSocketIOClient {
 		});
 	}
 
-	public async navigate(path: string, routeInfo: RouteInfo) {
-		await this.sendMessage({
+	public navigate(path: string, routeInfo: RouteInfo) {
+		this.sendMessage({
 			type: "navigate",
 			path,
 			routeInfo,
@@ -226,7 +234,7 @@ export class PulseSocketIOClient {
 				// Ignore messages for paths that are not mounted
 				if (!route) return;
 				if (route) {
-					route.onInit(message.vdom, message.callbacks, message.render_props, message.css_refs);
+					route.onInit(message);
 				}
 				// Clear any prior error for this path on successful init
 				if (this.#serverErrors.has(message.path)) {

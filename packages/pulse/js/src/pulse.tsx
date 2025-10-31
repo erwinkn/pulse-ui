@@ -1,4 +1,12 @@
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import {
+	createContext,
+	type ReactNode,
+	useContext,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
@@ -70,13 +78,12 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 	const rrNavigate = useNavigate();
 	const { directives } = prerender;
 
-	const client = useMemo(
-		() => new PulseSocketIOClient(config.serverAddress, directives, rrNavigate),
-		[config.serverAddress, rrNavigate, directives],
-	);
-
+	// biome-ignore lint/correctness/useExhaustiveDependencies: another useEffect syncs the directives without recreating the client
+	const client = useMemo(() => {
+		return new PulseSocketIOClient(config.serverAddress, directives, rrNavigate);
+	}, [config.serverAddress, rrNavigate]);
+	useEffect(() => client.setDirectives(directives), [client, directives]);
 	useEffect(() => client.onConnectionChange(setConnected), [client]);
-
 	useEffect(() => {
 		if (inBrowser) {
 			client.connect();
@@ -122,7 +129,7 @@ export interface PulseViewProps {
 export function PulseView({ externalComponents, path, cssModules }: PulseViewProps) {
 	const client = usePulseClient();
 	const initialView = usePulsePrerender(path);
-	const initialVDOM = initialView.vdom;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: We only want to lose the renderer on unmount. initialView will change on every navigation with our current setup, so we hack around it with another useEffect below. This is not ideal and will be fixed in the future.
 	const renderer = useMemo(
 		() =>
 			new VDOMRenderer(
@@ -134,16 +141,9 @@ export function PulseView({ externalComponents, path, cssModules }: PulseViewPro
 				initialView.render_props,
 				initialView.css_refs,
 			),
-		[client, path, externalComponents, cssModules, initialView],
+		[client, path, externalComponents, cssModules],
 	);
-	const [tree, setTree] = useState<ReactNode>(() =>
-		renderer.init(
-			initialVDOM,
-			initialView.callbacks,
-			initialView.render_props,
-			initialView.css_refs,
-		),
-	);
+	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
 	const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
 
 	const location = useLocation();
@@ -163,12 +163,13 @@ export function PulseView({ externalComponents, path, cssModules }: PulseViewPro
 		} satisfies RouteInfo;
 	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to unmount on navigation, so another useEffect sync the routeInfo on navigation.
 	useEffect(() => {
 		if (inBrowser) {
 			client.mountView(path, {
 				routeInfo,
-				onInit: (vdom, callbacks, renderProps, cssRefs) => {
-					setTree(renderer.init(vdom, callbacks, renderProps, cssRefs));
+				onInit: (view) => {
+					setTree(renderer.init(view));
 				},
 				onUpdate: (ops) => {
 					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
@@ -182,14 +183,29 @@ export function PulseView({ externalComponents, path, cssModules }: PulseViewPro
 				client.unmount(path);
 			};
 		}
-		// routeInfo is NOT included here on purpose
-	}, [client, renderer, path, routeInfo]);
+		//  routeInfo is NOT included here on purpose
+	}, [client, renderer, path]);
 
 	useEffect(() => {
 		if (inBrowser) {
 			client.navigate(path, routeInfo);
 		}
 	}, [client, path, routeInfo]);
+	// Hack for our current prerendering setup on client-side navigation. Will be improved soon
+	const hasRendered = useRef(false);
+	useEffect(() => {
+		// First rendering pass, no need to update the tree
+		if (!hasRendered.current) {
+			hasRendered.current = true;
+		}
+		// 2nd+ rendering pass. Happens when a route stays mounted on navigation.
+		else {
+			setTree(renderer.init(initialView));
+		}
+		return () => {
+			hasRendered.current = false;
+		};
+	}, [initialView, renderer]);
 
 	if (serverError) {
 		return <ServerError error={serverError} />;

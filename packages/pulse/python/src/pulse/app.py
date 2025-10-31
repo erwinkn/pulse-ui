@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from enum import IntEnum
-from typing import Any, Callable, Literal, NotRequired, TypedDict, TypeVar, cast
+from typing import Any, Callable, Literal, TypeVar, cast
 
 import socketio
 import uvicorn
@@ -56,7 +56,8 @@ from pulse.messages import (
 	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
-	ServerInitMessage,
+	PrerenderPayload,
+	PrerenderResult,
 	ServerMessage,
 )
 from pulse.middleware import (
@@ -73,7 +74,7 @@ from pulse.proxy import PulseProxy
 from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
-from pulse.routing import Layout, Route, RouteInfo, RouteTree
+from pulse.routing import Layout, Route, RouteTree
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -91,22 +92,11 @@ class AppStatus(IntEnum):
 	created = 0
 	initialized = 1
 	running = 2
-	stopped = 3
+	draining = 3
+	stopped = 4
 
 
 PulseMode = Literal["subdomains", "single-server"]
-
-
-class PrerenderPayload(TypedDict):
-	paths: list[str]
-	routeInfo: RouteInfo
-	ttlSeconds: NotRequired[float | int]
-	renderId: NotRequired[str]
-
-
-class PrerenderResult(TypedDict):
-	renderId: str
-	views: dict[str, ServerInitMessage | None]
 
 
 class App:
@@ -278,6 +268,11 @@ class App:
 			yield
 		finally:
 			try:
+				await self.close()
+			except Exception:
+				logger.exception("Error during App.close()")
+
+			try:
 				if isinstance(self.session_store, SessionStore):
 					await self.session_store.close()
 			except Exception:
@@ -380,7 +375,7 @@ class App:
 
 		# Debug middleware to log CORS-related request details
 		# @self.fastapi.middleware("http")
-		# async def cors_debug_middleware(  # pyright: ignore[reportUnusedFunction]
+		# async def cors_debug_middleware(
 		# 	request: Request, call_next: Callable[[Request], Awaitable[Response]]
 		# ):
 		# 	origin = request.headers.get("origin")
@@ -483,7 +478,13 @@ class App:
 				)
 				cleanup = True
 
-			result: PrerenderResult = {"renderId": render_id, "views": {}}
+			initial_result: PrerenderResult = {
+				"views": {},
+				"directives": {
+					"headers": {"X-Pulse-Render-Id": render_id},
+					"socketio": {"auth": {"render_id": render_id}, "headers": {}},
+				},
+			}
 
 			def _prerender_one(path: str):
 				captured = render.prerender_mount_capture(path, route_info)
@@ -499,10 +500,12 @@ class App:
 				# Fallback: shouldn't happen, return not found to be safe
 				return NotFound()
 
+			result = initial_result.copy()
+
 			with PulseContext.update(render=render):
 				for p in paths:
 					try:
-						res = self.middleware.prerender(
+						res = self.middleware.prerender_route(
 							path=p,
 							route_info=route_info,
 							request=PulseRequest.from_fastapi(request),
@@ -545,7 +548,19 @@ class App:
 				if cleanup:
 					later(float(ttl), _gc_if_unadopted, render_id)
 
-			resp = JSONResponse(serialize(result))
+			# Call top-level batch prerender middleware to modify final result
+			def _return_result() -> PrerenderResult:
+				return result
+
+			final_result = self.middleware.prerender(
+				payload=payload,
+				result=result,
+				request=PulseRequest.from_fastapi(request),
+				session=session.data,
+				next=_return_result,
+			)
+
+			resp = JSONResponse(serialize(final_result))
 			session.handle_response(resp)
 			return resp
 
@@ -572,7 +587,7 @@ class App:
 			sid: str, environ: dict[str, Any], auth: dict[str, str] | None
 		):
 			# Expect renderId during websocket auth and require a valid user session
-			rid = auth.get("renderId") if auth else None
+			rid = auth.get("render_id") if auth else None
 
 			# Parse cookies from environ and ensure a session exists
 			cookie = self.cookie.get_from_socketio(environ)
@@ -824,6 +839,29 @@ class App:
 	def close_session_if_inactive(self, sid: str):
 		if len(self._user_to_render[sid]) == 0:
 			self.close_session(sid)
+
+	async def close(self):
+		"""
+		Close the app and clean up all sessions.
+		This method is called automatically during shutdown.
+		"""
+
+		# Close all render sessions
+		for rid in list(self.render_sessions.keys()):
+			self.close_render(rid)
+
+		# Close all user sessions
+		for sid in list(self.user_sessions.keys()):
+			self.close_session(sid)
+
+		# Update status
+		self.status = AppStatus.stopped
+		# Call plugin on_shutdown hooks before closing
+		for plugin in self.plugins:
+			try:
+				plugin.on_shutdown(self)
+			except Exception:
+				logger.exception("Error during plugin.on_shutdown()")
 
 	def refresh_cookies(self, sid: str):
 		# If the session is currently inside an HTTP request, we don't need to schedule

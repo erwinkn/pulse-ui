@@ -81,6 +81,9 @@ from .deployment import (
 from .deployment import (
 	wait_for_healthy_targets as wait_for_healthy_targets,
 )
+from .plugin import (
+	AWSECSPlugin as AWSECSPlugin,
+)
 from .reporting import (
 	CiReporter as CiReporter,
 )

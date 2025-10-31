@@ -15,6 +15,14 @@ import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOM, VDOMUpdate } from "./vdom";
 
+export interface SocketIODirectives {
+	headers?: Record<string, string>;
+	auth?: Record<string, string>;
+}
+export interface Directives {
+	headers?: Record<string, string>;
+	socketio?: SocketIODirectives;
+}
 export interface MountedView {
 	routeInfo: RouteInfo;
 	onInit: (vdom: VDOM, callbacks: string[], renderProps: string[], cssRefs: string[]) => void;
@@ -46,16 +54,27 @@ export class PulseSocketIOClient {
 	#serverErrorListeners: Set<ServerErrorListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
 	#url: string;
-	#renderId: string;
 	#frameworkNavigate: NavigateFunction;
+	#directives: Directives;
 
-	constructor(url: string, renderId: string, frameworkNavigate: NavigateFunction) {
+	constructor(url: string, directives: Directives, frameworkNavigate: NavigateFunction) {
 		this.#url = url;
-		this.#renderId = renderId;
+		this.#directives = directives;
 		this.#frameworkNavigate = frameworkNavigate;
 		this.#socket = null;
 		this.#activeViews = new Map();
 		this.#messageQueue = [];
+		// Load directives from sessionStorage
+		if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
+			const stored = sessionStorage.getItem("__PULSE_DIRECTIVES");
+			if (stored) {
+				try {
+					this.#directives = JSON.parse(stored);
+				} catch {
+					// Ignore parse errors
+				}
+			}
+		}
 	}
 	public isConnected(): boolean {
 		return this.#socket?.connected ?? false;
@@ -68,7 +87,8 @@ export class PulseSocketIOClient {
 		return new Promise((resolve, reject) => {
 			const socket = io(this.#url, {
 				transports: ["websocket", "webtransport"],
-				auth: { renderId: this.#renderId },
+				auth: this.#directives.socketio?.auth,
+				extraHeaders: this.#directives.socketio?.headers,
 			});
 			this.#socket = socket;
 

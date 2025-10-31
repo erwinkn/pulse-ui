@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { PulseSocketIOClient } from "./client";
+import { type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
 import type { ServerErrorInfo } from "./messages";
 import { VDOMRenderer } from "./renderer";
@@ -22,8 +22,8 @@ export type PulsePrerenderView = {
 };
 
 export type PulsePrerender = {
-	renderId: string;
 	views: Record<string, PulsePrerenderView>;
+	directives: Directives;
 };
 // =================================================================
 // Context and Hooks
@@ -68,11 +68,11 @@ const inBrowser = typeof window !== "undefined";
 export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
 	const [connected, setConnected] = useState(true);
 	const rrNavigate = useNavigate();
-	const { renderId } = prerender;
+	const { directives } = prerender;
 
 	const client = useMemo(
-		() => new PulseSocketIOClient(config.serverAddress, renderId, rrNavigate),
-		[config.serverAddress, rrNavigate, renderId],
+		() => new PulseSocketIOClient(config.serverAddress, directives, rrNavigate),
+		[config.serverAddress, rrNavigate, directives],
 	);
 
 	useEffect(() => client.onConnectionChange(setConnected), [client]);

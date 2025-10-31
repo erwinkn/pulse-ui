@@ -1,6 +1,6 @@
 [project]
 name = "pulse-framework"
-version = "0.1.38"
+version = "0.1.39"
 description = "Pulse - Full-stack framework for building real-time React applications in Python"
 readme = "README.md"
 requires-python = ">=3.11"

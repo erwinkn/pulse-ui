@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload, override
+from typing import Any, Generic, TypeVar, overload, override
 
-from pulse.messages import ClientMessage, ServerInitMessage
+from pulse.messages import (
+	ClientMessage,
+	PrerenderPayload,
+	PrerenderResult,
+	ServerInitMessage,
+)
 from pulse.request import PulseRequest
 from pulse.routing import RouteInfo
-
-if TYPE_CHECKING:
-	from pulse.app import PrerenderPayload, PrerenderResult
 
 T = TypeVar("T")
 

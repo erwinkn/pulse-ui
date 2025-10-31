@@ -7,7 +7,7 @@ import base64
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import boto3
 import httpx
@@ -693,10 +693,10 @@ async def mark_previous_deployments_as_draining(
 		raise DeploymentError(msg) from exc
 
 	# Mark each previous deployment as draining
-	drained_ids = []
+	drained_ids: list[str] = []
 
 	for svc in previous_services:
-		old_deployment_id = svc["serviceName"]
+		old_deployment_id = cast(str, svc["serviceName"])
 		service_arn = svc["serviceArn"]
 
 		reporter.detail(f"Marking {old_deployment_id} as draining...")
@@ -1022,7 +1022,10 @@ async def wait_for_healthy_targets(
 
 		try:
 			response = elbv2.describe_target_health(TargetGroupArn=target_group_arn)
-			targets = response.get("TargetHealthDescriptions", [])
+
+			targets = cast(
+				list[dict[str, Any]], response.get("TargetHealthDescriptions", [])
+			)
 			current_time = asyncio.get_event_loop().time()
 
 			healthy_count = sum(
@@ -1038,7 +1041,7 @@ async def wait_for_healthy_targets(
 			total_count = len(targets)
 
 			# Track when tasks exit initial state and check grace periods
-			tasks_failed_grace_period = []
+			tasks_failed_grace_period: list[dict[str, Any]] = []
 			for t in targets:
 				target = t.get("Target", {})
 				target_id = target.get("Id", "")

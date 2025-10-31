@@ -19,7 +19,7 @@ Environment variables:
 import json
 import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 import boto3
 
@@ -98,7 +98,7 @@ def process_draining_services(
 	print("🔍 Looking for draining services...")
 
 	# Find all services in the cluster
-	service_arns = []
+	service_arns: list[str] = []
 	paginator = ecs.get_paginator("list_services")
 	for page in paginator.paginate(cluster=cluster):
 		service_arns.extend(page.get("serviceArns", []))
@@ -115,7 +115,7 @@ def process_draining_services(
 		services.extend(response.get("services", []))
 
 	# Filter for ACTIVE services with state=draining tag (skip deploying)
-	draining_services = []
+	draining_services: list[dict[str, Any]] = []
 	for svc in services:
 		if svc.get("status") != "ACTIVE":
 			continue
@@ -328,7 +328,7 @@ def cleanup_stuck_deploying_services(
 	print("🔍 Looking for stuck deploying services...")
 
 	# Find all services
-	service_arns = []
+	service_arns: list[str] = []
 	paginator = ecs.get_paginator("list_services")
 	for page in paginator.paginate(cluster=cluster):
 		service_arns.extend(page.get("serviceArns", []))
@@ -338,7 +338,7 @@ def cleanup_stuck_deploying_services(
 		return 0
 
 	# Get service details
-	services = []
+	services: list[dict[str, Any]] = []
 	for i in range(0, len(service_arns), 10):
 		batch = service_arns[i : i + 10]
 		response = ecs.describe_services(cluster=cluster, services=batch)
@@ -346,7 +346,7 @@ def cleanup_stuck_deploying_services(
 
 	# Filter for ACTIVE services with state=deploying that exceed max age
 	max_age_seconds = max_age_hr * 3600
-	stuck_services = []
+	stuck_services: list[dict[str, Any]] = []
 	for svc in services:
 		if svc.get("status") != "ACTIVE":
 			continue
@@ -375,7 +375,7 @@ def cleanup_stuck_deploying_services(
 	# Clean up each stuck service
 	cleaned_count = 0
 	for svc in stuck_services:
-		deployment_id = svc["serviceName"]
+		deployment_id = cast(str, svc["serviceName"])
 		service_arn = svc["serviceArn"]
 		created_at = svc.get("createdAt")
 		age_hours = (
@@ -452,7 +452,7 @@ def cleanup_inactive_services(
 	print("🧹 Looking for inactive services to clean up...")
 
 	# Find all services
-	service_arns = []
+	service_arns: list[str] = []
 	paginator = ecs.get_paginator("list_services")
 	for page in paginator.paginate(cluster=cluster):
 		service_arns.extend(page.get("serviceArns", []))
@@ -462,7 +462,7 @@ def cleanup_inactive_services(
 		return 0
 
 	# Get service details
-	services = []
+	services: list[dict[str, Any]] = []
 	for i in range(0, len(service_arns), 10):
 		batch = service_arns[i : i + 10]
 		response = ecs.describe_services(cluster=cluster, services=batch)
@@ -491,7 +491,7 @@ def cleanup_inactive_services(
 	# Clean up each inactive service
 	cleaned_count = 0
 	for svc in inactive_services:
-		deployment_id = svc["serviceName"]
+		deployment_id = cast(str, svc["serviceName"])
 		service_arn = svc["serviceArn"]
 
 		print(f"  🧹 {deployment_id}: cleaning up...")

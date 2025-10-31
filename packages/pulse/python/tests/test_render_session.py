@@ -6,7 +6,7 @@ Each session mounts both routes and mutates state via callbacks. We assert
 that updates from one session do not leak into the other.
 """
 
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pulse as ps
 import pytest
@@ -288,6 +288,7 @@ def test_global_state_disposed_on_session_close():
 	class Disposable(ps.State):
 		count: int = 0
 
+		@override
 		def on_dispose(self):
 			disposed.append("ok")
 

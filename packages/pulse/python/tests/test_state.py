@@ -2,7 +2,7 @@
 Tests for the State class and computed properties.
 """
 
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pulse as ps
 import pytest
@@ -601,3 +601,46 @@ class TestState:
 		# After fixing the condition, it should work
 		state.count = 3
 		assert state.failing_computed == 6
+
+	def test_on_dispose_hook(self):
+		"""Test that on_dispose hook is called when state is disposed"""
+		cleanup_calls = []
+
+		class MyState(ps.State):
+			count: int = 0
+
+			@override
+			def on_dispose(self):
+				cleanup_calls.append("cleaned")
+
+		state = MyState()
+		assert cleanup_calls == []
+
+		state.dispose()
+		assert cleanup_calls == ["cleaned"]
+
+	def test_on_dispose_runs_before_effects_disposed(self):
+		"""Test that on_dispose runs before effects are disposed"""
+		order = []
+
+		class MyState(ps.State):
+			count: int = 0
+
+			@ps.effect
+			def my_effect(self):
+				def cleanup():
+					order.append("effect_disposed")
+
+				return cleanup
+
+			@override
+			def on_dispose(self):
+				order.append("on_dispose_called")
+
+		state = MyState()
+		state.my_effect.schedule()
+		flush_effects()
+
+		state.dispose()
+		# on_dispose should be called before effects are disposed
+		assert order == ["on_dispose_called", "effect_disposed"]

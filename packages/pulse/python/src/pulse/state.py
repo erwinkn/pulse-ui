@@ -206,6 +206,15 @@ class State(ABC, metaclass=StateMeta):
 	```
 
 	Properties will automatically trigger re-renders when changed.
+
+	Override `on_dispose()` to run cleanup code when the state is disposed:
+	```python
+	class MyState(ps.State):
+	    def on_dispose(self):
+	        # Clean up timers, connections, etc.
+	        self.timer.cancel()
+	        self.connection.close()
+	```
 	"""
 
 	@override
@@ -310,7 +319,19 @@ class State(ABC, metaclass=StateMeta):
 			# if isinstance(value,QueryProperty):
 			#     value.
 
+	def on_dispose(self) -> None:
+		"""
+		Override this method to run cleanup code when the state is disposed.
+
+		This is called automatically when `dispose()` is called, before effects are disposed.
+		Use this to clean up timers, connections, or other resources.
+		"""
+		pass
+
 	def dispose(self):
+		# Call user-defined cleanup hook first
+		self.on_dispose()
+
 		disposed = set()
 		for value in self.__dict__.values():
 			if isinstance(value, Effect):

@@ -289,9 +289,8 @@ def test_global_state_disposed_on_session_close():
 		count: int = 0
 
 		@override
-		def dispose(self):
+		def on_dispose(self):
 			disposed.append("ok")
-			super().dispose()
 
 	accessor = ps.global_state(Disposable)
 

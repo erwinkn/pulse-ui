@@ -156,3 +156,25 @@ ClientPulseMessage = (
 )
 ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
 ClientMessage = ClientPulseMessage | ClientChannelMessage
+
+
+class PrerenderPayload(TypedDict):
+	paths: list[str]
+	routeInfo: RouteInfo
+	ttlSeconds: NotRequired[float | int]
+	renderId: NotRequired[str]
+
+
+class SocketIODirectives(TypedDict):
+	headers: dict[str, str]
+	auth: dict[str, str]
+
+
+class Directives(TypedDict):
+	headers: dict[str, str]
+	socketio: SocketIODirectives
+
+
+class PrerenderResult(TypedDict):
+	views: dict[str, ServerInitMessage | None]
+	directives: Directives

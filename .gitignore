@@ -174,3 +174,13 @@ cython_debug/
 
 # Ruff
 .ruff_cache
+
+# CDK
+cdk.out
+cdk.context.json
+
+# AWS deployment secrets
+.pulse/
+
+# Mac
+.DS_Store

@@ -6,7 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from pulse.cli.dependencies import DependencyResolutionError, prepare_web_dependencies
+from pulse.cli.dependencies import (
+	DependencyResolutionError,
+	convert_pep440_to_semver,
+	prepare_web_dependencies,
+)
 from pulse.cli.helpers import load_app_from_target, parse_app_target
 from pulse.cli.models import CommandSpec
 from pulse.cli.packages import (
@@ -165,6 +169,34 @@ def test_prepare_web_dependencies_raises_on_conflict(tmp_path: Path):
 			pulse_version="9.9.9",
 			component_provider=lambda: [conflicting],  # pyright: ignore[reportArgumentType]
 		)
+
+
+@pytest.mark.parametrize(
+	"pep440_version,expected_semver",
+	[
+		# PEP 440 prerelease formats
+		("0.1.37a1", "0.1.37-alpha.1"),
+		("0.1.37b1", "0.1.37-beta.1"),
+		("0.1.37rc1", "0.1.37-rc.1"),
+		("0.1.37dev1", "0.1.37-dev.1"),
+		("1.2.3alpha2", "1.2.3-alpha.2"),
+		("2.0.0beta3", "2.0.0-beta.3"),
+		("3.1.4rc5", "3.1.4-rc.5"),
+		# PEP 440 .dev format
+		("0.1.37.dev1", "0.1.37-dev.1"),
+		("1.0.0.dev2", "1.0.0-dev.2"),
+		# Regular versions (should pass through unchanged)
+		("1.0.0", "1.0.0"),
+		("2.1.3", "2.1.3"),
+		("0.1.37", "0.1.37"),
+		# Edge cases with different prerelease types
+		("1.0.0a0", "1.0.0-alpha.0"),
+		("1.0.0b0", "1.0.0-beta.0"),
+		("1.0.0rc0", "1.0.0-rc.0"),
+	],
+)
+def test_convert_pep440_to_semver(pep440_version: str, expected_semver: str):
+	assert convert_pep440_to_semver(pep440_version) == expected_semver
 
 
 def test_execute_commands_streams_output(

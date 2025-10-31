@@ -1,0 +1,5 @@
+{
+  "app": "uv run python app.py",
+  "requireApproval": "never",
+  "versionReporting": true
+}

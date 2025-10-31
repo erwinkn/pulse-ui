@@ -1,6 +1,8 @@
 import asyncio
+import os
 import time
 from datetime import datetime
+from typing import TypedDict, override
 
 import pulse as ps
 from pulse.middleware import Deny, NotFound, Ok, Redirect
@@ -14,13 +16,13 @@ from pulse.user_session import InMemorySessionStore
 class CounterState(ps.State):
 	count: int = 0
 	count2: int = 0
-	ticking = False
+	ticking: bool = False
 
 	def __init__(self, name: str):
-		self._name = name
+		self._name: str = name
 
 	def increment(self):
-		self.count += 1
+		self.count += 2
 
 	async def increment_with_delay(self):
 		await asyncio.sleep(1)
@@ -43,6 +45,10 @@ class CounterState(ps.State):
 
 	def decrement(self):
 		self.count -= 1
+
+	@override
+	def on_dispose(self):
+		self.stop_ticking()
 
 	@ps.computed
 	def double_count(self) -> int:
@@ -116,7 +122,7 @@ class LeafState(ps.State):
 	count: int = 0
 
 	def __init__(self, label: str):
-		self._label = label
+		self._label: str = label
 
 	def inc(self):
 		self.count += 1
@@ -196,16 +202,16 @@ def about():
 
 def setup_counter(count: int):
 	@ps.effect
-	def log_count():
+	def log_count():  # pyright: ignore[reportUnusedFunction]
 		print(f"Logging count from setup: {count}")
 
 
 @ps.component
-def Leaf(label: str, key=None):
+def Leaf(label: str, key: str | None = None):
 	# setup: called once per component instance; captures mount-only effect
 	def _init(lbl: str):
 		@ps.effect
-		def on_mount():
+		def on_mount():  # pyright: ignore[reportUnusedFunction]
 			print(f"[Leaf mount] {lbl}")
 
 		return {"label": lbl}
@@ -345,13 +351,18 @@ def counter_details():
 	)
 
 
+class User(TypedDict):
+	id: int
+	name: str
+
+
 class QueryDemoState(ps.State):
 	user_id: int = 1
 	keyed_calls: int = 0
 	unkeyed_calls: int = 0
 
 	@ps.query(keep_previous_data=True)
-	async def user_keyed(self) -> dict:
+	async def user_keyed(self) -> User:
 		self.keyed_calls += 1
 		# Simulate async work
 		await asyncio.sleep(1)
@@ -363,7 +374,7 @@ class QueryDemoState(ps.State):
 
 	# Unkeyed (auto-tracked) query variant
 	@ps.query(keep_previous_data=True)
-	async def user_unkeyed(self) -> dict:
+	async def user_unkeyed(self) -> User:
 		with ps.Untrack():
 			self.unkeyed_calls += 1
 		# Simulate async work
@@ -562,7 +573,8 @@ app = ps.App(
 			],
 		)
 	],
-	session_store=InMemorySessionStore() if ps.env.pulse_env == "prod" else None,
+	session_store=InMemorySessionStore() if ps.mode() == "prod" else None,
+	server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
 )
 
 
@@ -570,7 +582,10 @@ app = ps.App(
 
 
 class LoggingMiddleware(ps.PulseMiddleware):
-	def prerender(self, *, path, route_info, request, session, next):
+	@override
+	def prerender(
+		self, *, path, route_info, request, session, next
+	) -> ps.PrerenderResponse:
 		# before
 		print(f"[MW prerender] path={path} host={request.headers.get('host')}")
 		# Seed same keys as connect to avoid prerender flash

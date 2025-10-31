@@ -910,7 +910,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-aws"
-version = "0.1.5"
+version = "0.1.6"
 source = { editable = "packages/pulse-aws" }
 dependencies = [
     { name = "aws-cdk-lib" },

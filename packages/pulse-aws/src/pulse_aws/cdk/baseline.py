@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -130,6 +131,30 @@ class BaselineStack(Stack):
 				status_code=503,
 				content_type="application/json",
 				message_body='{"status":"draining"}',
+			),
+		)
+
+		# Add verification endpoint rule (highest priority) to validate domain routing
+		# This allows us to verify ALB reachability even when Cloudflare proxy is enabled
+		# Use a hash token in the path instead of exposing the ALB DNS name for security
+		alb_dns_name = self.load_balancer.load_balancer_dns_name
+		verification_token = hashlib.sha256(
+			f"{deployment_name}:{alb_dns_name}".encode()
+		).hexdigest()[:16]
+		verification_path = f"/_pulse/verify-{verification_token}"
+		verification_response_body = f'{{"status":"ok","token":"{verification_token}","service":"pulse-alb-verify"}}'
+		elbv2.ApplicationListenerRule(
+			self,
+			"AlbVerificationRule",
+			listener=self.listener,
+			priority=1,
+			conditions=[
+				elbv2.ListenerCondition.path_patterns([verification_path]),
+			],
+			action=elbv2.ListenerAction.fixed_response(
+				status_code=200,
+				content_type="application/json",
+				message_body=verification_response_body,
 			),
 		)
 

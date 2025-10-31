@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
 import boto3
+import httpx
 from botocore.exceptions import ClientError
 
 from pulse_aws.baseline import BaselineStackOutputs
@@ -104,23 +106,51 @@ async def _prompt_retry(
 	return True
 
 
-def _prepare_context(
-	context: DeploymentContext | None,
-	reporter: Reporter | None,
-) -> DeploymentContext:
-	"""Normalize context/reporter configuration."""
-	if context is None:
-		return create_context(reporter=reporter)
-	if reporter is not None:
-		context.reporter = reporter
-	return context
-
-
 def _emit_dns_instructions(config: DnsConfiguration, reporter: Reporter) -> None:
 	"""Print DNS instructions via the reporter."""
 	instructions = config.format_for_display()
 	for line in instructions.splitlines():
 		reporter.info(line)
+
+
+async def _verify_alb_via_https(
+	domain: str,
+	baseline: BaselineStackOutputs,
+) -> bool:
+	"""Verify that the domain reaches the ALB by checking the verification endpoint.
+
+	This works even when Cloudflare proxy is enabled, as it uses HTTPS to verify
+	that requests to the domain actually reach our ALB. Uses a hash token instead
+	of exposing the ALB DNS name for security.
+
+	Args:
+	    domain: The domain to check
+	    baseline: Baseline stack outputs containing expected ALB DNS name
+
+	Returns:
+	    True if the verification endpoint returns the expected token
+	"""
+
+	# Compute expected token (matches what CDK generates)
+	expected_token = hashlib.sha256(
+		f"{baseline.deployment_name}:{baseline.alb_dns_name}".encode()
+	).hexdigest()[:16]
+	verification_path = f"/_pulse/verify-{expected_token}"
+
+	try:
+		async with httpx.AsyncClient(timeout=10.0, verify=True) as client:
+			response = await client.get(
+				f"https://{domain}{verification_path}",
+				follow_redirects=True,
+			)
+			if response.status_code == 200:
+				data = response.json()
+				returned_token = data.get("token", "")
+				if returned_token == expected_token:
+					return True
+	except Exception:
+		pass
+	return False
 
 
 async def _ensure_certificate_ready(
@@ -209,9 +239,22 @@ async def _ensure_domain_routing(
 		proxied = domain_uses_cloudflare_proxy(domain)
 		if proxied:
 			reporter.info(
-				f"{domain} appears to be served through Cloudflare; skipping direct ALB IP verification."
+				f"{domain} appears to be served through Cloudflare proxy. "
+				+ "Attempting to verify ALB reachability via HTTPS endpoint..."
 			)
-			return True, True
+			# Use HTTPS verification endpoint to confirm domain reaches our ALB
+			alb_reachable = await _verify_alb_via_https(domain, baseline)
+			if alb_reachable:
+				reporter.success(
+					f"{domain} successfully verified to reach ALB ({baseline.alb_dns_name}) via HTTPS."
+				)
+				return True, True
+			else:
+				reporter.warning(
+					f"{domain} could not reach ALB verification endpoint. "
+					+ "Ensure the domain is properly configured to route to the ALB."
+				)
+				return False, True
 		reporter.success(f"{domain} resolves to {baseline.alb_dns_name}; DNS is ready.")
 		return True, False
 
@@ -244,9 +287,22 @@ async def _ensure_domain_routing(
 			proxied = domain_uses_cloudflare_proxy(domain)
 			if proxied:
 				reporter.info(
-					f"{domain} appears to be served through Cloudflare; skipping direct ALB IP verification."
+					f"{domain} appears to be served through Cloudflare proxy. "
+					+ "Attempting to verify ALB reachability via HTTPS endpoint..."
 				)
-				return True, True
+				# Use HTTPS verification endpoint to confirm domain reaches our ALB
+				alb_reachable = await _verify_alb_via_https(domain, baseline)
+				if alb_reachable:
+					reporter.success(
+						f"{domain} successfully verified to reach ALB ({baseline.alb_dns_name}) via HTTPS."
+					)
+					return True, True
+				else:
+					reporter.warning(
+						f"{domain} could not reach ALB verification endpoint. "
+						+ "Ensure the domain is properly configured to route to the ALB."
+					)
+					return False, True
 			reporter.success(f"{domain} now resolves to {baseline.alb_dns_name}.")
 			return True, False
 
@@ -1325,6 +1381,7 @@ async def cleanup_inactive_deployments(
 	# Create AWS clients
 	ecs = boto3.client("ecs", region_name=baseline.region)
 	elbv2 = boto3.client("elbv2", region_name=baseline.region)
+	ssm = boto3.client("ssm", region_name=baseline.region)
 
 	# Call the reaper's cleanup function
 	try:
@@ -1333,6 +1390,7 @@ async def cleanup_inactive_deployments(
 			listener_arn=baseline.listener_arn,
 			ecs=ecs,
 			elbv2=elbv2,
+			ssm_client=ssm,
 		)
 
 		if cleaned_count > 0:
@@ -1358,8 +1416,6 @@ async def deploy(
 	health_check: HealthCheckConfig | None = None,
 	reaper: ReaperConfig | None = None,
 	certificate_arn: str | None = None,
-	context: DeploymentContext | None = None,
-	reporter: Reporter | None = None,
 ) -> dict[str, str]:
 	"""Deploy an application to AWS ECS with full blue-green deployment workflow.
 
@@ -1386,8 +1442,6 @@ async def deploy(
 	    health_check: ALB health check configuration (uses defaults if None)
 	    reaper: Reaper Lambda configuration (uses defaults if None)
 	    certificate_arn: ACM certificate ARN (looked up if not provided)
-	    context: Optional deployment execution context (auto-detected if omitted)
-	    reporter: Optional reporter to override logging behaviour
 
 	Returns:
 	    Dictionary with deployment information:
@@ -1431,7 +1485,7 @@ async def deploy(
 	"""
 	from pulse_aws.baseline import ensure_baseline_stack
 
-	context = _prepare_context(context, reporter)
+	context = create_context()
 	reporter = context.reporter
 
 	reporter.section(f"Deploy {deployment_name}")
@@ -1568,7 +1622,8 @@ async def deploy(
 	reporter.detail(f"Image URI: {image_uri}")
 	if domain_proxied:
 		reporter.detail(
-			f"{domain} is served via Cloudflare proxy; ALB IP verification skipped."
+			f"{domain} is served via Cloudflare proxy. "
+			+ "ALB reachability verified via HTTPS endpoint."
 		)
 	if marked_draining:
 		reporter.detail(

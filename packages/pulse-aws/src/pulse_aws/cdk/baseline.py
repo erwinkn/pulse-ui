@@ -167,11 +167,11 @@ class BaselineStack(Stack):
 			description="Task role for Pulse ECS tasks",
 		)
 
-		# Grant SSM permissions for reading deployment state parameters
+		# Grant SSM permissions for reading deployment state and writing task state
 		self.task_role.add_to_policy(
 			iam.PolicyStatement(
 				effect=iam.Effect.ALLOW,
-				actions=["ssm:GetParameter"],
+				actions=["ssm:GetParameter", "ssm:PutParameter"],
 				resources=[
 					f"arn:aws:ssm:{self.region}:{self.account}:parameter/apps/{deployment_name}/*"
 				],

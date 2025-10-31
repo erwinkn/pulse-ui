@@ -43,7 +43,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 	ssm = boto3.client("ssm")
 	drained_count = process_draining_services(
 		cluster=CLUSTER,
-		deployment_name=DEPLOYMENT_NAME,
 		ecs=ecs,
 		ssm_client=ssm,
 		max_age_hr=MAX_AGE_HR,
@@ -56,6 +55,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 		max_age_hr=DEPLOYMENT_TIMEOUT,
 		ecs=ecs,
 		elbv2=elbv2,
+		ssm_client=ssm,
 	)
 
 	# Step 3: Clean up services with runningCount=0
@@ -64,6 +64,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 		listener_arn=LISTENER_ARN,
 		ecs=ecs,
 		elbv2=elbv2,
+		ssm_client=ssm,
 	)
 
 	result = {
@@ -79,7 +80,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def process_draining_services(
 	cluster: str,
-	deployment_name: str,
 	ecs: Any,
 	ssm_client: Any,
 	max_age_hr: float = 1.0,
@@ -88,7 +88,6 @@ def process_draining_services(
 
 	Args:
 	    cluster: ECS cluster name
-	    deployment_name: Deployment environment name
 	    ecs: boto3 ECS client
 	    ssm_client: boto3 SSM client
 	    max_age_hr: Maximum service age in hours (force retire)
@@ -129,7 +128,6 @@ def process_draining_services(
 			draining_services.append(
 				{
 					"service": svc,
-					"deployment_name": tag_dict.get("deployment_name"),
 					"deployment_id": tag_dict.get("deployment_id"),
 				}
 			)
@@ -201,7 +199,6 @@ def process_draining_services(
 		# Check SSM parameters for each task
 		all_ready = check_all_tasks_ready(
 			ssm_client=ssm_client,
-			deployment_name=item["deployment_name"] or deployment_name,
 			deployment_id=deployment_id,
 			task_ids=task_ids,
 		)
@@ -218,7 +215,6 @@ def process_draining_services(
 
 def check_all_tasks_ready(
 	ssm_client: Any,
-	deployment_name: str,
 	deployment_id: str,
 	task_ids: list[str],
 ) -> bool:
@@ -226,7 +222,6 @@ def check_all_tasks_ready(
 
 	Args:
 	    ssm_client: boto3 SSM client
-	    deployment_name: Deployment environment name
 	    deployment_id: Deployment ID
 	    task_ids: List of task IDs to check
 
@@ -238,7 +233,7 @@ def check_all_tasks_ready(
 
 	# Check SSM parameters for each task
 	for task_id in task_ids:
-		param_name = f"/apps/{deployment_name}/{deployment_id}/tasks/{task_id}"
+		param_name = f"/apps/{DEPLOYMENT_NAME}/{deployment_id}/tasks/{task_id}"
 
 		try:
 			response = ssm_client.get_parameter(Name=param_name)
@@ -315,6 +310,7 @@ def cleanup_stuck_deploying_services(
 	max_age_hr: float,
 	ecs: Any,
 	elbv2: Any,
+	ssm_client: Any,
 ) -> int:
 	"""Clean up services stuck in deploying state that exceed max age.
 
@@ -324,6 +320,7 @@ def cleanup_stuck_deploying_services(
 	    max_age_hr: Maximum age in hours before cleanup
 	    ecs: boto3 ECS client
 	    elbv2: boto3 ELBv2 client
+	    ssm_client: boto3 SSM client
 
 	Returns:
 	    Number of services that were cleaned up
@@ -419,6 +416,9 @@ def cleanup_stuck_deploying_services(
 				except Exception as e:
 					print(f"    ⚠️  Failed to delete target group: {e}")
 
+		# Clean up SSM parameters
+		cleanup_ssm_parameters(ssm_client, deployment_id)
+
 		# Delete ECS service
 		try:
 			ecs.delete_service(cluster=cluster, service=service_arn, force=True)
@@ -435,6 +435,7 @@ def cleanup_inactive_services(
 	listener_arn: str,
 	ecs: Any,
 	elbv2: Any,
+	ssm_client: Any,
 ) -> int:
 	"""Clean up services with runningCount=0 that are marked as draining.
 
@@ -443,6 +444,7 @@ def cleanup_inactive_services(
 	    listener_arn: ALB listener ARN for rule cleanup
 	    ecs: boto3 ECS client
 	    elbv2: boto3 ELBv2 client
+	    ssm_client: boto3 SSM client
 
 	Returns:
 	    Number of services that were cleaned up
@@ -514,6 +516,9 @@ def cleanup_inactive_services(
 				except Exception as e:
 					print(f"    ⚠️  Failed to delete target group: {e}")
 
+		# Clean up SSM parameters
+		cleanup_ssm_parameters(ssm_client, deployment_id)
+
 		# Delete ECS service
 		try:
 			ecs.delete_service(cluster=cluster, service=service_arn, force=True)
@@ -523,6 +528,59 @@ def cleanup_inactive_services(
 			print(f"    ❌ Failed to delete service: {e}")
 
 	return cleaned_count
+
+
+def cleanup_ssm_parameters(
+	ssm_client: Any,
+	deployment_id: str,
+) -> None:
+	"""Clean up SSM parameters for a deployment.
+
+	Deletes:
+	- /apps/{deployment_name}/{deployment_id}/state (deployment state)
+	- /apps/{deployment_name}/{deployment_id}/tasks/* (all task parameters)
+
+	Args:
+	    ssm_client: boto3 SSM client
+	    deployment_id: Deployment ID
+	"""
+	print(f"    🧹 Cleaning up SSM parameters for {deployment_id}...")
+
+	# Delete deployment state parameter
+	state_param = f"/apps/{DEPLOYMENT_NAME}/{deployment_id}/state"
+	try:
+		ssm_client.delete_parameter(Name=state_param)
+		print(f"      ✅ Deleted deployment state: {state_param}")
+	except ssm_client.exceptions.ParameterNotFound:
+		print(f"      ⏭️  Deployment state parameter not found: {state_param}")
+	except Exception as e:
+		print(f"      ⚠️  Failed to delete deployment state: {e}")
+
+	# List and delete all task parameters
+	tasks_prefix = f"/apps/{DEPLOYMENT_NAME}/{deployment_id}/tasks/"
+	try:
+		paginator = ssm_client.get_paginator("get_parameters_by_path")
+		task_params_deleted = 0
+
+		for page in paginator.paginate(Path=tasks_prefix, Recursive=False):
+			params = page.get("Parameters", [])
+			if params:
+				names = [p["Name"] for p in params]
+				# Delete in batches of 10 (SSM limit)
+				for i in range(0, len(names), 10):
+					batch = names[i : i + 10]
+					try:
+						ssm_client.delete_parameters(Names=batch)
+						task_params_deleted += len(batch)
+					except Exception as e:
+						print(f"      ⚠️  Failed to delete task parameters batch: {e}")
+
+		if task_params_deleted > 0:
+			print(f"      ✅ Deleted {task_params_deleted} task parameter(s)")
+		else:
+			print(f"      ⏭️  No task parameters found under {tasks_prefix}")
+	except Exception as e:
+		print(f"      ⚠️  Failed to list/delete task parameters: {e}")
 
 
 def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str, str]]:

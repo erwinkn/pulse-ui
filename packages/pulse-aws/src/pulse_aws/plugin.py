@@ -190,9 +190,8 @@ class AWSECSPlugin(ps.Plugin):
 				Overwrite=True,
 			)
 			self._last_written_state = draining
-			state_label = "draining" if draining else "healthy"
 			print(
-				f"✅ Task state updated: {task_param_name} = {state_label}",
+				f"✅ Task state updated: {task_param_name} = {value}",
 				flush=True,
 			)
 		except Exception as e:

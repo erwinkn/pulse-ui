@@ -939,7 +939,7 @@ class App:
 			return  # no active render for this user session
 
 		# We don't want to wait for this to resolve
-		create_task(render.call_api(f"/{self.api_prefix}/set-cookies", method="GET"))
+		create_task(render.call_api(f"{self.api_prefix}/set-cookies", method="GET"))
 		sess.scheduled_cookie_refresh = True
 
 

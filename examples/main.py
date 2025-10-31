@@ -46,6 +46,10 @@ class CounterState(ps.State):
 	def decrement(self):
 		self.count -= 1
 
+	@override
+	def on_dispose(self):
+		self.stop_ticking()
+
 	@ps.computed
 	def double_count(self) -> int:
 		"""A computed property that doubles the count."""

@@ -22,7 +22,7 @@ class CounterState(ps.State):
 		self._name: str = name
 
 	def increment(self):
-		self.count += 2
+		self.count += 1
 
 	async def increment_with_delay(self):
 		await asyncio.sleep(1)
@@ -509,7 +509,7 @@ def app_layout():
 	return ps.div(
 		ps.header(
 			ps.div(
-				ps.h1("Pulse Demo", className="text-2xl font-bold"),
+				ps.h1("Pulse Demo 2.0", className="text-2xl font-bold"),
 				ps.div(
 					ps.span(f"Shared Counter: {state.shared_count}", className="mr-4"),
 					ps.button(

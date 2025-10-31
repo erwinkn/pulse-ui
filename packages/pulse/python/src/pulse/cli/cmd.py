@@ -249,7 +249,15 @@ def generate(
 	app = app_ctx.app
 	console.log(f"📋 Found {len(app.routes.flat_tree)} routes")
 
-	addr = app.server_address or "localhost:8000"
+	# In CI or prod mode, server_address must be provided
+	if (ci or prod) and not app.server_address:
+		typer.echo(
+			"❌ server_address must be provided when generating in CI or production mode. "
+			+ "Set it in your App constructor or via the PULSE_SERVER_ADDRESS environment variable."
+		)
+		raise typer.Exit(1)
+
+	addr = app.server_address or "http://localhost:8000"
 	app.run_codegen(addr)
 
 	if len(app.routes.flat_tree) > 0:

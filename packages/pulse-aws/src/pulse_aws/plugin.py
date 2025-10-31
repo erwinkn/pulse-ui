@@ -76,8 +76,9 @@ class AWSECSPlugin(ps.Plugin):
 		# Discover task ID
 		try:
 			self._task_id = self._discover_task_id()
-			logger.info(
-				f"🆔 Task ID: {self._task_id}, Deployment: {self.deployment_name}/{self.deployment_id}"
+			print(
+				f"🆔 Task ID: {self._task_id}, Deployment: {self.deployment_name}/{self.deployment_id}",
+				flush=True,
 			)
 		except Exception as e:
 			logger.warning(f"⚠️  Failed to discover task ID: {e}")
@@ -158,8 +159,9 @@ class AWSECSPlugin(ps.Plugin):
 		ssm = boto3.client("ssm")
 		param_name = f"/apps/{self.deployment_name}/{self.deployment_id}/state"
 
-		logger.info(
-			f"🔍 Starting SSM state polling: {param_name} (every {self.drain_poll_seconds}s)"
+		print(
+			f"🔍 Starting SSM state polling: {param_name} (every {self.drain_poll_seconds}s)",
+			flush=True,
 		)
 
 		while True:
@@ -174,8 +176,9 @@ class AWSECSPlugin(ps.Plugin):
 						# First time seeing draining state
 						self._draining = True
 						self._drain_started_at = now
-						logger.info(
-							f"🚨 Deployment marked as DRAINING (grace period: {self.drain_grace_seconds}s)"
+						print(
+							f"🚨 Deployment marked as DRAINING (grace period: {self.drain_grace_seconds}s)",
+							flush=True,
 						)
 
 					# Check if grace period has elapsed
@@ -189,9 +192,10 @@ class AWSECSPlugin(ps.Plugin):
 						if active_sessions == 0:
 							if not self._shutdown_ready:
 								self._shutdown_ready = True
-								logger.info(
+								print(
 									f"✅ Grace period elapsed ({elapsed:.0f}s >= {self.drain_grace_seconds}s) "
-									+ "and no active sessions, ShutdownReady=1"
+									+ "and no active sessions, ShutdownReady=1",
+									flush=True,
 								)
 								self._emit_emf(1)
 						else:
@@ -199,8 +203,9 @@ class AWSECSPlugin(ps.Plugin):
 							if self._shutdown_ready:
 								# Reset if sessions reconnect
 								self._shutdown_ready = False
-								logger.info(
-									f"⚠️  Active sessions detected ({active_sessions}), resetting ShutdownReady"
+								print(
+									f"⚠️  Active sessions detected ({active_sessions}), resetting ShutdownReady",
+									flush=True,
 								)
 							self._emit_emf(0)
 					else:
@@ -209,7 +214,7 @@ class AWSECSPlugin(ps.Plugin):
 				else:
 					# Not draining, emit 0
 					if self._draining:
-						logger.info("✅ Deployment state changed back to active")
+						print("✅ Deployment state changed back to active", flush=True)
 						self._draining = False
 						self._drain_started_at = None
 						self._shutdown_ready = False

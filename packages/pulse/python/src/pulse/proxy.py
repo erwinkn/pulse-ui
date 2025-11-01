@@ -1,46 +1,34 @@
 """
-Proxy ASGI app for forwarding requests to React Router server in single-server mode.
+Proxy handler for forwarding requests to React Router server in single-server mode.
 """
 
 import logging
-from collections.abc import Iterable
-from typing import Callable, cast
+from typing import Callable
 
 import httpx
-from starlette.datastructures import Headers
-from starlette.types import ASGIApp, Receive, Scope, Send
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, Response
 
 logger = logging.getLogger(__name__)
 
 
-class PulseProxy:
+class ReactProxyHandler:
 	"""
-	ASGI app that proxies non-API requests to React Router server.
-
-	In single-server mode, Python FastAPI handles /_pulse/* routes and
-	proxies everything else to the React Router server running on an internal port.
+	Handles proxying HTTP requests to React Router server.
 	"""
 
-	def __init__(
-		self,
-		app: ASGIApp,
-		get_react_server_address: Callable[[], str | None],
-		api_prefix: str = "/_pulse",
-	):
+	get_react_server_address: Callable[[], str | None]
+	_client: httpx.AsyncClient | None
+
+	def __init__(self, get_react_server_address: Callable[[], str | None]):
 		"""
-		Initialize proxy ASGI app.
-
 		Args:
-		    app: The ASGI application to wrap (socketio.ASGIApp)
 		    get_react_server_address: Callable that returns the React Router server full URL (or None if not started)
-		    api_prefix: Prefix for API routes that should NOT be proxied (default: "/_pulse")
 		"""
-		self.app: ASGIApp = app
-		self.get_react_server_address: Callable[[], str | None] = (
-			get_react_server_address
-		)
-		self.api_prefix: str = api_prefix
-		self._client: httpx.AsyncClient | None = None
+		self.get_react_server_address = get_react_server_address
+		self._client = None
 
 	@property
 	def client(self) -> httpx.AsyncClient:
@@ -52,37 +40,7 @@ class PulseProxy:
 			)
 		return self._client
 
-	async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-		"""
-		ASGI application handler.
-
-		Routes starting with api_prefix or WebSocket connections go to FastAPI.
-		Everything else is proxied to React Router.
-		"""
-		if scope["type"] != "http":
-			# Pass through non-HTTP requests (WebSocket, lifespan, etc.)
-			await self.app(scope, receive, send)
-			return
-
-		path = scope["path"]
-
-		# Check if path starts with API prefix or is a WebSocket upgrade
-		if path.startswith(self.api_prefix):
-			# This is an API route, pass through to FastAPI
-			await self.app(scope, receive, send)
-			return
-
-		# Check if this is a WebSocket upgrade request (even if not prefixed)
-		headers = Headers(scope=scope)
-		if headers.get("upgrade", "").lower() == "websocket":
-			# WebSocket request, pass through to FastAPI
-			await self.app(scope, receive, send)
-			return
-
-		# Proxy to React Router server
-		await self._proxy_request(scope, receive, send)
-
-	async def _proxy_request(self, scope: Scope, receive: Receive, send: Send) -> None:
+	async def __call__(self, request: Request) -> Response:
 		"""
 		Forward HTTP request to React Router server and stream response back.
 		"""
@@ -90,103 +48,48 @@ class PulseProxy:
 		react_server_address = self.get_react_server_address()
 		if react_server_address is None:
 			# React server not started yet, return error
-			await send(
-				{
-					"type": "http.response.start",
-					"status": 503,
-					"headers": [(b"content-type", b"text/plain")],
-				}
+			return PlainTextResponse(
+				"Service Unavailable: React server not ready", status_code=503
 			)
-			await send(
-				{
-					"type": "http.response.body",
-					"body": b"Service Unavailable: React server not ready",
-				}
-			)
-			return
 
 		# Build target URL
-		path = scope["path"]
-		query_string = scope.get("query_string", b"").decode("utf-8")
-		# Ensure react_server_address doesn't end with /
-		base_url = react_server_address.rstrip("/")
-		target_path = f"{base_url}{path}"
-		if query_string:
-			target_path += f"?{query_string}"
+		url = react_server_address.rstrip("/") + request.url.path
+		if request.url.query:
+			url += "?" + request.url.query
 
-		# Extract headers
-		headers: dict[str, str] = {}
-		for name, value in cast(Iterable[tuple[bytes, bytes]], scope["headers"]):
-			name = name.decode("latin1")
-			value = value.decode("latin1")
-
-			# Skip host header (will be set by httpx)
-			if name.lower() == "host":
-				continue
-
-			# Collect headers (handle multiple values)
-			existing = headers.get(name)
-			if existing:
-				headers[name] = f"{existing},{value}"
-			else:
-				headers[name] = value
-
-		# Read request body
-		body_parts: list[bytes] = []
-		while True:
-			message = await receive()
-			if message["type"] == "http.request":
-				body_parts.append(message.get("body", b""))
-				if not message.get("more_body", False):
-					break
-		body = b"".join(body_parts)
+		# Extract headers, skip host header (will be set by httpx)
+		headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
 
 		try:
-			# Forward request to React Router
-			method = scope["method"]
-			response = await self.client.request(
-				method=method,
-				url=target_path,
+			# Build request
+			req = self.client.build_request(
+				method=request.method,
+				url=url,
 				headers=headers,
-				content=body,
+				content=request.stream(),
 			)
 
-			# Send response status
-			await send(
-				{
-					"type": "http.response.start",
-					"status": response.status_code,
-					"headers": [
-						(name.encode("latin1"), value.encode("latin1"))
-						for name, value in response.headers.items()
-					],
-				}
-			)
+			# Send request with streaming
+			r = await self.client.send(req, stream=True)
 
-			# Stream response body
-			await send(
-				{
-					"type": "http.response.body",
-					"body": response.content,
-				}
+			# Filter out headers that shouldn't be present in streaming responses
+			response_headers = {
+				k: v
+				for k, v in r.headers.items()
+				# if k.lower() not in ("content-length", "transfer-encoding")
+			}
+
+			return StreamingResponse(
+				r.aiter_raw(),
+				background=BackgroundTask(r.aclose),
+				status_code=r.status_code,
+				headers=response_headers,
 			)
 
 		except httpx.RequestError as e:
 			logger.error(f"Proxy request failed: {e}")
-
-			# Send error response
-			await send(
-				{
-					"type": "http.response.start",
-					"status": 502,
-					"headers": [(b"content-type", b"text/plain")],
-				}
-			)
-			await send(
-				{
-					"type": "http.response.body",
-					"body": b"Bad Gateway: Could not reach React Router server",
-				}
+			return PlainTextResponse(
+				"Bad Gateway: Could not reach React Router server", status_code=502
 			)
 
 	async def close(self):

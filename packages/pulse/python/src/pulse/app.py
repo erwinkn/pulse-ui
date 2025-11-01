@@ -71,7 +71,7 @@ from pulse.middleware import (
 	Redirect,
 )
 from pulse.plugin import Plugin
-from pulse.proxy import PulseProxy
+from pulse.proxy import ReactProxyHandler
 from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
@@ -335,11 +335,6 @@ class App:
 		self.setup(server_address)
 		self.status = AppStatus.running
 
-		# In single-server mode, the Pulse server acts as reverse proxy to the React server
-		if self.mode == "single-server":
-			return PulseProxy(
-				self.asgi, lambda: envvars.react_server_address, self.api_prefix
-			)
 		return self.asgi
 
 	def run(
@@ -379,28 +374,6 @@ class App:
 				**cors_config,
 			)
 
-		# Debug middleware to log CORS-related request details
-		# @self.fastapi.middleware("http")
-		# async def cors_debug_middleware(
-		# 	request: Request, call_next: Callable[[Request], Awaitable[Response]]
-		# ):
-		# 	origin = request.headers.get("origin")
-		# 	method = request.method
-		# 	path = request.url.path
-		# 	print(
-		# 		f"[CORS Debug] {method} {path} | Origin: {origin} | "
-		# 		+ f"Mode: {self.mode} | Server: {self.server_address}"
-		# 	)
-		# 	response = await call_next(request)
-		# 	allow_origin = response.headers.get("access-control-allow-origin")
-		# 	if allow_origin:
-		# 		print(f"[CORS Debug] Response allows origin: {allow_origin}")
-		# 	elif origin:
-		# 		logger.warning(
-		# 			f"[CORS Debug] Origin {origin} present but no Access-Control-Allow-Origin header set"
-		# 		)
-		# 	return response
-
 		# Mount PulseContext for all FastAPI routes (no route info). Other API
 		# routes / middleware should be added at the module-level, which means
 		# this middleware will wrap all of them.
@@ -419,8 +392,6 @@ class App:
 			)
 			render_id = request.headers.get("x-pulse-render-id")
 			render = self._get_render_for_session(render_id, session)
-			if render:
-				print(f"Reusing render session {render_id}")
 			with PulseContext.update(session=session, render=render):
 				res: Response = await call_next(request)
 			session.handle_response(res)
@@ -567,6 +538,26 @@ class App:
 		# Call on_setup hooks after FastAPI routes/middleware are in place
 		for plugin in self.plugins:
 			plugin.on_setup(self)
+
+		# In single-server mode, add catch-all route to proxy unmatched requests to React server
+		# This route must be registered last so FastAPI tries all specific routes first
+		# FastAPI will match specific routes before this catch-all, but we add an explicit check
+		# as a safety measure to ensure API routes are never proxied
+		if self.mode == "single-server":
+			proxy_handler = ReactProxyHandler(lambda: envvars.react_server_address)
+
+			@self.fastapi.api_route(
+				"/{path:path}",
+				methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+				include_in_schema=False,
+			)
+			async def proxy_catch_all(request: Request, path: str):  # pyright: ignore[reportUnusedFunction]
+				# Skip WebSocket upgrades (handled by Socket.IO)
+				if request.headers.get("upgrade", "").lower() == "websocket":
+					raise HTTPException(status_code=404, detail="Not found")
+
+				# Proxy all unmatched HTTP requests to React Router
+				return await proxy_handler(request)
 
 		@self.sio.event
 		async def connect(  # pyright: ignore[reportUnusedFunction]
@@ -902,7 +893,6 @@ class App:
 			self._cancel_render_cleanup(rid)
 
 		# Close all render sessions
-		print("Closing app")
 		for rid in list(self.render_sessions.keys()):
 			self.close_render(rid)
 

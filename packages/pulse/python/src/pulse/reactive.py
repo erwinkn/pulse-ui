@@ -458,6 +458,11 @@ class AsyncEffect(Effect):
 		return f"effect:{base}"
 
 	@override
+	def push_change(self):
+		self.cancel()
+		super().push_change()
+
+	@override
 	def _copy_kwargs(self):
 		kwargs = super()._copy_kwargs()
 		kwargs.pop("immediate", None)

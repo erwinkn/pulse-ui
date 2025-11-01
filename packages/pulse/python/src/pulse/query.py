@@ -44,11 +44,20 @@ class QueryAsyncEffect(AsyncEffect):
 		self._keep_previous_data = keep_previous_data
 
 	@override
-	def push_change(self):
+	def push_change(self, keep_previous_data: bool | None = None):
 		# Synchronously clear data before scheduling the effect to run.
 		# This ensures renders see the loading state immediately, not stale data.
-		self._result._set_loading(clear_data=not self._keep_previous_data)  # pyright: ignore[reportPrivateUsage]
+		if keep_previous_data is None:
+			keep_previous_data = self._keep_previous_data
+		self._result.set_loading(clear_data=not keep_previous_data)
 		super().push_change()
+
+	def refetch(self, keep_previous_data: bool | None = None):
+		if keep_previous_data is None:
+			keep_previous_data = self._keep_previous_data
+		self.cancel()
+		self._result.set_loading(clear_data=not keep_previous_data)
+		self.run()
 
 
 class QueryResult(Generic[T]):
@@ -63,7 +72,7 @@ class QueryResult(Generic[T]):
 		# Tracks whether at least one load cycle completed (success or error)
 		self._has_loaded: Signal[bool] = Signal(False, name="query.has_loaded")
 		# Effect driving this query (attached by QueryProperty)
-		self._effect: AsyncEffect | None = None
+		self._effect: QueryAsyncEffect | None = None
 
 	@property
 	def is_loading(self) -> bool:
@@ -89,14 +98,13 @@ class QueryResult(Generic[T]):
 	def has_loaded(self) -> bool:
 		return self._has_loaded.read()
 
-	def attach_effect(self, effect: AsyncEffect) -> None:
+	def attach_effect(self, effect: QueryAsyncEffect) -> None:
 		self._effect = effect
 
-	def refetch(self) -> None:
+	def refetch(self, keep_previous_data: bool | None = None) -> None:
 		if self._effect is None:
 			return
-		self._effect.cancel()
-		self._effect.run()
+		self._effect.refetch(keep_previous_data=keep_previous_data)
 
 	def dispose(self) -> None:
 		if self._effect is None:
@@ -104,16 +112,16 @@ class QueryResult(Generic[T]):
 		self._effect.dispose()
 
 	# Internal setters used by the query machinery
-	def _set_loading(self, *, clear_data: bool = False):
+	def set_loading(self, *, clear_data: bool = False):
 		# print("[QueryResult] set loading=True")
 		self._is_loading.write(True)
 		self._is_error.write(False)
 		self._error.write(None)
 		if clear_data:
 			# If there was an explicit initial value, reset to it; otherwise clear
-			self._data.write(self._initial_data)
+			self._data.write(None)
 
-	def _set_success(self, data: T):
+	def set_success(self, data: T):
 		# print(f"[QueryResult] set success data={data!r}")
 		self._data.write(data)
 		self._is_loading.write(False)
@@ -121,7 +129,7 @@ class QueryResult(Generic[T]):
 		self._error.write(None)
 		self._has_loaded.write(True)
 
-	def _set_error(self, err: Exception):
+	def set_error(self, err: Exception):
 		# print(f"[QueryResult] set error err={err!r}")
 		self._error.write(err)
 		self._is_loading.write(False)
@@ -139,16 +147,6 @@ class QueryResult(Generic[T]):
 			return
 		self._initial_data = data
 		self._data.write(data)
-
-	# Public helpers mirroring internal transitions
-	def set_loading(self, *, clear_data: bool = False) -> None:
-		self._set_loading(clear_data=clear_data)
-
-	def set_success(self, data: T) -> None:
-		self._set_success(data)
-
-	def set_error(self, err: Exception) -> None:
-		self._set_error(err)
 
 
 OnSuccessFn = Callable[[TState], Any] | Callable[[TState, T], Any]
@@ -299,9 +297,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 				if inflight_key == key:
 					return None
 				inflight_key = key
-
-			# Set loading immediately; optionally clear previous data
-			result.set_loading(clear_data=not self._keep_previous_data)
 
 			try:
 				data = await bound_fetch()

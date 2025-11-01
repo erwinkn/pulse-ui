@@ -336,7 +336,7 @@ async def test_state_query_with_initial_value_narrows_and_preserves():
 	assert q.is_loading is False
 	assert q.data == {"id": 1}
 
-	# Disable keep_previous_data -> during refetch, it should reset to initial, not None
+	# Disable keep_previous_data -> during refetch, it should reset to None, not initial
 	class S2(ps.State):
 		uid: int = 1
 
@@ -355,12 +355,12 @@ async def test_state_query_with_initial_value_narrows_and_preserves():
 	await run_query()
 	assert q2.data == {"id": 1}
 
-	# change key -> refetch; while loading with keep_previous_data=False, it should reset to initial
+	# change key -> refetch; while loading with keep_previous_data=False, it should reset to None
 	s2.uid = 2
 	flush_effects()
 	await asyncio.sleep(0)
 	assert q2.is_loading is True
-	assert q2.data == {"id": -1}
+	assert q2.data is None
 	await asyncio.sleep(0)
 	await asyncio.sleep(0)
 	assert q2.is_loading is False
@@ -443,7 +443,7 @@ async def test_state_query_initial_data_decorator_uses_value_after_init_and_upda
 
 
 @pytest.mark.asyncio
-async def test_state_query_initial_data_respected_on_refetch_when_keep_previous_false():
+async def test_state_query_clears_to_none_on_refetch_when_keep_previous_false():
 	class S(ps.State):
 		uid: int = 1
 
@@ -465,12 +465,12 @@ async def test_state_query_initial_data_respected_on_refetch_when_keep_previous_
 	assert q.data == {"id": -1}
 	await run_query()
 	assert q.data == {"id": 1}
-	# Change key -> while loading, data should reset to initial_data
+	# Change key -> while loading, data should reset to None (not initial_data)
 	s.uid = 2
 	flush_effects()
 	await asyncio.sleep(0)
 	assert q.is_loading is True
-	assert q.data == {"id": -1}
+	assert q.data is None
 	await asyncio.sleep(0)
 	await asyncio.sleep(0)
 	assert q.is_loading is False

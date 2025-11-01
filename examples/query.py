@@ -12,6 +12,7 @@ class UserApi(ps.State):
 	# Keyed query with keep_previous_data default True
 	@ps.query(keep_previous_data=True)
 	async def user(self):
+		print("Running user query")
 		await asyncio.sleep(0.3)
 		# Simulate API; id 13 fails to demonstrate on_error
 		if self.user_id == 13:
@@ -81,7 +82,7 @@ def QueryExample():
 		ps.div(
 			ps.h2("Keyed user()", className="text-xl font-semibold mb-2"),
 			ps.p(
-				"Loading..." if s.user.is_loading else f"Data: {s.user.data}",
+				"Loading..." if s.user.data is None else f"Data: {s.user.data}",
 				className="mb-2",
 			),
 			ps.p(
@@ -90,7 +91,9 @@ def QueryExample():
 			),
 			ps.div(
 				ps.button(
-					"Refetch", onClick=s.user.refetch, className="btn-primary mr-2"
+					"Refetch",
+					onClick=lambda: s.user.refetch(keep_previous_data=False),
+					className="btn-primary mr-2",
 				),
 				ps.button(
 					"Optimistic rename",

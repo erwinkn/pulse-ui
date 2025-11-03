@@ -42,6 +42,7 @@
 		"@mantine/dates": "^8",
 		"@mantine/form": "^8",
 		"@mantine/hooks": "^8",
+		"@mantine/notifications": "^8",
 		"dayjs": "^1",
 		"recharts": "^3"
 	},

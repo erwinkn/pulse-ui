@@ -7,7 +7,7 @@ import { $ } from "bun";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packagesRoot = join(__dirname, "..", "packages");
 
-const BUILD_ORDER = ["pulse-ui-client", "pulse-mantine/js"];
+const BUILD_ORDER = ["pulse/js", "pulse-mantine/js"];
 
 async function readPackageJson(packagePath: string) {
 	const data = await readFile(join(packagesRoot, packagePath, "package.json"), "utf8");

@@ -7,3 +7,5 @@
 
 .pulse.lock
 pulse/
+.pulse/
+app/pulse/

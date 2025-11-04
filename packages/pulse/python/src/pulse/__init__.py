@@ -15,6 +15,9 @@
 # (2) All imports should target the module in which a symbol is actually defined, rather than a
 # container module where it is imported.
 
+# External re-exports
+from starlette.datastructures import UploadFile as UploadFile
+
 # Core app/session
 from pulse.app import App as App
 from pulse.app import PulseMode as PulseMode
@@ -88,9 +91,6 @@ from pulse.form import (
 )
 from pulse.form import (
 	ManualForm as ManualForm,
-)
-from pulse.form import (
-	UploadFile as UploadFile,
 )
 
 # Helpers

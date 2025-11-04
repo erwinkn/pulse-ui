@@ -27,9 +27,6 @@ export function Notifications({ channelId, ...props }: PulseNotificationsProps) 
 	const { store = defaultStore, ...rest } = props;
 	// biome-ignore lint/correctness/useHookAtTopLevel: channelId is not expected to change
 	const channel = channelId ? usePulseChannel(channelId) : undefined;
-	store.subscribe((state) => {
-		state.queue;
-	});
 	useEffect(() => {
 		if (!channel) return;
 

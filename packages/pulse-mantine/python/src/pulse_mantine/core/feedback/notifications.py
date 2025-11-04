@@ -9,7 +9,8 @@ import pulse as ps
 
 from ..box import BoxProps
 from ..styles import StyleFn
-from ..theme import MantineColor, MantineRadius
+from ..theme import MantineRadius
+from ..types import MantineColor
 
 ps.css("@mantine/notifications/styles.css")
 
@@ -203,7 +204,7 @@ class NotificationsStore(ps.State):
 
 	def update(self, kwargs: NotificationData) -> str:
 		ident = kwargs["id"]
-		payload = cast(NotificationData, kwargs)
+		payload = kwargs
 		existing = self.registry.get(ident)
 		merged = payload if not existing else existing | payload
 		self.registry[ident] = merged
@@ -215,15 +216,9 @@ class NotificationsStore(ps.State):
 		return id
 
 	def clean(self) -> None:
-		self.registry.clear()
-		self.visible_ids.clear()
-		self.queued_ids.clear()
 		self._channel.emit("clean")
 
 	def cleanQueue(self) -> None:
-		for identifier in self.queued_ids:
-			self.registry.pop(identifier, None)
-		self.queued_ids.clear()
 		self._channel.emit("cleanQueue")
 
 	def getVisible(self) -> list[NotificationData]:
@@ -251,14 +246,14 @@ class NotificationsStore(ps.State):
 			result = update(current)
 		else:
 			result = update
-		# result = [ensure_id(item) for item in result]
-		self.registry = {}
+		new_notifications: list[NotificationData] = []
 		for item in result:
 			ident, item = ensure_id(item)
 			self.registry[ident] = item
+			new_notifications.append(item)
 		self._channel.emit(
 			"updateState",
-			{"notifications": [serialize(x) for x in self.registry.values()]},
+			{"notifications": [serialize(x) for x in new_notifications]},
 		)
 
 	def _on_state_sync(self, payload: Any) -> None:

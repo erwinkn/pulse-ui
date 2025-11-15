@@ -12,7 +12,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
 import typer
 from rich.console import Console
@@ -110,14 +110,14 @@ def run(
 		port = find_available_port(port)
 
 	console = Console()
-	console.log(f"📁 Loading app from: {app_file}")
+	console.print(f"📁 Loading app from: {app_file}")
 	app_ctx = load_app_from_target(app_file)
 	_apply_app_context_to_env(app_ctx)
 	app_instance = app_ctx.app
 
 	is_single_server = app_instance.mode == "single-server"
 	if is_single_server:
-		console.log("🔧 [cyan]Single-server mode[/cyan]")
+		console.print("🔧 [cyan]Single-server mode[/cyan]")
 
 	# In single-server + server-only mode, require explicit React server address
 	if is_single_server and server_only:
@@ -168,41 +168,76 @@ def run(
 	web_args = extra_flags if web_only else []
 
 	commands: list[CommandSpec] = []
+
+	# Track readiness for announcement
+	server_ready = {"server": False, "web": False}
+	announced = False
+
+	def mark_web_ready() -> None:
+		server_ready["web"] = True
+		check_and_announce()
+
+	def mark_server_ready() -> None:
+		server_ready["server"] = True
+		check_and_announce()
+
+	def check_and_announce() -> None:
+		"""Announce when all required servers are ready."""
+		nonlocal announced
+		if announced:
+			return
+
+		needs_server = not web_only
+		needs_web = not server_only
+
+		if needs_server and not server_ready["server"]:
+			return
+		if needs_web and not server_ready["web"]:
+			return
+
+		# All required servers are ready, show announcement
+		announced = True
+		protocol = "http" if address in ("127.0.0.1", "localhost") else "https"
+		server_url = f"{protocol}://{address}:{port}"
+		console.print("")
+		console.print(
+			f"✨ [bold green]Pulse running at:[/bold green] [bold cyan][link={server_url}]{server_url}[/link][/bold cyan]"
+		)
+		console.print(f"   [dim]API: {server_url}/_pulse/...[/dim]")
+		console.print("")
+
 	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
 	# before building the uvicorn command, which needs that env var
 	if not server_only:
-		if is_single_server:
-			web_port = find_available_port(5173)
-			commands.append(
-				build_web_command(
-					web_root=web_root,
-					extra_args=web_args,
-					port=web_port,
-					mode=app_instance.env,
-				)
-			)
-			# Set env var so app can read the React server address
-			react_server_address = f"http://localhost:{web_port}"
-			os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = react_server_address
-		else:
-			commands.append(build_web_command(web_root=web_root, extra_args=web_args))
+		web_port = find_available_port(5173)
+		web_cmd = build_web_command(
+			web_root=web_root,
+			extra_args=web_args,
+			port=web_port,
+			mode=app_instance.env,
+			ready_pattern=r"localhost:\d+",
+			on_ready=mark_web_ready,
+		)
+		commands.append(web_cmd)
+		# Set env var so app can read the React server address (only used in single-server mode)
+		env.react_server_address = f"http://localhost:{web_port}"
 
 	if not web_only:
-		commands.append(
-			build_uvicorn_command(
-				app_ctx=app_ctx,
-				address=address,
-				port=port,
-				reload_enabled=reload,
-				extra_args=server_args,
-				dev_secret=dev_secret,
-				server_only=server_only,
-				console=console,
-				web_root=web_root,
-				announce_url=is_single_server,
-				verbose=verbose,
-			)
+		server_cmd = build_uvicorn_command(
+			app_ctx=app_ctx,
+			address=address,
+			port=port,
+			reload_enabled=reload,
+			extra_args=server_args,
+			dev_secret=dev_secret,
+			server_only=server_only,
+			console=console,
+			web_root=web_root,
+			verbose=verbose,
+			ready_pattern=r"Application startup complete",
+			on_ready=mark_server_ready,
 		)
+		commands.append(server_cmd)
 
 	# Only add tags in dev mode to avoid breaking structured output (e.g., CloudWatch EMF metrics)
 	tag_colors = (
@@ -340,8 +375,9 @@ def build_uvicorn_command(
 	server_only: bool,
 	console: Console,
 	web_root: Path,
-	announce_url: bool,
 	verbose: bool = False,
+	ready_pattern: str | None = None,
+	on_ready: Callable[[], None] | None = None,
 ) -> CommandSpec:
 	app_import = f"{app_ctx.module_name}:{app_ctx.app_var}.asgi_factory"
 	args: list[str] = [
@@ -401,22 +437,13 @@ def build_uvicorn_command(
 		log_config_file.write_text(json.dumps(log_config))
 		args.extend(["--log-config", str(log_config_file)])
 
-	def _announce() -> None:
-		protocol = "http" if address in ("127.0.0.1", "localhost") else "https"
-		server_url = f"{protocol}://{address}:{port}"
-		console.log("")
-		console.log(
-			f"✨ [bold green]Pulse running at:[/bold green] [bold cyan][link={server_url}]{server_url}[/link][/bold cyan]"
-		)
-		console.log(f"   [dim]API: {server_url}/_pulse/...[/dim]")
-		console.log("")
-
 	return CommandSpec(
 		name="server",
 		args=args,
 		cwd=cwd,
 		env=command_env,
-		on_spawn=_announce if announce_url else None,
+		ready_pattern=ready_pattern,
+		on_ready=on_ready,
 	)
 
 
@@ -426,6 +453,8 @@ def build_web_command(
 	extra_args: Sequence[str],
 	port: int | None = None,
 	mode: PulseEnv = "dev",
+	ready_pattern: str | None = None,
+	on_ready: Callable[[], None] | None = None,
 ) -> CommandSpec:
 	command_env = os.environ.copy()
 	if mode == "prod":
@@ -453,7 +482,14 @@ def build_web_command(
 		}
 	)
 
-	return CommandSpec(name="web", args=args, cwd=web_root, env=command_env)
+	return CommandSpec(
+		name="web",
+		args=args,
+		cwd=web_root,
+		env=command_env,
+		ready_pattern=ready_pattern,
+		on_ready=on_ready,
+	)
 
 
 def _apply_app_context_to_env(app_ctx: AppLoadResult) -> None:

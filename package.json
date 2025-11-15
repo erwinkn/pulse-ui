@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "bun ./scripts/build-js-packages.ts && bun upgrade"
+    "build": "bun ./scripts/build-js-packages.ts"
   },
   "workspaces": [
     "packages/pulse/js/",

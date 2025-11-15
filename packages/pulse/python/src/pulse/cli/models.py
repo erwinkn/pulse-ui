@@ -31,3 +31,5 @@ class CommandSpec:
 	cwd: Path
 	env: dict[str, str]
 	on_spawn: Callable[[], None] | None = None
+	ready_pattern: str | None = None  # Regex pattern to detect when command is ready
+	on_ready: Callable[[], None] | None = None  # Callback when ready_pattern matches

@@ -3,24 +3,30 @@ from __future__ import annotations
 import contextlib
 import os
 import pty
+import re
 import select
 import signal
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from io import TextIOBase
-from typing import cast
+from typing import TypeVar, cast
 
 from rich.console import Console
 
 from pulse.cli.helpers import os_family
 from pulse.cli.models import CommandSpec
 
+_K = TypeVar("_K", int, str)
+
 ANSI_CODES = {
 	"cyan": "\033[36m",
 	"orange1": "\033[38;5;208m",
 	"default": "\033[90m",
 }
+
+# Regex to strip ANSI escape codes
+ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
 def execute_commands(
@@ -45,6 +51,34 @@ def execute_commands(
 	return _run_with_pty(commands, console=console, colors=color_lookup)
 
 
+def _call_on_spawn(spec: CommandSpec) -> None:
+	"""Call the on_spawn callback if it exists."""
+	if spec.on_spawn:
+		try:
+			spec.on_spawn()
+		except Exception:
+			pass
+
+
+def _check_on_ready(
+	spec: CommandSpec,
+	line: str,
+	ready_flags: dict[_K, bool],
+	key: _K,
+) -> None:
+	"""Check if line matches ready_pattern and call on_ready if needed."""
+	if spec.ready_pattern and not ready_flags[key]:
+		# Strip ANSI codes before matching
+		clean_line = ANSI_ESCAPE.sub("", line)
+		if re.search(spec.ready_pattern, clean_line):
+			ready_flags[key] = True
+			if spec.on_ready:
+				try:
+					spec.on_ready()
+				except Exception:
+					pass
+
+
 def _run_with_pty(
 	commands: Sequence[CommandSpec],
 	*,
@@ -52,8 +86,9 @@ def _run_with_pty(
 	colors: Mapping[str, str],
 ) -> int:
 	procs: list[tuple[str, int, int]] = []
-	fd_to_name: dict[int, str] = {}
+	fd_to_spec: dict[int, CommandSpec] = {}
 	buffers: dict[int, bytearray] = {}
+	ready_flags: dict[int, bool] = {}
 
 	try:
 		for spec in commands:
@@ -66,13 +101,10 @@ def _run_with_pty(
 				fcntl = __import__("fcntl")
 				fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
 				procs.append((spec.name, pid, fd))
-				fd_to_name[fd] = spec.name
+				fd_to_spec[fd] = spec
 				buffers[fd] = bytearray()
-				if spec.on_spawn:
-					try:
-						spec.on_spawn()
-					except Exception:
-						pass
+				ready_flags[fd] = False
+				_call_on_spawn(spec)
 
 		while procs:
 			for tag, pid, fd in list(procs):
@@ -105,7 +137,9 @@ def _run_with_pty(
 						buffers[fd] = remainder
 						decoded = line.decode(errors="replace")
 						if decoded:
-							_write_tagged_line(fd_to_name[fd], decoded, colors)
+							spec = fd_to_spec[fd]
+							_write_tagged_line(spec.name, decoded, colors)
+							_check_on_ready(spec, decoded, ready_flags, fd)
 				except OSError:
 					continue
 
@@ -144,9 +178,10 @@ def _run_without_pty(
 ) -> int:
 	from selectors import EVENT_READ, DefaultSelector
 
-	procs: list[tuple[str, subprocess.Popen[str]]] = []
+	procs: list[tuple[str, subprocess.Popen[str], CommandSpec]] = []
 	completed_codes: list[int] = []
 	selector = DefaultSelector()
+	ready_flags: dict[str, bool] = {}
 
 	try:
 		for spec in commands:
@@ -160,14 +195,11 @@ def _run_without_pty(
 				bufsize=1,
 				universal_newlines=True,
 			)
-			if spec.on_spawn:
-				try:
-					spec.on_spawn()
-				except Exception:
-					pass
+			_call_on_spawn(spec)
 			if proc.stdout:
 				selector.register(proc.stdout, EVENT_READ, data=spec.name)
-			procs.append((spec.name, proc))
+			ready_flags[spec.name] = False
+			procs.append((spec.name, proc, spec))
 
 		while procs:
 			events = selector.select(timeout=0.1)
@@ -180,13 +212,16 @@ def _run_without_pty(
 				line = cast(TextIOBase, stream).readline()
 				if line:
 					_write_tagged_line(name, line.rstrip("\n"), colors)
+					spec = next((s for n, _, s in procs if n == name), None)
+					if spec:
+						_check_on_ready(spec, line, ready_flags, name)
 				else:
 					selector.unregister(stream)
-			remaining: list[tuple[str, subprocess.Popen[str]]] = []
-			for name, proc in procs:
+			remaining: list[tuple[str, subprocess.Popen[str], CommandSpec]] = []
+			for name, proc, spec in procs:
 				code = proc.poll()
 				if code is None:
-					remaining.append((name, proc))
+					remaining.append((name, proc, spec))
 				else:
 					completed_codes.append(code)
 					if proc.stdout:
@@ -195,12 +230,12 @@ def _run_without_pty(
 							proc.stdout.close()
 			procs = remaining
 	except KeyboardInterrupt:
-		for _name, proc in procs:
+		for _name, proc, _spec in procs:
 			with contextlib.suppress(Exception):
 				proc.terminate()
 		return 130
 	finally:
-		for _name, proc in procs:
+		for _name, proc, _spec in procs:
 			with contextlib.suppress(Exception):
 				proc.terminate()
 			with contextlib.suppress(Exception):
@@ -210,11 +245,21 @@ def _run_without_pty(
 				selector.unregister(key.fileobj)
 		selector.close()
 
-	exit_codes = completed_codes + [proc.returncode or 0 for _name, proc in procs]
+	exit_codes = completed_codes + [
+		proc.returncode or 0 for _name, proc, _spec in procs
+	]
 	return max(exit_codes) if exit_codes else 0
 
 
 def _write_tagged_line(name: str, message: str, colors: Mapping[str, str]) -> None:
+	# Filter out unwanted web server messages
+	clean_message = ANSI_ESCAPE.sub("", message)
+	if (
+		"Network: use --host to expose" in clean_message
+		or "press h + enter to show help" in clean_message
+	):
+		return
+
 	# Only add tags if colors dict is not empty (i.e., tagging is enabled)
 	if colors:
 		color = ANSI_CODES.get(colors.get(name, ""), ANSI_CODES["default"])

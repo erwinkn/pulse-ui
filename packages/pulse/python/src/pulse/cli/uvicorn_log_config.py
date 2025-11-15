@@ -54,7 +54,7 @@ def get_log_config(default_level: str = "info") -> dict[str, Any]:
 		"formatters": {
 			"default": {
 				"()": "uvicorn.logging.DefaultFormatter",
-				"fmt": "%(levelprefix)s %(message)s",
+				"fmt": "%(message)s",
 				"use_colors": None,
 			},
 			"access": {

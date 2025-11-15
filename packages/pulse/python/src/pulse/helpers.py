@@ -418,9 +418,29 @@ async def maybe_await(value: T | Awaitable[T]) -> T:
 def find_available_port(start_port: int = 8000, max_attempts: int = 100) -> int:
 	"""Find an available port starting from start_port."""
 	for port in range(start_port, start_port + max_attempts):
+		# First check if something is actively listening on the port
+		# by trying to connect to it (check both IPv4 and IPv6)
+		port_in_use = False
+		for family, addr in [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")]:
+			try:
+				with socket.socket(family, socket.SOCK_STREAM) as test_socket:
+					test_socket.settimeout(0.1)
+					result = test_socket.connect_ex((addr, port))
+					# If connection succeeds (result == 0), something is listening
+					if result == 0:
+						port_in_use = True
+						break
+			except OSError:
+				# Connection failed, continue checking
+				pass
+
+		if port_in_use:
+			continue
+
+		# Port appears free, try to bind to it
+		# Allow reuse of addresses in TIME_WAIT state (matches uvicorn behavior)
 		try:
 			with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-				# Allow reuse of addresses in TIME_WAIT state (matches uvicorn behavior)
 				s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 				s.bind(("localhost", port))
 				return port

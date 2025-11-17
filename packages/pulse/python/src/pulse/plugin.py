@@ -16,9 +16,6 @@ class Plugin:
 	def routes(self) -> list[Route | Layout]:
 		return []
 
-	def dev_routes(self) -> list[Route | Layout]:
-		return []
-
 	def middleware(self) -> list[PulseMiddleware]:
 		return []
 

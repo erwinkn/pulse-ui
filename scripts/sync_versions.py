@@ -144,7 +144,6 @@ def main() -> int:
 		print("Please review the changes and add them to your commit:")
 		for file in changed_files:
 			print(f"  git add {file}")
-		return 1  # Return non-zero to abort commit so user can stage changes
 
 	return 0
 

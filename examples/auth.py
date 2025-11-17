@@ -1,5 +1,5 @@
 """
-Example: Cookie-based auth with middleware and FastAPI endpoints.
+Example: Cookie-based auth with FastAPI endpoints.
 
 Dev assumptions:
 - Node and Python run on the same host (e.g., localhost) even if ports differ.
@@ -7,7 +7,7 @@ Dev assumptions:
 - In production, put both behind the same origin or use Domain=.example.com.
 
 This example shows:
-- A middleware that protects "/secret" and populates session context
+- A /secret route that redirects to /login if the user is not authenticated
 - A /login page (any email/password) posting to Python endpoints to set a cookie
 - A sign-out button that clears the cookie
 """
@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Awaitable, Callable
+from typing import Any, override
 from urllib.parse import urlparse
 
 import pulse as ps
@@ -23,65 +25,49 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
 
-class AuthMiddleware(ps.PulseMiddleware):
-	def prerender(self, *, path, route_info, request, session, next):
-		try:
-			print("[MW prerender ctx]", {k: v for k, v in session.items()})
-		except Exception:
-			print("[MW prerender ctx] <unavailable>")
-
-		# Protect /secret at prerender time
-		if path.startswith("/secret") and not session.get("user_email"):
-			print("[Prerender] Redirecting to login")
-			return ps.Redirect("/login")
-
-		return next()
-
-	def connect(self, *, request, session, next):
-		# Connection context uses the same Pulse session (rebuilt from cookie for cookie-backed store)
-		try:
-			print("[MW connect ctx]", {k: v for k, v in session.items()})
-		except Exception:
-			print("[MW connect ctx] <unavailable>")
-		return next()
-
-	def message(self, *, session, data, next):
-		t = data.get("type")  # type: ignore[assignment]
-		if t in {"mount", "navigate"}:
-			path = data.get("path")  # type: ignore[assignment]
-			if (
-				not session.get("user_email")
-				and isinstance(path, str)
-				and path.startswith("/secret")
-			):
-				return ps.Deny()
-		try:
-			print("[MW message ctx]", {k: v for k, v in session.items()})
-		except Exception:
-			print("[MW message ctx] <unavailable>")
-		return next()
-
-
 # Simple logging/timing middleware
 class LoggingMiddleware(ps.PulseMiddleware):
-	def prerender(self, *, path, route_info, request, session, next):
+	@override
+	async def prerender_route(
+		self,
+		*,
+		path: str,
+		route_info: ps.RouteInfo,
+		request: ps.PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[ps.RoutePrerenderResponse]],
+	) -> ps.RoutePrerenderResponse:
 		start = time.perf_counter()
-		res = next()
+		res = await next()
 		duration_ms = (time.perf_counter() - start) * 1000
 		print(f"[MW prerender] path={path} took={duration_ms:.1f}ms")
 		return res
 
-	def connect(self, *, request, session, next):
+	@override
+	async def connect(
+		self,
+		*,
+		request: ps.PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[ps.ConnectResponse]],
+	) -> ps.ConnectResponse:
 		ua = request.headers.get("user-agent")
 		ip = request.client[0] if request.client else None
 		print(f"[MW connect] ip={ip} ua={(ua or '')[:60]}")
-		return next()
+		return await next()
 
-	def message(self, *, session, data, next):
+	@override
+	async def message(
+		self,
+		*,
+		data: ps.ClientMessage,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[ps.Ok[None]]],
+	) -> ps.Ok[None] | ps.Deny:
 		t = data.get("type") if isinstance(data, dict) else None
 		if t:
 			print(f"[MW message] type={t}")
-		return next()
+		return await next()
 
 
 # ---------------------- UI ----------------------
@@ -143,6 +129,9 @@ def login():
 @ps.component
 def secret():
 	sess = ps.session()
+	if not sess.get("user_email"):
+		ps.redirect("/login")
+
 	nickname = sess.get("nickname", "")
 
 	async def sign_out():
@@ -227,7 +216,7 @@ app = ps.App(
 			],
 		)
 	],
-	middleware=[LoggingMiddleware(), AuthMiddleware()],
+	middleware=[LoggingMiddleware()],
 )
 
 
@@ -259,8 +248,6 @@ async def api_logout(request: Request, response: Response):
 @app.fastapi.post("/api/log-session")
 async def api_log_session(request: Request):
 	try:
-		import pulse as ps
-
 		ctx = ps.session()
 		print("[API log-session] ctx:", {k: v for k, v in ctx.items()})
 	except Exception as e:

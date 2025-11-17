@@ -58,18 +58,20 @@ from pulse.messages import (
 	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
+	Prerender,
 	PrerenderPayload,
-	PrerenderResult,
 	ServerMessage,
 )
 from pulse.middleware import (
+	ConnectResponse,
 	Deny,
 	MiddlewareStack,
 	NotFound,
 	Ok,
-	PulseCoreMiddleware,
+	PrerenderResponse,
 	PulseMiddleware,
 	Redirect,
+	RoutePrerenderResponse,
 )
 from pulse.plugin import Plugin
 from pulse.proxy import ReactProxy
@@ -252,11 +254,11 @@ class App:
 		self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
 
 		if middleware is None:
-			mw_stack: list[PulseMiddleware] = [PulseCoreMiddleware()]
+			mw_stack: list[PulseMiddleware] = []
 		elif isinstance(middleware, PulseMiddleware):
-			mw_stack = [PulseCoreMiddleware(), middleware]
+			mw_stack = [middleware]
 		else:
-			mw_stack = [PulseCoreMiddleware(), *middleware]
+			mw_stack = list(middleware)
 
 		# Let plugins contribute middleware (in plugin priority order)
 		for plugin in self.plugins:
@@ -460,15 +462,7 @@ class App:
 			# Schedule cleanup timeout (will cancel/reschedule on activity)
 			self._schedule_render_cleanup(render_id)
 
-			initial_result: PrerenderResult = {
-				"views": {},
-				"directives": {
-					"headers": {"X-Pulse-Render-Id": render_id},
-					"socketio": {"auth": {"render_id": render_id}, "headers": {}},
-				},
-			}
-
-			def _prerender_one(path: str):
+			async def _prerender_one(path: str):
 				captured = render.prerender_mount_capture(path, route_info)
 				if captured["type"] == "vdom_init":
 					return Ok(captured)
@@ -482,57 +476,85 @@ class App:
 				# Fallback: shouldn't happen, return not found to be safe
 				return NotFound()
 
-			result = initial_result.copy()
+			def _normalize_prerender_response(res: Any) -> RoutePrerenderResponse:
+				if isinstance(res, (Ok, Redirect, NotFound)):
+					return res
+				# Treat any other value as a VDOM payload
+				return Ok(res)
 
 			with PulseContext.update(render=render):
-				for p in paths:
-					try:
-						res = self.middleware.prerender_route(
-							path=p,
-							route_info=route_info,
-							request=PulseRequest.from_fastapi(request),
-							session=session.data,
-							next=lambda p=p: _prerender_one(p),
-						)
-						if isinstance(res, Ok):
-							result["views"][p] = res.payload
-						elif isinstance(res, Redirect):
-							# Abort immediately with JSON redirect signal
-							location = res.path or "/"
-							resp = JSONResponse({"redirect": location})
-							session.handle_response(resp)
-							return resp
-						elif isinstance(res, NotFound):
-							# Abort immediately with JSON notFound signal
-							resp = JSONResponse({"notFound": True})
-							session.handle_response(resp)
-							return resp
-						else:
-							raise ValueError("Unexpected prerender response:", res)
-					except RedirectInterrupt as r:
-						resp = JSONResponse({"redirect": r.path})
-						session.handle_response(resp)
-						return resp
-					except NotFoundInterrupt:
-						resp = JSONResponse({"notFound": True})
-						session.handle_response(resp)
-						return resp
+				# Call top-level prerender middleware, which wraps the route processing
+				async def _process_routes() -> PrerenderResponse:
+					result_data: Prerender = {
+						"views": {},
+						"directives": {
+							"headers": {"X-Pulse-Render-Id": render_id},
+							"socketio": {
+								"auth": {"render_id": render_id},
+								"headers": {},
+							},
+						},
+					}
 
-			# Call top-level batch prerender middleware to modify final result
-			def _return_result() -> PrerenderResult:
-				return result
+					# Fan out on routes
+					for p in paths:
+						try:
+							# Capture p in closure to avoid loop variable binding issue
+							async def _next(path: str = p) -> RoutePrerenderResponse:
+								return await _prerender_one(path)
 
-			final_result = self.middleware.prerender(
-				payload=payload,
-				result=result,
-				request=PulseRequest.from_fastapi(request),
-				session=session.data,
-				next=_return_result,
-			)
+							# Call prerender_route middleware (in) -> prerender route -> (out)
+							res = await self.middleware.prerender_route(
+								path=p,
+								route_info=route_info,
+								request=PulseRequest.from_fastapi(request),
+								session=session.data,
+								next=_next,
+							)
+							res = _normalize_prerender_response(res)
+							if isinstance(res, Ok):
+								# Aggregate results
+								result_data["views"][p] = res.payload
+							elif isinstance(res, Redirect):
+								# Return redirect immediately
+								return Redirect(path=res.path or "/")
+							elif isinstance(res, NotFound):
+								# Return not found immediately
+								return NotFound()
+							else:
+								raise ValueError("Unexpected prerender response:", res)
+						except RedirectInterrupt as r:
+							return Redirect(path=r.path)
+						except NotFoundInterrupt:
+							return NotFound()
 
-			resp = JSONResponse(serialize(final_result))
-			session.handle_response(resp)
-			return resp
+					return Ok(result_data)
+
+				result = await self.middleware.prerender(
+					payload=payload,
+					request=PulseRequest.from_fastapi(request),
+					session=session.data,
+					next=_process_routes,
+				)
+
+			# Handle redirect/notFound responses
+			if isinstance(result, Redirect):
+				resp = JSONResponse({"redirect": result.path})
+				session.handle_response(resp)
+				return resp
+			if isinstance(result, NotFound):
+				resp = JSONResponse({"notFound": True})
+				session.handle_response(resp)
+				return resp
+
+			# Handle Ok result - serialize the payload (PrerenderResultData)
+			if isinstance(result, Ok):
+				resp = JSONResponse(serialize(result.payload))
+				session.handle_response(resp)
+				return resp
+
+			# Fallback (shouldn't happen)
+			raise ValueError("Unexpected prerender result type")
 
 		@self.fastapi.post(f"{prefix}/forms/{{render_id}}/{{form_id}}")
 		async def handle_form_submit(  # pyright: ignore[reportUnusedFunction]
@@ -626,15 +648,22 @@ class App:
 
 			with PulseContext.update(session=session, render=render):
 
-				def _next():
+				async def _next():
+					return Ok(None)
+
+				def _normalize_connect_response(res: Any) -> ConnectResponse:
+					if isinstance(res, (Ok, Deny)):
+						return res  # type: ignore[return-value]
+					# Treat any other value as allow
 					return Ok(None)
 
 				try:
-					res = self.middleware.connect(
+					res = await self.middleware.connect(
 						request=PulseRequest.from_socketio_environ(environ, auth),
 						session=session.data,
 						next=_next,
 					)
+					res = _normalize_connect_response(res)
 				except Exception as exc:
 					render.report_error("/", "connect", exc)
 					res = Ok(None)
@@ -653,7 +682,7 @@ class App:
 					self._schedule_render_cleanup(rid)
 
 		@self.sio.event
-		def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
+		async def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
 			rid = self._socket_to_render.get(sid)
 			if not rid:
 				return
@@ -668,9 +697,9 @@ class App:
 			msg = cast(ClientMessage, deserialize(data))
 			try:
 				if msg["type"] == "channel_message":
-					self._handle_channel_message(render, session, msg)
+					await self._handle_channel_message(render, session, msg)
 				else:
-					self._handle_pulse_message(render, session, msg)
+					await self._handle_pulse_message(render, session, msg)
 			except Exception as e:
 				path = msg.get("path", "")
 				render.report_error(path, "server", e)
@@ -710,10 +739,10 @@ class App:
 		handle = later(self.session_timeout, _cleanup)
 		self._render_cleanups[rid] = handle
 
-	def _handle_pulse_message(
+	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
-		def _next() -> Ok[None]:
+		async def _next() -> Ok[None]:
 			if msg["type"] == "mount":
 				render.mount(msg["path"], msg["routeInfo"])
 			elif msg["type"] == "navigate":
@@ -729,13 +758,20 @@ class App:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()
 
+		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+			if isinstance(res, (Ok, Deny)):
+				return res  # type: ignore[return-value]
+			# Treat any other value as allow
+			return Ok(None)
+
 		with PulseContext.update(session=session, render=render):
 			try:
-				res = self.middleware.message(
+				res = await self.middleware.message(
 					data=msg,
 					session=session.data,
 					next=_next,
 				)
+				res = _normalize_message_response(res)
 			except Exception:
 				logger.exception("Error in message middleware")
 				return
@@ -749,7 +785,7 @@ class App:
 					{"kind": "deny"},
 				)
 
-	def _handle_channel_message(
+	async def _handle_channel_message(
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
 		if msg.get("responseTo"):
@@ -759,15 +795,20 @@ class App:
 			channel_id = str(msg.get("channel", ""))
 			msg = cast(ClientChannelRequestMessage, msg)
 
-			def _next() -> Ok[Any]:
-				return Ok(
-					render.channels.handle_client_event(
-						render=render, session=session, message=msg
-					)
+			async def _next() -> Ok[None]:
+				render.channels.handle_client_event(
+					render=render, session=session, message=msg
 				)
+				return Ok(None)
+
+			def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+				if isinstance(res, (Ok, Deny)):
+					return res  # type: ignore[return-value]
+				# Treat any other value as allow
+				return Ok(None)
 
 			with PulseContext.update(session=session, render=render):
-				res = self.middleware.channel(
+				res = await self.middleware.channel(
 					channel_id=channel_id,
 					event=msg.get("event", ""),
 					payload=msg.get("payload"),
@@ -775,6 +816,7 @@ class App:
 					session=session.data,
 					next=_next,
 				)
+				res = _normalize_message_response(res)
 
 			if isinstance(res, Deny):
 				if req_id := msg.get("requestId"):

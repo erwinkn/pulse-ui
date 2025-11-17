@@ -175,6 +175,6 @@ class Directives(TypedDict):
 	socketio: SocketIODirectives
 
 
-class PrerenderResult(TypedDict):
+class Prerender(TypedDict):
 	views: dict[str, ServerInitMessage | None]
 	directives: Directives

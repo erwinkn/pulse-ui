@@ -1,11 +1,22 @@
 import asyncio
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import TypedDict, override
+from typing import Any, TypedDict, override
 
 import pulse as ps
-from pulse.middleware import Deny, NotFound, Ok, Redirect
+from pulse.messages import ClientMessage
+from pulse.middleware import (
+	ConnectResponse,
+	Deny,
+	NotFound,
+	Ok,
+	PrerenderResponse,
+	Redirect,
+)
+from pulse.request import PulseRequest
+from pulse.routing import RouteInfo
 from pulse.user_session import InMemorySessionStore
 from pulse_aws import AWSECSPlugin
 
@@ -585,9 +596,15 @@ app = ps.App(
 
 class LoggingMiddleware(ps.PulseMiddleware):
 	@override
-	def prerender(
-		self, *, path, route_info, request, session, next
-	) -> ps.PrerenderResponse:
+	async def prerender_route(
+		self,
+		*,
+		path: str,
+		route_info: RouteInfo,
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[PrerenderResponse]],
+	) -> PrerenderResponse:
 		# before
 		print(f"[MW prerender] path={path} host={request.headers.get('host')}")
 		# Seed same keys as connect to avoid prerender flash
@@ -596,7 +613,7 @@ class LoggingMiddleware(ps.PulseMiddleware):
 			request.client[0] if request.client else None
 		)
 		session["connected_at"] = session.get("connected_at") or int(time.time())
-		res = next()
+		res = await next()
 		# after
 		if isinstance(res, Ok):
 			kind = "ok"
@@ -609,7 +626,14 @@ class LoggingMiddleware(ps.PulseMiddleware):
 		print(f"[MW prerender:after] kind={kind}")
 		return res
 
-	def connect(self, *, request, session, next):
+	@override
+	async def connect(
+		self,
+		*,
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[ConnectResponse]],
+	) -> ConnectResponse:
 		# Add some context visible in components
 		ua = request.headers.get("user-agent")
 		ip = request.client[0] if request.client else None
@@ -617,9 +641,16 @@ class LoggingMiddleware(ps.PulseMiddleware):
 		session["ip"] = ip
 		session["connected_at"] = int(time.time())
 		print(f"[MW connect] ip={ip} ua={(ua or '')[:40]}")
-		return next()
+		return await next()
 
-	def message(self, *, data, session, next):
+	@override
+	async def message(
+		self,
+		*,
+		data: ClientMessage,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[Ok[None]]],
+	) -> Ok[None] | Deny:
 		# Light logging of message types
 		try:
 			msg_type = data.get("type")
@@ -628,7 +659,7 @@ class LoggingMiddleware(ps.PulseMiddleware):
 		# Do not spam logs for vdom churn; only mount/navigate/callback
 		if msg_type in {"mount", "navigate", "callback", "unmount"}:
 			print(f"[MW message] type={msg_type}")
-		res = next()
+		res = await next()
 		if isinstance(res, Ok):
 			result = "ok"
 		elif isinstance(res, Deny):

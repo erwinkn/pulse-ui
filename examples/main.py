@@ -1,11 +1,22 @@
 import asyncio
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import TypedDict, override
+from typing import Any, TypedDict, override
 
 import pulse as ps
-from pulse.middleware import Deny, NotFound, Ok, Redirect
+from pulse.messages import ClientMessage
+from pulse.middleware import (
+	ConnectResponse,
+	Deny,
+	NotFound,
+	Ok,
+	PrerenderResponse,
+	Redirect,
+)
+from pulse.request import PulseRequest
+from pulse.routing import RouteInfo
 from pulse.user_session import InMemorySessionStore
 
 
@@ -547,6 +558,82 @@ def app_layout():
 	)
 
 
+class LoggingMiddleware(ps.PulseMiddleware):
+	@override
+	async def prerender_route(
+		self,
+		*,
+		path: str,
+		route_info: RouteInfo,
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[PrerenderResponse]],
+	) -> PrerenderResponse:
+		# before
+		print(f"[MW prerender] path={path} host={request.headers.get('host')}")
+		# Seed same keys as connect to avoid prerender flash
+		session["user_agent"] = request.headers.get("user-agent")
+		session["ip"] = request.headers.get("x-forwarded-for") or (
+			request.client[0] if request.client else None
+		)
+		session["connected_at"] = session.get("connected_at") or int(time.time())
+		res = await next()
+		# after
+		if isinstance(res, Ok):
+			kind = "ok"
+		elif isinstance(res, Redirect):
+			kind = f"redirect:{res.path}"
+		elif isinstance(res, NotFound):
+			kind = "not_found"
+		else:
+			kind = type(res).__name__
+		print(f"[MW prerender:after] kind={kind}")
+		return res
+
+	@override
+	async def connect(
+		self,
+		*,
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[ConnectResponse]],
+	) -> ConnectResponse:
+		# Add some context visible in components
+		ua = request.headers.get("user-agent")
+		ip = request.client[0] if request.client else None
+		session["user_agent"] = ua
+		session["ip"] = ip
+		session["connected_at"] = int(time.time())
+		print(f"[MW connect] ip={ip} ua={(ua or '')[:40]}")
+		return await next()
+
+	@override
+	async def message(
+		self,
+		*,
+		data: ClientMessage,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[Ok[None]]],
+	) -> Ok[None] | Deny:
+		# Light logging of message types
+		try:
+			msg_type = data.get("type")
+		except Exception:
+			msg_type = "<unknown>"
+		# Do not spam logs for vdom churn; only mount/navigate/callback
+		if msg_type in {"mount", "navigate", "callback", "unmount"}:
+			print(f"[MW message] type={msg_type}")
+		res = await next()
+		if isinstance(res, Ok):
+			result = "ok"
+		elif isinstance(res, Deny):
+			result = "deny"
+		else:
+			result = type(res).__name__
+		print(f"[MW message:after] type={msg_type} result={result}")
+		return res
+
+
 # Routing
 # -------
 # Define the application's routes. A layout route wraps all other routes
@@ -573,68 +660,13 @@ app = ps.App(
 			],
 		)
 	],
+	# middleware=[LoggingMiddleware()],
 	session_store=InMemorySessionStore() if ps.mode() == "prod" else None,
 	server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
 )
 
 
 # --- Demo Middleware ---------------------------------------------------------
-
-
-class LoggingMiddleware(ps.PulseMiddleware):
-	@override
-	def prerender(
-		self, *, path, route_info, request, session, next
-	) -> ps.PrerenderResponse:
-		# before
-		print(f"[MW prerender] path={path} host={request.headers.get('host')}")
-		# Seed same keys as connect to avoid prerender flash
-		session["user_agent"] = request.headers.get("user-agent")
-		session["ip"] = request.headers.get("x-forwarded-for") or (
-			request.client[0] if request.client else None
-		)
-		session["connected_at"] = session.get("connected_at") or int(time.time())
-		res = next()
-		# after
-		if isinstance(res, Ok):
-			kind = "ok"
-		elif isinstance(res, Redirect):
-			kind = f"redirect:{res.path}"
-		elif isinstance(res, NotFound):
-			kind = "not_found"
-		else:
-			kind = type(res).__name__
-		print(f"[MW prerender:after] kind={kind}")
-		return res
-
-	def connect(self, *, request, session, next):
-		# Add some context visible in components
-		ua = request.headers.get("user-agent")
-		ip = request.client[0] if request.client else None
-		session["user_agent"] = ua
-		session["ip"] = ip
-		session["connected_at"] = int(time.time())
-		print(f"[MW connect] ip={ip} ua={(ua or '')[:40]}")
-		return next()
-
-	def message(self, *, data, session, next):
-		# Light logging of message types
-		try:
-			msg_type = data.get("type")
-		except Exception:
-			msg_type = "<unknown>"
-		# Do not spam logs for vdom churn; only mount/navigate/callback
-		if msg_type in {"mount", "navigate", "callback", "unmount"}:
-			print(f"[MW message] type={msg_type}")
-		res = next()
-		if isinstance(res, Ok):
-			result = "ok"
-		elif isinstance(res, Deny):
-			result = "deny"
-		else:
-			result = type(res).__name__
-		print(f"[MW message:after] type={msg_type} result={result}")
-		return res
 
 
 # Attach middleware (keep config separate from routes for clarity)

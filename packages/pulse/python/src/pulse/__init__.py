@@ -1300,9 +1300,10 @@ from pulse.html.tags import (
 from pulse.html.tags import (
 	wbr as wbr,
 )
+from pulse.messages import ClientMessage as ClientMessage
 from pulse.messages import Directives as Directives
+from pulse.messages import Prerender as Prerender
 from pulse.messages import PrerenderPayload as PrerenderPayload
-from pulse.messages import PrerenderResult as PrerenderResult
 from pulse.messages import SocketIODirectives as SocketIODirectives
 
 # Middleware
@@ -1329,6 +1330,9 @@ from pulse.middleware import (
 )
 from pulse.middleware import (
 	Redirect as Redirect,
+)
+from pulse.middleware import (
+	RoutePrerenderResponse as RoutePrerenderResponse,
 )
 from pulse.middleware import (
 	stack as stack,
@@ -1419,6 +1423,7 @@ from pulse.render_session import (
 from pulse.request import PulseRequest as PulseRequest
 from pulse.routing import Layout as Layout
 from pulse.routing import Route as Route
+from pulse.routing import RouteInfo as RouteInfo
 from pulse.serializer import deserialize as deserialize
 
 # Serializer

@@ -1,7 +1,6 @@
 import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
-import type { ChannelBridge } from "./channel";
-import { createChannelBridge, PulseChannelResetError } from "./channel";
+import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
 import type {
 	ClientApiResultMessage,
@@ -29,7 +28,8 @@ export interface MountedView {
 	onInit: (view: PulsePrerenderView) => void;
 	onUpdate: (ops: VDOMUpdate[]) => void;
 }
-export type ConnectionStatusListener = (connected: boolean) => void;
+export type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
+export type ConnectionStatusListener = (status: ConnectionStatus) => void;
 export type ServerErrorListener = (path: string, error: ServerErrorInfo | null) => void;
 
 export interface PulseClient {
@@ -57,14 +57,33 @@ export class PulseSocketIOClient {
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
+	#connectionStatusConfig: {
+		initialConnectingDelay: number;
+		initialErrorDelay: number;
+		reconnectErrorDelay: number;
+	};
+	#hasConnectedOnce: boolean = false;
+	#connectingTimeout: ReturnType<typeof setTimeout> | null = null;
+	#errorTimeout: ReturnType<typeof setTimeout> | null = null;
+	#currentStatus: ConnectionStatus = "ok";
 
-	constructor(url: string, directives: Directives, frameworkNavigate: NavigateFunction) {
+	constructor(
+		url: string,
+		directives: Directives,
+		frameworkNavigate: NavigateFunction,
+		connectionStatusConfig: {
+			initialConnectingDelay: number;
+			initialErrorDelay: number;
+			reconnectErrorDelay: number;
+		},
+	) {
 		this.#url = url;
 		this.#directives = directives;
 		this.#frameworkNavigate = frameworkNavigate;
 		this.#socket = null;
 		this.#activeViews = new Map();
 		this.#messageQueue = [];
+		this.#connectionStatusConfig = connectionStatusConfig;
 		// Load directives from sessionStorage
 		if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
 			const stored = sessionStorage.getItem("__PULSE_DIRECTIVES");
@@ -84,9 +103,54 @@ export class PulseSocketIOClient {
 		return this.#socket?.connected ?? false;
 	}
 
+	#clearTimeouts(): void {
+		if (this.#connectingTimeout) {
+			clearTimeout(this.#connectingTimeout);
+			this.#connectingTimeout = null;
+		}
+		if (this.#errorTimeout) {
+			clearTimeout(this.#errorTimeout);
+			this.#errorTimeout = null;
+		}
+	}
+
+	#setStatus(status: ConnectionStatus): void {
+		this.#clearTimeouts();
+		this.#currentStatus = status;
+		this.#notifyConnectionListeners(status);
+	}
+
+	#handleConnected(): void {
+		this.#hasConnectedOnce = true;
+		this.#setStatus("ok");
+	}
+
+	#setInitialConnectionStatus(): void {
+		// Initial connection attempt - start with no message, then show connecting after delay
+		this.#setStatus("ok");
+		this.#connectingTimeout = setTimeout(() => {
+			this.#setStatus("connecting");
+			this.#errorTimeout = setTimeout(() => {
+				this.#setStatus("error");
+			}, this.#connectionStatusConfig.initialErrorDelay);
+		}, this.#connectionStatusConfig.initialConnectingDelay);
+	}
+
+	#handleDisconnected(): void {
+		// Reconnection after losing connection - show reconnecting immediately
+		this.#setStatus("reconnecting");
+		this.#errorTimeout = setTimeout(() => {
+			this.#setStatus("error");
+		}, this.#connectionStatusConfig.reconnectErrorDelay);
+	}
+
 	public async connect(): Promise<void> {
 		if (this.#socket) {
 			return;
+		}
+		// Start timing logic for connection attempt
+		if (!this.#hasConnectedOnce) {
+			this.#setInitialConnectionStatus();
 		}
 		return new Promise((resolve, reject) => {
 			const socket = io(this.#url, {
@@ -123,20 +187,20 @@ export class PulseSocketIOClient {
 				}
 				this.#messageQueue = [];
 
-				this.notifyConnectionListeners(true);
+				this.#handleConnected();
 				resolve();
 			});
 
 			socket.on("connect_error", (err) => {
 				console.error("[SocketIOTransport] Connection failed:", err);
-				this.notifyConnectionListeners(false);
+				this.#handleDisconnected();
 				reject(err);
 			});
 
 			socket.on("disconnect", () => {
 				console.log("[SocketIOTransport] Disconnected");
 				this.#handleTransportDisconnect();
-				this.notifyConnectionListeners(false);
+				this.#handleDisconnected();
 			});
 
 			// Wrap in an arrow function to avoid losing the `this` reference
@@ -148,19 +212,16 @@ export class PulseSocketIOClient {
 
 	onConnectionChange(listener: ConnectionStatusListener): () => void {
 		this.#connectionListeners.add(listener);
-		// Only notify immediately if we've attempted connection (socket exists)
-		// This prevents showing error before first connection attempt
-		if (this.#socket !== null) {
-			listener(this.isConnected());
-		}
+		// Notify immediately with current status
+		listener(this.#currentStatus);
 		return () => {
 			this.#connectionListeners.delete(listener);
 		};
 	}
 
-	private notifyConnectionListeners(connected: boolean): void {
+	#notifyConnectionListeners(status: ConnectionStatus): void {
 		for (const listener of this.#connectionListeners) {
-			listener(connected);
+			listener(status);
 		}
 	}
 
@@ -173,7 +234,7 @@ export class PulseSocketIOClient {
 		};
 	}
 
-	private notifyServerError(path: string, error: ServerErrorInfo | null) {
+	#notifyServerError(path: string, error: ServerErrorInfo | null) {
 		for (const listener of this.#serverErrorListeners) listener(path, error);
 	}
 
@@ -213,6 +274,7 @@ export class PulseSocketIOClient {
 	}
 
 	public disconnect() {
+		this.#clearTimeouts();
 		this.#socket?.disconnect();
 		this.#socket = null;
 		this.#messageQueue = [];
@@ -224,6 +286,8 @@ export class PulseSocketIOClient {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
 		}
 		this.#channels.clear();
+		this.#currentStatus = "ok";
+		this.#hasConnectedOnce = false;
 	}
 
 	#handleServerMessage(message: ServerMessage) {
@@ -239,7 +303,7 @@ export class PulseSocketIOClient {
 				// Clear any prior error for this path on successful init
 				if (this.#serverErrors.has(message.path)) {
 					this.#serverErrors.delete(message.path);
-					this.notifyServerError(message.path, null);
+					this.#notifyServerError(message.path, null);
 				}
 				break;
 			}
@@ -250,14 +314,14 @@ export class PulseSocketIOClient {
 				// Clear any prior error for this path on successful update
 				if (this.#serverErrors.has(message.path)) {
 					this.#serverErrors.delete(message.path);
-					this.notifyServerError(message.path, null);
+					this.#notifyServerError(message.path, null);
 				}
 				break;
 			}
 			case "server_error": {
 				if (!this.#activeViews.has(message.path)) return; // discard for inactive paths
 				this.#serverErrors.set(message.path, message.error);
-				this.notifyServerError(message.path, message.error);
+				this.#notifyServerError(message.path, message.error);
 				break;
 			}
 			case "api_call": {
@@ -398,7 +462,7 @@ export class PulseSocketIOClient {
 		let entry = this.#channels.get(id);
 		if (!entry) {
 			entry = {
-				bridge: createChannelBridge(this, id),
+				bridge: new ChannelBridge(this, id),
 				refCount: 0,
 			};
 			this.#channels.set(id, entry);

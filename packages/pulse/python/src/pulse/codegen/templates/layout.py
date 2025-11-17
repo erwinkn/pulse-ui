@@ -11,6 +11,11 @@ import { useLoaderData } from "react-router";
 export const config: PulseConfig = {
   serverAddress: "${server_address}",
   apiPrefix: "${api_prefix}",
+  connectionStatus: {
+    initialConnectingDelay: ${int(connection_status.initial_connecting_delay * 1000)},
+    initialErrorDelay: ${int(connection_status.initial_error_delay * 1000)},
+    reconnectErrorDelay: ${int(connection_status.reconnect_error_delay * 1000)},
+  },
 };
 
 

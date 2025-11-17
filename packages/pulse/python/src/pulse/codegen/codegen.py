@@ -3,6 +3,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pulse.cli.helpers import ensure_gitignore_has
 from pulse.codegen.templates.layout import LAYOUT_TEMPLATE
@@ -15,6 +16,9 @@ from pulse.codegen.utils import NameRegistry
 from pulse.css import CssImport, CssModule
 from pulse.env import env
 from pulse.routing import Layout, Route, RouteTree
+
+if TYPE_CHECKING:
+	from pulse.app import ConnectionStatusConfig
 
 logger = logging.getLogger(__file__)
 
@@ -112,6 +116,7 @@ class Codegen:
 		server_address: str,
 		internal_server_address: str | None = None,
 		api_prefix: str = "",
+		connection_status: "ConnectionStatusConfig | None" = None,
 	):
 		# Ensure generated files are gitignored
 		ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
@@ -124,7 +129,10 @@ class Codegen:
 		generated_files = set(
 			[
 				self.generate_layout_tsx(
-					server_address, internal_server_address, api_prefix
+					server_address,
+					internal_server_address,
+					api_prefix,
+					connection_status,
 				),
 				self.generate_routes_ts(),
 				self.generate_routes_runtime_ts(),
@@ -150,13 +158,18 @@ class Codegen:
 		server_address: str,
 		internal_server_address: str | None = None,
 		api_prefix: str = "",
+		connection_status: "ConnectionStatusConfig | None" = None,
 	):
 		"""Generates the content of _layout.tsx"""
+		from pulse.app import ConnectionStatusConfig
+
+		connection_status = connection_status or ConnectionStatusConfig()
 		content = str(
 			LAYOUT_TEMPLATE.render_unicode(
 				server_address=server_address,
 				internal_server_address=internal_server_address or server_address,
 				api_prefix=api_prefix,
+				connection_status=connection_status,
 			)
 		)
 		# The underscore avoids an eventual naming conflict with a generated

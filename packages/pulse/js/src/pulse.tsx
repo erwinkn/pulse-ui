@@ -8,7 +8,7 @@ import {
 	useState,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { type Directives, PulseSocketIOClient } from "./client";
+import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
 import type { ServerErrorInfo } from "./messages";
 import { VDOMRenderer } from "./renderer";
@@ -18,8 +18,15 @@ import type { ComponentRegistry, VDOM } from "./vdom";
 // Types
 // =================================================================
 
+export interface ConnectionStatusConfig {
+	initialConnectingDelay: number;
+	initialErrorDelay: number;
+	reconnectErrorDelay: number;
+}
+
 export interface PulseConfig {
 	serverAddress: string;
+	connectionStatus: ConnectionStatusConfig;
 }
 
 export type PulsePrerenderView = {
@@ -74,40 +81,72 @@ export interface PulseProviderProps {
 const inBrowser = typeof window !== "undefined";
 
 export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
-	const [connected, setConnected] = useState(true);
+	const [status, setStatus] = useState<ConnectionStatus>("ok");
 	const rrNavigate = useNavigate();
 	const { directives } = prerender;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: another useEffect syncs the directives without recreating the client
 	const client = useMemo(() => {
-		return new PulseSocketIOClient(config.serverAddress, directives, rrNavigate);
-	}, [config.serverAddress, rrNavigate]);
+		return new PulseSocketIOClient(
+			config.serverAddress,
+			directives,
+			rrNavigate,
+			config.connectionStatus,
+		);
+	}, [config.serverAddress, rrNavigate, config.connectionStatus]);
 	useEffect(() => client.setDirectives(directives), [client, directives]);
-	useEffect(() => client.onConnectionChange(setConnected), [client]);
+
 	useEffect(() => {
-		if (inBrowser) {
-			client.connect();
-			return () => client.disconnect();
-		}
+		if (!inBrowser) return;
+
+		const handleConnectionChange = (newStatus: ConnectionStatus) => {
+			setStatus(newStatus);
+		};
+
+		const unsubscribe = client.onConnectionChange(handleConnectionChange);
+
+		// Start connection attempt
+		client.connect();
+
+		return () => {
+			unsubscribe();
+			client.disconnect();
+		};
 	}, [client]);
+
+	const getStatusMessage = () => {
+		switch (status) {
+			case "connecting":
+				return "Connecting...";
+			case "reconnecting":
+				return "Reconnecting...";
+			case "error":
+				return "Failed to connect to the server.";
+			case "ok":
+			default:
+				return null;
+		}
+	};
+
+	const statusMessage = getStatusMessage();
 
 	return (
 		<PulseClientContext.Provider value={client}>
 			<PulsePrerenderContext.Provider value={prerender}>
-				{!connected && (
+				{statusMessage && (
 					<div
 						style={{
 							position: "fixed",
 							bottom: "20px",
 							right: "20px",
-							backgroundColor: "red",
+							backgroundColor: status === "error" ? "red" : "#666",
 							color: "white",
 							padding: "10px",
 							borderRadius: "5px",
 							zIndex: 1000,
 						}}
 					>
-						Failed to connect to the server.
+						{statusMessage}
 					</div>
 				)}
 				{children}

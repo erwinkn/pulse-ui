@@ -244,7 +244,3 @@ export class ChannelBridge {
 		// No-op: owning client manages registry lifecycle.
 	}
 }
-
-export function createChannelBridge(client: PulseSocketIOClient, id: string): ChannelBridge {
-	return new ChannelBridge(client, id);
-}

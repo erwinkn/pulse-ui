@@ -81,11 +81,17 @@ def parse_route_path(path: str) -> list[PathSegment]:
 
 # Normalize to react-router's convention: no leading and trailing slashes. Empty
 # string interpreted as the root.
-def normalize_path(path: str):
+def ensure_relative_path(path: str):
 	if path.startswith("/"):
 		path = path[1:]
 	if path.endswith("/"):
 		path = path[:-1]
+	return path
+
+
+def ensure_absolute_path(path: str):
+	if not path.startswith("/"):
+		path = "/" + path
 	return path
 
 
@@ -167,7 +173,7 @@ class Route:
 		css_modules: Sequence[CssModule] | None = None,
 		css_imports: Sequence[CssImport] | None = None,
 	):
-		self.path = normalize_path(path)
+		self.path = ensure_relative_path(path)
 		self.segments = parse_route_path(path)
 
 		self.render = render
@@ -191,8 +197,8 @@ class Route:
 		return [path]
 
 	def unique_path(self):
-		# Ensure consistent keys without accidental leading/trailing slashes
-		return normalize_path("/".join(self._path_list()))
+		# Return absolute path with leading '/'
+		return ensure_absolute_path("/".join(self._path_list()))
 
 	def file_path(self) -> str:
 		path = "/".join(self._path_list(include_layouts=False))
@@ -224,8 +230,7 @@ class Route:
 				f"Cannot build default RouteInfo for dynamic route '{self.path}'."
 			)
 
-		unique = self.unique_path()
-		pathname = "/" if unique == "" else f"/{unique}"
+		pathname = self.unique_path()
 		return {
 			"pathname": pathname,
 			"hash": "",
@@ -280,7 +285,9 @@ class Layout:
 		return path_list
 
 	def unique_path(self):
-		return "/".join(self._path_list(include_layouts=True))
+		# Return absolute path with leading '/'
+		path = "/".join(self._path_list(include_layouts=True))
+		return f"/{path}"
 
 	def file_path(self) -> str:
 		path_list = self._path_list(include_layouts=True)
@@ -318,8 +325,7 @@ class Layout:
 
 		# Build pathname from ancestor route path segments (exclude layout indicators)
 		path_list = self._path_list(include_layouts=False)
-		unique = normalize_path("/".join(path_list))
-		pathname = "/" if unique == "" else f"/{unique}"
+		pathname = ensure_absolute_path("/".join(path_list))
 		return {
 			"pathname": pathname,
 			"hash": "",
@@ -366,7 +372,7 @@ class RouteTree:
 			_flatten_route_tree(route)
 
 	def find(self, path: str):
-		path = normalize_path(path)
+		path = ensure_absolute_path(path)
 		route = self.flat_tree.get(path)
 		if not route:
 			raise ValueError(f"No route found for path '{path}'")

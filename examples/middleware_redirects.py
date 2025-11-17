@@ -31,8 +31,8 @@ class RouteRedirectMiddleware(ps.PulseMiddleware):
 		self,
 		*,
 		path: str,
-		route_info: ps.RouteInfo,
 		request: ps.PulseRequest,
+		route_info: ps.RouteInfo,
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[RoutePrerenderResponse]],
 	) -> RoutePrerenderResponse:
@@ -52,8 +52,8 @@ class RouteNotFoundMiddleware(ps.PulseMiddleware):
 		self,
 		*,
 		path: str,
-		route_info: ps.RouteInfo,
 		request: ps.PulseRequest,
+		route_info: ps.RouteInfo,
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[RoutePrerenderResponse]],
 	) -> RoutePrerenderResponse:
@@ -111,58 +111,118 @@ class PrerenderNotFoundMiddleware(ps.PulseMiddleware):
 @ps.component
 def home():
 	return ps.div(
-		ps.h1("Home"),
-		ps.p("Welcome to the middleware redirect/notfound test example."),
-		ps.ul(
-			ps.li(
-				ps.a({"href": "/old-path"}, "Visit /old-path (redirects to /new-path)")
-			),
-			ps.li(
-				ps.a(
-					{"href": "/blocked-path"}, "Visit /blocked-path (returns NotFound)"
-				)
-			),
-			ps.li(
-				ps.a(
-					{"href": "/old-batch"}, "Visit /old-batch (redirects via prerender)"
-				)
-			),
-			ps.li(
-				ps.a(
-					{"href": "/blocked-batch"},
-					"Visit /blocked-batch (NotFound via prerender)",
-				)
-			),
-			ps.li(ps.a({"href": "/new-path"}, "Visit /new-path (works normally)")),
-			ps.li(ps.a({"href": "/new-batch"}, "Visit /new-batch (works normally)")),
+		ps.h1(
+			"Middleware Redirect & NotFound Demo",
+			className="text-4xl font-bold mb-6 text-center",
 		),
+		ps.p(
+			"Welcome to the middleware redirect/notfound test example. Click the links below to test different middleware behaviors.",
+			className="text-lg text-gray-700 mb-8 text-center max-w-2xl mx-auto",
+		),
+		ps.div(
+			ps.h2("Test Links", className="text-2xl font-semibold mb-4"),
+			ps.ul(
+				ps.li(
+					ps.a(
+						"Visit /old-path (redirects to /new-path)",
+						href="/old-path",
+						className="link text-blue-600 hover:text-blue-800",
+					),
+					className="mb-2",
+				),
+				ps.li(
+					ps.a(
+						"Visit /blocked-path (returns NotFound)",
+						href="/blocked-path",
+						className="link text-red-600 hover:text-red-800",
+					),
+					className="mb-2",
+				),
+				ps.li(
+					ps.a(
+						"Visit /old-batch (redirects via prerender)",
+						href="/old-batch",
+						className="link text-blue-600 hover:text-blue-800",
+					),
+					className="mb-2",
+				),
+				ps.li(
+					ps.a(
+						"Visit /blocked-batch (NotFound via prerender)",
+						href="/blocked-batch",
+						className="link text-red-600 hover:text-red-800",
+					),
+					className="mb-2",
+				),
+				ps.li(
+					ps.a(
+						"Visit /new-path (works normally)",
+						href="/new-path",
+						className="link text-green-600 hover:text-green-800",
+					),
+					className="mb-2",
+				),
+				ps.li(
+					ps.a(
+						"Visit /new-batch (works normally)",
+						href="/new-batch",
+						className="link text-green-600 hover:text-green-800",
+					),
+					className="mb-2",
+				),
+				className="list-disc list-inside space-y-2",
+			),
+			className="bg-white p-6 rounded-lg shadow-md max-w-2xl mx-auto",
+		),
+		className="min-h-screen bg-gray-100 text-gray-800 py-12 px-4",
 	)
 
 
 @ps.component
 def new_path():
 	return ps.div(
-		ps.h1("New Path"),
-		ps.p("You were redirected here from /old-path!"),
-		ps.a({"href": "/"}, "Back to home"),
+		ps.h1("New Path", className="text-3xl font-bold mb-4"),
+		ps.p(
+			"You were redirected here from /old-path!",
+			className="text-lg text-gray-700 mb-6",
+		),
+		ps.a(
+			"Back to home",
+			href="/",
+			className="link text-blue-600 hover:text-blue-800 inline-block",
+		),
+		className="min-h-screen bg-gray-100 text-gray-800 py-12 px-4 container mx-auto max-w-2xl",
 	)
 
 
 @ps.component
 def new_batch():
 	return ps.div(
-		ps.h1("New Batch"),
-		ps.p("You were redirected here from /old-batch!"),
-		ps.a({"href": "/"}, "Back to home"),
+		ps.h1("New Batch", className="text-3xl font-bold mb-4"),
+		ps.p(
+			"You were redirected here from /old-batch!",
+			className="text-lg text-gray-700 mb-6",
+		),
+		ps.a(
+			"Back to home",
+			href="/",
+			className="link text-blue-600 hover:text-blue-800 inline-block",
+		),
+		className="min-h-screen bg-gray-100 text-gray-800 py-12 px-4 container mx-auto max-w-2xl",
 	)
 
 
 @ps.component
 def normal_page():
 	return ps.div(
-		ps.h1("Normal Page"),
-		ps.p("This page works normally."),
-		ps.a({"href": "/"}, "Back to home"),
+		ps.h1("Normal Page", className="text-3xl font-bold mb-4"),
+		ps.p("This page works normally.", className="text-lg text-gray-700 mb-6"),
+		ps.a(
+			"Back to home",
+			href="/",
+			className="link text-blue-600 hover:text-blue-800 inline-block",
+		),
+		className="min-h-screen bg-gray-100 text-gray-800 py-12 px-4 container mx-auto max-w-2xl",
 	)
 
 

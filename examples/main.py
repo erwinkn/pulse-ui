@@ -661,6 +661,7 @@ app = ps.App(
 		)
 	],
 	# middleware=[LoggingMiddleware()],
+	middleware=[ps.LatencyMiddleware()],
 	session_store=InMemorySessionStore() if ps.mode() == "prod" else None,
 	server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
 )

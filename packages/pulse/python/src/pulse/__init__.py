@@ -1314,6 +1314,9 @@ from pulse.middleware import (
 	Deny as Deny,
 )
 from pulse.middleware import (
+	LatencyMiddleware as LatencyMiddleware,
+)
+from pulse.middleware import (
 	MiddlewareStack as MiddlewareStack,
 )
 from pulse.middleware import (

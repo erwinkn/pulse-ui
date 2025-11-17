@@ -11,6 +11,7 @@ import os
 from collections import defaultdict
 from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Callable, Literal, TypeVar, cast
 
@@ -71,7 +72,7 @@ from pulse.middleware import (
 	Redirect,
 )
 from pulse.plugin import Plugin
-from pulse.proxy import ReactProxyHandler
+from pulse.proxy import ReactProxy
 from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
@@ -98,6 +99,25 @@ class AppStatus(IntEnum):
 
 
 PulseMode = Literal["subdomains", "single-server"]
+
+
+@dataclass
+class ConnectionStatusConfig:
+	"""
+	Configuration for connection status message delays.
+
+	Attributes:
+	    initial_connecting_delay: Delay in seconds before showing "Connecting..." message
+	        on initial connection attempt. Default: 2.0
+	    initial_error_delay: Additional delay in seconds before showing error message
+	        on initial connection attempt (after connecting message). Default: 8.0
+	    reconnect_error_delay: Delay in seconds before showing error message when
+	        reconnecting after losing connection. Default: 8.0
+	"""
+
+	initial_connecting_delay: float = 2.0
+	initial_error_delay: float = 8.0
+	reconnect_error_delay: float = 8.0
 
 
 class App:
@@ -144,6 +164,7 @@ class App:
 	_socket_to_render: dict[str, str]
 	_render_cleanups: dict[str, asyncio.TimerHandle]
 	session_timeout: float
+	connection_status: ConnectionStatusConfig
 
 	def __init__(
 		self,
@@ -164,14 +185,8 @@ class App:
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
+		connection_status: ConnectionStatusConfig | None = None,
 	):
-		"""
-		Initialize a new Pulse App.
-
-		Args:
-		    routes: Optional list of Route objects to register.
-		    codegen: Optional codegen configuration.
-		"""
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
 		self.mode = mode
@@ -222,6 +237,7 @@ class App:
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self.session_timeout = session_timeout
+		self.connection_status = connection_status or ConnectionStatusConfig()
 
 		self.codegen = Codegen(
 			self.routes,
@@ -266,10 +282,6 @@ class App:
 				logger.info(
 					f"Single-server mode: React Router running at {react_server_address}"
 				)
-			else:
-				logger.warning(
-					"Single-server mode: PULSE_REACT_SERVER_ADDRESS not set."
-				)
 
 		try:
 			yield
@@ -303,6 +315,7 @@ class App:
 			self.server_address,
 			self.internal_server_address or self.server_address,
 			self.api_prefix,
+			connection_status=self.connection_status,
 		)
 
 	def asgi_factory(self):
@@ -544,7 +557,14 @@ class App:
 		# FastAPI will match specific routes before this catch-all, but we add an explicit check
 		# as a safety measure to ensure API routes are never proxied
 		if self.mode == "single-server":
-			proxy_handler = ReactProxyHandler(lambda: envvars.react_server_address)
+			react_server_address = envvars.react_server_address
+			if not react_server_address:
+				raise RuntimeError(
+					"PULSE_REACT_SERVER_ADDRESS must be set in single-server mode. "
+					+ "Use 'pulse run' CLI command or set the environment variable."
+				)
+
+			proxy_handler = ReactProxy(react_server_address)
 
 			@self.fastapi.api_route(
 				"/{path:path}",
@@ -552,8 +572,12 @@ class App:
 				include_in_schema=False,
 			)
 			async def proxy_catch_all(request: Request, path: str):  # pyright: ignore[reportUnusedFunction]
-				# Skip WebSocket upgrades (handled by Socket.IO)
-				if request.headers.get("upgrade", "").lower() == "websocket":
+				# Skip WebSocket upgrades outside the Vite dev server (handled by Socket.IO)
+				is_websocket_upgrade = (
+					request.headers.get("upgrade", "").lower() == "websocket"
+				)
+				is_vite_dev_server = self.env == "dev" and request.url.path == "/"
+				if is_websocket_upgrade and not is_vite_dev_server:
 					raise HTTPException(status_code=404, detail="Not found")
 
 				# Proxy all unmatched HTTP requests to React Router
@@ -615,7 +639,6 @@ class App:
 					render.report_error("/", "connect", exc)
 					res = Ok(None)
 				if isinstance(res, Deny):
-					print(f"Denying connection, closing RenderSession {rid}")
 					# Tear down the created session if denied
 					self.close_render(rid)
 
@@ -623,7 +646,6 @@ class App:
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
 			rid = self._socket_to_render.pop(sid, None)
 			if rid is not None:
-				print(f"Disconnecting WebSocket for RenderSession {rid}")
 				render = self.render_sessions.get(rid)
 				if render:
 					render.connected = False
@@ -844,7 +866,6 @@ class App:
 	):
 		if rid in self.render_sessions:
 			raise ValueError(f"RenderSession {rid} already exists")
-		print(f"Creating RenderSession {rid}")
 		render = RenderSession(
 			rid,
 			self.routes,
@@ -863,7 +884,6 @@ class App:
 		render = self.render_sessions.pop(rid, None)
 		if not render:
 			return
-		print(f"Closing RenderSession {rid}")
 		sid = self._render_to_user.pop(rid)
 		session = self.user_sessions[sid]
 		render.close()

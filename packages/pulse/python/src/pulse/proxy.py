@@ -2,32 +2,36 @@
 Proxy handler for forwarding requests to React Router server in single-server mode.
 """
 
+import asyncio
 import logging
-from typing import Callable
+from typing import cast
 
 import httpx
+import websockets
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
+from starlette.websockets import WebSocket, WebSocketDisconnect
+from websockets.typing import Subprotocol
 
 logger = logging.getLogger(__name__)
 
 
-class ReactProxyHandler:
+class ReactProxy:
 	"""
-	Handles proxying HTTP requests to React Router server.
+	Handles proxying HTTP requests and WebSocket connections to React Router server.
 	"""
 
-	get_react_server_address: Callable[[], str | None]
+	react_server_address: str
 	_client: httpx.AsyncClient | None
 
-	def __init__(self, get_react_server_address: Callable[[], str | None]):
+	def __init__(self, react_server_address: str):
 		"""
 		Args:
-		    get_react_server_address: Callable that returns the React Router server full URL (or None if not started)
+		    react_server_address: React Router server full URL (required in single-server mode)
 		"""
-		self.get_react_server_address = get_react_server_address
+		self.react_server_address = react_server_address
 		self._client = None
 
 	@property
@@ -40,20 +44,134 @@ class ReactProxyHandler:
 			)
 		return self._client
 
+	def _is_websocket_upgrade(self, request: Request) -> bool:
+		"""Check if request is a WebSocket upgrade."""
+		upgrade = request.headers.get("upgrade", "").lower()
+		connection = request.headers.get("connection", "").lower()
+		return upgrade == "websocket" and "upgrade" in connection
+
+	def _http_to_ws_url(self, http_url: str) -> str:
+		"""Convert HTTP URL to WebSocket URL."""
+		if http_url.startswith("https://"):
+			return http_url.replace("https://", "wss://", 1)
+		elif http_url.startswith("http://"):
+			return http_url.replace("http://", "ws://", 1)
+		return http_url
+
+	async def proxy_websocket(self, websocket: WebSocket) -> None:
+		"""
+		Proxy WebSocket connection to React Router server.
+		Only allowed in dev mode and on root path "/".
+		"""
+
+		# Build target WebSocket URL
+		ws_url = self._http_to_ws_url(self.react_server_address)
+		target_url = ws_url.rstrip("/") + websocket.url.path
+		if websocket.url.query:
+			target_url += "?" + websocket.url.query
+
+		# Extract subprotocols from client request
+		subprotocol_header = websocket.headers.get("sec-websocket-protocol")
+		subprotocols: list[Subprotocol] | None = None
+		if subprotocol_header:
+			# Parse comma-separated list of subprotocols
+			# Subprotocol is a NewType (just a type annotation), so cast strings to it
+			subprotocols = cast(
+				list[Subprotocol], [p.strip() for p in subprotocol_header.split(",")]
+			)
+
+		# Extract headers for WebSocket connection (excluding WebSocket-specific headers)
+		headers = {
+			k: v
+			for k, v in websocket.headers.items()
+			if k.lower()
+			not in (
+				"host",
+				"upgrade",
+				"connection",
+				"sec-websocket-key",
+				"sec-websocket-version",
+				"sec-websocket-protocol",
+			)
+		}
+
+		# Accept the client WebSocket connection first
+		# We'll accept without subprotocol initially, then update if target accepts one
+		await websocket.accept()
+
+		# Connect to target WebSocket server
+		try:
+			async with websockets.connect(
+				target_url,
+				additional_headers=headers,
+				subprotocols=subprotocols,
+				ping_interval=None,  # Let the target server handle ping/pong
+			) as target_ws:
+				# Forward messages bidirectionally
+				async def forward_client_to_target():
+					try:
+						async for message in websocket.iter_text():
+							await target_ws.send(message)
+					except (WebSocketDisconnect, websockets.ConnectionClosed):
+						# Client disconnected, close target connection
+						logger.debug("Client disconnected, closing target connection")
+						try:
+							await target_ws.close()
+						except Exception:
+							pass
+					except Exception as e:
+						logger.error(f"Error forwarding client message: {e}")
+						raise
+
+				async def forward_target_to_client():
+					try:
+						async for message in target_ws:
+							if isinstance(message, str):
+								await websocket.send_text(message)
+							else:
+								await websocket.send_bytes(message)
+					except (WebSocketDisconnect, websockets.ConnectionClosed) as e:
+						# Client or target disconnected, stop forwarding
+						logger.debug(
+							"Connection closed, stopping forward_target_to_client"
+						)
+						# If target disconnected, close client connection
+						if isinstance(e, websockets.ConnectionClosed):
+							try:
+								await websocket.close()
+							except Exception:
+								pass
+					except Exception as e:
+						logger.error(f"Error forwarding target message: {e}")
+						raise
+
+				# Run both forwarding tasks concurrently
+				# If one side closes, the other will detect it and stop gracefully
+				await asyncio.gather(
+					forward_client_to_target(),
+					forward_target_to_client(),
+					return_exceptions=True,
+				)
+
+		except (websockets.WebSocketException, websockets.ConnectionClosedError) as e:
+			logger.error(f"WebSocket proxy connection failed: {e}")
+			await websocket.close(
+				code=1014,  # Bad Gateway
+				reason="Bad Gateway: Could not connect to React Router server",
+			)
+		except Exception as e:
+			logger.error(f"WebSocket proxy error: {e}")
+			await websocket.close(
+				code=1011,  # Internal Server Error
+				reason="Bad Gateway: Proxy error",
+			)
+
 	async def __call__(self, request: Request) -> Response:
 		"""
 		Forward HTTP request to React Router server and stream response back.
 		"""
-		# Get the React server address
-		react_server_address = self.get_react_server_address()
-		if react_server_address is None:
-			# React server not started yet, return error
-			return PlainTextResponse(
-				"Service Unavailable: React server not ready", status_code=503
-			)
-
 		# Build target URL
-		url = react_server_address.rstrip("/") + request.url.path
+		url = self.react_server_address.rstrip("/") + request.url.path
 		if request.url.query:
 			url += "?" + request.url.query
 

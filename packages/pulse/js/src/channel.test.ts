@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import { createChannelBridge, PulseChannelResetError } from "./channel";
+import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { ClientChannelMessage } from "./messages";
 
 function makeClient() {
@@ -8,7 +8,7 @@ function makeClient() {
 		sent.push(message);
 	});
 	const client = { sendMessage } as any;
-	const bridge = createChannelBridge(client, "chan-1");
+	const bridge = new ChannelBridge(client, "chan-1");
 	return { bridge, sent, sendMessage };
 }
 

@@ -15,7 +15,6 @@ from pulse.messages import (
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
 )
-from pulse.routing import normalize_path
 
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
@@ -69,7 +68,8 @@ class ChannelsManager:
 
 		route_path: str | None = None
 		if ctx.route is not None:
-			route_path = normalize_path(ctx.route.pulse_route.unique_path())
+			# unique_path() returns absolute path, use as-is for keys
+			route_path = ctx.route.pulse_route.unique_path()
 
 		channel = Channel(
 			self,
@@ -84,18 +84,18 @@ class ChannelsManager:
 		return channel
 
 	# ------------------------------------------------------------------
-	def remove_route(self, route_path: str) -> None:
-		key = normalize_path(route_path)
-		route_channels = list(self._channels_by_route.get(key, set()))
+	def remove_route(self, path: str) -> None:
+		# route_path is already an absolute path
+		route_channels = list(self._channels_by_route.get(path, set()))
 		# if route_channels:
-		# 	print(f"Disposing {len(route_channels)} channel(s) for route {key}")
+		# 	print(f"Disposing {len(route_channels)} channel(s) for route {route_path}")
 		for channel_id in route_channels:
 			channel = self._channels.get(channel_id)
 			if channel is None:
 				continue
 			channel.closed = True
 			self.dispose_channel(channel, reason="route.unmount")
-		self._channels_by_route.pop(key, None)
+		self._channels_by_route.pop(path, None)
 
 	# ------------------------------------------------------------------
 	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:

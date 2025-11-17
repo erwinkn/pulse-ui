@@ -124,15 +124,15 @@ def test_route_tree_find_top_level_route(route_tree: RouteTree):
 
 
 def test_route_tree_find_non_existent(route_tree: RouteTree):
-	with pytest.raises(ValueError, match="No route found for path 'nonexistent'"):
-		route_tree.find("nonexistent")
+	with pytest.raises(ValueError, match="No route found for path '/nonexistent'"):
+		route_tree.find("/nonexistent")
 
 
 def test_route_tree_find_non_existent_in_layout(route_tree: RouteTree):
 	with pytest.raises(
-		ValueError, match="No route found for path '<layout>|nonexistent'"
+		ValueError, match="No route found for path '/<layout>|nonexistent'"
 	):
-		route_tree.find("<layout>|nonexistent")
+		route_tree.find("/<layout>|nonexistent")
 
 
 def test_route_tree_consecutive_layouts():
@@ -168,4 +168,4 @@ def test_route_tree_nested_layouts():
 	assert isinstance(route, Route) and route.path == "counter"
 	# This gets the two layouts
 	paths = [route.unique_path() for route in route_tree.tree]
-	assert paths == ["<layout>", "<layout>2"]
+	assert paths == ["/<layout>", "/<layout>2"]

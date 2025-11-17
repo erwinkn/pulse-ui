@@ -50,7 +50,7 @@ class TestCodegen:
 		)
 		assert "// No components needed for this route" in result
 		assert "const externalComponents: ComponentRegistry = {};" in result
-		assert 'const path = "simple"' in result
+		assert 'const path = "/simple"' in result
 		assert "export function headers" in result
 		assert "export default function RouteComponent()" in result
 		assert "externalComponents={externalComponents}" in result
@@ -304,7 +304,7 @@ class TestCodegen:
 		)
 		assert 'import { Header } from "./components/Header";' in home_content
 		assert '"Header": Header,' in home_content
-		assert 'const path = ""' in home_content
+		assert 'const path = "/"' in home_content
 		assert "externalComponents={externalComponents}" in home_content
 		assert "path={path}" in home_content
 
@@ -312,7 +312,7 @@ class TestCodegen:
 		assert 'import { Button } from "./components/Button";' in interactive_content
 		assert '"Header": Header,' not in interactive_content
 		assert '"Button": Button,' in interactive_content
-		assert 'const path = "interactive"' in interactive_content
+		assert 'const path = "/interactive"' in interactive_content
 		assert "externalComponents={externalComponents}" in interactive_content
 		assert "path={path}" in interactive_content
 

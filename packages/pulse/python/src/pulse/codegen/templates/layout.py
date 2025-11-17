@@ -40,7 +40,10 @@ export async function loader(args: LoaderFunctionArgs) {
   if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
   const body = await res.json();
   if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
-  if (body.notFound) return new Response(null, { status: 404 });
+  if (body.notFound) {
+    console.error("Not found:", url.pathname);
+    throw new Response("Not Found", { status: 404 });
+  }
   const prerenderData = deserialize(body) as PulsePrerender;
   const setCookies =
     (res.headers.getSetCookie?.() as string[] | undefined) ??
@@ -78,7 +81,7 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
   if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
   const body = await res.json();
   if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
-  if (body.notFound) return new Response(null, { status: 404 });
+  if (body.notFound) throw new Response("Not Found", { status: 404 });
   const prerenderData = deserialize(body) as PulsePrerender;
   if (typeof window !== "undefined" && typeof sessionStorage !== "undefined" && prerenderData.directives) {
     sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(prerenderData.directives));

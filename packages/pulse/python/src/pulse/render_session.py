@@ -26,7 +26,7 @@ from pulse.routing import (
 	RouteContext,
 	RouteInfo,
 	RouteTree,
-	normalize_path,
+	ensure_absolute_path,
 )
 from pulse.state import State
 from pulse.vdom import Element
@@ -353,7 +353,7 @@ class RenderSession:
 		self,
 		path: str,
 	):
-		path = normalize_path(path)
+		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			raise ValueError(f"No active route for '{path}'")

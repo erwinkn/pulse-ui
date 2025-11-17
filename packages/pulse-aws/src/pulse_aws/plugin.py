@@ -14,7 +14,8 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Callable, override
+from collections.abc import Awaitable, Callable
+from typing import Any, override
 
 import pulse as ps
 import requests
@@ -286,25 +287,27 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 		self.plugin = plugin
 
 	@override
-	def prerender(
+	async def prerender(
 		self,
 		*,
 		payload: ps.PrerenderPayload,
-		result: ps.PrerenderResult,
 		request: ps.PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], ps.PrerenderResult],
-	) -> ps.PrerenderResult:
+		next: Callable[[], Awaitable[ps.PrerenderResponse]],
+	) -> ps.PrerenderResponse:
 		"""Add AWS ECS deployment affinity header to prerender directives."""
-		res = next()
+		res = await next()
 
-		directives = res["directives"]
-		# Add deployment ID header for ALB affinity routing (HTTP requests)
-		directives["headers"]["X-Pulse-Render-Affinity"] = self.plugin.deployment_id
-		# Add deployment ID header for Socket.IO connections (WebSocket affinity)
-		directives["socketio"]["headers"]["X-Pulse-Render-Affinity"] = (
-			self.plugin.deployment_id
-		)
+		# Only modify directives if we have an Ok result
+		if isinstance(res, ps.Ok):
+			directives = res.payload["directives"]
+			# Add deployment ID header for ALB affinity routing (HTTP requests)
+			directives["headers"]["X-Pulse-Render-Affinity"] = self.plugin.deployment_id
+			# Add deployment ID header for Socket.IO connections (WebSocket affinity)
+			directives["socketio"]["headers"]["X-Pulse-Render-Affinity"] = (
+				self.plugin.deployment_id
+			)
+		# For Redirect or NotFound, just pass through
 		return res
 
 

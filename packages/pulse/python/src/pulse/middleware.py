@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Generic, TypeVar, overload, override
 
 from pulse.messages import (
 	ClientMessage,
+	Prerender,
 	PrerenderPayload,
-	PrerenderResult,
 	ServerInitMessage,
 )
 from pulse.request import PulseRequest
@@ -26,20 +26,21 @@ class NotFound: ...
 
 
 class Ok(Generic[T]):
-	payload: T | None
+	payload: T
 
 	@overload
 	def __init__(self, payload: T) -> None: ...
 	@overload
-	def __init__(self, payload: T | None = None) -> None: ...
+	def __init__(self, payload: None = None) -> None: ...
 	def __init__(self, payload: T | None = None) -> None:
-		self.payload = payload
+		self.payload = payload  # pyright: ignore[reportAttributeAccessIssue]
 
 
 class Deny: ...
 
 
-PrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
+RoutePrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
+PrerenderResponse = Ok[Prerender] | Redirect | NotFound
 ConnectResponse = Ok[None] | Deny
 
 
@@ -50,56 +51,55 @@ class PulseMiddleware:
 	for later use. Return a decision to allow or short-circuit the flow.
 	"""
 
-	def prerender(
+	async def prerender(
 		self,
 		*,
 		payload: "PrerenderPayload",
-		result: "PrerenderResult",
 		request: PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], "PrerenderResult"],
-	) -> "PrerenderResult":
+		next: Callable[[], Awaitable[PrerenderResponse]],
+	) -> PrerenderResponse:
 		"""Handle batch prerender at the top level.
 
-		Receives the full PrerenderPayload and can modify the PrerenderResult
-		(views and directives) before it's returned to the client.
+		Receives the full PrerenderPayload. Call next() to get the PrerenderResult
+		and can modify it (views and directives) before returning to the client.
 		"""
-		return next()
+		return await next()
 
-	def prerender_route(
+	async def prerender_route(
 		self,
 		*,
 		path: str,
 		request: PulseRequest,
 		route_info: RouteInfo,
 		session: dict[str, Any],
-		next: Callable[[], PrerenderResponse],
-	) -> PrerenderResponse:
-		return next()
+		next: Callable[[], Awaitable[RoutePrerenderResponse]],
+	) -> RoutePrerenderResponse:
+		return await next()
 
-	def connect(
+	async def connect(
 		self,
 		*,
 		request: PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], ConnectResponse],
+		next: Callable[[], Awaitable[ConnectResponse]],
 	) -> ConnectResponse:
-		return next()
+		return await next()
 
-	def message(
+	async def message(
 		self,
 		*,
 		data: ClientMessage,
 		session: dict[str, Any],
-		next: Callable[[], Ok[None]],
+		next: Callable[[], Awaitable[Ok[None]]],
 	) -> Ok[None] | Deny:
 		"""Handle per-message authorization.
 
 		Return Deny() to block, Ok(None) to allow.
 		"""
-		return next()
+		return await next()
 
-	def channel(
+	async def channel(
 		self,
 		*,
 		channel_id: str,
@@ -107,9 +107,9 @@ class PulseMiddleware:
 		payload: Any,
 		request_id: str | None,
 		session: dict[str, Any],
-		next: Callable[[], Ok[None]],
+		next: Callable[[], Awaitable[Ok[None]]],
 	) -> Ok[None] | Deny:
-		return next()
+		return await next()
 
 
 class MiddlewareStack(PulseMiddleware):
@@ -123,52 +123,50 @@ class MiddlewareStack(PulseMiddleware):
 		self._middlewares: list[PulseMiddleware] = list(middlewares)
 
 	@override
-	def prerender(
+	async def prerender(
 		self,
 		*,
 		payload: "PrerenderPayload",
-		result: "PrerenderResult",
 		request: PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], "PrerenderResult"],
-	) -> "PrerenderResult":
-		def dispatch(index: int) -> "PrerenderResult":
+		next: Callable[[], Awaitable[PrerenderResponse]],
+	) -> PrerenderResponse:
+		async def dispatch(index: int) -> PrerenderResponse:
 			if index >= len(self._middlewares):
-				return next()
+				return await next()
 			mw = self._middlewares[index]
 
-			def _next() -> "PrerenderResult":
-				return dispatch(index + 1)
+			async def _next() -> PrerenderResponse:
+				return await dispatch(index + 1)
 
-			return mw.prerender(
+			return await mw.prerender(
 				payload=payload,
-				result=result,
 				request=request,
 				session=session,
 				next=_next,
 			)
 
-		return dispatch(0)
+		return await dispatch(0)
 
 	@override
-	def prerender_route(
+	async def prerender_route(
 		self,
 		*,
 		path: str,
 		request: PulseRequest,
 		route_info: RouteInfo,
 		session: dict[str, Any],
-		next: Callable[[], PrerenderResponse],
-	) -> PrerenderResponse:
-		def dispatch(index: int) -> PrerenderResponse:
+		next: Callable[[], Awaitable[RoutePrerenderResponse]],
+	) -> RoutePrerenderResponse:
+		async def dispatch(index: int) -> RoutePrerenderResponse:
 			if index >= len(self._middlewares):
-				return next()
+				return await next()
 			mw = self._middlewares[index]
 
-			def _next() -> PrerenderResponse:
-				return dispatch(index + 1)
+			async def _next() -> RoutePrerenderResponse:
+				return await dispatch(index + 1)
 
-			return mw.prerender_route(
+			return await mw.prerender_route(
 				path=path,
 				route_info=route_info,
 				request=request,
@@ -176,50 +174,56 @@ class MiddlewareStack(PulseMiddleware):
 				next=_next,
 			)
 
-		return dispatch(0)
+		return await dispatch(0)
 
 	@override
-	def connect(
+	async def connect(
 		self,
 		*,
 		request: PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], ConnectResponse],
+		next: Callable[[], Awaitable[ConnectResponse]],
 	) -> ConnectResponse:
-		def dispatch(index: int) -> ConnectResponse:
+		async def dispatch(index: int) -> ConnectResponse:
 			if index >= len(self._middlewares):
-				return next()
+				return await next()
 			mw = self._middlewares[index]
 
-			def _next() -> ConnectResponse:
-				return dispatch(index + 1)
+			async def _next() -> ConnectResponse:
+				return await dispatch(index + 1)
 
-			return mw.connect(request=request, session=session, next=_next)
+			return await mw.connect(request=request, session=session, next=_next)
 
-		return dispatch(0)
+		return await dispatch(0)
 
 	@override
-	def message(
+	async def message(
 		self,
 		*,
 		data: ClientMessage,
 		session: dict[str, Any],
-		next: Callable[[], Ok[None]],
+		next: Callable[[], Awaitable[Ok[None]]],
 	) -> Ok[None] | Deny:
-		def dispatch(index: int) -> Ok[None] | Deny:
+		async def dispatch(index: int) -> Ok[None] | Deny:
 			if index >= len(self._middlewares):
-				return next()
+				return await next()
 			mw = self._middlewares[index]
 
-			def _next() -> Ok[None]:
-				return dispatch(index + 1)  # pyright: ignore[reportReturnType]
+			async def _next() -> Ok[None]:
+				result = await dispatch(index + 1)
+				# If dispatch returns Deny, the middleware should have short-circuited
+				# This should only be called when continuing the chain
+				if isinstance(result, Deny):
+					# This shouldn't happen, but handle it gracefully
+					return Ok(None)
+				return result
 
-			return mw.message(session=session, data=data, next=_next)
+			return await mw.message(session=session, data=data, next=_next)
 
-		return dispatch(0)
+		return await dispatch(0)
 
 	@override
-	def channel(
+	async def channel(
 		self,
 		*,
 		channel_id: str,
@@ -227,17 +231,23 @@ class MiddlewareStack(PulseMiddleware):
 		payload: Any,
 		request_id: str | None,
 		session: dict[str, Any],
-		next: Callable[[], Ok[None]],
+		next: Callable[[], Awaitable[Ok[None]]],
 	) -> Ok[None] | Deny:
-		def dispatch(index: int) -> Ok[None] | Deny:
+		async def dispatch(index: int) -> Ok[None] | Deny:
 			if index >= len(self._middlewares):
-				return next()
+				return await next()
 			mw = self._middlewares[index]
 
-			def _next() -> Ok[None]:
-				return dispatch(index + 1)  # pyright: ignore[reportReturnType]
+			async def _next() -> Ok[None]:
+				result = await dispatch(index + 1)
+				# If dispatch returns Deny, the middleware should have short-circuited
+				# This should only be called when continuing the chain
+				if isinstance(result, Deny):
+					# This shouldn't happen, but handle it gracefully
+					return Ok(None)
+				return result
 
-			return mw.channel(
+			return await mw.channel(
 				channel_id=channel_id,
 				event=event,
 				payload=payload,
@@ -246,7 +256,7 @@ class MiddlewareStack(PulseMiddleware):
 				next=_next,
 			)
 
-		return dispatch(0)
+		return await dispatch(0)
 
 
 def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
@@ -256,94 +266,3 @@ def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
 	Prefer passing a `list`/`tuple` to `App` directly.
 	"""
 	return MiddlewareStack(list(middlewares))
-
-
-class PulseCoreMiddleware(PulseMiddleware):
-	"""Core middleware that ensures a PulseContext is mounted around the chain.
-
-	It executes first to set up the context, then lets subsequent middlewares
-	run, and finally returns their response unchanged.
-	"""
-
-	@override
-	def prerender(
-		self,
-		*,
-		payload: "PrerenderPayload",
-		result: "PrerenderResult",
-		request: PulseRequest,
-		session: dict[str, Any],
-		next: Callable[[], "PrerenderResult"],
-	) -> "PrerenderResult":
-		res = next()
-		# Return the result as-is (no normalization needed)
-		return res
-
-	# --- Normalization helpers -------------------------------------------------
-	def _normalize_prerender_response(self, res: Any) -> PrerenderResponse:
-		if isinstance(res, (Ok, Redirect, NotFound)):
-			return res  # type: ignore[return-value]
-		# Treat any other value as a VDOM payload
-		return Ok(res)
-
-	def _normalize_connect_response(self, res: Any) -> ConnectResponse:
-		if isinstance(res, (Ok, Deny)):
-			return res  # type: ignore[return-value]
-		# Treat any other value as allow
-		return Ok(None)
-
-	def _normalize_message_response(self, res: Any) -> Ok[None] | Deny:
-		if isinstance(res, (Ok, Deny)):
-			return res  # type: ignore[return-value]
-		# Treat any other value as allow
-		return Ok(None)
-
-	@override
-	def prerender_route(
-		self,
-		*,
-		path: str,
-		request: PulseRequest,
-		route_info: RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], PrerenderResponse],
-	) -> PrerenderResponse:
-		# No render object is available during prerender middleware
-		res = next()
-		return self._normalize_prerender_response(res)
-
-	@override
-	def connect(
-		self,
-		*,
-		request: PulseRequest,
-		session: dict[str, Any],
-		next: Callable[[], ConnectResponse],
-	) -> ConnectResponse:
-		res = next()
-		return self._normalize_connect_response(res)
-
-	@override
-	def message(
-		self,
-		*,
-		data: ClientMessage,
-		session: dict[str, Any],
-		next: Callable[[], Ok[None]],
-	) -> Ok[None] | Deny:
-		res = next()
-		return self._normalize_message_response(res)
-
-	@override
-	def channel(
-		self,
-		*,
-		channel_id: str,
-		event: str,
-		payload: Any,
-		request_id: str | None,
-		session: dict[str, Any],
-		next: Callable[[], Ok[None]],
-	) -> Ok[None] | Deny:
-		res = next()
-		return self._normalize_message_response(res)

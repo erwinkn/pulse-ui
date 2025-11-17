@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TypedDict, cast, override
 
 from pulse.css import CssImport, CssModule
+from pulse.env import env
 from pulse.react_component import ReactComponent
 from pulse.reactive_extensions import ReactiveDict
 from pulse.vdom import Component
@@ -163,6 +164,7 @@ class Route:
 	css_imports: Sequence[CssImport] | None
 	is_index: bool
 	is_dynamic: bool
+	dev: bool
 
 	def __init__(
 		self,
@@ -172,6 +174,7 @@ class Route:
 		components: "Sequence[ReactComponent[...]] | None" = None,
 		css_modules: Sequence[CssModule] | None = None,
 		css_imports: Sequence[CssImport] | None = None,
+		dev: bool = False,
 	):
 		self.path = ensure_relative_path(path)
 		self.segments = parse_route_path(path)
@@ -181,6 +184,7 @@ class Route:
 		self.components = components
 		self.css_modules = css_modules
 		self.css_imports = css_imports
+		self.dev = dev
 		self.parent: Route | Layout | None = None
 
 		self.is_index = self.path == ""
@@ -255,6 +259,7 @@ class Layout:
 	components: Sequence[ReactComponent[...]] | None
 	css_modules: Sequence[CssModule] | None
 	css_imports: Sequence[CssImport] | None
+	dev: bool
 
 	def __init__(
 		self,
@@ -263,12 +268,14 @@ class Layout:
 		components: "Sequence[ReactComponent[...]] | None" = None,
 		css_modules: Sequence[CssModule] | None = None,
 		css_imports: Sequence[CssImport] | None = None,
+		dev: bool = False,
 	):
 		self.render = render
 		self.children = children or []
 		self.components = components
 		self.css_modules = css_modules
 		self.css_imports = css_imports
+		self.dev = dev
 		self.parent: Route | Layout | None = None
 		# 1-based sibling index assigned by RouteTree at each level
 		self.idx: int = 1
@@ -336,6 +343,48 @@ class Layout:
 		}
 
 
+def filter_dev_routes(routes: Sequence[Route | Layout]) -> list[Route | Layout]:
+	"""
+	Filter out routes with dev=True.
+
+	This function removes all routes marked with dev=True from the route tree.
+	Should only be called when env != "dev".
+	"""
+	filtered: list[Route | Layout] = []
+	for route in routes:
+		# Skip dev-only routes
+		if route.dev:
+			continue
+
+		# Recursively filter children
+		if route.children:
+			filtered_children = filter_dev_routes(route.children)
+			# Create a copy of the route with filtered children
+			if isinstance(route, Route):
+				filtered_route = Route(
+					path=route.path,
+					render=route.render,
+					children=filtered_children,
+					components=route.components,
+					css_modules=route.css_modules,
+					css_imports=route.css_imports,
+					dev=route.dev,
+				)
+			else:  # Layout
+				filtered_route = Layout(
+					render=route.render,
+					children=filtered_children,
+					components=route.components,
+					css_modules=route.css_modules,
+					css_imports=route.css_imports,
+					dev=route.dev,
+				)
+			filtered.append(filtered_route)
+		else:
+			filtered.append(route)
+	return filtered
+
+
 class InvalidRouteError(Exception): ...
 
 
@@ -344,6 +393,9 @@ class RouteTree:
 	flat_tree: dict[str, Route | Layout]
 
 	def __init__(self, routes: Sequence[Route | Layout]) -> None:
+		# Filter out dev routes when not in dev environment
+		if env.pulse_env != "dev":
+			routes = filter_dev_routes(routes)
 		self.tree = list(routes)
 		self.flat_tree = {}
 

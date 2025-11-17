@@ -171,7 +171,6 @@ class App:
 	def __init__(
 		self,
 		routes: Sequence[Route | Layout] | None = None,
-		dev_routes: Sequence[Route | Layout] | None = None,
 		codegen: CodegenConfig | None = None,
 		middleware: PulseMiddleware | Sequence[PulseMiddleware] | None = None,
 		plugins: Sequence[Plugin] | None = None,
@@ -214,13 +213,12 @@ class App:
 		# Add plugin routes after user-defined routes
 		for plugin in self.plugins:
 			all_routes.extend(plugin.routes())
-			if self.env == "dev":
-				all_routes.extend(plugin.dev_routes())
 
 		# Auto-add React components to all routes
 		add_react_components(all_routes, registered_react_components())
 		add_css_modules(all_routes, registered_css_modules())
 		add_css_imports(all_routes, registered_css_imports())
+		# RouteTree filters routes based on dev flag and environment during construction
 		self.routes = RouteTree(all_routes)
 		self.not_found = not_found
 		# Default not-found path for client-side navigation on not_found()

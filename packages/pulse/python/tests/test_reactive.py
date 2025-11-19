@@ -768,6 +768,79 @@ def test_effect_explicit_deps_only():
 	assert e.runs == 2
 
 
+def test_effect_immediate_false_explicit_deps_registers_on_init():
+	"""Test that an effect with immediate=False and explicit deps registers dependencies immediately upon initialization."""
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+
+	@effect(immediate=False, deps=[a, b])
+	def e():
+		_ = a()
+		_ = b()
+
+	# Explicit deps should be registered immediately upon initialization (before first run)
+	assert e.runs == 0
+	assert a.obs == [e]
+	assert b.obs == [e]
+	# Explicit deps should be stored in regular deps attribute (not _explicit_deps)
+	assert e._explicit_deps == [a, b]
+	assert e.deps == {a: a.last_change, b: b.last_change}
+
+	# After first run, deps should still be registered
+	flush_effects()
+	assert e.runs == 1
+	assert e.deps == {a: a.last_change, b: b.last_change}
+	assert a.obs == [e]
+	assert b.obs == [e]
+
+
+def test_effect_explicit_deps_doesnt_track_dynamic_deps():
+	"""Test that updating an explicit dependency triggers effect execution."""
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+	c = Signal(0, name="c")
+
+	runs = 0
+	values = []
+
+	@effect(deps=[a, b])
+	def e():  # pyright: ignore[reportUnusedFunction]
+		nonlocal runs
+		runs += 1
+		# Read c but it shouldn't be tracked due to explicit deps
+		values.append((a(), b(), c()))
+
+	flush_effects()
+	assert runs == 1
+	assert values == [(0, 0, 0)]
+
+	# Updating c should not trigger effect (not in explicit deps)
+	c.write(10)
+	flush_effects()
+	assert runs == 1
+	assert values == [(0, 0, 0)]
+
+	# Updating a should trigger effect
+	a.write(1)
+	flush_effects()
+	assert runs == 2
+	assert values == [(0, 0, 0), (1, 0, 10)]
+
+	# Updating b should trigger effect
+	b.write(2)
+	flush_effects()
+	assert runs == 3
+	assert values == [(0, 0, 0), (1, 0, 10), (1, 2, 10)]
+
+	# Updating both a and b in batch should trigger once
+	with Batch():
+		a.write(3)
+		b.write(4)
+	flush_effects()
+	assert runs == 4
+	assert values == [(0, 0, 0), (1, 0, 10), (1, 2, 10), (3, 4, 10)]
+
+
 @pytest.mark.asyncio
 async def test_async_effect_tracks_dependencies_across_await():
 	s1 = Signal(1, name="s1")
@@ -839,65 +912,44 @@ async def test_async_effect_cleanup_on_rerun():
 
 # TODO: find a way to make this pass. Effect cancellation works in practice.
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-	reason="Cancellation timing is event-loop dependent; non-deterministic in CI",
-	strict=False,
-)
 async def test_async_effect_cancels_inflight_on_rerun():
-	s = Signal(0, name="s")
-	progressed_values: list[int] = []
-	loop = asyncio.get_event_loop()
-	gate0: asyncio.Future[None] = loop.create_future()
-	gate1: asyncio.Future[None] = loop.create_future()
+	loop = asyncio.get_running_loop()
+	gate: asyncio.Future[None] = loop.create_future()
+	finished = False
 
-	@effect
+	s = Signal(0, name="s")
+
+	@effect(deps=[s])
 	async def e():
-		_ = s()
-		if s() == 0:
-			await gate0
-		else:
-			await gate1
-		progressed_values.append(s())
+		nonlocal finished
+		await gate
+		finished = True
+
+	assert e.deps == {s: s.last_change}
 
 	# Start first run and pause at gate0
 	flush_effects()
-	await asyncio.sleep(0)
-	initial_task = getattr(e, "_task", None)
+	initial_task = e._task  # pyright: ignore[reportPrivateUsage]
+	assert initial_task is not None, "Effect's task should be set after first run"
+	assert not finished, "Effect should not have finished after first run"
 
 	# Trigger rerun -> should cancel in-flight task
+	print("Writing to signal", s.name)
 	s.write(1)
+	print("Signal written", s.name)
+	assert e._task is None, "Effect's task should be set to None on cancellation"  # pyright: ignore[reportPrivateUsage]
+	assert not finished, "Effect should not have finished after signal write"
 	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	# Wait until the effect has rerun and replaced the task, then release gate1 only
-	for _ in range(10):
-		if (
-			getattr(e, "_task", None) is not initial_task
-			and getattr(e, "_task", None) is not None
-		):
-			break
-		await asyncio.sleep(0)
+	assert initial_task.cancelled(), (
+		"Initial task should be cancelled after signal write"
+	)
+	assert e._task is not None, "Effect's task should be set after rescheduling"  # pyright: ignore[reportPrivateUsage]
 
-	if not gate1.done():
-		gate1.set_result(None)
+	# Let the effect finish
+	gate.set_result(None)
 	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-
-	# Only the second run should have progressed (allow a few ticks to settle)
-	for _ in range(20):
-		if progressed_values == [1]:
-			break
-		await asyncio.sleep(0)
-	assert progressed_values == [1]
-
-	# Releasing gate0 later should not allow the cancelled first run to progress
-	if not gate0.done():
-		gate0.set_result(None)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	assert progressed_values == [1]
-	# The second run should have completed by now (counts as first completed run)
-	assert e.runs == 1
+	assert e._task is None, "Effect's task should be cleared after run"  # pyright: ignore[reportPrivateUsage]
+	assert finished, "Effect should have finished after rerun"
 
 
 @pytest.mark.asyncio

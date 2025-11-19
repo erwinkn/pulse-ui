@@ -276,6 +276,12 @@ class Effect:
 		if immediate and lazy:
 			raise ValueError("An effect cannot be boht immediate and lazy")
 
+		# Register explicit dependencies immediately upon initialization
+		if deps is not None:
+			self.deps = {dep: dep.last_change for dep in deps}
+			for dep in deps:
+				dep.add_obs(self)
+
 		rc = REACTIVE_CONTEXT.get()
 		if rc.scope is not None:
 			rc.scope.register_effect(self)
@@ -479,38 +485,46 @@ class AsyncEffect(Effect):
 		# Cancel any previous run still in flight
 		self.cancel()
 
-		async def _runner():
-			nonlocal execution_epoch
-			with Scope() as scope:
-				try:
-					result = cast(AsyncEffectFn, self.fn)()
-					if inspect.isawaitable(result):
-						self.cleanup_fn = await result
-					else:
-						# Support accidental non-async returns in async-annotated fns
-						self.cleanup_fn = result
-				except asyncio.CancelledError:
-					# Swallow cancellation
-					return
-				except Exception as e:
-					self.handle_error(e)
-				self.runs += 1
-				self.last_run = execution_epoch
-			self._apply_scope_results(scope)
+		this_task: asyncio.Task[None] | None = None
 
-		self._task = create_task(_runner(), name=self._task_name())
+		async def _runner():
+			nonlocal execution_epoch, this_task
+			try:
+				with Scope() as scope:
+					try:
+						result = cast(AsyncEffectFn, self.fn)()
+						if inspect.isawaitable(result):
+							self.cleanup_fn = await result
+						else:
+							# Support accidental non-async returns in async-annotated fns
+							self.cleanup_fn = result
+					except asyncio.CancelledError:
+						# Re-raise so finally block executes to clear task reference
+						raise
+					except Exception as e:
+						self.handle_error(e)
+					self.runs += 1
+					self.last_run = execution_epoch
+				self._apply_scope_results(scope)
+			finally:
+				# Clear the task reference when it finishes
+				if self._task is this_task:
+					self._task = None
+
+		this_task = create_task(_runner(), name=self._task_name())
+		self._task = this_task
 
 	def cancel(self) -> None:
 		self.unschedule()
-		if self._task and not self._task.done():
-			self._task.cancel()
+		if self._task:
+			if not self._task.cancelled():
+				self._task.cancel()
+			self._task = None
 
 	@override
 	def dispose(self):
 		# Run children cleanups first, then cancel in-flight task
-		self.unschedule()
-		if self._task and not self._task.done():
-			self._task.cancel()
+		self.cancel()
 		for child in self.children.copy():
 			child.dispose()
 		if self.cleanup_fn:

@@ -937,7 +937,9 @@ async def test_async_effect_cancels_inflight_on_rerun():
 	print("Writing to signal", s.name)
 	s.write(1)
 	print("Signal written", s.name)
-	assert e._task is None, "Effect's task should be set to None on cancellation"  # pyright: ignore[reportPrivateUsage]
+	# Effect restarts immediately, so _task should be a new task
+	assert e._task is not None  # pyright: ignore[reportPrivateUsage]
+	assert e._task is not initial_task  # pyright: ignore[reportPrivateUsage]
 	assert not finished, "Effect should not have finished after signal write"
 	await asyncio.sleep(0)
 	assert initial_task.cancelled(), (
@@ -2113,3 +2115,101 @@ def test_computed_exception_does_not_cause_circular_dependency():
 	# After fixing the condition, it should work
 	s.write(3)
 	assert c() == 6
+
+
+@pytest.mark.asyncio
+async def test_async_effect_skips_batch():
+	s = Signal(0)
+	runs = 0
+
+	@effect
+	async def e():
+		nonlocal runs
+		runs += 1
+		s()
+		await asyncio.sleep(0)
+
+	# Starts immediately
+	assert e.runs == 0  # Task created but not run yet
+	await asyncio.sleep(0.01)
+	assert e.runs == 1
+
+	# Update inside batch
+	with Batch() as batch:
+		s.write(1)
+		# AsyncEffect should ignore batch and run immediately (task created)
+		assert e not in batch.effects
+		assert e.runs == 1  # Task created, not run yet
+		await asyncio.sleep(0.01)
+		assert e.runs == 2
+
+	# Exiting batch does nothing extra
+	await asyncio.sleep(0.01)
+	assert e.runs == 2
+
+
+@pytest.mark.asyncio
+async def test_async_effect_await_run():
+	s = Signal(0)
+	finished = False
+
+	@effect(lazy=True)
+	async def e():
+		nonlocal finished
+		s()
+		await asyncio.sleep(0.01)
+		finished = True
+
+	# Run and await
+	await e.run()
+	assert finished
+	assert e.runs == 1
+
+
+@pytest.mark.asyncio
+async def test_async_effect_await_call():
+	s = Signal(0)
+	finished = False
+
+	@effect(lazy=True)
+	async def e():
+		nonlocal finished
+		s()
+		await asyncio.sleep(0.01)
+		finished = True
+
+	# Call and await
+	await e()
+	assert finished
+	assert e.runs == 1
+
+
+@pytest.mark.asyncio
+async def test_async_effect_copy_and_deepcopy():
+	s = Signal(0)
+
+	async def fn():
+		s()
+
+	e = AsyncEffect(fn, name="test")
+
+	# Copy
+	e_copy = copy.copy(e)
+	assert isinstance(e_copy, AsyncEffect)
+	assert e_copy.name == "test"
+	# It starts immediately, so it might have a task
+	assert e_copy._task is not None  # pyright: ignore[reportPrivateUsage]
+	assert e_copy._task is not e._task  # pyright: ignore[reportPrivateUsage]
+	assert e_copy is not e
+
+	# Deepcopy
+	e_deep = copy.deepcopy(e)
+	assert isinstance(e_deep, AsyncEffect)
+	assert e_deep.name == "test"
+	assert e_deep._task is not None  # pyright: ignore[reportPrivateUsage]
+	assert e_deep._task is not e._task  # pyright: ignore[reportPrivateUsage]
+	assert e_deep is not e
+
+	e.dispose()
+	e_copy.dispose()
+	e_deep.dispose()

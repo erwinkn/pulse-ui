@@ -438,7 +438,8 @@ class Effect:
 
 
 class AsyncEffect(Effect):
-	batch: "Batch | None"
+	batch: "None"  # pyright: ignore[reportIncompatibleVariableOverride]
+	_task: asyncio.Task[None] | None
 
 	def __init__(
 		self,
@@ -448,6 +449,8 @@ class AsyncEffect(Effect):
 		on_error: Callable[[Exception], None] | None = None,
 		deps: list[Signal[Any] | Computed[Any]] | None = None,
 	):
+		# Track an async task when running async effects
+		self._task = None
 		super().__init__(
 			fn=fn,  # pyright: ignore[reportArgumentType]
 			name=name,
@@ -456,17 +459,19 @@ class AsyncEffect(Effect):
 			on_error=on_error,
 			deps=deps,
 		)
-		# Track an async task when running async effects
-		self._task: asyncio.Task[Any] | None = None
 
-	def _task_name(self) -> str:
-		base = self.name or "effect"
-		return f"effect:{base}"
+	@override
+	def schedule(self):
+		"""
+		Schedule the async effect. Unlike synchronous effects, async effects do not
+		go through batches, they cancel the previous run and create a new task
+		immediately..
+		"""
+		self.run()
 
 	@override
 	def push_change(self):
-		self.cancel()
-		super().push_change()
+		self.schedule()
 
 	@override
 	def _copy_kwargs(self):
@@ -475,21 +480,27 @@ class AsyncEffect(Effect):
 		return kwargs
 
 	@override
-	def _execute(self) -> None:
+	def run(self) -> asyncio.Task[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+		"""
+		Run the async effect immediately, cancelling any previous run.
+		Returns the asyncio.Task.
+		"""
 		execution_epoch = epoch()
-
-		# Clear batch *before* running as we may update a signal that causes
-		# this effect to be rescheduled.
-		self.batch = None
 
 		# Cancel any previous run still in flight
 		self.cancel()
-
 		this_task: asyncio.Task[None] | None = None
 
 		async def _runner():
 			nonlocal execution_epoch, this_task
 			try:
+				# Perform cleanups in the new task
+				with Untrack():
+					try:
+						self._cleanup_before_run()
+					except Exception as e:
+						self.handle_error(e)
+
 				with Scope() as scope:
 					try:
 						result = cast(AsyncEffectFn, self.fn)()
@@ -511,11 +522,16 @@ class AsyncEffect(Effect):
 				if self._task is this_task:
 					self._task = None
 
-		this_task = create_task(_runner(), name=self._task_name())
+		this_task = create_task(_runner(), name=f"effect:{self.name or 'unnamed'}")
 		self._task = this_task
+		return this_task
+
+	@override
+	async def __call__(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+		await self.run()
 
 	def cancel(self) -> None:
-		self.unschedule()
+		# No batch removal needed as AsyncEffect is not batched
 		if self._task:
 			if not self._task.cancelled():
 				self._task.cancel()

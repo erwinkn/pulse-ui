@@ -72,6 +72,7 @@ from pulse.css import (
 # Decorators
 from pulse.decorators import computed as computed
 from pulse.decorators import effect as effect
+from pulse.decorators import mutation as mutation
 from pulse.decorators import query as query
 
 # Environment
@@ -1343,6 +1344,7 @@ from pulse.middleware import (
 
 # Plugin
 from pulse.plugin import Plugin as Plugin
+from pulse.queries.query import QueryStatus as QueryStatus
 
 # React component registry
 from pulse.react_component import (

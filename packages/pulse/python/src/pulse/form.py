@@ -1,10 +1,9 @@
 import json
 import uuid
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import (
 	TYPE_CHECKING,
-	Any,
 	Never,
 	TypedDict,
 	Unpack,
@@ -60,7 +59,7 @@ class FormRegistration:
 	render_id: str
 	route_path: str
 	session_id: str
-	on_submit: Callable[[FormData], Coroutine[Any, Any, None]]
+	on_submit: Callable[[FormData], Awaitable[None]]
 
 
 class FormRegistry:
@@ -73,7 +72,7 @@ class FormRegistry:
 		render_id: str,
 		route_id: str,
 		session_id: str,
-		on_submit: Callable[[FormData], Coroutine[Any, Any, None]],
+		on_submit: Callable[[FormData], Awaitable[None]],
 	) -> FormRegistration:
 		registration = FormRegistration(
 			uuid.uuid4().hex,

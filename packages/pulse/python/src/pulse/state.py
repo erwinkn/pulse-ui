@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterator
 from enum import IntEnum
 from typing import Any, Generic, Never, TypeVar, override
 
+from pulse.helpers import Disposable
 from pulse.reactive import (
 	AsyncEffect,
 	Computed,
@@ -330,15 +331,22 @@ class State(ABC, metaclass=StateMeta):
 
 	def dispose(self):
 		# Call user-defined cleanup hook first
+		from pulse.queries.query_observer import QueryResult
+
 		self.on_dispose()
 
-		disposed = set()
+		disposed_effects = set[Effect]()
 		for value in self.__dict__.values():
-			if isinstance(value, Effect):
+			if isinstance(value, Disposable):
 				value.dispose()
-				disposed.add(value)
+			if isinstance(value, QueryResult):
+				disposed_effects.add(value._callback_effect)  # pyright: ignore[reportPrivateUsage]
+				disposed_effects.add(value._observe_effect)  # pyright: ignore[reportPrivateUsage]
+				continue
+			if isinstance(value, Effect):
+				disposed_effects.add(value)
 
-		if len(set(self._scope.effects) - disposed) > 0:
+		if len(set(self._scope.effects) - disposed_effects) > 0:
 			raise RuntimeError(
 				f"State.dispose() missed effects defined on its Scope: {[e.name for e in self._scope.effects]}"
 			)

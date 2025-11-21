@@ -2,7 +2,8 @@ import asyncio
 import inspect
 import os
 import socket
-from collections.abc import Awaitable, Callable, Coroutine
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypedDict, TypeVar, overload, override
 from urllib.parse import urlsplit
 
@@ -86,9 +87,13 @@ def data(**attrs: Any):
 
 
 # --- Async scheduling helpers (work from loop or sync threads) ---
+class Disposable(ABC):
+	@abstractmethod
+	def dispose(self):
+		pass
 
 
-def _running_under_pytest() -> bool:
+def is_running_under_pytest() -> bool:
 	"""Detect if running inside pytest using environment variables."""
 	return bool(os.environ.get("PYTEST_CURRENT_TEST")) or (
 		"PYTEST_XDIST_TESTRUNUID" in os.environ
@@ -109,12 +114,12 @@ def schedule_on_loop(callback: Callable[[], None]) -> None:
 		try:
 			from_thread.run(_runner)
 		except RuntimeError:
-			if not _running_under_pytest():
+			if not is_running_under_pytest():
 				raise
 
 
 def create_task(
-	coroutine: Coroutine[Any, Any, T],
+	coroutine: Awaitable[T],
 	*,
 	name: str | None = None,
 	on_done: Callable[[asyncio.Task[T]], None] | None = None,
@@ -126,16 +131,22 @@ def create_task(
 	"""
 
 	try:
-		loop = asyncio.get_running_loop()
-		task = loop.create_task(coroutine, name=name)
+		asyncio.get_running_loop()
+		# ensure_future accepts Awaitable and returns a Task when given a coroutine
+		task = asyncio.ensure_future(coroutine)
+		if name is not None:
+			task.set_name(name)
 		if on_done:
 			task.add_done_callback(on_done)
 		return task
 	except RuntimeError:
 
 		async def _runner():
-			loop = asyncio.get_running_loop()
-			task = loop.create_task(coroutine, name=name)
+			asyncio.get_running_loop()
+			# ensure_future accepts Awaitable and returns a Task when given a coroutine
+			task = asyncio.ensure_future(coroutine)
+			if name is not None:
+				task.set_name(name)
 			if on_done:
 				task.add_done_callback(on_done)
 			return task
@@ -143,7 +154,7 @@ def create_task(
 		try:
 			return from_thread.run(_runner)
 		except RuntimeError:
-			if _running_under_pytest():
+			if is_running_under_pytest():
 				return None  # pyright: ignore[reportReturnType]
 			raise
 

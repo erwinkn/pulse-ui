@@ -2117,6 +2117,126 @@ def test_computed_exception_does_not_cause_circular_dependency():
 	assert c() == 6
 
 
+def test_computed_with_previous_value_parameter():
+	"""Test that computed functions can optionally receive the previous value."""
+	s = Signal(1, name="s")
+
+	prev_values: list[int | None] = []
+
+	def computed_with_prev(prev: int | None) -> int:
+		prev_values.append(prev)
+		return s() * 2
+
+	c = Computed(computed_with_prev, name="c")
+
+	# First access: prev should be None (initial value)
+	assert c() == 2
+	assert prev_values == [None]
+
+	# Second access: prev should be 2
+	s.write(2)
+	assert c() == 4
+	assert prev_values == [None, 2]
+
+	# Third access: prev should be 4
+	s.write(3)
+	assert c() == 6
+	assert prev_values == [None, 2, 4]
+
+
+def test_computed_with_previous_value_parameter_first_run():
+	"""Test that computed receives None on first run when it accepts previous value."""
+	s = Signal(10, name="s")
+
+	first_prev: int | None = None
+
+	def computed_with_prev(prev: int | None) -> int:
+		nonlocal first_prev
+		if first_prev is None:
+			first_prev = prev
+		return s() * 2
+
+	c = Computed(computed_with_prev, name="c")
+
+	# First access
+	result = c()
+	assert result == 20
+	assert first_prev is None
+
+
+def test_computed_without_previous_value_parameter():
+	"""Test that computed functions without parameters still work normally."""
+	s = Signal(5, name="s")
+
+	def computed_no_params():
+		return s() * 3
+
+	c = Computed(computed_no_params, name="c")
+
+	assert c() == 15
+	s.write(10)
+	assert c() == 30
+
+
+def test_computed_previous_value_with_computed_chain():
+	"""Test previous value parameter works in computed chains."""
+	s = Signal(1, name="s")
+
+	prev_values_c1: list[int | None] = []
+	prev_values_c2: list[int | None] = []
+
+	def c1_fn(prev: int | None) -> int:
+		prev_values_c1.append(prev)
+		return s() * 2
+
+	def c2_fn(prev: int | None) -> int:
+		prev_values_c2.append(prev)
+		return c1() * 2
+
+	c1 = Computed(c1_fn, name="c1")
+	c2 = Computed(c2_fn, name="c2")
+
+	# First access
+	assert c2() == 4
+	assert prev_values_c1 == [None]
+	assert prev_values_c2 == [None]
+
+	# Second access
+	s.write(2)
+	assert c2() == 8
+	assert prev_values_c1 == [None, 2]
+	assert prev_values_c2 == [None, 4]
+
+
+def test_computed_previous_value_with_dynamic_dependencies():
+	"""Test previous value parameter works with dynamic dependencies."""
+	s1 = Signal(10, name="s1")
+	s2 = Signal(20, name="s2")
+	toggle = Signal(True, name="toggle")
+
+	prev_values: list[int | None] = []
+
+	def c_fn(prev: int | None) -> int:
+		prev_values.append(prev)
+		return s1() if toggle() else s2()
+
+	c = Computed(c_fn, name="c")
+
+	# First access
+	assert c() == 10
+	assert prev_values == [None]
+
+	# Change toggle - should see previous value
+	toggle.write(False)
+	assert c() == 20
+	assert prev_values == [None, 10]
+
+	# Change s2 - should see previous value
+	s2.write(30)
+	assert c() == 30
+	assert prev_values == [None, 10, 20]
+
+
 @pytest.mark.asyncio
 async def test_async_effect_skips_batch():
 	s = Signal(0)
@@ -2213,3 +2333,165 @@ async def test_async_effect_copy_and_deepcopy():
 	e.dispose()
 	e_copy.dispose()
 	e_deep.dispose()
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_starts_task_if_not_running():
+	finished = False
+
+	@effect(lazy=True)
+	async def e():
+		nonlocal finished
+		await asyncio.sleep(0.01)
+		finished = True
+
+	# No task running initially
+	assert e._task is None  # pyright: ignore[reportPrivateUsage]
+
+	# Wait should start the task and wait for completion
+	await e.wait()
+	assert finished
+	assert e.runs == 1
+	assert e._task is None  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_waits_for_existing_task():
+	loop = asyncio.get_running_loop()
+	gate: asyncio.Future[None] = loop.create_future()
+	finished = False
+
+	@effect(lazy=True)
+	async def e():
+		nonlocal finished
+		await gate
+		finished = True
+
+	# Start the task
+	e.run()
+	assert e.is_scheduled is True
+	assert not finished
+
+	# Wait should wait for the existing task
+	wait_task = asyncio.create_task(e.wait())
+	await asyncio.sleep(0)  # Let wait start
+
+	# Release the gate
+	gate.set_result(None)
+	await wait_task
+
+	assert finished
+	assert e.runs == 1
+	assert e.is_scheduled is False
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_handles_cancellation():
+	started = 0
+	finished = 0
+
+	def on_error(e: Exception):
+		raise e
+
+	@effect(lazy=True, on_error=on_error)
+	async def e():
+		nonlocal started
+		nonlocal finished
+		started += 1
+		await asyncio.sleep(0.01)
+		finished += 1
+
+	# Start first run. Won't finish until we execute two awaits.
+	e.run()
+	assert e.is_scheduled is True
+	await asyncio.sleep(0)  # Let effect start
+	assert started == 1
+	assert finished == 0
+
+	# Start waiting
+	wait_task = asyncio.create_task(e.wait())
+	await asyncio.sleep(0)
+	assert started == 1
+	assert finished == 0
+
+	e.run()
+	await asyncio.sleep(0)
+
+	assert started == 2
+	assert finished == 0
+	assert not wait_task.cancelled()
+
+	await wait_task
+
+	assert started == 2
+	assert finished == 1
+	assert e.runs == 1
+	assert e.is_scheduled is False
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_handles_multiple_cancellations():
+	started = 0
+	finished = 0
+
+	def on_error(e: Exception):
+		raise e
+
+	@effect(lazy=True, on_error=on_error)
+	async def e():
+		nonlocal started, finished
+		started += 1
+		await asyncio.sleep(0.01)
+		finished += 1
+
+	# Start first run
+	e.run()
+	await asyncio.sleep(0)  # Let effect start
+	assert started == 1
+	assert finished == 0
+
+	# Start waiting
+	wait_task = asyncio.create_task(e.wait())
+	await asyncio.sleep(0)
+
+	# Cancel and restart multiple times
+	for _ in range(2):
+		e.run()
+		await asyncio.sleep(0)
+
+	# Final run should complete
+	await wait_task
+
+	assert started == 3
+	assert finished == 1
+	assert e.runs == 1  # Only the final run completes
+	assert e.is_scheduled is False
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_after_completion():
+	started = 0
+	finished = 0
+
+	def on_error(e: Exception):
+		raise e
+
+	@effect(lazy=True, on_error=on_error)
+	async def e():
+		nonlocal started, finished
+		started += 1
+		await asyncio.sleep(0.01)
+		finished += 1
+
+	# Run and complete
+	await e.run()
+	assert started == 1
+	assert finished == 1
+	assert e.is_scheduled is False
+
+	# Wait after completion should start a new run
+	await e.wait()
+	assert started == 2
+	assert finished == 2
+	assert e.runs == 2
+	assert e.is_scheduled is False

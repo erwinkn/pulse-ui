@@ -1,18 +1,17 @@
 import asyncio
 import copy
 import inspect
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
 from typing import (
 	Any,
 	Generic,
 	ParamSpec,
 	TypeVar,
-	cast,
 	override,
 )
 
-from pulse.helpers import create_task, schedule_on_loop, values_equal
+from pulse.helpers import create_task, maybe_await, schedule_on_loop, values_equal
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -94,6 +93,7 @@ class Computed(Generic[T]):
 	name: str | None
 	dirty: bool
 	on_stack: bool
+	accepts_prev_value: bool
 
 	def __init__(self, fn: Callable[..., T], name: str | None = None):
 		self.fn = fn
@@ -106,6 +106,18 @@ class Computed(Generic[T]):
 		self.deps: dict[Signal[Any] | Computed[Any], int] = {}
 		self.obs: list[Computed[Any] | Effect] = []
 		self._obs_change_listeners: list[Callable[[int], None]] = []
+		sig = inspect.signature(self.fn)
+		params = list(sig.parameters.values())
+		# Check if function has at least one positional parameter
+		# (excluding *args and **kwargs, and keyword-only params)
+		self.accepts_prev_value = any(
+			p.kind
+			in (
+				inspect.Parameter.POSITIONAL_ONLY,
+				inspect.Parameter.POSITIONAL_OR_KEYWORD,
+			)
+			for p in params
+		)
 
 	def read(self) -> T:
 		if self.on_stack:
@@ -156,7 +168,10 @@ class Computed(Generic[T]):
 			self.on_stack = True
 			try:
 				execution_epoch = epoch()
-				self.value = self.fn()
+				if self.accepts_prev_value:
+					self.value = self.fn(prev_value)
+				else:
+					self.value = self.fn()
 				if epoch() != execution_epoch:
 					raise RuntimeError(
 						f"Detected write to a signal in computed {self.name}. Computeds should be read-only."
@@ -231,7 +246,7 @@ class Computed(Generic[T]):
 EffectCleanup = Callable[[], None]
 # Split effect function types into sync and async for clearer typing
 EffectFn = Callable[[], EffectCleanup | None]
-AsyncEffectFn = Callable[[], Coroutine[Any, Any, EffectCleanup | None]]
+AsyncEffectFn = Callable[[], Awaitable[EffectCleanup | None]]
 
 
 class Effect:
@@ -438,7 +453,8 @@ class Effect:
 
 
 class AsyncEffect(Effect):
-	batch: "None"  # pyright: ignore[reportIncompatibleVariableOverride]
+	fn: AsyncEffectFn  # pyright: ignore[reportIncompatibleMethodOverride]
+	batch: None  # pyright: ignore[reportIncompatibleVariableOverride]
 	_task: asyncio.Task[None] | None
 
 	def __init__(
@@ -469,9 +485,9 @@ class AsyncEffect(Effect):
 		"""
 		self.run()
 
-	@override
-	def push_change(self):
-		self.schedule()
+	@property
+	def is_scheduled(self) -> bool:
+		return self._task is not None
 
 	@override
 	def _copy_kwargs(self):
@@ -503,12 +519,8 @@ class AsyncEffect(Effect):
 
 				with Scope() as scope:
 					try:
-						result = cast(AsyncEffectFn, self.fn)()
-						if inspect.isawaitable(result):
-							self.cleanup_fn = await result
-						else:
-							# Support accidental non-async returns in async-annotated fns
-							self.cleanup_fn = result
+						result = self.fn()
+						self.cleanup_fn = await maybe_await(result)
 					except asyncio.CancelledError:
 						# Re-raise so finally block executes to clear task reference
 						raise
@@ -533,9 +545,30 @@ class AsyncEffect(Effect):
 	def cancel(self) -> None:
 		# No batch removal needed as AsyncEffect is not batched
 		if self._task:
-			if not self._task.cancelled():
-				self._task.cancel()
+			t = self._task
 			self._task = None
+			if not t.cancelled():
+				t.cancel()
+
+	async def wait(self) -> None:
+		"""
+		Wait until the completion of the current task if it's already running,
+		or start a run if it's not running. In case of cancellation, awaits
+		the new task by recursively calling itself.
+		"""
+		while True:
+			try:
+				await (self._task or self.run())
+				return
+			except asyncio.CancelledError:
+				# If wait() itself is cancelled, propagate it
+				current_task = asyncio.current_task()
+				if current_task is not None and (
+					current_task.cancelling() > 0 or current_task.cancelled()
+				):
+					raise
+				# Effect task was cancelled, continue waiting for new task
+				continue
 
 	@override
 	def dispose(self):

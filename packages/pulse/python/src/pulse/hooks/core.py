@@ -3,9 +3,9 @@ import logging
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, override
 
-from pulse.helpers import call_flexible
+from pulse.helpers import Disposable, call_flexible
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class HookMetadata:
 	extra: Mapping[str, Any] | None = None
 
 
-class HookState:
+class HookState(Disposable):
 	"""Base class returned by hook factories."""
 
 	render_cycle: int
@@ -52,6 +52,7 @@ class HookState:
 		"""Called after the component render has completed."""
 		...
 
+	@override
 	def dispose(self) -> None:
 		"""Called when the hook instance is discarded."""
 		...

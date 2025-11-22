@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import aws_cdk as cdk
+import pytest
 from aws_cdk.assertions import Template
 from pulse_aws.cdk.baseline import BaselineStack
 from pulse_aws.certificate import parse_acm_validation_records
@@ -21,6 +22,7 @@ def synth(**kwargs) -> Template:
 	return Template.from_stack(stack)
 
 
+@pytest.mark.cdk
 def test_stack_with_certificate_arn():
 	template = synth()
 

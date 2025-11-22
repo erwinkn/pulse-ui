@@ -18,6 +18,7 @@ from pulse.messages import (
 	ServerNavigateToMessage,
 	ServerUpdateMessage,
 )
+from pulse.queries.store import QueryStore
 from pulse.reactive import Effect, flush_effects
 from pulse.renderer import RenderTree
 from pulse.routing import (
@@ -60,6 +61,7 @@ class RenderSession:
 	routes: RouteTree
 	channels: "ChannelsManager"
 	forms: "FormRegistry"
+	query_store: QueryStore
 
 	def __init__(
 		self,
@@ -85,6 +87,7 @@ class RenderSession:
 		self._pending_api: dict[str, asyncio.Future[dict[str, Any]]] = {}
 		# Registry of per-session global singletons (created via ps.global_state without id)
 		self._global_states: dict[str, State] = {}
+		self.query_store = QueryStore()
 		# Connection state
 		self.connected: bool = False
 		self.channels = ChannelsManager(self)

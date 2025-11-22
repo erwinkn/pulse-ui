@@ -1,18 +1,23 @@
 import asyncio
 import copy
 import inspect
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
 from typing import (
 	Any,
 	Generic,
 	ParamSpec,
 	TypeVar,
-	cast,
 	override,
 )
 
-from pulse.helpers import create_task, schedule_on_loop, values_equal
+from pulse.helpers import (
+	Disposable,
+	create_task,
+	maybe_await,
+	schedule_on_loop,
+	values_equal,
+)
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -94,6 +99,7 @@ class Computed(Generic[T]):
 	name: str | None
 	dirty: bool
 	on_stack: bool
+	accepts_prev_value: bool
 
 	def __init__(self, fn: Callable[..., T], name: str | None = None):
 		self.fn = fn
@@ -106,6 +112,18 @@ class Computed(Generic[T]):
 		self.deps: dict[Signal[Any] | Computed[Any], int] = {}
 		self.obs: list[Computed[Any] | Effect] = []
 		self._obs_change_listeners: list[Callable[[int], None]] = []
+		sig = inspect.signature(self.fn)
+		params = list(sig.parameters.values())
+		# Check if function has at least one positional parameter
+		# (excluding *args and **kwargs, and keyword-only params)
+		self.accepts_prev_value = any(
+			p.kind
+			in (
+				inspect.Parameter.POSITIONAL_ONLY,
+				inspect.Parameter.POSITIONAL_OR_KEYWORD,
+			)
+			for p in params
+		)
 
 	def read(self) -> T:
 		if self.on_stack:
@@ -156,7 +174,10 @@ class Computed(Generic[T]):
 			self.on_stack = True
 			try:
 				execution_epoch = epoch()
-				self.value = self.fn()
+				if self.accepts_prev_value:
+					self.value = self.fn(prev_value)
+				else:
+					self.value = self.fn()
 				if epoch() != execution_epoch:
 					raise RuntimeError(
 						f"Detected write to a signal in computed {self.name}. Computeds should be read-only."
@@ -231,10 +252,10 @@ class Computed(Generic[T]):
 EffectCleanup = Callable[[], None]
 # Split effect function types into sync and async for clearer typing
 EffectFn = Callable[[], EffectCleanup | None]
-AsyncEffectFn = Callable[[], Coroutine[Any, Any, EffectCleanup | None]]
+AsyncEffectFn = Callable[[], Awaitable[EffectCleanup | None]]
 
 
-class Effect:
+class Effect(Disposable):
 	"""
 	Synchronous effect and base class. Use AsyncEffect for async effects.
 	Both are isinstance(Effect).
@@ -247,6 +268,7 @@ class Effect:
 	last_run: int
 	immediate: bool
 	_lazy: bool
+	explicit_deps: bool
 	batch: "Batch | None"
 
 	def __init__(
@@ -269,12 +291,18 @@ class Effect:
 		self.last_run = -1
 		self.scope: Scope | None = None
 		self.batch = None
-		self._explicit_deps: list[Signal[Any] | Computed[Any]] | None = deps
+		self.explicit_deps = deps is not None
 		self.immediate = immediate
 		self._lazy = lazy
 
 		if immediate and lazy:
 			raise ValueError("An effect cannot be boht immediate and lazy")
+
+		# Register explicit dependencies immediately upon initialization
+		if deps is not None:
+			self.deps = {dep: dep.last_change for dep in deps}
+			for dep in deps:
+				dep.add_obs(self)
 
 		rc = REACTIVE_CONTEXT.get()
 		if rc.scope is not None:
@@ -291,6 +319,7 @@ class Effect:
 		if self.cleanup_fn:
 			self.cleanup_fn()
 
+	@override
 	def dispose(self):
 		self.unschedule()
 		for child in self.children.copy():
@@ -353,15 +382,24 @@ class Effect:
 			return
 		raise exc
 
-	def _apply_scope_results(self, scope: "Scope") -> None:
+	def _apply_scope_results(
+		self,
+		scope: "Scope",
+		captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None,
+	) -> None:
+		# Apply captured last_change values at the end for explicit deps
+		if self.explicit_deps:
+			assert captured_last_changes is not None
+			for dep, last_change in captured_last_changes.items():
+				self.deps[dep] = last_change
+			return
+
 		self.children = scope.effects
 		for child in self.children:
 			child.parent = self
 
 		prev_deps = set(self.deps)
-		if self._explicit_deps is not None:
-			self.deps = {dep: dep.last_change for dep in self._explicit_deps}
-		else:
+		if not self.explicit_deps:
 			self.deps = scope.deps
 		new_deps = set(self.deps)
 		add_deps = new_deps - prev_deps
@@ -379,8 +417,8 @@ class Effect:
 
 	def _copy_kwargs(self) -> dict[str, Any]:
 		deps = None
-		if self._explicit_deps is not None:
-			deps = list(self._explicit_deps)
+		if self.explicit_deps:
+			deps = list(self.deps.keys())
 		return {
 			"fn": self.fn,
 			"name": self.name,
@@ -418,6 +456,10 @@ class Effect:
 
 	def _execute(self) -> None:
 		execution_epoch = epoch()
+		# Capture last_change for explicit deps before running
+		captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None
+		if self.explicit_deps:
+			captured_last_changes = {dep: dep.last_change for dep in self.deps}
 		with Scope() as scope:
 			# Clear batch *before* running as we may update a signal that causes
 			# this effect to be rescheduled.
@@ -428,11 +470,13 @@ class Effect:
 				self.handle_error(e)
 			self.runs += 1
 			self.last_run = execution_epoch
-		self._apply_scope_results(scope)
+		self._apply_scope_results(scope, captured_last_changes)
 
 
 class AsyncEffect(Effect):
-	batch: "Batch | None"
+	fn: AsyncEffectFn  # pyright: ignore[reportIncompatibleMethodOverride]
+	batch: None  # pyright: ignore[reportIncompatibleVariableOverride]
+	_task: asyncio.Task[None] | None
 
 	def __init__(
 		self,
@@ -442,6 +486,8 @@ class AsyncEffect(Effect):
 		on_error: Callable[[Exception], None] | None = None,
 		deps: list[Signal[Any] | Computed[Any]] | None = None,
 	):
+		# Track an async task when running async effects
+		self._task = None
 		super().__init__(
 			fn=fn,  # pyright: ignore[reportArgumentType]
 			name=name,
@@ -450,17 +496,19 @@ class AsyncEffect(Effect):
 			on_error=on_error,
 			deps=deps,
 		)
-		# Track an async task when running async effects
-		self._task: asyncio.Task[Any] | None = None
-
-	def _task_name(self) -> str:
-		base = self.name or "effect"
-		return f"effect:{base}"
 
 	@override
-	def push_change(self):
-		self.cancel()
-		super().push_change()
+	def schedule(self):
+		"""
+		Schedule the async effect. Unlike synchronous effects, async effects do not
+		go through batches, they cancel the previous run and create a new task
+		immediately..
+		"""
+		self.run()
+
+	@property
+	def is_scheduled(self) -> bool:
+		return self._task is not None
 
 	@override
 	def _copy_kwargs(self):
@@ -469,48 +517,91 @@ class AsyncEffect(Effect):
 		return kwargs
 
 	@override
-	def _execute(self) -> None:
+	def run(self) -> asyncio.Task[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+		"""
+		Run the async effect immediately, cancelling any previous run.
+		Returns the asyncio.Task.
+		"""
 		execution_epoch = epoch()
-
-		# Clear batch *before* running as we may update a signal that causes
-		# this effect to be rescheduled.
-		self.batch = None
 
 		# Cancel any previous run still in flight
 		self.cancel()
+		this_task: asyncio.Task[None] | None = None
 
 		async def _runner():
-			nonlocal execution_epoch
-			with Scope() as scope:
-				try:
-					result = cast(AsyncEffectFn, self.fn)()
-					if inspect.isawaitable(result):
-						self.cleanup_fn = await result
-					else:
-						# Support accidental non-async returns in async-annotated fns
-						self.cleanup_fn = result
-				except asyncio.CancelledError:
-					# Swallow cancellation
-					return
-				except Exception as e:
-					self.handle_error(e)
-				self.runs += 1
-				self.last_run = execution_epoch
-			self._apply_scope_results(scope)
+			nonlocal execution_epoch, this_task
+			try:
+				# Perform cleanups in the new task
+				with Untrack():
+					try:
+						self._cleanup_before_run()
+					except Exception as e:
+						self.handle_error(e)
 
-		self._task = create_task(_runner(), name=self._task_name())
+				# Capture last_change for explicit deps before running
+				captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = (
+					None
+				)
+				if self.explicit_deps:
+					captured_last_changes = {dep: dep.last_change for dep in self.deps}
+
+				with Scope() as scope:
+					try:
+						result = self.fn()
+						self.cleanup_fn = await maybe_await(result)
+					except asyncio.CancelledError:
+						# Re-raise so finally block executes to clear task reference
+						raise
+					except Exception as e:
+						self.handle_error(e)
+					self.runs += 1
+					self.last_run = execution_epoch
+				self._apply_scope_results(scope, captured_last_changes)
+			finally:
+				# Clear the task reference when it finishes
+				if self._task is this_task:
+					self._task = None
+
+		this_task = create_task(_runner(), name=f"effect:{self.name or 'unnamed'}")
+		self._task = this_task
+		return this_task
+
+	@override
+	async def __call__(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+		await self.run()
 
 	def cancel(self) -> None:
-		self.unschedule()
-		if self._task and not self._task.done():
-			self._task.cancel()
+		# No batch removal needed as AsyncEffect is not batched
+		if self._task:
+			t = self._task
+			self._task = None
+			if not t.cancelled():
+				t.cancel()
+
+	async def wait(self) -> None:
+		"""
+		Wait until the completion of the current task if it's already running,
+		or start a run if it's not running. In case of cancellation, awaits
+		the new task by recursively calling itself.
+		"""
+		while True:
+			try:
+				await (self._task or self.run())
+				return
+			except asyncio.CancelledError:
+				# If wait() itself is cancelled, propagate it
+				current_task = asyncio.current_task()
+				if current_task is not None and (
+					current_task.cancelling() > 0 or current_task.cancelled()
+				):
+					raise
+				# Effect task was cancelled, continue waiting for new task
+				continue
 
 	@override
 	def dispose(self):
 		# Run children cleanups first, then cancel in-flight task
-		self.unschedule()
-		if self._task and not self._task.done():
-			self._task.cancel()
+		self.cancel()
 		for child in self.children.copy():
 			child.dispose()
 		if self.cleanup_fn:

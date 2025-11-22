@@ -360,7 +360,6 @@ class TestRouteTemplateConflicts:
 		]
 		rt.add_components(comps)
 		ctx = rt.context()
-		print("Context:", ctx)
 
 		# Imports aliased due to reserved names
 		import_sources = cast(list[Any], ctx["import_sources"])

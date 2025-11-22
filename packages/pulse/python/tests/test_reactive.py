@@ -768,6 +768,79 @@ def test_effect_explicit_deps_only():
 	assert e.runs == 2
 
 
+def test_effect_immediate_false_explicit_deps_registers_on_init():
+	"""Test that an effect with immediate=False and explicit deps registers dependencies immediately upon initialization."""
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+
+	@effect(immediate=False, deps=[a, b])
+	def e():
+		_ = a()
+		_ = b()
+
+	# Explicit deps should be registered immediately upon initialization (before first run)
+	assert e.runs == 0
+	assert a.obs == [e]
+	assert b.obs == [e]
+	# Explicit deps should be stored in regular deps attribute (not _explicit_deps)
+	assert e.explicit_deps is True
+	assert e.deps == {a: a.last_change, b: b.last_change}
+
+	# After first run, deps should still be registered
+	flush_effects()
+	assert e.runs == 1
+	assert e.deps == {a: a.last_change, b: b.last_change}
+	assert a.obs == [e]
+	assert b.obs == [e]
+
+
+def test_effect_explicit_deps_doesnt_track_dynamic_deps():
+	"""Test that updating an explicit dependency triggers effect execution."""
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+	c = Signal(0, name="c")
+
+	runs = 0
+	values = []
+
+	@effect(deps=[a, b])
+	def e():  # pyright: ignore[reportUnusedFunction]
+		nonlocal runs
+		runs += 1
+		# Read c but it shouldn't be tracked due to explicit deps
+		values.append((a(), b(), c()))
+
+	flush_effects()
+	assert runs == 1
+	assert values == [(0, 0, 0)]
+
+	# Updating c should not trigger effect (not in explicit deps)
+	c.write(10)
+	flush_effects()
+	assert runs == 1
+	assert values == [(0, 0, 0)]
+
+	# Updating a should trigger effect
+	a.write(1)
+	flush_effects()
+	assert runs == 2
+	assert values == [(0, 0, 0), (1, 0, 10)]
+
+	# Updating b should trigger effect
+	b.write(2)
+	flush_effects()
+	assert runs == 3
+	assert values == [(0, 0, 0), (1, 0, 10), (1, 2, 10)]
+
+	# Updating both a and b in batch should trigger once
+	with Batch():
+		a.write(3)
+		b.write(4)
+	flush_effects()
+	assert runs == 4
+	assert values == [(0, 0, 0), (1, 0, 10), (1, 2, 10), (3, 4, 10)]
+
+
 @pytest.mark.asyncio
 async def test_async_effect_tracks_dependencies_across_await():
 	s1 = Signal(1, name="s1")
@@ -839,65 +912,44 @@ async def test_async_effect_cleanup_on_rerun():
 
 # TODO: find a way to make this pass. Effect cancellation works in practice.
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-	reason="Cancellation timing is event-loop dependent; non-deterministic in CI",
-	strict=False,
-)
 async def test_async_effect_cancels_inflight_on_rerun():
-	s = Signal(0, name="s")
-	progressed_values: list[int] = []
-	loop = asyncio.get_event_loop()
-	gate0: asyncio.Future[None] = loop.create_future()
-	gate1: asyncio.Future[None] = loop.create_future()
+	loop = asyncio.get_running_loop()
+	gate: asyncio.Future[None] = loop.create_future()
+	finished = False
 
-	@effect
+	s = Signal(0, name="s")
+
+	@effect(deps=[s])
 	async def e():
-		_ = s()
-		if s() == 0:
-			await gate0
-		else:
-			await gate1
-		progressed_values.append(s())
+		nonlocal finished
+		await gate
+		finished = True
+
+	assert e.deps == {s: s.last_change}
 
 	# Start first run and pause at gate0
 	flush_effects()
-	await asyncio.sleep(0)
-	initial_task = getattr(e, "_task", None)
+	initial_task = e._task  # pyright: ignore[reportPrivateUsage]
+	assert initial_task is not None, "Effect's task should be set after first run"
+	assert not finished, "Effect should not have finished after first run"
 
 	# Trigger rerun -> should cancel in-flight task
 	s.write(1)
+	# Effect restarts immediately, so _task should be a new task
+	assert e._task is not None  # pyright: ignore[reportPrivateUsage]
+	assert e._task is not initial_task  # pyright: ignore[reportPrivateUsage]
+	assert not finished, "Effect should not have finished after signal write"
 	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	# Wait until the effect has rerun and replaced the task, then release gate1 only
-	for _ in range(10):
-		if (
-			getattr(e, "_task", None) is not initial_task
-			and getattr(e, "_task", None) is not None
-		):
-			break
-		await asyncio.sleep(0)
+	assert initial_task.cancelled(), (
+		"Initial task should be cancelled after signal write"
+	)
+	assert e._task is not None, "Effect's task should be set after rescheduling"  # pyright: ignore[reportPrivateUsage]
 
-	if not gate1.done():
-		gate1.set_result(None)
+	# Let the effect finish
+	gate.set_result(None)
 	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-
-	# Only the second run should have progressed (allow a few ticks to settle)
-	for _ in range(20):
-		if progressed_values == [1]:
-			break
-		await asyncio.sleep(0)
-	assert progressed_values == [1]
-
-	# Releasing gate0 later should not allow the cancelled first run to progress
-	if not gate0.done():
-		gate0.set_result(None)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	assert progressed_values == [1]
-	# The second run should have completed by now (counts as first completed run)
-	assert e.runs == 1
+	assert e._task is None, "Effect's task should be cleared after run"  # pyright: ignore[reportPrivateUsage]
+	assert finished, "Effect should have finished after rerun"
 
 
 @pytest.mark.asyncio
@@ -2061,3 +2113,446 @@ def test_computed_exception_does_not_cause_circular_dependency():
 	# After fixing the condition, it should work
 	s.write(3)
 	assert c() == 6
+
+
+def test_computed_with_previous_value_parameter():
+	"""Test that computed functions can optionally receive the previous value."""
+	s = Signal(1, name="s")
+
+	prev_values: list[int | None] = []
+
+	def computed_with_prev(prev: int | None) -> int:
+		prev_values.append(prev)
+		return s() * 2
+
+	c = Computed(computed_with_prev, name="c")
+
+	# First access: prev should be None (initial value)
+	assert c() == 2
+	assert prev_values == [None]
+
+	# Second access: prev should be 2
+	s.write(2)
+	assert c() == 4
+	assert prev_values == [None, 2]
+
+	# Third access: prev should be 4
+	s.write(3)
+	assert c() == 6
+	assert prev_values == [None, 2, 4]
+
+
+def test_computed_with_previous_value_parameter_first_run():
+	"""Test that computed receives None on first run when it accepts previous value."""
+	s = Signal(10, name="s")
+
+	first_prev: int | None = None
+
+	def computed_with_prev(prev: int | None) -> int:
+		nonlocal first_prev
+		if first_prev is None:
+			first_prev = prev
+		return s() * 2
+
+	c = Computed(computed_with_prev, name="c")
+
+	# First access
+	result = c()
+	assert result == 20
+	assert first_prev is None
+
+
+def test_computed_without_previous_value_parameter():
+	"""Test that computed functions without parameters still work normally."""
+	s = Signal(5, name="s")
+
+	def computed_no_params():
+		return s() * 3
+
+	c = Computed(computed_no_params, name="c")
+
+	assert c() == 15
+	s.write(10)
+	assert c() == 30
+
+
+def test_computed_previous_value_with_computed_chain():
+	"""Test previous value parameter works in computed chains."""
+	s = Signal(1, name="s")
+
+	prev_values_c1: list[int | None] = []
+	prev_values_c2: list[int | None] = []
+
+	def c1_fn(prev: int | None) -> int:
+		prev_values_c1.append(prev)
+		return s() * 2
+
+	def c2_fn(prev: int | None) -> int:
+		prev_values_c2.append(prev)
+		return c1() * 2
+
+	c1 = Computed(c1_fn, name="c1")
+	c2 = Computed(c2_fn, name="c2")
+
+	# First access
+	assert c2() == 4
+	assert prev_values_c1 == [None]
+	assert prev_values_c2 == [None]
+
+	# Second access
+	s.write(2)
+	assert c2() == 8
+	assert prev_values_c1 == [None, 2]
+	assert prev_values_c2 == [None, 4]
+
+
+def test_computed_previous_value_with_dynamic_dependencies():
+	"""Test previous value parameter works with dynamic dependencies."""
+	s1 = Signal(10, name="s1")
+	s2 = Signal(20, name="s2")
+	toggle = Signal(True, name="toggle")
+
+	prev_values: list[int | None] = []
+
+	def c_fn(prev: int | None) -> int:
+		prev_values.append(prev)
+		return s1() if toggle() else s2()
+
+	c = Computed(c_fn, name="c")
+
+	# First access
+	assert c() == 10
+	assert prev_values == [None]
+
+	# Change toggle - should see previous value
+	toggle.write(False)
+	assert c() == 20
+	assert prev_values == [None, 10]
+
+	# Change s2 - should see previous value
+	s2.write(30)
+	assert c() == 30
+	assert prev_values == [None, 10, 20]
+
+
+@pytest.mark.asyncio
+async def test_async_effect_skips_batch():
+	s = Signal(0)
+	runs = 0
+
+	@effect
+	async def e():
+		nonlocal runs
+		runs += 1
+		s()
+		await asyncio.sleep(0)
+
+	# Starts immediately
+	assert e.runs == 0  # Task created but not run yet
+	await asyncio.sleep(0.01)
+	assert e.runs == 1
+
+	# Update inside batch
+	with Batch() as batch:
+		s.write(1)
+		# AsyncEffect should ignore batch and run immediately (task created)
+		assert e not in batch.effects
+		assert e.runs == 1  # Task created, not run yet
+		await asyncio.sleep(0.01)
+		assert e.runs == 2
+
+	# Exiting batch does nothing extra
+	await asyncio.sleep(0.01)
+	assert e.runs == 2
+
+
+@pytest.mark.asyncio
+async def test_async_effect_await_run():
+	s = Signal(0)
+	finished = False
+
+	@effect(lazy=True)
+	async def e():
+		nonlocal finished
+		s()
+		await asyncio.sleep(0.01)
+		finished = True
+
+	# Run and await
+	await e.run()
+	assert finished
+	assert e.runs == 1
+
+
+@pytest.mark.asyncio
+async def test_async_effect_await_call():
+	s = Signal(0)
+	finished = False
+
+	@effect(lazy=True)
+	async def e():
+		nonlocal finished
+		s()
+		await asyncio.sleep(0.01)
+		finished = True
+
+	# Call and await
+	await e()
+	assert finished
+	assert e.runs == 1
+
+
+@pytest.mark.asyncio
+async def test_async_effect_copy_and_deepcopy():
+	s = Signal(0)
+
+	async def fn():
+		s()
+
+	e = AsyncEffect(fn, name="test")
+
+	# Copy
+	e_copy = copy.copy(e)
+	assert isinstance(e_copy, AsyncEffect)
+	assert e_copy.name == "test"
+	# It starts immediately, so it might have a task
+	assert e_copy._task is not None  # pyright: ignore[reportPrivateUsage]
+	assert e_copy._task is not e._task  # pyright: ignore[reportPrivateUsage]
+	assert e_copy is not e
+
+	# Deepcopy
+	e_deep = copy.deepcopy(e)
+	assert isinstance(e_deep, AsyncEffect)
+	assert e_deep.name == "test"
+	assert e_deep._task is not None  # pyright: ignore[reportPrivateUsage]
+	assert e_deep._task is not e._task  # pyright: ignore[reportPrivateUsage]
+	assert e_deep is not e
+
+	e.dispose()
+	e_copy.dispose()
+	e_deep.dispose()
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_starts_task_if_not_running():
+	finished = False
+
+	@effect(lazy=True)
+	async def e():
+		nonlocal finished
+		await asyncio.sleep(0.01)
+		finished = True
+
+	# No task running initially
+	assert e._task is None  # pyright: ignore[reportPrivateUsage]
+
+	# Wait should start the task and wait for completion
+	await e.wait()
+	assert finished
+	assert e.runs == 1
+	assert e._task is None  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_waits_for_existing_task():
+	loop = asyncio.get_running_loop()
+	gate: asyncio.Future[None] = loop.create_future()
+	finished = False
+
+	@effect(lazy=True)
+	async def e():
+		nonlocal finished
+		await gate
+		finished = True
+
+	# Start the task
+	e.run()
+	assert e.is_scheduled is True
+	assert not finished
+
+	# Wait should wait for the existing task
+	wait_task = asyncio.create_task(e.wait())
+	await asyncio.sleep(0)  # Let wait start
+
+	# Release the gate
+	gate.set_result(None)
+	await wait_task
+
+	assert finished
+	assert e.runs == 1
+	assert e.is_scheduled is False
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_handles_cancellation():
+	started = 0
+	finished = 0
+
+	def on_error(e: Exception):
+		raise e
+
+	@effect(lazy=True, on_error=on_error)
+	async def e():
+		nonlocal started
+		nonlocal finished
+		started += 1
+		await asyncio.sleep(0.01)
+		finished += 1
+
+	# Start first run. Won't finish until we execute two awaits.
+	e.run()
+	assert e.is_scheduled is True
+	await asyncio.sleep(0)  # Let effect start
+	assert started == 1
+	assert finished == 0
+
+	# Start waiting
+	wait_task = asyncio.create_task(e.wait())
+	await asyncio.sleep(0)
+	assert started == 1
+	assert finished == 0
+
+	e.run()
+	await asyncio.sleep(0)
+
+	assert started == 2
+	assert finished == 0
+	assert not wait_task.cancelled()
+
+	await wait_task
+
+	assert started == 2
+	assert finished == 1
+	assert e.runs == 1
+	assert e.is_scheduled is False
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_handles_multiple_cancellations():
+	started = 0
+	finished = 0
+
+	def on_error(e: Exception):
+		raise e
+
+	@effect(lazy=True, on_error=on_error)
+	async def e():
+		nonlocal started, finished
+		started += 1
+		await asyncio.sleep(0.01)
+		finished += 1
+
+	# Start first run
+	e.run()
+	await asyncio.sleep(0)  # Let effect start
+	assert started == 1
+	assert finished == 0
+
+	# Start waiting
+	wait_task = asyncio.create_task(e.wait())
+	await asyncio.sleep(0)
+
+	# Cancel and restart multiple times
+	for _ in range(2):
+		e.run()
+		await asyncio.sleep(0)
+
+	# Final run should complete
+	await wait_task
+
+	assert started == 3
+	assert finished == 1
+	assert e.runs == 1  # Only the final run completes
+	assert e.is_scheduled is False
+
+
+@pytest.mark.asyncio
+async def test_async_effect_wait_after_completion():
+	started = 0
+	finished = 0
+
+	def on_error(e: Exception):
+		raise e
+
+	@effect(lazy=True, on_error=on_error)
+	async def e():
+		nonlocal started, finished
+		started += 1
+		await asyncio.sleep(0.01)
+		finished += 1
+
+	# Run and complete
+	await e.run()
+	assert started == 1
+	assert finished == 1
+	assert e.is_scheduled is False
+
+	# Wait after completion should start a new run
+	await e.wait()
+	assert started == 2
+	assert finished == 2
+	assert e.runs == 2
+	assert e.is_scheduled is False
+
+
+def test_effect_explicit_deps_rerun_on_internal_modification():
+	"""
+	Test that if a synchronous effect modifies one of its explicit dependencies,
+	it re-runs. This happens because we capture the dependency version
+	at the *start* of execution. Since the version changes during execution,
+	at the end the dependency is considered changed relative to the start.
+	"""
+	count = Signal(0, name="count")
+	runs = 0
+
+	@effect(deps=[count])
+	def e():  # pyright: ignore[reportUnusedFunction]
+		nonlocal runs
+		runs += 1
+		if count() < 2:
+			count.write(count() + 1)
+
+	flush_effects()
+	# Run 1: sees count=0. writes count=1.
+	# End of Run 1: deps updated to what they were at START (count=0).
+	# Check: count=1 > last_seen=0 -> Rerun.
+
+	# Run 2: sees count=1. writes count=2.
+	# End of Run 2: deps updated to what they were at START (count=1).
+	# Check: count=2 > last_seen=1 -> Rerun.
+
+	# Run 3: sees count=2. No write.
+	# End of Run 3: deps updated to what they were at START (count=2).
+	# Check: count=2 == last_seen=2 -> Done.
+
+	assert runs == 3
+	assert count() == 2
+
+
+@pytest.mark.asyncio
+async def test_async_effect_explicit_deps_rerun_on_external_modification_during_run():
+	"""
+	Test that if an async effect's explicit dependency changes while the effect
+	is awaiting, the effect re-runs.
+	"""
+	s = Signal(0, name="s")
+
+	@effect(deps=[s])
+	async def e():
+		await asyncio.sleep(0.01)
+
+	# Allow effect to start
+	await asyncio.sleep(0)
+	assert e.runs == 0
+
+	# Modify s while e is running/awaiting
+	s.write(1)
+	assert e.runs == 0
+
+	# Allow effect to finish its first run
+	await asyncio.sleep(0.02)
+	assert e.runs == 1
+
+	s.write(2)
+	await asyncio.sleep(0.02)
+	assert e.runs == 2

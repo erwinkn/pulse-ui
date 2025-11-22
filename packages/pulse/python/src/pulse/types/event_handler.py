@@ -1,10 +1,9 @@
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from typing import (
-	Any,
 	TypeVar,
 )
 
-EventHandlerResult = None | Coroutine[Any, Any, None]
+EventHandlerResult = None | Awaitable[None]
 
 T1 = TypeVar("T1", contravariant=True)
 T2 = TypeVar("T2", contravariant=True)

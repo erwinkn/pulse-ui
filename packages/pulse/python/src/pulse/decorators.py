@@ -1,10 +1,17 @@
 # Separate file from reactive.py due to needing to import from state too
 
 import inspect
-from collections.abc import Callable, Coroutine
-from typing import Any, Protocol, TypeVar, overload
+from collections.abc import Awaitable, Callable
+from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, overload
 
-from pulse.query import QueryProperty, QueryPropertyWithInitial
+from pulse.helpers import MISSING
+from pulse.queries.common import OnErrorFn, OnSuccessFn
+from pulse.queries.mutation import MutationProperty
+from pulse.queries.query import RETRY_DELAY_DEFAULT
+from pulse.queries.query_observer import (
+	QueryProperty,
+	QueryPropertyWithInitial,
+)
 from pulse.reactive import (
 	AsyncEffect,
 	AsyncEffectFn,
@@ -18,6 +25,7 @@ from pulse.state import ComputedProperty, State, StateEffect
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound=State)
+P = ParamSpec("P")
 
 
 # -> @ps.computed The chalenge is:
@@ -58,7 +66,7 @@ def computed(fn: Callable[..., Any] | None = None, *, name: str | None = None):
 
 
 StateEffectFn = Callable[[TState], EffectCleanup | None]
-AsyncStateEffectFn = Callable[[TState], Coroutine[Any, Any, EffectCleanup | None]]
+AsyncStateEffectFn = Callable[[TState], Awaitable[EffectCleanup | None]]
 
 
 class EffectBuilder(Protocol):
@@ -171,75 +179,159 @@ def effect(
 # -----------------
 # Query decorator
 # -----------------
-@overload
-def query(
-	fn: Callable[[TState], Coroutine[Any, Any, T]],
-	*,
-	keep_alive: bool = False,
-	keep_previous_data: bool = False,
-) -> QueryProperty[T, TState]: ...
-@overload
-def query(
-	fn: None = None, *, keep_alive: bool = False, keep_previous_data: bool = False
-) -> Callable[
-	[Callable[[TState], Coroutine[Any, Any, T]]], QueryProperty[T, TState]
-]: ...
 
 
-# When an initial value is provided, the resulting property narrows data to non-None
+# With initial (narrowed return type) - more specific overloads first
 @overload
 def query(
-	fn: Callable[[TState], Coroutine[Any, Any, T]],
+	fn: Callable[[TState], Awaitable[T]],
 	*,
-	keep_alive: bool = False,
+	key: Callable[[TState], tuple[Any, ...]] | None = None,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
-	initial: T,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	initial: T | Callable[[TState], T],
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
 ) -> QueryPropertyWithInitial[T, TState]: ...
+
+
 @overload
 def query(
 	fn: None = None,
 	*,
-	keep_alive: bool = False,
+	key: Callable[[TState], tuple[Any, ...]] | None = None,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
-	initial: T,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	initial: T | Callable[[TState], T],
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
 ) -> Callable[
-	[Callable[[TState], Coroutine[Any, Any, T]]], QueryPropertyWithInitial[T, TState]
+	[Callable[[TState], Awaitable[T]]], QueryPropertyWithInitial[T, TState]
 ]: ...
 
 
+@overload
 def query(
-	fn: Callable[[TState], Any] | None = None,
+	fn: Callable[[TState], Awaitable[T]],
 	*,
-	keep_alive: bool = False,
+	key: Callable[[TState], tuple[Any, ...]] | None = None,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
-	initial: Any = None,
-) -> (
-	QueryProperty[T, TState]
-	| QueryPropertyWithInitial[T, TState]
-	| Callable[
-		[Callable[[TState], Coroutine[Any, Any, T]]],
-		QueryProperty[T, TState] | QueryPropertyWithInitial[T, TState],
-	]
+	retries: int = 3,
+	retry_delay: float | None = None,
+	initial: T | Callable[[TState], T] | None = ...,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+) -> QueryProperty[T, TState]: ...
+
+
+@overload
+def query(
+	fn: None = None,
+	*,
+	key: Callable[[TState], tuple[Any, ...]] | None = None,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
+	keep_previous_data: bool = False,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	initial: T | Callable[[TState], T] | None = ...,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+) -> Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]: ...
+
+
+def query(
+	fn: Callable[[TState], Awaitable[T]] | None = None,
+	*,
+	key: Callable[[TState], tuple[Any, ...]] | None = None,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
+	keep_previous_data: bool = False,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	initial: T | Callable[[TState], T] | None = MISSING,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
 ):
-	def decorator(func: Callable[[TState], Coroutine[Any, Any, T]], /):
+	def decorator(
+		func: Callable[[TState], Awaitable[T]], /
+	) -> QueryProperty[T, TState] | QueryPropertyWithInitial[T, TState]:
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())
 		# Only state-method form supported for now (single 'self')
 		if not (len(params) == 1 and params[0].name == "self"):
 			raise TypeError("@query currently only supports state methods (self)")
-		if initial is not None:
-			return QueryPropertyWithInitial(
-				func.__name__,
-				func,
-				keep_alive=keep_alive,
-				keep_previous_data=keep_previous_data,
-				initial=initial,
-			)
-		return QueryProperty(
+
+		prop_cls = QueryPropertyWithInitial if initial is not None else QueryProperty
+
+		return prop_cls(
 			func.__name__,
 			func,
-			keep_alive=keep_alive,
+			key=key,
+			stale_time=stale_time,
+			gc_time=gc_time if gc_time is not None else 300.0,
 			keep_previous_data=keep_previous_data,
+			retries=retries,
+			retry_delay=RETRY_DELAY_DEFAULT if retry_delay is None else retry_delay,
+			initial=initial,
+			on_success=on_success,
+			on_error=on_error,
+		)
+
+	if fn:
+		return decorator(fn)
+	return decorator
+
+
+# -----------------
+# Mutation decorator
+# -----------------
+@overload
+def mutation(
+	fn: Callable[Concatenate[TState, P], Awaitable[T]],
+	*,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+) -> MutationProperty[T, TState, P]: ...
+
+
+@overload
+def mutation(
+	fn: None = None,
+	*,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+) -> Callable[
+	[Callable[Concatenate[TState, P], Awaitable[T]]], MutationProperty[T, TState, P]
+]: ...
+
+
+def mutation(
+	fn: Callable[Concatenate[TState, P], Awaitable[T]] | None = None,
+	*,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+):
+	def decorator(func: Callable[Concatenate[TState, P], Awaitable[T]], /):
+		sig = inspect.signature(func)
+		params = list(sig.parameters.values())
+
+		if len(params) == 0 or params[0].name != "self":
+			raise TypeError("@mutation method must have 'self' as first argument")
+
+		return MutationProperty(
+			func.__name__,
+			func,
+			on_success=on_success,
+			on_error=on_error,
 		)
 
 	if fn:

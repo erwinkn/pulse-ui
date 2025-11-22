@@ -17,48 +17,106 @@ S9 = TypeVar("S9", bound=State)
 S10 = TypeVar("S10", bound=State)
 
 
+class StateNamespace:
+	__slots__: tuple[str, ...] = ("states", "key", "called")
+	states: tuple[State, ...]
+	key: str | None
+	called: bool
+
+	def __init__(self, key: str | None) -> None:
+		self.states = ()
+		self.key = key
+		self.called = False
+
+	def ensure_not_called(self) -> None:
+		if self.called:
+			key_msg = (
+				f" with key='{self.key}'" if self.key is not None else " without a key"
+			)
+			raise RuntimeError(
+				f"`pulse.states` can only be called once per component render{key_msg}"
+			)
+
+	def get_or_create_states(
+		self, args: tuple[State | Callable[[], State], ...]
+	) -> tuple[State, ...]:
+		if len(self.states) > 0:
+			# Reuse existing states
+			existing_states = self.states
+			# Validate that the number of arguments matches
+			if len(args) != len(existing_states):
+				key_msg = (
+					f" with key='{self.key}'"
+					if self.key is not None
+					else " without a key"
+				)
+				raise RuntimeError(
+					f"`pulse.states` called with {len(args)} argument(s) but was previously "
+					+ f"called with {len(existing_states)} argument(s){key_msg}. "
+					+ "The number of arguments must remain consistent across renders."
+				)
+			# Dispose any State instances passed directly as args that aren't being used
+			existing_set = set(existing_states)
+			for arg in args:
+				if isinstance(arg, State) and arg not in existing_set:
+					try:
+						if not arg.__disposed__:
+							arg.dispose()
+					except RuntimeError:
+						# Already disposed, ignore
+						pass
+			return existing_states
+
+		# Create new states
+		instances = tuple(_instantiate_state(arg) for arg in args)
+		self.states = instances
+		return instances
+
+	def dispose(self) -> None:
+		for state in self.states:
+			try:
+				if not state.__disposed__:
+					state.dispose()
+			except RuntimeError:
+				# Already disposed, ignore
+				pass
+		self.states = ()
+
+
 class StatesHookState(HookState):
-	__slots__: tuple[str, ...] = ("initialized", "states", "key", "_called")
-	initialized: bool
-	_called: bool
+	__slots__: tuple[str, ...] = ("namespaces",)
+	namespaces: dict[str | None, StateNamespace]
 
 	def __init__(self) -> None:
 		super().__init__()
-		self.initialized = False
-		self.states: tuple[State, ...] = ()
-		self.key: str | None = None
-		self._called = False
+		self.namespaces = {}
 
 	@override
 	def on_render_start(self, render_cycle: int) -> None:
 		super().on_render_start(render_cycle)
-		self._called = False
+		if self.namespaces:
+			for namespace in self.namespaces.values():
+				namespace.called = False
 
-	def replace(self, states: list[State], key: str | None) -> None:
-		self.dispose_states()
-		self.states = tuple(states)
-		self.key = key
-		self.initialized = True
+	def get_namespace(self, key: str | None) -> StateNamespace:
+		if key not in self.namespaces:
+			self.namespaces[key] = StateNamespace(key)
+		return self.namespaces[key]
 
-	def dispose_states(self) -> None:
-		for state in self.states:
-			state.dispose()
-		self.states = ()
-		self.initialized = False
-		self.key = None
+	def get_or_create_states(
+		self, args: tuple[State | Callable[[], State], ...], key: str | None
+	) -> tuple[State, ...]:
+		namespace = self.get_namespace(key)
+		namespace.ensure_not_called()
+		result = namespace.get_or_create_states(args)
+		namespace.called = True
+		return result
 
 	@override
 	def dispose(self) -> None:
-		self.dispose_states()
-
-	def ensure_not_called(self) -> None:
-		if self._called:
-			raise RuntimeError(
-				"`pulse.states` can only be called once per component render"
-			)
-
-	def mark_called(self) -> None:
-		self._called = True
+		for namespace in self.namespaces.values():
+			namespace.dispose()
+		self.namespaces.clear()
 
 
 def _instantiate_state(arg: State | Callable[[], State]) -> State:
@@ -219,29 +277,8 @@ def states(*args: S | Callable[[], S], key: str | None = ...) -> tuple[S, ...]: 
 
 
 def states(*args: State | Callable[[], State], key: str | None = None):
-	state = _states_hook()
-	state.ensure_not_called()
-
-	if not state.initialized:
-		instances = [_instantiate_state(arg) for arg in args]
-		state.replace(instances, key)
-		state.mark_called()
-		result = state.states
-		return result[0] if len(result) == 1 else result
-
-	if key is not None and key != state.key:
-		instances = [_instantiate_state(arg) for arg in args]
-		state.replace(instances, key)
-		state.mark_called()
-		result = state.states
-		return result[0] if len(result) == 1 else result
-
-	for arg in args:
-		if isinstance(arg, State):
-			arg.dispose()
-
-	state.mark_called()
-	result = state.states
+	hook_state = _states_hook()
+	result = hook_state.get_or_create_states(args, key)
 	return result[0] if len(result) == 1 else result
 
 

@@ -12,6 +12,7 @@ from fastapi import Response
 
 from pulse.cookies import SetCookie
 from pulse.env import env
+from pulse.helpers import Disposable
 from pulse.reactive import AsyncEffect, Effect
 from pulse.reactive_extensions import ReactiveDict, reactive
 
@@ -23,7 +24,7 @@ Session = ReactiveDict[str, Any]
 logger = logging.getLogger(__name__)
 
 
-class UserSession:
+class UserSession(Disposable):
 	sid: str
 	data: Session
 	app: "App"
@@ -65,8 +66,8 @@ class UserSession:
 			max_age_seconds=app.cookie.max_age_seconds,
 		)
 
+	@override
 	def dispose(self):
-		print(f"Closing session {self.sid}")
 		self._effect.dispose()
 
 	def handle_response(self, res: Response):

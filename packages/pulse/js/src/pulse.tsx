@@ -122,7 +122,7 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 				return "Reconnecting...";
 			case "error":
 				return "Failed to connect to the server.";
-			case "ok":
+			// "ok" falls through to default
 			default:
 				return null;
 		}

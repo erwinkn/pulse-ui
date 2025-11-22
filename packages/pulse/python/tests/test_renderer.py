@@ -628,7 +628,10 @@ def test_keyed_parent_node_move_preserves_child_state():
 	states_ns = a_component.hooks.namespaces.get("pulse:core.states")
 	assert states_ns is not None
 	stored_hook_state = next(iter(states_ns.states.values()))
-	stored_counter = stored_hook_state.states[0]
+	# StatesHookState now uses namespaces dict, key=None for states() without key
+	state_namespace = stored_hook_state.namespaces.get(None)
+	assert state_namespace is not None
+	stored_counter = state_namespace.states[0]
 	assert isinstance(stored_counter, Counter)
 	assert stored_counter.label == "A"
 	assert stored_counter.count == 1

@@ -2,12 +2,25 @@ import asyncio
 import inspect
 import os
 import socket
-from collections.abc import Awaitable, Callable, Coroutine
-from typing import Any, ParamSpec, Protocol, TypedDict, TypeVar, overload, override
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from functools import wraps
+from typing import (
+	Any,
+	ParamSpec,
+	Protocol,
+	Self,
+	TypedDict,
+	TypeVar,
+	overload,
+	override,
+)
 from urllib.parse import urlsplit
 
 from anyio import from_thread
 from fastapi import Request
+
+from pulse.env import env
 
 
 def values_equal(a: Any, b: Any) -> bool:
@@ -86,9 +99,34 @@ def data(**attrs: Any):
 
 
 # --- Async scheduling helpers (work from loop or sync threads) ---
+class Disposable(ABC):
+	__disposed__: bool = False
+
+	@abstractmethod
+	def dispose(self) -> None: ...
+
+	def __init_subclass__(cls, **kwargs: Any):
+		super().__init_subclass__(**kwargs)
+
+		if "dispose" in cls.__dict__:
+			original_dispose = cls.dispose
+
+			@wraps(original_dispose)
+			def wrapped_dispose(self: Self, *args: Any, **kwargs: Any):
+				if self.__disposed__:
+					if env.pulse_env == "dev":
+						cls_name = type(self).__name__
+						raise RuntimeError(
+							f"{self} (type={cls_name}) was disposed twice. This is likely a bug."
+						)
+					return
+				self.__disposed__ = True
+				return original_dispose(self, *args, **kwargs)
+
+			cls.dispose = wrapped_dispose
 
 
-def _running_under_pytest() -> bool:
+def is_pytest() -> bool:
 	"""Detect if running inside pytest using environment variables."""
 	return bool(os.environ.get("PYTEST_CURRENT_TEST")) or (
 		"PYTEST_XDIST_TESTRUNUID" in os.environ
@@ -109,12 +147,12 @@ def schedule_on_loop(callback: Callable[[], None]) -> None:
 		try:
 			from_thread.run(_runner)
 		except RuntimeError:
-			if not _running_under_pytest():
+			if not is_pytest():
 				raise
 
 
 def create_task(
-	coroutine: Coroutine[Any, Any, T],
+	coroutine: Awaitable[T],
 	*,
 	name: str | None = None,
 	on_done: Callable[[asyncio.Task[T]], None] | None = None,
@@ -126,16 +164,22 @@ def create_task(
 	"""
 
 	try:
-		loop = asyncio.get_running_loop()
-		task = loop.create_task(coroutine, name=name)
+		asyncio.get_running_loop()
+		# ensure_future accepts Awaitable and returns a Task when given a coroutine
+		task = asyncio.ensure_future(coroutine)
+		if name is not None:
+			task.set_name(name)
 		if on_done:
 			task.add_done_callback(on_done)
 		return task
 	except RuntimeError:
 
 		async def _runner():
-			loop = asyncio.get_running_loop()
-			task = loop.create_task(coroutine, name=name)
+			asyncio.get_running_loop()
+			# ensure_future accepts Awaitable and returns a Task when given a coroutine
+			task = asyncio.ensure_future(coroutine)
+			if name is not None:
+				task.set_name(name)
 			if on_done:
 				task.add_done_callback(on_done)
 			return task
@@ -143,7 +187,7 @@ def create_task(
 		try:
 			return from_thread.run(_runner)
 		except RuntimeError:
-			if _running_under_pytest():
+			if is_pytest():
 				return None  # pyright: ignore[reportReturnType]
 			raise
 

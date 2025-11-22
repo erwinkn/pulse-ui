@@ -1,10 +1,9 @@
 import json
 import uuid
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import (
 	TYPE_CHECKING,
-	Any,
 	Never,
 	TypedDict,
 	Unpack,
@@ -16,7 +15,7 @@ from starlette.datastructures import FormData as StarletteFormData
 from starlette.datastructures import UploadFile
 
 from pulse.context import PulseContext
-from pulse.helpers import call_flexible, maybe_await
+from pulse.helpers import Disposable, call_flexible, maybe_await
 from pulse.hooks.core import HOOK_CONTEXT, HookMetadata, HookState, hooks
 from pulse.hooks.runtime import server_address
 from pulse.hooks.stable import stable
@@ -60,10 +59,10 @@ class FormRegistration:
 	render_id: str
 	route_path: str
 	session_id: str
-	on_submit: Callable[[FormData], Coroutine[Any, Any, None]]
+	on_submit: Callable[[FormData], Awaitable[None]]
 
 
-class FormRegistry:
+class FormRegistry(Disposable):
 	def __init__(self, render: "RenderSession") -> None:
 		self._render: "RenderSession" = render
 		self._handlers: dict[str, FormRegistration] = {}
@@ -73,7 +72,7 @@ class FormRegistry:
 		render_id: str,
 		route_id: str,
 		session_id: str,
-		on_submit: Callable[[FormData], Coroutine[Any, Any, None]],
+		on_submit: Callable[[FormData], Awaitable[None]],
 	) -> FormRegistration:
 		registration = FormRegistration(
 			uuid.uuid4().hex,
@@ -88,9 +87,9 @@ class FormRegistry:
 	def unregister(self, form_id: str) -> None:
 		self._handlers.pop(form_id, None)
 
+	@override
 	def dispose(self) -> None:
-		for form_id in list(self._handlers.keys()):
-			self.unregister(form_id)
+		self._handlers.clear()
 
 	async def handle_submit(
 		self,
@@ -203,7 +202,7 @@ class GeneratedFormProps(TypedDict):
 	onSubmit: Callable[[], None]
 
 
-class ManualForm:
+class ManualForm(Disposable):
 	_submit_signal: Signal[bool]
 	_render: "RenderSession"
 	_registration: FormRegistration | None
@@ -267,6 +266,7 @@ class ManualForm:
 		props.update(self.props())  # pyright: ignore[reportCallIssue, reportArgumentType]
 		return client_form_component(*children, key=key, **props)
 
+	@override
 	def dispose(self) -> None:
 		if self._registration is None:
 			return

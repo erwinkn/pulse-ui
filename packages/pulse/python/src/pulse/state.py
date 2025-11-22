@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterator
 from enum import IntEnum
 from typing import Any, Generic, Never, TypeVar, override
 
+from pulse.helpers import Disposable
 from pulse.reactive import (
 	AsyncEffect,
 	Computed,
@@ -185,7 +186,7 @@ class StateStatus(IntEnum):
 STATE_STATUS_FIELD = "__pulse_status__"
 
 
-class State(ABC, metaclass=StateMeta):
+class State(Disposable, metaclass=StateMeta):
 	"""
 	Base class for reactive state objects.
 
@@ -328,19 +329,19 @@ class State(ABC, metaclass=StateMeta):
 		"""
 		pass
 
+	@override
 	def dispose(self):
 		# Call user-defined cleanup hook first
+
 		self.on_dispose()
-
-		disposed = set()
 		for value in self.__dict__.values():
-			if isinstance(value, Effect):
+			if isinstance(value, Disposable):
 				value.dispose()
-				disposed.add(value)
 
-		if len(set(self._scope.effects) - disposed) > 0:
+		undisposed_effects = [e for e in self._scope.effects if not e.__disposed__]
+		if len(undisposed_effects) > 0:
 			raise RuntimeError(
-				f"State.dispose() missed effects defined on its Scope: {[e.name for e in self._scope.effects]}"
+				f"State.dispose() missed effects defined on its Scope: {[e.name for e in undisposed_effects]}"
 			)
 
 	@override

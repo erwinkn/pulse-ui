@@ -31,7 +31,6 @@ class QueryStore:
 			return self._entries[key]
 
 		def _on_dispose(e: Query[Any]) -> None:
-			print("disposing query entry in store", e.key)
 			if e.key in self._entries and self._entries[e.key] is e:
 				del self._entries[e.key]
 

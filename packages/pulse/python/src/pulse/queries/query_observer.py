@@ -5,13 +5,13 @@ from typing import (
 	Any,
 	Generic,
 	TypeVar,
-	TypeVarTuple,
 	cast,
 	override,
 )
 
 from pulse.context import PulseContext
-from pulse.helpers import Disposable, call_flexible, maybe_await
+from pulse.helpers import MISSING, Disposable
+from pulse.queries.common import OnErrorFn, OnSuccessFn, bind_state
 from pulse.queries.query import (
 	RETRY_DELAY_DEFAULT,
 	Query,
@@ -23,12 +23,7 @@ from pulse.reactive import Computed, Effect, Untrack
 from pulse.state import InitializableProperty, State
 
 T = TypeVar("T")
-TState = TypeVar("TState", bound="State")
-Args = TypeVarTuple("Args")
-R = TypeVar("R")
-
-OnSuccessFn = Callable[[TState], Any] | Callable[[TState, T], Any]
-OnErrorFn = Callable[[TState], Any] | Callable[[TState, Exception], Any]
+TState = TypeVar("TState", bound=State)
 
 
 class QueryResult(Generic[T], Disposable):
@@ -200,7 +195,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		gc_time: float = 300.0,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
-		initial: T | Callable[[TState], T] | None = None,
+		initial: T | Callable[[TState], T] | None = MISSING,
 		key: Callable[[TState], QueryKey] | None = None,
 		on_success: OnSuccessFn[TState, T] | None = None,
 		on_error: OnErrorFn[TState] | None = None,
@@ -229,7 +224,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 
 	# Decorator to attach a function providing initial data
 	def initial_data(self, fn: Callable[[TState], T]):
-		if self._initial_data is not None:
+		if self._initial_data is not MISSING:
 			raise RuntimeError(
 				f"Duplicate initial_data() decorator for query '{self.name}'. Only one is allowed."
 			)
@@ -368,51 +363,3 @@ class QueryPropertyWithInitial(QueryProperty[T, TState]):
 	def __get__(self, obj: Any, objtype: Any = None) -> QueryResultWithInitial[T]:
 		# Reuse base initialization but narrow the return type for type-checkers
 		return cast(QueryResultWithInitial[T], super().__get__(obj, objtype))
-
-
-class MutationProperty(Generic[T, TState, *Args]):
-	on_success: Callable[[TState, T], Any] | None
-	on_error: Callable[[TState, Exception], Any] | None
-	name: str
-	fn: Callable[[TState, *Args], Awaitable[T]]
-
-	def __init__(
-		self,
-		name: str,
-		fn: Callable[[TState, *Args], Awaitable[T]],
-		on_success: OnSuccessFn[TState, T] | None = None,
-		on_error: OnErrorFn[TState] | None = None,
-	):
-		self.name = name
-		self.fn = fn
-		self.on_success = on_success  # pyright: ignore[reportAttributeAccessIssue]
-		self.on_error = on_error  # pyright: ignore[reportAttributeAccessIssue]
-
-	def __get__(self, obj: Any, objtype: Any = None) -> Callable[..., Awaitable[T]]:
-		if obj is None:
-			return self  # pyright: ignore[reportReturnType]
-
-		async def bound_mutation(*args: Any, **kwargs: Any) -> T:
-			# Bind methods
-			bound_fn = bind_state(obj, self.fn)
-			bound_on_success = (
-				bind_state(obj, self.on_success) if self.on_success else None
-			)
-			bound_on_error = bind_state(obj, self.on_error) if self.on_error else None
-
-			try:
-				result = await bound_fn(*args, **kwargs)  # pyright: ignore[reportArgumentType]
-				if bound_on_success:
-					await maybe_await(call_flexible(bound_on_success, result))
-				return result
-			except Exception as e:
-				if bound_on_error:
-					await maybe_await(call_flexible(bound_on_error, e))
-				raise e
-
-		return bound_mutation
-
-
-def bind_state(state: TState, fn: Callable[[TState, *Args], R]) -> Callable[[*Args], R]:
-	"Type-safe helper to bind a method to a state"
-	return fn.__get__(state, state.__class__)

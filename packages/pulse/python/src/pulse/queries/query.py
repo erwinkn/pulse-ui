@@ -13,7 +13,14 @@ from typing import (
 	override,
 )
 
-from pulse.helpers import Disposable, call_flexible, is_pytest, later, maybe_await
+from pulse.helpers import (
+	MISSING,
+	Disposable,
+	call_flexible,
+	is_pytest,
+	later,
+	maybe_await,
+)
 from pulse.reactive import AsyncEffect, Computed, Signal
 
 if TYPE_CHECKING:
@@ -92,7 +99,7 @@ class Query(Generic[T], Disposable):
 		fn: Callable[[], Awaitable[T]],
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
-		initial_data: T | None = None,
+		initial_data: T | None = MISSING,
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
 	):
@@ -107,13 +114,16 @@ class Query(Generic[T], Disposable):
 		)
 
 		# Initialize reactive signals
-		self.data = Signal(initial_data, name=f"query.data({key})")
+		self.data = Signal(
+			None if initial_data is MISSING else initial_data, name=f"query.data({key})"
+		)
 		self.error = Signal(None, name=f"query.error({key})")
 		self.last_updated = Signal(
-			time.time() if initial_data else 0.0, name=f"query.last_updated({key})"
+			time.time() if initial_data is not MISSING else 0.0,
+			name=f"query.last_updated({key})",
 		)
 		self.status = Signal(
-			"loading" if initial_data is None else "success",
+			"loading" if initial_data is MISSING else "success",
 			name=f"query.status({key})",
 		)
 		self.fetch_status = Signal("idle", name=f"query.fetch_status({key})")
@@ -239,15 +249,12 @@ class Query(Generic[T], Disposable):
 	def schedule_gc(self):
 		self.cancel_gc()
 		if self.cfg.gc_time > 0:
-			print("scheduling gc", self.key, self.cfg.gc_time)
 			self._gc_handle = later(self.cfg.gc_time, self.dispose)
 		else:
-			print("disposing query immediately", self.key)
 			self.dispose()
 
 	def cancel_gc(self):
 		if self._gc_handle:
-			print("cancelling gc", self.key)
 			self._gc_handle.cancel()
 			self._gc_handle = None
 
@@ -256,7 +263,6 @@ class Query(Generic[T], Disposable):
 		"""
 		Cleans up the query entry, removing it from the store.
 		"""
-		print("disposing query", self.key)
 		if self._effect:
 			self._effect.dispose()
 

@@ -119,7 +119,7 @@ async def test_query_entry_cancel_refetch():
 		nonlocal calls
 		calls += 1
 		try:
-			await asyncio.sleep(0.1)
+			await asyncio.sleep(0.01)
 		except asyncio.CancelledError:
 			# print("Cancelled!")
 			raise
@@ -163,11 +163,8 @@ async def test_query_store_garbage_collection():
 	entry = store.ensure(key, fetcher, gc_time=0.01)
 	assert store.get(key) is entry
 
-	print("observing")
 	observer = QueryResult(Computed(lambda: entry, name="test_query"), gc_time=0.01)
-	print("unobserving")
 	observer.dispose()
-	print("finished observing")
 	# entry.schedule_gc()
 
 	# Should still be there immediately
@@ -301,7 +298,7 @@ async def test_query_retry_exhausted():
 async def test_query_retry_delay():
 	"""Test that retry delay is respected between attempts."""
 	key = ("test", 1)
-	attempts = []
+	attempts: list[float] = []
 
 	async def fetcher():
 		attempts.append(asyncio.get_event_loop().time())
@@ -309,13 +306,13 @@ async def test_query_retry_delay():
 			raise ValueError("retry")
 		return "success"
 
-	entry = Query(key, fetcher, retries=3, retry_delay=0.05)
+	entry = Query(key, fetcher, retries=3, retry_delay=0.01)
 	await entry.refetch()
 
 	# Check that delays were respected (with some tolerance)
 	assert len(attempts) == 3
-	assert attempts[1] - attempts[0] >= 0.04  # ~0.05 delay
-	assert attempts[2] - attempts[1] >= 0.04  # ~0.05 delay
+	assert attempts[1] - attempts[0] >= 0.008  # ~0.01 delay
+	assert attempts[2] - attempts[1] >= 0.008  # ~0.01 delay
 	assert entry.status.read() == "success"
 
 
@@ -383,11 +380,11 @@ async def test_query_retry_cancellation():
 		attempts += 1
 		raise ValueError("failure")
 
-	entry = Query(key, fetcher, retries=3, retry_delay=0.1)
+	entry = Query(key, fetcher, retries=3, retry_delay=0.01)
 	task = asyncio.create_task(entry.refetch())
 
 	# Cancel during retry delay
-	await asyncio.sleep(0.05)
+	await asyncio.sleep(0.005)
 	task.cancel()
 
 	try:
@@ -396,8 +393,5 @@ async def test_query_retry_cancellation():
 		pass
 
 	# Should be cancelled, not completed
-	print("Task done:", task.done())
-	print("Task cancelled:", task.cancelled())
-	print("Attempts:", attempts)
 	assert task.cancelled()
 	assert attempts == 1  # Only first attempt ran

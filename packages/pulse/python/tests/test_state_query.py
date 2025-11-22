@@ -1,10 +1,14 @@
 import asyncio
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, ParamSpec, TypeVar
 
 import pulse as ps
 import pytest
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 @pytest.fixture(autouse=True)
@@ -16,10 +20,10 @@ def _pulse_context():  # pyright: ignore[reportUnusedFunction]
 		yield
 
 
-def with_render_session(fn):
+def with_render_session(fn: Callable[P, Awaitable[R]]):
 	"""Decorator to wrap test functions with a RenderSession context."""
 
-	async def wrapper(*args, **kwargs):
+	async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
 		# Create a minimal RouteTree for the session (not needed for query tests)
 		routes = RouteTree([])
 		session = RenderSession("test-session", routes)
@@ -457,14 +461,11 @@ async def test_state_query_on_success_sync():
 
 		@ps.query(retries=0)
 		async def user(self) -> dict[str, Any]:
-			print("started query")
 			await asyncio.sleep(0)
-			print("finished query")
 			return {"id": self.uid}
 
 		@user.on_success
 		def _on_success(self, data: dict[str, Any]):
-			print("on_success")
 			self.ok_calls += 1
 			self.last = data
 

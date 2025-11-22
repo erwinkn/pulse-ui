@@ -2,13 +2,13 @@
 
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol, TypeVar, overload
+from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, overload
 
+from pulse.helpers import MISSING
+from pulse.queries.common import OnErrorFn, OnSuccessFn
+from pulse.queries.mutation import MutationProperty
 from pulse.queries.query import RETRY_DELAY_DEFAULT
 from pulse.queries.query_observer import (
-	MutationProperty,
-	OnErrorFn,
-	OnSuccessFn,
 	QueryProperty,
 	QueryPropertyWithInitial,
 )
@@ -25,6 +25,7 @@ from pulse.state import ComputedProperty, State, StateEffect
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound=State)
+P = ParamSpec("P")
 
 
 # -> @ps.computed The chalenge is:
@@ -225,7 +226,7 @@ def query(
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	initial: T | Callable[[TState], T] | None = None,
+	initial: T | Callable[[TState], T] | None = ...,
 	on_success: OnSuccessFn[TState, T] | None = None,
 	on_error: OnErrorFn[TState] | None = None,
 ) -> QueryProperty[T, TState]: ...
@@ -241,7 +242,7 @@ def query(
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	initial: T | Callable[[TState], T] | None = None,
+	initial: T | Callable[[TState], T] | None = ...,
 	on_success: OnSuccessFn[TState, T] | None = None,
 	on_error: OnErrorFn[TState] | None = None,
 ) -> Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]: ...
@@ -256,11 +257,13 @@ def query(
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	initial: T | Callable[[TState], T] | None = None,
+	initial: T | Callable[[TState], T] | None = MISSING,
 	on_success: OnSuccessFn[TState, T] | None = None,
 	on_error: OnErrorFn[TState] | None = None,
 ):
-	def decorator(func: Callable[[TState], Awaitable[T]], /):
+	def decorator(
+		func: Callable[[TState], Awaitable[T]], /
+	) -> QueryProperty[T, TState] | QueryPropertyWithInitial[T, TState]:
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())
 		# Only state-method form supported for now (single 'self')
@@ -293,11 +296,11 @@ def query(
 # -----------------
 @overload
 def mutation(
-	fn: Callable[..., Awaitable[T]],
+	fn: Callable[Concatenate[TState, P], Awaitable[T]],
 	*,
 	on_success: OnSuccessFn[TState, T] | None = None,
 	on_error: OnErrorFn[TState] | None = None,
-) -> MutationProperty[T, TState]: ...
+) -> MutationProperty[T, TState, P]: ...
 
 
 @overload
@@ -306,16 +309,18 @@ def mutation(
 	*,
 	on_success: OnSuccessFn[TState, T] | None = None,
 	on_error: OnErrorFn[TState] | None = None,
-) -> Callable[[Callable[..., Awaitable[T]]], MutationProperty[T, TState]]: ...
+) -> Callable[
+	[Callable[Concatenate[TState, P], Awaitable[T]]], MutationProperty[T, TState, P]
+]: ...
 
 
 def mutation(
-	fn: Callable[..., Any] | None = None,
+	fn: Callable[Concatenate[TState, P], Awaitable[T]] | None = None,
 	*,
 	on_success: OnSuccessFn[TState, T] | None = None,
 	on_error: OnErrorFn[TState] | None = None,
 ):
-	def decorator(func: Callable[..., Awaitable[T]], /):
+	def decorator(func: Callable[Concatenate[TState, P], Awaitable[T]], /):
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())
 

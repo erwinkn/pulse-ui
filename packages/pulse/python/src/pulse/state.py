@@ -336,7 +336,6 @@ class State(Disposable, metaclass=StateMeta):
 		self.on_dispose()
 		for value in self.__dict__.values():
 			if isinstance(value, Disposable):
-				print("disposing from state", value)
 				value.dispose()
 
 		undisposed_effects = [e for e in self._scope.effects if not e.__disposed__]

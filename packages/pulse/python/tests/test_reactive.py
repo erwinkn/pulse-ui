@@ -934,9 +934,7 @@ async def test_async_effect_cancels_inflight_on_rerun():
 	assert not finished, "Effect should not have finished after first run"
 
 	# Trigger rerun -> should cancel in-flight task
-	print("Writing to signal", s.name)
 	s.write(1)
-	print("Signal written", s.name)
 	# Effect restarts immediately, so _task should be a new task
 	assert e._task is not None  # pyright: ignore[reportPrivateUsage]
 	assert e._task is not initial_task  # pyright: ignore[reportPrivateUsage]

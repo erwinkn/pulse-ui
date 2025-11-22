@@ -285,6 +285,7 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 
 	def __init__(self, plugin: AWSECSPlugin):
 		self.plugin = plugin
+		super().__init__()
 
 	@override
 	async def prerender(

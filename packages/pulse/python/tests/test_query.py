@@ -2,7 +2,9 @@ import asyncio
 
 import pytest
 from pulse.queries.query import Query
+from pulse.queries.query_observer import QueryResult
 from pulse.queries.store import QueryStore
+from pulse.reactive import Computed
 
 
 @pytest.mark.asyncio
@@ -158,21 +160,22 @@ async def test_query_store_garbage_collection():
 		return "data"
 
 	# Create with short gc_time
-	entry = store.ensure(key, fetcher, gc_time=0.1)
-
-	# Add observer
-	entry.observe(gc_time=0.1)
-
+	entry = store.ensure(key, fetcher, gc_time=0.01)
 	assert store.get(key) is entry
 
-	# Remove observer
-	entry.unobserve()
+	print("observing")
+	observer = QueryResult(Computed(lambda: entry, name="test_query"), gc_time=0.01)
+	print("unobserving")
+	observer.dispose()
+	print("finished observing")
+	# entry.schedule_gc()
 
 	# Should still be there immediately
+	# entry.schedule_gc()
 	assert store.get(key) is entry
 
 	# Wait for GC
-	await asyncio.sleep(0.2)
+	await asyncio.sleep(0.02)
 
 	# Should be gone
 	assert store.get(key) is None
@@ -186,25 +189,27 @@ async def test_query_entry_gc_time_reconciliation():
 	"""
 	entry = Query(("test", 1), lambda: asyncio.sleep(0), gc_time=0.0)
 
-	entry.observe(gc_time=10.0)
+	query_computed = Computed(lambda: entry, name="test_query")
+	# QueryResult automatically observes on creation
+	obs1 = QueryResult(query_computed, gc_time=10.0)
 	assert entry.cfg.gc_time == 10.0
 
-	entry.observe(gc_time=5.0)
+	obs2 = QueryResult(query_computed, gc_time=5.0)
 	assert entry.cfg.gc_time == 10.0  # Max of 10.0 and 5.0
 
-	entry.unobserve()
+	entry.unobserve(obs2)
 	# gc_time never decreases, stays at max seen
 	assert entry.cfg.gc_time == 10.0
 
-	entry.unobserve()
+	entry.unobserve(obs1)
 	# Still keeps the max seen value
 	assert entry.cfg.gc_time == 10.0
 
 	# Adding a larger gc_time increases it further
-	entry.observe(gc_time=20.0)
+	obs3 = QueryResult(query_computed, gc_time=20.0)
 	assert entry.cfg.gc_time == 20.0
 
-	entry.unobserve()
+	entry.unobserve(obs3)
 	# Still keeps the max
 	assert entry.cfg.gc_time == 20.0
 
@@ -226,9 +231,6 @@ async def test_async_query_effect_sync_loading():
 	# Force fetch_status to idle (status is already loading from initial_data=None)
 	entry.status.write("success")
 	entry.fetch_status.write("idle")
-
-	# Need to observe first to create the effect
-	entry.observe()
 
 	# Schedule effect (like a dependency change would)
 	# We need to manually trigger push_change or run

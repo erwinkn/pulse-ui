@@ -11,7 +11,13 @@ from typing import (
 	override,
 )
 
-from pulse.helpers import create_task, maybe_await, schedule_on_loop, values_equal
+from pulse.helpers import (
+	Disposable,
+	create_task,
+	maybe_await,
+	schedule_on_loop,
+	values_equal,
+)
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -249,7 +255,7 @@ EffectFn = Callable[[], EffectCleanup | None]
 AsyncEffectFn = Callable[[], Awaitable[EffectCleanup | None]]
 
 
-class Effect:
+class Effect(Disposable):
 	"""
 	Synchronous effect and base class. Use AsyncEffect for async effects.
 	Both are isinstance(Effect).
@@ -262,6 +268,7 @@ class Effect:
 	last_run: int
 	immediate: bool
 	_lazy: bool
+	explicit_deps: bool
 	batch: "Batch | None"
 
 	def __init__(
@@ -284,7 +291,7 @@ class Effect:
 		self.last_run = -1
 		self.scope: Scope | None = None
 		self.batch = None
-		self._explicit_deps: list[Signal[Any] | Computed[Any]] | None = deps
+		self.explicit_deps = deps is not None
 		self.immediate = immediate
 		self._lazy = lazy
 
@@ -312,6 +319,7 @@ class Effect:
 		if self.cleanup_fn:
 			self.cleanup_fn()
 
+	@override
 	def dispose(self):
 		self.unschedule()
 		for child in self.children.copy():
@@ -374,15 +382,24 @@ class Effect:
 			return
 		raise exc
 
-	def _apply_scope_results(self, scope: "Scope") -> None:
+	def _apply_scope_results(
+		self,
+		scope: "Scope",
+		captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None,
+	) -> None:
+		# Apply captured last_change values at the end for explicit deps
+		if self.explicit_deps:
+			assert captured_last_changes is not None
+			for dep, last_change in captured_last_changes.items():
+				self.deps[dep] = last_change
+			return
+
 		self.children = scope.effects
 		for child in self.children:
 			child.parent = self
 
 		prev_deps = set(self.deps)
-		if self._explicit_deps is not None:
-			self.deps = {dep: dep.last_change for dep in self._explicit_deps}
-		else:
+		if not self.explicit_deps:
 			self.deps = scope.deps
 		new_deps = set(self.deps)
 		add_deps = new_deps - prev_deps
@@ -400,8 +417,8 @@ class Effect:
 
 	def _copy_kwargs(self) -> dict[str, Any]:
 		deps = None
-		if self._explicit_deps is not None:
-			deps = list(self._explicit_deps)
+		if self.explicit_deps:
+			deps = list(self.deps.keys())
 		return {
 			"fn": self.fn,
 			"name": self.name,
@@ -439,6 +456,10 @@ class Effect:
 
 	def _execute(self) -> None:
 		execution_epoch = epoch()
+		# Capture last_change for explicit deps before running
+		captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None
+		if self.explicit_deps:
+			captured_last_changes = {dep: dep.last_change for dep in self.deps}
 		with Scope() as scope:
 			# Clear batch *before* running as we may update a signal that causes
 			# this effect to be rescheduled.
@@ -449,7 +470,7 @@ class Effect:
 				self.handle_error(e)
 			self.runs += 1
 			self.last_run = execution_epoch
-		self._apply_scope_results(scope)
+		self._apply_scope_results(scope, captured_last_changes)
 
 
 class AsyncEffect(Effect):
@@ -517,6 +538,13 @@ class AsyncEffect(Effect):
 					except Exception as e:
 						self.handle_error(e)
 
+				# Capture last_change for explicit deps before running
+				captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = (
+					None
+				)
+				if self.explicit_deps:
+					captured_last_changes = {dep: dep.last_change for dep in self.deps}
+
 				with Scope() as scope:
 					try:
 						result = self.fn()
@@ -528,7 +556,7 @@ class AsyncEffect(Effect):
 						self.handle_error(e)
 					self.runs += 1
 					self.last_run = execution_epoch
-				self._apply_scope_results(scope)
+				self._apply_scope_results(scope, captured_last_changes)
 			finally:
 				# Clear the task reference when it finishes
 				if self._task is this_task:

@@ -783,7 +783,7 @@ def test_effect_immediate_false_explicit_deps_registers_on_init():
 	assert a.obs == [e]
 	assert b.obs == [e]
 	# Explicit deps should be stored in regular deps attribute (not _explicit_deps)
-	assert e._explicit_deps == [a, b]
+	assert e.explicit_deps is True
 	assert e.deps == {a: a.last_change, b: b.last_change}
 
 	# After first run, deps should still be registered
@@ -2495,3 +2495,66 @@ async def test_async_effect_wait_after_completion():
 	assert finished == 2
 	assert e.runs == 2
 	assert e.is_scheduled is False
+
+
+def test_effect_explicit_deps_rerun_on_internal_modification():
+	"""
+	Test that if a synchronous effect modifies one of its explicit dependencies,
+	it re-runs. This happens because we capture the dependency version
+	at the *start* of execution. Since the version changes during execution,
+	at the end the dependency is considered changed relative to the start.
+	"""
+	count = Signal(0, name="count")
+	runs = 0
+
+	@effect(deps=[count])
+	def e():  # pyright: ignore[reportUnusedFunction]
+		nonlocal runs
+		runs += 1
+		if count() < 2:
+			count.write(count() + 1)
+
+	flush_effects()
+	# Run 1: sees count=0. writes count=1.
+	# End of Run 1: deps updated to what they were at START (count=0).
+	# Check: count=1 > last_seen=0 -> Rerun.
+
+	# Run 2: sees count=1. writes count=2.
+	# End of Run 2: deps updated to what they were at START (count=1).
+	# Check: count=2 > last_seen=1 -> Rerun.
+
+	# Run 3: sees count=2. No write.
+	# End of Run 3: deps updated to what they were at START (count=2).
+	# Check: count=2 == last_seen=2 -> Done.
+
+	assert runs == 3
+	assert count() == 2
+
+
+@pytest.mark.asyncio
+async def test_async_effect_explicit_deps_rerun_on_external_modification_during_run():
+	"""
+	Test that if an async effect's explicit dependency changes while the effect
+	is awaiting, the effect re-runs.
+	"""
+	s = Signal(0, name="s")
+
+	@effect(deps=[s])
+	async def e():
+		await asyncio.sleep(0.01)
+
+	# Allow effect to start
+	await asyncio.sleep(0)
+	assert e.runs == 0
+
+	# Modify s while e is running/awaiting
+	s.write(1)
+	assert e.runs == 0
+
+	# Allow effect to finish its first run
+	await asyncio.sleep(0.02)
+	assert e.runs == 1
+
+	s.write(2)
+	await asyncio.sleep(0.02)
+	assert e.runs == 2

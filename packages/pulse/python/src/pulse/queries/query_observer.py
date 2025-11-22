@@ -19,7 +19,7 @@ from pulse.queries.query import (
 	QueryKey,
 	QueryStatus,
 )
-from pulse.reactive import AsyncEffect, Computed, Effect
+from pulse.reactive import Computed, Effect, Untrack
 from pulse.state import InitializableProperty, State
 
 T = TypeVar("T")
@@ -48,7 +48,6 @@ class QueryResult(Generic[T], Disposable):
 	_callback_effect: Effect
 	_observe_effect: Effect
 	_data_computed: Computed[T | None]
-	_disposed: bool
 	_disposed_data: T | None
 
 	def __init__(
@@ -66,41 +65,25 @@ class QueryResult(Generic[T], Disposable):
 		self._keep_previous_data = keep_previous_data
 		self._on_success = on_success
 		self._on_error = on_error
-		self._disposed = False
 		self._disposed_data = None
 
-		async def query_callbacks_effect():
-			status = self._query().status()
-			if status == "success" and self._on_success:
-				await maybe_await(
-					call_flexible(self._on_success, self._query().data.read())
-				)
-
-			if status == "error" and self._on_error:
-				await maybe_await(
-					call_flexible(self._on_error, self._query().error.read())
-				)
-
-		def observe_query_effect():
+		def observe_effect():
 			query = self._query()
-			query.observe(gc_time=self._gc_time)
+			with Untrack():
+				# This may create an effect, which should live independently of our observe effect
+				query.observe(self)
 
 			# If stale or loading, schedule refetch
 			if self.is_stale():
 				query.invalidate()
 
-			return lambda: query.unobserve()
+			# Return cleanup function that captures the observer
+			return lambda: query.unobserve(self)
 
-		# Immediate to ensure query.observe() is called immediately, creating the query effect
 		self._observe_effect = Effect(
-			observe_query_effect,
+			observe_effect,
 			name=f"query_observe({self._query().key})",
 			immediate=True,
-		)
-		self._callback_effect = AsyncEffect(
-			query_callbacks_effect,
-			name=f"query_callbacks({self._query().key})",
-			deps=[self._query().status],
 		)
 		self._data_computed = Computed(
 			self._data_computed_fn, name=f"query_data({self._query().key})"
@@ -143,8 +126,6 @@ class QueryResult(Generic[T], Disposable):
 
 	@property
 	def data(self) -> T | None:
-		if self._disposed:
-			return self._disposed_data
 		return self._data_computed()
 
 	@property
@@ -175,28 +156,8 @@ class QueryResult(Generic[T], Disposable):
 
 	@override
 	def dispose(self):
-		"""Clean up the result and its callback effect."""
-		if self._disposed:
-			return
-
-		# Remember the last known data so callers can still read it after disposal
-		# without triggering recomputation or new queries.
-		self._disposed_data = self.data
-		self._disposed = True
-
-		self._callback_effect.dispose()
+		"""Clean up the result and its observe effect."""
 		self._observe_effect.dispose()
-
-		# Detach computeds from their dependencies so future signal writes
-		# (such as changing a query key on a disposed State) do not resubscribe
-		# or create new queries.
-		for dep in list(self._data_computed.deps):
-			dep.remove_obs(self._data_computed)
-		self._data_computed.deps = {}
-
-		for dep in list(self._query.deps):
-			dep.remove_obs(self._query)
-		self._query.deps = {}
 
 
 class QueryProperty(Generic[T, TState], InitializableProperty):

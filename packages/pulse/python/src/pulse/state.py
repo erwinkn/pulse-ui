@@ -186,7 +186,7 @@ class StateStatus(IntEnum):
 STATE_STATUS_FIELD = "__pulse_status__"
 
 
-class State(ABC, metaclass=StateMeta):
+class State(Disposable, metaclass=StateMeta):
 	"""
 	Base class for reactive state objects.
 
@@ -329,26 +329,20 @@ class State(ABC, metaclass=StateMeta):
 		"""
 		pass
 
+	@override
 	def dispose(self):
 		# Call user-defined cleanup hook first
-		from pulse.queries.query_observer import QueryResult
 
 		self.on_dispose()
-
-		disposed_effects = set[Effect]()
 		for value in self.__dict__.values():
 			if isinstance(value, Disposable):
+				print("disposing from state", value)
 				value.dispose()
-			if isinstance(value, QueryResult):
-				disposed_effects.add(value._callback_effect)  # pyright: ignore[reportPrivateUsage]
-				disposed_effects.add(value._observe_effect)  # pyright: ignore[reportPrivateUsage]
-				continue
-			if isinstance(value, Effect):
-				disposed_effects.add(value)
 
-		if len(set(self._scope.effects) - disposed_effects) > 0:
+		undisposed_effects = [e for e in self._scope.effects if not e.__disposed__]
+		if len(undisposed_effects) > 0:
 			raise RuntimeError(
-				f"State.dispose() missed effects defined on its Scope: {[e.name for e in self._scope.effects]}"
+				f"State.dispose() missed effects defined on its Scope: {[e.name for e in undisposed_effects]}"
 			)
 
 	@override

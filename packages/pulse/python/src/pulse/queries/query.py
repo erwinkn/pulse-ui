@@ -3,6 +3,7 @@ import time
 from collections.abc import Awaitable, Callable, Hashable
 from dataclasses import dataclass
 from typing import (
+	TYPE_CHECKING,
 	Any,
 	Generic,
 	Literal,
@@ -12,8 +13,11 @@ from typing import (
 	override,
 )
 
-from pulse.helpers import is_running_under_pytest, later
+from pulse.helpers import Disposable, call_flexible, is_pytest, later, maybe_await
 from pulse.reactive import AsyncEffect, Computed, Signal
+
+if TYPE_CHECKING:
+	from pulse.queries.query_observer import QueryResult
 
 T = TypeVar("T")
 QueryKey: TypeAlias = tuple[Hashable, ...]
@@ -56,10 +60,10 @@ class QueryConfig(Generic[T]):
 	on_dispose: Callable[[Any], None] | None
 
 
-RETRY_DELAY_DEFAULT = 2.0 if not is_running_under_pytest() else 0.01
+RETRY_DELAY_DEFAULT = 2.0 if not is_pytest() else 0.01
 
 
-class Query(Generic[T]):
+class Query(Generic[T], Disposable):
 	"""
 	Represents a single query instance in a store.
 	Manages the async effect, data/status signals, and observer tracking.
@@ -78,7 +82,7 @@ class Query(Generic[T]):
 	retries: Signal[int]
 	retry_reason: Signal[Exception | None]
 
-	_obs_count: int
+	_observers: "list[QueryResult[T]]"
 	_effect: AsyncEffect | None
 	_gc_handle: asyncio.TimerHandle | None
 
@@ -116,12 +120,10 @@ class Query(Generic[T]):
 		self.retries = Signal(0, name=f"query.retries({key})")
 		self.retry_reason = Signal(None, name=f"query.retry_reason({key})")
 
-		self._obs_count = 0
+		self._observers = []
 		self._gc_handle = None
 		# Effect is created lazily on first observation
 		self._effect = None
-		# Schedule GC, will be cancelled by first observer
-		self.schedule_gc()
 
 	def set_data(self, data: T):
 		self._set_success(data, manual=True)
@@ -160,7 +162,6 @@ class Query(Generic[T]):
 				self._run,
 				query=self,
 				name=f"query_effect({self.key})",
-				lazy=True,
 				deps=[] if self.key is not None else None,
 			)
 		return self._effect
@@ -174,6 +175,9 @@ class Query(Generic[T]):
 			try:
 				result = await self.fn()
 				self._set_success(result)
+				for obs in self._observers:
+					if obs._on_success:  # pyright: ignore[reportPrivateUsage]
+						await maybe_await(call_flexible(obs._on_success, result))  # pyright: ignore[reportPrivateUsage]
 				return
 			except asyncio.CancelledError:
 				raise
@@ -188,6 +192,9 @@ class Query(Generic[T]):
 					# All retries exhausted - update retry_reason to final error
 					self.retry_reason.write(e)
 					self._set_error(e)
+					for obs in self._observers:
+						if obs._on_error:  # pyright: ignore[reportPrivateUsage]
+							await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
 					return
 
 	async def refetch(self, cancel_refetch: bool = True) -> T:
@@ -209,40 +216,47 @@ class Query(Generic[T]):
 		Marks query as stale. If there are active observers, triggers a refetch.
 		"""
 		should_schedule = not self.effect.is_scheduled or cancel_refetch
-		if should_schedule and self._obs_count > 0:
+		if should_schedule and len(self._observers) > 0:
 			self.effect.schedule()
 
-	def observe(self, gc_time: float = 300.0):
-		"""Register an observer. Cancels GC and updates gc_time if provided."""
-		# Access effect to ensure it's created (lazy property)
-		_ = self.effect
-		self._obs_count += 1
+	def observe(
+		self,
+		observer: "QueryResult[T]",
+	):
+		_ = self.effect  # ensure effect is created
+		self._observers.append(observer)
 		self.cancel_gc()
-		if gc_time > 0:
-			self.cfg.gc_time = max(self.cfg.gc_time, gc_time)
+		if observer._gc_time > 0:  # pyright: ignore[reportPrivateUsage]
+			self.cfg.gc_time = max(self.cfg.gc_time, observer._gc_time)  # pyright: ignore[reportPrivateUsage]
 
-	def unobserve(self):
+	def unobserve(self, observer: "QueryResult[T]"):
 		"""Unregister an observer. Schedules GC if no observers remain."""
-		self._obs_count -= 1
-		if self._obs_count == 0:
+		if observer in self._observers:
+			self._observers.remove(observer)
+		if len(self._observers) == 0:
 			self.schedule_gc()
 
 	def schedule_gc(self):
 		self.cancel_gc()
 		if self.cfg.gc_time > 0:
+			print("scheduling gc", self.key, self.cfg.gc_time)
 			self._gc_handle = later(self.cfg.gc_time, self.dispose)
 		else:
+			print("disposing query immediately", self.key)
 			self.dispose()
 
 	def cancel_gc(self):
 		if self._gc_handle:
+			print("cancelling gc", self.key)
 			self._gc_handle.cancel()
 			self._gc_handle = None
 
+	@override
 	def dispose(self):
 		"""
 		Cleans up the query entry, removing it from the store.
 		"""
+		print("disposing query", self.key)
 		if self._effect:
 			self._effect.dispose()
 

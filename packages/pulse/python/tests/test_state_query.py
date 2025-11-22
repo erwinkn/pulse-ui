@@ -457,11 +457,14 @@ async def test_state_query_on_success_sync():
 
 		@ps.query(retries=0)
 		async def user(self) -> dict[str, Any]:
+			print("started query")
 			await asyncio.sleep(0)
+			print("finished query")
 			return {"id": self.uid}
 
 		@user.on_success
 		def _on_success(self, data: dict[str, Any]):
+			print("on_success")
 			self.ok_calls += 1
 			self.last = data
 
@@ -699,13 +702,13 @@ async def test_state_query_on_error_handler_async_only():
 
 @pytest.mark.asyncio
 @with_render_session
-async def test_state_query_dispose_cancels_inflight_and_stops_updates():
+async def test_state_query_gc_time_0_disposes_immediately():
 	class S(ps.State):
 		uid: int = 1
 		started: bool = False
 		finished: bool = False
 
-		@ps.query(retries=0)
+		@ps.query(retries=0, gc_time=0)
 		async def user(self) -> dict[str, Any]:
 			self.started = True
 			# simulate in-flight
@@ -726,26 +729,16 @@ async def test_state_query_dispose_cancels_inflight_and_stops_updates():
 
 	s.dispose()
 
+	assert s.user.__disposed__ is True
+
 	# Allow any scheduled tasks to attempt to finish; they should be canceled
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-
-	# The effect's task should be canceled or finished; either is acceptable due to race
-	eff = getattr(s, "__query_effect_user")
-	from pulse.reactive import AsyncEffect  # local import for typing
-
-	assert isinstance(eff, AsyncEffect)
-	assert eff._task is None or eff._task.cancelled() or eff._task.done()  # pyright: ignore[reportPrivateUsage]
-	# No further updates should be scheduled by this effect after dispose
-	prev_finished = s.finished
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	assert s.finished == prev_finished
+	await asyncio.sleep(0.01)
+	assert not s.finished
 
 
 @pytest.mark.asyncio
 @with_render_session
-async def test_state_query_no_refetch_after_state_dispose():
+async def test_state_query_gc_time_0_no_refetch_after_state_dispose():
 	class S(ps.State):
 		uid: int = 1
 		calls: int = 0
@@ -773,12 +766,8 @@ async def test_state_query_no_refetch_after_state_dispose():
 
 	# Changing key after dispose must not schedule a new run
 	s.uid = 2
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-
-	# Calls count unchanged, and data not updated to new id
+	await asyncio.sleep(0.01)
 	assert s.calls == 1
-	assert q.data == {"id": 1}
 
 
 @pytest.mark.asyncio

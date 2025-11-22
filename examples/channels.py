@@ -4,7 +4,7 @@ import json
 import random
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Callable, override
 from uuid import uuid4
 
 import pulse as ps
@@ -154,7 +154,8 @@ class ChannelInstanceState(ps.State):
 		finally:
 			self.pending_request = False
 
-	def dispose(self) -> None:
+	@override
+	def on_dispose(self) -> None:
 		for cleanup in self._cleanup_handlers:
 			try:
 				cleanup()

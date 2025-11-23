@@ -3,7 +3,7 @@ import logging
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar, override
+from typing import Any, Generic, Literal, TypeVar, override
 
 from pulse.helpers import Disposable, call_flexible
 
@@ -40,10 +40,7 @@ class HookMetadata:
 class HookState(Disposable):
 	"""Base class returned by hook factories."""
 
-	render_cycle: int
-
-	def __init__(self) -> None:
-		self.render_cycle = 0
+	render_cycle: int = 0
 
 	def on_render_start(self, render_cycle: int) -> None:
 		self.render_cycle = render_cycle
@@ -177,13 +174,14 @@ class HookContext:
 		exc_type: type[BaseException] | None,
 		exc_val: BaseException | None,
 		exc_tb: Any,
-	):
+	) -> Literal[False]:
 		if self._token is not None:
 			HOOK_CONTEXT.reset(self._token)
 			self._token = None
 
 			for namespace in self.namespaces.values():
 				namespace.on_render_end(self.render_cycle)
+		return False
 
 	def namespace_for(self, hook: Hook[T]) -> HookNamespace[T]:
 		namespace = self.namespaces.get(hook.name)

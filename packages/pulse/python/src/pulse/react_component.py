@@ -535,10 +535,11 @@ class ComponentRegistry:
 		exc_type: type[BaseException] | None,
 		exc_val: BaseException | None,
 		exc_tb: Any,
-	):
+	) -> Literal[False]:
 		if self._token:
 			COMPONENT_REGISTRY.reset(self._token)
 			self._token = None
+		return False
 
 
 COMPONENT_REGISTRY: ContextVar[ComponentRegistry] = ContextVar(

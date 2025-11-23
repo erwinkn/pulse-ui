@@ -2,7 +2,7 @@
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pulse.routing import RouteContext
 
@@ -58,10 +58,11 @@ class PulseContext:
 		exc_type: type[BaseException] | None = None,
 		exc_val: BaseException | None = None,
 		exc_tb: TracebackType | None = None,
-	):
+	) -> Literal[False]:
 		if self._token is not None:
 			PULSE_CONTEXT.reset(self._token)
 			self._token = None
+		return False
 
 
 PULSE_CONTEXT: ContextVar["PulseContext | None"] = ContextVar(

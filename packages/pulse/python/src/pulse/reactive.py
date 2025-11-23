@@ -6,6 +6,7 @@ from contextvars import ContextVar, Token
 from typing import (
 	Any,
 	Generic,
+	Literal,
 	ParamSpec,
 	TypeVar,
 	override,
@@ -675,11 +676,12 @@ class Batch:
 		exc_type: type[BaseException] | None,
 		exc_value: BaseException | None,
 		exc_traceback: Any,
-	):
+	) -> Literal[False]:
 		self.flush()
 		# Restore previous reactive context
 		if self._token:
 			REACTIVE_CONTEXT.reset(self._token)
+		return False
 
 
 class GlobalBatch(Batch):
@@ -755,10 +757,11 @@ class Scope:
 		exc_type: type[BaseException] | None,
 		exc_value: BaseException | None,
 		exc_traceback: Any,
-	):
+	) -> Literal[False]:
 		# Restore previous reactive context
 		if self._token:
 			REACTIVE_CONTEXT.reset(self._token)
+		return False
 
 
 class Untrack(Scope): ...
@@ -801,8 +804,9 @@ class ReactiveContext:
 		exc_type: type[BaseException] | None,
 		exc_value: BaseException | None,
 		exc_tb: Any,
-	):
+	) -> Literal[False]:
 		REACTIVE_CONTEXT.reset(self._tokens.pop())
+		return False
 
 
 def epoch():

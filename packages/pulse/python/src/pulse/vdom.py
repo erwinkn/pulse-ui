@@ -23,6 +23,7 @@ from typing import (
 )
 
 from pulse.hooks.core import HookContext
+from pulse.hooks.init import rewrite_init_blocks
 
 # ============================================================================
 # Core VDOM
@@ -291,7 +292,8 @@ def component(
 	fn: "Callable[P, Element] | None" = None, *, name: str | None = None
 ) -> "Component[P] | Callable[[Callable[P, Element]], Component[P]]":
 	def decorator(fn: Callable[P, Element]):
-		return Component(fn, name)
+		rewritten = rewrite_init_blocks(fn)
+		return Component(rewritten, name)
 
 	if fn is not None:
 		return decorator(fn)

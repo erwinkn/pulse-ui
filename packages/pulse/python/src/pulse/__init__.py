@@ -161,6 +161,11 @@ from pulse.hooks.core import (
 # Hooks - Effects
 from pulse.hooks.effects import EffectsHookState as EffectsHookState
 from pulse.hooks.effects import effects as effects
+
+# Hooks - Init
+from pulse.hooks.init import (
+	init as init,
+)
 from pulse.hooks.runtime import (
 	GLOBAL_STATES as GLOBAL_STATES,
 )

@@ -9,6 +9,7 @@ from pulse.queries.common import OnErrorFn, OnSuccessFn
 from pulse.queries.mutation import MutationProperty
 from pulse.queries.query import RETRY_DELAY_DEFAULT
 from pulse.queries.query_observer import (
+	InfiniteQueryProperty,
 	QueryProperty,
 	QueryPropertyWithInitial,
 )
@@ -282,6 +283,118 @@ def query(
 			retries=retries,
 			retry_delay=RETRY_DELAY_DEFAULT if retry_delay is None else retry_delay,
 			initial=initial,
+			on_success=on_success,
+			on_error=on_error,
+		)
+
+	if fn:
+		return decorator(fn)
+	return decorator
+
+
+# -----------------
+# Infinite query decorator
+# -----------------
+
+
+TIPage = TypeVar("TIPage")
+TIPageParam = TypeVar("TIPageParam")
+
+
+@overload
+def infinite_query(
+	fn: Callable[[TState, Any], Awaitable[TIPage]],
+	*,
+	key: Callable[[TState], tuple[Any, ...]] | None = None,
+	initial_page_param: TIPageParam,
+	get_next_page_param: Callable[
+		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+	],
+	get_previous_page_param: Callable[
+		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+	]
+	| None = None,
+	max_pages: int = 0,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
+	keep_previous_data: bool = False,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	on_success: OnSuccessFn[TState, list[TIPage]] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+) -> InfiniteQueryProperty[TIPage, TIPageParam, TState]: ...
+
+
+@overload
+def infinite_query(
+	fn: None = None,
+	*,
+	key: Callable[[TState], tuple[Any, ...]] | None = None,
+	initial_page_param: TIPageParam,
+	get_next_page_param: Callable[
+		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+	],
+	get_previous_page_param: Callable[
+		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+	]
+	| None = None,
+	max_pages: int = 0,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
+	keep_previous_data: bool = False,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	on_success: OnSuccessFn[TState, list[TIPage]] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+) -> Callable[
+	[Callable[[TState, Any], Awaitable[TIPage]]],
+	InfiniteQueryProperty[TIPage, TIPageParam, TState],
+]: ...
+
+
+def infinite_query(
+	fn: Callable[[TState, Any], Awaitable[TIPage]] | None = None,
+	*,
+	key: Callable[[TState], tuple[Any, ...]] | None = None,
+	initial_page_param: TIPageParam,
+	get_next_page_param: Callable[
+		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+	],
+	get_previous_page_param: Callable[
+		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+	]
+	| None = None,
+	max_pages: int = 0,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
+	keep_previous_data: bool = False,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	on_success: OnSuccessFn[TState, list[TIPage]] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+):
+	def decorator(
+		func: Callable[[TState, Any], Awaitable[TIPage]], /
+	) -> InfiniteQueryProperty[TIPage, TIPageParam, TState]:
+		sig = inspect.signature(func)
+		params = list(sig.parameters.values())
+		if not (len(params) == 2 and params[0].name == "self"):
+			raise TypeError(
+				"@infinite_query must be applied to a state method with signature (self, context)"
+			)
+
+		return InfiniteQueryProperty(
+			func.__name__,
+			func,
+			initial_page_param=initial_page_param,
+			get_next_page_param=get_next_page_param,
+			get_previous_page_param=get_previous_page_param,
+			max_pages=max_pages,
+			stale_time=stale_time,
+			gc_time=gc_time if gc_time is not None else 300.0,
+			keep_previous_data=keep_previous_data,
+			retries=retries,
+			retry_delay=RETRY_DELAY_DEFAULT if retry_delay is None else retry_delay,
 			on_success=on_success,
 			on_error=on_error,
 		)

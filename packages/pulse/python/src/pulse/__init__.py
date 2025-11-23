@@ -72,6 +72,7 @@ from pulse.css import (
 # Decorators
 from pulse.decorators import computed as computed
 from pulse.decorators import effect as effect
+from pulse.decorators import infinite_query as infinite_query
 from pulse.decorators import mutation as mutation
 from pulse.decorators import query as query
 

@@ -12,6 +12,7 @@ from typing import (
 from pulse.context import PulseContext
 from pulse.helpers import MISSING, Disposable
 from pulse.queries.common import OnErrorFn, OnSuccessFn, bind_state
+from pulse.queries.infinite_query import InfiniteQuery
 from pulse.queries.query import (
 	RETRY_DELAY_DEFAULT,
 	Query,
@@ -363,3 +364,240 @@ class QueryPropertyWithInitial(QueryProperty[T, TState]):
 	def __get__(self, obj: Any, objtype: Any = None) -> QueryResultWithInitial[T]:
 		# Reuse base initialization but narrow the return type for type-checkers
 		return cast(QueryResultWithInitial[T], super().__get__(obj, objtype))
+
+
+# -----------------
+# Infinite queries
+# -----------------
+
+TIPage = TypeVar("TIPage")
+TIPageParam = TypeVar("TIPageParam")
+
+
+class InfiniteQueryResult(QueryResult[list[TIPage]]):
+	query: Computed[InfiniteQuery[TIPage, TIPageParam]]  # type: ignore[assignment]
+
+	def is_stale(self) -> bool:  # type: ignore[override]
+		# Infinite queries should not auto-refetch by default; respect explicit stale_time > 0
+		if self._stale_time <= 0:
+			return False
+		return super().is_stale()
+
+	@property
+	def pages(self) -> list[TIPage] | None:
+		return cast(InfiniteQuery[TIPage, TIPageParam], self._query()).pages.read()
+
+	@property
+	def page_params(self) -> list[TIPageParam]:
+		return cast(
+			InfiniteQuery[TIPage, TIPageParam], self._query()
+		).page_params.read()
+
+	@property
+	def has_next_page(self) -> bool:
+		return cast(InfiniteQuery[TIPage, TIPageParam], self._query()).has_next_page()
+
+	@property
+	def has_previous_page(self) -> bool:
+		return cast(
+			InfiniteQuery[TIPage, TIPageParam], self._query()
+		).has_previous_page()
+
+	@property
+	def is_fetching_next_page(self) -> bool:
+		return cast(
+			InfiniteQuery[TIPage, TIPageParam], self._query()
+		).is_fetching_next_page()
+
+	@property
+	def is_fetching_previous_page(self) -> bool:
+		return cast(
+			InfiniteQuery[TIPage, TIPageParam], self._query()
+		).is_fetching_previous_page()
+
+	async def fetch_next_page(self, page_param: TIPageParam | None = None):
+		return await cast(
+			InfiniteQuery[TIPage, TIPageParam], self._query()
+		).fetch_next_page(page_param)
+
+	async def fetch_previous_page(self, page_param: TIPageParam | None = None):
+		return await cast(
+			InfiniteQuery[TIPage, TIPageParam], self._query()
+		).fetch_previous_page(page_param)
+
+
+class InfiniteQueryProperty(
+	Generic[TIPage, TIPageParam, TState], InitializableProperty
+):
+	name: str
+	_fetch_fn: "Callable[[TState, Any], Awaitable[TIPage]]"
+	_keep_alive: bool
+	_keep_previous_data: bool
+	_stale_time: float
+	_gc_time: float
+	_retries: int
+	_retry_delay: float
+	_initial_page_param: TIPageParam
+	_get_next_page_param: Callable[
+		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+	]
+	_get_previous_page_param: Callable[
+		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+	]
+	_max_pages: int
+	_key_fn: Callable[[TState], QueryKey] | None
+	_on_success_fn: Callable[[TState, list[TIPage]], Any] | None
+	_on_error_fn: Callable[[TState, Exception], Any] | None
+	_priv_result: str
+
+	def __init__(
+		self,
+		name: str,
+		fetch_fn: "Callable[[TState, Any], Awaitable[TIPage]]",
+		*,
+		initial_page_param: TIPageParam,
+		get_next_page_param: Callable[
+			[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+		],
+		get_previous_page_param: Callable[
+			[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
+		]
+		| None,
+		max_pages: int,
+		stale_time: float,
+		gc_time: float,
+		keep_previous_data: bool,
+		retries: int,
+		retry_delay: float,
+		on_success: OnSuccessFn[TState, list[TIPage]] | None,
+		on_error: OnErrorFn[TState] | None,
+	):
+		self.name = name
+		self._fetch_fn = fetch_fn
+		self._initial_page_param = initial_page_param
+		self._get_next_page_param = get_next_page_param
+		self._get_previous_page_param = (
+			get_previous_page_param
+			if get_previous_page_param is not None
+			else lambda *_: None
+		)
+		self._max_pages = max_pages
+		self._keep_previous_data = keep_previous_data
+		self._stale_time = stale_time
+		self._gc_time = gc_time
+		self._retries = retries
+		self._retry_delay = retry_delay
+		self._on_success_fn = on_success  # pyright: ignore[reportAttributeAccessIssue]
+		self._on_error_fn = on_error  # pyright: ignore[reportAttributeAccessIssue]
+		self._key_fn = None
+		self._priv_result = f"__inf_query_{name}"
+
+	def key(self, fn: Callable[[TState], QueryKey]):
+		if self._key_fn is not None:
+			raise RuntimeError(
+				f"Duplicate key() decorator for infinite query '{self.name}'. Only one is allowed."
+			)
+		self._key_fn = fn
+		return fn
+
+	def on_success(self, fn: OnSuccessFn[TState, list[TIPage]]):
+		if self._on_success_fn is not None:
+			raise RuntimeError(
+				f"Duplicate on_success() decorator for infinite query '{self.name}'. Only one is allowed."
+			)
+		self._on_success_fn = fn  # pyright: ignore[reportAttributeAccessIssue]
+		return fn
+
+	def on_error(self, fn: OnErrorFn[TState]):
+		if self._on_error_fn is not None:
+			raise RuntimeError(
+				f"Duplicate on_error() decorator for infinite query '{self.name}'. Only one is allowed."
+			)
+		self._on_error_fn = fn  # pyright: ignore[reportAttributeAccessIssue]
+		return fn
+
+	@override
+	def initialize(self, state: Any, name: str) -> InfiniteQueryResult[TIPage]:
+		result: InfiniteQueryResult[TIPage] | None = getattr(
+			state, self._priv_result, None
+		)
+		if result:
+			return result
+
+		fetch_fn = bind_state(state, self._fetch_fn)
+
+		if self._key_fn:
+			query = self._resolve_keyed(state, fetch_fn)
+		else:
+			query = self._resolve_unkeyed(fetch_fn)
+
+		result = InfiniteQueryResult(
+			query=query,
+			stale_time=self._stale_time,
+			keep_previous_data=self._keep_previous_data,
+			gc_time=self._gc_time,
+			on_success=bind_state(state, self._on_success_fn)
+			if self._on_success_fn
+			else None,
+			on_error=bind_state(state, self._on_error_fn)
+			if self._on_error_fn
+			else None,
+		)
+
+		setattr(state, self._priv_result, result)
+		return result
+
+	def _resolve_keyed(
+		self,
+		state: TState,
+		fetch_fn: Callable[[Any], Awaitable[TIPage]],
+	) -> Computed[InfiniteQuery[TIPage, TIPageParam]]:
+		assert self._key_fn is not None
+		key_computed = Computed(
+			bind_state(state, self._key_fn), name=f"inf_query.key.{self.name}"
+		)
+		render = PulseContext.get().render
+		if render is None:
+			raise RuntimeError("No render session available")
+		store = render.query_store
+
+		def query() -> InfiniteQuery[TIPage, TIPageParam]:
+			key = key_computed()
+			return cast(
+				InfiniteQuery[TIPage, TIPageParam],
+				store.ensure_infinite(
+					key,
+					fetch_fn,
+					initial_page_param=self._initial_page_param,
+					get_next_page_param=self._get_next_page_param,
+					get_previous_page_param=self._get_previous_page_param,
+					max_pages=self._max_pages,
+					gc_time=self._gc_time,
+					retries=self._retries,
+					retry_delay=self._retry_delay,
+				),
+			)
+
+		return Computed(query, name=f"inf_query.{self.name}")
+
+	def _resolve_unkeyed(
+		self,
+		fetch_fn: Callable[[Any], Awaitable[TIPage]],
+	) -> Computed[InfiniteQuery[TIPage, TIPageParam]]:
+		query = InfiniteQuery[TIPage, TIPageParam](
+			key=None,
+			query_fn=fetch_fn,
+			initial_page_param=self._initial_page_param,
+			get_next_page_param=self._get_next_page_param,
+			get_previous_page_param=self._get_previous_page_param,
+			max_pages=self._max_pages,
+			gc_time=self._gc_time,
+			retries=self._retries,
+			retry_delay=self._retry_delay,
+		)
+		return Computed(lambda: query, name=f"inf_query.{self.name}")
+
+	def __get__(self, obj: Any, objtype: Any = None) -> InfiniteQueryResult[TIPage]:
+		if obj is None:
+			return self  # pyright: ignore[reportReturnType]
+		return self.initialize(obj, self.name)

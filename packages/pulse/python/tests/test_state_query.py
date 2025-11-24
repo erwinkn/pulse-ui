@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, TypeVar
 
@@ -211,72 +212,6 @@ async def test_state_query_missing_key_defaults_to_auto_tracking():
 
 @pytest.mark.asyncio
 @with_render_session
-async def test_state_query_keep_previous_data_on_refetch_default():
-	class S(ps.State):
-		uid: int = 1
-
-		@ps.query(retries=0, keep_previous_data=True)
-		async def user(self) -> dict[str, Any]:
-			await asyncio.sleep(0)
-			return {"id": self.uid}
-
-		@user.key
-		def _user_key(self):
-			return ("user", self.uid)
-
-	s = S()
-	q = s.user
-
-	# initial load
-	await q.wait()
-	assert q.data == {"id": 1}
-
-	# change key -> effect re-runs; while loading, previous data should be kept (default)
-	s.uid = 2
-	await asyncio.sleep(0)  # task started, still loading
-	assert q.is_loading is True
-	assert q.data == {"id": 1}
-	# finish
-	await q.wait()
-	assert q.is_loading is False
-	assert q.data == {"id": 2}
-
-
-@pytest.mark.asyncio
-@with_render_session
-async def test_state_query_keep_previous_data_can_be_disabled():
-	class S(ps.State):
-		uid: int = 1
-
-		@ps.query(retries=0, keep_previous_data=False)
-		async def user(self) -> dict[str, Any]:
-			await asyncio.sleep(0)
-			return {"id": self.uid}
-
-		@user.key
-		def _user_key(self):
-			return ("user", self.uid)
-
-	s = S()
-	q = s.user
-
-	# initial load
-	await q.wait()
-	assert q.data == {"id": 1}
-
-	# change key -> while loading, data should be cleared when keep_previous_data=False
-	s.uid = 2
-	await asyncio.sleep(0)  # task started
-	assert q.is_loading is True
-	assert q.data is None
-	# finish
-	await q.wait()
-	assert q.is_loading is False
-	assert q.data == {"id": 2}
-
-
-@pytest.mark.asyncio
-@with_render_session
 async def test_state_query_manual_set_data():
 	class S(ps.State):
 		uid: int = 1
@@ -315,14 +250,145 @@ async def test_state_query_manual_set_data():
 
 @pytest.mark.asyncio
 @with_render_session
-async def test_state_query_with_initial_value_narrows_and_preserves():
+async def test_state_query_manual_set_data_updater():
 	class S(ps.State):
 		uid: int = 1
 
-		@ps.query(retries=0, initial={"id": 0}, keep_previous_data=True)
+		@ps.query(retries=0)
 		async def user(self) -> dict[str, Any]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	await q.wait()
+	assert q.data == {"id": 1}
+
+	q.set_data(lambda prev: {"id": (prev or {"id": 0})["id"] + 1})
+	assert q.data == {"id": 2}
+	assert q.is_loading is False
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_initial_data_updated_at_staleness():
+	now = time.time()
+
+	class S(ps.State):
+		@ps.query(stale_time=5)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": 1}
+
+		@user.key
+		def _key(self):
+			return ("user-initial-stale",)
+
+	s = S()
+	q = s.user
+
+	# Set initial data with an old timestamp to make it stale
+	q.set_initial_data({"id": 1}, updated_at=now - 10)
+	assert q.data == {"id": 1}
+	assert q.is_stale() is True
+
+	s2_now = time.time()
+
+	class S2(ps.State):
+		@ps.query(stale_time=30)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": 2}
+
+		@user.key
+		def _key(self):
+			return ("user-initial-fresh",)
+
+	s2 = S2()
+	q2 = s2.user
+
+	# Set initial data with current timestamp to keep it fresh
+	q2.set_initial_data({"id": 2}, updated_at=s2_now)
+	assert q2.is_stale() is False
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_set_initial_data_api():
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _key(self):
+			return ("user-set-initial", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Seed without fetching
+	q.set_initial_data({"id": 123}, updated_at=0)
+	assert q.data == {"id": 123}
+	assert q.is_stale() is True
+
+	# Next wait should still refetch and replace
+	await q.wait()
+	assert q.data == {"id": 1}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_set_initial_data_no_effect_after_load():
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _key(self):
+			return ("user-no-effect-after-load", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	assert q.data == {"id": 1}
+	assert q.status == "success"
+
+	# Try to set initial data after query has loaded - should have no effect
+	old_data = q.data
+	q.set_initial_data({"id": 999}, updated_at=0)
+	assert q.data == old_data  # Data should not change
+	assert q.data == {"id": 1}  # Should still be the fetched data
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_with_initial_value_preserves():
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0, keep_previous_data=True)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.initial_data
+		def _user_initial(self):
+			return {"id": 0}
 
 		@user.key
 		def _user_key(self):
@@ -346,10 +412,14 @@ async def test_state_query_with_initial_value_narrows_and_preserves():
 	class S2(ps.State):
 		uid: int = 1
 
-		@ps.query(retries=0, initial={"id": -1}, keep_previous_data=False)
+		@ps.query(retries=0, keep_previous_data=False)
 		async def user(self) -> dict[str, int]:
 			await asyncio.sleep(0)
 			return {"id": self.uid}
+
+		@user.initial_data
+		def _user_initial(self):
+			return {"id": -1}
 
 		@user.key
 		def _user_key(self):
@@ -416,7 +486,13 @@ async def test_state_query_initial_data_decorator_uses_value_after_init_and_upda
 
 @pytest.mark.asyncio
 @with_render_session
-async def test_state_query_clears_to_none_on_refetch_when_keep_previous_false():
+async def test_state_query_initial_data_used_on_key_change_when_keep_previous_false():
+	"""
+	When keep_previous_data=False and initial_data is provided, changing the key
+	creates a new query that starts with initial_data (not None), since initial_data
+	is used on mount. New key = new query = uses initial_data.
+	"""
+
 	class S(ps.State):
 		uid: int = 1
 
@@ -438,9 +514,7 @@ async def test_state_query_clears_to_none_on_refetch_when_keep_previous_false():
 	assert q.data == {"id": -1}
 	await q.wait()
 	assert q.data == {"id": 1}
-	# Change key -> while loading, data should reset to initial_data (because we have it)
-	# In TanStack Query, initialData is used on mount. New key = new query.
-	# So it should show initial data.
+	# Change key -> new query starts with initial_data (not None)
 	s.uid = 2
 	await asyncio.sleep(0)
 	assert q.is_loading is False
@@ -873,3 +947,314 @@ async def test_query_preserves_data_on_key_change_when_keep_previous_true():
 	# After fetch completes, new data should be present and loading should be false
 	assert q.is_loading is False
 	assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_invalidate_triggers_refetch():
+	"""Test that invalidate() marks query as stale and triggers refetch if there are observers."""
+
+	class S(ps.State):
+		uid: int = 1
+		calls: int = 0
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, Any]:
+			self.calls += 1
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	assert q.data == {"id": 1}
+	assert s.calls == 1
+
+	# Invalidate should trigger refetch
+	q.invalidate()
+	await q.wait()
+	assert q.data == {"id": 1}
+	assert s.calls == 2
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_invalidate_without_observers_does_not_refetch():
+	"""Test that invalidate() without observers does not trigger refetch."""
+
+	class S(ps.State):
+		uid: int = 1
+		calls: int = 0
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, Any]:
+			self.calls += 1
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	assert q.data == {"id": 1}
+	assert s.calls == 1
+
+	# Dispose the query result (removes observer)
+	q.dispose()
+
+	# Invalidate without observers should not trigger refetch
+	q.invalidate()
+	await asyncio.sleep(0.01)  # Wait to ensure no refetch happens
+	assert s.calls == 1  # Should still be 1
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_set_error():
+	"""Test that set_error() manually sets error state."""
+
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	assert q.data == {"id": 1}
+	assert q.is_success is True
+	assert q.is_error is False
+
+	# Manually set error
+	error = ValueError("manual error")
+	q.set_error(error)
+	assert q.is_error is True
+	assert q.is_success is False
+	assert q.error == error
+	# Data should still be present (set_error doesn't clear data)
+	assert q.data == {"id": 1}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_set_error_with_keep_previous_data():
+	"""Test that set_error() works correctly with keep_previous_data."""
+
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0, keep_previous_data=True)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	assert q.data == {"id": 1}
+
+	# Manually set error
+	q.set_error(ValueError("manual error"))
+	assert q.is_error is True
+	assert q.data == {"id": 1}  # Data preserved with keep_previous_data
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_refetch_with_cancel_refetch_false():
+	"""Test that refetch(cancel_refetch=False) deduplicates concurrent requests."""
+
+	class S(ps.State):
+		uid: int = 1
+		calls: int = 0
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, Any]:
+			self.calls += 1
+			await asyncio.sleep(0.01)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	assert s.calls == 1
+
+	# Start two refetches with cancel_refetch=False (should deduplicate)
+	t1 = asyncio.create_task(q.refetch(cancel_refetch=False))
+	t2 = asyncio.create_task(q.refetch(cancel_refetch=False))
+
+	res1 = await t1
+	res2 = await t2
+
+	# Should have only run once (deduplicated)
+	assert s.calls == 2  # 1 initial + 1 deduplicated refetch
+	assert res1 == {"id": 1}
+	assert res2 == {"id": 1}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_refetch_with_cancel_refetch_true():
+	"""Test that refetch(cancel_refetch=True) cancels previous request and starts new one."""
+
+	class S(ps.State):
+		uid: int = 1
+		calls: int = 0
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, Any]:
+			self.calls += 1
+			await asyncio.sleep(0.02)  # Longer delay to ensure cancellation
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	initial_calls = s.calls
+	assert initial_calls == 1
+
+	# Start first refetch
+	t1 = asyncio.create_task(q.refetch(cancel_refetch=True))
+	await asyncio.sleep(0.01)  # Let it start but not complete
+
+	# Start second refetch with cancel_refetch=True (should cancel first)
+	t2 = asyncio.create_task(q.refetch(cancel_refetch=True))
+
+	# First might raise CancelledError or return result
+	try:
+		await t1
+	except asyncio.CancelledError:
+		pass
+
+	res2 = await t2
+
+	# Should have run at least twice (first may or may not complete before cancellation)
+	# The important thing is that cancel_refetch=True allows new request
+	assert s.calls >= initial_calls + 1
+	assert res2 == {"id": 1}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_multiple_observers_same_query():
+	"""Test that multiple QueryResult instances can observe the same query."""
+
+	class S(ps.State):
+		uid: int = 1
+		calls: int = 0
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, Any]:
+			self.calls += 1
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s1 = S()
+	s2 = S()  # Different state instance, but same key
+
+	q1 = s1.user
+	q2 = s2.user  # Should observe the same query due to same key
+
+	# Both should trigger the same query
+	await q1.wait()
+	assert q1.data == {"id": 1}
+	assert s1.calls == 1
+
+	# q2 should see the same data (from cache, same query)
+	assert q2.data == {"id": 1}
+	assert s2.calls == 0  # Should not have called again (shared query)
+
+	# Refetch from one should update both (same query instance)
+	await q1.refetch()
+	assert q1.data == {"id": 1}
+	assert q2.data == {"id": 1}  # Both see the same query data
+	assert s1.calls == 2  # Refetch was called
+	assert s2.calls == 0  # Still no call from s2 (shared query)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_multiple_observers_lifecycle():
+	"""Test observer lifecycle when multiple observers are added/removed."""
+
+	class S(ps.State):
+		uid: int = 1
+		calls: int = 0
+
+		@ps.query(retries=0, gc_time=0.1)
+		async def user(self) -> dict[str, Any]:
+			self.calls += 1
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s1 = S()
+	s2 = S()
+
+	q1 = s1.user
+	q2 = s2.user
+
+	# Both observers active
+	await q1.wait()
+	assert s1.calls == 1
+
+	# Dispose one observer
+	q1.dispose()
+
+	# Query should still exist (other observer still active)
+	assert q2.data == {"id": 1}
+
+	# Dispose second observer - query should be GC'd
+	q2.dispose()
+	await asyncio.sleep(0.15)  # Wait for GC
+
+	# New query should be created (old one was GC'd)
+	s3 = S()
+	q3 = s3.user
+	await q3.wait()
+	assert s3.calls == 1  # New query, fresh call

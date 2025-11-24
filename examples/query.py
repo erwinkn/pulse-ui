@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import reveal_type
 
 import pulse as ps
 
@@ -132,6 +133,7 @@ class UserApi(ps.State):
 @ps.component
 def QueryExample():
 	s = ps.states(UserApi)
+	reveal_type(s.user)
 
 	def prev():
 		s.user_id = max(1, s.user_id - 1)

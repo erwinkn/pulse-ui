@@ -20,6 +20,7 @@ from pulse.helpers import (
 )
 
 T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 P = ParamSpec("P")
 
 
@@ -94,16 +95,16 @@ class Signal(Generic[T]):
 			obs.push_change()
 
 
-class Computed(Generic[T]):
-	fn: Callable[..., T]
+class Computed(Generic[T_co]):
+	fn: Callable[..., T_co]
 	name: str | None
 	dirty: bool
 	on_stack: bool
 	accepts_prev_value: bool
 
-	def __init__(self, fn: Callable[..., T], name: str | None = None):
+	def __init__(self, fn: Callable[..., T_co], name: str | None = None):
 		self.fn = fn
-		self.value: T = None  # pyright: ignore[reportAttributeAccessIssue]
+		self.value: T_co = None  # pyright: ignore[reportAttributeAccessIssue]
 		self.name = name
 		self.dirty = False
 		self.on_stack = False
@@ -125,7 +126,7 @@ class Computed(Generic[T]):
 			for p in params
 		)
 
-	def read(self) -> T:
+	def read(self) -> T_co:
 		if self.on_stack:
 			raise RuntimeError("Circular dependency detected")
 
@@ -138,10 +139,10 @@ class Computed(Generic[T]):
 			rc.scope.register_dep(self)
 		return self.value
 
-	def __call__(self) -> T:
+	def __call__(self) -> T_co:
 		return self.read()
 
-	def unwrap(self) -> T:
+	def unwrap(self) -> T_co:
 		"""Return the current value while registering subscriptions."""
 		return self.read()
 

@@ -2,17 +2,13 @@
 
 import inspect
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, overload
 
-from pulse.helpers import MISSING
 from pulse.queries.common import OnErrorFn, OnSuccessFn
+from pulse.queries.infinite_query import InfiniteQueryProperty
 from pulse.queries.mutation import MutationProperty
-from pulse.queries.query import RETRY_DELAY_DEFAULT
-from pulse.queries.query_observer import (
-	InfiniteQueryProperty,
-	QueryProperty,
-	QueryPropertyWithInitial,
-)
+from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryProperty
 from pulse.reactive import (
 	AsyncEffect,
 	AsyncEffectFn,
@@ -182,54 +178,18 @@ def effect(
 # -----------------
 
 
-# With initial (narrowed return type) - more specific overloads first
 @overload
 def query(
 	fn: Callable[[TState], Awaitable[T]],
 	*,
-	key: Callable[[TState], tuple[Any, ...]] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	initial: T | Callable[[TState], T],
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
-) -> QueryPropertyWithInitial[T, TState]: ...
-
-
-@overload
-def query(
-	fn: None = None,
-	*,
-	key: Callable[[TState], tuple[Any, ...]] | None = None,
-	stale_time: float = 0.0,
-	gc_time: float | None = 300.0,
-	keep_previous_data: bool = False,
-	retries: int = 3,
-	retry_delay: float | None = None,
-	initial: T | Callable[[TState], T],
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
-) -> Callable[
-	[Callable[[TState], Awaitable[T]]], QueryPropertyWithInitial[T, TState]
-]: ...
-
-
-@overload
-def query(
-	fn: Callable[[TState], Awaitable[T]],
-	*,
-	key: Callable[[TState], tuple[Any, ...]] | None = None,
-	stale_time: float = 0.0,
-	gc_time: float | None = 300.0,
-	keep_previous_data: bool = False,
-	retries: int = 3,
-	retry_delay: float | None = None,
-	initial: T | Callable[[TState], T] | None = ...,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
+	initial_data_updated_at: float | datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
 ) -> QueryProperty[T, TState]: ...
 
 
@@ -237,54 +197,49 @@ def query(
 def query(
 	fn: None = None,
 	*,
-	key: Callable[[TState], tuple[Any, ...]] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	initial: T | Callable[[TState], T] | None = ...,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
+	initial_data_updated_at: float | datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
 ) -> Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]: ...
 
 
 def query(
 	fn: Callable[[TState], Awaitable[T]] | None = None,
 	*,
-	key: Callable[[TState], tuple[Any, ...]] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	initial: T | Callable[[TState], T] | None = MISSING,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
+	initial_data_updated_at: float | datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
 ):
 	def decorator(
 		func: Callable[[TState], Awaitable[T]], /
-	) -> QueryProperty[T, TState] | QueryPropertyWithInitial[T, TState]:
+	) -> QueryProperty[T, TState]:
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())
 		# Only state-method form supported for now (single 'self')
 		if not (len(params) == 1 and params[0].name == "self"):
 			raise TypeError("@query currently only supports state methods (self)")
 
-		prop_cls = QueryPropertyWithInitial if initial is not None else QueryProperty
-
-		return prop_cls(
+		return QueryProperty(
 			func.__name__,
 			func,
-			key=key,
 			stale_time=stale_time,
 			gc_time=gc_time if gc_time is not None else 300.0,
 			keep_previous_data=keep_previous_data,
 			retries=retries,
 			retry_delay=RETRY_DELAY_DEFAULT if retry_delay is None else retry_delay,
-			initial=initial,
-			on_success=on_success,
-			on_error=on_error,
+			initial_data_updated_at=initial_data_updated_at,
+			enabled=enabled,
+			fetch_on_mount=fetch_on_mount,
 		)
 
 	if fn:
@@ -303,25 +258,18 @@ TIPageParam = TypeVar("TIPageParam")
 
 @overload
 def infinite_query(
-	fn: Callable[[TState, Any], Awaitable[TIPage]],
+	fn: Callable[[TState, TIPageParam], Awaitable[TIPage]],
 	*,
-	key: Callable[[TState], tuple[Any, ...]] | None = None,
 	initial_page_param: TIPageParam,
-	get_next_page_param: Callable[
-		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
-	],
-	get_previous_page_param: Callable[
-		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
-	]
-	| None = None,
 	max_pages: int = 0,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	on_success: OnSuccessFn[TState, list[TIPage]] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
+	initial_data_updated_at: float | datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
 ) -> InfiniteQueryProperty[TIPage, TIPageParam, TState]: ...
 
 
@@ -329,23 +277,16 @@ def infinite_query(
 def infinite_query(
 	fn: None = None,
 	*,
-	key: Callable[[TState], tuple[Any, ...]] | None = None,
 	initial_page_param: TIPageParam,
-	get_next_page_param: Callable[
-		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
-	],
-	get_previous_page_param: Callable[
-		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
-	]
-	| None = None,
 	max_pages: int = 0,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	on_success: OnSuccessFn[TState, list[TIPage]] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
+	initial_data_updated_at: float | datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
 ) -> Callable[
 	[Callable[[TState, Any], Awaitable[TIPage]]],
 	InfiniteQueryProperty[TIPage, TIPageParam, TState],
@@ -353,50 +294,42 @@ def infinite_query(
 
 
 def infinite_query(
-	fn: Callable[[TState, Any], Awaitable[TIPage]] | None = None,
+	fn: Callable[[TState, TIPageParam], Awaitable[TIPage]] | None = None,
 	*,
-	key: Callable[[TState], tuple[Any, ...]] | None = None,
 	initial_page_param: TIPageParam,
-	get_next_page_param: Callable[
-		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
-	],
-	get_previous_page_param: Callable[
-		[TIPage, list[TIPage], TIPageParam, list[TIPageParam]], TIPageParam | None
-	]
-	| None = None,
 	max_pages: int = 0,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	keep_previous_data: bool = False,
 	retries: int = 3,
 	retry_delay: float | None = None,
-	on_success: OnSuccessFn[TState, list[TIPage]] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
+	initial_data_updated_at: float | datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
 ):
 	def decorator(
-		func: Callable[[TState, Any], Awaitable[TIPage]], /
+		func: Callable[[TState, TIPageParam], Awaitable[TIPage]], /
 	) -> InfiniteQueryProperty[TIPage, TIPageParam, TState]:
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())
 		if not (len(params) == 2 and params[0].name == "self"):
 			raise TypeError(
-				"@infinite_query must be applied to a state method with signature (self, context)"
+				"@infinite_query must be applied to a state method with signature (self, page_param)"
 			)
 
 		return InfiniteQueryProperty(
 			func.__name__,
 			func,
 			initial_page_param=initial_page_param,
-			get_next_page_param=get_next_page_param,
-			get_previous_page_param=get_previous_page_param,
 			max_pages=max_pages,
 			stale_time=stale_time,
 			gc_time=gc_time if gc_time is not None else 300.0,
 			keep_previous_data=keep_previous_data,
 			retries=retries,
 			retry_delay=RETRY_DELAY_DEFAULT if retry_delay is None else retry_delay,
-			on_success=on_success,
-			on_error=on_error,
+			initial_data_updated_at=initial_data_updated_at,
+			enabled=enabled,
+			fetch_on_mount=fetch_on_mount,
 		)
 
 	if fn:

@@ -1,8 +1,7 @@
 import asyncio
 
 import pytest
-from pulse.queries.query import Query
-from pulse.queries.query_observer import QueryResult
+from pulse.queries.query import Query, QueryResult
 from pulse.queries.store import QueryStore
 from pulse.reactive import Computed
 

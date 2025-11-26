@@ -387,11 +387,21 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 	# ─────────────────────────────────────────────────────────────────────────
 
 	def _cancel_queue(self):
-		"""Cancel all pending actions in the queue."""
+		"""Cancel all pending and in-flight actions."""
+		# Cancel pending actions in the queue
 		while self._queue:
 			action = self._queue.popleft()
 			if not action.future.done():
 				action.future.cancel()
+
+		# Cancel the currently executing action and task
+		current = self.current_action.read()
+		if current is not None and not current.future.done():
+			current.future.cancel()
+
+		if self._queue_task and not self._queue_task.done():
+			self._queue_task.cancel()
+			self._queue_task = None
 
 	def _enqueue(
 		self,
@@ -453,8 +463,11 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 				if not action.future.done():
 					action.future.set_result(ActionError(e))
 			finally:
-				self.is_fetching.write(False)
-				self.current_action.write(None)
+				# Only reset state if we're still the current action
+				# (not replaced by another action via cancel_fetch)
+				if self.current_action.read() is action:
+					self.is_fetching.write(False)
+					self.current_action.write(None)
 
 	async def _execute_action(
 		self,
@@ -506,7 +519,6 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self, action: "Refetch[T, TParam]"
 	) -> list[Page[T, TParam]]:
 		if len(self.pages) == 0:
-			print("performing initial fetch in refetch_all")
 			page = await self.fn(self.cfg.initial_page_param)
 			self.pages.append(Page(page, self.cfg.initial_page_param))
 			await self.commit()
@@ -526,9 +538,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 				)
 
 			if should_refetch:
-				print(f"Refeching page {page_param}")
 				page = await self.fn(page_param)
-				print("Result:", page)
 			else:
 				page = old_page.data
 			self.pages[idx] = Page(page, page_param)
@@ -728,7 +738,6 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 			return prev
 		# Access pages.version to subscribe to structural changes
 		result = unwrap(query.pages) if len(query.pages) > 0 else None
-		print("Computed data:", result)
 		return result
 
 	@property

@@ -650,3 +650,111 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	# Wait and verify no more refetches
 	await asyncio.sleep(0.1)
 	assert s.calls == calls_at_dispose
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_cancel_fetch_cancels_inflight_request():
+	"""Test that cancel_fetch=True actually cancels in-flight requests."""
+
+	class S(ps.State):
+		fetch_started: list[int] = []
+		fetch_completed: list[int] = []
+
+		@ps.infinite_query(initial_page_param=0, retries=0)
+		async def slow_query(self, page_param: int) -> int:
+			self.fetch_started.append(page_param)
+			# Slow fetch - gives time for cancellation
+			await asyncio.sleep(0.2)
+			self.fetch_completed.append(page_param)
+			return page_param
+
+		@slow_query.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 5 else None
+
+		@slow_query.key
+		def _key(self):
+			return ("cancel-inflight",)
+
+	s = S()
+	q = s.slow_query
+
+	# Start initial fetch (but don't await it fully)
+	wait_task = asyncio.create_task(q.wait())
+	# Give it time to start the fetch
+	await asyncio.sleep(0.05)
+
+	# Verify fetch started
+	assert 0 in s.fetch_started
+	assert 0 not in s.fetch_completed
+
+	# Now cancel with refetch - the in-flight request should be cancelled
+	refetch_task = asyncio.create_task(q.refetch(cancel_fetch=True))
+
+	# Wait for the new refetch to complete
+	await refetch_task
+
+	# The first fetch should have been cancelled (not completed)
+	# and the refetch should have run instead
+	assert s.fetch_completed == [0], (
+		f"Expected only refetch to complete, but got: started={s.fetch_started}, completed={s.fetch_completed}"
+	)
+
+	# The wait_task should have been cancelled
+	assert wait_task.cancelled() or wait_task.done()
+
+	q.dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
+	"""Test that fetch_next_page with cancel_fetch=True cancels in-flight requests."""
+
+	class S(ps.State):
+		fetch_started: list[int] = []
+		fetch_completed: list[int] = []
+
+		@ps.infinite_query(initial_page_param=0, retries=0)
+		async def slow_query(self, page_param: int) -> int:
+			self.fetch_started.append(page_param)
+			await asyncio.sleep(0.2)
+			self.fetch_completed.append(page_param)
+			return page_param
+
+		@slow_query.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 5 else None
+
+		@slow_query.key
+		def _key(self):
+			return ("cancel-fetch-next",)
+
+	s = S()
+	q = s.slow_query
+
+	# Get initial page first
+	await q.wait()
+	assert q.pages == [0]
+	s.fetch_started.clear()
+	s.fetch_completed.clear()
+
+	# Start fetching next page (don't await - we'll cancel it)
+	_fetch_task = asyncio.create_task(q.fetch_next_page())
+	await asyncio.sleep(0.05)
+
+	assert 1 in s.fetch_started
+	assert 1 not in s.fetch_completed
+
+	# Cancel and start refetch
+	refetch_task = asyncio.create_task(q.refetch(cancel_fetch=True))
+	await refetch_task
+
+	# The fetch_next_page should have been cancelled
+	# Only the refetch should complete (which refetches page 0)
+	assert 1 not in s.fetch_completed, (
+		f"fetch_next_page should have been cancelled, but completed: {s.fetch_completed}"
+	)
+
+	q.dispose()

@@ -405,18 +405,19 @@ class ReactiveList(list[T1]):
 	- Setting an index writes to that index's Signal
 	- Structural operations (append/insert/pop/remove/clear/extend/sort/reverse/slice assigns)
 	  trigger a structural version Signal so consumers can listen for changes that affect layout
-	- Iteration and len are NOT reactive; prefer explicit index reads inside render/effects
+	- Iteration subscribes to all item signals and structural changes
+	- len() subscribes to structural changes
 	"""
 
 	__slots__: tuple[str, ...] = ("_signals", "_structure")
 
-	def __init__(self, initial: Iterable[_Any] | None = None) -> None:
+	def __init__(self, initial: Iterable[T1] | None = None) -> None:
 		super().__init__()
-		self._signals: list[Signal[_Any]] = []
+		self._signals: list[Signal[T1]] = []
 		self._structure: Signal[int] = Signal(0)
 		if initial:
 			for item in initial:
-				v = cast(_Any, reactive(item))
+				v = reactive(item)
 				self._signals.append(Signal(v))
 				super().append(v)
 
@@ -617,7 +618,8 @@ class ReactiveList(list[T1]):
 	@override
 	def __iter__(self) -> Iterator[T1]:
 		self._structure.read()
-		return super().__iter__()
+		for sig in self._signals:
+			yield sig.read()
 
 	def __copy__(self):
 		result = type(self)()
@@ -640,7 +642,7 @@ class ReactiveSet(set[T1]):
 
 	- `x in s` reads a membership Signal for element `x`
 	- Mutations update membership Signals for affected elements
-	- Iteration and len are NOT reactive
+	- Iteration subscribes to membership signals for all elements
 	"""
 
 	__slots__: tuple[str, ...] = ("_signals",)
@@ -663,6 +665,12 @@ class ReactiveSet(set[T1]):
 			self._signals[element] = Signal(bool(present))
 			sig = self._signals[element]
 		return bool(sig.read())
+
+	@override
+	def __iter__(self) -> Iterator[T1]:
+		# Subscribe to membership signals and return present elements
+		present = [elem for elem, sig in self._signals.items() if sig.read()]
+		return iter(present)
 
 	@override
 	def add(self, element: T1) -> None:
@@ -1068,7 +1076,11 @@ def unwrap(value: _Any, untrack: bool = False) -> _Any:
 			return {k: _unwrap(val) for k, val in v.items()}
 		if isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)):
 			if isinstance(v, tuple):
-				return tuple(_unwrap(val) for val in v)
+				# Preserve namedtuple types
+				if hasattr(v, "_fields"):
+					return type(v)(*(_unwrap(val) for val in v))
+				else:
+					return tuple(_unwrap(val) for val in v)
 			return [_unwrap(val) for val in v]
 		if isinstance(v, set):
 			return {_unwrap(val) for val in v}

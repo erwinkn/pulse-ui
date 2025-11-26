@@ -1,0 +1,462 @@
+import datetime as dt
+from collections.abc import Callable
+from typing import Any, TypeVar, overload
+
+from pulse.context import PulseContext
+from pulse.queries.common import ActionResult, QueryKey
+from pulse.queries.infinite_query import InfiniteQuery, Page
+from pulse.queries.query import Query
+
+T = TypeVar("T")
+
+# Query filter types
+QueryFilter = (
+	QueryKey  # exact key match
+	| list[QueryKey]  # explicit list of keys
+	| Callable[[QueryKey], bool]  # predicate function
+)
+
+
+def _normalize_filter(
+	filter: QueryFilter | None,
+) -> Callable[[QueryKey], bool] | None:
+	"""Convert any QueryFilter to a predicate function."""
+	if filter is None:
+		return None
+	if isinstance(filter, tuple):
+		# Exact key match
+		exact_key = filter
+		return lambda k: k == exact_key
+	if isinstance(filter, list):
+		# List of keys
+		key_set = set(filter)
+		return lambda k: k in key_set
+	# Already a callable predicate
+	return filter
+
+
+def _prefix_filter(prefix: tuple[Any, ...]) -> Callable[[QueryKey], bool]:
+	"""Create a predicate that matches keys starting with the given prefix."""
+	prefix_len = len(prefix)
+	return lambda k: len(k) >= prefix_len and k[:prefix_len] == prefix
+
+
+class QueryClient:
+	"""
+	Client for managing queries and infinite queries in a session.
+
+	Provides methods to get, set, invalidate, and refetch queries by key
+	or using filter predicates.
+
+	Automatically resolves to the current RenderSession's query store.
+	"""
+
+	def _get_store(self):
+		"""Get the query store from the current PulseContext."""
+		render = PulseContext.get().render
+		if render is None:
+			raise RuntimeError("No render session available")
+		return render.query_store
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# Query accessors
+	# ─────────────────────────────────────────────────────────────────────────
+
+	def get(self, key: QueryKey) -> Query[Any] | None:
+		"""Get an existing regular query by key, or None if not found."""
+		return self._get_store().get(key)
+
+	def get_infinite(self, key: QueryKey) -> InfiniteQuery[Any, Any] | None:
+		"""Get an existing infinite query by key, or None if not found."""
+		return self._get_store().get_infinite(key)
+
+	def get_all(
+		self,
+		filter: QueryFilter | None = None,
+		*,
+		include_infinite: bool = True,
+	) -> list[Query[Any] | InfiniteQuery[Any, Any]]:
+		"""
+		Get all queries matching the filter.
+
+		Args:
+			filter: Optional filter - can be an exact key, list of keys, or predicate.
+				If None, returns all queries.
+			include_infinite: Whether to include infinite queries (default True).
+
+		Returns:
+			List of matching Query or InfiniteQuery instances.
+		"""
+		store = self._get_store()
+		predicate = _normalize_filter(filter)
+		results: list[Query[Any] | InfiniteQuery[Any, Any]] = []
+
+		for key, entry in store.items():
+			if predicate is not None and not predicate(key):
+				continue
+			if not include_infinite and isinstance(entry, InfiniteQuery):
+				continue
+			results.append(entry)
+
+		return results
+
+	def get_queries(self, filter: QueryFilter | None = None) -> list[Query[Any]]:
+		"""Get all regular queries matching the filter."""
+		store = self._get_store()
+		predicate = _normalize_filter(filter)
+		results: list[Query[Any]] = []
+
+		for key, entry in store.items():
+			if isinstance(entry, InfiniteQuery):
+				continue
+			if predicate is not None and not predicate(key):
+				continue
+			results.append(entry)
+
+		return results
+
+	def get_infinite_queries(
+		self, filter: QueryFilter | None = None
+	) -> list[InfiniteQuery[Any, Any]]:
+		"""Get all infinite queries matching the filter."""
+		store = self._get_store()
+		predicate = _normalize_filter(filter)
+		results: list[InfiniteQuery[Any, Any]] = []
+
+		for key, entry in store.items():
+			if not isinstance(entry, InfiniteQuery):
+				continue
+			if predicate is not None and not predicate(key):
+				continue
+			results.append(entry)
+
+		return results
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# Data accessors
+	# ─────────────────────────────────────────────────────────────────────────
+
+	def get_data(self, key: QueryKey) -> Any | None:
+		"""Get the data for a query by key. Returns None if not found or no data."""
+		query = self.get(key)
+		if query is None:
+			return None
+		return query.data.read()
+
+	def get_infinite_data(self, key: QueryKey) -> list[Page[Any, Any]] | None:
+		"""Get the pages for an infinite query by key."""
+		query = self.get_infinite(key)
+		if query is None:
+			return None
+		return list(query.pages)
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# Data setters
+	# ─────────────────────────────────────────────────────────────────────────
+
+	@overload
+	def set_data(
+		self,
+		key_or_filter: QueryKey,
+		data: T | Callable[[T | None], T],
+		*,
+		updated_at: float | dt.datetime | None = None,
+	) -> bool: ...
+
+	@overload
+	def set_data(
+		self,
+		key_or_filter: list[QueryKey] | Callable[[QueryKey], bool],
+		data: Callable[[Any], Any],
+		*,
+		updated_at: float | dt.datetime | None = None,
+	) -> int: ...
+
+	def set_data(
+		self,
+		key_or_filter: QueryKey | list[QueryKey] | Callable[[QueryKey], bool],
+		data: Any | Callable[[Any], Any],
+		*,
+		updated_at: float | dt.datetime | None = None,
+	) -> bool | int:
+		"""
+		Set data for queries matching the key or filter.
+
+		When using a single key, returns True if query exists and was updated.
+		When using a filter, returns count of updated queries.
+
+		Args:
+			key_or_filter: Exact key or filter predicate.
+			data: New data value or updater function.
+			updated_at: Optional timestamp to set.
+
+		Returns:
+			bool if exact key, int count if filter.
+		"""
+		# Single key case
+		if isinstance(key_or_filter, tuple):
+			query = self.get(key_or_filter)
+			if query is None:
+				return False
+			query.set_data(data, updated_at=updated_at)
+			return True
+
+		# Filter case
+		queries = self.get_queries(key_or_filter)
+		for q in queries:
+			q.set_data(data, updated_at=updated_at)
+		return len(queries)
+
+	def set_infinite_data(
+		self,
+		key: QueryKey,
+		pages: list[Page[Any, Any]]
+		| Callable[[list[Page[Any, Any]]], list[Page[Any, Any]]],
+		*,
+		updated_at: float | dt.datetime | None = None,
+	) -> bool:
+		"""Set pages for an infinite query by key."""
+		query = self.get_infinite(key)
+		if query is None:
+			return False
+		query.set_data(pages, updated_at=updated_at)
+		return True
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# Invalidation
+	# ─────────────────────────────────────────────────────────────────────────
+
+	@overload
+	def invalidate(
+		self,
+		key_or_filter: QueryKey,
+		*,
+		cancel_refetch: bool = False,
+	) -> bool: ...
+
+	@overload
+	def invalidate(
+		self,
+		key_or_filter: list[QueryKey] | Callable[[QueryKey], bool] | None = None,
+		*,
+		cancel_refetch: bool = False,
+	) -> int: ...
+
+	def invalidate(
+		self,
+		key_or_filter: QueryKey
+		| list[QueryKey]
+		| Callable[[QueryKey], bool]
+		| None = None,
+		*,
+		cancel_refetch: bool = False,
+	) -> bool | int:
+		"""
+		Invalidate queries matching the key or filter.
+
+		For regular queries: marks as stale and refetches if observed.
+		For infinite queries: triggers refetch of all pages if observed.
+
+		Args:
+			key_or_filter: Exact key, filter predicate, or None for all.
+			cancel_refetch: Cancel in-flight requests before refetch.
+
+		Returns:
+			bool if exact key, int count if filter/None.
+		"""
+		# Single key case
+		if isinstance(key_or_filter, tuple):
+			query = self.get(key_or_filter)
+			if query is not None:
+				query.invalidate(cancel_refetch=cancel_refetch)
+				return True
+			inf_query = self.get_infinite(key_or_filter)
+			if inf_query is not None:
+				inf_query.invalidate(cancel_fetch=cancel_refetch)
+				return True
+			return False
+
+		# Filter case
+		queries = self.get_all(key_or_filter)
+		for q in queries:
+			if isinstance(q, InfiniteQuery):
+				q.invalidate(cancel_fetch=cancel_refetch)
+			else:
+				q.invalidate(cancel_refetch=cancel_refetch)
+		return len(queries)
+
+	def invalidate_prefix(
+		self,
+		prefix: tuple[Any, ...],
+		*,
+		cancel_refetch: bool = False,
+	) -> int:
+		"""
+		Invalidate all queries whose keys start with the given prefix.
+
+		Example:
+			ps.queries.invalidate_prefix(("users",))  # invalidates ("users",), ("users", 1), etc.
+		"""
+		return self.invalidate(_prefix_filter(prefix), cancel_refetch=cancel_refetch)
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# Refetch
+	# ─────────────────────────────────────────────────────────────────────────
+
+	async def refetch(
+		self,
+		key: QueryKey,
+		*,
+		cancel_refetch: bool = True,
+	) -> ActionResult[Any] | None:
+		"""
+		Refetch a query by key and return the result.
+
+		Returns None if the query doesn't exist.
+		"""
+		query = self.get(key)
+		if query is not None:
+			return await query.refetch(cancel_refetch=cancel_refetch)
+
+		inf_query = self.get_infinite(key)
+		if inf_query is not None:
+			return await inf_query.refetch(cancel_fetch=cancel_refetch)
+
+		return None
+
+	async def refetch_all(
+		self,
+		filter: QueryFilter | None = None,
+		*,
+		cancel_refetch: bool = True,
+	) -> list[ActionResult[Any]]:
+		"""
+		Refetch all queries matching the filter.
+
+		Returns list of ActionResult for each refetched query.
+		"""
+		queries = self.get_all(filter)
+		results: list[ActionResult[Any]] = []
+
+		for q in queries:
+			if isinstance(q, InfiniteQuery):
+				result = await q.refetch(cancel_fetch=cancel_refetch)
+			else:
+				result = await q.refetch(cancel_refetch=cancel_refetch)
+			results.append(result)
+
+		return results
+
+	async def refetch_prefix(
+		self,
+		prefix: tuple[Any, ...],
+		*,
+		cancel_refetch: bool = True,
+	) -> list[ActionResult[Any]]:
+		"""Refetch all queries whose keys start with the given prefix."""
+		return await self.refetch_all(
+			_prefix_filter(prefix), cancel_refetch=cancel_refetch
+		)
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# Error handling
+	# ─────────────────────────────────────────────────────────────────────────
+
+	def set_error(
+		self,
+		key: QueryKey,
+		error: Exception,
+		*,
+		updated_at: float | dt.datetime | None = None,
+	) -> bool:
+		"""Set error state on a query by key."""
+		query = self.get(key)
+		if query is not None:
+			query.set_error(error, updated_at=updated_at)
+			return True
+
+		inf_query = self.get_infinite(key)
+		if inf_query is not None:
+			inf_query.set_error(error, updated_at=updated_at)
+			return True
+
+		return False
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# Reset / Remove
+	# ─────────────────────────────────────────────────────────────────────────
+
+	def remove(self, key: QueryKey) -> bool:
+		"""
+		Remove a query from the store, disposing it.
+
+		Returns True if query existed and was removed.
+		"""
+		store = self._get_store()
+		entry = store.get_any(key)
+		if entry is None:
+			return False
+		entry.dispose()
+		return True
+
+	def remove_all(self, filter: QueryFilter | None = None) -> int:
+		"""
+		Remove all queries matching the filter.
+
+		Returns count of removed queries.
+		"""
+		queries = self.get_all(filter)
+		for q in queries:
+			q.dispose()
+		return len(queries)
+
+	def remove_prefix(self, prefix: tuple[Any, ...]) -> int:
+		"""Remove all queries whose keys start with the given prefix."""
+		return self.remove_all(_prefix_filter(prefix))
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# State queries
+	# ─────────────────────────────────────────────────────────────────────────
+
+	def is_fetching(self, filter: QueryFilter | None = None) -> bool:
+		"""Check if any query matching the filter is currently fetching."""
+		queries = self.get_all(filter)
+		for q in queries:
+			if q.is_fetching():
+				return True
+		return False
+
+	def is_loading(self, filter: QueryFilter | None = None) -> bool:
+		"""Check if any query matching the filter is in loading state."""
+		queries = self.get_all(filter)
+		for q in queries:
+			if isinstance(q, InfiniteQuery):
+				if q.status() == "loading":
+					return True
+			elif q.status() == "loading":
+				return True
+		return False
+
+	# ─────────────────────────────────────────────────────────────────────────
+	# Wait helpers
+	# ─────────────────────────────────────────────────────────────────────────
+
+	async def wait(self, key: QueryKey) -> ActionResult[Any] | None:
+		"""
+		Wait for a query to complete and return the result.
+
+		Returns None if the query doesn't exist.
+		"""
+		query = self.get(key)
+		if query is not None:
+			return await query.wait()
+
+		inf_query = self.get_infinite(key)
+		if inf_query is not None:
+			return await inf_query.wait()
+
+		return None
+
+
+# Singleton instance
+queries = QueryClient()

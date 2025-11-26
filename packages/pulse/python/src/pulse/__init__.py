@@ -72,8 +72,6 @@ from pulse.css import (
 # Decorators
 from pulse.decorators import computed as computed
 from pulse.decorators import effect as effect
-from pulse.decorators import mutation as mutation
-from pulse.decorators import query as query
 
 # Environment
 from pulse.env import PulseEnv as PulseEnv
@@ -1349,7 +1347,18 @@ from pulse.middleware import (
 
 # Plugin
 from pulse.plugin import Plugin as Plugin
-from pulse.queries.query import QueryStatus as QueryStatus
+from pulse.queries.client import QueryClient as QueryClient
+from pulse.queries.client import QueryFilter as QueryFilter
+from pulse.queries.client import queries as queries
+from pulse.queries.common import ActionError as ActionError
+from pulse.queries.common import ActionResult as ActionResult
+from pulse.queries.common import ActionSuccess as ActionSuccess
+from pulse.queries.common import QueryKey as QueryKey
+from pulse.queries.common import QueryStatus as QueryStatus
+from pulse.queries.infinite_query import infinite_query as infinite_query
+from pulse.queries.mutation import mutation as mutation
+from pulse.queries.query import QueryResult as QueryResult
+from pulse.queries.query import query as query
 
 # React component registry
 from pulse.react_component import (

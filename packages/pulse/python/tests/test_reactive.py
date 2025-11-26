@@ -1023,7 +1023,7 @@ async def test_async_effect_cleanup_on_rerun():
 @pytest.mark.asyncio
 async def test_async_effect_cancels_inflight_on_rerun():
 	loop = asyncio.get_running_loop()
-	gate: asyncio.Future[None] = loop.create_future()
+	gates: list[asyncio.Future[None]] = []
 	finished = False
 
 	s = Signal(0, name="s")
@@ -1031,16 +1031,22 @@ async def test_async_effect_cancels_inflight_on_rerun():
 	@effect(deps=[s])
 	async def e():
 		nonlocal finished
+		# Each run gets its own gate so cancelling one doesn't affect others
+		gate = loop.create_future()
+		gates.append(gate)
 		await gate
 		finished = True
 
 	assert e.deps == {s: s.last_change}
 
-	# Start first run and pause at gate0
-	flush_effects()
+	# Start first run and pause at gate
 	initial_task = e._task  # pyright: ignore[reportPrivateUsage]
 	assert initial_task is not None, "Effect's task should be set after first run"
 	assert not finished, "Effect should not have finished after first run"
+
+	# Let the task actually start running (blocked at gate)
+	await asyncio.sleep(0)
+	assert len(gates) == 1, "First run should have created a gate"
 
 	# Trigger rerun -> should cancel in-flight task
 	s.write(1)
@@ -1053,12 +1059,55 @@ async def test_async_effect_cancels_inflight_on_rerun():
 		"Initial task should be cancelled after signal write"
 	)
 	assert e._task is not None, "Effect's task should be set after rescheduling"  # pyright: ignore[reportPrivateUsage]
+	assert len(gates) == 2, "Second run should have created another gate"
 
 	# Let the effect finish
-	gate.set_result(None)
+	gates[1].set_result(None)
 	await asyncio.sleep(0)
 	assert e._task is None, "Effect's task should be cleared after run"  # pyright: ignore[reportPrivateUsage]
 	assert finished, "Effect should have finished after rerun"
+
+
+@pytest.mark.asyncio
+async def test_async_effect_skips_restart_when_task_not_started():
+	"""
+	When multiple signals change before the task starts executing,
+	we should not cancel and recreate the task multiple times.
+	"""
+	loop = asyncio.get_running_loop()
+	gates: list[asyncio.Future[None]] = []
+	run_count = 0
+
+	s1 = Signal(0, name="s1")
+	s2 = Signal(0, name="s2")
+
+	@effect(deps=[s1, s2])
+	async def e():
+		nonlocal run_count
+		run_count += 1
+		gate = loop.create_future()
+		gates.append(gate)
+		await gate
+
+	initial_task = e._task  # pyright: ignore[reportPrivateUsage]
+	assert initial_task is not None
+	assert not e._task_started  # pyright: ignore[reportPrivateUsage]
+
+	# Write to both signals before task starts - should not restart
+	s1.write(1)
+	s2.write(2)
+
+	# Task should still be the same (not cancelled and recreated)
+	assert e._task is initial_task  # pyright: ignore[reportPrivateUsage]
+
+	# Let it run
+	await asyncio.sleep(0)
+	assert len(gates) == 1, "Should only have created one gate (one run)"
+	assert run_count == 1
+
+	gates[0].set_result(None)
+	await asyncio.sleep(0)
+	assert e._task is None  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.asyncio

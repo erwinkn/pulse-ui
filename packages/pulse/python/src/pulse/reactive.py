@@ -383,6 +383,11 @@ class Effect(Disposable):
 			self._cancel_interval()
 
 	def push_change(self):
+		# Short-circuit if already scheduled in a batch.
+		# This avoids redundant schedule() calls and O(n) list checks
+		# when the same effect is reached through multiple dependency paths.
+		if self.batch is not None:
+			return
 		self.schedule()
 
 	def should_run(self):
@@ -517,6 +522,7 @@ class AsyncEffect(Effect):
 	fn: AsyncEffectFn  # pyright: ignore[reportIncompatibleMethodOverride]
 	batch: None  # pyright: ignore[reportIncompatibleVariableOverride]
 	_task: asyncio.Task[None] | None
+	_task_started: bool
 
 	def __init__(
 		self,
@@ -529,6 +535,7 @@ class AsyncEffect(Effect):
 	):
 		# Track an async task when running async effects
 		self._task = None
+		self._task_started = False
 		super().__init__(
 			fn=fn,  # pyright: ignore[reportArgumentType]
 			name=name,
@@ -538,6 +545,16 @@ class AsyncEffect(Effect):
 			deps=deps,
 			interval=interval,
 		)
+
+	@override
+	def push_change(self):
+		# Short-circuit if task exists but hasn't started executing yet.
+		# This avoids cancelling and recreating tasks multiple times when reached
+		# through multiple dependency paths before the event loop runs.
+		# Once the task starts running, new push_change calls will cancel and restart.
+		if self._task is not None and not self._task.done() and not self._task_started:
+			return
+		self.schedule()
 
 	@override
 	def schedule(self):
@@ -573,6 +590,7 @@ class AsyncEffect(Effect):
 		async def _runner():
 			nonlocal execution_epoch, this_task
 			try:
+				self._task_started = True
 				# Perform cleanups in the new task
 				with Untrack():
 					try:
@@ -606,6 +624,7 @@ class AsyncEffect(Effect):
 				# Clear the task reference when it finishes
 				if self._task is this_task:
 					self._task = None
+					self._task_started = False
 
 		this_task = create_task(_runner(), name=f"effect:{self.name or 'unnamed'}")
 		self._task = this_task

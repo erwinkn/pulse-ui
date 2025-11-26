@@ -9,6 +9,7 @@ from typing import (
 	Generic,
 	TypeVar,
 	cast,
+	overload,
 	override,
 )
 
@@ -22,9 +23,11 @@ from pulse.helpers import (
 	maybe_await,
 )
 from pulse.queries.common import (
+	ActionError,
+	ActionResult,
+	ActionSuccess,
 	OnErrorFn,
 	OnSuccessFn,
-	QueryFetchStatus,
 	QueryKey,
 	QueryStatus,
 	bind_state,
@@ -64,7 +67,7 @@ class Query(Generic[T], Disposable):
 	error: Signal[Exception | None]
 	last_updated: Signal[float]
 	status: Signal[QueryStatus]
-	fetch_status: Signal[QueryFetchStatus]
+	is_fetching: Signal[bool]
 	retries: Signal[int]
 	retry_reason: Signal[Exception | None]
 
@@ -111,7 +114,7 @@ class Query(Generic[T], Disposable):
 			"loading" if initial_data is MISSING else "success",
 			name=f"query.status({key})",
 		)
-		self.fetch_status = Signal("idle", name=f"query.fetch_status({key})")
+		self.is_fetching = Signal(False, name=f"query.is_fetching({key})")
 		self.retries = Signal(0, name=f"query.retries({key})")
 		self.retry_reason = Signal(None, name=f"query.retry_reason({key})")
 
@@ -165,7 +168,7 @@ class Query(Generic[T], Disposable):
 		self.error.write(None)
 		self.status.write("success")
 		if not manual:
-			self.fetch_status.write("idle")
+			self.is_fetching.write(False)
 			self.retries.write(0)
 			self.retry_reason.write(None)
 
@@ -174,7 +177,7 @@ class Query(Generic[T], Disposable):
 		self.last_updated.write(time.time())
 		self.status.write("error")
 		if not manual:
-			self.fetch_status.write("idle")
+			self.is_fetching.write(False)
 			# Don't reset retries on final error - preserve for debugging
 			# retry_reason is updated to the final error in _run
 
@@ -225,19 +228,25 @@ class Query(Generic[T], Disposable):
 							await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
 					return
 
-	async def refetch(self, cancel_refetch: bool = True) -> T:
+	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""
 		Reruns the query and returns the result.
 		If cancel_refetch is True (default), cancels any in-flight request and starts a new one.
 		If cancel_refetch is False, deduplicates requests if one is already in flight.
 		"""
-		if cancel_refetch:
-			self.effect.cancel()
+		if cancel_refetch or not self.is_fetching():
+			self.effect.schedule()
 		return await self.wait()
 
-	async def wait(self) -> T:
+	async def wait(self) -> ActionResult[T]:
+		# If loading and no task, schedule a refetch
+		if self.status() == "loading" and not self.is_fetching():
+			self.effect.schedule()
 		await self.effect.wait()
-		return cast(T, self.data.read())
+		# Return result based on current state
+		if self.status() == "error":
+			return ActionError(cast(Exception, self.error.read()))
+		return ActionSuccess(cast(T, self.data.read()))
 
 	def invalidate(self, cancel_refetch: bool = False):
 		"""
@@ -299,11 +308,13 @@ class QueryResult(Generic[T], Disposable):
 	_query: Computed[Query[T]]
 	_stale_time: float
 	_gc_time: float
+	_refetch_interval: float | None
 	_keep_previous_data: bool
 	_on_success: Callable[[T], Awaitable[None] | None] | None
 	_on_error: Callable[[Exception], Awaitable[None] | None] | None
 	_callback_effect: Effect
 	_observe_effect: Effect
+	_interval_effect: Effect | None
 	_data_computed: Computed[T | None]
 	_disposed_data: T | None
 	_enabled: Signal[bool]
@@ -315,6 +326,7 @@ class QueryResult(Generic[T], Disposable):
 		query: Computed[Query[T]],
 		stale_time: float = 0.0,
 		gc_time: float = 300.0,
+		refetch_interval: float | None = None,
 		keep_previous_data: bool = False,
 		on_success: Callable[[T], Awaitable[None] | None] | None = None,
 		on_error: Callable[[Exception], Awaitable[None] | None] | None = None,
@@ -324,11 +336,13 @@ class QueryResult(Generic[T], Disposable):
 		self._query = query
 		self._stale_time = stale_time
 		self._gc_time = gc_time
+		self._refetch_interval = refetch_interval
 		self._keep_previous_data = keep_previous_data
 		self._on_success = on_success
 		self._on_error = on_error
 		self._disposed_data = None
 		self._enabled = Signal(enabled, name=f"query.enabled({query().key})")
+		self._interval_effect = None
 
 		def observe_effect():
 			query = self._query()
@@ -355,13 +369,28 @@ class QueryResult(Generic[T], Disposable):
 			self._data_computed_fn, name=f"query_data({self._query().key})"
 		)
 
+		# Set up interval effect if interval is specified
+		if refetch_interval is not None and refetch_interval > 0:
+			self._setup_interval_effect(refetch_interval)
+
+	def _setup_interval_effect(self, interval: float):
+		"""Create an effect that invalidates the query at the specified interval."""
+
+		def interval_fn():
+			# Read enabled to make this effect reactive to enabled changes
+			if self._enabled():
+				self._query().invalidate()
+
+		self._interval_effect = Effect(
+			interval_fn,
+			name=f"query_interval({self._query().key})",
+			interval=interval,
+			immediate=True,
+		)
+
 	@property
 	def status(self) -> QueryStatus:
 		return self._query().status()
-
-	@property
-	def fetch_status(self) -> QueryFetchStatus:
-		return self._query().fetch_status()
 
 	# Forward property reads to the query's signals (with automatic reactive tracking)
 	@property
@@ -378,7 +407,7 @@ class QueryResult(Generic[T], Disposable):
 
 	@property
 	def is_fetching(self) -> bool:
-		return self.fetch_status == "fetching"
+		return self._query().is_fetching()
 
 	@property
 	def error(self) -> Exception | None:
@@ -402,11 +431,11 @@ class QueryResult(Generic[T], Disposable):
 		query = self._query()
 		return (time.time() - query.last_updated.read()) > self._stale_time
 
-	async def refetch(self, cancel_refetch: bool = True) -> T:
+	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""Refetch the query data."""
 		return await self._query().refetch(cancel_refetch=cancel_refetch)
 
-	async def wait(self) -> T:
+	async def wait(self) -> ActionResult[T]:
 		return await self._query().wait()
 
 	def invalidate(self):
@@ -445,6 +474,8 @@ class QueryResult(Generic[T], Disposable):
 	@override
 	def dispose(self):
 		"""Clean up the result and its observe effect."""
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
 		self._observe_effect.dispose()
 
 
@@ -468,12 +499,13 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	_keep_previous_data: bool
 	_stale_time: float
 	_gc_time: float
+	_refetch_interval: float | None
 	_retries: int
 	_retry_delay: float
 	_initial_data_updated_at: float | dt.datetime | None
 	_enabled: bool
 	_initial_data: T | Callable[[TState], T] | None
-	_key_fn: Callable[[TState], QueryKey] | None
+	_key: QueryKey | Callable[[TState], QueryKey] | None
 	# Not using OnSuccessFn and OnErrorFn since unions of callables are not well
 	# supported in the type system. We just need to be careful to use
 	# call_flexible to invoke these functions.
@@ -489,20 +521,23 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		keep_previous_data: bool = False,
 		stale_time: float = 0.0,
 		gc_time: float = 300.0,
+		refetch_interval: float | None = None,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		enabled: bool = True,
 		fetch_on_mount: bool = True,
+		key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	):
 		self.name = name
 		self._fetch_fn = fetch_fn
-		self._key_fn = None
+		self._key = key
 		self._on_success_fn = None
 		self._on_error_fn = None
 		self._keep_previous_data = keep_previous_data
 		self._stale_time = stale_time
 		self._gc_time = gc_time
+		self._refetch_interval = refetch_interval
 		self._retries = retries
 		self._retry_delay = retry_delay
 		self._initial_data_updated_at = initial_data_updated_at
@@ -513,11 +548,11 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 
 	# Decorator to attach a key function
 	def key(self, fn: Callable[[TState], QueryKey]):
-		if self._key_fn is not None:
+		if self._key is not None:
 			raise RuntimeError(
-				f"Duplicate key() decorator for query '{self.name}'. Only one is allowed."
+				f"Cannot use @{self.name}.key decorator when a key is already provided to @query(key=...)."
 			)
-		self._key_fn = fn
+		self._key = fn
 		return fn
 
 	# Decorator to attach a function providing initial data
@@ -560,24 +595,23 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		initial_data = cast(
 			T | None,
 			(
-				self._initial_data(state)
+				call_flexible(self._initial_data, state)
 				if callable(self._initial_data)
-				and len(inspect.signature(self._initial_data).parameters) == 1
 				else self._initial_data
 			),
 		)
 
-		if self._key_fn:
-			# Keyed query: use session-wide QueryStore
-			query = self._resolve_keyed(
-				state,
+		if self._key is None:
+			# Unkeyed query: create private Query
+			query = self._resolve_unkeyed(
 				fetch_fn,
 				initial_data,
 				self._initial_data_updated_at,
 			)
 		else:
-			# Unkeyed query: create private Query
-			query = self._resolve_unkeyed(
+			# Keyed query: use session-wide QueryStore
+			query = self._resolve_keyed(
+				state,
 				fetch_fn,
 				initial_data,
 				self._initial_data_updated_at,
@@ -589,6 +623,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			stale_time=self._stale_time,
 			keep_previous_data=self._keep_previous_data,
 			gc_time=self._gc_time,
+			refetch_interval=self._refetch_interval,
 			on_success=bind_state(state, self._on_success_fn)
 			if self._on_success_fn
 			else None,
@@ -611,11 +646,17 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		initial_data_updated_at: float | dt.datetime | None,
 	) -> Computed[Query[T]]:
 		"""Create or get a keyed query from the session store using a Computed."""
-		assert self._key_fn is not None
+		assert self._key is not None
 
-		key_computed = Computed(
-			bind_state(state, self._key_fn), name=f"query.key.{self.name}"
-		)
+		# Create a Computed for the key - passthrough for constant keys, reactive for function keys
+		if callable(self._key):
+			key_computed = Computed(
+				bind_state(state, self._key), name=f"query.key.{self.name}"
+			)
+		else:
+			const_key = self._key  # ensure a constant reference
+			key_computed = Computed(lambda: const_key, name=f"query.key.{self.name}")
+
 		render = PulseContext.get().render
 		if render is None:
 			raise RuntimeError("No render session available")
@@ -657,3 +698,80 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		if obj is None:
 			return self  # pyright: ignore[reportReturnType]
 		return self.initialize(obj, self.name)
+
+
+@overload
+def query(
+	fn: Callable[[TState], Awaitable[T]],
+	*,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
+	refetch_interval: float | None = None,
+	keep_previous_data: bool = False,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	initial_data_updated_at: float | dt.datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
+	key: QueryKey | None = None,
+) -> QueryProperty[T, TState]: ...
+
+
+@overload
+def query(
+	fn: None = None,
+	*,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
+	refetch_interval: float | None = None,
+	keep_previous_data: bool = False,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	initial_data_updated_at: float | dt.datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
+	key: QueryKey | None = None,
+) -> Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]: ...
+
+
+def query(
+	fn: Callable[[TState], Awaitable[T]] | None = None,
+	*,
+	stale_time: float = 0.0,
+	gc_time: float | None = 300.0,
+	refetch_interval: float | None = None,
+	keep_previous_data: bool = False,
+	retries: int = 3,
+	retry_delay: float | None = None,
+	initial_data_updated_at: float | dt.datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
+	key: QueryKey | None = None,
+):
+	def decorator(
+		func: Callable[[TState], Awaitable[T]], /
+	) -> QueryProperty[T, TState]:
+		sig = inspect.signature(func)
+		params = list(sig.parameters.values())
+		# Only state-method form supported for now (single 'self')
+		if not (len(params) == 1 and params[0].name == "self"):
+			raise TypeError("@query currently only supports state methods (self)")
+
+		return QueryProperty(
+			func.__name__,
+			func,
+			stale_time=stale_time,
+			gc_time=gc_time if gc_time is not None else 300.0,
+			refetch_interval=refetch_interval,
+			keep_previous_data=keep_previous_data,
+			retries=retries,
+			retry_delay=RETRY_DELAY_DEFAULT if retry_delay is None else retry_delay,
+			initial_data_updated_at=initial_data_updated_at,
+			enabled=enabled,
+			fetch_on_mount=fetch_on_mount,
+			key=key,
+		)
+
+	if fn:
+		return decorator(fn)
+	return decorator

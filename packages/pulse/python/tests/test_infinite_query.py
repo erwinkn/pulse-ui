@@ -4,6 +4,7 @@ from typing import Any, TypedDict
 
 import pulse as ps
 import pytest
+from pulse.queries.common import ActionError
 from pulse.queries.infinite_query import Page
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
@@ -176,8 +177,11 @@ async def test_infinite_query_page_error_sets_error():
 	await q.wait()
 	assert q.pages == [0]
 
-	with pytest.raises(RuntimeError):
-		await q.fetch_next_page()
+	# TanStack style: fetch_next_page returns ActionResult
+	result = await q.fetch_next_page()
+	assert result.status == "error"
+	assert isinstance(result, ActionError)
+	assert isinstance(result.error, RuntimeError)
 
 	assert q.is_error is True
 	assert q.pages == [0]
@@ -337,6 +341,7 @@ async def test_infinite_query_refetch_page_filter():
 
 	await q.refetch(refetch_page=lambda page, idx, all_pages: idx == 0)
 	assert q.pages is not None
+	print("PAges:", q.pages)
 	assert [p["version"] for p in q.pages] == [1, 0]
 
 
@@ -405,11 +410,16 @@ async def test_infinite_query_set_initial_data_no_effect_after_load():
 @pytest.mark.asyncio
 @with_render_session
 async def test_infinite_query_fetch_page_basic():
+	"""Test that fetch_page refetches an existing page."""
+	fetch_count = 0
+
 	class S(ps.State):
 		@ps.infinite_query(initial_page_param=0, max_pages=3, retries=0)
 		async def nums(self, page_param: int) -> int:
+			nonlocal fetch_count
+			fetch_count += 1
 			await asyncio.sleep(0)
-			return page_param
+			return page_param * 10 + fetch_count  # Different value each fetch
 
 		@nums.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
@@ -424,23 +434,33 @@ async def test_infinite_query_fetch_page_basic():
 
 	# Initial fetch
 	await q.wait()
-	assert q.pages == [0]
+	assert q.pages == [1]  # 0*10 + 1
 	assert q.page_params == [0]
 
-	# Fetch page 2 (should insert at end)
-	await q.fetch_page(2)
-	assert q.pages == [0, 2]
-	assert q.page_params == [0, 2]
+	# Fetch next page
+	await q.fetch_next_page()
+	assert q.pages == [1, 12]  # [0*10+1, 1*10+2]
+	assert q.page_params == [0, 1]
 
-	# Fetch page 1 (should insert in middle)
-	await q.fetch_page(1)
-	assert q.pages == [0, 1, 2]
-	assert q.page_params == [0, 1, 2]
+	# Fetch non-existent page returns ActionSuccess with None data
+	result = await q.fetch_page(5)
+	assert result.status == "success"
+	assert result.data is None
+	assert q.pages == [1, 12]  # Unchanged
 
-	# Fetch existing page 1 (should update in place)
-	await q.fetch_page(1)
-	assert q.pages == [0, 1, 2]
-	assert q.page_params == [0, 1, 2]
+	# Refetch existing page 0 updates it
+	result = await q.fetch_page(0)
+	assert result.status == "success"
+	assert result.data == 3  # 0*10 + 3
+	assert q.pages == [3, 12]
+	assert q.page_params == [0, 1]
+
+	# Refetch existing page 1 updates it
+	result = await q.fetch_page(1)
+	assert result.status == "success"
+	assert result.data == 14  # 1*10 + 4
+	assert q.pages == [3, 14]
+	assert q.page_params == [0, 1]
 
 
 @pytest.mark.asyncio
@@ -449,7 +469,7 @@ async def test_infinite_query_retry_on_initial_fetch():
 	"""Test that infinite query retries on initial fetch failure."""
 
 	class S(ps.State):
-		attempts = 0
+		attempts: int = 0
 
 		@ps.infinite_query(initial_page_param=0, retries=2, retry_delay=0.01)
 		async def failing_query(self, page_param: int) -> int:
@@ -478,19 +498,18 @@ async def test_infinite_query_retry_on_initial_fetch():
 @pytest.mark.asyncio
 @with_render_session
 async def test_infinite_query_retry_on_fetch_page():
-	"""Test that fetch_page retries on failure."""
+	"""Test that fetch_page retries on failure when refetching existing page."""
 
 	class S(ps.State):
-		attempts = 0
+		attempts: int = 0
 
 		@ps.infinite_query(initial_page_param=0, retries=2, retry_delay=0.01)
 		async def failing_query(self, page_param: int) -> int:
 			self.attempts += 1
-			if (
-				page_param == 1 and self.attempts < 4
-			):  # Fail first 3 attempts for page 1
+			# Fail attempts 2 and 3 (when refetching page 0)
+			if self.attempts in (2, 3):
 				raise ValueError(f"attempt {self.attempts}")
-			return page_param
+			return page_param * 10 + self.attempts
 
 		@failing_query.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
@@ -503,18 +522,17 @@ async def test_infinite_query_retry_on_fetch_page():
 	s = S()
 	q = s.failing_query
 
-	# Initial fetch should succeed
+	# Initial fetch should succeed (attempt 1)
 	await q.wait()
-	assert q.pages == [0]
+	assert q.pages == [1]  # 0*10 + 1
 	assert s.attempts == 1
 
-	# Fetch page 1 should retry and succeed
-	result = await q.fetch_page(1)
-	assert result == 1
-	assert q.pages is not None
-	assert [p for p in q.pages] == [0, 1]
-	# With retries=2, _fetch_page_value should try 3 times: attempt 2,3,4
-	assert s.attempts == 4  # 1 for page 0, 3 for page 1
+	# Refetch page 0 should retry and succeed on attempt 4
+	result = await q.fetch_page(0)
+	assert result.status == "success"
+	assert result.data == 4  # 0*10 + 4
+	assert q.pages == [4]
+	assert s.attempts == 4  # 1 initial + 3 for refetch (2 failed, 1 success)
 
 
 @pytest.mark.asyncio
@@ -523,7 +541,7 @@ async def test_infinite_query_retry_exhausted():
 	"""Test that infinite query fails after retries are exhausted."""
 
 	class S(ps.State):
-		attempts = 0
+		attempts: int = 0
 
 		@ps.infinite_query(initial_page_param=0, retries=1, retry_delay=0.01)
 		async def failing_query(self, page_param: int) -> int:
@@ -551,44 +569,84 @@ async def test_infinite_query_retry_exhausted():
 
 @pytest.mark.asyncio
 @with_render_session
-async def test_infinite_query_fetch_page_intelligent_trimming():
+async def test_infinite_query_refetch_interval():
+	"""Test that refetch_interval triggers automatic refetches."""
+
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=0, max_pages=3, retries=0)
-		async def nums(self, page_param: int) -> int:
+		calls: int = 0
+
+		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.05)
+		async def items(self, page_param: int) -> int:
+			self.calls += 1
 			await asyncio.sleep(0)
-			return page_param
+			return self.calls
 
-		@nums.get_next_page_param
+		@items.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
-			return pages[-1].param + 1 if pages[-1].param < 10 else None
+			return None  # Single page
 
-		@nums.key
+		@items.key
 		def _key(self):
-			return ("fetch-page-trim",)
+			return ("interval-items",)
 
 	s = S()
-	q = s.nums
+	q = s.items
 
 	# Initial fetch
 	await q.wait()
-	assert q.pages == [0]
-	assert q.page_params == [0]
+	assert s.calls == 1
+	assert q.pages == [1]
 
-	# Fetch pages to reach max
-	await q.fetch_page(1)
-	await q.fetch_page(2)
-	await q.fetch_page(3)
-	assert q.pages == [1, 2, 3]  # max_pages=3, so page 0 was trimmed when adding page 3
-	assert q.page_params == [1, 2, 3]
+	# Wait for interval to trigger refetch
+	await asyncio.sleep(0.08)
+	assert s.calls == 2
+	assert q.pages == [2]
 
-	# Fetch page 10 - should remove page 1 (furthest from 10)
-	await q.fetch_page(10)
-	assert len(q.pages or []) == 3
-	assert q.page_params == [2, 3, 10]  # Should be sorted, page 1 removed
-	assert 1 not in (q.page_params or [])  # Page 1 should be removed
+	# Wait for another interval
+	await asyncio.sleep(0.06)
+	assert s.calls == 3
+	assert q.pages == [3]
 
-	# Fetch page -5 - should remove page 10 (furthest from -5)
-	await q.fetch_page(-5)
-	assert len(q.pages or []) == 3
-	assert q.page_params == [-5, 2, 3]  # Should be sorted, page 10 removed
-	assert 10 not in (q.page_params or [])  # Page 10 should be removed
+	q.dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_refetch_interval_stops_on_dispose():
+	"""Test that refetch_interval stops when query is disposed."""
+
+	class S(ps.State):
+		calls: int = 0
+
+		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.05)
+		async def items(self, page_param: int) -> int:
+			self.calls += 1
+			await asyncio.sleep(0)
+			return self.calls
+
+		@items.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return None
+
+		@items.key
+		def _key(self):
+			return ("interval-dispose",)
+
+	s = S()
+	q = s.items
+
+	# Initial fetch
+	await q.wait()
+	assert s.calls == 1
+
+	# Wait for one interval refetch
+	await asyncio.sleep(0.08)
+	assert s.calls == 2
+
+	# Dispose - interval should stop
+	q.dispose()
+	calls_at_dispose = s.calls
+
+	# Wait and verify no more refetches
+	await asyncio.sleep(0.1)
+	assert s.calls == calls_at_dispose

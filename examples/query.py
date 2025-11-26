@@ -208,7 +208,7 @@ def QueryExample():
 			ps.h2("Query Status Properties", className="text-xl font-semibold mb-2"),
 			ps.div(
 				ps.p(f"Status: {s.user.status}", className="mb-1"),
-				ps.p(f"Fetch Status: {s.user.fetch_status}", className="mb-1"),
+				ps.p(f"is_fetching: {s.user.is_fetching}", className="mb-1"),
 				ps.p(f"is_loading: {s.user.is_loading}", className="mb-1"),
 				ps.p(f"is_success: {s.user.is_success}", className="mb-1"),
 				ps.p(f"is_error: {s.user.is_error}", className="mb-1"),

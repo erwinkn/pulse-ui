@@ -2,13 +2,8 @@
 
 import inspect
 from collections.abc import Awaitable, Callable
-from datetime import datetime
-from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, overload
+from typing import Any, ParamSpec, Protocol, TypeVar, overload
 
-from pulse.queries.common import OnErrorFn, OnSuccessFn
-from pulse.queries.infinite_query import InfiniteQueryProperty
-from pulse.queries.mutation import MutationProperty
-from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryProperty
 from pulse.reactive import (
 	AsyncEffect,
 	AsyncEffectFn,
@@ -86,6 +81,7 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	interval: float | None = None,
 ) -> Effect: ...
 
 
@@ -98,6 +94,7 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	interval: float | None = None,
 ) -> AsyncEffect: ...
 # In practice this overload returns a StateEffect, but it gets converted into an
 # Effect at state instantiation.
@@ -114,6 +111,7 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	interval: float | None = None,
 ) -> EffectBuilder: ...
 
 
@@ -125,6 +123,7 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	interval: float | None = None,
 ):
 	# The type checker is not happy if I don't specify the `/` here.
 	def decorator(func: Callable[..., Any], /):
@@ -143,6 +142,7 @@ def effect(
 				lazy=lazy,
 				on_error=on_error,
 				deps=deps,
+				interval=interval,
 			)
 
 		if len(params) > 0:
@@ -158,6 +158,7 @@ def effect(
 				lazy=lazy,
 				on_error=on_error,
 				deps=deps,
+				interval=interval,
 			)
 		return Effect(
 			func,  # type: ignore[arg-type]
@@ -166,218 +167,7 @@ def effect(
 			lazy=lazy,
 			on_error=on_error,
 			deps=deps,
-		)
-
-	if fn:
-		return decorator(fn)
-	return decorator
-
-
-# -----------------
-# Query decorator
-# -----------------
-
-
-@overload
-def query(
-	fn: Callable[[TState], Awaitable[T]],
-	*,
-	stale_time: float = 0.0,
-	gc_time: float | None = 300.0,
-	keep_previous_data: bool = False,
-	retries: int = 3,
-	retry_delay: float | None = None,
-	initial_data_updated_at: float | datetime | None = None,
-	enabled: bool = True,
-	fetch_on_mount: bool = True,
-) -> QueryProperty[T, TState]: ...
-
-
-@overload
-def query(
-	fn: None = None,
-	*,
-	stale_time: float = 0.0,
-	gc_time: float | None = 300.0,
-	keep_previous_data: bool = False,
-	retries: int = 3,
-	retry_delay: float | None = None,
-	initial_data_updated_at: float | datetime | None = None,
-	enabled: bool = True,
-	fetch_on_mount: bool = True,
-) -> Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]: ...
-
-
-def query(
-	fn: Callable[[TState], Awaitable[T]] | None = None,
-	*,
-	stale_time: float = 0.0,
-	gc_time: float | None = 300.0,
-	keep_previous_data: bool = False,
-	retries: int = 3,
-	retry_delay: float | None = None,
-	initial_data_updated_at: float | datetime | None = None,
-	enabled: bool = True,
-	fetch_on_mount: bool = True,
-):
-	def decorator(
-		func: Callable[[TState], Awaitable[T]], /
-	) -> QueryProperty[T, TState]:
-		sig = inspect.signature(func)
-		params = list(sig.parameters.values())
-		# Only state-method form supported for now (single 'self')
-		if not (len(params) == 1 and params[0].name == "self"):
-			raise TypeError("@query currently only supports state methods (self)")
-
-		return QueryProperty(
-			func.__name__,
-			func,
-			stale_time=stale_time,
-			gc_time=gc_time if gc_time is not None else 300.0,
-			keep_previous_data=keep_previous_data,
-			retries=retries,
-			retry_delay=RETRY_DELAY_DEFAULT if retry_delay is None else retry_delay,
-			initial_data_updated_at=initial_data_updated_at,
-			enabled=enabled,
-			fetch_on_mount=fetch_on_mount,
-		)
-
-	if fn:
-		return decorator(fn)
-	return decorator
-
-
-# -----------------
-# Infinite query decorator
-# -----------------
-
-
-TIPage = TypeVar("TIPage")
-TIPageParam = TypeVar("TIPageParam")
-
-
-@overload
-def infinite_query(
-	fn: Callable[[TState, TIPageParam], Awaitable[TIPage]],
-	*,
-	initial_page_param: TIPageParam,
-	max_pages: int = 0,
-	stale_time: float = 0.0,
-	gc_time: float | None = 300.0,
-	keep_previous_data: bool = False,
-	retries: int = 3,
-	retry_delay: float | None = None,
-	initial_data_updated_at: float | datetime | None = None,
-	enabled: bool = True,
-	fetch_on_mount: bool = True,
-) -> InfiniteQueryProperty[TIPage, TIPageParam, TState]: ...
-
-
-@overload
-def infinite_query(
-	fn: None = None,
-	*,
-	initial_page_param: TIPageParam,
-	max_pages: int = 0,
-	stale_time: float = 0.0,
-	gc_time: float | None = 300.0,
-	keep_previous_data: bool = False,
-	retries: int = 3,
-	retry_delay: float | None = None,
-	initial_data_updated_at: float | datetime | None = None,
-	enabled: bool = True,
-	fetch_on_mount: bool = True,
-) -> Callable[
-	[Callable[[TState, Any], Awaitable[TIPage]]],
-	InfiniteQueryProperty[TIPage, TIPageParam, TState],
-]: ...
-
-
-def infinite_query(
-	fn: Callable[[TState, TIPageParam], Awaitable[TIPage]] | None = None,
-	*,
-	initial_page_param: TIPageParam,
-	max_pages: int = 0,
-	stale_time: float = 0.0,
-	gc_time: float | None = 300.0,
-	keep_previous_data: bool = False,
-	retries: int = 3,
-	retry_delay: float | None = None,
-	initial_data_updated_at: float | datetime | None = None,
-	enabled: bool = True,
-	fetch_on_mount: bool = True,
-):
-	def decorator(
-		func: Callable[[TState, TIPageParam], Awaitable[TIPage]], /
-	) -> InfiniteQueryProperty[TIPage, TIPageParam, TState]:
-		sig = inspect.signature(func)
-		params = list(sig.parameters.values())
-		if not (len(params) == 2 and params[0].name == "self"):
-			raise TypeError(
-				"@infinite_query must be applied to a state method with signature (self, page_param)"
-			)
-
-		return InfiniteQueryProperty(
-			func.__name__,
-			func,
-			initial_page_param=initial_page_param,
-			max_pages=max_pages,
-			stale_time=stale_time,
-			gc_time=gc_time if gc_time is not None else 300.0,
-			keep_previous_data=keep_previous_data,
-			retries=retries,
-			retry_delay=RETRY_DELAY_DEFAULT if retry_delay is None else retry_delay,
-			initial_data_updated_at=initial_data_updated_at,
-			enabled=enabled,
-			fetch_on_mount=fetch_on_mount,
-		)
-
-	if fn:
-		return decorator(fn)
-	return decorator
-
-
-# -----------------
-# Mutation decorator
-# -----------------
-@overload
-def mutation(
-	fn: Callable[Concatenate[TState, P], Awaitable[T]],
-	*,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
-) -> MutationProperty[T, TState, P]: ...
-
-
-@overload
-def mutation(
-	fn: None = None,
-	*,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
-) -> Callable[
-	[Callable[Concatenate[TState, P], Awaitable[T]]], MutationProperty[T, TState, P]
-]: ...
-
-
-def mutation(
-	fn: Callable[Concatenate[TState, P], Awaitable[T]] | None = None,
-	*,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
-):
-	def decorator(func: Callable[Concatenate[TState, P], Awaitable[T]], /):
-		sig = inspect.signature(func)
-		params = list(sig.parameters.values())
-
-		if len(params) == 0 or params[0].name != "self":
-			raise TypeError("@mutation method must have 'self' as first argument")
-
-		return MutationProperty(
-			func.__name__,
-			func,
-			on_success=on_success,
-			on_error=on_error,
+			interval=interval,
 		)
 
 	if fn:

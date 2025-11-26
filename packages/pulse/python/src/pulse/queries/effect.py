@@ -6,12 +6,11 @@ from typing import (
 	override,
 )
 
-from pulse.queries.common import QueryFetchStatus
 from pulse.reactive import AsyncEffect, Computed, Signal
 
 
 class Fetcher(Protocol):
-	fetch_status: Signal[QueryFetchStatus]
+	is_fetching: Signal[bool]
 
 
 class AsyncQueryEffect(AsyncEffect):
@@ -36,5 +35,5 @@ class AsyncQueryEffect(AsyncEffect):
 	@override
 	def run(self) -> asyncio.Task[Any]:
 		# Immediately set loading state before running the effect
-		self.fetcher.fetch_status.write("fetching")
+		self.fetcher.is_fetching.write(True)
 		return super().run()

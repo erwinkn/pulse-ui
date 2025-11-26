@@ -17,6 +17,14 @@ class QueryStore:
 	def __init__(self):
 		self._entries: dict[QueryKey, Query[Any] | InfiniteQuery[Any, Any]] = {}
 
+	def items(self):
+		"""Iterate over all (key, query) pairs in the store."""
+		return self._entries.items()
+
+	def get_any(self, key: QueryKey) -> Query[Any] | InfiniteQuery[Any, Any] | None:
+		"""Get any query (regular or infinite) by key, or None if not found."""
+		return self._entries.get(key)
+
 	def ensure(
 		self,
 		key: QueryKey,

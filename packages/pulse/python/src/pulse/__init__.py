@@ -1304,6 +1304,9 @@ from pulse.html.tags import (
 from pulse.html.tags import (
 	wbr as wbr,
 )
+from pulse.javascript.function import (
+	javascript as javascript,
+)
 from pulse.messages import ClientMessage as ClientMessage
 from pulse.messages import Directives as Directives
 from pulse.messages import Prerender as Prerender

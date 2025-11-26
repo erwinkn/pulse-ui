@@ -21,6 +21,7 @@ from pulse.helpers import (
 )
 
 T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 P = ParamSpec("P")
 
 
@@ -95,16 +96,16 @@ class Signal(Generic[T]):
 			obs.push_change()
 
 
-class Computed(Generic[T]):
-	fn: Callable[..., T]
+class Computed(Generic[T_co]):
+	fn: Callable[..., T_co]
 	name: str | None
 	dirty: bool
 	on_stack: bool
 	accepts_prev_value: bool
 
-	def __init__(self, fn: Callable[..., T], name: str | None = None):
+	def __init__(self, fn: Callable[..., T_co], name: str | None = None):
 		self.fn = fn
-		self.value: T = None  # pyright: ignore[reportAttributeAccessIssue]
+		self.value: T_co = None  # pyright: ignore[reportAttributeAccessIssue]
 		self.name = name
 		self.dirty = False
 		self.on_stack = False
@@ -126,7 +127,7 @@ class Computed(Generic[T]):
 			for p in params
 		)
 
-	def read(self) -> T:
+	def read(self) -> T_co:
 		if self.on_stack:
 			raise RuntimeError("Circular dependency detected")
 
@@ -139,10 +140,10 @@ class Computed(Generic[T]):
 			rc.scope.register_dep(self)
 		return self.value
 
-	def __call__(self) -> T:
+	def __call__(self) -> T_co:
 		return self.read()
 
-	def unwrap(self) -> T:
+	def unwrap(self) -> T_co:
 		"""Return the current value while registering subscriptions."""
 		return self.read()
 
@@ -269,6 +270,8 @@ class Effect(Disposable):
 	last_run: int
 	immediate: bool
 	_lazy: bool
+	_interval: float | None
+	_interval_handle: asyncio.TimerHandle | None
 	explicit_deps: bool
 	batch: "Batch | None"
 
@@ -280,6 +283,7 @@ class Effect(Disposable):
 		lazy: bool = False,
 		on_error: Callable[[Exception], None] | None = None,
 		deps: list[Signal[Any] | Computed[Any]] | None = None,
+		interval: float | None = None,
 	):
 		self.fn = fn  # type: ignore[assignment]
 		self.name = name
@@ -295,6 +299,8 @@ class Effect(Disposable):
 		self.explicit_deps = deps is not None
 		self.immediate = immediate
 		self._lazy = lazy
+		self._interval = interval
+		self._interval_handle = None
 
 		if immediate and lazy:
 			raise ValueError("An effect cannot be boht immediate and lazy")
@@ -322,7 +328,7 @@ class Effect(Disposable):
 
 	@override
 	def dispose(self):
-		self.unschedule()
+		self.cancel(cancel_interval=True)
 		for child in self.children.copy():
 			child.dispose()
 		if self.cleanup_fn:
@@ -331,6 +337,26 @@ class Effect(Disposable):
 			dep.obs.remove(self)
 		if self.parent:
 			self.parent.children.remove(self)
+
+	def _schedule_interval(self):
+		"""Schedule the next interval run if interval is set."""
+		if self._interval is not None and self._interval > 0:
+			from pulse.helpers import later
+
+			self._interval_handle = later(self._interval, self._on_interval)
+
+	def _on_interval(self):
+		"""Called when the interval timer fires."""
+		if self._interval is not None:
+			# Run directly instead of scheduling - interval runs are unconditional
+			self.run()
+			self._schedule_interval()
+
+	def _cancel_interval(self):
+		"""Cancel the interval timer."""
+		if self._interval_handle is not None:
+			self._interval_handle.cancel()
+			self._interval_handle = None
 
 	def schedule(self):
 		# Immediate effects run right away when scheduled and do not enter a batch
@@ -342,10 +368,19 @@ class Effect(Disposable):
 		batch.register_effect(self)
 		self.batch = batch
 
-	def unschedule(self):
+	def cancel(self, cancel_interval: bool = True):
+		"""
+		Cancel the effect. For sync effects, removes from batch.
+		For async effects (override), also cancels the running task.
+
+		Args:
+			cancel_interval: If True (default), also cancels the interval timer.
+		"""
 		if self.batch is not None:
 			self.batch.effects.remove(self)
 			self.batch = None
+		if cancel_interval:
+			self._cancel_interval()
 
 	def push_change(self):
 		self.schedule()
@@ -427,6 +462,7 @@ class Effect(Disposable):
 			"lazy": self._lazy,
 			"on_error": self.on_error,
 			"deps": deps,
+			"interval": self._interval,
 		}
 
 	def __copy__(self):
@@ -472,6 +508,9 @@ class Effect(Disposable):
 			self.runs += 1
 			self.last_run = execution_epoch
 		self._apply_scope_results(scope, captured_last_changes)
+		# Start/restart interval if set and not currently scheduled
+		if self._interval is not None and self._interval_handle is None:
+			self._schedule_interval()
 
 
 class AsyncEffect(Effect):
@@ -486,6 +525,7 @@ class AsyncEffect(Effect):
 		lazy: bool = False,
 		on_error: Callable[[Exception], None] | None = None,
 		deps: list[Signal[Any] | Computed[Any]] | None = None,
+		interval: float | None = None,
 	):
 		# Track an async task when running async effects
 		self._task = None
@@ -496,6 +536,7 @@ class AsyncEffect(Effect):
 			lazy=lazy,
 			on_error=on_error,
 			deps=deps,
+			interval=interval,
 		)
 
 	@override
@@ -525,8 +566,8 @@ class AsyncEffect(Effect):
 		"""
 		execution_epoch = epoch()
 
-		# Cancel any previous run still in flight
-		self.cancel()
+		# Cancel any previous run still in flight, but preserve the interval
+		self.cancel(cancel_interval=False)
 		this_task: asyncio.Task[None] | None = None
 
 		async def _runner():
@@ -558,6 +599,9 @@ class AsyncEffect(Effect):
 					self.runs += 1
 					self.last_run = execution_epoch
 				self._apply_scope_results(scope, captured_last_changes)
+				# Start/restart interval if set and not currently scheduled
+				if self._interval is not None and self._interval_handle is None:
+					self._schedule_interval()
 			finally:
 				# Clear the task reference when it finishes
 				if self._task is this_task:
@@ -571,23 +615,34 @@ class AsyncEffect(Effect):
 	async def __call__(self):  # pyright: ignore[reportIncompatibleMethodOverride]
 		await self.run()
 
-	def cancel(self) -> None:
-		# No batch removal needed as AsyncEffect is not batched
+	@override
+	def cancel(self, cancel_interval: bool = True) -> None:
+		"""
+		Cancel the async effect. Cancels the running task and optionally the interval.
+
+		Args:
+			cancel_interval: If True (default), also cancels the interval timer.
+		"""
 		if self._task:
 			t = self._task
 			self._task = None
 			if not t.cancelled():
 				t.cancel()
+		if cancel_interval:
+			self._cancel_interval()
 
 	async def wait(self) -> None:
 		"""
-		Wait until the completion of the current task if it's already running,
-		or start a run if it's not running. In case of cancellation, awaits
-		the new task by recursively calling itself.
+		Wait until the completion of the current task if it's already running.
+		Does not start a new task if none is running.
+		If the task is cancelled while waiting, waits for a new task if one is started.
 		"""
 		while True:
+			if self._task is None or self._task.done():
+				# No task running, return immediately
+				return
 			try:
-				await (self._task or self.run())
+				await self._task
 				return
 			except asyncio.CancelledError:
 				# If wait() itself is cancelled, propagate it
@@ -596,13 +651,14 @@ class AsyncEffect(Effect):
 					current_task.cancelling() > 0 or current_task.cancelled()
 				):
 					raise
-				# Effect task was cancelled, continue waiting for new task
+				# Effect task was cancelled, check if a new task was started
+				# and continue waiting if so
 				continue
 
 	@override
 	def dispose(self):
-		# Run children cleanups first, then cancel in-flight task
-		self.cancel()
+		# Run children cleanups first, then cancel in-flight task and interval
+		self.cancel(cancel_interval=True)
 		for child in self.children.copy():
 			child.dispose()
 		if self.cleanup_fn:

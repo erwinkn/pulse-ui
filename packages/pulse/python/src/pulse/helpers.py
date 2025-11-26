@@ -212,31 +212,39 @@ def later(
 	"""
 	Schedule `fn(*args, **kwargs)` to run after `delay` seconds.
 	Works with sync or async functions. Returns a TimerHandle; call .cancel() to cancel.
+
+	The callback runs with no reactive scope to avoid accidentally capturing
+	reactive dependencies from the calling context. Other context vars (like
+	PulseContext) are preserved normally.
 	"""
+
+	from pulse.reactive import Untrack
+
 	loop = asyncio.get_running_loop()
 
 	def _run():
 		try:
-			res = fn(*args, **kwargs)
-			if asyncio.iscoroutine(res):
-				task = loop.create_task(res)
+			with Untrack():
+				res = fn(*args, **kwargs)
+				if asyncio.iscoroutine(res):
+					task = loop.create_task(res)
 
-				def _log_task_exception(t: asyncio.Task[Any]):
-					try:
-						t.result()
-					except asyncio.CancelledError:
-						# Normal cancellation path
-						pass
-					except Exception as exc:
-						loop.call_exception_handler(
-							{
-								"message": "Unhandled exception in later() task",
-								"exception": exc,
-								"context": {"callback": fn},
-							}
-						)
+					def _log_task_exception(t: asyncio.Task[Any]):
+						try:
+							t.result()
+						except asyncio.CancelledError:
+							# Normal cancellation path
+							pass
+						except Exception as exc:
+							loop.call_exception_handler(
+								{
+									"message": "Unhandled exception in later() task",
+									"exception": exc,
+									"context": {"callback": fn},
+								}
+							)
 
-				task.add_done_callback(_log_task_exception)
+					task.add_done_callback(_log_task_exception)
 		except Exception as exc:
 			# Surface exceptions via the loop's exception handler and continue
 			loop.call_exception_handler(
@@ -273,9 +281,16 @@ def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwa
 	For async functions, waits for completion before starting the next delay.
 	Returns a handle with .cancel() to stop future runs.
 
+	The callback runs with no reactive scope to avoid accidentally capturing
+	reactive dependencies from the calling context. Other context vars (like
+	PulseContext) are preserved normally.
+
 	Optional kwargs:
 	- immediate: bool = False  # run once immediately before the first interval
 	"""
+
+	from pulse.reactive import Untrack
+
 	loop = asyncio.get_running_loop()
 	handle = RepeatHandle()
 
@@ -288,9 +303,10 @@ def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwa
 				if handle.cancelled:
 					break
 				try:
-					result = fn(*args, **kwargs)
-					if asyncio.iscoroutine(result):
-						await result
+					with Untrack():
+						result = fn(*args, **kwargs)
+						if asyncio.iscoroutine(result):
+							await result
 				except asyncio.CancelledError:
 					# Propagate to outer handler to finish cleanly
 					raise

@@ -1,7 +1,7 @@
 import asyncio
 import copy
 from dataclasses import InitVar, asdict, astuple, dataclass, field, replace
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, NamedTuple, cast
 
 import pulse as ps
 import pytest
@@ -13,7 +13,9 @@ from pulse import (
 	Untrack,
 	computed,
 	effect,
+	later,
 	reactive,
+	repeat,
 )
 from pulse.reactive import Batch, flush_effects
 from pulse.reactive_extensions import (
@@ -21,6 +23,7 @@ from pulse.reactive_extensions import (
 	ReactiveList,
 	ReactiveSet,
 	reactive_dataclass,
+	unwrap,
 )
 
 
@@ -144,6 +147,110 @@ def test_untrack():
 	s1.write(2)  # should trigger effect
 	flush_effects()
 	assert runs == 2
+
+
+@pytest.mark.asyncio
+async def test_later_does_not_track_dependencies():
+	"""Test that later() callbacks run with Untrack() and don't create reactive dependencies."""
+	s1 = Signal(1, name="s1")
+	s2 = Signal(10, name="s2")
+
+	effect_runs = 0
+	callback_runs = 0
+
+	def my_effect():
+		nonlocal effect_runs
+		effect_runs += 1
+		# Read s1 to create a dependency
+		_ = s1()
+
+		# Schedule later() with a callback that reads s2
+		# This should NOT create a dependency on s2 for the effect
+		def callback():
+			nonlocal callback_runs
+			callback_runs += 1
+			_ = s2()  # Read s2 inside callback
+
+		later(0.01, callback)
+
+	Effect(my_effect, name="later_effect")
+	flush_effects()
+
+	assert effect_runs == 1
+	assert callback_runs == 0
+
+	# Wait for callback to execute
+	await asyncio.sleep(0.02)
+	assert callback_runs == 1
+
+	# Change s2 - should NOT trigger effect rerun
+	s2.write(20)
+	flush_effects()
+	assert effect_runs == 1  # Effect should not rerun
+
+	# Change s1 - should trigger effect rerun
+	s1.write(2)
+	flush_effects()
+	assert effect_runs == 2  # Effect should rerun
+
+
+@pytest.mark.asyncio
+async def test_repeat_does_not_track_dependencies():
+	"""Test that repeat() callbacks run with Untrack() and don't create reactive dependencies."""
+	s1 = Signal(1, name="s1")
+	s2 = Signal(10, name="s2")
+
+	effect_runs = 0
+	callback_runs = 0
+	handle: Any = None
+
+	def my_effect():
+		nonlocal effect_runs, handle
+		effect_runs += 1
+		# Read s1 to create a dependency
+		_ = s1()
+
+		# Schedule repeat() with a callback that reads s2
+		# This should NOT create a dependency on s2 for the effect
+		# Only create handle once to avoid multiple timers
+		if handle is None:
+
+			def callback():
+				nonlocal callback_runs
+				callback_runs += 1
+				_ = s2()  # Read s2 inside callback
+
+			handle = repeat(0.01, callback)
+
+	Effect(my_effect, name="repeat_effect")
+	flush_effects()
+
+	assert effect_runs == 1
+	assert callback_runs == 0
+
+	# Wait for callback to execute
+	await asyncio.sleep(0.02)
+	assert callback_runs >= 1
+
+	initial_callback_runs = callback_runs
+
+	# Change s2 - should NOT trigger effect rerun
+	s2.write(20)
+	flush_effects()
+	assert effect_runs == 1  # Effect should not rerun
+
+	# Wait a bit more - callback should continue running
+	await asyncio.sleep(0.02)
+	assert callback_runs > initial_callback_runs
+
+	# Change s1 - should trigger effect rerun
+	s1.write(2)
+	flush_effects()
+	assert effect_runs == 2  # Effect should rerun
+
+	# Cleanup
+	if handle:
+		handle.cancel()
 
 
 def test_batching():
@@ -559,14 +666,16 @@ async def test_async_effect_immediate_not_allowed():
 			await asyncio.sleep(0)
 
 
-def test_cancel_only_on_async_effect():
+def test_cancel_on_effects():
 	@effect
 	def sync_e(): ...
 
-	# Sync effect should be instance of Effect (base) and not expose cancel
+	# Sync effect should be instance of Effect (base) and expose cancel
 	assert isinstance(sync_e, Effect)
 	assert not isinstance(sync_e, AsyncEffect)
-	assert not hasattr(sync_e, "cancel")
+	assert hasattr(sync_e, "cancel")
+	# Should be safe to call even if not scheduled
+	sync_e.cancel()
 
 	@effect(lazy=True)
 	async def async_e():
@@ -1201,7 +1310,7 @@ def test_reactive_list_basic_index_reactivity():
 
 	@effect
 	def e():
-		seen.append(lst[1])  # pyright: ignore[reportUnknownArgumentType]  # subscribe to index 1
+		seen.append(lst[1])  # subscribe to index 1
 
 	flush_effects()
 	assert e.runs == 1
@@ -1236,7 +1345,7 @@ def test_reactive_list_structural_changes_bump_version_and_remap_dependencies():
 	def e():  # pyright: ignore[reportUnusedFunction]
 		# depend on structural version and first item
 		versions.append(lst.version)
-		first_values.append(lst[0])  # pyright: ignore[reportUnknownArgumentType]
+		first_values.append(lst[0])
 
 	flush_effects()
 	assert versions[-1] == 0 and first_values[-1] == 3
@@ -1376,7 +1485,7 @@ def test_reactive_list_len_is_reactive_and_slice_optimization():
 
 	@effect
 	def e():
-		len_reads.append(len(lst))  # pyright: ignore[reportUnknownArgumentType]
+		len_reads.append(len(lst))
 
 	flush_effects()
 	assert len_reads == [4]
@@ -1407,31 +1516,29 @@ def test_reactive_list_len_is_reactive_and_slice_optimization():
 	assert len_reads[-1] == 3
 
 
-def test_reactive_list_iter_is_reactive_to_structure_only():
+def test_reactive_list_iter_subscribes_to_items_and_structure():
 	lst = ReactiveList([1, 2, 3])
 
 	iter_counts: list[int] = []
 
 	@effect
-	def e():
-		# Depend only on iteration count, not values
+	def e():  # pyright: ignore[reportUnusedFunction]
 		iter_counts.append(sum(1 for _ in lst))
 
 	flush_effects()
 	assert iter_counts == [3]
 
-	# Change a value in place: should not rerun, since __iter__ depends on structure only
-	runs = e.runs
+	# Change a value in place: should rerun since __iter__ subscribes to items
 	lst[0] = 10
 	flush_effects()
-	assert e.runs == runs
+	assert iter_counts == [3, 3]
 
 	# Structural change via append triggers rerun
 	lst.append(4)
 	flush_effects()
 	assert iter_counts[-1] == 4
 
-	# Equal-length slice replacement should not rerun
+	# Equal-length slice replacement should rerun (items changed)
 	lst[1:3] = [20, 30]
 	flush_effects()
 	assert iter_counts[-1] == 4
@@ -2049,8 +2156,8 @@ def test_reactive_dict_deepcopy_clones_nested_values():
 
 def test_reactive_list_copy_and_deepcopy_use_new_signals():
 	items = ReactiveList([1, {"nested": 2}])
-	copied = copy.copy(items)  # pyright: ignore[reportUnknownArgumentType]
-	deep_copied = copy.deepcopy(items)  # pyright: ignore[reportUnknownArgumentType]
+	copied = copy.copy(items)
+	deep_copied = copy.deepcopy(items)
 
 	assert copied is not items
 	assert deep_copied is not items
@@ -2066,6 +2173,7 @@ def test_reactive_list_copy_and_deepcopy_use_new_signals():
 	nested_deep = deep_copied[1]
 	assert isinstance(nested_copy, dict)
 	assert isinstance(nested_deep, dict)
+	assert isinstance(nested_original, dict)
 	nested_original["nested"] = 7
 	assert nested_copy["nested"] == 2
 	assert nested_deep["nested"] == 2
@@ -2334,7 +2442,7 @@ async def test_async_effect_copy_and_deepcopy():
 
 
 @pytest.mark.asyncio
-async def test_async_effect_wait_starts_task_if_not_running():
+async def test_async_effect_wait_does_not_start_task_if_not_running():
 	finished = False
 
 	@effect(lazy=True)
@@ -2346,10 +2454,10 @@ async def test_async_effect_wait_starts_task_if_not_running():
 	# No task running initially
 	assert e._task is None  # pyright: ignore[reportPrivateUsage]
 
-	# Wait should start the task and wait for completion
+	# Wait should NOT start a task if none is running
 	await e.wait()
-	assert finished
-	assert e.runs == 1
+	assert not finished
+	assert e.runs == 0
 	assert e._task is None  # pyright: ignore[reportPrivateUsage]
 
 
@@ -2487,11 +2595,11 @@ async def test_async_effect_wait_after_completion():
 	assert finished == 1
 	assert e.is_scheduled is False
 
-	# Wait after completion should start a new run
+	# Wait after completion should NOT start a new run
 	await e.wait()
-	assert started == 2
-	assert finished == 2
-	assert e.runs == 2
+	assert started == 1
+	assert finished == 1
+	assert e.runs == 1
 	assert e.is_scheduled is False
 
 
@@ -2556,3 +2664,307 @@ async def test_async_effect_explicit_deps_rerun_on_external_modification_during_
 	s.write(2)
 	await asyncio.sleep(0.02)
 	assert e.runs == 2
+
+
+def test_unwrap_preserves_namedtuple_type():
+	"""unwrap should preserve namedtuple types, not convert them to plain tuples."""
+
+	class Point(NamedTuple):
+		x: int
+		y: int
+
+	p = Point(1, 2)
+
+	result = unwrap(p)
+
+	assert type(result) is Point
+	assert result.x == 1
+	assert result.y == 2
+
+
+def test_reactive_list_iteration_subscribes_to_items():
+	"""Iterating a ReactiveList should subscribe to each item's signal."""
+	rl = ReactiveList([1, 2, 3])
+	results: list[list[int]] = []
+
+	@effect
+	def e():  # pyright: ignore[reportUnusedFunction]
+		results.append(list[int](rl))
+
+	flush_effects()
+	assert results == [[1, 2, 3]]
+
+	# Mutating an item should trigger the effect
+	rl[1] = 99
+	flush_effects()
+	assert results == [[1, 2, 3], [1, 99, 3]]
+
+
+def test_reactive_set_iteration_subscribes_to_membership():
+	"""Iterating a ReactiveSet should subscribe to membership signals."""
+	rs = ReactiveSet([1, 2, 3])
+	results: list[set[int]] = []
+
+	@effect
+	def e():  # pyright: ignore[reportUnusedFunction]
+		collected = set[int]()
+		for item in rs:
+			collected.add(item)
+		results.append(collected)
+
+	flush_effects()
+	assert results == [{1, 2, 3}]
+
+	# Removing an item should trigger the effect
+	rs.discard(2)
+	flush_effects()
+	assert results == [{1, 2, 3}, {1, 3}]
+
+
+def test_reactive_dict_items_subscribes_to_values():
+	"""Iterating d.items() should subscribe to value signals."""
+	rd = ReactiveDict({"a": 1, "b": 2})
+	results: list[dict[str, int]] = []
+
+	@effect
+	def e():  # pyright: ignore[reportUnusedFunction]
+		results.append(dict(rd.items()))
+
+	flush_effects()
+	assert results == [{"a": 1, "b": 2}]
+
+	# Changing a value should trigger the effect
+	rd["a"] = 99
+	flush_effects()
+	assert results == [{"a": 1, "b": 2}, {"a": 99, "b": 2}]
+
+
+def test_reactive_dict_values_subscribes_to_values():
+	"""Iterating d.values() should subscribe to value signals."""
+	rd = ReactiveDict({"a": 1, "b": 2})
+	results: list[list[int]] = []
+
+	@effect
+	def e():  # pyright: ignore[reportUnusedFunction]
+		results.append(list(rd.values()))
+
+	flush_effects()
+	assert results == [[1, 2]]
+
+	# Changing a value should trigger the effect
+	rd["a"] = 99
+	flush_effects()
+	assert results == [[1, 2], [99, 2]]
+
+
+# ---------------------- Effect Interval Tests ----------------------
+
+
+@pytest.mark.asyncio
+async def test_effect_interval_runs_periodically():
+	"""Test that an effect with interval runs periodically."""
+	runs: list[int] = []
+
+	@effect(interval=0.05)
+	def e():
+		runs.append(len(runs))
+
+	flush_effects()
+	assert len(runs) == 1
+
+	# Wait for interval to trigger
+	await asyncio.sleep(0.06)
+	assert len(runs) == 2
+
+	# Wait for another interval
+	await asyncio.sleep(0.06)
+	assert len(runs) == 3
+
+	e.dispose()
+
+
+@pytest.mark.asyncio
+async def test_effect_cancel_with_cancel_interval_true():
+	"""Test that cancel(cancel_interval=True) stops the interval."""
+	runs: list[int] = []
+
+	@effect(interval=0.05)
+	def e():
+		runs.append(len(runs))
+
+	flush_effects()
+	assert len(runs) == 1
+
+	# Cancel with interval cancellation (default)
+	e.cancel(cancel_interval=True)
+	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
+
+	# Wait - interval should not trigger
+	await asyncio.sleep(0.08)
+	flush_effects()
+	assert len(runs) == 1
+
+	e.dispose()
+
+
+@pytest.mark.asyncio
+async def test_effect_cancel_with_cancel_interval_false():
+	"""Test that cancel(cancel_interval=False) preserves the interval."""
+	runs: list[int] = []
+
+	@effect(interval=0.05)
+	def e():
+		runs.append(len(runs))
+
+	flush_effects()
+	assert len(runs) == 1
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
+
+	# Cancel without interval cancellation
+	e.cancel(cancel_interval=False)
+	# Interval handle should still exist
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
+
+	# Wait - interval should still trigger
+	await asyncio.sleep(0.08)
+	flush_effects()
+	assert len(runs) == 2
+
+	e.dispose()
+
+
+@pytest.mark.asyncio
+async def test_effect_run_restarts_cancelled_interval():
+	"""Test that running an effect restarts a cancelled interval."""
+	runs: list[int] = []
+
+	@effect(interval=0.05)
+	def e():
+		runs.append(len(runs))
+
+	flush_effects()
+	assert len(runs) == 1
+
+	# Cancel with interval cancellation
+	e.cancel(cancel_interval=True)
+	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
+
+	# Manually run the effect - should restart interval
+	e.run()
+	assert len(runs) == 2
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
+
+	# Wait - interval should trigger again
+	await asyncio.sleep(0.08)
+	flush_effects()
+	assert len(runs) == 3
+
+	e.dispose()
+
+
+@pytest.mark.asyncio
+async def test_async_effect_interval_runs_periodically():
+	"""Test that an async effect with interval runs periodically."""
+	runs: list[int] = []
+
+	@effect(interval=0.05, lazy=True)
+	async def e():
+		runs.append(len(runs))
+		await asyncio.sleep(0)
+
+	# Start the effect
+	await e.run()
+	assert len(runs) == 1
+
+	# Wait for interval to trigger
+	await asyncio.sleep(0.08)
+	await e.wait()
+	assert len(runs) == 2
+
+	# Wait for another interval
+	await asyncio.sleep(0.06)
+	await e.wait()
+	assert len(runs) == 3
+
+	e.dispose()
+
+
+@pytest.mark.asyncio
+async def test_async_effect_cancel_with_cancel_interval_true():
+	"""Test that async cancel(cancel_interval=True) stops the interval."""
+	runs: list[int] = []
+
+	@effect(interval=0.05, lazy=True)
+	async def e():
+		runs.append(len(runs))
+		await asyncio.sleep(0)
+
+	await e.run()
+	assert len(runs) == 1
+
+	# Cancel with interval cancellation (default)
+	e.cancel(cancel_interval=True)
+	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
+
+	# Wait - interval should not trigger
+	await asyncio.sleep(0.08)
+	assert len(runs) == 1
+
+	e.dispose()
+
+
+@pytest.mark.asyncio
+async def test_async_effect_cancel_with_cancel_interval_false():
+	"""Test that async cancel(cancel_interval=False) preserves the interval."""
+	runs: list[int] = []
+
+	@effect(interval=0.05, lazy=True)
+	async def e():
+		runs.append(len(runs))
+		await asyncio.sleep(0)
+
+	await e.run()
+	assert len(runs) == 1
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
+
+	# Cancel without interval cancellation
+	e.cancel(cancel_interval=False)
+	# Interval handle should still exist
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
+
+	# Wait - interval should still trigger
+	await asyncio.sleep(0.08)
+	await e.wait()
+	assert len(runs) == 2
+
+	e.dispose()
+
+
+@pytest.mark.asyncio
+async def test_async_effect_run_restarts_cancelled_interval():
+	"""Test that running an async effect restarts a cancelled interval."""
+	runs: list[int] = []
+
+	@effect(interval=0.05, lazy=True)
+	async def e():
+		runs.append(len(runs))
+		await asyncio.sleep(0)
+
+	await e.run()
+	assert len(runs) == 1
+
+	# Cancel with interval cancellation
+	e.cancel(cancel_interval=True)
+	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
+
+	# Manually run the effect - should restart interval
+	await e.run()
+	assert len(runs) == 2
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
+
+	# Wait - interval should trigger again
+	await asyncio.sleep(0.08)
+	await e.wait()
+	assert len(runs) == 3
+
+	e.dispose()

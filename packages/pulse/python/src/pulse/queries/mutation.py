@@ -1,3 +1,4 @@
+import inspect
 from collections.abc import Awaitable, Callable
 from typing import (
 	Any,
@@ -5,6 +6,7 @@ from typing import (
 	Generic,
 	ParamSpec,
 	TypeVar,
+	overload,
 	override,
 )
 
@@ -140,3 +142,48 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 	def initialize(self, state: State, name: str) -> MutationResult[T, P]:
 		# For compatibility with InitializableProperty, but mutations don't need special initialization
 		return self.__get__(state, state.__class__)
+
+
+@overload
+def mutation(
+	fn: Callable[Concatenate[TState, P], Awaitable[T]],
+	*,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+) -> MutationProperty[T, TState, P]: ...
+
+
+@overload
+def mutation(
+	fn: None = None,
+	*,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+) -> Callable[
+	[Callable[Concatenate[TState, P], Awaitable[T]]], MutationProperty[T, TState, P]
+]: ...
+
+
+def mutation(
+	fn: Callable[Concatenate[TState, P], Awaitable[T]] | None = None,
+	*,
+	on_success: OnSuccessFn[TState, T] | None = None,
+	on_error: OnErrorFn[TState] | None = None,
+):
+	def decorator(func: Callable[Concatenate[TState, P], Awaitable[T]], /):
+		sig = inspect.signature(func)
+		params = list(sig.parameters.values())
+
+		if len(params) == 0 or params[0].name != "self":
+			raise TypeError("@mutation method must have 'self' as first argument")
+
+		return MutationProperty(
+			func.__name__,
+			func,
+			on_success=on_success,
+			on_error=on_error,
+		)
+
+	if fn:
+		return decorator(fn)
+	return decorator

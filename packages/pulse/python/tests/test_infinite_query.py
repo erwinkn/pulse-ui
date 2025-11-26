@@ -341,7 +341,6 @@ async def test_infinite_query_refetch_page_filter():
 
 	await q.refetch(refetch_page=lambda page, idx, all_pages: idx == 0)
 	assert q.pages is not None
-	print("PAges:", q.pages)
 	assert [p["version"] for p in q.pages] == [1, 0]
 
 

@@ -411,13 +411,13 @@ class ReactiveList(list[T1]):
 
 	__slots__: tuple[str, ...] = ("_signals", "_structure")
 
-	def __init__(self, initial: Iterable[_Any] | None = None) -> None:
+	def __init__(self, initial: Iterable[T1] | None = None) -> None:
 		super().__init__()
-		self._signals: list[Signal[_Any]] = []
+		self._signals: list[Signal[T1]] = []
 		self._structure: Signal[int] = Signal(0)
 		if initial:
 			for item in initial:
-				v = cast(_Any, reactive(item))
+				v = reactive(item)
 				self._signals.append(Signal(v))
 				super().append(v)
 

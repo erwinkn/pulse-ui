@@ -2,6 +2,7 @@ import asyncio
 from typing import TypedDict
 
 import pulse as ps
+from pulse.queries.infinite_query import Page
 
 
 class Item(TypedDict):
@@ -49,12 +50,12 @@ class Feed(ps.State):
 		)
 
 	@feed_page.get_next_page_param
-	def _get_next_page_param(self, ctx: ps.NextPageParamContext[PageData, int]):
-		return ctx.last_page["next"]
+	def _get_next_page_param(self, pages: list[Page[PageData, int]]) -> int | None:
+		return pages[-1].data["next"] if pages else None
 
 	@feed_page.get_previous_page_param
-	def _get_previous_page_param(self, ctx: ps.PreviousPageParamContext[PageData, int]):
-		return ctx.first_page["prev"]
+	def _get_previous_page_param(self, pages: list[Page[PageData, int]]) -> int | None:
+		return pages[0].data["prev"] if pages else None
 
 	@feed_page.key
 	def _key(self):
@@ -74,10 +75,10 @@ def InfiniteQueryDemo():
 		await query.fetch_previous_page()
 
 	async def jump_to_first():
-		await query.fetch_previous_page(0)
+		await query.fetch_page(0)
 
 	async def jump_to_last():
-		await query.fetch_next_page(state.max_page)
+		await query.fetch_page(state.max_page)
 
 	async def refetch_all():
 		await query.refetch()

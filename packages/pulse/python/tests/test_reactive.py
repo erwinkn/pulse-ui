@@ -1,7 +1,7 @@
 import asyncio
 import copy
 from dataclasses import InitVar, asdict, astuple, dataclass, field, replace
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, NamedTuple, cast
 
 import pulse as ps
 import pytest
@@ -1310,7 +1310,7 @@ def test_reactive_list_basic_index_reactivity():
 
 	@effect
 	def e():
-		seen.append(lst[1])  # pyright: ignore[reportUnknownArgumentType]  # subscribe to index 1
+		seen.append(lst[1])  # subscribe to index 1
 
 	flush_effects()
 	assert e.runs == 1
@@ -1345,7 +1345,7 @@ def test_reactive_list_structural_changes_bump_version_and_remap_dependencies():
 	def e():  # pyright: ignore[reportUnusedFunction]
 		# depend on structural version and first item
 		versions.append(lst.version)
-		first_values.append(lst[0])  # pyright: ignore[reportUnknownArgumentType]
+		first_values.append(lst[0])
 
 	flush_effects()
 	assert versions[-1] == 0 and first_values[-1] == 3
@@ -1485,7 +1485,7 @@ def test_reactive_list_len_is_reactive_and_slice_optimization():
 
 	@effect
 	def e():
-		len_reads.append(len(lst))  # pyright: ignore[reportUnknownArgumentType]
+		len_reads.append(len(lst))
 
 	flush_effects()
 	assert len_reads == [4]
@@ -1522,7 +1522,7 @@ def test_reactive_list_iter_subscribes_to_items_and_structure():
 	iter_counts: list[int] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		iter_counts.append(sum(1 for _ in lst))
 
 	flush_effects()
@@ -2156,8 +2156,8 @@ def test_reactive_dict_deepcopy_clones_nested_values():
 
 def test_reactive_list_copy_and_deepcopy_use_new_signals():
 	items = ReactiveList([1, {"nested": 2}])
-	copied = copy.copy(items)  # pyright: ignore[reportUnknownArgumentType]
-	deep_copied = copy.deepcopy(items)  # pyright: ignore[reportUnknownArgumentType]
+	copied = copy.copy(items)
+	deep_copied = copy.deepcopy(items)
 
 	assert copied is not items
 	assert deep_copied is not items
@@ -2173,6 +2173,7 @@ def test_reactive_list_copy_and_deepcopy_use_new_signals():
 	nested_deep = deep_copied[1]
 	assert isinstance(nested_copy, dict)
 	assert isinstance(nested_deep, dict)
+	assert isinstance(nested_original, dict)
 	nested_original["nested"] = 7
 	assert nested_copy["nested"] == 2
 	assert nested_deep["nested"] == 2
@@ -2667,9 +2668,11 @@ async def test_async_effect_explicit_deps_rerun_on_external_modification_during_
 
 def test_unwrap_preserves_namedtuple_type():
 	"""unwrap should preserve namedtuple types, not convert them to plain tuples."""
-	from collections import namedtuple
 
-	Point = namedtuple("Point", ["x", "y"])
+	class Point(NamedTuple):
+		x: int
+		y: int
+
 	p = Point(1, 2)
 
 	result = unwrap(p)
@@ -2685,8 +2688,8 @@ def test_reactive_list_iteration_subscribes_to_items():
 	results: list[list[int]] = []
 
 	@effect
-	def e():
-		results.append(list(rl))
+	def e():  # pyright: ignore[reportUnusedFunction]
+		results.append(list[int](rl))
 
 	flush_effects()
 	assert results == [[1, 2, 3]]
@@ -2703,8 +2706,8 @@ def test_reactive_set_iteration_subscribes_to_membership():
 	results: list[set[int]] = []
 
 	@effect
-	def e():
-		collected = set()
+	def e():  # pyright: ignore[reportUnusedFunction]
+		collected = set[int]()
 		for item in rs:
 			collected.add(item)
 		results.append(collected)
@@ -2724,7 +2727,7 @@ def test_reactive_dict_items_subscribes_to_values():
 	results: list[dict[str, int]] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		results.append(dict(rd.items()))
 
 	flush_effects()
@@ -2742,7 +2745,7 @@ def test_reactive_dict_values_subscribes_to_values():
 	results: list[list[int]] = []
 
 	@effect
-	def e():
+	def e():  # pyright: ignore[reportUnusedFunction]
 		results.append(list(rd.values()))
 
 	flush_effects()
@@ -2794,7 +2797,7 @@ async def test_effect_cancel_with_cancel_interval_true():
 
 	# Cancel with interval cancellation (default)
 	e.cancel(cancel_interval=True)
-	assert e._interval_handle is None
+	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should not trigger
 	await asyncio.sleep(0.08)
@@ -2815,12 +2818,12 @@ async def test_effect_cancel_with_cancel_interval_false():
 
 	flush_effects()
 	assert len(runs) == 1
-	assert e._interval_handle is not None
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Cancel without interval cancellation
 	e.cancel(cancel_interval=False)
 	# Interval handle should still exist
-	assert e._interval_handle is not None
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should still trigger
 	await asyncio.sleep(0.08)
@@ -2844,12 +2847,12 @@ async def test_effect_run_restarts_cancelled_interval():
 
 	# Cancel with interval cancellation
 	e.cancel(cancel_interval=True)
-	assert e._interval_handle is None
+	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Manually run the effect - should restart interval
 	e.run()
 	assert len(runs) == 2
-	assert e._interval_handle is not None
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should trigger again
 	await asyncio.sleep(0.08)
@@ -2901,7 +2904,7 @@ async def test_async_effect_cancel_with_cancel_interval_true():
 
 	# Cancel with interval cancellation (default)
 	e.cancel(cancel_interval=True)
-	assert e._interval_handle is None
+	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should not trigger
 	await asyncio.sleep(0.08)
@@ -2922,12 +2925,12 @@ async def test_async_effect_cancel_with_cancel_interval_false():
 
 	await e.run()
 	assert len(runs) == 1
-	assert e._interval_handle is not None
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Cancel without interval cancellation
 	e.cancel(cancel_interval=False)
 	# Interval handle should still exist
-	assert e._interval_handle is not None
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should still trigger
 	await asyncio.sleep(0.08)
@@ -2952,12 +2955,12 @@ async def test_async_effect_run_restarts_cancelled_interval():
 
 	# Cancel with interval cancellation
 	e.cancel(cancel_interval=True)
-	assert e._interval_handle is None
+	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Manually run the effect - should restart interval
 	await e.run()
 	assert len(runs) == 2
-	assert e._interval_handle is not None
+	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should trigger again
 	await asyncio.sleep(0.08)

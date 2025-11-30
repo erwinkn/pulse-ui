@@ -3,6 +3,8 @@
 from collections.abc import Callable, Sequence
 from typing import Literal, TypeVar, TypeVarTuple, overload, override
 
+from pulse.javascript_v2.ids import generate_id
+
 T = TypeVar("T")
 Args = TypeVarTuple("Args")
 R = TypeVar("R")
@@ -20,7 +22,7 @@ class Import:
 	before: tuple[str, ...]
 	# For runtime expression computation
 	prop: str | None
-	alias: str | None
+	id: str
 
 	def __init__(
 		self,
@@ -30,7 +32,6 @@ class Import:
 		before: Sequence[str] = (),
 		*,
 		prop: str | None = None,
-		alias: str | None = None,
 		register: bool = True,
 	) -> None:
 		self.name = name
@@ -38,7 +39,7 @@ class Import:
 		self.kind = kind
 		self.before = tuple(before)
 		self.prop = prop
-		self.alias = alias
+		self.id = generate_id()
 		if register:
 			IMPORT_REGISTRY.add(self)
 
@@ -89,11 +90,17 @@ class Import:
 		return self.kind == "default"
 
 	@property
+	def js_name(self) -> str:
+		"""Unique JS identifier for this import."""
+		return f"{self.name}_{self.id}"
+
+	@property
 	def expr(self) -> str:
 		"""Runtime expression for this import."""
+		base = self.js_name
 		if self.prop:
-			return f"{self.alias or self.name}.{self.prop}"
-		return self.alias or self.name
+			return f"{base}.{self.prop}"
+		return base
 
 	@override
 	def __eq__(self, other: object) -> bool:

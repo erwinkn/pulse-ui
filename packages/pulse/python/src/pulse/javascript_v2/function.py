@@ -1,21 +1,34 @@
 from __future__ import annotations
 
+import builtins
 import inspect
+import types
 from typing import Any, Callable, Generic, TypeAlias, TypeVar, TypeVarTuple
 
-from pulse.javascript_v2.constants import const_to_js
+from pulse.javascript_v2.constants import JsConstant, const_to_js
+from pulse.javascript_v2.errors import JSCompilationError
+from pulse.javascript_v2.ids import generate_id
 from pulse.javascript_v2.imports import Import
-from pulse.javascript_v2.introspection import get_function_refs, validate_no_nonlocals
-from pulse.javascript_v2.nodes import JSExpr
+from pulse.javascript_v2.module import JsModule
 
 Args = TypeVarTuple("Args")
 R = TypeVar("R")
 
 AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any, ...], Any]"
+JsDep: TypeAlias = "AnyJsFunction | JsConstant | Import | PyBuiltin"
 
 # Global cache for deduplication across all transpiled functions
 # Registered BEFORE analyzing deps to handle mutual recursion
 FUNCTION_CACHE: dict[Callable[..., object], AnyJsFunction] = {}
+
+
+class PyBuiltin:
+	"""Placeholder for Python builtins that need JS equivalents."""
+
+	name: str
+
+	def __init__(self, name: str) -> None:
+		self.name = name
 
 
 def _get_or_create_function(fn: Callable[..., object]) -> AnyJsFunction:
@@ -25,82 +38,57 @@ def _get_or_create_function(fn: Callable[..., object]) -> AnyJsFunction:
 	return FUNCTION_CACHE[fn]
 
 
+def javascript(fn: Callable[..., object]) -> AnyJsFunction:
+	"""Decorator to convert a function into a JsFunction.
+
+	Usage:
+		@javascript
+		def my_func(x: int) -> int:
+			return x + 1
+
+		# my_func is now a JsFunction instance
+	"""
+	return JsFunction(fn)
+
+
 class JsFunction(Generic[*Args, R]):
 	fn: Callable[[*Args], R]
-
-	# Raw mapping: global name -> value (for codegen to process)
-	globals: dict[str, object]
-	builtins: dict[str, object]
+	id: str
+	deps: dict[str, JsDep]
 
 	def __init__(self, fn: Callable[[*Args], R]) -> None:
 		self.fn = fn
-		self.globals = {}
-		self.builtins = {}
-
-		# Ensure the function isn't a closure (no captured nonlocals)
-		validate_no_nonlocals(fn)
+		self.id = generate_id()
 
 		# Register self in cache BEFORE analyzing deps (handles cycles)
 		FUNCTION_CACHE[fn] = self
 
-		# Get all references including those in nested functions
-		refs = get_function_refs(fn)
+		# Analyze dependencies in a single pass
+		self.deps = _analyze_function_deps(fn)
 
-		# Store raw mappings - codegen will categorize and dedupe
-		self.globals = dict(refs.globals)
-		self.builtins = dict(refs.builtins)
+	@property
+	def js_name(self) -> str:
+		"""Unique JS identifier for this function."""
+		return f"{self.fn.__name__}_{self.id}"
 
-		# Eagerly analyze function dependencies to populate cache
-		# (ensures cycle handling works)
-		for value in refs.globals.values():
-			if isinstance(value, JsFunction):
-				pass  # Already wrapped
-			elif inspect.isfunction(value):
-				_get_or_create_function(value)
+	def imports(self) -> dict[str, Import]:
+		"""Get all Import dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, Import)}
+
+	def functions(self) -> dict[str, AnyJsFunction]:
+		"""Get all JsFunction dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, JsFunction)}
+
+	def constants(self) -> dict[str, JsConstant]:
+		"""Get all JsConstant dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, JsConstant)}
+
+	def builtins(self) -> dict[str, PyBuiltin]:
+		"""Get all PyBuiltin dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, PyBuiltin)}
 
 	def __call__(self, *args: *Args) -> JsFunctionCall[*Args]:
 		return JsFunctionCall(self, args)
-
-	def get_function_deps(self) -> dict[str, AnyJsFunction]:
-		"""Get all function dependencies (wrapped in JsFunction)."""
-		result: dict[str, AnyJsFunction] = {}
-		for name, value in self.globals.items():
-			if isinstance(value, JsFunction):
-				result[name] = value
-			elif inspect.isfunction(value):
-				result[name] = FUNCTION_CACHE[value]
-		return result
-
-	def get_constant_deps(self) -> dict[str, JSExpr]:
-		"""Get all constant dependencies (converted to JSExpr, deduplicated)."""
-		result: dict[str, JSExpr] = {}
-		for name, value in self.globals.items():
-			# Skip non-constants
-			if (
-				isinstance(value, (JsFunction, Import))
-				or inspect.isfunction(value)
-				or inspect.ismodule(value)
-				or callable(value)
-			):
-				continue
-			result[name] = const_to_js(value)  # pyright: ignore[reportArgumentType]
-		return result
-
-	def get_import_deps(self) -> dict[str, Import]:
-		"""Get all Import dependencies."""
-		return {
-			name: value
-			for name, value in self.globals.items()
-			if isinstance(value, Import)
-		}
-
-	def get_module_deps(self) -> dict[str, object]:
-		"""Get all module dependencies."""
-		return {
-			name: value
-			for name, value in self.globals.items()
-			if inspect.ismodule(value)
-		}
 
 
 class JsFunctionCall(Generic[*Args]):
@@ -110,3 +98,82 @@ class JsFunctionCall(Generic[*Args]):
 	def __init__(self, fn: JsFunction[*Args, Any], args: tuple[*Args]) -> None:
 		self.fn = fn
 		self.args = args
+
+
+def _analyze_function_deps(fn: Callable[..., object]) -> dict[str, JsDep]:
+	"""Analyze function dependencies in a single pass through code objects.
+
+	Returns a dict mapping global names to their JsDep representations.
+	Raises JSCompilationError for unhandled cases (e.g., callable objects).
+	"""
+	code = fn.__code__
+
+	# Collect all names from code object and nested functions in one pass
+	seen_codes: set[int] = set()
+	all_names: set[str] = set()
+
+	def walk_code(c: types.CodeType) -> None:
+		if id(c) in seen_codes:
+			return
+		seen_codes.add(id(c))
+		all_names.update(c.co_names)
+		all_names.update(c.co_freevars)  # Include closure variables
+		for const in c.co_consts:
+			if isinstance(const, types.CodeType):
+				walk_code(const)
+
+	walk_code(code)
+
+	# Build effective globals dict: start with function's globals, then add closure values
+	fn_globals = dict(fn.__globals__)
+
+	# Resolve closure variables from closure cells
+	if code.co_freevars and fn.__closure__:
+		closure = fn.__closure__
+		for i, freevar_name in enumerate(code.co_freevars):
+			if i < len(closure):
+				cell = closure[i]
+				# Get the value from the closure cell
+				try:
+					fn_globals[freevar_name] = cell.cell_contents
+				except ValueError:
+					# Cell is empty (unbound), skip it
+					pass
+
+	# Categorize names in a single pass
+	builtin_dict = builtins.__dict__
+	deps: dict[str, JsDep] = {}
+
+	for name in all_names:
+		if name in fn_globals:
+			value = fn_globals[name]
+
+			# Handle known types
+			if isinstance(value, (JsFunction, Import)):
+				deps[name] = value
+			elif isinstance(value, type) and issubclass(value, JsModule):
+				# JsModule classes - planned for future handling
+				# For now, skip (will be handled separately)
+				continue
+			elif inspect.ismodule(value):
+				# Python modules - planned for future handling
+				# Will be handled separately via PyModule registry
+				continue
+			elif inspect.isfunction(value):
+				deps[name] = _get_or_create_function(value)
+			elif callable(value):
+				# Callable objects (not functions) are not supported
+				raise JSCompilationError(
+					f"Callable object '{name}' (type: {type(value).__name__}) is not supported. "
+					+ "Only functions can be transpiled."
+				)
+			else:
+				# Constants
+				deps[name] = const_to_js(value, name)
+		elif name in builtin_dict:
+			# Python builtins
+			deps[name] = PyBuiltin(name)
+		# Unresolved names (e.g., attribute accesses like 'math.pi') are skipped
+		# They'll be handled during code generation
+
+	return deps

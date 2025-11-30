@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from pulse.javascript_v2.constants import CONSTANTS_CACHE
-from pulse.javascript_v2.function import FUNCTION_CACHE, JsFunction
+from pulse.javascript_v2.constants import CONSTANTS_CACHE, JsConstant
+from pulse.javascript_v2.errors import JSCompilationError
+from pulse.javascript_v2.function import (
+	FUNCTION_CACHE,
+	JsFunction,
+	PyBuiltin,
+	javascript,
+)
 from pulse.javascript_v2.imports import Import, clear_import_registry
 from pulse.javascript_v2.nodes import JSArray, JSNumber, JSString
 
@@ -17,281 +23,228 @@ def clear_caches() -> None:
 	clear_import_registry()
 
 
-# =============================================================================
-# Module-level test fixtures (to avoid closure issues)
-# =============================================================================
+def test_detects_js_import() -> None:
+	test_import = Import("foo", "./foo.js")
 
-# Imports
-_test_import = Import("foo", "./foo.js")
-_import_a = Import("a", "./a.js")
-_import_b = Import.default("b", "./b.js")
+	@javascript
+	def fn() -> int:
+		return test_import  # pyright: ignore[reportReturnType]
 
-# Constants
-_MY_CONST = 42
-_GREETING = "hello"
-_ITEMS = [1, 2, 3]
+	assert "test_import" in fn.deps
+	assert fn.deps["test_import"] is test_import
 
-# Shared constant for dedup test
-_SHARED_CONST = 999
 
+def test_multiple_imports() -> None:
+	import_a = Import("a", "./a.js")
+	import_b = Import.default("b", "./b.js")
 
-# Helper functions
-def _helper(x: int) -> int:
-	return x + 1
+	@javascript
+	def fn() -> tuple[int, str]:
+		return import_a, import_b  # pyright: ignore[reportReturnType]
 
+	imports = fn.imports()
+	assert len(imports) == 2
+	assert imports["import_a"] is import_a
+	assert imports["import_b"] is import_b
 
-def _add(a: int, b: int) -> int:
-	return a + b
 
+def test_detects_numeric_constant() -> None:
+	MY_CONST = 42
 
-def _mul(a: int, b: int) -> int:
-	return a * b
+	@javascript
+	def fn() -> int:
+		return MY_CONST
 
+	assert "MY_CONST" in fn.deps
+	const = fn.deps["MY_CONST"]
+	assert isinstance(const, JsConstant)
+	assert isinstance(const.expr, JSNumber)
 
-def _level2(x: int) -> int:
-	return x * 2
 
+def test_detects_string_constant() -> None:
+	GREETING = "hello"
 
-def _level1(x: int) -> int:
-	return _level2(x) + 1
+	@javascript
+	def fn() -> str:
+		return GREETING
 
+	assert "GREETING" in fn.deps
+	const = fn.deps["GREETING"]
+	assert isinstance(const, JsConstant)
+	assert isinstance(const.expr, JSString)
 
-# Mutually recursive
-def _is_even(n: int) -> bool:
-	if n == 0:
-		return True
-	return _is_odd(n - 1)
 
+def test_detects_list_constant() -> None:
+	ITEMS = [1, 2, 3]
 
-def _is_odd(n: int) -> bool:
-	if n == 0:
-		return False
-	return _is_even(n - 1)
+	@javascript
+	def fn() -> list[int]:
+		return ITEMS
 
+	assert "ITEMS" in fn.deps
+	const = fn.deps["ITEMS"]
+	assert isinstance(const, JsConstant)
+	assert isinstance(const.expr, JSArray)
 
-# Self-recursive
-def _factorial(n: int) -> int:
-	if n <= 1:
-		return 1
-	return n * _factorial(n - 1)
 
+def test_constants_are_cached_globally() -> None:
+	"""Same constant value should reuse cached JsConstant."""
+	SHARED_CONST = 999
 
-# =============================================================================
-# Test functions that use module-level fixtures
-# =============================================================================
+	@javascript
+	def fn1() -> int:
+		return SHARED_CONST
 
+	@javascript
+	def fn2() -> int:
+		return SHARED_CONST + 1
 
-def _fn_uses_import() -> int:
-	return _test_import  # pyright: ignore[reportReturnType]
+	assert fn1.deps["SHARED_CONST"] is fn2.deps["SHARED_CONST"]
 
 
-def _fn_uses_multiple_imports() -> tuple[int, str]:
-	return _import_a, _import_b  # pyright: ignore[reportReturnType]
+def test_detects_function_dependency() -> None:
+	def helper(x: int) -> int:
+		return x + 1
 
+	@javascript
+	def fn(x: int) -> int:
+		return helper(x)
 
-def _fn_uses_numeric_const() -> int:
-	return _MY_CONST
+	assert "helper" in fn.deps
+	helper_dep = fn.deps["helper"]
+	assert isinstance(helper_dep, JsFunction)
+	assert helper_dep.fn is helper
 
 
-def _fn_uses_string_const() -> str:
-	return _GREETING
+def test_multiple_function_dependencies() -> None:
+	def add(a: int, b: int) -> int:
+		return a + b
 
+	def mul(a: int, b: int) -> int:
+		return a * b
 
-def _fn_uses_list_const() -> list[int]:
-	return _ITEMS
+	@javascript
+	def fn(x: int) -> int:
+		return add(mul(x, 2), 1)
 
+	fn_deps = fn.functions()
+	assert "add" in fn_deps
+	assert "mul" in fn_deps
 
-def _fn_uses_helper(x: int) -> int:
-	return _helper(x)
 
+def test_function_dependency_cached() -> None:
+	"""Same function referenced twice should use cache."""
 
-def _fn_uses_add_mul(x: int) -> int:
-	return _add(_mul(x, 2), 1)
+	def helper(x: int) -> int:
+		return x + 1
 
+	@javascript
+	def fn1(x: int) -> int:
+		return helper(x)
 
-def _fn_uses_level1(x: int) -> int:
-	return _level1(x)
+	@javascript
+	def fn2(x: int) -> int:
+		return helper(x) + 1
 
+	assert fn1.deps["helper"] is fn2.deps["helper"]
 
-def _fn_nested_deps(items: list[int]) -> list[int]:
-	def transform(x: int) -> int:
-		return x * _MY_CONST
 
-	return [transform(x) for x in items]
+def test_transitive_dependencies() -> None:
+	"""Dependencies of dependencies are analyzed."""
 
+	def level2(x: int) -> int:
+		return x * 2
 
-def _fn_uses_shared_const_1() -> int:
-	return _SHARED_CONST
+	def level1(x: int) -> int:
+		return level2(x) + 1
 
+	@javascript
+	def fn(x: int) -> int:
+		return level1(x)
 
-def _fn_uses_shared_const_2() -> int:
-	return _SHARED_CONST + 1
+	assert "level1" in fn.deps
+	level1_fn = fn.deps["level1"]
+	assert isinstance(level1_fn, JsFunction)
+	assert "level2" in level1_fn.deps
 
 
-# =============================================================================
-# Tests
-# =============================================================================
+def test_mutual_recursion() -> None:
+	"""Mutually recursive functions should not cause infinite loop."""
 
+	def is_even_fn(n: int) -> bool:
+		if n == 0:
+			return True
+		return is_odd_fn(n - 1)
 
-class TestJsFunctionImports:
-	def test_detects_js_import(self) -> None:
-		jsfn = JsFunction(_fn_uses_import)
-		imports = jsfn.get_import_deps()
-		assert "_test_import" in imports
-		assert imports["_test_import"] is _test_import
+	def is_odd_fn(n: int) -> bool:
+		if n == 0:
+			return False
+		return is_even_fn(n - 1)
 
-	def test_multiple_imports(self) -> None:
-		jsfn = JsFunction(_fn_uses_multiple_imports)
-		imports = jsfn.get_import_deps()
-		assert len(imports) == 2
-		assert imports["_import_a"] is _import_a
-		assert imports["_import_b"] is _import_b
+	is_even = javascript(is_even_fn)
+	_ = javascript(is_odd_fn)  # Create to handle mutual recursion
 
+	assert "is_odd_fn" in is_even.deps
+	jsfn_odd = is_even.deps["is_odd_fn"]
+	assert isinstance(jsfn_odd, JsFunction)
 
-class TestJsFunctionConstants:
-	def test_detects_numeric_constant(self) -> None:
-		jsfn = JsFunction(_fn_uses_numeric_const)
-		constants = jsfn.get_constant_deps()
-		assert "_MY_CONST" in constants
-		assert isinstance(constants["_MY_CONST"], JSNumber)
+	assert "is_even_fn" in jsfn_odd.deps
+	assert jsfn_odd.deps["is_even_fn"] is is_even
 
-	def test_detects_string_constant(self) -> None:
-		jsfn = JsFunction(_fn_uses_string_const)
-		constants = jsfn.get_constant_deps()
-		assert "_GREETING" in constants
-		assert isinstance(constants["_GREETING"], JSString)
 
-	def test_detects_list_constant(self) -> None:
-		jsfn = JsFunction(_fn_uses_list_const)
-		constants = jsfn.get_constant_deps()
-		assert "_ITEMS" in constants
-		assert isinstance(constants["_ITEMS"], JSArray)
+def test_self_recursion() -> None:
+	"""Self-recursive function should work."""
 
-	def test_constants_are_cached_globally(self) -> None:
-		"""Same constant value should reuse cached JSExpr."""
-		jsfn1 = JsFunction(_fn_uses_shared_const_1)
-		jsfn2 = JsFunction(_fn_uses_shared_const_2)
+	def factorial_fn(n: int) -> int:
+		if n <= 1:
+			return 1
+		return n * factorial_fn(n - 1)
 
-		constants1 = jsfn1.get_constant_deps()
-		constants2 = jsfn2.get_constant_deps()
+	factorial = javascript(factorial_fn)
 
-		# Both should have the same JSExpr instance (cached)
-		assert constants1["_SHARED_CONST"] is constants2["_SHARED_CONST"]
+	assert "factorial_fn" in factorial.deps
+	assert factorial.deps["factorial_fn"] is factorial
 
 
-class TestJsFunctionDependencies:
-	def test_detects_function_dependency(self) -> None:
-		jsfn = JsFunction(_fn_uses_helper)
-		functions = jsfn.get_function_deps()
-		assert "_helper" in functions
-		assert isinstance(functions["_helper"], JsFunction)
-		assert functions["_helper"].fn is _helper
+def test_rejects_callable_objects() -> None:
+	"""Callable objects (not functions) should raise JSCompilationError."""
 
-	def test_multiple_function_dependencies(self) -> None:
-		jsfn = JsFunction(_fn_uses_add_mul)
-		functions = jsfn.get_function_deps()
-		assert "_add" in functions
-		assert "_mul" in functions
+	class CallableClass:
+		def __call__(self, x: int) -> int:
+			return x + 1
 
-	def test_function_dependency_cached(self) -> None:
-		"""Same function referenced twice should use cache."""
+	callable_obj = CallableClass()
 
-		def fn1(x: int) -> int:
-			return _helper(x)
+	def fn(x: int) -> int:
+		return callable_obj(x)
 
-		def fn2(x: int) -> int:
-			return _helper(x) + 1
+	with pytest.raises(JSCompilationError, match="Callable object.*is not supported"):
+		JsFunction(fn)
 
-		jsfn1 = JsFunction(fn1)
-		jsfn2 = JsFunction(fn2)
 
-		functions1 = jsfn1.get_function_deps()
-		functions2 = jsfn2.get_function_deps()
+def test_nested_function_deps_captured() -> None:
+	"""Dependencies in nested functions should be captured."""
+	MY_CONST = 42
 
-		# Both should reference the same JsFunction wrapper
-		assert functions1["_helper"] is functions2["_helper"]
+	@javascript
+	def fn(items: list[int]) -> list[int]:
+		def transform(x: int) -> int:
+			return x * MY_CONST
 
-	def test_transitive_dependencies(self) -> None:
-		"""Dependencies of dependencies are analyzed."""
-		jsfn = JsFunction(_fn_uses_level1)
-		functions = jsfn.get_function_deps()
-		assert "_level1" in functions
+		return [transform(x) for x in items]
 
-		level1_fn = functions["_level1"]
-		level1_functions = level1_fn.get_function_deps()
-		assert "_level2" in level1_functions
+	assert "MY_CONST" in fn.deps
+	assert isinstance(fn.deps["MY_CONST"], JsConstant)
 
 
-class TestJsFunctionCycles:
-	def test_mutual_recursion(self) -> None:
-		"""Mutually recursive functions should not cause infinite loop."""
-		jsfn_even = JsFunction(_is_even)
-		functions_even = jsfn_even.get_function_deps()
+def test_builtins_become_pybuiltin() -> None:
+	"""Builtins are wrapped as PyBuiltin placeholders."""
 
-		assert "_is_odd" in functions_even
-		jsfn_odd = functions_even["_is_odd"]
+	@javascript
+	def fn(items: list[int]) -> int:
+		return len(items)
 
-		functions_odd = jsfn_odd.get_function_deps()
-		assert "_is_even" in functions_odd
-
-		# The _is_even reference in _is_odd should be the same as jsfn_even
-		assert functions_odd["_is_even"] is jsfn_even
-
-	def test_self_recursion(self) -> None:
-		"""Self-recursive function should work."""
-		jsfn = JsFunction(_factorial)
-		functions = jsfn.get_function_deps()
-
-		# factorial references itself
-		assert "_factorial" in functions
-		assert functions["_factorial"] is jsfn
-
-
-class TestJsFunctionErrors:
-	def test_rejects_closure(self) -> None:
-		from collections.abc import Callable
-
-		def make_closure() -> Callable[[], int]:
-			captured = 42
-
-			def inner() -> int:
-				return captured
-
-			return inner
-
-		closure = make_closure()
-
-		with pytest.raises(ValueError, match="captures nonlocal variables"):
-			JsFunction(closure)
-
-
-class TestJsFunctionNestedFunctions:
-	def test_nested_function_deps_captured(self) -> None:
-		"""Dependencies in nested functions should be captured."""
-		jsfn = JsFunction(_fn_nested_deps)
-		constants = jsfn.get_constant_deps()
-
-		# Should capture _MY_CONST from nested function
-		assert "_MY_CONST" in constants
-
-
-class TestRawGlobalsAccess:
-	def test_globals_contains_raw_values(self) -> None:
-		"""JsFunction.globals should contain the raw Python objects."""
-		jsfn = JsFunction(_fn_uses_helper)
-
-		# Raw function is in globals
-		assert "_helper" in jsfn.globals
-		assert jsfn.globals["_helper"] is _helper
-
-	def test_builtins_contains_raw_values(self) -> None:
-		"""JsFunction.builtins should contain the raw builtin objects."""
-
-		def fn(items: list[int]) -> int:
-			return len(items)
-
-		jsfn = JsFunction(fn)
-
-		# len builtin is in builtins
-		assert "len" in jsfn.builtins
-		assert jsfn.builtins["len"] is len
+	assert "len" in fn.deps
+	builtin = fn.deps["len"]
+	assert isinstance(builtin, PyBuiltin)
+	assert builtin.name == "len"

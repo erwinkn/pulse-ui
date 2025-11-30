@@ -1,4 +1,6 @@
-from collections.abc import Sequence
+"""JavaScript Math module bindings."""
+
+from typing import ClassVar
 
 from pulse.javascript_v2.constants import jsify
 from pulse.javascript_v2.module import JsModule, PyModule
@@ -13,249 +15,201 @@ from pulse.javascript_v2.nodes import (
 )
 
 
-def MathMethod(name: str, args: Sequence[JSExpr]):
-	return JSMemberCall(JSIdentifier("Math"), name, args)
-
-
 class Math(JsModule):
-	@staticmethod
-	def abs(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("abs", [jsify(x)])
+	"""JavaScript Math object bindings.
 
-	@staticmethod
-	def acos(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("acos", [jsify(x)])
-
-	@staticmethod
-	def acosh(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("acosh", [jsify(x)])
-
-	@staticmethod
-	def asin(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("asin", [jsify(x)])
-
-	@staticmethod
-	def asinh(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("asinh", [jsify(x)])
-
-	@staticmethod
-	def atan(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("atan", [jsify(x)])
-
-	@staticmethod
-	def atan2(y: int | float | JSExpr, x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("atan2", [jsify(y), jsify(x)])
-
-	@staticmethod
-	def atanh(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("atanh", [jsify(x)])
-
-	@staticmethod
-	def cbrt(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("cbrt", [jsify(x)])
-
-	@staticmethod
-	def ceil(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("ceil", [jsify(x)])
-
-	@staticmethod
-	def clz32(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("clz32", [jsify(x)])
-
-	@staticmethod
-	def cos(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("cos", [jsify(x)])
-
-	@staticmethod
-	def cosh(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("cosh", [jsify(x)])
-
-	@staticmethod
-	def exp(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("exp", [jsify(x)])
-
-	@staticmethod
-	def expm1(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("expm1", [jsify(x)])
-
-	@staticmethod
-	def floor(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("floor", [jsify(x)])
-
-	@staticmethod
-	def fround(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("fround", [jsify(x)])
-
-	@staticmethod
-	def hypot(*values: int | float | JSExpr) -> JSExpr:
-		return MathMethod("hypot", [jsify(v) for v in values])
-
-	@staticmethod
-	def imul(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
-		return MathMethod("imul", [jsify(x), jsify(y)])
-
-	@staticmethod
-	def log(value: int | float | JSExpr) -> JSExpr:
-		return MathMethod("log", [jsify(value)])
-
-	@staticmethod
-	def log10(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("log10", [jsify(x)])
-
-	@staticmethod
-	def log1p(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("log1p", [jsify(x)])
-
-	@staticmethod
-	def log2(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("log2", [jsify(x)])
-
-	@staticmethod
-	def max(*values: int | float | JSExpr) -> JSExpr:
-		return MathMethod("max", [jsify(v) for v in values])
-
-	@staticmethod
-	def min(*values: int | float | JSExpr) -> JSExpr:
-		return MathMethod("min", [jsify(v) for v in values])
-
-	@staticmethod
-	def pow(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
-		return MathMethod("pow", [jsify(x), jsify(y)])
-
-	@staticmethod
-	def random() -> JSExpr:
-		return MathMethod("random", [])
-
-	@staticmethod
-	def round(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("round", [jsify(x)])
-
-	@staticmethod
-	def sign(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("sign", [jsify(x)])
-
-	@staticmethod
-	def sin(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("sin", [jsify(x)])
-
-	@staticmethod
-	def sinh(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("sinh", [jsify(x)])
-
-	@staticmethod
-	def sqrt(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("sqrt", [jsify(x)])
-
-	@staticmethod
-	def tan(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("tan", [jsify(x)])
-
-	@staticmethod
-	def tanh(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("tanh", [jsify(x)])
-
-	@staticmethod
-	def trunc(x: int | float | JSExpr) -> JSExpr:
-		return MathMethod("trunc", [jsify(x)])
+	Type hints match Python semantics for use in @javascript functions.
+	At runtime, accessing any method/property raises JsModuleError.
+	"""
 
 	# Constants
+	E: ClassVar[float]
+	LN2: ClassVar[float]
+	LN10: ClassVar[float]
+	LOG2E: ClassVar[float]
+	LOG10E: ClassVar[float]
+	PI: ClassVar[float]
+	SQRT1_2: ClassVar[float]
+	SQRT2: ClassVar[float]
+
+	# Methods
 	@staticmethod
-	def E() -> JSExpr:
-		return JSMember(JSIdentifier("Math"), "E")
+	def abs(x: float) -> float: ...
 
 	@staticmethod
-	def LN2() -> JSExpr:
-		return JSMember(JSIdentifier("Math"), "LN2")
+	def acos(x: float) -> float: ...
 
 	@staticmethod
-	def LN10() -> JSExpr:
-		return JSMember(JSIdentifier("Math"), "LN10")
+	def acosh(x: float) -> float: ...
 
 	@staticmethod
-	def LOG2E() -> JSExpr:
-		return JSMember(JSIdentifier("Math"), "LOG2E")
+	def asin(x: float) -> float: ...
 
 	@staticmethod
-	def LOG10E() -> JSExpr:
-		return JSMember(JSIdentifier("Math"), "LOG10E")
+	def asinh(x: float) -> float: ...
 
 	@staticmethod
-	def PI() -> JSExpr:
-		return JSMember(JSIdentifier("Math"), "PI")
+	def atan(x: float) -> float: ...
 
 	@staticmethod
-	def SQRT1_2() -> JSExpr:
-		return JSMember(JSIdentifier("Math"), "SQRT1_2")
+	def atan2(y: float, x: float) -> float: ...
 
 	@staticmethod
-	def SQRT2() -> JSExpr:
-		return JSMember(JSIdentifier("Math"), "SQRT2")
+	def atanh(x: float) -> float: ...
+
+	@staticmethod
+	def cbrt(x: float) -> float: ...
+
+	@staticmethod
+	def ceil(x: float) -> int: ...
+
+	@staticmethod
+	def clz32(x: int) -> int: ...
+
+	@staticmethod
+	def cos(x: float) -> float: ...
+
+	@staticmethod
+	def cosh(x: float) -> float: ...
+
+	@staticmethod
+	def exp(x: float) -> float: ...
+
+	@staticmethod
+	def expm1(x: float) -> float: ...
+
+	@staticmethod
+	def floor(x: float) -> int: ...
+
+	@staticmethod
+	def fround(x: float) -> float: ...
+
+	@staticmethod
+	def hypot(*values: float) -> float: ...
+
+	@staticmethod
+	def imul(x: int, y: int) -> int: ...
+
+	@staticmethod
+	def log(x: float) -> float: ...
+
+	@staticmethod
+	def log10(x: float) -> float: ...
+
+	@staticmethod
+	def log1p(x: float) -> float: ...
+
+	@staticmethod
+	def log2(x: float) -> float: ...
+
+	@staticmethod
+	def max(*values: float) -> float: ...
+
+	@staticmethod
+	def min(*values: float) -> float: ...
+
+	@staticmethod
+	def pow(x: float, y: float) -> float: ...
+
+	@staticmethod
+	def random() -> float: ...
+
+	@staticmethod
+	def round(x: float) -> int: ...
+
+	@staticmethod
+	def sign(x: float) -> int: ...
+
+	@staticmethod
+	def sin(x: float) -> float: ...
+
+	@staticmethod
+	def sinh(x: float) -> float: ...
+
+	@staticmethod
+	def sqrt(x: float) -> float: ...
+
+	@staticmethod
+	def tan(x: float) -> float: ...
+
+	@staticmethod
+	def tanh(x: float) -> float: ...
+
+	@staticmethod
+	def trunc(x: float) -> int: ...
+
+
+# Helper for generating Math method calls during transpilation
+def MathCall(name: str, *args: int | float | JSExpr) -> JSExpr:
+	return JSMemberCall(JSIdentifier("Math"), name, [jsify(a) for a in args])
+
+
+def MathProp(name: str) -> JSExpr:
+	return JSMember(JSIdentifier("Math"), name)
 
 
 class PyMath(PyModule):
-	"Provides transpilation for Python math functions"
+	"""Provides transpilation for Python math functions to JavaScript."""
 
 	@staticmethod
 	def acos(x: int | float | JSExpr) -> JSExpr:
-		return Math.acos(x)
+		return MathCall("acos", x)
 
 	@staticmethod
 	def acosh(x: int | float | JSExpr) -> JSExpr:
-		return Math.acosh(x)
+		return MathCall("acosh", x)
 
 	@staticmethod
 	def asin(x: int | float | JSExpr) -> JSExpr:
-		return Math.asin(x)
+		return MathCall("asin", x)
 
 	@staticmethod
 	def asinh(x: int | float | JSExpr) -> JSExpr:
-		return Math.asinh(x)
+		return MathCall("asinh", x)
 
 	@staticmethod
 	def atan(x: int | float | JSExpr) -> JSExpr:
-		return Math.atan(x)
+		return MathCall("atan", x)
 
 	@staticmethod
 	def atan2(y: int | float | JSExpr, x: int | float | JSExpr) -> JSExpr:
-		return Math.atan2(y, x)
+		return MathCall("atan2", y, x)
 
 	@staticmethod
 	def atanh(x: int | float | JSExpr) -> JSExpr:
-		return Math.atanh(x)
+		return MathCall("atanh", x)
 
 	@staticmethod
 	def cbrt(x: int | float | JSExpr) -> JSExpr:
-		return Math.cbrt(x)
+		return MathCall("cbrt", x)
 
 	@staticmethod
 	def ceil(x: int | float | JSExpr) -> JSExpr:
-		return Math.ceil(x)
+		return MathCall("ceil", x)
 
 	@staticmethod
 	def copysign(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
 		# Math.sign(y) * Math.abs(x)
-		return JSBinary(Math.sign(y), "*", Math.abs(x))
+		return JSBinary(MathCall("sign", y), "*", MathCall("abs", x))
 
 	@staticmethod
 	def cos(x: int | float | JSExpr) -> JSExpr:
-		return Math.cos(x)
+		return MathCall("cos", x)
 
 	@staticmethod
 	def cosh(x: int | float | JSExpr) -> JSExpr:
-		return Math.cosh(x)
+		return MathCall("cosh", x)
 
 	@staticmethod
 	def degrees(x: int | float | JSExpr) -> JSExpr:
 		# Convert radians to degrees: x * (180 / π)
-		return JSBinary(jsify(x), "*", JSBinary(JSNumber(180), "/", Math.PI()))
+		return JSBinary(jsify(x), "*", JSBinary(JSNumber(180), "/", MathProp("PI")))
 
 	@staticmethod
 	def dist(
 		p: int | float | JSExpr | list[int | float | JSExpr],
 		q: int | float | JSExpr | list[int | float | JSExpr],
 	) -> JSExpr:
-		# sqrt(sum((px - qx) ** 2 for px, qx in zip(p, q)))
-		# This is a simplified version - full implementation would need array handling
 		raise NotImplementedError("dist requires array/iterable handling")
 
 	@staticmethod
@@ -268,7 +222,7 @@ class PyMath(PyModule):
 
 	@staticmethod
 	def exp(x: int | float | JSExpr) -> JSExpr:
-		return Math.exp(x)
+		return MathCall("exp", x)
 
 	@staticmethod
 	def exp2(x: int | float | JSExpr) -> JSExpr:
@@ -277,11 +231,11 @@ class PyMath(PyModule):
 
 	@staticmethod
 	def expm1(x: int | float | JSExpr) -> JSExpr:
-		return Math.expm1(x)
+		return MathCall("expm1", x)
 
 	@staticmethod
 	def fabs(x: int | float | JSExpr) -> JSExpr:
-		return Math.abs(x)
+		return MathCall("abs", x)
 
 	@staticmethod
 	def factorial(x: int | float | JSExpr) -> JSExpr:
@@ -289,7 +243,7 @@ class PyMath(PyModule):
 
 	@staticmethod
 	def floor(x: int | float | JSExpr) -> JSExpr:
-		return Math.floor(x)
+		return MathCall("floor", x)
 
 	@staticmethod
 	def fmod(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
@@ -314,7 +268,7 @@ class PyMath(PyModule):
 
 	@staticmethod
 	def hypot(*coordinates: int | float | JSExpr) -> JSExpr:
-		return Math.hypot(*coordinates)
+		return MathCall("hypot", *coordinates)
 
 	@staticmethod
 	def isclose(
@@ -325,33 +279,35 @@ class PyMath(PyModule):
 		abs_tol: int | float | JSExpr = 0.0,
 	) -> JSExpr:
 		# abs(a - b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
-		abs_diff = Math.abs(JSBinary(jsify(a), "-", jsify(b)))
-		max_abs = MathMethod("max", [Math.abs(jsify(a)), Math.abs(jsify(b))])
+		abs_diff = MathCall("abs", JSBinary(jsify(a), "-", jsify(b)))
+		max_abs = JSMemberCall(
+			JSIdentifier("Math"),
+			"max",
+			[MathCall("abs", a), MathCall("abs", b)],
+		)
 		rel_bound = JSBinary(jsify(rel_tol), "*", max_abs)
-		max_bound = MathMethod("max", [rel_bound, jsify(abs_tol)])
+		max_bound = JSMemberCall(
+			JSIdentifier("Math"), "max", [rel_bound, jsify(abs_tol)]
+		)
 		return JSBinary(abs_diff, "<=", max_bound)
 
 	@staticmethod
 	def isfinite(x: int | float | JSExpr) -> JSExpr:
-		# Number.isFinite(x)
 		return JSMemberCall(JSIdentifier("Number"), "isFinite", [jsify(x)])
 
 	@staticmethod
 	def isinf(x: int | float | JSExpr) -> JSExpr:
-		# !Number.isFinite(x) && !Number.isNaN(x)
 		is_finite = JSMemberCall(JSIdentifier("Number"), "isFinite", [jsify(x)])
 		is_nan = JSMemberCall(JSIdentifier("Number"), "isNaN", [jsify(x)])
 		return JSBinary(JSUnary("!", is_finite), "&&", JSUnary("!", is_nan))
 
 	@staticmethod
 	def isnan(x: int | float | JSExpr) -> JSExpr:
-		# Number.isNaN(x)
 		return JSMemberCall(JSIdentifier("Number"), "isNaN", [jsify(x)])
 
 	@staticmethod
 	def isqrt(n: int | float | JSExpr) -> JSExpr:
-		# Math.floor(Math.sqrt(n))
-		return Math.floor(Math.sqrt(n))
+		return MathCall("floor", MathCall("sqrt", n))
 
 	@staticmethod
 	def lcm(*integers: int | float | JSExpr) -> JSExpr:
@@ -372,21 +328,20 @@ class PyMath(PyModule):
 		base: int | float | JSExpr | None = None,
 	) -> JSExpr:
 		if base is None:
-			return Math.log(value)
-		else:
-			return JSBinary(Math.log(value), "/", Math.log(base))
+			return MathCall("log", value)
+		return JSBinary(MathCall("log", value), "/", MathCall("log", base))
 
 	@staticmethod
 	def log10(x: int | float | JSExpr) -> JSExpr:
-		return Math.log10(x)
+		return MathCall("log10", x)
 
 	@staticmethod
 	def log1p(x: int | float | JSExpr) -> JSExpr:
-		return Math.log1p(x)
+		return MathCall("log1p", x)
 
 	@staticmethod
 	def log2(x: int | float | JSExpr) -> JSExpr:
-		return Math.log2(x)
+		return MathCall("log2", x)
 
 	@staticmethod
 	def modf(x: int | float | JSExpr) -> JSExpr:
@@ -407,7 +362,7 @@ class PyMath(PyModule):
 
 	@staticmethod
 	def pow(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
-		return Math.pow(x, y)
+		return MathCall("pow", x, y)
 
 	@staticmethod
 	def prod(
@@ -420,25 +375,25 @@ class PyMath(PyModule):
 	@staticmethod
 	def radians(x: int | float | JSExpr) -> JSExpr:
 		# Convert degrees to radians: x * (π / 180)
-		return JSBinary(jsify(x), "*", JSBinary(Math.PI(), "/", JSNumber(180)))
+		return JSBinary(jsify(x), "*", JSBinary(MathProp("PI"), "/", JSNumber(180)))
 
 	@staticmethod
 	def remainder(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
 		# x - n * y where n is the nearest integer to x/y
-		n = Math.round(JSBinary(jsify(x), "/", jsify(y)))
+		n = MathCall("round", JSBinary(jsify(x), "/", jsify(y)))
 		return JSBinary(jsify(x), "-", JSBinary(n, "*", jsify(y)))
 
 	@staticmethod
 	def sin(x: int | float | JSExpr) -> JSExpr:
-		return Math.sin(x)
+		return MathCall("sin", x)
 
 	@staticmethod
 	def sinh(x: int | float | JSExpr) -> JSExpr:
-		return Math.sinh(x)
+		return MathCall("sinh", x)
 
 	@staticmethod
 	def sqrt(x: int | float | JSExpr) -> JSExpr:
-		return Math.sqrt(x)
+		return MathCall("sqrt", x)
 
 	@staticmethod
 	def sumprod(
@@ -449,15 +404,15 @@ class PyMath(PyModule):
 
 	@staticmethod
 	def tan(x: int | float | JSExpr) -> JSExpr:
-		return Math.tan(x)
+		return MathCall("tan", x)
 
 	@staticmethod
 	def tanh(x: int | float | JSExpr) -> JSExpr:
-		return Math.tanh(x)
+		return MathCall("tanh", x)
 
 	@staticmethod
 	def trunc(x: int | float | JSExpr) -> JSExpr:
-		return Math.trunc(x)
+		return MathCall("trunc", x)
 
 	@staticmethod
 	def ulp(x: int | float | JSExpr) -> JSExpr:

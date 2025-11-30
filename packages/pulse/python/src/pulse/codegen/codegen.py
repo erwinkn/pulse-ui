@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from pulse.cli.helpers import ensure_gitignore_has
 from pulse.codegen.templates.layout import LAYOUT_TEMPLATE
-from pulse.codegen.templates.route import CssModuleImport, render_route
+from pulse.codegen.templates.route import generate_route
 from pulse.codegen.templates.routes_ts import (
 	ROUTES_CONFIG_TEMPLATE,
 	ROUTES_RUNTIME_TEMPLATE,
@@ -232,29 +232,25 @@ class Codegen:
 		else:
 			output_path = self.output_folder / "routes" / route.file_path()
 
-		components = route.components or []
-		css_modules = route.css_modules or []
-		css_side_effects = route.css_imports or []
-
 		target_dir = output_path.parent
-		css_imports: list[CssModuleImport] = []
-		for module in css_modules:
+
+		# Prepare CSS modules as (CssModule, import_path) tuples
+		css_module_tuples: list[tuple[CssModule, str]] = []
+		for module in route.css_modules or []:
 			import_path = self._prepare_css_module(module, target_dir)
-			css_imports.append({"id": module.id, "import_path": import_path})
+			css_module_tuples.append((module, import_path))
 
-		css_side_effect_specs: list[str] = []
-		for css_import in css_side_effects:
-			spec = self._prepare_css_import(css_import, target_dir)
-			css_side_effect_specs.append(spec)
+		# Prepare CSS imports as (CssImport, import_path) tuples
+		css_import_tuples: list[tuple[CssImport, str]] = []
+		for css_import in route.css_imports or []:
+			import_path = self._prepare_css_import(css_import, target_dir)
+			css_import_tuples.append((css_import, import_path))
 
-		content = render_route(
-			route=route,
-			components=components,
-			css_modules=css_imports,
-			css_imports=css_side_effect_specs,
-			js_functions=[],
-			external_js=[],
-			reserved_names=None,
+		content = generate_route(
+			path=route.unique_path(),
+			css_modules=css_module_tuples if css_module_tuples else None,
+			css_imports=css_import_tuples if css_import_tuples else None,
+			components=list(route.components) if route.components else None,
 		)
 		return write_file_if_changed(output_path, content)
 

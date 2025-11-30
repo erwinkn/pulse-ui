@@ -1,12 +1,12 @@
 from typing import Any
 
 import pulse as ps
-from pulse.codegen.imports import ImportStatement
+from pulse.javascript_v2.imports import Import
 
 
 @ps.react_component(
 	"DatesProvider",
 	"pulse-mantine",
-	extra_imports=[ImportStatement(src="@mantine/dates/styles.css", side_effect=True)],
+	extra_imports=[Import.css("@mantine/dates/styles.css")],
 )
 def DatesProvider(*children: ps.Child, key: str | None = None, **props: Any): ...

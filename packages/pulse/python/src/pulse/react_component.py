@@ -24,8 +24,8 @@ from typing import (
 	override,
 )
 
-from pulse.codegen.imports import Imported, ImportStatement
 from pulse.helpers import Sentinel
+from pulse.javascript_v2.imports import Import
 from pulse.reactive_extensions import unwrap
 from pulse.vdom import Child, Element, Node
 
@@ -295,22 +295,27 @@ def default_fn_signature_without_children(
 ) -> Element: ...
 
 
-class ReactComponent(Generic[P], Imported):
+class ReactComponent(Generic[P]):
 	"""
 	A React component that can be used within the UI tree.
 	Returns a function that creates mount point UITreeNode instances.
 
 	Args:
-	    tag: Name of the component (or "default" for default export)
-	    import_path: Module path to import the component from
-	    alias: Optional alias for the component in the registry
+	    name: Name of the component (or "default" for default export)
+	    src: Module path to import the component from
 	    is_default: True if this is a default export, else named export
-	    import_name: If specified, import this name from import_path and access tag as a property of it
+	    prop: Optional property name to access the component from the imported object
+	    lazy: Whether to lazy load the component
+	    version: Optional npm semver constraint for this component's package
+	    prop_spec: Optional PropSpec for the component
+	    fn_signature: Function signature to parse for props
+	    extra_imports: Additional imports to include (CSS files, etc.)
 
 	Returns:
 	    A function that creates Node instances with mount point tags
 	"""
 
+	import_: Import
 	props_spec: PropSpec
 	fn_signature: Callable[P, Element]
 	lazy: bool
@@ -326,11 +331,13 @@ class ReactComponent(Generic[P], Imported):
 		version: str | None = None,
 		prop_spec: PropSpec | None = None,
 		fn_signature: Callable[P, Element] = default_signature,
-		extra_imports: tuple[ImportStatement, ...]
-		| list[ImportStatement]
-		| None = None,
+		extra_imports: tuple[Import, ...] | list[Import] | None = None,
 	):
-		super().__init__(name, src, is_default=is_default, prop=prop)
+		# Create the Import directly
+		if is_default:
+			self.import_ = Import.default(name, src, prop=prop)
+		else:
+			self.import_ = Import.named(name, src, prop=prop)
 
 		# Build props_spec from fn_signature if provided and props not provided
 		if prop_spec:
@@ -347,9 +354,36 @@ class ReactComponent(Generic[P], Imported):
 		self.lazy = lazy
 		# Optional npm semver constraint for this component's package
 		self.version: str | None = version
-		# Additional import statements to include in route where this component is used
-		self.extra_imports: list[ImportStatement] = list(extra_imports or [])
+		# Additional imports to include in route where this component is used
+		self.extra_imports: list[Import] = list(extra_imports or [])
 		COMPONENT_REGISTRY.get().add(self)
+
+	@property
+	def name(self) -> str:
+		return self.import_.name
+
+	@property
+	def src(self) -> str:
+		return self.import_.src
+
+	@property
+	def is_default(self) -> bool:
+		return self.import_.is_default
+
+	@property
+	def prop(self) -> str | None:
+		return self.import_.prop
+
+	@property
+	def expr(self) -> str:
+		"""Expression for the component in the registry and VDOM tags.
+
+		This uses the original name (without unique ID suffix) for backward
+		compatibility with the client-side code.
+		"""
+		if self.prop:
+			return f"{self.name}.{self.prop}"
+		return self.name
 
 	@override
 	def __repr__(self) -> str:
@@ -806,7 +840,7 @@ def react_component(
 	is_default: bool = False,
 	lazy: bool = False,
 	version: str | None = None,
-	extra_imports: list[ImportStatement] | None = None,
+	extra_imports: list[Import] | None = None,
 ) -> Callable[[Callable[P, None] | Callable[P, Element]], ReactComponent[P]]:
 	"""
 	Decorator to define a React component wrapper. The decorated function is

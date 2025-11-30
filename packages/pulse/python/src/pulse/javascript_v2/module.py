@@ -73,10 +73,11 @@ class JsModuleMeta(type):
 		if js_src is not None:
 			from pulse.javascript_v2.imports import Import
 
-			if is_default:
-				imp = Import.default(js_name, js_src)
-			else:
-				imp = Import.named(js_name, js_src)
+			imp = (
+				Import.default(js_name, js_src)
+				if is_default
+				else Import.named(js_name, js_src)
+			)
 			cls._js_import_ = imp  # pyright: ignore[reportAttributeAccessIssue]
 
 		# Convert methods to stubs and properties to descriptors

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict, Unpack
 
 import pulse as ps
-from pulse.codegen.imports import ImportStatement
+from pulse.javascript_v2.imports import Import
 
 from .styles import CSSVariables
 from .theme import MantineTheme, MantineThemeOverride
@@ -51,9 +51,8 @@ class MantineProviderProps(TypedDict, total=False):
 	"MantineProvider",
 	"@mantine/core",
 	extra_imports=[
-		ImportStatement(
-			src="@mantine/core/styles.css",
-			side_effect=True,
+		Import.css(
+			"@mantine/core/styles.css",
 			# Ensure core styles load before dates/charts styles if present
 			before=["@mantine/dates/styles.css", "@mantine/charts/styles.css"],
 		)

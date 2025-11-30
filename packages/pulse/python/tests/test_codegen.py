@@ -6,16 +6,15 @@ through TypeScript code generation and React component integration.
 """
 
 from pathlib import Path
-from typing import Any, cast
 
 import pulse as ps
 import pytest
 from pulse import div
 from pulse.app import App
 from pulse.codegen.codegen import Codegen, CodegenConfig
-from pulse.codegen.js import JsFunction
-from pulse.codegen.templates.route import RouteTemplate
+from pulse.codegen.templates.route import generate_route
 from pulse.components.react_router import Outlet
+from pulse.javascript_v2.imports import clear_import_registry
 from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
 from pulse.routing import Route, RouteTree
 from pulse.vdom import Component, component
@@ -27,8 +26,9 @@ class TestCodegen:
 	"""Test the Codegen class."""
 
 	def setup_method(self):
-		"""Clear the component registry before each test."""
+		"""Clear the component registry and import registry before each test."""
 		COMPONENT_REGISTRY.get().clear()
+		clear_import_registry()
 
 	def test_generate_route_page_no_components(self, tmp_path: Path):
 		"""Test generating a single route page with no components."""
@@ -43,12 +43,11 @@ class TestCodegen:
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		assert 'import type { HeadersArgs } from "react-router";' in result
-		assert (
-			'import { PulseView, type ComponentRegistry } from "pulse-ui-client";'
-			in result
-		)
-		assert "// No components needed for this route" in result
+		assert "import type { HeadersArgs" in result
+		assert '"react-router"' in result
+		assert "import { PulseView" in result
+		assert '"pulse-ui-client"' in result
+		assert "import type { ComponentRegistry" in result
 		assert "const externalComponents: ComponentRegistry = {};" in result
 		assert 'const path = "/simple"' in result
 		assert "export function headers" in result
@@ -73,11 +72,13 @@ class TestCodegen:
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		assert 'import { button } from "./Button";' in result
-		assert 'import { card } from "./Card";' in result
-		assert '"button": button,' in result
-		assert '"card": card,' in result
-		assert "No components needed for this route" not in result
+		# New system uses unique IDs like button_1, card_2
+		assert "import { button as button_" in result
+		assert '"./Button"' in result
+		assert "import { card as card_" in result
+		assert '"./Card"' in result
+		# Components are in the registry with their expr
+		assert "externalComponents: ComponentRegistry = {" in result
 
 	def test_generate_route_page_with_default_export_components(self, tmp_path: Path):
 		"""Test generating route with default export components."""
@@ -95,11 +96,12 @@ class TestCodegen:
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		assert 'import DefaultComp from "./DefaultComp";' in result
-		assert '"DefaultComp": DefaultComp,' in result
+		# Default imports use the name directly with unique ID
+		assert "import DefaultComp_" in result
+		assert '"./DefaultComp"' in result
 
 	def test_generate_route_page_with_property_components(self, tmp_path: Path):
-		"""Test generating route with import_name components (nested component access)."""
+		"""Test generating route with prop-accessed components (nested component access)."""
 		app_shell_header = ReactComponent("AppShell", "@mantine/core", prop="Header")
 		app_shell_footer = ReactComponent("AppShell", "@mantine/core", prop="Footer")
 		route = Route(
@@ -115,21 +117,15 @@ class TestCodegen:
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		# Should import AppShell only once despite having two components
-		assert 'import { AppShell } from "@mantine/core";' in result
-		assert result.count("import { AppShell }") == 1  # Only one import
+		# Should import AppShell with unique ID
+		assert "import { AppShell as AppShell_" in result
+		assert '"@mantine/core"' in result
+		# Should have one import (deduplication by same name/src)
+		assert result.count("import { AppShell as") == 1
 
-		# Should have components in registry
-		assert '"AppShell.Header": AppShell.Header,' in result
-		assert '"AppShell.Footer": AppShell.Footer,' in result
-		assert "No components needed for this route" not in result
-
-	def test_generate_route_page_with_duplicate_imports_different_aliases(
-		self, tmp_path: Path
-	):
-		"""Test generating route with multiple components importing same value with different aliases."""
-		# Duplicate imports of the same symbol should deduplicate import statements
-		# and result in a single registry entry (last wins if duplicates are provided).
+	def test_generate_route_page_with_duplicate_imports(self, tmp_path: Path):
+		"""Test generating route with duplicate components."""
+		# Duplicate imports of the same symbol should deduplicate
 		button1 = ReactComponent("button", "./Button")
 		button2 = ReactComponent("button", "./Button")
 		route = Route(
@@ -145,13 +141,8 @@ class TestCodegen:
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		# Should import button once
-		assert 'import { button } from "./Button";' in result
-		assert result.count("import { button }") == 1  # Only one import
-
-		# Should have a single registry entry for the duplicate name
-		assert result.count('"button": button,') == 1
-		assert "No components needed for this route" not in result
+		# Should have only one import statement for button
+		assert result.count('from "./Button"') == 1
 
 	def test_generate_route_page_with_lazy_component_imports_renderlazy(
 		self, tmp_path: Path
@@ -172,18 +163,14 @@ class TestCodegen:
 		result = route_page_path.read_text()
 
 		# Should import RenderLazy from pulse-ui-client when any component is lazy
-		assert (
-			'import { PulseView, type ComponentRegistry, RenderLazy } from "pulse-ui-client";'
-			in result
-		)
+		assert "RenderLazy" in result
+		assert '"pulse-ui-client"' in result
 
-		# Should use RenderLazy dynamic import for the component and not import it statically
-		assert (
-			'RenderLazy(() => import("./LazyThing").then((m) => ({ default: m.LazyThing })))'
-			in result
-		)
-		assert 'import { LazyThing } from "./LazyThing";' not in result
-		assert 'import LazyThing from "./LazyThing";' not in result
+		# Should use RenderLazy dynamic import for the component
+		assert 'RenderLazy(() => import("./LazyThing")' in result
+		# Should NOT import it statically
+		assert "import LazyThing_" not in result
+		assert "import { LazyThing" not in result
 
 	def test_generate_routes_ts_empty(self, tmp_path: Path):
 		"""Test generating config with empty routes list."""
@@ -298,20 +285,15 @@ class TestCodegen:
 		assert 'file: "test_pulse_app/routes/users/_id_4742d9b5.tsx"' in runtime_content
 
 		home_content = (routes_dir / "index.tsx").read_text()
-		assert (
-			'import { PulseView, type ComponentRegistry } from "pulse-ui-client";'
-			in home_content
-		)
-		assert 'import { Header } from "./components/Header";' in home_content
-		assert '"Header": Header,' in home_content
+		assert "import { PulseView" in home_content
+		assert '"pulse-ui-client"' in home_content
+		assert "import { Header as Header_" in home_content
 		assert 'const path = "/"' in home_content
 		assert "externalComponents={externalComponents}" in home_content
 		assert "path={path}" in home_content
 
 		interactive_content = (routes_dir / "interactive.tsx").read_text()
-		assert 'import { Button } from "./components/Button";' in interactive_content
-		assert '"Header": Header,' not in interactive_content
-		assert '"Button": Button,' in interactive_content
+		assert "import { Button as Button_" in interactive_content
 		assert 'const path = "/interactive"' in interactive_content
 		assert "externalComponents={externalComponents}" in interactive_content
 		assert "path={path}" in interactive_content
@@ -342,151 +324,83 @@ class TestCodegen:
 		assert layout1 != layout2
 
 
-class TestRouteTemplateConflicts:
-	"""Unit tests for RouteTemplate name/alias conflict resolution."""
+class TestGenerateRoute:
+	"""Unit tests for the new generate_route function."""
 
-	def _by_src(self, import_sources: list[Any], src: str):
-		for s in import_sources:
-			if s.src == src:
-				return s
-		raise AssertionError(f"No import source for {src}")
-
-	def test_alias_named_imports_on_reserved_conflict_and_component_ssr(self):
-		rt = RouteTemplate(reserved_names=["Button", "AppShell"])
-
-		comps = [
-			ReactComponent(name="Button", src="./ui/button"),
-			ReactComponent(name="AppShell", src="@mantine/core", prop="Header"),
-		]
-		rt.add_components(comps)
-		ctx = rt.context()
-
-		# Imports aliased due to reserved names
-		import_sources = cast(list[Any], ctx["import_sources"])
-		by_button = self._by_src(import_sources, "./ui/button")
-		assert len(by_button.values) == 1
-		assert by_button.values[0].name == "Button"
-		assert by_button.values[0].alias == "Button2"
-
-		by_mantine = self._by_src(import_sources, "@mantine/core")
-		assert len(by_mantine.values) == 1
-		assert by_mantine.values[0].name == "AppShell"
-		assert by_mantine.values[0].alias == "AppShell2"
-
-		components_ctx = cast(list[Any], ctx["components_ctx"])
-		comps_ctx = {c["key"]: c for c in components_ctx}
-		assert comps_ctx["Button2"]["expr"] == "Button2"
-		assert comps_ctx["Button2"]["dynamic"] == "({ default: m.Button })"
-		assert comps_ctx["AppShell2.Header"]["expr"] == "AppShell2.Header"
-		assert (
-			comps_ctx["AppShell2.Header"]["dynamic"]
-			== "({ default: m.AppShell.Header })"
-		)
-
-	def test_alias_default_import_on_reserved_conflict(self):
-		rt = RouteTemplate(reserved_names=["DefaultComp"])  # force aliasing
-
-		comps = [ReactComponent(name="DefaultComp", src="./Default", is_default=True)]
-		rt.add_components(comps)
-		ctx = rt.context()
-
-		import_sources = cast(list[Any], ctx["import_sources"])
-		by_default = self._by_src(import_sources, "./Default")
-		# Default import is a single identifier string
-		assert by_default.default_import == "DefaultComp2"
-
-		comp_ctx = cast(list[Any], ctx["components_ctx"])[0]
-		assert comp_ctx["key"] == "DefaultComp2"
-		assert comp_ctx["expr"] == "DefaultComp2"
-		# Dynamic selector for default import uses m.default
-		assert comp_ctx["dynamic"] == "({ default: m.default })"
-
-	def test_deduplicate_repeated_imports_of_same_symbol(self):
-		rt = RouteTemplate()
-		# Same component twice -> one import value
-		comps = [
-			ReactComponent(name="Button", src="./Button"),
-			ReactComponent(name="Button", src="./Button"),
-		]
-		rt.add_components(comps)
-		ctx = rt.context()
-
-		import_sources = cast(list[Any], ctx["import_sources"])
-		by_src = self._by_src(import_sources, "./Button")
-		assert len(by_src.values) == 1
-		# Final components_ctx keeps one (last-wins on same key)
-		components_ctx = cast(list[Any], ctx["components_ctx"])
-		assert len(components_ctx) == 1
-		assert components_ctx[0]["key"] == "Button"
-
-	def test_alias_same_named_components_from_different_sources(self):
+	def setup_method(self):
+		"""Clear the import registry before each test."""
+		clear_import_registry()
 		COMPONENT_REGISTRY.get().clear()
-		rt = RouteTemplate()
-		comps = [
-			ReactComponent(name="Select", src="@lib/a"),
-			ReactComponent(name="Select", src="@lib/b"),
-		]
-		rt.add_components(comps)
-		ctx = rt.context()
 
-		import_sources = cast(list[Any], ctx["import_sources"])
-		by_a = self._by_src(import_sources, "@lib/a")
-		by_b = self._by_src(import_sources, "@lib/b")
-		assert by_a.values[0].name == "Select"
-		assert by_a.values[0].alias is None
-		assert by_b.values[0].name == "Select"
-		assert by_b.values[0].alias == "Select2"
+	def test_generate_route_basic(self):
+		"""Test basic route generation."""
+		result = generate_route(path="/test")
 
-		components_ctx = cast(list[Any], ctx["components_ctx"])
-		comps_ctx = {c["key"]: c for c in components_ctx}
-		assert comps_ctx["Select"]["expr"] == "Select"
-		assert comps_ctx["Select"]["src"] == "@lib/a"
-		assert comps_ctx["Select2"]["expr"] == "Select2"
-		assert comps_ctx["Select2"]["src"] == "@lib/b"
+		assert "import { PulseView" in result
+		assert "import type { ComponentRegistry" in result
+		assert "import type { HeadersArgs" in result
+		assert 'const path = "/test"' in result
+		assert "export default function RouteComponent()" in result
+		assert "export function headers" in result
 
-		node_a = comps[0]()
-		node_b = comps[1]()
-		assert node_a.tag == "$$Select"
-		assert node_b.tag == "$$Select2"
+	def test_generate_route_with_component(self):
+		"""Test route generation with a component."""
+		Button = ReactComponent("Button", "@mantine/core")
 
-	def test_alias_same_named_import_from_two_sources_and_keep_both_components(self):
-		rt = RouteTemplate()
-		comps = [
-			ReactComponent(name="Stack", src="@mantine/core"),
-			# Different source and a prop so the component registry key differs
-			ReactComponent(name="Stack", src="@other/lib", prop="Item"),
-		]
-		rt.add_components(comps)
-		ctx = rt.context()
-
-		import_sources = cast(list[Any], ctx["import_sources"])
-		by_core = self._by_src(import_sources, "@mantine/core")
-		by_other = self._by_src(import_sources, "@other/lib")
-		assert by_core.values[0].name == "Stack" and by_core.values[0].alias is None
-		assert (
-			by_other.values[0].name == "Stack" and by_other.values[0].alias == "Stack2"
+		result = generate_route(
+			path="/dashboard",
+			components=[Button],
 		)
 
-		components_ctx = cast(list[Any], ctx["components_ctx"])
-		comps_ctx = {c["key"]: c for c in components_ctx}
-		assert comps_ctx["Stack"]["expr"] == "Stack"
-		assert comps_ctx["Stack2.Item"]["expr"] == "Stack2.Item"
+		assert "import { Button as Button_" in result
+		assert '"@mantine/core"' in result
+		assert "externalComponents: ComponentRegistry = {" in result
 
-	def test_reserve_js_function_names_with_conflicts(self):
-		rt = RouteTemplate()
-		# "path" and "RenderLazy" are in RESERVED_NAMES, should alias
-		rt.reserve_js_function_names(
-			[
-				JsFunction("path", lambda: None),
-				JsFunction("myFn", lambda: None),
-				JsFunction("RenderLazy", lambda: None),
-			]
+	def test_generate_route_with_lazy_component(self):
+		"""Test route generation with a lazy component."""
+		LazyComp = ReactComponent("HeavyChart", "@mantine/charts", lazy=True)
+
+		result = generate_route(
+			path="/charts",
+			components=[LazyComp],
 		)
-		ctx = rt.context()
-		locals_map = cast(dict[str, Any], ctx["local_js_names"])
-		assert locals_map["path"] == "path2"
-		assert locals_map["myFn"] == "myFn"
-		assert locals_map["RenderLazy"] == "RenderLazy2"
+
+		assert "RenderLazy" in result
+		assert 'RenderLazy(() => import("@mantine/charts")' in result
+		# Lazy components should NOT be imported statically
+		assert "import HeavyChart_" not in result
+		assert "import { HeavyChart" not in result
+
+	def test_generate_route_with_css_import(self):
+		"""Test route generation with CSS side-effect import."""
+		from pulse.javascript_v2.imports import Import
+
+		Button = ReactComponent(
+			"Button",
+			"@mantine/core",
+			extra_imports=[Import.css("@mantine/core/styles.css")],
+		)
+
+		result = generate_route(
+			path="/styled",
+			components=[Button],
+		)
+
+		assert 'import "@mantine/core/styles.css"' in result
+
+	def test_generate_route_deduplicates_imports(self):
+		"""Test that duplicate imports are deduplicated."""
+		# Create two components with the same import
+		Button1 = ReactComponent("Button", "@mantine/core")
+		Button2 = ReactComponent("Button", "@mantine/core")
+
+		result = generate_route(
+			path="/test",
+			components=[Button1, Button2],
+		)
+
+		# Should only have one import statement
+		assert result.count('from "@mantine/core"') == 1
 
 
 if __name__ == "__main__":

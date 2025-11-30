@@ -464,3 +464,7 @@ def use(
 	key: str | None = None,
 	**props: Unpack[HTMLSVGProps[GenericHTMLElement]],
 ) -> Node: ...
+
+# Lists exported for JS transpiler
+TAGS: list[tuple[str, dict[str, Any] | None]]
+SELF_CLOSING_TAGS: list[tuple[str, dict[str, Any] | None]]

@@ -5,9 +5,11 @@ import hashlib
 import inspect
 import textwrap
 from typing import (
+	Any,
 	Callable,
 	Generic,
 	NamedTuple,
+	TypeAlias,
 	TypeVar,
 	TypeVarTuple,
 )
@@ -30,13 +32,15 @@ from .transpiler import JsTranspiler
 R = TypeVar("R")
 Args = TypeVarTuple("Args")
 
+AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any,...], Any]"
+
 
 class JsFunctionCode(NamedTuple):
 	code: str
 	hash: str
 
 
-_JS_FUNCTION_CACHE: dict[Callable[..., object], "JsFunction"] = {}
+_JS_FUNCTION_CACHE: dict[Callable[..., object], AnyJsFunction] = {}
 
 
 def _const_to_js_expr(value: object) -> JSExpr:
@@ -50,10 +54,11 @@ def _const_to_js_expr(value: object) -> JSExpr:
 	if isinstance(value, str):
 		return JSString(value)
 	if isinstance(value, (list, tuple)):
-		return JSArray([_const_to_js_expr(v) for v in value])
+		return JSArray([_const_to_js_expr(v) for v in value])  # pyright: ignore[reportUnknownArgumentType]
 	if isinstance(value, (set, frozenset)):
 		return JSNew(
-			JSIdentifier("Set"), [JSArray([_const_to_js_expr(v) for v in value])]
+			JSIdentifier("Set"),
+			[JSArray([_const_to_js_expr(v) for v in value])],  # pyright: ignore[reportUnknownArgumentType]
 		)
 	if isinstance(value, dict):
 		# Normalize Python dict constants to Map semantics so methods like .get() work
@@ -61,7 +66,7 @@ def _const_to_js_expr(value: object) -> JSExpr:
 		for k, v in value.items():
 			if not isinstance(k, str):
 				raise JSCompilationError("Only string keys supported in constant dicts")
-			entries.append(JSArray([JSString(k), _const_to_js_expr(v)]))
+			entries.append(JSArray([JSString(k), _const_to_js_expr(v)]))  # pyright: ignore[reportUnknownArgumentType]
 		return JSNew(JSIdentifier("Map"), [JSArray(entries)])
 	raise JSCompilationError(f"Unsupported global constant: {type(value).__name__}")
 
@@ -70,7 +75,7 @@ class JsFunction(Generic[*Args, R]):
 	js_name: str
 	fn: Callable[[*Args], R]
 	imports: list[JSImport]
-	dependencies: dict[str, "JsFunction"]
+	dependencies: dict[str, AnyJsFunction]
 	globals: dict[str, JSExpr]
 	_fndef: ast.FunctionDef
 	_arg_names: list[str]
@@ -208,13 +213,13 @@ class _NameAllocator:
 			idx += 1
 
 
-def emit_many(roots: list[JsFunction]) -> tuple[str, dict[JsFunction, str]]:
+def emit_many(roots: list[AnyJsFunction]) -> tuple[str, dict[AnyJsFunction, str]]:
 	# Build union DAG
-	visited: set[JsFunction] = set()
-	temp: set[JsFunction] = set()
-	order: list[JsFunction] = []
+	visited: set[AnyJsFunction] = set()
+	temp: set[AnyJsFunction] = set()
+	order: list[AnyJsFunction] = []
 
-	def dfs(node: JsFunction):
+	def dfs(node: AnyJsFunction):
 		if node in temp:
 			raise JSCompilationError("Cycle detected in function dependencies")
 		if node in visited:
@@ -233,14 +238,14 @@ def emit_many(roots: list[JsFunction]) -> tuple[str, dict[JsFunction, str]]:
 	allocator = _NameAllocator()
 
 	# Allocate function names deterministically by base python name
-	fn_names: dict[JsFunction, str] = {}
+	fn_names: dict[AnyJsFunction, str] = {}
 	for node in order:
 		base = node.fn.__name__
 		fn_names[node] = allocator.alloc(base)
 
 	# Allocate constants with dedup by emitted code
 	const_code_to_name: dict[str, str] = {}
-	const_alloc_per_node: dict[JsFunction, dict[str, str]] = {}
+	const_alloc_per_node: dict[AnyJsFunction, dict[str, str]] = {}
 	for node in order:
 		mapping: dict[str, str] = {}
 		for cname, cexpr in node.globals.items():
@@ -256,7 +261,7 @@ def emit_many(roots: list[JsFunction]) -> tuple[str, dict[JsFunction, str]]:
 		const_alloc_per_node[node] = mapping
 
 	# Build rename maps per node
-	rename_per_node: dict[JsFunction, dict[str, str]] = {}
+	rename_per_node: dict[AnyJsFunction, dict[str, str]] = {}
 	for node in order:
 		ren: dict[str, str] = {}
 		# functions referenced by their original global names
@@ -269,8 +274,8 @@ def emit_many(roots: list[JsFunction]) -> tuple[str, dict[JsFunction, str]]:
 	# Emit: all function declarations (deps first, roots last), then constants
 	lines: list[str] = []
 	for node in order:
-		js_fn_expr = node._transpile(rename_per_node[node]).emit()
-		lines.append(node._emit_named_function(fn_names[node], js_fn_expr))
+		js_fn_expr = node._transpile(rename_per_node[node]).emit()  # pyright: ignore[reportPrivateUsage]
+		lines.append(node._emit_named_function(fn_names[node], js_fn_expr))  # pyright: ignore[reportPrivateUsage]
 
 	# Emit constants after functions (function declarations are hoisted)
 	for code, name in sorted(
@@ -282,6 +287,11 @@ def emit_many(roots: list[JsFunction]) -> tuple[str, dict[JsFunction, str]]:
 
 
 class ExternalJsFunction(Generic[*Args, R]):
+	name: str
+	src: str
+	is_default: bool
+	hint: Callable[[*Args], R]
+
 	def __init__(
 		self, name: str, src: str, is_default: bool, hint: Callable[[*Args], R]
 	) -> None:
@@ -293,7 +303,7 @@ class ExternalJsFunction(Generic[*Args, R]):
 	def __call__(self, *args: *Args) -> R: ...
 
 
-def external_javascript(name: str, src: str, is_default=False):
+def external_javascript(name: str, src: str, is_default: bool = False):
 	def decorator(fn: Callable[[*Args], R]):
 		return ExternalJsFunction(name=name, src=src, is_default=is_default, hint=fn)
 

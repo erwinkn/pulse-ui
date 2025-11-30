@@ -1,14 +1,21 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from operator import concat
+from typing import Literal, override
 
 from pulse.codegen.utils import NameRegistry
 
+# Global registry for all Import objects
+IMPORT_REGISTRY: set["Import"] = set()
 
-class Imported:
+
+class Import:
+	"""Universal import descriptor. Registers itself on creation."""
+
 	name: str
 	src: str
-	is_default: bool
+	kind: Literal["default", "named", "type", "side_effect"]
+	before: tuple[str, ...]
+	# For runtime expression computation
 	prop: str | None
 	alias: str | None
 
@@ -16,179 +23,248 @@ class Imported:
 		self,
 		name: str,
 		src: str,
-		is_default: bool = False,
+		kind: Literal["default", "named", "type", "side_effect"] = "named",
+		before: Sequence[str] = (),
+		*,
 		prop: str | None = None,
 		alias: str | None = None,
+		register: bool = True,
 	) -> None:
 		self.name = name
 		self.src = src
-		self.is_default = is_default
+		self.kind = kind
+		self.before = tuple(before)
 		self.prop = prop
 		self.alias = alias
+		if register:
+			IMPORT_REGISTRY.add(self)
+
+	@classmethod
+	def default(
+		cls,
+		name: str,
+		src: str,
+		*,
+		prop: str | None = None,
+		register: bool = True,
+	) -> "Import":
+		return cls(name, src, "default", prop=prop, register=register)
+
+	@classmethod
+	def named(
+		cls,
+		name: str,
+		src: str,
+		*,
+		prop: str | None = None,
+		register: bool = True,
+	) -> "Import":
+		return cls(name, src, "named", prop=prop, register=register)
+
+	@classmethod
+	def type_(
+		cls,
+		name: str,
+		src: str,
+		*,
+		register: bool = True,
+	) -> "Import":
+		return cls(name, src, "type", register=register)
+
+	@classmethod
+	def css(
+		cls,
+		src: str,
+		before: Sequence[str] = (),
+		*,
+		register: bool = True,
+	) -> "Import":
+		return cls("", src, "side_effect", before, register=register)
 
 	@property
-	def expr(self):
+	def is_default(self) -> bool:
+		return self.kind == "default"
+
+	@property
+	def expr(self) -> str:
+		"""Runtime expression for this import."""
 		if self.prop:
 			return f"{self.alias or self.name}.{self.prop}"
 		return self.alias or self.name
 
+	@override
+	def __eq__(self, other: object) -> bool:
+		if not isinstance(other, Import):
+			return NotImplemented
+		return (self.name, self.src, self.kind) == (other.name, other.src, other.kind)
 
-@dataclass
+	@override
+	def __hash__(self) -> int:
+		return hash((self.name, self.src, self.kind))
+
+	@override
+	def __repr__(self) -> str:
+		parts = [f"name={self.name!r}", f"src={self.src!r}"]
+		if self.kind != "named":
+			parts.append(f"kind={self.kind!r}")
+		if self.prop:
+			parts.append(f"prop={self.prop!r}")
+		return f"Import({', '.join(parts)})"
+
+
+def registered_imports() -> list[Import]:
+	"""Get all registered imports."""
+	return list(IMPORT_REGISTRY)
+
+
+def clear_import_registry() -> None:
+	"""Clear the import registry."""
+	IMPORT_REGISTRY.clear()
+
+
+@dataclass(slots=True)
 class ImportMember:
 	name: str
 	alias: str | None = None
 
 	@property
-	def identifier(self):
+	def identifier(self) -> str:
 		return self.alias or self.name
 
 
 @dataclass
 class ImportStatement:
+	"""Merged import line for codegen output."""
+
 	src: str
+	default_import: str | None = None
 	values: list[ImportMember] = field(default_factory=list)
 	types: list[ImportMember] = field(default_factory=list)
-	default_import: str | None = None
-	# When True, emit a side-effect import: `import "<src>";`
-	# Can be combined with named/default imports; side-effect line is emitted
-	# only when there are no named/default/type imports for the source.
 	side_effect: bool = False
-	# Optional ordering constraint: ensure this statement is emitted before
-	# any import statements whose `src` matches one of these values.
-	# Example: ImportStatement(src="@mantine/core/styles.css", side_effect=True,
-	#                          before=["@mantine/dates/styles.css"]) ensures
-	# core styles are imported before dates styles.
 	before: list[str] = field(default_factory=list)
 
 
 class Imports:
-	names: NameRegistry
+	"""Collects imports, handles aliasing/dedup, generates statements."""
+
+	_names: NameRegistry
+	_by_src: dict[str, ImportStatement]
+	_seen: dict[tuple[str, str, str], str]
 
 	def __init__(
 		self,
-		imports: Iterable[ImportStatement | Imported],
+		reserved: Iterable[str] = (),
+		*,
 		names: NameRegistry | None = None,
 	) -> None:
-		self.names = names or NameRegistry()
-		# Map (src, name) -> identifier (either name or alias)
-		self._import_map: dict[tuple[str, str], str] = {}
-		self.sources: dict[str, ImportStatement] = {}
-		for stmt in imports:
-			if not isinstance(stmt, ImportStatement):
-				continue
+		self._names = names or NameRegistry(set(reserved))
+		self._by_src = {}
+		self._seen = {}  # (src, name, kind) -> identifier
 
+	def add(self, imp: Import) -> str:
+		"""Add import, returns identifier to use (handles aliasing)."""
+		key = (imp.src, imp.name, imp.kind)
+		if key in self._seen:
+			return self._seen[key]
+
+		stmt = self._by_src.setdefault(imp.src, ImportStatement(imp.src))
+
+		for b in imp.before:
+			if b not in stmt.before:
+				stmt.before.append(b)
+
+		if imp.kind == "side_effect":
+			stmt.side_effect = True
+			return ""
+
+		if imp.kind == "default":
 			if stmt.default_import:
-				stmt.default_import = self.names.register(stmt.default_import)
+				return stmt.default_import
+			ident = self._names.register(imp.name)
+			stmt.default_import = ident
+			self._seen[key] = ident
+			return ident
 
-			for imp in concat(stmt.values, stmt.types):
-				name = self.names.register(imp.name)
-				if name != imp.name:
-					imp.alias = name
-				self._import_map[(stmt.src, imp.name)] = name
-
-			self.sources[stmt.src] = stmt
+		# named or type
+		ident = self._names.register(imp.name)
+		member = ImportMember(imp.name, ident if ident != imp.name else None)
+		(stmt.types if imp.kind == "type" else stmt.values).append(member)
+		self._seen[key] = ident
+		return ident
 
 	def import_(
 		self, src: str, name: str, is_type: bool = False, is_default: bool = False
 	) -> str:
-		stmt = self.sources.get(src)
-		if not stmt:
-			stmt = ImportStatement(src)
-			self.sources[src] = stmt
-
+		"""Convenience method matching old API."""
 		if is_default:
-			if stmt.default_import:
-				return stmt.default_import
-			stmt.default_import = self.names.register(name)
-			return stmt.default_import
-
-		else:
-			if (src, name) in self._import_map:
-				return self._import_map[(src, name)]
-
-			unique_name = self.names.register(name)
-			alias = unique_name if unique_name != name else None
-			imp = ImportMember(name, alias)
-			if is_type:
-				stmt.types.append(imp)
-			else:
-				stmt.values.append(imp)
-			# Remember mapping so future imports of the same (src, name) reuse identifier
-			self._import_map[(src, name)] = imp.identifier
-			return imp.identifier
+			return self.add(Import.default(name, src, register=False))
+		if is_type:
+			return self.add(Import.type_(name, src, register=False))
+		return self.add(Import(name, src, register=False))
 
 	def add_statement(self, stmt: ImportStatement) -> None:
-		"""Merge an ImportStatement into the current Imports registry.
-
-		Ensures consistent aliasing via NameRegistry and de-duplicates
-		previously imported names from the same source.
-		"""
-		existing = self.sources.get(stmt.src)
+		"""Merge an ImportStatement into the current Imports registry."""
+		existing = self._by_src.get(stmt.src)
 		if not existing:
-			# Normalize names through registry to avoid later conflicts
+			# Normalize names through registry
 			if stmt.default_import:
-				stmt.default_import = self.names.register(stmt.default_import)
-			for imp in concat(stmt.values, stmt.types):
-				name = self.names.register(imp.name)
+				stmt.default_import = self._names.register(stmt.default_import)
+			for imp in [*stmt.values, *stmt.types]:
+				name = self._names.register(imp.name)
 				if name != imp.name:
 					imp.alias = name
-				self._import_map[(stmt.src, imp.name)] = name
-			self.sources[stmt.src] = stmt
+				key = (stmt.src, imp.name, "type" if imp in stmt.types else "named")
+				self._seen[key] = name
+			self._by_src[stmt.src] = stmt
 			return
 
-		# Merge into existing statement for the same src
+		# Merge into existing statement
 		if stmt.default_import and not existing.default_import:
-			existing.default_import = self.names.register(stmt.default_import)
+			existing.default_import = self._names.register(stmt.default_import)
 
-		# Merge named imports
 		def _merge_list(
-			dst: list[ImportMember], src_list: list[ImportMember], is_type: bool = False
+			dst: list[ImportMember], src_list: list[ImportMember], kind: str
 		):
 			for imp in src_list:
-				key = (stmt.src, imp.name)
-				if key in self._import_map:
+				key = (stmt.src, imp.name, kind)
+				if key in self._seen:
 					continue
-				unique = self.names.register(imp.name)
+				unique = self._names.register(imp.name)
 				if unique != imp.name:
 					imp.alias = unique
-				self._import_map[key] = imp.alias or imp.name
+				self._seen[key] = imp.alias or imp.name
 				dst.append(imp)
 
-		_merge_list(existing.values, stmt.values, is_type=False)
-		_merge_list(existing.types, stmt.types, is_type=True)
+		_merge_list(existing.values, stmt.values, "named")
+		_merge_list(existing.types, stmt.types, "type")
 		existing.side_effect = existing.side_effect or stmt.side_effect
+
 		# Merge ordering constraints
 		if stmt.before:
-			# Preserve order, avoid duplicates
 			seen = set(existing.before)
 			for s in stmt.before:
 				if s not in seen:
 					existing.before.append(s)
 					seen.add(s)
 
-	def ordered_sources(self) -> list[ImportStatement]:
-		"""Return sources ordered to satisfy `before` constraints.
-
-		Uses a stable topological sort (Kahn's algorithm) where insertion order
-		is preserved among nodes with equal dependency rank. Falls back to
-		insertion order if cycles are detected.
-		"""
-		# Build graph: edge u->v means u must come before v
-		keys = list(self.sources.keys())
-		index = {k: i for i, k in enumerate(keys)}  # for stability
+	def statements(self) -> list[ImportStatement]:
+		"""Return statements in topologically sorted order."""
+		keys = list(self._by_src.keys())
+		index = {k: i for i, k in enumerate(keys)}
 		indegree: dict[str, int] = {k: 0 for k in keys}
 		adj: dict[str, list[str]] = {k: [] for k in keys}
-		for u, stmt in self.sources.items():
+
+		for u, stmt in self._by_src.items():
 			for v in stmt.before:
-				if v in adj:  # only consider edges to imports present
+				if v in adj:
 					adj[u].append(v)
 					indegree[v] += 1
 
 		# Kahn's algorithm
 		queue = [k for k, d in indegree.items() if d == 0]
-		# Stable ordering of initial nodes
 		queue.sort(key=lambda k: index[k])
 		ordered: list[str] = []
+
 		while queue:
 			u = queue.pop(0)
 			ordered.append(u)
@@ -198,7 +274,12 @@ class Imports:
 					queue.append(v)
 					queue.sort(key=lambda k: index[k])
 
-		# If not all nodes processed, cycle detected; fall back to insertion order
+		# Cycle detected; fall back to insertion order
 		if len(ordered) != len(keys):
 			ordered = keys
-		return [self.sources[k] for k in ordered]
+
+		return [self._by_src[k] for k in ordered]
+
+	# Backwards compat alias
+	def ordered_sources(self) -> list[ImportStatement]:
+		return self.statements()

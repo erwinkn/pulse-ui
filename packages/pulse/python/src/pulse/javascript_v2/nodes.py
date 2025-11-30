@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import ast
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, override
-
-
-class JSCompilationError(Exception):
-	pass
-
 
 ALLOWED_BINOPS: dict[type[ast.operator], str] = {
 	ast.Add: "+",
@@ -40,16 +36,17 @@ ALLOWED_CMPOPS: dict[type[ast.cmpop], str] = {
 ###############################################################################
 
 
-class JSNode:
-	def emit(self) -> str:  # pragma: no cover - overridden
+class JSNode(ABC):
+	@abstractmethod
+	def emit(self) -> str:
 		raise NotImplementedError
 
 
-class JSExpr(JSNode):
+class JSExpr(JSNode, ABC):
 	pass
 
 
-class JSStmt(JSNode):
+class JSStmt(JSNode, ABC):
 	pass
 
 

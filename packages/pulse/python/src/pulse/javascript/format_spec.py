@@ -1,5 +1,5 @@
 import ast
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from pulse.javascript.nodes import (
 	JSBinary,
@@ -17,15 +17,15 @@ from pulse.javascript.nodes import (
 
 
 class FormatSpecInfo(TypedDict):
-	fill: Optional[str]
-	align: Optional[str]
-	sign: Optional[str]
+	fill: str | None
+	align: str | None
+	sign: str | None
 	alt: bool
 	zero: bool
-	width: Optional[int]
-	grouping: Optional[str]
-	precision: Optional[int]
-	type: Optional[str]
+	width: int | None
+	grouping: str | None
+	precision: int | None
+	type: str | None
 
 
 def _parse_format_spec(spec: str) -> FormatSpecInfo:
@@ -110,7 +110,7 @@ def _parse_format_spec(spec: str) -> FormatSpecInfo:
 	}
 
 
-def _apply_format_spec(value_expr: JSExpr, spec: str) -> JSExpr:
+def apply_format_spec(value_expr: JSExpr, spec: str) -> JSExpr:
 	spec_info = _parse_format_spec(spec)
 	fill = spec_info["fill"] or " "
 	align = spec_info["align"]
@@ -423,7 +423,7 @@ def _apply_format_spec(value_expr: JSExpr, spec: str) -> JSExpr:
 	return combined
 
 
-def _extract_formatspec_str(node: ast.AST):
+def extract_formatspec(node: ast.AST):
 	"""Return the literal string of a format spec if it is constant-only.
 
 	For f-strings, ast.FormattedValue.format_spec can be a JoinedStr. We

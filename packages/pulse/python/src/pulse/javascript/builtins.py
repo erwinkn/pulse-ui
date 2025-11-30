@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, cast
+from typing import Callable, cast, override
 
 from pulse.html import tags as _html_tags
 
-from .format_spec import _apply_format_spec
+from .format_spec import apply_format_spec
 from .nodes import (
 	JSArray,
 	JSArrowFunction,
@@ -42,38 +42,38 @@ from .utils import define_if_not_primary, extract_constant_number, iife
 
 class Builtins:
 	@staticmethod
-	def print(*args):
+	def print(*args: JSExpr) -> JSExpr:
 		return JSMemberCall(JSIdentifier("console"), "log", args)
 
 	@staticmethod
-	def len(x: JSExpr):
+	def len(x: JSExpr) -> JSExpr:
 		# - Length for strings and arrays.
 		# - Size for sets and maps.
 		# - Objects would be `Object.keys(x).length`, but we explicitly avoid it
 		return JSBinary(JSMember(x, "length"), "??", JSMember(x, "size"))
 
 	@staticmethod
-	def min(*args):
+	def min(*args: JSExpr) -> JSExpr:
 		return JSMemberCall(JSIdentifier("Math"), "min", args)
 
 	@staticmethod
-	def max(*args):
+	def max(*args: JSExpr) -> JSExpr:
 		return JSMemberCall(JSIdentifier("Math"), "max", args)
 
 	@staticmethod
-	def abs(x):
+	def abs(x: JSExpr) -> JSExpr:
 		return JSMemberCall(JSIdentifier("Math"), "abs", [x])
 
 	@staticmethod
 	def round(number: JSExpr, ndigits: JSExpr | None = None):
 		# One-argument form
 		if ndigits is None:
-			return JSCall(JSIdentifier("Math.round"), [cast(JSExpr, number)])
+			return JSCall(JSIdentifier("Math.round"), [number])
 
 		# Two-argument form
 		# Positive branch: Number(x).toFixed(n)
-		num_e: JSExpr = cast(JSExpr, number)
-		nd_e: JSExpr = cast(JSExpr, ndigits)
+		num_e: JSExpr = number
+		nd_e: JSExpr = ndigits
 		pos_branch = JSMemberCall(
 			JSCall(JSIdentifier("Number"), [num_e]), "toFixed", [nd_e]
 		)
@@ -112,7 +112,7 @@ class Builtins:
 		return JSCall(JSIdentifier("String"), [x])
 
 	@staticmethod
-	def int(*args, **kwargs):
+	def int(*args: JSExpr, **kwargs: JSExpr) -> JSExpr:
 		if kwargs:
 			num = kwargs.get("x")
 			base = kwargs.get("base")
@@ -203,7 +203,7 @@ class Builtins:
 	@staticmethod
 	def format(value: JSExpr, spec: JSExpr):
 		if isinstance(spec, JSString):
-			return _apply_format_spec(value, spec.value)
+			return apply_format_spec(value, spec.value)
 		raise JSCompilationError("format() spec must be a constant string")
 
 	@staticmethod
@@ -239,7 +239,7 @@ class Builtins:
 		)
 
 	@staticmethod
-	def sorted(*args: JSExpr, **kwargs):
+	def sorted(*args: JSExpr, **kwargs: JSExpr) -> JSExpr:
 		# sorted(iterable, key=None, reverse=False)
 		if len(args) != 1:
 			raise JSCompilationError("sorted() expects exactly one positional argument")
@@ -316,7 +316,7 @@ class Builtins:
 		return JSMemberCall(x, "charCodeAt", [JSNumber(0)])
 
 	@staticmethod
-	def dict(*args: JSExpr, **kwargs):
+	def dict(*args: JSExpr, **kwargs: JSExpr) -> JSExpr:
 		# dict(), dict(iterable), or dict(a=1, b=2)
 		if len(args) > 1:
 			raise JSCompilationError("dict() expects at most one positional argument")
@@ -375,7 +375,7 @@ BUILTINS: dict[str, Builtin] = {
 
 class BuiltinMethods(ABC):
 	def __init__(self, obj: JSExpr) -> None:
-		self.this = obj
+		self.this: JSExpr = obj
 
 	@classmethod
 	@abstractmethod
@@ -388,10 +388,12 @@ class BuiltinMethods(ABC):
 
 class ListMethods(BuiltinMethods):
 	@classmethod
+	@override
 	def __runtime_check__(cls, expr: JSExpr):
 		return JSMemberCall(JSIdentifier("Array"), "isArray", [expr])
 
 	@classmethod
+	@override
 	def __methods__(cls) -> set[str]:
 		return LIST_METHODS
 
@@ -470,10 +472,12 @@ LIST_METHODS = {k for k in ListMethods.__dict__.keys() if not k.startswith("__")
 
 class StringMethods(BuiltinMethods):
 	@classmethod
+	@override
 	def __runtime_check__(cls, expr: JSExpr):
 		return JSBinary(JSUnary("typeof", expr), "===", JSString("string"))
 
 	@classmethod
+	@override
 	def __methods__(cls) -> set[str]:
 		return STR_METHODS
 
@@ -526,10 +530,12 @@ STR_METHODS = {k for k in StringMethods.__dict__.keys() if not k.startswith("__"
 
 class SetMethods(BuiltinMethods):
 	@classmethod
+	@override
 	def __runtime_check__(cls, expr: JSExpr):
 		return JSBinary(expr, "instanceof", JSIdentifier("Set"))
 
 	@classmethod
+	@override
 	def __methods__(cls):
 		return SET_METHODS
 
@@ -573,10 +579,12 @@ SET_METHODS = {k for k in SetMethods.__dict__.keys() if not k.startswith("__")}
 
 class DictMethods(BuiltinMethods):
 	@classmethod
+	@override
 	def __runtime_check__(cls, expr: JSExpr):
 		return JSBinary(expr, "instanceof", JSIdentifier("Map"))
 
 	@classmethod
+	@override
 	def __methods__(cls):
 		return DICT_METHODS
 
@@ -784,7 +792,10 @@ def _make_jsx_tag_fn(tag_name: str) -> Callable[..., JSXElement]:
 
 		# Ordered props path (supports spreads). Expect a list of tuples:
 		# ("named", name: str, value: JSExpr) | ("spread", value: JSExpr)
-		ordered = props.pop("__ordered_props__", None)  # type: ignore[assignment]
+		ordered = cast(
+			list[tuple[str, str, JSExpr] | tuple[str, JSExpr]] | None,
+			props.pop("__ordered_props__", None),
+		)
 		jsx_props: list[JSXProp | JSXSpreadProp] = []
 		if ordered is not None and isinstance(ordered, list):
 			for entry in ordered:

@@ -30,10 +30,12 @@ from __future__ import annotations
 import ast
 import hashlib
 import inspect
+import linecache
+import os
 import textwrap
 from typing import Any, Callable, cast
 
-from pulse.javascript.format_spec import _apply_format_spec, _extract_formatspec_str
+from pulse.javascript.format_spec import apply_format_spec, extract_formatspec
 
 from .builtins import (
 	BUILTINS,
@@ -99,6 +101,16 @@ class JsTranspiler(ast.NodeVisitor):
 	  non-local/global references resolved by the orchestrator.
 	"""
 
+	fndef: ast.FunctionDef
+	args: list[str]
+	globals: list[str]
+	builtins: dict[str, Builtin]
+	rename: dict[str, str]
+	module_builtins: dict[str, dict[str, Builtin]]
+	predeclared: set[str]
+	locals: set[str]
+	_temp_counter: int
+
 	def __init__(
 		self,
 		fndef: ast.FunctionDef,
@@ -115,11 +127,10 @@ class JsTranspiler(ast.NodeVisitor):
 		self.rename = rename
 		self.module_builtins = module_builtins or {}
 
-		self.predeclared: set[str] = set(args) | set(globals)
+		self.predeclared = set(args) | set(globals)
 		# Track locals for declaration decisions
-		self.locals: set[str] = set(self.predeclared)
-		self._lines: list[str] = []
-		self._temp_counter: int = 0
+		self.locals = set(self.predeclared)
+		self._temp_counter = 0
 
 	# -----------------------------
 	# Builtin replacement helpers
@@ -305,11 +316,11 @@ class JsTranspiler(ast.NodeVisitor):
 				slice_node = node.slice
 				child_nodes: list[ast.expr] = []
 				if isinstance(slice_node, ast.Tuple):
-					child_nodes.extend(cast(list[ast.expr], slice_node.elts))
+					child_nodes.extend(slice_node.elts)
 				elif isinstance(slice_node, ast.List):
-					child_nodes.extend(cast(list[ast.expr], slice_node.elts))
+					child_nodes.extend(slice_node.elts)
 				else:
-					child_nodes.append(cast(ast.expr, slice_node))
+					child_nodes.append(slice_node)
 				extra_children: list[JSExpr] = []
 				for ch in child_nodes:
 					if isinstance(ch, ast.Starred):
@@ -318,7 +329,7 @@ class JsTranspiler(ast.NodeVisitor):
 						extra_children.append(self.emit_expr(ch))
 				all_children = base_args + extra_children
 				builtin_fn = self.module_builtins[mod_alias][attr]
-				base_kwargs["__ordered_props__"] = ordered_props  # type: ignore[assignment]
+				base_kwargs["__ordered_props__"] = ordered_props  # pyright: ignore[reportArgumentType]
 				return builtin_fn(*all_children, **base_kwargs)
 		return None
 
@@ -384,8 +395,6 @@ class JsTranspiler(ast.NodeVisitor):
 		self._temp_counter = 0
 		for stmt in self.fndef.body:
 			s = self.emit_stmt(stmt)
-			if s is None:
-				continue
 			stmts.append(s)
 		# Function expression
 		return JSFunctionDef(self.args, stmts)
@@ -540,7 +549,11 @@ class JsTranspiler(ast.NodeVisitor):
 				return JSBoolean(True)
 			if v is False:
 				return JSBoolean(False)
-			return JSNumber(v)
+			if isinstance(v, (int, float)):
+				return JSNumber(float(v))
+			raise JSCompilationError(
+				f"Unsupported constant type in JS compilation: {type(v).__name__}"
+			)
 		if isinstance(node, ast.Name):
 			ident = node.id
 			# Renames take precedence over predeclared locals/globals
@@ -699,8 +712,8 @@ class JsTranspiler(ast.NodeVisitor):
 					expr = self.emit_expr(part.value)
 					# Apply full format spec if provided
 					if part.format_spec is not None:
-						spec_str = _extract_formatspec_str(part.format_spec)
-						expr = _apply_format_spec(expr, spec_str)
+						spec_str = extract_formatspec(part.format_spec)
+						expr = apply_format_spec(expr, spec_str)
 						# Special case: f-string with a single formatted value -> do not wrap in JS template
 						if len(node.values) == 1:
 							return expr
@@ -730,6 +743,52 @@ def compile_python_to_js(fn: Callable[..., Any]) -> tuple[str, int, str]:
 		inner = getattr(fn, "fn", None)
 		if callable(inner):
 			fn = inner  # type: ignore[assignment]
+
+	# Invalidate linecache before getting source to handle stale file paths
+	# (e.g., when files are moved but .pyc files still reference old paths)
+
+	file = inspect.getsourcefile(fn)
+	if file:
+		linecache.checkcache(file)
+		# If file doesn't exist but code object has a filename, try to find the actual file
+		if not os.path.exists(file) and hasattr(fn, "__code__"):
+			code = fn.__code__
+			stale_path = code.co_filename
+			if stale_path != file and os.path.exists(stale_path):
+				# Update linecache with the correct file
+				with open(stale_path, "r", encoding="utf-8") as f:
+					lines = f.readlines()
+				linecache.cache[stale_path] = (len(stale_path), None, lines, stale_path)
+			elif not os.path.exists(stale_path):
+				# Try to find file by basename in common test directories
+				basename = os.path.basename(stale_path)
+				for search_dir in [
+					os.path.join(
+						os.path.dirname(os.path.dirname(stale_path)), "javascript"
+					),
+					os.path.join(
+						os.path.dirname(os.path.dirname(stale_path)), "javascript_v2"
+					),
+				]:
+					candidate = os.path.join(search_dir, basename)
+					if os.path.exists(candidate):
+						with open(candidate, "r", encoding="utf-8") as f:
+							lines = f.readlines()
+						# Update cache for both stale and correct paths
+						linecache.cache[stale_path] = (
+							len(stale_path),
+							None,
+							lines,
+							stale_path,
+						)
+						linecache.cache[candidate] = (
+							len(candidate),
+							None,
+							lines,
+							candidate,
+						)
+						break
+
 	try:
 		src = inspect.getsource(fn)
 	except OSError as e:

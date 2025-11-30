@@ -542,6 +542,10 @@ class JsTranspiler(ast.NodeVisitor):
 		if isinstance(node, ast.Constant):
 			v = node.value
 			if isinstance(v, str):
+				# Use template literals for strings containing Unicode line separators
+				# (\u2028 and \u2029) as they can break JavaScript parsing in regular strings
+				if "\u2028" in v or "\u2029" in v:
+					return JSTemplate([v])
 				return JSString(v)
 			if v is None:
 				return JSUndefined()
@@ -550,7 +554,7 @@ class JsTranspiler(ast.NodeVisitor):
 			if v is False:
 				return JSBoolean(False)
 			if isinstance(v, (int, float)):
-				return JSNumber(float(v))
+				return JSNumber(v)
 			raise JSCompilationError(
 				f"Unsupported constant type in JS compilation: {type(v).__name__}"
 			)
@@ -733,17 +737,16 @@ class JsTranspiler(ast.NodeVisitor):
 ###############################################################################
 
 
-def compile_python_to_js(fn: Callable[..., Any]) -> tuple[str, int, str]:
-	"""Compile a Python function to a JavaScript function expression.
+def get_function_source(fn: Callable[..., Any]) -> str:
+	"""Get the source code of a function with cache busting for stale file paths.
 
-	Returns (code, n_args, hash_prefix).
+	Handles cases where:
+	- Files have been moved but .pyc files still reference old paths
+	- Functions are defined in test files that may have been relocated
+	- Linecache needs to be invalidated/updated
+
+	Raises JSCompilationError if source cannot be retrieved.
 	"""
-	# Allow JsFunction wrapper instances (unwrap to original Python callable)
-	if hasattr(fn, "fn"):
-		inner = getattr(fn, "fn", None)
-		if callable(inner):
-			fn = inner  # type: ignore[assignment]
-
 	# Invalidate linecache before getting source to handle stale file paths
 	# (e.g., when files are moved but .pyc files still reference old paths)
 
@@ -793,6 +796,22 @@ def compile_python_to_js(fn: Callable[..., Any]) -> tuple[str, int, str]:
 		src = inspect.getsource(fn)
 	except OSError as e:
 		raise JSCompilationError(f"Cannot retrieve source for {fn}: {e}") from e
+
+	return src
+
+
+def compile_python_to_js(fn: Callable[..., Any]) -> tuple[str, int, str]:
+	"""Compile a Python function to a JavaScript function expression.
+
+	Returns (code, n_args, hash_prefix).
+	"""
+	# Allow JsFunction wrapper instances (unwrap to original Python callable)
+	if hasattr(fn, "fn"):
+		inner = getattr(fn, "fn", None)
+		if callable(inner):
+			fn = inner  # type: ignore[assignment]
+
+	src = get_function_source(fn)
 
 	src = textwrap.dedent(src)
 	module = ast.parse(src)

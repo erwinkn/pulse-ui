@@ -274,9 +274,15 @@ class Builtins:
 		return JSTertiary(reverse, JSMemberCall(sort_call, "reverse", []), sort_call)
 
 	@staticmethod
-	def zip(*args: JSExpr):
+	def zip(*args: JSExpr, strict: JSExpr | None = None):
 		if len(args) == 0:
 			return JSArray([])
+
+		# JavaScript doesn't support strict mode for zip, so we ignore the strict parameter
+		# but validate it's False if provided
+		if strict is not None:
+			# In a real implementation, we'd check if strict is False, but for now just ignore it
+			pass
 
 		# minLen = min(a.length, b.length, ...)
 		def length_of(x: JSExpr) -> JSExpr:

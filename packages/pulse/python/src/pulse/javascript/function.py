@@ -27,7 +27,7 @@ from .nodes import (
 	JSNumber,
 	JSString,
 )
-from .transpiler import JsTranspiler
+from .transpiler import JsTranspiler, get_function_source
 
 R = TypeVar("R")
 Args = TypeVarTuple("Args")
@@ -91,11 +91,7 @@ class JsFunction(Generic[*Args, R]):
 		self.dependencies = {}
 		self.globals = {}
 
-		try:
-			src = inspect.getsource(fn)
-		except OSError as e:
-			raise JSCompilationError(f"Cannot retrieve source for {fn}: {e}") from e
-
+		src = get_function_source(fn)
 		src = textwrap.dedent(src)
 		module = ast.parse(src)
 		fndefs = [n for n in module.body if isinstance(n, ast.FunctionDef)]
@@ -108,8 +104,8 @@ class JsFunction(Generic[*Args, R]):
 
 		# Choose a stable JS name for this function
 		try:
-			own_src = inspect.getsource(fn)
-		except OSError:
+			own_src = get_function_source(fn)
+		except JSCompilationError:
 			own_src = fn.__name__
 		h = hashlib.sha256(textwrap.dedent(own_src).encode("utf-8")).hexdigest()[:8]
 		self.js_name = f"{fn.__name__}${h}"

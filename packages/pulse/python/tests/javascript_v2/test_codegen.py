@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from pulse.codegen.imports import IMPORT_REGISTRY, Import, clear_import_registry
 from pulse.javascript_v2.codegen import (
 	CodegenOutput,
 	collect_from_functions,
 	collect_from_registries,
 )
 from pulse.javascript_v2.function import FUNCTION_CACHE, JsFunction
+from pulse.javascript_v2.imports import IMPORT_REGISTRY, Import, clear_import_registry
 from pulse.javascript_v2.nodes import JSNumber
 
 

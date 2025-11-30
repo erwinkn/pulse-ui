@@ -24,7 +24,7 @@ from typing import (
 	override,
 )
 
-from pulse.codegen.imports import Import, ImportStatement
+from pulse.codegen.imports import Imported, ImportStatement
 from pulse.helpers import Sentinel
 from pulse.reactive_extensions import unwrap
 from pulse.vdom import Child, Element, Node
@@ -295,7 +295,7 @@ def default_fn_signature_without_children(
 ) -> Element: ...
 
 
-class ReactComponent(Generic[P], Import):
+class ReactComponent(Generic[P], Imported):
 	"""
 	A React component that can be used within the UI tree.
 	Returns a function that creates mount point UITreeNode instances.
@@ -330,8 +330,7 @@ class ReactComponent(Generic[P], Import):
 		| list[ImportStatement]
 		| None = None,
 	):
-		kind = "default" if is_default else "named"
-		super().__init__(name, src, kind, prop=prop)
+		super().__init__(name, src, is_default=is_default, prop=prop)
 
 		# Build props_spec from fn_signature if provided and props not provided
 		if prop_spec:

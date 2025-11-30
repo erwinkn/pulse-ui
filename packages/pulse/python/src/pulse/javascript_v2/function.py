@@ -3,8 +3,8 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, Generic, TypeAlias, TypeVar, TypeVarTuple
 
-from pulse.codegen.imports import Import
 from pulse.javascript_v2.constants import const_to_js
+from pulse.javascript_v2.imports import Import
 from pulse.javascript_v2.introspection import get_function_refs, validate_no_nonlocals
 from pulse.javascript_v2.nodes import JSExpr
 

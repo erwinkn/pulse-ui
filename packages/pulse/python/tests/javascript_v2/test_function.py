@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from pulse.codegen.imports import Import, clear_import_registry
 from pulse.javascript_v2.constants import CONSTANTS_CACHE
 from pulse.javascript_v2.function import FUNCTION_CACHE, JsFunction
+from pulse.javascript_v2.imports import Import, clear_import_registry
 from pulse.javascript_v2.nodes import JSArray, JSNumber, JSString
 
 

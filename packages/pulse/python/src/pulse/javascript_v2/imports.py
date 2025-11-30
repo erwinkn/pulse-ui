@@ -1,13 +1,133 @@
-"""JS imports for use in @javascript decorated functions."""
+"""Unified JS import system for javascript_v2."""
 
-from collections.abc import Callable
-from typing import TypeVar, TypeVarTuple, overload
-
-from pulse.codegen.imports import Import
+from collections.abc import Callable, Sequence
+from typing import Literal, TypeVar, TypeVarTuple, overload, override
 
 T = TypeVar("T")
 Args = TypeVarTuple("Args")
 R = TypeVar("R")
+
+# Global registry for all Import objects
+IMPORT_REGISTRY: set["Import"] = set()
+
+
+class Import:
+	"""Universal import descriptor. Registers itself on creation."""
+
+	name: str
+	src: str
+	kind: Literal["default", "named", "type", "side_effect"]
+	before: tuple[str, ...]
+	# For runtime expression computation
+	prop: str | None
+	alias: str | None
+
+	def __init__(
+		self,
+		name: str,
+		src: str,
+		kind: Literal["default", "named", "type", "side_effect"] = "named",
+		before: Sequence[str] = (),
+		*,
+		prop: str | None = None,
+		alias: str | None = None,
+		register: bool = True,
+	) -> None:
+		self.name = name
+		self.src = src
+		self.kind = kind
+		self.before = tuple(before)
+		self.prop = prop
+		self.alias = alias
+		if register:
+			IMPORT_REGISTRY.add(self)
+
+	@classmethod
+	def default(
+		cls,
+		name: str,
+		src: str,
+		*,
+		prop: str | None = None,
+		register: bool = True,
+	) -> "Import":
+		return cls(name, src, "default", prop=prop, register=register)
+
+	@classmethod
+	def named(
+		cls,
+		name: str,
+		src: str,
+		*,
+		prop: str | None = None,
+		register: bool = True,
+	) -> "Import":
+		return cls(name, src, "named", prop=prop, register=register)
+
+	@classmethod
+	def type_(
+		cls,
+		name: str,
+		src: str,
+		*,
+		register: bool = True,
+	) -> "Import":
+		return cls(name, src, "type", register=register)
+
+	@classmethod
+	def css(
+		cls,
+		src: str,
+		before: Sequence[str] = (),
+		*,
+		register: bool = True,
+	) -> "Import":
+		return cls("", src, "side_effect", before, register=register)
+
+	@property
+	def is_default(self) -> bool:
+		return self.kind == "default"
+
+	@property
+	def expr(self) -> str:
+		"""Runtime expression for this import."""
+		if self.prop:
+			return f"{self.alias or self.name}.{self.prop}"
+		return self.alias or self.name
+
+	@override
+	def __eq__(self, other: object) -> bool:
+		if not isinstance(other, Import):
+			return NotImplemented
+		return (self.name, self.src, self.kind) == (other.name, other.src, other.kind)
+
+	@override
+	def __hash__(self) -> int:
+		return hash((self.name, self.src, self.kind))
+
+	@override
+	def __repr__(self) -> str:
+		parts = [f"name={self.name!r}", f"src={self.src!r}"]
+		if self.kind != "named":
+			parts.append(f"kind={self.kind!r}")
+		if self.prop:
+			parts.append(f"prop={self.prop!r}")
+		return f"Import({', '.join(parts)})"
+
+
+def registered_imports() -> list[Import]:
+	"""Get all registered imports."""
+	return list(IMPORT_REGISTRY)
+
+
+def clear_import_registry() -> None:
+	"""Clear the import registry."""
+	IMPORT_REGISTRY.clear()
+
+
+# =============================================================================
+# js_import decorator/function
+# =============================================================================
 
 
 @overload

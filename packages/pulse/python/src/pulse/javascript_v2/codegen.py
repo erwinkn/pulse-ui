@@ -10,9 +10,9 @@ import inspect
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from pulse.codegen.imports import IMPORT_REGISTRY, Import
 from pulse.javascript_v2.constants import const_to_js
 from pulse.javascript_v2.function import FUNCTION_CACHE, AnyJsFunction
+from pulse.javascript_v2.imports import IMPORT_REGISTRY, Import
 from pulse.javascript_v2.nodes import JSExpr, JSImport
 
 

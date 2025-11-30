@@ -252,8 +252,8 @@ class Codegen:
 			components=components,
 			css_modules=css_imports,
 			css_imports=css_side_effect_specs,
-			js_functions=None,
-			js_imports=None,
+			js_functions=[],
+			external_js=[],
 			reserved_names=None,
 		)
 		return write_file_if_changed(output_path, content)
@@ -333,7 +333,7 @@ class Codegen:
 				dest_path = self._copy_css_source(css_import.source_path)
 				existing = dest_path
 			else:
-				existing = css_import.src
+				existing = css_import.specifier or ""
 			self._css_import_dest[css_import.id] = existing
 
 		value = self._css_import_dest[css_import.id]

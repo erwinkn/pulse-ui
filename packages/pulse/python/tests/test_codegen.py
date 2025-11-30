@@ -13,9 +13,9 @@ import pytest
 from pulse import div
 from pulse.app import App
 from pulse.codegen.codegen import Codegen, CodegenConfig
+from pulse.codegen.js import JsFunction
 from pulse.codegen.templates.route import RouteTemplate
 from pulse.components.react_router import Outlet
-from pulse.javascript_v2.function import JsFunction
 from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
 from pulse.routing import Route, RouteTree
 from pulse.vdom import Component, component
@@ -473,23 +473,13 @@ class TestRouteTemplateConflicts:
 		assert comps_ctx["Stack2.Item"]["expr"] == "Stack2.Item"
 
 	def test_reserve_js_function_names_with_conflicts(self):
-		# Define module-level functions for JsFunction (can't use lambdas)
-		def path() -> None:
-			pass
-
-		def myFn() -> None:
-			pass
-
-		def RenderLazy() -> None:
-			pass
-
 		rt = RouteTemplate()
 		# "path" and "RenderLazy" are in RESERVED_NAMES, should alias
 		rt.reserve_js_function_names(
 			[
-				JsFunction(path),
-				JsFunction(myFn),
-				JsFunction(RenderLazy),
+				JsFunction("path", lambda: None),
+				JsFunction("myFn", lambda: None),
+				JsFunction("RenderLazy", lambda: None),
 			]
 		)
 		ctx = rt.context()

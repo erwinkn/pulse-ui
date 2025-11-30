@@ -3,9 +3,9 @@ from typing import TypedDict, TypeVarTuple
 
 from mako.template import Template
 
-from pulse.codegen.imports import Import, Imports, ImportStatement
+from pulse.codegen.imports import Imports, ImportStatement
+from pulse.codegen.js import ExternalJsFunction, JsFunction
 from pulse.codegen.utils import NameRegistry
-from pulse.javascript_v2.function import JsFunction
 from pulse.react_component import ReactComponent
 from pulse.routing import Layout, Route
 
@@ -48,7 +48,7 @@ class RouteTemplate:
 	def __init__(self, reserved_names: Iterable[str] | None = None) -> None:
 		initial = set(reserved_names or []).union(RESERVED_NAMES)
 		self.names = NameRegistry(initial)
-		self._imports = Imports(names=self.names)
+		self._imports = Imports([], names=self.names)
 		self.components_by_key: dict[str, ComponentInfo] = {}
 		self._js_local_names: dict[str, str] = {}
 		self.needs_render_lazy: bool = False
@@ -113,19 +113,20 @@ class RouteTemplate:
 
 	def add_css_imports(self, imports: Sequence[str]) -> None:
 		for spec in imports:
-			self._imports.add(Import.css(spec, register=False))
+			stmt = ImportStatement(spec, side_effect=True)
+			self._imports.add_statement(stmt)
 
-	def add_js_imports(self, imports: Sequence[Import]) -> None:
-		"""Add JS imports to the route."""
-		for imp in imports:
-			self._imports.add(imp)
+	def add_external_js(self, fns: Sequence[ExternalJsFunction[*Args, object]]) -> None:
+		for fn in fns:
+			self._imports.import_(fn.src, fn.name, is_default=True)
+		# TODO: update fn in case of aliasing
 
 	def reserve_js_function_names(
-		self, js_functions: "Sequence[JsFunction[*Args, object]]"
+		self, js_functions: Sequence[JsFunction[*Args, object]]
 	) -> None:
 		for j in js_functions:
-			fn_name = j.fn.__name__
-			self._js_local_names[fn_name] = self.names.register(fn_name)
+			self._js_local_names[j.name] = self.names.register(j.name)
+		# TODO: update fn in case of aliasing
 
 	def context(self) -> dict[str, object]:
 		# Deterministic order of import sources with ordering constraints
@@ -242,8 +243,8 @@ def render_route(
 	components: Sequence[ReactComponent[...]] | None = None,
 	css_modules: Sequence[CssModuleImport] | None = None,
 	css_imports: Sequence[str] | None = None,
-	js_functions: "Sequence[JsFunction[*Args, object]] | None" = None,
-	js_imports: Sequence[Import] | None = None,
+	js_functions: Sequence[JsFunction[*Args, object]] | None = None,
+	external_js: Sequence[ExternalJsFunction[*Args, object]] | None = None,
 	reserved_names: Iterable[str] | None = None,
 ) -> str:
 	comps = list(components or [])
@@ -256,8 +257,8 @@ def render_route(
 	imports = list(css_imports or [])
 	if imports:
 		jt.add_css_imports(imports)
-	if js_imports:
-		jt.add_js_imports(list(js_imports))
+	if external_js:
+		jt.add_external_js(list(external_js))
 	if js_functions:
 		jt.reserve_js_function_names(list(js_functions))
 

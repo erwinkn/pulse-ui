@@ -1,4 +1,3 @@
-from pulse.codegen.imports import IMPORT_REGISTRY, Import, clear_import_registry
 from pulse.javascript_v2.codegen import (
 	CodegenOutput,
 	ConstantDef,
@@ -8,7 +7,12 @@ from pulse.javascript_v2.codegen import (
 )
 from pulse.javascript_v2.constants import CONSTANTS_CACHE
 from pulse.javascript_v2.function import FUNCTION_CACHE, JsFunction
-from pulse.javascript_v2.imports import js_import
+from pulse.javascript_v2.imports import (
+	IMPORT_REGISTRY,
+	Import,
+	clear_import_registry,
+	js_import,
+)
 
 
 def clear_registries() -> None:

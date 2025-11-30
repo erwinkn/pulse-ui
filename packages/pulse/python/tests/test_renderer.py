@@ -269,7 +269,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_css_reference():
 	assert isinstance(child.hooks, TrackingHookContext)
 	assert child.hooks.did_unmount is False
 
-	css_module = CssModule(Path("/fake.css"), register=False)
+	css_module = CssModule("test", Path("/fake.css"))
 	css_ref = CssReference(css_module, "foo")
 
 	tree.diff(div(render=css_ref))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
@@ -840,8 +840,8 @@ def test_css_references():
 	"""Test CSS reference handling."""
 	from pulse.css import CssModule, CssReference
 
-	# Create a mock CSS module (id is auto-generated from path)
-	css_module = CssModule(Path("/fake/path"), register=False)
+	# Create a mock CSS module
+	css_module = CssModule("test_module", Path("/fake/path"))
 	css_ref = CssReference(css_module, "test")
 
 	tree = RenderTree(div(className=css_ref))
@@ -857,13 +857,13 @@ def test_css_references():
 		{
 			"type": "update_props",
 			"path": "",
-			"data": {"set": {"className": f"{css_module.id}:test2"}},
+			"data": {"set": {"className": "test_module:test2"}},
 		}
 	]
 
 
 def test_css_reference_add_remove_cycle():
-	css_module = CssModule(Path("/fake/path"), register=False)
+	css_module = CssModule("test_module", Path("/fake/path"))
 	first = CssReference(css_module, "first")
 	second = CssReference(css_module, "second")
 

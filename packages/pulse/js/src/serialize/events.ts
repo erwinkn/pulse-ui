@@ -1,5 +1,6 @@
 /* === IMPORTANT === */
 
+import type { MouseEvent, PointerEvent, SyntheticEvent, UIEvent } from "react";
 import { extractElement } from "./elements";
 import { createExtractor } from "./extractor";
 
@@ -30,9 +31,9 @@ const SYNTHETIC_KEYS = [
 	"isTrusted",
 	"timeStamp",
 	"type",
-] as const satisfies readonly (keyof React.SyntheticEvent)[];
+] as const satisfies readonly (keyof SyntheticEvent)[];
 
-const UI_KEYS = [...SYNTHETIC_KEYS, "detail"] as const satisfies readonly (keyof React.UIEvent)[];
+const UI_KEYS = [...SYNTHETIC_KEYS, "detail"] as const satisfies readonly (keyof UIEvent)[];
 
 const MOUSE_KEYS = [
 	...UI_KEYS,
@@ -50,7 +51,7 @@ const MOUSE_KEYS = [
 	"screenX",
 	"screenY",
 	"shiftKey",
-] as const satisfies readonly (keyof React.MouseEvent)[];
+] as const satisfies readonly (keyof MouseEvent)[];
 
 const POINTER_KEYS = [
 	...MOUSE_KEYS,
@@ -64,7 +65,7 @@ const POINTER_KEYS = [
 	"height",
 	"pointerType",
 	"isPrimary",
-] as const satisfies readonly (keyof React.PointerEvent)[];
+] as const satisfies readonly (keyof PointerEvent)[];
 
 const syntheticExtractor = makeExtractor(SYNTHETIC_KEYS);
 
@@ -264,7 +265,7 @@ export function extractEvent(value: any): any {
 		"nativeEvent" in value &&
 		typeof value.isDefaultPrevented === "function"
 	) {
-		const evt = value as React.SyntheticEvent;
+		const evt = value as SyntheticEvent;
 		// The `type` property is crucial for the lookup.
 		if (typeof evt.type !== "string") {
 			return value;

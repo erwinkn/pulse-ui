@@ -12,7 +12,7 @@ from typing import (
 
 from pulse.helpers import values_equal
 from pulse.javascript_v2.context import interpreted_mode
-from pulse.javascript_v2.function import JsFunctionCall
+from pulse.javascript_v2.function import AnyJsFunction, JsFunction, JsFunctionCall
 from pulse.javascript_v2.imports import Import
 from pulse.javascript_v2.nodes import JSExpr, to_js_expr
 from pulse.vdom import (
@@ -28,15 +28,20 @@ from pulse.vdom import (
 
 
 def is_jsexpr(value: object) -> bool:
-	"""Check if a value is a JSExpr, Import, or JsFunctionCall."""
-	return isinstance(value, (JSExpr, Import, JsFunctionCall))
+	"""Check if a value is a JSExpr, Import, JsFunction, or JsFunctionCall."""
+	return isinstance(value, (JSExpr, Import, JsFunction, JsFunctionCall))
 
 
-def emit_jsexpr(value: JSExpr | Import | JsFunctionCall[*tuple[Any, ...]]) -> str:
+def emit_jsexpr(
+	value: "JSExpr | Import | AnyJsFunction | JsFunctionCall[*tuple[Any, ...]]",
+) -> str:
 	"""Emit a JSExpr in interpreted mode (for client-side evaluation)."""
 	with interpreted_mode():
 		if isinstance(value, Import):
 			return value.emit()
+		if isinstance(value, JsFunction):
+			# Emit as a function reference: get_object('fn_name')
+			return f"get_object('{value.js_name}')"
 		if isinstance(value, JsFunctionCall):
 			# Emit as a function call: fn_name(arg1, arg2, ...)
 			fn_name = f"get_object('{value.fn.js_name}')"
@@ -465,19 +470,6 @@ class Renderer:
 			old_value = previous.get(key)
 			prop_path = join_path(path, key)
 
-			if callable(value):
-				if isinstance(old_value, (Node, ComponentNode)):
-					unmount_element(old_value)
-				if normalized is None:
-					normalized = current.copy()
-				normalized[key] = "$cb"
-				register_callback(
-					self.callbacks, prop_path, cast(Callable[..., Any], value)
-				)
-				if old_value != "$cb":
-					updated[key] = "$cb"
-				continue
-
 			if is_jsexpr(value):
 				if isinstance(old_value, (Node, ComponentNode)):
 					unmount_element(old_value)
@@ -516,6 +508,19 @@ class Renderer:
 					vdom_value, normalized_value = self.render_tree(value, prop_path)
 					normalized[key] = normalized_value
 					updated[key] = vdom_value
+				continue
+
+			if callable(value):
+				if isinstance(old_value, (Node, ComponentNode)):
+					unmount_element(old_value)
+				if normalized is None:
+					normalized = current.copy()
+				normalized[key] = "$cb"
+				register_callback(
+					self.callbacks, prop_path, cast(Callable[..., Any], value)
+				)
+				if old_value != "$cb":
+					updated[key] = "$cb"
 				continue
 
 			if isinstance(old_value, (Node, ComponentNode)):

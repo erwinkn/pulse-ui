@@ -1,9 +1,10 @@
 """JavaScript Math module bindings."""
 
+import math as _math_module
 from typing import ClassVar
 
 from pulse.javascript_v2.constants import jsify
-from pulse.javascript_v2.module import JsModule, PyModule
+from pulse.javascript_v2.module import JsModule, PyModule, register_module
 from pulse.javascript_v2.nodes import (
 	JSBinary,
 	JSExpr,
@@ -150,6 +151,13 @@ def MathProp(name: str) -> JSExpr:
 
 class PyMath(PyModule):
 	"""Provides transpilation for Python math functions to JavaScript."""
+
+	# Constants (as class attributes returning JSExpr)
+	pi = MathProp("PI")
+	e = MathProp("E")
+	tau = JSBinary(JSNumber(2), "*", MathProp("PI"))  # 2 * PI
+	inf = JSIdentifier("Infinity")
+	nan = JSIdentifier("NaN")
 
 	@staticmethod
 	def acos(x: int | float | JSExpr) -> JSExpr:
@@ -431,3 +439,7 @@ class PyMath(PyModule):
 	@staticmethod
 	def comb(n: int | float | JSExpr, k: int | float | JSExpr) -> JSExpr:
 		raise NotImplementedError("comb requires factorial implementation")
+
+
+# Register the Python math module for transpilation
+register_module(_math_module, PyMath)

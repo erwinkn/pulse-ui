@@ -173,16 +173,19 @@ def _generate_constants_section(constants: Sequence[JsConstant]) -> str:
 
 
 def _generate_functions_section(functions: Sequence[AnyJsFunction]) -> str:
-	"""Generate the functions section (placeholder stubs for now)."""
+	"""Generate the functions section with actual transpiled code."""
 	if not functions:
 		return ""
 
+	from pulse.javascript_v2.transpiler import transpile_function
+
 	lines: list[str] = ["// Functions"]
 	for fn in functions:
-		# TODO: Actual transpilation will be implemented later
-		lines.append(f"function {fn.js_name}() {{")
-		lines.append("  // TODO: transpiled body")
-		lines.append("}")
+		# transpile_function returns "function(args){...}"
+		js_code = transpile_function(fn)
+		# Convert anonymous function to named function: "function name_id(args){...}"
+		named_fn = js_code.replace("function(", f"function {fn.js_name}(", 1)
+		lines.append(named_fn)
 
 	return "\n".join(lines)
 
@@ -191,13 +194,14 @@ def _generate_registry_section(
 	all_imports: Sequence[Import],
 	lazy_components: Sequence[tuple[ReactComponent[...], Import]] | None = None,
 	prop_components: Sequence[ReactComponent[...]] | None = None,
+	functions: Sequence[AnyJsFunction] | None = None,
 ) -> str:
 	"""Generate the unified registry containing all imports for runtime lookup."""
 	lines: list[str] = []
 
 	# Unified Registry - contains all imports that need to be looked up at runtime
 	lines.append("// Unified Registry")
-	lines.append("const __registry: Record<string, unknown> = {")
+	lines.append("const __registry = {")
 
 	# Add non-type, non-side-effect imports to the registry
 	seen_js_names: set[str] = set()
@@ -229,6 +233,10 @@ def _generate_registry_section(
 		lines.append(
 			f'  "{key}": {render_lazy_imp.js_name}(() => import("{comp.src}").then((m) => {dynamic})),'
 		)
+
+	# Add transpiled functions to the registry
+	for fn in functions or []:
+		lines.append(f'  "{fn.js_name}": {fn.js_name},')
 
 	lines.append("};")
 
@@ -286,14 +294,8 @@ def generate_route(
 
 	# Add core Pulse imports - store references to use their js_name later
 	pulse_view_import = Import.named("PulseView", "pulse-ui-client")
-	headers_args_import = Import.type_("HeadersArgs", "react-router")
 
-	all_imports.extend(
-		[
-			pulse_view_import,
-			headers_args_import,
-		]
-	)
+	all_imports.append(pulse_view_import)
 
 	# Check if we need RenderLazy and collect lazy components
 	render_lazy_import: Import | None = None
@@ -341,7 +343,7 @@ def generate_route(
 		output_parts.append("")
 
 	output_parts.append(
-		_generate_registry_section(all_imports, lazy_components, prop_components)
+		_generate_registry_section(all_imports, lazy_components, prop_components, funcs)
 	)
 	output_parts.append("")
 
@@ -356,20 +358,14 @@ export default function RouteComponent() {{
 }}''')
 	output_parts.append("")
 
-	# Headers function - use js_name for HeadersArgs
-	headers_args_js = headers_args_import.js_name
-	output_parts.append(f"""// Action and loader headers are not returned automatically
-function hasAnyHeaders(headers: Headers): boolean {{
+	# Headers function
+	output_parts.append("""// Action and loader headers are not returned automatically
+function hasAnyHeaders(headers) {
   return [...headers].length > 0;
-}}
+}
 
-export function headers({{
-  actionHeaders,
-  loaderHeaders,
-}}: {headers_args_js}) {{
-  return hasAnyHeaders(actionHeaders)
-    ? actionHeaders
-    : loaderHeaders;
-}}""")
+export function headers({ actionHeaders, loaderHeaders }) {
+  return hasAnyHeaders(actionHeaders) ? actionHeaders : loaderHeaders;
+}""")
 
 	return "\n".join(output_parts)

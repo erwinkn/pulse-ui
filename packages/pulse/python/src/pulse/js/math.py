@@ -1,4 +1,7 @@
-"""JavaScript Math builtin module.
+"""
+NOTE: experimental setup for JS modules in the transpilation process
+
+JavaScript Math builtin module.
 
 Usage:
     import pulse.js.math as Math

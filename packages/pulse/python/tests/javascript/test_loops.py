@@ -1,9 +1,9 @@
-import pulse as ps
+from pulse.javascript.function import javascript
 from pulse.javascript.transpiler import compile_python_to_js
 
 
 def test_simple_for_over_list():
-	@ps.javascript
+	@javascript
 	def f(xs):
 		s = 0
 		for x in xs:

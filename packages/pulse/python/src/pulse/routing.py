@@ -1,12 +1,15 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TypedDict, cast, override
+from typing import TYPE_CHECKING, TypedDict, cast, override
 
 from pulse.env import env
 from pulse.react_component import ReactComponent
 from pulse.reactive_extensions import ReactiveDict
 from pulse.vdom import Component
+
+if TYPE_CHECKING:
+	from pulse.javascript_v2.function import AnyJsFunction
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"
@@ -159,6 +162,7 @@ class Route:
 	render: Component[[]]
 	children: Sequence["Route | Layout"]
 	components: Sequence[ReactComponent[...]] | None
+	functions: "Sequence[AnyJsFunction] | None"
 	is_index: bool
 	is_dynamic: bool
 	dev: bool
@@ -169,6 +173,7 @@ class Route:
 		render: Component[[]],
 		children: "Sequence[Route | Layout] | None" = None,
 		components: "Sequence[ReactComponent[...]] | None" = None,
+		functions: "Sequence[AnyJsFunction] | None" = None,
 		dev: bool = False,
 	):
 		self.path = ensure_relative_path(path)
@@ -177,6 +182,7 @@ class Route:
 		self.render = render
 		self.children = children or []
 		self.components = components
+		self.functions = functions
 		self.dev = dev
 		self.parent: Route | Layout | None = None
 
@@ -250,6 +256,7 @@ class Layout:
 	render: Component[...]
 	children: Sequence["Route | Layout"]
 	components: Sequence[ReactComponent[...]] | None
+	functions: "Sequence[AnyJsFunction] | None"
 	dev: bool
 
 	def __init__(
@@ -257,11 +264,13 @@ class Layout:
 		render: "Component[...]",
 		children: "Sequence[Route | Layout] | None" = None,
 		components: "Sequence[ReactComponent[...]] | None" = None,
+		functions: "Sequence[AnyJsFunction] | None" = None,
 		dev: bool = False,
 	):
 		self.render = render
 		self.children = children or []
 		self.components = components
+		self.functions = functions
 		self.dev = dev
 		self.parent: Route | Layout | None = None
 		# 1-based sibling index assigned by RouteTree at each level

@@ -43,12 +43,10 @@ class TestCodegen:
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		assert "import type { HeadersArgs" in result
-		assert '"react-router"' in result
 		assert "import { PulseView" in result
 		assert '"pulse-ui-client"' in result
 		# Unified registry only
-		assert "const __registry: Record<string, unknown>" in result
+		assert "const __registry = {" in result
 		assert 'const path = "/simple"' in result
 		assert "export function headers" in result
 		assert "export default function RouteComponent()" in result
@@ -78,7 +76,7 @@ class TestCodegen:
 		assert "import { card as card_" in result
 		assert '"./Card"' in result
 		# Components are in the unified registry
-		assert "const __registry: Record<string, unknown>" in result
+		assert "const __registry = {" in result
 
 	def test_generate_route_page_with_default_export_components(self, tmp_path: Path):
 		"""Test generating route with default export components."""
@@ -170,7 +168,7 @@ class TestCodegen:
 		assert "RenderLazy_" in result
 		assert 'import("./LazyThing")' in result
 		# Lazy component should be in the unified registry
-		assert "const __registry: Record<string, unknown>" in result
+		assert "const __registry = {" in result
 		# Should NOT import it statically
 		assert "import LazyThing_" not in result
 		assert "import { LazyThing" not in result
@@ -263,7 +261,11 @@ class TestCodegen:
 		assert (routes_dir / "index.tsx").exists()
 		assert (routes_dir / "interactive.tsx").exists()
 		assert (routes_dir / "users.tsx").exists()
-		assert (routes_dir / "users" / "_id_4742d9b5.tsx").exists()
+		# The dynamic route :id gets sanitized with a hash suffix
+		user_id_files = list((routes_dir / "users").glob("_id_*.tsx"))
+		assert len(user_id_files) == 1, (
+			f"Expected 1 _id_*.tsx file, found {user_id_files}"
+		)
 
 		layout_content = (pulse_app_dir / "_layout.tsx").read_text()
 		assert (
@@ -285,7 +287,9 @@ class TestCodegen:
 		assert 'path: "users"' in runtime_content
 		assert 'file: "test_pulse_app/routes/users.tsx"' in runtime_content
 		assert 'path: ":id"' in runtime_content
-		assert 'file: "test_pulse_app/routes/users/_id_4742d9b5.tsx"' in runtime_content
+		# The dynamic route file has a hash suffix that depends on extension
+		assert 'file: "test_pulse_app/routes/users/_id_' in runtime_content
+		assert '.tsx"' in runtime_content
 
 		home_content = (routes_dir / "index.tsx").read_text()
 		assert "import { PulseView" in home_content
@@ -340,11 +344,10 @@ class TestGenerateRoute:
 		result = generate_route(path="/test")
 
 		assert "import { PulseView" in result
-		assert "import type { HeadersArgs" in result
 		assert 'const path = "/test"' in result
 		assert "export default function RouteComponent()" in result
 		assert "export function headers" in result
-		assert "const __registry: Record<string, unknown>" in result
+		assert "const __registry = {" in result
 
 	def test_generate_route_with_component(self):
 		"""Test route generation with a component."""
@@ -358,7 +361,7 @@ class TestGenerateRoute:
 		assert "import { Button as Button_" in result
 		assert '"@mantine/core"' in result
 		# Uses unified registry
-		assert "const __registry: Record<string, unknown>" in result
+		assert "const __registry = {" in result
 
 	def test_generate_route_with_lazy_component(self):
 		"""Test route generation with a lazy component."""

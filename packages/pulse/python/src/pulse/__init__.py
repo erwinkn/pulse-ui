@@ -1287,11 +1287,9 @@ from pulse.html.tags import (
 from pulse.html.tags import (
 	wbr as wbr,
 )
-from pulse.javascript.function import (
-	javascript as javascript,
-)
 
-# JavaScript v2 Import system
+# JavaScript v2 transpilation system
+from pulse.javascript_v2.function import javascript as javascript
 from pulse.javascript_v2.imports import CssImport as CssImport
 from pulse.javascript_v2.imports import Import as Import
 from pulse.messages import ClientMessage as ClientMessage

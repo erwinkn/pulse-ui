@@ -394,6 +394,18 @@ class JSRaw(JSExpr):
 ###############################################################################
 
 
+def _check_not_interpreted_mode(node_type: str) -> None:
+	"""Raise an error if we're in interpreted mode - JSX can't be eval'd."""
+	from pulse.javascript_v2.context import is_interpreted_mode
+
+	if is_interpreted_mode():
+		raise ValueError(
+			f"{node_type} cannot be used in interpreted mode (as a prop or child value). "
+			"JSX syntax requires transpilation and cannot be evaluated at runtime. "
+			"Use standard VDOM elements (ps.div, ps.span, etc.) instead."
+		)
+
+
 def _escape_jsx_text(text: str) -> str:
 	# Minimal escaping for text nodes
 	return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -406,6 +418,7 @@ class JSXProp(JSExpr):
 
 	@override
 	def emit(self) -> str:
+		_check_not_interpreted_mode("JSXProp")
 		if self.value is None:
 			return self.name
 		# Prefer compact string literal attribute when possible
@@ -420,6 +433,7 @@ class JSXSpreadProp(JSExpr):
 
 	@override
 	def emit(self) -> str:
+		_check_not_interpreted_mode("JSXSpreadProp")
 		return f"{{...{self.value.emit()}}}"
 
 
@@ -431,6 +445,7 @@ class JSXElement(JSExpr):
 
 	@override
 	def emit(self) -> str:
+		_check_not_interpreted_mode("JSXElement")
 		tag_code = self.tag if isinstance(self.tag, str) else self.tag.emit()
 		props_code = " ".join(p.emit() for p in self.props) if self.props else ""
 		if not self.children:
@@ -458,6 +473,7 @@ class JSXFragment(JSExpr):
 
 	@override
 	def emit(self) -> str:
+		_check_not_interpreted_mode("JSXFragment")
 		if not self.children:
 			return "<></>"
 		parts: list[str] = []

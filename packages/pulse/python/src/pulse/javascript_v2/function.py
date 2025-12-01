@@ -5,17 +5,19 @@ import inspect
 import types
 from typing import Any, Callable, Generic, TypeAlias, TypeVar, TypeVarTuple
 
+# Import module registrations to ensure they're available for dependency analysis
+import pulse.javascript_v2.modules.math  # noqa: F401, E402
 from pulse.javascript_v2.constants import JsConstant, const_to_js
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.ids import generate_id
 from pulse.javascript_v2.imports import Import
-from pulse.javascript_v2.module import JsModule
+from pulse.javascript_v2.module import JsModule, PyModule
 
 Args = TypeVarTuple("Args")
 R = TypeVar("R")
 
 AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any, ...], Any]"
-JsDep: TypeAlias = "AnyJsFunction | JsConstant | Import | PyBuiltin"
+JsDep: TypeAlias = "AnyJsFunction | JsConstant | Import | PyBuiltin | PyModuleRef"
 
 # Global cache for deduplication across all transpiled functions
 # Registered BEFORE analyzing deps to handle mutual recursion
@@ -29,6 +31,21 @@ class PyBuiltin:
 
 	def __init__(self, name: str) -> None:
 		self.name = name
+
+
+class PyModuleRef:
+	"""Reference to a registered Python module for transpilation.
+
+	When a function uses `import math` or `from math import log`, we create
+	a PyModuleRef that tracks the module and its PyModule transpilation class.
+	"""
+
+	module: types.ModuleType
+	transpiler: type[PyModule]
+
+	def __init__(self, module: types.ModuleType, transpiler: type[PyModule]) -> None:
+		self.module = module
+		self.transpiler = transpiler
 
 
 def _get_or_create_function(fn: Callable[..., object]) -> AnyJsFunction:
@@ -73,6 +90,10 @@ class JsFunction(Generic[*Args, R]):
 	def builtins(self) -> dict[str, PyBuiltin]:
 		"""Get all PyBuiltin dependencies."""
 		return {k: v for k, v in self.deps.items() if isinstance(v, PyBuiltin)}
+
+	def modules(self) -> dict[str, PyModuleRef]:
+		"""Get all PyModuleRef dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, PyModuleRef)}
 
 	def __call__(self, *args: *Args) -> JsFunctionCall[*Args]:
 		return JsFunctionCall(self, args)
@@ -143,9 +164,12 @@ def _analyze_function_deps(fn: Callable[..., object]) -> dict[str, JsDep]:
 				# For now, skip (will be handled separately)
 				continue
 			elif inspect.ismodule(value):
-				# Python modules - planned for future handling
-				# Will be handled separately via PyModule registry
-				continue
+				# Python modules - check if registered in PyModule registry
+				from pulse.javascript_v2.module import PY_MODULES
+
+				if value in PY_MODULES:
+					deps[name] = PyModuleRef(value, PY_MODULES[value])
+				# Unregistered modules are skipped
 			elif inspect.isfunction(value):
 				deps[name] = _get_or_create_function(value)
 			elif callable(value):

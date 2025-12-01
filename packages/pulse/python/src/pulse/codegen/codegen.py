@@ -259,6 +259,7 @@ class Codegen:
 		content = generate_route(
 			path=route.unique_path(),
 			components=list(route.components) if route.components else None,
+			functions=list(route.functions) if route.functions else None,
 			route_file_path=output_path,
 			css_dir=self.output_folder / "css",
 		)

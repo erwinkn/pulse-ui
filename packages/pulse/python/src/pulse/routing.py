@@ -207,7 +207,7 @@ class Route:
 		path = "/".join(self._path_list(include_layouts=False))
 		if self.is_index:
 			path += "index"
-		path += ".tsx"
+		path += ".jsx"
 		# Replace Windows-invalid characters in filenames
 		return _sanitize_filename(path)
 

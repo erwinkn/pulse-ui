@@ -51,23 +51,6 @@ from pulse.context import PulseContext as PulseContext
 # Cookies
 from pulse.cookies import Cookie as Cookie
 from pulse.cookies import SetCookie as SetCookie
-from pulse.css import (
-	CssImport as CssImport,
-)
-from pulse.css import (
-	CssModule as CssModule,
-)
-from pulse.css import (
-	CssReference as CssReference,
-)
-
-# CSS
-from pulse.css import (
-	css as css,
-)
-from pulse.css import (
-	css_module as css_module,
-)
 
 # Decorators
 from pulse.decorators import computed as computed
@@ -1307,6 +1290,10 @@ from pulse.html.tags import (
 from pulse.javascript.function import (
 	javascript as javascript,
 )
+
+# JavaScript v2 Import system
+from pulse.javascript_v2.imports import CssImport as CssImport
+from pulse.javascript_v2.imports import Import as Import
 from pulse.messages import ClientMessage as ClientMessage
 from pulse.messages import Directives as Directives
 from pulse.messages import Prerender as Prerender

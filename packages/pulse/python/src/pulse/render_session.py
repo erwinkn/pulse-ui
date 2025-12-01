@@ -290,14 +290,16 @@ class RenderSession:
 				if normalized_root is not None:
 					mount.element = normalized_root
 				mount.rendered = True
-				return ServerInitMessage(
+				msg = ServerInitMessage(
 					type="vdom_init",
 					path=path,
 					vdom=vdom,
 					callbacks=sorted(mount.tree.callbacks.keys()),
 					render_props=sorted(mount.tree.render_props),
-					css_refs=sorted(mount.tree.css_refs),
 				)
+				if mount.tree.jsexpr_paths:
+					msg["jsexpr_paths"] = mount.tree.jsexpr_paths
+				return msg
 
 		captured: ServerInitMessage | ServerNavigateToMessage | None = None
 
@@ -313,8 +315,9 @@ class RenderSession:
 					vdom=msg.get("vdom"),
 					callbacks=msg.get("callbacks", []),
 					render_props=msg.get("render_props", []),
-					css_refs=msg.get("css_refs", []),
 				)
+				if "jsexpr_paths" in msg:
+					captured["jsexpr_paths"] = msg["jsexpr_paths"]
 			elif msg["type"] == "navigate_to":
 				captured = ServerNavigateToMessage(
 					type="navigate_to",
@@ -341,14 +344,16 @@ class RenderSession:
 				if normalized_root is not None:
 					mount.element = normalized_root
 				mount.rendered = True
-			return ServerInitMessage(
+			msg = ServerInitMessage(
 				type="vdom_init",
 				path=path,
 				vdom=vdom,
 				callbacks=sorted(mount.tree.callbacks.keys()),
 				render_props=sorted(mount.tree.render_props),
-				css_refs=sorted(mount.tree.css_refs),
 			)
+			if mount.tree.jsexpr_paths:
+				msg["jsexpr_paths"] = mount.tree.jsexpr_paths
+			return msg
 
 		return captured
 
@@ -412,16 +417,16 @@ class RenderSession:
 						if normalized_root is not None:
 							mount.element = normalized_root
 						mount.rendered = True
-						self.send(
-							ServerInitMessage(
-								type="vdom_init",
-								path=path,
-								vdom=vdom,
-								callbacks=sorted(mount.tree.callbacks.keys()),
-								render_props=sorted(mount.tree.render_props),
-								css_refs=sorted(mount.tree.css_refs),
-							)
+						msg = ServerInitMessage(
+							type="vdom_init",
+							path=path,
+							vdom=vdom,
+							callbacks=sorted(mount.tree.callbacks.keys()),
+							render_props=sorted(mount.tree.render_props),
 						)
+						if mount.tree.jsexpr_paths:
+							msg["jsexpr_paths"] = mount.tree.jsexpr_paths
+						self.send(msg)
 					else:
 						ops = mount.tree.diff(mount.element)
 						normalized_root = getattr(mount.tree, "_normalized", None)

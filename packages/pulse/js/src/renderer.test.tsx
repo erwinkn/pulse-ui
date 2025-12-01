@@ -9,22 +9,10 @@ function childrenArray(el: React.ReactElement): React.ReactNode[] {
 }
 
 describe("applyReactTreeUpdates", () => {
-	function makeRenderer(
-		initialCallbacks: string[] = [],
-		cssModules: Record<string, Record<string, string>> = {},
-		initialCssRefs: string[] = [],
-	) {
+	function makeRenderer(initialCallbacks: string[] = [], registry: Record<string, unknown> = {}) {
 		const invokeCallback = vi.fn();
 		const client: any = { invokeCallback };
-		const renderer = new VDOMRenderer(
-			client,
-			"/test",
-			{},
-			cssModules,
-			initialCallbacks,
-			[],
-			initialCssRefs,
-		);
+		const renderer = new VDOMRenderer(client, "/test", initialCallbacks, [], registry);
 		return { renderer, invokeCallback };
 	}
 
@@ -94,59 +82,7 @@ describe("applyReactTreeUpdates", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", [123]);
 	});
 
-	it("hydrates css refs from initial payload", () => {
-		const cssModules = { moduleA: { container: "container_hash" } };
-		const { renderer } = makeRenderer([], cssModules, ["className"]);
-		const tree = renderer.renderNode({
-			tag: "div",
-			props: {
-				className: "moduleA:container",
-			},
-		});
-		const el = tree as React.ReactElement;
-		expect((el.props as any).className).toBe("container_hash");
-	});
-
-	it("applies css ref deltas", () => {
-		const cssModules = { moduleA: { button: "button_hash" } };
-		const { renderer } = makeRenderer([], cssModules);
-		const initialVDOM: VDOMNode = { tag: "button" };
-		let tree = renderer.renderNode(initialVDOM);
-
-		tree = renderer.applyUpdates(tree, [
-			{
-				type: "update_css_refs",
-				path: "",
-				data: { add: ["className"] },
-			},
-			{
-				type: "update_props",
-				path: "",
-				data: {
-					set: { className: "moduleA:button" },
-				},
-			},
-		]);
-		const button = tree as React.ReactElement;
-		expect((button.props as any).className).toBe("button_hash");
-
-		tree = renderer.applyUpdates(tree, [
-			{
-				type: "update_css_refs",
-				path: "",
-				data: { remove: ["className"] },
-			},
-			{
-				type: "update_props",
-				path: "",
-				data: {
-					set: { className: "plain" },
-				},
-			},
-		]);
-		const updatedButton = tree as React.ReactElement;
-		expect((updatedButton.props as any).className).toBe("plain");
-	});
+	// CSS tests removed - CSS references are now handled via jsexpr_paths
 
 	it("replaces a nested child via path", () => {
 		const { renderer } = makeRenderer();

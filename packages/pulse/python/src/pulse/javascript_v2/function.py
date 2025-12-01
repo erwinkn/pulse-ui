@@ -38,19 +38,6 @@ def _get_or_create_function(fn: Callable[..., object]) -> AnyJsFunction:
 	return FUNCTION_CACHE[fn]
 
 
-def javascript(fn: Callable[..., object]) -> AnyJsFunction:
-	"""Decorator to convert a function into a JsFunction.
-
-	Usage:
-		@javascript
-		def my_func(x: int) -> int:
-			return x + 1
-
-		# my_func is now a JsFunction instance
-	"""
-	return JsFunction(fn)
-
-
 class JsFunction(Generic[*Args, R]):
 	fn: Callable[[*Args], R]
 	id: str
@@ -177,3 +164,16 @@ def _analyze_function_deps(fn: Callable[..., object]) -> dict[str, JsDep]:
 		# They'll be handled during code generation
 
 	return deps
+
+
+def javascript(fn: Callable[[*Args], R]) -> JsFunction[*Args, R]:
+	"""Decorator to convert a function into a JsFunction.
+
+	Usage:
+		@javascript
+		def my_func(x: int) -> int:
+			return x + 1
+
+		# my_func is now a JsFunction instance
+	"""
+	return JsFunction(fn)

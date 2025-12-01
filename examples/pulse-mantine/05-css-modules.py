@@ -1,8 +1,8 @@
 import pulse as ps
 from pulse_mantine import Button, Group, MantineProvider, Stack, Text, Title
 
-ps.css("@mantine/core/styles.css")
-styles = ps.css_module("./mantine-demo.module.css", relative=True)
+ps.CssImport("@mantine/core/styles.css")
+styles = ps.CssImport("./mantine-demo.module.css", module=True, relative=True)
 
 
 @ps.component

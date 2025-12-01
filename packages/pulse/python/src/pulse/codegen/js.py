@@ -32,6 +32,7 @@ class ExternalJsFunction(Generic[*Args, R]):
 
 	import_: Import
 	hint: Callable[[*Args], R]
+	_prop: str | None
 
 	def __init__(
 		self,
@@ -43,9 +44,10 @@ class ExternalJsFunction(Generic[*Args, R]):
 		hint: Callable[[*Args], R],
 	) -> None:
 		if is_default:
-			self.import_ = Import.default(name, src, prop=prop)
+			self.import_ = Import.default(name, src)
 		else:
-			self.import_ = Import.named(name, src, prop=prop)
+			self.import_ = Import.named(name, src)
+		self._prop = prop
 		self.hint = hint
 
 	@property
@@ -62,10 +64,13 @@ class ExternalJsFunction(Generic[*Args, R]):
 
 	@property
 	def prop(self) -> str | None:
-		return self.import_.prop
+		return self._prop
 
 	@property
 	def expr(self) -> str:
-		return self.import_.expr
+		base = self.import_.js_name
+		if self._prop:
+			return f"{base}.{self._prop}"
+		return base
 
 	def __call__(self, *args: *Args) -> R: ...

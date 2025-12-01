@@ -541,6 +541,8 @@ def op_is_right_associative(op: str) -> bool:
 
 
 def expr_precedence(e: JSExpr) -> int:
+	from pulse.javascript_v2.imports import Import
+
 	if isinstance(e, JSBinary):
 		return op_precedence(e.op)
 	if isinstance(e, JSUnary):
@@ -572,6 +574,7 @@ def expr_precedence(e: JSExpr) -> int:
 			JSRaw,
 			JSXElement,
 			JSXFragment,
+			Import,
 		),
 	):
 		return PRIMARY_PRECEDENCE
@@ -735,3 +738,40 @@ def _emit_child_for_primary(expr: JSExpr) -> str:
 
 def is_primary(expr: JSExpr):
 	return isinstance(expr, (JSNumber, JSString, JSUndefined, JSNull, JSIdentifier))
+
+
+def to_js_expr(value: object) -> JSExpr:
+	"""Convert a Python value to a JSExpr.
+
+	Handles:
+	- JSExpr: returned as-is
+	- Import (including CssModule): wrapped in _ImportExpr
+	- str: JSString
+	- int/float: JSNumber
+	- bool: JSBoolean
+	- None: JSNull
+	- list/tuple: JSArray (recursively converted)
+	- dict: JSObjectExpr (recursively converted)
+	"""
+	# Already a JSExpr
+	if isinstance(value, JSExpr):
+		return value
+
+	# Primitives
+	if isinstance(value, str):
+		return JSString(value)
+	if isinstance(value, bool):  # Must check before int since bool is subclass of int
+		return JSBoolean(value)
+	if isinstance(value, (int, float)):
+		return JSNumber(value)
+	if value is None:
+		return JSNull()
+
+	# Collections
+	if isinstance(value, (list, tuple)):
+		return JSArray([to_js_expr(v) for v in value])
+	if isinstance(value, dict):
+		props = [JSProp(JSString(str(k)), to_js_expr(v)) for k, v in value.items()]
+		return JSObjectExpr(props)
+
+	raise TypeError(f"Cannot convert {type(value).__name__} to JSExpr")

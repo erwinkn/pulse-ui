@@ -14,7 +14,7 @@ class ServerInitMessage(TypedDict):
 	vdom: VDOM
 	callbacks: list[str]
 	render_props: list[str]
-	css_refs: list[str]
+	jsexpr_paths: NotRequired[dict[str, str]]  # path -> JS code for interpretation
 
 
 class ServerUpdateMessage(TypedDict):

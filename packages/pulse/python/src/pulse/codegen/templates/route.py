@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
+from pathlib import Path
 
-from pulse.css import CssImport, CssModule
 from pulse.javascript_v2.constants import JsConstant
 from pulse.javascript_v2.function import AnyJsFunction, JsFunction
-from pulse.javascript_v2.imports import Import
+from pulse.javascript_v2.imports import Import, registered_imports
 from pulse.react_component import ReactComponent
 
 
@@ -186,58 +187,50 @@ def _generate_functions_section(functions: Sequence[AnyJsFunction]) -> str:
 	return "\n".join(lines)
 
 
-def _generate_registries_section(
-	css_modules: Sequence[tuple[CssModule, Import]],
-	functions: Sequence[AnyJsFunction],
-	components: Sequence[ReactComponent[...]],
+def _generate_registry_section(
+	all_imports: Sequence[Import],
+	lazy_components: Sequence[tuple[ReactComponent[...], Import]] | None = None,
+	prop_components: Sequence[ReactComponent[...]] | None = None,
 ) -> str:
-	"""Generate the registries section (cssModules, functions, externalComponents)."""
+	"""Generate the unified registry containing all imports for runtime lookup."""
 	lines: list[str] = []
 
-	# CSS Modules Registry
-	lines.append("// CSS Modules Registry")
-	if css_modules:
-		lines.append("const cssModules = {")
-		for module, imp in css_modules:
-			lines.append(f'  "{module.id}": {imp.js_name},')
-		lines.append("};")
-	else:
-		lines.append("const cssModules = {};")
+	# Unified Registry - contains all imports that need to be looked up at runtime
+	lines.append("// Unified Registry")
+	lines.append("const __registry: Record<string, unknown> = {")
 
-	lines.append("")
+	# Add non-type, non-side-effect imports to the registry
+	seen_js_names: set[str] = set()
+	for imp in all_imports:
+		if imp.is_side_effect or imp.is_type_only:
+			continue
+		if imp.js_name in seen_js_names:
+			continue
+		seen_js_names.add(imp.js_name)
+		lines.append(f'  "{imp.js_name}": {imp.js_name},')
 
-	# Functions Registry
-	lines.append("// Functions Registry")
-	if functions:
-		lines.append("const functions = {")
-		for fn in functions:
-			lines.append(f'  "{fn.fn.__name__}": {fn.js_name},')
-		lines.append("};")
-	else:
-		lines.append("const functions = {};")
+	# Add components with prop access (e.g., AppShell.Header)
+	# These need separate registry entries because the lookup key includes the prop
+	for comp in prop_components or []:
+		if comp.prop:
+			# Key is "ImportName_123.PropName", value is ImportName_123.PropName
+			key = f"{comp.import_.js_name}.{comp.prop}"
+			lines.append(f'  "{key}": {key},')
 
-	lines.append("")
+	# Add lazy components with RenderLazy wrapper
+	for comp, render_lazy_imp in lazy_components or []:
+		attr = "default" if comp.is_default else comp.name
+		prop_accessor = f".{comp.prop}" if comp.prop else ""
+		dynamic = f"({{ default: m.{attr}{prop_accessor} }})"
+		# Key includes prop if present (e.g., "AppShell_123.Header")
+		key = comp.import_.js_name
+		if comp.prop:
+			key = f"{key}.{comp.prop}"
+		lines.append(
+			f'  "{key}": {render_lazy_imp.js_name}(() => import("{comp.src}").then((m) => {dynamic})),'
+		)
 
-	# Components Registry
-	lines.append("// Components Registry")
-	if components:
-		lines.append("const externalComponents: ComponentRegistry = {")
-		for comp in components:
-			if comp.lazy:
-				attr = "default" if comp.is_default else comp.name
-				prop_accessor = f".{comp.prop}" if comp.prop else ""
-				dynamic = f"({{ default: m.{attr}{prop_accessor} }})"
-				lines.append(
-					f'  "{comp.expr}": RenderLazy(() => import("{comp.src}").then((m) => {dynamic})),'
-				)
-			else:
-				js_expr = comp.import_.js_name
-				if comp.prop:
-					js_expr = f"{js_expr}.{comp.prop}"
-				lines.append(f'  "{comp.expr}": {js_expr},')
-		lines.append("};")
-	else:
-		lines.append("const externalComponents: ComponentRegistry = {};")
+	lines.append("};")
 
 	return "\n".join(lines)
 
@@ -245,43 +238,81 @@ def _generate_registries_section(
 def generate_route(
 	path: str,
 	imports: Sequence[Import] | None = None,
-	css_modules: Sequence[tuple[CssModule, str]] | None = None,
-	css_imports: Sequence[tuple[CssImport, str]] | None = None,
 	functions: Sequence[AnyJsFunction] | None = None,
 	components: Sequence[ReactComponent[...]] | None = None,
+	route_file_path: Path | None = None,
+	css_dir: Path | None = None,
 ) -> str:
-	"""Generate a route file with all imports, functions, and components."""
-	# 1. Collect all imports
-	all_imports: list[Import] = list(imports or [])
-	css_module_imports: list[tuple[CssModule, Import]] = []
+	"""Generate a route file with all imports, functions, and components.
 
-	# Add core Pulse imports
+	Args:
+		path: The route path (e.g., "/users/:id")
+		imports: Additional imports to include
+		functions: JS functions to include
+		components: React components used in the route
+		route_file_path: Path where the route file will be written (for computing relative imports)
+		css_dir: Path to the CSS output directory (for computing relative CSS imports)
+	"""
+	# 1. Collect lazy component import IDs to exclude from registered_imports
+	lazy_import_ids: set[str] = set()
+	for comp in components or []:
+		if comp.lazy:
+			lazy_import_ids.add(comp.import_.id)
+
+	# 2. Collect all imports
+	# Start with all registered imports (includes CSS imports from CssImport)
+	# but exclude lazy component imports (they're loaded dynamically)
+	all_imports: list[Import] = [
+		imp for imp in registered_imports() if imp.id not in lazy_import_ids
+	]
+
+	# Update src for local CSS imports to use relative paths from the route file
+	if route_file_path is not None and css_dir is not None:
+		from pulse.javascript_v2.imports import CssImport
+
+		route_dir = route_file_path.parent
+		for imp in all_imports:
+			if isinstance(imp, CssImport) and imp.is_local:
+				# Compute relative path from route file to CSS file
+				generated_filename = imp.generated_filename
+				assert generated_filename is not None
+				css_file_path = css_dir / generated_filename
+				rel_path = Path(os.path.relpath(css_file_path, route_dir))
+				imp.src = rel_path.as_posix()
+
+	# Add any explicitly passed imports
+	if imports:
+		all_imports.extend(imports)
+
+	# Add core Pulse imports - store references to use their js_name later
+	pulse_view_import = Import.named("PulseView", "pulse-ui-client")
+	headers_args_import = Import.type_("HeadersArgs", "react-router")
+
 	all_imports.extend(
 		[
-			Import.named("PulseView", "pulse-ui-client"),
-			Import.type_("ComponentRegistry", "pulse-ui-client"),
-			Import.type_("HeadersArgs", "react-router"),
+			pulse_view_import,
+			headers_args_import,
 		]
 	)
 
-	# Check if we need RenderLazy
+	# Check if we need RenderLazy and collect lazy components
+	render_lazy_import: Import | None = None
+	lazy_components: list[tuple[ReactComponent[...], Import]] = []
 	if any(c.lazy for c in (components or [])):
-		all_imports.append(Import.named("RenderLazy", "pulse-ui-client"))
+		render_lazy_import = Import.named("RenderLazy", "pulse-ui-client")
+		all_imports.append(render_lazy_import)
 
-	# Add CSS module imports (convert CssModule to default Import)
-	for module, import_path in css_modules or []:
-		imp = Import.default(module.id, import_path)
-		all_imports.append(imp)
-		css_module_imports.append((module, imp))
-
-	# Add CSS side-effect imports
-	for _, import_path in css_imports or []:
-		all_imports.append(Import.side_effect(import_path))
-
-	# Add component imports
+	# Add component imports and collect components with prop access
+	prop_components: list[ReactComponent[...]] = []
 	for comp in components or []:
-		if not comp.lazy:
+		if comp.lazy:
+			if render_lazy_import is not None:
+				lazy_components.append((comp, render_lazy_import))
+		else:
 			all_imports.append(comp.import_)
+			# Track components with prop access for registry
+			if comp.prop:
+				prop_components.append(comp)
 		all_imports.extend(comp.extra_imports)
 
 	# 2. Collect function graph (constants + functions in order)
@@ -310,33 +341,35 @@ def generate_route(
 		output_parts.append("")
 
 	output_parts.append(
-		_generate_registries_section(css_module_imports, funcs, list(components or []))
+		_generate_registry_section(all_imports, lazy_components, prop_components)
 	)
 	output_parts.append("")
 
-	# Route component
+	# Route component - use js_name for PulseView
+	pulse_view_js = pulse_view_import.js_name
 	output_parts.append(f'''const path = "{path}";
 
 export default function RouteComponent() {{
   return (
-    <PulseView key={{path}} externalComponents={{externalComponents}} path={{path}} cssModules={{cssModules}} functions={{functions}} />
+    <{pulse_view_js} key={{path}} registry={{__registry}} path={{path}} />
   );
 }}''')
 	output_parts.append("")
 
-	# Headers function
-	output_parts.append("""// Action and loader headers are not returned automatically
-function hasAnyHeaders(headers: Headers): boolean {
+	# Headers function - use js_name for HeadersArgs
+	headers_args_js = headers_args_import.js_name
+	output_parts.append(f"""// Action and loader headers are not returned automatically
+function hasAnyHeaders(headers: Headers): boolean {{
   return [...headers].length > 0;
-}
+}}
 
-export function headers({
+export function headers({{
   actionHeaders,
   loaderHeaders,
-}: HeadersArgs) {
+}}: {headers_args_js}) {{
   return hasAnyHeaders(actionHeaders)
     ? actionHeaders
     : loaderHeaders;
-}""")
+}}""")
 
 	return "\n".join(output_parts)

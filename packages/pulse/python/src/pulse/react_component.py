@@ -319,6 +319,7 @@ class ReactComponent(Generic[P]):
 	props_spec: PropSpec
 	fn_signature: Callable[P, Element]
 	lazy: bool
+	_prop: str | None  # Property access like AppShell.Header
 
 	def __init__(
 		self,
@@ -333,11 +334,12 @@ class ReactComponent(Generic[P]):
 		fn_signature: Callable[P, Element] = default_signature,
 		extra_imports: tuple[Import, ...] | list[Import] | None = None,
 	):
-		# Create the Import directly
+		# Create the Import directly (prop is stored separately on ReactComponent)
 		if is_default:
-			self.import_ = Import.default(name, src, prop=prop)
+			self.import_ = Import.default(name, src)
 		else:
-			self.import_ = Import.named(name, src, prop=prop)
+			self.import_ = Import.named(name, src)
+		self._prop = prop
 
 		# Build props_spec from fn_signature if provided and props not provided
 		if prop_spec:
@@ -372,18 +374,18 @@ class ReactComponent(Generic[P]):
 
 	@property
 	def prop(self) -> str | None:
-		return self.import_.prop
+		return self._prop
 
 	@property
 	def expr(self) -> str:
 		"""Expression for the component in the registry and VDOM tags.
 
-		This uses the original name (without unique ID suffix) for backward
-		compatibility with the client-side code.
+		Uses the import's js_name (with unique ID suffix) to match the
+		unified registry on the client side.
 		"""
 		if self.prop:
-			return f"{self.name}.{self.prop}"
-		return self.name
+			return f"{self.import_.js_name}.{self.prop}"
+		return self.import_.js_name
 
 	@override
 	def __repr__(self) -> str:

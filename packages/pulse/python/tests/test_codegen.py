@@ -47,12 +47,12 @@ class TestCodegen:
 		assert '"react-router"' in result
 		assert "import { PulseView" in result
 		assert '"pulse-ui-client"' in result
-		assert "import type { ComponentRegistry" in result
-		assert "const externalComponents: ComponentRegistry = {};" in result
+		# Unified registry only
+		assert "const __registry: Record<string, unknown>" in result
 		assert 'const path = "/simple"' in result
 		assert "export function headers" in result
 		assert "export default function RouteComponent()" in result
-		assert "externalComponents={externalComponents}" in result
+		assert "registry={__registry}" in result
 		assert "path={path}" in result
 
 	def test_generate_route_page_with_components(self, tmp_path: Path):
@@ -77,8 +77,8 @@ class TestCodegen:
 		assert '"./Button"' in result
 		assert "import { card as card_" in result
 		assert '"./Card"' in result
-		# Components are in the registry with their expr
-		assert "externalComponents: ComponentRegistry = {" in result
+		# Components are in the unified registry
+		assert "const __registry: Record<string, unknown>" in result
 
 	def test_generate_route_page_with_default_export_components(self, tmp_path: Path):
 		"""Test generating route with default export components."""
@@ -166,8 +166,11 @@ class TestCodegen:
 		assert "RenderLazy" in result
 		assert '"pulse-ui-client"' in result
 
-		# Should use RenderLazy dynamic import for the component
-		assert 'RenderLazy(() => import("./LazyThing")' in result
+		# Should use RenderLazy dynamic import in the unified registry (now with ID suffix)
+		assert "RenderLazy_" in result
+		assert 'import("./LazyThing")' in result
+		# Lazy component should be in the unified registry
+		assert "const __registry: Record<string, unknown>" in result
 		# Should NOT import it statically
 		assert "import LazyThing_" not in result
 		assert "import { LazyThing" not in result
@@ -289,13 +292,13 @@ class TestCodegen:
 		assert '"pulse-ui-client"' in home_content
 		assert "import { Header as Header_" in home_content
 		assert 'const path = "/"' in home_content
-		assert "externalComponents={externalComponents}" in home_content
+		assert "registry={__registry}" in home_content
 		assert "path={path}" in home_content
 
 		interactive_content = (routes_dir / "interactive.tsx").read_text()
 		assert "import { Button as Button_" in interactive_content
 		assert 'const path = "/interactive"' in interactive_content
-		assert "externalComponents={externalComponents}" in interactive_content
+		assert "registry={__registry}" in interactive_content
 		assert "path={path}" in interactive_content
 
 	def test_sibling_layouts_get_distinct_files(self, tmp_path: Path):
@@ -337,11 +340,11 @@ class TestGenerateRoute:
 		result = generate_route(path="/test")
 
 		assert "import { PulseView" in result
-		assert "import type { ComponentRegistry" in result
 		assert "import type { HeadersArgs" in result
 		assert 'const path = "/test"' in result
 		assert "export default function RouteComponent()" in result
 		assert "export function headers" in result
+		assert "const __registry: Record<string, unknown>" in result
 
 	def test_generate_route_with_component(self):
 		"""Test route generation with a component."""
@@ -354,7 +357,8 @@ class TestGenerateRoute:
 
 		assert "import { Button as Button_" in result
 		assert '"@mantine/core"' in result
-		assert "externalComponents: ComponentRegistry = {" in result
+		# Uses unified registry
+		assert "const __registry: Record<string, unknown>" in result
 
 	def test_generate_route_with_lazy_component(self):
 		"""Test route generation with a lazy component."""
@@ -365,20 +369,20 @@ class TestGenerateRoute:
 			components=[LazyComp],
 		)
 
-		assert "RenderLazy" in result
-		assert 'RenderLazy(() => import("@mantine/charts")' in result
+		assert "RenderLazy_" in result
+		assert 'import("@mantine/charts")' in result
 		# Lazy components should NOT be imported statically
 		assert "import HeavyChart_" not in result
 		assert "import { HeavyChart" not in result
 
 	def test_generate_route_with_css_import(self):
 		"""Test route generation with CSS side-effect import."""
-		from pulse.javascript_v2.imports import Import
+		from pulse.javascript_v2.imports import CssImport
 
 		Button = ReactComponent(
 			"Button",
 			"@mantine/core",
-			extra_imports=[Import.css("@mantine/core/styles.css")],
+			extra_imports=[CssImport("@mantine/core/styles.css")],
 		)
 
 		result = generate_route(

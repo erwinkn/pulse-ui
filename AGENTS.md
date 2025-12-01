@@ -6,7 +6,7 @@
 - Minimize the amount of state and data structures 
 - Do not worry about backwards compatibility unless explicitly instructed to do so
 - Avoid single-use helper functions, unless the goal is to have single main function with clear control that performs multiple tasks in sequence by calling helpers
-- Avoid use of `if TYPE_CHECKING` unless an actual import cycle is created
+- Avoid use of `typing.TYPE_CHECKING` and non-global imports unless they are necessary to avoid an import cycle
 
 ## Development Commands
 ### Running code
@@ -23,6 +23,7 @@
 
 ### Type Checking
 - Run type checking: `make typecheck`
+- Python-only: use `basedpyright` directly
 
 ### Testing
 - Python tests: `uv run pytest`

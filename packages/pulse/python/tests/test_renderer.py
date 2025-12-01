@@ -4,7 +4,6 @@ from typing import Any, cast, override
 
 import pulse as ps
 import pytest
-from pulse.css import CssModule, CssReference
 from pulse.hooks.core import HookContext
 from pulse.html.tags import button, div, li, span, ul
 from pulse.renderer import RenderTree
@@ -253,8 +252,14 @@ def test_diff_props_unmounts_render_prop_when_removed():
 	assert child.hooks.did_unmount is True
 
 
-def test_diff_props_unmounts_render_prop_when_replaced_with_css_reference():
-	from pulse.css import CssModule, CssReference
+def test_diff_props_unmounts_render_prop_when_replaced_with_jsexpr(tmp_path: Path):
+	from pulse.javascript_v2.imports import (
+		CssImport,
+		clear_import_registry,
+	)
+
+	# Clean up registries
+	clear_import_registry()
 
 	@component
 	def Child() -> Node:
@@ -269,12 +274,20 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_css_reference():
 	assert isinstance(child.hooks, TrackingHookContext)
 	assert child.hooks.did_unmount is False
 
-	css_module = CssModule("test", Path("/fake.css"))
-	css_ref = CssReference(css_module, "foo")
+	# Create a temporary CSS module file for testing
+	test_css_file = tmp_path / "test.module.css"
+	test_css_file.write_text(".foo { color: red; }")
+
+	# Use CssImport to create the CSS module import
+	css_module = CssImport(str(test_css_file), module=True)
+	css_ref = css_module.foo  # Returns JSMember
 
 	tree.diff(div(render=css_ref))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 
 	assert child.hooks.did_unmount is True
+
+	# Clean up
+	clear_import_registry()
 
 
 def test_render_tree_initial_callbacks():
@@ -299,7 +312,6 @@ def test_render_tree_initial_callbacks():
 	}
 	assert set(tree.callbacks.keys()) == {"0.onClick"}
 	assert tree.render_props == set()
-	assert tree.css_refs == set()
 
 
 def test_callback_removal_emits_update_callbacks_delta():
@@ -418,7 +430,6 @@ def test_render_tree_unmount_clears_state_and_unmounts_children():
 	assert child.hooks.did_unmount is True
 	assert tree.callbacks == {}
 	assert tree.render_props == set()
-	assert tree.css_refs == set()
 	assert tree.normalized is None
 
 
@@ -836,53 +847,39 @@ def test_render_props():
 	]
 
 
-def test_css_references():
-	"""Test CSS reference handling."""
-	from pulse.css import CssModule, CssReference
+def test_css_module_with_jsexpr(tmp_path: Path):
+	"""Test CSS module via CssImport returns JSExpr that integrates with renderer."""
+	from pulse.javascript_v2.imports import (
+		CssImport,
+		clear_import_registry,
+	)
 
-	# Create a mock CSS module
-	css_module = CssModule("test_module", Path("/fake/path"))
-	css_ref = CssReference(css_module, "test")
+	# Clean up first
+	clear_import_registry()
+
+	# Create a temporary CSS file for testing
+	test_css_file = tmp_path / "test.module.css"
+	test_css_file.write_text(".test { color: red; }")
+
+	# Create a CSS module using CssImport
+	css_module = CssImport(str(test_css_file), module=True)
+
+	# Accessing a property returns a JSMember
+	css_ref = css_module.test
 
 	tree = RenderTree(div(className=css_ref))
-	tree.render()
+	vdom = tree.render()
 
-	assert tree.css_refs == {"className"}
+	# CSS references go through jsexpr_paths
+	assert "className" in tree.jsexpr_paths
+	assert "css_" in tree.jsexpr_paths["className"]
+	assert ".test" in tree.jsexpr_paths["className"]
 
-	# Change CSS reference
-	css_ref2 = CssReference(css_module, "test2")
+	# VDOM should have the $js placeholder
+	assert vdom["props"]["className"] == "$js"  # pyright: ignore[reportIndexIssue,reportArgumentType,reportOptionalSubscript,reportTypedDictNotRequiredAccess]
 
-	ops = tree.diff(div(className=css_ref2))
-	assert ops == [
-		{
-			"type": "update_props",
-			"path": "",
-			"data": {"set": {"className": "test_module:test2"}},
-		}
-	]
-
-
-def test_css_reference_add_remove_cycle():
-	css_module = CssModule("test_module", Path("/fake/path"))
-	first = CssReference(css_module, "first")
-	second = CssReference(css_module, "second")
-
-	tree = RenderTree(div(className=first))
-	tree.render()
-
-	ops = tree.diff(div(className="plain"))
-	assert {
-		"type": "update_css_refs",
-		"path": "",
-		"data": {"remove": ["className"]},
-	} in ops
-
-	ops = tree.diff(div(className=second))
-	assert {
-		"type": "update_css_refs",
-		"path": "",
-		"data": {"add": ["className"]},
-	} in ops
+	# Clean up
+	clear_import_registry()
 
 
 # -----------------------------------------------------------------------------

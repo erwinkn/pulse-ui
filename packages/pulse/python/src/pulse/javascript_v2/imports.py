@@ -1,9 +1,20 @@
 """Unified JS import system for javascript_v2."""
 
+import inspect
 from collections.abc import Callable, Sequence
-from typing import ClassVar, TypeAlias, TypeVar, TypeVarTuple, overload, override
+from pathlib import Path
+from typing import (
+	ClassVar,
+	TypeAlias,
+	TypeVar,
+	TypeVarTuple,
+	overload,
+	override,
+)
 
+from pulse.javascript_v2.context import is_interpreted_mode
 from pulse.javascript_v2.ids import generate_id
+from pulse.javascript_v2.nodes import JSCall, JSExpr, JSMember, to_js_expr
 
 T = TypeVar("T")
 Args = TypeVarTuple("Args")
@@ -16,7 +27,59 @@ _ImportKey: TypeAlias = tuple[str, str, bool]
 _REGISTRY: dict[_ImportKey, "Import"] = {}
 
 
-class Import:
+def _caller_file(depth: int = 2) -> Path:
+	"""Get the file path of the caller.
+
+	Args:
+		depth: How many frames to go back (2 = caller of the function that calls this)
+	"""
+	frame = inspect.currentframe()
+	try:
+		# Walk up the call stack
+		for _ in range(depth):
+			if frame is None:
+				raise RuntimeError("Cannot determine caller frame")
+			frame = frame.f_back
+		if frame is None:
+			raise RuntimeError("Cannot determine caller frame")
+		return Path(frame.f_code.co_filename).resolve()
+	finally:
+		del frame
+
+
+def _is_local_css_path(path: str) -> bool:
+	"""Check if a CSS path refers to a local file vs a package import.
+
+	Local paths:
+	- Start with './' or '../' (relative)
+	- Start with '/' (absolute)
+	- Don't start with '@' (scoped npm package)
+	- Don't look like a bare module specifier
+
+	Package imports:
+	- Start with '@' (e.g., '@mantine/core/styles.css')
+	- Bare specifiers (e.g., 'some-package/styles.css')
+	"""
+	# Relative paths are local
+	if path.startswith("./") or path.startswith("../"):
+		return True
+	# Absolute paths are local
+	if path.startswith("/"):
+		return True
+	# Scoped packages
+	if path.startswith("@"):
+		return False
+	# If it contains no slashes, it could be a local file in current dir
+	# But without './' prefix, treat bare names as package imports for safety
+	# Exception: if it ends with .css and doesn't look like a package
+	if "/" not in path and path.endswith(".css"):
+		# Ambiguous - could be local or package. Require explicit ./
+		return False
+	# Everything else (bare specifiers with paths) are package imports
+	return False
+
+
+class Import(JSExpr):
 	"""Universal import descriptor.
 
 	Import identity is determined by (name, src, is_default):
@@ -41,8 +104,9 @@ class Import:
 		# Side-effect import: import "./styles.css"
 		Import.side_effect("./styles.css")
 
-		# Access a property of an import
-		foo_bar = foo.with_prop("bar")  # foo.bar, shares same ID as foo
+		# CSS module import with class access
+		styles = Import.css_module("./styles.module.css", relative=True)
+		styles.container  # Returns JSMember for 'container' class
 	"""
 
 	__slots__: ClassVar[tuple[str, ...]] = (
@@ -51,8 +115,8 @@ class Import:
 		"is_default",
 		"is_type_only",
 		"before",
-		"prop",
 		"id",
+		"source_path",
 	)
 
 	name: str
@@ -60,8 +124,8 @@ class Import:
 	is_default: bool
 	is_type_only: bool
 	before: tuple[str, ...]
-	prop: str | None
 	id: str
+	source_path: Path | None  # For local CSS files that need to be copied
 
 	def __init__(
 		self,
@@ -71,12 +135,12 @@ class Import:
 		is_default: bool = False,
 		is_type_only: bool = False,
 		before: Sequence[str] = (),
-		prop: str | None = None,
+		source_path: Path | None = None,
 	) -> None:
 		self.name = name
 		self.src = src
 		self.is_default = is_default
-		self.prop = prop
+		self.source_path = source_path
 
 		before_tuple = tuple(before)
 
@@ -116,7 +180,6 @@ class Import:
 		*,
 		is_type_only: bool = False,
 		before: Sequence[str] = (),
-		prop: str | None = None,
 	) -> "Import":
 		"""Create a default import."""
 		return cls(
@@ -125,7 +188,6 @@ class Import:
 			is_default=True,
 			is_type_only=is_type_only,
 			before=before,
-			prop=prop,
 		)
 
 	@classmethod
@@ -136,7 +198,6 @@ class Import:
 		*,
 		is_type_only: bool = False,
 		before: Sequence[str] = (),
-		prop: str | None = None,
 	) -> "Import":
 		"""Create a named import."""
 		return cls(
@@ -145,7 +206,6 @@ class Import:
 			is_default=False,
 			is_type_only=is_type_only,
 			before=before,
-			prop=prop,
 		)
 
 	@classmethod
@@ -160,24 +220,6 @@ class Import:
 		"""Create a type-only import."""
 		return cls(name, src, is_default=is_default, is_type_only=True, before=before)
 
-	@classmethod
-	def side_effect(
-		cls,
-		src: str,
-		before: Sequence[str] = (),
-	) -> "Import":
-		"""Create a side-effect import (e.g., CSS files). Unique by src only."""
-		return cls("", src, is_default=False, is_type_only=False, before=before)
-
-	@classmethod
-	def css(
-		cls,
-		src: str,
-		before: Sequence[str] = (),
-	) -> "Import":
-		"""Alias for side_effect, commonly used for CSS imports."""
-		return cls.side_effect(src, before)
-
 	@property
 	def is_side_effect(self) -> bool:
 		"""True if this is a side-effect only import (no bindings)."""
@@ -188,28 +230,30 @@ class Import:
 		"""Unique JS identifier for this import."""
 		return f"{self.name}_{self.id}"
 
-	@property
-	def expr(self) -> str:
-		"""Runtime expression for this import."""
+	@override
+	def emit(self) -> str:
+		"""Emit JS code for this import.
+
+		In normal mode: returns the unique JS name (e.g., "Button_1")
+		In interpreted mode: returns a get_object call (e.g., "get_object('Button_1')")
+		"""
 		base = self.js_name
-		if self.prop:
-			return f"{base}.{self.prop}"
+		if is_interpreted_mode():
+			return f"get_object('{base}')"
 		return base
 
-	def with_prop(self, prop: str) -> "Import":
-		"""Create a new Import targeting a property of this import.
+	def __getattr__(self, name: str) -> "JSMember":
+		"""Access a property of this import as a JSMember expression."""
+		if name.startswith("_"):
+			raise AttributeError(name)
 
-		The returned Import shares the same ID, so it references the same
-		underlying JS import but accesses a different property.
-		"""
-		return Import(
-			name=self.name,
-			src=self.src,
-			is_default=self.is_default,
-			is_type_only=self.is_type_only,
-			before=self.before,
-			prop=prop,
-		)
+		return JSMember(self, name)
+
+	def __call__(self, *args: object) -> "JSCall":
+		"""Call this import as a function, returning a JSCall expression."""
+
+		js_args = [to_js_expr(arg) for arg in args]
+		return JSCall(self, js_args)
 
 	@override
 	def __repr__(self) -> str:
@@ -218,9 +262,95 @@ class Import:
 			parts.append("is_default=True")
 		if self.is_type_only:
 			parts.append("is_type_only=True")
-		if self.prop:
-			parts.append(f"prop={self.prop!r}")
+		if self.source_path:
+			parts.append(f"source_path={self.source_path!r}")
 		return f"Import({', '.join(parts)})"
+
+
+class CssImport(Import):
+	"""Import for CSS files (both local files and npm packages).
+
+	For local files, tracks the source path and provides a generated filename
+	for the output directory. For npm packages, acts as a regular import.
+
+	Args:
+		path: Path to CSS file. Can be:
+			- Package path (e.g., "@mantine/core/styles.css")
+			- Relative path with relative=True (e.g., "./global.css")
+			- Absolute path (e.g., "/path/to/styles.css")
+		module: If True, import as a CSS module (default export for class access).
+			If False, import for side effects only (global styles).
+		relative: If True, resolve path relative to the caller's file.
+		before: List of import sources that should come after this import.
+
+	Examples:
+		# Side-effect CSS import (global styles)
+		CssImport("@mantine/core/styles.css")
+
+		# CSS module for class access
+		styles = CssImport("./styles.module.css", module=True, relative=True)
+		styles.container  # Returns JSMember for 'container' class
+
+		# Local CSS file (will be copied during codegen)
+		CssImport("./global.css", relative=True)
+	"""
+
+	def __init__(
+		self,
+		path: str,
+		*,
+		module: bool = False,
+		relative: bool = False,
+		before: Sequence[str] = (),
+	) -> None:
+		source_path: Path | None = None
+		import_src = path
+
+		if relative:
+			# Resolve relative to caller's file (depth=2: _caller_file -> __init__ -> caller)
+			caller = _caller_file(depth=2)
+			source_path = (caller.parent / Path(path)).resolve()
+			if not source_path.exists():
+				kind = "CSS module" if module else "CSS file"
+				raise FileNotFoundError(
+					f"{kind} '{path}' not found relative to {caller.parent}"
+				)
+			import_src = str(source_path)
+		elif _is_local_css_path(path):
+			# Absolute local path
+			source_path = Path(path).resolve()
+			if not source_path.exists():
+				kind = "CSS module" if module else "CSS file"
+				raise FileNotFoundError(f"{kind} '{path}' not found")
+			import_src = str(source_path)
+
+		# CSS modules are default imports with "css" name prefix
+		# Side-effect imports have empty name and is_default=False
+		name = "css" if module else ""
+		is_default = module
+
+		super().__init__(
+			name,
+			import_src,
+			is_default=is_default,
+			is_type_only=False,
+			before=before,
+			source_path=source_path,
+		)
+
+	@property
+	def is_local(self) -> bool:
+		"""True if this is a local CSS file (not an npm package)."""
+		return self.source_path is not None
+
+	@property
+	def generated_filename(self) -> str | None:
+		"""Generated filename for local CSS files, or None for package imports."""
+		if self.source_path is None:
+			return None
+		if self.source_path.name.endswith(".module.css"):
+			return f"css_{self.id}.module.css"
+		return f"css_{self.id}.css"
 
 
 def registered_imports() -> list[Import]:

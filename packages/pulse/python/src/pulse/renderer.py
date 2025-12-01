@@ -10,8 +10,11 @@ from typing import (
 	cast,
 )
 
-from pulse.css import CssReference
 from pulse.helpers import values_equal
+from pulse.javascript_v2.context import interpreted_mode
+from pulse.javascript_v2.function import JsFunctionCall
+from pulse.javascript_v2.imports import Import
+from pulse.javascript_v2.nodes import JSExpr, to_js_expr
 from pulse.vdom import (
 	VDOM,
 	Callback,
@@ -22,6 +25,24 @@ from pulse.vdom import (
 	Props,
 	VDOMNode,
 )
+
+
+def is_jsexpr(value: object) -> bool:
+	"""Check if a value is a JSExpr, Import, or JsFunctionCall."""
+	return isinstance(value, (JSExpr, Import, JsFunctionCall))
+
+
+def emit_jsexpr(value: JSExpr | Import | JsFunctionCall[*tuple[Any, ...]]) -> str:
+	"""Emit a JSExpr in interpreted mode (for client-side evaluation)."""
+	with interpreted_mode():
+		if isinstance(value, Import):
+			return value.emit()
+		if isinstance(value, JsFunctionCall):
+			# Emit as a function call: fn_name(arg1, arg2, ...)
+			fn_name = f"get_object('{value.fn.js_name}')"
+			args_js = ", ".join(to_js_expr(arg).emit() for arg in value.args)
+			return f"{fn_name}({args_js})"
+		return value.emit()
 
 
 class ReplaceOperation(TypedDict):
@@ -68,12 +89,6 @@ class UpdateCallbacksOperation(TypedDict):
 	data: PathDelta
 
 
-class UpdateCssRefsOperation(TypedDict):
-	type: Literal["update_css_refs"]
-	path: str
-	data: PathDelta
-
-
 class UpdateRenderPropsOperation(TypedDict):
 	type: Literal["update_render_props"]
 	path: str
@@ -88,7 +103,6 @@ VDOMOperation: TypeAlias = (
 	# | MoveOperation,
 	| ReconciliationOperation
 	| UpdateCallbacksOperation
-	| UpdateCssRefsOperation
 	| UpdateRenderPropsOperation
 )
 
@@ -99,13 +113,13 @@ class RenderTree:
 	root: Element
 	callbacks: Callbacks
 	render_props: set[str]
-	css_refs: set[str]
+	jsexpr_paths: dict[str, str]  # path -> emitted JS code for interpretation
 
 	def __init__(self, root: Element) -> None:
 		self.root = root
 		self.callbacks = {}
 		self.render_props = set()
-		self.css_refs = set()
+		self.jsexpr_paths = {}
 		self.normalized: Element | None = None
 
 	def render(self) -> VDOM:
@@ -114,7 +128,7 @@ class RenderTree:
 		self.root = normalized
 		self.callbacks = renderer.callbacks
 		self.render_props = renderer.render_props
-		self.css_refs = renderer.css_refs
+		self.jsexpr_paths = renderer.jsexpr_paths
 		self.normalized = normalized
 		return vdom
 
@@ -135,22 +149,7 @@ class RenderTree:
 		render_props_add = sorted(render_props_next - render_props_prev)
 		render_props_remove = sorted(render_props_prev - render_props_next)
 
-		css_prev = self.css_refs
-		css_next = renderer.css_refs
-		css_add = sorted(css_next - css_prev)
-		css_remove = sorted(css_prev - css_next)
-
 		prefix: list[VDOMOperation] = []
-
-		if css_add or css_remove:
-			css_delta: PathDelta = {}
-			if css_add:
-				css_delta["add"] = css_add
-			if css_remove:
-				css_delta["remove"] = css_remove
-			prefix.append(
-				UpdateCssRefsOperation(type="update_css_refs", path="", data=css_delta)
-			)
 
 		if callback_add or callback_remove:
 			callback_delta: PathDelta = {}
@@ -176,11 +175,15 @@ class RenderTree:
 				)
 			)
 
+		# JSExpr paths use a different update mechanism - they're sent with prop updates
+		# since the emitted JS code may change. For now, we track them as path -> code.
+		# TODO: Add UpdateJsExprPathsOperation if needed for incremental updates.
+
 		ops = prefix + renderer.operations if prefix else renderer.operations
 
 		self.callbacks = renderer.callbacks
 		self.render_props = renderer.render_props
-		self.css_refs = renderer.css_refs
+		self.jsexpr_paths = renderer.jsexpr_paths
 		self.normalized = normalized
 		self.root = normalized
 
@@ -192,7 +195,7 @@ class RenderTree:
 			self.normalized = None
 		self.callbacks.clear()
 		self.render_props.clear()
-		self.css_refs.clear()
+		self.jsexpr_paths.clear()
 
 
 @dataclass(slots=True)
@@ -214,7 +217,7 @@ class Renderer:
 	def __init__(self) -> None:
 		self.callbacks: Callbacks = {}
 		self.render_props: set[str] = set()
-		self.css_refs: set[str] = set()
+		self.jsexpr_paths: dict[str, str] = {}
 		self.operations: list[VDOMOperation] = []
 
 	# ------------------------------------------------------------------
@@ -226,6 +229,15 @@ class Renderer:
 			return self.render_component(node, path)
 		if isinstance(node, Node):
 			return self.render_node(node, path)
+		# Handle JSExpr as children - emit JS code and use "$js" placeholder
+		if is_jsexpr(node):
+			# Safe cast: is_jsexpr() ensures node is JSExpr | Import | JsFunctionCall
+			node_as_jsexpr = cast(
+				"JSExpr | Import | JsFunctionCall[*tuple[Any, ...]]", cast(object, node)
+			)
+			js_code = emit_jsexpr(node_as_jsexpr)
+			self.jsexpr_paths[path] = js_code
+			return "$js", cast(Element, node)
 		return node, node
 
 	def render_component(
@@ -466,15 +478,24 @@ class Renderer:
 					updated[key] = "$cb"
 				continue
 
-			if isinstance(value, CssReference):
+			if is_jsexpr(value):
 				if isinstance(old_value, (Node, ComponentNode)):
 					unmount_element(old_value)
 				if normalized is None:
 					normalized = current.copy()
 				normalized[key] = value
-				self.css_refs.add(prop_path)
-				if not isinstance(old_value, CssReference) or old_value != value:
-					updated[key] = _css_ref_token(value)
+				# Emit the JSExpr in interpreted mode and store it
+				js_code = emit_jsexpr(cast("JSExpr | Import", value))
+				self.jsexpr_paths[prop_path] = js_code
+				# Send a placeholder to the client - the actual value will be computed
+				# by evaluating the js_code from jsexpr_paths
+				old_js_code = (
+					emit_jsexpr(cast("JSExpr | Import", old_value))
+					if is_jsexpr(old_value)
+					else None
+				)
+				if old_js_code != js_code:
+					updated[key] = "$js"  # Placeholder indicating this is a JSExpr
 				continue
 
 			if isinstance(value, (Node, ComponentNode)):
@@ -599,10 +620,6 @@ def lis(seq: list[int]) -> list[int]:
 		k = prev[k]
 	lis_indices.reverse()
 	return lis_indices
-
-
-def _css_ref_token(ref: CssReference) -> str:
-	return f"{ref.module.id}:{ref.name}"
 
 
 def unmount_element(element: Element) -> None:

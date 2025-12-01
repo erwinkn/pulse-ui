@@ -2,7 +2,6 @@
 # NOT the same thing as the properties in `elements.py` (but very similar)
 from typing import Any, Literal, TypedDict
 
-from pulse.css import CssReference
 from pulse.helpers import CSSProperties
 from pulse.html.elements import (
 	GenericHTMLElement,
@@ -69,10 +68,12 @@ from pulse.html.events import (
 	TElement,
 	TextAreaDOMEvents,
 )
+from pulse.javascript_v2.nodes import JSExpr
 
 Booleanish = Literal[True, False, "true", "false"]
 CrossOrigin = Literal["anonymous", "use-credentials", ""] | None
-ClassName = str | CssReference
+# ClassName can be a string or any JSExpr (e.g., JSMember from CssModule.classname)
+ClassName = str | JSExpr
 
 
 class BaseHTMLProps(TypedDict, total=False):

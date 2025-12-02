@@ -378,6 +378,182 @@ class TestEdgeCases:
 		assert node.props == expected_props
 
 
+class TestJSONSafeValidation:
+	"""Test validation of JSON-unsafe values (NaN, Infinity) in dev mode."""
+
+	def test_nan_in_props_raises(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that NaN in props raises ValueError in dev mode."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		with pytest.raises(ValueError, match="Cannot use nan in <div> prop 'value'"):
+			div(value=float("nan"))  # pyright: ignore[reportCallIssue]
+
+	def test_inf_in_props_raises(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that Infinity in props raises ValueError in dev mode."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		with pytest.raises(ValueError, match="Cannot use inf in <div> prop 'value'"):
+			div(value=float("inf"))  # pyright: ignore[reportCallIssue]
+
+	def test_negative_inf_in_props_raises(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that -Infinity in props raises ValueError in dev mode."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		with pytest.raises(ValueError, match="Cannot use -inf in <div> prop 'value'"):
+			div(value=float("-inf"))  # pyright: ignore[reportCallIssue]
+
+	def test_nan_in_nested_props_raises(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that NaN in nested props raises ValueError in dev mode."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		with pytest.raises(ValueError, match="Cannot use nan in <div> prop 'data'"):
+			div(data={"nested": {"value": float("nan")}})  # pyright: ignore[reportCallIssue]
+
+	def test_nan_in_list_props_raises(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that NaN in list props raises ValueError in dev mode."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		with pytest.raises(ValueError, match="Cannot use nan in <div> prop 'values'"):
+			div(values=[1.0, 2.0, float("nan"), 4.0])  # pyright: ignore[reportCallIssue]
+
+	def test_nan_in_children_raises(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that NaN in children raises ValueError in dev mode."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		with pytest.raises(ValueError, match="Cannot use nan in <div> children"):
+			div(float("nan"))
+
+	def test_valid_floats_allowed(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that regular floats are allowed."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		# These should not raise
+		node = div(value=3.14159, data={"x": 1.0, "y": 2.0})  # pyright: ignore[reportCallIssue]
+		assert node.props == {"value": 3.14159, "data": {"x": 1.0, "y": 2.0}}
+
+	def test_validation_skipped_in_prod(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that validation is skipped in prod mode."""
+		monkeypatch.setenv("PULSE_MODE", "prod")
+		# Should not raise in prod mode
+		node = div(value=float("nan"))  # pyright: ignore[reportCallIssue]
+		assert node.props is not None
+
+	def test_validation_skipped_in_ci(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that validation is skipped in CI mode."""
+		monkeypatch.setenv("PULSE_MODE", "ci")
+		# Should not raise in CI mode
+		node = div(value=float("inf"))  # pyright: ignore[reportCallIssue]
+		assert node.props is not None
+
+	def test_component_nan_in_kwargs_raises(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that NaN in component kwargs raises ValueError in dev mode."""
+		from pulse.vdom import component
+
+		monkeypatch.setenv("PULSE_MODE", "dev")
+
+		@component
+		def MyComponent(value: float):
+			return div(str(value))
+
+		with pytest.raises(
+			ValueError, match="Cannot use nan in <MyComponent> prop 'value'"
+		):
+			MyComponent(value=float("nan"))
+
+	def test_component_nan_in_children_raises(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that NaN in component children raises ValueError in dev mode."""
+		from pulse.vdom import component
+
+		monkeypatch.setenv("PULSE_MODE", "dev")
+
+		@component
+		def MyComponent(*children):  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
+			return div(*children)  # pyright: ignore[reportUnknownArgumentType]
+
+		with pytest.raises(
+			ValueError, match="Cannot use nan in <MyComponent> children"
+		):
+			MyComponent(float("nan"))
+
+
+class TestMissingKeyWarnings:
+	"""Test that missing key warnings are emitted at the correct location."""
+
+	def test_tag_factory_warns_for_unkeyed_iterable(
+		self, monkeypatch: pytest.MonkeyPatch
+	):
+		"""Test that tag factories emit warning for iterables without keys."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		with pytest.warns(
+			UserWarning,
+			match=r"\[Pulse\] Iterable children of <div> contain elements without 'key'",
+		):
+			items = [span() for _ in range(3)]
+			div(items)
+
+	def test_tag_factory_no_warning_with_keys(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that no warning is emitted when all items have keys."""
+		monkeypatch.setenv("PULSE_MODE", "dev")
+		import warnings
+
+		with warnings.catch_warnings():
+			warnings.simplefilter("error")
+			items = [span(key=f"item-{i}") for i in range(3)]
+			div(items)  # Should not raise
+
+	def test_tag_factory_no_warning_in_prod(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that no warning is emitted in prod mode."""
+		monkeypatch.setenv("PULSE_MODE", "prod")
+		import warnings
+
+		with warnings.catch_warnings():
+			warnings.simplefilter("error")
+			items = [span() for _ in range(3)]
+			div(items)  # Should not raise in prod
+
+	def test_component_bracket_syntax_warns(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that component bracket syntax emits warning for unkeyed iterables."""
+		from pulse.vdom import component
+
+		monkeypatch.setenv("PULSE_MODE", "dev")
+
+		@component
+		def MyComponent(*children):  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
+			return div(*children)  # pyright: ignore[reportUnknownArgumentType]
+
+		with pytest.warns(
+			UserWarning,
+			match=r"\[Pulse\] Iterable children of <MyComponent> contain elements without 'key'",
+		):
+			items = [span() for _ in range(3)]
+			MyComponent()[items]
+
+	def test_component_positional_args_warns(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that component positional args emit warning for unkeyed iterables."""
+		from pulse.vdom import component
+
+		monkeypatch.setenv("PULSE_MODE", "dev")
+
+		@component
+		def MyComponent(*children):  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
+			return div(*children)  # pyright: ignore[reportUnknownArgumentType]
+
+		with pytest.warns(
+			UserWarning,
+			match=r"\[Pulse\] Iterable children of <MyComponent> contain elements without 'key'",
+		):
+			items = [span() for _ in range(3)]
+			MyComponent(items)
+
+	def test_react_component_warns(self, monkeypatch: pytest.MonkeyPatch):
+		"""Test that ReactComponent emits warning for unkeyed iterables."""
+		from pulse.react_component import ReactComponent
+
+		monkeypatch.setenv("PULSE_MODE", "dev")
+
+		MyReactComp = ReactComponent("MyReactComp", "test/MyReactComp")
+
+		with pytest.warns(
+			UserWarning,
+			match=r"\[Pulse\] Iterable children of <\$\$MyReactComp> contain elements without 'key'",
+		):
+			items = [span() for _ in range(3)]
+			MyReactComp(items)
+
+
 if __name__ == "__main__":
 	pytest.main([__file__, "-v"])
 

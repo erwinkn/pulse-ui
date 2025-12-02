@@ -15,13 +15,25 @@ export function serialize(data: Serializable): Serialized {
 	// Single global counter - increments once per node visit
 	let globalIndex = 0;
 
-	function process(value: Serializable): PlainJSON {
-		if (
-			value == null ||
-			typeof value === "number" ||
-			typeof value === "string" ||
-			typeof value === "boolean"
-		) {
+	function process(value: Serializable, context?: string): PlainJSON {
+		if (value == null || typeof value === "string" || typeof value === "boolean") {
+			return value;
+		}
+
+		if (typeof value === "number") {
+			if (Number.isNaN(value)) {
+				const ctx = context ? ` in '${context}'` : "";
+				throw new Error(
+					`Cannot serialize NaN${ctx}. NaN and Infinity are not supported because they cannot be serialized to JSON.`,
+				);
+			}
+			if (!Number.isFinite(value)) {
+				const kind = value > 0 ? "Infinity" : "-Infinity";
+				const ctx = context ? ` in '${context}'` : "";
+				throw new Error(
+					`Cannot serialize ${kind}${ctx}. NaN and Infinity are not supported because they cannot be serialized to JSON.`,
+				);
+			}
 			return value;
 		}
 
@@ -44,7 +56,7 @@ export function serialize(data: Serializable): Serialized {
 			const length = value.length;
 			const result = new Array(length);
 			for (let i = 0; i < length; i++) {
-				result[i] = process(value[i]);
+				result[i] = process(value[i], context);
 			}
 			return result;
 		}
@@ -53,7 +65,7 @@ export function serialize(data: Serializable): Serialized {
 			maps.push(idx);
 			const rec: Record<string, any> = {};
 			for (const [key, entry] of value.entries()) {
-				rec[String(key)] = process(entry);
+				rec[String(key)] = process(entry, String(key));
 			}
 			return rec;
 		}
@@ -64,7 +76,7 @@ export function serialize(data: Serializable): Serialized {
 			const result = new Array(size);
 			let i = 0;
 			for (const entry of value) {
-				result[i] = process(entry);
+				result[i] = process(entry, context);
 				i += 1;
 			}
 			return result;
@@ -75,7 +87,7 @@ export function serialize(data: Serializable): Serialized {
 			const keys = Object.keys(value);
 			for (let i = 0; i < keys.length; i++) {
 				const key = keys[i];
-				rec[key] = process(value[key]);
+				rec[key] = process(value[key], key);
 			}
 			return rec;
 		}

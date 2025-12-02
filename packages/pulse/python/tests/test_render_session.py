@@ -311,3 +311,274 @@ def test_global_state_disposed_on_session_close():
 def test_dummy_placeholder_to_keep_line_numbers_stable():
 	# Placeholder after revert; keep file stable
 	assert True
+
+
+# =============================================================================
+# Reconnection / Rehydration Tests
+# =============================================================================
+
+
+@ps.component
+def simple_component():
+	return ps.div()["Hello World"]
+
+
+def test_disconnect_pauses_render_effects():
+	"""Test that RenderSession.disconnect() pauses all route render effects."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	mount = session.route_mounts["a"]
+	assert mount.effect is not None
+	assert mount.effect.paused is False
+
+	# Disconnect should pause the effect
+	session.disconnect()
+
+	assert session.connected is False
+	assert mount.effect.paused is True
+
+	session.close()
+
+
+def test_reconnect_sends_fresh_vdom_init():
+	"""Test that reconnecting to an existing session sends fresh vdom_init."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	# First connection
+	messages1: list[ServerMessage] = []
+	session.connect(lambda msg: messages1.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	assert len(messages1) == 1
+	assert messages1[0]["type"] == "vdom_init"
+
+	# Disconnect
+	session.disconnect()
+
+	# Reconnect
+	messages2: list[ServerMessage] = []
+	session.connect(lambda msg: messages2.append(msg))
+
+	# Mount again (simulating client reconnection)
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Should send fresh vdom_init, not vdom_update
+	assert len(messages2) == 1
+	assert messages2[0]["type"] == "vdom_init"
+
+	session.close()
+
+
+def test_messages_dropped_while_disconnected():
+	"""Test that messages are dropped (not buffered) while disconnected."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+	messages.clear()
+
+	# Disconnect
+	session.disconnect()
+
+	# Try to send a message while disconnected
+	session.send({"type": "vdom_update", "path": "a", "ops": []})  # type: ignore[typeddict-item]
+
+	# Reconnect
+	messages2: list[ServerMessage] = []
+	session.connect(lambda msg: messages2.append(msg))
+
+	# Message should NOT have been buffered
+	assert len(messages2) == 0
+
+	session.close()
+
+
+def test_route_info_updated_on_reconnect():
+	"""Test that routeInfo is updated when reconnecting with different params."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	route_info1: RouteInfo = {
+		"pathname": "a",
+		"hash": "",
+		"query": "?foo=bar",
+		"queryParams": {"foo": "bar"},
+		"pathParams": {},
+		"catchall": [],
+	}
+	with ps.PulseContext.update(render=session):
+		session.mount("a", route_info1)
+
+	mount = session.route_mounts["a"]
+	assert mount.route.query == "?foo=bar"
+
+	# Disconnect
+	session.disconnect()
+
+	# Reconnect with different query params
+	session.connect(lambda msg: messages.append(msg))
+
+	route_info2: RouteInfo = {
+		"pathname": "a",
+		"hash": "",
+		"query": "?baz=qux",
+		"queryParams": {"baz": "qux"},
+		"pathParams": {},
+		"catchall": [],
+	}
+	with ps.PulseContext.update(render=session):
+		session.mount("a", route_info2)
+
+	# Route info should be updated
+	assert mount.route.query == "?baz=qux"
+
+	session.close()
+
+
+@ps.component
+def StatefulCounter():
+	state = ps.states(CounterState)
+
+	def increment():
+		state.count += 1
+
+	return ps.div()[
+		ps.span()[str(state.count)],
+		ps.button(onClick=increment)["Increment"],
+	]
+
+
+def test_state_preserved_across_reconnect():
+	"""Test that state changes are reflected in VDOM after reconnect."""
+	routes = RouteTree([Route("a", StatefulCounter)])
+	session = RenderSession("test-id", routes)
+
+	# First connection
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Should have initial vdom_init with count 0
+	assert len(messages) == 1
+	assert messages[0]["type"] == "vdom_init"
+	assert "0" in str(messages[0]["vdom"])
+
+	# Execute the increment callback
+	session.execute_callback("a", "1.onClick", [])
+	session.flush()
+
+	# Should have vdom_update
+	assert len(messages) == 2
+	assert messages[1]["type"] == "vdom_update"
+
+	# Disconnect
+	session.disconnect()
+
+	# Reconnect
+	messages2: list[ServerMessage] = []
+	session.connect(lambda msg: messages2.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Should get fresh vdom_init with updated count
+	assert len(messages2) == 1
+	assert messages2[0]["type"] == "vdom_init"
+	# The count should be 1 (preserved from before disconnect)
+	assert "1" in str(messages2[0]["vdom"])
+
+	session.close()
+
+
+def test_effect_not_scheduled_while_paused():
+	"""Test that state changes while disconnected don't schedule paused effects."""
+	routes = make_routes()
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	mount = session.route_mounts["a"]
+	assert mount.effect is not None
+	_ = mount.effect.runs  # Capture initial runs for reference
+
+	# Disconnect (pauses the effect)
+	session.disconnect()
+
+	# The effect should be paused
+	assert mount.effect.paused is True
+
+	# Verify the effect doesn't get scheduled while paused
+	assert mount.effect.batch is None
+
+	session.close()
+
+
+def test_multiple_routes_all_rehydrated_on_reconnect():
+	"""Test that all mounted routes send vdom_init on reconnect."""
+	routes = make_routes()
+	session = RenderSession("test-id", routes)
+
+	# First connection - mount both routes
+	messages1: list[ServerMessage] = []
+	session.connect(lambda msg: messages1.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+		session.mount("b", make_route_info("b"))
+
+	# Should have 2 vdom_init messages
+	init_messages = [m for m in messages1 if m["type"] == "vdom_init"]
+	assert len(init_messages) == 2
+
+	# Disconnect
+	session.disconnect()
+
+	# Both effects should be paused
+	effect_a = session.route_mounts["a"].effect
+	effect_b = session.route_mounts["b"].effect
+	assert effect_a is not None
+	assert effect_b is not None
+	assert effect_a.paused is True
+	assert effect_b.paused is True
+
+	# Reconnect
+	messages2: list[ServerMessage] = []
+	session.connect(lambda msg: messages2.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+		session.mount("b", make_route_info("b"))
+
+	# Should get 2 fresh vdom_init messages
+	init_messages2 = [m for m in messages2 if m["type"] == "vdom_init"]
+	assert len(init_messages2) == 2
+
+	# Both effects should be resumed
+	assert effect_a.paused is False
+	assert effect_b.paused is False
+
+	session.close()

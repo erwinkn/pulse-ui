@@ -1347,6 +1347,101 @@ async def test_query_preserves_data_on_key_change_when_keep_previous_true():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_unkeyed_query_resets_data_on_dependency_change_when_keep_previous_false():
+	"""
+	Regression test: when keep_previous_data=False for an unkeyed query,
+	changing a dependency should reset data to None while refetching.
+	This prevents showing stale data for one render.
+	"""
+
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0, keep_previous_data=False)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	assert q.data == {"id": 1}
+	assert q.is_loading is False
+
+	# Change dependency - this should trigger refetch and reset data
+	s.uid = 2
+
+	# Allow effect to detect the change and start refetching
+	await asyncio.sleep(0)
+
+	# CRITICAL: Check the query result state while refetching.
+	# With keep_previous_data=False, data should be None during refetch.
+	assert q.is_fetching is True, (
+		f"Query should be fetching after dependency change, but is_fetching={q.is_fetching}"
+	)
+	assert q.data is None, (
+		f"Query data should be None when keep_previous_data=False during refetch, but got {q.data}"
+	)
+
+	# Now complete the new query
+	await q.wait()
+
+	# After fetch completes, new data should be present
+	assert q.is_loading is False
+	assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_unkeyed_query_preserves_data_on_dependency_change_when_keep_previous_true():
+	"""
+	Regression test: when keep_previous_data=True for an unkeyed query,
+	changing a dependency should preserve the previous data while refetching.
+	"""
+
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0, keep_previous_data=True)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+	s = S()
+	q = s.user
+
+	# Complete first fetch
+	await q.wait()
+	assert q.data == {"id": 1}
+	assert q.is_loading is False
+
+	# Change dependency - this should trigger refetch but preserve data
+	s.uid = 2
+
+	# Allow effect to detect the change and start refetching
+	await asyncio.sleep(0)
+
+	# CRITICAL: Check the query result state while refetching.
+	# With keep_previous_data=True, data should be preserved during refetch.
+	assert q.is_fetching is True, (
+		f"Query should be fetching after dependency change, but is_fetching={q.is_fetching}"
+	)
+	assert q.data == {"id": 1}, (
+		f"Query data should be preserved when keep_previous_data=True, but got {q.data}"
+	)
+
+	# Now complete the new query
+	await q.wait()
+
+	# After fetch completes, new data should be present
+	assert q.is_loading is False
+	assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_state_query_invalidate_triggers_refetch():
 	"""Test that invalidate() marks query as stale and triggers refetch if there are observers."""
 

@@ -14,7 +14,7 @@ from pulse.cookies import SetCookie
 from pulse.env import env
 from pulse.helpers import Disposable
 from pulse.reactive import AsyncEffect, Effect
-from pulse.reactive_extensions import ReactiveDict, reactive
+from pulse.reactive_extensions import ReactiveDict, reactive, unwrap
 
 if TYPE_CHECKING:
 	from pulse.app import App
@@ -52,11 +52,15 @@ class UserSession(Disposable):
 
 	async def _save_server_session(self):
 		assert isinstance(self.app.session_store, SessionStore)
-		await self.app.session_store.save(self.sid, self.data)
+		# unwrap subscribes the effect to all signals in the session ReactiveDict
+		data = unwrap(self.data)
+		await self.app.session_store.save(self.sid, data)
 
 	def refresh_session_cookie(self, app: "App"):
 		assert isinstance(app.session_store, CookieSessionStore)
-		signed_cookie = app.session_store.encode(self.sid, self.data)
+		# unwrap subscribes the effect to all signals in the session ReactiveDict
+		data = unwrap(self.data)
+		signed_cookie = app.session_store.encode(self.sid, data)
 		self.set_cookie(
 			name=app.cookie.name,
 			value=signed_cookie,

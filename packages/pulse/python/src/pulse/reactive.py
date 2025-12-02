@@ -274,6 +274,7 @@ class Effect(Disposable):
 	_interval_handle: asyncio.TimerHandle | None
 	explicit_deps: bool
 	batch: "Batch | None"
+	paused: bool
 
 	def __init__(
 		self,
@@ -301,6 +302,7 @@ class Effect(Disposable):
 		self._lazy = lazy
 		self._interval = interval
 		self._interval_handle = None
+		self.paused = False
 
 		if immediate and lazy:
 			raise ValueError("An effect cannot be boht immediate and lazy")
@@ -358,7 +360,20 @@ class Effect(Disposable):
 			self._interval_handle.cancel()
 			self._interval_handle = None
 
+	def pause(self):
+		"""Pause the effect - it won't run when dependencies change."""
+		self.paused = True
+		self.cancel(cancel_interval=True)
+
+	def resume(self):
+		"""Resume a paused effect and schedule it to run."""
+		if self.paused:
+			self.paused = False
+			self.schedule()
+
 	def schedule(self):
+		if self.paused:
+			return
 		# Immediate effects run right away when scheduled and do not enter a batch
 		if self.immediate:
 			self.run()
@@ -383,6 +398,8 @@ class Effect(Disposable):
 			self._cancel_interval()
 
 	def push_change(self):
+		if self.paused:
+			return
 		# Short-circuit if already scheduled in a batch.
 		# This avoids redundant schedule() calls and O(n) list checks
 		# when the same effect is reached through multiple dependency paths.

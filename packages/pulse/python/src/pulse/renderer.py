@@ -527,21 +527,6 @@ class Renderer:
 		unmount_element(node)
 
 
-def extract_key(element: Element) -> str | None:
-	if isinstance(element, ComponentNode):
-		return element.key
-	if isinstance(element, Node):
-		return element.key
-	return None
-
-
-def child_key(element: Element, index: int) -> str:
-	key = extract_key(element)
-	if key is not None:
-		return key
-	return f"__idx__{index}"
-
-
 def normalize_children(children: Sequence[Element] | None) -> list[Element]:
 	if not children:
 		return []
@@ -571,34 +556,6 @@ def same_node(left: Element, right: Element) -> bool:
 	if isinstance(left, ComponentNode) and isinstance(right, ComponentNode):
 		return left.fn == right.fn and left.key == right.key
 	return False
-
-
-def lis(seq: list[int]) -> list[int]:
-	if not seq:
-		return []
-	tails: list[int] = []
-	prev: list[int] = [-1] * len(seq)
-	for i, v in enumerate(seq):
-		lo, hi = 0, len(tails)
-		while lo < hi:
-			mid = (lo + hi) // 2
-			if seq[tails[mid]] < v:
-				lo = mid + 1
-			else:
-				hi = mid
-		if lo > 0:
-			prev[i] = tails[lo - 1]
-		if lo == len(tails):
-			tails.append(i)
-		else:
-			tails[lo] = i
-	lis_indices: list[int] = []
-	k = tails[-1] if tails else -1
-	while k != -1:
-		lis_indices.append(k)
-		k = prev[k]
-	lis_indices.reverse()
-	return lis_indices
 
 
 def _css_ref_token(ref: CssReference) -> str:

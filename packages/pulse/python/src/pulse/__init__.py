@@ -1357,7 +1357,7 @@ from pulse.queries.common import QueryKey as QueryKey
 from pulse.queries.common import QueryStatus as QueryStatus
 from pulse.queries.infinite_query import infinite_query as infinite_query
 from pulse.queries.mutation import mutation as mutation
-from pulse.queries.query import QueryResult as QueryResult
+from pulse.queries.protocol import QueryResult as QueryResult
 from pulse.queries.query import query as query
 
 # React component registry

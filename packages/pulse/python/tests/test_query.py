@@ -1,11 +1,12 @@
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar, cast
 
 import pulse as ps
 import pytest
-from pulse.queries.query import Query, QueryResult
+from pulse.queries.protocol import QueryResult
+from pulse.queries.query import KeyedQuery, KeyedQueryResult, UnkeyedQueryResult
 from pulse.queries.store import QueryStore
 from pulse.reactive import Computed, Untrack
 from pulse.render_session import RenderSession
@@ -13,6 +14,7 @@ from pulse.routing import RouteTree
 
 P = ParamSpec("P")
 R = TypeVar("R")
+T = TypeVar("T")
 
 
 def create_query_with_observer(
@@ -21,12 +23,17 @@ def create_query_with_observer(
 	gc_time: float = 300.0,
 	retries: int = 3,
 	retry_delay: float = 0.01,
-) -> tuple[Query[Any], QueryResult[Any]]:
+) -> tuple[KeyedQuery[Any], KeyedQueryResult[Any]]:
 	"""Helper to create a Query with a QueryResult observer (required for fetch function)."""
-	query = Query(key, gc_time=gc_time, retries=retries, retry_delay=retry_delay)
+	query = KeyedQuery(key, gc_time=gc_time, retries=retries, retry_delay=retry_delay)
 	query_computed = Computed(lambda: query, name=f"test_query({key})")
-	result = QueryResult(query_computed, fetch_fn=fetcher, gc_time=gc_time)
+	result = KeyedQueryResult(query_computed, fetch_fn=fetcher, gc_time=gc_time)
 	return query, result
+
+
+def query_result(q: QueryResult[T]) -> KeyedQueryResult[T] | UnkeyedQueryResult[T]:
+	"""Helper to cast QueryResult to the concrete union type for accessing internal methods."""
+	return cast(KeyedQueryResult[T] | UnkeyedQueryResult[T], q)
 
 
 @pytest.mark.asyncio
@@ -188,10 +195,10 @@ async def test_query_store_garbage_collection():
 	entry = store.ensure(key, gc_time=0.01)
 	assert store.get(key) is entry
 
-	observer = QueryResult(
+	observer = KeyedQueryResult(
 		Computed(lambda: entry, name="test_query"), fetch_fn=fetcher, gc_time=0.01
 	)
-	observer.dispose()
+	query_result(observer).dispose()
 	# entry.schedule_gc()
 
 	# Should still be there immediately
@@ -216,14 +223,14 @@ async def test_query_entry_gc_time_reconciliation():
 		await asyncio.sleep(0)
 		return None
 
-	entry = Query(("test", 1), gc_time=0.0)
+	entry = KeyedQuery(("test", 1), gc_time=0.0)
 
 	query_computed = Computed(lambda: entry, name="test_query")
 	# QueryResult automatically observes on creation
-	obs1 = QueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=10.0)
+	obs1 = KeyedQueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=10.0)
+	# Should take max of store's 0 and obs1's 10
 	assert entry.cfg.gc_time == 10.0
-
-	obs2 = QueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=5.0)
+	obs2 = KeyedQueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=5.0)
 	assert entry.cfg.gc_time == 10.0  # Max of 10.0 and 5.0
 
 	entry.unobserve(obs2)
@@ -235,7 +242,7 @@ async def test_query_entry_gc_time_reconciliation():
 	assert entry.cfg.gc_time == 10.0
 
 	# Adding a larger gc_time increases it further
-	obs3 = QueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=20.0)
+	obs3 = KeyedQueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=20.0)
 	assert entry.cfg.gc_time == 20.0
 
 	entry.unobserve(obs3)
@@ -426,9 +433,9 @@ async def test_query_retry_cancellation():
 
 	# Use longer retry delay to make timing more reliable
 	# Create with fetch_on_mount=False so we control when fetching starts
-	query = Query(key, gc_time=300.0, retries=3, retry_delay=1.0)
+	query = KeyedQuery(key, gc_time=300.0, retries=3, retry_delay=1.0)
 	query_computed = Computed(lambda: query, name=f"test_query({key})")
-	observer = QueryResult(
+	observer = KeyedQueryResult(
 		query_computed, fetch_fn=fetcher, gc_time=300.0, fetch_on_mount=False
 	)
 
@@ -1244,7 +1251,7 @@ async def test_state_query_gc_time_0_disposes_immediately():
 
 	s.dispose()
 
-	assert s.user.__disposed__ is True
+	assert query_result(s.user).__disposed__ is True
 
 	# Allow any scheduled tasks to attempt to finish; they should be canceled
 	await asyncio.sleep(0.01)
@@ -1546,7 +1553,7 @@ async def test_state_query_invalidate_without_observers_does_not_refetch():
 	assert s.calls == 1
 
 	# Dispose the query result (removes observer)
-	q.dispose()
+	query_result(q).dispose()
 
 	# Invalidate without observers should not trigger refetch
 	q.invalidate()
@@ -1782,13 +1789,13 @@ async def test_state_query_multiple_observers_lifecycle():
 	assert s1.calls == 1
 
 	# Dispose one observer
-	q1.dispose()
+	query_result(q1).dispose()
 
 	# Query should still exist (other observer still active)
 	assert q2.data == {"id": 1}
 
 	# Dispose second observer - query should be GC'd
-	q2.dispose()
+	query_result(q2).dispose()
 	await asyncio.sleep(0.15)  # Wait for GC
 
 	# New query should be created (old one was GC'd)
@@ -1835,7 +1842,7 @@ async def test_state_query_refetch_interval():
 	assert q.data == 3
 
 	# Dispose should stop the interval
-	q.dispose()
+	query_result(q).dispose()
 	await asyncio.sleep(0.08)
 	assert s.calls == 3  # No more refetches
 
@@ -1870,7 +1877,7 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 	assert s.calls == 2
 
 	# Dispose - interval should stop
-	q.dispose()
+	query_result(q).dispose()
 	calls_at_dispose = s.calls
 
 	# Wait and verify no more refetches
@@ -1933,7 +1940,7 @@ async def test_keyed_query_uses_latest_fetch_fn_after_state_recreation():
 
 	# Step 4: Dispose state1's query (simulate navigating away from route)
 	# The query cache still holds the cached queries with gc_time=10
-	q1.dispose()
+	query_result(q1).dispose()
 
 	# Step 5: Create new state instance (simulate navigating back to route)
 	state2 = QueryState("state2")
@@ -2494,7 +2501,7 @@ async def test_query_result_dispose_cancels_in_flight_fetch():
 	await fetch_started.wait()
 
 	# Dispose before fetch completes
-	q.dispose()
+	query_result(q).dispose()
 
 	# Give time for cancellation to propagate
 	await asyncio.sleep(0.1)
@@ -2548,7 +2555,7 @@ async def test_query_result_dispose_does_not_cancel_other_observer_fetch():
 	await fetch_started.wait()
 
 	# s2 disposes - should NOT cancel s1's fetch since s1 is the active observer
-	q2.dispose()
+	query_result(q2).dispose()
 
 	# Wait for s1's fetch to complete
 	await wait_task
@@ -2604,7 +2611,7 @@ async def test_query_result_dispose_reschedules_fetch_from_other_observer():
 	fetch_started.clear()
 
 	# s1 disposes - should cancel fetch and reschedule from s2
-	q1.dispose()
+	query_result(q1).dispose()
 
 	# Wait for the first fetch to be cancelled
 	await first_fetch_cancelled.wait()
@@ -2629,7 +2636,7 @@ async def test_query_result_dispose_reschedules_fetch_from_other_observer():
 		pass  # Expected
 
 	# Clean up
-	q2.dispose()
+	query_result(q2).dispose()
 
 
 @pytest.mark.asyncio
@@ -2669,7 +2676,7 @@ async def test_query_result_dispose_no_reschedule_when_no_other_observers():
 	await fetch_started.wait()
 
 	# Dispose the only observer
-	q.dispose()
+	query_result(q).dispose()
 
 	# Wait for cancellation to propagate
 	await asyncio.wait_for(fetch_cancelled.wait(), timeout=1.0)
@@ -2741,7 +2748,7 @@ async def test_key_change_cancels_in_flight_fetch():
 		pass  # Expected
 
 	# Clean up
-	q.dispose()
+	query_result(q).dispose()
 
 
 @pytest.mark.asyncio
@@ -2792,7 +2799,7 @@ async def test_key_change_starts_new_fetch():
 	assert q.data == {"id": 2}
 
 	# Clean up
-	q.dispose()
+	query_result(q).dispose()
 
 
 @pytest.mark.asyncio
@@ -2851,5 +2858,42 @@ async def test_key_change_does_not_affect_other_observer():
 	assert q1.data == {"id": 1}
 
 	# Clean up
-	q1.dispose()
-	q2.dispose()
+	query_result(q1).dispose()
+	query_result(q2).dispose()
+
+
+# --- Protocol Tests ---
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_result_protocol_isinstance_keyed():
+	"""KeyedQueryResult instances should be recognized as QueryResult via isinstance."""
+
+	class S(ps.State):
+		@ps.query
+		async def my_query(self):
+			return "data"
+
+		@my_query.key
+		def _key(self):
+			return ("test",)
+
+	s = S()
+	result = s.my_query
+	assert isinstance(result, QueryResult)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_result_protocol_isinstance_unkeyed():
+	"""UnkeyedQuery instances should be recognized as QueryResult via isinstance."""
+
+	class S(ps.State):
+		@ps.query
+		async def my_query(self):
+			return "data"
+
+	s = S()
+	result = s.my_query
+	assert isinstance(result, UnkeyedQueryResult)

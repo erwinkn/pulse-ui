@@ -57,6 +57,8 @@ class Page(NamedTuple, Generic[T, TParam]):
 class FetchNext(Generic[T, TParam]):
 	"""Fetch the next page."""
 
+	fetch_fn: Callable[[TParam], Awaitable[T]]
+	observer: "InfiniteQueryResult[T, TParam] | None" = None
 	future: "asyncio.Future[ActionResult[Page[T, TParam] | None]]" = field(
 		default_factory=asyncio.Future
 	)
@@ -66,6 +68,8 @@ class FetchNext(Generic[T, TParam]):
 class FetchPrevious(Generic[T, TParam]):
 	"""Fetch the previous page."""
 
+	fetch_fn: Callable[[TParam], Awaitable[T]]
+	observer: "InfiniteQueryResult[T, TParam] | None" = None
 	future: "asyncio.Future[ActionResult[Page[T, TParam] | None]]" = field(
 		default_factory=asyncio.Future
 	)
@@ -75,6 +79,8 @@ class FetchPrevious(Generic[T, TParam]):
 class Refetch(Generic[T, TParam]):
 	"""Refetch all pages."""
 
+	fetch_fn: Callable[[TParam], Awaitable[T]]
+	observer: "InfiniteQueryResult[T, TParam] | None" = None
 	refetch_page: Callable[[T, int, list[T]], bool] | None = None
 	future: "asyncio.Future[ActionResult[list[Page[T, TParam]]]]" = field(
 		default_factory=asyncio.Future
@@ -85,7 +91,9 @@ class Refetch(Generic[T, TParam]):
 class RefetchPage(Generic[T, TParam]):
 	"""Refetch a single page by param."""
 
+	fetch_fn: Callable[[TParam], Awaitable[T]]
 	param: TParam
+	observer: "InfiniteQueryResult[T, TParam] | None" = None
 	future: "asyncio.Future[ActionResult[T | None]]" = field(
 		default_factory=asyncio.Future
 	)
@@ -113,8 +121,16 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 	"""Paginated query that stores data as a list of Page(data, param)."""
 
 	key: QueryKey
-	fn: Callable[[TParam], Awaitable[T]]
 	cfg: InfiniteQueryConfig[T, TParam]
+
+	@property
+	def fn(self) -> Callable[[TParam], Awaitable[T]]:
+		"""Get the fetch function from the first observer."""
+		if len(self._observers) == 0:
+			raise RuntimeError(
+				f"InfiniteQuery '{self.key}' has no observers. Cannot access fetch function."
+			)
+		return self._observers[0]._fetch_fn  # pyright: ignore[reportPrivateUsage]
 
 	# Reactive state
 	pages: ReactiveList[Page[T, TParam]]
@@ -139,7 +155,6 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 	def __init__(
 		self,
 		key: QueryKey,
-		fn: Callable[[TParam], Awaitable[T]],
 		*,
 		initial_page_param: TParam,
 		get_next_page_param: Callable[[list[Page[T, TParam]]], TParam | None],
@@ -155,7 +170,6 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		on_dispose: Callable[[Any], None] | None = None,
 	):
 		self.key = key
-		self.fn = fn
 
 		self.cfg = InfiniteQueryConfig(
 			retries=retries,
@@ -287,12 +301,18 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if updated_at is not None:
 			self.set_updated_at(updated_at)
 
-	async def wait(self) -> ActionResult[list[Page[T, TParam]]]:
+	async def wait(
+		self,
+		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
+		observer: "InfiniteQueryResult[T, TParam] | None" = None,
+	) -> ActionResult[list[Page[T, TParam]]]:
 		"""Wait for initial data or until queue is empty."""
 		# If no data and loading, enqueue initial fetch (unless already processing)
 		if len(self.pages) == 0 and self.status() == "loading":
 			if self._queue_task is None or self._queue_task.done():
-				self._enqueue(Refetch())
+				# Use provided fetch_fn or fall back to first observer's fetch_fn
+				fn = fetch_fn if fetch_fn is not None else self.fn
+				self._enqueue(Refetch(fetch_fn=fn, observer=observer))
 		# Wait for any in-progress queue processing
 		if self._queue_task and not self._queue_task.done():
 			await self._queue_task
@@ -308,9 +328,14 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if gc_time and gc_time > 0:
 			self.cfg.gc_time = max(self.cfg.gc_time, gc_time)
 
-	def unobserve(self, observer: Any):
+	def unobserve(self, observer: "InfiniteQueryResult[T, TParam]"):
+		"""Unregister an observer. Cancels pending actions. Schedules GC if no observers remain."""
 		if observer in self._observers:
 			self._observers.remove(observer)
+
+		# Cancel pending actions from this observer
+		self._cancel_observer_actions(observer)
+
 		if len(self._observers) == 0:
 			self.schedule_gc()
 
@@ -319,12 +344,18 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		*,
 		cancel_fetch: bool = False,
 		refetch_page: Callable[[T, int, list[T]], bool] | None = None,
+		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
+		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 	):
 		"""Enqueue a refetch. Synchronous - does not wait for completion."""
 		if cancel_fetch:
 			self._cancel_queue()
 		if len(self._observers) > 0:
-			self._enqueue(Refetch(refetch_page=refetch_page))
+			# Use provided fetch_fn or fall back to first observer's fetch_fn
+			fn = fetch_fn if fetch_fn is not None else self.fn
+			self._enqueue(
+				Refetch(fetch_fn=fn, observer=observer, refetch_page=refetch_page)
+			)
 
 	def schedule_gc(self):
 		self.cancel_gc()
@@ -402,6 +433,26 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if self._queue_task and not self._queue_task.done():
 			self._queue_task.cancel()
 			self._queue_task = None
+
+	def _cancel_observer_actions(
+		self, observer: "InfiniteQueryResult[T, TParam]"
+	) -> None:
+		"""Cancel pending actions from a specific observer.
+
+		Note: Does not cancel the currently executing action to avoid disrupting the
+		queue processor. The fetch will complete but results will be ignored since
+		the observer is disposed.
+		"""
+		# Cancel pending actions from this observer (not the currently executing one)
+		remaining: deque[Action[T, TParam]] = deque()
+		while self._queue:
+			action = self._queue.popleft()
+			if action.observer is observer:
+				if not action.future.done():
+					action.future.cancel()
+			else:
+				remaining.append(action)
+		self._queue = remaining
 
 	def _enqueue(
 		self,
@@ -493,7 +544,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			self.has_next_page.write(False)
 			return None
 
-		page = await self.fn(next_param)
+		page = await action.fetch_fn(next_param)
 		page = Page(page, next_param)
 		self.pages.append(page)
 		self._trim_front()
@@ -508,7 +559,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			self.has_previous_page.write(False)
 			return None
 
-		data = await self.fn(prev_param)
+		data = await action.fetch_fn(prev_param)
 		page = Page(data, prev_param)
 		self.pages.insert(0, page)
 		self._trim_back()
@@ -519,7 +570,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self, action: "Refetch[T, TParam]"
 	) -> list[Page[T, TParam]]:
 		if len(self.pages) == 0:
-			page = await self.fn(self.cfg.initial_page_param)
+			page = await action.fetch_fn(self.cfg.initial_page_param)
 			self.pages.append(Page(page, self.cfg.initial_page_param))
 			await self.commit()
 			return self.pages
@@ -538,7 +589,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 				)
 
 			if should_refetch:
-				page = await self.fn(page_param)
+				page = await action.fetch_fn(page_param)
 			else:
 				page = old_page.data
 			self.pages[idx] = Page(page, page_param)
@@ -562,7 +613,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if idx is None:
 			return None
 
-		page = await self.fn(action.param)
+		page = await action.fetch_fn(action.param)
 		self.pages[idx] = Page(page, action.param)
 		await self.commit()
 		return page
@@ -573,40 +624,80 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 	async def fetch_next_page(
 		self,
+		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
 		*,
+		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 		cancel_fetch: bool = False,
 	) -> ActionResult[Page[T, TParam] | None]:
-		"""Fetch the next page. Queued for sequential execution."""
-		action: FetchNext[T, TParam] = FetchNext()
+		"""
+		Fetch the next page. Queued for sequential execution.
+
+		Note: Prefer calling fetch_next_page() on InfiniteQueryResult to ensure the
+		correct fetch function is used. When called directly on InfiniteQuery, uses
+		the first observer's fetch function if not provided.
+		"""
+		fn = fetch_fn if fetch_fn is not None else self.fn
+		action: FetchNext[T, TParam] = FetchNext(fetch_fn=fn, observer=observer)
 		return await self._enqueue(action, cancel_fetch=cancel_fetch)
 
 	async def fetch_previous_page(
 		self,
+		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
 		*,
+		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 		cancel_fetch: bool = False,
 	) -> ActionResult[Page[T, TParam] | None]:
-		"""Fetch the previous page. Queued for sequential execution."""
-		action: FetchPrevious[T, TParam] = FetchPrevious()
+		"""
+		Fetch the previous page. Queued for sequential execution.
+
+		Note: Prefer calling fetch_previous_page() on InfiniteQueryResult to ensure
+		the correct fetch function is used. When called directly on InfiniteQuery,
+		uses the first observer's fetch function if not provided.
+		"""
+		fn = fetch_fn if fetch_fn is not None else self.fn
+		action: FetchPrevious[T, TParam] = FetchPrevious(fetch_fn=fn, observer=observer)
 		return await self._enqueue(action, cancel_fetch=cancel_fetch)
 
 	async def refetch(
 		self,
+		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
 		*,
+		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 		cancel_fetch: bool = False,
 		refetch_page: Callable[[T, int, list[T]], bool] | None = None,
 	) -> ActionResult[list[Page[T, TParam]]]:
-		"""Refetch all pages. Queued for sequential execution."""
-		action: Refetch[T, TParam] = Refetch(refetch_page=refetch_page)
+		"""
+		Refetch all pages. Queued for sequential execution.
+
+		Note: Prefer calling refetch() on InfiniteQueryResult to ensure the correct
+		fetch function is used. When called directly on InfiniteQuery, uses the first
+		observer's fetch function if not provided.
+		"""
+		fn = fetch_fn if fetch_fn is not None else self.fn
+		action: Refetch[T, TParam] = Refetch(
+			fetch_fn=fn, observer=observer, refetch_page=refetch_page
+		)
 		return await self._enqueue(action, cancel_fetch=cancel_fetch)
 
 	async def refetch_page(
 		self,
 		param: TParam,
+		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
 		*,
+		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 		cancel_fetch: bool = False,
 	) -> ActionResult[T | None]:
-		"""Refetch an existing page by its param. Queued for sequential execution."""
-		action: RefetchPage[T, TParam] = RefetchPage(param=param)
+		"""
+		Refetch an existing page by its param. Queued for sequential execution.
+
+		Note: Prefer calling refetch_page() on InfiniteQueryResult to ensure the
+		correct fetch function is used. When called directly on InfiniteQuery, uses
+		the first observer's fetch function if not provided.
+		"""
+		fn = fetch_fn if fetch_fn is not None else self.fn
+		action: RefetchPage[T, TParam] = RefetchPage(
+			fetch_fn=fn, param=param, observer=observer
+		)
 		return await self._enqueue(action, cancel_fetch=cancel_fetch)
 
 	@override
@@ -628,6 +719,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	"""
 
 	_query: Computed[InfiniteQuery[T, TParam]]
+	_fetch_fn: Callable[[TParam], Awaitable[T]]
 	_stale_time: float
 	_gc_time: float
 	_refetch_interval: float | None
@@ -643,6 +735,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	def __init__(
 		self,
 		query: Computed[InfiniteQuery[T, TParam]],
+		fetch_fn: Callable[[TParam], Awaitable[T]],
 		stale_time: float = 0.0,
 		gc_time: float = 300.0,
 		refetch_interval: float | None = None,
@@ -654,6 +747,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		fetch_on_mount: bool = True,
 	):
 		self._query = query
+		self._fetch_fn = fetch_fn
 		self._stale_time = stale_time
 		self._gc_time = gc_time
 		self._refetch_interval = refetch_interval
@@ -667,12 +761,14 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		def observe_effect():
 			q = self._query()
 			enabled = self._enabled()
+
 			with Untrack():
 				q.observe(self)
 
-			if enabled and fetch_on_mount and self.is_stale():
-				q.invalidate()
+				if enabled and fetch_on_mount and self.is_stale():
+					q.invalidate()
 
+			# Return cleanup function that captures the query (old query on key change)
 			def cleanup():
 				q.unobserve(self)
 
@@ -781,14 +877,18 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		*,
 		cancel_fetch: bool = False,
 	) -> ActionResult[Page[T, TParam] | None]:
-		return await self._query().fetch_next_page(cancel_fetch=cancel_fetch)
+		return await self._query().fetch_next_page(
+			self._fetch_fn, observer=self, cancel_fetch=cancel_fetch
+		)
 
 	async def fetch_previous_page(
 		self,
 		*,
 		cancel_fetch: bool = False,
 	) -> ActionResult[Page[T, TParam] | None]:
-		return await self._query().fetch_previous_page(cancel_fetch=cancel_fetch)
+		return await self._query().fetch_previous_page(
+			self._fetch_fn, observer=self, cancel_fetch=cancel_fetch
+		)
 
 	async def fetch_page(
 		self,
@@ -796,7 +896,12 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		*,
 		cancel_fetch: bool = False,
 	) -> ActionResult[T | None]:
-		return await self._query().refetch_page(page_param, cancel_fetch=cancel_fetch)
+		return await self._query().refetch_page(
+			page_param,
+			fetch_fn=self._fetch_fn,
+			observer=self,
+			cancel_fetch=cancel_fetch,
+		)
 
 	def set_initial_data(
 		self,
@@ -820,15 +925,18 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		refetch_page: Callable[[T, int, list[T]], bool] | None = None,
 	) -> ActionResult[list[Page[T, TParam]]]:
 		return await self._query().refetch(
-			cancel_fetch=cancel_fetch, refetch_page=refetch_page
+			self._fetch_fn,
+			observer=self,
+			cancel_fetch=cancel_fetch,
+			refetch_page=refetch_page,
 		)
 
 	async def wait(self) -> ActionResult[list[Page[T, TParam]]]:
-		return await self._query().wait()
+		return await self._query().wait(fetch_fn=self._fetch_fn, observer=self)
 
 	def invalidate(self):
 		query = self._query()
-		query.invalidate()
+		query.invalidate(fetch_fn=self._fetch_fn, observer=self)
 
 	def enable(self):
 		self._enabled.write(True)
@@ -842,6 +950,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 
 	@override
 	def dispose(self):
+		"""Clean up the result and its observe effect."""
 		if self._interval_effect is not None:
 			self._interval_effect.dispose()
 		self._observe_effect.dispose()
@@ -1001,6 +1110,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 
 		result = InfiniteQueryResult(
 			query=query,
+			fetch_fn=fetch_fn,
 			stale_time=self._stale_time,
 			keep_previous_data=self._keep_previous_data,
 			gc_time=self._gc_time,
@@ -1048,7 +1158,6 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 				InfiniteQuery[T, TParam],
 				store.ensure_infinite(
 					key,
-					fetch_fn,
 					initial_page_param=self._initial_page_param,
 					get_next_page_param=next_fn,
 					get_previous_page_param=prev_fn,

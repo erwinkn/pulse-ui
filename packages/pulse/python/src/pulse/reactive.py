@@ -191,7 +191,8 @@ class Computed(Generic[T_co]):
 				if len(scope.effects) > 0:
 					raise RuntimeError(
 						"An effect was created within a computed variable's function. "
-						+ "This behavior is not allowed, computed variables should be pure calculations."
+						+ "This is most likely unintended. If you need to create an effect here, "
+						+ "wrap the effect creation with Untrack()."
 					)
 			finally:
 				self.on_stack = False

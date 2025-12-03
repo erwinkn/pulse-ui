@@ -270,7 +270,7 @@ async def test_async_query_effect_sync_loading():
 	assert entry.is_fetching.read() is True
 
 	# Wait for the refetch to complete
-	await entry.effect.wait()
+	await entry.wait()
 	assert entry.status.read() == "success"
 	assert entry.is_fetching.read() is False
 
@@ -2556,6 +2556,136 @@ async def test_query_result_dispose_does_not_cancel_other_observer_fetch():
 	# s1's fetch should have completed
 	assert ("s1", "started") in fetch_log
 	assert ("s1", "completed") in fetch_log
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_result_dispose_reschedules_fetch_from_other_observer():
+	"""
+	Test that when the initiating observer disposes mid-fetch, the fetch is cancelled
+	and rescheduled from another observer if one exists.
+	"""
+	fetch_log: list[tuple[str, str]] = []
+	fetch_started = asyncio.Event()
+	first_fetch_cancelled = asyncio.Event()
+
+	class S(ps.State):
+		name: str
+
+		def __init__(self, name: str):
+			self.name = name
+
+		@ps.query(retries=0, gc_time=10)
+		async def data(self) -> str:
+			fetch_log.append((self.name, "started"))
+			fetch_started.set()
+			try:
+				await asyncio.sleep(0.5)
+				fetch_log.append((self.name, "completed"))
+				return f"result-{self.name}"
+			except asyncio.CancelledError:
+				fetch_log.append((self.name, "cancelled"))
+				first_fetch_cancelled.set()
+				raise
+
+		@data.key
+		def _key(self):
+			return ("shared-key",)
+
+	s1 = S("s1")
+	s2 = S("s2")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# s1 starts fetch
+	wait_task_s1 = asyncio.create_task(q1.wait())
+	await fetch_started.wait()
+	fetch_started.clear()
+
+	# s1 disposes - should cancel fetch and reschedule from s2
+	q1.dispose()
+
+	# Wait for the first fetch to be cancelled
+	await first_fetch_cancelled.wait()
+
+	# Wait for the rescheduled fetch (from s2) to start
+	await fetch_started.wait()
+
+	# Wait for s2's fetch to complete via q2
+	await q2.wait()
+
+	# Verify the flow: s1 started, s1 cancelled, s2 started, s2 completed
+	assert ("s1", "started") in fetch_log
+	assert ("s1", "cancelled") in fetch_log
+	assert ("s1", "completed") not in fetch_log
+	assert ("s2", "started") in fetch_log
+	assert ("s2", "completed") in fetch_log
+
+	# s1's wait task should have been cancelled
+	try:
+		await asyncio.wait_for(wait_task_s1, timeout=0.1)
+	except (asyncio.CancelledError, asyncio.TimeoutError):
+		pass  # Expected
+
+	# Clean up
+	q2.dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_result_dispose_no_reschedule_when_no_other_observers():
+	"""
+	Test that when the only observer disposes mid-fetch, the fetch is cancelled
+	and no reschedule happens (since there are no other observers).
+	"""
+	fetch_log: list[str] = []
+	fetch_started = asyncio.Event()
+	fetch_cancelled = asyncio.Event()
+
+	class S(ps.State):
+		@ps.query(retries=0, gc_time=10)
+		async def data(self) -> str:
+			fetch_log.append("started")
+			fetch_started.set()
+			try:
+				await asyncio.sleep(0.5)
+				fetch_log.append("completed")
+				return "result"
+			except asyncio.CancelledError:
+				fetch_log.append("cancelled")
+				fetch_cancelled.set()
+				raise
+
+		@data.key
+		def _key(self):
+			return ("single-observer-key",)
+
+	s = S()
+	q = s.data
+
+	# Start fetch
+	wait_task = asyncio.create_task(q.wait())
+	await fetch_started.wait()
+
+	# Dispose the only observer
+	q.dispose()
+
+	# Wait for cancellation to propagate
+	await asyncio.wait_for(fetch_cancelled.wait(), timeout=1.0)
+
+	# Fetch should be cancelled, not completed, and no new fetch started
+	assert "started" in fetch_log
+	assert "cancelled" in fetch_log
+	assert "completed" not in fetch_log
+	# Only one "started" entry - no reschedule
+	assert fetch_log.count("started") == 1
+
+	# The wait task should complete (cancelled)
+	try:
+		await asyncio.wait_for(wait_task, timeout=0.1)
+	except (asyncio.CancelledError, asyncio.TimeoutError):
+		pass  # Expected
 
 
 @pytest.mark.asyncio

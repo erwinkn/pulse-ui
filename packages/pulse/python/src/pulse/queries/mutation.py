@@ -147,18 +147,12 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 @overload
 def mutation(
 	fn: Callable[Concatenate[TState, P], Awaitable[T]],
-	*,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
 ) -> MutationProperty[T, TState, P]: ...
 
 
 @overload
 def mutation(
 	fn: None = None,
-	*,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
 ) -> Callable[
 	[Callable[Concatenate[TState, P], Awaitable[T]]], MutationProperty[T, TState, P]
 ]: ...
@@ -166,9 +160,6 @@ def mutation(
 
 def mutation(
 	fn: Callable[Concatenate[TState, P], Awaitable[T]] | None = None,
-	*,
-	on_success: OnSuccessFn[TState, T] | None = None,
-	on_error: OnErrorFn[TState] | None = None,
 ):
 	def decorator(func: Callable[Concatenate[TState, P], Awaitable[T]], /):
 		sig = inspect.signature(func)
@@ -177,12 +168,7 @@ def mutation(
 		if len(params) == 0 or params[0].name != "self":
 			raise TypeError("@mutation method must have 'self' as first argument")
 
-		return MutationProperty(
-			func.__name__,
-			func,
-			on_success=on_success,
-			on_error=on_error,
-		)
+		return MutationProperty(func.__name__, func)
 
 	if fn:
 		return decorator(fn)

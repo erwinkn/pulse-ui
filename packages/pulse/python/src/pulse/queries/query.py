@@ -5,6 +5,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import (
+	TYPE_CHECKING,
 	Any,
 	Generic,
 	TypeVar,
@@ -35,6 +36,9 @@ from pulse.queries.common import (
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.state import InitializableProperty, State
+
+if TYPE_CHECKING:
+	from pulse.queries.protocol import QueryResult
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound=State)
@@ -364,7 +368,7 @@ class KeyedQuery(Generic[T], Disposable):
 		Args:
 			fetch_fn: The async function to fetch data.
 			cancel_previous: If True, cancels any in-flight fetch before starting.
-			initiator: The KeyedQueryResult that initiated this fetch (for cancellation tracking).
+			initiator: The KeyedQueryResult observer that initiated this fetch (for cancellation tracking).
 		"""
 		if cancel_previous and self._task and not self._task.done():
 			self._task.cancel()
@@ -480,7 +484,7 @@ class KeyedQuery(Generic[T], Disposable):
 			self.cfg.on_dispose(self)
 
 
-class UnkeyedQuery(Generic[T], Disposable):
+class UnkeyedQueryResult(Generic[T], Disposable):
 	"""
 	Query for unkeyed queries (single observer with dependency tracking).
 	Uses an AsyncEffect to track dependencies and re-run on changes.
@@ -696,10 +700,6 @@ class UnkeyedQuery(Generic[T], Disposable):
 		self._effect.dispose()
 
 
-# Type alias for backward compatibility with store
-Query = KeyedQuery
-
-
 class KeyedQueryResult(Generic[T], Disposable):
 	"""
 	Observer wrapper for keyed queries.
@@ -810,6 +810,10 @@ class KeyedQueryResult(Generic[T], Disposable):
 		return self._query().is_fetching()
 
 	@property
+	def is_scheduled(self) -> bool:
+		return self._query().is_scheduled
+
+	@property
 	def error(self) -> Exception | None:
 		return self._query().error.read()
 
@@ -893,11 +897,6 @@ class KeyedQueryResult(Generic[T], Disposable):
 			self._interval_effect.dispose()
 		if not self._observe_effect.__disposed__:
 			self._observe_effect.dispose()
-
-
-# Type aliases for backward compatibility
-QueryResult = KeyedQueryResult
-UnkeyedQueryResult = UnkeyedQuery  # UnkeyedQuery now includes result functionality
 
 
 class QueryProperty(Generic[T, TState], InitializableProperty):
@@ -1006,9 +1005,9 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	@override
 	def initialize(
 		self, state: Any, name: str
-	) -> KeyedQueryResult[T] | UnkeyedQuery[T]:
+	) -> KeyedQueryResult[T] | UnkeyedQueryResult[T]:
 		# Return cached query instance if present
-		result: KeyedQueryResult[T] | UnkeyedQuery[T] | None = getattr(
+		result: KeyedQueryResult[T] | UnkeyedQueryResult[T] | None = getattr(
 			state, self._priv_result, None
 		)
 		if result:
@@ -1109,9 +1108,9 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		initial_data: T | None,
 		initial_data_updated_at: float | dt.datetime | None,
 		state: TState,
-	) -> UnkeyedQuery[T]:
+	) -> UnkeyedQueryResult[T]:
 		"""Create a private unkeyed query."""
-		return UnkeyedQuery[T](
+		return UnkeyedQueryResult[T](
 			fetch_fn=fetch_fn,
 			on_success=bind_state(state, self._on_success_fn)
 			if self._on_success_fn
@@ -1131,9 +1130,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			fetch_on_mount=self._fetch_on_mount,
 		)
 
-	def __get__(
-		self, obj: Any, objtype: Any = None
-	) -> KeyedQueryResult[T] | UnkeyedQuery[T]:
+	def __get__(self, obj: Any, objtype: Any = None) -> "QueryResult[T]":
 		if obj is None:
 			return self  # pyright: ignore[reportReturnType]
 		return self.initialize(obj, self.name)

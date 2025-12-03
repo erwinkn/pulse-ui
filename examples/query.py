@@ -1,23 +1,43 @@
 import asyncio
 import time
-from typing import reveal_type
+from typing import TypedDict
 
 import pulse as ps
 
 
-# Static callback functions for mutations (since decorators need module-level functions)
-def _on_update_success_static(state, result):
-	state.mutation_success_calls += 1
-	print(f"Mutation succeeded: {result}")
+class UserData(TypedDict):
+	id: int
+	name: str
 
 
-def _on_update_error_static(state, error):
-	state.mutation_error_calls += 1
-	print(f"Mutation failed: {error}")
+class DetailsData(TypedDict):
+	uppercase: str
 
 
-def _on_delete_error_static(state, error):
-	print(f"Delete failed: {error}")
+class UserProfileData(TypedDict):
+	id: int
+	profile: str
+	timestamp: float
+
+
+class UserPermissionsData(TypedDict):
+	id: int
+	permissions: list[str]
+
+
+class UserStatusData(TypedDict):
+	id: int
+	status: str
+	last_seen: float
+
+
+class UpdateUserNameResult(TypedDict):
+	success: bool
+	new_name: str
+
+
+class DeleteUserResult(TypedDict):
+	deleted: bool
 
 
 class UserApi(ps.State):
@@ -30,7 +50,7 @@ class UserApi(ps.State):
 
 	# Keyed query with keep_previous_data default True
 	@ps.query(keep_previous_data=False)
-	async def user(self):
+	async def user(self) -> UserData:
 		print("Running user query")
 		await asyncio.sleep(0.5)
 		# Simulate API; id 13 fails to demonstrate on_error
@@ -46,7 +66,7 @@ class UserApi(ps.State):
 
 	# Provide initial data after __init__ (e.g., seeded values)
 	@user.initial_data
-	def _initial_user(self):
+	def _initial_user(self) -> UserData:
 		# Pretend we had a cached snapshot
 		return {"id": 0, "name": "<loading>"}
 
@@ -62,13 +82,13 @@ class UserApi(ps.State):
 
 	# Unkeyed query (auto-tracked) using current id
 	@ps.query(keep_previous_data=False)
-	async def details(self):
+	async def details(self) -> DetailsData:
 		await asyncio.sleep(0.8)
 		return {"uppercase": str(self.user_id).upper()}
 
 	# Query with custom stale_time (data considered fresh for 5 seconds)
 	@ps.query(stale_time=5.0, keep_previous_data=True)
-	async def user_profile(self):
+	async def user_profile(self) -> UserProfileData:
 		print("Running user profile query")
 		await asyncio.sleep(0.2)
 		return {
@@ -83,7 +103,7 @@ class UserApi(ps.State):
 
 	# Query with custom retry configuration
 	@ps.query(retries=5, retry_delay=1.0, gc_time=60.0)
-	async def user_permissions(self):
+	async def user_permissions(self) -> UserPermissionsData:
 		print("Running user permissions query")
 		await asyncio.sleep(0.1)
 		# Simulate occasional failure for retry demonstration
@@ -99,7 +119,7 @@ class UserApi(ps.State):
 
 	# Query with no retries for fast-failing operations
 	@ps.query(retries=0)
-	async def user_status(self):
+	async def user_status(self) -> UserStatusData:
 		print("Running user status query")
 		await asyncio.sleep(0.05)
 		return {"id": self.user_id, "status": "active", "last_seen": time.time()}
@@ -109,8 +129,8 @@ class UserApi(ps.State):
 		return ("user_status", self.user_id)
 
 	# Mutation example - update user name
-	@ps.mutation(on_success=_on_update_success_static, on_error=_on_update_error_static)
-	async def update_user_name(self, new_name: str):
+	@ps.mutation
+	async def update_user_name(self, new_name: str) -> UpdateUserNameResult:
 		print(f"Updating user {self.user_id} name to {new_name}")
 		await asyncio.sleep(0.5)
 		# Simulate server update
@@ -120,20 +140,33 @@ class UserApi(ps.State):
 		self.user_profile.invalidate()
 		return {"success": True, "new_name": new_name}
 
+	@update_user_name.on_success
+	def _on_update_success(self, result: UpdateUserNameResult):
+		self.mutation_success_calls += 1
+		print(f"Mutation succeeded: {result}")
+
+	@update_user_name.on_error
+	def _on_update_error(self, error: Exception):
+		self.mutation_error_calls += 1
+		print(f"Mutation failed: {error}")
+
 	# Mutation that can fail
-	@ps.mutation(on_error=_on_delete_error_static)
-	async def delete_user(self):
+	@ps.mutation
+	async def delete_user(self) -> DeleteUserResult:
 		print(f"Deleting user {self.user_id}")
 		await asyncio.sleep(0.3)
 		if self.user_id == 1:
 			raise RuntimeError("Cannot delete admin user")
 		return {"deleted": True}
 
+	@delete_user.on_error
+	def _on_delete_error(self, error: Exception):
+		print(f"Delete failed: {error}")
+
 
 @ps.component
 def QueryExample():
 	s = ps.states(UserApi)
-	reveal_type(s.user)
 
 	def prev():
 		s.user_id = max(1, s.user_id - 1)
@@ -159,11 +192,6 @@ def QueryExample():
 	async def manual_set_data():
 		# Manually set data without triggering a fetch
 		s.user.set_data({"id": s.user_id, "name": "Manually Set"})
-
-	async def manual_set_error():
-		# Manually set error state (accessing underlying query)
-		# Note: This is not typically done in user code, but shown for demo
-		pass  # QueryResult doesn't expose set_error, only set_data
 
 	async def invalidate_all():
 		# Invalidate all queries to force refetch
@@ -213,7 +241,6 @@ def QueryExample():
 				ps.p(f"is_success: {s.user.is_success}", className="mb-1"),
 				ps.p(f"is_error: {s.user.is_error}", className="mb-1"),
 				ps.p(f"is_fetching: {s.user.is_fetching}", className="mb-1"),
-				ps.p(f"has_loaded: {s.user.has_loaded}", className="mb-1"),
 				ps.p(f"Error: {s.user.error}", className="mb-1 text-red-600"),
 				className="text-sm font-mono bg-gray-100 p-2 rounded",
 			),
@@ -355,7 +382,7 @@ def QueryExample():
 			ps.h2("Session-wide Query Caching", className="text-xl font-semibold mb-2"),
 			ps.p(
 				"Change user_id and notice how queries with the same key share cached data. "
-				"Try switching between users to see cache hits.",
+				+ "Try switching between users to see cache hits.",
 				className="text-sm text-gray-600",
 			),
 			className="p-3 rounded bg-white shadow",

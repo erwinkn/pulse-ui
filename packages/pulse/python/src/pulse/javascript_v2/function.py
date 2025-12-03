@@ -1,23 +1,33 @@
 from __future__ import annotations
 
+import ast
 import builtins
 import inspect
+import textwrap
 import types
 from typing import Any, Callable, Generic, TypeAlias, TypeVar, TypeVarTuple
 
 # Import module registrations to ensure they're available for dependency analysis
-import pulse.javascript_v2.modules.math  # noqa: F401, E402
+import pulse.javascript_v2.modules  # noqa: F401
 from pulse.javascript_v2.constants import JsConstant, const_to_js
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.ids import generate_id
 from pulse.javascript_v2.imports import Import
-from pulse.javascript_v2.module import JsModule, PyModule
+from pulse.javascript_v2.module import (
+	PY_MODULE_VALUES,
+	PY_MODULES,
+	JsModule,
+	PyModuleTranspiler,
+)
+from pulse.javascript_v2.nodes import JSExpr
+from pulse.javascript_v2.transpiler import JsTranspiler
 
 Args = TypeVarTuple("Args")
 R = TypeVar("R")
 
+
 AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any, ...], Any]"
-JsDep: TypeAlias = "AnyJsFunction | JsConstant | Import | PyBuiltin | PyModuleRef"
+JsDep: TypeAlias = "AnyJsFunction | JsConstant | Import | PyBuiltin | PyModuleRef | PyModuleFunctionRef | JSExpr"
 
 # Global cache for deduplication across all transpiled functions
 # Registered BEFORE analyzing deps to handle mutual recursion
@@ -36,23 +46,31 @@ class PyBuiltin:
 class PyModuleRef:
 	"""Reference to a registered Python module for transpilation.
 
-	When a function uses `import math` or `from math import log`, we create
-	a PyModuleRef that tracks the module and its PyModule transpilation class.
+	When a function uses `import math`, we create a PyModuleRef that tracks
+	the module and its transpiler (either a PyModule class or a dict).
 	"""
 
 	module: types.ModuleType
-	transpiler: type[PyModule]
+	transpiler: PyModuleTranspiler
 
-	def __init__(self, module: types.ModuleType, transpiler: type[PyModule]) -> None:
+	def __init__(
+		self, module: types.ModuleType, transpiler: PyModuleTranspiler
+	) -> None:
 		self.module = module
 		self.transpiler = transpiler
 
 
-def _get_or_create_function(fn: Callable[..., object]) -> AnyJsFunction:
-	"""Get cached JsFunction or create and cache it."""
-	if fn not in FUNCTION_CACHE:
-		JsFunction(fn)  # Constructor registers in cache
-	return FUNCTION_CACHE[fn]
+class PyModuleFunctionRef:
+	"""Reference to a function imported from a registered Python module.
+
+	When a function uses `from math import log`, we create a PyModuleFunctionRef
+	that holds the emit callable (e.g., PyMath.log) that generates the JS AST.
+	"""
+
+	emit: Callable[..., JSExpr]
+
+	def __init__(self, emit: Callable[..., JSExpr]) -> None:
+		self.emit = emit
 
 
 class JsFunction(Generic[*Args, R]):
@@ -94,6 +112,69 @@ class JsFunction(Generic[*Args, R]):
 	def modules(self) -> dict[str, PyModuleRef]:
 		"""Get all PyModuleRef dependencies."""
 		return {k: v for k, v in self.deps.items() if isinstance(v, PyModuleRef)}
+
+	def module_functions(self) -> dict[str, PyModuleFunctionRef]:
+		"""Get all PyModuleFunctionRef dependencies (named imports from modules)."""
+		return {
+			k: v for k, v in self.deps.items() if isinstance(v, PyModuleFunctionRef)
+		}
+
+	def transpile(self) -> str:
+		"""Transpile this JsFunction to JavaScript code.
+
+		Returns the complete JavaScript function code.
+		"""
+
+		# Get source code
+		src = inspect.getsource(self.fn)
+		src = textwrap.dedent(src)
+
+		# Parse to AST
+		module = ast.parse(src)
+		fndefs = [n for n in module.body if isinstance(n, ast.FunctionDef)]
+		if not fndefs:
+			raise JSCompilationError("No function definition found in source")
+		fndef = fndefs[-1]
+
+		# Get argument names
+		arg_names = [arg.arg for arg in fndef.args.args]
+
+		# Build rename map, builtins set, and modules map from dependencies
+		rename: dict[str, str] = {}
+		builtins: set[str] = set()
+		modules: dict[str, type | dict[str, Any]] = {}
+		module_funcs: dict[str, Callable[..., JSExpr]] = {}
+		inline_exprs: dict[str, JSExpr] = {}
+		for name, dep in self.deps.items():
+			if isinstance(dep, (JsFunction, JsConstant)):
+				rename[name] = dep.js_name
+			elif isinstance(dep, PyBuiltin):
+				# PyBuiltins go to the builtins set
+				builtins.add(name)
+			elif isinstance(dep, PyModuleRef):
+				# PyModuleRefs go to the modules map
+				modules[name] = dep.transpiler
+			elif isinstance(dep, PyModuleFunctionRef):
+				# PyModuleFunctionRef: map the local name to the emit callable
+				module_funcs[name] = dep.emit
+			elif isinstance(dep, JSExpr):
+				# Direct JSExpr (e.g., module constants like math.pi -> Math.PI)
+				inline_exprs[name] = dep
+			elif hasattr(dep, "js_name"):
+				rename[name] = dep.js_name
+
+		# Transpile
+		visitor = JsTranspiler(
+			fndef,
+			args=arg_names,
+			rename=rename,
+			builtins=builtins,
+			modules=modules,
+			module_funcs=module_funcs,
+			inline_exprs=inline_exprs,
+		)
+		js_fn = visitor.transpile(name=self.js_name)
+		return js_fn.emit()
 
 	def __call__(self, *args: *Args) -> JsFunctionCall[*Args]:
 		return JsFunctionCall(self, args)
@@ -164,14 +245,19 @@ def _analyze_function_deps(fn: Callable[..., object]) -> dict[str, JsDep]:
 				# For now, skip (will be handled separately)
 				continue
 			elif inspect.ismodule(value):
-				# Python modules - check if registered in PyModule registry
-				from pulse.javascript_v2.module import PY_MODULES
-
 				if value in PY_MODULES:
 					deps[name] = PyModuleRef(value, PY_MODULES[value])
 				# Unregistered modules are skipped
+			elif id(value) in PY_MODULE_VALUES:
+				# Value from a registered module (constant or function)
+				transpiler = PY_MODULE_VALUES[id(value)]
+				if isinstance(transpiler, JSExpr):
+					deps[name] = transpiler
+				else:
+					# It's a callable emit function
+					deps[name] = PyModuleFunctionRef(transpiler)
 			elif inspect.isfunction(value):
-				deps[name] = _get_or_create_function(value)
+				deps[name] = javascript(value)
 			elif callable(value):
 				# Callable objects (not functions) are not supported
 				raise JSCompilationError(
@@ -179,7 +265,7 @@ def _analyze_function_deps(fn: Callable[..., object]) -> dict[str, JsDep]:
 					+ "Only functions can be transpiled."
 				)
 			else:
-				# Constants
+				# Regular constants
 				deps[name] = const_to_js(value, name)
 		elif name in builtin_dict:
 			# Python builtins
@@ -200,4 +286,8 @@ def javascript(fn: Callable[[*Args], R]) -> JsFunction[*Args, R]:
 
 		# my_func is now a JsFunction instance
 	"""
-	return JsFunction(fn)
+	result = FUNCTION_CACHE.get(fn)
+	if not result:
+		result = JsFunction(fn)
+		FUNCTION_CACHE[fn] = result
+	return result  # pyright: ignore[reportReturnType]

@@ -71,8 +71,6 @@ class JsModuleMeta(type):
 
 		# Register import if source is provided
 		if js_src is not None:
-			from pulse.javascript_v2.imports import Import
-
 			imp = (
 				Import.default(js_name, js_src)
 				if is_default
@@ -163,8 +161,48 @@ class PyModule:
 	"""Base class for Python module transpilation mappings."""
 
 
-PY_MODULES: dict[ModuleType, type[PyModule]] = {}
+# Type alias for module transpilers - either a PyModule class or a dict
+PyModuleTranspiler = (
+	type[PyModule] | dict[str, JSExpr | Any]
+)  # Any = Callable[..., JSExpr]
+
+PY_MODULES: dict[ModuleType, PyModuleTranspiler] = {}
+
+# Map from id(value) -> JSExpr or Callable[..., JSExpr]
+# For constants: id(math.pi) -> JSMember("Math", "PI")
+# For functions: id(math.log) -> PyMath.log (the callable that emits JS)
+PY_MODULE_VALUES: dict[int, JSExpr | Any] = {}  # Any = Callable[..., JSExpr]
 
 
-def register_module(module: ModuleType, transpilation: type[PyModule]):
+def register_module(module: ModuleType, transpilation: PyModuleTranspiler) -> None:
+	"""Register a Python module for transpilation.
+
+	Args:
+		module: The Python module to register (e.g., `math`, `pulse.html.tags`)
+		transpilation: Either a PyModule subclass or a dict mapping attribute names
+			to JSExpr (for constants) or Callable[..., JSExpr] (for functions)
+	"""
 	PY_MODULES[module] = transpilation
+
+	# Register values and functions from the transpilation
+	if isinstance(transpilation, dict):
+		# Dict-based transpiler
+		for attr_name, attr in transpilation.items():
+			module_value = getattr(module, attr_name, None)
+			if module_value is None:
+				continue
+			if isinstance(attr, JSExpr) or callable(attr):
+				PY_MODULE_VALUES[id(module_value)] = attr
+	else:
+		# PyModule class-based transpiler
+		for attr_name in dir(transpilation):
+			if attr_name.startswith("_"):
+				continue
+			attr = getattr(transpilation, attr_name, None)
+			if attr is None:
+				continue
+			module_value = getattr(module, attr_name, None)
+			if module_value is None:
+				continue
+			if isinstance(attr, JSExpr) or callable(attr):
+				PY_MODULE_VALUES[id(module_value)] = attr

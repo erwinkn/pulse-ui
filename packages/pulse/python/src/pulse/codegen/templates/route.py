@@ -177,15 +177,11 @@ def _generate_functions_section(functions: Sequence[AnyJsFunction]) -> str:
 	if not functions:
 		return ""
 
-	from pulse.javascript_v2.transpiler import transpile_function
-
 	lines: list[str] = ["// Functions"]
 	for fn in functions:
-		# transpile_function returns "function(args){...}"
-		js_code = transpile_function(fn)
-		# Convert anonymous function to named function: "function name_id(args){...}"
-		named_fn = js_code.replace("function(", f"function {fn.js_name}(", 1)
-		lines.append(named_fn)
+		# fn.transpile() returns "function name_id(args){...}"
+		js_code = fn.transpile()
+		lines.append(js_code)
 
 	return "\n".join(lines)
 

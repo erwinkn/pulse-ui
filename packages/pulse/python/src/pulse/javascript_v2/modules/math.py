@@ -1,10 +1,9 @@
 """JavaScript Math module bindings."""
 
-import math as _math_module
 from typing import ClassVar
 
 from pulse.javascript_v2.constants import jsify
-from pulse.javascript_v2.module import JsModule, PyModule, register_module
+from pulse.javascript_v2.module import JsModule, PyModule
 from pulse.javascript_v2.nodes import (
 	JSBinary,
 	JSExpr,
@@ -439,7 +438,3 @@ class PyMath(PyModule):
 	@staticmethod
 	def comb(n: int | float | JSExpr, k: int | float | JSExpr) -> JSExpr:
 		raise NotImplementedError("comb requires factorial implementation")
-
-
-# Register the Python math module for transpilation
-register_module(_math_module, PyMath)

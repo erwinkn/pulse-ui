@@ -4,7 +4,10 @@ import ast
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, override
+from typing import override
+
+from pulse.javascript_v2.context import is_interpreted_mode
+from pulse.javascript_v2.errors import JSCompilationError
 
 ALLOWED_BINOPS: dict[type[ast.operator], str] = {
 	ast.Add: "+",
@@ -43,7 +46,41 @@ class JSNode(ABC):
 
 
 class JSExpr(JSNode, ABC):
-	pass
+	"""Base class for JavaScript expressions.
+
+	Subclasses can override emit_call, emit_subscript, and emit_getattr to
+	customize how the expression behaves when called, indexed, or accessed.
+	This enables extensibility for things like JSX elements.
+	"""
+
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		"""Called when this expression is used as a function: expr(args).
+
+		Override to customize call behavior. Default emits JSCall(self, args)
+		and rejects keyword arguments.
+		"""
+		if kwargs:
+			raise JSCompilationError(
+				"Keyword arguments not supported in default function call"
+			)
+		return JSCall(self, args)
+
+	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+		"""Called when this expression is indexed: expr[a, b, c].
+
+		Override to customize subscript behavior. Default requires single index
+		and emits JSSubscript(self, index).
+		"""
+		if len(indices) != 1:
+			raise JSCompilationError("Multiple indices not supported in subscript")
+		return JSSubscript(self, indices[0])
+
+	def emit_getattr(self, attr: str) -> JSExpr:
+		"""Called when an attribute is accessed: expr.attr.
+
+		Override to customize attribute access. Default emits JSMember(self, attr).
+		"""
+		return JSMember(self, attr)
 
 
 class JSStmt(JSNode, ABC):
@@ -61,7 +98,7 @@ class JSIdentifier(JSExpr):
 
 @dataclass
 class JSString(JSExpr):
-	value: Any
+	value: str
 
 	@override
 	def emit(self) -> str:
@@ -85,7 +122,7 @@ class JSString(JSExpr):
 
 @dataclass
 class JSNumber(JSExpr):
-	value: float
+	value: int | float
 
 	@override
 	def emit(self) -> str:
@@ -242,11 +279,14 @@ class JSTertiary(JSExpr):
 class JSFunctionDef(JSExpr):
 	params: Sequence[str]
 	body: Sequence[JSStmt]
+	name: str | None = None
 
 	@override
 	def emit(self) -> str:
 		params = ", ".join(self.params)
 		body_code = "\n".join(s.emit() for s in self.body)
+		if self.name:
+			return f"function {self.name}({params}){{\n{body_code}\n}}"
 		return f"function({params}){{\n{body_code}\n}}"
 
 
@@ -396,8 +436,6 @@ class JSRaw(JSExpr):
 
 def _check_not_interpreted_mode(node_type: str) -> None:
 	"""Raise an error if we're in interpreted mode - JSX can't be eval'd."""
-	from pulse.javascript_v2.context import is_interpreted_mode
-
 	if is_interpreted_mode():
 		raise ValueError(
 			f"{node_type} cannot be used in interpreted mode (as a prop or child value). "
@@ -557,6 +595,7 @@ def op_is_right_associative(op: str) -> bool:
 
 
 def expr_precedence(e: JSExpr) -> int:
+	# Required to avoid circular import
 	from pulse.javascript_v2.imports import Import
 
 	if isinstance(e, JSBinary):

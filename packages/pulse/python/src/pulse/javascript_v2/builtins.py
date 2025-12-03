@@ -6,6 +6,8 @@ This module provides transpilation for Python builtins to JavaScript.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.nodes import (
 	JSArray,
@@ -305,7 +307,7 @@ def emit_isinstance(*args: JSExpr) -> JSExpr:
 
 
 # Registry of builtin emitters
-BUILTIN_EMITTERS: dict[str, object] = {
+BUILTIN_EMITTERS: dict[str, Callable[..., JSExpr]] = {
 	"print": emit_print,
 	"len": emit_len,
 	"min": emit_min,

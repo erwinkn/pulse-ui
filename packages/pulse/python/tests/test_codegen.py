@@ -39,7 +39,7 @@ class TestCodegen:
 		codegen = Codegen(RouteTree([route]), codegen_config)
 		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
-		route_page_path = codegen.output_folder / "routes" / "simple.tsx"
+		route_page_path = codegen.output_folder / "routes" / "simple.jsx"
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
@@ -66,7 +66,7 @@ class TestCodegen:
 		codegen = Codegen(RouteTree([route]), codegen_config)
 		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
-		route_page_path = codegen.output_folder / "routes" / "with-components.tsx"
+		route_page_path = codegen.output_folder / "routes" / "with-components.jsx"
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
@@ -90,7 +90,7 @@ class TestCodegen:
 		codegen = Codegen(RouteTree([route]), codegen_config)
 		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
-		route_page_path = codegen.output_folder / "routes" / "default-export.tsx"
+		route_page_path = codegen.output_folder / "routes" / "default-export.jsx"
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
@@ -111,7 +111,7 @@ class TestCodegen:
 		codegen = Codegen(RouteTree([route]), codegen_config)
 		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
-		route_page_path = codegen.output_folder / "routes" / "app-shell.tsx"
+		route_page_path = codegen.output_folder / "routes" / "app-shell.jsx"
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
@@ -135,7 +135,7 @@ class TestCodegen:
 		codegen = Codegen(RouteTree([route]), codegen_config)
 		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
-		route_page_path = codegen.output_folder / "routes" / "duplicate-imports.tsx"
+		route_page_path = codegen.output_folder / "routes" / "duplicate-imports.jsx"
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
@@ -156,7 +156,7 @@ class TestCodegen:
 		codegen = Codegen(RouteTree([route]), codegen_config)
 		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
-		route_page_path = codegen.output_folder / "routes" / "lazy.tsx"
+		route_page_path = codegen.output_folder / "routes" / "lazy.jsx"
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
@@ -258,13 +258,13 @@ class TestCodegen:
 
 		assert (pulse_app_dir / "_layout.tsx").exists()
 		assert (pulse_app_dir / "routes.ts").exists()
-		assert (routes_dir / "index.tsx").exists()
-		assert (routes_dir / "interactive.tsx").exists()
-		assert (routes_dir / "users.tsx").exists()
+		assert (routes_dir / "index.jsx").exists()
+		assert (routes_dir / "interactive.jsx").exists()
+		assert (routes_dir / "users.jsx").exists()
 		# The dynamic route :id gets sanitized with a hash suffix
-		user_id_files = list((routes_dir / "users").glob("_id_*.tsx"))
+		user_id_files = list((routes_dir / "users").glob("_id_*.jsx"))
 		assert len(user_id_files) == 1, (
-			f"Expected 1 _id_*.tsx file, found {user_id_files}"
+			f"Expected 1 _id_*.jsx file, found {user_id_files}"
 		)
 
 		layout_content = (pulse_app_dir / "_layout.tsx").read_text()
@@ -283,15 +283,15 @@ class TestCodegen:
 		# Validate the runtime route tree carries correct file/path data
 		runtime_content = (pulse_app_dir / "routes.runtime.ts").read_text()
 		assert 'path: "interactive"' in runtime_content
-		assert 'file: "test_pulse_app/routes/interactive.tsx"' in runtime_content
+		assert 'file: "test_pulse_app/routes/interactive.jsx"' in runtime_content
 		assert 'path: "users"' in runtime_content
-		assert 'file: "test_pulse_app/routes/users.tsx"' in runtime_content
+		assert 'file: "test_pulse_app/routes/users.jsx"' in runtime_content
 		assert 'path: ":id"' in runtime_content
 		# The dynamic route file has a hash suffix that depends on extension
 		assert 'file: "test_pulse_app/routes/users/_id_' in runtime_content
-		assert '.tsx"' in runtime_content
+		assert '.jsx"' in runtime_content
 
-		home_content = (routes_dir / "index.tsx").read_text()
+		home_content = (routes_dir / "index.jsx").read_text()
 		assert "import { PulseView" in home_content
 		assert '"pulse-ui-client"' in home_content
 		assert "import { Header as Header_" in home_content
@@ -299,7 +299,7 @@ class TestCodegen:
 		assert "registry={__registry}" in home_content
 		assert "path={path}" in home_content
 
-		interactive_content = (routes_dir / "interactive.tsx").read_text()
+		interactive_content = (routes_dir / "interactive.jsx").read_text()
 		assert "import { Button as Button_" in interactive_content
 		assert 'const path = "/interactive"' in interactive_content
 		assert "registry={__registry}" in interactive_content

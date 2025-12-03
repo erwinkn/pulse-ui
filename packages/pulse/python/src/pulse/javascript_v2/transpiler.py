@@ -13,10 +13,10 @@ This transpiler is designed for use with @javascript decorated functions.
 from __future__ import annotations
 
 import ast
-import inspect
-import textwrap
-from typing import TYPE_CHECKING, Any, Callable
+import re
+from typing import Any, Callable
 
+from pulse.javascript_v2.builtins import BUILTIN_EMITTERS, emit_method
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.nodes import (
 	ALLOWED_BINOPS,
@@ -57,9 +57,6 @@ from pulse.javascript_v2.nodes import (
 	JSWhile,
 )
 
-if TYPE_CHECKING:
-	from pulse.javascript_v2.function import JsFunction
-
 
 class JsTranspiler(ast.NodeVisitor):
 	"""AST visitor that builds a JS AST from a restricted Python subset.
@@ -75,7 +72,9 @@ class JsTranspiler(ast.NodeVisitor):
 	args: list[str]
 	rename: dict[str, str]
 	builtins: set[str]
-	modules: dict[str, type]
+	modules: dict[str, type | dict[str, Any]]
+	module_funcs: dict[str, Callable[..., JSExpr]]  # local_name -> emit callable
+	inline_exprs: dict[str, JSExpr]  # local_name -> JSExpr (for module constants)
 	locals: set[str]
 	_temp_counter: int
 
@@ -85,13 +84,17 @@ class JsTranspiler(ast.NodeVisitor):
 		args: list[str],
 		rename: dict[str, str],
 		builtins: set[str] | None = None,
-		modules: dict[str, type] | None = None,
+		modules: dict[str, type | dict[str, Any]] | None = None,
+		module_funcs: dict[str, Callable[..., JSExpr]] | None = None,
+		inline_exprs: dict[str, JSExpr] | None = None,
 	) -> None:
 		self.fndef = fndef
 		self.args = args
 		self.rename = rename
 		self.builtins = builtins or set()
 		self.modules = modules or {}
+		self.module_funcs = module_funcs or {}
+		self.inline_exprs = inline_exprs or {}
 		# Track locals for declaration decisions (args are predeclared)
 		self.locals = set(args)
 		self._temp_counter = 0
@@ -124,8 +127,12 @@ class JsTranspiler(ast.NodeVisitor):
 		return False
 
 	# --- Entrypoint ---------------------------------------------------------
-	def transpile(self) -> JSFunctionDef:
-		"""Transpile the function definition to a JS function."""
+	def transpile(self, name: str | None = None) -> JSFunctionDef:
+		"""Transpile the function definition to a JS function.
+
+		Args:
+			name: Optional function name to emit. If None, emits anonymous function.
+		"""
 		stmts: list[JSStmt] = []
 		self._temp_counter = 0
 		for i, stmt in enumerate(self.fndef.body):
@@ -139,7 +146,7 @@ class JsTranspiler(ast.NodeVisitor):
 				continue
 			s = self.emit_stmt(stmt)
 			stmts.append(s)
-		return JSFunctionDef(self.args, stmts)
+		return JSFunctionDef(self.args, stmts, name=name)
 
 	# --- Statements ----------------------------------------------------------
 	def emit_stmt(self, node: ast.stmt) -> JSStmt:
@@ -322,8 +329,9 @@ class JsTranspiler(ast.NodeVisitor):
 			# Check for module attribute access: module.attr
 			if isinstance(node.value, ast.Name) and node.value.id in self.modules:
 				return self._emit_module_attr(node.value.id, node.attr)
+			# Use emit_getattr hook for extensibility
 			value = self.emit_expr(node.value)
-			return JSMember(value, node.attr)
+			return value.emit_getattr(node.attr)
 
 		if isinstance(node, ast.Subscript):
 			return self._emit_subscript(node)
@@ -382,6 +390,9 @@ class JsTranspiler(ast.NodeVisitor):
 		# Renames take precedence (for dependencies)
 		if ident in self.rename:
 			return JSIdentifier(self.rename[ident])
+		# Inline expressions (e.g., module constants like math.pi -> Math.PI)
+		if ident in self.inline_exprs:
+			return self.inline_exprs[ident]
 		if ident in self.locals:
 			return JSIdentifier(ident)
 		# Builtins are valid identifiers (but will be handled specially in _emit_call)
@@ -530,6 +541,18 @@ class JsTranspiler(ast.NodeVisitor):
 		if isinstance(node.func, ast.Name) and node.func.id in self.builtins:
 			return self._emit_builtin_call(node.func.id, args, node)
 
+		# Check for named imports from modules: `from math import log` -> log(x)
+		if isinstance(node.func, ast.Name) and node.func.id in self.module_funcs:
+			emit_func = self.module_funcs[node.func.id]
+			# Handle keyword arguments
+			kwargs: dict[str, JSExpr] = {}
+			for kw in node.keywords:
+				if kw.arg is not None:
+					kwargs[kw.arg] = self.emit_expr(kw.value)
+			if kwargs:
+				return emit_func(*args, **kwargs)
+			return emit_func(*args)
+
 		# Check for module method call: module.func(args)
 		if isinstance(node.func, ast.Attribute):
 			# Check if the object is a registered module
@@ -545,21 +568,31 @@ class JsTranspiler(ast.NodeVisitor):
 			method = node.func.attr
 			return self._emit_method_call(obj, method, args, node)
 
-		# Function call
+		# Function call - use emit_call hook for extensibility
 		callee = self.emit_expr(node.func)
-		return JSCall(callee, args)
+		kwargs: dict[str, JSExpr] = {}
+		for kw in node.keywords:
+			if kw.arg is not None:
+				kwargs[kw.arg] = self.emit_expr(kw.value)
+		return callee.emit_call(args, kwargs)
 
 	def _emit_module_call(
 		self, module_name: str, func_name: str, args: list[JSExpr], node: ast.Call
 	) -> JSExpr:
 		"""Emit a call to a PyModule function: module.func(args)."""
-		transpiler_cls = self.modules[module_name]
+		transpiler = self.modules[module_name]
 
-		# Get the static method from the transpiler class
-		method = getattr(transpiler_cls, func_name, None)
+		# Get the method from either a class or dict transpiler
+		if isinstance(transpiler, dict):
+			method = transpiler.get(func_name)
+			transpiler_name = "dict"
+		else:
+			method = getattr(transpiler, func_name, None)
+			transpiler_name = transpiler.__name__
+
 		if method is None:
 			raise JSCompilationError(
-				f"Module '{module_name}' has no function '{func_name}'"
+				f"Module transpiler '{transpiler_name}' has no function '{func_name}'"
 			)
 
 		# Handle keyword arguments
@@ -575,10 +608,14 @@ class JsTranspiler(ast.NodeVisitor):
 
 	def _emit_module_attr(self, module_name: str, attr_name: str) -> JSExpr:
 		"""Emit a module attribute access: module.attr (e.g., math.pi)."""
-		transpiler_cls = self.modules[module_name]
+		transpiler = self.modules[module_name]
 
-		# Check if the attribute exists on the transpiler class
-		attr = getattr(transpiler_cls, attr_name, None)
+		# Get the attribute from either a class or dict transpiler
+		if isinstance(transpiler, dict):
+			attr = transpiler.get(attr_name)
+		else:
+			attr = getattr(transpiler, attr_name, None)
+
 		if attr is None:
 			raise JSCompilationError(
 				f"Module '{module_name}' has no attribute '{attr_name}'"
@@ -605,8 +642,6 @@ class JsTranspiler(ast.NodeVisitor):
 		self, name: str, args: list[JSExpr], node: ast.Call
 	) -> JSExpr:
 		"""Emit a call to a Python builtin function."""
-		from pulse.javascript_v2.builtins import BUILTIN_EMITTERS
-
 		if name not in BUILTIN_EMITTERS:
 			raise JSCompilationError(f"Unsupported builtin: {name}")
 
@@ -627,8 +662,6 @@ class JsTranspiler(ast.NodeVisitor):
 		self, obj: JSExpr, method: str, args: list[JSExpr], node: ast.Call
 	) -> JSExpr:
 		"""Emit a method call, handling Python builtin methods."""
-		from pulse.javascript_v2.builtins import emit_method
-
 		# Check for Python builtin method that needs transpilation
 		result = emit_method(obj, method, args)
 		if result is not None:
@@ -641,18 +674,23 @@ class JsTranspiler(ast.NodeVisitor):
 		"""Emit a subscript expression."""
 		value = self.emit_expr(node.value)
 
-		# Slice handling
+		# Slice handling (not passed through emit_subscript hook)
 		if isinstance(node.slice, ast.Slice):
 			return self._emit_slice(value, node.slice)
 
-		# Negative index: use .at()
+		# Negative index: use .at() (not passed through emit_subscript hook)
 		if isinstance(node.slice, ast.UnaryOp) and isinstance(node.slice.op, ast.USub):
 			idx_expr = self.emit_expr(node.slice.operand)
 			return JSMemberCall(value, "at", [JSUnary("-", idx_expr)])
 
-		# Regular subscript
-		index = self.emit_expr(node.slice)
-		return JSSubscript(value, index)
+		# Collect indices - tuple means multiple indices like x[a, b, c]
+		if isinstance(node.slice, ast.Tuple):
+			indices = [self.emit_expr(e) for e in node.slice.elts]
+		else:
+			indices = [self.emit_expr(node.slice)]
+
+		# Use emit_subscript hook for extensibility
+		return value.emit_subscript(indices)
 
 	def _emit_slice(self, value: JSExpr, slice_node: ast.Slice) -> JSExpr:
 		"""Emit a slice operation."""
@@ -730,10 +768,7 @@ class JsTranspiler(ast.NodeVisitor):
 		if not spec:
 			return expr
 
-		# Parse format spec: [[fill]align][sign][#][0][width][,][.precision][type]
-		import re
-
-		# Match Python format spec pattern
+		# Parse Python format spec: [[fill]align][sign][#][0][width][,][.precision][type]
 		pattern = r"^([^<>=^]?[<>=^])?([+\- ])?([#])?(0)?(\d+)?([,_])?(\.(\d+))?([bcdeEfFgGnosxX%])?$"
 		match = re.match(pattern, spec)
 		if not match:
@@ -967,61 +1002,3 @@ class JsTranspiler(ast.NodeVisitor):
 		raise JSCompilationError(
 			"Only name or tuple targets supported in comprehensions"
 		)
-
-
-def transpile_function(fn: JsFunction[Any, Any]) -> str:
-	"""Transpile a JsFunction to JavaScript code.
-
-	Returns the complete JavaScript function code.
-	"""
-	from pulse.javascript_v2.function import (
-		JsConstant,
-		JsFunction,
-		PyBuiltin,
-		PyModuleRef,
-	)
-
-	# Get source code
-	src = _get_function_source(fn.fn)
-	src = textwrap.dedent(src)
-
-	# Parse to AST
-	module = ast.parse(src)
-	fndefs = [n for n in module.body if isinstance(n, ast.FunctionDef)]
-	if not fndefs:
-		raise JSCompilationError("No function definition found in source")
-	fndef = fndefs[-1]
-
-	# Get argument names
-	arg_names = [arg.arg for arg in fndef.args.args]
-
-	# Build rename map, builtins set, and modules map from dependencies
-	rename: dict[str, str] = {}
-	builtins: set[str] = set()
-	modules: dict[str, type] = {}
-	for name, dep in fn.deps.items():
-		if isinstance(dep, (JsFunction, JsConstant)):
-			rename[name] = dep.js_name
-		elif isinstance(dep, PyBuiltin):
-			# PyBuiltins go to the builtins set
-			builtins.add(name)
-		elif isinstance(dep, PyModuleRef):
-			# PyModuleRefs go to the modules map
-			modules[name] = dep.transpiler
-		elif hasattr(dep, "js_name"):
-			rename[name] = dep.js_name
-
-	# Transpile
-	visitor = JsTranspiler(
-		fndef, args=arg_names, rename=rename, builtins=builtins, modules=modules
-	)
-	js_fn = visitor.transpile()
-	return js_fn.emit()
-
-
-def _get_function_source(fn: Callable[..., object]) -> str:
-	"""Get the source code of a function."""
-	try:
-		return inspect.getsource(fn)
-	except OSError as e:
-		raise JSCompilationError(f"Cannot retrieve source for {fn}: {e}") from e

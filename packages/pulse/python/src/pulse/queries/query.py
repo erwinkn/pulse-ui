@@ -33,7 +33,7 @@ from pulse.queries.common import (
 	bind_state,
 )
 from pulse.queries.effect import AsyncQueryEffect
-from pulse.reactive import AsyncEffect, Computed, Effect, Signal, Untrack
+from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.state import InitializableProperty, State
 
 T = TypeVar("T")
@@ -59,7 +59,6 @@ class Query(Generic[T], Disposable):
 	"""
 
 	key: QueryKey | None
-	fn: Callable[[], Awaitable[T]]
 	cfg: QueryConfig[T]
 
 	# Reactive signals for query state
@@ -71,14 +70,27 @@ class Query(Generic[T], Disposable):
 	retries: Signal[int]
 	retry_reason: Signal[Exception | None]
 
-	_observers: "list[QueryResult[T]]"
-	_effect: AsyncEffect | None
+	observers: "list[QueryResult[T]]"
+	active_observer: "QueryResult[T] | None"
+	effect: AsyncQueryEffect
 	_gc_handle: asyncio.TimerHandle | None
+
+	@property
+	def fn(self) -> Callable[[], Awaitable[T]]:
+		"""Get the fetch function from the active observer."""
+		if self.active_observer is None:
+			raise RuntimeError(
+				f"Query '{self.key}' has no active observer. Cannot access fetch function."
+			)
+		return self.active_observer._fetch_fn  # pyright: ignore[reportPrivateUsage]
+
+	def set_active_observer(self, observer: "QueryResult[T]"):
+		"""Set the active observer whose fetch function will be used."""
+		self.active_observer = observer
 
 	def __init__(
 		self,
 		key: QueryKey | None,
-		fn: Callable[[], Awaitable[T]],
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
 		initial_data: T | None = MISSING,
@@ -87,7 +99,6 @@ class Query(Generic[T], Disposable):
 		on_dispose: Callable[[Any], None] | None = None,
 	):
 		self.key = key
-		self.fn = fn
 		self.cfg = QueryConfig(
 			retries=retries,
 			retry_delay=retry_delay,
@@ -118,10 +129,18 @@ class Query(Generic[T], Disposable):
 		self.retries = Signal(0, name=f"query.retries({key})")
 		self.retry_reason = Signal(None, name=f"query.retry_reason({key})")
 
-		self._observers = []
+		self.observers = []
+		self.active_observer = None
 		self._gc_handle = None
-		# Effect is created lazily on first observation
-		self._effect = None
+		# Create effect as lazy so it doesn't auto-schedule.
+		# The first observer will schedule it after setting itself as active.
+		self.effect = AsyncQueryEffect(
+			self._run,
+			fetcher=self,
+			name=f"query_effect({key})",
+			deps=[] if self.key is not None else None,
+			lazy=True,
+		)
 
 	def set_data(
 		self,
@@ -185,18 +204,6 @@ class Query(Generic[T], Disposable):
 		self.retries.write(self.retries.read() + 1)
 		self.retry_reason.write(reason)
 
-	@property
-	def effect(self) -> AsyncEffect:
-		"""Lazy property that creates the query effect on first access."""
-		if self._effect is None:
-			self._effect = AsyncQueryEffect(
-				self._run,
-				fetcher=self,
-				name=f"query_effect({self.key})",
-				deps=[] if self.key is not None else None,
-			)
-		return self._effect
-
 	async def _run(self):
 		# Reset retries at start of run
 		self.retries.write(0)
@@ -206,7 +213,7 @@ class Query(Generic[T], Disposable):
 			try:
 				result = await self.fn()
 				self._set_success(result)
-				for obs in self._observers:
+				for obs in self.observers:
 					if obs._on_success:  # pyright: ignore[reportPrivateUsage]
 						await maybe_await(call_flexible(obs._on_success, result))  # pyright: ignore[reportPrivateUsage]
 				return
@@ -223,22 +230,38 @@ class Query(Generic[T], Disposable):
 					# All retries exhausted - update retry_reason to final error
 					self.retry_reason.write(e)
 					self._set_error(e)
-					for obs in self._observers:
+					for obs in self.observers:
 						if obs._on_error:  # pyright: ignore[reportPrivateUsage]
 							await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
 					return
+
+	def _ensure_active_observer(self):
+		"""Ensure there's an active observer, falling back to the first observer."""
+		if self.active_observer is None and len(self.observers) > 0:
+			self.active_observer = self.observers[0]
 
 	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""
 		Reruns the query and returns the result.
 		If cancel_refetch is True (default), cancels any in-flight request and starts a new one.
 		If cancel_refetch is False, deduplicates requests if one is already in flight.
+
+		Note: Prefer calling refetch() on QueryResult to ensure the correct fetch function is used.
+		When called directly on Query, uses the first observer's fetch function.
 		"""
+		self._ensure_active_observer()
 		if cancel_refetch or not self.is_fetching():
 			self.effect.schedule()
 		return await self.wait()
 
 	async def wait(self) -> ActionResult[T]:
+		"""
+		Wait for the query to complete and return the result.
+
+		Note: Prefer calling wait() on QueryResult to ensure the correct fetch function is used.
+		When called directly on Query, uses the first observer's fetch function.
+		"""
+		self._ensure_active_observer()
 		# If loading and no task, schedule a refetch
 		if self.status() == "loading" and not self.is_fetching():
 			self.effect.schedule()
@@ -251,26 +274,35 @@ class Query(Generic[T], Disposable):
 	def invalidate(self, cancel_refetch: bool = False):
 		"""
 		Marks query as stale. If there are active observers, triggers a refetch.
+
+		Note: Prefer calling invalidate() on QueryResult to ensure the correct fetch function is used.
+		When called directly on Query, uses the first observer's fetch function.
 		"""
+		self._ensure_active_observer()
 		should_schedule = not self.effect.is_scheduled or cancel_refetch
-		if should_schedule and len(self._observers) > 0:
+		if should_schedule and len(self.observers) > 0:
 			self.effect.schedule()
 
 	def observe(
 		self,
 		observer: "QueryResult[T]",
 	):
-		_ = self.effect  # ensure effect is created
-		self._observers.append(observer)
+		self.observers.append(observer)
 		self.cancel_gc()
 		if observer._gc_time > 0:  # pyright: ignore[reportPrivateUsage]
 			self.cfg.gc_time = max(self.cfg.gc_time, observer._gc_time)  # pyright: ignore[reportPrivateUsage]
 
 	def unobserve(self, observer: "QueryResult[T]"):
-		"""Unregister an observer. Schedules GC if no observers remain."""
-		if observer in self._observers:
-			self._observers.remove(observer)
-		if len(self._observers) == 0:
+		"""Unregister an observer. Cancels fetch if observer was active. Schedules GC if no observers remain."""
+		if observer in self.observers:
+			self.observers.remove(observer)
+
+		# Cancel in-flight fetch if this observer initiated it
+		if self.active_observer is observer and self.is_fetching():
+			self.effect.cancel(cancel_interval=False)
+			self.active_observer = None
+
+		if len(self.observers) == 0:
 			self.schedule_gc()
 
 	def schedule_gc(self):
@@ -290,8 +322,7 @@ class Query(Generic[T], Disposable):
 		"""
 		Cleans up the query entry, removing it from the store.
 		"""
-		if self._effect:
-			self._effect.dispose()
+		self.effect.dispose()
 
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
@@ -306,6 +337,7 @@ class QueryResult(Generic[T], Disposable):
 	"""
 
 	_query: Computed[Query[T]]
+	_fetch_fn: Callable[[], Awaitable[T]]
 	_stale_time: float
 	_gc_time: float
 	_refetch_interval: float | None
@@ -324,6 +356,7 @@ class QueryResult(Generic[T], Disposable):
 	def __init__(
 		self,
 		query: Computed[Query[T]],
+		fetch_fn: Callable[[], Awaitable[T]],
 		stale_time: float = 0.0,
 		gc_time: float = 300.0,
 		refetch_interval: float | None = None,
@@ -334,6 +367,7 @@ class QueryResult(Generic[T], Disposable):
 		fetch_on_mount: bool = True,
 	):
 		self._query = query
+		self._fetch_fn = fetch_fn
 		self._stale_time = stale_time
 		self._gc_time = gc_time
 		self._refetch_interval = refetch_interval
@@ -347,14 +381,16 @@ class QueryResult(Generic[T], Disposable):
 		def observe_effect():
 			query = self._query()
 			enabled = self._enabled()
+
 			with Untrack():
 				query.observe(self)
 
-			# If stale or loading, schedule refetch (only when enabled)
-			if enabled and fetch_on_mount and self.is_stale():
-				query.invalidate()
+				# If stale or loading, schedule refetch (only when enabled)
+				# Use self.invalidate() to ensure this observer's fetch function is used
+				if enabled and fetch_on_mount and self.is_stale():
+					self.invalidate()
 
-			# Return cleanup function that captures the observer
+			# Return cleanup function that captures the query (old query on key change)
 			def cleanup():
 				query.unobserve(self)
 
@@ -432,16 +468,39 @@ class QueryResult(Generic[T], Disposable):
 		return (time.time() - query.last_updated.read()) > self._stale_time
 
 	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
-		"""Refetch the query data."""
-		return await self._query().refetch(cancel_refetch=cancel_refetch)
+		"""
+		Refetch the query data using this observer's fetch function.
+		If cancel_refetch is True (default), cancels any in-flight request and starts a new one.
+		If cancel_refetch is False, deduplicates requests if one is already in flight.
+		"""
+		query = self._query()
+		if cancel_refetch or not query.is_fetching():
+			query.set_active_observer(self)
+			query.effect.schedule()
+		return await self.wait()
 
 	async def wait(self) -> ActionResult[T]:
-		return await self._query().wait()
+		"""Wait for the current query to complete."""
+		query = self._query()
+		# If loading and no task, schedule a refetch with this observer's fetch function
+		if query.status() == "loading" and not query.is_fetching():
+			query.set_active_observer(self)
+			query.effect.schedule()
+		await query.effect.wait()
+		# After waiting, set this observer as active for any subsequent operations
+		query.set_active_observer(self)
+		# Return result based on current state
+		if query.status() == "error":
+			return ActionError(cast(Exception, query.error.read()))
+		return ActionSuccess(cast(T, query.data.read()))
 
 	def invalidate(self):
-		"""Mark the query as stale and refetch if there are observers."""
+		"""Mark the query as stale and refetch using this observer's fetch function."""
 		query = self._query()
-		query.invalidate()
+		should_schedule = not query.effect.is_scheduled
+		if should_schedule and len(query.observers) > 0:
+			query.set_active_observer(self)
+			query.effect.schedule()
 
 	def set_data(self, data: T | Callable[[T | None], T]):
 		"""Optimistically set data without changing loading/error state."""
@@ -604,7 +663,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		if self._key is None:
 			# Unkeyed query: create private Query
 			query = self._resolve_unkeyed(
-				fetch_fn,
 				initial_data,
 				self._initial_data_updated_at,
 			)
@@ -612,7 +670,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			# Keyed query: use session-wide QueryStore
 			query = self._resolve_keyed(
 				state,
-				fetch_fn,
 				initial_data,
 				self._initial_data_updated_at,
 			)
@@ -620,6 +677,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		# Wrap query in QueryResult
 		result = QueryResult[T](
 			query=query,
+			fetch_fn=fetch_fn,
 			stale_time=self._stale_time,
 			keep_previous_data=self._keep_previous_data,
 			gc_time=self._gc_time,
@@ -641,7 +699,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	def _resolve_keyed(
 		self,
 		state: TState,
-		fetch_fn: Callable[[], Awaitable[T]],
 		initial_data: T | None,
 		initial_data_updated_at: float | dt.datetime | None,
 	) -> Computed[Query[T]]:
@@ -664,28 +721,27 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 
 		def query() -> Query[T]:
 			key = key_computed()
-			return store.ensure(
-				key,
-				fetch_fn,
-				initial_data,
-				initial_data_updated_at=initial_data_updated_at,
-				gc_time=self._gc_time,
-				retries=self._retries,
-				retry_delay=self._retry_delay,
-			)
+			# Use Untrack to avoid an error due to creating an Effect within a computed
+			with Untrack():
+				return store.ensure(
+					key,
+					initial_data,
+					initial_data_updated_at=initial_data_updated_at,
+					gc_time=self._gc_time,
+					retries=self._retries,
+					retry_delay=self._retry_delay,
+				)
 
 		return Computed(query, name=f"query.{self.name}")
 
 	def _resolve_unkeyed(
 		self,
-		fetch_fn: Callable[[], Awaitable[T]],
 		initial_data: T | None,
 		initial_data_updated_at: float | dt.datetime | None,
 	) -> Computed[Query[T]]:
 		"""Create a private unkeyed query."""
 		query = Query[T](
 			key=None,
-			fn=fetch_fn,
 			initial_data=initial_data,
 			initial_data_updated_at=initial_data_updated_at,
 			gc_time=self._gc_time,

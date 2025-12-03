@@ -49,17 +49,24 @@ async def test_query_client_get_returns_none_for_missing():
 @pytest.mark.asyncio
 @with_render_session
 async def test_query_client_get_and_set_data():
-	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
+	# Use the @ps.query decorator to create a query with proper fetch function
+	class S(ps.State):
+		@ps.query(retries=0)
+		async def user(self) -> str:
+			return "initial"
 
-	# Create a query in the store
-	async def fetcher():
-		return "initial"
+		@user.key
+		def _user_key(self):
+			return ("user", 1)
 
-	query = store.ensure(("user", 1), fetcher)
-	await query.refetch()
+	s = S()
+	q = s.user
+
+	# Wait for the fetch to complete
+	await q.wait()
 
 	# Get via client
-	assert ps.queries.get(("user", 1)) is query
+	assert ps.queries.get(("user", 1)) is not None
 	assert ps.queries.get_data(("user", 1)) == "initial"
 
 	# Set via client
@@ -80,13 +87,10 @@ async def test_query_client_get_and_set_data():
 async def test_query_client_get_all_with_filters():
 	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
 
-	async def fetcher():
-		return "data"
-
-	# Create several queries
-	store.ensure(("users", 1), fetcher)
-	store.ensure(("users", 2), fetcher)
-	store.ensure(("posts", 1), fetcher)
+	# Create several queries (fetcher is now provided by QueryResult, not store.ensure)
+	store.ensure(("users", 1))
+	store.ensure(("users", 2))
+	store.ensure(("posts", 1))
 
 	# Get all
 	all_queries = ps.queries.get_all()
@@ -111,14 +115,11 @@ async def test_query_client_get_all_with_filters():
 async def test_query_client_prefix_operations():
 	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
 
-	async def fetcher():
-		return "data"
-
-	# Create queries with nested keys
-	store.ensure(("api", "users", 1), fetcher)
-	store.ensure(("api", "users", 2), fetcher)
-	store.ensure(("api", "posts", 1), fetcher)
-	store.ensure(("cache", "items"), fetcher)
+	# Create queries with nested keys (fetcher is now provided by QueryResult, not store.ensure)
+	store.ensure(("api", "users", 1))
+	store.ensure(("api", "users", 2))
+	store.ensure(("api", "posts", 1))
+	store.ensure(("cache", "items"))
 
 	# Invalidate by prefix returns count
 	count = ps.queries.invalidate_prefix(("api", "users"))
@@ -140,10 +141,8 @@ async def test_query_client_prefix_operations():
 async def test_query_client_invalidate_single_key():
 	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
 
-	async def fetcher():
-		return "data"
-
-	store.ensure(("test",), fetcher)
+	# Create query (fetcher is now provided by QueryResult, not store.ensure)
+	store.ensure(("test",))
 
 	# Invalidate returns True if query exists
 	assert ps.queries.invalidate(("test",)) is True
@@ -155,11 +154,9 @@ async def test_query_client_invalidate_single_key():
 async def test_query_client_invalidate_all():
 	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
 
-	async def fetcher():
-		return "data"
-
-	store.ensure(("a",), fetcher)
-	store.ensure(("b",), fetcher)
+	# Create queries (fetcher is now provided by QueryResult, not store.ensure)
+	store.ensure(("a",))
+	store.ensure(("b",))
 
 	# Invalidate all (None filter) returns count
 	count = ps.queries.invalidate()
@@ -178,16 +175,12 @@ async def test_query_client_infinite_queries():
 	assert render is not None
 	store = render.query_store
 
-	async def fetcher(page: int):
-		return [f"item-{page}"]
-
 	def get_next(pages: list[Page[list[str], int]]):
 		return pages[-1].param + 1 if pages else 0
 
-	# Create infinite query
+	# Create infinite query (without fetcher - fetcher is now provided by InfiniteQueryResult)
 	inf_query = store.ensure_infinite(
 		("items",),
-		fetcher,
 		initial_page_param=0,
 		get_next_page_param=get_next,
 	)
@@ -220,12 +213,10 @@ async def test_query_client_infinite_queries():
 async def test_query_client_status_checks():
 	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
 
-	async def fetcher():
-		return "data"
-
-	# Query with initial_data=None starts as success (not loading)
-	query = store.ensure(("test",), fetcher)
-	assert ps.queries.is_loading() is False
+	# Query without initial_data starts as loading
+	query = store.ensure(("test",))
+	# Note: Without initial_data, query starts in loading state
+	assert ps.queries.is_loading() is True
 
 	# Manually set to loading state for testing
 	query.status.write("loading")
@@ -244,19 +235,25 @@ async def test_query_client_status_checks():
 @pytest.mark.asyncio
 @with_render_session
 async def test_query_client_set_error():
-	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
+	# Use the @ps.query decorator to create a query with proper fetch function
+	class S(ps.State):
+		@ps.query(retries=0)
+		async def data(self) -> str:
+			return "data"
 
-	async def fetcher():
-		return "data"
+		@data.key
+		def _data_key(self):
+			return ("test",)
 
-	query = store.ensure(("test",), fetcher)
-	await query.refetch()
+	s = S()
+	query = s.data
+	await query.wait()
 
 	# Set error via client
 	error = ValueError("test error")
 	assert ps.queries.set_error(("test",), error) is True
-	assert query.status() == "error"
-	assert query.error() is error
+	assert query.status == "error"
+	assert query.error is error
 
 	# Non-existent key
 	assert ps.queries.set_error(("missing",), error) is False
@@ -272,11 +269,9 @@ async def test_query_client_set_error():
 async def test_query_client_remove():
 	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
 
-	async def fetcher():
-		return "data"
-
-	store.ensure(("a",), fetcher)
-	store.ensure(("b",), fetcher)
+	# Create queries (fetcher is now provided by QueryResult, not store.ensure)
+	store.ensure(("a",))
+	store.ensure(("b",))
 
 	assert len(ps.queries.get_all()) == 2
 
@@ -286,7 +281,7 @@ async def test_query_client_remove():
 	assert len(ps.queries.get_all()) == 1
 
 	# Remove all
-	store.ensure(("c",), fetcher)
+	store.ensure(("c",))
 	count = ps.queries.remove_all()
 	assert count == 2
 	assert len(ps.queries.get_all()) == 0

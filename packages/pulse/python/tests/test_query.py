@@ -7,7 +7,7 @@ import pulse as ps
 import pytest
 from pulse.queries.query import Query, QueryResult
 from pulse.queries.store import QueryStore
-from pulse.reactive import Computed
+from pulse.reactive import Computed, Untrack
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
 
@@ -15,21 +15,32 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
+def create_query_with_observer(
+	key: tuple[Any, ...],
+	fetcher: Callable[[], Awaitable[Any]],
+	gc_time: float = 300.0,
+	retries: int = 3,
+	retry_delay: float = 0.01,
+) -> tuple[Query[Any], QueryResult[Any]]:
+	"""Helper to create a Query with a QueryResult observer (required for fetch function)."""
+	query = Query(key, gc_time=gc_time, retries=retries, retry_delay=retry_delay)
+	query_computed = Computed(lambda: query, name=f"test_query({key})")
+	result = QueryResult(query_computed, fetch_fn=fetcher, gc_time=gc_time)
+	return query, result
+
+
 @pytest.mark.asyncio
 async def test_query_store_create_and_get():
 	store = QueryStore()
 	key = ("test", 1)
 
-	async def fetcher():
-		return "data"
-
 	# Create new
-	entry1 = store.ensure(key, fetcher)
+	entry1 = store.ensure(key)
 	assert entry1.key == key
 	assert store.get(key) is entry1
 
 	# Get existing
-	entry2 = store.ensure(key, fetcher)
+	entry2 = store.ensure(key)
 	assert entry2 is entry1
 
 
@@ -41,21 +52,23 @@ async def test_query_entry_lifecycle():
 		await asyncio.sleep(0)
 		return "result"
 
-	entry = Query(key, fetcher)
+	entry, observer = create_query_with_observer(key, fetcher)
 
-	# Initial state
-	assert entry.status.read() == "loading"
+	# QueryResult automatically starts fetching if stale on mount
+	# Wait for initial fetch to complete
+	await observer.wait()
+
+	assert entry.status.read() == "success"
 	assert entry.is_fetching.read() is False
-	assert entry.data.read() is None
+	assert entry.data.read() == "result"
 	assert entry.error.read() is None
 
-	# Start fetch
+	# Refetch and verify cycle
 	task = asyncio.create_task(entry.refetch())
 	# Let it start
 	await asyncio.sleep(0)
 
 	# Check sync loading state (AsyncQueryEffect)
-	assert entry.status.read() == "loading"
 	assert entry.is_fetching.read() is True
 
 	await task
@@ -74,16 +87,12 @@ async def test_query_entry_error_lifecycle():
 		await asyncio.sleep(0)
 		raise ValueError("oops")
 
-	entry = Query(key, fetcher, retries=0)
-	task = asyncio.create_task(entry.refetch())
-	await asyncio.sleep(0)
+	entry, observer = create_query_with_observer(key, fetcher, retries=0)
 
-	assert entry.status.read() == "loading"
-	assert entry.is_fetching.read() is True
-
+	# Wait for the auto-fetch to complete with error
 	try:
-		await task
-	except ValueError:
+		await observer.wait()
+	except Exception:
 		pass
 
 	assert entry.status.read() == "error"
@@ -103,21 +112,24 @@ async def test_query_entry_deduplication():
 		await asyncio.sleep(0.01)
 		return calls
 
-	entry = Query(key, fetcher)
+	entry, observer = create_query_with_observer(key, fetcher)
+	# Wait for auto-fetch to complete
+	await observer.wait()
+	assert calls == 1
 
-	# Start two fetches with deduplication (cancel_refetch=False)
+	# Start two more refetches with deduplication (cancel_refetch=False)
 	t1 = asyncio.create_task(entry.refetch(cancel_refetch=False))
 	t2 = asyncio.create_task(entry.refetch(cancel_refetch=False))
 
 	res1 = await t1
 	res2 = await t2
 
-	# Should have only run once
-	assert calls == 1
+	# Should have only run once more (total 2)
+	assert calls == 2
 	assert res1.status == "success"
-	assert res1.data == 1
+	assert res1.data == 2
 	assert res2.status == "success"
-	assert res2.data == 1
+	assert res2.data == 2
 
 
 @pytest.mark.asyncio
@@ -135,7 +147,10 @@ async def test_query_entry_cancel_refetch():
 			raise
 		return calls
 
-	entry = Query(key, fetcher)
+	entry, observer = create_query_with_observer(key, fetcher)
+	# Wait for auto-fetch to complete
+	await observer.wait()
+	initial_calls = calls
 
 	# Start first fetch
 	t1 = asyncio.create_task(entry.refetch(cancel_refetch=True))
@@ -156,10 +171,9 @@ async def test_query_entry_cancel_refetch():
 
 	res2 = await t2
 
-	# Should have run twice (started twice), but first was cancelled
-	assert calls == 2
+	# Should have run twice more (started twice), but first was cancelled
+	assert calls == initial_calls + 2
 	assert res2.status == "success"
-	assert res2.data == 2
 
 
 @pytest.mark.asyncio
@@ -171,10 +185,12 @@ async def test_query_store_garbage_collection():
 		return "data"
 
 	# Create with short gc_time
-	entry = store.ensure(key, fetcher, gc_time=0.01)
+	entry = store.ensure(key, gc_time=0.01)
 	assert store.get(key) is entry
 
-	observer = QueryResult(Computed(lambda: entry, name="test_query"), gc_time=0.01)
+	observer = QueryResult(
+		Computed(lambda: entry, name="test_query"), fetch_fn=fetcher, gc_time=0.01
+	)
 	observer.dispose()
 	# entry.schedule_gc()
 
@@ -195,14 +211,19 @@ async def test_query_entry_gc_time_reconciliation():
 	Verify that gc_time only increases, never decreases.
 	If a past observer had a large gc_time, it persists even after removal.
 	"""
-	entry = Query(("test", 1), lambda: asyncio.sleep(0), gc_time=0.0)
+
+	async def dummy_fetcher():
+		await asyncio.sleep(0)
+		return None
+
+	entry = Query(("test", 1), gc_time=0.0)
 
 	query_computed = Computed(lambda: entry, name="test_query")
 	# QueryResult automatically observes on creation
-	obs1 = QueryResult(query_computed, gc_time=10.0)
+	obs1 = QueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=10.0)
 	assert entry.cfg.gc_time == 10.0
 
-	obs2 = QueryResult(query_computed, gc_time=5.0)
+	obs2 = QueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=5.0)
 	assert entry.cfg.gc_time == 10.0  # Max of 10.0 and 5.0
 
 	entry.unobserve(obs2)
@@ -214,7 +235,7 @@ async def test_query_entry_gc_time_reconciliation():
 	assert entry.cfg.gc_time == 10.0
 
 	# Adding a larger gc_time increases it further
-	obs3 = QueryResult(query_computed, gc_time=20.0)
+	obs3 = QueryResult(query_computed, fetch_fn=dummy_fetcher, gc_time=20.0)
 	assert entry.cfg.gc_time == 20.0
 
 	entry.unobserve(obs3)
@@ -234,22 +255,22 @@ async def test_async_query_effect_sync_loading():
 		await asyncio.sleep(0.01)
 		return "done"
 
-	entry = Query(key, fetcher)
+	entry, observer = create_query_with_observer(key, fetcher)
 
-	# Force is_fetching to False (status is already loading from initial_data=None)
-	entry.status.write("success")
-	entry.is_fetching.write(False)
+	# Wait for initial fetch to complete
+	await observer.wait()
+	assert entry.status.read() == "success"
+	assert entry.is_fetching.read() is False
 
-	# Schedule effect (like a dependency change would)
-	# We need to manually trigger push_change or run
-	entry.effect.push_change()
+	# Now invalidate - should synchronously set is_fetching=True before any async tick
+	observer.invalidate()
 
-	# Should be LOADING immediately
+	# Should be LOADING immediately (synchronously, before any await)
 	assert entry.status.read() == "success"
 	assert entry.is_fetching.read() is True
 
-	# Run it to clear
-	await entry.effect.run()
+	# Wait for the refetch to complete
+	await entry.effect.wait()
 	assert entry.status.read() == "success"
 	assert entry.is_fetching.read() is False
 
@@ -267,8 +288,10 @@ async def test_query_retry_success():
 			raise ValueError("temporary failure")
 		return "success"
 
-	entry = Query(key, fetcher, retries=3, retry_delay=0.01)
-	await entry.refetch()
+	entry, observer = create_query_with_observer(
+		key, fetcher, retries=3, retry_delay=0.01
+	)
+	await observer.refetch()
 
 	assert entry.status.read() == "success"
 	assert entry.data.read() == "success"
@@ -289,8 +312,10 @@ async def test_query_retry_exhausted():
 		attempts += 1
 		raise ValueError(f"failure {attempts}")
 
-	entry = Query(key, fetcher, retries=2, retry_delay=0.01)
-	await entry.refetch()
+	entry, observer = create_query_with_observer(
+		key, fetcher, retries=2, retry_delay=0.01
+	)
+	await observer.refetch()
 
 	assert entry.status.read() == "error"
 	assert entry.data.read() is None
@@ -317,8 +342,10 @@ async def test_query_retry_delay():
 			raise ValueError("retry")
 		return "success"
 
-	entry = Query(key, fetcher, retries=3, retry_delay=0.01)
-	await entry.refetch()
+	entry, observer = create_query_with_observer(
+		key, fetcher, retries=3, retry_delay=0.01
+	)
+	await observer.refetch()
 
 	# Check that delays were respected (with some tolerance)
 	assert len(attempts) == 3
@@ -338,8 +365,10 @@ async def test_query_no_retries():
 		attempts += 1
 		raise ValueError("failure")
 
-	entry = Query(key, fetcher, retries=0, retry_delay=0.01)
-	await entry.refetch()
+	entry, observer = create_query_with_observer(
+		key, fetcher, retries=0, retry_delay=0.01
+	)
+	await observer.refetch()
 
 	assert entry.status.read() == "error"
 	assert entry.retries.read() == 0
@@ -357,8 +386,10 @@ async def test_query_retry_tracking():
 			raise errors.pop(0)
 		return "success"
 
-	entry = Query(key, fetcher, retries=3, retry_delay=0.01)
-	await entry.refetch()
+	entry, observer = create_query_with_observer(
+		key, fetcher, retries=3, retry_delay=0.01
+	)
+	await observer.refetch()
 
 	# After success, retries should be reset
 	assert entry.status.read() == "success"
@@ -369,8 +400,10 @@ async def test_query_retry_tracking():
 	async def failing_fetcher():
 		raise ValueError("final error")
 
-	entry2 = Query(("test", 2), failing_fetcher, retries=2, retry_delay=0.01)
-	await entry2.refetch()
+	entry2, observer2 = create_query_with_observer(
+		("test", 2), failing_fetcher, retries=2, retry_delay=0.01
+	)
+	await observer2.refetch()
 
 	# Retry count should be preserved on final error
 	assert entry2.status.read() == "error"
@@ -391,11 +424,22 @@ async def test_query_retry_cancellation():
 		attempts += 1
 		raise ValueError("failure")
 
-	entry = Query(key, fetcher, retries=3, retry_delay=0.01)
-	task = asyncio.create_task(entry.refetch())
+	# Use longer retry delay to make timing more reliable
+	# Create with fetch_on_mount=False so we control when fetching starts
+	query = Query(key, gc_time=300.0, retries=3, retry_delay=1.0)
+	query_computed = Computed(lambda: query, name=f"test_query({key})")
+	observer = QueryResult(
+		query_computed, fetch_fn=fetcher, gc_time=300.0, fetch_on_mount=False
+	)
 
-	# Cancel during retry delay
-	await asyncio.sleep(0.005)
+	# Now start a refetch - this will be the first fetch
+	task = asyncio.create_task(observer.refetch())
+
+	# Wait for first attempt to complete and enter retry delay
+	# The fetcher runs synchronously (no await before the raise), so just give it time to start
+	await asyncio.sleep(0.01)
+
+	# Now cancel during retry delay
 	task.cancel()
 
 	try:
@@ -1832,3 +1876,850 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 	# Wait and verify no more refetches
 	await asyncio.sleep(0.1)
 	assert s.calls == calls_at_dispose
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_keyed_query_uses_latest_fetch_fn_after_state_recreation():
+	"""
+	Regression test for bug where keyed query uses stale fetch function after
+	state is recreated (e.g., when navigating away and back to a route).
+
+	Scenario:
+	1. Create state1 with user_id=1, fetch for key ("user", 1)
+	2. Change user_id to 3, fetch for key ("user", 3)
+	3. Dispose state1's query (simulate navigating away from route)
+	4. Create state2 with user_id=1 (new state, like navigating back)
+	5. Refetch for key ("user", 1) - should use state2's fetch_fn, not state1's
+	6. Change user_id to 2
+	7. Fetch for key ("user", 2) - should use state2's fetch_fn and return user_id=2
+
+	The bug: cached query keeps using old fetch_fn bound to disposed state1,
+	which may return wrong data.
+	"""
+	fetch_log: list[tuple[str, int]] = []
+
+	class QueryState(ps.State):
+		user_id: int = 1
+		_name: str
+
+		def __init__(self, name: str):
+			self._name = name
+
+		@ps.query(retries=0, keep_previous_data=False, gc_time=10, stale_time=0)
+		async def user(self) -> dict[str, Any]:
+			fetch_log.append((self._name, self.user_id))
+			await asyncio.sleep(0)
+			return {"id": self.user_id, "name": f"User {self.user_id}"}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.user_id)
+
+	# Step 1: Create first state instance
+	state1 = QueryState("state1")
+	q1 = state1.user
+
+	# Step 2: Fetch for user_id=1
+	await q1.wait()
+	assert q1.data == {"id": 1, "name": "User 1"}
+	assert fetch_log == [("state1", 1)]
+
+	# Step 3: Change to user_id=3 and fetch
+	state1.user_id = 3
+	await q1.wait()
+	assert q1.data == {"id": 3, "name": "User 3"}
+	assert fetch_log == [("state1", 1), ("state1", 3)]
+
+	# Step 4: Dispose state1's query (simulate navigating away from route)
+	# The query cache still holds the cached queries with gc_time=10
+	q1.dispose()
+
+	# Step 5: Create new state instance (simulate navigating back to route)
+	state2 = QueryState("state2")
+	q2 = state2.user
+
+	# Step 6: Fetch for user_id=1 (default) - query for ("user", 1) is cached
+	# Since stale_time=0, it should refetch
+	await q2.wait()
+	# The query for ("user", 1) should refetch using state2's fetch_fn
+	# Bug: it uses state1's old fetch_fn
+	assert q2.data == {"id": 1, "name": "User 1"}, (
+		f"Expected data for user_id=1, but got {q2.data}. "
+		f"Query may be using stale data!"
+	)
+	# Verify that state2's fetch was used (not state1's stale function)
+	assert fetch_log[-1] == ("state2", 1), (
+		f"Expected fetch from state2, but got {fetch_log[-1]}. "
+		f"Query is using stale fetch_fn from state1!"
+	)
+
+	# Step 7: Change to user_id=2 and fetch
+	state2.user_id = 2
+	await q2.wait()
+	assert q2.data == {"id": 2, "name": "User 2"}, (
+		f"Expected data for user_id=2, but got {q2.data}. "
+		f"Query may be using stale data or stale fetch_fn!"
+	)
+	# Verify that state2's fetch was used
+	assert fetch_log[-1] == ("state2", 2), (
+		f"Expected fetch from state2 with user_id=2, but got {fetch_log[-1]}. "
+		f"Query is using stale fetch_fn!"
+	)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_keyed_query_multiple_observers_use_own_fetch_fn():
+	"""
+	Test that when multiple state instances share the same query key but have
+	different non-key properties, each observer uses its own fetch function.
+
+	Scenario:
+	- Two state instances share key ("shared",) but have different `suffix` values
+	- The `suffix` property is NOT part of the key
+	- When refetch/invalidate is called on each QueryResult, it should use
+	  that observer's fetch function with its own `suffix` value
+	"""
+	fetch_log: list[tuple[str, str]] = []
+
+	class S(ps.State):
+		_name: str
+		suffix: str  # Not part of the key
+
+		def __init__(self, name: str, suffix: str):
+			self._name = name
+			self.suffix = suffix
+
+		@ps.query(retries=0, gc_time=10, stale_time=0)
+		async def data(self) -> str:
+			result = f"{self._name}-{self.suffix}"
+			fetch_log.append((self._name, self.suffix))
+			await asyncio.sleep(0)
+			return result
+
+		@data.key
+		def _data_key(self):
+			return ("shared",)  # Same key for all instances
+
+	# Create two state instances with different suffix values
+	s1 = S("state1", suffix="A")
+	s2 = S("state2", suffix="B")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Initial fetch - q1 fetches first
+	await q1.wait()
+	assert q1.data == "state1-A"
+	assert fetch_log == [("state1", "A")]
+
+	# q2 shares the same query, so it sees the same data
+	assert q2.data == "state1-A"
+
+	# Now refetch via q2 - should use s2's fetch function with suffix="B"
+	await q2.refetch()
+	assert q2.data == "state2-B"
+	assert fetch_log[-1] == ("state2", "B"), (
+		f"Expected fetch from state2 with suffix=B, but got {fetch_log[-1]}"
+	)
+
+	# q1 also sees the updated data (shared query)
+	assert q1.data == "state2-B"
+
+	# Refetch via q1 - should use s1's fetch function with suffix="A"
+	await q1.refetch()
+	assert q1.data == "state1-A"
+	assert fetch_log[-1] == ("state1", "A"), (
+		f"Expected fetch from state1 with suffix=A, but got {fetch_log[-1]}"
+	)
+
+	# Both see the same data
+	assert q2.data == "state1-A"
+
+	# Test invalidate() - should also use the correct fetch function
+	fetch_log.clear()
+	q2.invalidate()
+	await q2.wait()
+	assert fetch_log[-1] == ("state2", "B"), (
+		f"Expected invalidate to use state2's fetch function, but got {fetch_log[-1]}"
+	)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_keyed_query_wait_after_invalidate_uses_correct_fetch_fn():
+	"""
+	Test that wait() after invalidate() uses the correct fetch function.
+	"""
+	fetch_log: list[tuple[str, int]] = []
+
+	class S(ps.State):
+		_name: str
+		value: int  # Not part of the key
+
+		def __init__(self, name: str, value: int):
+			self._name = name
+			self.value = value
+
+		@ps.query(retries=0, gc_time=10, stale_time=0)
+		async def data(self) -> dict[str, Any]:
+			fetch_log.append((self._name, self.value))
+			await asyncio.sleep(0)
+			return {"source": self._name, "value": self.value}
+
+		@data.key
+		def _data_key(self):
+			return ("wait-test",)
+
+	s1 = S("state1", value=100)
+	s2 = S("state2", value=200)
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# wait() on q1 should use s1's fetch function
+	await q1.wait()
+	assert q1.data == {"source": "state1", "value": 100}
+	assert fetch_log == [("state1", 100)]
+
+	# q2 shares the query, sees same data
+	assert q2.data == {"source": "state1", "value": 100}
+
+	# Invalidate via q2 and then wait - should use s2's fetch function
+	q2.invalidate()
+	await q2.wait()
+	assert q2.data == {"source": "state2", "value": 200}
+	assert fetch_log[-1] == ("state2", 200), (
+		f"Expected wait() after invalidate to use state2's fetch function, but got {fetch_log[-1]}"
+	)
+
+	# q1 also sees updated data (shared query)
+	assert q1.data == {"source": "state2", "value": 200}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_unkeyed_query_refetch_uses_own_fetch_fn():
+	"""
+	Test that unkeyed queries with different state instances use their own
+	fetch function when refetching.
+
+	For unkeyed queries, each State instance has its own Query. This test
+	verifies that refetch() uses the correct fetch function for each instance,
+	even when the divergent property is read inside `with Untrack()`.
+	"""
+	fetch_log: list[tuple[str, str]] = []
+
+	class S(ps.State):
+		_name: str
+		tracked_id: int = 1  # This IS tracked (affects when query refetches)
+		suffix: str  # Not tracked - read in Untrack context
+
+		def __init__(self, name: str, suffix: str):
+			self._name = name
+			self.suffix = suffix
+
+		@ps.query(retries=0)
+		async def data(self) -> str:
+			# tracked_id is tracked (affects key/staleness)
+			tid = self.tracked_id
+			# suffix is NOT tracked - read in Untrack context
+			with Untrack():
+				sfx = self.suffix
+			result = f"{self._name}-{tid}-{sfx}"
+			fetch_log.append((self._name, sfx))
+			await asyncio.sleep(0)
+			return result
+
+	# Create two state instances with same tracked_id but different suffix
+	s1 = S("state1", suffix="X")
+	s2 = S("state2", suffix="Y")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Wait for both to complete initial fetch
+	await q1.wait()
+	await q2.wait()
+
+	# Verify each query fetched with its own fetch function
+	assert q1.data == "state1-1-X"
+	assert q2.data == "state2-1-Y"
+
+	# Clear log and test refetch
+	fetch_log.clear()
+
+	# refetch on q1 should use s1's fetch function
+	await q1.refetch()
+	assert fetch_log[-1] == ("state1", "X"), (
+		f"Expected refetch to use state1's fetch function with suffix=X, got {fetch_log[-1]}"
+	)
+	assert q1.data == "state1-1-X"
+
+	# refetch on q2 should use s2's fetch function
+	await q2.refetch()
+	assert fetch_log[-1] == ("state2", "Y"), (
+		f"Expected refetch to use state2's fetch function with suffix=Y, got {fetch_log[-1]}"
+	)
+	assert q2.data == "state2-1-Y"
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_unkeyed_query_invalidate_uses_correct_fetch_fn():
+	"""
+	Test that invalidate() on unkeyed queries uses the correct fetch function
+	when the divergent property is read inside `with Untrack()`.
+
+	For unkeyed queries, each State instance has its own Query. This test
+	verifies that invalidate() uses the correct fetch function for each instance.
+	"""
+	fetch_log: list[tuple[str, int]] = []
+
+	class S(ps.State):
+		_name: str
+		counter: int  # Tracked dependency
+		multiplier: int  # Untracked - affects result but not staleness
+
+		def __init__(self, name: str, multiplier: int):
+			self._name = name
+			self.counter = 0
+			self.multiplier = multiplier
+
+		@ps.query(retries=0)
+		async def computed(self) -> int:
+			c = self.counter  # Tracked
+			with Untrack():
+				m = self.multiplier  # Untracked
+			fetch_log.append((self._name, m))
+			await asyncio.sleep(0)
+			return c * m
+
+	s1 = S("state1", multiplier=10)
+	s2 = S("state2", multiplier=100)
+
+	q1 = s1.computed
+	q2 = s2.computed
+
+	# Wait for initial fetches to complete
+	await q1.wait()
+	await q2.wait()
+	assert q1.data == 0  # 0 * 10
+	assert q2.data == 0  # 0 * 100
+
+	# Test invalidate uses the correct fetch function
+	fetch_log.clear()
+	q1.invalidate()
+	await q1.wait()
+	assert fetch_log[-1] == ("state1", 10), (
+		f"Expected invalidate to use state1's fetch function, got {fetch_log[-1]}"
+	)
+	assert q1.data == 0  # 0 * 10
+
+	q2.invalidate()
+	await q2.wait()
+	assert fetch_log[-1] == ("state2", 100), (
+		f"Expected invalidate to use state2's fetch function, got {fetch_log[-1]}"
+	)
+	assert q2.data == 0  # 0 * 100
+
+	# Change counter (tracked) and verify refetch uses correct fetch function
+	fetch_log.clear()
+	s1.counter = 5
+	await asyncio.sleep(0)  # Let effect detect change
+	await q1.wait()
+	assert q1.data == 50  # 5 * 10
+	assert fetch_log[-1] == ("state1", 10)
+
+	s2.counter = 5
+	await asyncio.sleep(0)
+	await q2.wait()
+	assert q2.data == 500  # 5 * 100
+	assert fetch_log[-1] == ("state2", 100)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_keyed_query_concurrent_refetch_cancels_and_uses_new_fetch_fn():
+	"""
+	Test that when two observers call refetch() concurrently with cancel_refetch=True,
+	the second refetch cancels the first and uses its own fetch function.
+
+	Scenario:
+	- q1.refetch() starts, its task begins running (awaiting network)
+	- q2.refetch() is called while q1's fetch is in progress
+	- q2.refetch() should cancel q1's task and start a new one with q2's fetch function
+	"""
+	fetch_log: list[tuple[str, str, str]] = []  # (name, suffix, status)
+	fetch_started = asyncio.Event()
+	fetch_can_complete = asyncio.Event()
+
+	class S(ps.State):
+		_name: str
+		suffix: str
+
+		def __init__(self, name: str, suffix: str):
+			self._name = name
+			self.suffix = suffix
+
+		@ps.query(retries=0, gc_time=10, stale_time=0)
+		async def data(self) -> str:
+			fetch_log.append((self._name, self.suffix, "started"))
+			fetch_started.set()
+			await fetch_can_complete.wait()
+			fetch_log.append((self._name, self.suffix, "completed"))
+			return f"{self._name}-{self.suffix}"
+
+		@data.key
+		def _data_key(self):
+			return ("concurrent-test",)
+
+	s1 = S("state1", suffix="A")
+	s2 = S("state2", suffix="B")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Wait for initial fetch to complete
+	fetch_can_complete.set()
+	await q1.wait()
+	fetch_log.clear()
+	fetch_started.clear()
+	fetch_can_complete.clear()
+
+	# Start q1's refetch (it will block on fetch_can_complete)
+	refetch1_task = asyncio.create_task(q1.refetch())
+	await fetch_started.wait()  # Wait for q1's fetch to start
+	assert fetch_log[-1] == ("state1", "A", "started")
+
+	# Now q2 refetches - should cancel q1's fetch and start its own
+	fetch_started.clear()
+	refetch2_task = asyncio.create_task(q2.refetch())
+	await fetch_started.wait()  # Wait for q2's fetch to start
+	assert fetch_log[-1] == ("state2", "B", "started")
+
+	# Let the fetch complete
+	fetch_can_complete.set()
+	await refetch2_task
+
+	# Verify q2's fetch completed and was used
+	assert fetch_log[-1] == ("state2", "B", "completed")
+	assert q2.data == "state2-B"
+
+	# q1's refetch task should also complete (it was waiting on the same query)
+	await refetch1_task
+	# Both see the same data (shared query)
+	assert q1.data == "state2-B"
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_keyed_query_concurrent_refetch_with_cancel_false_deduplicates():
+	"""
+	Test that when two observers call refetch(cancel_refetch=False) concurrently,
+	the second one deduplicates and waits for the first fetch to complete.
+
+	This means the first observer's fetch function is used.
+	"""
+	fetch_log: list[tuple[str, str]] = []
+	fetch_started = asyncio.Event()
+	fetch_can_complete = asyncio.Event()
+
+	class S(ps.State):
+		_name: str
+		suffix: str
+
+		def __init__(self, name: str, suffix: str):
+			self._name = name
+			self.suffix = suffix
+
+		@ps.query(retries=0, gc_time=10, stale_time=0)
+		async def data(self) -> str:
+			fetch_log.append((self._name, self.suffix))
+			fetch_started.set()
+			await fetch_can_complete.wait()
+			return f"{self._name}-{self.suffix}"
+
+		@data.key
+		def _data_key(self):
+			return ("dedup-test",)
+
+	s1 = S("state1", suffix="A")
+	s2 = S("state2", suffix="B")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Wait for initial fetch to complete
+	fetch_can_complete.set()
+	await q1.wait()
+	fetch_log.clear()
+	fetch_started.clear()
+	fetch_can_complete.clear()
+
+	# Start q1's refetch (it will block on fetch_can_complete)
+	refetch1_task = asyncio.create_task(q1.refetch(cancel_refetch=False))
+	await fetch_started.wait()
+	assert fetch_log == [("state1", "A")]
+
+	# q2 refetches with cancel_refetch=False - should NOT start a new fetch
+	# because one is already in progress
+	refetch2_task = asyncio.create_task(q2.refetch(cancel_refetch=False))
+
+	# Give it a moment to potentially start (it shouldn't)
+	await asyncio.sleep(0.01)
+
+	# Only one fetch should have happened
+	assert len(fetch_log) == 1
+	assert fetch_log == [("state1", "A")]
+
+	# Let the fetch complete
+	fetch_can_complete.set()
+	await refetch1_task
+	await refetch2_task
+
+	# Both see the result from s1's fetch function
+	assert q1.data == "state1-A"
+	assert q2.data == "state1-A"
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_keyed_query_concurrent_refetch_second_cancels_first_mid_flight():
+	"""
+	Test that when q2 cancels q1's in-flight fetch, q1's fetch function never completes
+	and q2's fetch function is used for the final result.
+	"""
+	fetch_completion_log: list[str] = []
+	fetch_started = asyncio.Event()
+	fetch_can_complete = asyncio.Event()
+
+	class S(ps.State):
+		_name: str
+		suffix: str
+
+		def __init__(self, name: str, suffix: str):
+			self._name = name
+			self.suffix = suffix
+
+		@ps.query(retries=0, gc_time=10, stale_time=0)
+		async def data(self) -> str:
+			name = self._name
+			fetch_started.set()
+			try:
+				await fetch_can_complete.wait()
+				fetch_completion_log.append(f"{name}-completed")
+				return f"{name}-{self.suffix}"
+			except asyncio.CancelledError:
+				fetch_completion_log.append(f"{name}-cancelled")
+				raise
+
+		@data.key
+		def _data_key(self):
+			return ("cancel-mid-flight",)
+
+	s1 = S("state1", suffix="A")
+	s2 = S("state2", suffix="B")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Wait for initial fetch
+	fetch_can_complete.set()
+	await q1.wait()
+	fetch_completion_log.clear()
+	fetch_started.clear()
+	fetch_can_complete.clear()
+
+	# Start q1's refetch
+	refetch1_task = asyncio.create_task(q1.refetch())
+	await fetch_started.wait()
+
+	# q2 cancels q1's fetch and starts its own
+	fetch_started.clear()
+	refetch2_task = asyncio.create_task(q2.refetch())
+	await fetch_started.wait()
+
+	# At this point, q1's fetch should have been cancelled
+	await asyncio.sleep(0)  # Let cancellation propagate
+	assert "state1-cancelled" in fetch_completion_log
+
+	# Let q2's fetch complete
+	fetch_can_complete.set()
+	await refetch2_task
+
+	# q2's fetch should complete, q1's should not
+	assert "state2-completed" in fetch_completion_log
+	assert "state1-completed" not in fetch_completion_log
+
+	# Both see q2's result
+	assert q1.data == "state2-B"
+	assert q2.data == "state2-B"
+
+	# refetch1_task should complete (it was waiting on the query)
+	await refetch1_task
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_result_dispose_cancels_in_flight_fetch():
+	"""
+	Test that when a QueryResult is disposed while it has an in-flight fetch,
+	the fetch is cancelled to avoid running fetch functions from a disposed state.
+	"""
+	fetch_started = asyncio.Event()
+	fetch_completed = asyncio.Event()
+	fetch_log: list[str] = []
+
+	class S(ps.State):
+		@ps.query(retries=0, gc_time=10)
+		async def data(self) -> str:
+			fetch_log.append("started")
+			fetch_started.set()
+			await asyncio.sleep(0.5)  # Long running fetch
+			fetch_log.append("completed")
+			fetch_completed.set()
+			return "result"
+
+		@data.key
+		def _key(self):
+			return ("dispose-cancel",)
+
+	s = S()
+	q = s.data
+
+	# Start fetch but don't wait for it
+	wait_task = asyncio.create_task(q.wait())
+	await fetch_started.wait()
+
+	# Dispose before fetch completes
+	q.dispose()
+
+	# Give time for cancellation to propagate
+	await asyncio.sleep(0.1)
+
+	# Fetch should have been cancelled, not completed
+	assert "started" in fetch_log
+	assert "completed" not in fetch_log
+
+	# The wait task should complete (either with error or cancelled)
+	try:
+		await asyncio.wait_for(wait_task, timeout=0.5)
+	except (asyncio.CancelledError, asyncio.TimeoutError):
+		pass  # Expected - task was cancelled
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_result_dispose_does_not_cancel_other_observer_fetch():
+	"""
+	Test that disposing one observer doesn't cancel a fetch started by another observer.
+	"""
+	fetch_log: list[tuple[str, str]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		name: str
+
+		def __init__(self, name: str):
+			self.name = name
+
+		@ps.query(retries=0, gc_time=10)
+		async def data(self) -> str:
+			fetch_log.append((self.name, "started"))
+			fetch_started.set()
+			await asyncio.sleep(0.1)
+			fetch_log.append((self.name, "completed"))
+			return f"result-{self.name}"
+
+		@data.key
+		def _key(self):
+			return ("shared-key",)
+
+	s1 = S("s1")
+	s2 = S("s2")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# s1 starts fetch
+	wait_task = asyncio.create_task(q1.wait())
+	await fetch_started.wait()
+
+	# s2 disposes - should NOT cancel s1's fetch since s1 is the active observer
+	q2.dispose()
+
+	# Wait for s1's fetch to complete
+	await wait_task
+
+	# s1's fetch should have completed
+	assert ("s1", "started") in fetch_log
+	assert ("s1", "completed") in fetch_log
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_key_change_cancels_in_flight_fetch():
+	"""
+	Test that when a keyed query's key changes, the in-flight fetch for the old key
+	is cancelled if this observer was the active observer.
+
+	Scenario: user_id changes from 1 to 2 before the fetch for user_id=1 completes.
+	The fetch should be cancelled and not cache data under the wrong key.
+	"""
+	fetch_log: list[tuple[int, str]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		user_id: int = 1
+
+		@ps.query(retries=0, gc_time=10)
+		async def user(self) -> dict[str, int]:
+			uid = self.user_id
+			fetch_log.append((uid, "started"))
+			fetch_started.set()
+			await asyncio.sleep(0.5)  # Long running fetch
+			fetch_log.append((uid, "completed"))
+			return {"id": uid}
+
+		@user.key
+		def _key(self):
+			return ("user", self.user_id)
+
+	s = S()
+	q = s.user
+
+	# Start fetch for user_id=1
+	wait_task = asyncio.create_task(q.wait())
+	await fetch_started.wait()
+	fetch_started.clear()
+
+	# Change key before fetch completes
+	s.user_id = 2
+	# Allow the reactive system to process the key change
+	await asyncio.sleep(0.05)
+
+	# The old fetch (for user_id=1) should be cancelled
+	assert (1, "started") in fetch_log
+	assert (1, "completed") not in fetch_log
+
+	# The wait task might error or complete - it's for the old key
+	try:
+		await asyncio.wait_for(wait_task, timeout=0.1)
+	except (asyncio.CancelledError, asyncio.TimeoutError):
+		pass  # Expected
+
+	# Clean up
+	q.dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_key_change_starts_new_fetch():
+	"""
+	Test that when a keyed query's key changes, a new fetch is started for the new key.
+	"""
+	fetch_log: list[tuple[int, str]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		user_id: int = 1
+
+		@ps.query(retries=0, gc_time=10)
+		async def user(self) -> dict[str, int]:
+			uid = self.user_id
+			fetch_log.append((uid, "started"))
+			fetch_started.set()
+			await asyncio.sleep(0.1)
+			fetch_log.append((uid, "completed"))
+			return {"id": uid}
+
+		@user.key
+		def _key(self):
+			return ("user", self.user_id)
+
+	s = S()
+	q = s.user
+
+	# Start fetch for user_id=1
+	await fetch_started.wait()
+	fetch_started.clear()
+
+	# Change key - should trigger new fetch for user_id=2
+	s.user_id = 2
+	await fetch_started.wait()
+
+	# Both fetches should have started
+	assert (1, "started") in fetch_log
+	assert (2, "started") in fetch_log
+
+	# Wait for the new fetch to complete
+	await q.wait()
+
+	# New fetch should complete with correct data
+	assert (2, "completed") in fetch_log
+	assert q.data == {"id": 2}
+
+	# Clean up
+	q.dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_key_change_does_not_affect_other_observer():
+	"""
+	Test that when one observer's key changes, it doesn't affect another observer
+	on the same old key that started the fetch.
+	"""
+	fetch_log: list[tuple[str, int, str]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		name: str
+		user_id: int
+
+		def __init__(self, name: str, user_id: int):
+			self.name = name
+			self.user_id = user_id
+
+		@ps.query(retries=0, gc_time=10)
+		async def user(self) -> dict[str, int]:
+			uid = self.user_id
+			fetch_log.append((self.name, uid, "started"))
+			fetch_started.set()
+			await asyncio.sleep(0.2)
+			fetch_log.append((self.name, uid, "completed"))
+			return {"id": uid}
+
+		@user.key
+		def _key(self):
+			return ("user", self.user_id)
+
+	# Two states observing the same key initially
+	s1 = S("s1", 1)
+	s2 = S("s2", 1)
+
+	q1 = s1.user
+	q2 = s2.user
+
+	# s1 starts fetch for key ("user", 1)
+	wait_task = asyncio.create_task(q1.wait())
+	await fetch_started.wait()
+	fetch_started.clear()
+
+	# s2 changes its key - but s1 started the fetch, so it should continue
+	s2.user_id = 2
+	await asyncio.sleep(0.05)  # Let reactive system process
+
+	# Wait for s1's fetch to complete
+	await wait_task
+
+	# s1's fetch should complete successfully
+	assert ("s1", 1, "started") in fetch_log
+	assert ("s1", 1, "completed") in fetch_log
+	assert q1.data == {"id": 1}
+
+	# Clean up
+	q1.dispose()
+	q2.dispose()

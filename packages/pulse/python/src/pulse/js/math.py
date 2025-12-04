@@ -9,16 +9,14 @@ Usage:
     from pulse.js.math import PI, floor
     PI                # -> Math.PI
     floor(3.7)        # -> Math.floor(3.7)
+
+Note: This module is registered externally via register_js_module().
+Dynamic attribute access (__getattr__) is set up during registration.
 """
 
 from __future__ import annotations
 
-from pulse.javascript_v2.js_module import JsModuleConfig, setup_js_module
-
-# Module configuration - Math is a JavaScript builtin (no import needed)
-__js__ = JsModuleConfig.builtin("Math")
-
-# Constants
+# Constants (type stubs for IDE support)
 PI: float
 E: float
 LN2: float
@@ -29,7 +27,7 @@ SQRT1_2: float
 SQRT2: float
 
 
-# Methods
+# Methods (type stubs for IDE support)
 def abs(x: float) -> float: ...
 def acos(x: float) -> float: ...
 def acosh(x: float) -> float: ...
@@ -65,7 +63,3 @@ def sqrt(x: float) -> float: ...
 def tan(x: float) -> float: ...
 def tanh(x: float) -> float: ...
 def trunc(x: float) -> int: ...
-
-
-# Replace stubs with JSMember expressions at runtime
-setup_js_module()

@@ -168,23 +168,27 @@ class TestJsModuleTranspilation:
 
 
 class TestJsModuleConfig:
-	"""Test JsModuleConfig functionality."""
+	"""Test JsModule functionality via JS_MODULES registry."""
 
 	def test_builtin_module_config(self) -> None:
 		"""Builtin modules have no src."""
 		import pulse.js.math
+		from pulse.javascript_v2.js_module import JS_MODULES
 
-		config = pulse.js.math.__js__
+		config = JS_MODULES[pulse.js.math]
 		assert config.name == "Math"
 		assert config.is_builtin
 		assert config.src is None
 
-	def test_builtin_to_import_returns_none(self) -> None:
-		"""Builtin modules don't need imports."""
+	def test_builtin_to_js_expr_returns_identifier(self) -> None:
+		"""Builtin modules return JSIdentifier."""
 		import pulse.js.math
+		from pulse.javascript_v2.js_module import JS_MODULES
 
-		config = pulse.js.math.__js__
-		assert config.to_import() is None
+		config = JS_MODULES[pulse.js.math]
+		js_expr = config.to_js_expr()
+		assert isinstance(js_expr, JSIdentifier)
+		assert js_expr.name == "Math"
 
 
 class TestJsNumberModule:
@@ -193,8 +197,9 @@ class TestJsNumberModule:
 	def test_number_module_config(self) -> None:
 		"""Number module should be configured as builtin."""
 		import pulse.js.number
+		from pulse.javascript_v2.js_module import JS_MODULES
 
-		config = pulse.js.number.__js__
+		config = JS_MODULES[pulse.js.number]
 		assert config.name == "Number"
 		assert config.is_builtin
 		assert config.src is None

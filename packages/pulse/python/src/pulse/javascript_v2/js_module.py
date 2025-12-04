@@ -1,11 +1,13 @@
-"""Core infrastructure for pulse.js modules."""
+"""Core infrastructure for JavaScript module bindings.
+
+JS modules are Python modules that map to JavaScript modules/builtins.
+Registration is external (like Python modules) via register_js_module().
+"""
 
 from __future__ import annotations
 
-import inspect
-import sys
 from dataclasses import dataclass
-from types import FunctionType
+from types import ModuleType
 from typing import Literal
 
 from pulse.javascript_v2.imports import Import
@@ -13,7 +15,7 @@ from pulse.javascript_v2.nodes import JSIdentifier, JSMember
 
 
 @dataclass(frozen=True)
-class JsModuleConfig:
+class JsModule:
 	"""Configuration for a JavaScript module binding.
 
 	Attributes:
@@ -30,88 +32,71 @@ class JsModuleConfig:
 	def is_builtin(self) -> bool:
 		return self.src is None
 
-	@classmethod
-	def builtin(cls, name: str) -> JsModuleConfig:
-		"""Create a builtin module config (no import needed)."""
-		return cls(name=name, src=None)
+	def to_js_expr(self) -> JSIdentifier | Import:
+		"""Generate the appropriate JSExpr for this module.
 
-	@classmethod
-	def named(cls, name: str, src: str) -> JsModuleConfig:
-		"""Create a named import module: import { name } from "src" """
-		return cls(name=name, src=src, kind="named")
-
-	@classmethod
-	def default(cls, name: str, src: str) -> JsModuleConfig:
-		"""Create a default import module: import name from "src" """
-		return cls(name=name, src=src, kind="default")
-
-	@classmethod
-	def namespace(cls, name: str, src: str) -> JsModuleConfig:
-		"""Create a namespace import: import * as name from "src" """
-		return cls(name=name, src=src, kind="namespace")
-
-	def to_import(self) -> Import | None:
-		"""Generate an Import object for non-builtin modules.
-
-		Returns None for builtin modules (no import needed).
+		Returns JSIdentifier for builtins, Import for external modules.
 		"""
 		if self.is_builtin:
-			return None
-
-		from pulse.javascript_v2.imports import Import
+			return JSIdentifier(self.name)
 
 		assert self.src is not None
 		if self.kind == "default":
 			return Import.default(self.name, self.src)
 		elif self.kind == "namespace":
-			# Namespace imports use default import mechanics with a different emit
-			return Import.default(self.name, self.src)
+			return Import.namespace(self.name, self.src)
 		else:  # named
 			return Import.named(self.name, self.src)
 
 
-def setup_js_module() -> None:
-	"""Call at end of a pulse.js.* module to replace stubs with JSMember expressions.
+# Registry: Python module -> JsModule config
+JS_MODULES: dict[ModuleType, JsModule] = {}
 
-	Expects __js__ to be defined at module level with a JsModuleConfig.
 
-	This replaces all public functions and uninitialized annotations with
-	JSMember instances for use in transpilation.
+def register_js_module(
+	module: ModuleType,
+	*,
+	name: str,
+	src: str | None = None,
+	kind: Literal["named", "default", "namespace"] = "named",
+) -> None:
+	"""Register a Python module as a JavaScript module binding.
+
+	This function:
+	1. Creates a JsModule config and adds it to JS_MODULES
+	2. Sets up __getattr__ on the module for dynamic attribute access
+
+	Args:
+		module: The Python module to register (e.g., pulse.js.math)
+		name: The JavaScript identifier (e.g., "Math")
+		src: Import source path. None for builtins.
+		kind: Import kind - "named", "default", or "namespace"
+
+	Example:
+		import pulse.js.math as math_module
+		register_js_module(math_module, name="Math")  # builtin
+		register_js_module(lodash_module, name="_", src="lodash", kind="default")
 	"""
+	js_module = JsModule(name=name, src=src, kind=kind)
+	JS_MODULES[module] = js_module
 
-	# Get the calling module
-	frame = inspect.currentframe()
-	assert frame is not None and frame.f_back is not None
-	caller_globals = frame.f_back.f_globals
-	module = sys.modules[caller_globals["__name__"]]
+	# Delete all public functions so everything goes through __getattr__
+	from types import FunctionType
 
-	# Get the JsModuleConfig from the module
-	config = caller_globals.get("__js__")
-	if not isinstance(config, JsModuleConfig):
-		raise RuntimeError(
-			f"Module {module.__name__} must define __js__ = JsModuleConfig(...) before calling setup_js_module()"
-		)
-
-	# Replace functions with JSMember
-	for name in list(vars(module)):
-		if name.startswith("_"):
+	for attr_name in list(vars(module)):
+		if attr_name.startswith("_"):
 			continue
-		value = getattr(module, name)
-		if isinstance(value, FunctionType):
-			setattr(module, name, JSMember(JSIdentifier(config.name), name))
+		if isinstance(getattr(module, attr_name), FunctionType):
+			delattr(module, attr_name)
 
-	# Handle annotated but unassigned attributes
-	annotations = getattr(module, "__annotations__", {})
-	for name in annotations:
-		if name.startswith("_"):
-			continue
-		if not hasattr(module, name) or getattr(module, name) is None:
-			setattr(module, name, JSMember(JSIdentifier(config.name), name))
+	# Clear annotations (they're just for IDE hints, not runtime values)
+	if hasattr(module, "__annotations__"):
+		module.__annotations__.clear()
 
-	# Set up __getattr__ for dynamic access
+	# Set up __getattr__ - all attribute access now goes through here
 	def __getattr__(name: str) -> JSMember:
 		if name.startswith("_"):
 			raise AttributeError(name)
-		return JSMember(JSIdentifier(config.name), name)
+		return JSMember(JSIdentifier(js_module.name), name)
 
 	module.__getattr__ = __getattr__  # type: ignore[method-assign]

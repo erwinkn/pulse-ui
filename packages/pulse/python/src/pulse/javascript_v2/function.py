@@ -24,8 +24,8 @@ from pulse.javascript_v2.context import is_interpreted_mode
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.ids import generate_id
 from pulse.javascript_v2.imports import Import
-from pulse.javascript_v2.js_module import JsModuleConfig
-from pulse.javascript_v2.nodes import JSExpr, JSIdentifier
+from pulse.javascript_v2.js_module import JS_MODULES
+from pulse.javascript_v2.nodes import JSExpr
 from pulse.javascript_v2.py_module import (
 	PY_MODULE_VALUES,
 	PY_MODULES,
@@ -66,9 +66,6 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 		builtin_dict = builtins.__dict__
 		deps: dict[str, JSExpr] = {}
 
-		print("Analyzing JsFunction deps")
-		print("Registered Python modules:", [m.__name__ for m in PY_MODULES])
-
 		for name in all_names:
 			if name in builtin_dict:
 				# Python builtins -> PyBuiltinExpr
@@ -85,18 +82,9 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 			if isinstance(value, JSExpr):
 				deps[name] = value
 			elif inspect.ismodule(value):
-				if hasattr(value, "__js__"):
-					# import pulse.js.math as Math
-					config = cast(JsModuleConfig, value.__js__)
-					if config.src is None:
-						deps[name] = JSIdentifier(config.name)
-					else:
-						if config.kind == "default":
-							deps[name] = Import.default(config.name, config.src)
-						elif config.kind == "namespace":
-							deps[name] = Import.namespace(config.name, config.src)
-						else:
-							deps[name] = Import.named(config.name, config.src)
+				if value in JS_MODULES:
+					# import pulse.js.math as Math -> JSIdentifier or Import
+					deps[name] = JS_MODULES[value].to_js_expr()
 				elif value in PY_MODULES:
 					deps[name] = PyModuleExpr(PY_MODULES[value])
 				else:
@@ -107,11 +95,8 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 					)
 
 			elif id(value) in PY_MODULE_VALUES:
-				transpiler = PY_MODULE_VALUES[id(value)]
-				if isinstance(transpiler, JSExpr):
-					deps[name] = transpiler
-				else:
-					deps[name] = PyModuleFuncExpr(transpiler)
+				# PY_MODULE_VALUES always contains JSExpr (wrapping happens in py_module.py)
+				deps[name] = PY_MODULE_VALUES[id(value)]
 			elif inspect.isfunction(value):
 				deps[name] = javascript(value)
 			elif callable(value):

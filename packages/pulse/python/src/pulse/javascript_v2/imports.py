@@ -113,15 +113,19 @@ class Import(JSExpr):
 		"name",
 		"src",
 		"is_default",
+		"is_namespace",
 		"is_type_only",
 		"before",
 		"id",
 		"source_path",
 	)
 
+	is_primary: bool = True
+
 	name: str
 	src: str
 	is_default: bool
+	is_namespace: bool
 	is_type_only: bool
 	before: tuple[str, ...]
 	id: str
@@ -133,6 +137,7 @@ class Import(JSExpr):
 		src: str,
 		*,
 		is_default: bool = False,
+		is_namespace: bool = False,
 		is_type_only: bool = False,
 		before: Sequence[str] = (),
 		source_path: Path | None = None,
@@ -140,13 +145,16 @@ class Import(JSExpr):
 		self.name = name
 		self.src = src
 		self.is_default = is_default
+		self.is_namespace = is_namespace
 		self.source_path = source_path
 
 		before_tuple = tuple(before)
 
-		# Dedupe key: for default/side-effect imports, only src matters
+		# Dedupe key: for default/side-effect/namespace imports, only src matters
 		key: _ImportKey = (
-			("", src, is_default) if (is_default or name == "") else (name, src, False)
+			("", src, is_default or is_namespace)
+			if (is_default or is_namespace or name == "")
+			else (name, src, False)
 		)
 
 		if key in _REGISTRY:
@@ -209,6 +217,22 @@ class Import(JSExpr):
 		)
 
 	@classmethod
+	def namespace(
+		cls,
+		name: str,
+		src: str,
+		*,
+		before: Sequence[str] = (),
+	) -> "Import":
+		"""Create a namespace import: import * as name from src."""
+		return cls(
+			name,
+			src,
+			is_namespace=True,
+			before=before,
+		)
+
+	@classmethod
 	def type_(
 		cls,
 		name: str,
@@ -260,6 +284,8 @@ class Import(JSExpr):
 		parts = [f"name={self.name!r}", f"src={self.src!r}"]
 		if self.is_default:
 			parts.append("is_default=True")
+		if self.is_namespace:
+			parts.append("is_namespace=True")
 		if self.is_type_only:
 			parts.append("is_type_only=True")
 		if self.source_path:

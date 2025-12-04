@@ -53,11 +53,24 @@ class JSExpr(JSNode, ABC):
 	This enables extensibility for things like JSX elements.
 	"""
 
+	# Set to True for expressions that emit JSX (should not be wrapped in {})
+	is_jsx: bool = False
+
+	# Set to True for expressions that have primary precedence (identifiers, literals, etc.)
+	# Used by expr_precedence to determine if parenthesization is needed
+	is_primary: bool = False
+
 	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
 		"""Called when this expression is used as a function: expr(args).
 
 		Override to customize call behavior. Default emits JSCall(self, args)
 		and rejects keyword arguments.
+
+		The kwargs dict maps prop names to JSExpr values:
+		- "propName" -> JSExpr for named kwargs
+		- "$spread{N}" -> JSSpread(expr) for **spread kwargs
+
+		Dict order is preserved, so iteration order matches source order.
 		"""
 		if kwargs:
 			raise JSCompilationError(
@@ -90,6 +103,7 @@ class JSStmt(JSNode, ABC):
 @dataclass
 class JSIdentifier(JSExpr):
 	name: str
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -99,6 +113,7 @@ class JSIdentifier(JSExpr):
 @dataclass
 class JSString(JSExpr):
 	value: str
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -123,6 +138,7 @@ class JSString(JSExpr):
 @dataclass
 class JSNumber(JSExpr):
 	value: int | float
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -132,6 +148,7 @@ class JSNumber(JSExpr):
 @dataclass
 class JSBoolean(JSExpr):
 	value: bool
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -140,6 +157,8 @@ class JSBoolean(JSExpr):
 
 @dataclass
 class JSNull(JSExpr):
+	is_primary: bool = True
+
 	@override
 	def emit(self) -> str:
 		return "null"
@@ -147,6 +166,8 @@ class JSNull(JSExpr):
 
 @dataclass
 class JSUndefined(JSExpr):
+	is_primary: bool = True
+
 	@override
 	def emit(self) -> str:
 		return "undefined"
@@ -155,6 +176,7 @@ class JSUndefined(JSExpr):
 @dataclass
 class JSArray(JSExpr):
 	elements: Sequence[JSExpr]
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -194,6 +216,7 @@ class JSComputedProp(JSExpr):
 @dataclass
 class JSObjectExpr(JSExpr):
 	props: Sequence[JSProp | JSComputedProp | JSSpread]
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -295,6 +318,7 @@ class JSTemplate(JSExpr):
 	# parts are either raw strings (literal text) or JSExpr instances which are
 	# emitted inside ${...}
 	parts: Sequence[str | JSExpr]
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -330,6 +354,26 @@ class JSMember(JSExpr):
 	def emit(self) -> str:
 		obj_code = _emit_child_for_primary(self.obj)
 		return f"{obj_code}.{self.prop}"
+
+	@override
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		"""Called when this member is used as a function: obj.prop(args).
+
+		Returns JSMemberCall for method call syntax.
+
+		Note: While JSCall(JSMember(...)) would emit identically, we use JSMemberCall
+		for semantic clarity and easier pattern matching (e.g., checking if a call is
+		a method call via isinstance(x, JSMemberCall) rather than checking if the callee
+		is a JSMember).
+		"""
+		if kwargs:
+			raise JSCompilationError("Keyword arguments not supported in method call")
+		return JSMemberCall(self.obj, self.prop, args)
+
+	def __call__(self, *args: object) -> "JSMemberCall":
+		"""Call this member as a method, returning a JSMemberCall expression."""
+		js_args = [to_js_expr(arg) for arg in args]
+		return JSMemberCall(self.obj, self.prop, js_args)
 
 
 @dataclass
@@ -423,6 +467,7 @@ class JSAssign(JSStmt):
 @dataclass
 class JSRaw(JSExpr):
 	content: str
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -480,6 +525,8 @@ class JSXElement(JSExpr):
 	tag: str | JSExpr
 	props: Sequence[JSXProp | JSXSpreadProp] = tuple()
 	children: Sequence[str | JSExpr | "JSXElement"] = tuple()
+	is_jsx: bool = True
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -497,7 +544,7 @@ class JSXElement(JSExpr):
 		for c in self.children:
 			if isinstance(c, str):
 				child_parts.append(_escape_jsx_text(c))
-			elif isinstance(c, JSXElement):
+			elif isinstance(c, JSXElement) or (isinstance(c, JSExpr) and c.is_jsx):
 				child_parts.append(c.emit())
 			else:
 				child_parts.append("{" + c.emit() + "}")
@@ -508,6 +555,8 @@ class JSXElement(JSExpr):
 @dataclass
 class JSXFragment(JSExpr):
 	children: Sequence[str | JSExpr | JSXElement] = tuple()
+	is_jsx: bool = True
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -518,7 +567,7 @@ class JSXFragment(JSExpr):
 		for c in self.children:
 			if isinstance(c, str):
 				parts.append(_escape_jsx_text(c))
-			elif isinstance(c, JSXElement):
+			elif isinstance(c, JSXElement) or (isinstance(c, JSExpr) and c.is_jsx):
 				parts.append(c.emit())
 			else:
 				parts.append("{" + c.emit() + "}")
@@ -595,9 +644,6 @@ def op_is_right_associative(op: str) -> bool:
 
 
 def expr_precedence(e: JSExpr) -> int:
-	# Required to avoid circular import
-	from pulse.javascript_v2.imports import Import
-
 	if isinstance(e, JSBinary):
 		return op_precedence(e.op)
 	if isinstance(e, JSUnary):
@@ -613,25 +659,8 @@ def expr_precedence(e: JSExpr) -> int:
 	# Nullish now represented as JSBinary with op "??"; precedence resolved below
 	if isinstance(e, (JSMember, JSSubscript, JSCall, JSMemberCall, JSNew)):
 		return op_precedence(".")
-	# Treat primitives and containers as primary
-	if isinstance(
-		e,
-		(
-			JSIdentifier,
-			JSString,
-			JSNumber,
-			JSBoolean,
-			JSNull,
-			JSUndefined,
-			JSArray,
-			JSObjectExpr,
-			JSTemplate,
-			JSRaw,
-			JSXElement,
-			JSXFragment,
-			Import,
-		),
-	):
+	# Primary expressions (identifiers, literals, containers) don't need parens
+	if e.is_primary:
 		return PRIMARY_PRECEDENCE
 	return 0
 

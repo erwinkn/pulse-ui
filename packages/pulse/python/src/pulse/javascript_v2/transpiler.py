@@ -14,12 +14,10 @@ from __future__ import annotations
 
 import ast
 import re
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
 
-from pulse.javascript_v2.builtins import BUILTIN_EMITTERS, emit_method
-from pulse.javascript_v2.constants import JsConstant
+from pulse.javascript_v2.builtins import emit_method
 from pulse.javascript_v2.errors import JSCompilationError
-from pulse.javascript_v2.imports import Import
 from pulse.javascript_v2.nodes import (
 	ALLOWED_BINOPS,
 	ALLOWED_CMPOPS,
@@ -58,30 +56,18 @@ from pulse.javascript_v2.nodes import (
 	JSUndefined,
 	JSWhile,
 )
-from pulse.javascript_v2.types import (
-	JsModuleRef,
-	PyBuiltin,
-	PyModuleFunctionRef,
-	PyModuleRef,
-)
-from pulse.js._core import JsValue
-
-if TYPE_CHECKING:
-	from collections.abc import Callable
-
-	from pulse.javascript_v2.function import JsDep
 
 
 class JsTranspiler(ast.NodeVisitor):
 	"""AST visitor that builds a JS AST from a restricted Python subset.
 
-	The visitor receives a deps dictionary mapping names to their dependency types.
-	It dispatches based on the type of dependency when emitting names and calls.
+	The visitor receives a deps dictionary mapping names to JSExpr values.
+	Behavior is encoded in JSExpr subclass hooks (emit_call, emit_getattr, emit_subscript).
 	"""
 
 	fndef: ast.FunctionDef
 	args: list[str]
-	deps: dict[str, JsDep]
+	deps: dict[str, JSExpr]
 	locals: set[str]
 	_temp_counter: int
 
@@ -89,7 +75,7 @@ class JsTranspiler(ast.NodeVisitor):
 		self,
 		fndef: ast.FunctionDef,
 		args: list[str],
-		deps: dict[str, JsDep],
+		deps: dict[str, JSExpr],
 	) -> None:
 		self.fndef = fndef
 		self.args = args
@@ -334,10 +320,14 @@ class JsTranspiler(ast.NodeVisitor):
 			return self._emit_fstring(node)
 
 		if isinstance(node, ast.ListComp):
-			return self._emit_list_comprehension(node)
+			return self._emit_comprehension_chain(
+				node.generators, lambda: self.emit_expr(node.elt)
+			)
 
 		if isinstance(node, ast.GeneratorExp):
-			return self._emit_generator_expr(node)
+			return self._emit_comprehension_chain(
+				node.generators, lambda: self.emit_expr(node.elt)
+			)
 
 		if isinstance(node, ast.SetComp):
 			arr = self._emit_comprehension_chain(
@@ -379,38 +369,21 @@ class JsTranspiler(ast.NodeVisitor):
 		raise JSCompilationError(f"Unsupported constant type: {type(v).__name__}")
 
 	def _emit_name(self, node: ast.Name) -> JSExpr:
-		"""Emit a name reference."""
-		ident = node.id
+		"""Emit a name reference.
 
-		# Check deps first - dispatch based on type
-		if ident in self.deps:
-			dep = self.deps[ident]
-			# Import JsFunction here to avoid circular import at module level
-			from pulse.javascript_v2.function import JsFunction
+		All dependencies are JSExpr subclasses. Behavior is encoded in hooks.
+		"""
+		name = node.id
 
-			if isinstance(dep, (JsFunction, JsConstant, Import)):
-				# These have js_name - emit as renamed identifier
-				return JSIdentifier(dep.js_name)
-			elif isinstance(dep, JsValue):
-				# Value imported from pulse.js.* module
-				# e.g., `from pulse.js.math import PI` -> `Math.PI`
-				return JSMember(JSIdentifier(dep._config.name), dep._name)
-			elif isinstance(dep, JsModuleRef):
-				# pulse.js.* module imported as a whole
-				# e.g., `import pulse.js.math as Math` -> `Math`
-				return JSIdentifier(dep.config.name)
-			elif isinstance(dep, JSExpr):
-				# Direct JSExpr (e.g., module constants like math.pi -> Math.PI)
-				return dep
-			elif isinstance(dep, (PyBuiltin, PyModuleRef, PyModuleFunctionRef)):
-				# These are handled specially in _emit_call, just return identifier
-				return JSIdentifier(ident)
+		# Check deps first - all are JSExpr
+		if name in self.deps:
+			return self.deps[name]
 
 		# Local variable
-		if ident in self.locals:
-			return JSIdentifier(ident)
+		if name in self.locals:
+			return JSIdentifier(name)
 
-		raise JSCompilationError(f"Unbound name referenced: {ident}")
+		raise JSCompilationError(f"Unbound name referenced: {name}")
 
 	def _emit_list_or_tuple(self, node: ast.List | ast.Tuple) -> JSExpr:
 		"""Emit a list or tuple literal."""
@@ -537,7 +510,10 @@ class JsTranspiler(ast.NodeVisitor):
 		return membership_expr
 
 	def _emit_call(self, node: ast.Call) -> JSExpr:
-		"""Emit a function call."""
+		"""Emit a function call.
+
+		All behavior is encoded in JSExpr.emit_call hooks.
+		"""
 		# Handle typing.cast: ignore type argument, return value unchanged
 		if isinstance(node.func, ast.Name) and node.func.id == "cast":
 			if len(node.args) >= 2:
@@ -545,161 +521,69 @@ class JsTranspiler(ast.NodeVisitor):
 			raise JSCompilationError("typing.cast requires two arguments")
 
 		args = [self.emit_expr(a) for a in node.args]
-		kwargs: dict[str, JSExpr]
+		kwargs = self._build_kwargs(node)
 
-		# Check if callee is a known dependency
-		if isinstance(node.func, ast.Name) and node.func.id in self.deps:
-			dep = self.deps[node.func.id]
-
-			# PyBuiltin - use builtin emitter
-			if isinstance(dep, PyBuiltin):
-				return self._emit_builtin_call(dep.name, args, node)
-
-			# PyModuleFunctionRef - call the emit function directly
-			if isinstance(dep, PyModuleFunctionRef):
-				kwargs = {}
-				for kw in node.keywords:
-					if kw.arg is not None:
-						kwargs[kw.arg] = self.emit_expr(kw.value)
-				if kwargs:
-					return dep.emit(*args, **kwargs)
-				return dep.emit(*args)
-
-			# JsValue - function from pulse.js.* module
-			# e.g., `from pulse.js.math import floor; floor(x)` -> `Math.floor(x)`
-			if isinstance(dep, JsValue):
-				return JSMemberCall(JSIdentifier(dep._config.name), dep._name, args)
-
-		# Check for module method call: module.func(args)
+		# Check for method call: obj.method(args)
+		# Use emit_getattr then emit_call so module functions work correctly
 		if isinstance(node.func, ast.Attribute):
-			# Check if the object is a registered module
-			if (
-				isinstance(node.func.value, ast.Name)
-				and node.func.value.id in self.deps
-			):
-				dep = self.deps[node.func.value.id]
-				if isinstance(dep, PyModuleRef):
-					return self._emit_module_call(dep, node.func.attr, args, node)
-
-				# JsModuleRef - pulse.js.* module method call
-				# e.g., `import pulse.js.math as Math; Math.floor(x)` -> `Math.floor(x)`
-				if isinstance(dep, JsModuleRef):
-					return JSMemberCall(
-						JSIdentifier(dep.config.name), node.func.attr, args
-					)
-
 			obj = self.emit_expr(node.func.value)
-			method = node.func.attr
-			return self._emit_method_call(obj, method, args, node)
+			method_expr = obj.emit_getattr(node.func.attr)
+			# If it's a PyModuleFuncExpr or similar, use emit_call hook
+			# Otherwise, use standard method call transpilation
+			if hasattr(method_expr, "emit_fn") or not self._is_standard_member(
+				method_expr
+			):
+				return method_expr.emit_call(args, kwargs)
+			# Standard method call - check for Python builtin methods
+			return self._emit_method_call(obj, node.func.attr, args, kwargs)
 
-		# Function call - use emit_call hook for extensibility
+		# Function call - use emit_call hook
 		callee = self.emit_expr(node.func)
-		kwargs = {}
-		for kw in node.keywords:
-			if kw.arg is not None:
-				kwargs[kw.arg] = self.emit_expr(kw.value)
 		return callee.emit_call(args, kwargs)
 
-	def _emit_module_call(
-		self,
-		module_ref: PyModuleRef,
-		func_name: str,
-		args: list[JSExpr],
-		node: ast.Call,
-	) -> JSExpr:
-		"""Emit a call to a PyModule function: module.func(args)."""
-		transpiler = module_ref.transpiler
+	def _is_standard_member(self, expr: JSExpr) -> bool:
+		"""Check if expr is a standard JSMember that should use method call transpilation."""
+		return isinstance(expr, JSMember)
 
-		# Get the method from dict transpiler
-		method = transpiler.get(func_name)
+	def _build_kwargs(self, node: ast.Call) -> dict[str, JSExpr]:
+		"""Build kwargs dict from AST Call node.
 
-		if method is None:
-			raise JSCompilationError(f"Module transpiler has no function '{func_name}'")
+		Returns a dict mapping:
+		- "propName" -> JSExpr for named kwargs
+		- "$spread{N}" -> JSSpread(expr) for **spread kwargs
 
-		if not callable(method):
-			raise JSCompilationError(
-				f"Module transpiler attribute '{func_name}' is not callable"
-			)
-
-		# Handle keyword arguments
+		Dict order is preserved (Python 3.7+), so iteration order matches source order.
+		Uses $ prefix for spreads since it's not a valid Python identifier.
+		"""
 		kwargs: dict[str, JSExpr] = {}
-		for kw in node.keywords:
-			if kw.arg is not None:
-				kwargs[kw.arg] = self.emit_expr(kw.value)
+		spread_count = 0
 
-		# Call the transpiler method with args
-		if kwargs:
-			return method(*args, **kwargs)
-		return method(*args)
+		for kw in node.keywords:
+			if kw.arg is None:
+				# **kwargs spread - use invalid Python identifier to avoid conflicts
+				kwargs[f"$spread{spread_count}"] = JSSpread(self.emit_expr(kw.value))
+				spread_count += 1
+			else:
+				kwargs[kw.arg] = self.emit_expr(kw.value)
+		return kwargs
 
 	def _emit_attribute(self, node: ast.Attribute) -> JSExpr:
-		"""Emit an attribute access."""
-		# Check for module attribute access: module.attr
-		if isinstance(node.value, ast.Name) and node.value.id in self.deps:
-			dep = self.deps[node.value.id]
-			if isinstance(dep, PyModuleRef):
-				return self._emit_module_attr(dep, node.attr)
+		"""Emit an attribute access.
 
-			# JsModuleRef - pulse.js.* module attribute access
-			# e.g., `import pulse.js.math as Math; Math.PI` -> `Math.PI`
-			if isinstance(dep, JsModuleRef):
-				return JSMember(JSIdentifier(dep.config.name), node.attr)
-
-		# Use emit_getattr hook for extensibility
+		All behavior is encoded in JSExpr.emit_getattr hooks.
+		"""
 		value = self.emit_expr(node.value)
 		return value.emit_getattr(node.attr)
 
-	def _emit_module_attr(self, module_ref: PyModuleRef, attr_name: str) -> JSExpr:
-		"""Emit a module attribute access: module.attr (e.g., math.pi)."""
-		transpiler = module_ref.transpiler
-
-		# Get the attribute from dict transpiler
-		attr = transpiler.get(attr_name)
-
-		if attr is None:
-			raise JSCompilationError(f"Module has no attribute '{attr_name}'")
-
-		# If it's a JSExpr (constant), return it directly
-		if isinstance(attr, JSExpr):
-			return attr
-
-		# If it's a callable (function with no args for constants), call it
-		if callable(attr):
-			result = attr()
-			if isinstance(result, JSExpr):
-				return result
-			raise JSCompilationError(
-				f"Module attribute '{attr_name}' callable did not return JSExpr"
-			)
-
-		raise JSCompilationError(
-			f"Module attribute '{attr_name}' is not a valid JSExpr or callable"
-		)
-
-	def _emit_builtin_call(
-		self, name: str, args: list[JSExpr], node: ast.Call
-	) -> JSExpr:
-		"""Emit a call to a Python builtin function."""
-		if name not in BUILTIN_EMITTERS:
-			raise JSCompilationError(f"Unsupported builtin: {name}")
-
-		emitter = BUILTIN_EMITTERS[name]
-
-		# Handle keyword arguments for builtins that support them
-		kwargs: dict[str, JSExpr] = {}
-		for kw in node.keywords:
-			if kw.arg is not None:
-				kwargs[kw.arg] = self.emit_expr(kw.value)
-
-		# Call the emitter with args and kwargs
-		if kwargs:
-			return emitter(*args, **kwargs)
-		return emitter(*args)
-
 	def _emit_method_call(
-		self, obj: JSExpr, method: str, args: list[JSExpr], node: ast.Call
+		self, obj: JSExpr, method: str, args: list[JSExpr], kwargs: dict[str, JSExpr]
 	) -> JSExpr:
 		"""Emit a method call, handling Python builtin methods."""
+		if kwargs:
+			raise JSCompilationError(
+				f"Keyword arguments not supported for method call .{method}()"
+			)
+
 		# Check for Python builtin method that needs transpilation
 		result = emit_method(obj, method, args)
 		if result is not None:
@@ -972,18 +856,6 @@ class JsTranspiler(ast.NodeVisitor):
 		else:
 			return JSArrowFunction(f"({', '.join(params)})", body)
 
-	def _emit_list_comprehension(self, node: ast.ListComp) -> JSExpr:
-		"""Emit a list comprehension."""
-		return self._emit_comprehension_chain(
-			node.generators, lambda: self.emit_expr(node.elt)
-		)
-
-	def _emit_generator_expr(self, node: ast.GeneratorExp) -> JSExpr:
-		"""Emit a generator expression (as an array)."""
-		return self._emit_comprehension_chain(
-			node.generators, lambda: self.emit_expr(node.elt)
-		)
-
 	def _emit_comprehension_chain(
 		self,
 		generators: list[ast.comprehension],
@@ -1001,11 +873,23 @@ class JsTranspiler(ast.NodeVisitor):
 				raise JSCompilationError("Async comprehensions are not supported")
 
 			iter_expr = self.emit_expr(gen.iter)
-			param_code, names = self._arrow_param_from_target(gen.target)
+			# Get arrow function parameter code and variable names from a target
+			if isinstance(gen.target, ast.Name):
+				param_code = gen.target.id
+				names = [gen.target.id]
+			elif isinstance(gen.target, ast.Tuple) and all(
+				isinstance(e, ast.Name) for e in gen.target.elts
+			):
+				names = [e.id for e in gen.target.elts if isinstance(e, ast.Name)]
+				param_code = f"([{', '.join(names)}])"
+			else:
+				raise JSCompilationError(
+					"Only name or tuple targets supported in comprehensions"
+				)
 			for nm in names:
 				self.locals.add(nm)
 
-			base: JSExpr = iter_expr
+			base = iter_expr
 
 			# Apply filters
 			if gen.ifs:
@@ -1027,16 +911,3 @@ class JsTranspiler(ast.NodeVisitor):
 			return build_chain(0)
 		finally:
 			self.locals = saved_locals
-
-	def _arrow_param_from_target(self, target: ast.expr) -> tuple[str, list[str]]:
-		"""Get arrow function parameter code and variable names from a target."""
-		if isinstance(target, ast.Name):
-			return target.id, [target.id]
-		if isinstance(target, ast.Tuple) and all(
-			isinstance(e, ast.Name) for e in target.elts
-		):
-			names = [e.id for e in target.elts if isinstance(e, ast.Name)]
-			return f"([{', '.join(names)}])", names
-		raise JSCompilationError(
-			"Only name or tuple targets supported in comprehensions"
-		)

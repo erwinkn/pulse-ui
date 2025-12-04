@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import TypeAlias
+from typing import TypeAlias, override
 
+from pulse.javascript_v2.context import is_interpreted_mode
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.ids import generate_id
 from pulse.javascript_v2.nodes import (
@@ -22,8 +23,10 @@ JsVar: TypeAlias = "JsValue | JSExpr"
 CONSTANTS_CACHE: dict[int, "JsConstant"] = {}  # id(value) -> JsConstant
 
 
-class JsConstant:
+class JsConstant(JSExpr):
 	"""Wrapper for constant values used in transpiled JS functions."""
+
+	is_primary: bool = True
 
 	value: object
 	expr: JSExpr
@@ -40,6 +43,18 @@ class JsConstant:
 	def js_name(self) -> str:
 		"""Unique JS identifier for this constant."""
 		return f"{self.name}_{self.id}" if self.name else f"_const_{self.id}"
+
+	@override
+	def emit(self) -> str:
+		"""Emit JS code for this constant.
+
+		In normal mode: returns the unique JS name (e.g., "CONSTANT_1")
+		In interpreted mode: returns a get_object call (e.g., "get_object('CONSTANT_1')")
+		"""
+		base = self.js_name
+		if is_interpreted_mode():
+			return f"get_object('{base}')"
+		return base
 
 
 def _value_to_expr(value: JsValue) -> JSExpr:

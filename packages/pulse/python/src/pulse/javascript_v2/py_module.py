@@ -6,11 +6,77 @@ For direct JavaScript module bindings, use the pulse.js.* module system instead.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from types import ModuleType
-from typing import Any
+from typing import Any, TypeAlias, override
 
+from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.nodes import JSExpr
-from pulse.javascript_v2.types import PyModuleTranspiler
+
+# Type alias for module transpilers - either a PyModule class or a dict
+PyModuleTranspiler: TypeAlias = dict[str, "JSExpr | Callable[..., JSExpr]"]
+
+
+@dataclass
+class PyModuleExpr(JSExpr):
+	"""JSExpr for a Python module imported as a whole (e.g., `import math`).
+
+	Holds a transpiler dict mapping attribute names to JSExpr or callables.
+	Attribute access looks up the attr in the dict and returns the result.
+	"""
+
+	transpiler: dict[str, JSExpr | Callable[..., JSExpr]]
+
+	@override
+	def emit(self) -> str:
+		raise JSCompilationError("PyModuleExpr cannot be emitted directly")
+
+	@override
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		raise JSCompilationError("PyModuleExpr cannot be called directly")
+
+	@override
+	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+		raise JSCompilationError("PyModuleExpr cannot be subscripted")
+
+	@override
+	def emit_getattr(self, attr: str) -> JSExpr:
+		method = self.transpiler.get(attr)
+		if method is None:
+			raise JSCompilationError(f"Module has no attribute '{attr}'")
+		if isinstance(method, JSExpr):
+			return method
+		# It's a callable (function) - wrap in PyModuleFuncExpr for call
+		return PyModuleFuncExpr(method)
+
+
+@dataclass
+class PyModuleFuncExpr(JSExpr):
+	"""JSExpr for a function imported from a Python module (e.g., `from math import log`).
+
+	Holds the emit callable that generates the JS AST when called.
+	"""
+
+	emit_fn: Callable[..., JSExpr]
+
+	@override
+	def emit(self) -> str:
+		raise JSCompilationError("PyModuleFuncExpr cannot be emitted directly")
+
+	@override
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		if kwargs:
+			return self.emit_fn(*args, **kwargs)
+		return self.emit_fn(*args)
+
+	@override
+	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+		raise JSCompilationError("PyModuleFuncExpr cannot be subscripted")
+
+	@override
+	def emit_getattr(self, attr: str) -> JSExpr:
+		raise JSCompilationError("PyModuleFuncExpr cannot have attributes")
 
 
 class PyModule:

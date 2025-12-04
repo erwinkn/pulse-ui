@@ -6,8 +6,7 @@ import pytest
 from pulse.javascript_v2.constants import CONSTANTS_CACHE
 from pulse.javascript_v2.function import FUNCTION_CACHE, javascript
 from pulse.javascript_v2.imports import clear_import_registry
-from pulse.javascript_v2.types import JsModuleRef
-from pulse.js._core import JsValue
+from pulse.javascript_v2.nodes import JSIdentifier, JSMember
 
 
 # Clear caches between tests
@@ -22,7 +21,7 @@ class TestJsModuleDetection:
 	"""Test dependency detection for pulse.js.* modules."""
 
 	def test_detects_js_module_import(self) -> None:
-		"""Test: import pulse.js.math as Math"""
+		"""Test: import pulse.js.math as Math -> JSIdentifier("Math")"""
 		import pulse.js.math as Math
 
 		@javascript
@@ -31,12 +30,12 @@ class TestJsModuleDetection:
 
 		assert "Math" in fn.deps
 		dep = fn.deps["Math"]
-		assert isinstance(dep, JsModuleRef)
-		assert dep.config.name == "Math"
-		assert dep.config.is_builtin
+		# Builtin modules resolve to JSIdentifier with the module name
+		assert isinstance(dep, JSIdentifier)
+		assert dep.name == "Math"
 
 	def test_detects_js_value_function_import(self) -> None:
-		"""Test: from pulse.js.math import floor"""
+		"""Test: from pulse.js.math import floor -> JSMember(JSIdentifier(Math), floor)"""
 		from pulse.js.math import floor
 
 		@javascript
@@ -45,10 +44,14 @@ class TestJsModuleDetection:
 
 		assert "floor" in fn.deps
 		dep = fn.deps["floor"]
-		assert isinstance(dep, JsValue)
+		# JSMember is now used directly
+		assert isinstance(dep, JSMember)
+		assert dep.prop == "floor"
+		assert isinstance(dep.obj, JSIdentifier)
+		assert dep.obj.name == "Math"
 
 	def test_detects_js_value_constant_import(self) -> None:
-		"""Test: from pulse.js.math import PI"""
+		"""Test: from pulse.js.math import PI -> JSMember(JSIdentifier(Math), PI)"""
 		from pulse.js.math import PI
 
 		@javascript
@@ -57,7 +60,10 @@ class TestJsModuleDetection:
 
 		assert "PI" in fn.deps
 		dep = fn.deps["PI"]
-		assert isinstance(dep, JsValue)
+		assert isinstance(dep, JSMember)
+		assert dep.prop == "PI"
+		assert isinstance(dep.obj, JSIdentifier)
+		assert dep.obj.name == "Math"
 
 	def test_detects_multiple_js_value_imports(self) -> None:
 		"""Test: from pulse.js.math import floor, PI, sin"""
@@ -71,7 +77,7 @@ class TestJsModuleDetection:
 		assert "sin" in fn.deps
 		assert "PI" in fn.deps
 		for name in ["floor", "sin", "PI"]:
-			assert isinstance(fn.deps[name], JsValue)
+			assert isinstance(fn.deps[name], JSMember)
 
 
 class TestJsModuleTranspilation:
@@ -161,38 +167,6 @@ class TestJsModuleTranspilation:
 		assert "Math.PI" in js
 
 
-class TestJsValueRuntimeBehavior:
-	"""Test that JsValue raises appropriately at runtime."""
-
-	def test_jsvalue_raises_on_call(self) -> None:
-		"""JsValue should raise when called at runtime."""
-		from pulse.js.math import floor
-
-		with pytest.raises(Exception, match="cannot be called at runtime"):
-			floor(3.5)
-
-	def test_jsvalue_raises_on_property_access(self) -> None:
-		"""JsValue should raise on attribute access."""
-		from pulse.js.math import PI
-
-		with pytest.raises(Exception, match="cannot be accessed at runtime"):
-			_ = PI.something  # pyright: ignore[reportAttributeAccessIssue]
-
-	def test_jsvalue_raises_on_arithmetic(self) -> None:
-		"""JsValue should raise on arithmetic operations."""
-		from pulse.js.math import PI
-
-		with pytest.raises(Exception, match="cannot be used in expression at runtime"):
-			_ = PI + 1
-
-	def test_jsvalue_raises_on_comparison(self) -> None:
-		"""JsValue should raise on comparison operations."""
-		from pulse.js.math import PI
-
-		with pytest.raises(Exception, match="cannot be compared at runtime"):
-			_ = PI == 3.14
-
-
 class TestJsModuleConfig:
 	"""Test JsModuleConfig functionality."""
 
@@ -226,7 +200,7 @@ class TestJsNumberModule:
 		assert config.src is None
 
 	def test_number_module_import(self) -> None:
-		"""Test: import pulse.js.number as Number"""
+		"""Test: import pulse.js.number as Number -> JSIdentifier("Number")"""
 		import pulse.js.number as Number
 
 		@javascript
@@ -235,11 +209,11 @@ class TestJsNumberModule:
 
 		assert "Number" in fn.deps
 		dep = fn.deps["Number"]
-		assert isinstance(dep, JsModuleRef)
-		assert dep.config.name == "Number"
+		assert isinstance(dep, JSIdentifier)
+		assert dep.name == "Number"
 
 	def test_number_function_import(self) -> None:
-		"""Test: from pulse.js.number import isFinite"""
+		"""Test: from pulse.js.number import isFinite -> JSMember(JSIdentifier(Number), isFinite)"""
 		from pulse.js.number import isFinite
 
 		@javascript
@@ -248,10 +222,13 @@ class TestJsNumberModule:
 
 		assert "isFinite" in fn.deps
 		dep = fn.deps["isFinite"]
-		assert isinstance(dep, JsValue)
+		assert isinstance(dep, JSMember)
+		assert dep.prop == "isFinite"
+		assert isinstance(dep.obj, JSIdentifier)
+		assert dep.obj.name == "Number"
 
 	def test_number_constant_import(self) -> None:
-		"""Test: from pulse.js.number import EPSILON"""
+		"""Test: from pulse.js.number import EPSILON -> JSMember(JSIdentifier(Number), EPSILON)"""
 		from pulse.js.number import EPSILON
 
 		@javascript
@@ -260,7 +237,10 @@ class TestJsNumberModule:
 
 		assert "EPSILON" in fn.deps
 		dep = fn.deps["EPSILON"]
-		assert isinstance(dep, JsValue)
+		assert isinstance(dep, JSMember)
+		assert dep.prop == "EPSILON"
+		assert isinstance(dep.obj, JSIdentifier)
+		assert dep.obj.name == "Number"
 
 	def test_transpiles_number_method_call(self) -> None:
 		"""Test: Number.isFinite(x) -> Number.isFinite(x)"""

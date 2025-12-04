@@ -7,6 +7,8 @@ This module provides transpilation for Python builtins to JavaScript.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import override
 
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.nodes import (
@@ -338,6 +340,40 @@ BUILTIN_EMITTERS: dict[str, Callable[..., JSExpr]] = {
 	"divmod": emit_divmod,
 	"isinstance": emit_isinstance,
 }
+
+
+@dataclass
+class PyBuiltin(JSExpr):
+	"""JSExpr for a Python builtin (e.g., `len`, `range`, `print`).
+
+	Holds the builtin name and uses BUILTIN_EMITTERS to generate JS.
+	"""
+
+	name: str
+
+	@override
+	def emit(self) -> str:
+		raise JSCompilationError(
+			f"PyBuiltinExpr '{self.name}' cannot be emitted directly"
+		)
+
+	@override
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		if self.name not in BUILTIN_EMITTERS:
+			raise JSCompilationError(f"Unsupported builtin: {self.name}")
+
+		emitter = BUILTIN_EMITTERS[self.name]
+		if kwargs:
+			return emitter(*args, **kwargs)
+		return emitter(*args)
+
+	@override
+	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+		raise JSCompilationError(f"PyBuiltinExpr '{self.name}' cannot be subscripted")
+
+	@override
+	def emit_getattr(self, attr: str) -> JSExpr:
+		raise JSCompilationError(f"PyBuiltinExpr '{self.name}' cannot have attributes")
 
 
 # =============================================================================

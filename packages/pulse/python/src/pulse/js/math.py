@@ -13,7 +13,7 @@ Usage:
 
 from __future__ import annotations
 
-from pulse.js._core import JsModuleConfig, setup_js_module
+from pulse.javascript_v2.js_module import JsModuleConfig, setup_js_module
 
 # Module configuration - Math is a JavaScript builtin (no import needed)
 __js__ = JsModuleConfig.builtin("Math")
@@ -67,5 +67,5 @@ def tanh(x: float) -> float: ...
 def trunc(x: float) -> int: ...
 
 
-# Replace stubs with JsValue markers at runtime
+# Replace stubs with JSMember expressions at runtime
 setup_js_module()

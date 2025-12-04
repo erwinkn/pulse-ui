@@ -14,7 +14,7 @@ from pulse.app import App
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.codegen.templates.route import generate_route
 from pulse.components.react_router import Outlet
-from pulse.javascript_v2.imports import clear_import_registry
+from pulse.javascript_v2.imports import Import, clear_import_registry
 from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
 from pulse.routing import Route, RouteTree
 from pulse.vdom import Component, component
@@ -408,6 +408,21 @@ class TestGenerateRoute:
 
 		# Should only have one import statement
 		assert result.count('from "@mantine/core"') == 1
+
+	def test_generate_route_with_namespace_import(self):
+		"""Test route generation with namespace import."""
+		ns_import = Import.namespace("Icons", "lucide-react")
+
+		result = generate_route(
+			path="/icons",
+			imports=[ns_import],
+		)
+
+		# Should generate: import * as Icons_X from "lucide-react";
+		assert "import * as Icons_" in result
+		assert 'from "lucide-react"' in result
+		# Should be in the registry
+		assert '"Icons_' in result
 
 
 if __name__ == "__main__":

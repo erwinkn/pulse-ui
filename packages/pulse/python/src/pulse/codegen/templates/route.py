@@ -15,6 +15,7 @@ from pulse.react_component import ReactComponent
 def _generate_import_statement(src: str, imports: list[Import]) -> str:
 	"""Generate import statement(s) for a source module."""
 	default_imports: list[Import] = []
+	namespace_imports: list[Import] = []
 	named_imports: list[Import] = []
 	type_imports: list[Import] = []
 	has_side_effect = False
@@ -22,6 +23,8 @@ def _generate_import_statement(src: str, imports: list[Import]) -> str:
 	for imp in imports:
 		if imp.is_side_effect:
 			has_side_effect = True
+		elif imp.is_namespace:
+			namespace_imports.append(imp)
 		elif imp.is_default:
 			if imp.is_type_only:
 				type_imports.append(imp)
@@ -34,6 +37,11 @@ def _generate_import_statement(src: str, imports: list[Import]) -> str:
 				named_imports.append(imp)
 
 	lines: list[str] = []
+
+	# Namespace import (only one allowed per source)
+	if namespace_imports:
+		imp = namespace_imports[0]
+		lines.append(f'import * as {imp.js_name} from "{src}";')
 
 	# Default import (only one allowed per source)
 	if default_imports:
@@ -59,6 +67,7 @@ def _generate_import_statement(src: str, imports: list[Import]) -> str:
 	if (
 		has_side_effect
 		and not default_imports
+		and not namespace_imports
 		and not named_imports
 		and not type_imports
 	):

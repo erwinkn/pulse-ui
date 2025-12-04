@@ -284,22 +284,18 @@ class TestToJsExpr:
 class TestComplexExpressions:
 	"""Tests for complex expression scenarios."""
 
-	@pytest.mark.skip(reason="JSMember.__call__ not yet implemented")
 	def test_method_call_on_import(self) -> None:
 		"""Method call on import (chained member + call)."""
-		# Note: This requires JSMember to implement __call__
 		React = Import.default("React", "react")
 		# React.createElement("div")
-		call = React.createElement("div")  # pyright: ignore[reportCallIssue]
+		call = React.createElement("div")
 		result = call.emit()
 		assert f'React_{React.id}.createElement("div")' == result
 
-	@pytest.mark.skip(reason="JSMember.__call__ not yet implemented")
 	def test_method_call_interpreted(self) -> None:
 		"""Method call in interpreted mode."""
-		# Note: This requires JSMember to implement __call__
 		React = Import.default("React", "react")
-		call = React.createElement("div")  # pyright: ignore[reportCallIssue]
+		call = React.createElement("div")
 		with interpreted_mode():
 			result = call.emit()
 		assert f"get_object('React_{React.id}').createElement(\"div\")" == result

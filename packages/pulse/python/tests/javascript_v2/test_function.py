@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pulse.javascript_v2.builtins import PyBuiltin
 from pulse.javascript_v2.constants import CONSTANTS_CACHE, JsConstant
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.function import (
@@ -12,7 +13,6 @@ from pulse.javascript_v2.function import (
 )
 from pulse.javascript_v2.imports import Import, clear_import_registry
 from pulse.javascript_v2.nodes import JSArray, JSNumber, JSString
-from pulse.javascript_v2.types import PyBuiltin
 
 
 # Clear caches between tests
@@ -46,6 +46,21 @@ def test_multiple_imports() -> None:
 	assert len(imports) == 2
 	assert imports["import_a"] is import_a
 	assert imports["import_b"] is import_b
+
+
+def test_namespace_import() -> None:
+	ns_import = Import.namespace("Foo", "foo-package")
+
+	@javascript
+	def fn() -> int:
+		return ns_import  # pyright: ignore[reportReturnType]
+
+	imports = fn.imports()
+	assert len(imports) == 1
+	assert imports["ns_import"] is ns_import
+	assert ns_import.is_namespace is True
+	assert ns_import.is_default is False
+	assert ns_import.name == "Foo"
 
 
 def test_detects_numeric_constant() -> None:
@@ -238,7 +253,7 @@ def test_nested_function_deps_captured() -> None:
 
 
 def test_builtins_become_pybuiltin() -> None:
-	"""Builtins are wrapped as PyBuiltin placeholders."""
+	"""Builtins are wrapped as PyBuiltin."""
 
 	@javascript
 	def fn(items: list[int]) -> int:

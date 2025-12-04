@@ -117,8 +117,8 @@ class Codegen:
 		# Ensure generated files are gitignored
 		ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
 
-		self._copied_css_files: set[Path] = set()
-		self._css_dest_paths: dict[str, Path] = {}
+		self._copied_css_files = set()
+		self._css_dest_paths = {}
 
 		# Copy all registered CSS files to the output css directory
 		self._copy_css_files()

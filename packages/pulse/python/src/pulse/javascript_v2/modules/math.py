@@ -1,9 +1,13 @@
-"""JavaScript Math module bindings."""
+"""Python math module transpilation to JavaScript Math.
 
-from typing import ClassVar
+This module provides transpilation from Python's `math` module to JavaScript's `Math` object.
+For direct JavaScript Math bindings, use `pulse.js.math` instead.
+"""
+
+# pyright: reportUnannotatedClassAttribute=false
 
 from pulse.javascript_v2.constants import jsify
-from pulse.javascript_v2.module import JsModule, PyModule
+from pulse.javascript_v2.module import PyModule
 from pulse.javascript_v2.nodes import (
 	JSBinary,
 	JSExpr,
@@ -13,130 +17,6 @@ from pulse.javascript_v2.nodes import (
 	JSNumber,
 	JSUnary,
 )
-
-
-class Math(JsModule):
-	"""JavaScript Math object bindings.
-
-	Type hints match Python semantics for use in @javascript functions.
-	At runtime, accessing any method/property raises JsModuleError.
-	"""
-
-	# Constants
-	E: ClassVar[float]
-	LN2: ClassVar[float]
-	LN10: ClassVar[float]
-	LOG2E: ClassVar[float]
-	LOG10E: ClassVar[float]
-	PI: ClassVar[float]
-	SQRT1_2: ClassVar[float]
-	SQRT2: ClassVar[float]
-
-	# Methods
-	@staticmethod
-	def abs(x: float) -> float: ...
-
-	@staticmethod
-	def acos(x: float) -> float: ...
-
-	@staticmethod
-	def acosh(x: float) -> float: ...
-
-	@staticmethod
-	def asin(x: float) -> float: ...
-
-	@staticmethod
-	def asinh(x: float) -> float: ...
-
-	@staticmethod
-	def atan(x: float) -> float: ...
-
-	@staticmethod
-	def atan2(y: float, x: float) -> float: ...
-
-	@staticmethod
-	def atanh(x: float) -> float: ...
-
-	@staticmethod
-	def cbrt(x: float) -> float: ...
-
-	@staticmethod
-	def ceil(x: float) -> int: ...
-
-	@staticmethod
-	def clz32(x: int) -> int: ...
-
-	@staticmethod
-	def cos(x: float) -> float: ...
-
-	@staticmethod
-	def cosh(x: float) -> float: ...
-
-	@staticmethod
-	def exp(x: float) -> float: ...
-
-	@staticmethod
-	def expm1(x: float) -> float: ...
-
-	@staticmethod
-	def floor(x: float) -> int: ...
-
-	@staticmethod
-	def fround(x: float) -> float: ...
-
-	@staticmethod
-	def hypot(*values: float) -> float: ...
-
-	@staticmethod
-	def imul(x: int, y: int) -> int: ...
-
-	@staticmethod
-	def log(x: float) -> float: ...
-
-	@staticmethod
-	def log10(x: float) -> float: ...
-
-	@staticmethod
-	def log1p(x: float) -> float: ...
-
-	@staticmethod
-	def log2(x: float) -> float: ...
-
-	@staticmethod
-	def max(*values: float) -> float: ...
-
-	@staticmethod
-	def min(*values: float) -> float: ...
-
-	@staticmethod
-	def pow(x: float, y: float) -> float: ...
-
-	@staticmethod
-	def random() -> float: ...
-
-	@staticmethod
-	def round(x: float) -> int: ...
-
-	@staticmethod
-	def sign(x: float) -> int: ...
-
-	@staticmethod
-	def sin(x: float) -> float: ...
-
-	@staticmethod
-	def sinh(x: float) -> float: ...
-
-	@staticmethod
-	def sqrt(x: float) -> float: ...
-
-	@staticmethod
-	def tan(x: float) -> float: ...
-
-	@staticmethod
-	def tanh(x: float) -> float: ...
-
-	@staticmethod
-	def trunc(x: float) -> int: ...
 
 
 # Helper for generating Math method calls during transpilation

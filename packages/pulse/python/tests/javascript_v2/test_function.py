@@ -8,11 +8,11 @@ from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.function import (
 	FUNCTION_CACHE,
 	JsFunction,
-	PyBuiltin,
 	javascript,
 )
 from pulse.javascript_v2.imports import Import, clear_import_registry
 from pulse.javascript_v2.nodes import JSArray, JSNumber, JSString
+from pulse.javascript_v2.types import PyBuiltin
 
 
 # Clear caches between tests

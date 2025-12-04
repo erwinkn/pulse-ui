@@ -1292,6 +1292,7 @@ from pulse.html.tags import (
 from pulse.javascript_v2.function import javascript as javascript
 from pulse.javascript_v2.imports import CssImport as CssImport
 from pulse.javascript_v2.imports import Import as Import
+from pulse.javascript_v2.imports import import_js as import_js
 from pulse.messages import ClientMessage as ClientMessage
 from pulse.messages import Directives as Directives
 from pulse.messages import Prerender as Prerender

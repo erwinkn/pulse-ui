@@ -439,8 +439,8 @@ def _check_not_interpreted_mode(node_type: str) -> None:
 	if is_interpreted_mode():
 		raise ValueError(
 			f"{node_type} cannot be used in interpreted mode (as a prop or child value). "
-			"JSX syntax requires transpilation and cannot be evaluated at runtime. "
-			"Use standard VDOM elements (ps.div, ps.span, etc.) instead."
+			+ "JSX syntax requires transpilation and cannot be evaluated at runtime. "
+			+ "Use standard VDOM elements (ps.div, ps.span, etc.) instead."
 		)
 
 
@@ -824,9 +824,9 @@ def to_js_expr(value: object) -> JSExpr:
 
 	# Collections
 	if isinstance(value, (list, tuple)):
-		return JSArray([to_js_expr(v) for v in value])
+		return JSArray([to_js_expr(v) for v in value])  # pyright: ignore[reportUnknownArgumentType]
 	if isinstance(value, dict):
-		props = [JSProp(JSString(str(k)), to_js_expr(v)) for k, v in value.items()]
+		props = [JSProp(JSString(str(k)), to_js_expr(v)) for k, v in value.items()]  # pyright: ignore[reportUnknownArgumentType]
 		return JSObjectExpr(props)
 
 	raise TypeError(f"Cannot convert {type(value).__name__} to JSExpr")

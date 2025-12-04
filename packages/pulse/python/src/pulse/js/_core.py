@@ -5,7 +5,10 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from types import FunctionType
-from typing import Any, Final, Literal, final, override
+from typing import TYPE_CHECKING, Any, Final, Literal, final, override
+
+if TYPE_CHECKING:
+	from pulse.javascript_v2.imports import Import
 
 
 class JsModuleError(Exception):
@@ -50,28 +53,58 @@ class JsModuleConfig:
 		"""Create a namespace import: import * as name from "src" """
 		return cls(name=name, src=src, kind="namespace")
 
+	def to_import(self) -> Import | None:
+		"""Generate an Import object for non-builtin modules.
+
+		Returns None for builtin modules (no import needed).
+		"""
+		if self.is_builtin:
+			return None
+
+		from pulse.javascript_v2.imports import Import
+
+		assert self.src is not None
+		if self.kind == "default":
+			return Import.default(self.name, self.src)
+		elif self.kind == "namespace":
+			# Namespace imports use default import mechanics with a different emit
+			return Import.default(self.name, self.src)
+		else:  # named
+			return Import.named(self.name, self.src)
+
 
 @final
 class JsValue:
-	"""A marker for a JavaScript value. Raises on any operation."""
+	"""A marker for a JavaScript value. Raises on any operation.
 
-	__slots__: Final = ("_module", "_name")
+	Contains all information needed for transpilation:
+	- config: The JsModuleConfig for the parent module
+	- name: The value/function name within the module
 
-	def __init__(self, module: str, name: str) -> None:
-		self._module = module
-		self._name = name
+	During transpilation, this becomes JSMember(config.name, name) for properties
+	or JSMemberCall(config.name, name, args) for function calls.
+	"""
+
+	__slots__: Final = ("config", "name")
+	config: JsModuleConfig
+	name: str
+
+	def __init__(self, config: JsModuleConfig, name: str) -> None:
+		self.config = config
+		self.name = name
+
+	@property
+	def js_module_name(self) -> str:
+		"""The JavaScript module name (e.g., 'Math')."""
+		return self.config.name
 
 	def _error(self, op: str = "accessed") -> JsModuleError:
-		module = object.__getattribute__(self, "_module")
-		name = object.__getattribute__(self, "_name")
-		msg = f"pulse.js.{module}.{name} cannot be {op} at runtime. Use only within @javascript decorated functions."
+		msg = f"{self.config.name}.{self.name} cannot be {op} at runtime. Use only within @javascript decorated functions."
 		return JsModuleError(msg)
 
 	@override
 	def __repr__(self) -> str:
-		module = object.__getattribute__(self, "_module")
-		name = object.__getattribute__(self, "_name")
-		return f"<JsValue {module}.{name}>"
+		return f"<JsValue {self.config.name}.{self.name}>"
 
 	# Raise on any operation
 	def __getattr__(self, name: str) -> Any:
@@ -160,9 +193,7 @@ class JsValue:
 	@override
 	def __hash__(self) -> int:
 		# Allow hashing so it can be used in sets/dicts for tracking
-		module = object.__getattribute__(self, "_module")
-		name = object.__getattribute__(self, "_name")
-		return hash((module, name))
+		return hash((self.config.name, self.name))
 
 
 def setup_js_module() -> None:
@@ -181,8 +212,12 @@ def setup_js_module() -> None:
 	caller_globals = frame.f_back.f_globals
 	module = sys.modules[caller_globals["__name__"]]
 
-	# Short name for JsValue (e.g., "math")
-	short_name = module.__name__.rsplit(".", 1)[-1]
+	# Get the JsModuleConfig from the module
+	config = caller_globals.get("__js__")
+	if not isinstance(config, JsModuleConfig):
+		raise RuntimeError(
+			f"Module {module.__name__} must define __js__ = JsModuleConfig(...) before calling setup_js_module()"
+		)
 
 	# Replace functions with JsValue
 	for name in list(vars(module)):
@@ -190,7 +225,7 @@ def setup_js_module() -> None:
 			continue
 		value = getattr(module, name)
 		if isinstance(value, FunctionType):
-			setattr(module, name, JsValue(short_name, name))
+			setattr(module, name, JsValue(config, name))
 
 	# Handle annotated but unassigned attributes
 	annotations = getattr(module, "__annotations__", {})
@@ -198,12 +233,12 @@ def setup_js_module() -> None:
 		if name.startswith("_"):
 			continue
 		if not hasattr(module, name) or getattr(module, name) is None:
-			setattr(module, name, JsValue(short_name, name))
+			setattr(module, name, JsValue(config, name))
 
 	# Set up __getattr__ for dynamic access
 	def __getattr__(name: str) -> JsValue:
 		if name.startswith("_"):
 			raise AttributeError(name)
-		return JsValue(short_name, name)
+		return JsValue(config, name)
 
 	module.__getattr__ = __getattr__  # type: ignore[method-assign]

@@ -1,6 +1,4 @@
 """
-NOTE: experimental setup for JS modules in the transpilation process
-
 JavaScript Math builtin module.
 
 Usage:

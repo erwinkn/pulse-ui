@@ -354,6 +354,8 @@ BUILTIN_EMITTERS: dict[str, Callable[..., JSExpr]] = {
 class StringMethods:
 	"""String method transpilation."""
 
+	this: JSExpr
+
 	def __init__(self, obj: JSExpr) -> None:
 		self.this = obj
 
@@ -418,6 +420,8 @@ STR_METHODS = {k for k in StringMethods.__dict__ if not k.startswith("_")}
 class ListMethods:
 	"""List method transpilation."""
 
+	this: JSExpr
+
 	def __init__(self, obj: JSExpr) -> None:
 		self.this = obj
 
@@ -473,6 +477,8 @@ LIST_METHODS = {k for k in ListMethods.__dict__ if not k.startswith("_")}
 class DictMethods:
 	"""Dict (Map) method transpilation."""
 
+	this: JSExpr
+
 	def __init__(self, obj: JSExpr) -> None:
 		self.this = obj
 
@@ -508,6 +514,8 @@ DICT_METHODS = {k for k in DictMethods.__dict__ if not k.startswith("_")}
 
 class SetMethods:
 	"""Set method transpilation."""
+
+	this: JSExpr
 
 	def __init__(self, obj: JSExpr) -> None:
 		self.this = obj

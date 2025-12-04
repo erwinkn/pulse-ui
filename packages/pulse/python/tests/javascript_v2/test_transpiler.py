@@ -5,6 +5,8 @@ Adapted from the v1 transpiler tests, excluding tests that require:
 - Builtin method transpilation with runtime type checks
 """
 
+# pyright: reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportReturnType=false, reportAttributeAccessIssue=false, reportIndexIssue=false, reportCallIssue=false, reportOperatorIssue=false, reportUnusedVariable=false, reportMissingTypeArgument=false
+
 import warnings
 
 from pulse.javascript_v2.errors import JSCompilationError
@@ -888,6 +890,307 @@ class TestDependencies:
 		code = f.transpile()
 		# The constant should be renamed to its js_name
 		assert "MULTIPLIER_" in code
+
+
+# =============================================================================
+# Import Usage in Transpiled Code
+# =============================================================================
+
+
+class TestImportTranspilation:
+	"""Test Import usage scenarios within transpiled functions."""
+
+	def test_import_called_as_function_no_args(self):
+		"""Import called as function with no arguments."""
+		from pulse.javascript_v2.imports import Import
+
+		init = Import("init", "./utils")
+
+		@javascript
+		def setup():
+			return init()
+
+		code = setup.transpile()
+		assert f"{init.js_name}()" in code
+
+	def test_import_called_as_function_with_args(self):
+		"""Import called as function with various argument types."""
+		from pulse.javascript_v2.imports import Import
+
+		process = Import("process", "./utils")
+
+		@javascript
+		def run(x: int, name: str):
+			return process(x, name, True, None)
+
+		code = run.transpile()
+		assert f"{process.js_name}(x, name, true, undefined)" in code
+
+	def test_import_called_with_string_literals(self):
+		"""Import called with string literal arguments."""
+		from pulse.javascript_v2.imports import Import
+
+		clsx = Import("clsx", "clsx")
+
+		@javascript
+		def make_class():
+			return clsx("p-4", "bg-red")
+
+		code = make_class.transpile()
+		assert f'{clsx.js_name}("p-4", "bg-red")' in code
+
+	def test_import_attribute_access(self):
+		"""Import with attribute/property access."""
+		from pulse.javascript_v2.imports import Import
+
+		styles = Import("styles", "./app.module.css")
+
+		@javascript
+		def get_class():
+			return styles.container
+
+		code = get_class.transpile()
+		assert f"{styles.js_name}.container" in code
+
+	def test_import_nested_attribute_access(self):
+		"""Import with nested attribute access."""
+		from pulse.javascript_v2.imports import Import
+
+		config = Import("config", "./config")
+
+		@javascript
+		def get_setting():
+			return config.settings.theme
+
+		code = get_setting.transpile()
+		assert f"{config.js_name}.settings.theme" in code
+
+	def test_import_subscript_access_with_variable(self):
+		"""Import with subscript access using a variable."""
+		from pulse.javascript_v2.imports import Import
+
+		data = Import("data", "./data")
+
+		@javascript
+		def get_item(key: str):
+			return data[key]
+
+		code = get_item.transpile()
+		assert f"{data.js_name}[key]" in code
+
+	def test_import_subscript_access_with_literal(self):
+		"""Import with subscript access using a string literal."""
+		from pulse.javascript_v2.imports import Import
+
+		translations = Import("translations", "./i18n")
+
+		@javascript
+		def get_greeting():
+			return translations["hello"]
+
+		code = get_greeting.transpile()
+		assert f'{translations.js_name}["hello"]' in code
+
+	def test_import_subscript_access_with_number(self):
+		"""Import with subscript access using a number."""
+		from pulse.javascript_v2.imports import Import
+
+		items = Import("items", "./data")
+
+		@javascript
+		def get_first():
+			return items[0]
+
+		code = get_first.transpile()
+		assert f"{items.js_name}[0]" in code
+
+	def test_import_passed_as_argument(self):
+		"""Import passed as argument to another function."""
+		from pulse.javascript_v2.imports import Import
+
+		Button = Import("Button", "@mantine/core")
+		createElement = Import("createElement", "react")
+
+		@javascript
+		def render():
+			return createElement(Button, None)
+
+		code = render.transpile()
+		assert f"{createElement.js_name}({Button.js_name}, undefined)" in code
+
+	def test_import_passed_to_javascript_function(self):
+		"""Import passed as argument to a @javascript function."""
+		from pulse.javascript_v2.imports import Import
+
+		config = Import("config", "./config")
+
+		@javascript
+		def process_config(cfg):
+			return cfg.value
+
+		@javascript
+		def main():
+			return process_config(config)
+
+		code = main.transpile()
+		assert f"{process_config.js_name}({config.js_name})" in code
+
+	def test_import_method_call(self):
+		"""Import with method call."""
+		from pulse.javascript_v2.imports import Import
+
+		api = Import("api", "./api")
+
+		@javascript
+		def fetch_data(id: int):
+			return api.get(id)
+
+		code = fetch_data.transpile()
+		assert f"{api.js_name}.get(id)" in code
+
+	def test_import_method_call_with_multiple_args(self):
+		"""Import with method call with multiple arguments."""
+		from pulse.javascript_v2.imports import Import
+
+		client = Import("client", "./client")
+
+		@javascript
+		def send_request(url: str, data: dict):
+			return client.post(url, data, True)
+
+		code = send_request.transpile()
+		assert f"{client.js_name}.post(url, data, true)" in code
+
+	def test_import_chained_method_calls(self):
+		"""Import with chained method calls."""
+		from pulse.javascript_v2.imports import Import
+
+		builder = Import("builder", "./builder")
+
+		@javascript
+		def build_query():
+			return builder.select("*").from_table("users")
+
+		code = build_query.transpile()
+		assert f'{builder.js_name}.select("*").from_table("users")' in code
+
+	def test_import_in_binary_operation(self):
+		"""Import used in binary operations."""
+		from pulse.javascript_v2.imports import Import
+
+		BASE_VALUE = Import("BASE_VALUE", "./constants")
+
+		@javascript
+		def calculate(x: int):
+			return x + BASE_VALUE
+
+		code = calculate.transpile()
+		assert f"x + {BASE_VALUE.js_name}" in code
+
+	def test_import_in_comparison(self):
+		"""Import used in comparison."""
+		from pulse.javascript_v2.imports import Import
+
+		MAX_VALUE = Import("MAX_VALUE", "./constants")
+
+		@javascript
+		def is_valid(x: int):
+			return x < MAX_VALUE
+
+		code = is_valid.transpile()
+		assert f"x < {MAX_VALUE.js_name}" in code
+
+	def test_import_in_ternary(self):
+		"""Import used in conditional expression."""
+		from pulse.javascript_v2.imports import Import
+
+		DEFAULT = Import("DEFAULT", "./constants")
+
+		@javascript
+		def get_value(x: int):
+			return x if x > 0 else DEFAULT
+
+		code = get_value.transpile()
+		assert DEFAULT.js_name in code
+		# Python ternary becomes JS ternary
+		assert "?" in code
+
+	def test_import_in_list_literal(self):
+		"""Import used within a list literal."""
+		from pulse.javascript_v2.imports import Import
+
+		item1 = Import("item1", "./items")
+		item2 = Import("item2", "./items")
+
+		@javascript
+		def get_items():
+			return [item1, item2]
+
+		code = get_items.transpile()
+		assert f"[{item1.js_name}, {item2.js_name}]" in code
+
+	def test_import_in_dict_literal(self):
+		"""Import used within a dict literal (transpiles to Map)."""
+		from pulse.javascript_v2.imports import Import
+
+		handler = Import("handler", "./handlers")
+
+		@javascript
+		def get_config():
+			return {"onClick": handler}
+
+		code = get_config.transpile()
+		# Python dicts transpile to JS Map
+		assert f'["onClick", {handler.js_name}]' in code
+
+	def test_import_assigned_to_variable(self):
+		"""Import assigned to a local variable."""
+		from pulse.javascript_v2.imports import Import
+
+		utils = Import("utils", "./utils")
+
+		@javascript
+		def process():
+			helper = utils.helper
+			return helper()
+
+		code = process.transpile()
+		assert f"helper = {utils.js_name}.helper" in code
+		assert "helper()" in code
+
+	def test_multiple_imports_same_function(self):
+		"""Multiple different imports used in the same function."""
+		from pulse.javascript_v2.imports import Import
+
+		Button = Import("Button", "@mantine/core")
+		Icon = Import("Icon", "@mantine/core")
+		styles = Import("styles", "./styles.module.css")
+
+		@javascript
+		def render():
+			return {"btn": Button, "icon": Icon, "class": styles.container}
+
+		code = render.transpile()
+		imports = render.imports()
+		assert Button.js_name in code
+		assert Icon.js_name in code
+		assert f"{styles.js_name}.container" in code
+		assert len(imports) == 3
+
+	def test_default_import(self):
+		"""Default import usage."""
+		from pulse.javascript_v2.imports import Import
+
+		React = Import.default("React", "react")
+
+		@javascript
+		def use_react():
+			return React.createElement("div", None)
+
+		code = use_react.transpile()
+		imports = use_react.imports()
+		assert f"{React.js_name}.createElement" in code
+		assert imports["React"].is_default
 
 
 # =============================================================================

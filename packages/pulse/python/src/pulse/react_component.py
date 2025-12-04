@@ -25,7 +25,16 @@ from typing import (
 )
 
 from pulse.helpers import Sentinel
+from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.imports import Import
+from pulse.javascript_v2.nodes import (
+	JSExpr,
+	JSMember,
+	JSSpread,
+	JSXElement,
+	JSXProp,
+	JSXSpreadProp,
+)
 from pulse.reactive_extensions import unwrap
 from pulse.vdom import Child, Element, Node
 
@@ -295,7 +304,88 @@ def default_fn_signature_without_children(
 ) -> Element: ...
 
 
-class ReactComponent(Generic[P]):
+# ----------------------------------------------------------------------------
+# JSX transpilation helpers
+# ----------------------------------------------------------------------------
+
+
+def _build_jsx_props(kwargs: dict[str, JSExpr]) -> list[JSXProp | JSXSpreadProp]:
+	"""Build JSX props list from kwargs dict.
+
+	Kwargs maps:
+	- "propName" -> JSExpr for named props
+	- "__spread_N" -> JSSpread(expr) for spread props
+	"""
+	props: list[JSXProp | JSXSpreadProp] = []
+	for key, value in kwargs.items():
+		if isinstance(value, JSSpread):
+			props.append(JSXSpreadProp(value.expr))
+		else:
+			props.append(JSXProp(key, value))
+	return props
+
+
+def _flatten_children(
+	items: list[JSExpr], out: list[JSExpr | JSXElement | str]
+) -> None:
+	"""Flatten arrays and handle spreads in children list."""
+	from pulse.javascript_v2.nodes import JSArray, JSString
+
+	for it in items:
+		if isinstance(it, JSArray):
+			_flatten_children(list(it.elements), out)
+		elif isinstance(it, JSSpread):
+			out.append(it.expr)
+		elif isinstance(it, JSString):
+			out.append(it.value)
+		else:
+			out.append(it)
+
+
+class ReactComponentCallExpr(JSExpr):
+	"""JSX call expression for a ReactComponent.
+
+	Created when a ReactComponent is called with props. Supports subscripting
+	to add children, producing the final JSXElement.
+	"""
+
+	is_jsx: bool = True
+	component: "ReactComponent[...]"
+	props: tuple[JSXProp | JSXSpreadProp, ...]
+	children: tuple[str | JSExpr | JSXElement, ...]
+
+	def __init__(
+		self,
+		component: "ReactComponent[...]",
+		props: tuple[JSXProp | JSXSpreadProp, ...],
+		children: tuple[str | JSExpr | JSXElement, ...],
+	) -> None:
+		self.component = component
+		self.props = props
+		self.children = children
+
+	@override
+	def emit(self) -> str:
+		return JSXElement(self.component, self.props, self.children).emit()
+
+	@override
+	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+		"""Handle Component(props...)[children] -> JSXElement."""
+		extra_children: list[JSExpr | JSXElement | str] = []
+		_flatten_children(indices, extra_children)
+		all_children = list(self.children) + extra_children
+		return JSXElement(self.component, self.props, all_children)
+
+	@override
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		"""Calling an already-called component is an error."""
+		raise JSCompilationError(
+			f"Cannot call <{self.component.name}> - already called. "
+			+ "Use subscript for children: Component(props...)[children]"
+		)
+
+
+class ReactComponent(JSExpr, Generic[P]):
 	"""
 	A React component that can be used within the UI tree.
 	Returns a function that creates mount point UITreeNode instances.
@@ -359,6 +449,31 @@ class ReactComponent(Generic[P]):
 		# Additional imports to include in route where this component is used
 		self.extra_imports: list[Import] = list(extra_imports or [])
 		COMPONENT_REGISTRY.get().add(self)
+
+	@override
+	def emit(self) -> str:
+		if self.prop:
+			return JSMember(self.import_, self.prop).emit()
+		return self.import_.emit()
+
+	@override
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		"""Handle Component(props...) -> ReactComponentCallExpr."""
+		props_list = _build_jsx_props(kwargs)
+		children_list: list[JSExpr | JSXElement | str] = []
+		_flatten_children(args, children_list)
+		return ReactComponentCallExpr(self, tuple(props_list), tuple(children_list))
+
+	@override
+	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+		"""Direct subscript on ReactComponent is not allowed.
+
+		Use Component(props...)[children] instead of Component[children].
+		"""
+		raise JSCompilationError(
+			f"Cannot subscript ReactComponent '{self.name}' directly. "
+			+ "Use Component(props...)[children] or Component()[children] instead."
+		)
 
 	@property
 	def name(self) -> str:

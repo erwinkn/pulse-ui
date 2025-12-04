@@ -6,6 +6,7 @@ This module provides transpilation for Python builtins to JavaScript.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import override
@@ -26,7 +27,9 @@ from pulse.javascript_v2.nodes import (
 	JSSpread,
 	JSString,
 	JSSubscript,
+	JSTemplate,
 	JSTertiary,
+	JSUnary,
 	JSUndefined,
 )
 
@@ -387,13 +390,37 @@ class PyBuiltin(JSExpr):
 # transformation is needed).
 
 
-class StringMethods:
-	"""String method transpilation."""
-
-	this: JSExpr
+class BuiltinMethods(ABC):
+	"""Abstract base class for type-specific method transpilation."""
 
 	def __init__(self, obj: JSExpr) -> None:
-		self.this = obj
+		self.this: JSExpr = obj
+
+	@classmethod
+	@abstractmethod
+	def __runtime_check__(cls, expr: JSExpr) -> JSExpr:
+		"""Return a JS expression that checks if expr is this type at runtime."""
+		...
+
+	@classmethod
+	@abstractmethod
+	def __methods__(cls) -> set[str]:
+		"""Return the set of method names this class handles."""
+		...
+
+
+class StringMethods(BuiltinMethods):
+	"""String method transpilation."""
+
+	@classmethod
+	@override
+	def __runtime_check__(cls, expr: JSExpr) -> JSExpr:
+		return JSBinary(JSUnary("typeof", expr), "===", JSString("string"))
+
+	@classmethod
+	@override
+	def __methods__(cls) -> set[str]:
+		return STR_METHODS
 
 	def lower(self) -> JSExpr:
 		"""str.lower() -> str.toLowerCase()"""
@@ -453,13 +480,18 @@ class StringMethods:
 STR_METHODS = {k for k in StringMethods.__dict__ if not k.startswith("_")}
 
 
-class ListMethods:
+class ListMethods(BuiltinMethods):
 	"""List method transpilation."""
 
-	this: JSExpr
+	@classmethod
+	@override
+	def __runtime_check__(cls, expr: JSExpr) -> JSExpr:
+		return JSMemberCall(JSIdentifier("Array"), "isArray", [expr])
 
-	def __init__(self, obj: JSExpr) -> None:
-		self.this = obj
+	@classmethod
+	@override
+	def __methods__(cls) -> set[str]:
+		return LIST_METHODS
 
 	def append(self, value: JSExpr) -> JSExpr:
 		"""list.append(value) -> (list.push(value), undefined)"""
@@ -510,13 +542,18 @@ class ListMethods:
 LIST_METHODS = {k for k in ListMethods.__dict__ if not k.startswith("_")}
 
 
-class DictMethods:
+class DictMethods(BuiltinMethods):
 	"""Dict (Map) method transpilation."""
 
-	this: JSExpr
+	@classmethod
+	@override
+	def __runtime_check__(cls, expr: JSExpr) -> JSExpr:
+		return JSBinary(expr, "instanceof", JSIdentifier("Map"))
 
-	def __init__(self, obj: JSExpr) -> None:
-		self.this = obj
+	@classmethod
+	@override
+	def __methods__(cls) -> set[str]:
+		return DICT_METHODS
 
 	def get(self, key: JSExpr, default: JSExpr | None = None) -> JSExpr | None:
 		"""dict.get(key, default) -> dict.get(key) ?? default"""
@@ -548,13 +585,18 @@ class DictMethods:
 DICT_METHODS = {k for k in DictMethods.__dict__ if not k.startswith("_")}
 
 
-class SetMethods:
+class SetMethods(BuiltinMethods):
 	"""Set method transpilation."""
 
-	this: JSExpr
+	@classmethod
+	@override
+	def __runtime_check__(cls, expr: JSExpr) -> JSExpr:
+		return JSBinary(expr, "instanceof", JSIdentifier("Set"))
 
-	def __init__(self, obj: JSExpr) -> None:
-		self.this = obj
+	@classmethod
+	@override
+	def __methods__(cls) -> set[str]:
+		return SET_METHODS
 
 	def add(self, value: JSExpr) -> JSExpr | None:
 		"""set.add() doesn't need transformation."""
@@ -579,24 +621,45 @@ SET_METHODS = {k for k in SetMethods.__dict__ if not k.startswith("_")}
 # Collect all known method names for quick lookup
 ALL_METHODS = STR_METHODS | LIST_METHODS | DICT_METHODS | SET_METHODS
 
-# Map method names to their handler classes
-# Note: Some methods exist in multiple classes (e.g., copy, clear)
-# We apply all that might match since we don't have runtime type info
-METHOD_CLASSES: list[
-	type[StringMethods] | type[ListMethods] | type[DictMethods] | type[SetMethods]
-] = [
-	StringMethods,
-	ListMethods,
+# Method classes in priority order (higher priority = later in list = outermost ternary)
+# We prefer string/list semantics first, then set, then dict.
+METHOD_CLASSES: list[type[BuiltinMethods]] = [
 	DictMethods,
 	SetMethods,
+	ListMethods,
+	StringMethods,
 ]
+
+
+def _try_dispatch_method(
+	cls: type[BuiltinMethods], obj: JSExpr, method: str, args: list[JSExpr]
+) -> JSExpr | None:
+	"""Try to dispatch a method call to a specific builtin class.
+
+	Returns the transformed expression, or None if the method returns None
+	(fall through to default) or if dispatch fails.
+	"""
+	if method not in cls.__methods__():
+		return None
+
+	try:
+		handler = cls(obj)
+		method_fn = getattr(handler, method, None)
+		if method_fn is None:
+			return None
+		return method_fn(*args)
+	except TypeError:
+		return None
 
 
 def emit_method(obj: JSExpr, method: str, args: list[JSExpr]) -> JSExpr | None:
 	"""Emit a method call, handling Python builtin methods.
 
-	Tries each method class that has the method name. Returns the first
-	non-None result, or None if all return None (fall through to default).
+	For known literal types (JSString, JSTemplate, JSArray, JSNew Set/Map),
+	dispatches directly without runtime checks.
+
+	For unknown types, builds a ternary chain that checks types at runtime
+	and dispatches to the appropriate method implementation.
 
 	Returns:
 		JSExpr if the method should be transpiled specially
@@ -605,18 +668,51 @@ def emit_method(obj: JSExpr, method: str, args: list[JSExpr]) -> JSExpr | None:
 	if method not in ALL_METHODS:
 		return None
 
+	# Fast path: known literal types - dispatch directly without runtime checks
+	if isinstance(obj, (JSString, JSTemplate)):
+		if method in StringMethods.__methods__():
+			result = _try_dispatch_method(StringMethods, obj, method, args)
+			if result is not None:
+				return result
+		return None
+
+	if isinstance(obj, JSArray):
+		if method in ListMethods.__methods__():
+			result = _try_dispatch_method(ListMethods, obj, method, args)
+			if result is not None:
+				return result
+		return None
+
+	# Fast path: new Set(...) and new Map(...) are known types
+	if isinstance(obj, JSNew) and isinstance(obj.ctor, JSIdentifier):
+		if obj.ctor.name == "Set" and method in SetMethods.__methods__():
+			result = _try_dispatch_method(SetMethods, obj, method, args)
+			if result is not None:
+				return result
+			return None
+		if obj.ctor.name == "Map" and method in DictMethods.__methods__():
+			result = _try_dispatch_method(DictMethods, obj, method, args)
+			if result is not None:
+				return result
+			return None
+
+	# Slow path: unknown type - build ternary chain with runtime type checks
+	# Start with the default fallback (regular method call)
+	default_expr = JSMemberCall(obj, method, args)
+	expr: JSExpr = default_expr
+
+	# Apply in increasing priority so that later (higher priority) wrappers
+	# end up outermost in the final expression.
 	for cls in METHOD_CLASSES:
-		if method not in {k for k in cls.__dict__ if not k.startswith("_")}:
+		if method not in cls.__methods__():
 			continue
 
-		handler = cls(obj)
-		method_fn = getattr(handler, method, None)
-		if method_fn is None:
-			continue
+		dispatch_expr = _try_dispatch_method(cls, obj, method, args)
+		if dispatch_expr is not None:
+			expr = JSTertiary(cls.__runtime_check__(obj), dispatch_expr, expr)
 
-		# Call with args
-		result = method_fn(*args)
-		if result is not None:
-			return result
+	# If we built ternaries, return them; otherwise return None to fall through
+	if expr is not default_expr:
+		return expr
 
 	return None

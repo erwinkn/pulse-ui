@@ -359,15 +359,17 @@ class JSMember(JSExpr):
 	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
 		"""Called when this member is used as a function: obj.prop(args).
 
-		Returns JSMemberCall for method call syntax.
-
-		Note: While JSCall(JSMember(...)) would emit identically, we use JSMemberCall
-		for semantic clarity and easier pattern matching (e.g., checking if a call is
-		a method call via isinstance(x, JSMemberCall) rather than checking if the callee
-		is a JSMember).
+		Checks for Python builtin method transpilation (e.g., str.upper -> toUpperCase),
+		then falls back to regular JSMemberCall.
 		"""
 		if kwargs:
 			raise JSCompilationError("Keyword arguments not supported in method call")
+		# Check for Python builtin method transpilation (late import to avoid cycle)
+		from pulse.javascript_v2.builtins import emit_method
+
+		result = emit_method(self.obj, self.prop, args)
+		if result is not None:
+			return result
 		return JSMemberCall(self.obj, self.prop, args)
 
 	def __call__(self, *args: object) -> "JSMemberCall":

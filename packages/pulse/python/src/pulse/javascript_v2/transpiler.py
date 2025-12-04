@@ -16,7 +16,6 @@ import ast
 import re
 from collections.abc import Callable
 
-from pulse.javascript_v2.builtins import emit_method
 from pulse.javascript_v2.errors import JSCompilationError
 from pulse.javascript_v2.nodes import (
 	ALLOWED_BINOPS,
@@ -523,27 +522,15 @@ class JsTranspiler(ast.NodeVisitor):
 		args = [self.emit_expr(a) for a in node.args]
 		kwargs = self._build_kwargs(node)
 
-		# Check for method call: obj.method(args)
-		# Use emit_getattr then emit_call so module functions work correctly
+		# Method call: obj.method(args) -> obj.emit_getattr(method).emit_call(args)
 		if isinstance(node.func, ast.Attribute):
 			obj = self.emit_expr(node.func.value)
 			method_expr = obj.emit_getattr(node.func.attr)
-			# If it's a PyModuleFuncExpr or similar, use emit_call hook
-			# Otherwise, use standard method call transpilation
-			if hasattr(method_expr, "emit_fn") or not self._is_standard_member(
-				method_expr
-			):
-				return method_expr.emit_call(args, kwargs)
-			# Standard method call - check for Python builtin methods
-			return self._emit_method_call(obj, node.func.attr, args, kwargs)
+			return method_expr.emit_call(args, kwargs)
 
-		# Function call - use emit_call hook
+		# Function call
 		callee = self.emit_expr(node.func)
 		return callee.emit_call(args, kwargs)
-
-	def _is_standard_member(self, expr: JSExpr) -> bool:
-		"""Check if expr is a standard JSMember that should use method call transpilation."""
-		return isinstance(expr, JSMember)
 
 	def _build_kwargs(self, node: ast.Call) -> dict[str, JSExpr]:
 		"""Build kwargs dict from AST Call node.
@@ -574,23 +561,6 @@ class JsTranspiler(ast.NodeVisitor):
 		"""
 		value = self.emit_expr(node.value)
 		return value.emit_getattr(node.attr)
-
-	def _emit_method_call(
-		self, obj: JSExpr, method: str, args: list[JSExpr], kwargs: dict[str, JSExpr]
-	) -> JSExpr:
-		"""Emit a method call, handling Python builtin methods."""
-		if kwargs:
-			raise JSCompilationError(
-				f"Keyword arguments not supported for method call .{method}()"
-			)
-
-		# Check for Python builtin method that needs transpilation
-		result = emit_method(obj, method, args)
-		if result is not None:
-			return result
-
-		# Default: just emit obj.method(args)
-		return JSMemberCall(obj, method, args)
 
 	def _emit_subscript(self, node: ast.Subscript) -> JSExpr:
 		"""Emit a subscript expression."""

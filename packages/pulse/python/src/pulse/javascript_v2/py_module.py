@@ -44,11 +44,11 @@ class PyModuleExpr(JSExpr):
 
 	@override
 	def emit_getattr(self, attr: str) -> JSExpr:
-		method = self.transpiler.get(attr)
-		if method is None:
+		value = self.transpiler.get(attr)
+		if value is None:
 			raise JSCompilationError(f"Module has no attribute '{attr}'")
 		# transpiler always contains JSExpr (wrapping happens in register_module)
-		return method
+		return value
 
 
 @dataclass

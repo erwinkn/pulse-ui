@@ -2161,3 +2161,259 @@ class TestPyModules:
 		assert code.startswith("function(")
 		# Should not have a name after "function"
 		assert "function " not in code
+
+
+# =============================================================================
+# Builtin Method Runtime Checks
+# =============================================================================
+
+
+class TestBuiltinMethodRuntimeChecks:
+	"""Test runtime type checking for builtin methods with type-dependent behavior."""
+
+	# -------------------------------------------------------------------------
+	# Fast Path Tests: Known Literal Types (no runtime checks needed)
+	# -------------------------------------------------------------------------
+
+	def test_string_literal_method_no_runtime_check(self):
+		"""String literals dispatch directly without runtime checks."""
+
+		@javascript
+		def f():
+			return "hello".upper()
+
+		code = f.transpile()
+		# Should be direct call, no typeof check
+		assert '"hello".toUpperCase()' in code
+		assert "typeof" not in code
+
+	def test_array_literal_method_no_runtime_check(self):
+		"""Array literals dispatch directly without runtime checks."""
+
+		@javascript
+		def f():
+			return [1, 2, 3].index(2)
+
+		code = f.transpile()
+		# Should be direct call, no Array.isArray check
+		assert "[1, 2, 3].indexOf(2)" in code
+		assert "Array.isArray" not in code
+
+	def test_set_literal_method_no_runtime_check(self):
+		"""Set constructor dispatch directly without runtime checks."""
+
+		@javascript
+		def f():
+			s = set()
+			return s.remove(1)
+
+		code = f.transpile()
+		# new Set() is a known type
+		assert ".delete(1)" in code
+
+	def test_map_literal_method_no_runtime_check(self):
+		"""Map constructor (dict literal) dispatch directly without runtime checks."""
+
+		@javascript
+		def f():
+			return {"a": 1, "b": 2}.keys()
+
+		code = f.transpile()
+		# Dict literal becomes new Map(), a known type
+		assert "[...new Map" in code
+		assert ".keys()]" in code
+		# Should not have instanceof check wrapping it
+		assert "instanceof Map ?" not in code
+
+	# -------------------------------------------------------------------------
+	# Slow Path Tests: Unknown Types (runtime checks needed)
+	# -------------------------------------------------------------------------
+
+	def test_unknown_type_string_method_has_runtime_check(self):
+		"""Unknown types need runtime typeof check for string methods."""
+
+		@javascript
+		def f(s):
+			return s.lower()
+
+		code = f.transpile()
+		# Should have typeof check
+		assert 'typeof s === "string"' in code
+		assert "s.toLowerCase()" in code
+
+	def test_unknown_type_list_method_has_runtime_check(self):
+		"""Unknown types need Array.isArray check for list methods."""
+
+		@javascript
+		def f(items):
+			return items.copy()
+
+		code = f.transpile()
+		# Should have Array.isArray check
+		assert "Array.isArray(items)" in code
+		assert "items.slice()" in code
+
+	def test_unknown_type_dict_method_has_runtime_check(self):
+		"""Unknown types need instanceof Map check for dict methods."""
+
+		@javascript
+		def f(d):
+			return d.keys()
+
+		code = f.transpile()
+		# Should have instanceof Map check
+		assert "d instanceof Map" in code
+		assert "[...d.keys()]" in code
+
+	def test_unknown_type_set_method_has_runtime_check(self):
+		"""Unknown types need instanceof Set check for set methods."""
+
+		@javascript
+		def f(s):
+			return s.remove(1)
+
+		code = f.transpile()
+		# Should have instanceof Set check
+		assert "s instanceof Set" in code
+		assert "s.delete(1)" in code
+
+	# -------------------------------------------------------------------------
+	# Method Overlap Tests: Methods that exist on multiple types
+	# -------------------------------------------------------------------------
+
+	def test_copy_method_overlap_list_and_dict(self):
+		"""copy() exists on both list and dict - needs ternary chain."""
+
+		@javascript
+		def f(x):
+			return x.copy()
+
+		code = f.transpile()
+		# Should have checks for both Array and Map
+		assert "Array.isArray(x)" in code
+		assert "x instanceof Map" in code
+		# List copy: .slice()
+		assert "x.slice()" in code
+		# Dict copy: new Map(x.entries())
+		assert "new Map(x.entries())" in code
+
+	def test_clear_method_overlap_dict_and_set(self):
+		"""clear() exists on both dict and set - but both pass through."""
+
+		@javascript
+		def f(x):
+			return x.clear()
+
+		code = f.transpile()
+		# Both Set and Map clear() don't need transformation,
+		# so it should just be x.clear() with no ternaries
+		assert "x.clear()" in code
+
+	def test_pop_method_list_with_index(self):
+		"""list.pop(index) has special handling."""
+
+		@javascript
+		def f(items, idx):
+			return items.pop(idx)
+
+		code = f.transpile()
+		# Should have Array.isArray check
+		assert "Array.isArray(items)" in code
+		# List pop with index: splice
+		assert "items.splice(idx, 1)[0]" in code
+
+	def test_pop_method_list_without_index(self):
+		"""list.pop() without index falls through to default."""
+
+		@javascript
+		def f(items):
+			return items.pop()
+
+		code = f.transpile()
+		# No index means fall through to regular pop()
+		assert "items.pop()" in code
+
+	# -------------------------------------------------------------------------
+	# Ternary Chain Structure Tests
+	# -------------------------------------------------------------------------
+
+	def test_ternary_chain_order(self):
+		"""Methods with multiple implementations build proper ternary chain."""
+
+		@javascript
+		def f(x):
+			return x.copy()
+
+		code = f.transpile()
+		# The ternary should check types in priority order
+		# Array.isArray should be checked before instanceof Map
+		array_pos = code.find("Array.isArray(x)")
+		map_pos = code.find("x instanceof Map")
+		assert array_pos != -1
+		assert map_pos != -1
+		# Array check comes before (is outer) Map check
+		assert array_pos < map_pos
+
+	def test_method_not_in_any_class_passes_through(self):
+		"""Methods not in any builtin class pass through unchanged."""
+
+		@javascript
+		def f(x):
+			return x.someCustomMethod()
+
+		code = f.transpile()
+		# Should just be a regular method call
+		assert "x.someCustomMethod()" in code
+		# No runtime checks
+		assert "typeof" not in code
+		assert "Array.isArray" not in code
+		assert "instanceof" not in code
+
+	# -------------------------------------------------------------------------
+	# Edge Cases
+	# -------------------------------------------------------------------------
+
+	def test_method_on_expression_result(self):
+		"""Method called on expression result (not a simple identifier)."""
+
+		@javascript
+		def f(items):
+			return items[0].lower()
+
+		code = f.transpile()
+		# Should have typeof check on the subscript expression
+		assert "typeof items[0]" in code or 'typeof (items[0]) === "string"' in code
+
+	def test_chained_method_calls_with_known_type(self):
+		"""Chained method calls on known types."""
+
+		@javascript
+		def f():
+			return "hello".upper().lower()
+
+		code = f.transpile()
+		# First call is on known string, second is also on string
+		assert '"hello".toUpperCase()' in code
+		assert ".toLowerCase()" in code
+
+	def test_string_join_reverses_receiver_and_arg(self):
+		"""str.join(iterable) -> iterable.join(str)."""
+
+		@javascript
+		def f(sep, items):
+			return sep.join(items)
+
+		code = f.transpile()
+		# Should reverse to items.join(sep)
+		assert "items.join(sep)" in code
+
+	def test_string_literal_join(self):
+		"""String literal join should work without runtime checks."""
+
+		@javascript
+		def f(items):
+			return ", ".join(items)
+
+		code = f.transpile()
+		assert 'items.join(", ")' in code
+		assert "typeof" not in code

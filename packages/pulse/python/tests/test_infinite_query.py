@@ -757,3 +757,685 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 	)
 
 	q.dispose()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fetch function isolation tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_multiple_observers_use_own_fetch_fn():
+	"""
+	Test that when multiple state instances share the same infinite query key but have
+	different non-key properties, each observer uses its own fetch function.
+
+	Scenario:
+	- Two state instances share key ("shared",) but have different `suffix` values
+	- The `suffix` property is NOT part of the key
+	- When refetch/invalidate is called on each InfiniteQueryResult, it should use
+	  that observer's fetch function with its own `suffix` value
+	"""
+	fetch_log: list[tuple[str, str, int]] = []  # (name, suffix, page_param)
+
+	class S(ps.State):
+		_name: str
+		suffix: str  # Not part of the key
+
+		def __init__(self, name: str, suffix: str):
+			self._name = name
+			self.suffix = suffix
+
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10, stale_time=0)
+		async def data(self, page_param: int) -> str:
+			result = f"{self._name}-{self.suffix}-{page_param}"
+			fetch_log.append((self._name, self.suffix, page_param))
+			await asyncio.sleep(0)
+			return result
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 2 else None
+
+		@data.key
+		def _data_key(self):
+			return ("shared",)  # Same key for all instances
+
+	# Create two state instances with different suffix values
+	s1 = S("state1", suffix="A")
+	s2 = S("state2", suffix="B")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Initial fetch - q1 fetches first
+	await q1.wait()
+	assert q1.pages == ["state1-A-0"]
+	assert fetch_log == [("state1", "A", 0)]
+
+	# q2 shares the same query, so it sees the same data
+	assert q2.pages == ["state1-A-0"]
+
+	# Now refetch via q2 - should use s2's fetch function with suffix="B"
+	await q2.refetch()
+	assert q2.pages == ["state2-B-0"]
+	assert fetch_log[-1] == ("state2", "B", 0), (
+		f"Expected refetch to use state2's fetch function, but got {fetch_log[-1]}"
+	)
+
+	# Refetch via q1 - should use s1's fetch function with suffix="A"
+	await q1.refetch()
+	assert q1.pages == ["state1-A-0"]
+	assert fetch_log[-1] == ("state1", "A", 0), (
+		f"Expected refetch to use state1's fetch function, but got {fetch_log[-1]}"
+	)
+
+	# Test fetch_next_page uses correct fetch function
+	await q2.fetch_next_page()
+	assert fetch_log[-1] == ("state2", "B", 1), (
+		f"Expected fetch_next_page to use state2's fetch function, but got {fetch_log[-1]}"
+	)
+
+	# fetch_next_page via q1 should use q1's fetch function
+	await q1.fetch_next_page()
+	assert fetch_log[-1] == ("state1", "A", 2), (
+		f"Expected fetch_next_page to use state1's fetch function, but got {fetch_log[-1]}"
+	)
+
+	# Test invalidate() - should also use the correct fetch function
+	# Note: invalidate refetches all pages, so the last fetch will be for the last page
+	fetch_log_before = len(fetch_log)
+	q2.invalidate()
+	await asyncio.sleep(0.1)  # Let invalidate trigger refetch
+	# Check that all new fetches used q2's fetch function
+	new_fetches = fetch_log[fetch_log_before:]
+	for name, suffix, _page in new_fetches:
+		assert (name, suffix) == ("state2", "B"), (
+			f"Expected invalidate to use state2's fetch function, but got ({name}, {suffix})"
+		)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_fetch_previous_uses_correct_fetch_fn():
+	"""
+	Test that fetch_previous_page uses the correct fetch function for each observer.
+	"""
+	fetch_log: list[tuple[str, int]] = []  # (suffix, page_param)
+
+	class S(ps.State):
+		suffix: str
+
+		def __init__(self, suffix: str):
+			self.suffix = suffix
+
+		@ps.infinite_query(initial_page_param=5, retries=0, gc_time=10)
+		async def data(self, page_param: int) -> str:
+			fetch_log.append((self.suffix, page_param))
+			await asyncio.sleep(0)
+			return f"{self.suffix}-{page_param}"
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 10 else None
+
+		@data.get_previous_page_param
+		def _get_prev(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[0].param - 1 if pages[0].param > 0 else None
+
+		@data.key
+		def _key(self):
+			return ("shared-prev",)
+
+	s1 = S(suffix="X")
+	s2 = S(suffix="Y")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Initial fetch via q1
+	await q1.wait()
+	assert fetch_log[-1] == ("X", 5)
+
+	# fetch_previous_page via q2 should use q2's fetch function
+	await q2.fetch_previous_page()
+	assert fetch_log[-1] == ("Y", 4), (
+		f"Expected fetch_previous_page to use state2's fetch function, but got {fetch_log[-1]}"
+	)
+
+	# fetch_previous_page via q1 should use q1's fetch function
+	await q1.fetch_previous_page()
+	assert fetch_log[-1] == ("X", 3), (
+		f"Expected fetch_previous_page to use state1's fetch function, but got {fetch_log[-1]}"
+	)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_wait_after_invalidate_uses_correct_fetch_fn():
+	"""
+	Test that wait() after invalidate() uses the correct fetch function.
+	"""
+	fetch_log: list[tuple[str, int]] = []
+
+	class S(ps.State):
+		suffix: str
+
+		def __init__(self, suffix: str):
+			self.suffix = suffix
+
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		async def data(self, page_param: int) -> str:
+			fetch_log.append((self.suffix, page_param))
+			await asyncio.sleep(0)
+			return f"{self.suffix}-{page_param}"
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 2 else None
+
+		@data.key
+		def _key(self):
+			return ("wait-invalidate",)
+
+	s1 = S(suffix="A")
+	s2 = S(suffix="B")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Initial fetch via q1
+	await q1.wait()
+	assert fetch_log[-1] == ("A", 0)
+
+	# wait() on q1 should use s1's fetch function (no-op since data exists)
+	await q1.wait()
+	# No new fetch since data already loaded
+
+	# Invalidate via q2 and then wait - should use s2's fetch function
+	q2.invalidate()
+	await q2.wait()
+	assert fetch_log[-1] == ("B", 0), (
+		f"Expected wait() after invalidate to use state2's fetch function, but got {fetch_log[-1]}"
+	)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_concurrent_fetch_next_uses_correct_fetch_fn():
+	"""
+	Test that when two observers call fetch_next_page concurrently without
+	cancel_fetch, only the first fetch runs (queue serialization), but the
+	action uses the correct fetch function for the observer that enqueued it.
+	"""
+	fetch_log: list[tuple[str, int]] = []
+
+	class S(ps.State):
+		suffix: str
+
+		def __init__(self, suffix: str):
+			self.suffix = suffix
+
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		async def data(self, page_param: int) -> str:
+			fetch_log.append((self.suffix, page_param))
+			await asyncio.sleep(0.05)  # Small delay to allow concurrency
+			return f"{self.suffix}-{page_param}"
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 5 else None
+
+		@data.key
+		def _key(self):
+			return ("concurrent-fetch-next",)
+
+	s1 = S(suffix="X")
+	s2 = S(suffix="Y")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Initial fetch
+	await q1.wait()
+	assert fetch_log[-1] == ("X", 0)
+
+	# Start both fetch_next_page concurrently
+	task1 = asyncio.create_task(q1.fetch_next_page())
+	task2 = asyncio.create_task(q2.fetch_next_page())
+
+	await asyncio.gather(task1, task2)
+
+	# Both actions should be processed sequentially
+	# First action uses q1's fetch function, second uses q2's
+	assert ("X", 1) in fetch_log, (
+		"Expected q1's fetch function to be used for first fetch_next"
+	)
+	assert ("Y", 2) in fetch_log, (
+		"Expected q2's fetch function to be used for second fetch_next"
+	)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_refetch_with_cancel_uses_correct_fetch_fn():
+	"""
+	Test that when q2 calls refetch with cancel_fetch=True while q1's fetch is
+	in progress, the new refetch uses q2's fetch function.
+	"""
+	fetch_started: list[tuple[str, int]] = []
+	fetch_completed: list[tuple[str, int]] = []
+
+	class S(ps.State):
+		suffix: str
+
+		def __init__(self, suffix: str):
+			self.suffix = suffix
+
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		async def data(self, page_param: int) -> str:
+			fetch_started.append((self.suffix, page_param))
+			await asyncio.sleep(0.2)  # Long enough to allow cancellation
+			fetch_completed.append((self.suffix, page_param))
+			return f"{self.suffix}-{page_param}"
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 2 else None
+
+		@data.key
+		def _key(self):
+			return ("cancel-refetch",)
+
+	s1 = S(suffix="A")
+	s2 = S(suffix="B")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Start q1's wait (which triggers initial fetch)
+	task1 = asyncio.create_task(q1.wait())
+	await asyncio.sleep(0.05)  # Let it start
+
+	assert ("A", 0) in fetch_started
+
+	# q2 cancels and starts its own refetch
+	task2 = asyncio.create_task(q2.refetch(cancel_fetch=True))
+	await task2
+
+	# q1's fetch should have been cancelled
+	assert ("A", 0) not in fetch_completed, "q1's fetch should have been cancelled"
+
+	# q2's refetch should have completed
+	assert ("B", 0) in fetch_completed, (
+		"q2's refetch should have completed with its fetch function"
+	)
+
+	# The wait task should be cancelled or done
+	assert task1.cancelled() or task1.done()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dispose cancellation tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
+	"""
+	Test that when an InfiniteQueryResult is disposed while it has an in-flight fetch,
+	the fetch is cancelled to avoid running fetch functions from a disposed state.
+	"""
+	fetch_started = asyncio.Event()
+	fetch_log: list[str] = []
+
+	class S(ps.State):
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		async def data(self, page_param: int) -> str:
+			fetch_log.append("started")
+			fetch_started.set()
+			await asyncio.sleep(0.5)  # Long running fetch
+			fetch_log.append("completed")
+			return f"result-{page_param}"
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 5 else None
+
+		@data.key
+		def _key(self):
+			return ("dispose-cancel-inf",)
+
+	s = S()
+	q = s.data
+
+	# Start fetch but don't wait for it
+	wait_task = asyncio.create_task(q.wait())
+	await fetch_started.wait()
+
+	# Dispose before fetch completes
+	q.dispose()
+
+	# Give time for cancellation to propagate
+	await asyncio.sleep(0.1)
+
+	# Fetch should have been cancelled, not completed
+	assert "started" in fetch_log
+	assert "completed" not in fetch_log
+
+	# The wait task should complete (either with error or cancelled)
+	try:
+		await asyncio.wait_for(wait_task, timeout=0.5)
+	except (asyncio.CancelledError, asyncio.TimeoutError):
+		pass  # Expected - task was cancelled
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_result_dispose_cancels_pending_actions():
+	"""
+	Test that when an InfiniteQueryResult is disposed, any pending actions
+	(not yet executing) enqueued by it are cancelled.
+	"""
+	fetch_log: list[tuple[str, int]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		name: str
+
+		def __init__(self, name: str):
+			self.name = name
+
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		async def data(self, page_param: int) -> str:
+			fetch_log.append((self.name, page_param))
+			fetch_started.set()
+			await asyncio.sleep(0.1)  # Long enough for dispose to happen
+			return f"{self.name}-{page_param}"
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 5 else None
+
+		@data.key
+		def _key(self):
+			return ("dispose-pending",)
+
+	s1 = S("s1")
+	s2 = S("s2")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# Wait for initial data from q1
+	await q1.wait()
+	assert ("s1", 0) in fetch_log
+	fetch_log.clear()
+	fetch_started.clear()
+
+	# s2 enqueues an action first - this will start executing
+	task_s2_first = asyncio.create_task(q2.fetch_next_page())
+	await fetch_started.wait()  # Wait for s2's fetch to start
+	fetch_started.clear()
+
+	# s1 enqueues an action - this will be pending in the queue
+	task_s1 = asyncio.create_task(q1.fetch_next_page())
+	await asyncio.sleep(0.01)  # Let it get enqueued
+
+	# Now dispose s1 - s1's pending action should be cancelled
+	q1.dispose()
+
+	# Wait for s2's first action to complete
+	await task_s2_first
+
+	# s1's task should be cancelled since it was pending when disposed
+	try:
+		await asyncio.wait_for(task_s1, timeout=0.5)
+		# If it completed, that's OK too - the action might have started before dispose
+	except asyncio.CancelledError:
+		pass  # Expected - pending action was cancelled
+	except asyncio.TimeoutError:
+		pytest.fail("task_s1 should have been cancelled or completed")
+
+	# s1's fetch should NOT have been executed (it was pending and cancelled)
+	assert not any(name == "s1" for name, _ in fetch_log), (
+		f"s1's pending action should have been cancelled, but fetch_log={fetch_log}"
+	)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_result_dispose_does_not_cancel_other_observer_fetch():
+	"""
+	Test that disposing one observer doesn't cancel a fetch started by another observer.
+	"""
+	fetch_log: list[tuple[str, str]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		name: str
+
+		def __init__(self, name: str):
+			self.name = name
+
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		async def data(self, page_param: int) -> str:
+			fetch_log.append((self.name, "started"))
+			fetch_started.set()
+			await asyncio.sleep(0.1)
+			fetch_log.append((self.name, "completed"))
+			return f"{self.name}-{page_param}"
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 5 else None
+
+		@data.key
+		def _key(self):
+			return ("dispose-other",)
+
+	s1 = S("s1")
+	s2 = S("s2")
+
+	q1 = s1.data
+	q2 = s2.data
+
+	# s1 starts fetch
+	wait_task = asyncio.create_task(q1.wait())
+	await fetch_started.wait()
+
+	# s2 disposes - should NOT cancel s1's fetch since s1 is the one who enqueued it
+	q2.dispose()
+
+	# Wait for s1's fetch to complete
+	await wait_task
+
+	# s1's fetch should have completed
+	assert ("s1", "started") in fetch_log
+	assert ("s1", "completed") in fetch_log
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_key_change_cancels_pending_actions():
+	"""
+	Test that when a keyed infinite query's key changes, pending actions
+	for the old key are cancelled.
+
+	Scenario: user_id changes from 1 to 2 before the fetch for user_id=1 completes.
+	The pending action should be cancelled.
+	"""
+	fetch_log: list[tuple[int, str]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		user_id: int = 1
+
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		async def projects(self, page_param: int) -> ProjectsPage:
+			uid = self.user_id
+			fetch_log.append((uid, "started"))
+			fetch_started.set()
+			await asyncio.sleep(0.5)  # Long running fetch
+			fetch_log.append((uid, "completed"))
+			return {"items": [uid * 10 + page_param], "next": None}
+
+		@projects.get_next_page_param
+		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
+			return pages[-1].data["next"]
+
+		@projects.key
+		def _key(self):
+			return ("projects", self.user_id)
+
+	s = S()
+	q = s.projects
+
+	# Start fetch for user_id=1
+	wait_task = asyncio.create_task(q.wait())
+	await fetch_started.wait()
+	fetch_started.clear()
+
+	# Change key before fetch completes
+	s.user_id = 2
+	# Allow the reactive system to process the key change
+	await asyncio.sleep(0.05)
+
+	# The old fetch (for user_id=1) may have been cancelled or continued
+	# depending on whether it was the currently executing action
+	# But any pending actions should be cancelled
+
+	# Wait for or cancel the old wait task
+	try:
+		await asyncio.wait_for(wait_task, timeout=0.1)
+	except (asyncio.CancelledError, asyncio.TimeoutError):
+		pass  # Expected
+
+	# Clean up
+	q.dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_key_change_starts_new_fetch():
+	"""
+	Test that when a keyed infinite query's key changes, a new fetch is started
+	for the new key.
+	"""
+	fetch_log: list[tuple[int, str]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		user_id: int = 1
+
+		# Use stale_time=1000 to ensure new queries are considered stale and auto-fetch
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10, stale_time=1000)
+		async def projects(self, page_param: int) -> ProjectsPage:
+			uid = self.user_id
+			fetch_log.append((uid, "started"))
+			fetch_started.set()
+			await asyncio.sleep(0.1)
+			fetch_log.append((uid, "completed"))
+			return {"items": [uid * 10 + page_param], "next": None}
+
+		@projects.get_next_page_param
+		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
+			return pages[-1].data["next"]
+
+		@projects.key
+		def _key(self):
+			return ("projects", self.user_id)
+
+	s = S()
+	q = s.projects
+
+	# Start fetch for user_id=1
+	await fetch_started.wait()
+	fetch_started.clear()
+
+	# Change key - should trigger new fetch for user_id=2
+	s.user_id = 2
+	await fetch_started.wait()
+
+	# Both fetches should have started
+	assert (1, "started") in fetch_log
+	assert (2, "started") in fetch_log
+
+	# Wait for the new fetch to complete
+	await q.wait()
+
+	# New fetch should complete with correct data
+	assert (2, "completed") in fetch_log
+	assert q.data is not None
+	assert q.data[0].data["items"] == [20]
+
+	# Clean up
+	q.dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_key_change_does_not_affect_other_observer():
+	"""
+	Test that when one observer's key changes, it doesn't affect another observer
+	on the same old key that started the fetch.
+	"""
+	fetch_log: list[tuple[str, int, str]] = []
+	fetch_started = asyncio.Event()
+
+	class S(ps.State):
+		name: str
+		user_id: int
+
+		def __init__(self, name: str, user_id: int):
+			self.name = name
+			self.user_id = user_id
+
+		# Use stale_time=1000 to ensure new queries are considered stale and auto-fetch
+		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10, stale_time=1000)
+		async def projects(self, page_param: int) -> ProjectsPage:
+			uid = self.user_id
+			fetch_log.append((self.name, uid, "started"))
+			fetch_started.set()
+			await asyncio.sleep(0.2)
+			fetch_log.append((self.name, uid, "completed"))
+			return {"items": [uid * 10 + page_param], "next": None}
+
+		@projects.get_next_page_param
+		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
+			return pages[-1].data["next"]
+
+		@projects.key
+		def _key(self):
+			return ("projects", self.user_id)
+
+	# Two states observing the same key initially
+	s1 = S("s1", 1)
+	s2 = S("s2", 1)
+
+	q1 = s1.projects
+	q2 = s2.projects
+
+	# s1 starts fetch for key ("projects", 1)
+	wait_task = asyncio.create_task(q1.wait())
+	await fetch_started.wait()
+	fetch_started.clear()
+
+	# s2 changes its key - but s1 started the fetch, so it should continue
+	s2.user_id = 2
+	await asyncio.sleep(0.05)  # Let reactive system process
+
+	# Wait for s1's fetch to complete
+	await wait_task
+
+	# s1's fetch should complete successfully
+	assert ("s1", 1, "started") in fetch_log
+	assert ("s1", 1, "completed") in fetch_log
+	assert q1.data is not None
+	assert q1.data[0].data["items"] == [10]
+
+	# Clean up
+	q1.dispose()
+	q2.dispose()

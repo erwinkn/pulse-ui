@@ -12,7 +12,6 @@ from pulse.middleware import (
 	Deny,
 	NotFound,
 	Ok,
-	PrerenderResponse,
 	Redirect,
 )
 from pulse.request import PulseRequest
@@ -372,7 +371,7 @@ class QueryDemoState(ps.State):
 	keyed_calls: int = 0
 	unkeyed_calls: int = 0
 
-	@ps.query(keep_previous_data=True)
+	@ps.query(keep_previous_data=True, stale_time=60)
 	async def user_keyed(self) -> User:
 		self.keyed_calls += 1
 		# Simulate async work
@@ -421,7 +420,7 @@ def query_demo():
 				ps.button("Next", onClick=next_, className="btn-secondary mr-2"),
 				ps.button(
 					"Refetch keyed",
-					onClick=state.user_keyed.refetch,
+					onClick=lambda: state.user_keyed.refetch(),
 					className="btn-primary",
 				),
 				className="mb-4",
@@ -439,7 +438,7 @@ def query_demo():
 			ps.div(
 				ps.button(
 					"Refetch unkeyed",
-					onClick=state.user_unkeyed.refetch,
+					onClick=lambda: state.user_unkeyed.refetch(),
 					className="btn-primary",
 				),
 				className="mb-2",
@@ -567,8 +566,8 @@ class LoggingMiddleware(ps.PulseMiddleware):
 		route_info: RouteInfo,
 		request: PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[PrerenderResponse]],
-	) -> PrerenderResponse:
+		next: Callable[[], Awaitable[ps.RoutePrerenderResponse]],
+	) -> ps.RoutePrerenderResponse:
 		# before
 		print(f"[MW prerender] path={path} host={request.headers.get('host')}")
 		# Seed same keys as connect to avoid prerender flash

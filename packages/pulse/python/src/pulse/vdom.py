@@ -6,6 +6,7 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 """
 
 import functools
+import math
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from inspect import Parameter, signature
@@ -22,8 +23,59 @@ from typing import (
 	override,
 )
 
+from pulse.env import env
 from pulse.hooks.core import HookContext
 from pulse.hooks.init import rewrite_init_blocks
+
+# ============================================================================
+# Validation helpers (dev mode only)
+# ============================================================================
+
+
+def _check_json_safe_float(value: float, context: str) -> None:
+	"""Raise ValueError if a float is NaN or Infinity."""
+	if math.isnan(value):
+		raise ValueError(
+			f"Cannot use nan in {context}. "
+			+ "NaN and Infinity are not supported in Pulse because they cannot be serialized to JSON. "
+			+ "Replace with None or a sentinel value before passing to components."
+		)
+	if math.isinf(value):
+		kind = "inf" if value > 0 else "-inf"
+		raise ValueError(
+			f"Cannot use {kind} in {context}. "
+			+ "NaN and Infinity are not supported in Pulse because they cannot be serialized to JSON. "
+			+ "Replace with None or a sentinel value before passing to components."
+		)
+
+
+def _validate_value(value: Any, context: str) -> None:
+	"""Recursively validate a value for JSON-unsafe floats (NaN, Infinity)."""
+	if isinstance(value, float):
+		_check_json_safe_float(value, context)
+	elif isinstance(value, dict):
+		for v in value.values():
+			_validate_value(v, context)
+	elif isinstance(value, (list, tuple)):
+		for item in value:
+			_validate_value(item, context)
+	# Skip other types - they'll be handled by the serializer
+
+
+def _validate_props(props: dict[str, Any] | None, parent_name: str) -> None:
+	"""Validate all props for JSON-unsafe values."""
+	if not props:
+		return
+	for key, value in props.items():
+		_validate_value(value, f"{parent_name} prop '{key}'")
+
+
+def _validate_children(children: "Sequence[Element]", parent_name: str) -> None:
+	"""Validate primitive children for JSON-unsafe values."""
+	for child in children:
+		if isinstance(child, float):
+			_check_json_safe_float(child, f"{parent_name} children")
+
 
 # ============================================================================
 # Core VDOM
@@ -75,6 +127,12 @@ class Node:
 			raise ValueError("key must be a string or None")
 		if not self.allow_children and children:
 			raise ValueError(f"{self.tag} cannot have children")
+		# Dev-only validation for JSON-unsafe values
+		if env.pulse_env == "dev":
+			parent_name = f"<{self.tag}>"
+			_validate_props(self.props, parent_name)
+			if self.children:
+				_validate_children(self.children, parent_name)
 
 	# --- Pretty printing helpers -------------------------------------------------
 	@override
@@ -199,6 +257,15 @@ class Component(Generic[P]):
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")
 
+		# Flatten children if component takes children (has *children parameter)
+		if self._takes_children and args:
+			flattened = _flatten_children(
+				args,  # pyright: ignore[reportArgumentType]
+				parent_name=f"<{self.name}>",
+				warn_stacklevel=4,
+			)
+			args = tuple(flattened)  # pyright: ignore[reportAssignmentType]
+
 		return ComponentNode(
 			fn=self.fn,
 			key=key,
@@ -244,6 +311,17 @@ class ComponentNode:
 		# Used for rendering
 		self.contents: Element | None = None
 		self.hooks = HookContext()
+		# Dev-only validation for JSON-unsafe values
+		if env.pulse_env == "dev":
+			parent_name = f"<{self.name}>"
+			# Validate kwargs (props)
+			_validate_props(self.kwargs, parent_name)
+			# Validate args (children passed positionally)
+			for arg in self.args:
+				if isinstance(arg, float):
+					_check_json_safe_float(arg, f"{parent_name} children")
+				elif isinstance(arg, (dict, list, tuple)):
+					_validate_value(arg, f"{parent_name} children")
 
 	def __getitem__(self, children_arg: "Child | tuple[Child, ...]"):
 		if not self.takes_children:
@@ -259,7 +337,7 @@ class ComponentNode:
 			children_arg = (children_arg,)
 		# Flatten children for ComponentNode as well
 		flattened_children = _flatten_children(
-			children_arg, parent_name=f"<{self.name}>"
+			children_arg, parent_name=f"<{self.name}>", warn_stacklevel=4
 		)
 		result = ComponentNode(
 			fn=self.fn,
@@ -315,28 +393,43 @@ Props = dict[str, Any]
 # ----------------------------------------------------------------------------
 
 
-def _flatten_children(children: Children, *, parent_name: str) -> Sequence[Element]:
-	"""Flatten children and emit warnings for unkeyed iterables."""
+def _flatten_children(
+	children: Children, *, parent_name: str, warn_stacklevel: int = 5
+) -> Sequence[Element]:
+	"""Flatten children and emit warnings for unkeyed iterables (dev mode only).
+
+	Args:
+		children: The children sequence to flatten.
+		parent_name: Name of the parent element for error messages.
+		warn_stacklevel: Stack level for warnings. Adjust based on call site:
+			- 5 for Node.__init__ via tag factory (user -> tag factory -> Node.__init__ -> _flatten_children -> visit -> warn)
+			- 4 for ComponentNode.__getitem__ or Component.__call__ (user -> method -> _flatten_children -> visit -> warn)
+	"""
 	flat: list[Element] = []
 	return_tuple = isinstance(children, tuple)
+	is_dev = env.pulse_env == "dev"
 
 	def visit(item: Child) -> None:
 		if isinstance(item, Iterable) and not isinstance(item, str):
 			# If any Node/ComponentNode yielded by this iterable lacks a key,
-			# emit a single warning for this iterable.
+			# emit a single warning for this iterable (dev mode only).
 			missing_key = False
 			for sub in item:
-				if isinstance(sub, (Node, ComponentNode)) and sub.key is None:
+				if (
+					is_dev
+					and isinstance(sub, (Node, ComponentNode))
+					and sub.key is None
+				):
 					missing_key = True
 				visit(sub)
 			if missing_key:
-				# Warn once per iterable without keys on its elements
+				# Warn once per iterable without keys on its elements.
 				warnings.warn(
 					(
 						f"[Pulse] Iterable children of {parent_name} contain elements without 'key'. "
 						"Add a stable 'key' to each element inside iterables to improve reconciliation."
 					),
-					stacklevel=3,
+					stacklevel=warn_stacklevel,
 				)
 		else:
 			# Not an iterable child: must be a Element or primitive

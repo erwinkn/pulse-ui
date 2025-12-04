@@ -145,4 +145,43 @@ describe("v3 serialization", () => {
 		expect(() => serialize({ x: () => {} } as any)).toThrow();
 		expect(() => serialize({ x: Symbol("s") } as any)).toThrow();
 	});
+
+	it("throws on NaN with context", () => {
+		expect(() => serialize({ value: NaN })).toThrow(
+			"Cannot serialize NaN in 'value'. NaN and Infinity are not supported because they cannot be serialized to JSON.",
+		);
+	});
+
+	it("throws on Infinity with context", () => {
+		expect(() => serialize({ value: Infinity })).toThrow(
+			"Cannot serialize Infinity in 'value'. NaN and Infinity are not supported because they cannot be serialized to JSON.",
+		);
+	});
+
+	it("throws on -Infinity with context", () => {
+		expect(() => serialize({ value: -Infinity })).toThrow(
+			"Cannot serialize -Infinity in 'value'. NaN and Infinity are not supported because they cannot be serialized to JSON.",
+		);
+	});
+
+	it("throws on NaN in nested object with innermost context", () => {
+		expect(() => serialize({ outer: { inner: NaN } })).toThrow("Cannot serialize NaN in 'inner'");
+	});
+
+	it("throws on NaN in array with parent context", () => {
+		expect(() => serialize({ values: [1, 2, NaN, 4] })).toThrow("Cannot serialize NaN in 'values'");
+	});
+
+	it("throws on NaN at top level without context", () => {
+		expect(() => serialize(NaN)).toThrow(
+			"Cannot serialize NaN. NaN and Infinity are not supported because they cannot be serialized to JSON.",
+		);
+	});
+
+	it("allows valid finite numbers", () => {
+		const data = { a: 1, b: 3.14, c: -100, d: 0, e: Number.MAX_VALUE };
+		const ser = serialize(data);
+		const parsed = deserialize(ser);
+		expect(parsed).toEqual(data);
+	});
 });

@@ -43,17 +43,21 @@ class RouteMount:
 	render: "RenderSession"
 	route: RouteContext
 	tree: RenderTree
+	effect: Effect | None
+	_pulse_ctx: PulseContext | None
+	element: Element
+	rendered: bool
 
 	def __init__(
 		self, render: "RenderSession", route: Route | Layout, route_info: RouteInfo
 	) -> None:
 		self.render = render
 		self.route = RouteContext(route_info, route)
-		self.effect: Effect | None = None
-		self._pulse_ctx: PulseContext | None = None
-		self.element: Element = route.render()
+		self.effect = None
+		self._pulse_ctx = None
+		self.element = route.render()
 		self.tree = RenderTree(self.element)
-		self.rendered: bool = False
+		self.rendered = False
 
 
 class RenderSession:
@@ -62,6 +66,13 @@ class RenderSession:
 	channels: "ChannelsManager"
 	forms: "FormRegistry"
 	query_store: QueryStore
+	route_mounts: dict[str, RouteMount]
+	_server_address: str | None
+	_client_address: str | None
+	_send_message: Callable[[ServerMessage], Any] | None
+	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
+	_global_states: dict[str, State]
+	connected: bool
 
 	def __init__(
 		self,
@@ -76,20 +87,18 @@ class RenderSession:
 
 		self.id = id
 		self.routes = routes
-		self.route_mounts: dict[str, RouteMount] = {}
+		self.route_mounts = {}
 		# Base server address for building absolute API URLs (e.g., http://localhost:8000)
-		self._server_address: str | None = server_address
+		self._server_address = server_address
 		# Best-effort client address, captured at prerender or socket connect time
-		self._client_address: str | None = client_address
-		self._send_message: Callable[[ServerMessage], Any] | None = None
-		# Buffer messages emitted before a connection is established
-		self._message_buffer: list[ServerMessage] = []
-		self._pending_api: dict[str, asyncio.Future[dict[str, Any]]] = {}
+		self._client_address = client_address
+		self._send_message = None
+		self._pending_api = {}
 		# Registry of per-session global singletons (created via ps.global_state without id)
-		self._global_states: dict[str, State] = {}
+		self._global_states = {}
 		self.query_store = QueryStore()
 		# Connection state
-		self.connected: bool = False
+		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
 
@@ -117,19 +126,22 @@ class RenderSession:
 	def connect(self, send_message: Callable[[ServerMessage], Any]):
 		self._send_message = send_message
 		self.connected = True
-		# Flush any buffered messages now that we can send
-		if self._message_buffer:
-			for msg in self._message_buffer:
-				self._send_message(msg)
-			self._message_buffer.clear()
+		# Don't flush buffer or resume effects here - mount() handles reconnection
+		# by resetting mount.rendered and resuming effects to send fresh vdom_init
+
+	def disconnect(self):
+		"""Called when client disconnects - pause render effects."""
+		self._send_message = None
+		self.connected = False
+		for mount in self.route_mounts.values():
+			if mount.effect:
+				mount.effect.pause()
 
 	def send(self, message: ServerMessage):
 		# If a sender is available (connected or during prerender capture), send immediately.
-		# Otherwise, buffer until a connection is established.
+		# Otherwise, drop the message - we'll send full VDOM state on reconnection.
 		if self._send_message:
 			self._send_message(message)
-		else:
-			self._message_buffer.append(message)
 
 	def report_error(
 		self,
@@ -174,8 +186,6 @@ class RenderSession:
 				self.channels.dispose_channel(channel, reason="render.close")
 		# The effect will be garbage collected, and with it the dependencies
 		self._send_message = None
-		# Discard any buffered messages on close
-		self._message_buffer.clear()
 		self.connected = False
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
@@ -397,8 +407,14 @@ class RenderSession:
 
 	def mount(self, path: str, route_info: RouteInfo):
 		if path in self.route_mounts:
-			# No logging, this is bound to happen with React strict mode
-			# logger.error(f"Route already mounted: '{path}'")
+			# Route already mounted - this is a reconnection case.
+			# Reset rendered flag so effect sends vdom_init, update route info,
+			# and resume the paused effect.
+			mount = self.route_mounts[path]
+			mount.rendered = False
+			mount.route.update(route_info)
+			if mount.effect and mount.effect.paused:
+				mount.effect.resume()
 			return
 
 		mount = self.create_route_mount(path, route_info)

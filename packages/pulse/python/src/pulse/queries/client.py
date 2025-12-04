@@ -5,7 +5,7 @@ from typing import Any, TypeVar, overload
 from pulse.context import PulseContext
 from pulse.queries.common import ActionResult, QueryKey
 from pulse.queries.infinite_query import InfiniteQuery, Page
-from pulse.queries.query import Query
+from pulse.queries.query import KeyedQuery
 
 T = TypeVar("T")
 
@@ -62,11 +62,11 @@ class QueryClient:
 	# Query accessors
 	# ─────────────────────────────────────────────────────────────────────────
 
-	def get(self, key: QueryKey) -> Query[Any] | None:
+	def get(self, key: QueryKey):
 		"""Get an existing regular query by key, or None if not found."""
 		return self._get_store().get(key)
 
-	def get_infinite(self, key: QueryKey) -> InfiniteQuery[Any, Any] | None:
+	def get_infinite(self, key: QueryKey):
 		"""Get an existing infinite query by key, or None if not found."""
 		return self._get_store().get_infinite(key)
 
@@ -75,7 +75,7 @@ class QueryClient:
 		filter: QueryFilter | None = None,
 		*,
 		include_infinite: bool = True,
-	) -> list[Query[Any] | InfiniteQuery[Any, Any]]:
+	) -> list[KeyedQuery[Any] | InfiniteQuery[Any, Any]]:
 		"""
 		Get all queries matching the filter.
 
@@ -89,7 +89,7 @@ class QueryClient:
 		"""
 		store = self._get_store()
 		predicate = _normalize_filter(filter)
-		results: list[Query[Any] | InfiniteQuery[Any, Any]] = []
+		results: list[KeyedQuery[Any] | InfiniteQuery[Any, Any]] = []
 
 		for key, entry in store.items():
 			if predicate is not None and not predicate(key):
@@ -100,11 +100,11 @@ class QueryClient:
 
 		return results
 
-	def get_queries(self, filter: QueryFilter | None = None) -> list[Query[Any]]:
+	def get_queries(self, filter: QueryFilter | None = None) -> list[KeyedQuery[Any]]:
 		"""Get all regular queries matching the filter."""
 		store = self._get_store()
 		predicate = _normalize_filter(filter)
-		results: list[Query[Any]] = []
+		results: list[KeyedQuery[Any]] = []
 
 		for key, entry in store.items():
 			if isinstance(entry, InfiniteQuery):

@@ -667,7 +667,7 @@ class App:
 			if rid is not None:
 				render = self.render_sessions.get(rid)
 				if render:
-					render.connected = False
+					render.disconnect()
 					# Schedule cleanup after timeout (will keep session alive for reuse)
 					self._schedule_render_cleanup(rid)
 

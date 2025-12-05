@@ -13,6 +13,10 @@ Usage:
     Set([1, 2, 3])  # -> new Set([1, 2, 3])
     Number.isFinite(42)  # -> Number.isFinite(42)
 
+    # Statement functions:
+    from pulse.js import throw
+    throw(Error("message"))  # -> throw Error("message");
+
     # For external modules:
     from pulse.js.lodash import chunk
     chunk(arr, 2)  # -> import { chunk } from "lodash"; chunk(arr, 2)
@@ -22,8 +26,14 @@ Usage:
 """
 
 import importlib
+from typing import Any, NoReturn
 
-from pulse.transpiler.nodes import JSIdentifier
+from pulse.transpiler.nodes import (
+	JSIdentifier,
+	JSStmtExpr,
+	JSThrow,
+	js_transformer,
+)
 
 # Namespace modules that resolve to JSIdentifier
 _MODULE_EXPORTS_IDENTIFIER: dict[str, str] = {
@@ -47,6 +57,14 @@ _MODULE_EXPORTS_ATTRIBUTE: dict[str, str] = {
 	"WeakSet": "pulse.js.weakset",
 	"Number": "pulse.js.number",
 }
+
+
+# Statement-like functions (not classes/objects, but callable transformers)
+@js_transformer("throw")
+def throw(x: Any) -> NoReturn:
+	# x is typed as object for users, but at transpile time it's JSExpr
+	return JSStmtExpr(JSThrow(x), name="throw")  # pyright: ignore[reportGeneralTypeIssues]
+
 
 # Cache for exported values
 _export_cache: dict[str, object] = {}

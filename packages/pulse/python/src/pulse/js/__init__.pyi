@@ -4,7 +4,8 @@ This file provides type hints for direct imports from pulse.js:
     from pulse.js import Set, Number, Array, Math, Date, Promise, etc.
 """
 
-from __future__ import annotations
+from typing import Any as _Any
+from typing import NoReturn as _NoReturn
 
 import pulse.js.console as _console
 import pulse.js.json as _JSON
@@ -27,3 +28,5 @@ from pulse.js.weakset import WeakSet as WeakSet
 JSON = _JSON
 Math = _Math
 console = _console
+
+def throw(x: _Any) -> _NoReturn: ...

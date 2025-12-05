@@ -23,19 +23,6 @@ CONSTRUCTORS: set[int] = set()
 F = TypeVar("F", bound=Callable[..., object])
 
 
-# def constructor(fn: F) -> F:
-# 	"""Mark a function stub as a JavaScript constructor.
-
-# 	When called, this will emit 'new Ctor(...)' instead of 'Ctor(...)'.
-
-# 	Usage:
-# 		@constructor
-# 		def Set(iterable: list[object] | None = None) -> object: ...
-# 	"""
-# 	CONSTRUCTORS.add(id(fn))
-# 	return fn
-
-
 @dataclass(frozen=True)
 class JsModule:
 	"""Configuration for a JavaScript module binding.

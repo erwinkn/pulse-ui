@@ -47,6 +47,7 @@ from pulse.transpiler.nodes import (
 	JSSingleStmt,
 	JSSpread,
 	JSStmt,
+	JSStmtExpr,
 	JSString,
 	JSSubscript,
 	JSTemplate,
@@ -203,7 +204,11 @@ class JsTranspiler(ast.NodeVisitor):
 			return JSIf(test, body, orelse)
 
 		if isinstance(node, ast.Expr):
-			return JSSingleStmt(self.emit_expr(node.value))
+			expr = self.emit_expr(node.value)
+			# Unwrap statement-expressions (e.g., throw)
+			if isinstance(expr, JSStmtExpr):
+				return expr.stmt
+			return JSSingleStmt(expr)
 
 		if isinstance(node, ast.While):
 			test = self.emit_expr(node.test)

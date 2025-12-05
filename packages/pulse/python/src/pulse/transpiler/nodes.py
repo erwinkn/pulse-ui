@@ -4,7 +4,7 @@ import ast
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, overload, override
+from typing import Any, TypeVar, overload, override
 
 from pulse.transpiler.context import is_interpreted_mode
 from pulse.transpiler.errors import JSCompilationError
@@ -303,7 +303,6 @@ class JSLogicalChain(JSExpr):
 	op: str  # '&&' or '||'
 	values: Sequence[JSExpr]
 
-	# TODO: parenthesizing
 	@override
 	def emit(self) -> str:
 		if len(self.values) == 1:
@@ -505,17 +504,18 @@ class JSTransformer(JSExpr):
 		raise JSCompilationError(f"{label} cannot have attributes")
 
 
-@overload
-def js_transformer(arg: str) -> Callable[[Callable[..., JSExpr]], JSTransformer]: ...
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 @overload
-def js_transformer(arg: Callable[..., JSExpr]) -> JSTransformer: ...
+def js_transformer(arg: str) -> Callable[[_F], _F]: ...
 
 
-def js_transformer(
-	arg: str | Callable[..., JSExpr],
-) -> Callable[[Callable[..., JSExpr]], JSTransformer] | JSTransformer:
+@overload
+def js_transformer(arg: _F) -> _F: ...
+
+
+def js_transformer(arg: str | _F) -> Callable[[_F], _F] | _F:
 	"""Decorator/helper for JSTransformer.
 
 	Usage:
@@ -524,16 +524,18 @@ def js_transformer(
 	or:
 		emit_len = js_transformer(lambda x: ...)
 
-	Returns a JSTransformer.
+	Returns a JSTransformer, but the type signature lies and preserves
+	the original function type. This allows decorated functions to have
+	proper return types (e.g., NoReturn for throw).
 	"""
 	if isinstance(arg, str):
 
-		def decorator(fn: Callable[..., JSExpr]) -> JSTransformer:
-			return JSTransformer(fn, name=arg)
+		def decorator(fn: _F) -> _F:
+			return JSTransformer(fn, name=arg)  # pyright: ignore[reportReturnType]
 
 		return decorator
 	elif callable(arg):
-		return JSTransformer(arg)  # type: ignore[arg-type]
+		return JSTransformer(arg)  # pyright: ignore[reportReturnType]
 	else:
 		raise TypeError(
 			"js_transformer expects a function or string (for decorator usage)"
@@ -547,6 +549,37 @@ class JSReturn(JSStmt):
 	@override
 	def emit(self) -> str:
 		return f"return {self.value.emit()};"
+
+
+@dataclass
+class JSThrow(JSStmt):
+	value: JSExpr
+
+	@override
+	def emit(self) -> str:
+		return f"throw {self.value.emit()};"
+
+
+@dataclass
+class JSStmtExpr(JSExpr):
+	"""Expression wrapper for a statement (e.g., throw).
+
+	Used for constructs like `throw(x)` that syntactically look like function calls
+	but must be emitted as statements. When used as an expression-statement,
+	the transpiler unwraps this and emits the inner statement directly.
+	"""
+
+	stmt: JSStmt
+	name: str = ""  # For error messages (e.g., "throw")
+
+	@override
+	def emit(self) -> str:
+		label = self.name or "statement"
+		raise JSCompilationError(
+			f"'{label}' cannot be used inside an expression. "
+			+ "Use it as a standalone statement instead. "
+			+ f"For example, write `{label}(x)` on its own line, not `y = {label}(x)` or `f({label}(x))`."
+		)
 
 
 @dataclass

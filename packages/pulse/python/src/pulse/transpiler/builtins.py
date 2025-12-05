@@ -7,7 +7,7 @@ This module provides transpilation for Python builtins to JavaScript.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import override
+from typing import cast, override
 
 from pulse.transpiler.errors import JSCompilationError
 from pulse.transpiler.nodes import (
@@ -341,37 +341,40 @@ def emit_isinstance(*args: JSExpr) -> JSExpr:
 
 
 # Registry of builtin emitters
-BUILTIN_EMITTERS: dict[str, JSTransformer] = {
-	"print": emit_print,
-	"len": emit_len,
-	"min": emit_min,
-	"max": emit_max,
-	"abs": emit_abs,
-	"round": emit_round,
-	"str": emit_str,
-	"int": emit_int,
-	"float": emit_float,
-	"list": emit_list,
-	"bool": emit_bool,
-	"set": emit_set,
-	"tuple": emit_tuple,
-	"dict": emit_dict,
-	"filter": emit_filter,
-	"map": emit_map,
-	"reversed": emit_reversed,
-	"enumerate": emit_enumerate,
-	"range": emit_range,
-	"sorted": emit_sorted,
-	"zip": emit_zip,
-	"pow": emit_pow,
-	"chr": emit_chr,
-	"ord": emit_ord,
-	"any": emit_any,
-	"all": emit_all,
-	"sum": emit_sum,
-	"divmod": emit_divmod,
-	"isinstance": emit_isinstance,
-}
+BUILTIN_EMITTERS = cast(
+	dict[str, JSTransformer],
+	{
+		"print": emit_print,
+		"len": emit_len,
+		"min": emit_min,
+		"max": emit_max,
+		"abs": emit_abs,
+		"round": emit_round,
+		"str": emit_str,
+		"int": emit_int,
+		"float": emit_float,
+		"list": emit_list,
+		"bool": emit_bool,
+		"set": emit_set,
+		"tuple": emit_tuple,
+		"dict": emit_dict,
+		"filter": emit_filter,
+		"map": emit_map,
+		"reversed": emit_reversed,
+		"enumerate": emit_enumerate,
+		"range": emit_range,
+		"sorted": emit_sorted,
+		"zip": emit_zip,
+		"pow": emit_pow,
+		"chr": emit_chr,
+		"ord": emit_ord,
+		"any": emit_any,
+		"all": emit_all,
+		"sum": emit_sum,
+		"divmod": emit_divmod,
+		"isinstance": emit_isinstance,
+	},
+)
 
 
 # =============================================================================

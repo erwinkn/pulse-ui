@@ -1676,6 +1676,86 @@ class TestBuiltins:
 
 
 # =============================================================================
+# Statement Functions (throw, etc.)
+# =============================================================================
+
+
+class TestStatementFunctions:
+	"""Test statement-like functions that transpile to JS statements."""
+
+	def test_throw_basic(self):
+		from pulse.js import throw
+
+		@javascript
+		def f(x):
+			throw("error")
+
+		code = f.transpile()
+		assert 'throw "error";' in code
+
+	def test_throw_in_if(self):
+		from pulse.js import throw
+
+		@javascript
+		def f(x):
+			if x < 0:
+				throw("negative")
+			return x
+
+		code = f.transpile()
+		assert "if (x < 0)" in code
+		assert 'throw "negative";' in code
+		assert "return x" in code
+
+	def test_throw_variable(self):
+		from pulse.js import throw
+
+		@javascript
+		def f(msg):
+			throw(msg)
+
+		code = f.transpile()
+		assert "throw msg;" in code
+
+	def test_throw_in_expression_context_fails(self):
+		import pytest
+		from pulse.js import throw
+
+		@javascript
+		def f(x):
+			y = throw("oops")
+			return y
+
+		with pytest.raises(JSCompilationError) as exc_info:
+			f.transpile()
+		assert "'throw' cannot be used inside an expression" in str(exc_info.value)
+
+	def test_throw_as_function_arg_fails(self):
+		import pytest
+		from pulse.js import throw
+
+		@javascript
+		def f(x):
+			print(throw("oops"))
+
+		with pytest.raises(JSCompilationError) as exc_info:
+			f.transpile()
+		assert "'throw' cannot be used inside an expression" in str(exc_info.value)
+
+	def test_throw_in_ternary_fails(self):
+		import pytest
+		from pulse.js import throw
+
+		@javascript
+		def f(x):
+			return throw("a") if x else throw("b")
+
+		with pytest.raises(JSCompilationError) as exc_info:
+			f.transpile()
+		assert "'throw' cannot be used inside an expression" in str(exc_info.value)
+
+
+# =============================================================================
 # Builtin Methods
 # =============================================================================
 

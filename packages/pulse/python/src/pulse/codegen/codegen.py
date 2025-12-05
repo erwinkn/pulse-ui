@@ -12,7 +12,7 @@ from pulse.codegen.templates.routes_ts import (
 	ROUTES_RUNTIME_TEMPLATE,
 )
 from pulse.env import env
-from pulse.javascript_v2.imports import registered_imports
+from pulse.javascript.imports import registered_imports
 from pulse.routing import Layout, Route, RouteTree
 
 if TYPE_CHECKING:
@@ -153,7 +153,7 @@ class Codegen:
 
 	def _copy_css_files(self) -> None:
 		"""Copy all registered local CSS files to the output css directory."""
-		from pulse.javascript_v2.imports import CssImport
+		from pulse.javascript.imports import CssImport
 
 		css_dir = self.output_folder / "css"
 

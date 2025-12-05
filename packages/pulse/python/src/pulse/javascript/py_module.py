@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import TypeAlias, cast, override
 
-from pulse.javascript_v2.errors import JSCompilationError
-from pulse.javascript_v2.nodes import JSExpr
+from pulse.javascript.errors import JSCompilationError
+from pulse.javascript.nodes import JSExpr
 
 # Type alias for module transpilers - either a PyModule class or a dict
 # The dict can contain JSExpr or Callable[..., JSExpr] during construction,

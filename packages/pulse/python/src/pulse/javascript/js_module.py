@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Literal
 
-from pulse.javascript_v2.imports import Import
-from pulse.javascript_v2.nodes import JSIdentifier, JSMember
+from pulse.javascript.imports import Import
+from pulse.javascript.nodes import JSIdentifier, JSMember
 
 
 @dataclass(frozen=True)

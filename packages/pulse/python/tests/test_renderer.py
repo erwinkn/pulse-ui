@@ -253,7 +253,7 @@ def test_diff_props_unmounts_render_prop_when_removed():
 
 
 def test_diff_props_unmounts_render_prop_when_replaced_with_jsexpr(tmp_path: Path):
-	from pulse.javascript_v2.imports import (
+	from pulse.javascript.imports import (
 		CssImport,
 		clear_import_registry,
 	)
@@ -849,7 +849,7 @@ def test_render_props():
 
 def test_css_module_with_jsexpr(tmp_path: Path):
 	"""Test CSS module via CssImport returns JSExpr that integrates with renderer."""
-	from pulse.javascript_v2.imports import (
+	from pulse.javascript.imports import (
 		CssImport,
 		clear_import_registry,
 	)

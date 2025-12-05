@@ -25,9 +25,9 @@ from typing import (
 )
 
 from pulse.helpers import Sentinel
-from pulse.javascript_v2.errors import JSCompilationError
-from pulse.javascript_v2.imports import Import
-from pulse.javascript_v2.nodes import (
+from pulse.javascript.errors import JSCompilationError
+from pulse.javascript.imports import Import
+from pulse.javascript.nodes import (
 	JSExpr,
 	JSMember,
 	JSSpread,
@@ -329,7 +329,7 @@ def _flatten_children(
 	items: list[JSExpr], out: list[JSExpr | JSXElement | str]
 ) -> None:
 	"""Flatten arrays and handle spreads in children list."""
-	from pulse.javascript_v2.nodes import JSArray, JSString
+	from pulse.javascript.nodes import JSArray, JSString
 
 	for it in items:
 		if isinstance(it, JSArray):

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 from pulse.html import tags
-from pulse.javascript_v2.function import javascript
+from pulse.javascript.function import javascript
 
 
 class TestJSXTagTranspilation:

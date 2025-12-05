@@ -1289,10 +1289,10 @@ from pulse.html.tags import (
 )
 
 # JavaScript v2 transpilation system
-from pulse.javascript_v2.function import javascript as javascript
-from pulse.javascript_v2.imports import CssImport as CssImport
-from pulse.javascript_v2.imports import Import as Import
-from pulse.javascript_v2.imports import import_js as import_js
+from pulse.javascript.function import javascript as javascript
+from pulse.javascript.imports import CssImport as CssImport
+from pulse.javascript.imports import Import as Import
+from pulse.javascript.imports import import_js as import_js
 from pulse.messages import ClientMessage as ClientMessage
 from pulse.messages import Directives as Directives
 from pulse.messages import Prerender as Prerender

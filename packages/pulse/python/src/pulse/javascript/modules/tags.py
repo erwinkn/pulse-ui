@@ -18,8 +18,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import override
 
-from pulse.javascript_v2.errors import JSCompilationError
-from pulse.javascript_v2.nodes import (
+from pulse.javascript.errors import JSCompilationError
+from pulse.javascript.nodes import (
 	JSArray,
 	JSExpr,
 	JSSpread,
@@ -29,7 +29,7 @@ from pulse.javascript_v2.nodes import (
 	JSXProp,
 	JSXSpreadProp,
 )
-from pulse.javascript_v2.py_module import PyModule
+from pulse.javascript.py_module import PyModule
 
 
 def _flatten_children(
@@ -113,7 +113,7 @@ class JSXCallExpr(JSExpr):
 	@override
 	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
 		"""Calling an already-called tag is an error."""
-		from pulse.javascript_v2.errors import JSCompilationError
+		from pulse.javascript.errors import JSCompilationError
 
 		raise JSCompilationError(
 			f"Cannot call JSX element <{self.tag_name}> - already called. "

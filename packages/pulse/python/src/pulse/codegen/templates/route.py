@@ -6,9 +6,9 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
-from pulse.javascript_v2.constants import JsConstant
-from pulse.javascript_v2.function import AnyJsFunction, JsFunction
-from pulse.javascript_v2.imports import Import, registered_imports
+from pulse.javascript.constants import JsConstant
+from pulse.javascript.function import AnyJsFunction, JsFunction
+from pulse.javascript.imports import Import, registered_imports
 from pulse.react_component import ReactComponent
 
 
@@ -154,7 +154,7 @@ def _collect_function_graph(
 
 		for dep in fn.deps.values():
 			if isinstance(dep, JsFunction):
-				walk(dep)
+				walk(dep)  # pyright: ignore[reportUnknownArgumentType]
 			elif isinstance(dep, JsConstant):
 				if dep.id not in seen_consts:
 					seen_consts.add(dep.id)
@@ -281,7 +281,7 @@ def generate_route(
 
 	# Update src for local CSS imports to use relative paths from the route file
 	if route_file_path is not None and css_dir is not None:
-		from pulse.javascript_v2.imports import CssImport
+		from pulse.javascript.imports import CssImport
 
 		route_dir = route_file_path.parent
 		for imp in all_imports:

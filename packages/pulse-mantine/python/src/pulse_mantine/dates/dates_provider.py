@@ -1,7 +1,7 @@
 from typing import Any
 
 import pulse as ps
-from pulse.javascript_v2.imports import CssImport
+from pulse.javascript.imports import CssImport
 
 
 @ps.react_component(

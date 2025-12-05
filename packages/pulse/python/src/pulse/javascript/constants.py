@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TypeAlias, override
 
-from pulse.javascript_v2.context import is_interpreted_mode
-from pulse.javascript_v2.errors import JSCompilationError
-from pulse.javascript_v2.ids import generate_id
-from pulse.javascript_v2.nodes import (
+from pulse.javascript.context import is_interpreted_mode
+from pulse.javascript.errors import JSCompilationError
+from pulse.javascript.ids import generate_id
+from pulse.javascript.nodes import (
 	JSArray,
 	JSBoolean,
 	JSExpr,

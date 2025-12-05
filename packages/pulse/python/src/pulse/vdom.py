@@ -7,6 +7,7 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 
 import functools
 import math
+import re
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from inspect import Parameter, signature
@@ -393,6 +394,18 @@ Props = dict[str, Any]
 # ----------------------------------------------------------------------------
 
 
+def _clean_parent_name_for_warning(parent_name: str) -> str:
+	"""Strip $$ prefix and hexadecimal suffix from ReactComponent tags in warning messages.
+
+	ReactComponent tags are in the format <$$ComponentName_1a2b> or <$$ComponentName_1a2b.prop>.
+	This function strips the $$ prefix and _1a2b suffix to show just the component name.
+	"""
+
+	# Match ReactComponent tags: <$$ComponentName_hex> or <$$ComponentName_hex.prop>
+	# Strip the $$ prefix and _hex suffix but keep the rest (hex digits are 0-9, a-f)
+	return re.sub(r"\$\$([^_]+)_[0-9a-f]+", r"\1", parent_name)
+
+
 def _flatten_children(
 	children: Children, *, parent_name: str, warn_stacklevel: int = 5
 ) -> Sequence[Element]:
@@ -424,9 +437,10 @@ def _flatten_children(
 				visit(sub)
 			if missing_key:
 				# Warn once per iterable without keys on its elements.
+				clean_name = _clean_parent_name_for_warning(parent_name)
 				warnings.warn(
 					(
-						f"[Pulse] Iterable children of {parent_name} contain elements without 'key'. "
+						f"[Pulse] Iterable children of {clean_name} contain elements without 'key'. "
 						"Add a stable 'key' to each element inside iterables to improve reconciliation."
 					),
 					stacklevel=warn_stacklevel,

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from pulse.javascript_v2.constants import CONSTANTS_CACHE
-from pulse.javascript_v2.function import FUNCTION_CACHE, javascript
-from pulse.javascript_v2.imports import clear_import_registry
-from pulse.javascript_v2.nodes import JSIdentifier, JSMember
+from pulse.javascript.constants import CONSTANTS_CACHE
+from pulse.javascript.function import FUNCTION_CACHE, javascript
+from pulse.javascript.imports import clear_import_registry
+from pulse.javascript.nodes import JSIdentifier, JSMember
 
 
 # Clear caches between tests
@@ -173,7 +173,7 @@ class TestJsModuleConfig:
 	def test_builtin_module_config(self) -> None:
 		"""Builtin modules have no src."""
 		import pulse.js.math
-		from pulse.javascript_v2.js_module import JS_MODULES
+		from pulse.javascript.js_module import JS_MODULES
 
 		config = JS_MODULES[pulse.js.math]
 		assert config.name == "Math"
@@ -183,7 +183,7 @@ class TestJsModuleConfig:
 	def test_builtin_to_js_expr_returns_identifier(self) -> None:
 		"""Builtin modules return JSIdentifier."""
 		import pulse.js.math
-		from pulse.javascript_v2.js_module import JS_MODULES
+		from pulse.javascript.js_module import JS_MODULES
 
 		config = JS_MODULES[pulse.js.math]
 		js_expr = config.to_js_expr()
@@ -197,7 +197,7 @@ class TestJsNumberModule:
 	def test_number_module_config(self) -> None:
 		"""Number module should be configured as builtin."""
 		import pulse.js.number
-		from pulse.javascript_v2.js_module import JS_MODULES
+		from pulse.javascript.js_module import JS_MODULES
 
 		config = JS_MODULES[pulse.js.number]
 		assert config.name == "Number"

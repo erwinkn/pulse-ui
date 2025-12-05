@@ -1,324 +1,251 @@
 from __future__ import annotations
 
 import ast
-import hashlib
+import builtins
 import inspect
 import textwrap
+import types as pytypes
 from typing import (
 	Any,
 	Callable,
 	Generic,
-	NamedTuple,
 	TypeAlias,
 	TypeVar,
 	TypeVarTuple,
+	cast,
+	override,
 )
 
-from .builtins import BUILTINS, TAG_BUILTINS, Builtin
-from .nodes import (
-	JSArray,
-	JSBoolean,
-	JSCompilationError,
-	JSExpr,
-	JSFunctionDef,
-	JSIdentifier,
-	JSImport,
-	JSNew,
-	JSNumber,
-	JSString,
+# Import module registrations to ensure they're available for dependency analysis
+import pulse.javascript.modules  # noqa: F401
+from pulse.javascript.builtins import PyBuiltin
+from pulse.javascript.constants import JsConstant, const_to_js
+from pulse.javascript.context import is_interpreted_mode
+from pulse.javascript.errors import JSCompilationError
+from pulse.javascript.ids import generate_id
+from pulse.javascript.imports import Import
+from pulse.javascript.js_module import JS_MODULES
+from pulse.javascript.nodes import JSExpr
+from pulse.javascript.py_module import (
+	PY_MODULE_VALUES,
+	PY_MODULES,
+	PyModuleExpr,
+	PyModuleFuncExpr,
 )
-from .transpiler import JsTranspiler, get_function_source
+from pulse.javascript.transpiler import JsTranspiler
 
-R = TypeVar("R")
 Args = TypeVarTuple("Args")
-
-AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any,...], Any]"
-
-
-class JsFunctionCode(NamedTuple):
-	code: str
-	hash: str
+R = TypeVar("R")
 
 
-_JS_FUNCTION_CACHE: dict[Callable[..., object], AnyJsFunction] = {}
+AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any, ...], Any]"
+
+# Global cache for deduplication across all transpiled functions
+# Registered BEFORE analyzing deps to handle mutual recursion
+FUNCTION_CACHE: dict[Callable[..., object], AnyJsFunction] = {}
 
 
-def _const_to_js_expr(value: object) -> JSExpr:
-	if value is None:
-		# Represent None as undefined for our JS subset
-		return JSIdentifier("undefined")
-	if isinstance(value, bool):
-		return JSBoolean(value)
-	if isinstance(value, (int, float)):
-		return JSNumber(value)
-	if isinstance(value, str):
-		return JSString(value)
-	if isinstance(value, (list, tuple)):
-		return JSArray([_const_to_js_expr(v) for v in value])  # pyright: ignore[reportUnknownArgumentType]
-	if isinstance(value, (set, frozenset)):
-		return JSNew(
-			JSIdentifier("Set"),
-			[JSArray([_const_to_js_expr(v) for v in value])],  # pyright: ignore[reportUnknownArgumentType]
-		)
-	if isinstance(value, dict):
-		# Normalize Python dict constants to Map semantics so methods like .get() work
-		entries: list[JSExpr] = []
-		for k, v in value.items():
-			if not isinstance(k, str):
-				raise JSCompilationError("Only string keys supported in constant dicts")
-			entries.append(JSArray([JSString(k), _const_to_js_expr(v)]))  # pyright: ignore[reportUnknownArgumentType]
-		return JSNew(JSIdentifier("Map"), [JSArray(entries)])
-	raise JSCompilationError(f"Unsupported global constant: {type(value).__name__}")
+class JsFunction(JSExpr, Generic[*Args, R]):
+	is_primary: bool = True
 
-
-class JsFunction(Generic[*Args, R]):
-	js_name: str
 	fn: Callable[[*Args], R]
-	imports: list[JSImport]
-	dependencies: dict[str, AnyJsFunction]
-	globals: dict[str, JSExpr]
-	_fndef: ast.FunctionDef
-	_arg_names: list[str]
-	_builtin_names: set[str]
-	_module_builtins: dict[str, dict[str, Builtin]]
+	id: str
+	deps: dict[str, JSExpr]
 
-	def __init__(
-		self,
-		fn: Callable[[*Args], R],
-	) -> None:
+	def __init__(self, fn: Callable[[*Args], R]) -> None:
 		self.fn = fn
-		self.imports = []
-		self.dependencies = {}
-		self.globals = {}
+		self.id = generate_id()
 
-		src = get_function_source(fn)
+		# Register self in cache BEFORE analyzing deps (handles cycles)
+		FUNCTION_CACHE[fn] = self
+
+		# Analyze code object and resolve globals + closure vars
+		effective_globals, all_names = _analyze_code_object(fn)
+
+		# Build dependencies dictionary - all values are JSExpr
+		builtin_dict = builtins.__dict__
+		deps: dict[str, JSExpr] = {}
+
+		for name in all_names:
+			if name in builtin_dict:
+				# Python builtins -> PyBuiltinExpr
+				deps[name] = PyBuiltin(name)
+				continue
+			value = effective_globals.get(name)
+
+			if value is None:
+				# Unresolved names (e.g., attribute accesses like 'sqrt' from 'math.sqrt')
+				# are skipped - they'll be handled during code generation
+				continue
+
+			# Already a JSExpr (JsFunction, JsConstant, Import, JSMember, etc.)
+			if isinstance(value, JSExpr):
+				deps[name] = value
+			elif inspect.ismodule(value):
+				if value in JS_MODULES:
+					# import pulse.js.math as Math -> JSIdentifier or Import
+					deps[name] = JS_MODULES[value].to_js_expr()
+				elif value in PY_MODULES:
+					deps[name] = PyModuleExpr(PY_MODULES[value])
+				else:
+					raise JSCompilationError(
+						f"Could not resolve JavaScript module import for '{name}' (value: {value!r}). "
+						+ "Neither a registered Python module nor a known JS wrapper. "
+						+ "Check your import statement and module configuration."
+					)
+
+			elif id(value) in PY_MODULE_VALUES:
+				# PY_MODULE_VALUES always contains JSExpr (wrapping happens in py_module.py)
+				deps[name] = PY_MODULE_VALUES[id(value)]
+			elif inspect.isfunction(value):
+				deps[name] = javascript(value)
+			elif callable(value):
+				raise JSCompilationError(
+					f"Callable object '{name}' (type: {type(value).__name__}) is not supported. "
+					+ "Only functions can be transpiled."
+				)
+			else:
+				deps[name] = const_to_js(value, name)
+
+		self.deps = deps
+
+	@property
+	def js_name(self) -> str:
+		"""Unique JS identifier for this function."""
+		return f"{self.fn.__name__}_{self.id}"
+
+	@override
+	def emit(self) -> str:
+		"""Emit JS code for this function reference.
+
+		In normal mode: returns the unique JS name (e.g., "myFunc_1")
+		In interpreted mode: returns a get_object call (e.g., "get_object('myFunc_1')")
+		"""
+		base = self.js_name
+		if is_interpreted_mode():
+			return f"get_object('{base}')"
+		return base
+
+	def imports(self) -> dict[str, Import]:
+		"""Get all Import dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, Import)}
+
+	def functions(self) -> dict[str, AnyJsFunction]:
+		"""Get all JsFunction dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, JsFunction)}
+
+	def constants(self) -> dict[str, JsConstant]:
+		"""Get all JsConstant dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, JsConstant)}
+
+	def builtins(self) -> dict[str, PyBuiltin]:
+		"""Get all PyBuiltinExpr dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, PyBuiltin)}
+
+	def modules(self) -> dict[str, PyModuleExpr]:
+		"""Get all PyModuleExpr dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, PyModuleExpr)}
+
+	def module_functions(self) -> dict[str, PyModuleFuncExpr]:
+		"""Get all PyModuleFuncExpr dependencies (named imports from modules)."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, PyModuleFuncExpr)}
+
+	def transpile(self) -> str:
+		"""Transpile this JsFunction to JavaScript code.
+
+		Returns the complete JavaScript function code.
+		"""
+
+		# Get source code
+		src = inspect.getsource(self.fn)
 		src = textwrap.dedent(src)
+
+		# Parse to AST
 		module = ast.parse(src)
 		fndefs = [n for n in module.body if isinstance(n, ast.FunctionDef)]
 		if not fndefs:
 			raise JSCompilationError("No function definition found in source")
-		# Choose the last function def in the block (common for decorators)
 		fndef = fndefs[-1]
 
+		# Get argument names
 		arg_names = [arg.arg for arg in fndef.args.args]
 
-		# Choose a stable JS name for this function
-		try:
-			own_src = get_function_source(fn)
-		except JSCompilationError:
-			own_src = fn.__name__
-		h = hashlib.sha256(textwrap.dedent(own_src).encode("utf-8")).hexdigest()[:8]
-		self.js_name = f"{fn.__name__}${h}"
-
-		closure = inspect.getclosurevars(fn)
-
-		# 1) Collect global functions and constants
-		self.dependencies = {}
-		self._module_builtins = {}
-		for name, val in closure.globals.items():
-			# Ignore typing helpers entirely (e.g., Any, cast)
-			mod_of_val = getattr(val, "__module__", "")
-			if mod_of_val in ("typing", "typing_extensions"):
-				continue
-			if inspect.isfunction(val):
-				jf = _JS_FUNCTION_CACHE.get(val)
-				if jf is None:
-					jf = JsFunction(val)
-					_JS_FUNCTION_CACHE[val] = jf
-				self.dependencies[name] = jf
-			elif inspect.ismodule(val):
-				mod_name = getattr(val, "__name__", "")
-				if mod_name == "pulse":
-					self._module_builtins[name] = dict(TAG_BUILTINS)
-			elif callable(val):
-				raise JSCompilationError(
-					f"Unsupported callable object in globals: {name} ({type(val).__name__}). Only plain functions are allowed."
-				)
-			else:
-				self.globals[name] = _const_to_js_expr(val)
-		# 2) Stash AST/transpile info for lazy transpile with rename later
-		self._fndef = fndef
-		self._arg_names = arg_names
-		self._builtin_names = (
-			set(closure.builtins) if hasattr(closure, "builtins") else set()
-		)
-
-	def _transpile(self, rename: dict[str, str]) -> JSFunctionDef:
-		# Always include HTML tag builtins; filter the rest by closure builtins
-		builtins = {
-			name: fn for name, fn in BUILTINS.items() if name in self._builtin_names
-		}
-		for name in TAG_BUILTINS.keys():
-			builtins[name] = BUILTINS[name]
-		visitor = JsTranspiler(
-			self._fndef,
-			args=self._arg_names,
-			rename=rename,
-			globals=list(self.dependencies.keys() | self.globals.keys()),
-			builtins=builtins,
-			module_builtins=self._module_builtins,
-		)
-		return visitor.transpile()
-
-	def _emit_named_function(self, allocated_name: str, js_fn_expr_code: str) -> str:
-		# Convert `function(args){...}` into `function <allocated_name>(args){...}`
-		prefix = "function("
-		named_prefix = f"function {allocated_name}("
-		if js_fn_expr_code.startswith(prefix):
-			return named_prefix + js_fn_expr_code[len(prefix) :]
-		# Fallback: if already arrow or otherwise, wrap as const binding with name
-		return (
-			f"function {allocated_name}{js_fn_expr_code[js_fn_expr_code.find('(') :]}"
-		)
-
-	def emit(self):
-		code, names = emit_many([self])
-		# Update js_name to the allocated emitted name for downstream consumers/tests
-		try:
-			self.js_name = names[self]
-		except Exception:
-			pass
-		h = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
-		return JsFunctionCode(code, h)
+		# Transpile - pass deps directly, transpiler handles dispatch
+		visitor = JsTranspiler(fndef, args=arg_names, deps=self.deps)
+		js_fn = visitor.transpile(name=self.js_name)
+		return js_fn.emit()
 
 	def __call__(self, *args: *Args) -> R:
-		return self.fn(*args)
+		return cast(R, JsFunctionCall(self, args))
 
 
-class _NameAllocator:
-	def __init__(self) -> None:
-		self.used: set[str] = set()
-		self.counts: dict[str, int] = {}
+class JsFunctionCall(Generic[*Args]):
+	fn: JsFunction[*Args, Any]
+	args: tuple[*Args]
 
-	def reserve(self, name: str) -> None:
-		self.used.add(name)
-
-	def alloc(self, base: str) -> str:
-		if base not in self.used:
-			self.used.add(base)
-			self.counts.setdefault(base, 1)
-			return base
-		# bump counter
-		idx = self.counts.get(base, 1) + 1
-		while True:
-			candidate = f"{base}{idx}"
-			if candidate not in self.used:
-				self.used.add(candidate)
-				self.counts[base] = idx
-				return candidate
-			idx += 1
+	def __init__(self, fn: JsFunction[*Args, Any], args: tuple[*Args]) -> None:
+		self.fn = fn
+		self.args = args
 
 
-def emit_many(roots: list[AnyJsFunction]) -> tuple[str, dict[AnyJsFunction, str]]:
-	# Build union DAG
-	visited: set[AnyJsFunction] = set()
-	temp: set[AnyJsFunction] = set()
-	order: list[AnyJsFunction] = []
+def _analyze_code_object(
+	fn: Callable[..., object],
+) -> tuple[dict[str, Any], set[str]]:
+	"""Analyze code object and resolve globals + closure variables.
 
-	def dfs(node: AnyJsFunction):
-		if node in temp:
-			raise JSCompilationError("Cycle detected in function dependencies")
-		if node in visited:
+	Returns a tuple of:
+	    - effective_globals: dict mapping names to their values (includes closure vars)
+	    - all_names: set of all names referenced in the code (including nested functions)
+	"""
+	code = fn.__code__
+
+	# Collect all names from code object and nested functions in one pass
+	seen_codes: set[int] = set()
+	all_names: set[str] = set()
+
+	def walk_code(c: pytypes.CodeType) -> None:
+		if id(c) in seen_codes:
 			return
-		temp.add(node)
-		for child in node.dependencies.values():
-			dfs(child)
-		temp.remove(node)
-		visited.add(node)
-		order.append(node)
+		seen_codes.add(id(c))
+		all_names.update(c.co_names)
+		all_names.update(c.co_freevars)  # Include closure variables
+		for const in c.co_consts:
+			if isinstance(const, pytypes.CodeType):
+				walk_code(const)
 
-	for r in roots:
-		dfs(r)
+	walk_code(code)
 
-	# Name allocator across the whole graph
-	allocator = _NameAllocator()
+	# Build effective globals dict: start with function's globals, then add closure values
+	effective_globals = dict(fn.__globals__)
 
-	# Allocate function names deterministically by base python name
-	fn_names: dict[AnyJsFunction, str] = {}
-	for node in order:
-		base = node.fn.__name__
-		fn_names[node] = allocator.alloc(base)
+	# Resolve closure variables from closure cells
+	if code.co_freevars and fn.__closure__:
+		closure = fn.__closure__
+		for i, freevar_name in enumerate(code.co_freevars):
+			if i < len(closure):
+				cell = closure[i]
+				# Get the value from the closure cell
+				try:
+					effective_globals[freevar_name] = cell.cell_contents
+				except ValueError:
+					# Cell is empty (unbound), skip it
+					pass
 
-	# Allocate constants with dedup by emitted code
-	const_code_to_name: dict[str, str] = {}
-	const_alloc_per_node: dict[AnyJsFunction, dict[str, str]] = {}
-	for node in order:
-		mapping: dict[str, str] = {}
-		for cname, cexpr in node.globals.items():
-			code = cexpr.emit()
-			existing = const_code_to_name.get(code)
-			if existing is not None:
-				mapping[cname] = existing
-				continue
-			# allocate new based on cname, may need suffix
-			allocated = allocator.alloc(cname)
-			const_code_to_name[code] = allocated
-			mapping[cname] = allocated
-		const_alloc_per_node[node] = mapping
-
-	# Build rename maps per node
-	rename_per_node: dict[AnyJsFunction, dict[str, str]] = {}
-	for node in order:
-		ren: dict[str, str] = {}
-		# functions referenced by their original global names
-		for ref_name, child in node.dependencies.items():
-			ren[ref_name] = fn_names[child]
-		# constants
-		ren.update(const_alloc_per_node.get(node, {}))
-		rename_per_node[node] = ren
-
-	# Emit: all function declarations (deps first, roots last), then constants
-	lines: list[str] = []
-	for node in order:
-		js_fn_expr = node._transpile(rename_per_node[node]).emit()  # pyright: ignore[reportPrivateUsage]
-		lines.append(node._emit_named_function(fn_names[node], js_fn_expr))  # pyright: ignore[reportPrivateUsage]
-
-	# Emit constants after functions (function declarations are hoisted)
-	for code, name in sorted(
-		((code, name) for code, name in const_code_to_name.items()), key=lambda x: x[1]
-	):
-		lines.append(f"const {name} = {code};")
-
-	return "\n\n".join(lines), {r: fn_names[r] for r in roots}
+	return effective_globals, all_names
 
 
-class ExternalJsFunction(Generic[*Args, R]):
-	name: str
-	src: str
-	is_default: bool
-	hint: Callable[[*Args], R]
-
-	def __init__(
-		self, name: str, src: str, is_default: bool, hint: Callable[[*Args], R]
-	) -> None:
-		self.name = name
-		self.src = src
-		self.is_default = is_default
-		self.hint = hint
-
-	def __call__(self, *args: *Args) -> R: ...
-
-
-def external_javascript(name: str, src: str, is_default: bool = False):
-	def decorator(fn: Callable[[*Args], R]):
-		return ExternalJsFunction(name=name, src=src, is_default=is_default, hint=fn)
-
-	return decorator
-
-
-def javascript(fn: Callable[[*Args], R]):
-	"""Decorator that compiles a Python function into JavaScript and stores
-	metadata on the function object for the reconciler.
+def javascript(fn: Callable[[*Args], R]) -> JsFunction[*Args, R]:
+	"""Decorator to convert a function into a JsFunction.
 
 	Usage:
 	    @javascript
-	    def formatter(x):
-	        return f"{x:.2f}"
+	    def my_func(x: int) -> int:
+	        return x + 1
+
+	    # my_func is now a JsFunction instance
 	"""
-
-	def decorator(inner: Callable[[*Args], R]):
-		return JsFunction(inner)
-
-	if fn is not None:
-		return decorator(fn)
-	return decorator
+	result = FUNCTION_CACHE.get(fn)
+	if not result:
+		result = JsFunction(fn)
+		FUNCTION_CACHE[fn] = result
+	return result  # pyright: ignore[reportReturnType]

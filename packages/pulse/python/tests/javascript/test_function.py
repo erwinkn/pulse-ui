@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import pytest
-from pulse.javascript_v2.builtins import PyBuiltin
-from pulse.javascript_v2.constants import CONSTANTS_CACHE, JsConstant
-from pulse.javascript_v2.errors import JSCompilationError
-from pulse.javascript_v2.function import (
+from pulse.javascript.builtins import PyBuiltin
+from pulse.javascript.constants import CONSTANTS_CACHE, JsConstant
+from pulse.javascript.errors import JSCompilationError
+from pulse.javascript.function import (
 	FUNCTION_CACHE,
 	JsFunction,
 	javascript,
 )
-from pulse.javascript_v2.imports import Import, clear_import_registry
-from pulse.javascript_v2.nodes import JSArray, JSNumber, JSString
+from pulse.javascript.imports import Import, clear_import_registry
+from pulse.javascript.nodes import JSArray, JSNumber, JSString
 
 
 # Clear caches between tests

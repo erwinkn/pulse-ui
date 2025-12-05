@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import ast
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, override
+from typing import override
 
-
-class JSCompilationError(Exception):
-	pass
-
+from pulse.javascript.context import is_interpreted_mode
+from pulse.javascript.errors import JSCompilationError
 
 ALLOWED_BINOPS: dict[type[ast.operator], str] = {
 	ast.Add: "+",
@@ -40,22 +39,71 @@ ALLOWED_CMPOPS: dict[type[ast.cmpop], str] = {
 ###############################################################################
 
 
-class JSNode:
-	def emit(self) -> str:  # pragma: no cover - overridden
+class JSNode(ABC):
+	@abstractmethod
+	def emit(self) -> str:
 		raise NotImplementedError
 
 
-class JSExpr(JSNode):
-	pass
+class JSExpr(JSNode, ABC):
+	"""Base class for JavaScript expressions.
+
+	Subclasses can override emit_call, emit_subscript, and emit_getattr to
+	customize how the expression behaves when called, indexed, or accessed.
+	This enables extensibility for things like JSX elements.
+	"""
+
+	# Set to True for expressions that emit JSX (should not be wrapped in {})
+	is_jsx: bool = False
+
+	# Set to True for expressions that have primary precedence (identifiers, literals, etc.)
+	# Used by expr_precedence to determine if parenthesization is needed
+	is_primary: bool = False
+
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		"""Called when this expression is used as a function: expr(args).
+
+		Override to customize call behavior. Default emits JSCall(self, args)
+		and rejects keyword arguments.
+
+		The kwargs dict maps prop names to JSExpr values:
+		- "propName" -> JSExpr for named kwargs
+		- "$spread{N}" -> JSSpread(expr) for **spread kwargs
+
+		Dict order is preserved, so iteration order matches source order.
+		"""
+		if kwargs:
+			raise JSCompilationError(
+				"Keyword arguments not supported in default function call"
+			)
+		return JSCall(self, args)
+
+	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+		"""Called when this expression is indexed: expr[a, b, c].
+
+		Override to customize subscript behavior. Default requires single index
+		and emits JSSubscript(self, index).
+		"""
+		if len(indices) != 1:
+			raise JSCompilationError("Multiple indices not supported in subscript")
+		return JSSubscript(self, indices[0])
+
+	def emit_getattr(self, attr: str) -> JSExpr:
+		"""Called when an attribute is accessed: expr.attr.
+
+		Override to customize attribute access. Default emits JSMember(self, attr).
+		"""
+		return JSMember(self, attr)
 
 
-class JSStmt(JSNode):
+class JSStmt(JSNode, ABC):
 	pass
 
 
 @dataclass
 class JSIdentifier(JSExpr):
 	name: str
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -64,7 +112,8 @@ class JSIdentifier(JSExpr):
 
 @dataclass
 class JSString(JSExpr):
-	value: Any
+	value: str
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -88,7 +137,8 @@ class JSString(JSExpr):
 
 @dataclass
 class JSNumber(JSExpr):
-	value: float
+	value: int | float
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -98,6 +148,7 @@ class JSNumber(JSExpr):
 @dataclass
 class JSBoolean(JSExpr):
 	value: bool
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -106,6 +157,8 @@ class JSBoolean(JSExpr):
 
 @dataclass
 class JSNull(JSExpr):
+	is_primary: bool = True
+
 	@override
 	def emit(self) -> str:
 		return "null"
@@ -113,6 +166,8 @@ class JSNull(JSExpr):
 
 @dataclass
 class JSUndefined(JSExpr):
+	is_primary: bool = True
+
 	@override
 	def emit(self) -> str:
 		return "undefined"
@@ -121,6 +176,7 @@ class JSUndefined(JSExpr):
 @dataclass
 class JSArray(JSExpr):
 	elements: Sequence[JSExpr]
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -160,6 +216,7 @@ class JSComputedProp(JSExpr):
 @dataclass
 class JSObjectExpr(JSExpr):
 	props: Sequence[JSProp | JSComputedProp | JSSpread]
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -245,11 +302,14 @@ class JSTertiary(JSExpr):
 class JSFunctionDef(JSExpr):
 	params: Sequence[str]
 	body: Sequence[JSStmt]
+	name: str | None = None
 
 	@override
 	def emit(self) -> str:
 		params = ", ".join(self.params)
 		body_code = "\n".join(s.emit() for s in self.body)
+		if self.name:
+			return f"function {self.name}({params}){{\n{body_code}\n}}"
 		return f"function({params}){{\n{body_code}\n}}"
 
 
@@ -258,6 +318,7 @@ class JSTemplate(JSExpr):
 	# parts are either raw strings (literal text) or JSExpr instances which are
 	# emitted inside ${...}
 	parts: Sequence[str | JSExpr]
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -293,6 +354,28 @@ class JSMember(JSExpr):
 	def emit(self) -> str:
 		obj_code = _emit_child_for_primary(self.obj)
 		return f"{obj_code}.{self.prop}"
+
+	@override
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		"""Called when this member is used as a function: obj.prop(args).
+
+		Checks for Python builtin method transpilation (e.g., str.upper -> toUpperCase),
+		then falls back to regular JSMemberCall.
+		"""
+		if kwargs:
+			raise JSCompilationError("Keyword arguments not supported in method call")
+		# Check for Python builtin method transpilation (late import to avoid cycle)
+		from pulse.javascript.builtins import emit_method
+
+		result = emit_method(self.obj, self.prop, args)
+		if result is not None:
+			return result
+		return JSMemberCall(self.obj, self.prop, args)
+
+	def __call__(self, *args: object) -> "JSMemberCall":
+		"""Call this member as a method, returning a JSMemberCall expression."""
+		js_args = [to_js_expr(arg) for arg in args]
+		return JSMemberCall(self.obj, self.prop, js_args)
 
 
 @dataclass
@@ -386,6 +469,7 @@ class JSAssign(JSStmt):
 @dataclass
 class JSRaw(JSExpr):
 	content: str
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
@@ -395,6 +479,16 @@ class JSRaw(JSExpr):
 ###############################################################################
 # JSX AST (minimal)
 ###############################################################################
+
+
+def _check_not_interpreted_mode(node_type: str) -> None:
+	"""Raise an error if we're in interpreted mode - JSX can't be eval'd."""
+	if is_interpreted_mode():
+		raise ValueError(
+			f"{node_type} cannot be used in interpreted mode (as a prop or child value). "
+			+ "JSX syntax requires transpilation and cannot be evaluated at runtime. "
+			+ "Use standard VDOM elements (ps.div, ps.span, etc.) instead."
+		)
 
 
 def _escape_jsx_text(text: str) -> str:
@@ -409,6 +503,7 @@ class JSXProp(JSExpr):
 
 	@override
 	def emit(self) -> str:
+		_check_not_interpreted_mode("JSXProp")
 		if self.value is None:
 			return self.name
 		# Prefer compact string literal attribute when possible
@@ -423,6 +518,7 @@ class JSXSpreadProp(JSExpr):
 
 	@override
 	def emit(self) -> str:
+		_check_not_interpreted_mode("JSXSpreadProp")
 		return f"{{...{self.value.emit()}}}"
 
 
@@ -431,9 +527,12 @@ class JSXElement(JSExpr):
 	tag: str | JSExpr
 	props: Sequence[JSXProp | JSXSpreadProp] = tuple()
 	children: Sequence[str | JSExpr | "JSXElement"] = tuple()
+	is_jsx: bool = True
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
+		_check_not_interpreted_mode("JSXElement")
 		tag_code = self.tag if isinstance(self.tag, str) else self.tag.emit()
 		props_code = " ".join(p.emit() for p in self.props) if self.props else ""
 		if not self.children:
@@ -447,7 +546,7 @@ class JSXElement(JSExpr):
 		for c in self.children:
 			if isinstance(c, str):
 				child_parts.append(_escape_jsx_text(c))
-			elif isinstance(c, JSXElement):
+			elif isinstance(c, JSXElement) or (isinstance(c, JSExpr) and c.is_jsx):
 				child_parts.append(c.emit())
 			else:
 				child_parts.append("{" + c.emit() + "}")
@@ -458,16 +557,19 @@ class JSXElement(JSExpr):
 @dataclass
 class JSXFragment(JSExpr):
 	children: Sequence[str | JSExpr | JSXElement] = tuple()
+	is_jsx: bool = True
+	is_primary: bool = True
 
 	@override
 	def emit(self) -> str:
+		_check_not_interpreted_mode("JSXFragment")
 		if not self.children:
 			return "<></>"
 		parts: list[str] = []
 		for c in self.children:
 			if isinstance(c, str):
 				parts.append(_escape_jsx_text(c))
-			elif isinstance(c, JSXElement):
+			elif isinstance(c, JSXElement) or (isinstance(c, JSExpr) and c.is_jsx):
 				parts.append(c.emit())
 			else:
 				parts.append("{" + c.emit() + "}")
@@ -559,24 +661,8 @@ def expr_precedence(e: JSExpr) -> int:
 	# Nullish now represented as JSBinary with op "??"; precedence resolved below
 	if isinstance(e, (JSMember, JSSubscript, JSCall, JSMemberCall, JSNew)):
 		return op_precedence(".")
-	# Treat primitives and containers as primary
-	if isinstance(
-		e,
-		(
-			JSIdentifier,
-			JSString,
-			JSNumber,
-			JSBoolean,
-			JSNull,
-			JSUndefined,
-			JSArray,
-			JSObjectExpr,
-			JSTemplate,
-			JSRaw,
-			JSXElement,
-			JSXFragment,
-		),
-	):
+	# Primary expressions (identifiers, literals, containers) don't need parens
+	if e.is_primary:
 		return PRIMARY_PRECEDENCE
 	return 0
 
@@ -738,3 +824,40 @@ def _emit_child_for_primary(expr: JSExpr) -> str:
 
 def is_primary(expr: JSExpr):
 	return isinstance(expr, (JSNumber, JSString, JSUndefined, JSNull, JSIdentifier))
+
+
+def to_js_expr(value: object) -> JSExpr:
+	"""Convert a Python value to a JSExpr.
+
+	Handles:
+	- JSExpr: returned as-is
+	- Import (including CssModule): wrapped in _ImportExpr
+	- str: JSString
+	- int/float: JSNumber
+	- bool: JSBoolean
+	- None: JSNull
+	- list/tuple: JSArray (recursively converted)
+	- dict: JSObjectExpr (recursively converted)
+	"""
+	# Already a JSExpr
+	if isinstance(value, JSExpr):
+		return value
+
+	# Primitives
+	if isinstance(value, str):
+		return JSString(value)
+	if isinstance(value, bool):  # Must check before int since bool is subclass of int
+		return JSBoolean(value)
+	if isinstance(value, (int, float)):
+		return JSNumber(value)
+	if value is None:
+		return JSNull()
+
+	# Collections
+	if isinstance(value, (list, tuple)):
+		return JSArray([to_js_expr(v) for v in value])  # pyright: ignore[reportUnknownArgumentType]
+	if isinstance(value, dict):
+		props = [JSProp(JSString(str(k)), to_js_expr(v)) for k, v in value.items()]  # pyright: ignore[reportUnknownArgumentType]
+		return JSObjectExpr(props)
+
+	raise TypeError(f"Cannot convert {type(value).__name__} to JSExpr")

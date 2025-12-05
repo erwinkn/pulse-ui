@@ -4,7 +4,7 @@
 from collections.abc import Callable
 from typing import Generic, TypeVar, TypeVarTuple
 
-from pulse.javascript_v2.imports import Import
+from pulse.javascript.imports import Import
 
 Args = TypeVarTuple("Args")
 R = TypeVar("R")

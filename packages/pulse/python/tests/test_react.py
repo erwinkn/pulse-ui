@@ -28,7 +28,7 @@ from pulse import (
 	prop,
 	react_component,
 )
-from pulse.javascript_v2.imports import clear_import_registry
+from pulse.javascript.imports import clear_import_registry
 from pulse.react_component import (
 	COMPONENT_REGISTRY,
 	DEFAULT,

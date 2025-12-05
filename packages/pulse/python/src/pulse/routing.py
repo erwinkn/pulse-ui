@@ -9,7 +9,7 @@ from pulse.reactive_extensions import ReactiveDict
 from pulse.vdom import Component
 
 if TYPE_CHECKING:
-	from pulse.javascript_v2.function import AnyJsFunction
+	from pulse.javascript.function import AnyJsFunction
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"

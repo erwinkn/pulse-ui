@@ -16,8 +16,6 @@ This example showcases ALL transpilation features:
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
-from typing import Any
 
 import pulse as ps
 
@@ -41,12 +39,6 @@ from pulse.js.number import MAX_SAFE_INTEGER, isFinite, isNaN, parseInt
 def clsx(*classes: str) -> str:
 	"""Typed import for the clsx library."""
 	...
-
-
-# Import a JS value with type annotation
-lodash_chunk: Callable[[list[Any], int], list[list[Any]]] = ps.import_js(
-	"chunk", "lodash-es", Callable[[list[Any], int], list[list[Any]]]
-)
 
 
 # =============================================================================
@@ -207,12 +199,6 @@ def js_number_constants():
 def use_clsx(is_active, is_disabled):
 	"""Use the clsx library for class names."""
 	return clsx("btn", "active" if is_active else "", "disabled" if is_disabled else "")
-
-
-@ps.javascript
-def use_lodash(items, size):
-	"""Use lodash chunk function."""
-	return lodash_chunk(items, size)
 
 
 # =============================================================================
@@ -851,7 +837,6 @@ ALL_FUNCTIONS = [
 	js_number_constants,
 	# Section 4: import_js
 	use_clsx,
-	use_lodash,
 	# Section 5: Cross-module
 	use_imported_square,
 	use_imported_cube,

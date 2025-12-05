@@ -12,9 +12,9 @@ from typing import (
 	override,
 )
 
-from pulse.javascript_v2.context import is_interpreted_mode
-from pulse.javascript_v2.ids import generate_id
-from pulse.javascript_v2.nodes import JSCall, JSExpr, JSMember, to_js_expr
+from pulse.javascript.context import is_interpreted_mode
+from pulse.javascript.ids import generate_id
+from pulse.javascript.nodes import JSCall, JSExpr, JSMember, to_js_expr
 
 T = TypeVar("T")
 Args = TypeVarTuple("Args")

@@ -510,7 +510,8 @@ class ReactComponent(JSExpr, Generic[P]):
 		props_part = f", props_spec={self.props_spec!r}"
 		return f"ReactComponent(name='{self.name}', src='{self.src}'{prop_part}{default_part}{lazy_part}{props_part})"
 
-	def __call__(self, *children: P.args, **props: P.kwargs) -> Node:
+	@override
+	def __call__(self, *children: P.args, **props: P.kwargs) -> Node:  # pyright: ignore[reportIncompatibleMethodOverride]
 		key = props.get("key")
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")

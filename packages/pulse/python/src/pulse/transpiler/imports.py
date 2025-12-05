@@ -14,7 +14,7 @@ from typing import (
 
 from pulse.transpiler.context import is_interpreted_mode
 from pulse.transpiler.ids import generate_id
-from pulse.transpiler.nodes import JSCall, JSExpr, JSMember, to_js_expr
+from pulse.transpiler.nodes import JSExpr
 
 T = TypeVar("T")
 Args = TypeVarTuple("Args")
@@ -265,19 +265,6 @@ class Import(JSExpr):
 		if is_interpreted_mode():
 			return f"get_object('{base}')"
 		return base
-
-	def __getattr__(self, name: str) -> "JSMember":
-		"""Access a property of this import as a JSMember expression."""
-		if name.startswith("_"):
-			raise AttributeError(name)
-
-		return JSMember(self, name)
-
-	def __call__(self, *args: object) -> "JSCall":
-		"""Call this import as a function, returning a JSCall expression."""
-
-		js_args = [to_js_expr(arg) for arg in args]
-		return JSCall(self, js_args)
 
 	@override
 	def __repr__(self) -> str:

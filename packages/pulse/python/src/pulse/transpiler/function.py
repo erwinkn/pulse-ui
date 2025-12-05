@@ -8,6 +8,7 @@ from typing import (
 	Any,
 	Callable,
 	Generic,
+	Never,
 	TypeAlias,
 	TypeVar,
 	TypeVarTuple,
@@ -175,7 +176,10 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 		js_fn = visitor.transpile(name=self.js_name)
 		return js_fn.emit()
 
-	def __call__(self, *args: *Args) -> R:
+	@override
+	def __call__(self, *args: *Args, **kwargs: Never) -> R:  # pyright: ignore[reportIncompatibleMethodOverride]
+		if kwargs:
+			raise JSCompilationError("Keyword arguments not supported")
 		return cast(R, JsFunctionCall(self, args))
 
 

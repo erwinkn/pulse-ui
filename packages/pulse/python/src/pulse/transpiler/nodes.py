@@ -4,7 +4,7 @@ import ast
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import overload, override
+from typing import Any, overload, override
 
 from pulse.transpiler.context import is_interpreted_mode
 from pulse.transpiler.errors import JSCompilationError
@@ -103,7 +103,7 @@ class JSExpr(JSNode, ABC):
 		"""
 		return self.emit_getattr(attr)
 
-	def __call__(self, *args: object, **kwargs: object) -> JSExpr:
+	def __call__(self, *args: Any, **kwargs: Any) -> JSExpr:
 		"""Support function calls at Python runtime.
 
 		Allows: expr(*args, **kwargs) where expr is any JSExpr.
@@ -114,7 +114,7 @@ class JSExpr(JSNode, ABC):
 		js_kwargs = {k: to_js_expr(v) for k, v in kwargs.items()}
 		return self.emit_call(js_args, js_kwargs)
 
-	def __getitem__(self, key: object) -> JSExpr:
+	def __getitem__(self, key: Any) -> JSExpr:
 		"""Support subscript access at Python runtime.
 
 		Allows: expr[key] where expr is any JSExpr.
@@ -400,11 +400,6 @@ class JSMember(JSExpr):
 		if result is not None:
 			return result
 		return JSMemberCall(self.obj, self.prop, args)
-
-	def __call__(self, *args: object) -> "JSMemberCall":
-		"""Call this member as a method, returning a JSMemberCall expression."""
-		js_args = [to_js_expr(arg) for arg in args]
-		return JSMemberCall(self.obj, self.prop, js_args)
 
 
 @dataclass

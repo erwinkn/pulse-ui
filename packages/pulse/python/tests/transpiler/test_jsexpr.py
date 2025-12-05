@@ -123,12 +123,6 @@ class TestImportGetattr:
 		# Chained access would require JSMember to also implement __getattr__
 		# For now, users must use Import directly for each property level
 
-	def test_private_attr_raises(self) -> None:
-		"""Private attributes raise AttributeError."""
-		imp = Import("Button", "@mantine/core")
-		with pytest.raises(AttributeError):
-			_ = imp._private
-
 
 class TestImportCall:
 	"""Tests for Import.__call__ returning JSCall."""

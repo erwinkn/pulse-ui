@@ -6,6 +6,7 @@ import pytest
 from pulse.transpiler.constants import CONSTANTS_CACHE
 from pulse.transpiler.function import FUNCTION_CACHE, javascript
 from pulse.transpiler.imports import clear_import_registry
+from pulse.transpiler.js_module import CONSTRUCTORS, JSConstructor
 from pulse.transpiler.nodes import JSIdentifier, JSMember
 
 
@@ -14,6 +15,7 @@ from pulse.transpiler.nodes import JSIdentifier, JSMember
 def clear_caches() -> None:
 	FUNCTION_CACHE.clear()
 	CONSTANTS_CACHE.clear()
+	CONSTRUCTORS.clear()
 	clear_import_registry()
 
 
@@ -294,3 +296,232 @@ class TestJsNumberModule:
 		js = fn.transpile()
 		assert "Number.isFinite(x)" in js
 		assert "Math.floor(x)" in js
+
+
+class TestJsModuleConstructorDetection:
+	"""Test constructor detection for classes and @constructor-decorated functions."""
+
+	def test_set_class_is_detected_as_constructor(self) -> None:
+		"""Test that Set class is detected as a constructor."""
+		import pulse.js.set
+		from pulse.transpiler.js_module import JS_MODULES
+
+		config = JS_MODULES[pulse.js.set]
+		assert "Set" in config.constructors
+
+	def test_set_class_returns_jsconstructor(self) -> None:
+		"""Test that accessing Set returns JSConstructor wrapper."""
+		from pulse.js.set import Set
+
+		@javascript
+		def fn() -> object:
+			return Set()  # type: ignore[misc]
+
+		assert "Set" in fn.deps
+		dep = fn.deps["Set"]
+		assert isinstance(dep, JSConstructor)
+		assert isinstance(dep.ctor, JSIdentifier)
+		assert dep.ctor.name == "Set"
+
+	def test_set_class_transpiles_to_new(self) -> None:
+		"""Test that Set() transpiles to new Set()."""
+		from pulse.js.set import Set
+
+		@javascript
+		def fn() -> object:
+			return Set()  # type: ignore[misc]
+
+		js = fn.transpile()
+		assert "new Set()" in js
+
+	def test_set_class_with_args_transpiles_to_new(self) -> None:
+		"""Test that Set([1, 2, 3]) transpiles to new Set([1, 2, 3])."""
+		from pulse.js.set import Set
+
+		@javascript
+		def fn() -> object:
+			return Set([1, 2, 3])
+
+		js = fn.transpile()
+		assert "new Set([1, 2, 3])" in js
+
+	def test_map_function_with_constructor_decorator(self) -> None:
+		"""Test that @constructor-decorated functions still work."""
+		import pulse.js.map
+		from pulse.transpiler.js_module import JS_MODULES
+
+		config = JS_MODULES[pulse.js.map]
+		assert "Map" in config.constructors
+
+	def test_map_function_returns_jsconstructor(self) -> None:
+		"""Test that accessing Map returns JSConstructor wrapper."""
+		from pulse.js.map import Map
+
+		@javascript
+		def fn() -> object:
+			return Map()
+
+		assert "Map" in fn.deps
+		dep = fn.deps["Map"]
+		assert isinstance(dep, JSConstructor)
+		assert isinstance(dep.ctor, JSIdentifier)
+		assert dep.ctor.name == "Map"
+
+	def test_map_function_transpiles_to_new(self) -> None:
+		"""Test that Map() transpiles to new Map()."""
+		from pulse.js.map import Map
+
+		@javascript
+		def fn() -> object:
+			return Map([("a", 1)])
+
+		js = fn.transpile()
+		assert 'new Map([["a", 1]])' in js
+
+
+class TestJsModuleImportFiltering:
+	"""Test that imported names are filtered out from module exports."""
+
+	def test_imported_classes_not_in_constructors(self) -> None:
+		"""Test that imported classes (like Protocol, Generic) are not in constructors."""
+		import pulse.js.set
+		from pulse.transpiler.js_module import JS_MODULES
+
+		config = JS_MODULES[pulse.js.set]
+		# Protocol, Generic, TypeVar, Iterable are imported, should not be in constructors
+		assert "Protocol" not in config.constructors
+		assert "Generic" not in config.constructors
+		assert "TypeVar" not in config.constructors
+		assert "Iterable" not in config.constructors
+		# Only Set (defined in module) should be in constructors
+		assert "Set" in config.constructors
+
+	def test_imported_functions_not_in_constructors(self) -> None:
+		"""Test that imported functions are not in constructors."""
+		import pulse.js.map
+		from pulse.transpiler.js_module import JS_MODULES
+
+		config = JS_MODULES[pulse.js.map]
+		# Protocol is imported, should not be in constructors
+		assert "Protocol" not in config.constructors
+		# MapProtocol is defined in module, so it's in constructors
+		# Map is defined in module with @constructor, so it's in constructors
+		assert "Map" in config.constructors
+
+	def test_imported_names_not_accessible_via_getattr(self) -> None:
+		"""Test that imported names raise AttributeError when accessed."""
+		import pulse.js.set
+
+		# Imported names should not be accessible
+		with pytest.raises(AttributeError):
+			_ = pulse.js.set.Protocol  # type: ignore[attr-defined, unused-assignment]
+		with pytest.raises(AttributeError):
+			_ = pulse.js.set.Generic  # type: ignore[attr-defined, unused-assignment]
+		with pytest.raises(AttributeError):
+			_ = pulse.js.set.TypeVar  # type: ignore[attr-defined, unused-assignment]
+
+		# Defined names should be accessible
+		set_class = pulse.js.set.Set
+		assert isinstance(set_class, JSConstructor)
+
+	def test_underscore_prefixed_names_filtered(self) -> None:
+		"""Test that names starting with underscore are filtered out."""
+		import pulse.js.set
+		from pulse.transpiler.js_module import JS_MODULES
+
+		config = JS_MODULES[pulse.js.set]
+		# _T (TypeVar) should not be in constructors
+		assert "_T" not in config.constructors
+
+	def test_console_module_functions_not_constructors(self) -> None:
+		"""Test that regular functions in console module are not constructors."""
+		import pulse.js.console
+		from pulse.transpiler.js_module import JS_MODULES
+
+		config = JS_MODULES[pulse.js.console]
+		# Console module has no constructors
+		assert len(config.constructors) == 0
+
+	def test_console_module_functions_accessible(self) -> None:
+		"""Test that console module functions are accessible but not constructors."""
+		import pulse.js.console
+
+		# Functions should be accessible
+		log = pulse.js.console.log
+		assert isinstance(log, JSMember)
+		assert log.prop == "log"
+
+		# But not as constructors
+		from pulse.transpiler.js_module import JS_MODULES
+
+		config = JS_MODULES[pulse.js.console]
+		assert "log" not in config.constructors
+
+
+class TestGlobalScopeModules:
+	"""Test global scope module behavior (e.g., Set, Map, Date)."""
+
+	def test_global_scope_module_disallows_module_import(self) -> None:
+		"""Test that global scope modules disallow module imports."""
+		import pulse.js.set
+		from pulse.transpiler.errors import JSCompilationError
+		from pulse.transpiler.js_module import JS_MODULES
+
+		config = JS_MODULES[pulse.js.set]
+		assert config.global_scope
+
+		# Module import should raise error
+		with pytest.raises(JSCompilationError, match="Cannot import module"):
+			config.to_js_expr()
+
+	def test_global_scope_module_allows_value_import(self) -> None:
+		"""Test that global scope modules allow value imports."""
+		from pulse.js.set import Set
+
+		@javascript
+		def fn() -> object:
+			return Set()  # type: ignore[misc]
+
+		assert "Set" in fn.deps
+		dep = fn.deps["Set"]
+		# Should be JSConstructor wrapping JSIdentifier (not JSMember)
+		assert isinstance(dep, JSConstructor)
+		assert isinstance(dep.ctor, JSIdentifier)
+		assert dep.ctor.name == "Set"
+
+	def test_global_scope_module_transpiles_as_identifier(self) -> None:
+		"""Test that global scope module values transpile as direct identifiers."""
+		from pulse.js.set import Set
+
+		@javascript
+		def fn() -> object:
+			return Set([1, 2, 3])
+
+		js = fn.transpile()
+		# Should be "new Set([1, 2, 3])" not "new Set.Set([1, 2, 3])"
+		assert "new Set([1, 2, 3])" in js
+		assert "Set.Set" not in js
+
+	def test_global_scope_map_module(self) -> None:
+		"""Test Map module with global scope."""
+		from pulse.js.map import Map
+
+		@javascript
+		def fn() -> object:
+			return Map([("a", 1)])
+
+		js = fn.transpile()
+		assert 'new Map([["a", 1]])' in js
+		assert "Map.Map" not in js
+
+	def test_global_scope_date_module(self) -> None:
+		"""Test Date module with global scope."""
+		from pulse.js.date import Date
+
+		@javascript
+		def fn() -> object:
+			return Date()
+
+		js = fn.transpile()
+		assert "new Date()" in js
+		assert "Date.Date" not in js

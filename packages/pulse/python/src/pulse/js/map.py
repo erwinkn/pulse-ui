@@ -12,7 +12,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, TypeVar
 
 from pulse.transpiler.js_module import register_js_module
 
@@ -20,8 +20,8 @@ _K = TypeVar("_K")
 _V = TypeVar("_V")
 
 
-class Map(Protocol, Generic[_K, _V]):  # pyright: ignore[reportInvalidTypeVarUse]
-	"""Protocol for JavaScript Map instances."""
+class Map(Generic[_K, _V]):
+	"""Class for JavaScript Map instances."""
 
 	def __init__(self, iterable: list[tuple[_K, _V]] | None = None): ...
 
@@ -31,7 +31,8 @@ class Map(Protocol, Generic[_K, _V]):  # pyright: ignore[reportInvalidTypeVarUse
 	def has(self, key: object) -> bool: ...
 	def set(self, key: _K, value: _V) -> Map[_K, _V]: ...
 
-	size: int
+	@property
+	def size(self) -> int: ...
 
 	def entries(self) -> object: ...
 	def forEach(self, callbackfn: object, thisArg: object | None = None) -> None: ...

@@ -13,93 +13,126 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Protocol
-
 from pulse.transpiler.js_module import register_js_module
 
 
-class Error(Protocol):
-	"""Protocol for JavaScript Error instances."""
+class Error:
+	"""Class for JavaScript Error instances."""
 
 	def __init__(self, message: str | None = None): ...
 
-	message: str
-	name: str
-	stack: str | None
+	@property
+	def message(self) -> str: ...
+
+	@property
+	def name(self) -> str: ...
+
+	@property
+	def stack(self) -> str | None: ...
 
 	def toString(self) -> str: ...
 
 
 # Error Subclasses - these are separate globals in JS, not members of Error
 # TODO: These need a different architecture (separate modules or standalone identifiers)
-class EvalError(Protocol):
-	"""Protocol for JavaScript EvalError instances."""
+class EvalError:
+	"""Class for JavaScript EvalError instances."""
 
 	def __init__(self, message: str | None = None): ...
 
-	message: str
-	name: str
-	stack: str | None
+	@property
+	def message(self) -> str: ...
+
+	@property
+	def name(self) -> str: ...
+
+	@property
+	def stack(self) -> str | None: ...
 
 	def toString(self) -> str: ...
 
 
-class RangeError(Protocol):
-	"""Protocol for JavaScript RangeError instances."""
+class RangeError:
+	"""Class for JavaScript RangeError instances."""
 
 	def __init__(self, message: str | None = None): ...
 
-	message: str
-	name: str
-	stack: str | None
+	@property
+	def message(self) -> str: ...
+
+	@property
+	def name(self) -> str: ...
+
+	@property
+	def stack(self) -> str | None: ...
 
 	def toString(self) -> str: ...
 
 
-class ReferenceError(Protocol):
-	"""Protocol for JavaScript ReferenceError instances."""
+class ReferenceError:
+	"""Class for JavaScript ReferenceError instances."""
 
 	def __init__(self, message: str | None = None): ...
 
-	message: str
-	name: str
-	stack: str | None
+	@property
+	def message(self) -> str: ...
+
+	@property
+	def name(self) -> str: ...
+
+	@property
+	def stack(self) -> str | None: ...
 
 	def toString(self) -> str: ...
 
 
-class SyntaxError(Protocol):
-	"""Protocol for JavaScript SyntaxError instances."""
+class SyntaxError:
+	"""Class for JavaScript SyntaxError instances."""
 
 	def __init__(self, message: str | None = None): ...
 
-	message: str
-	name: str
-	stack: str | None
+	@property
+	def message(self) -> str: ...
+
+	@property
+	def name(self) -> str: ...
+
+	@property
+	def stack(self) -> str | None: ...
 
 	def toString(self) -> str: ...
 
 
-class TypeError(Protocol):
-	"""Protocol for JavaScript TypeError instances."""
+class TypeError:
+	"""Class for JavaScript TypeError instances."""
 
 	def __init__(self, message: str | None = None): ...
 
-	message: str
-	name: str
-	stack: str | None
+	@property
+	def message(self) -> str: ...
+
+	@property
+	def name(self) -> str: ...
+
+	@property
+	def stack(self) -> str | None: ...
 
 	def toString(self) -> str: ...
 
 
-class URIError(Protocol):
-	"""Protocol for JavaScript URIError instances."""
+class URIError:
+	"""Class for JavaScript URIError instances."""
 
 	def __init__(self, message: str | None = None): ...
 
-	message: str
-	name: str
-	stack: str | None
+	@property
+	def message(self) -> str: ...
+
+	@property
+	def name(self) -> str: ...
+
+	@property
+	def stack(self) -> str | None: ...
 
 	def toString(self) -> str: ...
 

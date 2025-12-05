@@ -29,11 +29,11 @@ class MantineProviderProps(TypedDict, total=False):
 	"""Determines whether theme CSS variables should be added to given `cssVariablesSelector` @default `true`"""
 	deduplicateCssVariables: bool
 	"""Determines whether CSS variables should be deduplicated: if CSS variable has the same value as in default theme, it is not added in the runtime. @default `true`."""
-	getRootElement: ps.JsFunction[[], ps.HTMLElement | None]
+	getRootElement: ps.JsFunction[ps.HTMLElement | None]
 	"""Function to resolve root element to set `data-mantine-color-scheme` attribute, must return undefined on server, `() => document.documentElement` by default"""
 	classNamesPrefix: str
 	"""A prefix for components static classes (for example {selector}-Text-root), `mantine` by default"""
-	getStyleNonce: ps.JsFunction[[], str]
+	getStyleNonce: ps.JsFunction[str]
 	"""Function to generate nonce attribute added to all generated `<style />` tags"""
 	cssVariablesResolver: CSSVariablesResolver
 	"""Function to generate CSS variables based on theme object"""
@@ -62,8 +62,8 @@ def MantineProvider(*children: ps.Child, key: str | None = None, **props: Any): 
 
 
 class MantineStylesTransform(TypedDict, total=False):
-	sx: ps.JsFunction[[], ps.JsFunction[[Any], str]]
-	styles: ps.JsFunction[[], ps.JsFunction[[Any, Any], dict[str, str]]]
+	sx: ps.JsFunction[ps.JsFunction[Any, str]]
+	styles: ps.JsFunction[ps.JsFunction[Any, Any, dict[str, str]]]
 
 
 class ConvertCSSVariablesInput(TypedDict):
@@ -75,31 +75,31 @@ class ConvertCSSVariablesInput(TypedDict):
 	"CSS variables available only in light color scheme"
 
 
-CSSVariablesResolver = ps.JsFunction[[MantineTheme], ConvertCSSVariablesInput]
+CSSVariablesResolver = ps.JsFunction[MantineTheme, ConvertCSSVariablesInput]
 
 
 class MantineColorSchemeManager(TypedDict):
-	get: ps.JsFunction[[MantineColorScheme], MantineColorScheme]
+	get: ps.JsFunction[MantineColorScheme, MantineColorScheme]
 	"""Function to retrieve color scheme value from external storage, for example window.localStorage
     
     JS: get: (defaultValue: MantineColorScheme) => MantineColorScheme"""
 
-	set: ps.JsFunction[[MantineColorScheme], None]
+	set: ps.JsFunction[MantineColorScheme, None]
 	"""Function to set color scheme value in external storage, for example window.localStorage
     
     JS: set: (value: MantineColorScheme) => void"""
 
-	subscribe: ps.JsFunction[[ps.JsFunction[[MantineColorScheme], None]], None]
+	subscribe: ps.JsFunction[ps.JsFunction[MantineColorScheme, None], None]
 	"""Function to subscribe to color scheme changes triggered by external events
     
     JS: subscribe: (onUpdate: (colorScheme: MantineColorScheme) => void) => void"""
 
-	unsubscribe: ps.JsFunction[[], None]
+	unsubscribe: ps.JsFunction[None]
 	"""Function to unsubscribe from color scheme changes triggered by external events
     
     JS: unsubscribe: () => void"""
 
-	clear: ps.JsFunction[[], None]
+	clear: ps.JsFunction[None]
 	"""Function to clear value from external storage
     
     JS: clear: () => void"""

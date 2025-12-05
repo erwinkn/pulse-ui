@@ -345,15 +345,15 @@ class TestJsModuleConstructorDetection:
 		js = fn.transpile()
 		assert "new Set([1, 2, 3])" in js
 
-	def test_map_function_with_constructor_decorator(self) -> None:
-		"""Test that @constructor-decorated functions still work."""
+	def test_map_class_is_detected_as_constructor(self) -> None:
+		"""Test that Map class is detected as a constructor."""
 		import pulse.js.map
 		from pulse.transpiler.js_module import JS_MODULES
 
 		config = JS_MODULES[pulse.js.map]
 		assert "Map" in config.constructors
 
-	def test_map_function_returns_jsconstructor(self) -> None:
+	def test_map_class_returns_jsconstructor(self) -> None:
 		"""Test that accessing Map returns JSConstructor wrapper."""
 		from pulse.js.map import Map
 
@@ -414,11 +414,9 @@ class TestJsModuleImportFiltering:
 
 		# Imported names should not be accessible
 		with pytest.raises(AttributeError):
-			_ = pulse.js.set.Protocol  # type: ignore[attr-defined, unused-assignment]
+			_ = pulse.js.set.Generic  # pyright: ignore[reportPrivateLocalImportUsage]
 		with pytest.raises(AttributeError):
-			_ = pulse.js.set.Generic  # type: ignore[attr-defined, unused-assignment]
-		with pytest.raises(AttributeError):
-			_ = pulse.js.set.TypeVar  # type: ignore[attr-defined, unused-assignment]
+			_ = pulse.js.set.TypeVar  # pyright: ignore[reportPrivateLocalImportUsage]
 
 		# Defined names should be accessible
 		set_class = pulse.js.set.Set
@@ -494,7 +492,7 @@ class TestGlobalScopeModules:
 		from pulse.js.set import Set
 
 		@javascript
-		def fn() -> object:
+		def fn():
 			return Set([1, 2, 3])
 
 		js = fn.transpile()

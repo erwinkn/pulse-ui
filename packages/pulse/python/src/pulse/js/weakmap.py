@@ -12,7 +12,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, TypeVar
 
 from pulse.transpiler.js_module import register_js_module
 
@@ -20,8 +20,8 @@ _K = TypeVar("_K", bound=object)
 _V = TypeVar("_V")
 
 
-class WeakMap(Protocol, Generic[_K, _V]):  # pyright: ignore[reportInvalidTypeVarUse]
-	"""Protocol for JavaScript WeakMap instances."""
+class WeakMap(Generic[_K, _V]):
+	"""Class for JavaScript WeakMap instances."""
 
 	def __init__(self, iterable: list[tuple[_K, _V]] | None = None): ...
 

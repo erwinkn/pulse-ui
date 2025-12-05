@@ -254,3 +254,6 @@ def javascript(fn: Callable[[*Args], R]) -> JsFunction[*Args, R]:
 def registered_functions() -> list[AnyJsFunction]:
 	"""Get all registered JS functions."""
 	return list(FUNCTION_CACHE.values())
+
+
+X = JsFunction[int]

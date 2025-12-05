@@ -112,5 +112,5 @@ class Rectangle(TypedDict):
 AnimationTiming = Literal["ease", "ease-in", "ease-out", "ease-in-out", "linear"]
 
 
-MinPointSize = float | ps.JsFunction[[float | None, int], float]
+MinPointSize = float | ps.JsFunction[float | None, int, float]
 "A number or function (value: float | None, index: int) => minPointSize: float"

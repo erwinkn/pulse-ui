@@ -12,15 +12,15 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, TypeVar
 
 from pulse.transpiler.js_module import register_js_module
 
 _T = TypeVar("_T", bound=object)
 
 
-class WeakSet(Protocol, Generic[_T]):  # pyright: ignore[reportInvalidTypeVarUse]  # pyright: ignore[reportInvalidTypeVarUse]
-	"""Protocol for JavaScript WeakSet instances."""
+class WeakSet(Generic[_T]):
+	"""Class for JavaScript WeakSet instances."""
 
 	def __init__(self, iterable: list[_T] | None = None): ...
 

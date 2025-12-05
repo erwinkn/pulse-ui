@@ -13,13 +13,11 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Protocol
-
 from pulse.transpiler.js_module import register_js_module
 
 
-class Date(Protocol):
-	"""Protocol for JavaScript Date instances."""
+class Date:
+	"""Class for JavaScript Date instances."""
 
 	def __init__(self, value: int | str | None = None): ...
 

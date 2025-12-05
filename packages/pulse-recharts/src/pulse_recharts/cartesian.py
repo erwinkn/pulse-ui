@@ -34,7 +34,7 @@ YAxisOrientation = Literal["left", "right"]
 TickProp = (
 	ps.HTMLSVGProps[GenericHTMLElement]
 	| ps.Element
-	| ps.JsFunction[[Any], ps.Element]
+	| ps.JsFunction[Any, ps.Element]
 	| bool
 )
 
@@ -135,7 +135,7 @@ class BaseAxisProps(TypedDict, total=False):
 	tickSize: float
 	"""The size of tick line"""
 
-	tickFormatter: ps.JsFunction[[Any, int], str]
+	tickFormatter: ps.JsFunction[Any, int, str]
 	"""The formatter function of tick"""
 
 	allowDataOverflow: bool
@@ -387,7 +387,7 @@ ActiveDotType = (
 	ps.HTMLSVGProps[GenericHTMLElement]
 	| ps.Element
 	| bool
-	| ps.JsFunction[[Any], ps.Element]
+	| ps.JsFunction[Any, ps.Element]
 )
 
 
@@ -421,7 +421,7 @@ class LineProps(CurveProps, total=False):
 	"""Controls rendering of the active dot when tooltip is active.
     Same options as 'dot'. Default: True"""
 
-	label: bool | dict[str, Any] | ps.Element | ps.JsFunction[[Any], ps.Element]
+	label: bool | dict[str, Any] | ps.Element | ps.JsFunction[Any, ps.Element]
 	"""Controls rendering of labels on the line points.
 	- False: no labels
 	- True: default labels
@@ -501,4 +501,4 @@ class BarProps(RectangleProps, total=False):
 	# label: bool | str | float | ??
 
 
-ActiveBar = bool | ps.Element | ps.JsFunction[[BarProps], ps.Element]
+ActiveBar = bool | ps.Element | ps.JsFunction[BarProps, ps.Element]

@@ -13,19 +13,20 @@ Usage:
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, TypeVar
 
 from pulse.transpiler.js_module import register_js_module
 
 _T = TypeVar("_T", covariant=True)
 
 
-class Set(Protocol, Generic[_T]):
-	"""Protocol for JavaScript Set instances."""
+class Set(Generic[_T]):
+	"""Class for JavaScript Set instances."""
 
 	def __init__(self, iterable: Iterable[_T] | None = None): ...
 
-	size: int
+	@property
+	def size(self) -> int: ...
 
 	def add(self, value: object) -> None: ...
 	def clear(self) -> None: ...

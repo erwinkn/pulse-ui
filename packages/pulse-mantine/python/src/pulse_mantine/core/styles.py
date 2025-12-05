@@ -29,10 +29,10 @@ StyleProp = T | dict[str | MantineBreakpoint, T]
 (padding). Not to be confused with MantineStyleProp, which is used for the
 `style` prop."""
 
-StyleFn = ps.JsFunction[[MantineTheme, Props, Ctx], T]
+StyleFn = ps.JsFunction[MantineTheme, Props, Ctx, T]
 "(theme: MantineTheme, props, ctx) => styles payload"
 
-MantineStyle = ps.CSSProperties | ps.JsFunction[[MantineTheme], ps.CSSProperties]
+MantineStyle = ps.CSSProperties | ps.JsFunction[MantineTheme, ps.CSSProperties]
 MantineStyleProp = (
 	MantineStyle | Sequence[MantineStyle] | Sequence["MantineStyleProp"] | None
 )
@@ -44,7 +44,7 @@ MantineStyleProp = (
 # The actual types are even more wicked than this (ex: CssVars can be an array
 # of CssVars so infinite recursion is possible), but we try to provide the most
 # pragmatic version
-CSSVariablesDict = dict[str, str] | ps.JsFunction[[MantineTheme], dict[str, str]]
+CSSVariablesDict = dict[str, str] | ps.JsFunction[MantineTheme, dict[str, str]]
 CSSVariables = CSSVariablesDict | Sequence[CSSVariablesDict]
 
 

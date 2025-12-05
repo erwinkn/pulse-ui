@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import ast
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import override
+from typing import overload, override
 
-from pulse.javascript.context import is_interpreted_mode
-from pulse.javascript.errors import JSCompilationError
+from pulse.transpiler.context import is_interpreted_mode
+from pulse.transpiler.errors import JSCompilationError
 
 ALLOWED_BINOPS: dict[type[ast.operator], str] = {
 	ast.Add: "+",
@@ -365,7 +365,7 @@ class JSMember(JSExpr):
 		if kwargs:
 			raise JSCompilationError("Keyword arguments not supported in method call")
 		# Check for Python builtin method transpilation (late import to avoid cycle)
-		from pulse.javascript.builtins import emit_method
+		from pulse.transpiler.builtins import emit_method
 
 		result = emit_method(self.obj, self.prop, args)
 		if result is not None:
@@ -442,6 +442,78 @@ class JSComma(JSExpr):
 		# Always wrap comma expressions in parentheses to avoid precedence surprises
 		inner = ", ".join(v.emit() for v in self.values)
 		return f"({inner})"
+
+
+@dataclass
+class JSTransformer(JSExpr):
+	"""JSExpr that wraps a function transforming JSExpr args to JSExpr output.
+
+	Generalizes the pattern of call-only expressions. The wrapped function
+	receives positional and keyword JSExpr arguments and returns a JSExpr.
+
+	Example:
+		emit_len = JSTransformer(lambda x: JSMember(x, "length"), name="len")
+		# When called: emit_len.emit_call([some_expr], {}) -> JSMember(some_expr, "length")
+	"""
+
+	fn: Callable[..., JSExpr]
+	name: str = ""  # Optional name for error messages
+
+	@override
+	def emit(self) -> str:
+		label = self.name or "JSTransformer"
+		raise JSCompilationError(f"{label} cannot be emitted directly - must be called")
+
+	@override
+	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+		if kwargs:
+			return self.fn(*args, **kwargs)
+		return self.fn(*args)
+
+	@override
+	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+		label = self.name or "JSTransformer"
+		raise JSCompilationError(f"{label} cannot be subscripted")
+
+	@override
+	def emit_getattr(self, attr: str) -> JSExpr:
+		label = self.name or "JSTransformer"
+		raise JSCompilationError(f"{label} cannot have attributes")
+
+
+@overload
+def js_transformer(arg: str) -> Callable[[Callable[..., JSExpr]], JSTransformer]: ...
+
+
+@overload
+def js_transformer(arg: Callable[..., JSExpr]) -> JSTransformer: ...
+
+
+def js_transformer(
+	arg: str | Callable[..., JSExpr],
+) -> Callable[[Callable[..., JSExpr]], JSTransformer] | JSTransformer:
+	"""Decorator/helper for JSTransformer.
+
+	Usage:
+		@js_transformer("len")
+		def emit_len(x): ...
+	or:
+		emit_len = js_transformer(lambda x: ...)
+
+	Returns a JSTransformer.
+	"""
+	if isinstance(arg, str):
+
+		def decorator(fn: Callable[..., JSExpr]) -> JSTransformer:
+			return JSTransformer(fn, name=arg)
+
+		return decorator
+	elif callable(arg):
+		return JSTransformer(arg)  # type: ignore[arg-type]
+	else:
+		raise TypeError(
+			"js_transformer expects a function or string (for decorator usage)"
+		)
 
 
 @dataclass

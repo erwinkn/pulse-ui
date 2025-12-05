@@ -1,17 +1,17 @@
 # Placeholders for the WIP JS compilation feature
-# NOTE: This module is deprecated. Use pulse.javascript_v2 instead.
+# NOTE: This module is deprecated. Use pulse.transpiler instead.
 
 from collections.abc import Callable
 from typing import Generic, TypeVar, TypeVarTuple
 
-from pulse.javascript.imports import Import
+from pulse.transpiler.imports import Import
 
 Args = TypeVarTuple("Args")
 R = TypeVar("R")
 
 
 class JsFunction(Generic[*Args, R]):
-	"A transpiled JS function (deprecated - use pulse.javascript_v2.function.JsFunction)"
+	"A transpiled JS function (deprecated - use pulse.transpiler.function.JsFunction)"
 
 	name: str
 	hint: Callable[[*Args], R]
@@ -28,7 +28,7 @@ class JsFunction(Generic[*Args, R]):
 
 
 class ExternalJsFunction(Generic[*Args, R]):
-	"An imported JS function (deprecated - use pulse.javascript_v2.imports.Import)"
+	"An imported JS function (deprecated - use pulse.transpiler.imports.Import)"
 
 	import_: Import
 	hint: Callable[[*Args], R]

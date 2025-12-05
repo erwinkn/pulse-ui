@@ -12,8 +12,8 @@ from pulse.codegen.templates.routes_ts import (
 	ROUTES_RUNTIME_TEMPLATE,
 )
 from pulse.env import env
-from pulse.javascript.imports import registered_imports
 from pulse.routing import Layout, Route, RouteTree
+from pulse.transpiler.imports import registered_imports
 
 if TYPE_CHECKING:
 	from pulse.app import ConnectionStatusConfig
@@ -153,7 +153,7 @@ class Codegen:
 
 	def _copy_css_files(self) -> None:
 		"""Copy all registered local CSS files to the output css directory."""
-		from pulse.javascript.imports import CssImport
+		from pulse.transpiler.imports import CssImport
 
 		css_dir = self.output_folder / "css"
 
@@ -259,7 +259,6 @@ class Codegen:
 		content = generate_route(
 			path=route.unique_path(),
 			components=list(route.components) if route.components else None,
-			functions=list(route.functions) if route.functions else None,
 			route_file_path=output_path,
 			css_dir=self.output_folder / "css",
 		)

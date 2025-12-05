@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import pytest
-from pulse.javascript.builtins import PyBuiltin
-from pulse.javascript.constants import CONSTANTS_CACHE, JsConstant
-from pulse.javascript.errors import JSCompilationError
-from pulse.javascript.function import (
+from pulse.transpiler.constants import CONSTANTS_CACHE, JsConstant
+from pulse.transpiler.errors import JSCompilationError
+from pulse.transpiler.function import (
 	FUNCTION_CACHE,
 	JsFunction,
 	javascript,
 )
-from pulse.javascript.imports import Import, clear_import_registry
-from pulse.javascript.nodes import JSArray, JSNumber, JSString
+from pulse.transpiler.imports import Import, clear_import_registry
+from pulse.transpiler.nodes import JSArray, JSNumber, JSString, JSTransformer
 
 
 # Clear caches between tests
@@ -252,8 +251,8 @@ def test_nested_function_deps_captured() -> None:
 	assert isinstance(fn.deps["MY_CONST"], JsConstant)
 
 
-def test_builtins_become_pybuiltin() -> None:
-	"""Builtins are wrapped as PyBuiltin."""
+def test_builtins_become_jstransformer() -> None:
+	"""Builtins are wrapped as JSTransformer."""
 
 	@javascript
 	def fn(items: list[int]) -> int:
@@ -261,5 +260,22 @@ def test_builtins_become_pybuiltin() -> None:
 
 	assert "len" in fn.deps
 	builtin = fn.deps["len"]
-	assert isinstance(builtin, PyBuiltin)
+	assert isinstance(builtin, JSTransformer)
 	assert builtin.name == "len"
+
+
+def test_shadowed_builtin_uses_user_function() -> None:
+	"""User-defined function shadowing a builtin should be used instead."""
+
+	def len(x: list[int]) -> int:  # noqa: A001
+		return 42
+
+	@javascript
+	def fn(items: list[int]) -> int:
+		return len(items)
+
+	assert "len" in fn.deps
+	dep = fn.deps["len"]
+	# Should be a JsFunction (user's function), not JSTransformer (builtin)
+	assert isinstance(dep, JsFunction)
+	assert dep.fn is len

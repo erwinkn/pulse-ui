@@ -80,12 +80,6 @@ from pulse.helpers import (
 	CSSProperties as CSSProperties,
 )
 from pulse.helpers import (
-	JsFunction as JsFunction,
-)
-from pulse.helpers import (
-	JsObject as JsObject,
-)
-from pulse.helpers import (
 	later as later,
 )
 from pulse.helpers import (
@@ -1287,12 +1281,6 @@ from pulse.html.tags import (
 from pulse.html.tags import (
 	wbr as wbr,
 )
-
-# JavaScript v2 transpilation system
-from pulse.javascript.function import javascript as javascript
-from pulse.javascript.imports import CssImport as CssImport
-from pulse.javascript.imports import Import as Import
-from pulse.javascript.imports import import_js as import_js
 from pulse.messages import ClientMessage as ClientMessage
 from pulse.messages import Directives as Directives
 from pulse.messages import Prerender as Prerender
@@ -1439,6 +1427,13 @@ from pulse.serializer import serialize as serialize
 
 # State and routing
 from pulse.state import State as State
+from pulse.transpiler.function import JsFunction as JsFunction
+
+# JavaScript v2 transpilation system
+from pulse.transpiler.function import javascript as javascript
+from pulse.transpiler.imports import CssImport as CssImport
+from pulse.transpiler.imports import Import as Import
+from pulse.transpiler.imports import import_js as import_js
 
 # Types
 from pulse.types.event_handler import (

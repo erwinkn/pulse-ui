@@ -6,10 +6,10 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
-from pulse.javascript.constants import JsConstant
-from pulse.javascript.function import AnyJsFunction, JsFunction
-from pulse.javascript.imports import Import, registered_imports
 from pulse.react_component import ReactComponent
+from pulse.transpiler.constants import JsConstant
+from pulse.transpiler.function import AnyJsFunction, JsFunction, registered_functions
+from pulse.transpiler.imports import Import, registered_imports
 
 
 def _generate_import_statement(src: str, imports: list[Import]) -> str:
@@ -188,7 +188,6 @@ def _generate_functions_section(functions: Sequence[AnyJsFunction]) -> str:
 
 	lines: list[str] = ["// Functions"]
 	for fn in functions:
-		# fn.transpile() returns "function name_id(args){...}"
 		js_code = fn.transpile()
 		lines.append(js_code)
 
@@ -250,87 +249,65 @@ def _generate_registry_section(
 
 def generate_route(
 	path: str,
-	imports: Sequence[Import] | None = None,
-	functions: Sequence[AnyJsFunction] | None = None,
 	components: Sequence[ReactComponent[...]] | None = None,
 	route_file_path: Path | None = None,
 	css_dir: Path | None = None,
 ) -> str:
-	"""Generate a route file with all imports, functions, and components.
+	"""Generate a route file with all imports and components.
 
 	Args:
 		path: The route path (e.g., "/users/:id")
-		imports: Additional imports to include
-		functions: JS functions to include
 		components: React components used in the route
 		route_file_path: Path where the route file will be written (for computing relative imports)
 		css_dir: Path to the CSS output directory (for computing relative CSS imports)
 	"""
-	# 1. Collect lazy component import IDs to exclude from registered_imports
+	# Collect lazy component import IDs to exclude from registered_imports
 	lazy_import_ids: set[str] = set()
 	for comp in components or []:
 		if comp.lazy:
 			lazy_import_ids.add(comp.import_.id)
 
-	# 2. Collect all imports
-	# Start with all registered imports (includes CSS imports from CssImport)
-	# but exclude lazy component imports (they're loaded dynamically)
-	all_imports: list[Import] = [
-		imp for imp in registered_imports() if imp.id not in lazy_import_ids
-	]
+	# Add core Pulse imports - store references to use their js_name later
+	pulse_view_import = Import.named("PulseView", "pulse-ui-client")
+
+	# Check if we need RenderLazy
+	render_lazy_import: Import | None = None
+	if any(c.lazy for c in (components or [])):
+		render_lazy_import = Import.named("RenderLazy", "pulse-ui-client")
+
+	# Process components: add non-lazy imports and collect metadata
+	prop_components: list[ReactComponent[...]] = []
+	lazy_components: list[tuple[ReactComponent[...], Import]] = []
+	for comp in components or []:
+		if comp.lazy:
+			if render_lazy_import is not None:
+				lazy_components.append((comp, render_lazy_import))
+		else:
+			# Force registration by accessing the import
+			_ = comp.import_
+			if comp.prop:
+				prop_components.append(comp)
+
+	# Collect function graph (constants + functions in dependency order)
+	constants, funcs = _collect_function_graph(registered_functions())
+
+	# Get all registered imports, excluding lazy ones
+	all_imports = [imp for imp in registered_imports() if imp.id not in lazy_import_ids]
 
 	# Update src for local CSS imports to use relative paths from the route file
 	if route_file_path is not None and css_dir is not None:
-		from pulse.javascript.imports import CssImport
+		from pulse.transpiler.imports import CssImport
 
 		route_dir = route_file_path.parent
 		for imp in all_imports:
 			if isinstance(imp, CssImport) and imp.is_local:
-				# Compute relative path from route file to CSS file
 				generated_filename = imp.generated_filename
 				assert generated_filename is not None
 				css_file_path = css_dir / generated_filename
 				rel_path = Path(os.path.relpath(css_file_path, route_dir))
 				imp.src = rel_path.as_posix()
 
-	# Add any explicitly passed imports
-	if imports:
-		all_imports.extend(imports)
-
-	# Add core Pulse imports - store references to use their js_name later
-	pulse_view_import = Import.named("PulseView", "pulse-ui-client")
-
-	all_imports.append(pulse_view_import)
-
-	# Check if we need RenderLazy and collect lazy components
-	render_lazy_import: Import | None = None
-	lazy_components: list[tuple[ReactComponent[...], Import]] = []
-	if any(c.lazy for c in (components or [])):
-		render_lazy_import = Import.named("RenderLazy", "pulse-ui-client")
-		all_imports.append(render_lazy_import)
-
-	# Add component imports and collect components with prop access
-	prop_components: list[ReactComponent[...]] = []
-	for comp in components or []:
-		if comp.lazy:
-			if render_lazy_import is not None:
-				lazy_components.append((comp, render_lazy_import))
-		else:
-			all_imports.append(comp.import_)
-			# Track components with prop access for registry
-			if comp.prop:
-				prop_components.append(comp)
-		all_imports.extend(comp.extra_imports)
-
-	# 2. Collect function graph (constants + functions in order)
-	constants, funcs = _collect_function_graph(list(functions or []))
-
-	# Add imports from functions
-	for fn in funcs:
-		for imp in fn.imports().values():
-			all_imports.append(imp)
-
-	# 3. Generate output sections
+	# Generate output sections
 	output_parts: list[str] = []
 
 	imports_section = _generate_imports_section(all_imports)
@@ -352,7 +329,7 @@ def generate_route(
 	)
 	output_parts.append("")
 
-	# Route component - use js_name for PulseView
+	# Route component
 	pulse_view_js = pulse_view_import.js_name
 	output_parts.append(f'''const path = "{path}";
 

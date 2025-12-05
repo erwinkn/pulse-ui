@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TypeAlias, override
 
-from pulse.javascript.context import is_interpreted_mode
-from pulse.javascript.errors import JSCompilationError
-from pulse.javascript.ids import generate_id
-from pulse.javascript.nodes import (
+from pulse.transpiler.context import is_interpreted_mode
+from pulse.transpiler.errors import JSCompilationError
+from pulse.transpiler.ids import generate_id
+from pulse.transpiler.nodes import (
 	JSArray,
 	JSBoolean,
 	JSExpr,
@@ -103,3 +103,8 @@ def jsify(value: JsVar) -> JSExpr:
 	if not isinstance(value, JSExpr):
 		return const_to_js(value).expr
 	return value
+
+
+def registered_constants() -> list[JsConstant]:
+	"""Get all registered JS constants."""
+	return list(CONSTANTS_CACHE.values())

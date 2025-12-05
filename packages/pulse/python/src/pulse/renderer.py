@@ -11,10 +11,10 @@ from typing import (
 )
 
 from pulse.helpers import values_equal
-from pulse.javascript.context import interpreted_mode
-from pulse.javascript.function import AnyJsFunction, JsFunction, JsFunctionCall
-from pulse.javascript.imports import Import
-from pulse.javascript.nodes import JSExpr, to_js_expr
+from pulse.transpiler.context import interpreted_mode
+from pulse.transpiler.function import AnyJsFunction, JsFunction, JsFunctionCall
+from pulse.transpiler.imports import Import
+from pulse.transpiler.nodes import JSExpr, to_js_expr
 from pulse.vdom import (
 	VDOM,
 	Callback,

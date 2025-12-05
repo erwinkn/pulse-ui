@@ -9,8 +9,8 @@ Adapted from the v1 transpiler tests, excluding tests that require:
 
 import warnings
 
-from pulse.javascript.errors import JSCompilationError
-from pulse.javascript.function import javascript
+from pulse.transpiler.errors import JSCompilationError
+from pulse.transpiler.function import javascript
 
 # =============================================================================
 # Basic Statements
@@ -855,7 +855,7 @@ class TestDependencies:
 	"""Test dependency handling."""
 
 	def test_import_dependency(self):
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		clsx = Import("clsx", "clsx")
 
@@ -902,7 +902,7 @@ class TestImportTranspilation:
 
 	def test_import_called_as_function_no_args(self):
 		"""Import called as function with no arguments."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		init = Import("init", "./utils")
 
@@ -915,7 +915,7 @@ class TestImportTranspilation:
 
 	def test_import_called_as_function_with_args(self):
 		"""Import called as function with various argument types."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		process = Import("process", "./utils")
 
@@ -928,7 +928,7 @@ class TestImportTranspilation:
 
 	def test_import_called_with_string_literals(self):
 		"""Import called with string literal arguments."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		clsx = Import("clsx", "clsx")
 
@@ -941,7 +941,7 @@ class TestImportTranspilation:
 
 	def test_import_attribute_access(self):
 		"""Import with attribute/property access."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		styles = Import("styles", "./app.module.css")
 
@@ -954,7 +954,7 @@ class TestImportTranspilation:
 
 	def test_import_nested_attribute_access(self):
 		"""Import with nested attribute access."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		config = Import("config", "./config")
 
@@ -967,7 +967,7 @@ class TestImportTranspilation:
 
 	def test_import_subscript_access_with_variable(self):
 		"""Import with subscript access using a variable."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		data = Import("data", "./data")
 
@@ -980,7 +980,7 @@ class TestImportTranspilation:
 
 	def test_import_subscript_access_with_literal(self):
 		"""Import with subscript access using a string literal."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		translations = Import("translations", "./i18n")
 
@@ -993,7 +993,7 @@ class TestImportTranspilation:
 
 	def test_import_subscript_access_with_number(self):
 		"""Import with subscript access using a number."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		items = Import("items", "./data")
 
@@ -1006,7 +1006,7 @@ class TestImportTranspilation:
 
 	def test_import_passed_as_argument(self):
 		"""Import passed as argument to another function."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		Button = Import("Button", "@mantine/core")
 		createElement = Import("createElement", "react")
@@ -1020,7 +1020,7 @@ class TestImportTranspilation:
 
 	def test_import_passed_to_javascript_function(self):
 		"""Import passed as argument to a @javascript function."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		config = Import("config", "./config")
 
@@ -1037,7 +1037,7 @@ class TestImportTranspilation:
 
 	def test_import_method_call(self):
 		"""Import with method call."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		api = Import("api", "./api")
 
@@ -1050,7 +1050,7 @@ class TestImportTranspilation:
 
 	def test_import_method_call_with_multiple_args(self):
 		"""Import with method call with multiple arguments."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		client = Import("client", "./client")
 
@@ -1063,7 +1063,7 @@ class TestImportTranspilation:
 
 	def test_import_chained_method_calls(self):
 		"""Import with chained method calls."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		builder = Import("builder", "./builder")
 
@@ -1076,7 +1076,7 @@ class TestImportTranspilation:
 
 	def test_import_in_binary_operation(self):
 		"""Import used in binary operations."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		BASE_VALUE = Import("BASE_VALUE", "./constants")
 
@@ -1089,7 +1089,7 @@ class TestImportTranspilation:
 
 	def test_import_in_comparison(self):
 		"""Import used in comparison."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		MAX_VALUE = Import("MAX_VALUE", "./constants")
 
@@ -1102,7 +1102,7 @@ class TestImportTranspilation:
 
 	def test_import_in_ternary(self):
 		"""Import used in conditional expression."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		DEFAULT = Import("DEFAULT", "./constants")
 
@@ -1117,7 +1117,7 @@ class TestImportTranspilation:
 
 	def test_import_in_list_literal(self):
 		"""Import used within a list literal."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		item1 = Import("item1", "./items")
 		item2 = Import("item2", "./items")
@@ -1131,7 +1131,7 @@ class TestImportTranspilation:
 
 	def test_import_in_dict_literal(self):
 		"""Import used within a dict literal (transpiles to Map)."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		handler = Import("handler", "./handlers")
 
@@ -1145,7 +1145,7 @@ class TestImportTranspilation:
 
 	def test_import_assigned_to_variable(self):
 		"""Import assigned to a local variable."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		utils = Import("utils", "./utils")
 
@@ -1160,7 +1160,7 @@ class TestImportTranspilation:
 
 	def test_multiple_imports_same_function(self):
 		"""Multiple different imports used in the same function."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		Button = Import("Button", "@mantine/core")
 		Icon = Import("Icon", "@mantine/core")
@@ -1179,7 +1179,7 @@ class TestImportTranspilation:
 
 	def test_default_import(self):
 		"""Default import usage."""
-		from pulse.javascript.imports import Import
+		from pulse.transpiler.imports import Import
 
 		React = Import.default("React", "react")
 
@@ -2139,7 +2139,7 @@ class TestPyModules:
 
 	def test_js_function_def_with_name(self):
 		"""Test JSFunctionDef emits name when provided."""
-		from pulse.javascript.nodes import JSFunctionDef, JSNumber, JSReturn
+		from pulse.transpiler.nodes import JSFunctionDef, JSNumber, JSReturn
 
 		# Named function
 		named_fn = JSFunctionDef(
@@ -2151,7 +2151,7 @@ class TestPyModules:
 
 	def test_js_function_def_without_name(self):
 		"""Test JSFunctionDef emits anonymous function when name is None."""
-		from pulse.javascript.nodes import JSFunctionDef, JSNumber, JSReturn
+		from pulse.transpiler.nodes import JSFunctionDef, JSNumber, JSReturn
 
 		# Anonymous function
 		anon_fn = JSFunctionDef(params=["x"], body=[JSReturn(JSNumber(42))], name=None)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict, Unpack
 
 import pulse as ps
-from pulse.javascript.imports import CssImport
+from pulse.transpiler.imports import CssImport
 
 from .styles import CSSVariables
 from .theme import MantineTheme, MantineThemeOverride

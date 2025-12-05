@@ -16,8 +16,8 @@ import ast
 import re
 from collections.abc import Callable
 
-from pulse.javascript.errors import JSCompilationError
-from pulse.javascript.nodes import (
+from pulse.transpiler.errors import JSCompilationError
+from pulse.transpiler.nodes import (
 	ALLOWED_BINOPS,
 	ALLOWED_CMPOPS,
 	ALLOWED_UNOPS,

@@ -9,12 +9,11 @@ Usage:
     from pulse.js.number import isFinite, EPSILON
     isFinite(42)              # -> Number.isFinite(42)
     EPSILON                   # -> Number.EPSILON
-
-Note: This module is registered externally via register_js_module().
-Dynamic attribute access (__getattr__) is set up during registration.
 """
 
 from __future__ import annotations
+
+from pulse.transpiler.js_module import register_js_module
 
 # Constants (type stubs for IDE support)
 EPSILON: float
@@ -34,3 +33,7 @@ def isNaN(value: float) -> bool: ...
 def isSafeInteger(value: float) -> bool: ...
 def parseFloat(string: str) -> float: ...
 def parseInt(string: str, radix: int = 10) -> int: ...
+
+
+# Self-register this module as a JS builtin
+register_js_module(name="Number")

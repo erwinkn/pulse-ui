@@ -1,9 +1,9 @@
 """Tests for the JSExpr system and interpreted mode."""
 
 import pytest
-from pulse.javascript.context import interpreted_mode, is_interpreted_mode
-from pulse.javascript.imports import Import, clear_import_registry
-from pulse.javascript.nodes import (
+from pulse.transpiler.context import interpreted_mode, is_interpreted_mode
+from pulse.transpiler.imports import Import, clear_import_registry
+from pulse.transpiler.nodes import (
 	JSArray,
 	JSBoolean,
 	JSCall,

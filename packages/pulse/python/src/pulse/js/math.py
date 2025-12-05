@@ -9,12 +9,11 @@ Usage:
     from pulse.js.math import PI, floor
     PI                # -> Math.PI
     floor(3.7)        # -> Math.floor(3.7)
-
-Note: This module is registered externally via register_js_module().
-Dynamic attribute access (__getattr__) is set up during registration.
 """
 
 from __future__ import annotations
+
+from pulse.transpiler.js_module import register_js_module
 
 # Constants (type stubs for IDE support)
 PI: float
@@ -63,3 +62,7 @@ def sqrt(x: float) -> float: ...
 def tan(x: float) -> float: ...
 def tanh(x: float) -> float: ...
 def trunc(x: float) -> int: ...
+
+
+# Self-register this module as a JS builtin
+register_js_module(name="Math")

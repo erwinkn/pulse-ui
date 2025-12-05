@@ -7,12 +7,10 @@ This module provides transpilation for Python builtins to JavaScript.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import override
 
-from pulse.javascript.errors import JSCompilationError
-from pulse.javascript.nodes import (
+from pulse.transpiler.errors import JSCompilationError
+from pulse.transpiler.nodes import (
 	JSArray,
 	JSArrowFunction,
 	JSBinary,
@@ -29,37 +27,45 @@ from pulse.javascript.nodes import (
 	JSSubscript,
 	JSTemplate,
 	JSTertiary,
+	JSTransformer,
 	JSUnary,
 	JSUndefined,
+	js_transformer,
 )
 
 
+@js_transformer("print")
 def emit_print(*args: JSExpr) -> JSExpr:
 	"""print(*args) -> console.log(...)"""
 	return JSMemberCall(JSIdentifier("console"), "log", list(args))
 
 
+@js_transformer("len")
 def emit_len(x: JSExpr) -> JSExpr:
 	"""len(x) -> x.length ?? x.size"""
 	# .length for strings/arrays, .size for sets/maps
 	return JSBinary(JSMember(x, "length"), "??", JSMember(x, "size"))
 
 
+@js_transformer("min")
 def emit_min(*args: JSExpr) -> JSExpr:
 	"""min(*args) -> Math.min(...)"""
 	return JSMemberCall(JSIdentifier("Math"), "min", list(args))
 
 
+@js_transformer("max")
 def emit_max(*args: JSExpr) -> JSExpr:
 	"""max(*args) -> Math.max(...)"""
 	return JSMemberCall(JSIdentifier("Math"), "max", list(args))
 
 
+@js_transformer("abs")
 def emit_abs(x: JSExpr) -> JSExpr:
 	"""abs(x) -> Math.abs(x)"""
 	return JSMemberCall(JSIdentifier("Math"), "abs", [x])
 
 
+@js_transformer("round")
 def emit_round(number: JSExpr, ndigits: JSExpr | None = None) -> JSExpr:
 	"""round(number, ndigits=None) -> Math.round(...) or toFixed(...)"""
 	if ndigits is None:
@@ -69,11 +75,13 @@ def emit_round(number: JSExpr, ndigits: JSExpr | None = None) -> JSExpr:
 	return JSMemberCall(JSCall(JSIdentifier("Number"), [number]), "toFixed", [ndigits])
 
 
+@js_transformer("str")
 def emit_str(x: JSExpr) -> JSExpr:
 	"""str(x) -> String(x)"""
 	return JSCall(JSIdentifier("String"), [x])
 
 
+@js_transformer("int")
 def emit_int(*args: JSExpr) -> JSExpr:
 	"""int(x) or int(x, base) -> parseInt(...)"""
 	if len(args) == 1:
@@ -83,21 +91,25 @@ def emit_int(*args: JSExpr) -> JSExpr:
 	raise JSCompilationError("int() expects one or two arguments")
 
 
+@js_transformer("float")
 def emit_float(x: JSExpr) -> JSExpr:
 	"""float(x) -> parseFloat(x)"""
 	return JSCall(JSIdentifier("parseFloat"), [x])
 
 
+@js_transformer("list")
 def emit_list(x: JSExpr) -> JSExpr:
 	"""list(x) -> Array.from(x)"""
 	return JSCall(JSMember(JSIdentifier("Array"), "from"), [x])
 
 
+@js_transformer("bool")
 def emit_bool(x: JSExpr) -> JSExpr:
 	"""bool(x) -> Boolean(x)"""
 	return JSCall(JSIdentifier("Boolean"), [x])
 
 
+@js_transformer("set")
 def emit_set(*args: JSExpr) -> JSExpr:
 	"""set() or set(iterable) -> new Set([iterable])"""
 	if len(args) == 0:
@@ -107,6 +119,7 @@ def emit_set(*args: JSExpr) -> JSExpr:
 	raise JSCompilationError("set() expects at most one argument")
 
 
+@js_transformer("tuple")
 def emit_tuple(*args: JSExpr) -> JSExpr:
 	"""tuple() or tuple(iterable) -> Array.from(iterable)"""
 	if len(args) == 0:
@@ -116,6 +129,7 @@ def emit_tuple(*args: JSExpr) -> JSExpr:
 	raise JSCompilationError("tuple() expects at most one argument")
 
 
+@js_transformer("dict")
 def emit_dict(*args: JSExpr) -> JSExpr:
 	"""dict() or dict(iterable) -> new Map([iterable])"""
 	if len(args) == 0:
@@ -125,6 +139,7 @@ def emit_dict(*args: JSExpr) -> JSExpr:
 	raise JSCompilationError("dict() expects at most one argument")
 
 
+@js_transformer("filter")
 def emit_filter(*args: JSExpr) -> JSExpr:
 	"""filter(func, iterable) -> iterable.filter(func)"""
 	if not (1 <= len(args) <= 2):
@@ -141,16 +156,19 @@ def emit_filter(*args: JSExpr) -> JSExpr:
 	return JSMemberCall(iterable, "filter", [func])
 
 
+@js_transformer("map")
 def emit_map(func: JSExpr, iterable: JSExpr) -> JSExpr:
 	"""map(func, iterable) -> iterable.map(func)"""
 	return JSMemberCall(iterable, "map", [func])
 
 
+@js_transformer("reversed")
 def emit_reversed(iterable: JSExpr) -> JSExpr:
 	"""reversed(iterable) -> iterable.slice().reverse()"""
 	return JSMemberCall(JSMemberCall(iterable, "slice", []), "reverse", [])
 
 
+@js_transformer("enumerate")
 def emit_enumerate(iterable: JSExpr, start: JSExpr | None = None) -> JSExpr:
 	"""enumerate(iterable, start=0) -> iterable.map((v, i) => [i + start, v])"""
 	base = JSNumber(0) if start is None else start
@@ -166,6 +184,7 @@ def emit_enumerate(iterable: JSExpr, start: JSExpr | None = None) -> JSExpr:
 	)
 
 
+@js_transformer("range")
 def emit_range(*args: JSExpr) -> JSExpr:
 	"""range(stop) or range(start, stop[, step]) -> Array.from(...)"""
 	if not (1 <= len(args) <= 3):
@@ -197,6 +216,7 @@ def emit_range(*args: JSExpr) -> JSExpr:
 	)
 
 
+@js_transformer("sorted")
 def emit_sorted(
 	*args: JSExpr, key: JSExpr | None = None, reverse: JSExpr | None = None
 ) -> JSExpr:
@@ -232,6 +252,7 @@ def emit_sorted(
 	return JSTertiary(reverse, JSMemberCall(sort_call, "reverse", []), sort_call)
 
 
+@js_transformer("zip")
 def emit_zip(*args: JSExpr) -> JSExpr:
 	"""zip(*iterables) -> Array.from(...) with paired elements"""
 	if len(args) == 0:
@@ -252,6 +273,7 @@ def emit_zip(*args: JSExpr) -> JSExpr:
 	)
 
 
+@js_transformer("pow")
 def emit_pow(*args: JSExpr) -> JSExpr:
 	"""pow(base, exp) -> Math.pow(base, exp)"""
 	if len(args) != 2:
@@ -259,16 +281,19 @@ def emit_pow(*args: JSExpr) -> JSExpr:
 	return JSMemberCall(JSIdentifier("Math"), "pow", [args[0], args[1]])
 
 
+@js_transformer("chr")
 def emit_chr(x: JSExpr) -> JSExpr:
 	"""chr(x) -> String.fromCharCode(x)"""
 	return JSMemberCall(JSIdentifier("String"), "fromCharCode", [x])
 
 
+@js_transformer("ord")
 def emit_ord(x: JSExpr) -> JSExpr:
 	"""ord(x) -> x.charCodeAt(0)"""
 	return JSMemberCall(x, "charCodeAt", [JSNumber(0)])
 
 
+@js_transformer("any")
 def emit_any(x: JSExpr) -> JSExpr:
 	"""any(iterable) -> iterable.some(v => v)"""
 	# Optimization: if x is a map call, use .some directly
@@ -277,6 +302,7 @@ def emit_any(x: JSExpr) -> JSExpr:
 	return JSMemberCall(x, "some", [JSArrowFunction("v", JSIdentifier("v"))])
 
 
+@js_transformer("all")
 def emit_all(x: JSExpr) -> JSExpr:
 	"""all(iterable) -> iterable.every(v => v)"""
 	# Optimization: if x is a map call, use .every directly
@@ -285,6 +311,7 @@ def emit_all(x: JSExpr) -> JSExpr:
 	return JSMemberCall(x, "every", [JSArrowFunction("v", JSIdentifier("v"))])
 
 
+@js_transformer("sum")
 def emit_sum(*args: JSExpr) -> JSExpr:
 	"""sum(iterable, start=0) -> iterable.reduce((a, b) => a + b, start)"""
 	if not (1 <= len(args) <= 2):
@@ -297,6 +324,7 @@ def emit_sum(*args: JSExpr) -> JSExpr:
 	return JSMemberCall(base, "reduce", [reducer, start])
 
 
+@js_transformer("divmod")
 def emit_divmod(x: JSExpr, y: JSExpr) -> JSExpr:
 	"""divmod(x, y) -> [Math.floor(x / y), x - Math.floor(x / y) * y]"""
 	q = JSMemberCall(JSIdentifier("Math"), "floor", [JSBinary(x, "/", y)])
@@ -304,6 +332,7 @@ def emit_divmod(x: JSExpr, y: JSExpr) -> JSExpr:
 	return JSArray([q, r])
 
 
+@js_transformer("isinstance")
 def emit_isinstance(*args: JSExpr) -> JSExpr:
 	"""isinstance is not directly supported in v2; raise error."""
 	raise JSCompilationError(
@@ -312,7 +341,7 @@ def emit_isinstance(*args: JSExpr) -> JSExpr:
 
 
 # Registry of builtin emitters
-BUILTIN_EMITTERS: dict[str, Callable[..., JSExpr]] = {
+BUILTIN_EMITTERS: dict[str, JSTransformer] = {
 	"print": emit_print,
 	"len": emit_len,
 	"min": emit_min,
@@ -343,40 +372,6 @@ BUILTIN_EMITTERS: dict[str, Callable[..., JSExpr]] = {
 	"divmod": emit_divmod,
 	"isinstance": emit_isinstance,
 }
-
-
-@dataclass
-class PyBuiltin(JSExpr):
-	"""JSExpr for a Python builtin (e.g., `len`, `range`, `print`).
-
-	Holds the builtin name and uses BUILTIN_EMITTERS to generate JS.
-	"""
-
-	name: str
-
-	@override
-	def emit(self) -> str:
-		raise JSCompilationError(
-			f"PyBuiltinExpr '{self.name}' cannot be emitted directly"
-		)
-
-	@override
-	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
-		if self.name not in BUILTIN_EMITTERS:
-			raise JSCompilationError(f"Unsupported builtin: {self.name}")
-
-		emitter = BUILTIN_EMITTERS[self.name]
-		if kwargs:
-			return emitter(*args, **kwargs)
-		return emitter(*args)
-
-	@override
-	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
-		raise JSCompilationError(f"PyBuiltinExpr '{self.name}' cannot be subscripted")
-
-	@override
-	def emit_getattr(self, attr: str) -> JSExpr:
-		raise JSCompilationError(f"PyBuiltinExpr '{self.name}' cannot have attributes")
 
 
 # =============================================================================

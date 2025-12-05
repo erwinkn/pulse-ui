@@ -17,22 +17,21 @@ from typing import (
 )
 
 # Import module registrations to ensure they're available for dependency analysis
-import pulse.javascript.modules  # noqa: F401
-from pulse.javascript.builtins import PyBuiltin
-from pulse.javascript.constants import JsConstant, const_to_js
-from pulse.javascript.context import is_interpreted_mode
-from pulse.javascript.errors import JSCompilationError
-from pulse.javascript.ids import generate_id
-from pulse.javascript.imports import Import
-from pulse.javascript.js_module import JS_MODULES
-from pulse.javascript.nodes import JSExpr
-from pulse.javascript.py_module import (
+import pulse.transpiler.modules  # noqa: F401
+from pulse.transpiler.builtins import BUILTIN_EMITTERS
+from pulse.transpiler.constants import JsConstant, const_to_js
+from pulse.transpiler.context import is_interpreted_mode
+from pulse.transpiler.errors import JSCompilationError
+from pulse.transpiler.ids import generate_id
+from pulse.transpiler.imports import Import
+from pulse.transpiler.js_module import JS_MODULES
+from pulse.transpiler.nodes import JSExpr
+from pulse.transpiler.py_module import (
 	PY_MODULE_VALUES,
 	PY_MODULES,
 	PyModuleExpr,
-	PyModuleFuncExpr,
 )
-from pulse.javascript.transpiler import JsTranspiler
+from pulse.transpiler.transpiler import JsTranspiler
 
 Args = TypeVarTuple("Args")
 R = TypeVar("R")
@@ -68,8 +67,10 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 
 		for name in all_names:
 			if name in builtin_dict:
-				# Python builtins -> PyBuiltinExpr
-				deps[name] = PyBuiltin(name)
+				# Python builtins -> JSTransformer from BUILTIN_EMITTERS
+				if name not in BUILTIN_EMITTERS:
+					raise JSCompilationError(f"Unsupported builtin: {name}")
+				deps[name] = BUILTIN_EMITTERS[name]
 				continue
 			value = effective_globals.get(name)
 
@@ -137,18 +138,6 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 	def constants(self) -> dict[str, JsConstant]:
 		"""Get all JsConstant dependencies."""
 		return {k: v for k, v in self.deps.items() if isinstance(v, JsConstant)}
-
-	def builtins(self) -> dict[str, PyBuiltin]:
-		"""Get all PyBuiltinExpr dependencies."""
-		return {k: v for k, v in self.deps.items() if isinstance(v, PyBuiltin)}
-
-	def modules(self) -> dict[str, PyModuleExpr]:
-		"""Get all PyModuleExpr dependencies."""
-		return {k: v for k, v in self.deps.items() if isinstance(v, PyModuleExpr)}
-
-	def module_functions(self) -> dict[str, PyModuleFuncExpr]:
-		"""Get all PyModuleFuncExpr dependencies (named imports from modules)."""
-		return {k: v for k, v in self.deps.items() if isinstance(v, PyModuleFuncExpr)}
 
 	def transpile(self) -> str:
 		"""Transpile this JsFunction to JavaScript code.

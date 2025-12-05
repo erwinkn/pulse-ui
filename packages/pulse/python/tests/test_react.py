@@ -28,7 +28,6 @@ from pulse import (
 	prop,
 	react_component,
 )
-from pulse.javascript.imports import clear_import_registry
 from pulse.react_component import (
 	COMPONENT_REGISTRY,
 	DEFAULT,
@@ -40,6 +39,7 @@ from pulse.react_component import (
 	parse_typed_dict_props,
 	registered_react_components,
 )
+from pulse.transpiler.imports import clear_import_registry
 from pulse.vdom import Child, Element
 
 

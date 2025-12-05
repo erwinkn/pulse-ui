@@ -6,8 +6,8 @@ For direct JavaScript Math bindings, use `pulse.js.math` instead.
 
 # pyright: reportUnannotatedClassAttribute=false
 
-from pulse.javascript.constants import jsify
-from pulse.javascript.nodes import (
+from pulse.transpiler.constants import jsify
+from pulse.transpiler.nodes import (
 	JSBinary,
 	JSExpr,
 	JSIdentifier,
@@ -16,7 +16,7 @@ from pulse.javascript.nodes import (
 	JSNumber,
 	JSUnary,
 )
-from pulse.javascript.py_module import PyModule
+from pulse.transpiler.py_module import PyModule
 
 
 # Helper for generating Math method calls during transpilation

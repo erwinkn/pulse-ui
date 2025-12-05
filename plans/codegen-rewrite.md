@@ -7,6 +7,7 @@ Rewrite `packages/pulse/python/src/pulse/codegen/templates/route.py` to use the 
 ## Key Insight
 
 The `javascript_v2` module already has excellent infrastructure:
+
 - **`Import`** (`javascript_v2/imports.py`): Auto-registered with unique IDs, deduplication via global `_REGISTRY`
 - **`JsFunction`** (`javascript_v2/function.py`): Auto-registered with unique IDs, deduplication via `FUNCTION_CACHE`
 - **`JsConstant`** (`javascript_v2/constants.py`): Auto-registered with unique IDs, deduplication via `CONSTANTS_CACHE`
@@ -21,6 +22,7 @@ The current `route.py` uses `NameRegistry` to resolve conflicts by renaming (e.g
 **File**: `packages/pulse/python/src/pulse/codegen/templates/route.py`
 
 **New API signature:**
+
 ```python
 def generate_route(
     path: str,
@@ -33,6 +35,7 @@ def generate_route(
 ```
 
 **What gets deleted:**
+
 - `RouteTemplate` class (the entire class)
 - `NameRegistry` usage
 - `ComponentInfo`, `CssModuleImport`, `CssModuleCtx` TypedDicts (replaced by simpler structures)
@@ -47,6 +50,7 @@ def generate_route(
 ### Step 2.1: Group imports by source
 
 Group all `Import` objects by their `src` property:
+
 ```python
 def _group_imports_by_source(imports: Sequence[Import]) -> dict[str, list[Import]]:
     """Group imports by their source module."""
@@ -55,6 +59,7 @@ def _group_imports_by_source(imports: Sequence[Import]) -> dict[str, list[Import
 ### Step 2.2: Resolve import ordering
 
 Use `Import.before` constraints for topological sorting. Adapt the existing Kahn's algorithm from `codegen/imports.py:169-204` but simplified:
+
 ```python
 def _order_import_sources(
     grouped: dict[str, list[Import]]
@@ -65,6 +70,7 @@ def _order_import_sources(
 ### Step 2.3: Generate import statements
 
 For each source, emit:
+
 - Side-effect imports: `import "source";`
 - Default imports: `import Name_id from "source";`
 - Named imports: `import { name as name_id } from "source";`
@@ -77,6 +83,7 @@ For each source, emit:
 ### Step 3.1: Collect full dependency graph
 
 Given a list of `JsFunction` objects, walk their dependencies recursively to get all `JsFunction` and `JsConstant` nodes:
+
 ```python
 def _collect_function_graph(
     functions: Sequence[JsFunction]
@@ -95,7 +102,7 @@ const Y_0x4 = new Date();
 
 ```javascript
 function A_0x5() {
-    // TODO: transpiled body
+  // TODO: transpiled body
 }
 ```
 
@@ -108,6 +115,7 @@ The actual transpilation is deferred for later.
 ### Step 4.1: CSS Modules Registry
 
 Integrate with `pulse/css.py`:
+
 - `CssModule`: has `id` and `source_path`
 - Generate import with unique ID and add to registry
 
@@ -115,17 +123,18 @@ Integrate with `pulse/css.py`:
 import css_abc123def456 from "./path/to/module.css";
 
 const cssModules = {
-    "css_abc123def456": css_abc123def456,
+  css_abc123def456: css_abc123def456,
 };
 ```
 
 ### Step 4.2: Function Registry
 
 Map original function names to their unique JS names:
+
 ```javascript
 const functions = {
-    "my_func": my_func_0x5,
-    "helper": helper_0x6,
+  my_func: my_func_0x5,
+  helper: helper_0x6,
 };
 ```
 
@@ -149,10 +158,12 @@ const externalComponents: ComponentRegistry = {
 Currently `CssModule` and `CssImport` have their own ID generation (`_module_id`, `_import_id`). We will:
 
 **Keep the existing hash-based IDs** because:
+
 - CSS modules need stable IDs across runs for caching
 - The hash is content-based, which is good for CSS
 
 **Integration**: Create `Import` objects for CSS modules:
+
 ```python
 def css_module_to_import(module: CssModule) -> Import:
     """Convert a CssModule to an Import for the codegen system."""
@@ -172,7 +183,7 @@ The current `ReactComponent` extends `Imported` from `codegen/imports.py`. We wi
 3. Delegate `expr` property to the `Import.expr`
 
 ```python
-from pulse.javascript_v2.imports import Import
+from pulse.transpiler.imports import Import
 
 class ReactComponent(Generic[P]):
     """A React component that can be used within the UI tree."""
@@ -200,7 +211,7 @@ class ReactComponent(Generic[P]):
             self.import_ = Import.default(name, src, prop=prop)
         else:
             self.import_ = Import.named(name, src, prop=prop)
-        
+
         # ... rest of init
         self.extra_imports: list[Import] = list(extra_imports or [])
 
@@ -226,10 +237,12 @@ class ReactComponent(Generic[P]):
 ```
 
 **Changes to `extra_imports`:**
+
 - Change type from `list[ImportStatement]` to `list[Import]`
 - Existing usages of `ImportStatement` for side-effect CSS imports become `Import.css(src)`
 
 **Migration for existing component definitions:**
+
 ```python
 # Before (simple side-effect):
 extra_imports=[ImportStatement(src="@mantine/core/styles.css", side_effect=True)]
@@ -256,8 +269,9 @@ extra_imports=[
 ```
 
 **Files requiring migration:**
+
 - `packages/pulse-mantine/python/src/pulse_mantine/core/provider.py` - MantineProvider with `before` constraints
-- `packages/pulse-mantine/python/src/pulse_mantine/dates/dates_provider.py` - DatesProvider  
+- `packages/pulse-mantine/python/src/pulse_mantine/dates/dates_provider.py` - DatesProvider
 - `packages/pulse-mantine/python/src/pulse_mantine/charts/chart_tooltip.py` - ChartTooltip
 
 ---
@@ -354,7 +368,7 @@ Search for usages of `ReactComponent` or `react_component` with `extra_imports` 
 ### Files to Keep As-Is
 
 - `packages/pulse/python/src/pulse/javascript_v2/imports.py` - Already good
-- `packages/pulse/python/src/pulse/javascript_v2/function.py` - Already good  
+- `packages/pulse/python/src/pulse/javascript_v2/function.py` - Already good
 - `packages/pulse/python/src/pulse/javascript_v2/constants.py` - Already good
 - `packages/pulse/python/src/pulse/javascript_v2/ids.py` - Already good
 
@@ -370,9 +384,9 @@ Search for usages of `ReactComponent` or `react_component` with `extra_imports` 
 ```python
 # packages/pulse/python/src/pulse/codegen/templates/route.py
 
-from pulse.javascript_v2.imports import Import, registered_imports
-from pulse.javascript_v2.function import JsFunction
-from pulse.javascript_v2.constants import JsConstant
+from pulse.transpiler.imports import Import, registered_imports
+from pulse.transpiler.function import JsFunction
+from pulse.transpiler.constants import JsConstant
 from pulse.css import CssModule, CssImport
 from pulse.react_component import ReactComponent
 
@@ -385,40 +399,40 @@ def generate_route(
     components: Sequence[ReactComponent] | None = None,
 ) -> str:
     """Generate a route file with all imports, functions, and components."""
-    
+
     # 1. Collect all imports (from explicit + css + components)
     all_imports = _collect_all_imports(imports, css_modules, css_imports, components)
-    
+
     # 2. Collect function graph (constants + functions in order)
     constants, funcs = _collect_function_graph(functions or [])
-    
+
     # 3. Generate output sections
     output_parts = []
-    
+
     # Section: Imports
     output_parts.append(_generate_imports_section(all_imports))
-    
+
     # Section: Constants
     if constants:
         output_parts.append(_generate_constants_section(constants))
-    
-    # Section: Functions  
+
+    # Section: Functions
     if funcs:
         output_parts.append(_generate_functions_section(funcs))
-    
+
     # Section: Registries
     output_parts.append(_generate_registries_section(
         css_modules or [],
         funcs,
         components or [],
     ))
-    
+
     # Section: Route component
     output_parts.append(_generate_route_component(path))
-    
+
     # Section: Headers function
     output_parts.append(_generate_headers_function())
-    
+
     return "\n".join(output_parts)
 ```
 
@@ -448,6 +462,7 @@ Import (javascript_v2)
 1. **Function registry**: The `functions` registry will be used later, but no need to integrate it into `PulseView` yet. Generate the registry in the route file for future use.
 
 2. **Lazy components**: Lazy components should continue using `RenderLazy`. The codegen will emit:
+
    ```javascript
    "HeavyComponent": RenderLazy(() => import("./heavy").then((m) => ({ default: m.HeavyComponent }))),
    ```

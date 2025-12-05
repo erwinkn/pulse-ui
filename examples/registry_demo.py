@@ -14,8 +14,8 @@ codegen pipeline to work end-to-end.
 from typing import Any, cast
 
 import pulse as ps
-from pulse.javascript_v2.function import javascript
-from pulse.javascript_v2.imports import Import
+from pulse.transpiler.function import javascript
+from pulse.transpiler.imports import Import
 
 # =============================================================================
 # 1. CSS Module - classes resolve at runtime via __registry

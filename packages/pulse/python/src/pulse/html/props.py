@@ -68,7 +68,7 @@ from pulse.html.events import (
 	TElement,
 	TextAreaDOMEvents,
 )
-from pulse.javascript.nodes import JSExpr
+from pulse.transpiler.nodes import JSExpr
 
 Booleanish = Literal[True, False, "true", "false"]
 CrossOrigin = Literal["anonymous", "use-credentials", ""] | None

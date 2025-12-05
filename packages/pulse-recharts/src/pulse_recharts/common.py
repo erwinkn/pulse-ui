@@ -1,13 +1,13 @@
 from collections.abc import Callable
-from typing import Any, Literal, TypedDict, TypeVar
+from typing import Any, Literal, Protocol, TypedDict, TypeVar
 
 import pulse as ps
 
 T = TypeVar("T")
-DataKey = str | int | ps.JsFunction[[T], str | int]
+DataKey = str | int | ps.JsFunction[T, str | int]
 
 
-class ChartOffsetInternal(ps.JsObject):
+class ChartOffsetInternal(Protocol):
 	"""
 	This object defines the offset of the chart area and width and height and brush and ... it's a bit too much information all in one.
 	We use it internally but let's not expose it to the outside world.
@@ -69,7 +69,7 @@ class TickItem(TypedDict, total=False):
 TooltipIndex = str | None
 
 
-class MouseHandlerDataParam(ps.JsObject):
+class MouseHandlerDataParam(Protocol):
 	activeTooltipIndex: float | TooltipIndex | None
 	"""Index of the active tick in the current chart. Only works with number-indexed one-dimensional data charts,
     like Line, Area, Bar, Pie, etc.

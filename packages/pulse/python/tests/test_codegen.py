@@ -14,9 +14,9 @@ from pulse.app import App
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.codegen.templates.route import generate_route
 from pulse.components.react_router import Outlet
-from pulse.javascript.imports import Import, clear_import_registry
 from pulse.react_component import COMPONENT_REGISTRY, ReactComponent
 from pulse.routing import Route, RouteTree
+from pulse.transpiler.imports import Import, clear_import_registry
 from pulse.vdom import Component, component
 
 SERVER_ADDRESS = "http://localhost:8000"
@@ -380,7 +380,7 @@ class TestGenerateRoute:
 
 	def test_generate_route_with_css_import(self):
 		"""Test route generation with CSS side-effect import."""
-		from pulse.javascript.imports import CssImport
+		from pulse.transpiler.imports import CssImport
 
 		Button = ReactComponent(
 			"Button",
@@ -411,12 +411,10 @@ class TestGenerateRoute:
 
 	def test_generate_route_with_namespace_import(self):
 		"""Test route generation with namespace import."""
-		ns_import = Import.namespace("Icons", "lucide-react")
+		# Creating the import auto-registers it
+		Import.namespace("Icons", "lucide-react")
 
-		result = generate_route(
-			path="/icons",
-			imports=[ns_import],
-		)
+		result = generate_route(path="/icons")
 
 		# Should generate: import * as Icons_X from "lucide-react";
 		assert "import * as Icons_" in result

@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, TypedDict, Unpack
+from typing import Any, Literal, Protocol, TypedDict, Unpack
 
 import pulse as ps
 from pulse.html.elements import GenericHTMLElement
@@ -260,17 +260,17 @@ def YAxis(key: str | None = None, **props: Unpack[YAxisProps]): ...
 
 
 # TODO
-class AxisPropsForCartesianGridTicksGeneration(ps.JsObject): ...
+class AxisPropsForCartesianGridTicksGeneration(Protocol): ...
 
 
-class HorizontalCoordinateProps(ps.JsObject):
+class HorizontalCoordinateProps(Protocol):
 	yAxis: AxisPropsForCartesianGridTicksGeneration
 	width: float
 	height: float
 	offset: ChartOffsetInternal
 
 
-class VerticalCoordinateProps(ps.JsObject):
+class VerticalCoordinateProps(Protocol):
 	xAxis: AxisPropsForCartesianGridTicksGeneration
 	width: float
 	height: float
@@ -278,7 +278,7 @@ class VerticalCoordinateProps(ps.JsObject):
 
 
 # TODO
-class GridLineTypeFunctionProps(ps.JsObject): ...
+class GridLineTypeFunctionProps(Protocol): ...
 
 
 # SVGLineElementProps in practice
@@ -372,7 +372,7 @@ class CartesianGridProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 def CartesianGrid(key: str | None = None, **props: Unpack[CartesianGridProps]): ...
 
 
-class LinePointItem(ps.JsObject):
+class LinePointItem(Protocol):
 	value: float
 	payload: Any | None
 	"""Arbitrary data point payload associated with this coordinate, if any."""

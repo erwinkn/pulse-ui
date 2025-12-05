@@ -2121,6 +2121,212 @@ class TestPyModules:
 		code = f.transpile()
 		assert "Math.sqrt(x * x + y * y)" in code
 
+
+class TestReModule:
+	"""Test Python re module transpilation."""
+
+	def test_re_match(self):
+		"""Test re.match() transpilation - anchors at start."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.match(r"\d+", s)
+
+		code = f.transpile()
+		# Should anchor at start with ^
+		assert 's.match(new RegExp("^\\\\d+"))' in code
+
+	def test_re_search(self):
+		"""Test re.search() transpilation."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.search(r"\d+", s)
+
+		code = f.transpile()
+		assert 'new RegExp("\\\\d+").exec(s)' in code
+
+	def test_re_fullmatch(self):
+		"""Test re.fullmatch() transpilation - anchors at both ends."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.fullmatch(r"\d+", s)
+
+		code = f.transpile()
+		# Should anchor at both ends with ^ and $
+		assert 's.match(new RegExp("^\\\\d+$"))' in code
+
+	def test_re_sub_replace_all(self):
+		"""Test re.sub() transpilation - default replaces all."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.sub(r"\s+", " ", s)
+
+		code = f.transpile()
+		# Should use global flag for replace all
+		assert 's.replace(new RegExp("\\\\s+", "g"), " ")' in code
+
+	def test_re_sub_replace_first(self):
+		"""Test re.sub() with count=1 transpilation."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.sub(r"\s+", " ", s, count=1)
+
+		code = f.transpile()
+		# Should NOT use global flag for replace first
+		assert 's.replace(new RegExp("\\\\s+"), " ")' in code
+
+	def test_re_split(self):
+		"""Test re.split() transpilation."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.split(r"\s+", s)
+
+		code = f.transpile()
+		assert 's.split(new RegExp("\\\\s+"))' in code
+
+	def test_re_split_with_maxsplit(self):
+		"""Test re.split() with maxsplit transpilation."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.split(r"\s+", s, maxsplit=2)
+
+		code = f.transpile()
+		# Python maxsplit=2 means 3 parts, so JS limit=3
+		assert 's.split(new RegExp("\\\\s+"), 3)' in code
+
+	def test_re_findall(self):
+		"""Test re.findall() transpilation."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.findall(r"\d+", s)
+
+		code = f.transpile()
+		# Should use matchAll with spread and map
+		assert 'matchAll(new RegExp("\\\\d+", "g"))' in code
+		assert ".map(m => m[0])" in code
+
+	def test_re_compile(self):
+		"""Test re.compile() transpilation."""
+		import re
+
+		@javascript
+		def f():
+			return re.compile(r"\d+")
+
+		code = f.transpile()
+		assert 'new RegExp("\\\\d+")' in code
+
+	def test_re_flag_ignorecase(self):
+		"""Test re.I / re.IGNORECASE flag."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.search(r"hello", s, re.I)
+
+		code = f.transpile()
+		assert 'new RegExp("hello", "i")' in code
+
+	def test_re_flag_multiline(self):
+		"""Test re.M / re.MULTILINE flag."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.search(r"^hello", s, re.M)
+
+		code = f.transpile()
+		assert 'new RegExp("^hello", "m")' in code
+
+	def test_re_flag_dotall(self):
+		"""Test re.S / re.DOTALL flag."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.search(r"a.b", s, re.S)
+
+		code = f.transpile()
+		assert 'new RegExp("a.b", "s")' in code
+
+	def test_re_named_group_conversion(self):
+		"""Test Python named group (?P<name>...) converts to JS (?<name>...)."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.match(r"(?P<word>\w+)", s)
+
+		code = f.transpile()
+		# Python's (?P<word>...) should become JS's (?<word>...)
+		assert "(?<word>" in code
+		assert "(?P<" not in code
+
+	def test_re_named_backref_conversion(self):
+		"""Test Python named backref (?P=name) converts to JS \\k<name>."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.match(r"(?P<word>\w+)\s+(?P=word)", s)
+
+		code = f.transpile()
+		# Python's (?P=word) should become JS's \k<word>
+		assert "\\\\k<word>" in code
+		assert "(?P=" not in code
+
+	def test_re_replacement_backref_conversion(self):
+		"""Test Python replacement \\g<name> converts to JS $<name>."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.sub(r"(\w+)", r"\g<1>!", s)
+
+		code = f.transpile()
+		# Python's \g<1> should become JS's $<1>
+		assert "$<1>!" in code
+		assert "\\\\g<" not in code
+
+	def test_re_escape(self):
+		"""Test re.escape() transpilation."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.escape(s)
+
+		code = f.transpile()
+		assert "s.replace(" in code
+		assert "\\\\$&" in code
+
+	def test_re_test_convenience(self):
+		"""Test re.test() convenience method (returns boolean)."""
+		import re
+
+		@javascript
+		def f(s):
+			return re.test(r"\d+", s)
+
+		code = f.transpile()
+		# Should use RegExp.test() for boolean result
+		assert ".test(s)" in code
+
 	def test_function_name_in_output(self):
 		"""Test that transpiled functions include their JS name."""
 

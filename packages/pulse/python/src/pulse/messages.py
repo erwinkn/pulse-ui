@@ -1,8 +1,7 @@
 from typing import Any, Literal, NotRequired, TypedDict
 
-from pulse.renderer import VDOMOperation
 from pulse.routing import RouteInfo
-from pulse.vdom import VDOM
+from pulse.vdom import VDOM, VDOMOperation
 
 
 # ====================
@@ -14,7 +13,7 @@ class ServerInitMessage(TypedDict):
 	vdom: VDOM
 	callbacks: list[str]
 	render_props: list[str]
-	jsexpr_paths: NotRequired[dict[str, str]]  # path -> JS code for interpretation
+	jsexpr_paths: list[str]  # paths containing JS expressions
 
 
 class ServerUpdateMessage(TypedDict):

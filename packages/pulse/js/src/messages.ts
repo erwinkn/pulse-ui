@@ -12,7 +12,7 @@ export interface ServerInitMessage {
 	vdom: VDOM;
 	callbacks: string[];
 	render_props: string[];
-	css_refs: string[];
+	jsexpr_paths: string[];
 }
 
 export interface ServerUpdateMessage {

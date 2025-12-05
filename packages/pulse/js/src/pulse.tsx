@@ -33,7 +33,7 @@ export type PulsePrerenderView = {
 	vdom: VDOM;
 	callbacks: string[];
 	render_props: string[];
-	jsexpr_paths?: Record<string, string>; // path -> JS code for evaluation
+	jsexpr_paths: string[]; // paths containing JS expressions
 };
 
 export type PulsePrerender = {
@@ -176,7 +176,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				initialView.callbacks,
 				initialView.render_props,
 				registry,
-				initialView.jsexpr_paths ?? {},
+				initialView.jsexpr_paths,
 			),
 		[client, path, registry],
 	);

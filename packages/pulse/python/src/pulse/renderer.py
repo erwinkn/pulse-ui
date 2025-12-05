@@ -1,14 +1,7 @@
 import inspect
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import (
-	Any,
-	Literal,
-	NamedTuple,
-	TypeAlias,
-	TypedDict,
-	cast,
-)
+from typing import Any, NamedTuple, TypeAlias, cast
 
 from pulse.helpers import values_equal
 from pulse.transpiler.context import interpreted_mode
@@ -22,8 +15,17 @@ from pulse.vdom import (
 	ComponentNode,
 	Element,
 	Node,
+	PathDelta,
 	Props,
+	ReconciliationOperation,
+	ReplaceOperation,
+	UpdateCallbacksOperation,
+	UpdateJsExprPathsOperation,
+	UpdatePropsDelta,
+	UpdatePropsOperation,
+	UpdateRenderPropsOperation,
 	VDOMNode,
+	VDOMOperation,
 )
 
 
@@ -50,67 +52,6 @@ def emit_jsexpr(
 		return value.emit()
 
 
-class ReplaceOperation(TypedDict):
-	type: Literal["replace"]
-	path: str
-	data: VDOM
-
-
-# This payload makes it easy for the client to rebuild an array of React nodes
-# from the previous children array:
-# - Allocate array of size N
-# - For i in 0..N-1, check the following scenarios
-#   - i matches the next index in `new` -> use provided tree
-#   - i matches the next index in `reuse` -> reuse previous child
-#   - otherwise, reuse the element at the same index
-class ReconciliationOperation(TypedDict):
-	type: Literal["reconciliation"]
-	path: str
-	N: int
-	new: tuple[list[int], list[VDOM]]
-	reuse: tuple[list[int], list[int]]
-
-
-class UpdatePropsDelta(TypedDict, total=False):
-	# Only send changed/new keys under `set` and removed keys under `remove`
-	set: Props
-	remove: list[str]
-
-
-class UpdatePropsOperation(TypedDict):
-	type: Literal["update_props"]
-	path: str
-	data: UpdatePropsDelta
-
-
-class PathDelta(TypedDict, total=False):
-	add: list[str]
-	remove: list[str]
-
-
-class UpdateCallbacksOperation(TypedDict):
-	type: Literal["update_callbacks"]
-	path: str
-	data: PathDelta
-
-
-class UpdateRenderPropsOperation(TypedDict):
-	type: Literal["update_render_props"]
-	path: str
-	data: PathDelta
-
-
-VDOMOperation: TypeAlias = (
-	# InsertOperation,
-	# RemoveOperation,
-	ReplaceOperation
-	| UpdatePropsOperation
-	# | MoveOperation,
-	| ReconciliationOperation
-	| UpdateCallbacksOperation
-	| UpdateRenderPropsOperation
-)
-
 RenderPath: TypeAlias = str
 
 
@@ -118,13 +59,13 @@ class RenderTree:
 	root: Element
 	callbacks: Callbacks
 	render_props: set[str]
-	jsexpr_paths: dict[str, str]  # path -> emitted JS code for interpretation
+	jsexpr_paths: set[str]  # paths containing JS expressions
 
 	def __init__(self, root: Element) -> None:
 		self.root = root
 		self.callbacks = {}
 		self.render_props = set()
-		self.jsexpr_paths = {}
+		self.jsexpr_paths = set()
 		self.normalized: Element | None = None
 
 	def render(self) -> VDOM:
@@ -180,9 +121,21 @@ class RenderTree:
 				)
 			)
 
-		# JSExpr paths use a different update mechanism - they're sent with prop updates
-		# since the emitted JS code may change. For now, we track them as path -> code.
-		# TODO: Add UpdateJsExprPathsOperation if needed for incremental updates.
+		jsexpr_prev = self.jsexpr_paths
+		jsexpr_next = renderer.jsexpr_paths
+		jsexpr_add = sorted(jsexpr_next - jsexpr_prev)
+		jsexpr_remove = sorted(jsexpr_prev - jsexpr_next)
+		if jsexpr_add or jsexpr_remove:
+			jsexpr_delta: PathDelta = {}
+			if jsexpr_add:
+				jsexpr_delta["add"] = jsexpr_add
+			if jsexpr_remove:
+				jsexpr_delta["remove"] = jsexpr_remove
+			prefix.append(
+				UpdateJsExprPathsOperation(
+					type="update_jsexpr_paths", path="", data=jsexpr_delta
+				)
+			)
 
 		ops = prefix + renderer.operations if prefix else renderer.operations
 
@@ -201,6 +154,10 @@ class RenderTree:
 		self.callbacks.clear()
 		self.render_props.clear()
 		self.jsexpr_paths.clear()
+
+
+# Prefix for JSExpr values - code is embedded after the colon
+JSEXPR_PREFIX = "$js:"
 
 
 @dataclass(slots=True)
@@ -222,7 +179,7 @@ class Renderer:
 	def __init__(self) -> None:
 		self.callbacks: Callbacks = {}
 		self.render_props: set[str] = set()
-		self.jsexpr_paths: dict[str, str] = {}
+		self.jsexpr_paths: set[str] = set()
 		self.operations: list[VDOMOperation] = []
 
 	# ------------------------------------------------------------------
@@ -234,15 +191,15 @@ class Renderer:
 			return self.render_component(node, path)
 		if isinstance(node, Node):
 			return self.render_node(node, path)
-		# Handle JSExpr as children - emit JS code and use "$js" placeholder
+		# Handle JSExpr as children - emit JS code with $js: prefix
 		if is_jsexpr(node):
 			# Safe cast: is_jsexpr() ensures node is JSExpr | Import | JsFunctionCall
 			node_as_jsexpr = cast(
 				"JSExpr | Import | JsFunctionCall[*tuple[Any, ...]]", cast(object, node)
 			)
 			js_code = emit_jsexpr(node_as_jsexpr)
-			self.jsexpr_paths[path] = js_code
-			return "$js", cast(Element, node)
+			self.jsexpr_paths.add(path)
+			return f"{JSEXPR_PREFIX}{js_code}", cast(Element, node)
 		return node, node
 
 	def render_component(
@@ -476,18 +433,17 @@ class Renderer:
 				if normalized is None:
 					normalized = current.copy()
 				normalized[key] = value
-				# Emit the JSExpr in interpreted mode and store it
+				# Emit the JSExpr with $js: prefix - code is embedded in the value
 				js_code = emit_jsexpr(cast("JSExpr | Import", value))
-				self.jsexpr_paths[prop_path] = js_code
-				# Send a placeholder to the client - the actual value will be computed
-				# by evaluating the js_code from jsexpr_paths
+				self.jsexpr_paths.add(prop_path)
+				js_value = f"{JSEXPR_PREFIX}{js_code}"
 				old_js_code = (
 					emit_jsexpr(cast("JSExpr | Import", old_value))
 					if is_jsexpr(old_value)
 					else None
 				)
 				if old_js_code != js_code:
-					updated[key] = "$js"  # Placeholder indicating this is a JSExpr
+					updated[key] = js_value
 				continue
 
 			if isinstance(value, (Node, ComponentNode)):

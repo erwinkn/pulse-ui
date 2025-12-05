@@ -16,11 +16,14 @@ import type { PulsePrerenderView } from "./pulse";
 import type { ComponentRegistry, PathDelta, VDOMNode, VDOMUpdate } from "./vdom";
 import { FRAGMENT_TAG, isElementNode, isMountPointNode, MOUNT_POINT_PREFIX } from "./vdom";
 
+// Prefix for JSExpr values - code is embedded after the colon
+const JSEXPR_PREFIX = "$js:";
+
 export class VDOMRenderer {
 	#callbacks: Set<string>;
 	#callbackCache: Map<string, (...args: any) => void>;
 	#renderPropKeys: Set<string>;
-	#jsexprPaths: Map<string, string>; // path -> JS code for evaluation
+	#jsexprPaths: Set<string>; // paths containing JS expressions
 	#callbackList: string[];
 	#client: PulseSocketIOClient;
 	#path: string;
@@ -32,7 +35,7 @@ export class VDOMRenderer {
 		initialCallbacks: string[] = [],
 		initialRenderProps: string[] = [],
 		registry: Record<string, unknown> = {},
-		initialJsExprPaths: Record<string, string> = {},
+		initialJsExprPaths: string[] = [],
 	) {
 		this.#client = client;
 		this.#path = path;
@@ -40,7 +43,7 @@ export class VDOMRenderer {
 		this.#callbacks = new Set(initialCallbacks);
 		this.#callbackCache = new Map();
 		this.#renderPropKeys = new Set(initialRenderProps);
-		this.#jsexprPaths = new Map(Object.entries(initialJsExprPaths));
+		this.#jsexprPaths = new Set(initialJsExprPaths);
 		this.#callbackList = [...this.#callbacks].sort();
 	}
 
@@ -113,9 +116,17 @@ export class VDOMRenderer {
 		}
 	}
 
-	updateJsExprPaths(paths: Record<string, string>) {
-		// Replace all JSExpr paths with new ones
-		this.#jsexprPaths = new Map(Object.entries(paths));
+	applyJsExprPathsDelta(delta: PathDelta) {
+		if (delta.remove) {
+			for (const key of delta.remove) {
+				this.#jsexprPaths.delete(key);
+			}
+		}
+		if (delta.add) {
+			for (const key of delta.add) {
+				this.#jsexprPaths.add(key);
+			}
+		}
 	}
 
 	getCallback(path: string, prop: string) {
@@ -138,13 +149,11 @@ export class VDOMRenderer {
 			return node;
 		}
 
-		// Check for JSExpr placeholder - "$js" means we need to evaluate from jsexpr_paths
+		// Check for JSExpr - "$js:code" format has code embedded in the value
 		if (typeof node === "string") {
-			if (node === "$js") {
-				const jsExprCode = this.#jsexprPaths.get(currentPath);
-				if (jsExprCode !== undefined) {
-					return this.evaluateJsExpr(jsExprCode) as ReactNode;
-				}
+			if (node.startsWith(JSEXPR_PREFIX)) {
+				const jsExprCode = node.slice(JSEXPR_PREFIX.length);
+				return this.evaluateJsExpr(jsExprCode) as ReactNode;
 			}
 			return node;
 		}
@@ -202,9 +211,9 @@ export class VDOMRenderer {
 		if (this.#renderPropKeys.has(propPath)) {
 			return this.renderNode(value, propPath);
 		}
-		// Check for JSExpr - the value should be "$js" placeholder
-		const jsExprCode = this.#jsexprPaths.get(propPath);
-		if (jsExprCode !== undefined) {
+		// Check for JSExpr - "$js:code" format has code embedded in the value
+		if (typeof value === "string" && value.startsWith(JSEXPR_PREFIX)) {
+			const jsExprCode = value.slice(JSEXPR_PREFIX.length);
 			return this.evaluateJsExpr(jsExprCode);
 		}
 		return value;
@@ -223,11 +232,7 @@ export class VDOMRenderer {
 		this.#renderPropKeys = new Set(view.render_props);
 
 		// Set JSExpr paths
-		if (view.jsexpr_paths) {
-			this.#jsexprPaths = new Map(Object.entries(view.jsexpr_paths));
-		} else {
-			this.#jsexprPaths = new Map();
-		}
+		this.#jsexprPaths = new Set(view.jsexpr_paths);
 
 		return this.renderNode(view.vdom);
 	}
@@ -247,6 +252,10 @@ export class VDOMRenderer {
 			}
 			if (update.type === "update_render_props") {
 				this.applyRenderPropsDelta(update.data);
+				continue;
+			}
+			if (update.type === "update_jsexpr_paths") {
+				this.applyJsExprPathsDelta(update.data);
 				continue;
 			}
 

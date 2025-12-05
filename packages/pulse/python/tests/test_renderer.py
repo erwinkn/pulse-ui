@@ -872,11 +872,12 @@ def test_css_module_with_jsexpr(tmp_path: Path):
 
 	# CSS references go through jsexpr_paths
 	assert "className" in tree.jsexpr_paths
-	assert "css_" in tree.jsexpr_paths["className"]
-	assert ".test" in tree.jsexpr_paths["className"]
 
-	# VDOM should have the $js placeholder
-	assert vdom["props"]["className"] == "$js"  # pyright: ignore[reportIndexIssue,reportArgumentType,reportOptionalSubscript,reportTypedDictNotRequiredAccess]
+	# VDOM should have the $js:code value with code embedded
+	class_value = vdom["props"]["className"]  # pyright: ignore[reportIndexIssue,reportArgumentType,reportOptionalSubscript,reportTypedDictNotRequiredAccess]
+	assert class_value.startswith("$js:")
+	assert "css_" in class_value
+	assert ".test" in class_value
 
 	# Clean up
 	clear_import_registry()

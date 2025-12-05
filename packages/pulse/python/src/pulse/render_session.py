@@ -306,9 +306,8 @@ class RenderSession:
 					vdom=vdom,
 					callbacks=sorted(mount.tree.callbacks.keys()),
 					render_props=sorted(mount.tree.render_props),
+					jsexpr_paths=sorted(mount.tree.jsexpr_paths),
 				)
-				if mount.tree.jsexpr_paths:
-					msg["jsexpr_paths"] = mount.tree.jsexpr_paths
 				return msg
 
 		captured: ServerInitMessage | ServerNavigateToMessage | None = None
@@ -325,9 +324,8 @@ class RenderSession:
 					vdom=msg.get("vdom"),
 					callbacks=msg.get("callbacks", []),
 					render_props=msg.get("render_props", []),
+					jsexpr_paths=msg.get("jsexpr_paths", []),
 				)
-				if "jsexpr_paths" in msg:
-					captured["jsexpr_paths"] = msg["jsexpr_paths"]
 			elif msg["type"] == "navigate_to":
 				captured = ServerNavigateToMessage(
 					type="navigate_to",
@@ -360,9 +358,8 @@ class RenderSession:
 				vdom=vdom,
 				callbacks=sorted(mount.tree.callbacks.keys()),
 				render_props=sorted(mount.tree.render_props),
+				jsexpr_paths=sorted(mount.tree.jsexpr_paths),
 			)
-			if mount.tree.jsexpr_paths:
-				msg["jsexpr_paths"] = mount.tree.jsexpr_paths
 			return msg
 
 		return captured
@@ -439,9 +436,8 @@ class RenderSession:
 							vdom=vdom,
 							callbacks=sorted(mount.tree.callbacks.keys()),
 							render_props=sorted(mount.tree.render_props),
+							jsexpr_paths=sorted(mount.tree.jsexpr_paths),
 						)
-						if mount.tree.jsexpr_paths:
-							msg["jsexpr_paths"] = mount.tree.jsexpr_paths
 						self.send(msg)
 					else:
 						ops = mount.tree.diff(mount.element)

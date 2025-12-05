@@ -67,12 +67,18 @@ export interface UpdateRenderPropsUpdate extends VDOMUpdateBase {
 	data: PathDelta;
 }
 
+export interface UpdateJsExprPathsUpdate extends VDOMUpdateBase {
+	type: "update_jsexpr_paths";
+	data: PathDelta;
+}
+
 export type VDOMUpdate =
 	| ReplaceUpdate
 	| UpdatePropsUpdate
 	| ReconciliationUpdate
 	| UpdateCallbacksUpdate
-	| UpdateRenderPropsUpdate;
+	| UpdateRenderPropsUpdate
+	| UpdateJsExprPathsUpdate;
 
 export type UpdateType = VDOMUpdate["type"];
 

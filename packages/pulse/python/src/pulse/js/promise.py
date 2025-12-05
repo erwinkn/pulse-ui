@@ -11,19 +11,32 @@ Usage:
     reject(reason)                 # -> Promise.reject(reason)
 """
 
-from __future__ import annotations
-
-from pulse.transpiler.js_module import register_js_module
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
 
-# Static Methods (type stubs for IDE support)
-def all(iterable: list[object]) -> object: ...
-def allSettled(iterable: list[object]) -> object: ...
-def any(iterable: list[object]) -> object: ...
-def race(iterable: list[object]) -> object: ...
-def reject(reason: object) -> object: ...
-def resolve(value: object) -> object: ...
+class Promise:
+	"""JavaScript Promise constructor."""
+
+	def __init__(self, executor: object) -> None: ...
+
+	@staticmethod
+	def all(iterable: list[object]) -> object: ...
+
+	@staticmethod
+	def allSettled(iterable: list[object]) -> object: ...
+
+	@staticmethod
+	def any(iterable: list[object]) -> object: ...
+
+	@staticmethod
+	def race(iterable: list[object]) -> object: ...
+
+	@staticmethod
+	def reject(reason: object) -> object: ...
+
+	@staticmethod
+	def resolve(value: object) -> object: ...
 
 
 # Self-register this module as a JS builtin
-register_js_module(name="Promise", global_scope=True)
+_register_js_module(name="Promise", global_scope=True)

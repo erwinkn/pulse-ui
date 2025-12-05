@@ -11,15 +11,30 @@ Usage:
     parse("2023-01-01")           # -> Date.parse("2023-01-01")
 """
 
-from __future__ import annotations
-
-from pulse.transpiler.js_module import register_js_module
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
 
 class Date:
 	"""Class for JavaScript Date instances."""
 
 	def __init__(self, value: int | str | None = None): ...
+
+	@staticmethod
+	def now() -> float: ...
+
+	@staticmethod
+	def parse(dateString: str) -> float: ...
+
+	@staticmethod
+	def UTC(
+		year: int,
+		month: int,
+		date: int | None = None,
+		hours: int | None = None,
+		minutes: int | None = None,
+		seconds: int | None = None,
+		ms: int | None = None,
+	) -> float: ...
 
 	def getDate(self) -> int: ...
 	def getDay(self) -> int: ...
@@ -92,19 +107,5 @@ class Date:
 	def valueOf(self) -> float: ...
 
 
-# Static Methods (type stubs for IDE support)
-def now() -> float: ...
-def parse(dateString: str) -> float: ...
-def UTC(
-	year: int,
-	month: int,
-	date: int | None = None,
-	hours: int | None = None,
-	minutes: int | None = None,
-	seconds: int | None = None,
-	ms: int | None = None,
-) -> float: ...
-
-
 # Self-register this module as a JS builtin
-register_js_module(name="Date", global_scope=True)
+_register_js_module(name="Date", global_scope=True)

@@ -95,6 +95,35 @@ class JSExpr(JSNode, ABC):
 		"""
 		return JSMember(self, attr)
 
+	def __getattr__(self, attr: str) -> JSExpr:
+		"""Support attribute access at Python runtime.
+
+		Allows: expr.attr where expr is any JSExpr.
+		Delegates to emit_getattr for transpilation.
+		"""
+		return self.emit_getattr(attr)
+
+	def __call__(self, *args: object, **kwargs: object) -> JSExpr:
+		"""Support function calls at Python runtime.
+
+		Allows: expr(*args, **kwargs) where expr is any JSExpr.
+		Delegates to emit_call for transpilation.
+		"""
+		# Convert Python values to JSExpr
+		js_args = [to_js_expr(arg) for arg in args]
+		js_kwargs = {k: to_js_expr(v) for k, v in kwargs.items()}
+		return self.emit_call(js_args, js_kwargs)
+
+	def __getitem__(self, key: object) -> JSExpr:
+		"""Support subscript access at Python runtime.
+
+		Allows: expr[key] where expr is any JSExpr.
+		Delegates to emit_subscript for transpilation.
+		"""
+		# Convert Python value to JSExpr
+		js_key = to_js_expr(key)
+		return self.emit_subscript([js_key])
+
 
 class JSStmt(JSNode, ABC):
 	pass

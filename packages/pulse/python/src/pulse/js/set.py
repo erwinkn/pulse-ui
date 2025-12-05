@@ -10,20 +10,19 @@ Usage:
 	Set()                         # -> new Set()
 """
 
-from __future__ import annotations
+from collections.abc import Iterable as _Iterable
+from typing import Generic as _Generic
+from typing import TypeVar as _TypeVar
 
-from collections.abc import Iterable
-from typing import Generic, TypeVar
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
-from pulse.transpiler.js_module import register_js_module
-
-_T = TypeVar("_T", covariant=True)
+_T = _TypeVar("_T", covariant=True)
 
 
-class Set(Generic[_T]):
+class Set(_Generic[_T]):
 	"""Class for JavaScript Set instances."""
 
-	def __init__(self, iterable: Iterable[_T] | None = None): ...
+	def __init__(self, iterable: _Iterable[_T] | None = None): ...
 
 	@property
 	def size(self) -> int: ...
@@ -39,4 +38,4 @@ class Set(Generic[_T]):
 
 
 # Self-register this module as a JS builtin in global scope
-register_js_module(name="Set", global_scope=True)
+_register_js_module(name="Set", global_scope=True)

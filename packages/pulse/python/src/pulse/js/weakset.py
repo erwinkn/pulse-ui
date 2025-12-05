@@ -10,24 +10,23 @@ Usage:
     WeakSet()                     # -> new WeakSet()
 """
 
-from __future__ import annotations
+from typing import Generic as _Generic
+from typing import TypeVar as _TypeVar
 
-from typing import Generic, TypeVar
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
-from pulse.transpiler.js_module import register_js_module
-
-_T = TypeVar("_T", bound=object)
+_T = _TypeVar("_T", bound=object)
 
 
-class WeakSet(Generic[_T]):
+class WeakSet(_Generic[_T]):
 	"""Class for JavaScript WeakSet instances."""
 
 	def __init__(self, iterable: list[_T] | None = None): ...
 
-	def add(self, value: _T) -> WeakSet[_T]: ...
+	def add(self, value: _T) -> "WeakSet[_T]": ...
 	def delete(self, value: object) -> bool: ...
 	def has(self, value: object) -> bool: ...
 
 
 # Self-register this module as a JS builtin in global scope
-register_js_module(name="WeakSet", global_scope=True)
+_register_js_module(name="WeakSet", global_scope=True)

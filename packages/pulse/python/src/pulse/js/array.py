@@ -14,18 +14,25 @@ Usage:
     from_([1, 2, 3])              # -> Array.from([1, 2, 3])
 """
 
-from __future__ import annotations
-
-from pulse.transpiler.js_module import register_js_module
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
 
-# Static Methods (type stubs for IDE support)
-def isArray(value: object) -> bool: ...
-def from_(
-	arrayLike: object, mapFn: object | None = None, thisArg: object | None = None
-) -> list[object]: ...
-def of(*elements: object) -> list[object]: ...
+class Array:
+	"""JavaScript Array constructor."""
+
+	def __init__(self, *elements: object) -> None: ...
+
+	@staticmethod
+	def isArray(value: object) -> bool: ...
+
+	@staticmethod
+	def from_(
+		arrayLike: object, mapFn: object | None = None, thisArg: object | None = None
+	) -> list[object]: ...
+
+	@staticmethod
+	def of(*elements: object) -> list[object]: ...
 
 
 # Self-register this module as a JS builtin
-register_js_module(name="Array", global_scope=True)
+_register_js_module(name="Array", global_scope=True)

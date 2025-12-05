@@ -11,16 +11,23 @@ Usage:
     fromCodePoint(0x1F600)         # -> String.fromCodePoint(0x1F600)
 """
 
-from __future__ import annotations
-
-from pulse.transpiler.js_module import register_js_module
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
 
-# Static Methods (type stubs for IDE support)
-def fromCharCode(*codes: int) -> str: ...
-def fromCodePoint(*codePoints: int) -> str: ...
-def raw(template: str, *substitutions: str) -> str: ...
+class String:
+	"""JavaScript String constructor."""
+
+	def __init__(self, value: object) -> None: ...
+
+	@staticmethod
+	def fromCharCode(*codes: int) -> str: ...
+
+	@staticmethod
+	def fromCodePoint(*codePoints: int) -> str: ...
+
+	@staticmethod
+	def raw(template: str, *substitutions: str) -> str: ...
 
 
 # Self-register this module as a JS builtin
-register_js_module(name="String", global_scope=True)
+_register_js_module(name="String", global_scope=True)

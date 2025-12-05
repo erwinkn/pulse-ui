@@ -10,17 +10,16 @@ Usage:
     Map()                         # -> new Map()
 """
 
-from __future__ import annotations
+from typing import Generic as _Generic
+from typing import TypeVar as _TypeVar
 
-from typing import Generic, TypeVar
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
-from pulse.transpiler.js_module import register_js_module
-
-_K = TypeVar("_K")
-_V = TypeVar("_V")
+_K = _TypeVar("_K")
+_V = _TypeVar("_V")
 
 
-class Map(Generic[_K, _V]):
+class Map(_Generic[_K, _V]):
 	"""Class for JavaScript Map instances."""
 
 	def __init__(self, iterable: list[tuple[_K, _V]] | None = None): ...
@@ -29,7 +28,7 @@ class Map(Generic[_K, _V]):
 	def delete(self, key: object) -> bool: ...
 	def get(self, key: object) -> _V | None: ...
 	def has(self, key: object) -> bool: ...
-	def set(self, key: _K, value: _V) -> Map[_K, _V]: ...
+	def set(self, key: _K, value: _V) -> "Map[_K, _V]": ...
 
 	@property
 	def size(self) -> int: ...
@@ -41,4 +40,4 @@ class Map(Generic[_K, _V]):
 
 
 # Self-register this module as a JS builtin in global scope
-register_js_module(name="Map", global_scope=True)
+_register_js_module(name="Map", global_scope=True)

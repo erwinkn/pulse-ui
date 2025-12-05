@@ -9,9 +9,7 @@ Usage:
     RegExp(pattern, flags)        # -> new RegExp(pattern, flags)
 """
 
-from __future__ import annotations
-
-from pulse.transpiler.js_module import register_js_module
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
 
 class RegExp:
@@ -53,4 +51,4 @@ class RegExp:
 
 
 # Self-register this module as a JS builtin
-register_js_module(name="RegExp", global_scope=True)
+_register_js_module(name="RegExp", global_scope=True)

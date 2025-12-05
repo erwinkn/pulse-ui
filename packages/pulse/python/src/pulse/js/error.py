@@ -11,9 +11,7 @@ Usage:
     TypeError("message")         # -> new TypeError("message")
 """
 
-from __future__ import annotations
-
-from pulse.transpiler.js_module import register_js_module
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
 
 class Error:
@@ -138,4 +136,4 @@ class URIError:
 
 
 # Self-register this module as a JS builtin
-register_js_module(name="Error", global_scope=True)
+_register_js_module(name="Error", global_scope=True)

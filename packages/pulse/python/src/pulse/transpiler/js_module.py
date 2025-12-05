@@ -198,8 +198,6 @@ def register_js_module(
 	locally_defined_names: set[str] = set()
 
 	for attr_name in list(vars(module)):
-		if attr_name.startswith("_"):
-			continue
 		# Skip special module attributes
 		if attr_name in (
 			"__name__",
@@ -213,34 +211,42 @@ def register_js_module(
 		):
 			continue
 		attr = getattr(module, attr_name)
+		# Check if this is an imported name (has __module__ that doesn't match)
+		is_imported = hasattr(attr, "__module__") and attr.__module__ != module_name
 		if isinstance(attr, FunctionType):
 			# Functions without __module__ are assumed to be locally defined (stub functions)
-			# Only process functions defined in this module
-			if not hasattr(attr, "__module__") or is_defined_in_module(attr):
-				locally_defined_names.add(attr_name)
-				if id(attr) in CONSTRUCTORS:
-					ctor_names.add(attr_name)
+			if not is_imported and (
+				not hasattr(attr, "__module__") or is_defined_in_module(attr)
+			):
+				# Only track non-underscore-prefixed names for exports
+				if not attr_name.startswith("_"):
+					locally_defined_names.add(attr_name)
+					if id(attr) in CONSTRUCTORS:
+						ctor_names.add(attr_name)
 				delattr(module, attr_name)
 			else:
-				# Delete imported functions
+				# Delete imported functions (including underscore-prefixed)
 				delattr(module, attr_name)
 		elif inspect.isclass(attr):
 			# Only consider classes defined in this module (not imported)
-			if is_defined_in_module(attr):
-				locally_defined_names.add(attr_name)
-				ctor_names.add(attr_name)
+			if not is_imported and is_defined_in_module(attr):
+				# Only track non-underscore-prefixed names for exports
+				if not attr_name.startswith("_"):
+					locally_defined_names.add(attr_name)
+					ctor_names.add(attr_name)
 				delattr(module, attr_name)
 			else:
-				# Delete imported classes
+				# Delete imported classes (including underscore-prefixed)
 				delattr(module, attr_name)
-		elif hasattr(attr, "__module__") and attr.__module__ != module_name:
-			# Delete other imported objects (TypeVar, etc.)
+		elif is_imported:
+			# Delete all imported objects (TypeVar, Generic, etc.) including underscore-prefixed
 			delattr(module, attr_name)
 		else:
 			# For objects without __module__, assume they're locally defined
 			# (constants, etc.) - but constants are usually just annotations
 			# so they won't be in vars(module) anyway
-			locally_defined_names.add(attr_name)
+			if not attr_name.startswith("_"):
+				locally_defined_names.add(attr_name)
 			delattr(module, attr_name)
 
 	# Collect constant names from annotations (constants are just type annotations)

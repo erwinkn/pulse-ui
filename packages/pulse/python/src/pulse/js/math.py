@@ -11,9 +11,7 @@ Usage:
     floor(3.7)        # -> Math.floor(3.7)
 """
 
-from __future__ import annotations
-
-from pulse.transpiler.js_module import register_js_module
+from pulse.transpiler.js_module import register_js_module as _register_js_module
 
 # Constants (type stubs for IDE support)
 PI: float
@@ -65,4 +63,4 @@ def trunc(x: float) -> int: ...
 
 
 # Self-register this module as a JS builtin
-register_js_module(name="Math")
+_register_js_module(name="Math")

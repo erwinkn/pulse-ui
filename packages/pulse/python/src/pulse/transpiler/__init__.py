@@ -14,7 +14,7 @@ import from this module:
 # Core types
 # Builtins system
 from pulse.transpiler.builtins import ALL_METHODS as ALL_METHODS
-from pulse.transpiler.builtins import BUILTIN_EMITTERS as BUILTIN_EMITTERS
+from pulse.transpiler.builtins import BUILTINS as BUILTINS
 from pulse.transpiler.builtins import DICT_METHODS as DICT_METHODS
 from pulse.transpiler.builtins import LIST_METHODS as LIST_METHODS
 from pulse.transpiler.builtins import METHOD_CLASSES as METHOD_CLASSES
@@ -44,7 +44,6 @@ from pulse.transpiler.errors import JSCompilationError as JSCompilationError
 # Function system
 from pulse.transpiler.function import FUNCTION_CACHE as FUNCTION_CACHE
 from pulse.transpiler.function import JsFunction as JsFunction
-from pulse.transpiler.function import JsFunctionCall as JsFunctionCall
 from pulse.transpiler.function import javascript as javascript
 
 # Utilities
@@ -67,6 +66,7 @@ from pulse.transpiler.js_module import register_js_module as register_js_module
 from pulse.transpiler.nodes import ALLOWED_BINOPS as ALLOWED_BINOPS
 from pulse.transpiler.nodes import ALLOWED_CMPOPS as ALLOWED_CMPOPS
 from pulse.transpiler.nodes import ALLOWED_UNOPS as ALLOWED_UNOPS
+from pulse.transpiler.nodes import JSEXPR_REGISTRY as JSEXPR_REGISTRY
 
 # JS AST Nodes - Expressions
 from pulse.transpiler.nodes import JSArray as JSArray
@@ -120,15 +120,12 @@ from pulse.transpiler.nodes import JSXFragment as JSXFragment
 from pulse.transpiler.nodes import JSXProp as JSXProp
 from pulse.transpiler.nodes import JSXSpreadProp as JSXSpreadProp
 from pulse.transpiler.nodes import is_primary as is_primary
-from pulse.transpiler.nodes import to_js_expr as to_js_expr
 
 # Module registration - Python modules
-from pulse.transpiler.py_module import PY_MODULE_VALUES as PY_MODULE_VALUES
 from pulse.transpiler.py_module import PY_MODULES as PY_MODULES
 from pulse.transpiler.py_module import PyModule as PyModule
 from pulse.transpiler.py_module import PyModuleExpr as PyModuleExpr
 from pulse.transpiler.py_module import register_module as register_module
-from pulse.transpiler.py_module import register_value as register_value
 
 # Transpiler
 from pulse.transpiler.transpiler import JsTranspiler as JsTranspiler

@@ -72,6 +72,13 @@ export interface ServerNavigateToMessage {
 	replace: boolean;
 }
 
+export interface ServerJsExecMessage {
+	type: "js_exec";
+	path: string;
+	id: string;
+	code: string;
+}
+
 export type ServerMessage =
 	| ServerInitMessage
 	| ServerUpdateMessage
@@ -79,7 +86,8 @@ export type ServerMessage =
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerChannelRequestMessage
-	| ServerChannelResponseMessage;
+	| ServerChannelResponseMessage
+	| ServerJsExecMessage;
 
 export interface ClientCallbackMessage {
 	type: "callback";
@@ -134,6 +142,13 @@ export interface ClientChannelResponseMessage {
 
 export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
 
+export interface ClientJsResultMessage {
+	type: "js_result";
+	id: string;
+	result: any;
+	error: string | null;
+}
+
 export type ClientMessage =
 	| ClientMountMessage
 	| ClientCallbackMessage
@@ -141,4 +156,5 @@ export type ClientMessage =
 	| ClientUnmountMessage
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage
-	| ClientChannelResponseMessage;
+	| ClientChannelResponseMessage
+	| ClientJsResultMessage;

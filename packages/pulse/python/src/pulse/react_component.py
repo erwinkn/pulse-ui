@@ -13,6 +13,7 @@ from types import UnionType
 from typing import (
 	Annotated,
 	Any,
+	ClassVar,
 	Generic,
 	Literal,
 	ParamSpec,
@@ -309,11 +310,11 @@ def default_fn_signature_without_children(
 # ----------------------------------------------------------------------------
 
 
-def _build_jsx_props(kwargs: dict[str, JSExpr]) -> list[JSXProp | JSXSpreadProp]:
+def _build_jsx_props(kwargs: dict[str, Any]) -> list[JSXProp | JSXSpreadProp]:
 	"""Build JSX props list from kwargs dict.
 
 	Kwargs maps:
-	- "propName" -> JSExpr for named props
+	- "propName" -> value for named props
 	- "__spread_N" -> JSSpread(expr) for spread props
 	"""
 	props: list[JSXProp | JSXSpreadProp] = []
@@ -321,17 +322,17 @@ def _build_jsx_props(kwargs: dict[str, JSExpr]) -> list[JSXProp | JSXSpreadProp]
 		if isinstance(value, JSSpread):
 			props.append(JSXSpreadProp(value.expr))
 		else:
-			props.append(JSXProp(key, value))
+			props.append(JSXProp(key, JSExpr.of(value)))
 	return props
 
 
-def _flatten_children(
-	items: list[JSExpr], out: list[JSExpr | JSXElement | str]
-) -> None:
+def _flatten_children(items: list[Any], out: list[JSExpr | JSXElement | str]) -> None:
 	"""Flatten arrays and handle spreads in children list."""
 	from pulse.transpiler.nodes import JSArray, JSString
 
 	for it in items:
+		# Convert raw values first
+		it = JSExpr.of(it) if not isinstance(it, JSExpr) else it
 		if isinstance(it, JSArray):
 			_flatten_children(list(it.elements), out)
 		elif isinstance(it, JSSpread):
@@ -349,7 +350,7 @@ class ReactComponentCallExpr(JSExpr):
 	to add children, producing the final JSXElement.
 	"""
 
-	is_jsx: bool = True
+	is_jsx: ClassVar[bool] = True
 	component: "ReactComponent[...]"
 	props: tuple[JSXProp | JSXSpreadProp, ...]
 	children: tuple[str | JSExpr | JSXElement, ...]
@@ -369,7 +370,7 @@ class ReactComponentCallExpr(JSExpr):
 		return JSXElement(self.component, self.props, self.children).emit()
 
 	@override
-	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+	def emit_subscript(self, indices: list[Any]) -> JSExpr:
 		"""Handle Component(props...)[children] -> JSXElement."""
 		extra_children: list[JSExpr | JSXElement | str] = []
 		_flatten_children(indices, extra_children)
@@ -377,7 +378,7 @@ class ReactComponentCallExpr(JSExpr):
 		return JSXElement(self.component, self.props, all_children)
 
 	@override
-	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
 		"""Calling an already-called component is an error."""
 		raise JSCompilationError(
 			f"Cannot call <{self.component.name}> - already called. "
@@ -457,7 +458,7 @@ class ReactComponent(JSExpr, Generic[P]):
 		return self.import_.emit()
 
 	@override
-	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
 		"""Handle Component(props...) -> ReactComponentCallExpr."""
 		props_list = _build_jsx_props(kwargs)
 		children_list: list[JSExpr | JSXElement | str] = []
@@ -465,7 +466,7 @@ class ReactComponent(JSExpr, Generic[P]):
 		return ReactComponentCallExpr(self, tuple(props_list), tuple(children_list))
 
 	@override
-	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+	def emit_subscript(self, indices: list[Any]) -> JSExpr:
 		"""Direct subscript on ReactComponent is not allowed.
 
 		Use Component(props...)[children] instead of Component[children].

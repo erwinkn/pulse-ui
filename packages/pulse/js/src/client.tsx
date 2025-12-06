@@ -4,10 +4,12 @@ import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
 import type {
 	ClientApiResultMessage,
+	ClientJsResultMessage,
 	ClientMessage,
 	ServerApiCallMessage,
 	ServerChannelMessage,
 	ServerErrorInfo,
+	ServerJsExecMessage,
 	ServerMessage,
 } from "./messages";
 import type { PulsePrerenderView } from "./pulse";
@@ -27,6 +29,7 @@ export interface MountedView {
 	routeInfo: RouteInfo;
 	onInit: (view: PulsePrerenderView) => void;
 	onUpdate: (ops: VDOMUpdate[]) => void;
+	onJsExec?: (msg: ServerJsExecMessage) => void;
 }
 export type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
 export type ConnectionStatusListener = (status: ConnectionStatus) => void;
@@ -365,6 +368,10 @@ export class PulseSocketIOClient {
 				this.#routeChannelMessage(message);
 				break;
 			}
+			case "js_exec": {
+				this.#handleJsExec(message);
+				break;
+			}
 			default: {
 				console.error("Unexpected message:", message);
 			}
@@ -429,6 +436,32 @@ export class PulseSocketIOClient {
 			callback,
 			args: args.map(extractEvent),
 		});
+	}
+
+	#handleJsExec(message: ServerJsExecMessage) {
+		const view = this.#activeViews.get(message.path);
+		if (!view?.onJsExec) {
+			// No handler registered - execute anyway and send result back
+			// This shouldn't happen in practice as views should register handlers
+			console.warn(`[Pulse] No onJsExec handler for path: ${message.path}`);
+			this.#sendJsResult(message.id, undefined, "No JS executor registered");
+			return;
+		}
+		view.onJsExec(message);
+	}
+
+	public sendJsResult(id: string, result: any, error: string | null) {
+		this.#sendJsResult(id, result, error);
+	}
+
+	#sendJsResult(id: string, result: any, error: string | null) {
+		const msg: ClientJsResultMessage = {
+			type: "js_result",
+			id,
+			result,
+			error,
+		};
+		this.sendMessage(msg);
 	}
 
 	public acquireChannel(id: string): ChannelBridge {

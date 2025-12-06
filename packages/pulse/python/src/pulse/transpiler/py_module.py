@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType
-from typing import TypeAlias, cast, override
+from typing import Any, TypeAlias, cast, override
 
 from pulse.transpiler.errors import JSCompilationError
 from pulse.transpiler.nodes import JSExpr, JSTransformer
@@ -35,11 +35,11 @@ class PyModuleExpr(JSExpr):
 		raise JSCompilationError("PyModuleExpr cannot be emitted directly")
 
 	@override
-	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
 		raise JSCompilationError("PyModuleExpr cannot be called directly")
 
 	@override
-	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+	def emit_subscript(self, indices: list[Any]) -> JSExpr:
 		raise JSCompilationError("PyModuleExpr cannot be subscripted")
 
 	@override
@@ -71,23 +71,6 @@ class PyModule:
 
 PY_MODULES: dict[ModuleType, PyModuleTranspiler] = {}
 
-# Map from id(value) -> JSExpr
-# For constants: id(math.pi) -> JSMember("Math", "PI")
-# For functions: id(math.log) -> JSTransformer(callable)
-PY_MODULE_VALUES: dict[int, JSExpr] = {}
-
-
-def register_value(obj: object, expr: JSExpr | Callable[..., JSExpr]) -> None:
-	"""Register a Python object for transpilation to a JSExpr.
-
-	Args:
-		obj: The Python object to register (function, constant, etc.)
-		expr: Either a JSExpr or a Callable[..., JSExpr] (will be wrapped in JSTransformer)
-	"""
-	if callable(expr) and not isinstance(expr, JSExpr):
-		expr = JSTransformer(expr)
-	PY_MODULE_VALUES[id(obj)] = expr
-
 
 def register_module(
 	module: ModuleType,
@@ -115,10 +98,10 @@ def register_module(
 			if not attr_name.startswith("_")
 		)
 
-	# Normalize: wrap callables in JSTransformer and register in PY_MODULE_VALUES
+	# Normalize: wrap callables in JSTransformer and register via JSExpr.register
 	for attr_name, attr in items:
 		if isinstance(attr, JSExpr):
-			attr = attr
+			pass
 		elif callable(attr):
 			# Wrap callables in JSTransformer so result always contains JSExpr
 			attr = JSTransformer(cast(Callable[..., JSExpr], attr))
@@ -127,7 +110,10 @@ def register_module(
 			continue
 
 		transpiler_dict[attr_name] = attr
-		PY_MODULE_VALUES[id(getattr(module, attr_name, None))] = attr
+		# Register the module attribute value for lookup by id
+		module_value = getattr(module, attr_name, None)
+		if module_value is not None:
+			JSExpr.register(module_value, attr)
 
 	# Store as dict (now normalized to only JSExpr)
 	PY_MODULES[module] = transpiler_dict

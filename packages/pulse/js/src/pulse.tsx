@@ -211,6 +211,16 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				onUpdate: (ops) => {
 					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
 				},
+				onJsExec: (msg) => {
+					let result: any;
+					let error: string | null = null;
+					try {
+						result = renderer.evaluateJsExpr(msg.code);
+					} catch (e) {
+						error = e instanceof Error ? e.message : String(e);
+					}
+					client.sendJsResult(msg.id, result, error);
+				},
 			});
 			const offErr = client.onServerError((p, err) => {
 				if (p === path) setServerError(err);

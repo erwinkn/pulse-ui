@@ -744,6 +744,8 @@ class App:
 				render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
+			elif msg["type"] == "js_result":
+				render.handle_js_result(dict(msg))
 			else:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()

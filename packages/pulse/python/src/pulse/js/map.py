@@ -10,33 +10,74 @@ Usage:
     Map()                         # -> new Map()
 """
 
+from collections.abc import Callable as _Callable
+from collections.abc import Iterable as _Iterable
+from typing import Any as _Any
 from typing import Generic as _Generic
 from typing import TypeVar as _TypeVar
 
 from pulse.transpiler.js_module import register_js_module as _register_js_module
 
-_K = _TypeVar("_K")
-_V = _TypeVar("_V")
+K = _TypeVar("K")
+V = _TypeVar("V")
 
 
-class Map(_Generic[_K, _V]):
-	"""Class for JavaScript Map instances."""
+class Map(_Generic[K, V]):
+	"""JavaScript Map - a collection of keyed data items.
 
-	def __init__(self, iterable: list[tuple[_K, _V]] | None = None): ...
+	Map[K, V] preserves insertion order and allows keys of any type.
+	"""
 
-	def clear(self) -> None: ...
-	def delete(self, key: object) -> bool: ...
-	def get(self, key: object) -> _V | None: ...
-	def has(self, key: object) -> bool: ...
-	def set(self, key: _K, value: _V) -> "Map[_K, _V]": ...
+	def __init__(self, iterable: _Iterable[tuple[K, V]] | None = None) -> None: ...
 
 	@property
-	def size(self) -> int: ...
+	def size(self) -> int:
+		"""The number of key/value pairs in the Map."""
+		...
 
-	def entries(self) -> object: ...
-	def forEach(self, callbackfn: object, thisArg: object | None = None) -> None: ...
-	def keys(self) -> object: ...
-	def values(self) -> object: ...
+	def clear(self) -> None:
+		"""Remove all key/value pairs."""
+		...
+
+	def delete(self, key: K) -> bool:
+		"""Remove a key and its value. Returns True if the key existed."""
+		...
+
+	def get(self, key: K) -> V | None:
+		"""Return the value for a key, or None if not present."""
+		...
+
+	def has(self, key: K) -> bool:
+		"""Return True if the key exists in the Map."""
+		...
+
+	def set(self, key: K, value: V) -> "Map[K, V]":
+		"""Set a key/value pair. Returns the Map for chaining."""
+		...
+
+	def forEach(
+		self,
+		callback: _Callable[[V, K, "Map[K, V]"], None],
+		thisArg: _Any | None = None,
+	) -> None:
+		"""Execute a function for each key/value pair."""
+		...
+
+	def keys(self) -> _Iterable[K]:
+		"""Return an iterator of keys."""
+		...
+
+	def values(self) -> _Iterable[V]:
+		"""Return an iterator of values."""
+		...
+
+	def entries(self) -> _Iterable[tuple[K, V]]:
+		"""Return an iterator of [key, value] pairs."""
+		...
+
+	def __iter__(self) -> _Iterable[tuple[K, V]]:
+		"""Iterate over [key, value] pairs."""
+		...
 
 
 # Self-register this module as a JS builtin in global scope

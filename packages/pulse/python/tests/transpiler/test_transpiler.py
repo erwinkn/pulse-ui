@@ -109,6 +109,106 @@ class TestStatements:
 
 
 # =============================================================================
+# Nested Functions
+# =============================================================================
+
+
+class TestNestedFunctions:
+	"""Test nested function transpilation."""
+
+	def test_simple_nested_function(self):
+		@javascript
+		def outer(x):
+			def inner(y):
+				return y * 2
+
+			return inner(x)
+
+		code = outer.transpile()
+		assert "const inner = function(y)" in code
+		assert "return y * 2" in code
+		assert "return inner(x)" in code
+
+	def test_nested_function_closure(self):
+		@javascript
+		def outer(x):
+			def inner(y):
+				return x + y
+
+			return inner(10)
+
+		code = outer.transpile()
+		assert "const inner = function(y)" in code
+		assert "return x + y" in code
+
+	def test_nested_async_function(self):
+		@javascript
+		async def outer(x):
+			async def inner(y):
+				return y
+
+			return await inner(x)
+
+		code = outer.transpile()
+		assert "const inner = async function(y)" in code
+		assert "await inner(x)" in code
+
+	def test_nested_function_with_docstring(self):
+		@javascript
+		def outer(x):
+			def inner(y):
+				"""This docstring should be skipped."""
+				return y
+
+			return inner(x)
+
+		code = outer.transpile()
+		assert "docstring" not in code.lower()
+		assert "return y" in code
+
+	def test_nested_function_multiple_params(self):
+		@javascript
+		def outer():
+			def inner(a, b, c):
+				return a + b + c
+
+			return inner(1, 2, 3)
+
+		code = outer.transpile()
+		assert "const inner = function(a, b, c)" in code
+
+	def test_nested_function_shadows_outer_local(self):
+		@javascript
+		def outer(x):
+			y = 5
+
+			def inner(y):
+				return y * 2
+
+			return inner(x) + y
+
+		code = outer.transpile()
+		# inner's y is a parameter, should not conflict with outer's y
+		assert "let y = 5" in code
+		assert "return y * 2" in code
+
+	def test_multiple_nested_functions(self):
+		@javascript
+		def outer(x):
+			def add(a, b):
+				return a + b
+
+			def mul(a, b):
+				return a * b
+
+			return add(x, mul(x, 2))
+
+		code = outer.transpile()
+		assert "const add = function(a, b)" in code
+		assert "const mul = function(a, b)" in code
+
+
+# =============================================================================
 # Operators
 # =============================================================================
 
@@ -799,6 +899,15 @@ class TestLambdas:
 		code = f.transpile()
 		assert "() => 42" in code
 
+	def test_lambda_closure(self):
+		@javascript
+		def f(x):
+			fn = lambda y: x + y  # noqa: E731
+			return fn(10)
+
+		code = f.transpile()
+		assert "y => x + y" in code
+
 
 # =============================================================================
 # Comprehensions
@@ -924,7 +1033,7 @@ class TestImportTranspilation:
 			return process(x, name, True, None)
 
 		code = run.transpile()
-		assert f"{process.js_name}(x, name, true, undefined)" in code
+		assert f"{process.js_name}(x, name, true, null)" in code
 
 	def test_import_called_with_string_literals(self):
 		"""Import called with string literal arguments."""
@@ -1016,7 +1125,7 @@ class TestImportTranspilation:
 			return createElement(Button, None)
 
 		code = render.transpile()
-		assert f"{createElement.js_name}({Button.js_name}, undefined)" in code
+		assert f"{createElement.js_name}({Button.js_name}, null)" in code
 
 	def test_import_passed_to_javascript_function(self):
 		"""Import passed as argument to a @javascript function."""
@@ -1308,13 +1417,13 @@ class TestLiterals:
 		code = f.transpile()
 		assert "false" in code
 
-	def test_none_to_undefined(self):
+	def test_none_to_null(self):
 		@javascript
 		def f():
 			return None
 
 		code = f.transpile()
-		assert "undefined" in code
+		assert "null" in code
 
 	def test_list_literal(self):
 		@javascript
@@ -1753,6 +1862,141 @@ class TestStatementFunctions:
 		with pytest.raises(JSCompilationError) as exc_info:
 			f.transpile()
 		assert "'throw' cannot be used inside an expression" in str(exc_info.value)
+
+
+class TestNativeAsyncAwait:
+	"""Test native Python async/await transpilation."""
+
+	def test_async_def_marks_function_async(self):
+		@javascript
+		async def f(x):
+			return x
+
+		code = f.transpile()
+		assert "async function f" in code
+		assert "return x" in code
+
+	def test_native_await_transpiles(self):
+		@javascript
+		async def f(x):
+			return await x
+
+		code = f.transpile()
+		assert "async function f" in code
+		assert "await x" in code
+
+	def test_native_await_in_expression(self):
+		@javascript
+		async def f(x):
+			return 1 + await x
+
+		code = f.transpile()
+		assert "async function f" in code
+		assert "1 + await x" in code
+
+	def test_native_await_with_method_call(self):
+		@javascript
+		async def f(api):
+			return await api.fetch()
+
+		code = f.transpile()
+		assert "async function f" in code
+		assert "await api.fetch()" in code
+
+	def test_native_await_assigned_to_variable(self):
+		@javascript
+		async def f(promise):
+			result = await promise
+			return result + 1
+
+		code = f.transpile()
+		assert "async function f" in code
+		assert "let result = await promise" in code
+		assert "return result + 1" in code
+
+	def test_multiple_awaits(self):
+		@javascript
+		async def f(a, b):
+			x = await a
+			y = await b
+			return x + y
+
+		code = f.transpile()
+		assert "async function f" in code
+		assert "await a" in code
+		assert "await b" in code
+
+	def test_await_in_conditional(self):
+		@javascript
+		async def f(x, promise):
+			if x > 0:
+				return await promise
+			return 0
+
+		code = f.transpile()
+		assert "async function f" in code
+		assert "if (x > 0)" in code
+		assert "await promise" in code
+
+
+class TestAsyncioModule:
+	"""Test asyncio module transpilation."""
+
+	def test_asyncio_gather_basic(self):
+		import asyncio
+
+		@javascript
+		async def f(p1, p2):
+			return await asyncio.gather(p1, p2)
+
+		code = f.transpile()
+		assert "async function f" in code
+		assert "Promise.all" in code
+		assert "[p1, p2]" in code
+
+	def test_asyncio_gather_single(self):
+		import asyncio
+
+		@javascript
+		async def f(p1):
+			return await asyncio.gather(p1)
+
+		code = f.transpile()
+		assert "Promise.all" in code
+		assert "[p1]" in code
+
+	def test_asyncio_gather_multiple(self):
+		import asyncio
+
+		@javascript
+		async def f(p1, p2, p3):
+			return await asyncio.gather(p1, p2, p3)
+
+		code = f.transpile()
+		assert "Promise.all" in code
+		assert "[p1, p2, p3]" in code
+
+	def test_asyncio_gather_with_return_exceptions(self):
+		import asyncio
+
+		@javascript
+		async def f(p1, p2):
+			return await asyncio.gather(p1, p2, return_exceptions=True)
+
+		code = f.transpile()
+		assert "Promise.allSettled" in code
+		assert "[p1, p2]" in code
+
+	def test_asyncio_gather_with_return_exceptions_false(self):
+		import asyncio
+
+		@javascript
+		async def f(p1, p2):
+			return await asyncio.gather(p1, p2, return_exceptions=False)
+
+		code = f.transpile()
+		assert "Promise.all" in code
+		assert "Promise.allSettled" not in code
 
 
 # =============================================================================
@@ -2200,6 +2444,114 @@ class TestPyModules:
 
 		code = f.transpile()
 		assert "Math.sqrt(x * x + y * y)" in code
+
+
+class TestTypingModule:
+	"""Test Python typing module transpilation."""
+
+	def test_typing_cast_removed(self):
+		"""Test that typing.cast() is a no-op and just returns the value."""
+		from typing import cast
+
+		@javascript
+		def f(x):
+			return cast(int, x)
+
+		code = f.transpile()
+		# cast should be stripped, just returning x
+		assert "return x" in code
+		assert "cast" not in code
+		assert "int" not in code
+
+	def test_typing_cast_in_expression(self):
+		"""Test typing.cast() within an expression."""
+		from typing import cast
+
+		@javascript
+		def f(x):
+			return cast(str, x) + "!"
+
+		code = f.transpile()
+		assert 'x + "!"' in code
+		assert "cast" not in code
+
+	def test_typing_cast_nested(self):
+		"""Test typing.cast() with complex expressions."""
+		from typing import Any, cast
+
+		@javascript
+		def f(obj):
+			return cast(dict[str, Any], obj.data).keys()
+
+		code = f.transpile()
+		# Should just be obj.data.keys() with Map handling
+		assert "obj.data" in code
+		assert "cast" not in code
+
+	def test_typing_cast_any(self):
+		"""Test typing.cast(Any, ...) is stripped."""
+		from typing import Any, cast
+
+		@javascript
+		def f(x):
+			return cast(Any, x).foo()
+
+		code = f.transpile()
+		assert "x.foo()" in code
+		assert "cast" not in code
+		assert "Any" not in code
+
+	def test_typing_any_direct_use_errors(self):
+		"""Test that using Any directly (not via cast) raises an error."""
+		from typing import Any
+
+		import pytest
+
+		@javascript
+		def f():
+			return Any
+
+		with pytest.raises(JSCompilationError) as exc_info:
+			f.transpile()
+		assert "Type hint 'Any'" in str(exc_info.value)
+		assert "cannot be emitted" in str(exc_info.value)
+
+	def test_typing_cast_generic(self):
+		"""Test typing.cast with generic types like List[int]."""
+		from typing import List, cast  # pyright: ignore[reportDeprecated]
+
+		@javascript
+		def f(x):
+			return cast(List[int], x).copy()  # pyright: ignore[reportDeprecated]
+
+		code = f.transpile()
+		assert "cast" not in code
+		assert "List" not in code
+
+	def test_typing_cast_optional(self):
+		"""Test typing.cast with Optional."""
+		from typing import Optional, cast  # pyright: ignore[reportDeprecated]
+
+		@javascript
+		def f(x):
+			return cast(Optional[str], x)  # pyright: ignore[reportDeprecated]
+
+		code = f.transpile()
+		assert "return x" in code
+		assert "Optional" not in code
+
+	def test_typing_cast_callable(self):
+		"""Test typing.cast with Callable[[args], return]."""
+		from typing import Callable, cast
+
+		@javascript
+		def f(x):
+			return cast(Callable[[int, str], bool], x)(1, "a")
+
+		code = f.transpile()
+		assert 'x(1, "a")' in code
+		assert "Callable" not in code
+		assert "cast" not in code
 
 
 class TestReModule:

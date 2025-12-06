@@ -7,11 +7,9 @@
     "packages/pulse-mantine/python/src",
     "packages/pulse-msal/src",
     "packages/pulse-recharts/src",
-    "packages/pulse-aws/src",
+    "packages/pulse-aws/src"
   ],
-  "exclude": [
-    "packages/pulse/python/tests/javascript"
-  ],
+  "exclude": ["packages/pulse/python/tests/javascript"],
   "pythonVersion": "3.12",
   "allowedUntypedLibraries": [
     "socketio",

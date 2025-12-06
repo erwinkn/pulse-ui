@@ -6,8 +6,9 @@ This module provides transpilation for Python builtins to JavaScript.
 
 from __future__ import annotations
 
+import builtins
 from abc import ABC, abstractmethod
-from typing import cast, override
+from typing import Any, cast, override
 
 from pulse.transpiler.errors import JSCompilationError
 from pulse.transpiler.nodes import (
@@ -35,145 +36,151 @@ from pulse.transpiler.nodes import (
 
 
 @js_transformer("print")
-def emit_print(*args: JSExpr) -> JSExpr:
+def transform_print(*args: Any) -> JSExpr:
 	"""print(*args) -> console.log(...)"""
-	return JSMemberCall(JSIdentifier("console"), "log", list(args))
+	return JSMemberCall(JSIdentifier("console"), "log", [JSExpr.of(a) for a in args])
 
 
 @js_transformer("len")
-def emit_len(x: JSExpr) -> JSExpr:
+def transform_len(x: Any) -> JSExpr:
 	"""len(x) -> x.length ?? x.size"""
 	# .length for strings/arrays, .size for sets/maps
+	x = JSExpr.of(x)
 	return JSBinary(JSMember(x, "length"), "??", JSMember(x, "size"))
 
 
 @js_transformer("min")
-def emit_min(*args: JSExpr) -> JSExpr:
+def transform_min(*args: Any) -> JSExpr:
 	"""min(*args) -> Math.min(...)"""
-	return JSMemberCall(JSIdentifier("Math"), "min", list(args))
+	return JSMemberCall(JSIdentifier("Math"), "min", [JSExpr.of(a) for a in args])
 
 
 @js_transformer("max")
-def emit_max(*args: JSExpr) -> JSExpr:
+def transform_max(*args: Any) -> JSExpr:
 	"""max(*args) -> Math.max(...)"""
-	return JSMemberCall(JSIdentifier("Math"), "max", list(args))
+	return JSMemberCall(JSIdentifier("Math"), "max", [JSExpr.of(a) for a in args])
 
 
 @js_transformer("abs")
-def emit_abs(x: JSExpr) -> JSExpr:
+def transform_abs(x: Any) -> JSExpr:
 	"""abs(x) -> Math.abs(x)"""
-	return JSMemberCall(JSIdentifier("Math"), "abs", [x])
+	return JSMemberCall(JSIdentifier("Math"), "abs", [JSExpr.of(x)])
 
 
 @js_transformer("round")
-def emit_round(number: JSExpr, ndigits: JSExpr | None = None) -> JSExpr:
+def transform_round(number: Any, ndigits: Any = None) -> JSExpr:
 	"""round(number, ndigits=None) -> Math.round(...) or toFixed(...)"""
+	number = JSExpr.of(number)
 	if ndigits is None:
 		return JSCall(JSIdentifier("Math.round"), [number])
 	# With ndigits: Number(x).toFixed(ndigits) for positive, complex for negative
 	# For simplicity, assume positive ndigits (most common case)
-	return JSMemberCall(JSCall(JSIdentifier("Number"), [number]), "toFixed", [ndigits])
+	return JSMemberCall(
+		JSCall(JSIdentifier("Number"), [number]), "toFixed", [JSExpr.of(ndigits)]
+	)
 
 
 @js_transformer("str")
-def emit_str(x: JSExpr) -> JSExpr:
+def transform_str(x: Any) -> JSExpr:
 	"""str(x) -> String(x)"""
-	return JSCall(JSIdentifier("String"), [x])
+	return JSCall(JSIdentifier("String"), [JSExpr.of(x)])
 
 
 @js_transformer("int")
-def emit_int(*args: JSExpr) -> JSExpr:
+def transform_int(*args: Any) -> JSExpr:
 	"""int(x) or int(x, base) -> parseInt(...)"""
-	if len(args) == 1:
-		return JSCall(JSIdentifier("parseInt"), [args[0]])
-	if len(args) == 2:
-		return JSCall(JSIdentifier("parseInt"), [args[0], args[1]])
+	if builtins.len(args) == 1:
+		return JSCall(JSIdentifier("parseInt"), [JSExpr.of(args[0])])
+	if builtins.len(args) == 2:
+		return JSCall(
+			JSIdentifier("parseInt"), [JSExpr.of(args[0]), JSExpr.of(args[1])]
+		)
 	raise JSCompilationError("int() expects one or two arguments")
 
 
 @js_transformer("float")
-def emit_float(x: JSExpr) -> JSExpr:
+def transform_float(x: Any) -> JSExpr:
 	"""float(x) -> parseFloat(x)"""
-	return JSCall(JSIdentifier("parseFloat"), [x])
+	return JSCall(JSIdentifier("parseFloat"), [JSExpr.of(x)])
 
 
 @js_transformer("list")
-def emit_list(x: JSExpr) -> JSExpr:
+def transform_list(x: Any) -> JSExpr:
 	"""list(x) -> Array.from(x)"""
-	return JSCall(JSMember(JSIdentifier("Array"), "from"), [x])
+	return JSCall(JSMember(JSIdentifier("Array"), "from"), [JSExpr.of(x)])
 
 
 @js_transformer("bool")
-def emit_bool(x: JSExpr) -> JSExpr:
+def transform_bool(x: Any) -> JSExpr:
 	"""bool(x) -> Boolean(x)"""
-	return JSCall(JSIdentifier("Boolean"), [x])
+	return JSCall(JSIdentifier("Boolean"), [JSExpr.of(x)])
 
 
 @js_transformer("set")
-def emit_set(*args: JSExpr) -> JSExpr:
+def transform_set(*args: Any) -> JSExpr:
 	"""set() or set(iterable) -> new Set([iterable])"""
-	if len(args) == 0:
+	if builtins.len(args) == 0:
 		return JSNew(JSIdentifier("Set"), [])
-	if len(args) == 1:
-		return JSNew(JSIdentifier("Set"), [args[0]])
+	if builtins.len(args) == 1:
+		return JSNew(JSIdentifier("Set"), [JSExpr.of(args[0])])
 	raise JSCompilationError("set() expects at most one argument")
 
 
 @js_transformer("tuple")
-def emit_tuple(*args: JSExpr) -> JSExpr:
+def transform_tuple(*args: Any) -> JSExpr:
 	"""tuple() or tuple(iterable) -> Array.from(iterable)"""
-	if len(args) == 0:
+	if builtins.len(args) == 0:
 		return JSArray([])
-	if len(args) == 1:
-		return JSCall(JSMember(JSIdentifier("Array"), "from"), [args[0]])
+	if builtins.len(args) == 1:
+		return JSCall(JSMember(JSIdentifier("Array"), "from"), [JSExpr.of(args[0])])
 	raise JSCompilationError("tuple() expects at most one argument")
 
 
 @js_transformer("dict")
-def emit_dict(*args: JSExpr) -> JSExpr:
+def transform_dict(*args: Any) -> JSExpr:
 	"""dict() or dict(iterable) -> new Map([iterable])"""
-	if len(args) == 0:
+	if builtins.len(args) == 0:
 		return JSNew(JSIdentifier("Map"), [])
-	if len(args) == 1:
-		return JSNew(JSIdentifier("Map"), [args[0]])
+	if builtins.len(args) == 1:
+		return JSNew(JSIdentifier("Map"), [JSExpr.of(args[0])])
 	raise JSCompilationError("dict() expects at most one argument")
 
 
 @js_transformer("filter")
-def emit_filter(*args: JSExpr) -> JSExpr:
+def transform_filter(*args: Any) -> JSExpr:
 	"""filter(func, iterable) -> iterable.filter(func)"""
-	if not (1 <= len(args) <= 2):
+	if not (1 <= builtins.len(args) <= 2):
 		raise JSCompilationError("filter() expects one or two arguments")
-	if len(args) == 1:
+	if builtins.len(args) == 1:
 		# filter(iterable) - filter truthy values
-		iterable = args[0]
+		iterable = JSExpr.of(args[0])
 		predicate = JSArrowFunction("v", JSIdentifier("v"))
 		return JSMemberCall(iterable, "filter", [predicate])
-	func, iterable = args[0], args[1]
+	func, iterable = JSExpr.of(args[0]), JSExpr.of(args[1])
 	# filter(None, iterable) means filter truthy
-	if isinstance(func, JSUndefined):
+	if builtins.isinstance(func, JSUndefined):
 		func = JSArrowFunction("v", JSIdentifier("v"))
 	return JSMemberCall(iterable, "filter", [func])
 
 
 @js_transformer("map")
-def emit_map(func: JSExpr, iterable: JSExpr) -> JSExpr:
+def transform_map(func: Any, iterable: Any) -> JSExpr:
 	"""map(func, iterable) -> iterable.map(func)"""
-	return JSMemberCall(iterable, "map", [func])
+	return JSMemberCall(JSExpr.of(iterable), "map", [JSExpr.of(func)])
 
 
 @js_transformer("reversed")
-def emit_reversed(iterable: JSExpr) -> JSExpr:
+def transform_reversed(iterable: Any) -> JSExpr:
 	"""reversed(iterable) -> iterable.slice().reverse()"""
-	return JSMemberCall(JSMemberCall(iterable, "slice", []), "reverse", [])
+	return JSMemberCall(JSMemberCall(JSExpr.of(iterable), "slice", []), "reverse", [])
 
 
 @js_transformer("enumerate")
-def emit_enumerate(iterable: JSExpr, start: JSExpr | None = None) -> JSExpr:
+def transform_enumerate(iterable: Any, start: Any = None) -> JSExpr:
 	"""enumerate(iterable, start=0) -> iterable.map((v, i) => [i + start, v])"""
-	base = JSNumber(0) if start is None else start
+	base = JSNumber(0) if start is None else JSExpr.of(start)
 	return JSMemberCall(
-		iterable,
+		JSExpr.of(iterable),
 		"map",
 		[
 			JSArrowFunction(
@@ -185,20 +192,20 @@ def emit_enumerate(iterable: JSExpr, start: JSExpr | None = None) -> JSExpr:
 
 
 @js_transformer("range")
-def emit_range(*args: JSExpr) -> JSExpr:
+def transform_range(*args: Any) -> JSExpr:
 	"""range(stop) or range(start, stop[, step]) -> Array.from(...)"""
-	if not (1 <= len(args) <= 3):
+	if not (1 <= builtins.len(args) <= 3):
 		raise JSCompilationError("range() expects 1 to 3 arguments")
-	if len(args) == 1:
-		stop = args[0]
+	if builtins.len(args) == 1:
+		stop = JSExpr.of(args[0])
 		length = JSMemberCall(JSIdentifier("Math"), "max", [JSNumber(0), stop])
 		return JSCall(
 			JSMember(JSIdentifier("Array"), "from"),
 			[JSMemberCall(JSNew(JSIdentifier("Array"), [length]), "keys", [])],
 		)
-	start = args[0]
-	stop = args[1]
-	step = args[2] if len(args) == 3 else JSNumber(1)
+	start = JSExpr.of(args[0])
+	stop = JSExpr.of(args[1])
+	step = JSExpr.of(args[2]) if builtins.len(args) == 3 else JSNumber(1)
 	# count = max(0, ceil((stop - start) / step))
 	diff = JSBinary(stop, "-", start)
 	div = JSBinary(diff, "/", step)
@@ -217,13 +224,11 @@ def emit_range(*args: JSExpr) -> JSExpr:
 
 
 @js_transformer("sorted")
-def emit_sorted(
-	*args: JSExpr, key: JSExpr | None = None, reverse: JSExpr | None = None
-) -> JSExpr:
+def transform_sorted(*args: Any, key: Any = None, reverse: Any = None) -> JSExpr:
 	"""sorted(iterable, key=None, reverse=False) -> iterable.slice().sort(...)"""
-	if len(args) != 1:
+	if builtins.len(args) != 1:
 		raise JSCompilationError("sorted() expects exactly one positional argument")
-	iterable = args[0]
+	iterable = JSExpr.of(args[0])
 	clone = JSMemberCall(iterable, "slice", [])
 	# comparator: (a, b) => (a > b) - (a < b) or with key
 	if key is None:
@@ -233,39 +238,44 @@ def emit_sorted(
 			JSBinary(JSIdentifier("a"), "<", JSIdentifier("b")),
 		)
 	else:
+		key_js = JSExpr.of(key)
 		cmp_expr = JSBinary(
 			JSBinary(
-				JSCall(key, [JSIdentifier("a")]),
+				JSCall(key_js, [JSIdentifier("a")]),
 				">",
-				JSCall(key, [JSIdentifier("b")]),
+				JSCall(key_js, [JSIdentifier("b")]),
 			),
 			"-",
 			JSBinary(
-				JSCall(key, [JSIdentifier("a")]),
+				JSCall(key_js, [JSIdentifier("a")]),
 				"<",
-				JSCall(key, [JSIdentifier("b")]),
+				JSCall(key_js, [JSIdentifier("b")]),
 			),
 		)
 	sort_call = JSMemberCall(clone, "sort", [JSArrowFunction("(a, b)", cmp_expr)])
 	if reverse is None:
 		return sort_call
-	return JSTertiary(reverse, JSMemberCall(sort_call, "reverse", []), sort_call)
+	return JSTertiary(
+		JSExpr.of(reverse), JSMemberCall(sort_call, "reverse", []), sort_call
+	)
 
 
 @js_transformer("zip")
-def emit_zip(*args: JSExpr) -> JSExpr:
+def transform_zip(*args: Any) -> JSExpr:
 	"""zip(*iterables) -> Array.from(...) with paired elements"""
-	if len(args) == 0:
+	if builtins.len(args) == 0:
 		return JSArray([])
+
+	js_args = [JSExpr.of(a) for a in args]
 
 	def length_of(x: JSExpr) -> JSExpr:
 		return JSMember(x, "length")
 
-	min_len = length_of(args[0])
-	for it in args[1:]:
+	min_len = length_of(js_args[0])
+	for it in js_args[1:]:
 		min_len = JSMemberCall(JSIdentifier("Math"), "min", [min_len, length_of(it)])
 
-	elems = [JSSubscript(arg, JSIdentifier("i")) for arg in args]
+	elems = [JSSubscript(arg, JSIdentifier("i")) for arg in js_args]
 	make_pair = JSArrowFunction("i", JSArray(elems))
 	return JSCall(
 		JSMember(JSIdentifier("Array"), "from"),
@@ -274,50 +284,54 @@ def emit_zip(*args: JSExpr) -> JSExpr:
 
 
 @js_transformer("pow")
-def emit_pow(*args: JSExpr) -> JSExpr:
+def transform_pow(*args: Any) -> JSExpr:
 	"""pow(base, exp) -> Math.pow(base, exp)"""
-	if len(args) != 2:
+	if builtins.len(args) != 2:
 		raise JSCompilationError("pow() expects exactly two arguments")
-	return JSMemberCall(JSIdentifier("Math"), "pow", [args[0], args[1]])
+	return JSMemberCall(
+		JSIdentifier("Math"), "pow", [JSExpr.of(args[0]), JSExpr.of(args[1])]
+	)
 
 
 @js_transformer("chr")
-def emit_chr(x: JSExpr) -> JSExpr:
+def transform_chr(x: Any) -> JSExpr:
 	"""chr(x) -> String.fromCharCode(x)"""
-	return JSMemberCall(JSIdentifier("String"), "fromCharCode", [x])
+	return JSMemberCall(JSIdentifier("String"), "fromCharCode", [JSExpr.of(x)])
 
 
 @js_transformer("ord")
-def emit_ord(x: JSExpr) -> JSExpr:
+def transform_ord(x: Any) -> JSExpr:
 	"""ord(x) -> x.charCodeAt(0)"""
-	return JSMemberCall(x, "charCodeAt", [JSNumber(0)])
+	return JSMemberCall(JSExpr.of(x), "charCodeAt", [JSNumber(0)])
 
 
 @js_transformer("any")
-def emit_any(x: JSExpr) -> JSExpr:
+def transform_any(x: Any) -> JSExpr:
 	"""any(iterable) -> iterable.some(v => v)"""
+	x = JSExpr.of(x)
 	# Optimization: if x is a map call, use .some directly
-	if isinstance(x, JSMemberCall) and x.method == "map" and x.args:
+	if builtins.isinstance(x, JSMemberCall) and x.method == "map" and x.args:
 		return JSMemberCall(x.obj, "some", [x.args[0]])
 	return JSMemberCall(x, "some", [JSArrowFunction("v", JSIdentifier("v"))])
 
 
 @js_transformer("all")
-def emit_all(x: JSExpr) -> JSExpr:
+def transform_all(x: Any) -> JSExpr:
 	"""all(iterable) -> iterable.every(v => v)"""
+	x = JSExpr.of(x)
 	# Optimization: if x is a map call, use .every directly
-	if isinstance(x, JSMemberCall) and x.method == "map" and x.args:
+	if builtins.isinstance(x, JSMemberCall) and x.method == "map" and x.args:
 		return JSMemberCall(x.obj, "every", [x.args[0]])
 	return JSMemberCall(x, "every", [JSArrowFunction("v", JSIdentifier("v"))])
 
 
 @js_transformer("sum")
-def emit_sum(*args: JSExpr) -> JSExpr:
+def transform_sum(*args: Any) -> JSExpr:
 	"""sum(iterable, start=0) -> iterable.reduce((a, b) => a + b, start)"""
-	if not (1 <= len(args) <= 2):
+	if not (1 <= builtins.len(args) <= 2):
 		raise JSCompilationError("sum() expects one or two arguments")
-	start = args[1] if len(args) == 2 else JSNumber(0)
-	base = args[0]
+	start = JSExpr.of(args[1]) if builtins.len(args) == 2 else JSNumber(0)
+	base = JSExpr.of(args[0])
 	reducer = JSArrowFunction(
 		"(a, b)", JSBinary(JSIdentifier("a"), "+", JSIdentifier("b"))
 	)
@@ -325,54 +339,55 @@ def emit_sum(*args: JSExpr) -> JSExpr:
 
 
 @js_transformer("divmod")
-def emit_divmod(x: JSExpr, y: JSExpr) -> JSExpr:
+def transform_divmod(x: Any, y: Any) -> JSExpr:
 	"""divmod(x, y) -> [Math.floor(x / y), x - Math.floor(x / y) * y]"""
+	x, y = JSExpr.of(x), JSExpr.of(y)
 	q = JSMemberCall(JSIdentifier("Math"), "floor", [JSBinary(x, "/", y)])
 	r = JSBinary(x, "-", JSBinary(q, "*", y))
 	return JSArray([q, r])
 
 
 @js_transformer("isinstance")
-def emit_isinstance(*args: JSExpr) -> JSExpr:
+def transform_isinstance(*args: Any) -> JSExpr:
 	"""isinstance is not directly supported in v2; raise error."""
 	raise JSCompilationError(
 		"isinstance() is not supported in JavaScript transpilation"
 	)
 
 
-# Registry of builtin emitters
-BUILTIN_EMITTERS = cast(
-	dict[str, JSTransformer],
+# Registry of builtin transformers
+BUILTINS = cast(
+	builtins.dict[builtins.str, JSTransformer],
 	{
-		"print": emit_print,
-		"len": emit_len,
-		"min": emit_min,
-		"max": emit_max,
-		"abs": emit_abs,
-		"round": emit_round,
-		"str": emit_str,
-		"int": emit_int,
-		"float": emit_float,
-		"list": emit_list,
-		"bool": emit_bool,
-		"set": emit_set,
-		"tuple": emit_tuple,
-		"dict": emit_dict,
-		"filter": emit_filter,
-		"map": emit_map,
-		"reversed": emit_reversed,
-		"enumerate": emit_enumerate,
-		"range": emit_range,
-		"sorted": emit_sorted,
-		"zip": emit_zip,
-		"pow": emit_pow,
-		"chr": emit_chr,
-		"ord": emit_ord,
-		"any": emit_any,
-		"all": emit_all,
-		"sum": emit_sum,
-		"divmod": emit_divmod,
-		"isinstance": emit_isinstance,
+		"print": transform_print,
+		"len": transform_len,
+		"min": transform_min,
+		"max": transform_max,
+		"abs": transform_abs,
+		"round": transform_round,
+		"str": transform_str,
+		"int": transform_int,
+		"float": transform_float,
+		"list": transform_list,
+		"bool": transform_bool,
+		"set": transform_set,
+		"tuple": transform_tuple,
+		"dict": transform_dict,
+		"filter": transform_filter,
+		"map": transform_map,
+		"reversed": transform_reversed,
+		"enumerate": transform_enumerate,
+		"range": transform_range,
+		"sorted": transform_sorted,
+		"zip": transform_zip,
+		"pow": transform_pow,
+		"chr": transform_chr,
+		"ord": transform_ord,
+		"any": transform_any,
+		"all": transform_all,
+		"sum": transform_sum,
+		"divmod": transform_divmod,
+		"isinstance": transform_isinstance,
 	},
 )
 
@@ -402,7 +417,7 @@ class BuiltinMethods(ABC):
 
 	@classmethod
 	@abstractmethod
-	def __methods__(cls) -> set[str]:
+	def __methods__(cls) -> builtins.set[str]:
 		"""Return the set of method names this class handles."""
 		...
 
@@ -667,14 +682,14 @@ def emit_method(obj: JSExpr, method: str, args: list[JSExpr]) -> JSExpr | None:
 		return None
 
 	# Fast path: known literal types - dispatch directly without runtime checks
-	if isinstance(obj, (JSString, JSTemplate)):
+	if builtins.isinstance(obj, (JSString, JSTemplate)):
 		if method in StringMethods.__methods__():
 			result = _try_dispatch_method(StringMethods, obj, method, args)
 			if result is not None:
 				return result
 		return None
 
-	if isinstance(obj, JSArray):
+	if builtins.isinstance(obj, JSArray):
 		if method in ListMethods.__methods__():
 			result = _try_dispatch_method(ListMethods, obj, method, args)
 			if result is not None:
@@ -682,7 +697,7 @@ def emit_method(obj: JSExpr, method: str, args: list[JSExpr]) -> JSExpr | None:
 		return None
 
 	# Fast path: new Set(...) and new Map(...) are known types
-	if isinstance(obj, JSNew) and isinstance(obj.ctor, JSIdentifier):
+	if builtins.isinstance(obj, JSNew) and builtins.isinstance(obj.ctor, JSIdentifier):
 		if obj.ctor.name == "Set" and method in SetMethods.__methods__():
 			result = _try_dispatch_method(SetMethods, obj, method, args)
 			if result is not None:

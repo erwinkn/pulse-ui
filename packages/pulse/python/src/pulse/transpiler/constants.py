@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypeAlias, override
+from typing import ClassVar, TypeAlias, override
 
 from pulse.transpiler.context import is_interpreted_mode
 from pulse.transpiler.errors import JSCompilationError
@@ -26,7 +26,7 @@ CONSTANTS_CACHE: dict[int, "JsConstant"] = {}  # id(value) -> JsConstant
 class JsConstant(JSExpr):
 	"""Wrapper for constant values used in transpiled JS functions."""
 
-	is_primary: bool = True
+	is_primary: ClassVar[bool] = True
 
 	value: object
 	expr: JSExpr

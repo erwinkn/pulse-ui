@@ -109,7 +109,7 @@ class Import(JSExpr):
 		styles.container  # Returns JSMember for 'container' class
 	"""
 
-	__slots__: ClassVar[tuple[str, ...]] = (
+	__slots__ = (  # pyright: ignore[reportUnannotatedClassAttribute]
 		"name",
 		"src",
 		"is_default",
@@ -120,7 +120,7 @@ class Import(JSExpr):
 		"source_path",
 	)
 
-	is_primary: bool = True
+	is_primary: ClassVar[bool] = True
 
 	name: str
 	src: str

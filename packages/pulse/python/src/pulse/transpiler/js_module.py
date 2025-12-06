@@ -11,7 +11,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import FunctionType, ModuleType
-from typing import Literal, TypeVar, override
+from typing import Any, ClassVar, Literal, TypeVar, override
 
 from pulse.transpiler.errors import JSCompilationError
 from pulse.transpiler.imports import Import
@@ -110,19 +110,19 @@ class JSConstructor(JSExpr):
 	"""
 
 	ctor: JSExpr
-	is_primary: bool = True
+	is_primary: ClassVar[bool] = True
 
 	@override
 	def emit(self) -> str:
 		return self.ctor.emit()
 
 	@override
-	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
 		if kwargs:
 			raise JSCompilationError(
 				"Keyword arguments not supported in constructor call"
 			)
-		return JSNew(self.ctor, args)
+		return JSNew(self.ctor, [JSExpr.of(a) for a in args])
 
 
 # Registry: Python module -> JsModule config
@@ -177,7 +177,7 @@ def register_js_module(
 	# Only items defined in this module are considered (not imported ones)
 	# Track locally defined names so __getattr__ can distinguish them from imported ones
 
-	def is_defined_in_module(obj: object) -> bool:
+	def is_defined_in_module(obj: Any) -> bool:
 		"""Check if an object is defined in the current module (not imported)."""
 		return hasattr(obj, "__module__") and obj.__module__ == module_name
 

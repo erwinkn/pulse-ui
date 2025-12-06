@@ -11,13 +11,15 @@ Usage:
     fromCodePoint(0x1F600)         # -> String.fromCodePoint(0x1F600)
 """
 
+from typing import Any as _Any
+
 from pulse.transpiler.js_module import register_js_module as _register_js_module
 
 
 class String:
 	"""JavaScript String constructor."""
 
-	def __init__(self, value: object) -> None: ...
+	def __init__(self, value: _Any) -> None: ...
 
 	@staticmethod
 	def fromCharCode(*codes: int) -> str: ...

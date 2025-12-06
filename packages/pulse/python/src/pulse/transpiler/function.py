@@ -7,28 +7,26 @@ import types as pytypes
 from typing import (
 	Any,
 	Callable,
+	ClassVar,
 	Generic,
-	Never,
 	TypeAlias,
 	TypeVar,
 	TypeVarTuple,
-	cast,
 	override,
 )
 
 # Import module registrations to ensure they're available for dependency analysis
 import pulse.transpiler.modules  # noqa: F401
 from pulse.helpers import getsourcecode
-from pulse.transpiler.builtins import BUILTIN_EMITTERS
+from pulse.transpiler.builtins import BUILTINS
 from pulse.transpiler.constants import JsConstant, const_to_js
 from pulse.transpiler.context import is_interpreted_mode
 from pulse.transpiler.errors import JSCompilationError
 from pulse.transpiler.ids import generate_id
 from pulse.transpiler.imports import Import
 from pulse.transpiler.js_module import JS_MODULES
-from pulse.transpiler.nodes import JSExpr, JSTransformer
+from pulse.transpiler.nodes import JSEXPR_REGISTRY, JSExpr, JSTransformer
 from pulse.transpiler.py_module import (
-	PY_MODULE_VALUES,
 	PY_MODULES,
 	PyModuleExpr,
 )
@@ -46,7 +44,7 @@ FUNCTION_CACHE: dict[Callable[..., object], AnyJsFunction] = {}
 
 
 class JsFunction(JSExpr, Generic[*Args, R]):
-	is_primary: bool = True
+	is_primary: ClassVar[bool] = True
 
 	fn: Callable[[*Args], R]
 	id: str
@@ -73,8 +71,8 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 				# Note: co_names includes both global names AND attribute names (e.g., 'input'
 				# from 'tags.input'). We only add supported builtins; unsupported ones are
 				# skipped since they might be attribute accesses handled during transpilation.
-				if name in BUILTIN_EMITTERS:
-					deps[name] = BUILTIN_EMITTERS[name]
+				if name in BUILTINS:
+					deps[name] = BUILTINS[name]
 				continue
 
 			# Already a JSExpr (JsFunction, JsConstant, Import, JSMember, etc.)
@@ -93,9 +91,9 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 						+ "Check your import statement and module configuration."
 					)
 
-			elif id(value) in PY_MODULE_VALUES:
-				# PY_MODULE_VALUES always contains JSExpr (wrapping happens in py_module.py)
-				deps[name] = PY_MODULE_VALUES[id(value)]
+			elif id(value) in JSEXPR_REGISTRY:
+				# JSEXPR_REGISTRY always contains JSExpr (wrapping happens in JSExpr.register)
+				deps[name] = JSEXPR_REGISTRY[id(value)]
 			elif inspect.isfunction(value):
 				deps[name] = javascript(value)
 			elif callable(value):
@@ -143,12 +141,12 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 
 	def module_functions(self) -> dict[str, JSTransformer]:
 		"""Get all module function JSTransformer dependencies (named imports from modules)."""
-		from pulse.transpiler.builtins import BUILTIN_EMITTERS
+		from pulse.transpiler.builtins import BUILTINS
 
 		return {
 			k: v
 			for k, v in self.deps.items()
-			if isinstance(v, JSTransformer) and v.name not in BUILTIN_EMITTERS
+			if isinstance(v, JSTransformer) and v.name not in BUILTINS
 		}
 
 	def transpile(self) -> str:
@@ -163,7 +161,11 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 
 		# Parse to AST
 		module = ast.parse(src)
-		fndefs = [n for n in module.body if isinstance(n, ast.FunctionDef)]
+		fndefs = [
+			n
+			for n in module.body
+			if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+		]
 		if not fndefs:
 			raise JSCompilationError("No function definition found in source")
 		fndef = fndefs[-1]
@@ -175,21 +177,6 @@ class JsFunction(JSExpr, Generic[*Args, R]):
 		visitor = JsTranspiler(fndef, args=arg_names, deps=self.deps)
 		js_fn = visitor.transpile(name=self.js_name)
 		return js_fn.emit()
-
-	@override
-	def __call__(self, *args: *Args, **kwargs: Never) -> R:  # pyright: ignore[reportIncompatibleMethodOverride]
-		if kwargs:
-			raise JSCompilationError("Keyword arguments not supported")
-		return cast(R, JsFunctionCall(self, args))
-
-
-class JsFunctionCall(Generic[*Args]):
-	fn: JsFunction[*Args, Any]
-	args: tuple[*Args]
-
-	def __init__(self, fn: JsFunction[*Args, Any], args: tuple[*Args]) -> None:
-		self.fn = fn
-		self.args = args
 
 
 def analyze_code_object(

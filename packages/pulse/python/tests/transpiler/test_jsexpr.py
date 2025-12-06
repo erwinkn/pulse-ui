@@ -7,12 +7,12 @@ from pulse.transpiler.nodes import (
 	JSArray,
 	JSBoolean,
 	JSCall,
+	JSExpr,
 	JSMember,
 	JSNull,
 	JSNumber,
 	JSObjectExpr,
 	JSString,
-	to_js_expr,
 )
 
 
@@ -185,69 +185,69 @@ class TestImportCall:
 		)
 
 
-class TestToJsExpr:
-	"""Tests for to_js_expr conversion function."""
+class TestJSExprOf:
+	"""Tests for JSExpr.of() conversion method."""
 
 	def test_string(self) -> None:
 		"""String converts to JSString."""
-		result = to_js_expr("hello")
+		result = JSExpr.of("hello")
 		assert isinstance(result, JSString)
 		# JSString uses double quotes
 		assert result.emit() == '"hello"'
 
 	def test_int(self) -> None:
 		"""Int converts to JSNumber."""
-		result = to_js_expr(42)
+		result = JSExpr.of(42)
 		assert isinstance(result, JSNumber)
 		assert result.emit() == "42"
 
 	def test_float(self) -> None:
 		"""Float converts to JSNumber."""
-		result = to_js_expr(3.14)
+		result = JSExpr.of(3.14)
 		assert isinstance(result, JSNumber)
 		assert result.emit() == "3.14"
 
 	def test_bool_true(self) -> None:
 		"""True converts to JSBoolean."""
-		result = to_js_expr(True)
+		result = JSExpr.of(True)
 		assert isinstance(result, JSBoolean)
 		assert result.emit() == "true"
 
 	def test_bool_false(self) -> None:
 		"""False converts to JSBoolean."""
-		result = to_js_expr(False)
+		result = JSExpr.of(False)
 		assert isinstance(result, JSBoolean)
 		assert result.emit() == "false"
 
 	def test_none(self) -> None:
 		"""None converts to JSNull."""
-		result = to_js_expr(None)
+		result = JSExpr.of(None)
 		assert isinstance(result, JSNull)
 		assert result.emit() == "null"
 
 	def test_list(self) -> None:
 		"""List converts to JSArray."""
-		result = to_js_expr([1, 2, 3])
+		result = JSExpr.of([1, 2, 3])
 		assert isinstance(result, JSArray)
 		assert result.emit() == "[1, 2, 3]"
 
 	def test_tuple(self) -> None:
 		"""Tuple converts to JSArray."""
-		result = to_js_expr((1, "a", True))
+		result = JSExpr.of((1, "a", True))
 		assert isinstance(result, JSArray)
 		# JSString uses double quotes
 		assert result.emit() == '[1, "a", true]'
 
 	def test_dict(self) -> None:
 		"""Dict converts to JSObjectExpr."""
-		result = to_js_expr({"a": 1, "b": "two"})
+		result = JSExpr.of({"a": 1, "b": "two"})
 		assert isinstance(result, JSObjectExpr)
 		# JSString uses double quotes
 		assert result.emit() == '{"a": 1, "b": "two"}'
 
 	def test_nested_structures(self) -> None:
 		"""Nested structures convert correctly."""
-		result = to_js_expr({"items": [1, 2], "nested": {"x": True}})
+		result = JSExpr.of({"items": [1, 2], "nested": {"x": True}})
 		assert isinstance(result, JSObjectExpr)
 		# JSString uses double quotes
 		assert result.emit() == '{"items": [1, 2], "nested": {"x": true}}'
@@ -255,13 +255,13 @@ class TestToJsExpr:
 	def test_jsexpr_passthrough(self) -> None:
 		"""JSExpr values pass through unchanged."""
 		original = JSString("hello")
-		result = to_js_expr(original)
+		result = JSExpr.of(original)
 		assert result is original
 
 	def test_import_passthrough(self) -> None:
 		"""Import passes through unchanged (Import is a JSExpr)."""
 		imp = Import("Button", "@mantine/core")
-		result = to_js_expr(imp)
+		result = JSExpr.of(imp)
 		assert result is imp  # Import is already a JSExpr, returns as-is
 		assert result.emit() == f"Button_{imp.id}"
 
@@ -272,7 +272,7 @@ class TestToJsExpr:
 			pass
 
 		with pytest.raises(TypeError, match="Cannot convert CustomClass"):
-			to_js_expr(CustomClass())
+			JSExpr.of(CustomClass())
 
 
 class TestComplexExpressions:

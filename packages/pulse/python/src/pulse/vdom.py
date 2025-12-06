@@ -21,6 +21,7 @@ from typing import (
 	ParamSpec,
 	TypeAlias,
 	TypedDict,
+	final,
 	overload,
 	override,
 )
@@ -96,11 +97,16 @@ class Callback(NamedTuple):
 	n_args: int
 
 
-def NOOP(*_args: Any):
-	return None
-
-
+@final
 class Node:
+	__slots__ = (
+		"tag",
+		"props",
+		"children",
+		"allow_children",
+		"key",
+	)
+
 	tag: str
 	props: dict[str, Any] | None
 	children: "Sequence[Element] | None"
@@ -286,7 +292,19 @@ class Component(Generic[P]):
 		return self.name
 
 
+@final
 class ComponentNode:
+	__slots__ = (
+		"fn",
+		"args",
+		"kwargs",
+		"key",
+		"name",
+		"takes_children",
+		"hooks",
+		"contents",
+	)
+
 	fn: Callable[..., Any]
 	args: tuple[Any, ...]
 	kwargs: dict[str, Any]
@@ -294,6 +312,7 @@ class ComponentNode:
 	name: str
 	takes_children: bool
 	hooks: HookContext
+	contents: "Element | None"
 
 	def __init__(
 		self,
@@ -311,7 +330,7 @@ class ComponentNode:
 		self.name = name or _infer_component_name(fn)
 		self.takes_children = takes_children
 		# Used for rendering
-		self.contents: Element | None = None
+		self.contents = None
 		self.hooks = HookContext()
 		# Dev-only validation for JSON-unsafe values
 		if env.pulse_env == "dev":

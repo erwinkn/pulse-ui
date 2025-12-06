@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import override
+from typing import Any, ClassVar, override
 
 from pulse.transpiler.errors import JSCompilationError
 from pulse.transpiler.nodes import (
@@ -32,11 +32,11 @@ from pulse.transpiler.nodes import (
 from pulse.transpiler.py_module import PyModule
 
 
-def _flatten_children(
-	items: list[JSExpr], out: list[JSExpr | JSXElement | str]
-) -> None:
+def _flatten_children(items: list[Any], out: list[JSExpr | JSXElement | str]) -> None:
 	"""Flatten arrays and handle spreads in children list."""
 	for it in items:
+		# Convert raw values first
+		it = JSExpr.of(it) if not isinstance(it, JSExpr) else it
 		if isinstance(it, JSArray):
 			_flatten_children(list(it.elements), out)
 		elif isinstance(it, JSSpread):
@@ -48,11 +48,11 @@ def _flatten_children(
 			out.append(it)
 
 
-def _build_jsx_props(kwargs: dict[str, JSExpr]) -> list[JSXProp | JSXSpreadProp]:
+def _build_jsx_props(kwargs: dict[str, Any]) -> list[JSXProp | JSXSpreadProp]:
 	"""Build JSX props list from kwargs dict.
 
 	Kwargs maps:
-	- "propName" -> JSExpr for named props
+	- "propName" -> value for named props
 	- "__spread_N" -> JSSpread(expr) for spread props
 
 	Dict order is preserved, so iteration order matches source order.
@@ -64,8 +64,8 @@ def _build_jsx_props(kwargs: dict[str, JSExpr]) -> list[JSXProp | JSXSpreadProp]
 			# Spread prop: {...expr}
 			props.append(JSXSpreadProp(value.expr))
 		else:
-			# Named prop
-			props.append(JSXProp(key, value))
+			# Named prop - convert to JSExpr
+			props.append(JSXProp(key, JSExpr.of(value)))
 
 	return props
 
@@ -74,7 +74,7 @@ def _create_tag_function(tag_name: str):
 	"""Create a tag function that returns JSXCallExpr when called."""
 
 	@staticmethod
-	def tag_func(*args: JSExpr, **kwargs: JSExpr) -> JSExpr:
+	def tag_func(*args: Any, **kwargs: Any) -> JSExpr:
 		"""Tag function that creates JSXCallExpr with props and children."""
 		props_list = _build_jsx_props(kwargs)
 		children_list: list[JSExpr | JSXElement | str] = []
@@ -95,7 +95,7 @@ class JSXCallExpr(JSExpr):
 	tag_name: str
 	props: Sequence[JSXProp | JSXSpreadProp] = field(default_factory=tuple)
 	children: Sequence[str | JSExpr | JSXElement] = field(default_factory=tuple)
-	is_jsx: bool = True
+	is_jsx: ClassVar[bool] = True
 
 	@override
 	def emit(self) -> str:
@@ -103,7 +103,7 @@ class JSXCallExpr(JSExpr):
 		return JSXElement(self.tag_name, self.props, self.children).emit()
 
 	@override
-	def emit_subscript(self, indices: list[JSExpr]) -> JSExpr:
+	def emit_subscript(self, indices: list[Any]) -> JSExpr:
 		"""Handle tag(props...)[children] -> JSXElement."""
 		extra_children: list[JSExpr | JSXElement | str] = []
 		_flatten_children(indices, extra_children)
@@ -111,7 +111,7 @@ class JSXCallExpr(JSExpr):
 		return JSXElement(self.tag_name, self.props, all_children)
 
 	@override
-	def emit_call(self, args: list[JSExpr], kwargs: dict[str, JSExpr]) -> JSExpr:
+	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
 		"""Calling an already-called tag is an error."""
 		from pulse.transpiler.errors import JSCompilationError
 
@@ -259,7 +259,7 @@ class PyTags(PyModule):
 
 	# React fragment
 	@staticmethod
-	def fragment(*args: JSExpr, **kwargs: JSExpr) -> JSExpr:
+	def fragment(*args: Any, **kwargs: Any) -> JSExpr:
 		"""Fragment function that creates JSXFragment with children."""
 		if kwargs:
 			raise JSCompilationError("React fragments cannot have props")

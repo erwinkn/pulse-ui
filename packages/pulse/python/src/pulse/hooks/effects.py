@@ -6,7 +6,7 @@ from pulse.reactive import Effect, EffectFn, Untrack
 
 
 class EffectsHookState(HookState):
-	__slots__: tuple[str, ...] = ("initialized", "effects", "key", "_called")
+	__slots__ = ("initialized", "effects", "key", "_called")  # pyright: ignore[reportUnannotatedClassAttribute]
 	initialized: bool
 	_called: bool
 

@@ -1408,12 +1408,16 @@ from pulse.reactive_extensions import (
 from pulse.reactive_extensions import (
 	unwrap as unwrap,
 )
+
+# JavaScript execution
+from pulse.render_session import JsExecError as JsExecError
 from pulse.render_session import (
 	RenderSession as RenderSession,
 )
 from pulse.render_session import (
 	RouteMount as RouteMount,
 )
+from pulse.render_session import run_js as run_js
 
 # Request
 from pulse.request import PulseRequest as PulseRequest
@@ -1428,8 +1432,6 @@ from pulse.serializer import serialize as serialize
 # State and routing
 from pulse.state import State as State
 from pulse.transpiler.function import JsFunction as JsFunction
-
-# JavaScript v2 transpilation system
 from pulse.transpiler.function import javascript as javascript
 from pulse.transpiler.imports import CssImport as CssImport
 from pulse.transpiler.imports import Import as Import

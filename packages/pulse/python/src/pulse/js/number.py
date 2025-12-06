@@ -11,6 +11,7 @@ Usage:
     EPSILON                   # -> Number.EPSILON
 """
 
+from typing import Any as _Any
 from typing import ClassVar as _ClassVar
 
 from pulse.transpiler.js_module import register_js_module as _register_js_module
@@ -19,7 +20,7 @@ from pulse.transpiler.js_module import register_js_module as _register_js_module
 class Number:
 	"""JavaScript Number constructor and namespace."""
 
-	def __init__(self, value: object) -> None: ...
+	def __init__(self, value: _Any) -> None: ...
 
 	EPSILON: _ClassVar[float]
 	MAX_SAFE_INTEGER: _ClassVar[int]

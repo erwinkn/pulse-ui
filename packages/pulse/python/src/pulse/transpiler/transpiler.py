@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 import re
 from collections.abc import Callable
+from typing import Any
 
 from pulse.transpiler.errors import JSCompilationError
 from pulse.transpiler.nodes import (
@@ -25,6 +26,7 @@ from pulse.transpiler.nodes import (
 	JSArrowFunction,
 	JSAssign,
 	JSAugAssign,
+	JSAwait,
 	JSBinary,
 	JSBoolean,
 	JSBreak,
@@ -65,15 +67,16 @@ class JsTranspiler(ast.NodeVisitor):
 	Behavior is encoded in JSExpr subclass hooks (emit_call, emit_getattr, emit_subscript).
 	"""
 
-	fndef: ast.FunctionDef
+	fndef: ast.FunctionDef | ast.AsyncFunctionDef
 	args: list[str]
 	deps: dict[str, JSExpr]
 	locals: set[str]
 	_temp_counter: int
+	_is_async: bool
 
 	def __init__(
 		self,
-		fndef: ast.FunctionDef,
+		fndef: ast.FunctionDef | ast.AsyncFunctionDef,
 		args: list[str],
 		deps: dict[str, JSExpr],
 	) -> None:
@@ -83,6 +86,8 @@ class JsTranspiler(ast.NodeVisitor):
 		# Track locals for declaration decisions (args are predeclared)
 		self.locals = set(args)
 		self._temp_counter = 0
+		# Track async status during transpilation (starts True if source is async def)
+		self._is_async = isinstance(fndef, ast.AsyncFunctionDef)
 
 	def _fresh_temp(self) -> str:
 		"""Generate a fresh temporary variable name."""
@@ -131,7 +136,8 @@ class JsTranspiler(ast.NodeVisitor):
 				continue
 			s = self.emit_stmt(stmt)
 			stmts.append(s)
-		return JSFunctionDef(self.args, stmts, name=name)
+		# Use the flag we tracked during transpilation
+		return JSFunctionDef(self.args, stmts, name=name, is_async=self._is_async)
 
 	# --- Statements ----------------------------------------------------------
 	def emit_stmt(self, node: ast.stmt) -> JSStmt:
@@ -218,6 +224,9 @@ class JsTranspiler(ast.NodeVisitor):
 		if isinstance(node, ast.For):
 			return self._emit_for_loop(node)
 
+		if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+			return self._emit_nested_function(node)
+
 		raise JSCompilationError(f"Unsupported statement: {type(node).__name__}")
 
 	def _emit_unpacking_assign(
@@ -269,11 +278,42 @@ class JsTranspiler(ast.NodeVisitor):
 		body = [self.emit_stmt(s) for s in node.body]
 		return JSForOf(target, iter_expr, body)
 
+	def _emit_nested_function(
+		self, node: ast.FunctionDef | ast.AsyncFunctionDef
+	) -> JSStmt:
+		"""Emit a nested function definition."""
+		name = node.name
+		params = [arg.arg for arg in node.args.args]
+
+		# Save current locals and extend with params (closure captures outer scope)
+		saved_locals = set(self.locals)
+		self.locals.update(params)
+
+		# Skip docstrings and emit body
+		stmts: list[JSStmt] = []
+		for i, stmt in enumerate(node.body):
+			if (
+				i == 0
+				and isinstance(stmt, ast.Expr)
+				and isinstance(stmt.value, ast.Constant)
+				and isinstance(stmt.value.value, str)
+			):
+				continue
+			stmts.append(self.emit_stmt(stmt))
+
+		# Restore outer locals and add function name
+		self.locals = saved_locals
+		self.locals.add(name)
+
+		is_async = isinstance(node, ast.AsyncFunctionDef)
+		fn = JSFunctionDef(params, stmts, name=None, is_async=is_async)
+		return JSConstAssign(name, fn)
+
 	# --- Expressions ---------------------------------------------------------
 	def emit_expr(self, node: ast.expr | None) -> JSExpr:
 		"""Emit an expression."""
 		if node is None:
-			return JSUndefined()
+			return JSNull()
 
 		if isinstance(node, ast.Constant):
 			return self._emit_constant(node)
@@ -352,6 +392,11 @@ class JsTranspiler(ast.NodeVisitor):
 		if isinstance(node, ast.Starred):
 			return JSSpread(self.emit_expr(node.value))
 
+		if isinstance(node, ast.Await):
+			# Mark function as async when we encounter await
+			self._is_async = True
+			return JSAwait(self.emit_expr(node.value))
+
 		raise JSCompilationError(f"Unsupported expression: {type(node).__name__}")
 
 	def _emit_constant(self, node: ast.Constant) -> JSExpr:
@@ -363,7 +408,7 @@ class JsTranspiler(ast.NodeVisitor):
 				return JSTemplate([v])
 			return JSString(v)
 		if v is None:
-			return JSUndefined()
+			return JSNull()
 		if v is True:
 			return JSBoolean(True)
 		if v is False:
@@ -517,14 +562,18 @@ class JsTranspiler(ast.NodeVisitor):
 		"""Emit a function call.
 
 		All behavior is encoded in JSExpr.emit_call hooks.
+		emit_call receives raw Python values (JSExpr instances from emit_expr),
+		and decides what to convert using JSExpr.of().
 		"""
 		# Handle typing.cast: ignore type argument, return value unchanged
+		# Must short-circuit before evaluating args to avoid transpiling type annotations
 		if isinstance(node.func, ast.Name) and node.func.id == "cast":
 			if len(node.args) >= 2:
 				return self.emit_expr(node.args[1])
 			raise JSCompilationError("typing.cast requires two arguments")
 
-		args = [self.emit_expr(a) for a in node.args]
+		# Emit args as JSExpr (they're already the transpiled form)
+		args: list[Any] = [self.emit_expr(a) for a in node.args]
 		kwargs = self._build_kwargs(node)
 
 		# Method call: obj.method(args) -> obj.emit_getattr(method).emit_call(args)
@@ -537,17 +586,17 @@ class JsTranspiler(ast.NodeVisitor):
 		callee = self.emit_expr(node.func)
 		return callee.emit_call(args, kwargs)
 
-	def _build_kwargs(self, node: ast.Call) -> dict[str, JSExpr]:
+	def _build_kwargs(self, node: ast.Call) -> dict[str, Any]:
 		"""Build kwargs dict from AST Call node.
 
 		Returns a dict mapping:
-		- "propName" -> JSExpr for named kwargs
+		- "propName" -> JSExpr for named kwargs (as raw values)
 		- "$spread{N}" -> JSSpread(expr) for **spread kwargs
 
 		Dict order is preserved (Python 3.7+), so iteration order matches source order.
 		Uses $ prefix for spreads since it's not a valid Python identifier.
 		"""
-		kwargs: dict[str, JSExpr] = {}
+		kwargs: dict[str, Any] = {}
 		spread_count = 0
 
 		for kw in node.keywords:
@@ -581,8 +630,9 @@ class JsTranspiler(ast.NodeVisitor):
 			return JSMemberCall(value, "at", [JSUnary("-", idx_expr)])
 
 		# Collect indices - tuple means multiple indices like x[a, b, c]
+		# Pass as raw values (JSExpr instances) to emit_subscript
 		if isinstance(node.slice, ast.Tuple):
-			indices = [self.emit_expr(e) for e in node.slice.elts]
+			indices: list[Any] = [self.emit_expr(e) for e in node.slice.elts]
 		else:
 			indices = [self.emit_expr(node.slice)]
 

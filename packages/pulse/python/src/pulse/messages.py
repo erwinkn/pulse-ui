@@ -81,6 +81,15 @@ class ServerChannelResponseMessage(TypedDict):
 	error: NotRequired[Any]
 
 
+class ServerJsExecMessage(TypedDict):
+	"""Execute JavaScript code on the client."""
+
+	type: Literal["js_exec"]
+	path: str
+	id: str
+	code: str
+
+
 # ====================
 # Client messages
 # ====================
@@ -135,6 +144,15 @@ class ClientChannelResponseMessage(TypedDict):
 	error: NotRequired[Any]
 
 
+class ClientJsResultMessage(TypedDict):
+	"""Result of client-side JS execution."""
+
+	type: Literal["js_result"]
+	id: str
+	result: Any
+	error: str | None
+
+
 ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage
 ServerMessage = (
 	ServerInitMessage
@@ -143,6 +161,7 @@ ServerMessage = (
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerChannelMessage
+	| ServerJsExecMessage
 )
 
 
@@ -152,6 +171,7 @@ ClientPulseMessage = (
 	| ClientNavigateMessage
 	| ClientUnmountMessage
 	| ClientApiResultMessage
+	| ClientJsResultMessage
 )
 ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
 ClientMessage = ClientPulseMessage | ClientChannelMessage

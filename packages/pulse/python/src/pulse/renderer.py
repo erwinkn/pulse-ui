@@ -5,9 +5,8 @@ from typing import Any, NamedTuple, TypeAlias, cast
 
 from pulse.helpers import values_equal
 from pulse.transpiler.context import interpreted_mode
-from pulse.transpiler.function import AnyJsFunction, JsFunction, JsFunctionCall
 from pulse.transpiler.imports import Import
-from pulse.transpiler.nodes import JSExpr, to_js_expr
+from pulse.transpiler.nodes import JSExpr
 from pulse.vdom import (
 	VDOM,
 	Callback,
@@ -30,25 +29,15 @@ from pulse.vdom import (
 
 
 def is_jsexpr(value: object) -> bool:
-	"""Check if a value is a JSExpr, Import, JsFunction, or JsFunctionCall."""
-	return isinstance(value, (JSExpr, Import, JsFunction, JsFunctionCall))
+	"""Check if a value is a JSExpr or Import."""
+	return isinstance(value, (JSExpr, Import))
 
 
-def emit_jsexpr(
-	value: "JSExpr | Import | AnyJsFunction | JsFunctionCall[*tuple[Any, ...]]",
-) -> str:
+def emit_jsexpr(value: "JSExpr | Import") -> str:
 	"""Emit a JSExpr in interpreted mode (for client-side evaluation)."""
 	with interpreted_mode():
 		if isinstance(value, Import):
 			return value.emit()
-		if isinstance(value, JsFunction):
-			# Emit as a function reference: get_object('fn_name')
-			return f"get_object('{value.js_name}')"
-		if isinstance(value, JsFunctionCall):
-			# Emit as a function call: fn_name(arg1, arg2, ...)
-			fn_name = f"get_object('{value.fn.js_name}')"
-			args_js = ", ".join(to_js_expr(arg).emit() for arg in value.args)
-			return f"{fn_name}({args_js})"
 		return value.emit()
 
 
@@ -193,10 +182,8 @@ class Renderer:
 			return self.render_node(node, path)
 		# Handle JSExpr as children - emit JS code with $js: prefix
 		if is_jsexpr(node):
-			# Safe cast: is_jsexpr() ensures node is JSExpr | Import | JsFunctionCall
-			node_as_jsexpr = cast(
-				"JSExpr | Import | JsFunctionCall[*tuple[Any, ...]]", cast(object, node)
-			)
+			# Safe cast: is_jsexpr() ensures node is JSExpr | Import
+			node_as_jsexpr = cast("JSExpr | Import", cast(object, node))
 			js_code = emit_jsexpr(node_as_jsexpr)
 			self.jsexpr_paths.add(path)
 			return f"{JSEXPR_PREFIX}{js_code}", cast(Element, node)

@@ -18,7 +18,7 @@ S10 = TypeVar("S10", bound=State)
 
 
 class StateNamespace:
-	__slots__: tuple[str, ...] = ("states", "key", "called")
+	__slots__ = ("states", "key", "called")  # pyright: ignore[reportUnannotatedClassAttribute]
 	states: tuple[State, ...]
 	key: str | None
 	called: bool
@@ -84,7 +84,7 @@ class StateNamespace:
 
 
 class StatesHookState(HookState):
-	__slots__: tuple[str, ...] = ("namespaces",)
+	__slots__ = ("namespaces",)  # pyright: ignore[reportUnannotatedClassAttribute]
 	namespaces: dict[str | None, StateNamespace]
 
 	def __init__(self) -> None:

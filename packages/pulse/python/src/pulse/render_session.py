@@ -4,7 +4,7 @@ import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pulse.context import PulseContext
 from pulse.helpers import create_future_on_loop, create_task
@@ -14,6 +14,7 @@ from pulse.messages import (
 	ServerErrorMessage,
 	ServerErrorPhase,
 	ServerInitMessage,
+	ServerJsExecMessage,
 	ServerMessage,
 	ServerNavigateToMessage,
 	ServerUpdateMessage,
@@ -30,6 +31,9 @@ from pulse.routing import (
 	ensure_absolute_path,
 )
 from pulse.state import State
+from pulse.transpiler.context import interpreted_mode
+from pulse.transpiler.ids import generate_id
+from pulse.transpiler.nodes import JSExpr
 from pulse.vdom import Element
 
 if TYPE_CHECKING:
@@ -37,6 +41,27 @@ if TYPE_CHECKING:
 	from pulse.form import FormRegistry
 
 logger = logging.getLogger(__file__)
+
+
+class JsExecError(Exception):
+	"""Raised when client-side JS execution fails."""
+
+
+# Module-level convenience wrapper
+@overload
+def run_js(expr: JSExpr | str, *, result: Literal[True]) -> asyncio.Future[Any]: ...
+
+
+@overload
+def run_js(expr: JSExpr | str, *, result: Literal[False] = ...) -> None: ...
+
+
+def run_js(expr: JSExpr | str, *, result: bool = False) -> asyncio.Future[Any] | None:
+	"""Execute JavaScript on the client. Convenience wrapper for RenderSession.run_js()."""
+	ctx = PulseContext.get()
+	if ctx.render is None:
+		raise RuntimeError("run_js() can only be called during callback execution")
+	return ctx.render.run_js(expr, result=result)
 
 
 class RouteMount:
@@ -101,6 +126,8 @@ class RenderSession:
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
+		# Pending JS execution results (for awaiting run_js().result())
+		self._pending_js_results: dict[str, asyncio.Future[Any]] = {}
 
 	@property
 	def server_address(self) -> str:
@@ -147,7 +174,7 @@ class RenderSession:
 		self,
 		path: str,
 		phase: ServerErrorPhase,
-		exc: Exception,
+		exc: BaseException,
 		details: dict[str, Any] | None = None,
 	):
 		error_msg: ServerErrorMessage = {
@@ -190,26 +217,20 @@ class RenderSession:
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		mount = self.route_mounts[path]
+		cb = mount.tree.callbacks[key]
+
+		def report(e: BaseException, is_async: bool = False):
+			self.report_error(path, "callback", e, {"callback": key, "async": is_async})
+
 		try:
-			cb = mount.tree.callbacks[key]
-			fn, n_params = cb.fn, cb.n_args
-			res = fn(*args[:n_params])
-			if iscoroutine(res):
-
-				def _on_task_done(t: asyncio.Task[Any]):
-					try:
-						t.result()
-					except Exception as e:
-						self.report_error(
-							path,
-							"callback",
-							e,
-							{"callback": key, "async": True},
-						)
-
-				create_task(res, on_done=_on_task_done)
+			with PulseContext.update(render=self, route=mount.route):
+				res = cb.fn(*args[: cb.n_args])
+				if iscoroutine(res):
+					create_task(
+						res, on_done=lambda t: (e := t.exception()) and report(e, True)
+					)
 		except Exception as e:
-			self.report_error(path, "callback", e, {"callback": key})
+			report(e)
 
 	async def call_api(
 		self,
@@ -271,6 +292,94 @@ class RenderSession:
 					"body": data.get("body"),
 				}
 			)
+
+	# ---- JS Execution ----
+	@overload
+	def run_js(
+		self, expr: JSExpr | str, *, result: Literal[True]
+	) -> asyncio.Future[object]: ...
+
+	@overload
+	def run_js(self, expr: JSExpr | str, *, result: Literal[False] = ...) -> None: ...
+
+	def run_js(
+		self, expr: JSExpr | str, *, result: bool = False
+	) -> asyncio.Future[object] | None:
+		"""Execute JavaScript on the client.
+
+		Args:
+			expr: A JSExpr (e.g. from calling a @javascript function) or raw JS string.
+			result: If True, returns a Future that resolves with the JS return value.
+			        If False (default), returns None (fire-and-forget).
+
+		Returns:
+			None if result=False, otherwise a Future resolving to the JS result.
+
+		Example - Fire and forget:
+			@javascript
+			def focus_element(selector: str):
+				document.querySelector(selector).focus()
+
+			def on_save():
+				save_data()
+				run_js(focus_element("#next-input"))
+
+		Example - Await result:
+			@javascript
+			def get_scroll_position():
+				return {"x": window.scrollX, "y": window.scrollY}
+
+			async def on_click():
+				pos = await run_js(get_scroll_position(), result=True)
+				print(pos["x"], pos["y"])
+
+		Example - Raw JS string:
+			def on_click():
+				run_js("console.log('Hello from Python!')")
+		"""
+		ctx = PulseContext.get()
+		exec_id = generate_id()
+
+		if isinstance(expr, str):
+			code = expr
+		else:
+			with interpreted_mode():
+				code = expr.emit()
+
+		# Get path from route context, fallback to "/"
+		path = ctx.route.pathname if ctx.route else "/"
+
+		self.send(
+			ServerJsExecMessage(
+				type="js_exec",
+				path=path,
+				id=exec_id,
+				code=code,
+			)
+		)
+
+		if result:
+			loop = asyncio.get_running_loop()
+			future: asyncio.Future[object] = loop.create_future()
+			self._pending_js_results[exec_id] = future
+			return future
+
+		return None
+
+	def handle_js_result(self, data: dict[str, Any]) -> None:
+		"""Handle js_result message from client."""
+		exec_id = data.get("id")
+		if exec_id is None:
+			return
+		exec_id = str(exec_id)
+		fut = self._pending_js_results.pop(exec_id, None)
+		if fut is None or fut.done():
+			return
+		error = data.get("error")
+		if error is not None:
+			fut.set_exception(JsExecError(error))
+		else:
+			fut.set_result(data.get("result"))
 
 	def create_route_mount(self, path: str, route_info: RouteInfo | None = None):
 		route = self.routes.find(path)

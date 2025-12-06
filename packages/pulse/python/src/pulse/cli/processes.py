@@ -257,6 +257,7 @@ def _write_tagged_line(name: str, message: str, colors: Mapping[str, str]) -> No
 	if (
 		"Network: use --host to expose" in clean_message
 		or "press h + enter to show help" in clean_message
+		or "➜  Local:" in clean_message
 	):
 		return
 

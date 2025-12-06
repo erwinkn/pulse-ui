@@ -162,7 +162,11 @@ class TestReactProxyHeaderRewrite:
 				"content-type": "text/html",
 			}
 		)
-		mock_response.aiter_raw = AsyncMock(return_value=iter([b""]))
+
+		async def aiter_raw():
+			yield b""
+
+		mock_response.aiter_raw = aiter_raw
 		mock_response.aclose = AsyncMock()
 
 		# Create a mock client and inject it
@@ -193,7 +197,11 @@ class TestReactProxyHeaderRewrite:
 				"content-type": "application/json",
 			}
 		)
-		mock_response.aiter_raw = AsyncMock(return_value=iter([b"{}"]))
+
+		async def aiter_raw():
+			yield b"{}"
+
+		mock_response.aiter_raw = aiter_raw
 		mock_response.aclose = AsyncMock()
 
 		mock_client = MagicMock()
@@ -222,7 +230,11 @@ class TestReactProxyHeaderRewrite:
 				"x-custom-header": "some-value",
 			}
 		)
-		mock_response.aiter_raw = AsyncMock(return_value=iter([b"<html></html>"]))
+
+		async def aiter_raw():
+			yield b"<html></html>"
+
+		mock_response.aiter_raw = aiter_raw
 		mock_response.aclose = AsyncMock()
 
 		mock_client = MagicMock()

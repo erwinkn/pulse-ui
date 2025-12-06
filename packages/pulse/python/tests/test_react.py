@@ -6,6 +6,7 @@ within the UI tree generation system.
 """
 
 import inspect
+import re
 from typing import (
 	Annotated,
 	Any,
@@ -21,7 +22,6 @@ from typing import (
 import pytest
 from pulse import (
 	Node,
-	VDOMNode,
 	div,
 	h1,
 	p,
@@ -39,9 +39,19 @@ from pulse.react_component import (
 	parse_typed_dict_props,
 	registered_react_components,
 )
+from pulse.transpiler.imports import clear_import_registry
 from pulse.vdom import Child, Element
 
-from .test_utils import assert_node_equal
+
+def assert_mount_point_tag(tag: str, expected_name: str) -> None:
+	"""Assert that a mount point tag matches the expected component name with ID suffix.
+
+	Mount point tags have the format '$$<name>_<id>' where id is a hex number.
+	"""
+	pattern = rf"^\$\${re.escape(expected_name)}_[0-9a-f]+$"
+	assert re.match(pattern, tag), (
+		f"Expected tag matching '$$<name>_<hex_id>', got {tag!r}"
+	)
 
 
 class TestReactComponent:
@@ -91,10 +101,11 @@ class TestDefineReactComponent:
 	"""Test the define_react_component function."""
 
 	def setup_method(self):
-		"""Clear the component registry before each test."""
+		"""Clear the component registry and import registry before each test."""
 		# This is a bit of a hack to ensure a clean slate for tests,
 		# as the global registry persists.
 		COMPONENT_REGISTRY.set(ComponentRegistry())
+		clear_import_registry()
 
 	def test_define_component_basic(self):
 		"""Test defining a basic React component."""
@@ -153,7 +164,7 @@ class TestDefineReactComponent:
 		# Create a mount point
 		mount_point = TestComponent(prop1="value1", prop2="value2")
 
-		assert mount_point.tag == "$$TestComponent"
+		assert_mount_point_tag(mount_point.tag, "TestComponent")
 		assert mount_point.props == {"prop1": "value1", "prop2": "value2"}
 		assert mount_point.children is None
 
@@ -170,7 +181,7 @@ class TestDefineReactComponent:
 			"Text child", p()["Paragraph child"], className="container"
 		)
 
-		assert mount_point.tag == "$$Container"
+		assert_mount_point_tag(mount_point.tag, "Container")
 		assert mount_point.props == {"className": "container"}
 		assert mount_point.children is not None
 		assert len(mount_point.children) == 2
@@ -185,7 +196,7 @@ class TestDefineReactComponent:
 		# Use indexing syntax
 		mount_point = Card(title="Test Card")[p()["Card content"], "Additional text"]
 
-		assert mount_point.tag == "$$Card"
+		assert_mount_point_tag(mount_point.tag, "Card")
 		assert mount_point.props == {"title": "Test Card"}
 		assert mount_point.children is not None
 		assert len(mount_point.children) == 2
@@ -211,8 +222,9 @@ class TestComponentRegistry:
 	"""Test the component registry functionality."""
 
 	def setup_method(self):
-		"""Clear the component registry before each test."""
+		"""Clear the component registry and import registry before each test."""
 		COMPONENT_REGISTRY.set(ComponentRegistry())
+		clear_import_registry()
 
 	def test_empty_registry(self):
 		"""Test empty component registry."""
@@ -237,14 +249,17 @@ class TestMountPointGeneration:
 	"""Test mount point generation from React components."""
 
 	def setup_method(self):
-		"""Clear the component registry before each test."""
+		"""Clear the component registry and import registry before each test."""
 		COMPONENT_REGISTRY.set(ComponentRegistry())
+		clear_import_registry()
 
 	def test_mount_point_tag_format(self):
 		"""Test that mount points have correct tag format."""
 		TestComp = ReactComponent("Test", "./Test")
 		mount_point = TestComp()
-		assert mount_point.tag == "$$Test"
+		# Tag format is $$<js_name> where js_name is <name>_<id>
+		assert_mount_point_tag(mount_point.tag, "Test")
+		assert mount_point.tag == f"$${TestComp.import_.js_name}"
 
 	def test_mount_point_serialization(self):
 		"""Test that mount points serialize correctly."""
@@ -254,21 +269,15 @@ class TestMountPointGeneration:
 			p()["Counter description"], "Additional text"
 		]
 
-		expected: VDOMNode = {
-			"tag": "$$Counter",
-			"props": {"count": 5, "label": "Test Counter"},
-			"children": [
-				{
-					"tag": "p",
-					"props": {},
-					"children": ["Counter description"],
-				},
-				"Additional text",
-			],
-		}
-
-		# Compare Node trees using assert_node_equal
-		assert_node_equal(mount_point, Node.from_vdom(expected))
+		# Verify tag format
+		assert_mount_point_tag(mount_point.tag, "Counter")
+		# Verify props and children
+		assert mount_point.props == {"count": 5, "label": "Test Counter"}
+		assert mount_point.children is not None
+		assert len(mount_point.children) == 2
+		p_child = mount_point.children[0]
+		assert isinstance(p_child, Node) and p_child.tag == "p"
+		assert mount_point.children[1] == "Additional text"
 
 	def test_nested_mount_points(self):
 		"""Test nesting mount points within each other."""
@@ -281,29 +290,30 @@ class TestMountPointGeneration:
 			"And some additional text.",
 		]
 
-		expected: VDOMNode = {
-			"tag": "$$Card",
-			"props": {"title": "Nested Example"},
-			"children": [
-				{"tag": "p", "props": {}, "children": ["This card contains a button:"]},
-				{
-					"tag": "$$Button",
-					"props": {"variant": "primary"},
-					"children": ["Click me!"],
-				},
-				"And some additional text.",
-			],
-		}
-
-		assert_node_equal(nested_structure, Node.from_vdom(expected))
+		# Verify tag format
+		assert_mount_point_tag(nested_structure.tag, "Card")
+		assert nested_structure.props == {"title": "Nested Example"}
+		assert nested_structure.children is not None
+		assert len(nested_structure.children) == 3
+		# First child is a p tag
+		p_child = nested_structure.children[0]
+		assert isinstance(p_child, Node) and p_child.tag == "p"
+		# Second child is a Button mount point
+		button_child = nested_structure.children[1]
+		assert isinstance(button_child, Node)
+		assert_mount_point_tag(button_child.tag, "Button")
+		assert button_child.props == {"variant": "primary"}
+		# Third child is text
+		assert nested_structure.children[2] == "And some additional text."
 
 
 class TestComponentIntegrationWithHTML:
 	"""Test integration of React components with regular HTML elements."""
 
 	def setup_method(self):
-		"""Clear the component registry before each test."""
+		"""Clear the component registry and import registry before each test."""
 		COMPONENT_REGISTRY.set(ComponentRegistry())
+		clear_import_registry()
 
 	def test_mixed_html_and_components(self):
 		"""Test mixing HTML elements and React components."""
@@ -318,27 +328,38 @@ class TestComponentIntegrationWithHTML:
 			div()["More HTML content"],
 		]
 
-		expected: VDOMNode = {
-			"tag": "div",
-			"props": {"className": "app"},
-			"children": [
-				{"tag": "h1", "props": {}, "children": ["My App"]},
-				{
-					"tag": "$$UserCard",
-					"props": {"name": "John Doe", "email": "john@example.com"},
-					"children": None,
-				},
-				{"tag": "p", "props": {}, "children": ["Some regular HTML content"]},
-				{
-					"tag": "$$Counter",
-					"props": {"count": 42},
-					"children": ["This counter has children"],
-				},
-				{"tag": "div", "props": {}, "children": ["More HTML content"]},
-			],
+		# Verify structure
+		assert mixed_structure.tag == "div"
+		assert mixed_structure.props == {"className": "app"}
+		assert mixed_structure.children is not None
+		assert len(mixed_structure.children) == 5
+
+		# Check h1
+		h1_child = mixed_structure.children[0]
+		assert isinstance(h1_child, Node) and h1_child.tag == "h1"
+
+		# Check UserCard mount point
+		user_card_child = mixed_structure.children[1]
+		assert isinstance(user_card_child, Node)
+		assert_mount_point_tag(user_card_child.tag, "UserCard")
+		assert user_card_child.props == {
+			"name": "John Doe",
+			"email": "john@example.com",
 		}
 
-		assert_node_equal(mixed_structure, Node.from_vdom(expected))
+		# Check p
+		p_child = mixed_structure.children[2]
+		assert isinstance(p_child, Node) and p_child.tag == "p"
+
+		# Check Counter mount point
+		counter_child = mixed_structure.children[3]
+		assert isinstance(counter_child, Node)
+		assert_mount_point_tag(counter_child.tag, "Counter")
+		assert counter_child.props == {"count": 42}
+
+		# Check div
+		div_child = mixed_structure.children[4]
+		assert isinstance(div_child, Node) and div_child.tag == "div"
 
 	def test_component_props_types(self):
 		"""Test that component props handle various data types."""
@@ -587,7 +608,7 @@ def test_react_component_decorator_explicit_props_and_children():
 	# With children and partial props (title default applies)
 	node = Card(p()["Body"], disabled=True)
 	assert isinstance(node, Node)
-	assert node.tag == "$$Card"
+	assert_mount_point_tag(node.tag, "Card")
 	assert node.props == {"title": "Untitled", "disabled": True}
 	assert node.children is not None and len(node.children) == 1
 
@@ -616,7 +637,7 @@ def test_react_component_decorator_typed_dict_unpack_and_mapping():
 		Badge()  # pyright: ignore[reportCallIssue]
 
 	node = Badge("txt", label="New", class_name="pill", count=2, disabled=True)
-	assert node.tag == "$$Badge"
+	assert_mount_point_tag(node.tag, "Badge")
 	# class_name mapped to className, label preserved
 	assert node.props == {
 		"disabled": True,
@@ -634,7 +655,7 @@ def test_react_component_decorator_default_export_and_alias_rules():
 		return cast(Element, None)
 
 	node = DefaultComp()
-	assert node.tag == "$$DefaultComp"
+	assert_mount_point_tag(node.tag, "DefaultComp")
 
 
 def test_react_component_decorator_key_validation():
@@ -648,7 +669,7 @@ def test_react_component_decorator_key_validation():
 
 	# String key accepted
 	node = Box(key="k1")
-	assert node.tag == "$$Box"
+	assert_mount_point_tag(node.tag, "Box")
 	assert node.key == "k1"
 
 
@@ -680,7 +701,7 @@ def test_default_sentinel_omits_explicit_prop():
 
 	# Passing DEFAULT should omit the prop entirely
 	node = Card()
-	assert node.tag == "$$CardDefaultExplicit"
+	assert_mount_point_tag(node.tag, "CardDefaultExplicit")
 	assert node.props == {"title": "Untitled"}
 
 	# Passing None should keep the key with None value (serialize to null client-side)
@@ -705,7 +726,7 @@ def test_default_sentinel_omits_unpack_prop_and_skips_serialize():
 		return cast(Element, None)
 
 	node = Badge()
-	assert node.tag == "$$BadgeDefaultUnpack"
+	assert_mount_point_tag(node.tag, "BadgeDefaultUnpack")
 	# Omitted entirely
 	assert node.props is None
 
@@ -722,7 +743,7 @@ def test_default_sentinel_omits_unknown_when_untyped_kwargs():
 
 	node = Pane(dataAttr=DEFAULT)
 	# Unknowns are allowed but DEFAULT should ensure omission
-	assert node.tag == "$$PaneDefaultUnknown"
+	assert_mount_point_tag(node.tag, "PaneDefaultUnknown")
 	assert node.props == {"disabled": False}
 
 
@@ -828,6 +849,6 @@ def test_react_component_accepts_generic_like_typed_dict_props():
 
 	node = DataBox(value=123, label="n")
 	assert isinstance(node, Node)
-	assert node.tag == "$$DataBox"
+	assert_mount_point_tag(node.tag, "DataBox")
 	# Value typed by TypeVar should be accepted and passed through unchanged
 	assert node.props == {"value": 123, "label": "n"}

@@ -13,6 +13,7 @@ from types import UnionType
 from typing import (
 	Annotated,
 	Any,
+	ClassVar,
 	Generic,
 	Literal,
 	ParamSpec,
@@ -24,9 +25,18 @@ from typing import (
 	override,
 )
 
-from pulse.codegen.imports import Imported, ImportStatement
 from pulse.helpers import Sentinel
 from pulse.reactive_extensions import unwrap
+from pulse.transpiler.errors import JSCompilationError
+from pulse.transpiler.imports import Import
+from pulse.transpiler.nodes import (
+	JSExpr,
+	JSMember,
+	JSSpread,
+	JSXElement,
+	JSXProp,
+	JSXSpreadProp,
+)
 from pulse.vdom import Child, Element, Node
 
 T = TypeVar("T")
@@ -295,25 +305,112 @@ def default_fn_signature_without_children(
 ) -> Element: ...
 
 
-class ReactComponent(Generic[P], Imported):
+# ----------------------------------------------------------------------------
+# JSX transpilation helpers
+# ----------------------------------------------------------------------------
+
+
+def _build_jsx_props(kwargs: dict[str, Any]) -> list[JSXProp | JSXSpreadProp]:
+	"""Build JSX props list from kwargs dict.
+
+	Kwargs maps:
+	- "propName" -> value for named props
+	- "__spread_N" -> JSSpread(expr) for spread props
+	"""
+	props: list[JSXProp | JSXSpreadProp] = []
+	for key, value in kwargs.items():
+		if isinstance(value, JSSpread):
+			props.append(JSXSpreadProp(value.expr))
+		else:
+			props.append(JSXProp(key, JSExpr.of(value)))
+	return props
+
+
+def _flatten_children(items: list[Any], out: list[JSExpr | JSXElement | str]) -> None:
+	"""Flatten arrays and handle spreads in children list."""
+	from pulse.transpiler.nodes import JSArray, JSString
+
+	for it in items:
+		# Convert raw values first
+		it = JSExpr.of(it) if not isinstance(it, JSExpr) else it
+		if isinstance(it, JSArray):
+			_flatten_children(list(it.elements), out)
+		elif isinstance(it, JSSpread):
+			out.append(it.expr)
+		elif isinstance(it, JSString):
+			out.append(it.value)
+		else:
+			out.append(it)
+
+
+class ReactComponentCallExpr(JSExpr):
+	"""JSX call expression for a ReactComponent.
+
+	Created when a ReactComponent is called with props. Supports subscripting
+	to add children, producing the final JSXElement.
+	"""
+
+	is_jsx: ClassVar[bool] = True
+	component: "ReactComponent[...]"
+	props: tuple[JSXProp | JSXSpreadProp, ...]
+	children: tuple[str | JSExpr | JSXElement, ...]
+
+	def __init__(
+		self,
+		component: "ReactComponent[...]",
+		props: tuple[JSXProp | JSXSpreadProp, ...],
+		children: tuple[str | JSExpr | JSXElement, ...],
+	) -> None:
+		self.component = component
+		self.props = props
+		self.children = children
+
+	@override
+	def emit(self) -> str:
+		return JSXElement(self.component, self.props, self.children).emit()
+
+	@override
+	def emit_subscript(self, indices: list[Any]) -> JSExpr:
+		"""Handle Component(props...)[children] -> JSXElement."""
+		extra_children: list[JSExpr | JSXElement | str] = []
+		_flatten_children(indices, extra_children)
+		all_children = list(self.children) + extra_children
+		return JSXElement(self.component, self.props, all_children)
+
+	@override
+	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
+		"""Calling an already-called component is an error."""
+		raise JSCompilationError(
+			f"Cannot call <{self.component.name}> - already called. "
+			+ "Use subscript for children: Component(props...)[children]"
+		)
+
+
+class ReactComponent(JSExpr, Generic[P]):
 	"""
 	A React component that can be used within the UI tree.
 	Returns a function that creates mount point UITreeNode instances.
 
 	Args:
-	    tag: Name of the component (or "default" for default export)
-	    import_path: Module path to import the component from
-	    alias: Optional alias for the component in the registry
+	    name: Name of the component (or "default" for default export)
+	    src: Module path to import the component from
 	    is_default: True if this is a default export, else named export
-	    import_name: If specified, import this name from import_path and access tag as a property of it
+	    prop: Optional property name to access the component from the imported object
+	    lazy: Whether to lazy load the component
+	    version: Optional npm semver constraint for this component's package
+	    prop_spec: Optional PropSpec for the component
+	    fn_signature: Function signature to parse for props
+	    extra_imports: Additional imports to include (CSS files, etc.)
 
 	Returns:
 	    A function that creates Node instances with mount point tags
 	"""
 
+	import_: Import
 	props_spec: PropSpec
 	fn_signature: Callable[P, Element]
 	lazy: bool
+	_prop: str | None  # Property access like AppShell.Header
 
 	def __init__(
 		self,
@@ -326,11 +423,14 @@ class ReactComponent(Generic[P], Imported):
 		version: str | None = None,
 		prop_spec: PropSpec | None = None,
 		fn_signature: Callable[P, Element] = default_signature,
-		extra_imports: tuple[ImportStatement, ...]
-		| list[ImportStatement]
-		| None = None,
+		extra_imports: tuple[Import, ...] | list[Import] | None = None,
 	):
-		super().__init__(name, src, is_default=is_default, prop=prop)
+		# Create the Import directly (prop is stored separately on ReactComponent)
+		if is_default:
+			self.import_ = Import.default(name, src)
+		else:
+			self.import_ = Import.named(name, src)
+		self._prop = prop
 
 		# Build props_spec from fn_signature if provided and props not provided
 		if prop_spec:
@@ -347,9 +447,61 @@ class ReactComponent(Generic[P], Imported):
 		self.lazy = lazy
 		# Optional npm semver constraint for this component's package
 		self.version: str | None = version
-		# Additional import statements to include in route where this component is used
-		self.extra_imports: list[ImportStatement] = list(extra_imports or [])
+		# Additional imports to include in route where this component is used
+		self.extra_imports: list[Import] = list(extra_imports or [])
 		COMPONENT_REGISTRY.get().add(self)
+
+	@override
+	def emit(self) -> str:
+		if self.prop:
+			return JSMember(self.import_, self.prop).emit()
+		return self.import_.emit()
+
+	@override
+	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
+		"""Handle Component(props...) -> ReactComponentCallExpr."""
+		props_list = _build_jsx_props(kwargs)
+		children_list: list[JSExpr | JSXElement | str] = []
+		_flatten_children(args, children_list)
+		return ReactComponentCallExpr(self, tuple(props_list), tuple(children_list))
+
+	@override
+	def emit_subscript(self, indices: list[Any]) -> JSExpr:
+		"""Direct subscript on ReactComponent is not allowed.
+
+		Use Component(props...)[children] instead of Component[children].
+		"""
+		raise JSCompilationError(
+			f"Cannot subscript ReactComponent '{self.name}' directly. "
+			+ "Use Component(props...)[children] or Component()[children] instead."
+		)
+
+	@property
+	def name(self) -> str:
+		return self.import_.name
+
+	@property
+	def src(self) -> str:
+		return self.import_.src
+
+	@property
+	def is_default(self) -> bool:
+		return self.import_.is_default
+
+	@property
+	def prop(self) -> str | None:
+		return self._prop
+
+	@property
+	def expr(self) -> str:
+		"""Expression for the component in the registry and VDOM tags.
+
+		Uses the import's js_name (with unique ID suffix) to match the
+		unified registry on the client side.
+		"""
+		if self.prop:
+			return f"{self.import_.js_name}.{self.prop}"
+		return self.import_.js_name
 
 	@override
 	def __repr__(self) -> str:
@@ -359,7 +511,8 @@ class ReactComponent(Generic[P], Imported):
 		props_part = f", props_spec={self.props_spec!r}"
 		return f"ReactComponent(name='{self.name}', src='{self.src}'{prop_part}{default_part}{lazy_part}{props_part})"
 
-	def __call__(self, *children: P.args, **props: P.kwargs) -> Node:
+	@override
+	def __call__(self, *children: P.args, **props: P.kwargs) -> Node:  # pyright: ignore[reportIncompatibleMethodOverride]
 		key = props.get("key")
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")
@@ -806,7 +959,7 @@ def react_component(
 	is_default: bool = False,
 	lazy: bool = False,
 	version: str | None = None,
-	extra_imports: list[ImportStatement] | None = None,
+	extra_imports: list[Import] | None = None,
 ) -> Callable[[Callable[P, None] | Callable[P, Element]], ReactComponent[P]]:
 	"""
 	Decorator to define a React component wrapper. The decorated function is

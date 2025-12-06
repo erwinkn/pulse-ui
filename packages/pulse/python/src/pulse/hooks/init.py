@@ -9,6 +9,7 @@ import types
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast, override
 
+from pulse.helpers import getsourcecode
 from pulse.hooks.core import HookState, hooks
 
 # Storage keyed by (code object, lineno) of the `with ps.init()` call site.
@@ -419,7 +420,7 @@ class _InitCallChecker:
 
 def _get_source(func: Callable[..., Any]) -> str:
 	try:
-		return textwrap.dedent(inspect.getsource(func))
+		return textwrap.dedent(getsourcecode(func))
 	except OSError as exc:
 		src = getattr(func, "__source__", None)
 		if src is None:

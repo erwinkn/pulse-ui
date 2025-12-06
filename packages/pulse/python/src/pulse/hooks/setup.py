@@ -11,7 +11,7 @@ T = TypeVar("T")
 
 
 class SetupHookState(HookState):
-	__slots__: tuple[str, ...] = (
+	__slots__ = (  # pyright: ignore[reportUnannotatedClassAttribute]
 		"value",
 		"initialized",
 		"args",

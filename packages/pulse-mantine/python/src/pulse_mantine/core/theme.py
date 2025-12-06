@@ -30,7 +30,7 @@ class VariantColorResolverResult(TypedDict):
 
 
 VariantColorsResolver = ps.JsFunction[
-	[VariantColorsResolverInput], VariantColorResolverResult
+	VariantColorsResolverInput, VariantColorResolverResult
 ]
 
 

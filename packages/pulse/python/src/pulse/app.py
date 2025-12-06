@@ -31,12 +31,6 @@ from pulse.cookies import (
 	cors_options,
 	session_cookie,
 )
-from pulse.css import (
-	CssImport,
-	CssModule,
-	registered_css_imports,
-	registered_css_modules,
-)
 from pulse.env import (
 	ENV_PULSE_HOST,
 	ENV_PULSE_PORT,
@@ -216,8 +210,6 @@ class App:
 
 		# Auto-add React components to all routes
 		add_react_components(all_routes, registered_react_components())
-		add_css_modules(all_routes, registered_css_modules())
-		add_css_imports(all_routes, registered_css_imports())
 		# RouteTree filters routes based on dev flag and environment during construction
 		self.routes = RouteTree(all_routes)
 		self.not_found = not_found
@@ -752,6 +744,8 @@ class App:
 				render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
+			elif msg["type"] == "js_result":
+				render.handle_js_result(dict(msg))
 			else:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()
@@ -1002,19 +996,3 @@ def add_react_components(
 			route.components = components
 		if route.children:
 			add_react_components(route.children, components)
-
-
-def add_css_modules(routes: Sequence[Route | Layout], modules: list[CssModule]):
-	for route in routes:
-		if route.css_modules is None:
-			route.css_modules = modules
-		if route.children:
-			add_css_modules(route.children, modules)
-
-
-def add_css_imports(routes: Sequence[Route | Layout], imports: list[CssImport]):
-	for route in routes:
-		if route.css_imports is None:
-			route.css_imports = imports
-		if route.children:
-			add_css_imports(route.children, imports)

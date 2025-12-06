@@ -548,14 +548,10 @@ class TestMissingKeyWarnings:
 
 		with pytest.warns(
 			UserWarning,
-			match=r"\[Pulse\] Iterable children of <\$\$MyReactComp> contain elements without 'key'",
+			match=r"\[Pulse\] Iterable children of <MyReactComp> contain elements without 'key'",
 		):
 			items = [span() for _ in range(3)]
 			MyReactComp(items)
-
-
-if __name__ == "__main__":
-	pytest.main([__file__, "-v"])
 
 
 class TestFromVDOM:

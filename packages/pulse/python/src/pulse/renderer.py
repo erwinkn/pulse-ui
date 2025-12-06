@@ -1,17 +1,12 @@
 import inspect
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import (
-	Any,
-	Literal,
-	NamedTuple,
-	TypeAlias,
-	TypedDict,
-	cast,
-)
+from typing import Any, NamedTuple, TypeAlias, cast
 
-from pulse.css import CssReference
 from pulse.helpers import values_equal
+from pulse.transpiler.context import interpreted_mode
+from pulse.transpiler.imports import Import
+from pulse.transpiler.nodes import JSExpr
 from pulse.vdom import (
 	VDOM,
 	Callback,
@@ -19,78 +14,32 @@ from pulse.vdom import (
 	ComponentNode,
 	Element,
 	Node,
+	PathDelta,
 	Props,
+	ReconciliationOperation,
+	ReplaceOperation,
+	UpdateCallbacksOperation,
+	UpdateJsExprPathsOperation,
+	UpdatePropsDelta,
+	UpdatePropsOperation,
+	UpdateRenderPropsOperation,
 	VDOMNode,
+	VDOMOperation,
 )
 
 
-class ReplaceOperation(TypedDict):
-	type: Literal["replace"]
-	path: str
-	data: VDOM
+def is_jsexpr(value: object) -> bool:
+	"""Check if a value is a JSExpr or Import."""
+	return isinstance(value, (JSExpr, Import))
 
 
-# This payload makes it easy for the client to rebuild an array of React nodes
-# from the previous children array:
-# - Allocate array of size N
-# - For i in 0..N-1, check the following scenarios
-#   - i matches the next index in `new` -> use provided tree
-#   - i matches the next index in `reuse` -> reuse previous child
-#   - otherwise, reuse the element at the same index
-class ReconciliationOperation(TypedDict):
-	type: Literal["reconciliation"]
-	path: str
-	N: int
-	new: tuple[list[int], list[VDOM]]
-	reuse: tuple[list[int], list[int]]
+def emit_jsexpr(value: "JSExpr | Import") -> str:
+	"""Emit a JSExpr in interpreted mode (for client-side evaluation)."""
+	with interpreted_mode():
+		if isinstance(value, Import):
+			return value.emit()
+		return value.emit()
 
-
-class UpdatePropsDelta(TypedDict, total=False):
-	# Only send changed/new keys under `set` and removed keys under `remove`
-	set: Props
-	remove: list[str]
-
-
-class UpdatePropsOperation(TypedDict):
-	type: Literal["update_props"]
-	path: str
-	data: UpdatePropsDelta
-
-
-class PathDelta(TypedDict, total=False):
-	add: list[str]
-	remove: list[str]
-
-
-class UpdateCallbacksOperation(TypedDict):
-	type: Literal["update_callbacks"]
-	path: str
-	data: PathDelta
-
-
-class UpdateCssRefsOperation(TypedDict):
-	type: Literal["update_css_refs"]
-	path: str
-	data: PathDelta
-
-
-class UpdateRenderPropsOperation(TypedDict):
-	type: Literal["update_render_props"]
-	path: str
-	data: PathDelta
-
-
-VDOMOperation: TypeAlias = (
-	# InsertOperation,
-	# RemoveOperation,
-	ReplaceOperation
-	| UpdatePropsOperation
-	# | MoveOperation,
-	| ReconciliationOperation
-	| UpdateCallbacksOperation
-	| UpdateCssRefsOperation
-	| UpdateRenderPropsOperation
-)
 
 RenderPath: TypeAlias = str
 
@@ -99,13 +48,13 @@ class RenderTree:
 	root: Element
 	callbacks: Callbacks
 	render_props: set[str]
-	css_refs: set[str]
+	jsexpr_paths: set[str]  # paths containing JS expressions
 
 	def __init__(self, root: Element) -> None:
 		self.root = root
 		self.callbacks = {}
 		self.render_props = set()
-		self.css_refs = set()
+		self.jsexpr_paths = set()
 		self.normalized: Element | None = None
 
 	def render(self) -> VDOM:
@@ -114,7 +63,7 @@ class RenderTree:
 		self.root = normalized
 		self.callbacks = renderer.callbacks
 		self.render_props = renderer.render_props
-		self.css_refs = renderer.css_refs
+		self.jsexpr_paths = renderer.jsexpr_paths
 		self.normalized = normalized
 		return vdom
 
@@ -135,22 +84,7 @@ class RenderTree:
 		render_props_add = sorted(render_props_next - render_props_prev)
 		render_props_remove = sorted(render_props_prev - render_props_next)
 
-		css_prev = self.css_refs
-		css_next = renderer.css_refs
-		css_add = sorted(css_next - css_prev)
-		css_remove = sorted(css_prev - css_next)
-
 		prefix: list[VDOMOperation] = []
-
-		if css_add or css_remove:
-			css_delta: PathDelta = {}
-			if css_add:
-				css_delta["add"] = css_add
-			if css_remove:
-				css_delta["remove"] = css_remove
-			prefix.append(
-				UpdateCssRefsOperation(type="update_css_refs", path="", data=css_delta)
-			)
 
 		if callback_add or callback_remove:
 			callback_delta: PathDelta = {}
@@ -176,11 +110,27 @@ class RenderTree:
 				)
 			)
 
+		jsexpr_prev = self.jsexpr_paths
+		jsexpr_next = renderer.jsexpr_paths
+		jsexpr_add = sorted(jsexpr_next - jsexpr_prev)
+		jsexpr_remove = sorted(jsexpr_prev - jsexpr_next)
+		if jsexpr_add or jsexpr_remove:
+			jsexpr_delta: PathDelta = {}
+			if jsexpr_add:
+				jsexpr_delta["add"] = jsexpr_add
+			if jsexpr_remove:
+				jsexpr_delta["remove"] = jsexpr_remove
+			prefix.append(
+				UpdateJsExprPathsOperation(
+					type="update_jsexpr_paths", path="", data=jsexpr_delta
+				)
+			)
+
 		ops = prefix + renderer.operations if prefix else renderer.operations
 
 		self.callbacks = renderer.callbacks
 		self.render_props = renderer.render_props
-		self.css_refs = renderer.css_refs
+		self.jsexpr_paths = renderer.jsexpr_paths
 		self.normalized = normalized
 		self.root = normalized
 
@@ -192,7 +142,11 @@ class RenderTree:
 			self.normalized = None
 		self.callbacks.clear()
 		self.render_props.clear()
-		self.css_refs.clear()
+		self.jsexpr_paths.clear()
+
+
+# Prefix for JSExpr values - code is embedded after the colon
+JSEXPR_PREFIX = "$js:"
 
 
 @dataclass(slots=True)
@@ -214,7 +168,7 @@ class Renderer:
 	def __init__(self) -> None:
 		self.callbacks: Callbacks = {}
 		self.render_props: set[str] = set()
-		self.css_refs: set[str] = set()
+		self.jsexpr_paths: set[str] = set()
 		self.operations: list[VDOMOperation] = []
 
 	# ------------------------------------------------------------------
@@ -226,6 +180,13 @@ class Renderer:
 			return self.render_component(node, path)
 		if isinstance(node, Node):
 			return self.render_node(node, path)
+		# Handle JSExpr as children - emit JS code with $js: prefix
+		if is_jsexpr(node):
+			# Safe cast: is_jsexpr() ensures node is JSExpr | Import
+			node_as_jsexpr = cast("JSExpr | Import", cast(object, node))
+			js_code = emit_jsexpr(node_as_jsexpr)
+			self.jsexpr_paths.add(path)
+			return f"{JSEXPR_PREFIX}{js_code}", cast(Element, node)
 		return node, node
 
 	def render_component(
@@ -453,28 +414,23 @@ class Renderer:
 			old_value = previous.get(key)
 			prop_path = join_path(path, key)
 
-			if callable(value):
-				if isinstance(old_value, (Node, ComponentNode)):
-					unmount_element(old_value)
-				if normalized is None:
-					normalized = current.copy()
-				normalized[key] = "$cb"
-				register_callback(
-					self.callbacks, prop_path, cast(Callable[..., Any], value)
-				)
-				if old_value != "$cb":
-					updated[key] = "$cb"
-				continue
-
-			if isinstance(value, CssReference):
+			if is_jsexpr(value):
 				if isinstance(old_value, (Node, ComponentNode)):
 					unmount_element(old_value)
 				if normalized is None:
 					normalized = current.copy()
 				normalized[key] = value
-				self.css_refs.add(prop_path)
-				if not isinstance(old_value, CssReference) or old_value != value:
-					updated[key] = _css_ref_token(value)
+				# Emit the JSExpr with $js: prefix - code is embedded in the value
+				js_code = emit_jsexpr(cast("JSExpr | Import", value))
+				self.jsexpr_paths.add(prop_path)
+				js_value = f"{JSEXPR_PREFIX}{js_code}"
+				old_js_code = (
+					emit_jsexpr(cast("JSExpr | Import", old_value))
+					if is_jsexpr(old_value)
+					else None
+				)
+				if old_js_code != js_code:
+					updated[key] = js_value
 				continue
 
 			if isinstance(value, (Node, ComponentNode)):
@@ -495,6 +451,19 @@ class Renderer:
 					vdom_value, normalized_value = self.render_tree(value, prop_path)
 					normalized[key] = normalized_value
 					updated[key] = vdom_value
+				continue
+
+			if callable(value):
+				if isinstance(old_value, (Node, ComponentNode)):
+					unmount_element(old_value)
+				if normalized is None:
+					normalized = current.copy()
+				normalized[key] = "$cb"
+				register_callback(
+					self.callbacks, prop_path, cast(Callable[..., Any], value)
+				)
+				if old_value != "$cb":
+					updated[key] = "$cb"
 				continue
 
 			if isinstance(old_value, (Node, ComponentNode)):
@@ -556,10 +525,6 @@ def same_node(left: Element, right: Element) -> bool:
 	if isinstance(left, ComponentNode) and isinstance(right, ComponentNode):
 		return left.fn == right.fn and left.key == right.key
 	return False
-
-
-def _css_ref_token(ref: CssReference) -> str:
-	return f"{ref.module.id}:{ref.name}"
 
 
 def unmount_element(element: Element) -> None:

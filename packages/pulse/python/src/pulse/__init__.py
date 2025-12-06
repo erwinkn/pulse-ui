@@ -51,23 +51,6 @@ from pulse.context import PulseContext as PulseContext
 # Cookies
 from pulse.cookies import Cookie as Cookie
 from pulse.cookies import SetCookie as SetCookie
-from pulse.css import (
-	CssImport as CssImport,
-)
-from pulse.css import (
-	CssModule as CssModule,
-)
-from pulse.css import (
-	CssReference as CssReference,
-)
-
-# CSS
-from pulse.css import (
-	css as css,
-)
-from pulse.css import (
-	css_module as css_module,
-)
 
 # Decorators
 from pulse.decorators import computed as computed
@@ -95,12 +78,6 @@ from pulse.form import (
 # Helpers
 from pulse.helpers import (
 	CSSProperties as CSSProperties,
-)
-from pulse.helpers import (
-	JsFunction as JsFunction,
-)
-from pulse.helpers import (
-	JsObject as JsObject,
 )
 from pulse.helpers import (
 	later as later,
@@ -1431,12 +1408,16 @@ from pulse.reactive_extensions import (
 from pulse.reactive_extensions import (
 	unwrap as unwrap,
 )
+
+# JavaScript execution
+from pulse.render_session import JsExecError as JsExecError
 from pulse.render_session import (
 	RenderSession as RenderSession,
 )
 from pulse.render_session import (
 	RouteMount as RouteMount,
 )
+from pulse.render_session import run_js as run_js
 
 # Request
 from pulse.request import PulseRequest as PulseRequest
@@ -1450,6 +1431,11 @@ from pulse.serializer import serialize as serialize
 
 # State and routing
 from pulse.state import State as State
+from pulse.transpiler.function import JsFunction as JsFunction
+from pulse.transpiler.function import javascript as javascript
+from pulse.transpiler.imports import CssImport as CssImport
+from pulse.transpiler.imports import Import as Import
+from pulse.transpiler.imports import import_js as import_js
 
 # Types
 from pulse.types.event_handler import (

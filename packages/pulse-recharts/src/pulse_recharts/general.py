@@ -417,7 +417,7 @@ class LabelListProps(ps.HTMLSVGProps[GenericHTMLElement], Generic[T], total=Fals
 	data: list[T]
 	"The data input to the charts."
 
-	valueAccessor: ps.JsFunction[[T, int], str | int]
+	valueAccessor: ps.JsFunction[T, int, str | int]
 	"The accessor function to get the value of each label: (entry: T, idx: int) => str | int"
 
 	clockwise: bool
@@ -436,9 +436,9 @@ class LabelListProps(ps.HTMLSVGProps[GenericHTMLElement], Generic[T], total=Fals
 
 	textBreakAll: bool
 
-	formatter: ps.JsFunction[[ps.Element], ps.Element]
+	formatter: ps.JsFunction[ps.Element, ps.Element]
 
-	content: ps.Element | ps.JsFunction[[ps.Element], ps.Element]
+	content: ps.Element | ps.JsFunction[ps.Element, ps.Element]
 	"""If set a React element, the option is the customized react element of rendering each label. If set a function, the function will be called to render each label content.
 Examples:
 <LabelList content={<CustomizedLabel external={external} />} />

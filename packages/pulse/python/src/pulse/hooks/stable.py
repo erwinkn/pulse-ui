@@ -8,7 +8,7 @@ TCallable = TypeVar("TCallable", bound=Callable[..., Any])
 
 
 class StableEntry:
-	__slots__: tuple[str, ...] = ("value", "wrapper")
+	__slots__ = ("value", "wrapper")  # pyright: ignore[reportUnannotatedClassAttribute]
 	value: Any
 	wrapper: Callable[..., Any]
 
@@ -25,7 +25,7 @@ class StableEntry:
 
 
 class StableRegistry(HookState):
-	__slots__: tuple[str, ...] = ("entries",)
+	__slots__ = ("entries",)  # pyright: ignore[reportUnannotatedClassAttribute]
 
 	def __init__(self) -> None:
 		super().__init__()

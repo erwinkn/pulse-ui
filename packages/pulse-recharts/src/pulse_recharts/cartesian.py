@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, TypedDict, Unpack
+from typing import Any, Literal, Protocol, TypedDict, Unpack
 
 import pulse as ps
 from pulse.html.elements import GenericHTMLElement
@@ -34,7 +34,7 @@ YAxisOrientation = Literal["left", "right"]
 TickProp = (
 	ps.HTMLSVGProps[GenericHTMLElement]
 	| ps.Element
-	| ps.JsFunction[[Any], ps.Element]
+	| ps.JsFunction[Any, ps.Element]
 	| bool
 )
 
@@ -135,7 +135,7 @@ class BaseAxisProps(TypedDict, total=False):
 	tickSize: float
 	"""The size of tick line"""
 
-	tickFormatter: ps.JsFunction[[Any, int], str]
+	tickFormatter: ps.JsFunction[Any, int, str]
 	"""The formatter function of tick"""
 
 	allowDataOverflow: bool
@@ -260,17 +260,17 @@ def YAxis(key: str | None = None, **props: Unpack[YAxisProps]): ...
 
 
 # TODO
-class AxisPropsForCartesianGridTicksGeneration(ps.JsObject): ...
+class AxisPropsForCartesianGridTicksGeneration(Protocol): ...
 
 
-class HorizontalCoordinateProps(ps.JsObject):
+class HorizontalCoordinateProps(Protocol):
 	yAxis: AxisPropsForCartesianGridTicksGeneration
 	width: float
 	height: float
 	offset: ChartOffsetInternal
 
 
-class VerticalCoordinateProps(ps.JsObject):
+class VerticalCoordinateProps(Protocol):
 	xAxis: AxisPropsForCartesianGridTicksGeneration
 	width: float
 	height: float
@@ -278,7 +278,7 @@ class VerticalCoordinateProps(ps.JsObject):
 
 
 # TODO
-class GridLineTypeFunctionProps(ps.JsObject): ...
+class GridLineTypeFunctionProps(Protocol): ...
 
 
 # SVGLineElementProps in practice
@@ -372,7 +372,7 @@ class CartesianGridProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 def CartesianGrid(key: str | None = None, **props: Unpack[CartesianGridProps]): ...
 
 
-class LinePointItem(ps.JsObject):
+class LinePointItem(Protocol):
 	value: float
 	payload: Any | None
 	"""Arbitrary data point payload associated with this coordinate, if any."""
@@ -387,7 +387,7 @@ ActiveDotType = (
 	ps.HTMLSVGProps[GenericHTMLElement]
 	| ps.Element
 	| bool
-	| ps.JsFunction[[Any], ps.Element]
+	| ps.JsFunction[Any, ps.Element]
 )
 
 
@@ -421,7 +421,7 @@ class LineProps(CurveProps, total=False):
 	"""Controls rendering of the active dot when tooltip is active.
     Same options as 'dot'. Default: True"""
 
-	label: bool | dict[str, Any] | ps.Element | ps.JsFunction[[Any], ps.Element]
+	label: bool | dict[str, Any] | ps.Element | ps.JsFunction[Any, ps.Element]
 	"""Controls rendering of labels on the line points.
 	- False: no labels
 	- True: default labels
@@ -501,4 +501,4 @@ class BarProps(RectangleProps, total=False):
 	# label: bool | str | float | ??
 
 
-ActiveBar = bool | ps.Element | ps.JsFunction[[BarProps], ps.Element]
+ActiveBar = bool | ps.Element | ps.JsFunction[BarProps, ps.Element]

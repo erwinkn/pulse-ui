@@ -1,0 +1,2 @@
+class JSCompilationError(Exception):
+	pass

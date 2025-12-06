@@ -7,6 +7,7 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 
 import functools
 import math
+import re
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from inspect import Parameter, signature
@@ -14,11 +15,13 @@ from types import NoneType
 from typing import (
 	Any,
 	Generic,
+	Literal,
 	NamedTuple,
 	NotRequired,
 	ParamSpec,
 	TypeAlias,
 	TypedDict,
+	final,
 	overload,
 	override,
 )
@@ -94,11 +97,16 @@ class Callback(NamedTuple):
 	n_args: int
 
 
-def NOOP(*_args: Any):
-	return None
-
-
+@final
 class Node:
+	__slots__ = (
+		"tag",
+		"props",
+		"children",
+		"allow_children",
+		"key",
+	)
+
 	tag: str
 	props: dict[str, Any] | None
 	children: "Sequence[Element] | None"
@@ -284,7 +292,19 @@ class Component(Generic[P]):
 		return self.name
 
 
+@final
 class ComponentNode:
+	__slots__ = (
+		"fn",
+		"args",
+		"kwargs",
+		"key",
+		"name",
+		"takes_children",
+		"hooks",
+		"contents",
+	)
+
 	fn: Callable[..., Any]
 	args: tuple[Any, ...]
 	kwargs: dict[str, Any]
@@ -292,6 +312,7 @@ class ComponentNode:
 	name: str
 	takes_children: bool
 	hooks: HookContext
+	contents: "Element | None"
 
 	def __init__(
 		self,
@@ -309,7 +330,7 @@ class ComponentNode:
 		self.name = name or _infer_component_name(fn)
 		self.takes_children = takes_children
 		# Used for rendering
-		self.contents: Element | None = None
+		self.contents = None
 		self.hooks = HookContext()
 		# Dev-only validation for JSON-unsafe values
 		if env.pulse_env == "dev":
@@ -388,9 +409,93 @@ Callbacks = dict[str, Callback]
 VDOM: TypeAlias = VDOMNode | Primitive
 Props = dict[str, Any]
 
+
+# ============================================================================
+# VDOM Operations (updates sent from server to client)
+# ============================================================================
+
+
+class ReplaceOperation(TypedDict):
+	type: Literal["replace"]
+	path: str
+	data: VDOM
+
+
+# This payload makes it easy for the client to rebuild an array of React nodes
+# from the previous children array:
+# - Allocate array of size N
+# - For i in 0..N-1, check the following scenarios
+#   - i matches the next index in `new` -> use provided tree
+#   - i matches the next index in `reuse` -> reuse previous child
+#   - otherwise, reuse the element at the same index
+class ReconciliationOperation(TypedDict):
+	type: Literal["reconciliation"]
+	path: str
+	N: int
+	new: tuple[list[int], list[VDOM]]
+	reuse: tuple[list[int], list[int]]
+
+
+class UpdatePropsDelta(TypedDict, total=False):
+	# Only send changed/new keys under `set` and removed keys under `remove`
+	set: Props
+	remove: list[str]
+
+
+class UpdatePropsOperation(TypedDict):
+	type: Literal["update_props"]
+	path: str
+	data: UpdatePropsDelta
+
+
+class PathDelta(TypedDict, total=False):
+	add: list[str]
+	remove: list[str]
+
+
+class UpdateCallbacksOperation(TypedDict):
+	type: Literal["update_callbacks"]
+	path: str
+	data: PathDelta
+
+
+class UpdateRenderPropsOperation(TypedDict):
+	type: Literal["update_render_props"]
+	path: str
+	data: PathDelta
+
+
+class UpdateJsExprPathsOperation(TypedDict):
+	type: Literal["update_jsexpr_paths"]
+	path: str
+	data: PathDelta
+
+
+VDOMOperation: TypeAlias = (
+	ReplaceOperation
+	| UpdatePropsOperation
+	| ReconciliationOperation
+	| UpdateCallbacksOperation
+	| UpdateRenderPropsOperation
+	| UpdateJsExprPathsOperation
+)
+
+
 # ----------------------------------------------------------------------------
 # Component naming heuristics
 # ----------------------------------------------------------------------------
+
+
+def _clean_parent_name_for_warning(parent_name: str) -> str:
+	"""Strip $$ prefix and hexadecimal suffix from ReactComponent tags in warning messages.
+
+	ReactComponent tags are in the format <$$ComponentName_1a2b> or <$$ComponentName_1a2b.prop>.
+	This function strips the $$ prefix and _1a2b suffix to show just the component name.
+	"""
+
+	# Match ReactComponent tags: <$$ComponentName_hex> or <$$ComponentName_hex.prop>
+	# Strip the $$ prefix and _hex suffix but keep the rest (hex digits are 0-9, a-f)
+	return re.sub(r"\$\$([^_]+)_[0-9a-f]+", r"\1", parent_name)
 
 
 def _flatten_children(
@@ -424,9 +529,10 @@ def _flatten_children(
 				visit(sub)
 			if missing_key:
 				# Warn once per iterable without keys on its elements.
+				clean_name = _clean_parent_name_for_warning(parent_name)
 				warnings.warn(
 					(
-						f"[Pulse] Iterable children of {parent_name} contain elements without 'key'. "
+						f"[Pulse] Iterable children of {clean_name} contain elements without 'key'. "
 						"Add a stable 'key' to each element inside iterables to improve reconciliation."
 					),
 					stacklevel=warn_stacklevel,

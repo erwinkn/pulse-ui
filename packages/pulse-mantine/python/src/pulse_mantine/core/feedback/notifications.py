@@ -12,7 +12,7 @@ from ..styles import StyleFn
 from ..theme import MantineRadius
 from ..types import MantineColor
 
-ps.css("@mantine/notifications/styles.css")
+ps.CssImport("@mantine/notifications/styles.css")
 
 
 NotificationRootCSSVariables = Literal["--notification-radius", "--notification-color"]

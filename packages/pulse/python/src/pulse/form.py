@@ -278,7 +278,7 @@ class ManualForm(Disposable):
 
 
 class FormStorage(HookState):
-	__slots__: tuple[str, ...] = ("forms", "prev_forms", "render_mark")
+	__slots__ = ("forms", "prev_forms", "render_mark")  # pyright: ignore[reportUnannotatedClassAttribute]
 	render_mark: int
 
 	def __init__(self) -> None:

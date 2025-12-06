@@ -364,11 +364,11 @@ def get_client_address(request: Request) -> str | None:
 	"""Best-effort client origin/address from an HTTP request.
 
 	Preference order:
-	  1) Origin (full scheme://host:port)
-	  1b) Referer (full URL) when Origin missing during prerender forwarding
+	  1) Origin header (full scheme://host:port)
+	  1b) Referer header (full URL) when Origin missing
 	  2) Forwarded header (proto + for)
 	  3) X-Forwarded-* headers
-	  4) request.client host:port
+	  4) Host header (server address the client connected to)
 	"""
 	try:
 		origin = request.headers.get("origin")
@@ -402,14 +402,10 @@ def get_client_address(request: Request) -> str | None:
 				host = "localhost"
 			return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
 
-		host = request.client.host if request.client else ""
-		port = request.client.port if request.client else None
-		if host in ("127.0.0.1", "::1"):
-			host = "localhost"
-		if host and port:
-			return f"{proto}://{host}:{port}"
-		if host:
-			return f"{proto}://{host}"
+		# Fallback: use Host header which contains the server address the client connected to
+		host_header = request.headers.get("host")
+		if host_header:
+			return f"{proto}://{host_header}"
 		return None
 	except Exception:
 		return None
@@ -447,14 +443,10 @@ def get_client_address_socketio(environ: dict[str, Any]) -> str | None:
 				host = "localhost"
 			return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
 
-		host = environ.get("REMOTE_ADDR", "")
-		port = environ.get("REMOTE_PORT")
-		if host in ("127.0.0.1", "::1"):
-			host = "localhost"
-		if host and port:
-			return f"{proto}://{host}:{port}"
-		if host:
-			return f"{proto}://{host}"
+		# Fallback: use HTTP_HOST which contains the server address the client connected to
+		host_header = environ.get("HTTP_HOST")
+		if host_header:
+			return f"{proto}://{host_header}"
 		return None
 	except Exception:
 		return None

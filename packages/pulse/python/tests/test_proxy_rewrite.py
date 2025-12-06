@@ -1,5 +1,6 @@
 """Tests for ReactProxy URL rewriting and get_client_address fallback."""
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -18,7 +19,7 @@ class TestReactProxyUrlRewrite:
 			server_address="http://localhost:8000",
 		)
 		assert (
-			proxy._rewrite_url("http://localhost:5173/foo")
+			proxy.rewrite_url("http://localhost:5173/foo")
 			== "http://localhost:8000/foo"
 		)
 
@@ -28,7 +29,7 @@ class TestReactProxyUrlRewrite:
 			server_address="http://localhost:8000",
 		)
 		assert (
-			proxy._rewrite_url("http://localhost:5173/path?a=1")
+			proxy.rewrite_url("http://localhost:5173/path?a=1")
 			== "http://localhost:8000/path?a=1"
 		)
 
@@ -37,14 +38,14 @@ class TestReactProxyUrlRewrite:
 			react_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
-		assert proxy._rewrite_url("http://example.com/foo") == "http://example.com/foo"
+		assert proxy.rewrite_url("http://example.com/foo") == "http://example.com/foo"
 
 	def test_does_not_rewrite_relative_paths(self):
 		proxy = ReactProxy(
 			react_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
-		assert proxy._rewrite_url("/foo/bar") == "/foo/bar"
+		assert proxy.rewrite_url("/foo/bar") == "/foo/bar"
 
 
 class TestGetClientAddressFallback:
@@ -94,7 +95,7 @@ class TestGetClientAddressFallback:
 		assert result == "https://example.com"
 
 	def test_returns_none_when_no_headers(self):
-		scope = {
+		scope: dict[str, Any] = {
 			"type": "http",
 			"method": "GET",
 			"path": "/",
@@ -168,7 +169,7 @@ class TestReactProxyHeaderRewrite:
 		mock_client = MagicMock()
 		mock_client.build_request = MagicMock()
 		mock_client.send = AsyncMock(return_value=mock_response)
-		proxy._client = mock_client
+		proxy._client = mock_client  # pyright: ignore[reportPrivateUsage]
 
 		request = self._make_request("/")
 		response = await proxy(request)
@@ -198,7 +199,7 @@ class TestReactProxyHeaderRewrite:
 		mock_client = MagicMock()
 		mock_client.build_request = MagicMock()
 		mock_client.send = AsyncMock(return_value=mock_response)
-		proxy._client = mock_client
+		proxy._client = mock_client  # pyright: ignore[reportPrivateUsage]
 
 		request = self._make_request("/api")
 		response = await proxy(request)
@@ -227,7 +228,7 @@ class TestReactProxyHeaderRewrite:
 		mock_client = MagicMock()
 		mock_client.build_request = MagicMock()
 		mock_client.send = AsyncMock(return_value=mock_response)
-		proxy._client = mock_client
+		proxy._client = mock_client  # pyright: ignore[reportPrivateUsage]
 
 		request = self._make_request("/")
 		response = await proxy(request)

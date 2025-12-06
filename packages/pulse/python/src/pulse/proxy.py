@@ -41,7 +41,7 @@ class ReactProxy:
 		self.server_address = server_address
 		self._client = None
 
-	def _rewrite_url(self, url: str) -> str:
+	def rewrite_url(self, url: str) -> str:
 		"""Rewrite internal React server URLs to external server address."""
 		if self.react_server_address in url:
 			return url.replace(self.react_server_address, self.server_address)
@@ -207,7 +207,7 @@ class ReactProxy:
 			response_headers: dict[str, str] = {}
 			for k, v in r.headers.items():
 				if k.lower() in ("location", "content-location"):
-					v = self._rewrite_url(v)
+					v = self.rewrite_url(v)
 				response_headers[k] = v
 
 			return StreamingResponse(

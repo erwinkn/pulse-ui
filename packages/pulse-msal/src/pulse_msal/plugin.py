@@ -72,8 +72,12 @@ def auth(session_key: str = SESSION_KEY) -> dict[str, Any] | None:
 	return cast(dict[str, Any] | None, ps.session().get(session_key, {}).get("auth"))
 
 
-def login(next: str | None = None):
-	url = "/auth/login"
+def login(next: str | None = None, route_prefix: str = ""):
+	# Normalize route_prefix: ensure it starts with / and doesn't end with /
+	prefix = route_prefix.strip("/")
+	if prefix:
+		prefix = f"/{prefix}"
+	url = f"{prefix}/auth/login" if prefix else "/auth/login"
 	if next:
 		url += f"?next={quote(next)}"
 	ps.navigate(url)
@@ -91,6 +95,7 @@ class MSALPlugin(ps.Plugin):
 	session_key: str
 	claims_mapper: ClaimsMapper
 	token_cache_store: TokenCacheStore | None
+	route_prefix: str
 
 	def __init__(
 		self,
@@ -103,6 +108,7 @@ class MSALPlugin(ps.Plugin):
 		session_key: str | None = None,
 		claims_mapper: ClaimsMapper | None = None,
 		token_cache_store: TokenCacheStore | None = None,
+		route_prefix: str = "",
 	) -> None:
 		self.client_id = client_id
 		self.client_secret = client_secret
@@ -112,6 +118,10 @@ class MSALPlugin(ps.Plugin):
 		self.session_key = session_key or SESSION_KEY
 		self.claims_mapper = claims_mapper or _default_claims_mapper
 		self.token_cache_store = token_cache_store
+		# Normalize route_prefix: ensure it starts with / and doesn't end with /
+		self.route_prefix = route_prefix.strip("/")
+		if self.route_prefix:
+			self.route_prefix = f"/{self.route_prefix}"
 
 	def cca(self, cache: msal.TokenCache):
 		return msal.ConfidentialClientApplication(
@@ -138,7 +148,16 @@ class MSALPlugin(ps.Plugin):
 				base_dir = Path(app.codegen.cfg.web_root) / ".pulse" / "msal_cache"
 				self.token_cache_store = FileTokenCacheStore(base_dir)
 
-		@app.fastapi.get("/auth/login")
+		login_path = (
+			f"{self.route_prefix}/auth/login" if self.route_prefix else "/auth/login"
+		)
+		callback_path = (
+			f"{self.route_prefix}/auth/callback"
+			if self.route_prefix
+			else "/auth/callback"
+		)
+
+		@app.fastapi.get(login_path)
 		def auth_login(request: Request):  # pyright: ignore[reportUnusedFunction]
 			sess = ps.session()
 			ctx = sess.setdefault(self.session_key, {})
@@ -153,7 +172,7 @@ class MSALPlugin(ps.Plugin):
 						pass
 
 			cca = self.cca(cache)
-			redirect_uri = f"{app.server_address}/auth/callback"
+			redirect_uri = f"{app.server_address}{callback_path}"
 
 			flow: dict[str, Any] = cca.initiate_auth_code_flow(
 				scopes=self.scopes,
@@ -166,7 +185,7 @@ class MSALPlugin(ps.Plugin):
 			ctx["client_address"] = get_client_address(request)
 			return RedirectResponse(url=flow["auth_uri"])  # type: ignore[index]
 
-		@app.fastapi.get("/auth/callback")
+		@app.fastapi.get(callback_path)
 		def auth_callback(request: Request):  # pyright: ignore[reportUnusedFunction]
 			sess = ps.session()
 			ctx: dict[str, Any] = sess.setdefault(self.session_key, {})

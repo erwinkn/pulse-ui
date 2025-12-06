@@ -576,7 +576,10 @@ class App:
 					+ "Use 'pulse run' CLI command or set the environment variable."
 				)
 
-			proxy_handler = ReactProxy(react_server_address)
+			proxy_handler = ReactProxy(
+				react_server_address=react_server_address,
+				server_address=server_address,
+			)
 
 			@self.fastapi.api_route(
 				"/{path:path}",

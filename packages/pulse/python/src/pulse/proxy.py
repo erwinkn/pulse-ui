@@ -21,18 +21,31 @@ logger = logging.getLogger(__name__)
 class ReactProxy:
 	"""
 	Handles proxying HTTP requests and WebSocket connections to React Router server.
+
+	In single-server mode, the Python server proxies unmatched routes to the React
+	dev server. This proxy rewrites URLs in responses to use the external server
+	address instead of the internal React server address.
 	"""
 
 	react_server_address: str
+	server_address: str
 	_client: httpx.AsyncClient | None
 
-	def __init__(self, react_server_address: str):
+	def __init__(self, react_server_address: str, server_address: str):
 		"""
 		Args:
-		    react_server_address: React Router server full URL (required in single-server mode)
+		    react_server_address: Internal React Router server URL (e.g., http://localhost:5173)
+		    server_address: External server URL exposed to clients (e.g., http://localhost:8000)
 		"""
 		self.react_server_address = react_server_address
+		self.server_address = server_address
 		self._client = None
+
+	def _rewrite_url(self, url: str) -> str:
+		"""Rewrite internal React server URLs to external server address."""
+		if self.react_server_address in url:
+			return url.replace(self.react_server_address, self.server_address)
+		return url
 
 	@property
 	def client(self) -> httpx.AsyncClient:
@@ -190,12 +203,12 @@ class ReactProxy:
 			# Send request with streaming
 			r = await self.client.send(req, stream=True)
 
-			# Filter out headers that shouldn't be present in streaming responses
-			response_headers = {
-				k: v
-				for k, v in r.headers.items()
-				# if k.lower() not in ("content-length", "transfer-encoding")
-			}
+			# Rewrite headers that may contain internal React server URLs
+			response_headers: dict[str, str] = {}
+			for k, v in r.headers.items():
+				if k.lower() in ("location", "content-location"):
+					v = self._rewrite_url(v)
+				response_headers[k] = v
 
 			return StreamingResponse(
 				r.aiter_raw(),

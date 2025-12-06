@@ -88,7 +88,7 @@ DEFAULT_HOOK_KEY = object()
 
 
 class HookNamespace(Generic[T]):
-	__slots__: tuple[str, ...] = ("hook", "states")
+	__slots__ = ("hook", "states")  # pyright: ignore[reportUnannotatedClassAttribute]
 	hook: Hook[T]
 
 	def __init__(self, hook: Hook[T]) -> None:
@@ -265,7 +265,7 @@ HOOK_REGISTRY: HookRegistry = HookRegistry()
 
 
 class HooksAPI:
-	__slots__: tuple[()] = ()
+	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
 
 	State: type[HookState] = HookState
 	Metadata: type[HookMetadata] = HookMetadata

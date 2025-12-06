@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import linecache
 import os
 import socket
 from abc import ABC, abstractmethod
@@ -8,7 +9,6 @@ from functools import wraps
 from typing import (
 	Any,
 	ParamSpec,
-	Protocol,
 	Self,
 	TypedDict,
 	TypeVar,
@@ -43,18 +43,50 @@ def values_equal(a: Any, b: Any) -> bool:
 	return False
 
 
+def getsourcecode(obj: Any) -> str:
+	"""Get source code for an object, handling stale cache issues after module renames.
+
+	This is a wrapper around inspect.getsource() that handles cases where the
+	linecache has stale entries after module renames or when source files have moved.
+	"""
+	# Try to get source first without clearing cache (common case)
+	try:
+		return inspect.getsource(obj)
+	except OSError:
+		# If that fails, it might be a stale cache issue after module rename
+		# Clear cache and try again
+		linecache.clearcache()
+		try:
+			return inspect.getsource(obj)
+		except OSError:
+			# Still failing - code object might have a stale filename
+			# Get the actual source file from the module and update cache manually
+			module = inspect.getmodule(obj)
+			if module and hasattr(module, "__file__") and module.__file__:
+				module_file = module.__file__
+				if module_file.endswith(".pyc"):
+					module_file = module_file[:-1]
+				if os.path.exists(module_file):
+					# Read the file and update cache with code object's filename
+					with open(module_file, "r", encoding="utf-8") as f:
+						lines = f.readlines()
+					code_filename = obj.__code__.co_filename
+					linecache.cache[code_filename] = (
+						len(lines),
+						None,
+						lines,
+						code_filename,
+					)
+					# Try again after updating cache
+					return inspect.getsource(obj)
+			raise
+
+
 T = TypeVar("T")
 P = ParamSpec("P")
 
-
-JsFunction = Callable[P, T]
-
 # In case we refine it later
 CSSProperties = dict[str, Any]
-
-
-# Will be replaced by a JS transpiler type
-class JsObject(Protocol): ...
 
 
 MISSING = object()

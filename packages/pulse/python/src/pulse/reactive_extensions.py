@@ -45,7 +45,7 @@ class SupportsKeysAndGetItem(Protocol[T1, T2_co]):
 
 # Return an iterable view that subscribes to per-key signals during iteration
 class ReactiveDictItems(Generic[T1, T2]):
-	__slots__: tuple[str, ...] = ("_host",)
+	__slots__ = ("_host",)  # pyright: ignore[reportUnannotatedClassAttribute]
 	_host: ReactiveDict[T1, T2]
 
 	def __init__(self, host: ReactiveDict[T1, T2]) -> None:
@@ -60,7 +60,7 @@ class ReactiveDictItems(Generic[T1, T2]):
 
 
 class ReactiveDictValues(Generic[T1, T2]):
-	__slots__: tuple[str, ...] = ("_host",)
+	__slots__ = ("_host",)  # pyright: ignore[reportUnannotatedClassAttribute]
 	_host: ReactiveDict[T1, T2]
 
 	def __init__(self, host: ReactiveDict[T1, T2]) -> None:
@@ -84,7 +84,7 @@ class ReactiveDict(dict[T1, T2]):
 	- Iteration, membership checks, and len are reactive to structural changes
 	"""
 
-	__slots__: tuple[str, ...] = ("_signals", "_structure")
+	__slots__ = ("_signals", "_structure")  # pyright: ignore[reportUnannotatedClassAttribute]
 
 	def __init__(self, initial: Mapping[T1, T2] | None = None) -> None:
 		super().__init__()
@@ -409,7 +409,7 @@ class ReactiveList(list[T1]):
 	- len() subscribes to structural changes
 	"""
 
-	__slots__: tuple[str, ...] = ("_signals", "_structure")
+	__slots__ = ("_signals", "_structure")  # pyright: ignore[reportUnannotatedClassAttribute]
 
 	def __init__(self, initial: Iterable[T1] | None = None) -> None:
 		super().__init__()
@@ -645,7 +645,7 @@ class ReactiveSet(set[T1]):
 	- Iteration subscribes to membership signals for all elements
 	"""
 
-	__slots__: tuple[str, ...] = ("_signals",)
+	__slots__ = ("_signals",)  # pyright: ignore[reportUnannotatedClassAttribute]
 
 	def __init__(self, initial: Iterable[T1] | None = None) -> None:
 		super().__init__()

@@ -1,12 +1,12 @@
 from typing import Any
 
 import pulse as ps
-from pulse.codegen.imports import ImportStatement
+from pulse.transpiler.imports import CssImport
 
 
 @ps.react_component(
 	"ChartTooltip",
 	"@mantine/charts",
-	extra_imports=[ImportStatement(src="@mantine/charts/styles.css", side_effect=True)],
+	extra_imports=[CssImport("@mantine/charts/styles.css")],
 )
 def ChartTooltip(key: str | None = None, **props: Any): ...

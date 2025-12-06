@@ -1,0 +1,76 @@
+/**
+ * CSS Module demonstrating the new registry system.
+ * Classes are resolved at runtime via the __registry.
+ */
+
+.card {
+  padding: 24px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  font-size: 14px;
+  opacity: 0.85;
+  margin-bottom: 16px;
+}
+
+.button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.buttonPrimary {
+  background: white;
+  color: #667eea;
+}
+
+.buttonPrimary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.buttonSecondary {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.buttonSecondary:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.active {
+  ring: 2px solid white;
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+
+.greeting {
+  font-size: 18px;
+  font-weight: 500;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  margin-top: 16px;
+}
+
+.jsxChild {
+  margin-top: 16px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  font-style: italic;
+}

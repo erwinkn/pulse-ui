@@ -16,35 +16,58 @@ import type { PulsePrerenderView } from "./pulse";
 import type { ComponentRegistry, PathDelta, VDOMNode, VDOMUpdate } from "./vdom";
 import { FRAGMENT_TAG, isElementNode, isMountPointNode, MOUNT_POINT_PREFIX } from "./vdom";
 
+// Prefix for JSExpr values - code is embedded after the colon
+const JSEXPR_PREFIX = "$js:";
+
 export class VDOMRenderer {
 	#callbacks: Set<string>;
 	#callbackCache: Map<string, (...args: any) => void>;
 	#renderPropKeys: Set<string>;
-	#cssProps: Set<string>;
+	#jsexprPaths: Set<string>; // paths containing JS expressions
 	#callbackList: string[];
 	#client: PulseSocketIOClient;
 	#path: string;
-	#components: ComponentRegistry;
-	#cssModules: Record<string, Record<string, string>>;
+	#registry: Record<string, unknown>;
 
 	constructor(
 		client: PulseSocketIOClient,
 		path: string,
-		components: ComponentRegistry,
-		cssModules: Record<string, Record<string, string>>,
 		initialCallbacks: string[] = [],
 		initialRenderProps: string[] = [],
-		initialCssRefs: string[] = [],
+		registry: Record<string, unknown> = {},
+		initialJsExprPaths: string[] = [],
 	) {
 		this.#client = client;
 		this.#path = path;
-		this.#components = components;
-		this.#cssModules = cssModules;
+		this.#registry = registry;
 		this.#callbacks = new Set(initialCallbacks);
 		this.#callbackCache = new Map();
 		this.#renderPropKeys = new Set(initialRenderProps);
-		this.#cssProps = new Set(initialCssRefs);
+		this.#jsexprPaths = new Set(initialJsExprPaths);
 		this.#callbackList = [...this.#callbacks].sort();
+	}
+
+	/**
+	 * Get an object from the unified registry by its key (e.g., "Button_1").
+	 */
+	getObject(key: string): unknown {
+		const obj = this.#registry[key];
+		if (obj === undefined) {
+			throw new Error(`[Pulse] Unknown registry key: ${key}`);
+		}
+		return obj;
+	}
+
+	/**
+	 * Evaluate a JSExpr code string.
+	 * The code is expected to use get_object('key') calls to retrieve values from the registry.
+	 */
+	evaluateJsExpr(code: string): unknown {
+		// Create the get_object function that the code will call
+		const get_object = (key: string) => this.getObject(key);
+		// Use Function constructor to avoid direct eval
+		// The code is trusted (generated server-side) and uses get_object to access values
+		return new Function("get_object", `return ${code}`)(get_object);
 	}
 
 	// Accessors used by update logic to determine which props need rebinding
@@ -93,15 +116,15 @@ export class VDOMRenderer {
 		}
 	}
 
-	applyCssRefsDelta(delta: PathDelta) {
+	applyJsExprPathsDelta(delta: PathDelta) {
 		if (delta.remove) {
-			for (const prop of delta.remove) {
-				this.#cssProps.delete(prop);
+			for (const key of delta.remove) {
+				this.#jsexprPaths.delete(key);
 			}
 		}
 		if (delta.add) {
-			for (const prop of delta.add) {
-				this.#cssProps.add(prop);
+			for (const key of delta.add) {
+				this.#jsexprPaths.add(key);
 			}
 		}
 	}
@@ -121,9 +144,17 @@ export class VDOMRenderer {
 		if (
 			node == null || // catches both null and undefined
 			typeof node === "boolean" ||
-			typeof node === "number" ||
-			typeof node === "string"
+			typeof node === "number"
 		) {
+			return node;
+		}
+
+		// Check for JSExpr - "$js:code" format has code embedded in the value
+		if (typeof node === "string") {
+			if (node.startsWith(JSEXPR_PREFIX)) {
+				const jsExprCode = node.slice(JSEXPR_PREFIX.length);
+				return this.evaluateJsExpr(jsExprCode) as ReactNode;
+			}
 			return node;
 		}
 
@@ -149,7 +180,7 @@ export class VDOMRenderer {
 
 			if (isMountPointNode(node)) {
 				const componentKey = node.tag.slice(MOUNT_POINT_PREFIX.length);
-				const Component = this.#components[componentKey]!;
+				const Component = this.#registry[componentKey] as ComponentRegistry[string];
 				if (!Component) {
 					throw new Error(
 						`Could not find component ${componentKey}. This is a Pulse internal error.`,
@@ -180,33 +211,12 @@ export class VDOMRenderer {
 		if (this.#renderPropKeys.has(propPath)) {
 			return this.renderNode(value, propPath);
 		}
-		if (this.#cssProps.has(propPath)) {
-			return this.#resolveCssToken(value);
+		// Check for JSExpr - "$js:code" format has code embedded in the value
+		if (typeof value === "string" && value.startsWith(JSEXPR_PREFIX)) {
+			const jsExprCode = value.slice(JSEXPR_PREFIX.length);
+			return this.evaluateJsExpr(jsExprCode);
 		}
 		return value;
-	}
-
-	#resolveCssToken(token: string): string {
-		const idx = token.indexOf(":");
-		if (idx === -1) {
-			return token;
-		}
-		const moduleId = token.slice(0, idx);
-		const className = token.slice(idx + 1);
-		if (!moduleId || !className) {
-			return token;
-		}
-		const mod = this.#cssModules[moduleId];
-		if (!mod) {
-			throw new Error(`Received CSS reference for unknown module '${moduleId}'`);
-		}
-		const resolved = mod[className];
-		if (typeof resolved !== "string") {
-			throw new Error(
-				`Received CSS reference for missing class '${className}' in module '${moduleId}'`,
-			);
-		}
-		return resolved;
 	}
 
 	init(view: PulsePrerenderView): ReactNode {
@@ -221,8 +231,8 @@ export class VDOMRenderer {
 		// Set render props
 		this.#renderPropKeys = new Set(view.render_props);
 
-		// Set CSS refs
-		this.#cssProps = new Set(view.css_refs);
+		// Set JSExpr paths
+		this.#jsexprPaths = new Set(view.jsexpr_paths);
 
 		return this.renderNode(view.vdom);
 	}
@@ -240,12 +250,12 @@ export class VDOMRenderer {
 				this.applyCallbackDelta(update.data);
 				continue;
 			}
-			if (update.type === "update_css_refs") {
-				this.applyCssRefsDelta(update.data);
-				continue;
-			}
 			if (update.type === "update_render_props") {
 				this.applyRenderPropsDelta(update.data);
+				continue;
+			}
+			if (update.type === "update_jsexpr_paths") {
+				this.applyJsExprPathsDelta(update.data);
 				continue;
 			}
 

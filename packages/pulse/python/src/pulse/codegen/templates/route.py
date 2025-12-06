@@ -1,266 +1,353 @@
-from collections.abc import Iterable, Sequence
-from typing import TypedDict, TypeVarTuple
+"""Route code generation using the javascript_v2 import system."""
 
-from mako.template import Template
+from __future__ import annotations
 
-from pulse.codegen.imports import Imports, ImportStatement
-from pulse.codegen.js import ExternalJsFunction, JsFunction
-from pulse.codegen.utils import NameRegistry
+import os
+from collections.abc import Sequence
+from pathlib import Path
+
 from pulse.react_component import ReactComponent
-from pulse.routing import Layout, Route
-
-Args = TypeVarTuple("Args")
-
-
-class ComponentInfo(TypedDict):
-	key: str
-	expr: str
-	src: str
-	name: str
-	default: bool
-	lazy: bool
-	dynamic: str
+from pulse.transpiler.constants import JsConstant
+from pulse.transpiler.function import AnyJsFunction, JsFunction, registered_functions
+from pulse.transpiler.imports import Import, registered_imports
 
 
-class CssModuleImport(TypedDict):
-	id: str
-	import_path: str
+def _generate_import_statement(src: str, imports: list[Import]) -> str:
+	"""Generate import statement(s) for a source module."""
+	default_imports: list[Import] = []
+	namespace_imports: list[Import] = []
+	named_imports: list[Import] = []
+	type_imports: list[Import] = []
+	has_side_effect = False
 
-
-class CssModuleCtx(TypedDict):
-	id: str
-	identifier: str
-
-
-class RouteTemplate:
-	"""
-	Helper to resolve names and build import statements before rendering a route file.
-
-	- Maintains a per-file NameRegistry seeded with RESERVED_NAMES (plus user-provided)
-	- Uses Imports to avoid collisions across default/named/type imports
-	- Computes SSR expressions and lazy dynamic selectors for React components
-	- Reserves identifiers for local JS functions
-	"""
-
-	names: NameRegistry
-	_imports: Imports
-
-	def __init__(self, reserved_names: Iterable[str] | None = None) -> None:
-		initial = set(reserved_names or []).union(RESERVED_NAMES)
-		self.names = NameRegistry(initial)
-		self._imports = Imports([], names=self.names)
-		self.components_by_key: dict[str, ComponentInfo] = {}
-		self._js_local_names: dict[str, str] = {}
-		self.needs_render_lazy: bool = False
-		self._css_modules: dict[str, CssModuleCtx] = {}
-
-	def add_components(self, components: "Sequence[ReactComponent[...]]") -> None:
-		for comp in components:
-			if comp.lazy:
-				self.needs_render_lazy = True
-				# We still register the name as it's an easy way to guarantee a unique component key
-				ident = self.names.register(comp.name)
-				if ident != comp.name:
-					comp.alias = ident
+	for imp in imports:
+		if imp.is_side_effect:
+			has_side_effect = True
+		elif imp.is_namespace:
+			namespace_imports.append(imp)
+		elif imp.is_default:
+			if imp.is_type_only:
+				type_imports.append(imp)
 			else:
-				# For SSR-capable components, import the symbol and compute expression
-				ident = self._imports.import_(
-					comp.src, comp.name, is_default=comp.is_default
-				)
-				if ident != comp.name:
-					comp.alias = ident
+				default_imports.append(imp)
+		else:
+			if imp.is_type_only:
+				type_imports.append(imp)
+			else:
+				named_imports.append(imp)
 
-			key = comp.expr
-			existing = self.components_by_key.get(key)
-			if existing:
-				same_import = (
-					existing["src"] == comp.src
-					and existing["name"] == comp.name
-					and existing["default"] == comp.is_default
-				)
-				if not same_import:
-					raise RuntimeError(
-						"Invariant violation: two React components ended up with the same key. This is a Pulse bug, please raise an issue: https://github.com/erwinkn/pulse-ui"
-					)
+	lines: list[str] = []
 
-			self.components_by_key[key] = {
-				"key": key,
-				"lazy": comp.lazy,
-				"expr": comp.expr,
-				"src": comp.src,
-				"name": comp.name,
-				"default": comp.is_default,
-				"dynamic": dynamic_selector(comp),
-			}
+	# Namespace import (only one allowed per source)
+	if namespace_imports:
+		imp = namespace_imports[0]
+		lines.append(f'import * as {imp.js_name} from "{src}";')
 
-			# Register component-level extra imports (e.g., side-effect CSS)
-			extra_imports = getattr(comp, "extra_imports", None) or []
-			for stmt in extra_imports:
-				if isinstance(stmt, ImportStatement):
-					self._imports.add_statement(stmt)
+	# Default import (only one allowed per source)
+	if default_imports:
+		imp = default_imports[0]
+		lines.append(f'import {imp.js_name} from "{src}";')
 
-	def add_css_modules(self, modules: Sequence[CssModuleImport]) -> None:
-		for mod in modules:
-			if mod["id"] in self._css_modules:
-				continue
-			identifier = self._imports.import_(
-				mod["import_path"], mod["id"], is_default=True
-			)
-			self._css_modules[mod["id"]] = {
-				"id": mod["id"],
-				"identifier": identifier,
-			}
+	# Named imports
+	if named_imports:
+		members = [f"{imp.name} as {imp.js_name}" for imp in named_imports]
+		lines.append(f'import {{ {", ".join(members)} }} from "{src}";')
 
-	def add_css_imports(self, imports: Sequence[str]) -> None:
-		for spec in imports:
-			stmt = ImportStatement(spec, side_effect=True)
-			self._imports.add_statement(stmt)
+	# Type imports
+	if type_imports:
+		type_members: list[str] = []
+		for imp in type_imports:
+			if imp.is_default:
+				type_members.append(f"default as {imp.js_name}")
+			else:
+				type_members.append(f"{imp.name} as {imp.js_name}")
+		lines.append(f'import type {{ {", ".join(type_members)} }} from "{src}";')
 
-	def add_external_js(self, fns: Sequence[ExternalJsFunction[*Args, object]]) -> None:
-		for fn in fns:
-			self._imports.import_(fn.src, fn.name, is_default=True)
-		# TODO: update fn in case of aliasing
+	# Side-effect only import (only if no other imports)
+	if (
+		has_side_effect
+		and not default_imports
+		and not namespace_imports
+		and not named_imports
+		and not type_imports
+	):
+		lines.append(f'import "{src}";')
 
-	def reserve_js_function_names(
-		self, js_functions: Sequence[JsFunction[*Args, object]]
-	) -> None:
-		for j in js_functions:
-			self._js_local_names[j.name] = self.names.register(j.name)
-		# TODO: update fn in case of aliasing
-
-	def context(self) -> dict[str, object]:
-		# Deterministic order of import sources with ordering constraints
-		import_sources = self._imports.ordered_sources()
-		return {
-			"import_sources": import_sources,
-			"components_ctx": list(self.components_by_key.values()),
-			"local_js_names": self._js_local_names,
-			"needs_render_lazy": self.needs_render_lazy,
-			"css_modules_ctx": list(self._css_modules.values()),
-		}
+	return "\n".join(lines)
 
 
-def dynamic_selector(comp: "ReactComponent[...]"):
-	# Dynamic import mapping for lazy usage on the client
-	attr = "default" if comp.is_default else comp.name
-	prop_accessor = f".{comp.prop}" if comp.prop else ""
-	return f"({{ default: m.{attr}{prop_accessor} }})"
+def _generate_imports_section(imports: Sequence[Import]) -> str:
+	"""Generate the full imports section with deduplication and topological ordering."""
+	if not imports:
+		return ""
+
+	# Deduplicate imports by ID
+	seen_ids: set[str] = set()
+	unique_imports: list[Import] = []
+	for imp in imports:
+		if imp.id not in seen_ids:
+			seen_ids.add(imp.id)
+			unique_imports.append(imp)
+
+	# Group by source
+	grouped: dict[str, list[Import]] = {}
+	for imp in unique_imports:
+		if imp.src not in grouped:
+			grouped[imp.src] = []
+		grouped[imp.src].append(imp)
+
+	# Topological sort using Import.before constraints (Kahn's algorithm)
+	keys = list(grouped.keys())
+	if not keys:
+		return ""
+
+	index = {k: i for i, k in enumerate(keys)}  # for stability
+	indegree: dict[str, int] = {k: 0 for k in keys}
+	adj: dict[str, list[str]] = {k: [] for k in keys}
+
+	for src, src_imports in grouped.items():
+		for imp in src_imports:
+			for before_src in imp.before:
+				if before_src in adj:
+					adj[src].append(before_src)
+					indegree[before_src] += 1
+
+	queue = [k for k, d in indegree.items() if d == 0]
+	queue.sort(key=lambda k: index[k])
+	ordered: list[str] = []
+
+	while queue:
+		u = queue.pop(0)
+		ordered.append(u)
+		for v in adj[u]:
+			indegree[v] -= 1
+			if indegree[v] == 0:
+				queue.append(v)
+				queue.sort(key=lambda k: index[k])
+
+	# Fall back to insertion order if cycle detected
+	if len(ordered) != len(keys):
+		ordered = keys
+
+	lines: list[str] = []
+	for src in ordered:
+		stmt = _generate_import_statement(src, grouped[src])
+		if stmt:
+			lines.append(stmt)
+
+	return "\n".join(lines)
 
 
-# Constants and functions defined in the template below. We need to avoid name conflicts with imports
-RESERVED_NAMES = [
-	"externalComponents",
-	"path",
-	"RouteComponent",
-	"hasAnyHeaders",
-	"headers",
-	"HeadersArgs",
-	"PulseView",
-	"ComponentRegistry",
-	"RenderLazy",
-	"cssModules",
-]
+def _collect_function_graph(
+	functions: Sequence[AnyJsFunction],
+) -> tuple[list[JsConstant], list[AnyJsFunction]]:
+	"""Collect all constants and functions in dependency order (depth-first)."""
+	seen_funcs: set[str] = set()
+	seen_consts: set[str] = set()
+	all_funcs: list[AnyJsFunction] = []
+	all_consts: list[JsConstant] = []
 
-TEMPLATE = Template(
-	"""import { PulseView, type ComponentRegistry${", " + "RenderLazy" if needs_render_lazy else ""} } from "pulse-ui-client";
-import type { HeadersArgs } from "react-router";
+	def walk(fn: AnyJsFunction) -> None:
+		if fn.id in seen_funcs:
+			return
+		seen_funcs.add(fn.id)
 
-% if import_sources:
-// Component and helper imports
-% for import_source in import_sources:
-%   if import_source.default_import:
-import ${import_source.default_import} from "${import_source.src}";
-%   endif
-%   if import_source.values:
-import { ${', '.join([f"{v.name}{f' as {v.alias}' if v.alias else ''}" for v in import_source.values])} } from "${import_source.src}";
-%   endif
-%   if import_source.types:
-import type { ${', '.join([f"{t.name}{f' as {t.alias}' if t.alias else ''}" for t in import_source.types])} } from "${import_source.src}";
-%   endif
-%   if import_source.side_effect and (not import_source.default_import) and (not import_source.values) and (not import_source.types):
-import "${import_source.src}";
-%   endif
-% endfor
-% endif
+		for dep in fn.deps.values():
+			if isinstance(dep, JsFunction):
+				walk(dep)  # pyright: ignore[reportUnknownArgumentType]
+			elif isinstance(dep, JsConstant):
+				if dep.id not in seen_consts:
+					seen_consts.add(dep.id)
+					all_consts.append(dep)
 
-// Component registry
-% if css_modules_ctx:
-const cssModules = {
-% for mod in css_modules_ctx:
-  "${mod['id']}": ${mod['identifier']},
-% endfor
-};
-% else:
-const cssModules = {};
-% endif
+		all_funcs.append(fn)
 
-% if components_ctx:
-const externalComponents: ComponentRegistry = {
-% for c in components_ctx:
-%   if c['lazy']:
-  "${c['key']}": RenderLazy(() => import("${c['src']}").then((m) => ${c['dynamic']})),
-%   else:
-  "${c['key']}": ${c['expr']},
-%   endif
-% endfor
-};
-% else:
-// No components needed for this route
-const externalComponents: ComponentRegistry = {};
-% endif
+	for fn in functions:
+		walk(fn)
 
-const path = "${route.unique_path()}";
+	return all_consts, all_funcs
 
-export default function RouteComponent() {
+
+def _generate_constants_section(constants: Sequence[JsConstant]) -> str:
+	"""Generate the constants section."""
+	if not constants:
+		return ""
+
+	lines: list[str] = ["// Constants"]
+	for const in constants:
+		js_value = const.expr.emit()
+		lines.append(f"const {const.js_name} = {js_value};")
+
+	return "\n".join(lines)
+
+
+def _generate_functions_section(functions: Sequence[AnyJsFunction]) -> str:
+	"""Generate the functions section with actual transpiled code."""
+	if not functions:
+		return ""
+
+	lines: list[str] = ["// Functions"]
+	for fn in functions:
+		js_code = fn.transpile()
+		lines.append(js_code)
+
+	return "\n".join(lines)
+
+
+def _generate_registry_section(
+	all_imports: Sequence[Import],
+	lazy_components: Sequence[tuple[ReactComponent[...], Import]] | None = None,
+	prop_components: Sequence[ReactComponent[...]] | None = None,
+	functions: Sequence[AnyJsFunction] | None = None,
+) -> str:
+	"""Generate the unified registry containing all imports for runtime lookup."""
+	lines: list[str] = []
+
+	# Unified Registry - contains all imports that need to be looked up at runtime
+	lines.append("// Unified Registry")
+	lines.append("const __registry = {")
+
+	# Add non-type, non-side-effect imports to the registry
+	seen_js_names: set[str] = set()
+	for imp in all_imports:
+		if imp.is_side_effect or imp.is_type_only:
+			continue
+		if imp.js_name in seen_js_names:
+			continue
+		seen_js_names.add(imp.js_name)
+		lines.append(f'  "{imp.js_name}": {imp.js_name},')
+
+	# Add components with prop access (e.g., AppShell.Header)
+	# These need separate registry entries because the lookup key includes the prop
+	for comp in prop_components or []:
+		if comp.prop:
+			# Key is "ImportName_123.PropName", value is ImportName_123.PropName
+			key = f"{comp.import_.js_name}.{comp.prop}"
+			lines.append(f'  "{key}": {key},')
+
+	# Add lazy components with RenderLazy wrapper
+	for comp, render_lazy_imp in lazy_components or []:
+		attr = "default" if comp.is_default else comp.name
+		prop_accessor = f".{comp.prop}" if comp.prop else ""
+		dynamic = f"({{ default: m.{attr}{prop_accessor} }})"
+		# Key includes prop if present (e.g., "AppShell_123.Header")
+		key = comp.import_.js_name
+		if comp.prop:
+			key = f"{key}.{comp.prop}"
+		lines.append(
+			f'  "{key}": {render_lazy_imp.js_name}(() => import("{comp.src}").then((m) => {dynamic})),'
+		)
+
+	# Add transpiled functions to the registry
+	for fn in functions or []:
+		lines.append(f'  "{fn.js_name}": {fn.js_name},')
+
+	lines.append("};")
+
+	return "\n".join(lines)
+
+
+def generate_route(
+	path: str,
+	components: Sequence[ReactComponent[...]] | None = None,
+	route_file_path: Path | None = None,
+	css_dir: Path | None = None,
+) -> str:
+	"""Generate a route file with all imports and components.
+
+	Args:
+		path: The route path (e.g., "/users/:id")
+		components: React components used in the route
+		route_file_path: Path where the route file will be written (for computing relative imports)
+		css_dir: Path to the CSS output directory (for computing relative CSS imports)
+	"""
+	# Collect lazy component import IDs to exclude from registered_imports
+	lazy_import_ids: set[str] = set()
+	for comp in components or []:
+		if comp.lazy:
+			lazy_import_ids.add(comp.import_.id)
+
+	# Add core Pulse imports - store references to use their js_name later
+	pulse_view_import = Import.named("PulseView", "pulse-ui-client")
+
+	# Check if we need RenderLazy
+	render_lazy_import: Import | None = None
+	if any(c.lazy for c in (components or [])):
+		render_lazy_import = Import.named("RenderLazy", "pulse-ui-client")
+
+	# Process components: add non-lazy imports and collect metadata
+	prop_components: list[ReactComponent[...]] = []
+	lazy_components: list[tuple[ReactComponent[...], Import]] = []
+	for comp in components or []:
+		if comp.lazy:
+			if render_lazy_import is not None:
+				lazy_components.append((comp, render_lazy_import))
+		else:
+			# Force registration by accessing the import
+			_ = comp.import_
+			if comp.prop:
+				prop_components.append(comp)
+
+	# Collect function graph (constants + functions in dependency order)
+	constants, funcs = _collect_function_graph(registered_functions())
+
+	# Get all registered imports, excluding lazy ones
+	all_imports = [imp for imp in registered_imports() if imp.id not in lazy_import_ids]
+
+	# Update src for local CSS imports to use relative paths from the route file
+	if route_file_path is not None and css_dir is not None:
+		from pulse.transpiler.imports import CssImport
+
+		route_dir = route_file_path.parent
+		for imp in all_imports:
+			if isinstance(imp, CssImport) and imp.is_local:
+				generated_filename = imp.generated_filename
+				assert generated_filename is not None
+				css_file_path = css_dir / generated_filename
+				rel_path = Path(os.path.relpath(css_file_path, route_dir))
+				imp.src = rel_path.as_posix()
+
+	# Generate output sections
+	output_parts: list[str] = []
+
+	imports_section = _generate_imports_section(all_imports)
+	if imports_section:
+		output_parts.append(imports_section)
+
+	output_parts.append("")
+
+	if constants:
+		output_parts.append(_generate_constants_section(constants))
+		output_parts.append("")
+
+	if funcs:
+		output_parts.append(_generate_functions_section(funcs))
+		output_parts.append("")
+
+	output_parts.append(
+		_generate_registry_section(all_imports, lazy_components, prop_components, funcs)
+	)
+	output_parts.append("")
+
+	# Route component
+	pulse_view_js = pulse_view_import.js_name
+	output_parts.append(f'''const path = "{path}";
+
+export default function RouteComponent() {{
   return (
-    <PulseView key={path} externalComponents={externalComponents} path={path} cssModules={cssModules} />
+    <{pulse_view_js} key={{path}} registry={{__registry}} path={{path}} />
   );
-}
+}}''')
+	output_parts.append("")
 
-// Action and loader headers are not returned automatically
-function hasAnyHeaders(headers: Headers): boolean {
+	# Headers function
+	output_parts.append("""// Action and loader headers are not returned automatically
+function hasAnyHeaders(headers) {
   return [...headers].length > 0;
 }
 
-export function headers({
-  actionHeaders,
-  loaderHeaders,
-}: HeadersArgs) {
-  return hasAnyHeaders(actionHeaders)
-    ? actionHeaders
-    : loaderHeaders;
-}
-"""
-)
+export function headers({ actionHeaders, loaderHeaders }) {
+  return hasAnyHeaders(actionHeaders) ? actionHeaders : loaderHeaders;
+}""")
 
-# Back-compat alias
-ROUTE_TEMPLATE = TEMPLATE
-
-
-def render_route(
-	*,
-	route: Route | Layout,
-	components: Sequence[ReactComponent[...]] | None = None,
-	css_modules: Sequence[CssModuleImport] | None = None,
-	css_imports: Sequence[str] | None = None,
-	js_functions: Sequence[JsFunction[*Args, object]] | None = None,
-	external_js: Sequence[ExternalJsFunction[*Args, object]] | None = None,
-	reserved_names: Iterable[str] | None = None,
-) -> str:
-	comps = list(components or [])
-
-	jt = RouteTemplate(reserved_names=reserved_names)
-	jt.add_components(comps)
-	modules = list(css_modules or [])
-	if modules:
-		jt.add_css_modules(modules)
-	imports = list(css_imports or [])
-	if imports:
-		jt.add_css_imports(imports)
-	if external_js:
-		jt.add_external_js(list(external_js))
-	if js_functions:
-		jt.reserve_js_function_names(list(js_functions))
-
-	ctx = jt.context() | {"route": route}
-	return str(TEMPLATE.render_unicode(**ctx))
+	return "\n".join(output_parts)

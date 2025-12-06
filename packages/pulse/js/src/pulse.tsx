@@ -12,7 +12,7 @@ import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./c
 import type { RouteInfo } from "./helpers";
 import type { ServerErrorInfo } from "./messages";
 import { VDOMRenderer } from "./renderer";
-import type { ComponentRegistry, VDOM } from "./vdom";
+import type { VDOM } from "./vdom";
 
 // =================================================================
 // Types
@@ -33,7 +33,7 @@ export type PulsePrerenderView = {
 	vdom: VDOM;
 	callbacks: string[];
 	render_props: string[];
-	css_refs: string[];
+	jsexpr_paths: string[]; // paths containing JS expressions
 };
 
 export type PulsePrerender = {
@@ -160,12 +160,11 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 // =================================================================
 
 export interface PulseViewProps {
-	externalComponents: ComponentRegistry;
 	path: string;
-	cssModules: Record<string, Record<string, string>>;
+	registry: Record<string, unknown>;
 }
 
-export function PulseView({ externalComponents, path, cssModules }: PulseViewProps) {
+export function PulseView({ path, registry }: PulseViewProps) {
 	const client = usePulseClient();
 	const initialView = usePulsePrerender(path);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: We only want to lose the renderer on unmount. initialView will change on every navigation with our current setup, so we hack around it with another useEffect below. This is not ideal and will be fixed in the future.
@@ -174,13 +173,12 @@ export function PulseView({ externalComponents, path, cssModules }: PulseViewPro
 			new VDOMRenderer(
 				client,
 				path,
-				externalComponents,
-				cssModules,
 				initialView.callbacks,
 				initialView.render_props,
-				initialView.css_refs,
+				registry,
+				initialView.jsexpr_paths,
 			),
-		[client, path, externalComponents, cssModules],
+		[client, path, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
 	const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
@@ -212,6 +210,16 @@ export function PulseView({ externalComponents, path, cssModules }: PulseViewPro
 				},
 				onUpdate: (ops) => {
 					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
+				},
+				onJsExec: (msg) => {
+					let result: any;
+					let error: string | null = null;
+					try {
+						result = renderer.evaluateJsExpr(msg.code);
+					} catch (e) {
+						error = e instanceof Error ? e.message : String(e);
+					}
+					client.sendJsResult(msg.id, result, error);
 				},
 			});
 			const offErr = client.onServerError((p, err) => {

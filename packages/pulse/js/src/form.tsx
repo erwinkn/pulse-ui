@@ -1,6 +1,6 @@
-import React, { type FormEvent, forwardRef, useCallback } from "react";
+import { type ComponentPropsWithoutRef, type FormEvent, forwardRef, useCallback } from "react";
 
-export type PulseFormProps = React.ComponentPropsWithoutRef<"form"> & {
+export type PulseFormProps = ComponentPropsWithoutRef<"form"> & {
 	action: string;
 };
 
@@ -27,7 +27,7 @@ export const PulseForm = forwardRef<HTMLFormElement, PulseFormProps>(function Pu
 });
 
 interface SubmitForm {
-	event: React.FormEvent<HTMLFormElement>;
+	event: FormEvent<HTMLFormElement>;
 	action: string;
 	onSubmit?: PulseFormProps["onSubmit"];
 	formData?: FormData;

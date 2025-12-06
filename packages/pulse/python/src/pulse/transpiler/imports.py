@@ -293,6 +293,7 @@ class CssImport(Import):
 			- Absolute path (e.g., "/path/to/styles.css")
 		module: If True, import as a CSS module (default export for class access).
 			If False, import for side effects only (global styles).
+			Automatically set to True if path ends with ".module.css".
 		relative: If True, resolve path relative to the caller's file.
 		before: List of import sources that should come after this import.
 
@@ -300,8 +301,8 @@ class CssImport(Import):
 		# Side-effect CSS import (global styles)
 		CssImport("@mantine/core/styles.css")
 
-		# CSS module for class access
-		styles = CssImport("./styles.module.css", module=True, relative=True)
+		# CSS module for class access (module=True auto-detected from .module.css)
+		styles = CssImport("./styles.module.css", relative=True)
 		styles.container  # Returns JSMember for 'container' class
 
 		# Local CSS file (will be copied during codegen)
@@ -316,6 +317,10 @@ class CssImport(Import):
 		relative: bool = False,
 		before: Sequence[str] = (),
 	) -> None:
+		# Auto-detect CSS modules based on filename
+		if path.endswith(".module.css"):
+			module = True
+
 		source_path: Path | None = None
 		import_src = path
 

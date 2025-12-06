@@ -933,7 +933,7 @@ requires-dist = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.46"
+version = "0.1.47"
 source = { editable = "packages/pulse/python" }
 dependencies = [
     { name = "fastapi" },
@@ -991,7 +991,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-mantine"
-version = "0.1.19"
+version = "0.1.20"
 source = { editable = "packages/pulse-mantine/python" }
 dependencies = [
     { name = "pulse-framework" },
@@ -1024,7 +1024,7 @@ dev = [{ name = "redis", specifier = ">=6.4.0" }]
 
 [[package]]
 name = "pulse-recharts"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "packages/pulse-recharts" }
 dependencies = [
     { name = "pulse-framework" },

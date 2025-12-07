@@ -48,6 +48,7 @@ class ServerNavigateToMessage(TypedDict):
 	type: Literal["navigate_to"]
 	path: str
 	replace: bool
+	hard: bool
 
 
 class ServerApiCallMessage(TypedDict):

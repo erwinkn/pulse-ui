@@ -5,6 +5,8 @@ This module tests the direct UI tree node generation that matches
 the TypeScript UIElementNode format.
 """
 
+from typing import Any
+
 import pytest
 from pulse import (
 	Node,
@@ -505,7 +507,7 @@ class TestMissingKeyWarnings:
 			div(items)  # Should not raise in prod
 
 	def test_component_bracket_syntax_warns(self, monkeypatch: pytest.MonkeyPatch):
-		"""Test that component bracket syntax emits warning for unkeyed iterables."""
+		"""Components with `*children` flatten and warn for unkeyed iterables."""
 		from pulse.vdom import component
 
 		monkeypatch.setenv("PULSE_MODE", "dev")
@@ -522,7 +524,7 @@ class TestMissingKeyWarnings:
 			MyComponent()[items]
 
 	def test_component_positional_args_warns(self, monkeypatch: pytest.MonkeyPatch):
-		"""Test that component positional args emit warning for unkeyed iterables."""
+		"""Components with `*children` flatten and warn for unkeyed iterables."""
 		from pulse.vdom import component
 
 		monkeypatch.setenv("PULSE_MODE", "dev")
@@ -538,20 +540,25 @@ class TestMissingKeyWarnings:
 			items = [span() for _ in range(3)]
 			MyComponent(items)
 
-	def test_react_component_warns(self, monkeypatch: pytest.MonkeyPatch):
-		"""Test that ReactComponent emits warning for unkeyed iterables."""
-		from pulse.react_component import ReactComponent
+	def test_component_without_children_no_flatten(
+		self, monkeypatch: pytest.MonkeyPatch
+	):
+		"""Components without `*children` don't flatten - they're just functions."""
+		from pulse.vdom import component
 
 		monkeypatch.setenv("PULSE_MODE", "dev")
 
-		MyReactComp = ReactComponent("MyReactComp", "test/MyReactComp")
+		@component
+		def MyComponent(data: Any, value_col: str = "value"):
+			return div()
 
-		with pytest.warns(
-			UserWarning,
-			match=r"\[Pulse\] Iterable children of <MyReactComp> contain elements without 'key'",
-		):
-			items = [span() for _ in range(3)]
-			MyReactComp(items)
+		# Component without *children doesn't flatten - args passed as-is
+		items = [span() for _ in range(3)]
+		node = MyComponent(items, value_col="test")
+		# The list is passed as a single positional arg, not flattened into individual elements
+		assert len(node.args) == 1
+		assert node.args[0] == items  # Still a list, not flattened
+		assert node.kwargs == {"value_col": "test"}
 
 
 class TestFromVDOM:

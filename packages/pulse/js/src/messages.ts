@@ -70,6 +70,7 @@ export interface ServerNavigateToMessage {
 	type: "navigate_to";
 	path: string;
 	replace: boolean;
+	hard: boolean;
 }
 
 export interface ServerJsExecMessage {

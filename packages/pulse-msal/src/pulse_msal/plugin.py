@@ -278,17 +278,14 @@ class FileTokenCacheStore:
 		path = self._path_for_ctx(ctx)
 		try:
 			serialized = cache.serialize()
-		except Exception:
-			return
-		try:
 			path.write_text(serialized)
-		except Exception:
+		except:  # noqa: E722
 			# Best effort
 			pass
 
 
 class RedisTokenCacheStore:
-	client: Any
+	client: "redis.Redis"
 	prefix: str
 	ttl_seconds: int | None
 
@@ -328,7 +325,7 @@ class RedisTokenCacheStore:
 		key = self._key_for_ctx(ctx)
 		cache = msal.SerializableTokenCache()
 		try:
-			data = self.client.get(key)
+			data = cast(bytes, self.client.get(key))
 			if data:
 				cache.deserialize(data.decode("utf-8"))
 		except Exception:
@@ -343,12 +340,9 @@ class RedisTokenCacheStore:
 		key = self._key_for_ctx(ctx)
 		try:
 			serialized = cache.serialize()
-		except Exception:
-			return
-		try:
 			if self.ttl_seconds and self.ttl_seconds > 0:
 				self.client.setex(key, self.ttl_seconds, serialized)
 			else:
 				self.client.set(key, serialized)
-		except Exception:
+		except:  # noqa: E722
 			pass

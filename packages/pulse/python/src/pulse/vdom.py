@@ -265,7 +265,7 @@ class Component(Generic[P]):
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")
 
-		# Flatten children if component takes children (has *children parameter)
+		# Flatten children if component accepts them via `*children` parameter
 		if self._takes_children and args:
 			flattened = _flatten_children(
 				args,  # pyright: ignore[reportArgumentType]
@@ -356,11 +356,11 @@ class ComponentNode:
 			)
 		if not isinstance(children_arg, tuple):
 			children_arg = (children_arg,)
-		# Flatten children for ComponentNode as well
+		# Flatten children when component accepts them via `*children` parameter
 		flattened_children = _flatten_children(
 			children_arg, parent_name=f"<{self.name}>", warn_stacklevel=4
 		)
-		result = ComponentNode(
+		return ComponentNode(
 			fn=self.fn,
 			args=tuple(flattened_children),
 			kwargs=self.kwargs,
@@ -368,7 +368,6 @@ class ComponentNode:
 			key=self.key,
 			takes_children=self.takes_children,
 		)
-		return result
 
 	@override
 	def __repr__(self) -> str:
@@ -606,19 +605,18 @@ def _callable_qualname(fn: Callable[..., Any]) -> str:
 
 
 def _takes_children(fn: Callable[..., Any]) -> bool:
-	# Lightweight check: children allowed if function accepts positional
-	# arguments
+	"""Return True if function accepts children via `*children` parameter.
+
+	Convention: A component accepts children if and only if it has a VAR_POSITIONAL
+	parameter named "children". This convention should be documented in user-facing docs.
+	"""
 	try:
 		sig = signature(fn)
 	except (ValueError, TypeError):
 		# Builtins or callables without inspectable signature: assume no children
 		return False
 	for p in sig.parameters.values():
-		if p.kind in (
-			Parameter.VAR_POSITIONAL,
-			Parameter.POSITIONAL_ONLY,
-			Parameter.POSITIONAL_OR_KEYWORD,
-		):
+		if p.kind is Parameter.VAR_POSITIONAL and p.name == "children":
 			return True
 	return False
 

@@ -332,36 +332,37 @@ export class PulseSocketIOClient {
 				break;
 			}
 			case "navigate_to": {
-				// `navigate_to` is navigational; allow regardless of activeViews membership
 				const replace = !!message.replace;
 				let dest = message.path || "";
-				// Normalize protocol-relative URLs to absolute
 				if (dest.startsWith("//")) dest = `${window.location.protocol}${dest}`;
-				const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest);
-				if (hasScheme) {
-					if (dest.startsWith("http://") || dest.startsWith("https://")) {
-						try {
-							const url = new URL(dest);
-							if (url.origin === window.location.origin) {
-								const internal = `${url.pathname}${url.search}${url.hash}`;
-								this.#frameworkNavigate(internal, { replace });
-							} else {
-								if (replace) window.location.replace(dest);
-								else window.location.assign(dest);
-							}
-						} catch {
-							if (replace) window.location.replace(dest);
-							else window.location.assign(dest);
-						}
-					} else {
-						// mailto:, tel:, data:, etc.
-						if (replace) window.location.replace(dest);
-						else window.location.assign(dest);
-					}
-				} else {
-					// Relative or root-relative path → SPA navigate
-					this.#frameworkNavigate(dest, { replace });
+
+				const hardNav = () =>
+					replace ? window.location.replace(dest) : window.location.assign(dest);
+
+				if (message.hard) {
+					hardNav();
+					break;
 				}
+
+				// No scheme = relative path → SPA
+				if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest)) {
+					this.#frameworkNavigate(dest, { replace });
+					break;
+				}
+
+				// Same-origin http(s) → SPA
+				if (/^https?:\/\//.test(dest)) {
+					try {
+						const url = new URL(dest);
+						if (url.origin === window.location.origin) {
+							this.#frameworkNavigate(`${url.pathname}${url.search}${url.hash}`, { replace });
+							break;
+						}
+					} catch {}
+				}
+
+				// External URL or other scheme (mailto:, tel:, etc.)
+				hardNav();
 				break;
 			}
 			case "channel_message": {

@@ -103,11 +103,13 @@ async def set_cookie(
 	)
 
 
-def navigate(path: str, *, replace: bool = False) -> None:
+def navigate(path: str, *, replace: bool = False, hard: bool = False) -> None:
 	ctx = PulseContext.get()
 	if ctx.render is None:
 		raise RuntimeError("navigate() must be invoked inside a Pulse callback context")
-	ctx.render.send({"type": "navigate_to", "path": path, "replace": replace})
+	ctx.render.send(
+		{"type": "navigate_to", "path": path, "replace": replace, "hard": hard}
+	)
 
 
 def redirect(path: str, *, replace: bool = False) -> NoReturn:

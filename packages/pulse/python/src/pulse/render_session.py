@@ -440,6 +440,7 @@ class RenderSession:
 					type="navigate_to",
 					path=msg["path"],
 					replace=msg["replace"],
+					hard=msg.get("hard", False),
 				)
 
 		prev_sender = self._send_message
@@ -563,14 +564,20 @@ class RenderSession:
 					# Prefer client-side navigation over emitting VDOM operations
 					self.send(
 						ServerNavigateToMessage(
-							type="navigate_to", path=r.path, replace=r.replace
+							type="navigate_to",
+							path=r.path,
+							replace=r.replace,
+							hard=False,
 						)
 					)
 				except NotFoundInterrupt:
 					# Use app-configured not-found path; fallback to '/404'
 					self.send(
 						ServerNavigateToMessage(
-							type="navigate_to", path=ctx.app.not_found, replace=True
+							type="navigate_to",
+							path=ctx.app.not_found,
+							replace=True,
+							hard=False,
 						)
 					)
 

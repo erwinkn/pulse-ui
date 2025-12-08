@@ -645,7 +645,7 @@ def test_react_component_decorator_typed_dict_unpack_and_mapping():
 		"className": "pill",
 		"count": 2,
 	}
-	assert node.children == ("txt",)
+	assert node.children == ["txt"]
 
 
 def test_react_component_decorator_default_export_and_alias_rules():

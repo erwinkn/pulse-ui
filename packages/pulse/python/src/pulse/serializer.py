@@ -29,6 +29,7 @@ containing primitives, lists/tuples, ``dict``/plain objects, ``set`` and
 from __future__ import annotations
 
 import datetime as dt
+import math
 import types
 from dataclasses import fields, is_dataclass
 from typing import Any
@@ -56,7 +57,16 @@ def serialize(data: Any) -> Serialized:
 
 	def process(value: Any) -> PlainJSON:
 		nonlocal global_index
-		if value is None or isinstance(value, (bool, int, float, str)):
+		if value is None or isinstance(value, (bool, int, str)):
+			return value
+		if isinstance(value, float):
+			if math.isnan(value):
+				return None  # NaN → None (matches pandas None ↔ NaN semantics)
+			if math.isinf(value):
+				raise ValueError(
+					f"Cannot serialize {value}: Infinity is not valid JSON. "
+					+ "Replace with None or a sentinel value."
+				)
 			return value
 
 		idx = global_index

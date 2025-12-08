@@ -6,7 +6,6 @@ the TypeScript UINode format exactly, eliminating the need for translation.
 """
 
 import functools
-import math
 import re
 import warnings
 from collections.abc import Callable, Iterable, Sequence
@@ -29,56 +28,6 @@ from typing import (
 from pulse.env import env
 from pulse.hooks.core import HookContext
 from pulse.hooks.init import rewrite_init_blocks
-
-# ============================================================================
-# Validation helpers (dev mode only)
-# ============================================================================
-
-
-def _check_json_safe_float(value: float, context: str) -> None:
-	"""Raise ValueError if a float is NaN or Infinity."""
-	if math.isnan(value):
-		raise ValueError(
-			f"Cannot use nan in {context}. "
-			+ "NaN and Infinity are not supported in Pulse because they cannot be serialized to JSON. "
-			+ "Replace with None or a sentinel value before passing to components."
-		)
-	if math.isinf(value):
-		kind = "inf" if value > 0 else "-inf"
-		raise ValueError(
-			f"Cannot use {kind} in {context}. "
-			+ "NaN and Infinity are not supported in Pulse because they cannot be serialized to JSON. "
-			+ "Replace with None or a sentinel value before passing to components."
-		)
-
-
-def _validate_value(value: Any, context: str) -> None:
-	"""Recursively validate a value for JSON-unsafe floats (NaN, Infinity)."""
-	if isinstance(value, float):
-		_check_json_safe_float(value, context)
-	elif isinstance(value, dict):
-		for v in value.values():
-			_validate_value(v, context)
-	elif isinstance(value, (list, tuple)):
-		for item in value:
-			_validate_value(item, context)
-	# Skip other types - they'll be handled by the serializer
-
-
-def _validate_props(props: dict[str, Any] | None, parent_name: str) -> None:
-	"""Validate all props for JSON-unsafe values."""
-	if not props:
-		return
-	for key, value in props.items():
-		_validate_value(value, f"{parent_name} prop '{key}'")
-
-
-def _validate_children(children: "Sequence[Element]", parent_name: str) -> None:
-	"""Validate primitive children for JSON-unsafe values."""
-	for child in children:
-		if isinstance(child, float):
-			_check_json_safe_float(child, f"{parent_name} children")
-
 
 # ============================================================================
 # Core VDOM
@@ -109,7 +58,7 @@ class Node:
 
 	tag: str
 	props: dict[str, Any] | None
-	children: "Sequence[Element] | None"
+	children: "list[Element] | None"
 	allow_children: bool
 	key: str | None
 
@@ -122,7 +71,6 @@ class Node:
 		allow_children: bool = True,
 	):
 		self.tag = tag
-		# Normalize to None
 		self.props = props or None
 		self.children = (
 			_flatten_children(children, parent_name=f"<{self.tag}>")
@@ -134,13 +82,8 @@ class Node:
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")
 		if not self.allow_children and children:
-			raise ValueError(f"{self.tag} cannot have children")
-		# Dev-only validation for JSON-unsafe values
-		if env.pulse_env == "dev":
-			parent_name = f"<{self.tag}>"
-			_validate_props(self.props, parent_name)
-			if self.children:
-				_validate_children(self.children, parent_name)
+			clean_tag = clean_element_name(self.tag)
+			raise ValueError(f"{clean_tag} cannot have children")
 
 	# --- Pretty printing helpers -------------------------------------------------
 	@override
@@ -332,17 +275,6 @@ class ComponentNode:
 		# Used for rendering
 		self.contents = None
 		self.hooks = HookContext()
-		# Dev-only validation for JSON-unsafe values
-		if env.pulse_env == "dev":
-			parent_name = f"<{self.name}>"
-			# Validate kwargs (props)
-			_validate_props(self.kwargs, parent_name)
-			# Validate args (children passed positionally)
-			for arg in self.args:
-				if isinstance(arg, float):
-					_check_json_safe_float(arg, f"{parent_name} children")
-				elif isinstance(arg, (dict, list, tuple)):
-					_validate_value(arg, f"{parent_name} children")
 
 	def __getitem__(self, children_arg: "Child | tuple[Child, ...]"):
 		if not self.takes_children:
@@ -485,7 +417,7 @@ VDOMOperation: TypeAlias = (
 # ----------------------------------------------------------------------------
 
 
-def _clean_parent_name_for_warning(parent_name: str) -> str:
+def clean_element_name(parent_name: str) -> str:
 	"""Strip $$ prefix and hexadecimal suffix from ReactComponent tags in warning messages.
 
 	ReactComponent tags are in the format <$$ComponentName_1a2b> or <$$ComponentName_1a2b.prop>.
@@ -499,7 +431,7 @@ def _clean_parent_name_for_warning(parent_name: str) -> str:
 
 def _flatten_children(
 	children: Children, *, parent_name: str, warn_stacklevel: int = 5
-) -> Sequence[Element]:
+) -> list[Element]:
 	"""Flatten children and emit warnings for unkeyed iterables (dev mode only).
 
 	Args:
@@ -510,7 +442,6 @@ def _flatten_children(
 			- 4 for ComponentNode.__getitem__ or Component.__call__ (user -> method -> _flatten_children -> visit -> warn)
 	"""
 	flat: list[Element] = []
-	return_tuple = isinstance(children, tuple)
 	is_dev = env.pulse_env == "dev"
 
 	def visit(item: Child) -> None:
@@ -528,7 +459,7 @@ def _flatten_children(
 				visit(sub)
 			if missing_key:
 				# Warn once per iterable without keys on its elements.
-				clean_name = _clean_parent_name_for_warning(parent_name)
+				clean_name = clean_element_name(parent_name)
 				warnings.warn(
 					(
 						f"[Pulse] Iterable children of {clean_name} contain elements without 'key'. "
@@ -547,13 +478,14 @@ def _flatten_children(
 	for child in flat:
 		if isinstance(child, (Node, ComponentNode)) and child.key is not None:
 			if child.key in seen_keys:
+				clean_name = clean_element_name(parent_name)
 				raise ValueError(
-					f"[Pulse] Duplicate key '{child.key}' found among children of {parent_name}. "
+					f"[Pulse] Duplicate key '{child.key}' found among children of {clean_name}. "
 					+ "Keys must be unique per sibling set."
 				)
 			seen_keys.add(child.key)
 
-	return tuple(flat) if return_tuple else flat
+	return flat
 
 
 def _short_args(args: tuple[Any, ...], max_items: int = 4) -> list[str] | str:

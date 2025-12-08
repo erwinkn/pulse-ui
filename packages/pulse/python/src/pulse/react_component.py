@@ -37,7 +37,7 @@ from pulse.transpiler.nodes import (
 	JSXProp,
 	JSXSpreadProp,
 )
-from pulse.vdom import Child, Element, Node
+from pulse.vdom import Child, Element, Node, clean_element_name
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -205,7 +205,8 @@ class PropSpec:
 		unknown_keys = props.keys() - known_keys - {"key"}
 		if not self.allow_unspecified and unknown_keys:
 			bad = ", ".join(repr(k) for k in sorted(unknown_keys))
-			raise ValueError(f"Unexpected prop(s) for component '{comp_tag}': {bad}")
+			clean_tag = clean_element_name(comp_tag)
+			raise ValueError(f"Unexpected prop(s) for component '{clean_tag}': {bad}")
 		if self.allow_unspecified:
 			for k in unknown_keys:
 				v = props[k]
@@ -290,8 +291,9 @@ class PropSpec:
 					errors.append(
 						f"Multiple props map to '{js_key}': {', '.join(py_keys)}"
 					)
+			clean_tag = clean_element_name(comp_tag)
 			raise ValueError(
-				f"Invalid props for component '{comp_tag}': {'; '.join(errors)}"
+				f"Invalid props for component '{clean_tag}': {'; '.join(errors)}"
 			)
 
 		return result or None

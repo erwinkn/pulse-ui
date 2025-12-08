@@ -106,3 +106,38 @@ def test_dates_and_shared_references_v3():
 def test_unsupported_values_raise_v3():
 	with pytest.raises(TypeError):
 		serialize({"x": lambda: None})
+
+
+class TestNaNAndInfinity:
+	"""Test handling of NaN and Infinity during serialization."""
+
+	def test_nan_converted_to_none(self):
+		"""NaN floats should be converted to None during serialization."""
+		data = {"value": float("nan")}
+		payload = serialize(data)
+		parsed = deserialize(payload)
+		assert parsed == {"value": None}
+
+	def test_nan_in_nested_structure(self):
+		"""NaN in nested dicts/lists should be converted to None."""
+		data = {"nested": {"value": float("nan")}, "list": [1.0, float("nan"), 3.0]}
+		payload = serialize(data)
+		parsed = deserialize(payload)
+		assert parsed == {"nested": {"value": None}, "list": [1.0, None, 3.0]}
+
+	def test_infinity_raises(self):
+		"""Positive infinity should raise ValueError."""
+		with pytest.raises(ValueError, match="Infinity is not valid JSON"):
+			serialize({"value": float("inf")})
+
+	def test_negative_infinity_raises(self):
+		"""Negative infinity should raise ValueError."""
+		with pytest.raises(ValueError, match="Infinity is not valid JSON"):
+			serialize({"value": float("-inf")})
+
+	def test_valid_floats_pass_through(self):
+		"""Regular floats should serialize normally."""
+		data = {"pi": 3.14159, "values": [1.0, 2.5, -0.5]}
+		payload = serialize(data)
+		parsed = deserialize(payload)
+		assert parsed == data

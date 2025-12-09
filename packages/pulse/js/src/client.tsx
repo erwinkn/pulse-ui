@@ -29,7 +29,7 @@ export interface MountedView {
 	routeInfo: RouteInfo;
 	onInit: (view: PulsePrerenderView) => void;
 	onUpdate: (ops: VDOMUpdate[]) => void;
-	onJsExec?: (msg: ServerJsExecMessage) => void;
+	onJsExec: (msg: ServerJsExecMessage) => void;
 }
 export type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
 export type ConnectionStatusListener = (status: ConnectionStatus) => void;
@@ -441,11 +441,10 @@ export class PulseSocketIOClient {
 
 	#handleJsExec(message: ServerJsExecMessage) {
 		const view = this.#activeViews.get(message.path);
-		if (!view?.onJsExec) {
-			// No handler registered - execute anyway and send result back
-			// This shouldn't happen in practice as views should register handlers
-			console.warn(`[Pulse] No onJsExec handler for path: ${message.path}`);
-			this.#sendJsResult(message.id, undefined, "No JS executor registered");
+		if (!view) {
+			// View unmounted before the message arrived - send result back to unblock
+			// the server-side future (which is likely already cancelled anyway).
+			this.#sendJsResult(message.id, undefined, null);
 			return;
 		}
 		view.onJsExec(message);

@@ -6,6 +6,7 @@ Each session mounts both routes and mutates state via callbacks. We assert
 that updates from one session do not leak into the other.
 """
 
+import asyncio
 from typing import Any, cast, override
 
 import pulse as ps
@@ -580,5 +581,217 @@ def test_multiple_routes_all_rehydrated_on_reconnect():
 	# Both effects should be resumed
 	assert effect_a.paused is False
 	assert effect_b.paused is False
+
+	session.close()
+
+
+# =============================================================================
+# Timeout and Cancellation Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_call_api_timeout():
+	"""Test that call_api raises TimeoutError when no response arrives."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Call API with a very short timeout - no response will arrive
+	with pytest.raises(asyncio.TimeoutError):
+		await session.call_api("/test", timeout=0.01)
+
+	# Verify the pending API was cleaned up
+	assert len(session._pending_api) == 0  # pyright: ignore[reportPrivateUsage]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_call_api_success_before_timeout():
+	"""Test that call_api succeeds when response arrives before timeout."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Start the API call
+	api_task = asyncio.create_task(session.call_api("/test", timeout=1.0))
+
+	# Give it a moment to send the message
+	await asyncio.sleep(0.01)
+
+	# Find the api_call message and get its ID
+	api_msgs = [m for m in messages if m.get("type") == "api_call"]
+	assert len(api_msgs) == 1
+	api_id = cast(Any, api_msgs[0])["id"]
+
+	# Simulate client response
+	session.handle_api_result(
+		{
+			"id": api_id,
+			"ok": True,
+			"status": 200,
+			"headers": {},
+			"body": {"success": True},
+		}
+	)
+
+	# The task should complete successfully
+	result = await api_task
+	assert result["ok"] is True
+	assert result["body"] == {"success": True}
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_run_js_timeout():
+	"""Test that run_js future raises TimeoutError when no response arrives."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Run JS with result=True and short timeout
+	with ps.PulseContext.update(render=session, route=session.route_mounts["a"].route):
+		future = session.run_js("return 42", result=True, timeout=0.05)
+
+	assert future is not None
+
+	# Wait for timeout
+	with pytest.raises(asyncio.TimeoutError):
+		await future
+
+	# Verify the pending JS result was cleaned up
+	assert len(session._pending_js_results) == 0  # pyright: ignore[reportPrivateUsage]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_run_js_success_before_timeout():
+	"""Test that run_js future resolves when response arrives before timeout."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Run JS with result=True
+	with ps.PulseContext.update(render=session, route=session.route_mounts["a"].route):
+		future = session.run_js("return 42", result=True, timeout=1.0)
+
+	assert future is not None
+
+	# Find the js_exec message and get its ID
+	js_msgs = [m for m in messages if m.get("type") == "js_exec"]
+	assert len(js_msgs) == 1
+	exec_id = cast(Any, js_msgs[0])["id"]
+
+	# Simulate client response
+	session.handle_js_result({"id": exec_id, "result": 42, "error": None})
+
+	# The future should resolve with the result
+	result = await future
+	assert result == 42
+
+	session.close()
+
+
+def test_session_close_cancels_pending_api():
+	"""Test that session.close() cancels pending API futures."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Create a pending API future manually (simulating an in-flight request)
+	loop = asyncio.new_event_loop()
+	asyncio.set_event_loop(loop)
+	try:
+		fut: asyncio.Future[Any] = loop.create_future()
+		session._pending_api["test-id"] = fut  # pyright: ignore[reportPrivateUsage]
+
+		# Close the session
+		session.close()
+
+		# The future should be cancelled
+		assert fut.cancelled()
+		assert len(session._pending_api) == 0  # pyright: ignore[reportPrivateUsage]
+	finally:
+		loop.close()
+
+
+def test_session_close_cancels_pending_js():
+	"""Test that session.close() cancels pending JS result futures."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.mount("a", make_route_info("a"))
+
+	# Create a pending JS future manually
+	loop = asyncio.new_event_loop()
+	asyncio.set_event_loop(loop)
+	try:
+		fut: asyncio.Future[Any] = loop.create_future()
+		session._pending_js_results["test-id"] = fut  # pyright: ignore[reportPrivateUsage]
+
+		# Close the session
+		session.close()
+
+		# The future should be cancelled
+		assert fut.cancelled()
+		assert len(session._pending_js_results) == 0  # pyright: ignore[reportPrivateUsage]
+	finally:
+		loop.close()
+
+
+def test_handle_api_result_ignores_unknown_id():
+	"""Test that handle_api_result silently ignores unknown correlation IDs."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	session.connect(lambda _: None)
+
+	# Should not raise
+	session.handle_api_result(
+		{"id": "unknown-id", "ok": True, "status": 200, "headers": {}, "body": None}
+	)
+
+	session.close()
+
+
+def test_handle_js_result_ignores_unknown_id():
+	"""Test that handle_js_result silently ignores unknown exec IDs."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	session.connect(lambda _: None)
+
+	# Should not raise
+	session.handle_js_result({"id": "unknown-id", "result": 42, "error": None})
 
 	session.close()

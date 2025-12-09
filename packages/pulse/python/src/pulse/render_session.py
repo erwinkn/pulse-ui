@@ -11,7 +11,6 @@ from pulse.helpers import create_future_on_loop, create_task
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
 	ServerApiCallMessage,
-	ServerErrorMessage,
 	ServerErrorPhase,
 	ServerInitMessage,
 	ServerJsExecMessage,
@@ -92,12 +91,13 @@ class RenderSession:
 	forms: "FormRegistry"
 	query_store: QueryStore
 	route_mounts: dict[str, RouteMount]
+	connected: bool
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
+	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_global_states: dict[str, State]
-	connected: bool
 
 	def __init__(
 		self,
@@ -118,7 +118,6 @@ class RenderSession:
 		# Best-effort client address, captured at prerender or socket connect time
 		self._client_address = client_address
 		self._send_message = None
-		self._pending_api = {}
 		# Registry of per-session global singletons (created via ps.global_state without id)
 		self._global_states = {}
 		self.query_store = QueryStore()
@@ -126,8 +125,9 @@ class RenderSession:
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
+		self._pending_api = {}
 		# Pending JS execution results (for awaiting run_js().result())
-		self._pending_js_results: dict[str, asyncio.Future[Any]] = {}
+		self._pending_js_results = {}
 
 	@property
 	def server_address(self) -> str:
@@ -177,17 +177,18 @@ class RenderSession:
 		exc: BaseException,
 		details: dict[str, Any] | None = None,
 	):
-		error_msg: ServerErrorMessage = {
-			"type": "server_error",
-			"path": path,
-			"error": {
-				"message": str(exc),
-				"stack": traceback.format_exc(),
-				"phase": phase,
-				"details": details or {},
-			},
-		}
-		self.send(error_msg)
+		self.send(
+			{
+				"type": "server_error",
+				"path": path,
+				"error": {
+					"message": str(exc),
+					"stack": traceback.format_exc(),
+					"phase": phase,
+					"details": details or {},
+				},
+			}
+		)
 		logger.error(
 			"Error reported for path %r during %s: %s\n%s",
 			path,
@@ -211,6 +212,16 @@ class RenderSession:
 			if channel:
 				channel.closed = True
 				self.channels.dispose_channel(channel, reason="render.close")
+		# Cancel pending API calls
+		for fut in self._pending_api.values():
+			if not fut.done():
+				fut.cancel()
+		self._pending_api.clear()
+		# Cancel pending JS execution results
+		for fut in self._pending_js_results.values():
+			if not fut.done():
+				fut.cancel()
+		self._pending_js_results.clear()
 		# The effect will be garbage collected, and with it the dependencies
 		self._send_message = None
 		self.connected = False
@@ -240,12 +251,17 @@ class RenderSession:
 		headers: dict[str, str] | None = None,
 		body: Any | None = None,
 		credentials: str = "include",
+		timeout: float = 30.0,
 	) -> dict[str, Any]:
 		"""Request the client to perform a fetch and await the result.
 
 		Accepts either an absolute URL (http/https) or a relative path. When a
 		relative path is provided, it is resolved against this session's
 		server_address.
+
+		Args:
+			timeout: Maximum seconds to wait for response (default 30s).
+			         Raises asyncio.TimeoutError if exceeded.
 		"""
 		# Resolve to absolute URL if a relative path is passed
 		if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
@@ -274,7 +290,11 @@ class RenderSession:
 				credentials="include" if credentials == "include" else "omit",
 			)
 		)
-		result = await fut
+		try:
+			result = await asyncio.wait_for(fut, timeout=timeout)
+		except asyncio.TimeoutError:
+			self._pending_api.pop(corr_id, None)
+			raise
 		return result
 
 	def handle_api_result(self, data: dict[str, Any]):
@@ -296,14 +316,20 @@ class RenderSession:
 	# ---- JS Execution ----
 	@overload
 	def run_js(
-		self, expr: JSExpr | str, *, result: Literal[True]
+		self, expr: JSExpr | str, *, result: Literal[True], timeout: float = ...
 	) -> asyncio.Future[object]: ...
 
 	@overload
-	def run_js(self, expr: JSExpr | str, *, result: Literal[False] = ...) -> None: ...
+	def run_js(
+		self,
+		expr: JSExpr | str,
+		*,
+		result: Literal[False] = ...,
+		timeout: float = ...,
+	) -> None: ...
 
 	def run_js(
-		self, expr: JSExpr | str, *, result: bool = False
+		self, expr: JSExpr | str, *, result: bool = False, timeout: float = 10.0
 	) -> asyncio.Future[object] | None:
 		"""Execute JavaScript on the client.
 
@@ -311,6 +337,8 @@ class RenderSession:
 			expr: A JSExpr (e.g. from calling a @javascript function) or raw JS string.
 			result: If True, returns a Future that resolves with the JS return value.
 			        If False (default), returns None (fire-and-forget).
+			timeout: Maximum seconds to wait for result (default 10s, only applies when
+			         result=True). Future raises asyncio.TimeoutError if exceeded.
 
 		Returns:
 			None if result=False, otherwise a Future resolving to the JS result.
@@ -346,8 +374,9 @@ class RenderSession:
 			with interpreted_mode():
 				code = expr.emit()
 
-		# Get path from route context, fallback to "/"
-		path = ctx.route.pathname if ctx.route else "/"
+		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
+		# This must match the path used to key views on the client side
+		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
 		self.send(
 			ServerJsExecMessage(
@@ -362,6 +391,15 @@ class RenderSession:
 			loop = asyncio.get_running_loop()
 			future: asyncio.Future[object] = loop.create_future()
 			self._pending_js_results[exec_id] = future
+
+			# Schedule auto-timeout
+			def _on_timeout() -> None:
+				self._pending_js_results.pop(exec_id, None)
+				if not future.done():
+					future.set_exception(asyncio.TimeoutError())
+
+			loop.call_later(timeout, _on_timeout)
+
 			return future
 
 		return None

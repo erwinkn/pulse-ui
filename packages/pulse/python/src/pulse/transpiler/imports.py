@@ -4,6 +4,7 @@ import inspect
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import (
+	Any,
 	ClassVar,
 	TypeAlias,
 	TypeVar,
@@ -14,7 +15,8 @@ from typing import (
 
 from pulse.transpiler.context import is_interpreted_mode
 from pulse.transpiler.ids import generate_id
-from pulse.transpiler.nodes import JSExpr
+from pulse.transpiler.jsx import JSXCallExpr, build_jsx_props, convert_jsx_child
+from pulse.transpiler.nodes import JSCall, JSExpr
 
 T = TypeVar("T")
 Args = TypeVarTuple("Args")
@@ -118,6 +120,7 @@ class Import(JSExpr):
 		"before",
 		"id",
 		"source_path",
+		"jsx",
 	)
 
 	is_primary: ClassVar[bool] = True
@@ -130,6 +133,7 @@ class Import(JSExpr):
 	before: tuple[str, ...]
 	id: str
 	source_path: Path | None  # For local CSS files that need to be copied
+	jsx: bool
 
 	def __init__(
 		self,
@@ -141,12 +145,14 @@ class Import(JSExpr):
 		is_type_only: bool = False,
 		before: Sequence[str] = (),
 		source_path: Path | None = None,
+		jsx: bool = False,
 	) -> None:
 		self.name = name
 		self.src = src
 		self.is_default = is_default
 		self.is_namespace = is_namespace
 		self.source_path = source_path
+		self.jsx = jsx
 
 		before_tuple = tuple(before)
 
@@ -265,6 +271,23 @@ class Import(JSExpr):
 		if is_interpreted_mode():
 			return f"get_object('{base}')"
 		return base
+
+	@override
+	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
+		"""Handle Import calls - JSX if jsx=True, regular call otherwise."""
+		if not self.jsx:
+			if kwargs:
+				from pulse.transpiler.errors import JSCompilationError
+
+				raise JSCompilationError(
+					"Keyword arguments not supported in default function call"
+				)
+			return JSCall(self, [JSExpr.of(a) for a in args])
+
+		# JSX mode: positional args are children, kwargs are props
+		props = build_jsx_props(kwargs)
+		children = [convert_jsx_child(c) for c in args]
+		return JSXCallExpr(self, tuple(props), tuple(children))
 
 	@override
 	def __repr__(self) -> str:

@@ -14,60 +14,12 @@ to JSX elements. Tag functions can be called with props and subscripted with chi
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, field
-from typing import Any, ClassVar, override
+from typing import Any
 
 from pulse.transpiler.errors import JSCompilationError
-from pulse.transpiler.nodes import (
-	JSArray,
-	JSExpr,
-	JSSpread,
-	JSString,
-	JSXElement,
-	JSXFragment,
-	JSXProp,
-	JSXSpreadProp,
-)
+from pulse.transpiler.jsx import JSXCallExpr, build_jsx_props, convert_jsx_child
+from pulse.transpiler.nodes import JSExpr, JSXFragment
 from pulse.transpiler.py_module import PyModule
-
-
-def _flatten_children(items: list[Any], out: list[JSExpr | JSXElement | str]) -> None:
-	"""Flatten arrays and handle spreads in children list."""
-	for it in items:
-		# Convert raw values first
-		it = JSExpr.of(it) if not isinstance(it, JSExpr) else it
-		if isinstance(it, JSArray):
-			_flatten_children(list(it.elements), out)
-		elif isinstance(it, JSSpread):
-			# Spread children: pass the inner expression; React handles arrays
-			out.append(it.expr)
-		elif isinstance(it, JSString):
-			out.append(it.value)
-		else:
-			out.append(it)
-
-
-def _build_jsx_props(kwargs: dict[str, Any]) -> list[JSXProp | JSXSpreadProp]:
-	"""Build JSX props list from kwargs dict.
-
-	Kwargs maps:
-	- "propName" -> value for named props
-	- "__spread_N" -> JSSpread(expr) for spread props
-
-	Dict order is preserved, so iteration order matches source order.
-	"""
-	props: list[JSXProp | JSXSpreadProp] = []
-
-	for key, value in kwargs.items():
-		if isinstance(value, JSSpread):
-			# Spread prop: {...expr}
-			props.append(JSXSpreadProp(value.expr))
-		else:
-			# Named prop - convert to JSExpr
-			props.append(JSXProp(key, JSExpr.of(value)))
-
-	return props
 
 
 def _create_tag_function(tag_name: str):
@@ -76,49 +28,11 @@ def _create_tag_function(tag_name: str):
 	@staticmethod
 	def tag_func(*args: Any, **kwargs: Any) -> JSExpr:
 		"""Tag function that creates JSXCallExpr with props and children."""
-		props_list = _build_jsx_props(kwargs)
-		children_list: list[JSExpr | JSXElement | str] = []
-		_flatten_children(list(args), children_list)
+		props_list = build_jsx_props(kwargs)
+		children_list = [convert_jsx_child(c) for c in args]
 		return JSXCallExpr(tag_name, tuple(props_list), tuple(children_list))
 
 	return tag_func
-
-
-@dataclass
-class JSXCallExpr(JSExpr):
-	"""Expression representing a called tag with props (but possibly more children).
-
-	When subscripted, adds children to produce the final JSXElement.
-	Calling again is an error (can't call an element).
-	"""
-
-	tag_name: str
-	props: Sequence[JSXProp | JSXSpreadProp] = field(default_factory=tuple)
-	children: Sequence[str | JSExpr | JSXElement] = field(default_factory=tuple)
-	is_jsx: ClassVar[bool] = True
-
-	@override
-	def emit(self) -> str:
-		# Emit as final JSXElement
-		return JSXElement(self.tag_name, self.props, self.children).emit()
-
-	@override
-	def emit_subscript(self, indices: list[Any]) -> JSExpr:
-		"""Handle tag(props...)[children] -> JSXElement."""
-		extra_children: list[JSExpr | JSXElement | str] = []
-		_flatten_children(indices, extra_children)
-		all_children = list(self.children) + extra_children
-		return JSXElement(self.tag_name, self.props, all_children)
-
-	@override
-	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
-		"""Calling an already-called tag is an error."""
-		from pulse.transpiler.errors import JSCompilationError
-
-		raise JSCompilationError(
-			f"Cannot call JSX element <{self.tag_name}> - already called. "
-			+ "Use subscript for children: tag(props...)[children]"
-		)
 
 
 class PyTags(PyModule):
@@ -263,6 +177,5 @@ class PyTags(PyModule):
 		"""Fragment function that creates JSXFragment with children."""
 		if kwargs:
 			raise JSCompilationError("React fragments cannot have props")
-		children_list: list[JSExpr | JSXElement | str] = []
-		_flatten_children(list(args), children_list)
+		children_list = [convert_jsx_child(c) for c in args]
 		return JSXFragment(children_list)

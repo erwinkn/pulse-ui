@@ -413,23 +413,39 @@ VDOMOperation: TypeAlias = (
 
 
 # ----------------------------------------------------------------------------
-# Component naming heuristics
+# Sanitization heuristics
 # ----------------------------------------------------------------------------
 
 
-def clean_element_name(parent_name: str) -> str:
-	"""Strip $$ prefix and hexadecimal suffix from ReactComponent tags in warning messages.
-
-	ReactComponent tags are in the format <$$ComponentName_1a2b> or <$$ComponentName_1a2b.prop>.
-	This function strips the $$ prefix and _1a2b suffix to show just the component name.
-	"""
-
-	# Match ReactComponent tags: <$$ComponentName_hex> or <$$ComponentName_hex.prop>
-	# Strip the $$ prefix and _hex suffix but keep the rest (hex digits are 0-9, a-f)
-	return re.sub(r"\$\$([^_]+)_[0-9a-f]+", r"\1", parent_name)
-
-
 def _flatten_children(
+	children: Children, *, parent_name: str, warn_stacklevel: int = 5
+) -> list[Element]:
+	"""Flatten children, switching between prod and dev implementations."""
+	if env.pulse_env == "dev":
+		return _flatten_children_dev(
+			children, parent_name=parent_name, warn_stacklevel=warn_stacklevel
+		)
+	return _flatten_children_prod(children)
+
+
+def _flatten_children_prod(children: Children) -> list[Element]:
+	"""Flatten children (production mode - no checks)."""
+	flat: list[Element] = []
+
+	def visit(item: Child) -> None:
+		if isinstance(item, Iterable) and not isinstance(item, str):
+			for sub in item:
+				visit(sub)
+		else:
+			flat.append(item)
+
+	for child in children:
+		visit(child)
+
+	return flat
+
+
+def _flatten_children_dev(
 	children: Children, *, parent_name: str, warn_stacklevel: int = 5
 ) -> list[Element]:
 	"""Flatten children and emit warnings for unkeyed iterables (dev mode only).
@@ -442,7 +458,7 @@ def _flatten_children(
 			- 4 for ComponentNode.__getitem__ or Component.__call__ (user -> method -> _flatten_children -> visit -> warn)
 	"""
 	flat: list[Element] = []
-	is_dev = env.pulse_env == "dev"
+	seen_keys: set[str] = set()
 
 	def visit(item: Child) -> None:
 		if isinstance(item, Iterable) and not isinstance(item, str):
@@ -450,11 +466,7 @@ def _flatten_children(
 			# emit a single warning for this iterable (dev mode only).
 			missing_key = False
 			for sub in item:
-				if (
-					is_dev
-					and isinstance(sub, (Node, ComponentNode))
-					and sub.key is None
-				):
+				if isinstance(sub, (Node, ComponentNode)) and sub.key is None:
 					missing_key = True
 				visit(sub)
 			if missing_key:
@@ -468,38 +480,56 @@ def _flatten_children(
 					stacklevel=warn_stacklevel,
 				)
 		else:
-			# Not an iterable child: must be a Element or primitive
+			# Not an iterable child: must be a Element or primitive. Check for
+			# duplicate keys on nodes.
+			if isinstance(item, (Node, ComponentNode)) and item.key is not None:
+				if item.key in seen_keys:
+					clean_name = clean_element_name(parent_name)
+					raise ValueError(
+						f"[Pulse] Duplicate key '{item.key}' found among children of {clean_name}. "
+						+ "Keys must be unique per sibling set."
+					)
+				seen_keys.add(item.key)
 			flat.append(item)
 
 	for child in children:
 		visit(child)
 
-	seen_keys: set[str] = set()
-	for child in flat:
-		if isinstance(child, (Node, ComponentNode)) and child.key is not None:
-			if child.key in seen_keys:
-				clean_name = clean_element_name(parent_name)
-				raise ValueError(
-					f"[Pulse] Duplicate key '{child.key}' found among children of {clean_name}. "
-					+ "Keys must be unique per sibling set."
-				)
-			seen_keys.add(child.key)
-
 	return flat
 
 
-def _short_args(args: tuple[Any, ...], max_items: int = 4) -> list[str] | str:
-	if not args:
-		return []
-	out: list[str] = []
-	for a in args[: max_items - 1]:
-		s = repr(a)
-		if len(s) > 32:
-			s = s[:29] + "…" + s[-1]
-		out.append(s)
-	if len(args) > (max_items - 1):
-		out.append(f"…(+{len(args) - (max_items - 1)})")
-	return out
+def _takes_children(fn: Callable[..., Any]) -> bool:
+	"""Return True if function accepts children via `*children` parameter.
+
+	Convention: A component accepts children if and only if it has a VAR_POSITIONAL
+	parameter named "children". This convention should be documented in user-facing docs.
+	"""
+	try:
+		sig = signature(fn)
+	except (ValueError, TypeError):
+		# Builtins or callables without inspectable signature: assume no children
+		return False
+	for p in sig.parameters.values():
+		if p.kind is Parameter.VAR_POSITIONAL and p.name == "children":
+			return True
+	return False
+
+
+# ----------------------------------------------------------------------------
+# Formatting helpers (internal)
+# ----------------------------------------------------------------------------
+
+
+def clean_element_name(parent_name: str) -> str:
+	"""Strip $$ prefix and hexadecimal suffix from ReactComponent tags in warning messages.
+
+	ReactComponent tags are in the format <$$ComponentName_1a2b> or <$$ComponentName_1a2b.prop>.
+	This function strips the $$ prefix and _1a2b suffix to show just the component name.
+	"""
+
+	# Match ReactComponent tags: <$$ComponentName_hex> or <$$ComponentName_hex.prop>
+	# Strip the $$ prefix and _hex suffix but keep the rest (hex digits are 0-9, a-f)
+	return re.sub(r"\$\$([^_]+)_[0-9a-f]+", r"\1", parent_name)
 
 
 def _infer_component_name(fn: Callable[..., Any]) -> str:
@@ -536,34 +566,26 @@ def _callable_qualname(fn: Callable[..., Any]) -> str:
 	return f"{mod}.{qual}"
 
 
-def _takes_children(fn: Callable[..., Any]) -> bool:
-	"""Return True if function accepts children via `*children` parameter.
-
-	Convention: A component accepts children if and only if it has a VAR_POSITIONAL
-	parameter named "children". This convention should be documented in user-facing docs.
-	"""
-	try:
-		sig = signature(fn)
-	except (ValueError, TypeError):
-		# Builtins or callables without inspectable signature: assume no children
-		return False
-	for p in sig.parameters.values():
-		if p.kind is Parameter.VAR_POSITIONAL and p.name == "children":
-			return True
-	return False
-
-
-# ----------------------------------------------------------------------------
-# Formatting helpers (internal)
-# ----------------------------------------------------------------------------
-
-
 def _pretty_repr(node: Element):
 	if isinstance(node, Node):
 		return f"<{node.tag}>"
 	if isinstance(node, ComponentNode):
 		return f"<{node.name}"
 	return repr(node)
+
+
+def _short_args(args: tuple[Any, ...], max_items: int = 4) -> list[str] | str:
+	if not args:
+		return []
+	out: list[str] = []
+	for a in args[: max_items - 1]:
+		s = repr(a)
+		if len(s) > 32:
+			s = s[:29] + "…" + s[-1]
+		out.append(s)
+	if len(args) > (max_items - 1):
+		out.append(f"…(+{len(args) - (max_items - 1)})")
+	return out
 
 
 def _short_props(

@@ -7,7 +7,6 @@ export type {
 	ConnectionStatusListener,
 	MountedView,
 	PulseClient,
-	ServerErrorListener,
 } from "./client";
 export type { PulseFormProps } from "./form";
 // Form helpers
@@ -30,7 +29,7 @@ export type {
 	ServerChannelMessage,
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
-	ServerErrorInfo,
+	ServerError,
 	ServerErrorMessage,
 	ServerInitMessage,
 	ServerMessage,
@@ -49,10 +48,7 @@ export { RenderLazy } from "./renderer";
 //   decodeFromWire,
 //   cleanForSerialization,
 // } from "./serialize/clean";
-export {
-	deserialize,
-	serialize,
-} from "./serialize/serializer";
+export { deserialize, serialize } from "./serialize/serializer";
 // Transports (types only - implementation is internal)
 export type { MessageListener, Transport } from "./transport";
 export { usePulseChannel } from "./usePulseChannel";

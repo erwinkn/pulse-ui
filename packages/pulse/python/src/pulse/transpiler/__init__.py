@@ -43,7 +43,9 @@ from pulse.transpiler.errors import JSCompilationError as JSCompilationError
 
 # Function system
 from pulse.transpiler.function import FUNCTION_CACHE as FUNCTION_CACHE
+from pulse.transpiler.function import JSX_FUNCTION_CACHE as JSX_FUNCTION_CACHE
 from pulse.transpiler.function import JsFunction as JsFunction
+from pulse.transpiler.function import JsxFunction as JsxFunction
 from pulse.transpiler.function import javascript as javascript
 
 # Utilities
@@ -61,6 +63,7 @@ from pulse.transpiler.imports import registered_imports as registered_imports
 from pulse.transpiler.js_module import JS_MODULES as JS_MODULES
 from pulse.transpiler.js_module import JsModule as JsModule
 from pulse.transpiler.js_module import register_js_module as register_js_module
+from pulse.transpiler.jsx import JSXCallExpr as JSXCallExpr
 
 # JS AST Utilities
 from pulse.transpiler.nodes import ALLOWED_BINOPS as ALLOWED_BINOPS

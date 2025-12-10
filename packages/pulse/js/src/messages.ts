@@ -21,7 +21,7 @@ export interface ServerUpdateMessage {
 	ops: VDOMUpdate[];
 }
 
-export interface ServerErrorInfo {
+export interface ServerError {
 	message: string;
 	stack?: string;
 	phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
@@ -31,7 +31,7 @@ export interface ServerErrorInfo {
 export interface ServerErrorMessage {
 	type: "server_error";
 	path: string;
-	error: ServerErrorInfo;
+	error: ServerError;
 }
 
 export interface ServerApiCallMessage {

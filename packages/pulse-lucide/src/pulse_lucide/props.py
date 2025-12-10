@@ -1,6 +1,7 @@
+from typing import Unpack
+
 import pulse as ps
 from pulse.html.elements import GenericHTMLElement
-from pulse.react_component import prop_spec_from_typeddict
 
 
 class LucideProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
@@ -8,4 +9,6 @@ class LucideProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	absoluteStrokeWidth: bool
 
 
-LUCIDE_PROPS_SPEC = prop_spec_from_typeddict(LucideProps)
+def lucide_signature(
+	*children: ps.Child, key: str | None = None, **props: Unpack[LucideProps]
+) -> ps.Element: ...

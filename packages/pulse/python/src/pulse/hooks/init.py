@@ -311,7 +311,7 @@ def _collect_assigned_names(body: list[ast.stmt]) -> list[str]:
 def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 	"""Rewrite `with ps.init()` blocks in the provided function, if present."""
 
-	source = _get_source(func)  # raises immediately if missing
+	source = textwrap.dedent(getsourcecode(func))  # raises immediately if missing
 
 	if "init" not in source:  # quick prefilter, allow alias detection later
 		return func
@@ -416,18 +416,6 @@ class _InitCallChecker:
 			if self.is_init_call(node):
 				return True
 		return False
-
-
-def _get_source(func: Callable[..., Any]) -> str:
-	try:
-		return textwrap.dedent(getsourcecode(func))
-	except OSError as exc:
-		src = getattr(func, "__source__", None)
-		if src is None:
-			raise RuntimeError(
-				f"ps.init rewrite failed: unable to read source ({exc})"
-			) from exc
-		return textwrap.dedent(src)
 
 
 def _resolve_init_bindings(func: Callable[..., Any]) -> tuple[set[str], set[str]]:

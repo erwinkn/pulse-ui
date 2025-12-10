@@ -1,7 +1,7 @@
 from typing import Literal, TypedDict, Unpack
 
 from pulse.html.props import HTMLAnchorProps
-from pulse.react_component import DEFAULT, react_component
+from pulse.react_component import react_component
 from pulse.vdom import Child
 
 
@@ -16,23 +16,14 @@ def Link(
 	*children: Child,
 	key: str | None = None,
 	to: str,
-	# Default: render
-	discover: Literal["render", "none"] = DEFAULT,
-	# The React Router default is 'none' to match the behavior of regular links,
-	# but 'intent' is more desirable in general
+	discover: Literal["render", "none"] | None = None,
 	prefetch: Literal["none", "intent", "render", "viewport"] = "intent",
-	# Default: False
-	preventScrollReset: bool = DEFAULT,
-	# Default: 'route'
-	relative: Literal["route", "path"] = DEFAULT,
-	# Default: False
-	reloadDocument: bool = DEFAULT,
-	# Default: False
-	replace: bool = DEFAULT,
-	# Default: undefined
-	state: dict[str, object] = DEFAULT,
-	# Default: False
-	viewTransition: bool = DEFAULT,
+	preventScrollReset: bool | None = None,
+	relative: Literal["route", "path"] | None = None,
+	reloadDocument: bool | None = None,
+	replace: bool | None = None,
+	state: dict[str, object] | None = None,
+	viewTransition: bool | None = None,
 	**props: Unpack[HTMLAnchorProps],
 ): ...
 

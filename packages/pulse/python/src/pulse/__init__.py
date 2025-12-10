@@ -1348,13 +1348,7 @@ from pulse.react_component import (
 	ComponentRegistry as ComponentRegistry,
 )
 from pulse.react_component import (
-	Prop as Prop,
-)
-from pulse.react_component import (
 	ReactComponent as ReactComponent,
-)
-from pulse.react_component import (
-	prop as prop,
 )
 from pulse.react_component import (
 	react_component as react_component,
@@ -1432,6 +1426,7 @@ from pulse.serializer import serialize as serialize
 # State and routing
 from pulse.state import State as State
 from pulse.transpiler.function import JsFunction as JsFunction
+from pulse.transpiler.function import JsxFunction as JsxFunction
 from pulse.transpiler.function import javascript as javascript
 from pulse.transpiler.imports import CssImport as CssImport
 from pulse.transpiler.imports import Import as Import

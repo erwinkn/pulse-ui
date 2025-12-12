@@ -47,6 +47,15 @@ This convention already exists in `ReactComponent`. We just need `Node.emit()` t
 
 ## Phase 1: Make Node a JSExpr
 
+### Renderer update (required)
+
+`Node` becoming a `JSExpr` breaks `renderer.diff_props`: the `is_jsexpr` branch fires before the render-prop branch and will emit `$js:` for Nodes in props. Fix by handling `Node` / `ComponentNode` before `is_jsexpr` (or make `is_jsexpr` explicitly exclude them). Minimal change in `packages/pulse/python/src/pulse/renderer.py`:
+
+- Move the render-prop branch (`Node` / `ComponentNode`) above the `is_jsexpr` check, or
+- Change `is_jsexpr` to `return isinstance(value, (JSExpr, Import)) and not isinstance(value, (Node, ComponentNode))`
+
+Outcome: render-prop Nodes keep working; JSExpr paths tracking remains correct.
+
 ### Step 1.1: Add JSExpr import to vdom.py
 
 ```python

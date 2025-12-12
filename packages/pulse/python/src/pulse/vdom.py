@@ -10,7 +10,6 @@ import re
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from inspect import Parameter, signature
-from types import NoneType
 from typing import (
 	Any,
 	Generic,
@@ -116,70 +115,6 @@ class Node:
 			children=new_children,
 			key=self.key,
 			allow_children=self.allow_children,
-		)
-
-	@staticmethod
-	def from_vdom(
-		vdom: "VDOM",
-		callbacks: "Callbacks | None" = None,
-		*,
-		path: str = "",
-	) -> "Node | Primitive":
-		"""Create a Node tree from a VDOM structure.
-
-		- Primitive values are returned as-is
-		- Callbacks can be reattached by providing both `callbacks` (the
-		  callable registry) and `callback_props` (props per VDOM path)
-		"""
-
-		if isinstance(vdom, (str, int, float, bool, NoneType)):
-			return vdom
-
-		tag = vdom.get("tag")
-		props = vdom.get("props") or {}
-		key_value = vdom.get("key")
-
-		callbacks = callbacks or {}
-		prefix = f"{path}." if path else ""
-		prop_names: list[str] = []
-		for key in callbacks.keys():
-			if path:
-				if not key.startswith(prefix):
-					continue
-				remainder = key[len(prefix) :]
-			else:
-				remainder = key
-			if "." in remainder:
-				continue
-			prop_names.append(remainder)
-		if prop_names:
-			props = props.copy()
-			for name in prop_names:
-				callback_key = f"{path}.{name}" if path else name
-				callback = callbacks.get(callback_key)
-				if not callback:
-					raise ValueError(f"Missing callback '{callback_key}'")
-				props[name] = callback.fn
-
-		children_value: list[Element] | None = None
-		raw_children = vdom.get("children")
-		if raw_children is not None:
-			children_value = []
-			for idx, raw_child in enumerate(raw_children):
-				child_path = f"{path}.{idx}" if path else str(idx)
-				children_value.append(
-					Node.from_vdom(
-						raw_child,
-						callbacks=callbacks,
-						path=child_path,
-					)
-				)
-
-		return Node(
-			tag=tag,
-			props=props or None,
-			children=children_value,
-			key=key_value,
 		)
 
 

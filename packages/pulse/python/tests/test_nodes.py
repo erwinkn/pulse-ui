@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 from pulse import (
 	Node,
-	VDOMNode,
 	a,
 	br,
 	div,
@@ -27,7 +26,6 @@ from pulse import (
 	ul,
 )
 from pulse.html.tags import define_self_closing_tag, define_tag
-from pulse.vdom import Callback
 
 from .test_utils import assert_node_equal
 
@@ -160,30 +158,15 @@ class TestHTMLTags:
 			],
 		]
 
-		expected: VDOMNode = {
-			"tag": "div",
-			"props": {"className": "page"},
-			"children": [
-				{"tag": "h1", "children": ["Page Title"]},
-				{
-					"tag": "div",
-					"props": {"className": "content"},
-					"children": [
-						{"tag": "p", "children": ["First paragraph"]},
-						{
-							"tag": "p",
-							"children": [
-								"Second paragraph with ",
-								{"tag": "strong", "children": ["bold text"]},
-								" inside.",
-							],
-						},
-					],
-				},
+		expected = div(className="page")[
+			h1()["Page Title"],
+			div(className="content")[
+				p()["First paragraph"],
+				p()["Second paragraph with ", strong()["bold text"], " inside."],
 			],
-		}
+		]
 
-		assert_node_equal(structure, Node.from_vdom(expected))
+		assert_node_equal(structure, expected)
 
 	def test_self_closing_tags(self):
 		"""Test self-closing tags."""
@@ -276,17 +259,13 @@ class TestComplexStructures:
 		items = ["Item 1", "Item 2", "Item 3"]
 		list_structure = ul(className="list")[*[li()[item] for item in items]]
 
-		expected: VDOMNode = {
-			"tag": "ul",
-			"props": {"className": "list"},
-			"children": [
-				{"tag": "li", "children": ["Item 1"]},
-				{"tag": "li", "children": ["Item 2"]},
-				{"tag": "li", "children": ["Item 3"]},
-			],
-		}
+		expected = ul(className="list")[
+			li()["Item 1"],
+			li()["Item 2"],
+			li()["Item 3"],
+		]
 
-		assert_node_equal(list_structure, Node.from_vdom(expected))
+		assert_node_equal(list_structure, expected)
 
 	def test_mixed_content_types(self):
 		"""Test mixing different content types."""
@@ -298,18 +277,15 @@ class TestComplexStructures:
 			span()["More text"],
 		)
 
-		expected: VDOMNode = {
-			"tag": "div",
-			"children": [
-				"Plain text",
-				{"tag": "p", "children": ["Paragraph text"]},
-				123,
-				True,
-				{"tag": "span", "children": ["More text"]},
-			],
-		}
+		expected = div(
+			"Plain text",
+			p("Paragraph text"),
+			123,
+			True,
+			span()["More text"],
+		)
 
-		assert_node_equal(mixed_content, Node.from_vdom(expected))
+		assert_node_equal(mixed_content, expected)
 
 
 class TestEdgeCases:
@@ -318,36 +294,16 @@ class TestEdgeCases:
 	def test_empty_structures(self):
 		"""Test empty structures."""
 		node = div()
-		expected: VDOMNode = {"tag": "div"}
-		assert_node_equal(node, Node.from_vdom(expected))
+		expected = div()
+		assert_node_equal(node, expected)
 
 	def test_deeply_nested_structure(self):
 		"""Test deeply nested structures."""
 		deep_structure = div()[div()[div()[div()[div()["Deep content"]]]]]
 
-		expected: VDOMNode = {
-			"tag": "div",
-			"children": [
-				{
-					"tag": "div",
-					"children": [
-						{
-							"tag": "div",
-							"children": [
-								{
-									"tag": "div",
-									"children": [
-										{"tag": "div", "children": ["Deep content"]}
-									],
-								}
-							],
-						}
-					],
-				}
-			],
-		}
+		expected = div()[div()[div()[div()[div()["Deep content"]]]]]
 
-		assert_node_equal(deep_structure, Node.from_vdom(expected))
+		assert_node_equal(deep_structure, expected)
 
 	def test_none_handling(self):
 		"""Test handling of None values."""
@@ -468,61 +424,3 @@ class TestMissingKeyWarnings:
 		assert len(node.args) == 1
 		assert node.args[0] == items  # Still a list, not flattened
 		assert node.kwargs == {"value_col": "test"}
-
-
-class TestFromVDOM:
-	def test_from_vdom_primitives(self):
-		for value in ["text", 123, 3.14, True, None]:
-			assert Node.from_vdom(value) == value
-
-	def test_from_vdom_simple_element(self):
-		vdom: VDOMNode = {"tag": "div"}
-		node = Node.from_vdom(vdom)
-		assert isinstance(node, Node)
-		assert node.tag == "div"
-		assert_node_equal(node, Node("div"))
-
-	def test_from_vdom_with_props_and_children(self):
-		vdom: VDOMNode = {
-			"tag": "div",
-			"props": {"className": "container"},
-			"children": [
-				"Hello",
-				{"tag": "span", "children": ["World"]},
-			],
-		}
-
-		node = Node.from_vdom(vdom)
-		assert isinstance(node, Node)
-		expected = Node(
-			"div",
-			{"className": "container"},
-			[
-				"Hello",
-				Node("span", None, ["World"]),
-			],
-		)
-		assert_node_equal(node, expected)
-
-	def test_from_vdom_preserves_key_and_maps_callbacks(self):
-		vdom: VDOMNode = {
-			"tag": "button",
-			"key": "k1",
-			"props": {
-				"type": "button",
-			},
-			"children": ["Click"],
-		}
-
-		onClick = lambda: None  # noqa: E731
-		callbacks = {"onClick": Callback(onClick, 0)}
-
-		node = Node.from_vdom(vdom, callbacks)
-		assert isinstance(node, Node)
-		# onClick should be restored from callbacks registry
-		assert node.props == {"type": "button", "onClick": onClick}
-		assert node.key == "k1"
-		assert_node_equal(
-			node,
-			Node("button", {"type": "button", "onClick": onClick}, ["Click"], key="k1"),
-		)

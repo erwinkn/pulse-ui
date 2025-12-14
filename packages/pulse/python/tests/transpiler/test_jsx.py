@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pulse.html import tags
+from pulse.dom import tags
 from pulse.transpiler.errors import JSCompilationError
 from pulse.transpiler.function import (
 	FUNCTION_CACHE,
@@ -147,7 +147,7 @@ class TestJsxFunctionComponent:
 
 	def test_basic_component_transpilation(self) -> None:
 		"""Test basic component transpilation."""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def MyComp(name: str):
@@ -162,7 +162,7 @@ class TestJsxFunctionComponent:
 
 	def test_calling_component_from_another_component(self) -> None:
 		"""Test: calling component from another component emits JSX."""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def MyComp(name: str):
@@ -180,7 +180,7 @@ class TestJsxFunctionComponent:
 
 	def test_props_via_call_children_via_subscript(self) -> None:
 		"""Test: MyComp(className="wrapper")[span("Hello")]"""
-		from pulse.html.tags import div, span
+		from pulse.dom.tags import div, span
 
 		@javascript(component=True)
 		def MyComp(name: str):
@@ -198,7 +198,7 @@ class TestJsxFunctionComponent:
 
 	def test_children_passing(self) -> None:
 		"""Test: Container("child1", "child2", className="wrapper")"""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def Container(name: str):
@@ -217,7 +217,7 @@ class TestJsxFunctionComponent:
 	def test_component_with_hooks(self) -> None:
 		"""Test component using hooks."""
 		useState = Import("useState", "react")
-		from pulse.html.tags import button, div
+		from pulse.dom.tags import button, div
 
 		@javascript(component=True)
 		def Counter():
@@ -232,7 +232,7 @@ class TestJsxFunctionComponent:
 
 	def test_nested_components(self) -> None:
 		"""Test nested components."""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def Inner(name: str):
@@ -248,7 +248,7 @@ class TestJsxFunctionComponent:
 
 	def test_component_with_spread_children(self) -> None:
 		"""Test component with spread children *items"""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def Container(name: str):
@@ -264,7 +264,7 @@ class TestJsxFunctionComponent:
 
 	def test_component_empty_props_with_children(self) -> None:
 		"""Test: Component()[children]"""
-		from pulse.html.tags import div, span
+		from pulse.dom.tags import div, span
 
 		@javascript(component=True)
 		def Container(name: str):
@@ -281,7 +281,7 @@ class TestJsxFunctionComponent:
 
 	def test_component_returns_jsxcallexpr(self) -> None:
 		"""Test that calling a component returns JSXCallExpr."""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def MyComp(name: str):
@@ -293,7 +293,7 @@ class TestJsxFunctionComponent:
 
 	def test_component_subscript_adds_children(self) -> None:
 		"""Test that subscript on component call adds children."""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def MyComp(name: str):
@@ -329,7 +329,7 @@ class TestHooksRegularImport:
 		"""Test hooks inside components transpile correctly."""
 		useState = Import("useState", "react")
 		useEffect = Import("useEffect", "react")
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def MyComponent():
@@ -348,7 +348,7 @@ class TestJsxEdgeCases:
 
 	def test_props_via_call_children_via_subscript_complex(self) -> None:
 		"""Test: Component(className="box", onClick=handler)["Hello", span("World")]"""
-		from pulse.html.tags import span
+		from pulse.dom.tags import span
 
 		@javascript(component=True)
 		def Component(name: str):
@@ -372,7 +372,7 @@ class TestJsxEdgeCases:
 
 	def test_mixed_children_and_props(self) -> None:
 		"""Test mixed children and props."""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def Container(name: str):
@@ -391,7 +391,7 @@ class TestJsxEdgeCases:
 
 	def test_component_cannot_be_called_twice(self) -> None:
 		"""Test that calling an already-called component raises error."""
-		from pulse.html.tags import div
+		from pulse.dom.tags import div
 
 		@javascript(component=True)
 		def MyComp(name: str):
@@ -408,7 +408,7 @@ class TestRegression:
 
 	def test_tags_py_functionality_still_works(self) -> None:
 		"""Test that existing tags.py functionality still works after refactor."""
-		from pulse.html import tags
+		from pulse.dom import tags
 
 		@javascript
 		def fn():

@@ -1,6 +1,6 @@
 from typing import Literal, TypedDict, Unpack
 
-from pulse.html.props import HTMLAnchorProps
+from pulse.dom.props import HTMLAnchorProps
 from pulse.react_component import react_component
 from pulse.vdom import Child
 

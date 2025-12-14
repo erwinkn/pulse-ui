@@ -3,7 +3,7 @@ Tests for Node tree -> JavaScript code emission (nodes_v2.emit).
 
 This module covers:
 - Expression nodes (Literal, Identifier, Binary, etc.)
-- Data nodes (ValueNode, ElementNode)
+- Data nodes (Value, Element)
 - Precedence and associativity
 - JSX emission
 - Edge cases (escaping, special characters)
@@ -19,8 +19,8 @@ from pulse.transpiler_v2.nodes import (
 	Arrow,
 	Binary,
 	Call,
-	ElementNode,
-	ExprNode,
+	Element,
+	Expr,
 	Identifier,
 	Literal,
 	Member,
@@ -32,7 +32,7 @@ from pulse.transpiler_v2.nodes import (
 	Ternary,
 	Unary,
 	Undefined,
-	ValueNode,
+	Value,
 	emit,
 )
 
@@ -528,58 +528,55 @@ class TestSpreadEmit:
 
 
 # =============================================================================
-# ValueNode Tests
+# Value Tests
 # =============================================================================
 
 
-class TestValueNodeEmit:
-	"""Test ValueNode emission (Python values to JS literals)."""
+class TestValueEmit:
+	"""Test Value emission (Python values to JS literals)."""
 
 	def test_none(self):
-		assert emit(ValueNode(None)) == "null"
+		assert emit(Value(None)) == "null"
 
 	def test_bool(self):
-		assert emit(ValueNode(True)) == "true"
-		assert emit(ValueNode(False)) == "false"
+		assert emit(Value(True)) == "true"
+		assert emit(Value(False)) == "false"
 
 	def test_numbers(self):
-		assert emit(ValueNode(42)) == "42"
-		assert emit(ValueNode(3.14)) == "3.14"
+		assert emit(Value(42)) == "42"
+		assert emit(Value(3.14)) == "3.14"
 
 	def test_string(self):
-		assert emit(ValueNode("hello")) == '"hello"'
-		assert emit(ValueNode('say "hi"')) == '"say \\"hi\\""'
+		assert emit(Value("hello")) == '"hello"'
+		assert emit(Value('say "hi"')) == '"say \\"hi\\""'
 
 	def test_list(self):
-		assert emit(ValueNode([1, 2, 3])) == "[1, 2, 3]"
-		assert emit(ValueNode(["a", "b"])) == '["a", "b"]'
+		assert emit(Value([1, 2, 3])) == "[1, 2, 3]"
+		assert emit(Value(["a", "b"])) == '["a", "b"]'
 
 	def test_nested_list(self):
-		assert emit(ValueNode([[1, 2], [3, 4]])) == "[[1, 2], [3, 4]]"
+		assert emit(Value([[1, 2], [3, 4]])) == "[[1, 2], [3, 4]]"
 
 	def test_dict(self):
-		assert emit(ValueNode({"a": 1, "b": 2})) == '{"a": 1, "b": 2}'
+		assert emit(Value({"a": 1, "b": 2})) == '{"a": 1, "b": 2}'
 
 	def test_nested_dict(self):
-		assert emit(ValueNode({"outer": {"inner": 42}})) == '{"outer": {"inner": 42}}'
+		assert emit(Value({"outer": {"inner": 42}})) == '{"outer": {"inner": 42}}'
 
 	def test_mixed_structures(self):
 		value = {"items": [1, 2, 3], "config": {"enabled": True}}
-		assert (
-			emit(ValueNode(value))
-			== '{"items": [1, 2, 3], "config": {"enabled": true}}'
-		)
+		assert emit(Value(value)) == '{"items": [1, 2, 3], "config": {"enabled": true}}'
 
 	def test_datetime(self):
 		# 2024-01-15 12:30:00 UTC
 		dt_value = dt.datetime(2024, 1, 15, 12, 30, 0, tzinfo=dt.timezone.utc)
-		result = emit(ValueNode(dt_value))
+		result = emit(Value(dt_value))
 		assert result.startswith("new Date(")
 		assert result.endswith(")")
 
 	def test_set(self):
 		# Sets become new Set([...])
-		result = emit(ValueNode({1, 2, 3}))
+		result = emit(Value({1, 2, 3}))
 		assert result.startswith("new Set([")
 		assert result.endswith("])")
 
@@ -588,51 +585,51 @@ class TestValueNodeEmit:
 			pass
 
 		with pytest.raises(TypeError, match="Cannot emit CustomClass"):
-			emit(ValueNode(CustomClass()))
+			emit(Value(CustomClass()))
 
 
 # =============================================================================
-# ElementNode (JSX) Tests
+# Element (JSX) Tests
 # =============================================================================
 
 
-class TestElementNodeEmit:
-	"""Test ElementNode JSX emission."""
+class TestElementEmit:
+	"""Test Element JSX emission."""
 
 	def test_self_closing_no_props(self):
-		elem = ElementNode("div")
+		elem = Element("div")
 		assert emit(elem) == "<div />"
 
 	def test_self_closing_with_props(self):
-		elem = ElementNode("img", {"src": "/img.png", "alt": "Image"})
+		elem = Element("img", {"src": "/img.png", "alt": "Image"})
 		result = emit(elem)
 		assert 'src="/img.png"' in result
 		assert 'alt="Image"' in result
 		assert result.endswith(" />")
 
 	def test_with_text_child(self):
-		elem = ElementNode("p", children=["Hello world"])
+		elem = Element("p", children=["Hello world"])
 		assert emit(elem) == "<p>Hello world</p>"
 
 	def test_with_nested_element(self):
-		child = ElementNode("span", children=["inner"])
-		parent = ElementNode("div", children=[child])
+		child = Element("span", children=["inner"])
+		parent = Element("div", children=[child])
 		assert emit(parent) == "<div><span>inner</span></div>"
 
 	def test_with_multiple_children(self):
-		elem = ElementNode(
-			"div", children=["Hello ", ElementNode("strong", children=["world"])]
+		elem = Element(
+			"div", children=["Hello ", Element("strong", children=["world"])]
 		)
 		assert emit(elem) == "<div>Hello <strong>world</strong></div>"
 
 	def test_with_key(self):
-		elem = ElementNode("li", key="item-1", children=["Item 1"])
+		elem = Element("li", key="item-1", children=["Item 1"])
 		result = emit(elem)
 		assert 'key="item-1"' in result
 		assert result.startswith("<li")
 
 	def test_props_with_primitives(self):
-		elem = ElementNode(
+		elem = Element(
 			"input",
 			{"disabled": True, "value": 42, "hidden": False, "placeholder": None},
 		)
@@ -643,87 +640,87 @@ class TestElementNodeEmit:
 		assert "placeholder={null}" in result
 
 	def test_props_with_expression(self):
-		elem = ElementNode("button", {"onClick": Identifier("handleClick")})
+		elem = Element("button", {"onClick": Identifier("handleClick")})
 		result = emit(elem)
 		assert "onClick={handleClick}" in result
 
 	def test_props_with_value_node(self):
-		elem = ElementNode("div", {"data": ValueNode({"a": 1, "b": 2})})
+		elem = Element("div", {"data": Value({"a": 1, "b": 2})})
 		result = emit(elem)
 		assert 'data={{"a": 1, "b": 2}}' in result
 
 	def test_jsx_text_escaping(self):
-		elem = ElementNode("p", children=["<script>alert('xss')</script>"])
+		elem = Element("p", children=["<script>alert('xss')</script>"])
 		result = emit(elem)
 		assert "&lt;script&gt;" in result
 		assert "&lt;/script&gt;" in result
 
 	def test_jsx_attribute_escaping(self):
-		elem = ElementNode("div", {"title": 'say "hello"'})
+		elem = Element("div", {"title": 'say "hello"'})
 		result = emit(elem)
 		assert 'title="say &quot;hello&quot;"' in result
 
 	def test_child_number(self):
-		elem = ElementNode("span", children=[42])
+		elem = Element("span", children=[42])
 		assert emit(elem) == "<span>{42}</span>"
 
 	def test_child_expression(self):
-		elem = ElementNode("span", children=[Identifier("count")])
+		elem = Element("span", children=[Identifier("count")])
 		assert emit(elem) == "<span>{count}</span>"
 
 	def test_child_none_and_bool_ignored(self):
-		elem = ElementNode("div", children=[None, True, False, "visible"])
+		elem = Element("div", children=[None, True, False, "visible"])
 		assert emit(elem) == "<div>visible</div>"
 
 
-class TestElementNodeWithChildren:
-	"""Test ElementNode.with_children method."""
+class TestElementWithChildren:
+	"""Test Element.with_children method."""
 
 	def test_with_children_simple(self):
-		div = ElementNode("div")
+		div = Element("div")
 		result = div.with_children(["hello"])
 		assert emit(result) == "<div>hello</div>"
 
 	def test_with_children_preserves_tag(self):
-		span = ElementNode("span")
+		span = Element("span")
 		result = span.with_children(["text"])
 		assert emit(result) == "<span>text</span>"
 
 	def test_with_children_preserves_props(self):
-		div = ElementNode("div", props={"class": Literal("foo")})
+		div = Element("div", props={"class": Literal("foo")})
 		result = div.with_children(["content"])
 		assert emit(result) == '<div class="foo">content</div>'
 
 	def test_with_children_preserves_key(self):
-		li = ElementNode("li", key="item-1")
+		li = Element("li", key="item-1")
 		result = li.with_children(["text"])
 		output = emit(result)
 		assert 'key="item-1"' in output
 		assert "text" in output
 
 	def test_with_children_multiple(self):
-		div = ElementNode("div")
+		div = Element("div")
 		result = div.with_children(["a", "b", "c"])
 		assert emit(result) == "<div>abc</div>"
 
 	def test_with_children_nested_elements(self):
-		div = ElementNode("div")
-		span = ElementNode("span", children=["inner"])
+		div = Element("div")
+		span = Element("span", children=["inner"])
 		result = div.with_children([span])
 		assert emit(result) == "<div><span>inner</span></div>"
 
 	def test_with_children_expression_nodes(self):
-		div = ElementNode("div")
+		div = Element("div")
 		result = div.with_children([Identifier("x"), Literal(42)])
 		assert emit(result) == "<div>{x}{42}</div>"
 
 	def test_with_children_errors_if_children_exist(self):
-		div = ElementNode("div", children=["existing"])
+		div = Element("div", children=["existing"])
 		with pytest.raises(ValueError, match="already has children"):
 			div.with_children(["more"])
 
 	def test_with_children_returns_new_element(self):
-		original = ElementNode("div")
+		original = Element("div")
 		modified = original.with_children(["child"])
 		# Original unchanged
 		assert original.children is None
@@ -731,7 +728,7 @@ class TestElementNodeWithChildren:
 		assert modified.children == ["child"]
 
 	def test_with_children_empty_list_allowed(self):
-		div = ElementNode("div")
+		div = Element("div")
 		result = div.with_children([])
 		# Empty children list is still set (but emits as self-closing)
 		assert result.children == []
@@ -747,22 +744,22 @@ class TestFragmentEmit:
 	"""Test Fragment (empty tag) emission."""
 
 	def test_empty_fragment(self):
-		frag = ElementNode("", children=[])
+		frag = Element("", children=[])
 		assert emit(frag) == "<></>"
 
 	def test_fragment_with_children(self):
-		frag = ElementNode(
+		frag = Element(
 			"",
 			children=[
-				ElementNode("p", children=["First"]),
-				ElementNode("p", children=["Second"]),
+				Element("p", children=["First"]),
+				Element("p", children=["Second"]),
 			],
 		)
 		assert emit(frag) == "<><p>First</p><p>Second</p></>"
 
 	def test_fragment_with_key(self):
-		frag = ElementNode(
-			"", key="frag-1", children=[ElementNode("span", children=["content"])]
+		frag = Element(
+			"", key="frag-1", children=[Element("span", children=["content"])]
 		)
 		result = emit(frag)
 		assert result.startswith('<Fragment key="frag-1">')
@@ -778,20 +775,18 @@ class TestClientComponentEmit:
 	"""Test client component ($$ prefix) emission."""
 
 	def test_client_component_tag(self):
-		elem = ElementNode("$$MyComponent")
+		elem = Element("$$MyComponent")
 		assert emit(elem) == "<MyComponent />"
 
 	def test_client_component_with_props(self):
-		elem = ElementNode("$$Button", {"variant": "primary", "size": "lg"})
+		elem = Element("$$Button", {"variant": "primary", "size": "lg"})
 		result = emit(elem)
 		assert result.startswith("<Button ")
 		assert 'variant="primary"' in result
 		assert 'size="lg"' in result
 
 	def test_client_component_with_children(self):
-		elem = ElementNode(
-			"$$Card", children=[ElementNode("p", children=["Card content"])]
-		)
+		elem = Element("$$Card", children=[Element("p", children=["Card content"])])
 		assert emit(elem) == "<Card><p>Card content</p></Card>"
 
 
@@ -804,13 +799,13 @@ class TestSpreadPropsEmit:
 	"""Test spread props in JSX."""
 
 	def test_spread_in_props(self):
-		elem = ElementNode("div", {"spreadProps": Spread(Identifier("props"))})
+		elem = Element("div", {"spreadProps": Spread(Identifier("props"))})
 		result = emit(elem)
 		assert "{...props}" in result
 
 	def test_spread_call_in_props(self):
 		call = Call(Identifier("getProps"), [])
-		elem = ElementNode("div", {"spreadCall": Spread(call)})
+		elem = Element("div", {"spreadCall": Spread(call)})
 		result = emit(elem)
 		assert "{...getProps()}" in result
 
@@ -836,7 +831,7 @@ class TestPulseNodeEmitError:
 			pass
 
 		pulse_child = PulseNode(fn=child_component)
-		elem = ElementNode("div", children=[pulse_child])
+		elem = Element("div", children=[pulse_child])
 		with pytest.raises(TypeError, match="Cannot transpile PulseNode"):
 			emit(elem)
 
@@ -847,11 +842,11 @@ class TestPulseNodeEmitError:
 
 
 class TestNestedElementPropEmit:
-	"""Test ElementNode as prop value (render props)."""
+	"""Test Element as prop value (render props)."""
 
 	def test_element_as_prop(self):
-		icon = ElementNode("Icon", {"name": "check"})
-		elem = ElementNode("Button", {"icon": icon})
+		icon = Element("Icon", {"name": "check"})
+		elem = Element("Button", {"icon": icon})
 		result = emit(elem)
 		assert "icon={<Icon" in result
 
@@ -868,7 +863,7 @@ class TestCallablePropError:
 		def handler():
 			pass
 
-		elem = ElementNode("button", {"onClick": handler})  # pyright: ignore[reportArgumentType]
+		elem = Element("button", {"onClick": handler})  # pyright: ignore[reportArgumentType]
 		with pytest.raises(TypeError, match="Cannot emit callable"):
 			emit(elem)
 
@@ -907,9 +902,9 @@ class TestComplexExpressionEmit:
 		assert emit(sub) == "arr[i + 1]"
 
 	def test_deeply_nested_jsx(self):
-		inner = ElementNode("span", {"className": "inner"}, ["Deep"])
-		middle = ElementNode("div", {"className": "middle"}, [inner])
-		outer = ElementNode("section", {"className": "outer"}, [middle])
+		inner = Element("span", {"className": "inner"}, ["Deep"])
+		middle = Element("div", {"className": "middle"}, [inner])
+		outer = Element("section", {"className": "outer"}, [middle])
 		result = emit(outer)
 		assert '<section className="outer">' in result
 		assert '<div className="middle">' in result
@@ -954,7 +949,7 @@ class TestEdgeCasesEmit:
 
 	def test_datetime_child(self):
 		dt_value = dt.datetime(2024, 1, 15, 12, 30, 0, tzinfo=dt.timezone.utc)
-		elem = ElementNode("span", children=[dt_value])
+		elem = Element("span", children=[dt_value])
 		result = emit(elem)
 		assert "{new Date(" in result
 
@@ -984,93 +979,93 @@ class TestUndefinedEmit:
 
 
 # =============================================================================
-# ExprNode.of / ExprNode.register Tests
+# Expr.of / Expr.register Tests
 # =============================================================================
 
 
-class TestExprNodeOf:
-	"""Test ExprNode.of() conversion."""
+class TestExprOf:
+	"""Test Expr.of() conversion."""
 
 	def test_passthrough_expr_node(self):
-		"""ExprNode.of returns ExprNode as-is."""
+		"""Expr.of returns Expr as-is."""
 		lit = Literal(42)
-		assert ExprNode.of(lit) is lit
+		assert Expr.of(lit) is lit
 
 	def test_string(self):
-		"""ExprNode.of converts string to Literal."""
-		result = ExprNode.of("hello")
+		"""Expr.of converts string to Literal."""
+		result = Expr.of("hello")
 		assert isinstance(result, Literal)
 		assert result.value == "hello"
 
 	def test_int(self):
-		result = ExprNode.of(42)
+		result = Expr.of(42)
 		assert isinstance(result, Literal)
 		assert result.value == 42
 
 	def test_float(self):
-		result = ExprNode.of(3.14)
+		result = Expr.of(3.14)
 		assert isinstance(result, Literal)
 		assert result.value == 3.14
 
 	def test_bool_true(self):
-		result = ExprNode.of(True)
+		result = Expr.of(True)
 		assert isinstance(result, Literal)
 		assert result.value is True
 
 	def test_bool_false(self):
-		result = ExprNode.of(False)
+		result = Expr.of(False)
 		assert isinstance(result, Literal)
 		assert result.value is False
 
 	def test_none(self):
-		result = ExprNode.of(None)
+		result = Expr.of(None)
 		assert isinstance(result, Literal)
 		assert result.value is None
 
 	def test_list(self):
-		result = ExprNode.of([1, 2, 3])
+		result = Expr.of([1, 2, 3])
 		assert isinstance(result, Array)
 		assert len(result.elements) == 3
 		assert all(isinstance(e, Literal) for e in result.elements)
 
 	def test_tuple(self):
-		result = ExprNode.of((1, 2))
+		result = Expr.of((1, 2))
 		assert isinstance(result, Array)
 		assert len(result.elements) == 2
 
 	def test_dict(self):
-		result = ExprNode.of({"a": 1, "b": 2})
+		result = Expr.of({"a": 1, "b": 2})
 		assert isinstance(result, Object)
 		assert len(result.props) == 2
 
 	def test_set(self):
 		from pulse.transpiler_v2.nodes import New
 
-		result = ExprNode.of({1, 2})
+		result = Expr.of({1, 2})
 		assert isinstance(result, New)
 		assert emit(result).startswith("new Set(")
 
 	def test_nested_collections(self):
-		result = ExprNode.of({"items": [1, 2], "count": 2})
+		result = Expr.of({"items": [1, 2], "count": 2})
 		assert isinstance(result, Object)
 
 	def test_invalid_type_raises(self):
 		with pytest.raises(TypeError, match="Cannot convert"):
-			ExprNode.of(object())
+			Expr.of(object())
 
 
-class TestExprNodeRegister:
-	"""Test ExprNode.register() and registry lookup."""
+class TestExprRegister:
+	"""Test Expr.register() and registry lookup."""
 
 	def test_register_expr_node(self):
-		"""Register an ExprNode directly."""
+		"""Register an Expr directly."""
 		prev_registry = dict(EXPR_REGISTRY)
 		try:
 			EXPR_REGISTRY.clear()
 			val = object()
 			expr = Identifier("test")
-			ExprNode.register(val, expr)
-			assert ExprNode.of(val) is expr
+			Expr.register(val, expr)
+			assert Expr.of(val) is expr
 		finally:
 			EXPR_REGISTRY.clear()
 			EXPR_REGISTRY.update(prev_registry)
@@ -1083,7 +1078,7 @@ class TestExprNodeRegister:
 		try:
 			EXPR_REGISTRY.clear()
 			val = object()
-			ExprNode.register(val, lambda x, ctx: Literal(1))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+			Expr.register(val, lambda x, ctx: Literal(1))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 			result = EXPR_REGISTRY.get(id(val))
 			assert isinstance(result, Transformer)
 		finally:
@@ -1098,9 +1093,9 @@ class TestExprNodeRegister:
 			# Register the string "hello" to return a specific identifier
 			hello = "hello"
 			custom = Identifier("custom")
-			ExprNode.register(hello, custom)
+			Expr.register(hello, custom)
 			# Since strings are interned, this should find it
-			assert ExprNode.of(hello) is custom
+			assert Expr.of(hello) is custom
 		finally:
 			EXPR_REGISTRY.clear()
 			EXPR_REGISTRY.update(prev_registry)

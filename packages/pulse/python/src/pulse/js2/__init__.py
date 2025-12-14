@@ -1,17 +1,21 @@
 """JavaScript module bindings for use in @javascript decorated functions (transpiler_v2).
 
 Usage:
-    # For builtins (no import needed in JS):
-    import pulse.js2.math as Math
-    Math.PI  # -> Math.PI
+    # Import JS classes (for constructors and static methods):
+    from pulse.js2 import Set, Number, Array, Date, Promise, Map, Error
+    Set([1, 2, 3])         # -> new Set([1, 2, 3])
+    Number.isFinite(42)    # -> Number.isFinite(42)
+    Array.isArray(x)       # -> Array.isArray(x)
 
-    from pulse.js2.math import floor
-    floor(x)  # -> Math.floor(x)
+    # Import JS namespace objects (function-only modules):
+    from pulse.js2 import Math, JSON, console, window, document, navigator
+    Math.floor(3.7)        # -> Math.floor(3.7)
+    JSON.stringify(obj)    # -> JSON.stringify(obj)
+    console.log("hi")      # -> console.log("hi")
 
-    # Direct import of builtins from pulse.js2:
-    from pulse.js2 import Set, Number, Array, Math, Date, Promise
-    Set([1, 2, 3])  # -> new Set([1, 2, 3])
-    Number.isFinite(42)  # -> Number.isFinite(42)
+    # Alternative: import namespace modules for namespace access:
+    import pulse.js2.json as JSON
+    JSON.stringify(obj)    # -> JSON.stringify(obj)
 
     # Statement functions:
     from pulse.js2 import throw

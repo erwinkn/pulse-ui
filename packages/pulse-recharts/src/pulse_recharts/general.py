@@ -9,8 +9,8 @@ from typing import (
 )
 
 import pulse as ps
-from pulse.html.elements import GenericHTMLElement
-from pulse.html.props import HTMLSVGProps
+from pulse.dom.elements import GenericHTMLElement
+from pulse.dom.props import HTMLSVGProps
 
 from .common import DataKey
 

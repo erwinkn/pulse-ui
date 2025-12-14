@@ -25,7 +25,7 @@ JSONReviver = _Callable[[str, JSONValue], JSONValue]
 T = _TypeVar("T")
 
 
-def parse(text: str, reviver: JSONReviver | None = None) -> JSONValue:
+def parse(text: str, reviver: JSONReviver | None = None, /) -> JSONValue:
 	"""Parse a JSON string into a JavaScript value.
 
 	Args:
@@ -43,6 +43,7 @@ def stringify(
 	value: JSONValue,
 	replacer: JSONReplacer | None = None,
 	space: int | str | None = None,
+	/,
 ) -> str:
 	"""Convert a JavaScript value to a JSON string.
 

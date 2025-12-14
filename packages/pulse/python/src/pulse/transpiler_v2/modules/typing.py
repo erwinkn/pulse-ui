@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
-from typing import Any, final, override
+from typing import final, override
 
-from pulse.transpiler_v2.nodes import ExprNode
+from pulse.transpiler_v2.nodes import Expr
 from pulse.transpiler_v2.py_module import PyModule
 from pulse.transpiler_v2.transpiler import Transpiler
 
 
 @dataclass(slots=True)
-class TypeHint(ExprNode):
+class TypeHint(Expr):
 	"""A type hint that should never be emitted directly.
 
 	Used for typing constructs like Any that can be passed to cast() but
@@ -28,7 +29,7 @@ class TypeHint(ExprNode):
 		)
 
 	@override
-	def emit_subscript(self, key: Any, ctx: Transpiler) -> ExprNode:
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
 		# List[int], Optional[str], etc. -> still a type hint
 		return TypeHint(f"{self.name}[...]")
 
@@ -50,6 +51,6 @@ class PyTyping(PyModule):
 	Callable = TypeHint("Callable")
 
 	@staticmethod
-	def cast(_type: Any, val: Any, *, ctx: Transpiler) -> ExprNode:
+	def cast(_type: ast.expr, val: ast.expr, *, ctx: Transpiler) -> Expr:
 		"""cast(T, val) -> val (type cast is a no-op at runtime)."""
 		return ctx.emit_expr(val)

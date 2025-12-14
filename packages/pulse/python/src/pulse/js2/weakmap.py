@@ -2,12 +2,12 @@
 JavaScript WeakMap builtin module.
 
 Usage:
-    import pulse.js2.weakmap as WeakMap
+    from pulse.js2 import WeakMap
     WeakMap()                     # -> new WeakMap()
     WeakMap([[obj, "value"]])    # -> new WeakMap([[obj, "value"]])
 
+    # Or import from module directly:
     from pulse.js2.weakmap import WeakMap
-    WeakMap()                     # -> new WeakMap()
 """
 
 from collections.abc import Iterable as _Iterable
@@ -27,7 +27,7 @@ class WeakMap(_Generic[K, V]):
 	Keys must be objects (not primitives).
 	"""
 
-	def __init__(self, iterable: _Iterable[tuple[K, V]] | None = None) -> None: ...
+	def __init__(self, iterable: _Iterable[tuple[K, V]] | None = None, /) -> None: ...
 
 	def delete(self, key: K) -> bool:
 		"""Remove a key and its value. Returns True if the key existed."""

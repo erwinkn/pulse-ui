@@ -2,11 +2,11 @@
 JavaScript RegExp builtin module.
 
 Usage:
-    import pulse.js2.regexp as RegExp
+    from pulse.js2 import RegExp
     RegExp(pattern, flags)        # -> new RegExp(pattern, flags)
 
+    # Or import from module directly:
     from pulse.js2.regexp import RegExp
-    RegExp(pattern, flags)        # -> new RegExp(pattern, flags)
 """
 
 from pulse.transpiler_v2.js_module import JsModule
@@ -15,7 +15,7 @@ from pulse.transpiler_v2.js_module import JsModule
 class RegExp:
 	"""Class for JavaScript RegExp instances."""
 
-	def __init__(self, pattern: str, flags: str | None = None): ...
+	def __init__(self, pattern: str, flags: str | None = None, /): ...
 
 	def exec(self, string: str) -> list[str] | None: ...
 	def test(self, string: str) -> bool: ...

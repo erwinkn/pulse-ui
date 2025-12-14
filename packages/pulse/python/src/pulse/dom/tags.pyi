@@ -1,7 +1,7 @@
 from typing import Any, Protocol, Unpack
 
-from pulse.html.elements import GenericHTMLElement
-from pulse.html.props import (
+from pulse.dom.elements import GenericHTMLElement
+from pulse.dom.props import (
 	HTMLAnchorProps,
 	HTMLAreaProps,
 	HTMLAudioProps,

@@ -6,19 +6,21 @@ Registration is done by calling register_js_module() from within the module itse
 
 from __future__ import annotations
 
+import ast
 import inspect
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Literal, override
+from typing import Literal, override
 
+from pulse.transpiler_v2.errors import TranspileError
 from pulse.transpiler_v2.imports import Import
 from pulse.transpiler_v2.nodes import (
-	ExprNode,
+	Expr,
 	Identifier,
 	Member,
 	New,
 )
-from pulse.transpiler_v2.transpiler import TranspileError, Transpiler
+from pulse.transpiler_v2.transpiler import Transpiler
 
 _MODULE_DUNDERS = frozenset(
 	{
@@ -37,15 +39,15 @@ _MODULE_DUNDERS = frozenset(
 
 
 @dataclass(slots=True)
-class Class(ExprNode):
-	"""ExprNode wrapper that emits calls as `new ...(...)`.
+class Class(Expr):
+	"""Expr wrapper that emits calls as `new ...(...)`.
 
 	Must also behave like the wrapped expression for attribute access,
 	so patterns like `Promise.resolve(...)` work even if `Promise(...)` emits
 	as `new Promise(...)`.
 	"""
 
-	ctor: ExprNode
+	ctor: Expr
 	name: str = ""
 
 	@override
@@ -53,26 +55,26 @@ class Class(ExprNode):
 		self.ctor.emit(out)
 
 	@override
-	def emit_call(
+	def transpile_call(
 		self,
-		args: list[Any],
-		kwargs: dict[str, Any],
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
 		ctx: Transpiler,
-	) -> ExprNode:
+	) -> Expr:
 		if kwargs:
-			from pulse.transpiler_v2.transpiler import TranspileError
-
 			raise TranspileError("Keyword arguments not supported in constructor call")
 		return New(self.ctor, [ctx.emit_expr(a) for a in args])
 
 	@override
-	def emit_getattr(self, attr: str, ctx: Transpiler) -> ExprNode:
-		return Member(self.ctor, attr)
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+		# Convention: trailing underscore escapes Python keywords (e.g. from_ -> from, is_ -> is)
+		js_attr = attr[:-1] if attr.endswith("_") else attr
+		return Member(self.ctor, js_attr)
 
 
 @dataclass(frozen=True)
-class JsModule(ExprNode):
-	"""ExprNode representing a JavaScript module binding.
+class JsModule(Expr):
+	"""Expr representing a JavaScript module binding.
 
 	Attributes:
 		name: The JavaScript identifier for the module binding (e.g., "Math", "React"),
@@ -99,21 +101,21 @@ class JsModule(ExprNode):
 		raise TypeError(f"{label} cannot be emitted directly - access an attribute")
 
 	@override
-	def emit_call(
+	def transpile_call(
 		self,
-		args: list[Any],
-		kwargs: dict[str, Any],
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
 		ctx: Transpiler,
-	) -> ExprNode:
+	) -> Expr:
 		label = self.py_name or self.name or "JsModule"
 		raise TypeError(f"{label} cannot be called directly - access an attribute")
 
 	@override
-	def emit_getattr(self, attr: str, ctx: Transpiler) -> ExprNode:
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
 		return self.get_value(attr)
 
 	@override
-	def emit_subscript(self, key: Any, ctx: Transpiler) -> ExprNode:
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
 		label = self.py_name or self.name or "JsModule"
 		raise TypeError(f"{label} cannot be subscripted")
 
@@ -122,7 +124,7 @@ class JsModule(ExprNode):
 		return self.src is None
 
 	def to_expr(self) -> Identifier | Import:
-		"""Generate the appropriate ExprNode for this module.
+		"""Generate the appropriate Expr for this module.
 
 		Returns Identifier for builtins, Import for external modules.
 
@@ -180,6 +182,7 @@ class JsModule(ExprNode):
 			return Class(expr, name=name)
 		return expr
 
+	@override
 	@staticmethod
 	def register(  # pyright: ignore[reportIncompatibleMethodOverride]
 		*,
@@ -259,7 +262,7 @@ class JsModule(ExprNode):
 			constructors=frozenset(constructors),
 		)
 		# Register the module object itself so `import pulse.js2.math as Math` resolves via EXPR_REGISTRY.
-		ExprNode.register(module, js_module)
+		Expr.register(module, js_module)
 
 		def __getattr__(name: str) -> Member | Class | Identifier | Import:
 			if name.startswith("_") or name not in local_names:

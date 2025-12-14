@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from pulse.transpiler_v2.builtins import BUILTINS, emit_method
+from pulse.transpiler_v2.errors import TranspileError
 from pulse.transpiler_v2.nodes import (
 	Array,
 	Arrow,
@@ -22,7 +23,7 @@ from pulse.transpiler_v2.nodes import (
 	Break,
 	Call,
 	Continue,
-	ExprNode,
+	Expr,
 	ExprStmt,
 	ForOf,
 	Function,
@@ -65,32 +66,28 @@ ALLOWED_CMPOPS: dict[type[ast.cmpop], str] = {
 }
 
 
-class TranspileError(Exception):
-	"""Error during transpilation."""
-
-
 class Transpiler:
 	"""Transpile Python AST to v2 Node AST.
 
 	Takes a function definition and a dictionary of dependencies.
 	Dependencies are substituted when their names are referenced.
 
-	Dependencies are ExprNode instances. ExprNode subclasses can override:
-	- emit_call: custom call behavior (e.g., JSX components)
-	- emit_getattr: custom attribute access
-	- emit_subscript: custom subscript behavior
+	Dependencies are Expr instances. Expr subclasses can override:
+	- transpile_call: custom call behavior (e.g., JSX components)
+	- transpile_getattr: custom attribute access
+	- transpile_subscript: custom subscript behavior
 	"""
 
 	fndef: ast.FunctionDef | ast.AsyncFunctionDef
 	args: list[str]
-	deps: Mapping[str, ExprNode]
+	deps: Mapping[str, Expr]
 	locals: set[str]
 	_temp_counter: int
 
 	def __init__(
 		self,
 		fndef: ast.FunctionDef | ast.AsyncFunctionDef,
-		deps: Mapping[str, ExprNode],
+		deps: Mapping[str, Expr],
 	) -> None:
 		self.fndef = fndef
 		self.args = [arg.arg for arg in fndef.args.args]
@@ -322,7 +319,7 @@ class Transpiler:
 
 	# --- Expressions ---------------------------------------------------------
 
-	def emit_expr(self, node: ast.expr | None) -> ExprNode:
+	def emit_expr(self, node: ast.expr | None) -> Expr:
 		"""Emit an expression."""
 		if node is None:
 			return Literal(None)
@@ -410,7 +407,7 @@ class Transpiler:
 
 		raise TranspileError(f"Unsupported expression: {type(node).__name__}")
 
-	def _emit_constant(self, node: ast.Constant) -> ExprNode:
+	def _emit_constant(self, node: ast.Constant) -> Expr:
 		"""Emit a constant value."""
 		v = node.value
 		if isinstance(v, str):
@@ -426,7 +423,7 @@ class Transpiler:
 			return Literal(v)
 		raise TranspileError(f"Unsupported constant type: {type(v).__name__}")
 
-	def _emit_name(self, node: ast.Name) -> ExprNode:
+	def _emit_name(self, node: ast.Name) -> Expr:
 		"""Emit a name reference."""
 		name = node.id
 
@@ -444,9 +441,9 @@ class Transpiler:
 
 		raise TranspileError(f"Unbound name referenced: {name}")
 
-	def _emit_list_or_tuple(self, node: ast.List | ast.Tuple) -> ExprNode:
+	def _emit_list_or_tuple(self, node: ast.List | ast.Tuple) -> Expr:
 		"""Emit a list or tuple literal."""
-		parts: list[ExprNode] = []
+		parts: list[Expr] = []
 		for e in node.elts:
 			if isinstance(e, ast.Starred):
 				parts.append(Spread(self.emit_expr(e.value)))
@@ -454,9 +451,9 @@ class Transpiler:
 				parts.append(self.emit_expr(e))
 		return Array(parts)
 
-	def _emit_dict(self, node: ast.Dict) -> ExprNode:
+	def _emit_dict(self, node: ast.Dict) -> Expr:
 		"""Emit a dict literal as new Map([...])."""
-		entries: list[ExprNode] = []
+		entries: list[Expr] = []
 		for k, v in zip(node.keys, node.values, strict=False):
 			if k is None:
 				# Spread merge
@@ -471,7 +468,7 @@ class Transpiler:
 			entries.append(Array([key_expr, val_expr]))
 		return Call(Identifier("Map"), [Array(entries)])
 
-	def _emit_binop(self, node: ast.BinOp) -> ExprNode:
+	def _emit_binop(self, node: ast.BinOp) -> Expr:
 		"""Emit a binary operation."""
 		op = type(node.op)
 		if op not in ALLOWED_BINOPS:
@@ -480,14 +477,14 @@ class Transpiler:
 		right = self.emit_expr(node.right)
 		return Binary(left, ALLOWED_BINOPS[op], right)
 
-	def _emit_unaryop(self, node: ast.UnaryOp) -> ExprNode:
+	def _emit_unaryop(self, node: ast.UnaryOp) -> Expr:
 		"""Emit a unary operation."""
 		op = type(node.op)
 		if op not in ALLOWED_UNOPS:
 			raise TranspileError(f"Unsupported unary operator: {op.__name__}")
 		return Unary(ALLOWED_UNOPS[op], self.emit_expr(node.operand))
 
-	def _emit_boolop(self, node: ast.BoolOp) -> ExprNode:
+	def _emit_boolop(self, node: ast.BoolOp) -> Expr:
 		"""Emit a boolean operation (and/or chain)."""
 		op = "&&" if isinstance(node.op, ast.And) else "||"
 		values = [self.emit_expr(v) for v in node.values]
@@ -497,11 +494,11 @@ class Transpiler:
 			result = Binary(result, op, v)
 		return result
 
-	def _emit_compare(self, node: ast.Compare) -> ExprNode:
+	def _emit_compare(self, node: ast.Compare) -> Expr:
 		"""Emit a comparison expression."""
 		operands: list[ast.expr] = [node.left, *node.comparators]
-		exprs: list[ExprNode] = [self.emit_expr(e) for e in operands]
-		cmp_parts: list[ExprNode] = []
+		exprs: list[Expr] = [self.emit_expr(e) for e in operands]
+		cmp_parts: list[Expr] = []
 
 		for i, op in enumerate(node.ops):
 			left_node = operands[i]
@@ -523,12 +520,12 @@ class Transpiler:
 
 	def _build_comparison(
 		self,
-		left_expr: ExprNode,
+		left_expr: Expr,
 		left_node: ast.expr,
 		op: ast.cmpop,
-		right_expr: ExprNode,
+		right_expr: Expr,
 		right_node: ast.expr,
-	) -> ExprNode:
+	) -> Expr:
 		"""Build a single comparison."""
 		# Identity comparisons
 		if isinstance(op, (ast.Is, ast.IsNot)):
@@ -553,9 +550,7 @@ class Transpiler:
 			raise TranspileError(f"Unsupported comparison operator: {op_type.__name__}")
 		return Binary(left_expr, ALLOWED_CMPOPS[op_type], right_expr)
 
-	def _build_membership_test(
-		self, item: ExprNode, container: ExprNode, negate: bool
-	) -> ExprNode:
+	def _build_membership_test(self, item: Expr, container: Expr, negate: bool) -> Expr:
 		"""Build a membership test (in / not in)."""
 		is_string = Binary(Unary("typeof", container), "===", Literal("string"))
 		is_array = Call(Member(Identifier("Array"), "isArray"), [container])
@@ -579,11 +574,8 @@ class Transpiler:
 			return Unary("!", membership_expr)
 		return membership_expr
 
-	def _emit_call(self, node: ast.Call) -> ExprNode:
+	def _emit_call(self, node: ast.Call) -> Expr:
 		"""Emit a function call."""
-		# Resolve callee to ExprNode
-		callee = self.emit_expr(node.func)
-
 		# Collect args and kwargs as raw AST values
 		args_raw = list(node.args)
 		kwargs_raw: dict[str, Any] = {}
@@ -594,24 +586,14 @@ class Transpiler:
 				)
 			kwargs_raw[kw.arg] = kw.value
 
-		# Try custom emit_call on the callee
-		try:
-			return callee.emit_call(args_raw, kwargs_raw, self)
-		except NotImplementedError:
-			pass
-
-		# Emit args
-		args: list[ExprNode] = [self.emit_expr(a) for a in args_raw]
-
-		# Emit kwargs
-		kwargs: dict[str, ExprNode] = {
-			k: self.emit_expr(v) for k, v in kwargs_raw.items()
-		}
-
 		# Method call: obj.method(args) - try builtin method dispatch
 		if isinstance(node.func, ast.Attribute):
 			obj = self.emit_expr(node.func.value)
 			method = node.func.attr
+			args: list[Expr] = [self.emit_expr(a) for a in args_raw]
+			kwargs: dict[str, Expr] = {
+				k: self.emit_expr(v) for k, v in kwargs_raw.items()
+			}
 
 			# Try builtin method handling with runtime checks
 			result = emit_method(obj, method, args, kwargs)
@@ -623,21 +605,20 @@ class Transpiler:
 				raise TranspileError(
 					f"Keyword arguments not supported for method '{method}'"
 				)
-			# IMPORTANT: derive callee via emit_getattr so non-emittable module refs work.
-			return Call(obj.emit_getattr(method, self), args)
+			# IMPORTANT: derive method expr via transpile_getattr
+			return Call(obj.transpile_getattr(method, self), args)
 
-		# Function call - kwargs not supported
-		if kwargs:
-			raise TranspileError("Keyword arguments not yet supported in v2 transpiler")
-		return Call(callee, args)
+		# Function call (or other callable expr)
+		callee = self.emit_expr(node.func)
+		return callee.transpile_call(args_raw, kwargs_raw, self)
 
-	def _emit_attribute(self, node: ast.Attribute) -> ExprNode:
+	def _emit_attribute(self, node: ast.Attribute) -> Expr:
 		"""Emit an attribute access."""
 		value = self.emit_expr(node.value)
-		# Delegate to ExprNode.emit_getattr (default returns Member)
-		return value.emit_getattr(node.attr, self)
+		# Delegate to Expr.transpile_getattr (default returns Member)
+		return value.transpile_getattr(node.attr, self)
 
-	def _emit_subscript(self, node: ast.Subscript) -> ExprNode:
+	def _emit_subscript(self, node: ast.Subscript) -> Expr:
 		"""Emit a subscript expression."""
 		value = self.emit_expr(node.value)
 
@@ -655,10 +636,10 @@ class Transpiler:
 			# Multiple indices not typically supported in JS
 			raise TranspileError("Multiple indices not supported in subscript")
 
-		# Delegate to ExprNode.emit_subscript (default returns Subscript)
-		return value.emit_subscript(node.slice, self)
+		# Delegate to Expr.transpile_subscript (default returns Subscript)
+		return value.transpile_subscript(node.slice, self)
 
-	def _emit_slice(self, value: ExprNode, slice_node: ast.Slice) -> ExprNode:
+	def _emit_slice(self, value: Expr, slice_node: ast.Slice) -> Expr:
 		"""Emit a slice operation."""
 		if slice_node.step is not None:
 			raise TranspileError("Slice steps are not supported")
@@ -677,9 +658,9 @@ class Transpiler:
 				Member(value, "slice"), [self.emit_expr(lower), self.emit_expr(upper)]
 			)
 
-	def _emit_fstring(self, node: ast.JoinedStr) -> ExprNode:
+	def _emit_fstring(self, node: ast.JoinedStr) -> Expr:
 		"""Emit an f-string as a template literal."""
-		parts: list[str | ExprNode] = []
+		parts: list[str | Expr] = []
 		for part in node.values:
 			if isinstance(part, ast.Constant) and isinstance(part.value, str):
 				parts.append(part.value)
@@ -704,9 +685,7 @@ class Transpiler:
 				)
 		return Template(parts)
 
-	def _apply_format_spec(
-		self, expr: ExprNode, format_spec: ast.JoinedStr
-	) -> ExprNode:
+	def _apply_format_spec(self, expr: Expr, format_spec: ast.JoinedStr) -> Expr:
 		"""Apply a Python format spec to an expression."""
 		if len(format_spec.values) != 1:
 			raise TranspileError("Dynamic format specs not supported")
@@ -719,7 +698,7 @@ class Transpiler:
 		spec = spec_part.value
 		return self._parse_and_apply_format(expr, spec)
 
-	def _parse_and_apply_format(self, expr: ExprNode, spec: str) -> ExprNode:
+	def _parse_and_apply_format(self, expr: Expr, spec: str) -> Expr:
 		"""Parse a format spec string and apply it to expr."""
 		if not spec:
 			return expr
@@ -853,7 +832,7 @@ class Transpiler:
 
 		return expr
 
-	def _emit_lambda(self, node: ast.Lambda) -> ExprNode:
+	def _emit_lambda(self, node: ast.Lambda) -> Expr:
 		"""Emit a lambda expression as an arrow function."""
 		params = [arg.arg for arg in node.args.args]
 
@@ -870,15 +849,15 @@ class Transpiler:
 	def _emit_comprehension_chain(
 		self,
 		generators: list[ast.comprehension],
-		build_last: Callable[[], ExprNode],
-	) -> ExprNode:
+		build_last: Callable[[], Expr],
+	) -> Expr:
 		"""Build a flatMap/map chain for comprehensions."""
 		if len(generators) == 0:
 			raise TranspileError("Empty comprehension")
 
 		saved_locals = set(self.locals)
 
-		def build_chain(gen_index: int) -> ExprNode:
+		def build_chain(gen_index: int) -> Expr:
 			gen = generators[gen_index]
 			if gen.is_async:
 				raise TranspileError("Async comprehensions are not supported")
@@ -929,13 +908,13 @@ class Transpiler:
 
 def transpile(
 	fndef: ast.FunctionDef | ast.AsyncFunctionDef,
-	deps: Mapping[str, ExprNode] | None = None,
+	deps: Mapping[str, Expr] | None = None,
 ) -> Function | Arrow:
 	"""Transpile a Python function to a v2 Function or Arrow node.
 
 	Args:
 		fndef: The function definition AST node
-		deps: Dictionary mapping global names to ExprNode instances
+		deps: Dictionary mapping global names to Expr instances
 
 	Returns:
 		Arrow for single-expression functions, Function for multi-statement

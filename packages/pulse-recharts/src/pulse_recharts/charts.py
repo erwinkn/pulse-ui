@@ -1,7 +1,7 @@
 from typing import Any, Generic, TypedDict, TypeVar, Unpack
 
 import pulse as ps
-from pulse.html.elements import GenericHTMLElement
+from pulse.dom.elements import GenericHTMLElement
 
 from .common import (
 	CartesianLayout,

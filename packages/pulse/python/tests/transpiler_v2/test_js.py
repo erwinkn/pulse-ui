@@ -4,40 +4,35 @@ Tests for JavaScript module bindings (pulse.js2) in transpiler_v2.
 Tests verify that js2 modules transpile correctly to JavaScript code.
 """
 
-# Import js2 modules at module level to ensure they're registered
-import pulse.js2.array  # noqa: F401
-import pulse.js2.array as ArrayModule
-import pulse.js2.console  # noqa: F401
+from __future__ import annotations
 
-# Create module-level aliases for namespace imports (these resolve to JsModule ExprNodes)
+from typing import Any
+
+# Namespace imports for function-only modules (correct pattern)
 import pulse.js2.console as console
-import pulse.js2.date  # noqa: F401
-import pulse.js2.date as DateModule
-import pulse.js2.document  # noqa: F401
 import pulse.js2.document as document
-import pulse.js2.error  # noqa: F401
-import pulse.js2.json  # noqa: F401
 import pulse.js2.json as JSON
-import pulse.js2.map  # noqa: F401
-import pulse.js2.math  # noqa: F401
-import pulse.js2.navigator  # noqa: F401
 import pulse.js2.navigator as navigator
-import pulse.js2.number  # noqa: F401
-import pulse.js2.number as Number
-import pulse.js2.object  # noqa: F401
-import pulse.js2.object as ObjectModule
-import pulse.js2.promise  # noqa: F401
-import pulse.js2.promise as PromiseModule
-import pulse.js2.regexp  # noqa: F401
-import pulse.js2.set  # noqa: F401
-import pulse.js2.string  # noqa: F401
-import pulse.js2.string as StringModule
-import pulse.js2.weakmap  # noqa: F401
-import pulse.js2.weakset  # noqa: F401
-import pulse.js2.window  # noqa: F401
 import pulse.js2.window as window
 import pytest
-from pulse.js2 import Math
+
+# Class imports (correct pattern - import the class, not the module)
+from pulse.js2 import (
+	Array,
+	Date,
+	Error,
+	Map,
+	Math,
+	Number,
+	Object,
+	Promise,
+	RegExp,
+	Set,
+	String,
+	WeakMap,
+	WeakSet,
+	undefined,
+)
 from pulse.transpiler_v2 import (
 	clear_function_cache,
 	clear_import_registry,
@@ -159,7 +154,7 @@ class TestJSON:
 	def test_json_stringify(self):
 		# Use module-level JSON import
 		@javascript
-		def to_json(obj: dict):
+		def to_json(obj: dict[str, Any]):
 			return JSON.stringify(obj)
 
 		fn = to_json.transpile()
@@ -179,7 +174,7 @@ class TestJSON:
 	def test_json_namespace(self):
 		# Use module-level JSON import
 		@javascript
-		def round_trip(obj: dict):
+		def round_trip(obj: dict[str, Any]):
 			return JSON.parse(JSON.stringify(obj))
 
 		fn = round_trip.transpile()
@@ -235,20 +230,17 @@ class TestNumber:
 
 class TestString:
 	def test_string_from_char_code(self):
-		# Use module-level StringModule import
 		@javascript
 		def make_string():
-			return StringModule.fromCharCode(65, 66, 67)
+			return String.fromCharCode(65, 66, 67)
 
 		fn = make_string.transpile()
 		code = emit(fn)
 		assert "String.fromCharCode(65, 66, 67)" in code
 
 	def test_string_constructor(self):
-		from pulse.js2 import String
-
 		@javascript
-		def to_string(x):
+		def to_string(x: int):
 			return String(x)
 
 		fn = to_string.transpile()
@@ -263,8 +255,6 @@ class TestString:
 
 class TestArray:
 	def test_array_constructor(self):
-		from pulse.js2 import Array
-
 		@javascript
 		def make_array():
 			return Array(1, 2, 3)
@@ -274,11 +264,10 @@ class TestArray:
 		assert "new Array(1, 2, 3)" in code
 
 	def test_array_static_methods(self):
-		# Use module-level ArrayModule import
 		@javascript
-		def check_and_create(x):
-			if ArrayModule.isArray(x):
-				return ArrayModule.from_(x)
+		def check_and_create(x: list[int]):
+			if Array.isArray(x):
+				return Array.from_(x)
 
 		fn = check_and_create.transpile()
 		code = emit(fn)
@@ -286,10 +275,8 @@ class TestArray:
 		assert "Array.from(x)" in code
 
 	def test_array_from_js2_import(self):
-		from pulse.js2 import Array
-
 		@javascript
-		def check_array(x):
+		def check_array(x: Any) -> bool:
 			return Array.isArray(x)
 
 		fn = check_array.transpile()
@@ -304,10 +291,8 @@ class TestArray:
 
 class TestSet:
 	def test_set_constructor_empty(self):
-		from pulse.js2 import Set
-
 		@javascript
-		def make_set():
+		def make_set() -> Set[int]:
 			return Set()
 
 		fn = make_set.transpile()
@@ -315,10 +300,8 @@ class TestSet:
 		assert code == "function make_set_1() {\nreturn new Set();\n}"
 
 	def test_set_constructor_with_iterable(self):
-		from pulse.js2 import Set
-
 		@javascript
-		def make_set(items: list):
+		def make_set(items: list[int]):
 			return Set(items)
 
 		fn = make_set.transpile()
@@ -326,8 +309,6 @@ class TestSet:
 		assert code == "function make_set_1(items) {\nreturn new Set(items);\n}"
 
 	def test_set_methods(self):
-		from pulse.js2 import Set
-
 		@javascript
 		def set_ops():
 			s = Set([1, 2, 3])
@@ -350,10 +331,8 @@ class TestSet:
 
 class TestMap:
 	def test_map_constructor_empty(self):
-		from pulse.js2 import Map
-
 		@javascript
-		def make_map():
+		def make_map() -> Map[str, int]:
 			return Map()
 
 		fn = make_map.transpile()
@@ -361,10 +340,8 @@ class TestMap:
 		assert code == "function make_map_1() {\nreturn new Map();\n}"
 
 	def test_map_constructor_with_iterable(self):
-		from pulse.js2 import Map
-
 		@javascript
-		def make_map(pairs: list):
+		def make_map(pairs: list[tuple[str, int]]):
 			return Map(pairs)
 
 		fn = make_map.transpile()
@@ -372,11 +349,9 @@ class TestMap:
 		assert code == "function make_map_1(pairs) {\nreturn new Map(pairs);\n}"
 
 	def test_map_methods(self):
-		from pulse.js2 import Map
-
 		@javascript
 		def map_ops():
-			m = Map([["a", 1], ["b", 2]])
+			m: Map[str, int] = Map([("a", 1), ("b", 2)])
 			m.set("c", 3)
 			return m.get("a")
 
@@ -394,8 +369,6 @@ class TestMap:
 
 class TestDate:
 	def test_date_constructor(self):
-		from pulse.js2 import Date
-
 		@javascript
 		def make_date():
 			return Date()
@@ -405,18 +378,15 @@ class TestDate:
 		assert code == "function make_date_1() {\nreturn new Date();\n}"
 
 	def test_date_static_methods(self):
-		# Use module-level DateModule import
 		@javascript
 		def get_timestamp():
-			return DateModule.now()
+			return Date.now()
 
 		fn = get_timestamp.transpile()
 		code = emit(fn)
 		assert code == "function get_timestamp_1() {\nreturn Date.now();\n}"
 
 	def test_date_methods(self):
-		from pulse.js2 import Date
-
 		@javascript
 		def date_ops():
 			d = Date()
@@ -436,8 +406,6 @@ class TestDate:
 
 class TestPromise:
 	def test_promise_constructor(self):
-		from pulse.js2 import Promise
-
 		@javascript
 		def make_promise():
 			return Promise(lambda resolve, reject: resolve(42))
@@ -447,10 +415,9 @@ class TestPromise:
 		assert "new Promise" in code
 
 	def test_promise_static_methods(self):
-		# Use module-level PromiseModule import
 		@javascript
 		def promise_ops():
-			return PromiseModule.resolve(42), PromiseModule.reject("error")
+			return Promise.resolve(42), Promise.reject("error")
 
 		fn = promise_ops.transpile()
 		code = emit(fn)
@@ -458,8 +425,6 @@ class TestPromise:
 		assert 'Promise.reject("error")' in code
 
 	def test_promise_methods(self):
-		from pulse.js2 import Promise
-
 		@javascript
 		def promise_chain():
 			p = Promise.resolve(1)
@@ -478,8 +443,6 @@ class TestPromise:
 
 class TestError:
 	def test_error_constructor(self):
-		from pulse.js2 import Error
-
 		@javascript
 		def make_error(msg: str):
 			return Error(msg)
@@ -509,8 +472,6 @@ class TestError:
 
 class TestRegExp:
 	def test_regexp_constructor(self):
-		from pulse.js2 import RegExp
-
 		@javascript
 		def make_regexp(pattern: str):
 			return RegExp(pattern, "g")
@@ -523,8 +484,6 @@ class TestRegExp:
 		)
 
 	def test_regexp_methods(self):
-		from pulse.js2 import RegExp
-
 		@javascript
 		def regexp_ops(pattern: str, text: str):
 			re = RegExp(pattern)
@@ -544,13 +503,12 @@ class TestRegExp:
 
 class TestObject:
 	def test_object_static_methods(self):
-		# Use module-level ObjectModule import
 		@javascript
-		def object_ops(obj: dict):
+		def object_ops(obj: dict[str, Any]):
 			return (
-				ObjectModule.keys(obj),
-				ObjectModule.values(obj),
-				ObjectModule.entries(obj),
+				Object.keys(obj),
+				Object.values(obj),
+				Object.entries(obj),
 			)
 
 		fn = object_ops.transpile()
@@ -560,20 +518,18 @@ class TestObject:
 		assert "Object.entries(obj)" in code
 
 	def test_object_assign(self):
-		# Use module-level ObjectModule import
 		@javascript
-		def merge_objects(target: dict, source: dict):
-			return ObjectModule.assign(target, source)
+		def merge_objects(target: dict[str, Any], source: dict[str, Any]):
+			return Object.assign(target, source)
 
 		fn = merge_objects.transpile()
 		code = emit(fn)
 		assert "Object.assign(target, source)" in code
 
 	def test_object_is(self):
-		# Use module-level ObjectModule import
 		@javascript
-		def same_value(a, b):
-			return ObjectModule.is_(a, b)
+		def same_value(a: object, b: object):
+			return Object.is_(a, b)
 
 		fn = same_value.transpile()
 		code = emit(fn)
@@ -587,10 +543,8 @@ class TestObject:
 
 class TestWeakMap:
 	def test_weakmap_constructor(self):
-		from pulse.js2 import WeakMap
-
 		@javascript
-		def make_weakmap():
+		def make_weakmap() -> WeakMap[object, int]:
 			return WeakMap()
 
 		fn = make_weakmap.transpile()
@@ -598,11 +552,9 @@ class TestWeakMap:
 		assert code == "function make_weakmap_1() {\nreturn new WeakMap();\n}"
 
 	def test_weakmap_methods(self):
-		from pulse.js2 import WeakMap
-
 		@javascript
-		def weakmap_ops(key, value):
-			wm = WeakMap()
+		def weakmap_ops(key: str, value: int):
+			wm: WeakMap[str, int] = WeakMap()
 			wm.set(key, value)
 			return wm.get(key), wm.has(key)
 
@@ -621,10 +573,8 @@ class TestWeakMap:
 
 class TestWeakSet:
 	def test_weakset_constructor(self):
-		from pulse.js2 import WeakSet
-
 		@javascript
-		def make_weakset():
+		def make_weakset() -> WeakSet[object]:
 			return WeakSet()
 
 		fn = make_weakset.transpile()
@@ -632,11 +582,9 @@ class TestWeakSet:
 		assert code == "function make_weakset_1() {\nreturn new WeakSet();\n}"
 
 	def test_weakset_methods(self):
-		from pulse.js2 import WeakSet
-
 		@javascript
-		def weakset_ops(value):
-			ws = WeakSet()
+		def weakset_ops(value: object):
+			ws: WeakSet[object] = WeakSet()
 			ws.add(value)
 			return ws.has(value), ws.delete(value)
 
@@ -655,8 +603,6 @@ class TestWeakSet:
 
 class TestWindow:
 	def test_window_properties(self):
-		from pulse.js2 import window
-
 		@javascript
 		def get_dimensions():
 			return window.innerWidth, window.innerHeight
@@ -715,8 +661,6 @@ class TestDocument:
 
 class TestNavigator:
 	def test_navigator_properties(self):
-		from pulse.js2 import navigator
-
 		@javascript
 		def get_info():
 			return navigator.userAgent, navigator.language, navigator.onLine
@@ -747,8 +691,6 @@ class TestNavigator:
 
 class TestDirectImports:
 	def test_direct_import_set(self):
-		from pulse.js2 import Set
-
 		@javascript
 		def make_set():
 			return Set([1, 2, 3])
@@ -758,8 +700,6 @@ class TestDirectImports:
 		assert code == "function make_set_1() {\nreturn new Set([1, 2, 3]);\n}"
 
 	def test_direct_import_array(self):
-		from pulse.js2 import Array
-
 		@javascript
 		def make_array():
 			return Array(1, 2, 3)
@@ -769,8 +709,6 @@ class TestDirectImports:
 		assert "new Array(1, 2, 3)" in code
 
 	def test_direct_import_math(self):
-		from pulse.js2 import Math
-
 		@javascript
 		def use_math(x: float):
 			return Math.floor(x)
@@ -780,7 +718,6 @@ class TestDirectImports:
 		assert "Math.floor(x)" in code
 
 	def test_direct_import_console(self):
-		# Use module-level console import
 		@javascript
 		def log(msg: str):
 			console.log(msg)
@@ -790,8 +727,6 @@ class TestDirectImports:
 		assert "console.log(msg)" in code
 
 	def test_direct_import_promise(self):
-		from pulse.js2 import Promise
-
 		@javascript
 		def make_promise():
 			return Promise.resolve(42)
@@ -808,8 +743,6 @@ class TestDirectImports:
 
 class TestUndefined:
 	def test_undefined(self):
-		from pulse.js2 import undefined
-
 		@javascript
 		def return_undefined():
 			return undefined

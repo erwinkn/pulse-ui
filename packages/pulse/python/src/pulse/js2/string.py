@@ -2,13 +2,13 @@
 JavaScript String builtin module.
 
 Usage:
-    import pulse.js2.string as String
+    from pulse.js2 import String
+    String(x)                      # -> new String(x)
     String.fromCharCode(65)        # -> String.fromCharCode(65)
     String.fromCodePoint(0x1F600)  # -> String.fromCodePoint(0x1F600)
 
-    from pulse.js2.string import fromCharCode, fromCodePoint
-    fromCharCode(65)               # -> String.fromCharCode(65)
-    fromCodePoint(0x1F600)         # -> String.fromCodePoint(0x1F600)
+    # Or import from module directly:
+    from pulse.js2.string import String
 """
 
 from typing import Any as _Any
@@ -31,5 +31,5 @@ class String:
 	def raw(template: str, *substitutions: str) -> str: ...
 
 
-# Self-register this module as a JS builtin
-JsModule.register(name="String")
+# Self-register this module as a JS builtin (global identifier)
+JsModule.register(name=None)

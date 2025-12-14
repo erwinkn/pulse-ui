@@ -2,7 +2,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, Literal, Protocol, TypedDict, Unpack
 
 import pulse as ps
-from pulse.html.elements import GenericHTMLElement
+from pulse.dom.elements import GenericHTMLElement
 
 from pulse_recharts.common import ChartOffsetInternal, DataKey, MinPointSize
 from pulse_recharts.general import AnimationEasing, LegendType

@@ -15,11 +15,11 @@ from starlette.datastructures import FormData as StarletteFormData
 from starlette.datastructures import UploadFile
 
 from pulse.context import PulseContext
+from pulse.dom.props import HTMLFormProps
 from pulse.helpers import Disposable, call_flexible, maybe_await
 from pulse.hooks.core import HOOK_CONTEXT, HookMetadata, HookState, hooks
 from pulse.hooks.runtime import server_address
 from pulse.hooks.stable import stable
-from pulse.html.props import HTMLFormProps
 from pulse.react_component import react_component
 from pulse.reactive import Signal
 from pulse.serializer import deserialize

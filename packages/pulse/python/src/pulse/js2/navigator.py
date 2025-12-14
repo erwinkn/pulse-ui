@@ -63,12 +63,12 @@ def share(data: dict[str, str]) -> _Any:
 	...
 
 
-def sendBeacon(url: str, data: str | bytes | _Any | None = None) -> bool:
+def sendBeacon(url: str, data: str | bytes | _Any | None = None, /) -> bool:
 	"""Send data to a URL asynchronously. Returns True if successful."""
 	...
 
 
-def canShare(data: dict[str, str] | None = None) -> bool:
+def canShare(data: dict[str, str] | None = None, /) -> bool:
 	"""Check if data can be shared via the Web Share API."""
 	...
 

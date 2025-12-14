@@ -1,6 +1,6 @@
 """HTML tag function transpilation to JSX elements.
 
-This module provides transpilation from pulse.html.tags (like div, span, etc.)
+This module provides transpilation from pulse.dom.tags (like div, span, etc.)
 to JSX elements. Tag functions can be called with props and subscripted with children:
 
     # Python
@@ -36,7 +36,7 @@ def _create_tag_function(tag_name: str):
 
 
 class PyTags(PyModule):
-	"""Provides transpilation for pulse.html.tags to JSX elements."""
+	"""Provides transpilation for pulse.dom.tags to JSX elements."""
 
 	# Regular tags - each is a function that returns JSXCallExpr when called
 	a = _create_tag_function("a")

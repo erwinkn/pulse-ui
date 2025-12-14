@@ -2,8 +2,7 @@
 # NOT the same thing as the properties in `elements.py` (but very similar)
 from typing import Any, Literal, TypedDict
 
-from pulse.helpers import CSSProperties
-from pulse.html.elements import (
+from pulse.dom.elements import (
 	GenericHTMLElement,
 	HTMLAnchorElement,
 	HTMLAreaElement,
@@ -60,7 +59,7 @@ from pulse.html.elements import (
 	HTMLTrackElement,
 	HTMLUListElement,
 )
-from pulse.html.events import (
+from pulse.dom.events import (
 	DialogDOMEvents,
 	DOMEvents,
 	InputDOMEvents,
@@ -68,6 +67,7 @@ from pulse.html.events import (
 	TElement,
 	TextAreaDOMEvents,
 )
+from pulse.helpers import CSSProperties
 from pulse.transpiler.nodes import JSExpr
 
 Booleanish = Literal[True, False, "true", "false"]

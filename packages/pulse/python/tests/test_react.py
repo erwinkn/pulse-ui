@@ -1,5 +1,5 @@
 """
-Tests for React component integration in pulse.html.
+Tests for React component integration in pulse.dom.
 
 This module tests the system for defining and using React components
 within the UI tree generation system.

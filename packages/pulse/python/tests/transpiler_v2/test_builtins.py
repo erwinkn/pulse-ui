@@ -154,7 +154,7 @@ class TestListSetDictConversions:
 
 	def test_set_empty(self):
 		@javascript
-		def empty_set():
+		def empty_set() -> set[object]:
 			return set()
 
 		fn = empty_set.transpile()
@@ -172,7 +172,7 @@ class TestListSetDictConversions:
 
 	def test_dict_empty(self):
 		@javascript
-		def empty_dict():
+		def empty_dict() -> dict[str, object]:
 			return dict()
 
 		fn = empty_dict.transpile()
@@ -190,7 +190,7 @@ class TestListSetDictConversions:
 
 	def test_tuple_empty(self):
 		@javascript
-		def empty_tuple():
+		def empty_tuple() -> tuple[int]:
 			return tuple()
 
 		fn = empty_tuple.transpile()
@@ -303,7 +303,7 @@ class TestMapFilter:
 
 	def test_filter_with_lambda(self):
 		@javascript
-		def get_positive(items: Iterable[Any]):
+		def get_positive(items: Iterable[int]):
 			return filter(lambda x: x > 0, items)
 
 		fn = get_positive.transpile()

@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Literal, Unpack
 
 import pulse as ps
-from pulse.html.elements import GenericHTMLElement
+from pulse.dom.elements import GenericHTMLElement
 
 from .common import AnimationTiming, LayoutType, NullableCoordinate
 

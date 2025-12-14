@@ -4,13 +4,15 @@ Tests for Python module transpilation in v2 transpiler.
 Tests module registration, PyModule, Transformer, and built-in module transpilation.
 """
 
+import ast
 import importlib
+from typing import Any
 
 import pytest
 from pulse.transpiler_v2.nodes import (
 	EXPR_REGISTRY,
 	Call,
-	ExprNode,
+	Expr,
 	Identifier,
 	Literal,
 	Member,
@@ -19,6 +21,7 @@ from pulse.transpiler_v2.nodes import (
 	transformer,
 )
 from pulse.transpiler_v2.py_module import PyModule
+from pulse.transpiler_v2.transpiler import Transpiler
 
 # =============================================================================
 # Transformer Tests
@@ -28,31 +31,34 @@ from pulse.transpiler_v2.py_module import PyModule
 class TestTransformer:
 	"""Test Transformer node behavior."""
 
+	def _transformer_fn(self, *, ctx: Transpiler):
+		return Literal(1)
+
 	def test_transformer_emit_raises(self):
 		"""Transformer cannot be emitted directly."""
-		t = Transformer(lambda ctx: Literal(1))
+		t = Transformer(self._transformer_fn)
 		with pytest.raises(TypeError, match="cannot be emitted directly"):
 			t.emit([])
 
 	def test_transformer_with_name_in_error(self):
 		"""Transformer error includes name if provided."""
-		t = Transformer(lambda ctx: Literal(1), name="my_func")
+		t = Transformer(self._transformer_fn, name="my_func")
 		with pytest.raises(TypeError, match="my_func"):
 			out: list[str] = []
 			t.emit(out)
 
 	def test_transformer_emit_getattr_raises(self):
 		"""Transformer emit_getattr raises TypeError."""
-		t = Transformer(lambda ctx: Literal(1), name="my_func")
+		t = Transformer(self._transformer_fn)
 		# Need a mock ctx
 		with pytest.raises(TypeError, match="cannot have attributes"):
-			t.emit_getattr("foo", None)  # pyright: ignore[reportArgumentType]
+			t.transpile_getattr("foo", None)  # pyright: ignore[reportArgumentType]
 
 	def test_transformer_emit_subscript_raises(self):
 		"""Transformer emit_subscript raises TypeError."""
-		t = Transformer(lambda ctx: Literal(1), name="my_func")
+		t = Transformer(self._transformer_fn)
 		with pytest.raises(TypeError, match="cannot be subscripted"):
-			t.emit_subscript("key", None)  # pyright: ignore[reportArgumentType]
+			t.transpile_subscript(ast.Constant(value="key"), None)  # pyright: ignore[reportArgumentType]
 
 
 class TestTransformerDecorator:
@@ -61,18 +67,26 @@ class TestTransformerDecorator:
 	def test_decorator_with_name(self):
 		"""@transformer("name") creates named Transformer."""
 
-		@transformer("my_len")  # pyright: ignore[reportArgumentType]
-		def emit_len(x, *, ctx):
+		@transformer("my_len")
+		def emit_len(x: Any, *, ctx: Transpiler):
 			return Member(ctx.emit_expr(x), "length")
 
 		assert isinstance(emit_len, Transformer)
 		assert emit_len.name == "my_len"
 
 	def test_decorator_without_name(self):
-		"""@transformer creates Transformer without explicit name."""
-		t = transformer(  # pyright: ignore[reportCallIssue]
-			lambda x, ctx: Literal(1)  # pyright: ignore[reportArgumentType]
-		)
+		"""@transformer creates Transformer with function name."""
+
+		def test_fn(x: Any, *, ctx: Transpiler) -> Expr:
+			return Literal(1)
+
+		t = transformer(test_fn)
+		assert isinstance(t, Transformer)
+		assert t.name == "test_fn"
+
+	def test_decorator_lambda(self):
+		"""@transformer with lambda creates Transformer without name."""
+		t = transformer(lambda x, *, ctx: Literal(1))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 		assert isinstance(t, Transformer)
 		assert t.name == ""
 
@@ -83,7 +97,7 @@ class TestTransformerDecorator:
 
 
 class TestPyModule:
-	"""Test PyModule ExprNode behavior."""
+	"""Test PyModule Expr behavior."""
 
 	def test_module_expr_emit_raises(self):
 		"""PyModule cannot be emitted directly."""
@@ -96,26 +110,26 @@ class TestPyModule:
 		"""PyModule cannot be called."""
 		me = PyModule({"foo": Literal(1)}, name="mymodule")
 		with pytest.raises(TypeError, match="cannot be called directly"):
-			me.emit_call([], {}, None)  # pyright: ignore[reportArgumentType]
+			me.transpile_call([], {}, None)  # pyright: ignore[reportArgumentType]
 
 	def test_module_expr_emit_subscript_raises(self):
 		"""PyModule cannot be subscripted."""
 		me = PyModule({"foo": Literal(1)}, name="mymodule")
 		with pytest.raises(TypeError, match="cannot be subscripted"):
-			me.emit_subscript("key", None)  # pyright: ignore[reportArgumentType]
+			me.transpile_subscript(ast.Constant(value="key"), None)  # pyright: ignore[reportArgumentType]
 
 	def test_module_expr_emit_getattr_returns_expr(self):
 		"""PyModule.emit_getattr looks up attribute in transpiler dict."""
 		foo_expr = Literal(42)
 		me = PyModule({"foo": foo_expr}, name="mymodule")
-		result = me.emit_getattr("foo", None)  # pyright: ignore[reportArgumentType]
+		result = me.transpile_getattr("foo", None)  # pyright: ignore[reportArgumentType]
 		assert result is foo_expr
 
 	def test_module_expr_emit_getattr_missing_raises(self):
 		"""PyModule.emit_getattr raises for unknown attribute."""
 		me = PyModule({"foo": Literal(1)}, name="mymodule")
 		with pytest.raises(TypeError, match="has no attribute 'bar'"):
-			me.emit_getattr("bar", None)  # pyright: ignore[reportArgumentType]
+			me.transpile_getattr("bar", None)  # pyright: ignore[reportArgumentType]
 
 
 # =============================================================================
@@ -133,13 +147,17 @@ class TestModuleRegistration:
 		# Create a fake module
 		fake_module = types.ModuleType("fake_math")
 		fake_module.pi = 3.14159  # pyright: ignore[reportAttributeAccessIssue]
-		fake_module.sqrt = lambda x: x**0.5  # pyright: ignore[reportAttributeAccessIssue]
 
-		class FakeMath:
-			pi = Member(Identifier("Math"), "PI")
+		def sqrt_fn(x: float) -> float:
+			return x**0.5
+
+		fake_module.sqrt = sqrt_fn  # pyright: ignore[reportAttributeAccessIssue]
+
+		class FakeMath(PyModule):
+			pi: Expr = Member(Identifier("Math"), "PI")
 
 			@staticmethod
-			def sqrt(x, *, ctx):
+			def sqrt(x: Any, *, ctx: Transpiler) -> Expr:
 				return Call(Member(Identifier("Math"), "sqrt"), [ctx.emit_expr(x)])
 
 		prev_registry = dict(EXPR_REGISTRY)
@@ -153,8 +171,8 @@ class TestModuleRegistration:
 			assert "pi" in module_expr.transpiler
 			assert "sqrt" in module_expr.transpiler
 
-			# pi should be ExprNode
-			assert isinstance(module_expr.transpiler["pi"], ExprNode)
+			# pi should be Expr
+			assert isinstance(module_expr.transpiler["pi"], Expr)
 
 			# sqrt should be Transformer
 			assert isinstance(module_expr.transpiler["sqrt"], Transformer)
@@ -167,13 +185,16 @@ class TestModuleRegistration:
 		import types
 
 		fake_module = types.ModuleType("fake_json")
-		fake_module.dumps = lambda x: str(x)  # pyright: ignore[reportAttributeAccessIssue]
 
-		transpilation = {
-			"dumps": lambda obj, *, ctx: Call(
-				Member(Identifier("JSON"), "stringify"), [ctx.emit_expr(obj)]
-			)
-		}
+		def dumps_fn(x: Any) -> str:
+			return str(x)
+
+		fake_module.dumps = dumps_fn  # pyright: ignore[reportAttributeAccessIssue]
+
+		def dumps_transformer(obj: Any, *, ctx: Transpiler) -> Expr:
+			return Call(Member(Identifier("JSON"), "stringify"), [ctx.emit_expr(obj)])
+
+		transpilation = {"dumps": dumps_transformer}
 
 		prev_registry = dict(EXPR_REGISTRY)
 		try:
@@ -203,7 +224,7 @@ class TestMathModule:
 
 		# Mock context that just returns the identifier
 		class MockCtx:
-			def emit_expr(self, x):
+			def emit_expr(self, x: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.sqrt("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -214,7 +235,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, x):
+			def emit_expr(self, x: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.sin("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -225,7 +246,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, x):
+			def emit_expr(self, x: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.cos("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -236,7 +257,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, x):
+			def emit_expr(self, x: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.log("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -247,7 +268,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, x):
+			def emit_expr(self, x: Any) -> Expr:
 				if x == "x":
 					return Identifier("x")
 				return Literal(10)
@@ -260,7 +281,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, x):
+			def emit_expr(self, x: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.floor("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -271,7 +292,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, x):
+			def emit_expr(self, x: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.ceil("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -312,7 +333,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				if val == "x":
 					return Identifier("x")
 				return Identifier("y")
@@ -325,7 +346,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				if val == "x":
 					return Identifier("x")
 				return Identifier("y")
@@ -338,7 +359,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				return Identifier("degrees")
 
 		result = PyMath.radians("degrees", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -350,7 +371,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				return Identifier("radians")
 
 		result = PyMath.degrees("radians", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -362,7 +383,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.isnan("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -373,7 +394,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.isfinite("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -384,7 +405,7 @@ class TestMathModule:
 		from pulse.transpiler_v2.modules.math import PyMath
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyMath.trunc("x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -404,7 +425,7 @@ class TestJsonModule:
 		from pulse.transpiler_v2.modules.json import PyJson
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				return Identifier("obj")
 
 		result = PyJson.dumps("obj", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -415,7 +436,7 @@ class TestJsonModule:
 		from pulse.transpiler_v2.modules.json import PyJson
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				return Identifier("s")
 
 		result = PyJson.loads("s", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -435,7 +456,7 @@ class TestAsyncioModule:
 		from pulse.transpiler_v2.modules.asyncio import PyAsyncio
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				if val == "a":
 					return Identifier("a")
 				return Identifier("b")
@@ -448,7 +469,7 @@ class TestAsyncioModule:
 		from pulse.transpiler_v2.modules.asyncio import PyAsyncio
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				if val == "a":
 					return Identifier("a")
 				return Identifier("b")
@@ -470,7 +491,7 @@ class TestTypingModule:
 		from pulse.transpiler_v2.modules.typing import PyTyping
 
 		class MockCtx:
-			def emit_expr(self, val):
+			def emit_expr(self, val: Any) -> Expr:
 				return Identifier("x")
 
 		result = PyTyping.cast(int, "x", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
@@ -488,7 +509,10 @@ class TestTypingModule:
 		"""Subscripting a type hint returns another type hint."""
 		from pulse.transpiler_v2.modules.typing import PyTyping, TypeHint
 
-		result = PyTyping.List.emit_subscript(int, None)  # pyright: ignore[reportArgumentType]
+		result = PyTyping.List.transpile_subscript(
+			ast.Name(id="int", ctx=ast.Load()),
+			None,  # pyright: ignore[reportArgumentType]
+		)
 		assert isinstance(result, TypeHint)
 		assert "List" in result.name
 

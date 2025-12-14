@@ -10,10 +10,11 @@ from typing import Any, final
 from pulse.transpiler_v2.nodes import (
 	Binary,
 	Call,
-	ExprNode,
+	Expr,
 	Identifier,
 	Literal,
 	Member,
+	Unary,
 )
 from pulse.transpiler_v2.py_module import PyModule
 from pulse.transpiler_v2.transpiler import Transpiler
@@ -23,15 +24,15 @@ _Math = Identifier("Math")
 _Number = Identifier("Number")
 
 
-def _math_prop(name: str) -> ExprNode:
+def _math_prop(name: str) -> Expr:
 	return Member(_Math, name)
 
 
-def _math_call(name: str, args: list[ExprNode]) -> ExprNode:
+def _math_call(name: str, args: list[Expr]) -> Expr:
 	return Call(Member(_Math, name), args)
 
 
-def _number_call(name: str, args: list[ExprNode]) -> ExprNode:
+def _number_call(name: str, args: list[Expr]) -> Expr:
 	return Call(Member(_Number, name), args)
 
 
@@ -48,43 +49,43 @@ class PyMath(PyModule):
 
 	# Basic functions
 	@staticmethod
-	def acos(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def acos(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("acos", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def acosh(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def acosh(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("acosh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def asin(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def asin(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("asin", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def asinh(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def asinh(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("asinh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def atan(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def atan(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("atan", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def atan2(y: Any, x: Any, *, ctx: Transpiler) -> ExprNode:
+	def atan2(y: Any, x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("atan2", [ctx.emit_expr(y), ctx.emit_expr(x)])
 
 	@staticmethod
-	def atanh(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def atanh(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("atanh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def cbrt(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def cbrt(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("cbrt", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def ceil(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def ceil(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("ceil", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def copysign(x: Any, y: Any, *, ctx: Transpiler) -> ExprNode:
+	def copysign(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
 		# Math.sign(y) * Math.abs(x)
 		return Binary(
 			_math_call("sign", [ctx.emit_expr(y)]),
@@ -93,15 +94,15 @@ class PyMath(PyModule):
 		)
 
 	@staticmethod
-	def cos(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def cos(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("cos", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def cosh(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def cosh(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("cosh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def degrees(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def degrees(x: Any, *, ctx: Transpiler) -> Expr:
 		# x * (180 / PI)
 		return Binary(
 			ctx.emit_expr(x),
@@ -110,38 +111,38 @@ class PyMath(PyModule):
 		)
 
 	@staticmethod
-	def exp(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def exp(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("exp", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def exp2(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def exp2(x: Any, *, ctx: Transpiler) -> Expr:
 		# 2 ** x
 		return Binary(Literal(2), "**", ctx.emit_expr(x))
 
 	@staticmethod
-	def expm1(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def expm1(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("expm1", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def fabs(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def fabs(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("abs", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def floor(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def floor(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("floor", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def fmod(x: Any, y: Any, *, ctx: Transpiler) -> ExprNode:
+	def fmod(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
 		return Binary(ctx.emit_expr(x), "%", ctx.emit_expr(y))
 
 	@staticmethod
-	def hypot(*coords: Any, ctx: Transpiler) -> ExprNode:
+	def hypot(*coords: Any, ctx: Transpiler) -> Expr:
 		return _math_call("hypot", [ctx.emit_expr(c) for c in coords])
 
 	@staticmethod
 	def isclose(
 		a: Any, b: Any, *, rel_tol: Any = 1e-9, abs_tol: Any = 0.0, ctx: Transpiler
-	) -> ExprNode:
+	) -> Expr:
 		# abs(a - b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 		a_expr = ctx.emit_expr(a)
 		b_expr = ctx.emit_expr(b)
@@ -157,15 +158,13 @@ class PyMath(PyModule):
 		return Binary(abs_diff, "<=", max_bound)
 
 	@staticmethod
-	def isfinite(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def isfinite(x: Any, *, ctx: Transpiler) -> Expr:
 		return _number_call("isFinite", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def isinf(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def isinf(x: Any, *, ctx: Transpiler) -> Expr:
 		# !Number.isFinite(x) && !Number.isNaN(x)
 		x_expr = ctx.emit_expr(x)
-		from pulse.transpiler_v2.nodes import Unary
-
 		return Binary(
 			Unary("!", _number_call("isFinite", [x_expr])),
 			"&&",
@@ -173,15 +172,15 @@ class PyMath(PyModule):
 		)
 
 	@staticmethod
-	def isnan(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def isnan(x: Any, *, ctx: Transpiler) -> Expr:
 		return _number_call("isNaN", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def isqrt(n: Any, *, ctx: Transpiler) -> ExprNode:
+	def isqrt(n: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("floor", [_math_call("sqrt", [ctx.emit_expr(n)])])
 
 	@staticmethod
-	def ldexp(x: Any, i: Any, *, ctx: Transpiler) -> ExprNode:
+	def ldexp(x: Any, i: Any, *, ctx: Transpiler) -> Expr:
 		# x * (2 ** i)
 		return Binary(
 			ctx.emit_expr(x),
@@ -190,7 +189,7 @@ class PyMath(PyModule):
 		)
 
 	@staticmethod
-	def log(value: Any, base: Any = None, *, ctx: Transpiler) -> ExprNode:
+	def log(value: Any, base: Any = None, *, ctx: Transpiler) -> Expr:
 		if base is None:
 			return _math_call("log", [ctx.emit_expr(value)])
 		return Binary(
@@ -200,23 +199,23 @@ class PyMath(PyModule):
 		)
 
 	@staticmethod
-	def log10(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def log10(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("log10", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def log1p(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def log1p(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("log1p", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def log2(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def log2(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("log2", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def pow(x: Any, y: Any, *, ctx: Transpiler) -> ExprNode:
+	def pow(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("pow", [ctx.emit_expr(x), ctx.emit_expr(y)])
 
 	@staticmethod
-	def radians(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def radians(x: Any, *, ctx: Transpiler) -> Expr:
 		# x * (PI / 180)
 		return Binary(
 			ctx.emit_expr(x),
@@ -225,7 +224,7 @@ class PyMath(PyModule):
 		)
 
 	@staticmethod
-	def remainder(x: Any, y: Any, *, ctx: Transpiler) -> ExprNode:
+	def remainder(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
 		# x - round(x/y) * y
 		x_expr = ctx.emit_expr(x)
 		y_expr = ctx.emit_expr(y)
@@ -233,31 +232,31 @@ class PyMath(PyModule):
 		return Binary(x_expr, "-", Binary(n, "*", y_expr))
 
 	@staticmethod
-	def sin(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def sin(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("sin", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def sinh(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def sinh(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("sinh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def sqrt(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def sqrt(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("sqrt", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def tan(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def tan(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("tan", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def tanh(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def tanh(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("tanh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def trunc(x: Any, *, ctx: Transpiler) -> ExprNode:
+	def trunc(x: Any, *, ctx: Transpiler) -> Expr:
 		return _math_call("trunc", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def fma(x: Any, y: Any, z: Any, *, ctx: Transpiler) -> ExprNode:
+	def fma(x: Any, y: Any, z: Any, *, ctx: Transpiler) -> Expr:
 		# (x * y) + z
 		return Binary(
 			Binary(ctx.emit_expr(x), "*", ctx.emit_expr(y)),

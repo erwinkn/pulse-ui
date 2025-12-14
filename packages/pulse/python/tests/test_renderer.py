@@ -4,8 +4,8 @@ from typing import Any, cast, override
 
 import pulse as ps
 import pytest
+from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
-from pulse.html.tags import button, div, li, span, ul
 from pulse.renderer import RenderTree
 from pulse.vdom import Node, component
 

@@ -2,18 +2,13 @@
 JavaScript Object builtin module.
 
 Usage:
-    import pulse.js2.object as Object
+    from pulse.js2 import Object
     Object.keys({"a": 1})         # -> Object.keys({"a": 1})
     Object.assign({}, {"a": 1})   # -> Object.assign({}, {"a": 1})
-    Object.is(x, y)                # -> Object.is(x, y)
+    Object.is_(x, y)              # -> Object.is(x, y)
 
-    # Note: For 'is' (Python keyword), use namespace import:
-    # import pulse.js2.object as Object; Object.is(...)
-    # Or use the underscore version for direct import:
-    from pulse.js2.object import keys, assign, is_
-    keys({"a": 1})                # -> Object.keys({"a": 1})
-    assign({}, {"a": 1})          # -> Object.assign({}, {"a": 1})
-    is_(x, y)                     # -> Object.is(x, y)
+    # Or import from module directly:
+    from pulse.js2.object import Object
 """
 
 from collections.abc import Iterable as _Iterable
@@ -55,6 +50,7 @@ class Object:
 	def create(
 		proto: _Any | None,
 		propertiesObject: dict[str, PropertyDescriptor] | None = None,
+		/,
 	) -> _Any:
 		"""Create a new object with the specified prototype."""
 		...
@@ -169,5 +165,5 @@ class Object:
 		...
 
 
-# Self-register this module as a JS builtin
-JsModule.register(name="Object")
+# Self-register this module as a JS builtin (global identifier)
+JsModule.register(name=None)

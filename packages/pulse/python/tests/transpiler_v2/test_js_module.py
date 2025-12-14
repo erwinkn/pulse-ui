@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Iterator
 
 import pytest
@@ -64,7 +65,7 @@ class TestJsModule:
 
 	def test_name_none_to_expr_raises(self) -> None:
 		"""Modules with name=None cannot be imported as a whole."""
-		from pulse.transpiler_v2.transpiler import TranspileError
+		from pulse.transpiler_v2.errors import TranspileError
 
 		module = JsModule(name=None, py_name="pulse.js2.set")
 		with pytest.raises(TranspileError, match="Cannot import module"):
@@ -131,7 +132,7 @@ class TestClassNode:
 				return Identifier("x")
 
 		ctx = MockTranspiler()
-		result = ctor.emit_call(["x"], {}, ctx)  # pyright: ignore[reportArgumentType]
+		result = ctor.transpile_call([ast.Constant(value="x")], {}, ctx)  # pyright: ignore[reportArgumentType]
 		assert isinstance(result, New)
 		assert emit(result) == "new Set(x)"
 
@@ -158,7 +159,7 @@ class TestNew:
 
 
 class TestJsModuleExpr:
-	"""Test JsModule ExprNode behavior when used as a module reference."""
+	"""Test JsModule Expr behavior when used as a module reference."""
 
 	def test_emit_raises(self) -> None:
 		"""JsModule cannot be emitted directly."""
@@ -174,15 +175,15 @@ class TestJsModuleExpr:
 
 		ref = JsModule(name="Math", py_name="pulse.js.math")
 		with pytest.raises(TypeError, match="cannot be called"):
-			ref.emit_call([], {}, MockCtx())  # pyright: ignore[reportArgumentType]
+			ref.transpile_call([], {}, MockCtx())  # pyright: ignore[reportArgumentType]
 
 	def test_emit_getattr(self) -> None:
-		"""JsModule.emit_getattr returns module value."""
+		"""JsModule.transpile_getattr returns module value."""
 
 		class MockCtx:
 			pass
 
 		ref = JsModule(name="Math", py_name="pulse.js.math")
-		expr = ref.emit_getattr("floor", MockCtx())  # pyright: ignore[reportArgumentType]
+		expr = ref.transpile_getattr("floor", MockCtx())  # pyright: ignore[reportArgumentType]
 		assert isinstance(expr, Member)
 		assert emit(expr) == "Math.floor"

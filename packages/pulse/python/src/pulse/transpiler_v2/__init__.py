@@ -4,6 +4,9 @@
 from pulse.transpiler_v2.builtins import BUILTINS as BUILTINS
 from pulse.transpiler_v2.builtins import emit_method as emit_method
 
+# Errors
+from pulse.transpiler_v2.errors import TranspileError as TranspileError
+
 # Function system
 from pulse.transpiler_v2.function import FUNCTION_CACHE as FUNCTION_CACHE
 from pulse.transpiler_v2.function import JsFunction as JsFunction
@@ -40,8 +43,8 @@ from pulse.transpiler_v2.nodes import Child as Child
 from pulse.transpiler_v2.nodes import Continue as Continue
 
 # Data nodes
-from pulse.transpiler_v2.nodes import ElementNode as ElementNode
-from pulse.transpiler_v2.nodes import ExprNode as ExprNode
+from pulse.transpiler_v2.nodes import Element as Element
+from pulse.transpiler_v2.nodes import Expr as Expr
 from pulse.transpiler_v2.nodes import ExprStmt as ExprStmt
 from pulse.transpiler_v2.nodes import ForOf as ForOf
 from pulse.transpiler_v2.nodes import Function as Function
@@ -63,13 +66,12 @@ from pulse.transpiler_v2.nodes import Ternary as Ternary
 from pulse.transpiler_v2.nodes import Throw as Throw
 from pulse.transpiler_v2.nodes import Unary as Unary
 from pulse.transpiler_v2.nodes import Undefined as Undefined
-from pulse.transpiler_v2.nodes import ValueNode as ValueNode
+from pulse.transpiler_v2.nodes import Value as Value
 from pulse.transpiler_v2.nodes import While as While
 
 # Emit
 from pulse.transpiler_v2.nodes import emit as emit
 
 # Transpiler
-from pulse.transpiler_v2.transpiler import TranspileError as TranspileError
 from pulse.transpiler_v2.transpiler import Transpiler as Transpiler
 from pulse.transpiler_v2.transpiler import transpile as transpile

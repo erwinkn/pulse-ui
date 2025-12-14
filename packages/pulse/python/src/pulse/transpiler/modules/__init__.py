@@ -10,7 +10,7 @@ import math as math_builtin
 import re as re_builtin
 import typing as typing_builtin
 
-import pulse.html.tags as pulse_tags
+import pulse.dom.tags as pulse_tags
 from pulse.transpiler.modules.asyncio import PyAsyncio
 from pulse.transpiler.modules.json import PyJson
 from pulse.transpiler.modules.math import PyMath

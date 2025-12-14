@@ -8,7 +8,7 @@ from pulse.transpiler_v2.nodes import (
 	Array,
 	Binary,
 	Call,
-	ExprNode,
+	Expr,
 	Identifier,
 	Literal,
 	Member,
@@ -25,9 +25,7 @@ class PyAsyncio(PyModule):
 	"""Provides transpilation for Python asyncio functions to JavaScript Promise methods."""
 
 	@staticmethod
-	def gather(
-		*coros: Any, return_exceptions: Any = False, ctx: Transpiler
-	) -> ExprNode:
+	def gather(*coros: Any, return_exceptions: Any = False, ctx: Transpiler) -> Expr:
 		"""Transpile asyncio.gather to Promise.all or Promise.allSettled.
 
 		Args:

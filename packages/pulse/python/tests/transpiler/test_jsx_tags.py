@@ -3,12 +3,12 @@
 from typing import Any
 
 import pytest
-from pulse.html import tags
+from pulse.dom import tags
 from pulse.transpiler.function import javascript
 
 
 class TestJSXTagTranspilation:
-	"""Tests for transpiling pulse.html.tags to JSX elements."""
+	"""Tests for transpiling pulse.dom.tags to JSX elements."""
 
 	def test_simple_tag_no_props_no_children(self) -> None:
 		"""Test: div() -> <div />"""
@@ -233,7 +233,7 @@ class TestJSXModuleAccess:
 
 	def test_from_import_style(self) -> None:
 		"""Test using from-import style."""
-		from pulse.html.tags import div, span
+		from pulse.dom.tags import div, span
 
 		@javascript
 		def fn():

@@ -2,12 +2,12 @@
 JavaScript WeakSet builtin module.
 
 Usage:
-    import pulse.js2.weakset as WeakSet
+    from pulse.js2 import WeakSet
     WeakSet()                     # -> new WeakSet()
     WeakSet([obj1, obj2])        # -> new WeakSet([obj1, obj2])
 
+    # Or import from module directly:
     from pulse.js2.weakset import WeakSet
-    WeakSet()                     # -> new WeakSet()
 """
 
 from collections.abc import Iterable as _Iterable
@@ -26,7 +26,7 @@ class WeakSet(_Generic[T]):
 	Values must be objects (not primitives).
 	"""
 
-	def __init__(self, iterable: _Iterable[T] | None = None) -> None: ...
+	def __init__(self, iterable: _Iterable[T] | None = None, /) -> None: ...
 
 	def add(self, value: T) -> "WeakSet[T]":
 		"""Add a value to the WeakSet. Returns the WeakSet for chaining."""

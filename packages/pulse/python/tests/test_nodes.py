@@ -1,5 +1,5 @@
 """
-Tests for the pulse.html module's UI tree generation system.
+Tests for the pulse.dom module's UI tree generation system.
 
 This module tests the direct UI tree node generation that matches
 the TypeScript UIElementNode format.
@@ -8,10 +8,11 @@ the TypeScript UIElementNode format.
 from typing import Any
 
 import pytest
-from pulse import (
-	Node,
+from pulse.dom.tags import (
 	a,
 	br,
+	define_self_closing_tag,
+	define_tag,
 	div,
 	form,
 	h1,
@@ -25,7 +26,7 @@ from pulse import (
 	style,
 	ul,
 )
-from pulse.html.tags import define_self_closing_tag, define_tag
+from pulse.vdom import Node
 
 from .test_utils import assert_node_equal
 

@@ -10,12 +10,13 @@ import builtins
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, override
 
+from pulse.transpiler_v2.errors import TranspileError
 from pulse.transpiler_v2.nodes import (
 	Array,
 	Arrow,
 	Binary,
 	Call,
-	ExprNode,
+	Expr,
 	Identifier,
 	Literal,
 	Member,
@@ -40,38 +41,38 @@ if TYPE_CHECKING:
 
 
 @transformer("print")
-def emit_print(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_print(*args: Any, ctx: Transpiler) -> Expr:
 	"""print(*args) -> console.log(...)"""
 	return Call(Member(Identifier("console"), "log"), [ctx.emit_expr(a) for a in args])
 
 
 @transformer("len")
-def emit_len(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_len(x: Any, *, ctx: Transpiler) -> Expr:
 	"""len(x) -> x.length ?? x.size"""
 	x = ctx.emit_expr(x)
 	return Binary(Member(x, "length"), "??", Member(x, "size"))
 
 
 @transformer("min")
-def emit_min(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_min(*args: Any, ctx: Transpiler) -> Expr:
 	"""min(*args) -> Math.min(...)"""
 	return Call(Member(Identifier("Math"), "min"), [ctx.emit_expr(a) for a in args])
 
 
 @transformer("max")
-def emit_max(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_max(*args: Any, ctx: Transpiler) -> Expr:
 	"""max(*args) -> Math.max(...)"""
 	return Call(Member(Identifier("Math"), "max"), [ctx.emit_expr(a) for a in args])
 
 
 @transformer("abs")
-def emit_abs(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_abs(x: Any, *, ctx: Transpiler) -> Expr:
 	"""abs(x) -> Math.abs(x)"""
 	return Call(Member(Identifier("Math"), "abs"), [ctx.emit_expr(x)])
 
 
 @transformer("round")
-def emit_round(number: Any, ndigits: Any = None, *, ctx: Transpiler) -> ExprNode:
+def emit_round(number: Any, ndigits: Any = None, *, ctx: Transpiler) -> Expr:
 	"""round(number, ndigits=None) -> Math.round(...) or toFixed(...)"""
 	number = ctx.emit_expr(number)
 	if ndigits is None:
@@ -84,16 +85,14 @@ def emit_round(number: Any, ndigits: Any = None, *, ctx: Transpiler) -> ExprNode
 
 
 @transformer("str")
-def emit_str(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_str(x: Any, *, ctx: Transpiler) -> Expr:
 	"""str(x) -> String(x)"""
 	return Call(Identifier("String"), [ctx.emit_expr(x)])
 
 
 @transformer("int")
-def emit_int(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_int(*args: Any, ctx: Transpiler) -> Expr:
 	"""int(x) or int(x, base) -> parseInt(...)"""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	if builtins.len(args) == 1:
 		return Call(Identifier("parseInt"), [ctx.emit_expr(args[0])])
 	if builtins.len(args) == 2:
@@ -104,28 +103,26 @@ def emit_int(*args: Any, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("float")
-def emit_float(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_float(x: Any, *, ctx: Transpiler) -> Expr:
 	"""float(x) -> parseFloat(x)"""
 	return Call(Identifier("parseFloat"), [ctx.emit_expr(x)])
 
 
 @transformer("list")
-def emit_list(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_list(x: Any, *, ctx: Transpiler) -> Expr:
 	"""list(x) -> Array.from(x)"""
 	return Call(Member(Identifier("Array"), "from"), [ctx.emit_expr(x)])
 
 
 @transformer("bool")
-def emit_bool(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_bool(x: Any, *, ctx: Transpiler) -> Expr:
 	"""bool(x) -> Boolean(x)"""
 	return Call(Identifier("Boolean"), [ctx.emit_expr(x)])
 
 
 @transformer("set")
-def emit_set(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_set(*args: Any, ctx: Transpiler) -> Expr:
 	"""set() or set(iterable) -> new Set([iterable])"""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	if builtins.len(args) == 0:
 		return New(Identifier("Set"), [])
 	if builtins.len(args) == 1:
@@ -134,10 +131,8 @@ def emit_set(*args: Any, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("tuple")
-def emit_tuple(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_tuple(*args: Any, ctx: Transpiler) -> Expr:
 	"""tuple() or tuple(iterable) -> Array.from(iterable)"""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	if builtins.len(args) == 0:
 		return Array([])
 	if builtins.len(args) == 1:
@@ -146,10 +141,8 @@ def emit_tuple(*args: Any, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("dict")
-def emit_dict(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_dict(*args: Any, ctx: Transpiler) -> Expr:
 	"""dict() or dict(iterable) -> new Map([iterable])"""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	if builtins.len(args) == 0:
 		return New(Identifier("Map"), [])
 	if builtins.len(args) == 1:
@@ -158,10 +151,8 @@ def emit_dict(*args: Any, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("filter")
-def emit_filter(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_filter(*args: Any, ctx: Transpiler) -> Expr:
 	"""filter(func, iterable) -> iterable.filter(func)"""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	if not (1 <= builtins.len(args) <= 2):
 		raise TranspileError("filter() expects one or two arguments")
 	if builtins.len(args) == 1:
@@ -180,13 +171,13 @@ def emit_filter(*args: Any, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("map")
-def emit_map(func: Any, iterable: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_map(func: Any, iterable: Any, *, ctx: Transpiler) -> Expr:
 	"""map(func, iterable) -> iterable.map(func)"""
 	return Call(Member(ctx.emit_expr(iterable), "map"), [ctx.emit_expr(func)])
 
 
 @transformer("reversed")
-def emit_reversed(iterable: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_reversed(iterable: Any, *, ctx: Transpiler) -> Expr:
 	"""reversed(iterable) -> iterable.slice().reverse()"""
 	return Call(
 		Member(Call(Member(ctx.emit_expr(iterable), "slice"), []), "reverse"), []
@@ -194,7 +185,7 @@ def emit_reversed(iterable: Any, *, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("enumerate")
-def emit_enumerate(iterable: Any, start: Any = None, *, ctx: Transpiler) -> ExprNode:
+def emit_enumerate(iterable: Any, start: Any = None, *, ctx: Transpiler) -> Expr:
 	"""enumerate(iterable, start=0) -> iterable.map((v, i) => [i + start, v])"""
 	base = Literal(0) if start is None else ctx.emit_expr(start)
 	return Call(
@@ -209,10 +200,8 @@ def emit_enumerate(iterable: Any, start: Any = None, *, ctx: Transpiler) -> Expr
 
 
 @transformer("range")
-def emit_range(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_range(*args: Any, ctx: Transpiler) -> Expr:
 	"""range(stop) or range(start, stop[, step]) -> Array.from(...)"""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	if not (1 <= builtins.len(args) <= 3):
 		raise TranspileError("range() expects 1 to 3 arguments")
 	if builtins.len(args) == 1:
@@ -243,10 +232,8 @@ def emit_range(*args: Any, ctx: Transpiler) -> ExprNode:
 @transformer("sorted")
 def emit_sorted(
 	*args: Any, key: Any = None, reverse: Any = None, ctx: Transpiler
-) -> ExprNode:
+) -> Expr:
 	"""sorted(iterable, key=None, reverse=False) -> iterable.slice().sort(...)"""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	if builtins.len(args) != 1:
 		raise TranspileError("sorted() expects exactly one positional argument")
 	iterable = ctx.emit_expr(args[0])
@@ -282,14 +269,14 @@ def emit_sorted(
 
 
 @transformer("zip")
-def emit_zip(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_zip(*args: Any, ctx: Transpiler) -> Expr:
 	"""zip(*iterables) -> Array.from(...) with paired elements"""
 	if builtins.len(args) == 0:
 		return Array([])
 
 	js_args = [ctx.emit_expr(a) for a in args]
 
-	def length_of(x: ExprNode) -> ExprNode:
+	def length_of(x: Expr) -> Expr:
 		return Member(x, "length")
 
 	min_len = length_of(js_args[0])
@@ -305,7 +292,7 @@ def emit_zip(*args: Any, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("pow")
-def emit_pow(base: Any, exp: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_pow(base: Any, exp: Any, *, ctx: Transpiler) -> Expr:
 	"""pow(base, exp) -> Math.pow(base, exp)"""
 	return Call(
 		Member(Identifier("Math"), "pow"), [ctx.emit_expr(base), ctx.emit_expr(exp)]
@@ -313,19 +300,19 @@ def emit_pow(base: Any, exp: Any, *, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("chr")
-def emit_chr(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_chr(x: Any, *, ctx: Transpiler) -> Expr:
 	"""chr(x) -> String.fromCharCode(x)"""
 	return Call(Member(Identifier("String"), "fromCharCode"), [ctx.emit_expr(x)])
 
 
 @transformer("ord")
-def emit_ord(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_ord(x: Any, *, ctx: Transpiler) -> Expr:
 	"""ord(x) -> x.charCodeAt(0)"""
 	return Call(Member(ctx.emit_expr(x), "charCodeAt"), [Literal(0)])
 
 
 @transformer("any")
-def emit_any(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_any(x: Any, *, ctx: Transpiler) -> Expr:
 	"""any(iterable) -> iterable.some(v => v)"""
 	x = ctx.emit_expr(x)
 	# Optimization: if x is a map call, use .some directly
@@ -340,7 +327,7 @@ def emit_any(x: Any, *, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("all")
-def emit_all(x: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_all(x: Any, *, ctx: Transpiler) -> Expr:
 	"""all(iterable) -> iterable.every(v => v)"""
 	x = ctx.emit_expr(x)
 	# Optimization: if x is a map call, use .every directly
@@ -355,10 +342,8 @@ def emit_all(x: Any, *, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("sum")
-def emit_sum(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_sum(*args: Any, ctx: Transpiler) -> Expr:
 	"""sum(iterable, start=0) -> iterable.reduce((a, b) => a + b, start)"""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	if not (1 <= builtins.len(args) <= 2):
 		raise TranspileError("sum() expects one or two arguments")
 	start = ctx.emit_expr(args[1]) if builtins.len(args) == 2 else Literal(0)
@@ -368,7 +353,7 @@ def emit_sum(*args: Any, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("divmod")
-def emit_divmod(x: Any, y: Any, *, ctx: Transpiler) -> ExprNode:
+def emit_divmod(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
 	"""divmod(x, y) -> [Math.floor(x / y), x - Math.floor(x / y) * y]"""
 	x, y = ctx.emit_expr(x), ctx.emit_expr(y)
 	q = Call(Member(Identifier("Math"), "floor"), [Binary(x, "/", y)])
@@ -377,17 +362,15 @@ def emit_divmod(x: Any, y: Any, *, ctx: Transpiler) -> ExprNode:
 
 
 @transformer("isinstance")
-def emit_isinstance(*args: Any, ctx: Transpiler) -> ExprNode:
+def emit_isinstance(*args: Any, ctx: Transpiler) -> Expr:
 	"""isinstance is not directly supported in v2; raise error."""
-	from pulse.transpiler_v2.transpiler import TranspileError
-
 	raise TranspileError("isinstance() is not supported in JavaScript transpilation")
 
 
 # Registry of builtin transformers
 # Note: @transformer decorator returns Transformer but lies about the type
 # for ergonomic reasons. These are all Transformer instances at runtime.
-BUILTINS: builtins.dict[builtins.str, Transformer] = builtins.dict(
+BUILTINS: dict[str, Transformer[Any]] = dict(
 	print=emit_print,
 	len=emit_len,
 	min=emit_min,
@@ -434,12 +417,12 @@ BUILTINS: builtins.dict[builtins.str, Transformer] = builtins.dict(
 class BuiltinMethods(ABC):
 	"""Abstract base class for type-specific method transpilation."""
 
-	def __init__(self, obj: ExprNode) -> None:
-		self.this: ExprNode = obj
+	def __init__(self, obj: Expr) -> None:
+		self.this: Expr = obj
 
 	@classmethod
 	@abstractmethod
-	def __runtime_check__(cls, expr: ExprNode) -> ExprNode:
+	def __runtime_check__(cls, expr: Expr) -> Expr:
 		"""Return a JS expression that checks if expr is this type at runtime."""
 		...
 
@@ -455,7 +438,7 @@ class StringMethods(BuiltinMethods):
 
 	@classmethod
 	@override
-	def __runtime_check__(cls, expr: ExprNode) -> ExprNode:
+	def __runtime_check__(cls, expr: Expr) -> Expr:
 		return Binary(Unary("typeof", expr), "===", Literal("string"))
 
 	@classmethod
@@ -463,43 +446,43 @@ class StringMethods(BuiltinMethods):
 	def __methods__(cls) -> set[str]:
 		return STR_METHODS
 
-	def lower(self) -> ExprNode:
+	def lower(self) -> Expr:
 		"""str.lower() -> str.toLowerCase()"""
 		return Call(Member(self.this, "toLowerCase"), [])
 
-	def upper(self) -> ExprNode:
+	def upper(self) -> Expr:
 		"""str.upper() -> str.toUpperCase()"""
 		return Call(Member(self.this, "toUpperCase"), [])
 
-	def strip(self) -> ExprNode:
+	def strip(self) -> Expr:
 		"""str.strip() -> str.trim()"""
 		return Call(Member(self.this, "trim"), [])
 
-	def lstrip(self) -> ExprNode:
+	def lstrip(self) -> Expr:
 		"""str.lstrip() -> str.trimStart()"""
 		return Call(Member(self.this, "trimStart"), [])
 
-	def rstrip(self) -> ExprNode:
+	def rstrip(self) -> Expr:
 		"""str.rstrip() -> str.trimEnd()"""
 		return Call(Member(self.this, "trimEnd"), [])
 
-	def zfill(self, width: ExprNode) -> ExprNode:
+	def zfill(self, width: Expr) -> Expr:
 		"""str.zfill(width) -> str.padStart(width, '0')"""
 		return Call(Member(self.this, "padStart"), [width, Literal("0")])
 
-	def startswith(self, prefix: ExprNode) -> ExprNode:
+	def startswith(self, prefix: Expr) -> Expr:
 		"""str.startswith(prefix) -> str.startsWith(prefix)"""
 		return Call(Member(self.this, "startsWith"), [prefix])
 
-	def endswith(self, suffix: ExprNode) -> ExprNode:
+	def endswith(self, suffix: Expr) -> Expr:
 		"""str.endswith(suffix) -> str.endsWith(suffix)"""
 		return Call(Member(self.this, "endsWith"), [suffix])
 
-	def replace(self, old: ExprNode, new: ExprNode) -> ExprNode:
+	def replace(self, old: Expr, new: Expr) -> Expr:
 		"""str.replace(old, new) -> str.replaceAll(old, new)"""
 		return Call(Member(self.this, "replaceAll"), [old, new])
 
-	def capitalize(self) -> ExprNode:
+	def capitalize(self) -> Expr:
 		"""str.capitalize() -> str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()"""
 		left = Call(
 			Member(Call(Member(self.this, "charAt"), [Literal(0)]), "toUpperCase"), []
@@ -509,23 +492,23 @@ class StringMethods(BuiltinMethods):
 		)
 		return Binary(left, "+", right)
 
-	def split(self, sep: ExprNode) -> ExprNode | None:
+	def split(self, sep: Expr) -> Expr | None:
 		"""str.split() doesn't need transformation."""
 		return None
 
-	def join(self, iterable: ExprNode) -> ExprNode:
+	def join(self, iterable: Expr) -> Expr:
 		"""str.join(iterable) -> iterable.join(str)"""
 		return Call(Member(iterable, "join"), [self.this])
 
-	def find(self, sub: ExprNode) -> ExprNode:
+	def find(self, sub: Expr) -> Expr:
 		"""str.find(sub) -> str.indexOf(sub)"""
 		return Call(Member(self.this, "indexOf"), [sub])
 
-	def rfind(self, sub: ExprNode) -> ExprNode:
+	def rfind(self, sub: Expr) -> Expr:
 		"""str.rfind(sub) -> str.lastIndexOf(sub)"""
 		return Call(Member(self.this, "lastIndexOf"), [sub])
 
-	def count(self, sub: ExprNode) -> ExprNode:
+	def count(self, sub: Expr) -> Expr:
 		"""str.count(sub) -> (str.split(sub).length - 1)"""
 		return Binary(
 			Member(Call(Member(self.this, "split"), [sub]), "length"),
@@ -533,21 +516,21 @@ class StringMethods(BuiltinMethods):
 			Literal(1),
 		)
 
-	def isdigit(self) -> ExprNode:
+	def isdigit(self) -> Expr:
 		r"""str.isdigit() -> /^\d+$/.test(str)"""
 		return Call(
 			Member(Identifier("/^\\d+$/"), "test"),
 			[self.this],
 		)
 
-	def isalpha(self) -> ExprNode:
+	def isalpha(self) -> Expr:
 		r"""str.isalpha() -> /^[a-zA-Z]+$/.test(str)"""
 		return Call(
 			Member(Identifier("/^[a-zA-Z]+$/"), "test"),
 			[self.this],
 		)
 
-	def isalnum(self) -> ExprNode:
+	def isalnum(self) -> Expr:
 		r"""str.isalnum() -> /^[a-zA-Z0-9]+$/.test(str)"""
 		return Call(
 			Member(Identifier("/^[a-zA-Z0-9]+$/"), "test"),
@@ -563,7 +546,7 @@ class ListMethods(BuiltinMethods):
 
 	@classmethod
 	@override
-	def __runtime_check__(cls, expr: ExprNode) -> ExprNode:
+	def __runtime_check__(cls, expr: Expr) -> Expr:
 		return Call(Member(Identifier("Array"), "isArray"), [expr])
 
 	@classmethod
@@ -571,7 +554,7 @@ class ListMethods(BuiltinMethods):
 	def __methods__(cls) -> set[str]:
 		return LIST_METHODS
 
-	def append(self, value: ExprNode) -> ExprNode:
+	def append(self, value: Expr) -> Expr:
 		"""list.append(value) -> (list.push(value), undefined)[1]"""
 		# Returns undefined to match Python's None return
 		return Subscript(
@@ -579,14 +562,14 @@ class ListMethods(BuiltinMethods):
 			Literal(1),
 		)
 
-	def extend(self, iterable: ExprNode) -> ExprNode:
+	def extend(self, iterable: Expr) -> Expr:
 		"""list.extend(iterable) -> (list.push(...iterable), undefined)[1]"""
 		return Subscript(
 			Array([Call(Member(self.this, "push"), [Spread(iterable)]), Undefined()]),
 			Literal(1),
 		)
 
-	def pop(self, index: ExprNode | None = None) -> ExprNode | None:
+	def pop(self, index: Expr | None = None) -> Expr | None:
 		"""list.pop() or list.pop(index)"""
 		if index is None:
 			return None  # Fall through to default .pop()
@@ -594,11 +577,11 @@ class ListMethods(BuiltinMethods):
 			Call(Member(self.this, "splice"), [index, Literal(1)]), Literal(0)
 		)
 
-	def copy(self) -> ExprNode:
+	def copy(self) -> Expr:
 		"""list.copy() -> list.slice()"""
 		return Call(Member(self.this, "slice"), [])
 
-	def count(self, value: ExprNode) -> ExprNode:
+	def count(self, value: Expr) -> Expr:
 		"""list.count(value) -> list.filter(v => v === value).length"""
 		return Member(
 			Call(
@@ -608,25 +591,25 @@ class ListMethods(BuiltinMethods):
 			"length",
 		)
 
-	def index(self, value: ExprNode) -> ExprNode:
+	def index(self, value: Expr) -> Expr:
 		"""list.index(value) -> list.indexOf(value)"""
 		return Call(Member(self.this, "indexOf"), [value])
 
-	def reverse(self) -> ExprNode:
+	def reverse(self) -> Expr:
 		"""list.reverse() -> (list.reverse(), undefined)[1]"""
 		return Subscript(
 			Array([Call(Member(self.this, "reverse"), []), Undefined()]),
 			Literal(1),
 		)
 
-	def sort(self) -> ExprNode:
+	def sort(self) -> Expr:
 		"""list.sort() -> (list.sort(), undefined)[1]"""
 		return Subscript(
 			Array([Call(Member(self.this, "sort"), []), Undefined()]),
 			Literal(1),
 		)
 
-	def clear(self) -> ExprNode:
+	def clear(self) -> Expr:
 		"""list.clear() -> (list.length = 0, undefined)[1]"""
 		# Setting length to 0 clears the array
 		return Subscript(
@@ -634,7 +617,7 @@ class ListMethods(BuiltinMethods):
 			Literal(1),
 		)
 
-	def insert(self, index: ExprNode, value: ExprNode) -> ExprNode:
+	def insert(self, index: Expr, value: Expr) -> Expr:
 		"""list.insert(index, value) -> (list.splice(index, 0, value), undefined)[1]"""
 		return Subscript(
 			Array(
@@ -646,7 +629,7 @@ class ListMethods(BuiltinMethods):
 			Literal(1),
 		)
 
-	def remove(self, value: ExprNode) -> ExprNode:
+	def remove(self, value: Expr) -> Expr:
 		"""list.remove(value) -> list.splice(list.indexOf(value), 1)"""
 		return Call(
 			Member(self.this, "splice"),
@@ -662,7 +645,7 @@ class DictMethods(BuiltinMethods):
 
 	@classmethod
 	@override
-	def __runtime_check__(cls, expr: ExprNode) -> ExprNode:
+	def __runtime_check__(cls, expr: Expr) -> Expr:
 		return Binary(expr, "instanceof", Identifier("Map"))
 
 	@classmethod
@@ -670,33 +653,33 @@ class DictMethods(BuiltinMethods):
 	def __methods__(cls) -> set[str]:
 		return DICT_METHODS
 
-	def get(self, key: ExprNode, default: ExprNode | None = None) -> ExprNode | None:
+	def get(self, key: Expr, default: Expr | None = None) -> Expr | None:
 		"""dict.get(key, default) -> dict.get(key) ?? default"""
 		if default is None:
 			return None  # Fall through to default .get()
 		return Binary(Call(Member(self.this, "get"), [key]), "??", default)
 
-	def keys(self) -> ExprNode:
+	def keys(self) -> Expr:
 		"""dict.keys() -> [...dict.keys()]"""
 		return Array([Spread(Call(Member(self.this, "keys"), []))])
 
-	def values(self) -> ExprNode:
+	def values(self) -> Expr:
 		"""dict.values() -> [...dict.values()]"""
 		return Array([Spread(Call(Member(self.this, "values"), []))])
 
-	def items(self) -> ExprNode:
+	def items(self) -> Expr:
 		"""dict.items() -> [...dict.entries()]"""
 		return Array([Spread(Call(Member(self.this, "entries"), []))])
 
-	def copy(self) -> ExprNode:
+	def copy(self) -> Expr:
 		"""dict.copy() -> new Map(dict.entries())"""
 		return New(Identifier("Map"), [Call(Member(self.this, "entries"), [])])
 
-	def clear(self) -> ExprNode | None:
+	def clear(self) -> Expr | None:
 		"""dict.clear() doesn't need transformation."""
 		return None
 
-	def pop(self, key: ExprNode, default: ExprNode | None = None) -> ExprNode:
+	def pop(self, key: Expr, default: Expr | None = None) -> Expr:
 		"""dict.pop(key, default) -> complex expression to get and delete"""
 		# (v => (dict.delete(key), v))(dict.get(key) ?? default)
 		get_val = Call(Member(self.this, "get"), [key])
@@ -710,7 +693,7 @@ class DictMethods(BuiltinMethods):
 			[get_val],
 		)
 
-	def update(self, other: ExprNode) -> ExprNode:
+	def update(self, other: Expr) -> Expr:
 		"""dict.update(other) -> other.forEach((v, k) => dict.set(k, v))"""
 		return Call(
 			Member(other, "forEach"),
@@ -724,7 +707,7 @@ class DictMethods(BuiltinMethods):
 			],
 		)
 
-	def setdefault(self, key: ExprNode, default: ExprNode | None = None) -> ExprNode:
+	def setdefault(self, key: Expr, default: Expr | None = None) -> Expr:
 		"""dict.setdefault(key, default) -> dict.has(key) ? dict.get(key) : (dict.set(key, default), default)[1]"""
 		default_val = default if default is not None else Literal(None)
 		return Ternary(
@@ -747,7 +730,7 @@ class SetMethods(BuiltinMethods):
 
 	@classmethod
 	@override
-	def __runtime_check__(cls, expr: ExprNode) -> ExprNode:
+	def __runtime_check__(cls, expr: Expr) -> Expr:
 		return Binary(expr, "instanceof", Identifier("Set"))
 
 	@classmethod
@@ -755,27 +738,27 @@ class SetMethods(BuiltinMethods):
 	def __methods__(cls) -> set[str]:
 		return SET_METHODS
 
-	def add(self, value: ExprNode) -> ExprNode | None:
+	def add(self, value: Expr) -> Expr | None:
 		"""set.add() doesn't need transformation."""
 		return None
 
-	def remove(self, value: ExprNode) -> ExprNode:
+	def remove(self, value: Expr) -> Expr:
 		"""set.remove(value) -> set.delete(value)"""
 		return Call(Member(self.this, "delete"), [value])
 
-	def discard(self, value: ExprNode) -> ExprNode:
+	def discard(self, value: Expr) -> Expr:
 		"""set.discard(value) -> set.delete(value)"""
 		return Call(Member(self.this, "delete"), [value])
 
-	def clear(self) -> ExprNode | None:
+	def clear(self) -> Expr | None:
 		"""set.clear() doesn't need transformation."""
 		return None
 
-	def copy(self) -> ExprNode:
+	def copy(self) -> Expr:
 		"""set.copy() -> new Set(set)"""
 		return New(Identifier("Set"), [self.this])
 
-	def pop(self) -> ExprNode:
+	def pop(self) -> Expr:
 		"""set.pop() -> (v => (set.delete(v), v))(set.values().next().value)"""
 		get_first = Member(
 			Call(Member(Call(Member(self.this, "values"), []), "next"), []), "value"
@@ -788,14 +771,14 @@ class SetMethods(BuiltinMethods):
 			[get_first],
 		)
 
-	def update(self, other: ExprNode) -> ExprNode:
+	def update(self, other: Expr) -> Expr:
 		"""set.update(other) -> other.forEach(v => set.add(v))"""
 		return Call(
 			Member(other, "forEach"),
 			[Arrow(["$v"], Call(Member(self.this, "add"), [Identifier("$v")]))],
 		)
 
-	def intersection(self, other: ExprNode) -> ExprNode:
+	def intersection(self, other: Expr) -> Expr:
 		"""set.intersection(other) -> new Set([...set].filter(x => other.has(x)))"""
 		filtered = Call(
 			Member(Array([Spread(self.this)]), "filter"),
@@ -803,14 +786,14 @@ class SetMethods(BuiltinMethods):
 		)
 		return New(Identifier("Set"), [filtered])
 
-	def union(self, other: ExprNode) -> ExprNode:
+	def union(self, other: Expr) -> Expr:
 		"""set.union(other) -> new Set([...set, ...other])"""
 		return New(
 			Identifier("Set"),
 			[Array([Spread(self.this), Spread(other)])],
 		)
 
-	def difference(self, other: ExprNode) -> ExprNode:
+	def difference(self, other: Expr) -> Expr:
 		"""set.difference(other) -> new Set([...set].filter(x => !other.has(x)))"""
 		filtered = Call(
 			Member(Array([Spread(self.this)]), "filter"),
@@ -823,14 +806,14 @@ class SetMethods(BuiltinMethods):
 		)
 		return New(Identifier("Set"), [filtered])
 
-	def issubset(self, other: ExprNode) -> ExprNode:
+	def issubset(self, other: Expr) -> Expr:
 		"""set.issubset(other) -> [...set].every(x => other.has(x))"""
 		return Call(
 			Member(Array([Spread(self.this)]), "every"),
 			[Arrow(["$x"], Call(Member(other, "has"), [Identifier("$x")]))],
 		)
 
-	def issuperset(self, other: ExprNode) -> ExprNode:
+	def issuperset(self, other: Expr) -> Expr:
 		"""set.issuperset(other) -> [...other].every(x => set.has(x))"""
 		return Call(
 			Member(Array([Spread(other)]), "every"),
@@ -856,11 +839,11 @@ METHOD_CLASSES: builtins.list[builtins.type[BuiltinMethods]] = [
 
 def _try_dispatch_method(
 	cls: builtins.type[BuiltinMethods],
-	obj: ExprNode,
+	obj: Expr,
 	method: str,
-	args: list[ExprNode],
-	kwargs: builtins.dict[builtins.str, ExprNode] | None = None,
-) -> ExprNode | None:
+	args: list[Expr],
+	kwargs: builtins.dict[builtins.str, Expr] | None = None,
+) -> Expr | None:
 	"""Try to dispatch a method call to a specific builtin class.
 
 	Returns the transformed expression, or None if the method returns None
@@ -882,11 +865,11 @@ def _try_dispatch_method(
 
 
 def emit_method(
-	obj: ExprNode,
+	obj: Expr,
 	method: str,
-	args: list[ExprNode],
-	kwargs: builtins.dict[builtins.str, ExprNode] | None = None,
-) -> ExprNode | None:
+	args: list[Expr],
+	kwargs: builtins.dict[builtins.str, Expr] | None = None,
+) -> Expr | None:
 	"""Emit a method call, handling Python builtin methods.
 
 	For known literal types (Literal str, Template, Array, New Set/Map),
@@ -896,7 +879,7 @@ def emit_method(
 	and dispatches to the appropriate method implementation.
 
 	Returns:
-		ExprNode if the method should be transpiled specially
+		Expr if the method should be transpiled specially
 		None if the method should be emitted as a regular method call
 	"""
 	if method not in ALL_METHODS:
@@ -940,7 +923,7 @@ def emit_method(
 	# Slow path: unknown type - build ternary chain with runtime type checks
 	# Start with the default fallback (regular method call)
 	default_expr = Call(Member(obj, method), args)
-	expr: ExprNode = default_expr
+	expr: Expr = default_expr
 
 	# Apply in increasing priority so that later (higher priority) wrappers
 	# end up outermost in the final expression.

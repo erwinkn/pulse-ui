@@ -1,23 +1,34 @@
 from __future__ import annotations
 
+import ast
 import datetime as dt
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from inspect import isfunction
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, cast, overload, override
+from typing import (
+	TYPE_CHECKING,
+	Any,
+	Generic,
+	Protocol,
+	TypeAlias,
+	TypeVar,
+	cast,
+	overload,
+	override,
+)
 from typing import Literal as Lit
+
+from pulse.transpiler_v2.errors import TranspileError
 
 if TYPE_CHECKING:
 	from pulse.transpiler_v2.transpiler import Transpiler
 
 Primitive: TypeAlias = bool | int | float | str | dt.datetime | None
 
-# Global registry: id(value) -> ExprNode
-# Used by ExprNode.of() to resolve registered Python values
-EXPR_REGISTRY: dict[int, "ExprNode"] = {}
-TransformerFn: TypeAlias = Callable[..., "ExprNode"]
-_F = TypeVar("_F", bound="Callable[[*tuple[Any, ...], Transpiler], Any]")
+# Global registry: id(value) -> Expr
+# Used by Expr.of() to resolve registered Python values
+EXPR_REGISTRY: dict[int, "Expr"] = {}
 
 
 # =============================================================================
@@ -33,13 +44,13 @@ class Node(ABC):
 		"""Emit this node as JavaScript/JSX code into the output buffer."""
 
 
-class ExprNode(Node, ABC):
+class Expr(Node, ABC):
 	"""Base class for expression nodes.
 
 	Provides hooks for custom transpilation behavior:
-	- emit_call: customize behavior when called as a function
-	- emit_getattr: customize attribute access
-	- emit_subscript: customize subscript access
+	- transpile_call: customize behavior when called as a function
+	- transpile_getattr: customize attribute access
+	- transpile_subscript: customize subscript access
 
 	And serialization for client-side rendering:
 	- render: serialize to dict for client renderer (stub for now)
@@ -55,23 +66,25 @@ class ExprNode(Node, ABC):
 	# Transpilation hooks (override to customize behavior)
 	# -------------------------------------------------------------------------
 
-	def emit_call(
+	def transpile_call(
 		self,
-		args: list[Any],
-		kwargs: dict[str, Any],
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
 		ctx: Transpiler,
-	) -> ExprNode:
+	) -> Expr:
 		"""Called when this expression is used as a function: expr(args).
 
 		Override to customize call behavior.
 		Default raises - most expressions are not callable.
 
-		Args and kwargs are raw Python AST values (not yet emitted).
-		Use ctx.emit_expr() to convert them to ExprNode as needed.
+		Args and kwargs are raw Python `ast.expr` nodes (not yet transpiled).
+		Use ctx.emit_expr() to convert them to Expr as needed.
 		"""
-		raise NotImplementedError(f"{type(self).__name__} is not callable")
+		if kwargs:
+			raise TranspileError("Keyword arguments not yet supported in v2 transpiler")
+		return Call(self, [ctx.emit_expr(a) for a in args])
 
-	def emit_getattr(self, attr: str, ctx: Transpiler) -> ExprNode:
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
 		"""Called when an attribute is accessed: expr.attr.
 
 		Override to customize attribute access.
@@ -79,7 +92,7 @@ class ExprNode(Node, ABC):
 		"""
 		return Member(self, attr)
 
-	def emit_subscript(self, key: Any, ctx: Transpiler) -> ExprNode:
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
 		"""Called when subscripted: expr[key].
 
 		Override to customize subscript behavior.
@@ -102,15 +115,82 @@ class ExprNode(Node, ABC):
 		)
 
 	# -------------------------------------------------------------------------
-	# Registry for Python value -> ExprNode mapping
+	# Python dunder methods for natural syntax in @javascript functions
+	# These return Expr nodes that represent the operations at transpile time.
+	# -------------------------------------------------------------------------
+
+	def __call__(self, *args: object, **kwargs: object) -> "Call":
+		"""Allow calling Expr objects in Python code.
+
+		Returns a Call expression. Subclasses may override to return more
+		specific types (e.g., Element for JSX components).
+		"""
+		return Call(self, [Expr.of(a) for a in args])
+
+	def __getitem__(self, key: object) -> "Subscript":
+		"""Allow subscript access on Expr objects in Python code.
+
+		Returns a Subscript expression for type checking.
+		"""
+		return Subscript(self, Expr.of(key))
+
+	def __getattr__(self, attr: str) -> "Member":
+		"""Allow attribute access on Expr objects in Python code.
+
+		Returns a Member expression for type checking.
+		"""
+		return Member(self, attr)
+
+	def __add__(self, other: object) -> "Binary":
+		"""Allow + operator on Expr objects."""
+		return Binary(self, "+", Expr.of(other))
+
+	def __sub__(self, other: object) -> "Binary":
+		"""Allow - operator on Expr objects."""
+		return Binary(self, "-", Expr.of(other))
+
+	def __mul__(self, other: object) -> "Binary":
+		"""Allow * operator on Expr objects."""
+		return Binary(self, "*", Expr.of(other))
+
+	def __truediv__(self, other: object) -> "Binary":
+		"""Allow / operator on Expr objects."""
+		return Binary(self, "/", Expr.of(other))
+
+	def __mod__(self, other: object) -> "Binary":
+		"""Allow % operator on Expr objects."""
+		return Binary(self, "%", Expr.of(other))
+
+	def __and__(self, other: object) -> "Binary":
+		"""Allow & operator on Expr objects (maps to &&)."""
+		return Binary(self, "&&", Expr.of(other))
+
+	def __or__(self, other: object) -> "Binary":
+		"""Allow | operator on Expr objects (maps to ||)."""
+		return Binary(self, "||", Expr.of(other))
+
+	def __neg__(self) -> "Unary":
+		"""Allow unary - operator on Expr objects."""
+		return Unary("-", self)
+
+	def __pos__(self) -> "Unary":
+		"""Allow unary + operator on Expr objects."""
+		return Unary("+", self)
+
+	def __invert__(self) -> "Unary":
+		"""Allow ~ operator on Expr objects (maps to !)."""
+		return Unary("!", self)
+
+	# -------------------------------------------------------------------------
+	# Registry for Python value -> Expr mapping
 	# -------------------------------------------------------------------------
 
 	@staticmethod
-	def of(value: Any) -> ExprNode:
-		"""Convert a Python value to an ExprNode.
+	def of(value: Any) -> Expr:
+		"""Convert a Python value to an Expr.
 
 		Resolution order:
-		1. Already an ExprNode: returned as-is
+		1. Already an Expr: returned as-is
 		2. Registered in EXPR_REGISTRY: return the registered expr
 		3. Primitives: str/int/float -> Literal, bool -> Literal, None -> Literal(None)
 		4. Collections: list/tuple -> Array, dict -> Object (recursively converted)
@@ -118,8 +198,8 @@ class ExprNode(Node, ABC):
 
 		Raises TypeError for unconvertible values.
 		"""
-		# Already an ExprNode
-		if isinstance(value, ExprNode):
+		# Already an Expr
+		if isinstance(value, Expr):
 			return value
 
 		# Check registry (for modules, functions, etc.)
@@ -136,25 +216,25 @@ class ExprNode(Node, ABC):
 
 		# Collections
 		if isinstance(value, (list, tuple)):
-			return Array([ExprNode.of(v) for v in value])
+			return Array([Expr.of(v) for v in value])
 		if isinstance(value, dict):
-			props = [(str(k), ExprNode.of(v)) for k, v in value.items()]  # pyright: ignore[reportUnknownArgumentType]
+			props = [(str(k), Expr.of(v)) for k, v in value.items()]  # pyright: ignore[reportUnknownArgumentType]
 			return Object(props)
 		if isinstance(value, set):
 			# new Set([...])
-			return New(Identifier("Set"), [Array([ExprNode.of(v) for v in value])])
+			return New(Identifier("Set"), [Array([Expr.of(v) for v in value])])
 
-		raise TypeError(f"Cannot convert {type(value).__name__} to ExprNode")
+		raise TypeError(f"Cannot convert {type(value).__name__} to Expr")
 
 	@staticmethod
-	def register(value: Any, expr: ExprNode | Callable[..., ExprNode]) -> None:
-		"""Register a Python value for conversion via ExprNode.of().
+	def register(value: Any, expr: Expr | Callable[..., Expr]) -> None:
+		"""Register a Python value for conversion via Expr.of().
 
 		Args:
 			value: The Python object to register (function, constant, etc.)
-			expr: Either an ExprNode or a Callable[..., ExprNode] (will be wrapped in Transformer)
+			expr: Either an Expr or a Callable[..., Expr] (will be wrapped in Transformer)
 		"""
-		if callable(expr) and not isinstance(expr, ExprNode):
+		if callable(expr) and not isinstance(expr, Expr):
 			expr = Transformer(expr)
 		EXPR_REGISTRY[id(value)] = expr
 
@@ -171,7 +251,7 @@ class StmtNode(Node, ABC):
 
 
 @dataclass(slots=True)
-class ValueNode(ExprNode):
+class Value(Expr):
 	"""Wraps a non-primitive Python value for pass-through serialization.
 
 	Use cases:
@@ -188,7 +268,7 @@ class ValueNode(ExprNode):
 
 
 @dataclass(slots=True)
-class ElementNode(ExprNode):
+class Element(Expr):
 	"""A React element: built-in tag, fragment, or client component.
 
 	Tag conventions:
@@ -265,16 +345,16 @@ class ElementNode(ExprNode):
 		out.append(tag)
 		out.append(">")
 
-	def with_children(self, children: Sequence[Child]) -> ElementNode:
-		"""Return new ElementNode with children set.
+	def with_children(self, children: Sequence[Child]) -> Element:
+		"""Return new Element with children set.
 
 		Raises if this element already has children.
 		"""
 		if self.children:
 			raise ValueError(
-				f"ElementNode '{self.tag}' already has children; cannot add more via subscript"
+				f"Element '{self.tag}' already has children; cannot add more via subscript"
 			)
-		return ElementNode(
+		return Element(
 			tag=self.tag,
 			props=self.props,
 			children=list(children),
@@ -313,7 +393,7 @@ class PulseNode(Node):
 
 
 @dataclass(slots=True)
-class Identifier(ExprNode):
+class Identifier(Expr):
 	"""JS identifier: x, foo, myFunc"""
 
 	name: str
@@ -324,7 +404,7 @@ class Identifier(ExprNode):
 
 
 @dataclass(slots=True)
-class Literal(ExprNode):
+class Literal(Expr):
 	"""JS literal: 42, "hello", true, null"""
 
 	value: int | float | str | bool | None
@@ -343,7 +423,7 @@ class Literal(ExprNode):
 			out.append(str(self.value))
 
 
-class Undefined(ExprNode):
+class Undefined(Expr):
 	"""JS undefined literal.
 
 	Use Undefined() for JS `undefined`. Literal(None) emits `null`.
@@ -362,10 +442,10 @@ UNDEFINED = Undefined()
 
 
 @dataclass(slots=True)
-class Array(ExprNode):
+class Array(Expr):
 	"""JS array: [a, b, c]"""
 
-	elements: Sequence[ExprNode]
+	elements: Sequence[Expr]
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -378,10 +458,10 @@ class Array(ExprNode):
 
 
 @dataclass(slots=True)
-class Object(ExprNode):
+class Object(Expr):
 	"""JS object: { key: value }"""
 
-	props: Sequence[tuple[str, ExprNode]]
+	props: Sequence[tuple[str, Expr]]
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -397,10 +477,10 @@ class Object(ExprNode):
 
 
 @dataclass(slots=True)
-class Member(ExprNode):
+class Member(Expr):
 	"""JS member access: obj.prop"""
 
-	obj: ExprNode
+	obj: Expr
 	prop: str
 
 	@override
@@ -411,11 +491,11 @@ class Member(ExprNode):
 
 
 @dataclass(slots=True)
-class Subscript(ExprNode):
+class Subscript(Expr):
 	"""JS subscript access: obj[key]"""
 
-	obj: ExprNode
-	key: ExprNode
+	obj: Expr
+	key: Expr
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -426,11 +506,11 @@ class Subscript(ExprNode):
 
 
 @dataclass(slots=True)
-class Call(ExprNode):
+class Call(Expr):
 	"""JS function call: fn(args)"""
 
-	callee: ExprNode
-	args: Sequence[ExprNode]
+	callee: Expr
+	args: Sequence[Expr]
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -444,11 +524,11 @@ class Call(ExprNode):
 
 
 @dataclass(slots=True)
-class Unary(ExprNode):
+class Unary(Expr):
 	"""JS unary expression: -x, !x, typeof x"""
 
 	op: str
-	operand: ExprNode
+	operand: Expr
 
 	@override
 	def precedence(self) -> int:
@@ -467,12 +547,12 @@ class Unary(ExprNode):
 
 
 @dataclass(slots=True)
-class Binary(ExprNode):
+class Binary(Expr):
 	"""JS binary expression: x + y, a && b"""
 
-	left: ExprNode
+	left: Expr
 	op: str
-	right: ExprNode
+	right: Expr
 
 	@override
 	def precedence(self) -> int:
@@ -499,12 +579,12 @@ class Binary(ExprNode):
 
 
 @dataclass(slots=True)
-class Ternary(ExprNode):
+class Ternary(Expr):
 	"""JS ternary expression: cond ? a : b"""
 
-	cond: ExprNode
-	then: ExprNode
-	else_: ExprNode
+	cond: Expr
+	then: Expr
+	else_: Expr
 
 	@override
 	def precedence(self) -> int:
@@ -520,11 +600,11 @@ class Ternary(ExprNode):
 
 
 @dataclass(slots=True)
-class Arrow(ExprNode):
+class Arrow(Expr):
 	"""JS arrow function: (x) => expr or (x) => { ... }"""
 
 	params: Sequence[str]
-	body: ExprNode
+	body: Expr
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -539,14 +619,14 @@ class Arrow(ExprNode):
 
 
 @dataclass(slots=True)
-class Template(ExprNode):
+class Template(Expr):
 	"""JS template literal: `hello ${name}`
 
-	Parts alternate: [str, ExprNode, str, ExprNode, str, ...]
+	Parts alternate: [str, Expr, str, Expr, str, ...]
 	Always starts and ends with a string (may be empty).
 	"""
 
-	parts: Sequence[str | ExprNode]  # alternating, starting with str
+	parts: Sequence[str | Expr]  # alternating, starting with str
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -562,10 +642,10 @@ class Template(ExprNode):
 
 
 @dataclass(slots=True)
-class Spread(ExprNode):
+class Spread(Expr):
 	"""JS spread: ...expr"""
 
-	expr: ExprNode
+	expr: Expr
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -574,11 +654,11 @@ class Spread(ExprNode):
 
 
 @dataclass(slots=True)
-class New(ExprNode):
+class New(Expr):
 	"""JS new expression: new Ctor(args)"""
 
-	ctor: ExprNode
-	args: Sequence[ExprNode]
+	ctor: Expr
+	args: Sequence[Expr]
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -592,19 +672,26 @@ class New(ExprNode):
 		out.append(")")
 
 
+class TransformerFn(Protocol):
+	def __call__(self, *args: Any, ctx: Transpiler, **kwargs: Any) -> Expr: ...
+
+
+_F = TypeVar("_F", bound=TransformerFn)
+
+
 @dataclass(slots=True)
-class Transformer(ExprNode):
-	"""ExprNode that wraps a function transforming args to ExprNode output.
+class Transformer(Expr, Generic[_F]):
+	"""Expr that wraps a function transforming args to Expr output.
 
 	Used for Python->JS transpilation of functions, builtins, and module attrs.
-	The wrapped function receives args/kwargs and ctx, and returns an ExprNode.
+	The wrapped function receives args/kwargs and ctx, and returns an Expr.
 
 	Example:
 		emit_len = Transformer(lambda x, ctx: Member(ctx.emit_expr(x), "length"), name="len")
-		# When called: emit_len.emit_call([some_expr], {}, ctx) -> Member(some_expr, "length")
+		# When called: emit_len.transpile_call([some_ast], {}, ctx) -> Member(some_expr, "length")
 	"""
 
-	fn: TransformerFn
+	fn: _F
 	name: str = ""  # For error messages
 
 	@override
@@ -613,23 +700,23 @@ class Transformer(ExprNode):
 		raise TypeError(f"{label} cannot be emitted directly - must be called")
 
 	@override
-	def emit_call(
+	def transpile_call(
 		self,
-		args: list[Any],
-		kwargs: dict[str, Any],
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
 		ctx: Transpiler,
-	) -> ExprNode:
+	) -> Expr:
 		if kwargs:
 			return self.fn(*args, ctx=ctx, **kwargs)
 		return self.fn(*args, ctx=ctx)
 
 	@override
-	def emit_getattr(self, attr: str, ctx: Transpiler) -> ExprNode:
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
 		label = self.name or "Transformer"
 		raise TypeError(f"{label} cannot have attributes")
 
 	@override
-	def emit_subscript(self, key: Any, ctx: Transpiler) -> ExprNode:
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
 		label = self.name or "Transformer"
 		raise TypeError(f"{label} cannot be subscripted")
 
@@ -679,7 +766,7 @@ def transformer(arg: str | _F) -> Callable[[_F], _F] | _F:
 class Return(StmtNode):
 	"""JS return statement: return expr;"""
 
-	value: ExprNode | None = None
+	value: Expr | None = None
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -694,7 +781,7 @@ class Return(StmtNode):
 class If(StmtNode):
 	"""JS if statement: if (cond) { ... } else { ... }"""
 
-	cond: ExprNode
+	cond: Expr
 	then: Sequence[StmtNode]
 	else_: Sequence[StmtNode] = ()
 
@@ -723,7 +810,7 @@ class ForOf(StmtNode):
 	"""
 
 	target: str
-	iter: ExprNode
+	iter: Expr
 	body: Sequence[StmtNode]
 
 	@override
@@ -743,7 +830,7 @@ class ForOf(StmtNode):
 class While(StmtNode):
 	"""JS while loop: while (cond) { ... }"""
 
-	cond: ExprNode
+	cond: Expr
 	body: Sequence[StmtNode]
 
 	@override
@@ -784,7 +871,7 @@ class Assign(StmtNode):
 	"""
 
 	target: str
-	value: ExprNode
+	value: Expr
 	declare: Lit["let", "const"] | None = None
 	op: str | None = None  # For augmented: +=, -=, etc.
 
@@ -808,7 +895,7 @@ class Assign(StmtNode):
 class ExprStmt(StmtNode):
 	"""JS expression statement: expr;"""
 
-	expr: ExprNode
+	expr: Expr
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -835,7 +922,7 @@ class Block(StmtNode):
 class Throw(StmtNode):
 	"""JS throw statement: throw expr;"""
 
-	value: ExprNode
+	value: Expr
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -845,7 +932,7 @@ class Throw(StmtNode):
 
 
 @dataclass(slots=True)
-class Function(ExprNode):
+class Function(Expr):
 	"""JS function: function name(params) { ... } or async function ...
 
 	For statement-bodied functions. Use Arrow for expression-bodied.
@@ -873,8 +960,8 @@ class Function(ExprNode):
 		out.append("}")
 
 
-Child: TypeAlias = Primitive | ExprNode | PulseNode
-Prop: TypeAlias = Primitive | ExprNode
+Child: TypeAlias = Primitive | Expr | PulseNode
+Prop: TypeAlias = Primitive | Expr
 
 
 # =============================================================================
@@ -977,7 +1064,7 @@ def _escape_jsx_attr(s: str) -> str:
 	return s.replace("&", "&amp;").replace('"', "&quot;")
 
 
-def _emit_paren(node: ExprNode, parent_op: str, side: str, out: list[str]) -> None:
+def _emit_paren(node: Expr, parent_op: str, side: str, out: list[str]) -> None:
 	"""Emit child with parens if needed for precedence."""
 	# Ternary as child of binary always needs parens
 	needs_parens = False
@@ -1003,7 +1090,7 @@ def _emit_paren(node: ExprNode, parent_op: str, side: str, out: list[str]) -> No
 		node.emit(out)
 
 
-def _emit_primary(node: ExprNode, out: list[str]) -> None:
+def _emit_primary(node: Expr, out: list[str]) -> None:
 	"""Emit with parens if not primary precedence."""
 	if node.precedence() < 20 or isinstance(node, Ternary):
 		out.append("(")
@@ -1066,7 +1153,7 @@ def _emit_jsx_prop(name: str, value: Prop, out: list[str]) -> None:
 		out.append("}")
 		return
 	# Expression nodes
-	if isinstance(value, ExprNode):
+	if isinstance(value, Expr):
 		# String literals can use compact form
 		if isinstance(value, Literal) and isinstance(value.value, str):
 			out.append(name)
@@ -1100,15 +1187,15 @@ def _emit_jsx_prop(name: str, value: Prop, out: list[str]) -> None:
 		out.append(str(value))
 		out.append("}")
 		return
-	# ValueNode
-	if isinstance(value, ValueNode):
+	# Value
+	if isinstance(value, Value):
 		out.append(name)
 		out.append("={")
 		_emit_value(value.value, out)
 		out.append("}")
 		return
-	# Nested ElementNode (render prop)
-	if isinstance(value, ElementNode):
+	# Nested Element (render prop)
+	if isinstance(value, Element):
 		out.append(name)
 		out.append("={")
 		value.emit(out)
@@ -1149,18 +1236,18 @@ def _emit_jsx_child(child: Child, out: list[str]) -> None:
 			f"Cannot transpile PulseNode '{fn_name}'. "
 			+ "Server components must be rendered, not transpiled."
 		)
-	# ElementNode - recurse
-	if isinstance(child, ElementNode):
+	# Element - recurse
+	if isinstance(child, Element):
 		child.emit(out)
 		return
-	# ExprNode
-	if isinstance(child, ExprNode):
+	# Expr
+	if isinstance(child, Expr):
 		out.append("{")
 		child.emit(out)
 		out.append("}")
 		return
-	# ValueNode
-	if isinstance(child, ValueNode):
+	# Value
+	if isinstance(child, Value):
 		out.append("{")
 		_emit_value(child.value, out)
 		out.append("}")

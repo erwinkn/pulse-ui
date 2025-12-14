@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
-from typing import Any, TypeAlias, override
+from typing import TypeAlias, override
 
+from pulse.transpiler_v2.errors import TranspileError
 from pulse.transpiler_v2.nodes import (
-	ElementNode,
-	ExprNode,
+	Call,
+	Child,
+	Element,
+	Expr,
+	Literal,
 	Member,
+	Prop,
 )
 from pulse.transpiler_v2.transpiler import Transpiler
 
@@ -40,11 +46,11 @@ def clear_import_registry() -> None:
 
 
 @dataclass(slots=True, init=False)
-class Import(ExprNode):
+class Import(Expr):
 	"""JS import that auto-registers and dedupes.
 
-	An ExprNode that emits as its unique identifier (e.g., useState_1).
-	Overrides emit_call for JSX component behavior and emit_getattr for
+	An Expr that emits as its unique identifier (e.g., useState_1).
+	Overrides transpile_call for JSX component behavior and transpile_getattr for
 	member access.
 
 	Examples:
@@ -119,7 +125,7 @@ class Import(ExprNode):
 		return f"{self.name}_{self.id}"
 
 	# -------------------------------------------------------------------------
-	# ExprNode.emit: outputs the unique identifier
+	# Expr.emit: outputs the unique identifier
 	# -------------------------------------------------------------------------
 
 	@override
@@ -128,23 +134,21 @@ class Import(ExprNode):
 		out.append(self.js_name)
 
 	# -------------------------------------------------------------------------
-	# emit_call: handles fn() syntax
+	# transpile_call: handles fn() syntax
 	# -------------------------------------------------------------------------
 
 	@override
-	def emit_call(
+	def transpile_call(
 		self,
-		args: list[Any],
-		kwargs: dict[str, Any],
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
 		ctx: Transpiler,
-	) -> ExprNode:
+	) -> Expr:
 		"""Handle calls on this import.
 
-		For jsx=True: produces ElementNode with args as children, kwargs as props.
+		For jsx=True: produces Element with args as children, kwargs as props.
 		For jsx=False: produces standard Call node.
 		"""
-		from pulse.transpiler_v2.nodes import Call, Child, Literal, Prop
-
 		if not self.jsx:
 			# Standard function call
 			js_args = [ctx.emit_expr(a) for a in args]
@@ -166,13 +170,11 @@ class Import(ExprNode):
 				):
 					key = prop_value.value
 				else:
-					from pulse.transpiler_v2.transpiler import TranspileError
-
 					raise TranspileError("key prop must be a string literal")
 			else:
 				props[k] = prop_value
 
-		return ElementNode(
+		return Element(
 			tag=f"$${self.js_name}",
 			props=props if props else None,
 			children=children if children else None,
@@ -180,13 +182,28 @@ class Import(ExprNode):
 		)
 
 	# -------------------------------------------------------------------------
-	# emit_getattr: handles import.attr syntax
+	# transpile_getattr: handles import.attr syntax
 	# -------------------------------------------------------------------------
 
 	@override
-	def emit_getattr(self, attr: str, ctx: Transpiler) -> ExprNode:
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
 		"""Handle attribute access on this import.
 
 		Produces Member(self, attr) - self already emits as the identifier.
 		"""
 		return Member(self, attr)
+
+	# -------------------------------------------------------------------------
+	# Python dunder methods: allow natural syntax in @javascript functions
+	# -------------------------------------------------------------------------
+
+	@override
+	def __call__(self, *args: object, **kwargs: object) -> Call | Element:  # pyright: ignore[reportIncompatibleMethodOverride]
+		"""Allow calling Import objects in Python code.
+
+		Returns Call for regular imports, Element for JSX imports.
+		The actual transpilation happens via transpile_call when the transpiler processes the AST.
+		"""
+		if self.jsx:
+			return Element(tag=f"$${self.js_name}", props=None, children=None, key=None)
+		return Call(self, [Expr.of(a) for a in args])

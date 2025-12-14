@@ -79,7 +79,7 @@ def register_module(
 	"""Register a Python module for transpilation.
 
 	Args:
-		module: The Python module to register (e.g., `math`, `pulse.html.tags`)
+		module: The Python module to register (e.g., `math`, `pulse.dom.tags`)
 		transpilation: Either a PyModule subclass or a dict mapping attribute names
 			to JSExpr (for constants) or Callable[..., JSExpr] (for functions).
 			Callables will be wrapped in JSTransformer during registration.

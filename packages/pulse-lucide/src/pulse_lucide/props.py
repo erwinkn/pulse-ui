@@ -1,7 +1,7 @@
 from typing import Unpack
 
 import pulse as ps
-from pulse.html.elements import GenericHTMLElement
+from pulse.dom.elements import GenericHTMLElement
 
 
 class LucideProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):

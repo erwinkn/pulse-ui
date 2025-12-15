@@ -41,6 +41,8 @@ export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 export { PulseProvider, PulseView, usePulseClient } from "./pulse";
 // Renderer helpers
 export { RenderLazy } from "./renderer";
+// Renderer v2 (structural expressions + eval-keyed props)
+export { VDOMRenderer2 } from "./renderer2";
 // Serialization helpers
 // export { extractEvent } from "./serialize/events";
 // export {
@@ -60,3 +62,13 @@ export type {
 	VDOMNode,
 	VDOMUpdate,
 } from "./vdom";
+
+export type {
+	ComponentRegistry as ComponentRegistry2,
+	VDOM as VDOM2,
+	VDOMElement as VDOMElement2,
+	VDOMExpr as VDOMExpr2,
+	VDOMNode as VDOMNode2,
+	VDOMPropValue as VDOMPropValue2,
+	VDOMUpdate2,
+} from "./vdom2";

@@ -72,6 +72,13 @@ from pulse.transpiler_v2.nodes import While as While
 # Emit
 from pulse.transpiler_v2.nodes import emit as emit
 
+# React components (JSX imports with typed call signature)
+from pulse.transpiler_v2.react_component import ReactComponent as ReactComponent
+from pulse.transpiler_v2.react_component import react_component as react_component
+from pulse.transpiler_v2.react_component import (
+	registered_react_components as registered_react_components,
+)
+
 # Transpiler
 from pulse.transpiler_v2.transpiler import Transpiler as Transpiler
 from pulse.transpiler_v2.transpiler import transpile as transpile

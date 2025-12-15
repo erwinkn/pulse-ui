@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
+import { render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { VDOMRenderer } from "./renderer";
 
@@ -80,6 +81,82 @@ describe("applyReactTreeUpdates", () => {
 		expect(typeof (root.props as any).onClick).toBe("function");
 		(root.props as any).onClick(123);
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", [123]);
+	});
+
+	it("preserves element identity (type + key) when removing props (createElement path)", () => {
+		// React state is preserved across renders when element identity is preserved:
+		// same component `type` + same `key`.
+		const C = () => null;
+		const { renderer } = makeRenderer([], { C });
+
+		let tree = renderer.renderNode({
+			tag: "$$C",
+			key: "k1",
+			props: { foo: 1, bar: 2 },
+		});
+		const el1 = tree as React.ReactElement;
+		expect(el1.type).toBe(C);
+		expect(el1.key).toBe("k1");
+
+		tree = renderer.applyUpdates(tree, [
+			{ type: "update_props", path: "", data: { remove: ["foo"] } },
+		]);
+
+		const el2 = tree as React.ReactElement;
+		expect(el2.type).toBe(el1.type);
+		expect(el2.key).toBe(el1.key);
+		expect((el2.props as any).foo).toBeUndefined();
+		expect((el2.props as any).bar).toBe(2);
+	});
+
+	it("preserves React component state when removing props (direct render test)", async () => {
+		let mounts = 0;
+		let unmounts = 0;
+		// Use a class component to avoid hook-dispatcher issues if the environment ends up
+		// with multiple React module instances. This still tests real React reconciliation.
+		class C extends React.Component<{ bump?: boolean }, { n: number }> {
+			override state = { n: 0 };
+
+			override componentDidMount(): void {
+				mounts += 1;
+				if (this.props.bump && this.state.n === 0) {
+					this.setState({ n: 1 });
+				}
+			}
+
+			override componentWillUnmount(): void {
+				unmounts += 1;
+			}
+
+			override render(): React.ReactNode {
+				return React.createElement("div", { "data-testid": "n" }, String(this.state.n));
+			}
+		}
+
+		const { renderer } = makeRenderer([], { C });
+		let tree = renderer.renderNode({
+			tag: "$$C",
+			key: "k1",
+			props: { foo: 1, bump: true },
+			children: [],
+		});
+
+		const r = render(tree as any);
+		await waitFor(() => {
+			expect(screen.getByTestId("n")).toHaveTextContent("1");
+		});
+		expect(mounts).toBe(1);
+		expect(unmounts).toBe(0);
+
+		tree = renderer.applyUpdates(tree, [
+			{ type: "update_props", path: "", data: { remove: ["foo"] } },
+		]);
+		r.rerender(tree as any);
+		await waitFor(() => {
+			expect(screen.getByTestId("n")).toHaveTextContent("1");
+		});
+		expect(mounts).toBe(1);
+		expect(unmounts).toBe(0);
 	});
 
 	// CSS tests removed - CSS references are now handled via jsexpr_paths

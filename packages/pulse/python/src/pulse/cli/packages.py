@@ -116,6 +116,22 @@ def pick_more_specific(a: str | None, b: str | None) -> str | None:
 		return a
 	if b_exact:
 		return b
+
+	# If both are ranges, prefer higher version if possible (heuristic)
+	if a.startswith(("^", "~")) and b.startswith(("^", "~")):
+		av = a[1:]
+		bv = b[1:]
+		# Basic version comparison for digits
+		try:
+			a_parts = [int(p) for p in av.split(".") if p.isdigit()]
+			b_parts = [int(p) for p in bv.split(".") if p.isdigit()]
+			if a_parts > b_parts:
+				return a
+			if b_parts > a_parts:
+				return b
+		except ValueError:
+			pass
+
 	# Prefer longer constraint as proxy for specificity
 	return a if len(a) >= len(b) else b
 

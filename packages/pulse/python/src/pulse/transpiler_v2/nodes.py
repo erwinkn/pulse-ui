@@ -24,11 +24,41 @@ from pulse.transpiler_v2.errors import TranspileError
 if TYPE_CHECKING:
 	from pulse.transpiler_v2.transpiler import Transpiler
 
+_T = TypeVar("_T")
 Primitive: TypeAlias = bool | int | float | str | dt.datetime | None
+
+# =============================================================================
+# Global registries
+# =============================================================================
 
 # Global registry: id(value) -> Expr
 # Used by Expr.of() to resolve registered Python values
 EXPR_REGISTRY: dict[int, "Expr"] = {}
+
+
+# Global registry for Ref expressions: ordered by creation
+# Used for codegen to emit __registry entries
+REF_REGISTRY: list["Ref"] = []
+_ref_counter: int = 0
+
+
+def clear_ref_registry() -> None:
+	"""Clear the ref registry and reset counter."""
+	global _ref_counter
+	REF_REGISTRY.clear()
+	_ref_counter = 0
+
+
+def _next_ref_key() -> str:
+	"""Generate a unique ref key (separate counter, keeps keys small)."""
+	global _ref_counter
+	_ref_counter += 1
+	return str(_ref_counter)
+
+
+def registered_refs() -> list["Ref"]:
+	"""Get all registered refs in creation order."""
+	return list(REF_REGISTRY)
 
 
 # =============================================================================
@@ -182,6 +212,36 @@ class Expr(Node, ABC):
 		return Unary("!", self)
 
 	# -------------------------------------------------------------------------
+	# Type casting and wrapper methods
+	# -------------------------------------------------------------------------
+
+	def as_(self, typ_: "_T | type[_T]") -> "_T":
+		"""Cast this expression to a type or use as a decorator.
+
+		Usage as decorator:
+			@Import(...).as_
+			def fn(): ...
+
+		Usage for type casting:
+			clsx = Import(...).as_(Callable[[str, ...], str])
+		"""
+		return self  # pyright: ignore[reportReturnType]
+
+	def jsx(self) -> "Jsx":
+		"""Wrap this expression as a JSX component.
+
+		When called in transpiled code, produces Element(tag=self, ...).
+		"""
+		return Jsx(self)
+
+	def ref(self) -> "Ref":
+		"""Wrap this expression in a Ref for registry inclusion.
+
+		The Ref gets a unique key and is auto-registered for codegen.
+		"""
+		return Ref(self)
+
+	# -------------------------------------------------------------------------
 	# Registry for Python value -> Expr mapping
 	# -------------------------------------------------------------------------
 
@@ -250,6 +310,150 @@ class StmtNode(Node, ABC):
 # =============================================================================
 
 
+@dataclass(slots=True, init=False)
+class Ref(Expr):
+	"""A registry reference wrapper for an expression.
+
+	Provides a stable, unique key for the JS __registry. When emitted in
+	transpiled code, delegates to the wrapped expression. The key is used
+	by the runtime to look up values via get_object().
+
+	Ref has its own separate counter to keep registry keys small (they
+	can't be mangled and appear in wire format).
+
+	Example:
+		# Create a registry entry for a function
+		fn_ref = Ref(my_js_function)
+		# In codegen: __registry = { "1": my_js_function_42, ... }
+		# fn_ref.key == "1"
+	"""
+
+	expr: Expr
+	key: str
+
+	def __init__(self, expr: Expr) -> None:
+		self.expr = expr
+		self.key = _next_ref_key()
+		REF_REGISTRY.append(self)
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		"""Emit delegates to the wrapped expression."""
+		self.expr.emit(out)
+
+	@override
+	def transpile_call(
+		self,
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
+		ctx: "Transpiler",
+	) -> Expr:
+		"""Delegate to wrapped expression's transpile_call."""
+		return self.expr.transpile_call(args, kwargs, ctx)
+
+	@override
+	def transpile_getattr(self, attr: str, ctx: "Transpiler") -> Expr:
+		"""Delegate to wrapped expression's transpile_getattr."""
+		return self.expr.transpile_getattr(attr, ctx)
+
+	@override
+	def transpile_subscript(self, key: ast.expr, ctx: "Transpiler") -> Expr:
+		"""Delegate to wrapped expression's transpile_subscript."""
+		return self.expr.transpile_subscript(key, ctx)
+
+	@override
+	def __call__(self, *args: object, **kwargs: object) -> Call | Element:  # pyright: ignore[reportIncompatibleMethodOverride]
+		"""Runtime call - delegates to the wrapped expression."""
+		return self.expr(*args, **kwargs)
+
+
+@dataclass(slots=True)
+class Jsx(Expr):
+	"""JSX wrapper that makes any Expr callable as a component.
+
+	When called in transpiled code, produces Element(tag=expr, ...).
+	This enables patterns like `Jsx(Member(AppShell, "Header"))` to emit
+	`<AppShell.Header ... />`.
+
+	Example:
+		app_shell = Import("AppShell", "@mantine/core")
+		Header = Jsx(Member(app_shell, "Header"))
+		# In @javascript:
+		# Header(height=60) -> <AppShell_1.Header height={60} />
+	"""
+
+	expr: Expr
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		"""Emit delegates to the wrapped expression."""
+		self.expr.emit(out)
+
+	@override
+	def transpile_call(
+		self,
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
+		ctx: "Transpiler",
+	) -> Expr:
+		"""Transpile a call to this JSX wrapper into an Element.
+
+		Positional args become children, keyword args become props.
+		The `key` kwarg is extracted specially.
+		"""
+		children: list[Child] = [ctx.emit_expr(a) for a in args]
+
+		props: dict[str, Prop] = {}
+		key: str | None = None
+		for k, v in kwargs.items():
+			v = ctx.emit_expr(v)
+			if k == "key":
+				if isinstance(v, Literal) and isinstance(v.value, str):
+					key = v.value
+				else:
+					raise TranspileError("key prop must be a string literal")
+			else:
+				props[k] = v
+
+		return Element(
+			tag=self.expr,
+			props=props if props else None,
+			children=children if children else None,
+			key=key,
+		)
+
+	@override
+	def __call__(  # pyright: ignore[reportIncompatibleMethodOverride]
+		self, *args: Any, **kwargs: Any
+	) -> Element:
+		"""Allow calling Jsx in Python code.
+
+		Supports two usage patterns:
+		1. Decorator: @Jsx(expr) def Component(...): ...
+		2. Call: Jsx(expr)(props, children) -> Element
+		"""
+
+		# Normal call: build Element
+		props: dict[str, object] = {}
+		key: str | None = None
+		children: list[object] = list(args)
+
+		for k, v in kwargs.items():
+			if k == "key":
+				if not isinstance(v, str):
+					raise ValueError("key must be a string")
+				key = v
+			else:
+				props[k] = v
+
+		return Element(
+			tag=self.expr,
+			props=props if props else None,
+			children=children if children else None,
+			key=key,
+		)
+
+
 @dataclass(slots=True)
 class Value(Expr):
 	"""Wraps a non-primitive Python value for pass-through serialization.
@@ -267,25 +471,46 @@ class Value(Expr):
 		_emit_value(self.value, out)
 
 
-@dataclass(slots=True)
 class Element(Expr):
 	"""A React element: built-in tag, fragment, or client component.
 
 	Tag conventions:
-	- "" (empty): Fragment
+	- "" (empty string): Fragment
 	- "div", "span", etc.: HTML element
 	- "$$ComponentId": Client component (registered in JS registry)
+	- Expr (Import, Member, etc.): Direct component reference for transpilation
 	"""
 
-	tag: str
-	props: dict[str, Prop] | None = None
-	children: Sequence[Child] | None = None
-	key: str | None = None
+	__slots__ = ("tag", "props", "children", "key")
+
+	tag: str | Expr
+	props: dict[str, Any] | None
+	children: Sequence[Any] | None
+	key: str | None
+
+	def __init__(
+		self,
+		tag: str | Expr,
+		props: dict[str, Any] | None = None,
+		children: Sequence[Any] | None = None,
+		key: str | None = None,
+	) -> None:
+		self.tag = tag
+		self.props = props
+		self.children = children
+		self.key = key
+		if self.key is None and self.props:
+			self.key = self.props.pop("key", None)
+
+		is_key_str = isinstance(key, str)
+		is_key_lit_str = isinstance(key, Literal) and isinstance(key.value, str)
+		if key is not None and not (is_key_str or is_key_lit_str):
+			raise ValueError("Non-string keys are not supported yet")
 
 	@override
 	def emit(self, out: list[str]) -> None:
-		# Fragment
-		if not self.tag:
+		# Fragment (only for string tags)
+		if self.tag == "":
 			if self.key is not None:
 				# Fragment with key needs explicit Fragment component
 				out.append('<Fragment key="')
@@ -301,8 +526,13 @@ class Element(Expr):
 				out.append("</>")
 			return
 
-		# Resolve tag (strip $$ prefix for client components)
-		tag = self.tag[2:] if self.tag.startswith("$$") else self.tag
+		# Resolve tag - either emit Expr or use string (strip $$ prefix)
+		tag_out: list[str] = []
+		if isinstance(self.tag, Expr):
+			self.tag.emit(tag_out)
+		else:
+			tag_out.append(self.tag[2:] if self.tag.startswith("$$") else self.tag)
+		tag_str = "".join(tag_out)
 
 		# Build props into a separate buffer to check if empty
 		props_out: list[str] = []
@@ -324,7 +554,7 @@ class Element(Expr):
 		# Self-closing if no children
 		if not children_out:
 			out.append("<")
-			out.append(tag)
+			out.append(tag_str)
 			if props_out:
 				out.append(" ")
 				out.extend(props_out)
@@ -333,7 +563,7 @@ class Element(Expr):
 
 		# Open tag
 		out.append("<")
-		out.append(tag)
+		out.append(tag_str)
 		if props_out:
 			out.append(" ")
 			out.extend(props_out)
@@ -342,10 +572,35 @@ class Element(Expr):
 		out.extend(children_out)
 		# Close tag
 		out.append("</")
-		out.append(tag)
+		out.append(tag_str)
 		out.append(">")
 
-	def with_children(self, children: Sequence[Child]) -> Element:
+	@override
+	def __getitem__(self, key: Any) -> Element:  # pyright: ignore[reportIncompatibleMethodOverride]
+		"""Return new Element with children set via subscript.
+
+		Raises if this element already has children.
+		Accepts a single child or a Sequence of children.
+		"""
+		if self.children:
+			raise ValueError(
+				f"Element '{self.tag}' already has children; cannot add more via subscript"
+			)
+
+		# Convert key to sequence of children
+		if isinstance(key, (list, tuple)):
+			children = list(key)
+		else:
+			children = [key]
+
+		return Element(
+			tag=self.tag,
+			props=self.props,
+			children=children,
+			key=self.key,
+		)
+
+	def with_children(self, children: Sequence[Any]) -> Element:
 		"""Return new Element with children set.
 
 		Raises if this element already has children.

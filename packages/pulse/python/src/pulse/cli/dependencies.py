@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from pulse.cli.packages import (
 	VersionConflict,
@@ -16,7 +15,7 @@ from pulse.cli.packages import (
 	resolve_versions,
 	spec_satisfies,
 )
-from pulse.react_component import ReactComponent, registered_react_components
+from pulse.transpiler_v2.imports import get_registered_imports
 
 
 def convert_pep440_to_semver(python_version: str) -> str:
@@ -90,51 +89,29 @@ def get_required_dependencies(
 	web_root: Path,
 	*,
 	pulse_version: str,
-	component_provider: Callable[
-		[], Iterable[ReactComponent[Any]]
-	] = registered_react_components,
 ) -> dict[str, str | None]:
 	"""Get the required dependencies for a Pulse app."""
 	if not web_root.exists():
 		raise DependencyError(f"Directory not found: {web_root}")
 
-	try:
-		components = list(component_provider())
-	except Exception as exc:
-		raise DependencyError("Unable to inspect registered React components") from exc
-
 	constraints: dict[str, list[str | None]] = {
 		"pulse-ui-client": [pulse_version],
 	}
 
-	for comp in components:
-		src = getattr(comp, "src", None)
-		component_pkg_name: str | None = None
-		if src:
+	# New transpiler v2 imports
+	for imp in get_registered_imports():
+		if imp.src:
 			try:
-				spec = parse_install_spec(src)
+				spec = parse_install_spec(imp.src)
 			except ValueError as exc:
+				# We might want to be more lenient here or at least log it,
+				# but following existing pattern of raising DependencyError
 				raise DependencyError(str(exc)) from None
 			if spec:
 				name_only, ver = parse_dependency_spec(spec)
 				constraints.setdefault(name_only, []).append(ver)
-				component_pkg_name = name_only
-
-		comp_version = getattr(comp, "version", None)
-		if comp_version and component_pkg_name:
-			constraints.setdefault(component_pkg_name, []).append(comp_version)
-
-		for extra in getattr(comp, "extra_imports", []):
-			extra_src = getattr(extra, "src", None) if extra is not None else None
-			if not extra_src:
-				continue
-			try:
-				spec2 = parse_install_spec(extra_src)
-			except ValueError as exc:
-				raise DependencyError(str(exc)) from None
-			if spec2:
-				name_only2, ver2 = parse_dependency_spec(spec2)
-				constraints.setdefault(name_only2, []).append(ver2)
+				if imp.version:
+					constraints.setdefault(name_only, []).append(imp.version)
 
 	try:
 		resolved = resolve_versions(constraints)
@@ -157,15 +134,11 @@ def check_web_dependencies(
 	web_root: Path,
 	*,
 	pulse_version: str,
-	component_provider: Callable[
-		[], Iterable[ReactComponent[Any]]
-	] = registered_react_components,
 ) -> list[str]:
 	"""Check if web dependencies are in sync and return list of packages that need to be added/updated."""
 	desired = get_required_dependencies(
 		web_root=web_root,
 		pulse_version=pulse_version,
-		component_provider=component_provider,
 	)
 	pkg_json = load_package_json(web_root)
 
@@ -195,15 +168,11 @@ def prepare_web_dependencies(
 	web_root: Path,
 	*,
 	pulse_version: str,
-	component_provider: Callable[
-		[], Iterable[ReactComponent[Any]]
-	] = registered_react_components,
 ) -> DependencyPlan | None:
 	"""Inspect registered components and return the Bun command needed to sync dependencies."""
 	to_add = check_web_dependencies(
 		web_root=web_root,
 		pulse_version=pulse_version,
-		component_provider=component_provider,
 	)
 
 	if to_add:

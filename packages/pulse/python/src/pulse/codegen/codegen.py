@@ -1,4 +1,5 @@
 import logging
+import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,7 @@ from pulse.codegen.templates.routes_ts import (
 )
 from pulse.env import env
 from pulse.routing import Layout, Route, RouteTree
-from pulse.transpiler.imports import registered_imports
+from pulse.transpiler_v2 import get_registered_imports
 
 if TYPE_CHECKING:
 	from pulse.app import ConnectionStatusConfig
@@ -99,13 +100,17 @@ class Codegen:
 	def __init__(self, routes: RouteTree, config: CodegenConfig) -> None:
 		self.cfg = config
 		self.routes = routes
-		self._copied_css_files: set[Path] = set()
-		# Maps source path -> destination path for CSS files
-		self._css_dest_paths: dict[str, Path] = {}
+		self._copied_files: set[Path] = set()
+		# Maps source path string -> relative import path from route files
+		self._asset_import_paths: dict[str, str] = {}
 
 	@property
 	def output_folder(self):
 		return self.cfg.pulse_path
+
+	@property
+	def assets_folder(self):
+		return self.output_folder / "assets"
 
 	def generate_all(
 		self,
@@ -117,11 +122,11 @@ class Codegen:
 		# Ensure generated files are gitignored
 		ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
 
-		self._copied_css_files = set()
-		self._css_dest_paths = {}
+		self._copied_files = set()
+		self._asset_import_paths = {}
 
-		# Copy all registered CSS files to the output css directory
-		self._copy_css_files()
+		# Copy all registered local files to the assets directory
+		self._copy_local_files()
 
 		# Keep track of all generated files
 		generated_files = set(
@@ -140,7 +145,7 @@ class Codegen:
 				),
 			]
 		)
-		generated_files.update(self._copied_css_files)
+		generated_files.update(self._copied_files)
 
 		# Clean up any remaining files that are not part of the generated files
 		for path in self.output_folder.rglob("*"):
@@ -151,31 +156,54 @@ class Codegen:
 				except Exception as e:
 					logger.warning(f"Could not remove stale file {path}: {e}")
 
-	def _copy_css_files(self) -> None:
-		"""Copy all registered local CSS files to the output css directory."""
-		from pulse.transpiler.imports import CssImport
+	def _copy_local_files(self) -> None:
+		"""Copy all registered local files to the assets directory.
 
-		css_dir = self.output_folder / "css"
+		Collects all Import objects with is_local=True and copies their
+		source files to the assets folder, building an import path mapping.
+		"""
+		imports = get_registered_imports()
+		local_imports = [imp for imp in imports if imp.is_local]
 
-		for imp in registered_imports():
-			if not isinstance(imp, CssImport) or not imp.is_local:
+		if not local_imports:
+			return
+
+		self.assets_folder.mkdir(parents=True, exist_ok=True)
+
+		for imp in local_imports:
+			if imp.source_path is None:
 				continue
 
-			# Local CssImport has source_path and generated_filename set
-			source_path = imp.source_path
-			generated_filename = imp.generated_filename
-			assert source_path is not None and generated_filename is not None
+			# Get unique asset filename
+			asset_name = imp.asset_filename()
+			dest_path = self.assets_folder / asset_name
 
-			if not source_path.exists():
-				logger.warning(f"CSS file not found: {source_path}")
-				continue
+			# Copy file if source exists
+			if imp.source_path.exists():
+				shutil.copy2(imp.source_path, dest_path)
+				self._copied_files.add(dest_path)
+				logger.debug(f"Copied {imp.source_path} -> {dest_path}")
 
-			dest_path = css_dir / generated_filename
-			dest_path.parent.mkdir(parents=True, exist_ok=True)
-			content = source_path.read_text()
-			write_file_if_changed(dest_path, content)
-			self._copied_css_files.add(dest_path)
-			self._css_dest_paths[str(source_path)] = dest_path
+			# Store just the asset filename - the relative path is computed per-route
+			self._asset_import_paths[imp.src] = asset_name
+
+	def _compute_asset_prefix(self, route_file_path: str) -> str:
+		"""Compute the relative path prefix from a route file to the assets folder.
+
+		Args:
+			route_file_path: The route's file path (e.g., "users/_id_xxx.jsx")
+
+		Returns:
+			The relative path prefix (e.g., "../assets/" or "../../assets/")
+		"""
+		# Count directory depth: each "/" in the path adds one level
+		depth = route_file_path.count("/")
+		# Add 1 for the routes/ or layouts/ folder itself
+		return "../" * (depth + 1) + "assets/"
+
+	def get_asset_import_paths(self) -> dict[str, str]:
+		"""Get the mapping of source paths to asset filenames."""
+		return self._asset_import_paths
 
 	def generate_layout_tsx(
 		self,
@@ -251,16 +279,19 @@ class Codegen:
 		return "\n".join(lines)
 
 	def generate_route(self, route: Route | Layout, server_address: str):
+		route_file_path = route.file_path()
 		if isinstance(route, Layout):
-			output_path = self.output_folder / "layouts" / route.file_path()
+			output_path = self.output_folder / "layouts" / route_file_path
 		else:
-			output_path = self.output_folder / "routes" / route.file_path()
+			output_path = self.output_folder / "routes" / route_file_path
+
+		# Compute asset prefix based on route depth
+		asset_prefix = self._compute_asset_prefix(route_file_path)
 
 		content = generate_route(
 			path=route.unique_path(),
-			components=list(route.components) if route.components else None,
-			route_file_path=output_path,
-			css_dir=self.output_folder / "css",
+			asset_filenames=self._asset_import_paths,
+			asset_prefix=asset_prefix,
 		)
 		return write_file_if_changed(output_path, content)
 

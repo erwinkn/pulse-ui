@@ -1425,12 +1425,13 @@ from pulse.serializer import serialize as serialize
 
 # State and routing
 from pulse.state import State as State
-from pulse.transpiler.function import JsFunction as JsFunction
-from pulse.transpiler.function import JsxFunction as JsxFunction
-from pulse.transpiler.function import javascript as javascript
-from pulse.transpiler.imports import CssImport as CssImport
-from pulse.transpiler.imports import Import as Import
-from pulse.transpiler.imports import import_js as import_js
+
+# Transpiler v2
+from pulse.transpiler_v2.function import JsFunction as JsFunction
+from pulse.transpiler_v2.function import javascript as javascript
+from pulse.transpiler_v2.imports import Import as Import
+from pulse.transpiler_v2.nodes import Jsx as Jsx
+from pulse.transpiler_v2.nodes import Ref as Ref
 
 # Types
 from pulse.types.event_handler import (

@@ -9,16 +9,32 @@ from pulse.transpiler_v2.errors import TranspileError as TranspileError
 
 # Function system
 from pulse.transpiler_v2.function import FUNCTION_CACHE as FUNCTION_CACHE
+
+# Constant hoisting
+from pulse.transpiler_v2.function import Constant as Constant
 from pulse.transpiler_v2.function import JsFunction as JsFunction
 from pulse.transpiler_v2.function import analyze_deps as analyze_deps
 from pulse.transpiler_v2.function import clear_function_cache as clear_function_cache
+from pulse.transpiler_v2.function import (
+	collect_function_graph as collect_function_graph,
+)
 from pulse.transpiler_v2.function import javascript as javascript
+from pulse.transpiler_v2.function import registered_constants as registered_constants
 from pulse.transpiler_v2.function import registered_functions as registered_functions
+
+# ID generator
+from pulse.transpiler_v2.id import next_id as next_id
+from pulse.transpiler_v2.id import reset_id_counter as reset_id_counter
 
 # Import utilities
 from pulse.transpiler_v2.imports import Import as Import
+from pulse.transpiler_v2.imports import ImportKind as ImportKind
+from pulse.transpiler_v2.imports import caller_file as caller_file
 from pulse.transpiler_v2.imports import clear_import_registry as clear_import_registry
 from pulse.transpiler_v2.imports import get_registered_imports as get_registered_imports
+from pulse.transpiler_v2.imports import is_absolute_path as is_absolute_path
+from pulse.transpiler_v2.imports import is_local_path as is_local_path
+from pulse.transpiler_v2.imports import is_relative_path as is_relative_path
 
 # JS module system
 from pulse.transpiler_v2.js_module import JsModule as JsModule
@@ -50,6 +66,9 @@ from pulse.transpiler_v2.nodes import ForOf as ForOf
 from pulse.transpiler_v2.nodes import Function as Function
 from pulse.transpiler_v2.nodes import Identifier as Identifier
 from pulse.transpiler_v2.nodes import If as If
+
+# JSX wrapper
+from pulse.transpiler_v2.nodes import Jsx as Jsx
 from pulse.transpiler_v2.nodes import Literal as Literal
 from pulse.transpiler_v2.nodes import Member as Member
 from pulse.transpiler_v2.nodes import New as New
@@ -57,6 +76,9 @@ from pulse.transpiler_v2.nodes import Node as Node
 from pulse.transpiler_v2.nodes import Object as Object
 from pulse.transpiler_v2.nodes import Prop as Prop
 from pulse.transpiler_v2.nodes import PulseNode as PulseNode
+
+# Ref registry (for codegen __registry)
+from pulse.transpiler_v2.nodes import Ref as Ref
 from pulse.transpiler_v2.nodes import Return as Return
 from pulse.transpiler_v2.nodes import Spread as Spread
 from pulse.transpiler_v2.nodes import StmtNode as StmtNode
@@ -68,16 +90,14 @@ from pulse.transpiler_v2.nodes import Unary as Unary
 from pulse.transpiler_v2.nodes import Undefined as Undefined
 from pulse.transpiler_v2.nodes import Value as Value
 from pulse.transpiler_v2.nodes import While as While
+from pulse.transpiler_v2.nodes import clear_ref_registry as clear_ref_registry
 
 # Emit
 from pulse.transpiler_v2.nodes import emit as emit
+from pulse.transpiler_v2.nodes import registered_refs as registered_refs
 
 # React components (JSX imports with typed call signature)
-from pulse.transpiler_v2.react_component import ReactComponent as ReactComponent
 from pulse.transpiler_v2.react_component import react_component as react_component
-from pulse.transpiler_v2.react_component import (
-	registered_react_components as registered_react_components,
-)
 
 # Transpiler
 from pulse.transpiler_v2.transpiler import Transpiler as Transpiler

@@ -673,6 +673,58 @@ class TestElementEmit:
 		assert emit(elem) == "<div>visible</div>"
 
 
+class TestElementExprTag:
+	"""Test Element with Expr as tag (for transpilation)."""
+
+	def test_identifier_tag(self):
+		"""Element with Identifier tag."""
+		elem = Element(Identifier("Button"), children=["Click"])
+		assert emit(elem) == "<Button>Click</Button>"
+
+	def test_identifier_tag_self_closing(self):
+		"""Element with Identifier tag, no children."""
+		elem = Element(Identifier("Icon"), props={"name": "star"})
+		assert emit(elem) == '<Icon name="star" />'
+
+	def test_member_tag(self):
+		"""Element with Member tag (e.g., AppShell.Header)."""
+		app_shell = Identifier("AppShell")
+		header = Member(app_shell, "Header")
+		elem = Element(header, props={"height": 60}, children=["Title"])
+		assert emit(elem) == "<AppShell.Header height={60}>Title</AppShell.Header>"
+
+	def test_member_tag_self_closing(self):
+		"""Element with Member tag, self-closing."""
+		icons = Identifier("Icons")
+		star = Member(icons, "Star")
+		elem = Element(star, props={"size": 24})
+		assert emit(elem) == "<Icons.Star size={24} />"
+
+	def test_nested_member_tag(self):
+		"""Element with nested Member tag (e.g., Mantine.Core.Button)."""
+		mantine = Identifier("Mantine")
+		core = Member(mantine, "Core")
+		button = Member(core, "Button")
+		elem = Element(button, children=["Submit"])
+		assert emit(elem) == "<Mantine.Core.Button>Submit</Mantine.Core.Button>"
+
+	def test_member_with_props_and_children(self):
+		"""Member tag with both props and children."""
+		app = Identifier("App")
+		layout = Member(app, "Layout")
+		elem = Element(
+			layout,
+			props={"sidebar": True, "theme": "dark"},
+			children=[Element("div", children=["Content"])],
+		)
+		result = emit(elem)
+		assert "<App.Layout" in result
+		assert "sidebar={true}" in result
+		assert 'theme="dark"' in result
+		assert "<div>Content</div>" in result
+		assert "</App.Layout>" in result
+
+
 class TestElementWithChildren:
 	"""Test Element.with_children method."""
 
@@ -819,18 +871,12 @@ class TestPulseNodeEmitError:
 	"""Test that PulseNode emission raises appropriate errors."""
 
 	def test_pulse_node_in_emit_raises(self):
-		def my_component():
-			pass
-
-		node = PulseNode(fn=my_component)
+		node = PulseNode(fn=lambda: ...)
 		with pytest.raises(TypeError, match="Cannot transpile PulseNode"):
 			emit(node)
 
 	def test_pulse_node_as_child_raises(self):
-		def child_component():
-			pass
-
-		pulse_child = PulseNode(fn=child_component)
+		pulse_child = PulseNode(fn=lambda: ...)
 		elem = Element("div", children=[pulse_child])
 		with pytest.raises(TypeError, match="Cannot transpile PulseNode"):
 			emit(elem)

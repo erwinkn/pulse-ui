@@ -146,7 +146,8 @@ class JsModule(Expr):
 		if self.src is None:
 			return Identifier(self.name)
 
-		return Import(self.name, self.src, is_default=self.kind == "default")
+		import_kind = "default" if self.kind == "default" else "named"
+		return Import(self.name, self.src, kind=import_kind)
 
 	def get_value(self, name: str) -> Member | Class | Identifier | Import:
 		"""Get a member of this module as an expression.

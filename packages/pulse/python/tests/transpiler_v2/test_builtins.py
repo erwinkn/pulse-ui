@@ -73,6 +73,18 @@ class TestMinMax:
 		code = emit(fn)
 		assert code == "function get_min_1(a, b) {\nreturn Math.min(a, b);\n}"
 
+	def test_min_iterable(self):
+		@javascript
+		def get_min(items: Iterable[int | float]):
+			return min(items)
+
+		fn = get_min.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function get_min_1(items) {\nreturn Math.min(...Array.from(items));\n}"
+		)
+
 	def test_max_two_args(self):
 		@javascript
 		def get_max(a: int | float, b: int | float):
@@ -81,6 +93,18 @@ class TestMinMax:
 		fn = get_max.transpile()
 		code = emit(fn)
 		assert code == "function get_max_1(a, b) {\nreturn Math.max(a, b);\n}"
+
+	def test_max_iterable(self):
+		@javascript
+		def get_max(items: Iterable[int | float]):
+			return max(items)
+
+		fn = get_max.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function get_max_1(items) {\nreturn Math.max(...Array.from(items));\n}"
+		)
 
 	def test_nested_min_max(self):
 		@javascript
@@ -395,7 +419,10 @@ class TestMathBuiltins:
 
 		fn = round_it.transpile()
 		code = emit(fn)
-		assert code == "function round_it_1(x, n) {\nreturn Number(x).toFixed(n);\n}"
+		assert (
+			code
+			== "function round_it_1(x, n) {\nreturn Number(Number(x).toFixed(n));\n}"
+		)
 
 	def test_pow(self):
 		@javascript

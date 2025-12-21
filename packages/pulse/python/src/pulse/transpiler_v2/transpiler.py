@@ -600,13 +600,9 @@ class Transpiler:
 			if result is not None:
 				return result
 
-			# Default method call - kwargs not supported for unknown methods
-			if kwargs:
-				raise TranspileError(
-					f"Keyword arguments not supported for method '{method}'"
-				)
 			# IMPORTANT: derive method expr via transpile_getattr
-			return Call(obj.transpile_getattr(method, self), args)
+			method_expr = obj.transpile_getattr(method, self)
+			return method_expr.transpile_call(args_raw, kwargs_raw, self)
 
 		# Function call (or other callable expr)
 		callee = self.emit_expr(node.func)
@@ -873,7 +869,7 @@ class Transpiler:
 			):
 				names = [e.id for e in gen.target.elts if isinstance(e, ast.Name)]
 				# For destructuring, use array pattern as single param: [a, b]
-				params = [f"[{', '.join(names)}]"]
+				params = [f"([{', '.join(names)}])"]
 			else:
 				raise TranspileError(
 					"Only name or tuple targets supported in comprehensions"

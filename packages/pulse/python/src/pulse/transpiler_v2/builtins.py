@@ -56,12 +56,28 @@ def emit_len(x: Any, *, ctx: Transpiler) -> Expr:
 @transformer("min")
 def emit_min(*args: Any, ctx: Transpiler) -> Expr:
 	"""min(*args) -> Math.min(...)"""
+	if builtins.len(args) == 0:
+		raise TranspileError("min() expects at least one argument")
+	if builtins.len(args) == 1:
+		iterable = ctx.emit_expr(args[0])
+		return Call(
+			Member(Identifier("Math"), "min"),
+			[Spread(Call(Member(Identifier("Array"), "from"), [iterable]))],
+		)
 	return Call(Member(Identifier("Math"), "min"), [ctx.emit_expr(a) for a in args])
 
 
 @transformer("max")
 def emit_max(*args: Any, ctx: Transpiler) -> Expr:
 	"""max(*args) -> Math.max(...)"""
+	if builtins.len(args) == 0:
+		raise TranspileError("max() expects at least one argument")
+	if builtins.len(args) == 1:
+		iterable = ctx.emit_expr(args[0])
+		return Call(
+			Member(Identifier("Math"), "max"),
+			[Spread(Call(Member(Identifier("Array"), "from"), [iterable]))],
+		)
 	return Call(Member(Identifier("Math"), "max"), [ctx.emit_expr(a) for a in args])
 
 
@@ -77,10 +93,15 @@ def emit_round(number: Any, ndigits: Any = None, *, ctx: Transpiler) -> Expr:
 	number = ctx.emit_expr(number)
 	if ndigits is None:
 		return Call(Member(Identifier("Math"), "round"), [number])
-	# With ndigits: Number(x).toFixed(ndigits) for positive
+	# With ndigits: Number(Number(x).toFixed(ndigits)) to keep numeric semantics
 	return Call(
-		Member(Call(Identifier("Number"), [number]), "toFixed"),
-		[ctx.emit_expr(ndigits)],
+		Identifier("Number"),
+		[
+			Call(
+				Member(Call(Identifier("Number"), [number]), "toFixed"),
+				[ctx.emit_expr(ndigits)],
+			)
+		],
 	)
 
 

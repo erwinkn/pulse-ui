@@ -147,7 +147,7 @@ class TestComprehensions:
 		code = emit(fn)
 		assert (
 			code
-			== "function sum_pairs_1(pairs) {\nreturn pairs.map([a, b] => a + b);\n}"
+			== "function sum_pairs_1(pairs) {\nreturn pairs.map(([a, b]) => a + b);\n}"
 		)
 
 	def test_set_comp(self):
@@ -171,5 +171,5 @@ class TestComprehensions:
 		code = emit(fn)
 		assert (
 			code
-			== "function double_values_1(pairs) {\nreturn Map(pairs.map([k, v] => [k, v * 2]));\n}"
+			== "function double_values_1(pairs) {\nreturn Map(pairs.map(([k, v]) => [k, v * 2]));\n}"
 		)

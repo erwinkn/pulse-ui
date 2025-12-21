@@ -1,6 +1,7 @@
 from typing import Literal, TypedDict, Unpack
 
 from pulse.dom.props import HTMLAnchorProps
+from pulse.transpiler_v2 import Import
 from pulse.transpiler_v2.react_component import react_component
 from pulse.vdom import Child
 
@@ -11,8 +12,8 @@ class LinkPath(TypedDict):
 	hash: str
 
 
-# @react_component("Link", "react-router", version="^7")
-@react_component("Link", "react-router")
+# @react_component(Import("Link", "react-router", version="^7"))
+@react_component(Import("Link", "react-router"))
 def Link(
 	*children: Child,
 	key: str | None = None,
@@ -29,8 +30,8 @@ def Link(
 ): ...
 
 
-# @react_component("Outlet", "react-router", version="^7")
-@react_component("Outlet", "react-router")
+# @react_component(Import("Outlet", "react-router", version="^7"))
+@react_component(Import("Outlet", "react-router"))
 def Outlet(key: str | None = None): ...
 
 

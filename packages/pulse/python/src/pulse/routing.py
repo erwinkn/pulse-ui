@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import TypedDict, cast, override
 
 from pulse.env import env
-from pulse.react_component import ReactComponent
 from pulse.reactive_extensions import ReactiveDict
 from pulse.vdom import Component
 
@@ -158,7 +157,6 @@ class Route:
 	segments: list[PathSegment]
 	render: Component[[]]
 	children: Sequence["Route | Layout"]
-	components: Sequence[ReactComponent[...]] | None
 	is_index: bool
 	is_dynamic: bool
 	dev: bool
@@ -168,7 +166,6 @@ class Route:
 		path: str,
 		render: Component[[]],
 		children: "Sequence[Route | Layout] | None" = None,
-		components: "Sequence[ReactComponent[...]] | None" = None,
 		dev: bool = False,
 	):
 		self.path = ensure_relative_path(path)
@@ -176,7 +173,6 @@ class Route:
 
 		self.render = render
 		self.children = children or []
-		self.components = components
 		self.dev = dev
 		self.parent: Route | Layout | None = None
 
@@ -249,19 +245,16 @@ def replace_layout_indicator(path_list: list[str], value: str):
 class Layout:
 	render: Component[...]
 	children: Sequence["Route | Layout"]
-	components: Sequence[ReactComponent[...]] | None
 	dev: bool
 
 	def __init__(
 		self,
 		render: "Component[...]",
 		children: "Sequence[Route | Layout] | None" = None,
-		components: "Sequence[ReactComponent[...]] | None" = None,
 		dev: bool = False,
 	):
 		self.render = render
 		self.children = children or []
-		self.components = components
 		self.dev = dev
 		self.parent: Route | Layout | None = None
 		# 1-based sibling index assigned by RouteTree at each level
@@ -352,14 +345,12 @@ def filter_dev_routes(routes: Sequence[Route | Layout]) -> list[Route | Layout]:
 					path=route.path,
 					render=route.render,
 					children=filtered_children,
-					components=route.components,
 					dev=route.dev,
 				)
 			else:  # Layout
 				filtered_route = Layout(
 					render=route.render,
 					children=filtered_children,
-					components=route.components,
 					dev=route.dev,
 				)
 			filtered.append(filtered_route)

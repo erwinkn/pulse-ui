@@ -101,8 +101,6 @@ class Codegen:
 		self.cfg = config
 		self.routes = routes
 		self._copied_files: set[Path] = set()
-		# Maps source path string -> relative import path from route files
-		self._asset_import_paths: dict[str, str] = {}
 
 	@property
 	def output_folder(self):
@@ -123,10 +121,9 @@ class Codegen:
 		ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
 
 		self._copied_files = set()
-		self._asset_import_paths = {}
 
 		# Copy all registered local files to the assets directory
-		self._copy_local_files()
+		asset_import_paths = self._copy_local_files()
 
 		# Keep track of all generated files
 		generated_files = set(
@@ -140,7 +137,11 @@ class Codegen:
 				self.generate_routes_ts(),
 				self.generate_routes_runtime_ts(),
 				*(
-					self.generate_route(route, server_address=server_address)
+					self.generate_route(
+						route,
+						server_address=server_address,
+						asset_import_paths=asset_import_paths,
+					)
 					for route in self.routes.flat_tree.values()
 				),
 			]
@@ -156,27 +157,27 @@ class Codegen:
 				except Exception as e:
 					logger.warning(f"Could not remove stale file {path}: {e}")
 
-	def _copy_local_files(self) -> None:
+	def _copy_local_files(self) -> dict[str, str]:
 		"""Copy all registered local files to the assets directory.
 
 		Collects all Import objects with is_local=True and copies their
-		source files to the assets folder, building an import path mapping.
+		source files to the assets folder, returning an import path mapping.
 		"""
 		imports = get_registered_imports()
 		local_imports = [imp for imp in imports if imp.is_local]
 
 		if not local_imports:
-			return
+			return {}
 
 		self.assets_folder.mkdir(parents=True, exist_ok=True)
+		asset_import_paths: dict[str, str] = {}
 
 		for imp in local_imports:
 			if imp.source_path is None:
 				continue
 
-			# Get unique asset filename
-			asset_name = imp.asset_filename()
-			dest_path = self.assets_folder / asset_name
+			asset_filename = imp.asset_filename()
+			dest_path = self.assets_folder / asset_filename
 
 			# Copy file if source exists
 			if imp.source_path.exists():
@@ -185,7 +186,9 @@ class Codegen:
 				logger.debug(f"Copied {imp.source_path} -> {dest_path}")
 
 			# Store just the asset filename - the relative path is computed per-route
-			self._asset_import_paths[imp.src] = asset_name
+			asset_import_paths[imp.src] = asset_filename
+
+		return asset_import_paths
 
 	def _compute_asset_prefix(self, route_file_path: str) -> str:
 		"""Compute the relative path prefix from a route file to the assets folder.
@@ -200,10 +203,6 @@ class Codegen:
 		depth = route_file_path.count("/")
 		# Add 1 for the routes/ or layouts/ folder itself
 		return "../" * (depth + 1) + "assets/"
-
-	def get_asset_import_paths(self) -> dict[str, str]:
-		"""Get the mapping of source paths to asset filenames."""
-		return self._asset_import_paths
 
 	def generate_layout_tsx(
 		self,
@@ -278,7 +277,12 @@ class Codegen:
 					)
 		return "\n".join(lines)
 
-	def generate_route(self, route: Route | Layout, server_address: str):
+	def generate_route(
+		self,
+		route: Route | Layout,
+		server_address: str,
+		asset_import_paths: dict[str, str],
+	):
 		route_file_path = route.file_path()
 		if isinstance(route, Layout):
 			output_path = self.output_folder / "layouts" / route_file_path
@@ -290,7 +294,7 @@ class Codegen:
 
 		content = generate_route(
 			path=route.unique_path(),
-			asset_filenames=self._asset_import_paths,
+			asset_filenames=asset_import_paths,
 			asset_prefix=asset_prefix,
 		)
 		return write_file_if_changed(output_path, content)

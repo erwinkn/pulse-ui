@@ -1431,7 +1431,6 @@ from pulse.transpiler_v2.function import JsFunction as JsFunction
 from pulse.transpiler_v2.function import javascript as javascript
 from pulse.transpiler_v2.imports import Import as Import
 from pulse.transpiler_v2.nodes import Jsx as Jsx
-from pulse.transpiler_v2.nodes import Ref as Ref
 
 # Types
 from pulse.types.event_handler import (

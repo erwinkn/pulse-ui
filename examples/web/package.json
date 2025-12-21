@@ -26,6 +26,7 @@
 		"@types/react": "^19.1.2",
 		"@types/react-datepicker": "^7.0.0",
 		"@types/react-dom": "^19.1.2",
+		"baseline-browser-mapping": "^2.9.7",
 		"tailwindcss": "^4.1.11",
 		"typescript": "^5.8.3",
 		"vite": "^6.3.3",

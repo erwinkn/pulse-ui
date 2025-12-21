@@ -90,7 +90,7 @@ def _remove_lock_file(lock_path: Path) -> None:
 		pass
 
 
-def lock_path_for_web_root(web_root: Path, filename: str = ".pulse.lock") -> Path:
+def lock_path_for_web_root(web_root: Path, filename: str = ".pulse/lock") -> Path:
 	"""Return the lock file path for a given web root."""
 	return Path(web_root) / filename
 
@@ -110,13 +110,13 @@ class FolderLock:
 	        pass
 	"""
 
-	def __init__(self, web_root: Path, *, filename: str = ".pulse.lock"):
+	def __init__(self, web_root: Path, *, filename: str = ".pulse/lock"):
 		"""
 		Initialize FolderLock.
 
 		Args:
 		    web_root: Path to the web root directory
-		    filename: Name of the lock file (default: ".pulse.lock")
+		    filename: Name of the lock file (default: ".pulse/lock")
 		"""
 		self.lock_path: Path = lock_path_for_web_root(web_root, filename)
 

@@ -36,31 +36,6 @@ Primitive: TypeAlias = bool | int | float | str | dt.datetime | None
 EXPR_REGISTRY: dict[int, "Expr"] = {}
 
 
-# Global registry for Ref expressions: ordered by creation
-# Used for codegen to emit __registry entries
-REF_REGISTRY: list["Ref"] = []
-_ref_counter: int = 0
-
-
-def clear_ref_registry() -> None:
-	"""Clear the ref registry and reset counter."""
-	global _ref_counter
-	REF_REGISTRY.clear()
-	_ref_counter = 0
-
-
-def _next_ref_key() -> str:
-	"""Generate a unique ref key (separate counter, keeps keys small)."""
-	global _ref_counter
-	_ref_counter += 1
-	return str(_ref_counter)
-
-
-def registered_refs() -> list["Ref"]:
-	"""Get all registered refs in creation order."""
-	return list(REF_REGISTRY)
-
-
 # =============================================================================
 # Base classes
 # =============================================================================
@@ -234,13 +209,6 @@ class Expr(Node, ABC):
 		"""
 		return Jsx(self)
 
-	def ref(self) -> "Ref":
-		"""Wrap this expression in a Ref for registry inclusion.
-
-		The Ref gets a unique key and is auto-registered for codegen.
-		"""
-		return Ref(self)
-
 	# -------------------------------------------------------------------------
 	# Registry for Python value -> Expr mapping
 	# -------------------------------------------------------------------------
@@ -311,63 +279,6 @@ class StmtNode(Node, ABC):
 
 
 @dataclass(slots=True, init=False)
-class Ref(Expr):
-	"""A registry reference wrapper for an expression.
-
-	Provides a stable, unique key for the JS __registry. When emitted in
-	transpiled code, delegates to the wrapped expression. The key is used
-	by the runtime to look up values via get_object().
-
-	Ref has its own separate counter to keep registry keys small (they
-	can't be mangled and appear in wire format).
-
-	Example:
-		# Create a registry entry for a function
-		fn_ref = Ref(my_js_function)
-		# In codegen: __registry = { "1": my_js_function_42, ... }
-		# fn_ref.key == "1"
-	"""
-
-	expr: Expr
-	key: str
-
-	def __init__(self, expr: Expr) -> None:
-		self.expr = expr
-		self.key = _next_ref_key()
-		REF_REGISTRY.append(self)
-
-	@override
-	def emit(self, out: list[str]) -> None:
-		"""Emit delegates to the wrapped expression."""
-		self.expr.emit(out)
-
-	@override
-	def transpile_call(
-		self,
-		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
-		ctx: "Transpiler",
-	) -> Expr:
-		"""Delegate to wrapped expression's transpile_call."""
-		return self.expr.transpile_call(args, kwargs, ctx)
-
-	@override
-	def transpile_getattr(self, attr: str, ctx: "Transpiler") -> Expr:
-		"""Delegate to wrapped expression's transpile_getattr."""
-		return self.expr.transpile_getattr(attr, ctx)
-
-	@override
-	def transpile_subscript(self, key: ast.expr, ctx: "Transpiler") -> Expr:
-		"""Delegate to wrapped expression's transpile_subscript."""
-		return self.expr.transpile_subscript(key, ctx)
-
-	@override
-	def __call__(self, *args: object, **kwargs: object) -> Call | Element:  # pyright: ignore[reportIncompatibleMethodOverride]
-		"""Runtime call - delegates to the wrapped expression."""
-		return self.expr(*args, **kwargs)
-
-
-@dataclass(slots=True)
 class Jsx(Expr):
 	"""JSX wrapper that makes any Expr callable as a component.
 
@@ -383,6 +294,13 @@ class Jsx(Expr):
 	"""
 
 	expr: Expr
+	id: str
+
+	def __init__(self, expr: Expr) -> None:
+		from pulse.transpiler_v2.id import next_id
+
+		self.expr = expr
+		self.id = next_id()
 
 	@override
 	def emit(self, out: list[str]) -> None:

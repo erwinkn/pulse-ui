@@ -1,5 +1,8 @@
 """v2 transpiler with pure data node AST."""
 
+# Ensure built-in Python modules (e.g., math) are registered on import.
+from pulse.transpiler_v2 import modules as _modules  # noqa: F401
+
 # Builtins
 from pulse.transpiler_v2.builtins import BUILTINS as BUILTINS
 from pulse.transpiler_v2.builtins import emit_method as emit_method
@@ -76,9 +79,6 @@ from pulse.transpiler_v2.nodes import Node as Node
 from pulse.transpiler_v2.nodes import Object as Object
 from pulse.transpiler_v2.nodes import Prop as Prop
 from pulse.transpiler_v2.nodes import PulseNode as PulseNode
-
-# Ref registry (for codegen __registry)
-from pulse.transpiler_v2.nodes import Ref as Ref
 from pulse.transpiler_v2.nodes import Return as Return
 from pulse.transpiler_v2.nodes import Spread as Spread
 from pulse.transpiler_v2.nodes import StmtNode as StmtNode
@@ -90,11 +90,9 @@ from pulse.transpiler_v2.nodes import Unary as Unary
 from pulse.transpiler_v2.nodes import Undefined as Undefined
 from pulse.transpiler_v2.nodes import Value as Value
 from pulse.transpiler_v2.nodes import While as While
-from pulse.transpiler_v2.nodes import clear_ref_registry as clear_ref_registry
 
 # Emit
 from pulse.transpiler_v2.nodes import emit as emit
-from pulse.transpiler_v2.nodes import registered_refs as registered_refs
 
 # React components (JSX imports with typed call signature)
 from pulse.transpiler_v2.react_component import react_component as react_component

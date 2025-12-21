@@ -4,9 +4,7 @@ Tests for JSX support: tags, JsxFunction, ReactComponent, and related functional
 
 # pyright: reportPrivateUsage=false
 
-import ast
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from pulse.transpiler_v2 import (
@@ -18,14 +16,9 @@ from pulse.transpiler_v2 import (
 )
 from pulse.transpiler_v2.imports import Import
 from pulse.transpiler_v2.nodes import (
-	Call,
 	Element,
 	Jsx,
-	Literal,
 	Member,
-	Ref,
-	Subscript,
-	registered_refs,
 )
 
 
@@ -374,37 +367,33 @@ class TestJsxFunction:
 
 
 class TestReactComponent:
-	"""Test Ref(Jsx(expr)) pattern for React components."""
+	"""Test Jsx(expr) pattern for React components."""
 
-	def test_ref_jsx_with_import(self):
-		"""Ref(Jsx(Import)) creates a registry entry with correct key."""
+	def test_jsx_with_import(self):
+		"""Jsx(Import) uses the import's js_name in emission."""
 
 		button_import = Import("Button", "@mantine/core")
-		Button = Ref(Jsx(button_import))
+		Button = Jsx(button_import)
 
-		# Check key is a small unique ID
-		assert Button.key == "1"
 		# Check emit outputs the import's js_name
 		assert emit(Button) == button_import.js_name
 
-	def test_ref_jsx_with_member(self):
-		"""Ref(Jsx(Member)) for AppShell.Header patterns."""
+	def test_jsx_with_member(self):
+		"""Jsx(Member) for AppShell.Header patterns."""
 
 		app_shell = Import("AppShell", "@mantine/core")
 		header_expr = Member(app_shell, "Header")
-		Header = Ref(Jsx(header_expr))
+		Header = Jsx(header_expr)
 
-		# Check key is unique ID
-		assert Header.key == "1"
 		# Check emit includes member access
 		assert ".Header" in emit(Header)
 		assert "AppShell_" in emit(Header)
 
-	def test_ref_jsx_call_produces_mount_point_element(self):
-		"""Calling Ref(Jsx(expr)) produces Element with expr as tag."""
+	def test_jsx_call_produces_element(self):
+		"""Calling Jsx(expr) produces Element with expr as tag."""
 
 		button_import = Import("Button", "@mantine/core")
-		Button = Ref(Jsx(button_import))
+		Button = Jsx(button_import)
 
 		elem = Button("Click me", variant="primary")
 		# tag is now the underlying expr (e.g. Import)
@@ -413,11 +402,11 @@ class TestReactComponent:
 		assert elem.props is not None
 		assert elem.props["variant"] == "primary"
 
-	def test_ref_jsx_transpile_call(self):
-		"""Ref(Jsx(expr)).transpile_call produces Element with expr as tag."""
+	def test_jsx_transpile_call(self):
+		"""Jsx(expr).transpile_call produces Element with expr as tag."""
 
 		card_import = Import("Card", "@mantine/core")
-		Card = Ref(Jsx(card_import))
+		Card = Jsx(card_import)
 
 		@javascript(jsx=True)
 		def render() -> Any:
@@ -430,11 +419,11 @@ class TestReactComponent:
 		assert 'shadow="sm"' in code
 		assert "Content" in code
 
-	def test_ref_jsx_member_transpile_call(self):
-		"""Member-based Ref(Jsx) produces correct JSX in transpilation."""
+	def test_jsx_member_transpile_call(self):
+		"""Member-based Jsx produces correct JSX in transpilation."""
 
 		app_shell = Import("AppShell", "@mantine/core")
-		Header = Ref(Jsx(Member(app_shell, "Header")))
+		Header = Jsx(Member(app_shell, "Header"))
 
 		@javascript(jsx=True)
 		def render() -> Any:
@@ -444,31 +433,15 @@ class TestReactComponent:
 		code = emit(fn)
 		assert f"<{app_shell.js_name}.Header height={{60}} />" in code
 
-	def test_ref_registry(self):
-		"""Refs are registered in the ref registry."""
-
-		button = Import("Button", "@ui/button")
-		card = Import("Card", "@ui/card")
-
-		Button = Ref(Jsx(button))
-		Card = Ref(Jsx(card))
-
-		refs = registered_refs()
-		assert Button in refs
-		assert Card in refs
-		# Note: JsFunction also creates refs, so >= 2
-		assert len([r for r in refs if r in [Button, Card]]) == 2
-
 	def test_react_component_decorator(self):
-		"""The @react_component decorator returns a Ref(Jsx(expr))."""
+		"""The @react_component decorator returns a Jsx(expr)."""
 		from pulse.transpiler_v2.react_component import react_component
 
-		@react_component("Button", "@mantine/core")
+		@react_component(Import("Button", "@mantine/core"))
 		def Button(children: str, variant: str = "default") -> Element: ...
 
-		# Should be a Ref wrapping a Jsx
-		assert isinstance(Button, Ref)
-		assert isinstance(Button.expr, Jsx)
+		# Should be a Jsx
+		assert isinstance(Button, Jsx)
 
 
 # =============================================================================
@@ -477,7 +450,7 @@ class TestReactComponent:
 
 
 class TestJsxStandalone:
-	"""Test Jsx wrapper without Ref."""
+	"""Test Jsx wrapper behavior."""
 
 	def test_jsx_transpile_getattr(self):
 		"""Jsx.transpile_getattr is not overridden (returns Member)."""
@@ -514,59 +487,3 @@ class TestJsxStandalone:
 
 		# emit should delegate to the import
 		assert emit(jsx_button) == button.js_name
-
-
-# =============================================================================
-# Ref Delegation Methods
-# =============================================================================
-
-
-class TestRefDelegation:
-	"""Test Ref delegation to wrapped expression."""
-
-	def test_ref_transpile_getattr_delegates(self):
-		"""Ref.transpile_getattr delegates to wrapped expr."""
-
-		app_shell = Import("AppShell", "@mantine/core")
-		ref = Ref(app_shell)
-
-		# Access .Header through Ref
-		result = ref.transpile_getattr("Header", None)  # pyright: ignore[reportArgumentType]
-		assert isinstance(result, Member)
-		# Member uses .prop field, not .attr
-		assert result.prop == "Header"
-
-	def test_ref_transpile_subscript_delegates(self):
-		"""Ref.transpile_subscript delegates to wrapped expr."""
-
-		# Use Import which creates Subscript correctly
-		obj = Import("obj", "./obj", kind="default")
-		ref = Ref(obj)
-
-		# Access [0] through Ref - need to pass an ast.expr node
-		key_node = ast.Constant(value=0)
-		# Create a mock context with emit_expr
-		mock_ctx = MagicMock()
-		mock_ctx.emit_expr.return_value = Literal(0)
-
-		result = ref.transpile_subscript(key_node, mock_ctx)
-		assert isinstance(result, Subscript)
-		mock_ctx.emit_expr.assert_called_once_with(key_node)
-
-	def test_ref_wrapping_non_jsx_call_delegates(self):
-		"""Ref wrapping non-Jsx expr delegates call to wrapped expr."""
-
-		fn_import = Import("helper", "./utils")
-		ref = Ref(fn_import)
-
-		# Calling should delegate to import's __call__ (produces Call)
-		result = ref("arg1", "arg2")
-		assert isinstance(result, Call)
-
-	def test_ref_emit_delegates(self):
-		"""Ref.emit() defers to wrapped expr."""
-
-		button = Import("Button", "@mantine/core")
-		ref = Ref(button)
-
-		assert emit(ref) == button.js_name

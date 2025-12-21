@@ -8,12 +8,10 @@ from pulse.transpiler_v2 import (
 	Constant,
 	Import,
 	JsFunction,
-	Ref,
 	collect_function_graph,
 	emit,
 	get_registered_imports,
 	registered_functions,
-	registered_refs,
 )
 
 # Type alias for function types
@@ -203,23 +201,32 @@ def _generate_functions_section(functions: Sequence[AnyJsFunction]) -> str:
 	return "\n".join(lines)
 
 
-def _generate_registry_section(refs: Sequence[Ref] | None = None) -> str:
-	"""Generate the unified registry from registered Refs.
+def _generate_registry_section(
+	imports: Sequence[Import],
+	constants: Sequence[Constant],
+	functions: Sequence[AnyJsFunction],
+) -> str:
+	"""Generate the unified registry from all registered entities.
 
 	The registry contains all values that need to be looked up at runtime,
-	keyed by their Ref's unique key.
+	keyed by their unique ID.
 	"""
-	if refs is None:
-		refs = registered_refs()
-
 	lines: list[str] = []
 	lines.append("// Unified Registry")
 	lines.append("const __registry = {")
 
-	for ref in refs:
-		# Emit the wrapped expression as the value
-		expr_js = emit(ref.expr)
-		lines.append(f'  "{ref.key}": {expr_js},')
+	# Add imports
+	for imp in imports:
+		if not imp.is_side_effect:
+			lines.append(f'  "{imp.id}": {imp.js_name},')
+
+	# Add constants
+	for const in constants:
+		lines.append(f'  "{const.id}": {const.js_name},')
+
+	# Add functions
+	for fn in functions:
+		lines.append(f'  "{fn.id}": {fn.js_name},')
 
 	lines.append("};")
 
@@ -239,7 +246,7 @@ def generate_route(
 		asset_prefix: Relative path prefix from route file to assets folder
 	"""
 	# Note: Lazy component support is not yet implemented.
-	# Components now use Ref(Jsx(expr)) and register via REF_REGISTRY.
+	# Components now register via the unified registry.
 
 	# Add core Pulse imports
 	pulse_view_import = Import("PulseView", "pulse-ui-client")
@@ -269,7 +276,8 @@ def generate_route(
 		output_parts.append(_generate_functions_section(funcs))
 		output_parts.append("")
 
-	output_parts.append(_generate_registry_section())
+	# Generate the unified registry including all imports, constants and functions
+	output_parts.append(_generate_registry_section(all_imports, constants, funcs))
 	output_parts.append("")
 
 	# Route component

@@ -35,7 +35,7 @@ from pulse.js2.number import Number
 
 
 # Import a JS function with proper typing using Import as a decorator
-@ps.Import("clsx", "clsx", kind="default")
+@ps.Import("clsx", "clsx", kind="default").as_
 def clsx(*classes: str) -> str:
 	"""Typed import for the clsx library."""
 	...

@@ -34,9 +34,7 @@ from pulse.transpiler_v2.nodes import (
 	Expr,
 	Function,
 	Jsx,
-	Ref,
 	Return,
-	clear_ref_registry,
 )
 from pulse.transpiler_v2.transpiler import Transpiler
 
@@ -61,7 +59,6 @@ def clear_function_cache() -> None:
 	FUNCTION_CACHE.clear()
 	CONSTANT_REGISTRY.clear()
 	clear_import_registry()
-	clear_ref_registry()
 	reset_id_counter()
 
 
@@ -130,7 +127,6 @@ class JsFunction(Expr, Generic[*Args, R]):
 	- A unique identifier for deduplication
 	- Resolved dependencies (other functions, imports, constants, etc.)
 	- The ability to transpile to JavaScript code
-	- A Ref for registry inclusion (auto-created)
 
 	When emitted, produces the unique JS function name (e.g., "myFunc_1").
 	"""
@@ -138,15 +134,12 @@ class JsFunction(Expr, Generic[*Args, R]):
 	fn: Callable[[*Args], R]
 	id: str
 	deps: dict[str, Expr]
-	_ref: Ref
 	_transpiled: Function | None = field(default=None)
 
 	def __init__(self, fn: Callable[..., Any]) -> None:
 		self.fn = fn
 		self.id = next_id()
 		self._transpiled = None
-		# Create ref for registry inclusion (wraps self so it emits the js_name)
-		self._ref = Ref(self)
 		# Register self in cache BEFORE analyzing deps (handles cycles)
 		FUNCTION_CACHE[fn] = self
 		# Now analyze and build deps (may recursively call JsFunction() which will find us in cache)
@@ -155,14 +148,6 @@ class JsFunction(Expr, Generic[*Args, R]):
 	@override
 	def __call__(self, *args: *Args) -> R:  # pyright: ignore[reportIncompatibleMethodOverride]
 		return super().__call__(*args)  # pyright: ignore[reportReturnType]
-
-	@property
-	def registry_ref(self) -> Ref:
-		"""Registry reference for this function.
-
-		Named to avoid clashing with Expr.ref() convenience wrapper.
-		"""
-		return self._ref
 
 	@property
 	def js_name(self) -> str:
@@ -259,10 +244,6 @@ class JsxFunction(Expr, Generic[P, R]):
 	@property
 	def js_name(self) -> str:
 		return self.js_fn.js_name
-
-	@property
-	def registry_ref(self) -> Ref:
-		return self.js_fn.registry_ref
 
 	def transpile(self) -> Function:
 		return self.js_fn.transpile()

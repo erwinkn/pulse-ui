@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import sys
@@ -24,7 +23,6 @@ from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.env import env
 from pulse.transpiler_v2.imports import Import, clear_import_registry
-from rich.console import Console
 
 
 def test_parse_app_target_file_default(tmp_path: Path):
@@ -204,11 +202,9 @@ def test_execute_commands_streams_output(
 		env=os.environ.copy(),
 		on_spawn=lambda: spawns.append("server"),
 	)
-	console = Console(file=io.StringIO(), force_terminal=False, color_system=None)
 	exit_code = execute_commands(
 		[spec],
-		console=console,
-		tag_colors={"server": "cyan"},
+		tag_mode="plain",  # Use plain mode since capsys captures plain text
 	)
 	assert exit_code == 0
 	output = capsys.readouterr().out

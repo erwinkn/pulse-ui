@@ -8,22 +8,25 @@ import select
 import signal
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from io import TextIOBase
 from typing import TypeVar, cast
 
-from rich.console import Console
-
 from pulse.cli.helpers import os_family
+from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
 
 _K = TypeVar("_K", int, str)
 
+# ANSI color codes for tagged output
 ANSI_CODES = {
 	"cyan": "\033[36m",
 	"orange1": "\033[38;5;208m",
-	"default": "\033[90m",
+	"reset": "\033[0m",
 }
+
+# Tag colors mapping (used only in colored mode)
+TAG_COLORS = {"server": "cyan", "web": "orange1"}
 
 # Regex to strip ANSI escape codes
 ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -32,23 +35,27 @@ ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 def execute_commands(
 	commands: Sequence[CommandSpec],
 	*,
-	console: Console,
-	tag_colors: Mapping[str, str] | None = None,
+	tag_mode: TagMode = "colored",
 ) -> int:
-	"""Run the provided commands, streaming tagged output to stdout."""
+	"""Run the provided commands, streaming tagged output to stdout.
+
+	Args:
+		commands: List of command specifications to run
+		tag_mode: How to display process tags:
+			- "colored": Show [server]/[web] with ANSI colors (dev mode)
+			- "plain": Show [server]/[web] without colors (ci/prod mode)
+	"""
 	if not commands:
 		return 0
-
-	color_lookup = dict(tag_colors or {})
 
 	# Avoid pty.fork() in multi-threaded environments (like pytest) to prevent
 	# "DeprecationWarning: This process is multi-threaded, use of forkpty() may lead to deadlocks"
 	# Also skip pty on Windows or if fork is unavailable
 	in_pytest = "pytest" in sys.modules
 	if os_family() == "windows" or not hasattr(pty, "fork") or in_pytest:
-		return _run_without_pty(commands, console=console, colors=color_lookup)
+		return _run_without_pty(commands, tag_mode=tag_mode)
 
-	return _run_with_pty(commands, console=console, colors=color_lookup)
+	return _run_with_pty(commands, tag_mode=tag_mode)
 
 
 def _call_on_spawn(spec: CommandSpec) -> None:
@@ -82,8 +89,7 @@ def _check_on_ready(
 def _run_with_pty(
 	commands: Sequence[CommandSpec],
 	*,
-	console: Console,
-	colors: Mapping[str, str],
+	tag_mode: TagMode,
 ) -> int:
 	procs: list[tuple[str, int, int]] = []
 	fd_to_spec: dict[int, CommandSpec] = {}
@@ -138,7 +144,7 @@ def _run_with_pty(
 						decoded = line.decode(errors="replace")
 						if decoded:
 							spec = fd_to_spec[fd]
-							_write_tagged_line(spec.name, decoded, colors)
+							_write_tagged_line(spec.name, decoded, tag_mode)
 							_check_on_ready(spec, decoded, ready_flags, fd)
 				except OSError:
 					continue
@@ -173,8 +179,7 @@ def _run_with_pty(
 def _run_without_pty(
 	commands: Sequence[CommandSpec],
 	*,
-	console: Console,
-	colors: Mapping[str, str],
+	tag_mode: TagMode,
 ) -> int:
 	from selectors import EVENT_READ, DefaultSelector
 
@@ -211,7 +216,7 @@ def _run_without_pty(
 				# stream is now guaranteed to be a file-like object
 				line = cast(TextIOBase, stream).readline()
 				if line:
-					_write_tagged_line(name, line.rstrip("\n"), colors)
+					_write_tagged_line(name, line.rstrip("\n"), tag_mode)
 					spec = next((s for n, _, s in procs if n == name), None)
 					if spec:
 						_check_on_ready(spec, line, ready_flags, name)
@@ -251,7 +256,16 @@ def _run_without_pty(
 	return max(exit_codes) if exit_codes else 0
 
 
-def _write_tagged_line(name: str, message: str, colors: Mapping[str, str]) -> None:
+def _write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
+	"""Write a line of output with optional process tag.
+
+	Args:
+		name: Process name (e.g., "server", "web")
+		message: The line of output to write
+		tag_mode: How to display the tag:
+			- "colored": Show [name] with ANSI colors
+			- "plain": Show [name] without colors
+	"""
 	# Filter out unwanted web server messages
 	clean_message = ANSI_ESCAPE.sub("", message)
 	if (
@@ -261,12 +275,15 @@ def _write_tagged_line(name: str, message: str, colors: Mapping[str, str]) -> No
 	):
 		return
 
-	# Only add tags if colors dict is not empty (i.e., tagging is enabled)
-	if colors:
-		color = ANSI_CODES.get(colors.get(name, ""), ANSI_CODES["default"])
-		sys.stdout.write(f"{color}[{name}]\033[0m {message}\n")
+	if tag_mode == "colored":
+		color = ANSI_CODES.get(TAG_COLORS.get(name, ""), "")
+		if color:
+			sys.stdout.write(f"{color}[{name}]{ANSI_CODES['reset']} {message}\n")
+		else:
+			sys.stdout.write(f"[{name}] {message}\n")
 	else:
-		sys.stdout.write(f"{message}\n")
+		# Plain mode: tags without color
+		sys.stdout.write(f"[{name}] {message}\n")
 	sys.stdout.flush()
 
 

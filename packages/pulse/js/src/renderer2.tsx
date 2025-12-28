@@ -149,6 +149,12 @@ export class VDOMRenderer2 {
 						return l || r;
 					case "??":
 						return l ?? r;
+					case "**":
+						return l ** r;
+					case "in":
+						return l in r;
+					case "instanceof":
+						return l instanceof r;
 					case "===":
 						return l === r;
 					case "!==":
@@ -293,8 +299,15 @@ export class VDOMRenderer2 {
 	}
 
 	init(view: PulsePrerenderView & { vdom: VDOM }): ReactNode {
-		// v2 doesn't have callback/render-prop registries. Everything is structural.
 		return this.renderNode(view.vdom);
+	}
+
+	/**
+	 * Evaluate a JSExpr code string (legacy run_js support).
+	 */
+	evaluateJsExpr(code: string): unknown {
+		const get_object = (key: string) => this.getObject(key);
+		return new Function("get_object", `return ${code}`)(get_object);
 	}
 
 	#ensureChildrenArray(el: ReactElement): ReactNode[] {

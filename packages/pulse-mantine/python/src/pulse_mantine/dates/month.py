@@ -3,5 +3,5 @@ from typing import Any
 import pulse as ps
 
 
-@ps.react_component("Month", "pulse-mantine")
+@ps.react_component(ps.Import("Month", "pulse-mantine"))
 def Month(key: str | None = None, **props: Any): ...

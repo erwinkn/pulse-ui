@@ -17,9 +17,9 @@ class MantineTreeProps(ps.HTMLDivProps, total=False):
 	style: dict[str, Any]
 
 
-@ps.react_component("Tree", "pulse-mantine")
+@ps.react_component(ps.Import("Tree", "pulse-mantine"))
 def TreeInternal(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	channelId: str | None = None,
 	initialExpandedState: ExpandedState | None = None,
@@ -187,7 +187,7 @@ class TreeState(ps.State):
 	# Render the React wrapper component
 	def render(
 		self,
-		*children: ps.Child,
+		*children: ps.Node,
 		key: str | None = None,
 		**props: Unpack[MantineTreeProps],
 	):
@@ -205,7 +205,7 @@ class TreeState(ps.State):
 
 
 def Tree(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	state: TreeState | None = None,
 	**props: Unpack[MantineTreeProps],

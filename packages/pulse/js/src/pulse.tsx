@@ -11,8 +11,8 @@ import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
 import type { ServerError } from "./messages";
-import { VDOMRenderer } from "./renderer";
-import type { VDOM } from "./vdom";
+import { VDOMRenderer2 } from "./renderer2";
+import type { VDOM } from "./vdom2";
 
 // =================================================================
 // Types
@@ -31,9 +31,6 @@ export interface PulseConfig {
 
 export type PulsePrerenderView = {
 	vdom: VDOM;
-	callbacks: string[];
-	render_props: string[];
-	jsexpr_paths: string[]; // paths containing JS expressions
 };
 
 export type PulsePrerender = {
@@ -167,17 +164,8 @@ export interface PulseViewProps {
 export function PulseView({ path, registry }: PulseViewProps) {
 	const client = usePulseClient();
 	const initialView = usePulsePrerender(path);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: We only want to lose the renderer on unmount. initialView will change on every navigation with our current setup, so we hack around it with another useEffect below. This is not ideal and will be fixed in the future.
 	const renderer = useMemo(
-		() =>
-			new VDOMRenderer(
-				client,
-				path,
-				initialView.callbacks,
-				initialView.render_props,
-				registry,
-				initialView.jsexpr_paths,
-			),
+		() => new VDOMRenderer2(client, path, registry),
 		[client, path, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));

@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from typing import Any, TypeVar
 
 from pulse.reactive import Computed, Signal
-from pulse.vdom import Element
+from pulse.transpiler_v2.nodes import Element
 
 T1 = TypeVar("T1", bound=Element | Iterable[Element])
 T2 = TypeVar("T2", bound=Element | Iterable[Element] | None)

@@ -38,7 +38,7 @@ class AspectRatioProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: igno
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("AspectRatio", "@mantine/core")
+@ps.react_component(ps.Import("AspectRatio", "@mantine/core"))
 def AspectRatio(
-	*children: ps.Child, key: str | None = None, **props: Unpack[AspectRatioProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[AspectRatioProps]
 ): ...

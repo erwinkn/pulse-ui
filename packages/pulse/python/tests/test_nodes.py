@@ -26,7 +26,7 @@ from pulse.dom.tags import (
 	style,
 	ul,
 )
-from pulse.vdom import Node
+from pulse.transpiler_v2.nodes import Element
 
 from .test_utils import assert_node_equal
 
@@ -36,7 +36,7 @@ class TestUITreeNode:
 
 	def test_basic_node_creation(self):
 		"""Test creating basic UI tree nodes."""
-		node = Node("div")
+		node = Element("div")
 		assert node.tag == "div"
 		assert node.props is None
 		assert node.children is None
@@ -44,16 +44,16 @@ class TestUITreeNode:
 
 	def test_node_with_props(self):
 		"""Test creating nodes with props."""
-		node = Node("div", {"className": "container", "id": "main"})
+		node = Element("div", {"className": "container", "id": "main"})
 		assert node.tag == "div"
 		assert node.props == {"className": "container", "id": "main"}
 		assert node.children is None
 
 	def test_node_with_children(self):
 		"""Test creating nodes with children."""
-		child1 = Node("p")
+		child1 = Element("p")
 		child2 = "text content"
-		node = Node("div", children=[child1, child2])
+		node = Element("div", children=[child1, child2])
 
 		assert node.tag == "div"
 		assert node.children is not None
@@ -63,12 +63,12 @@ class TestUITreeNode:
 
 	def test_node_with_key(self):
 		"""Test creating nodes with keys."""
-		node = Node("div", key="my-key")
+		node = Element("div", key="my-key")
 		assert node.key == "my-key"
 
 	def test_indexing_syntax(self):
 		"""Test the indexing syntax for adding children."""
-		node = Node("div")
+		node = Element("div")
 
 		# Single child
 		result = node["Hello world"]
@@ -76,7 +76,7 @@ class TestUITreeNode:
 		assert result.tag == "div"
 
 		# Multiple children
-		child1 = Node("p")
+		child1 = Element("p")
 		result = node[child1, "text"]
 		assert result.children is not None
 		assert len(result.children) == 2
@@ -85,9 +85,9 @@ class TestUITreeNode:
 
 	def test_indexing_with_existing_children_fails(self):
 		"""Test that indexing fails when children already exist."""
-		node = Node("div", children=["existing"])
+		node = Element("div", children=["existing"])
 
-		with pytest.raises(ValueError, match="Node already has children"):
+		with pytest.raises(ValueError, match="already has children"):
 			node["new child"]
 
 
@@ -309,11 +309,11 @@ class TestEdgeCases:
 	def test_none_handling(self):
 		"""Test handling of None values."""
 		# None props should remain None
-		node = Node("div", None)
+		node = Element("div", None)
 		assert node.props is None
 
 		# None children should remain None
-		node = Node("div", children=None)
+		node = Element("div", children=None)
 		assert node.children is None
 
 	def test_string_prop_conversion(self):
@@ -343,13 +343,13 @@ class TestMissingKeyWarnings:
 	def test_tag_factory_warns_for_unkeyed_iterable(
 		self, monkeypatch: pytest.MonkeyPatch
 	):
-		"""Test that tag factories emit warning for iterables without keys."""
+		"""Tag factories warn for unkeyed iterables."""
 		monkeypatch.setenv("PULSE_MODE", "dev")
+		items = [span() for _ in range(3)]
 		with pytest.warns(
 			UserWarning,
 			match=r"\[Pulse\] Iterable children of <div> contain elements without 'key'",
 		):
-			items = [span() for _ in range(3)]
 			div(items)
 
 	def test_tag_factory_no_warning_with_keys(self, monkeypatch: pytest.MonkeyPatch):
@@ -373,8 +373,8 @@ class TestMissingKeyWarnings:
 			div(items)  # Should not raise in prod
 
 	def test_component_bracket_syntax_warns(self, monkeypatch: pytest.MonkeyPatch):
-		"""Components with `*children` flatten and warn for unkeyed iterables."""
-		from pulse.vdom import component
+		"""Bracket syntax on components warns for unkeyed iterables."""
+		from pulse.component import component
 
 		monkeypatch.setenv("PULSE_MODE", "dev")
 
@@ -382,16 +382,16 @@ class TestMissingKeyWarnings:
 		def MyComponent(*children):  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
 			return div(*children)  # pyright: ignore[reportUnknownArgumentType]
 
+		items = [span() for _ in range(3)]
 		with pytest.warns(
 			UserWarning,
 			match=r"\[Pulse\] Iterable children of <MyComponent> contain elements without 'key'",
 		):
-			items = [span() for _ in range(3)]
 			MyComponent()[items]
 
 	def test_component_positional_args_warns(self, monkeypatch: pytest.MonkeyPatch):
 		"""Components with `*children` flatten and warn for unkeyed iterables."""
-		from pulse.vdom import component
+		from pulse.component import component
 
 		monkeypatch.setenv("PULSE_MODE", "dev")
 
@@ -406,11 +406,22 @@ class TestMissingKeyWarnings:
 			items = [span() for _ in range(3)]
 			MyComponent(items)
 
+	def test_component_sets_pulsenode_name(self):
+		"""Component name is stored on PulseNode for debugging."""
+		from pulse.component import component
+
+		@component
+		def NamedComponent():
+			return div()
+
+		node = NamedComponent()
+		assert node.name == "NamedComponent"
+
 	def test_component_without_children_no_flatten(
 		self, monkeypatch: pytest.MonkeyPatch
 	):
 		"""Components without `*children` don't flatten - they're just functions."""
-		from pulse.vdom import component
+		from pulse.component import component
 
 		monkeypatch.setenv("PULSE_MODE", "dev")
 

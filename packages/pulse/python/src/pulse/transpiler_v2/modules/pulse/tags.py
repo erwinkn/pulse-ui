@@ -17,13 +17,7 @@ from dataclasses import dataclass
 from typing import final, override
 
 from pulse.transpiler_v2.errors import TranspileError
-from pulse.transpiler_v2.nodes import (
-	Child,
-	Element,
-	Expr,
-	Literal,
-	Prop,
-)
+from pulse.transpiler_v2.nodes import Element, Expr, Literal, Node, Prop
 from pulse.transpiler_v2.py_module import PyModule
 from pulse.transpiler_v2.transpiler import Transpiler
 
@@ -51,7 +45,7 @@ class TagExpr(Expr):
 	) -> Expr:
 		"""Handle tag calls: positional args are children, kwargs are props."""
 		# Build children from positional args
-		children: list[Child] = []
+		children: list[Node] = []
 		for a in args:
 			children.append(ctx.emit_expr(a))
 

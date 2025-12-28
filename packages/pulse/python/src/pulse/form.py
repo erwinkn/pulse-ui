@@ -23,8 +23,9 @@ from pulse.hooks.stable import stable
 from pulse.react_component import react_component
 from pulse.reactive import Signal
 from pulse.serializer import deserialize
+from pulse.transpiler_v2.imports import Import
+from pulse.transpiler_v2.nodes import Node
 from pulse.types.event_handler import EventHandler1
-from pulse.vdom import Child
 
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
@@ -45,9 +46,9 @@ FormValue = str | UploadFile
 FormData = dict[str, FormValue | list[FormValue]]
 
 
-@react_component("PulseForm", "pulse-ui-client")
+@react_component(Import("PulseForm", "pulse-ui-client"))
 def client_form_component(
-	*children: Child,
+	*children: Node,
 	key: str | None = None,
 	**props: Unpack[HTMLFormProps],
 ): ...
@@ -169,7 +170,7 @@ class PulseFormProps(HTMLFormProps, total=False):
 
 
 def Form(
-	*children: Child,
+	*children: Node,
 	key: str,
 	onSubmit: EventHandler1[FormData] | None = None,
 	**props: Unpack[PulseFormProps],  # pyright: ignore[reportGeneralTypeIssues]
@@ -259,7 +260,7 @@ class ManualForm(Disposable):
 
 	def __call__(
 		self,
-		*children: Child,
+		*children: Node,
 		key: str | None = None,
 		**props: Unpack[PulseFormProps],
 	):

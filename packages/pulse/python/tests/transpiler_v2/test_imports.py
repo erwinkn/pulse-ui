@@ -217,17 +217,19 @@ class TestImportDependency:
 class TestImportAsDecorator:
 	"""Test Import used as a decorator."""
 
-	def test_import_decorator_returns_import(self):
-		"""@Import decorating a function returns the Import itself."""
+	def test_import_decorator_returns_signature(self):
+		"""@Import decorating a function returns a Signature wrapping the Import."""
 		from pulse.transpiler_v2.imports import Import
+		from pulse.transpiler_v2.nodes import Signature
 
 		clsx_import = Import("clsx", "clsx", kind="default")
 
 		@clsx_import.as_
 		def clsx(*args: str) -> str: ...
 
-		# clsx should be the Import, not the function
-		assert clsx is clsx_import
+		# clsx should be a Signature wrapping the Import
+		assert isinstance(clsx, Signature)
+		assert clsx.expr is clsx_import
 
 	def test_import_decorator_call_still_works(self):
 		"""Import decorated can still be called to build expressions."""

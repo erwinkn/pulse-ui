@@ -129,7 +129,7 @@ def write_icons_impl_py(component_names: list[str], out_path: Path) -> None:
 		f.write("def __getattr__(name: str):\n")
 		f.write("    if name in _AVAILABLE_ICONS:\n")
 		f.write(
-			'        comp = ps.ReactComponent(name, "lucide-react", fn_signature=lucide_signature)\n'
+			'        comp = ps.react_component(ps.Import(name, "lucide-react"))(lucide_signature)\n'
 		)
 		f.write("        globals()[name] = comp\n")
 		f.write("        return comp\n")
@@ -151,7 +151,7 @@ def write_icons_stub_pyi(component_names: list[str], out_path: Path) -> None:
 		for name in component_names:
 			f.write(f"def {name}(\n")
 			f.write("    key: str | None = None, **props: Unpack[LucideProps]\n")
-			f.write(") -> ps.ComponentNode: ...\n")
+			f.write(") -> ps.Node: ...\n")
 
 
 def main():

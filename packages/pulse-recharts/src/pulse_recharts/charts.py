@@ -80,27 +80,27 @@ class PolarChartProps(TypedDict, Generic[T]):
 class AreaChartProps(ps.HTMLSVGProps[GenericHTMLElement], CartesianChartProps[Any]): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
-@ps.react_component("AreaChart", "recharts")
+@ps.react_component(ps.Import("AreaChart", "recharts"))
 def AreaChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[AreaChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[AreaChartProps]
 ): ...
 
 
 class BarChartProps(ps.HTMLSVGProps[GenericHTMLElement], CartesianChartProps[Any]): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
-@ps.react_component("BarChart", "recharts")
+@ps.react_component(ps.Import("BarChart", "recharts"))
 def BarChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[BarChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[BarChartProps]
 ): ...
 
 
 class LineChartProps(ps.HTMLSVGProps[GenericHTMLElement], CartesianChartProps[Any]): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
-@ps.react_component("LineChart", "recharts")
+@ps.react_component(ps.Import("LineChart", "recharts"))
 def LineChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[LineChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[LineChartProps]
 ): ...
 
 
@@ -109,27 +109,27 @@ class ComposedChartProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 ): ...
 
 
-@ps.react_component("ComposedChart", "recharts")
+@ps.react_component(ps.Import("ComposedChart", "recharts"))
 def ComposedChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[ComposedChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[ComposedChartProps]
 ): ...
 
 
 class PieChartProps(ps.HTMLSVGProps[GenericHTMLElement], PolarChartProps[Any]): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
-@ps.react_component("PieChart", "recharts")
+@ps.react_component(ps.Import("PieChart", "recharts"))
 def PieChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[PieChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[PieChartProps]
 ): ...
 
 
 class RadarChartProps(ps.HTMLSVGProps[GenericHTMLElement], PolarChartProps[Any]): ...  # pyright: ignore[reportIncompatibleVariableOverride]
 
 
-@ps.react_component("RadarChart", "recharts")
+@ps.react_component(ps.Import("RadarChart", "recharts"))
 def RadarChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[RadarChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[RadarChartProps]
 ): ...
 
 
@@ -138,9 +138,9 @@ class RadialBarChartProps(  # pyright: ignore[reportIncompatibleVariableOverride
 ): ...
 
 
-@ps.react_component("RadialBarChart", "recharts")
+@ps.react_component(ps.Import("RadialBarChart", "recharts"))
 def RadialBarChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[RadialBarChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[RadialBarChartProps]
 ): ...
 
 
@@ -149,9 +149,9 @@ class ScatterChartProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 ): ...
 
 
-@ps.react_component("ScatterChart", "recharts")
+@ps.react_component(ps.Import("ScatterChart", "recharts"))
 def ScatterChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[ScatterChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[ScatterChartProps]
 ): ...
 
 
@@ -160,9 +160,9 @@ class FunnelChartProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 ): ...
 
 
-@ps.react_component("FunnelChart", "recharts")
+@ps.react_component(ps.Import("FunnelChart", "recharts"))
 def FunnelChart(
-	*children: ps.Child, key: str | None = None, **props: Unpack[FunnelChartProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[FunnelChartProps]
 ): ...
 
 

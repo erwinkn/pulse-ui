@@ -3,9 +3,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TypedDict, cast, override
 
+from pulse.component import Component
 from pulse.env import env
 from pulse.reactive_extensions import ReactiveDict
-from pulse.vdom import Component
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"

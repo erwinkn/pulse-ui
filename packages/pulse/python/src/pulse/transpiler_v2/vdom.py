@@ -16,7 +16,7 @@ Notes:
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
+from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 # =============================================================================
 # JSON atoms
@@ -161,7 +161,7 @@ single sentinel string.
 """
 
 
-VDOMPropValue: TypeAlias = JsonValue | VDOMExpr | "VDOMElement" | CallbackPlaceholder
+VDOMPropValue: TypeAlias = "JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder"
 """Allowed prop value types.
 
 Hot path:
@@ -175,7 +175,7 @@ class VDOMElement(TypedDict):
 	"""A React element in wire format.
 
 	Special tags:
-	- "$$fragment": React Fragment
+	- "": React Fragment
 	- "$$<ComponentKey>": mount point for client component registry
 	"""
 
@@ -253,5 +253,3 @@ class PrerenderView(TypedDict):
 	"""Minimal payload required by the client to render + apply updates."""
 
 	vdom: VDOM
-	# Optional shared registry (client components, constants, etc.)
-	registry: NotRequired[dict[str, Any]]

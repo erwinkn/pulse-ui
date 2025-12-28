@@ -3,5 +3,5 @@ from typing import Any
 import pulse as ps
 
 
-@ps.react_component("FileButton", "@mantine/core")
-def FileButton(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(ps.Import("FileButton", "@mantine/core"))
+def FileButton(*children: ps.Node, key: str | None = None, **props: Any): ...

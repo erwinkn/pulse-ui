@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 
 // Special prefixes for reserved node types
-export const FRAGMENT_TAG = "$$fragment";
+export const FRAGMENT_TAG = "";
 export const MOUNT_POINT_PREFIX = "$$";
 
 // export type LazyComponent = () => Promise<{ default: ComponentType<any> }>;

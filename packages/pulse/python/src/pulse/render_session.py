@@ -33,7 +33,7 @@ from pulse.state import State
 from pulse.transpiler.context import interpreted_mode
 from pulse.transpiler.ids import generate_id
 from pulse.transpiler.nodes import JSExpr
-from pulse.vdom import Element
+from pulse.transpiler_v2.nodes import Element
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
@@ -433,7 +433,7 @@ class RenderSession:
 		initial message instead of sending over a socket.
 
 		Returns a dict:
-		  { "type": "vdom_init", "vdom": VDOM, "callbacks": list[str] } or
+		  { "type": "vdom_init", "vdom": VDOM } or
 		  { "type": "navigate_to", "path": str, "replace": bool }
 		"""
 		# If already mounted (e.g., repeated prerender), do nothing special.
@@ -447,15 +447,7 @@ class RenderSession:
 				if normalized_root is not None:
 					mount.element = normalized_root
 				mount.rendered = True
-				msg = ServerInitMessage(
-					type="vdom_init",
-					path=path,
-					vdom=vdom,
-					callbacks=sorted(mount.tree.callbacks.keys()),
-					render_props=sorted(mount.tree.render_props),
-					jsexpr_paths=sorted(mount.tree.jsexpr_paths),
-				)
-				return msg
+				return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 
 		captured: ServerInitMessage | ServerNavigateToMessage | None = None
 
@@ -466,12 +458,7 @@ class RenderSession:
 				return
 			if msg["type"] == "vdom_init" and msg["path"] == path:
 				captured = ServerInitMessage(
-					type="vdom_init",
-					path=path,
-					vdom=msg.get("vdom"),
-					callbacks=msg.get("callbacks", []),
-					render_props=msg.get("render_props", []),
-					jsexpr_paths=msg.get("jsexpr_paths", []),
+					type="vdom_init", path=path, vdom=msg.get("vdom")
 				)
 			elif msg["type"] == "navigate_to":
 				captured = ServerNavigateToMessage(
@@ -500,15 +487,7 @@ class RenderSession:
 				if normalized_root is not None:
 					mount.element = normalized_root
 				mount.rendered = True
-			msg = ServerInitMessage(
-				type="vdom_init",
-				path=path,
-				vdom=vdom,
-				callbacks=sorted(mount.tree.callbacks.keys()),
-				render_props=sorted(mount.tree.render_props),
-				jsexpr_paths=sorted(mount.tree.jsexpr_paths),
-			)
-			return msg
+			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 
 		return captured
 
@@ -578,15 +557,9 @@ class RenderSession:
 						if normalized_root is not None:
 							mount.element = normalized_root
 						mount.rendered = True
-						msg = ServerInitMessage(
-							type="vdom_init",
-							path=path,
-							vdom=vdom,
-							callbacks=sorted(mount.tree.callbacks.keys()),
-							render_props=sorted(mount.tree.render_props),
-							jsexpr_paths=sorted(mount.tree.jsexpr_paths),
+						self.send(
+							ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 						)
-						self.send(msg)
 					else:
 						ops = mount.tree.diff(mount.element)
 						normalized_root = getattr(mount.tree, "_normalized", None)

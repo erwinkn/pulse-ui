@@ -24,7 +24,7 @@ import pulse as ps
 from pulse._examples import clamp, cube, factorial, is_even, square
 
 # Import JS modules (the new pulse.js.* system)
-from pulse.js2 import Math
+from pulse.js2 import Math, console
 from pulse.js2.math import PI, floor, sin
 from pulse.js2.math import abs as js_abs
 from pulse.js2.number import Number
@@ -46,13 +46,13 @@ def clsx(*classes: str) -> str:
 # =============================================================================
 
 
-@ps.react_component("FunctionTester", "~/components/function-tester")
+@ps.react_component(ps.Import("FunctionTester", "~/components/function-tester"))
 def FunctionTester(
 	fn: Any, label: str, initialValue: Any = None, showCode: bool = False
 ) -> ps.Element: ...
 
 
-@ps.react_component("MultiArgFunctionTester", "~/components/function-tester")
+@ps.react_component(ps.Import("MultiArgFunctionTester", "~/components/function-tester"))
 def MultiArgFunctionTester(
 	fn: Any,
 	label: str,
@@ -62,13 +62,13 @@ def MultiArgFunctionTester(
 ) -> ps.Element: ...
 
 
-@ps.react_component("StringFunctionTester", "~/components/function-tester")
+@ps.react_component(ps.Import("StringFunctionTester", "~/components/function-tester"))
 def StringFunctionTester(
 	fn: Any, label: str, initialValue: str = "", showCode: bool = False
 ) -> ps.Element: ...
 
 
-@ps.react_component("ArrayFunctionTester", "~/components/function-tester")
+@ps.react_component(ps.Import("ArrayFunctionTester", "~/components/function-tester"))
 def ArrayFunctionTester(
 	fn: Any, label: str, initialValue: str = "", showCode: bool = False
 ) -> ps.Element: ...
@@ -461,7 +461,151 @@ def full_pipeline(x: float) -> float:
 
 
 # =============================================================================
-# Section 10: F-String Formatting
+# Section 10: React Components with Hooks
+# =============================================================================
+
+
+# Import React hooks using the Import system
+useState = ps.Import("useState", "react")
+useEffect = ps.Import("useEffect", "react")
+
+
+@ps.javascript(jsx=True)
+def ToggleComponent(initial_visible: bool = True, *children: Any) -> Any:
+	"""React component with show/hide toggle using useState and useEffect.
+
+	This component demonstrates:
+	- Using React hooks (useState, useEffect) via Import system
+	- JSX transpilation with jsx=True
+	- State management and side effects
+	- Accepting children as regular Pulse server-side components
+	"""
+	# Initialize state with useState hook
+	is_visible, set_is_visible = useState(initial_visible)
+
+	# Log state changes with useEffect hook
+	useEffect(
+		lambda: console.log(f"Toggle state changed: {is_visible}"),  # type: ignore
+		[is_visible],  # Dependency array
+	)
+
+	# Return JSX element
+	return ps.div()[
+		ps.button(
+			onClick=lambda e: set_is_visible(not is_visible),  # type: ignore
+			className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600",
+		)["Hide" if is_visible else "Show"],
+		ps.div(
+			style={"display": "block" if is_visible else "none"},
+			className="mt-4 p-4 border rounded",
+		)[*children],
+	]
+
+
+class CounterState(ps.State):
+	count: int = 0
+
+	def increment(self):
+		self.count += 1
+
+	def decrement(self):
+		self.count -= 1
+
+	def reset(self):
+		self.count = 0
+
+
+@ps.component
+def CounterComponent():
+	"""Pulse server-side component with its own state (counter)."""
+	state = ps.states(CounterState)
+
+	return ps.div(className="p-4 bg-slate-800 rounded-lg")[
+		ps.h3(
+			"Pulse Counter Component", className="text-lg font-semibold mb-3 text-white"
+		),
+		ps.p(
+			"This is a regular Pulse server-side component with its own state. "
+			+ "The counter persists independently of the React toggle state.",
+			className="text-slate-300 mb-4 text-sm",
+		),
+		ps.div(className="flex items-center space-x-4")[
+			ps.button(
+				onClick=lambda: state.decrement(),
+				className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600",
+			)["−"],
+			ps.span(f"Count: {state.count}", className="text-xl font-bold text-white"),
+			ps.button(
+				onClick=lambda: state.increment(),
+				className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600",
+			)["+"],
+		],
+		ps.button(
+			onClick=lambda: state.reset(),
+			className="mt-3 px-3 py-1 bg-slate-600 text-white rounded hover:bg-slate-700 text-sm",
+		)["Reset"],
+	]
+
+
+@ps.component
+def ReactHooksDemo():
+	"""Demo page showing the React component with hooks."""
+	return ps.div(className="min-h-screen bg-slate-950 text-slate-100 p-8")[
+		ps.div(className="max-w-4xl mx-auto")[
+			ps.h1("React Components with Hooks", className="text-3xl font-bold mb-4"),
+			ps.p(
+				"This example shows a React component created in Python using the transpiler_v2 system. "
+				+ "The component uses useState and useEffect hooks imported from React.",
+				className="text-slate-400 mb-8",
+			),
+			# Use the transpiled React component with Pulse component children
+			ToggleComponent(
+				True,
+				# Pass regular Pulse server-side components as children
+				ps.h3(
+					"Hidden Content with State", className="text-xl font-semibold mb-2"
+				),
+				ps.p(
+					"This content can be toggled on and off using the button above. "
+					+ "The component logs state changes to the console via useEffect. "
+					+ "Below is a Pulse component with its own independent state.",
+					className="text-slate-300 mb-4",
+				),
+				# Pulse component with its own state
+				CounterComponent(),
+				ps.div(className="mt-4 p-3 bg-slate-700 rounded")[
+					ps.p(
+						"Interaction Demo:",
+						className="text-sm font-semibold text-slate-300 mb-2",
+					),
+					ps.ul(className="text-sm text-slate-400 space-y-1")[
+						ps.li("• Toggle visibility with the React component above"),
+						ps.li("• Increment/decrement the counter independently"),
+						ps.li("• Both states are managed separately"),
+					],
+				],
+			),
+			ps.div(className="mt-8")[
+				ps.h2("How it works", className="text-2xl font-semibold mb-4"),
+				ps.div(className="space-y-4 text-slate-300")[
+					ps.p("1. React hooks are imported using ps.Import()"),
+					ps.p(
+						"2. The @ps.javascript(jsx=True) decorator enables JSX transpilation"
+					),
+					ps.p("3. useState manages the visibility state in React"),
+					ps.p("4. useEffect logs state changes to the console"),
+					ps.p(
+						"5. CounterComponent is a regular Pulse component with ps.state()"
+					),
+					ps.p("6. Both components maintain independent state"),
+				],
+			],
+		]
+	]
+
+
+# =============================================================================
+# Section 11: F-String Formatting
 # =============================================================================
 
 
@@ -495,7 +639,7 @@ def fstring_alignment(s: str) -> str:
 
 
 @ps.component
-def Section(*children: ps.Child, title: str, description: str):
+def Section(*children: ps.Node, title: str, description: str):
 	"""A section with a title and description."""
 	return ps.div(className="mb-8")[
 		ps.h2(title, className="text-2xl font-bold text-white mb-2"),

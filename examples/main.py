@@ -472,21 +472,18 @@ def dynamic_route():
 
 
 @ps.react_component(
-	"CustomDatePicker",
-	"~/components/date-picker",
-	is_default=True,
+	ps.Import("CustomDatePicker", "~/components/date-picker", kind="default"),
 	lazy=True,
 )
 def DatePicker(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	value: datetime | None = None,
 	onChange: ps.EventHandler1[datetime | None] | None = None,
 	placeholder: str = "Select a date",
 	className: str = "",
 	showTimeSelect: bool = False,
-) -> ps.Element:
-	return None  # signature-only; parsed for prop spec
+) -> ps.Element: ...
 
 
 class DatePickerState(ps.State):

@@ -189,6 +189,112 @@ class TestTagsIntegration:
 		assert div_expr.tag == "div"
 
 
+class TestPulseModuleIntegration:
+	"""Test main pulse module integration for `import pulse as ps` pattern."""
+
+	def test_pulse_module_registered_in_expr_registry(self):
+		"""Main pulse module is registered in EXPR_REGISTRY."""
+		import pulse as ps
+		import pulse.transpiler_v2.modules  # noqa: F401 - triggers registration
+		from pulse.transpiler_v2.nodes import EXPR_REGISTRY
+
+		# pulse module should be registered
+		assert id(ps) in EXPR_REGISTRY
+
+	def test_pulse_div_registered_in_expr_registry(self):
+		"""pulse.div is registered in EXPR_REGISTRY."""
+		import pulse as ps
+		import pulse.transpiler_v2.modules  # noqa: F401 - triggers registration
+		from pulse.transpiler_v2.nodes import EXPR_REGISTRY
+
+		# pulse.div should be registered (same as pulse.dom.tags.div)
+		assert id(ps.div) in EXPR_REGISTRY
+
+	def test_pulse_module_tags_via_pymodule(self):
+		"""Can access tags via main pulse module PyModule.transpile_getattr."""
+		import pulse as ps
+		import pulse.transpiler_v2.modules  # noqa: F401 - triggers registration
+		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
+		from pulse.transpiler_v2.nodes import EXPR_REGISTRY
+
+		pulse_module = EXPR_REGISTRY[id(ps)]
+		# Access div through the pulse module
+		div_expr = pulse_module.transpile_getattr("div", None)  # pyright: ignore[reportArgumentType]
+		assert isinstance(div_expr, TagExpr)
+		assert div_expr.tag == "div"
+
+	def test_pulse_as_ps_div_in_transpiled_function(self):
+		"""ps.div() works in @javascript(jsx=True) function with import pulse as ps."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.div("Hello")
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert code == 'function render_1() {\nreturn <div>{"Hello"}</div>;\n}'
+
+	def test_pulse_as_ps_nested_tags(self):
+		"""Nested ps.div/ps.span calls work in transpiled function."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.div(ps.span("inner"))
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function render_1() {\nreturn <div><span>{"inner"}</span></div>;\n}'
+		)
+
+	def test_pulse_as_ps_with_props(self):
+		"""ps.div(className=...) produces Element with props."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.div("Hello", className="container")
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function render_1() {\nreturn <div className="container">{"Hello"}</div>;\n}'
+		)
+
+	def test_pulse_as_ps_button_with_onclick(self):
+		"""ps.button with onClick handler works in transpiled function."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.button(
+				"Click me",
+				onClick=lambda e: None,  # type: ignore
+			)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "<button" in code
+		assert "onClick=" in code
+		assert "Click me" in code
+
+	def test_pulse_as_ps_self_closing_tag(self):
+		"""ps.img() produces self-closing JSX element."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.img(src="photo.jpg")
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert code == 'function render_1() {\nreturn <img src="photo.jpg" />;\n}'
+
+
 # =============================================================================
 # JSX Support - Jsx(JsFunction)
 # =============================================================================
@@ -453,16 +559,16 @@ class TestJsxStandalone:
 	"""Test Jsx wrapper behavior."""
 
 	def test_jsx_transpile_getattr(self):
-		"""Jsx.transpile_getattr is not overridden (returns Member)."""
+		"""Jsx.transpile_getattr delegates to wrapped expr."""
 
 		app_shell = Import("AppShell", "@mantine/core")
 		jsx_shell = Jsx(app_shell)
 
 		# Access .Header via transpile_getattr
 		header = jsx_shell.transpile_getattr("Header", None)  # pyright: ignore[reportArgumentType]
-		# Should be a Member wrapping the Jsx, since Jsx doesn't override it
+		# Delegates to wrapped expr, so Member wraps the Import, not the Jsx
 		assert isinstance(header, Member)
-		assert header.obj is jsx_shell
+		assert header.obj is app_shell
 		assert header.prop == "Header"
 
 	def test_jsx_runtime_call_produces_element(self):

@@ -13,10 +13,10 @@ from pulse import div
 from pulse.app import App
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.codegen.templates.route import generate_route
+from pulse.component import Component, component
 from pulse.components.react_router import Outlet
 from pulse.routing import Route, RouteTree
 from pulse.transpiler_v2 import Import, Jsx, clear_function_cache
-from pulse.vdom import Component, component
 
 SERVER_ADDRESS = "http://localhost:8000"
 
@@ -33,7 +33,9 @@ class TestCodegen:
 		route = Route("/simple", ps.component(lambda: div()["Simple route"]))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(
+			route, server_address=SERVER_ADDRESS, asset_import_paths={}
+		)
 
 		route_page_path = codegen.output_folder / "routes" / "simple.jsx"
 		assert route_page_path.exists()
@@ -62,7 +64,9 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(
+			route, server_address=SERVER_ADDRESS, asset_import_paths={}
+		)
 
 		route_page_path = codegen.output_folder / "routes" / "with-components.jsx"
 		assert route_page_path.exists()
@@ -86,7 +90,9 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(
+			route, server_address=SERVER_ADDRESS, asset_import_paths={}
+		)
 
 		route_page_path = codegen.output_folder / "routes" / "default-export.jsx"
 		assert route_page_path.exists()
@@ -113,7 +119,9 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(
+			route, server_address=SERVER_ADDRESS, asset_import_paths={}
+		)
 
 		route_page_path = codegen.output_folder / "routes" / "app-shell.jsx"
 		assert route_page_path.exists()
@@ -139,7 +147,9 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(
+			route, server_address=SERVER_ADDRESS, asset_import_paths={}
+		)
 
 		route_page_path = codegen.output_folder / "routes" / "duplicate-imports.jsx"
 		assert route_page_path.exists()
@@ -164,7 +174,9 @@ class TestCodegen:
 
 		# TODO: Implement lazy component support
 		with pytest.raises(NotImplementedError):
-			codegen.generate_route(route, server_address=SERVER_ADDRESS)
+			codegen.generate_route(
+				route, server_address=SERVER_ADDRESS, asset_import_paths={}
+			)
 
 	def test_generate_routes_ts_empty(self, tmp_path: Path):
 		"""Test generating config with empty routes list."""

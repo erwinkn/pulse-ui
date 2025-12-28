@@ -31,7 +31,7 @@ class CenterProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[re
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("Center", "@mantine/core")
+@ps.react_component(ps.Import("Center", "@mantine/core"))
 def Center(
-	*children: ps.Child, key: str | None = None, **props: Unpack[CenterProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[CenterProps]
 ): ...

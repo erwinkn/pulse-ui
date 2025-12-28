@@ -54,8 +54,8 @@ class GridProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[repo
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("Grid", "@mantine/core")
-def Grid(*children: ps.Child, key: str | None = None, **props: Unpack[GridProps]): ...
+@ps.react_component(ps.Import("Grid", "@mantine/core"))
+def Grid(*children: ps.Node, key: str | None = None, **props: Unpack[GridProps]): ...
 
 
 GridColStylesNames = Literal["root", "col", "inner", "container"]
@@ -94,7 +94,7 @@ class GridColProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[r
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("GridCol", "@mantine/core")
+@ps.react_component(ps.Import("GridCol", "@mantine/core"))
 def GridCol(
-	*children: ps.Child, key: str | None = None, **props: Unpack[GridColProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[GridColProps]
 ): ...

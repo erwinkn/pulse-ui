@@ -4,10 +4,6 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-import pulse
-
-from pulse_mantine.version import __version__ as __version__
-
 _EXPORTS: dict[str, str] = {
 	"Accordion": "pulse_mantine.core.data_display.accordion",
 	"AccordionChevron": "pulse_mantine.core.data_display.accordion",
@@ -81,6 +77,7 @@ _EXPORTS: dict[str, str] = {
 	"AspectRatioProps": "pulse_mantine.core.layout.aspect_ratio",
 	"AspectRatioStyles": "pulse_mantine.core.layout.aspect_ratio",
 	"AspectRatioStylesNames": "pulse_mantine.core.layout.aspect_ratio",
+	"AsyncValidator": "pulse_mantine.form.validators",
 	"Autocomplete": "pulse_mantine.core.combobox.autocomplete",
 	"Avatar": "pulse_mantine.core.data_display.avatar",
 	"AvatarGroup": "pulse_mantine.core.data_display.avatar",
@@ -174,6 +171,7 @@ _EXPORTS: dict[str, str] = {
 	"DrawerStack": "pulse_mantine.core.overlays.drawer",
 	"DrawerTitle": "pulse_mantine.core.overlays.drawer",
 	"EndsWith": "pulse_mantine.form.validators",
+	"ExpandedState": "pulse_mantine.core.navigation.tree",
 	"FieldValue": "pulse_mantine.form.form",
 	"Fieldset": "pulse_mantine.core.inputs.fieldset",
 	"FileButton": "pulse_mantine.core.buttons.file_button",
@@ -305,6 +303,7 @@ _EXPORTS: dict[str, str] = {
 	"MantineThemeOther": "pulse_mantine.core.theme",
 	"MantineThemeOverride": "pulse_mantine.core.theme",
 	"MantineThemeSizesOverride": "pulse_mantine.core.theme",
+	"MantineTreeProps": "pulse_mantine.core.navigation.tree",
 	"Mark": "pulse_mantine.core.typography.mark",
 	"Matches": "pulse_mantine.form.validators",
 	"MatchesField": "pulse_mantine.form.validators",
@@ -336,13 +335,29 @@ _EXPORTS: dict[str, str] = {
 	"MonthPickerInput": "pulse_mantine.dates.month_picker_input",
 	"MonthsList": "pulse_mantine.dates.months_list",
 	"MultiSelect": "pulse_mantine.core.combobox.multi_select",
+	"NOTIFICATIONS_CHANNEL_ID": "pulse_mantine.core.feedback.notifications",
 	"NativeSelect": "pulse_mantine.core.inputs.native_select",
 	"NavLink": "pulse_mantine.core.navigation.nav_link",
 	"Notification": "pulse_mantine.core.feedback.notifications",
+	"NotificationAttributes": "pulse_mantine.core.feedback.notifications",
+	"NotificationClassNames": "pulse_mantine.core.feedback.notifications",
+	"NotificationCssVariables": "pulse_mantine.core.feedback.notifications",
+	"NotificationData": "pulse_mantine.core.feedback.notifications",
+	"NotificationDataWithoutId": "pulse_mantine.core.feedback.notifications",
+	"NotificationPosition": "pulse_mantine.core.feedback.notifications",
 	"NotificationProps": "pulse_mantine.core.feedback.notifications",
-	"Notifications": "pulse_mantine.core.feedback.notifications",
-	"NotificationsProps": "pulse_mantine.core.feedback.notifications",
+	"NotificationRootCSSVariables": "pulse_mantine.core.feedback.notifications",
+	"NotificationStyles": "pulse_mantine.core.feedback.notifications",
+	"NotificationStylesNames": "pulse_mantine.core.feedback.notifications",
 	"NotificationsApi": "pulse_mantine.core.feedback.notifications",
+	"NotificationsAttributes": "pulse_mantine.core.feedback.notifications",
+	"NotificationsClassNames": "pulse_mantine.core.feedback.notifications",
+	"NotificationsCssVariables": "pulse_mantine.core.feedback.notifications",
+	"NotificationsInternal": "pulse_mantine.core.feedback.notifications",
+	"NotificationsProps": "pulse_mantine.core.feedback.notifications",
+	"NotificationsStore": "pulse_mantine.core.feedback.notifications",
+	"NotificationsStyles": "pulse_mantine.core.feedback.notifications",
+	"NotificationsStylesNames": "pulse_mantine.core.feedback.notifications",
 	"NumberFormatter": "pulse_mantine.core.data_display.number_formatter",
 	"NumberInput": "pulse_mantine.core.inputs.number_input",
 	"Overlay": "pulse_mantine.core.overlays.overlay",
@@ -451,9 +466,8 @@ _EXPORTS: dict[str, str] = {
 	"TooltipGroup": "pulse_mantine.core.overlays.tooltip",
 	"Transition": "pulse_mantine.core.misc.transition",
 	"TransitionTimingFunction": "pulse_mantine.core.layout.appshell",
-	"Tree": "pulse_mantine.core.navigation.tree",
+	"TreeInternal": "pulse_mantine.core.navigation.tree",
 	"TreeState": "pulse_mantine.core.navigation.tree",
-	"notifications": "pulse_mantine.core.feedback.notifications",
 	"Typography": "pulse_mantine.core.typography.typography",
 	"UnstyledButton": "pulse_mantine.core.buttons.unstyled_button",
 	"Validation": "pulse_mantine.form.validators",
@@ -469,22 +483,20 @@ _EXPORTS: dict[str, str] = {
 	"YearPicker": "pulse_mantine.dates.year_picker",
 	"YearPickerInput": "pulse_mantine.dates.year_picker_input",
 	"YearsList": "pulse_mantine.dates.years_list",
+	"notifications": "pulse_mantine.core.feedback.notifications",
+	"notifications_state": "pulse_mantine.core.feedback.notifications",
 }
 
-__all__ = sorted(_EXPORTS.keys())  # pyright: ignore[reportUnsupportedDunderAll]
+__all__ = tuple(sorted(_EXPORTS))  # pyright: ignore[reportUnsupportedDunderAll]
 
 
 def __getattr__(name: str) -> Any:
 	try:
 		module_name = _EXPORTS[name]
 	except KeyError as exc:
-		raise AttributeError(f"module {__name__} has no export {name}") from exc
+		raise AttributeError(f"module {__name__} has no attribute {name}") from exc
 	module = import_module(module_name)
-
-	# Ensure pulse-mantine Python and JS libraries match versions
 	value = getattr(module, name)
-	if isinstance(value, pulse.ReactComponent) and value.src == "pulse-mantine":
-		value.version = __version__
 	globals()[name] = value
 	return value
 

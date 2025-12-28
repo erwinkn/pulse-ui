@@ -10,7 +10,7 @@ from uuid import uuid4
 import pulse as ps
 
 
-@ps.react_component("ChannelTester", "~/components/channel-tester")
+@ps.react_component(ps.Import("ChannelTester", "~/components/channel-tester"))
 def ChannelTester(*, channelId: str, label: str): ...
 
 

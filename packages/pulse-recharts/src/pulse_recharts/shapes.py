@@ -38,7 +38,7 @@ class CurveProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	# pathRef?: Ref<SVGPathElement>;
 
 
-@ps.react_component("Curve", "recharts")
+@ps.react_component(ps.Import("Curve", "recharts"))
 def Curve(key: str | None = None, **props: Unpack[CurveProps]): ...
 
 
@@ -57,5 +57,5 @@ class RectangleProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	animationEasing: AnimationTiming
 
 
-@ps.react_component("Rectangle", "recharts")
+@ps.react_component(ps.Import("Rectangle", "recharts"))
 def Rectangle(key: str | None = None, **props: Unpack[RectangleProps]): ...

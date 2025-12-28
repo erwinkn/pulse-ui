@@ -1,8 +1,8 @@
 """
 Python -> JavaScript transpiler using v2 nodes.
 
-Transpiles a restricted subset of Python into a v2 Node AST.
-Dependencies are resolved through a dict[str, Node] mapping.
+Transpiles a restricted subset of Python into v2 Expr/Stmt AST nodes.
+Dependencies are resolved through a dict[str, Expr] mapping.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from pulse.transpiler_v2.nodes import (
 	Member,
 	Return,
 	Spread,
-	StmtNode,
+	Stmt,
 	Subscript,
 	Template,
 	Ternary,
@@ -67,7 +67,7 @@ ALLOWED_CMPOPS: dict[type[ast.cmpop], str] = {
 
 
 class Transpiler:
-	"""Transpile Python AST to v2 Node AST.
+	"""Transpile Python AST to v2 Expr/Stmt AST nodes.
 
 	Takes a function definition and a dictionary of dependencies.
 	Dependencies are substituted when their names are referenced.
@@ -152,7 +152,7 @@ class Transpiler:
 
 	# --- Statements ----------------------------------------------------------
 
-	def emit_stmt(self, node: ast.stmt) -> StmtNode:
+	def emit_stmt(self, node: ast.stmt) -> Stmt:
 		"""Emit a statement."""
 		if isinstance(node, ast.Return):
 			value = self.emit_expr(node.value) if node.value else None
@@ -237,7 +237,7 @@ class Transpiler:
 
 	def _emit_unpacking_assign(
 		self, target: ast.Tuple | ast.List, value: ast.expr
-	) -> StmtNode:
+	) -> Stmt:
 		"""Emit unpacking assignment: a, b, c = expr"""
 		elements = target.elts
 		if not elements or not all(isinstance(e, ast.Name) for e in elements):
@@ -245,7 +245,7 @@ class Transpiler:
 
 		tmp_name = self._fresh_temp()
 		value_expr = self.emit_expr(value)
-		stmts: list[StmtNode] = [Assign(tmp_name, value_expr, declare="const")]
+		stmts: list[Stmt] = [Assign(tmp_name, value_expr, declare="const")]
 
 		for idx, e in enumerate(elements):
 			assert isinstance(e, ast.Name)
@@ -259,7 +259,7 @@ class Transpiler:
 
 		return Block(stmts)
 
-	def _emit_for_loop(self, node: ast.For) -> StmtNode:
+	def _emit_for_loop(self, node: ast.For) -> Stmt:
 		"""Emit a for loop."""
 		# Handle tuple unpacking in for target
 		if isinstance(node.target, (ast.Tuple, ast.List)):
@@ -288,7 +288,7 @@ class Transpiler:
 
 	def _emit_nested_function(
 		self, node: ast.FunctionDef | ast.AsyncFunctionDef
-	) -> StmtNode:
+	) -> Stmt:
 		"""Emit a nested function definition."""
 		name = node.name
 		params = [arg.arg for arg in node.args.args]
@@ -307,7 +307,7 @@ class Transpiler:
 		):
 			body_stmts = body_stmts[1:]
 
-		stmts: list[StmtNode] = [self.emit_stmt(s) for s in body_stmts]
+		stmts: list[Stmt] = [self.emit_stmt(s) for s in body_stmts]
 
 		# Restore outer locals and add function name
 		self.locals = saved_locals

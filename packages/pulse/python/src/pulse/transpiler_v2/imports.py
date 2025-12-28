@@ -16,7 +16,7 @@ from typing import Literal as Lit
 
 from pulse.cli.packages import pick_more_specific
 from pulse.transpiler_v2.id import next_id
-from pulse.transpiler_v2.nodes import Call, Expr
+from pulse.transpiler_v2.nodes import Call, Expr, to_js_identifier
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -255,7 +255,7 @@ class Import(Expr):
 	@property
 	def js_name(self) -> str:
 		"""Unique JS identifier for this import."""
-		return f"{self.name}_{self.id}"
+		return f"{to_js_identifier(self.name)}_{self.id}"
 
 	@property
 	def is_local(self) -> bool:

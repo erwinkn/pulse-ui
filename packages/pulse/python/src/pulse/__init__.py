@@ -39,6 +39,14 @@ from pulse.channel import (
 # Codegen
 from pulse.codegen.codegen import CodegenConfig as CodegenConfig
 
+# VDOM (transpiler_v2)
+from pulse.component import (
+	Component as Component,
+)
+from pulse.component import (
+	component as component,
+)
+
 # Built-in components
 from pulse.components.for_ import For as For
 from pulse.components.if_ import If as If
@@ -1337,24 +1345,12 @@ from pulse.queries.mutation import mutation as mutation
 from pulse.queries.protocol import QueryResult as QueryResult
 from pulse.queries.query import query as query
 
-# React component registry
+# React components (v2)
 from pulse.react_component import (
-	COMPONENT_REGISTRY as COMPONENT_REGISTRY,
-)
-from pulse.react_component import (
-	DEFAULT as DEFAULT,
-)
-from pulse.react_component import (
-	ComponentRegistry as ComponentRegistry,
-)
-from pulse.react_component import (
-	ReactComponent as ReactComponent,
+	default_signature as default_signature,
 )
 from pulse.react_component import (
 	react_component as react_component,
-)
-from pulse.react_component import (
-	registered_react_components as registered_react_components,
 )
 
 # Reactivity primitives
@@ -1430,7 +1426,22 @@ from pulse.state import State as State
 from pulse.transpiler_v2.function import JsFunction as JsFunction
 from pulse.transpiler_v2.function import javascript as javascript
 from pulse.transpiler_v2.imports import Import as Import
+from pulse.transpiler_v2.nodes import (
+	Element as Element,
+)
 from pulse.transpiler_v2.nodes import Jsx as Jsx
+from pulse.transpiler_v2.nodes import (
+	Node as Node,
+)
+from pulse.transpiler_v2.nodes import (
+	Primitive as Primitive,
+)
+from pulse.transpiler_v2.nodes import (
+	PulseNode as PulseNode,
+)
+from pulse.transpiler_v2.vdom import (
+	VDOMNode as VDOMNode,
+)
 
 # Types
 from pulse.types.event_handler import (
@@ -1479,31 +1490,5 @@ from pulse.user_session import (
 )
 from pulse.user_session import (
 	UserSession as UserSession,
-)
-
-# VDOM
-from pulse.vdom import (
-	Child as Child,
-)
-from pulse.vdom import (
-	Component as Component,
-)
-from pulse.vdom import (
-	ComponentNode as ComponentNode,
-)
-from pulse.vdom import (
-	Element as Element,
-)
-from pulse.vdom import (
-	Node as Node,
-)
-from pulse.vdom import (
-	Primitive as Primitive,
-)
-from pulse.vdom import (
-	VDOMNode as VDOMNode,
-)
-from pulse.vdom import (
-	component as component,
 )
 from pulse.version import __version__ as __version__

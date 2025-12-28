@@ -17,5 +17,5 @@ class SpaceProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[rep
 	# no classNames, styles, vars, attributes
 
 
-@ps.react_component("Space", "@mantine/core")
-def Space(*children: ps.Child, key: str | None = None, **props: Unpack[SpaceProps]): ...
+@ps.react_component(ps.Import("Space", "@mantine/core"))
+def Space(*children: ps.Node, key: str | None = None, **props: Unpack[SpaceProps]): ...

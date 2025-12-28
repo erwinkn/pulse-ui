@@ -214,7 +214,7 @@ class XAxisProps(ps.HTMLSVGProps[GenericHTMLElement], BaseAxisProps, total=False
 	"""The margin between tick line and tick"""
 
 
-@ps.react_component("XAxis", "recharts")
+@ps.react_component(ps.Import("XAxis", "recharts"))
 def XAxis(key: str | None = None, **props: Unpack[XAxisProps]): ...
 
 
@@ -255,7 +255,7 @@ class YAxisProps(ps.HTMLSVGProps[GenericHTMLElement], BaseAxisProps, total=False
 	"""The rotate angle of tick"""
 
 
-@ps.react_component("YAxis", "recharts")
+@ps.react_component(ps.Import("YAxis", "recharts"))
 def YAxis(key: str | None = None, **props: Unpack[YAxisProps]): ...
 
 
@@ -368,7 +368,7 @@ class CartesianGridProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 	"(props: VerticalCoordinateProps, syncWithTicks: bool) -> coordinates: list[float]"
 
 
-@ps.react_component("CartesianGrid", "recharts")
+@ps.react_component(ps.Import("CartesianGrid", "recharts"))
 def CartesianGrid(key: str | None = None, **props: Unpack[CartesianGridProps]): ...
 
 
@@ -471,7 +471,7 @@ class LineProps(CurveProps, total=False):
 	"""Series data input. Usually inherited from parent chart."""
 
 
-@ps.react_component("Line", "recharts")
+@ps.react_component(ps.Import("Line", "recharts"))
 def Line(key: str | None = None, **props: Unpack[LineProps]): ...
 
 

@@ -58,7 +58,6 @@ from pulse.transpiler_v2.nodes import Break as Break
 from pulse.transpiler_v2.nodes import Call as Call
 
 # Type aliases
-from pulse.transpiler_v2.nodes import Child as Child
 from pulse.transpiler_v2.nodes import Continue as Continue
 
 # Data nodes
@@ -81,7 +80,7 @@ from pulse.transpiler_v2.nodes import Prop as Prop
 from pulse.transpiler_v2.nodes import PulseNode as PulseNode
 from pulse.transpiler_v2.nodes import Return as Return
 from pulse.transpiler_v2.nodes import Spread as Spread
-from pulse.transpiler_v2.nodes import StmtNode as StmtNode
+from pulse.transpiler_v2.nodes import Stmt as Stmt
 from pulse.transpiler_v2.nodes import Subscript as Subscript
 from pulse.transpiler_v2.nodes import Template as Template
 from pulse.transpiler_v2.nodes import Ternary as Ternary

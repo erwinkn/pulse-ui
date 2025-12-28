@@ -2,8 +2,8 @@ from typing import Literal, TypedDict, Unpack
 
 from pulse.dom.props import HTMLAnchorProps
 from pulse.transpiler_v2 import Import
+from pulse.transpiler_v2.nodes import Node
 from pulse.transpiler_v2.react_component import react_component
-from pulse.vdom import Child
 
 
 class LinkPath(TypedDict):
@@ -15,7 +15,7 @@ class LinkPath(TypedDict):
 # @react_component(Import("Link", "react-router", version="^7"))
 @react_component(Import("Link", "react-router"))
 def Link(
-	*children: Child,
+	*children: Node,
 	key: str | None = None,
 	to: str,
 	discover: Literal["render", "none"] | None = None,

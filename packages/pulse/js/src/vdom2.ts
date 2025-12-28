@@ -2,7 +2,7 @@
 // VDOM v2 (structural expressions + eval-keyed props)
 // =============================================================================
 
-export const FRAGMENT_TAG = "$$fragment";
+export const FRAGMENT_TAG = "";
 export const MOUNT_POINT_PREFIX = "$$";
 
 // Unified registry: mount-point key -> React component (or any registry object).

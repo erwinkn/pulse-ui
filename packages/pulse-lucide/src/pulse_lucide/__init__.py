@@ -2,7 +2,7 @@
 # pyright: reportUnsupportedDunderAll=false
 import pulse as ps
 
-from pulse_lucide.props import lucide_signature
+from .props import lucide_signature
 
 __all__ = [
 	"AArrowDown",
@@ -130,6 +130,7 @@ __all__ = [
 	"BadgeTurkishLira",
 	"BadgeX",
 	"BaggageClaim",
+	"Balloon",
 	"Ban",
 	"Banana",
 	"Bandage",
@@ -282,6 +283,7 @@ __all__ = [
 	"CandyCane",
 	"CandyOff",
 	"Cannabis",
+	"CannabisOff",
 	"Captions",
 	"CaptionsOff",
 	"Car",
@@ -383,6 +385,7 @@ __all__ = [
 	"CircleParkingOff",
 	"CirclePause",
 	"CirclePercent",
+	"CirclePile",
 	"CirclePlay",
 	"CirclePlus",
 	"CirclePoundSterling",
@@ -433,6 +436,7 @@ __all__ = [
 	"ClosedCaption",
 	"Cloud",
 	"CloudAlert",
+	"CloudBackup",
 	"CloudCheck",
 	"CloudCog",
 	"CloudDownload",
@@ -448,6 +452,7 @@ __all__ = [
 	"CloudSnow",
 	"CloudSun",
 	"CloudSunRain",
+	"CloudSync",
 	"CloudUpload",
 	"Cloudy",
 	"Clover",
@@ -645,6 +650,7 @@ __all__ = [
 	"Fish",
 	"FishOff",
 	"FishSymbol",
+	"FishingHook",
 	"Flag",
 	"FlagOff",
 	"FlagTriangleLeft",
@@ -779,6 +785,7 @@ __all__ = [
 	"Hash",
 	"HatGlasses",
 	"Haze",
+	"Hd",
 	"HdmiPort",
 	"Heading",
 	"Heading1",
@@ -862,6 +869,7 @@ __all__ = [
 	"Laugh",
 	"Layers",
 	"Layers2",
+	"LayersPlus",
 	"LayoutDashboard",
 	"LayoutGrid",
 	"LayoutList",
@@ -1267,6 +1275,7 @@ __all__ = [
 	"Scroll",
 	"ScrollText",
 	"Search",
+	"SearchAlert",
 	"SearchCheck",
 	"SearchCode",
 	"SearchSlash",
@@ -1438,6 +1447,7 @@ __all__ = [
 	"Stethoscope",
 	"Sticker",
 	"StickyNote",
+	"Stone",
 	"Store",
 	"StretchHorizontal",
 	"StretchVertical",
@@ -1517,6 +1527,7 @@ __all__ = [
 	"ToggleRight",
 	"Toilet",
 	"ToolCase",
+	"Toolbox",
 	"Tornado",
 	"Torus",
 	"Touchpad",
@@ -1667,7 +1678,7 @@ _AVAILABLE_ICONS = set(__all__)
 
 def __getattr__(name: str):
 	if name in _AVAILABLE_ICONS:
-		comp = ps.ReactComponent(name, "lucide-react", fn_signature=lucide_signature)
+		comp = ps.react_component(ps.Import(name, "lucide-react"))(lucide_signature)
 		globals()[name] = comp
 		return comp
 	raise AttributeError(f"module 'pulse_lucide' has no icon named {name!r}")

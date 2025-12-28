@@ -35,6 +35,7 @@ from pulse.transpiler_v2.nodes import (
 	Function,
 	Jsx,
 	Return,
+	to_js_identifier,
 )
 from pulse.transpiler_v2.transpiler import Transpiler
 
@@ -98,7 +99,9 @@ class Constant(Expr):
 	@property
 	def js_name(self) -> str:
 		"""Unique JS identifier for this constant."""
-		return f"{self.name}_{self.id}" if self.name else f"_const_{self.id}"
+		if self.name:
+			return f"{to_js_identifier(self.name)}_{self.id}"
+		return f"_const_{self.id}"
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -152,7 +155,7 @@ class JsFunction(Expr, Generic[*Args, R]):
 	@property
 	def js_name(self) -> str:
 		"""Unique JS identifier for this function."""
-		return f"{self.fn.__name__}_{self.id}"
+		return f"{to_js_identifier(self.fn.__name__)}_{self.id}"
 
 	@override
 	def emit(self, out: list[str]) -> None:

@@ -10,5 +10,5 @@ class LucideProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 
 
 def lucide_signature(
-	*children: ps.Child, key: str | None = None, **props: Unpack[LucideProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[LucideProps]
 ) -> ps.Element: ...

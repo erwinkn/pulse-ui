@@ -4,7 +4,8 @@ Test utilities for comparing VDOM trees and Node structures.
 
 from typing import Any
 
-from pulse.vdom import ComponentNode, Element, Node, Primitive, VDOMNode
+from pulse.transpiler_v2.nodes import Element, Primitive, PulseNode
+from pulse.transpiler_v2.vdom import VDOMNode
 
 
 def normalize_vdom_node(node: VDOMNode) -> dict[str, Any]:
@@ -38,7 +39,7 @@ def normalize_vdom_tree(
 		return tree
 
 
-def normalize_node(node: Node) -> dict[str, Any]:
+def normalize_node(node: Element) -> dict[str, Any]:
 	"""
 	Normalize a Node by converting it to a comparable dict format.
 	"""
@@ -62,14 +63,14 @@ def normalize_node(node: Node) -> dict[str, Any]:
 
 
 def normalize_node_tree(
-	tree: Element,
+	tree: Element | Primitive | PulseNode,
 ) -> dict[str, Any] | Primitive:
 	"""
 	Normalize a Node tree (Node or primitive) for comparison.
 	"""
-	if isinstance(tree, ComponentNode):
+	if isinstance(tree, PulseNode):
 		raise NotImplementedError()
-	return normalize_node(tree) if isinstance(tree, Node) else tree
+	return normalize_node(tree) if isinstance(tree, Element) else tree
 
 
 def assert_vdom_equal(actual: VDOMNode | Primitive, expected: VDOMNode | Primitive):
@@ -86,7 +87,7 @@ def assert_vdom_equal(actual: VDOMNode | Primitive, expected: VDOMNode | Primiti
 	)
 
 
-def assert_node_equal(actual: Node | Primitive, expected: Node | Primitive):
+def assert_node_equal(actual: Element | Primitive, expected: Element | Primitive):
 	"""
 	Assert that two Node trees are semantically equal.
 

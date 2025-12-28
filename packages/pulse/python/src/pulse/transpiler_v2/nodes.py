@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
+import string
+import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from inspect import isfunction
+from inspect import isfunction, signature
 from typing import (
 	TYPE_CHECKING,
 	Any,
@@ -19,6 +21,7 @@ from typing import (
 )
 from typing import Literal as Lit
 
+from pulse.env import env
 from pulse.transpiler_v2.errors import TranspileError
 
 if TYPE_CHECKING:
@@ -26,6 +29,22 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 Primitive: TypeAlias = bool | int | float | str | dt.datetime | None
+
+_JS_IDENTIFIER_START = set(string.ascii_letters + "_")
+_JS_IDENTIFIER_CONTINUE = set(string.ascii_letters + string.digits + "_")
+
+
+def to_js_identifier(name: str) -> str:
+	"""Normalize a string to a JS-compatible identifier."""
+	if not name:
+		return "_"
+	out: list[str] = []
+	for ch in name:
+		out.append(ch if ch in _JS_IDENTIFIER_CONTINUE else "_")
+	if not out or out[0] not in _JS_IDENTIFIER_START:
+		out.insert(0, "_")
+	return "".join(out)
+
 
 # =============================================================================
 # Global registries
@@ -39,17 +58,7 @@ EXPR_REGISTRY: dict[int, "Expr"] = {}
 # =============================================================================
 # Base classes
 # =============================================================================
-class Node(ABC):
-	"""Base class for all AST nodes."""
-
-	__slots__: tuple[str, ...] = ()
-
-	@abstractmethod
-	def emit(self, out: list[str]) -> None:
-		"""Emit this node as JavaScript/JSX code into the output buffer."""
-
-
-class Expr(Node, ABC):
+class Expr(ABC):
 	"""Base class for expression nodes.
 
 	Provides hooks for custom transpilation behavior:
@@ -62,6 +71,10 @@ class Expr(Node, ABC):
 	"""
 
 	__slots__: tuple[str, ...] = ()
+
+	@abstractmethod
+	def emit(self, out: list[str]) -> None:
+		"""Emit this expression as JavaScript/JSX code into the output buffer."""
 
 	def precedence(self) -> int:
 		"""Operator precedence (higher = binds tighter). Default: primary (20)."""
@@ -199,8 +212,22 @@ class Expr(Node, ABC):
 
 		Usage for type casting:
 			clsx = Import(...).as_(Callable[[str, ...], str])
+
+		If typ_ is a user-defined callable (function or lambda),
+		wraps the expression in a Signature node that stores the callable's
+		signature for type introspection.
 		"""
-		return self  # pyright: ignore[reportReturnType]
+		# Only wrap for user-defined functions (lambdas, def functions)
+		# Skip for types (str, int, etc.) used as type annotations
+		if isfunction(typ_):
+			try:
+				sig = signature(typ_)
+				return cast("_T", Signature(self, sig))
+			except (ValueError, TypeError):
+				# Signature not available (e.g., for built-ins), return self
+				pass
+
+		return cast("_T", self)
 
 	def jsx(self) -> "Jsx":
 		"""Wrap this expression as a JSX component.
@@ -267,10 +294,14 @@ class Expr(Node, ABC):
 		EXPR_REGISTRY[id(value)] = expr
 
 
-class StmtNode(Node, ABC):
+class Stmt(ABC):
 	"""Base class for statement nodes."""
 
 	__slots__: tuple[str, ...] = ()
+
+	@abstractmethod
+	def emit(self, out: list[str]) -> None:
+		"""Emit this statement as JavaScript code into the output buffer."""
 
 
 # =============================================================================
@@ -278,8 +309,57 @@ class StmtNode(Node, ABC):
 # =============================================================================
 
 
+class ExprWrapper(Expr):
+	"""Base class for Expr wrappers that delegate to an underlying expression.
+
+	Subclasses must define an `expr` attribute (via __slots__ or dataclass).
+	All Expr methods delegate to self.expr by default. Override specific
+	methods to customize behavior.
+	"""
+
+	__slots__ = ("expr",)
+	expr: Expr
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		self.expr.emit(out)
+
+	@override
+	def precedence(self) -> int:
+		return self.expr.precedence()
+
+	@override
+	def transpile_call(
+		self,
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
+		ctx: Transpiler,
+	) -> Expr:
+		return self.expr.transpile_call(args, kwargs, ctx)
+
+	@override
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+		return self.expr.transpile_getattr(attr, ctx)
+
+	@override
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+		return self.expr.transpile_subscript(key, ctx)
+
+	@override
+	def __call__(self, *args: object, **kwargs: object) -> Expr:  # pyright: ignore[reportIncompatibleMethodOverride]
+		return self.expr(*args, **kwargs)
+
+	@override
+	def __getitem__(self, key: object) -> Expr:  # pyright: ignore[reportIncompatibleMethodOverride]
+		return self.expr[key]
+
+	@override
+	def __getattr__(self, attr: str) -> Expr:  # pyright: ignore[reportIncompatibleMethodOverride]
+		return getattr(self.expr, attr)
+
+
 @dataclass(slots=True, init=False)
-class Jsx(Expr):
+class Jsx(ExprWrapper):
 	"""JSX wrapper that makes any Expr callable as a component.
 
 	When called in transpiled code, produces Element(tag=expr, ...).
@@ -303,11 +383,6 @@ class Jsx(Expr):
 		self.id = next_id()
 
 	@override
-	def emit(self, out: list[str]) -> None:
-		"""Emit delegates to the wrapped expression."""
-		self.expr.emit(out)
-
-	@override
 	def transpile_call(
 		self,
 		args: list[ast.expr],
@@ -319,7 +394,7 @@ class Jsx(Expr):
 		Positional args become children, keyword args become props.
 		The `key` kwarg is extracted specially.
 		"""
-		children: list[Child] = [ctx.emit_expr(a) for a in args]
+		children: list[Node] = [ctx.emit_expr(a) for a in args]
 
 		props: dict[str, Prop] = {}
 		key: str | None = None
@@ -354,7 +429,7 @@ class Jsx(Expr):
 		# Normal call: build Element
 		props: dict[str, object] = {}
 		key: str | None = None
-		children: list[object] = list(args)
+		children: list[Node] = list(args)
 
 		for k, v in kwargs.items():
 			if k == "key":
@@ -370,6 +445,23 @@ class Jsx(Expr):
 			children=children if children else None,
 			key=key,
 		)
+
+
+@dataclass(slots=True)
+class Signature(ExprWrapper):
+	"""Wraps an Expr with signature information for type checking.
+
+	When you call expr.as_(callable_type), this creates a Signature wrapper
+	that stores the callable's signature for introspection, while delegating
+	all other behavior to the wrapped expression.
+
+	Example:
+		button = Import("Button", "@mantine/core")
+		typed_button = Signature(button, signature_of_callable)
+	"""
+
+	expr: Expr
+	sig: Any  # inspect.Signature, but use Any for type compatibility
 
 
 @dataclass(slots=True)
@@ -403,19 +495,32 @@ class Element(Expr):
 
 	tag: str | Expr
 	props: dict[str, Any] | None
-	children: Sequence[Any] | None
+	children: Sequence[Node] | None
 	key: str | None
 
 	def __init__(
 		self,
 		tag: str | Expr,
 		props: dict[str, Any] | None = None,
-		children: Sequence[Any] | None = None,
+		children: Sequence[Node] | None = None,
 		key: str | None = None,
 	) -> None:
 		self.tag = tag
 		self.props = props
-		self.children = children
+		if children is None:
+			self.children = None
+		else:
+			if isinstance(tag, str):
+				parent_name = tag[2:] if tag.startswith("$$") else tag
+			else:
+				tag_out: list[str] = []
+				tag.emit(tag_out)
+				parent_name = "".join(tag_out)
+			self.children = _flatten_children(
+				children,
+				parent_name=parent_name,
+				warn_stacklevel=5,
+			)
 		self.key = key
 		if self.key is None and self.props:
 			self.key = self.props.pop("key", None)
@@ -518,7 +623,7 @@ class Element(Expr):
 			key=self.key,
 		)
 
-	def with_children(self, children: Sequence[Any]) -> Element:
+	def with_children(self, children: Sequence[Node]) -> Element:
 		"""Return new Element with children set.
 
 		Raises if this element already has children.
@@ -536,28 +641,153 @@ class Element(Expr):
 
 
 @dataclass(slots=True)
-class PulseNode(Node):
+class PulseNode:
 	"""A Pulse server-side component instance.
 
 	During rendering, PulseNode is called and replaced by its returned tree.
 	Can only appear in VDOM context (render path), never in transpiled code.
 	"""
 
-	fn: Any  # Callable[..., Child]
+	fn: Any  # Callable[..., Node]
 	args: tuple[Any, ...] = ()
 	kwargs: dict[str, Any] = field(default_factory=dict)
 	key: str | None = None
+	name: str | None = None  # Optional component name for debug messages.
 	# Renderer state (mutable, set during render)
 	hooks: Any = None  # HookContext
-	contents: Child | None = None
+	contents: Node | None = None
 
-	@override
 	def emit(self, out: list[str]) -> None:
 		fn_name = getattr(self.fn, "__name__", "unknown")
 		raise TypeError(
 			f"Cannot transpile PulseNode '{fn_name}'. "
 			+ "Server components must be rendered, not transpiled."
 		)
+
+	def __getitem__(self, children_arg: "Node | tuple[Node, ...]"):
+		if self.args:
+			raise ValueError(
+				"PulseNode already received positional args; pass children in the call or via brackets, not both."
+			)
+		if not isinstance(children_arg, tuple):
+			children_arg = (children_arg,)
+		parent_name = self.name
+		if parent_name is None:
+			parent_name = getattr(self.fn, "__name__", "Component")
+		flat = _flatten_children(
+			children_arg,
+			parent_name=parent_name,
+			warn_stacklevel=5,
+		)
+		return PulseNode(
+			fn=self.fn,
+			args=tuple(flat),
+			kwargs=self.kwargs,
+			key=self.key,
+			name=self.name,
+		)
+
+
+# =============================================================================
+# Children normalization helpers
+# =============================================================================
+def _flatten_children(
+	children: Sequence[Node | Iterable[Node]],
+	*,
+	parent_name: str,
+	warn_stacklevel: int = 5,
+) -> list[Node]:
+	if env.pulse_env == "dev":
+		return _flatten_children_dev(
+			children, parent_name=parent_name, warn_stacklevel=warn_stacklevel
+		)
+	return _flatten_children_prod(children)
+
+
+def _flatten_children_prod(children: Sequence[Node | Iterable[Node]]) -> list[Node]:
+	flat: list[Node] = []
+
+	def visit(item: Node | Iterable[Node]) -> None:
+		if isinstance(item, dict):
+			raise TypeError("Dict is not a valid child")
+		if isinstance(item, Iterable) and not isinstance(item, (str, bytes)):
+			for sub in item:
+				visit(sub)  # type: ignore[arg-type]
+		else:
+			flat.append(item)  # type: ignore[arg-type]
+
+	for child in children:
+		visit(child)
+
+	return flat
+
+
+def _flatten_children_dev(
+	children: Sequence[Node | Iterable[Node]],
+	*,
+	parent_name: str,
+	warn_stacklevel: int = 5,
+) -> list[Node]:
+	flat: list[Node] = []
+	seen_keys: set[str] = set()
+
+	def visit(item: Node | Iterable[Node]) -> None:
+		if isinstance(item, dict):
+			raise TypeError("Dict is not a valid child")
+		if isinstance(item, Iterable) and not isinstance(item, (str, bytes)):
+			missing_key = False
+			for sub in item:
+				if isinstance(sub, PulseNode) and sub.key is None:
+					missing_key = True
+				if isinstance(sub, Element) and _normalize_key(sub.key) is None:
+					missing_key = True
+				visit(sub)  # type: ignore[arg-type]
+			if missing_key:
+				clean_name = clean_element_name(parent_name)
+				warnings.warn(
+					(
+						f"[Pulse] Iterable children of {clean_name} contain elements without 'key'. "
+						"Add a stable 'key' to each element inside iterables to improve reconciliation."
+					),
+					stacklevel=warn_stacklevel,
+				)
+		else:
+			if isinstance(item, PulseNode) and item.key is not None:
+				if item.key in seen_keys:
+					clean_name = clean_element_name(parent_name)
+					raise ValueError(
+						f"[Pulse] Duplicate key '{item.key}' found among children of {clean_name}. "
+						+ "Keys must be unique per sibling set."
+					)
+				seen_keys.add(item.key)
+			if isinstance(item, Element):
+				key = _normalize_key(item.key)
+				if key is not None:
+					if key in seen_keys:
+						clean_name = clean_element_name(parent_name)
+						raise ValueError(
+							f"[Pulse] Duplicate key '{key}' found among children of {clean_name}. "
+							+ "Keys must be unique per sibling set."
+						)
+					seen_keys.add(key)
+			flat.append(item)  # type: ignore[arg-type]
+
+	for child in children:
+		visit(child)
+
+	return flat
+
+
+def clean_element_name(parent_name: str) -> str:
+	if parent_name.startswith("<") and parent_name.endswith(">"):
+		return parent_name
+	return f"<{parent_name}>"
+
+
+def _normalize_key(key: object | None) -> str | None:
+	if isinstance(key, Literal):
+		return key.value if isinstance(key.value, str) else None
+	return key if isinstance(key, str) else None
 
 
 # =============================================================================
@@ -936,7 +1166,7 @@ def transformer(arg: str | _F) -> Callable[[_F], _F] | _F:
 
 
 @dataclass(slots=True)
-class Return(StmtNode):
+class Return(Stmt):
 	"""JS return statement: return expr;"""
 
 	value: Expr | None = None
@@ -951,12 +1181,12 @@ class Return(StmtNode):
 
 
 @dataclass(slots=True)
-class If(StmtNode):
+class If(Stmt):
 	"""JS if statement: if (cond) { ... } else { ... }"""
 
 	cond: Expr
-	then: Sequence[StmtNode]
-	else_: Sequence[StmtNode] = ()
+	then: Sequence[Stmt]
+	else_: Sequence[Stmt] = ()
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -976,7 +1206,7 @@ class If(StmtNode):
 
 
 @dataclass(slots=True)
-class ForOf(StmtNode):
+class ForOf(Stmt):
 	"""JS for-of loop: for (const x of iter) { ... }
 
 	target can be a single name or array pattern for destructuring: [a, b]
@@ -984,7 +1214,7 @@ class ForOf(StmtNode):
 
 	target: str
 	iter: Expr
-	body: Sequence[StmtNode]
+	body: Sequence[Stmt]
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -1000,11 +1230,11 @@ class ForOf(StmtNode):
 
 
 @dataclass(slots=True)
-class While(StmtNode):
+class While(Stmt):
 	"""JS while loop: while (cond) { ... }"""
 
 	cond: Expr
-	body: Sequence[StmtNode]
+	body: Sequence[Stmt]
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -1018,7 +1248,7 @@ class While(StmtNode):
 
 
 @dataclass(slots=True)
-class Break(StmtNode):
+class Break(Stmt):
 	"""JS break statement."""
 
 	@override
@@ -1027,7 +1257,7 @@ class Break(StmtNode):
 
 
 @dataclass(slots=True)
-class Continue(StmtNode):
+class Continue(Stmt):
 	"""JS continue statement."""
 
 	@override
@@ -1036,7 +1266,7 @@ class Continue(StmtNode):
 
 
 @dataclass(slots=True)
-class Assign(StmtNode):
+class Assign(Stmt):
 	"""JS assignment: let x = expr; or x = expr; or x += expr;
 
 	declare: "let", "const", or None (reassignment)
@@ -1065,7 +1295,7 @@ class Assign(StmtNode):
 
 
 @dataclass(slots=True)
-class ExprStmt(StmtNode):
+class ExprStmt(Stmt):
 	"""JS expression statement: expr;"""
 
 	expr: Expr
@@ -1077,10 +1307,10 @@ class ExprStmt(StmtNode):
 
 
 @dataclass(slots=True)
-class Block(StmtNode):
+class Block(Stmt):
 	"""JS block: { ... } - a sequence of statements."""
 
-	body: Sequence[StmtNode]
+	body: Sequence[Stmt]
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -1092,7 +1322,7 @@ class Block(StmtNode):
 
 
 @dataclass(slots=True)
-class Throw(StmtNode):
+class Throw(Stmt):
 	"""JS throw statement: throw expr;"""
 
 	value: Expr
@@ -1112,7 +1342,7 @@ class Function(Expr):
 	"""
 
 	params: Sequence[str]
-	body: Sequence[StmtNode]
+	body: Sequence[Stmt]
 	name: str | None = None
 	is_async: bool = False
 
@@ -1133,7 +1363,7 @@ class Function(Expr):
 		out.append("}")
 
 
-Child: TypeAlias = Primitive | Expr | PulseNode
+Node: TypeAlias = Primitive | Expr | PulseNode
 Prop: TypeAlias = Primitive | Expr
 
 
@@ -1142,8 +1372,11 @@ Prop: TypeAlias = Primitive | Expr
 # =============================================================================
 
 
-def emit(node: Node) -> str:
-	"""Emit a node as JavaScript/JSX code."""
+Emittable: TypeAlias = Expr | Stmt
+
+
+def emit(node: Emittable) -> str:
+	"""Emit an expression or statement as JavaScript/JSX code."""
 	out: list[str] = []
 	node.emit(out)
 	return "".join(out)
@@ -1384,7 +1617,7 @@ def _emit_jsx_prop(name: str, value: Prop, out: list[str]) -> None:
 	out.append("}")
 
 
-def _emit_jsx_child(child: Child, out: list[str]) -> None:
+def _emit_jsx_child(child: Node, out: list[str]) -> None:
 	"""Emit a single JSX child."""
 	# Primitives
 	if child is None or isinstance(child, bool):

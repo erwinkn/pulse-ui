@@ -24,7 +24,7 @@ import pulse as ps
 from pulse._examples import clamp, cube, factorial, is_even, square
 
 # Import JS modules (the new pulse.js.* system)
-from pulse.js2 import Math, console
+from pulse.js2 import Math, console, obj
 from pulse.js2.math import PI, floor, sin
 from pulse.js2.math import abs as js_abs
 from pulse.js2.number import Number
@@ -471,7 +471,7 @@ useEffect = ps.Import("useEffect", "react")
 
 
 @ps.javascript(jsx=True)
-def ToggleComponent(initial_visible: bool = True, *children: Any) -> Any:
+def ToggleComponent(*children: ps.Node, initial_visible: bool = True):
 	"""React component with show/hide toggle using useState and useEffect.
 
 	This component demonstrates:
@@ -496,7 +496,7 @@ def ToggleComponent(initial_visible: bool = True, *children: Any) -> Any:
 			className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600",
 		)["Hide" if is_visible else "Show"],
 		ps.div(
-			style={"display": "block" if is_visible else "none"},
+			style=obj(display="block" if is_visible else "none"),
 			className="mt-4 p-4 border rounded",
 		)[*children],
 	]
@@ -552,6 +552,10 @@ def ReactHooksDemo():
 	"""Demo page showing the React component with hooks."""
 	return ps.div(className="min-h-screen bg-slate-950 text-slate-100 p-8")[
 		ps.div(className="max-w-4xl mx-auto")[
+			ps.Link(
+				to="/",
+				className="text-blue-400 hover:text-blue-300 mb-4 inline-block",
+			)["← Back to Transpiler Demo"],
 			ps.h1("React Components with Hooks", className="text-3xl font-bold mb-4"),
 			ps.p(
 				"This example shows a React component created in Python using the transpiler_v2 system. "
@@ -559,8 +563,7 @@ def ReactHooksDemo():
 				className="text-slate-400 mb-8",
 			),
 			# Use the transpiled React component with Pulse component children
-			ToggleComponent(
-				True,
+			ToggleComponent(initial_visible=True)[
 				# Pass regular Pulse server-side components as children
 				ps.h3(
 					"Hidden Content with State", className="text-xl font-semibold mb-2"
@@ -584,7 +587,7 @@ def ReactHooksDemo():
 						ps.li("• Both states are managed separately"),
 					],
 				],
-			),
+			],
 			ps.div(className="mt-8")[
 				ps.h2("How it works", className="text-2xl font-semibold mb-4"),
 				ps.div(className="space-y-4 text-slate-300")[
@@ -947,6 +950,24 @@ def TranspilerDemo():
 				),
 			],
 		],
+		# React Hooks Demo Link
+		ps.div(className="max-w-6xl mx-auto py-8 px-4")[
+			Section(
+				title="11. React Components with Hooks",
+				description="Create React components with useState and useEffect hooks.",
+			)[
+				ps.div(className="col-span-2 p-6 bg-slate-800 rounded-lg")[
+					ps.p(
+						"The transpiler can create full React components with hooks that run entirely in the browser.",
+						className="text-slate-300 mb-4",
+					),
+					ps.Link(
+						to="/react-hooks",
+						className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors",
+					)["View React Hooks Demo →"],
+				],
+			],
+		],
 		# Footer
 		ps.div(className="bg-slate-900 py-8 px-4 mt-8 border-t border-slate-800")[
 			ps.div(className="max-w-6xl mx-auto text-center text-slate-500")[
@@ -962,4 +983,9 @@ def TranspilerDemo():
 	]
 
 
-app = ps.App([ps.Route("/", TranspilerDemo)])
+app = ps.App(
+	[
+		ps.Route("/", TranspilerDemo),
+		ps.Route("/react-hooks", ReactHooksDemo),
+	]
+)

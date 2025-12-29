@@ -100,5 +100,16 @@ def throw(x: _Any) -> _NoReturn:
 	"""Throw a JavaScript error."""
 	...
 
+def obj(**kwargs: _Any) -> _Any:
+	"""Create a plain JavaScript object literal.
+
+	Use this instead of dict() when you need a plain JS object (e.g., for React style prop).
+
+	Example:
+		style=obj(display="block", color="red")
+		# Transpiles to: style={{ display: "block", color: "red" }}
+	"""
+	...
+
 # Primitive values
 undefined: Undefined

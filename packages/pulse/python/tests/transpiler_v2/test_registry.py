@@ -53,15 +53,16 @@ class TestFunctionAutoId:
 		assert isinstance(helper.id, str)
 
 	def test_jsx_wrapped_jsfunction_has_id(self):
-		"""@javascript(jsx=True) returns JsxFunction where underlying JsFunction has id."""
+		"""@javascript(jsx=True) returns JsxFunction with its own id."""
 
 		@javascript(jsx=True)
 		def MyComponent() -> str:
 			return "hi"
 
 		assert isinstance(MyComponent, JsxFunction)
-		assert isinstance(MyComponent.js_fn, JsFunction)
-		assert isinstance(MyComponent.js_fn.id, str)
+		# JsxFunction is a parallel implementation with its own id
+		assert hasattr(MyComponent, "id")
+		assert isinstance(MyComponent.id, str)
 
 	def test_function_id_is_unique(self):
 		"""Each function gets a unique id."""

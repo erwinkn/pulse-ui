@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 from pulse.transpiler_v2 import (
-	JsFunction,
 	clear_function_cache,
 	clear_import_registry,
 	emit,
@@ -233,7 +232,8 @@ class TestPulseModuleIntegration:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert code == 'function render_1() {\nreturn <div>{"Hello"}</div>;\n}'
+		# JSX functions use props destructuring for React compatibility
+		assert code == 'function render_1({}) {\nreturn <div>{"Hello"}</div>;\n}'
 
 	def test_pulse_as_ps_nested_tags(self):
 		"""Nested ps.div/ps.span calls work in transpiled function."""
@@ -245,9 +245,10 @@ class TestPulseModuleIntegration:
 
 		fn = render.transpile()
 		code = emit(fn)
+		# JSX functions use props destructuring for React compatibility
 		assert (
 			code
-			== 'function render_1() {\nreturn <div><span>{"inner"}</span></div>;\n}'
+			== 'function render_1({}) {\nreturn <div><span>{"inner"}</span></div>;\n}'
 		)
 
 	def test_pulse_as_ps_with_props(self):
@@ -260,9 +261,10 @@ class TestPulseModuleIntegration:
 
 		fn = render.transpile()
 		code = emit(fn)
+		# JSX functions use props destructuring for React compatibility
 		assert (
 			code
-			== 'function render_1() {\nreturn <div className="container">{"Hello"}</div>;\n}'
+			== 'function render_1({}) {\nreturn <div className="container">{"Hello"}</div>;\n}'
 		)
 
 	def test_pulse_as_ps_button_with_onclick(self):
@@ -292,7 +294,8 @@ class TestPulseModuleIntegration:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert code == 'function render_1() {\nreturn <img src="photo.jpg" />;\n}'
+		# JSX functions use props destructuring for React compatibility
+		assert code == 'function render_1({}) {\nreturn <img src="photo.jpg" />;\n}'
 
 
 # =============================================================================
@@ -301,10 +304,10 @@ class TestPulseModuleIntegration:
 
 
 class TestJsxFunction:
-	"""Test @javascript(jsx=True) returns JsxFunction wrapper."""
+	"""Test @javascript(jsx=True) returns JsxFunction."""
 
 	def test_jsx_function_basic(self):
-		"""@javascript(jsx=True) creates JsxFunction wrapper."""
+		"""@javascript(jsx=True) creates JsxFunction."""
 		from pulse.transpiler_v2.function import JsxFunction
 
 		@javascript(jsx=True)
@@ -312,7 +315,10 @@ class TestJsxFunction:
 			return name
 
 		assert isinstance(MyComponent, JsxFunction)
-		assert isinstance(MyComponent.js_fn, JsFunction)
+		# JsxFunction is a parallel implementation, not a wrapper
+		assert hasattr(MyComponent, "fn")
+		assert hasattr(MyComponent, "id")
+		assert hasattr(MyComponent, "deps")
 
 	def test_jsx_function_call_produces_element(self):
 		"""JsxFunction called produces Element."""
@@ -368,7 +374,7 @@ class TestJsxFunction:
 		)
 
 	def test_jsx_function_transpile(self):
-		"""JsxFunction.transpile() delegates to underlying JsFunction."""
+		"""JsxFunction.transpile() wraps in React component with props destructuring."""
 		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
 
 		div = TagExpr("div")
@@ -379,20 +385,22 @@ class TestJsxFunction:
 
 		fn = Greeting.transpile()
 		code = emit(fn)
-		assert code == "function Greeting_1(name) {\nreturn <div>{name}</div>;\n}"
+		# JSX functions use props destructuring: {name} instead of name
+		assert code == "function Greeting_1({name}) {\nreturn <div>{name}</div>;\n}"
 
 	def test_jsx_function_caching(self):
-		"""Underlying JsFunction is cached in FUNCTION_CACHE."""
-		from pulse.transpiler_v2.function import FUNCTION_CACHE
+		"""JsxFunction is cached in FUNCTION_CACHE."""
+		from pulse.transpiler_v2.function import FUNCTION_CACHE, JsxFunction
 
 		def MyComp() -> str:
 			return "hi"
 
 		comp1 = javascript(jsx=True)(MyComp)
 		comp2 = javascript(jsx=True)(MyComp)
-		assert comp1 is not comp2  # wrapper not cached
-		assert comp1.js_fn is comp2.js_fn  # underlying JsFunction is cached
+		# JsxFunction is cached directly
+		assert comp1 is comp2
 		assert MyComp in FUNCTION_CACHE
+		assert isinstance(FUNCTION_CACHE[MyComp], JsxFunction)
 
 	def test_jsx_function_as_dependency(self):
 		"""JsxFunction can be used as dependency in another function."""
@@ -454,7 +462,7 @@ class TestJsxFunction:
 
 		assert isinstance(regular, JsFunction)
 		assert isinstance(jsx_fn, JsxFunction)
-		assert isinstance(jsx_fn.js_fn, JsFunction)
+		# JsxFunction is a parallel implementation, not a wrapper
 
 	def test_jsx_function_js_name(self):
 		"""Underlying JsFunction.js_name is unique."""
@@ -465,6 +473,38 @@ class TestJsxFunction:
 
 		assert Widget.js_name.startswith("Widget_")
 		assert Widget.js_name == f"Widget_{Widget.id}"
+
+	def test_jsx_function_with_default_values(self):
+		"""JsxFunction with default param values uses props destructuring."""
+		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def Toggle(visible: bool = True) -> Any:
+			return div("content" if visible else "hidden")
+
+		fn = Toggle.transpile()
+		code = emit(fn)
+		# Should destructure with default value
+		assert "{visible = true}" in code
+		assert "function Toggle_" in code
+
+	def test_jsx_function_with_children_and_defaults(self):
+		"""JsxFunction with *children and default kwargs works as React component."""
+		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def Container(*children: Any, className: str = "default") -> Any:
+			return div(className=className)
+
+		fn = Container.transpile()
+		code = emit(fn)
+		# Should have both children and className with default
+		assert "{children, className = " in code
+		assert '"default"' in code
 
 
 # =============================================================================

@@ -20,12 +20,17 @@ Usage:
     # Statement functions:
     from pulse.js2 import throw
     throw(Error("message"))  # -> throw Error("message");
+
+    # Object literals (plain JS objects instead of Map):
+    from pulse.js2 import obj
+    obj(a=1, b=2)          # -> { a: 1, b: 2 }
 """
 
 import importlib as _importlib
 from typing import Any as _Any
 from typing import NoReturn as _NoReturn
 
+from pulse.transpiler_v2.builtins import obj as obj
 from pulse.transpiler_v2.nodes import UNDEFINED as _UNDEFINED
 from pulse.transpiler_v2.nodes import Identifier as _Identifier
 

@@ -177,5 +177,5 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function unpack_1(t) {\n{\nconst $tmp0 = t;\nlet a = $tmp0[0];\nlet b = $tmp0[1];\n}\nreturn a + b;\n}"
+			== "function unpack_1(t) {\nconst $tmp0 = t;\nlet a = $tmp0[0];\nlet b = $tmp0[1];\nreturn a + b;\n}"
 		)

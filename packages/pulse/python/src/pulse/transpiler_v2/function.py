@@ -20,7 +20,6 @@ from typing import (
 	TypeAlias,
 	TypeVar,
 	TypeVarTuple,
-	cast,
 	overload,
 	override,
 )
@@ -31,6 +30,7 @@ from pulse.transpiler_v2.id import next_id, reset_id_counter
 from pulse.transpiler_v2.imports import Import
 from pulse.transpiler_v2.nodes import (
 	EXPR_REGISTRY,
+	Arrow,
 	Expr,
 	Function,
 	Jsx,
@@ -42,10 +42,11 @@ from pulse.transpiler_v2.transpiler import Transpiler
 Args = TypeVarTuple("Args")
 P = ParamSpec("P")
 R = TypeVar("R")
-AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any, ...], Any]"
+AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any, ...], Any] | JsxFunction[..., Any]"
 
 # Global cache for deduplication across all transpiled functions
 # Registered BEFORE analyzing deps to handle mutual recursion
+# Stores JsFunction for regular @javascript, JsxFunction for @javascript(jsx=True)
 FUNCTION_CACHE: dict[Callable[..., Any], AnyJsFunction] = {}
 
 # Global registry for hoisted constants: id(value) -> Constant
@@ -122,6 +123,52 @@ def registered_constants() -> list[Constant]:
 	return list(CONSTANT_REGISTRY.values())
 
 
+def _transpile_function_body(
+	fn: Callable[..., Any],
+	deps: dict[str, Expr],
+	*,
+	jsx: bool = False,
+) -> tuple[Function | Arrow, str]:
+	"""Shared transpilation logic for JsFunction and JsxFunction.
+
+	Returns the transpiled Function/Arrow node and the source code.
+	"""
+	# Get and parse source
+	src = getsourcecode(fn)
+	src = textwrap.dedent(src)
+	module = ast.parse(src)
+
+	# Find the function definition
+	fndefs = [
+		n for n in module.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+	]
+	if not fndefs:
+		raise TranspileError("No function definition found in source")
+	fndef = fndefs[-1]
+
+	# Get filename for error messages
+	try:
+		filename = inspect.getfile(fn)
+	except (TypeError, OSError):
+		filename = None
+
+	# Transpile with source context for errors
+	try:
+		transpiler = Transpiler(fndef, deps, jsx=jsx)
+		result = transpiler.transpile()
+	except TranspileError as e:
+		# Re-raise with source context if not already present
+		if e.source is None:
+			raise e.with_context(
+				source=src,
+				filename=filename,
+				func_name=fn.__name__,
+			) from None
+		raise
+
+	return result, src
+
+
 @dataclass(slots=True, init=False)
 class JsFunction(Expr, Generic[*Args, R]):
 	"""A transpiled JavaScript function.
@@ -139,12 +186,13 @@ class JsFunction(Expr, Generic[*Args, R]):
 	deps: dict[str, Expr]
 	_transpiled: Function | None = field(default=None)
 
-	def __init__(self, fn: Callable[..., Any]) -> None:
+	def __init__(self, fn: Callable[..., Any], *, _register: bool = True) -> None:
 		self.fn = fn
 		self.id = next_id()
 		self._transpiled = None
-		# Register self in cache BEFORE analyzing deps (handles cycles)
-		FUNCTION_CACHE[fn] = self
+		if _register:
+			# Register self in cache BEFORE analyzing deps (handles cycles)
+			FUNCTION_CACHE[fn] = self
 		# Now analyze and build deps (may recursively call JsFunction() which will find us in cache)
 		self.deps = analyze_deps(fn)
 
@@ -170,24 +218,7 @@ class JsFunction(Expr, Generic[*Args, R]):
 		if self._transpiled is not None:
 			return self._transpiled
 
-		# Get and parse source
-		src = getsourcecode(self.fn)
-		src = textwrap.dedent(src)
-		module = ast.parse(src)
-
-		# Find the function definition
-		fndefs = [
-			n
-			for n in module.body
-			if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-		]
-		if not fndefs:
-			raise TranspileError("No function definition found in source")
-		fndef = fndefs[-1]
-
-		# Transpile
-		transpiler = Transpiler(fndef, self.deps)
-		result = transpiler.transpile()
+		result, _ = _transpile_function_body(self.fn, self.deps)
 
 		# Convert Arrow to Function if needed, and set the name
 		if isinstance(result, Function):
@@ -215,63 +246,98 @@ class JsFunction(Expr, Generic[*Args, R]):
 
 	def functions(self) -> dict[str, AnyJsFunction]:
 		"""Get all JsFunction dependencies."""
-		return {k: v for k, v in self.deps.items() if isinstance(v, JsFunction)}
+		return {
+			k: v
+			for k, v in self.deps.items()
+			if isinstance(v, (JsFunction, JsxFunction))
+		}
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class JsxFunction(Expr, Generic[P, R]):
-	"""Lightweight JSX wrapper around a cached JsFunction.
+	"""A transpiled JSX/React component function.
 
-	This is purely an ergonomic/typing helper:
-	- clear type (JsxFunction)
-	- preserves ParamSpec for __call__
-	- exposes .transpile() via the underlying JsFunction
+	Like JsFunction, but transpiles to a React component that receives
+	a single props object with destructuring.
 
-	There is still only ONE cache for functions: FUNCTION_CACHE (JsFunction).
+	For a Python function like:
+		def Component(*children, visible=True): ...
+
+	Generates:
+		function Component_1({children, visible = true}) { ... }
 	"""
 
-	js_fn: JsFunction[*tuple[Any, ...], Any]
+	fn: Callable[P, R]
+	id: str
+	deps: dict[str, Expr]
+	_transpiled: Function | None = field(default=None)
 
-	@property
-	def fn(self) -> Callable[..., Any]:
-		return self.js_fn.fn
-
-	@property
-	def id(self) -> str:
-		return self.js_fn.id
-
-	@property
-	def deps(self) -> dict[str, Expr]:
-		return self.js_fn.deps
+	def __init__(self, fn: Callable[..., Any]) -> None:
+		self.fn = fn
+		self.id = next_id()
+		self._transpiled = None
+		# Register self in cache BEFORE analyzing deps (handles cycles)
+		FUNCTION_CACHE[fn] = self
+		# Now analyze and build deps
+		self.deps = analyze_deps(fn)
 
 	@property
 	def js_name(self) -> str:
-		return self.js_fn.js_name
-
-	def transpile(self) -> Function:
-		return self.js_fn.transpile()
-
-	def imports(self) -> dict[str, Expr]:
-		return self.js_fn.imports()
-
-	def functions(self) -> dict[str, AnyJsFunction]:
-		return self.js_fn.functions()
+		"""Unique JS identifier for this function."""
+		return f"{to_js_identifier(self.fn.__name__)}_{self.id}"
 
 	@override
 	def emit(self, out: list[str]) -> None:
-		self.js_fn.emit(out)
+		"""Emit this function as its unique JS identifier."""
+		out.append(self.js_name)
+
+	def transpile(self) -> Function:
+		"""Transpile this JSX function to a React component.
+
+		The Transpiler handles converting parameters to a destructured props object.
+		"""
+		if self._transpiled is not None:
+			return self._transpiled
+
+		result, _ = _transpile_function_body(self.fn, self.deps, jsx=True)
+
+		# JSX transpilation always returns Function (never Arrow)
+		assert isinstance(result, Function), (
+			"JSX transpilation should always return Function"
+		)
+
+		# Set the unique name
+		self._transpiled = Function(
+			params=result.params,
+			body=result.body,
+			name=self.js_name,
+			is_async=result.is_async,
+		)
+		return self._transpiled
+
+	def imports(self) -> dict[str, Expr]:
+		"""Get all Import dependencies."""
+		return {k: v for k, v in self.deps.items() if isinstance(v, Import)}
+
+	def functions(self) -> dict[str, AnyJsFunction]:
+		"""Get all function dependencies."""
+		return {
+			k: v
+			for k, v in self.deps.items()
+			if isinstance(v, (JsFunction, JsxFunction))
+		}
 
 	@override
 	def transpile_call(
 		self, args: list[ast.expr], kwargs: dict[str, ast.expr], ctx: Transpiler
 	) -> Expr:
 		# delegate JSX element building to the generic Jsx wrapper
-		return Jsx(self.js_fn).transpile_call(args, kwargs, ctx)
+		return Jsx(self).transpile_call(args, kwargs, ctx)
 
 	@override
 	def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:  # pyright: ignore[reportIncompatibleMethodOverride]
 		# runtime/type-checking: produce Element via Jsx wrapper
-		return Jsx(self.js_fn)(*args, **kwargs)  # pyright: ignore[reportReturnType]
+		return Jsx(self)(*args, **kwargs)  # pyright: ignore[reportReturnType]
 
 
 def analyze_code_object(
@@ -409,22 +475,28 @@ def javascript(*, jsx: Literal[True]) -> Callable[[Callable[P, R]], Jsx]: ...
 
 
 def javascript(fn: Callable[[*Args], R] | None = None, *, jsx: bool = False) -> Any:
-	"""Decorator to convert a Python function into a JsFunction.
+	"""Decorator to convert a Python function into a JsFunction or JsxFunction.
 
 	When jsx=False (default), returns a JsFunction instance.
-	When jsx=True, returns Jsx(JsFunction), but caches only the underlying JsFunction.
+	When jsx=True, returns a JsxFunction instance.
+
+	Both are cached in FUNCTION_CACHE for deduplication and code generation.
 	"""
 
 	def decorator(f: Callable[[*Args], R]) -> Any:
-		result = FUNCTION_CACHE.get(f)
-		if result is None:
-			result = JsFunction(f)
+		cached = FUNCTION_CACHE.get(f)
+		if cached is not None:
+			# Already cached - return as-is (respects original jsx setting)
+			return cached
+
 		if jsx:
-			js_fn = cast(JsFunction[*tuple[Any, ...], Any], result)
-			# Preserve the original function's type signature for type checkers.
-			# Runtime object is JsxFunction.
-			return JsxFunction(js_fn).as_(type(f))
-		return result
+			# Create JsxFunction for React component semantics
+			jsx_fn = JsxFunction(f)
+			# Preserve the original function's type signature for type checkers
+			return jsx_fn.as_(type(f))
+
+		# Create regular JsFunction
+		return JsFunction(f)
 
 	if fn is not None:
 		return decorator(fn)
@@ -436,12 +508,10 @@ def registered_functions() -> list[AnyJsFunction]:
 	return list(FUNCTION_CACHE.values())
 
 
-def _unwrap_jsfunction(expr: Expr) -> JsFunction[*tuple[Any, ...], Any] | None:
-	# Unwrap common wrappers that may show up in deps
-	if isinstance(expr, JsFunction):
+def _unwrap_jsfunction(expr: Expr) -> AnyJsFunction | None:
+	"""Unwrap common wrappers to get the underlying JsFunction or JsxFunction."""
+	if isinstance(expr, (JsFunction, JsxFunction)):
 		return expr
-	if isinstance(expr, JsxFunction):
-		return expr.js_fn
 	if isinstance(expr, Jsx):
 		inner = expr.expr
 		if isinstance(inner, Expr):

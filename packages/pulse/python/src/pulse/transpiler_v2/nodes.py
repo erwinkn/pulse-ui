@@ -116,6 +116,10 @@ class Expr(ABC):
 		Override to customize subscript behavior.
 		Default returns Subscript(self, emitted_key).
 		"""
+		if isinstance(key, ast.Tuple):
+			raise TranspileError(
+				"Multiple indices not supported in subscript", node=key
+			)
 		return Subscript(self, ctx.emit_expr(key))
 
 	# -------------------------------------------------------------------------
@@ -597,6 +601,30 @@ class Element(Expr):
 		out.append("</")
 		out.append(tag_str)
 		out.append(">")
+
+	@override
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+		"""Transpile subscript as adding children to this element.
+
+		Handles both single children and tuple of children.
+		"""
+		if self.children:
+			raise TranspileError(
+				f"Element '{self.tag}' already has children; cannot add more via subscript"
+			)
+
+		# Convert key to list of children
+		if isinstance(key, ast.Tuple):
+			children = [ctx.emit_expr(e) for e in key.elts]
+		else:
+			children = [ctx.emit_expr(key)]
+
+		return Element(
+			tag=self.tag,
+			props=self.props,
+			children=children,
+			key=self.key,
+		)
 
 	@override
 	def __getitem__(self, key: Any) -> Element:  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -1322,6 +1350,24 @@ class Block(Stmt):
 
 
 @dataclass(slots=True)
+class StmtSequence(Stmt):
+	"""A sequence of statements without block braces.
+
+	Used for tuple unpacking where we need multiple statements
+	but don't want to create a new scope.
+	"""
+
+	body: Sequence[Stmt]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		for i, stmt in enumerate(self.body):
+			stmt.emit(out)
+			if i < len(self.body) - 1:
+				out.append("\n")
+
+
+@dataclass(slots=True)
 class Throw(Stmt):
 	"""JS throw statement: throw expr;"""
 
@@ -1645,6 +1691,12 @@ def _emit_jsx_child(child: Node, out: list[str]) -> None:
 	# Element - recurse
 	if isinstance(child, Element):
 		child.emit(out)
+		return
+	# Spread - emit as {expr} without the spread operator (arrays are already iterable in JSX)
+	if isinstance(child, Spread):
+		out.append("{")
+		child.expr.emit(out)
+		out.append("}")
 		return
 	# Expr
 	if isinstance(child, Expr):

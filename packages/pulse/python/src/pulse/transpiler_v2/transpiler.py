@@ -34,6 +34,7 @@ from pulse.transpiler_v2.nodes import (
 	Return,
 	Spread,
 	Stmt,
+	StmtSequence,
 	Subscript,
 	Template,
 	Ternary,
@@ -82,16 +83,27 @@ class Transpiler:
 	args: list[str]
 	deps: Mapping[str, Expr]
 	locals: set[str]
+	jsx: bool
 	_temp_counter: int
 
 	def __init__(
 		self,
 		fndef: ast.FunctionDef | ast.AsyncFunctionDef,
 		deps: Mapping[str, Expr],
+		*,
+		jsx: bool = False,
 	) -> None:
 		self.fndef = fndef
-		self.args = [arg.arg for arg in fndef.args.args]
+		# Collect all argument names (regular, vararg, kwonly, kwarg)
+		args: list[str] = [arg.arg for arg in fndef.args.args]
+		if fndef.args.vararg:
+			args.append(fndef.args.vararg.arg)
+		args.extend(arg.arg for arg in fndef.args.kwonlyargs)
+		if fndef.args.kwarg:
+			args.append(fndef.args.kwarg.arg)
+		self.args = args
 		self.deps = deps
+		self.jsx = jsx
 		self.locals = set(self.args)
 		self._temp_counter = 0
 		self.init_temp_counter()
@@ -120,6 +132,9 @@ class Transpiler:
 
 		For multi-statement functions, produces Function:
 			function(params) { ... }
+
+		For JSX functions, produces Function with destructured props parameter:
+			function({param1, param2 = default}) { ... }
 		"""
 		body = self.fndef.body
 
@@ -132,23 +147,78 @@ class Transpiler:
 		):
 			body = body[1:]
 
-		if not body:
-			return Arrow(self.args, Literal(None))
+		# Arrow optimizations (only for non-JSX)
+		if not self.jsx:
+			if not body:
+				return Arrow(self.args, Literal(None))
 
-		# Single expression or return statement -> expression-bodied arrow
-		if len(body) == 1:
-			stmt = body[0]
-			if isinstance(stmt, ast.Return):
-				expr = self.emit_expr(stmt.value)
-				return Arrow(self.args, expr)
-			if isinstance(stmt, ast.Expr):
-				expr = self.emit_expr(stmt.value)
-				return Arrow(self.args, expr)
+			if len(body) == 1:
+				stmt = body[0]
+				if isinstance(stmt, ast.Return):
+					expr = self.emit_expr(stmt.value)
+					return Arrow(self.args, expr)
+				if isinstance(stmt, ast.Expr):
+					expr = self.emit_expr(stmt.value)
+					return Arrow(self.args, expr)
 
-		# Multi-statement: emit as Function
+		# General case: Function (for JSX or multi-statement)
 		stmts = [self.emit_stmt(s) for s in body]
 		is_async = isinstance(self.fndef, ast.AsyncFunctionDef)
-		return Function(self.args, stmts, is_async=is_async)
+		args = [self._jsx_args()] if self.jsx else self.args
+		return Function(args, stmts, is_async=is_async)
+
+	def _jsx_args(self) -> str:
+		"""Build a destructured props parameter for JSX functions.
+
+		React components receive a single props object, so parameters
+		are emitted as a destructuring pattern: {param1, param2 = default, ...}
+		"""
+		args = self.fndef.args
+		destructure_parts: list[str] = []
+		default_out: list[str] = []
+
+		# Regular arguments (may have defaults at the end)
+		num_defaults = len(args.defaults)
+		num_args = len(args.args)
+		for i, arg in enumerate(args.args):
+			param_name = arg.arg
+			# Defaults align to the right: if we have 3 args and 1 default,
+			# the default is for args[2], not args[0]
+			default_idx = i - (num_args - num_defaults)
+			if default_idx >= 0:
+				# Has a default value
+				default_node = args.defaults[default_idx]
+				default_expr = self.emit_expr(default_node)
+				default_out.clear()
+				default_expr.emit(default_out)
+				destructure_parts.append(f"{param_name} = {''.join(default_out)}")
+			else:
+				# No default
+				destructure_parts.append(param_name)
+
+		# *args (VAR_POSITIONAL)
+		if args.vararg:
+			destructure_parts.append(args.vararg.arg)
+
+		# Keyword-only arguments
+		for i, arg in enumerate(args.kwonlyargs):
+			param_name = arg.arg
+			default_node = args.kw_defaults[i]
+			if default_node is not None:
+				# Has a default value
+				default_expr = self.emit_expr(default_node)
+				default_out.clear()
+				default_expr.emit(default_out)
+				destructure_parts.append(f"{param_name} = {''.join(default_out)}")
+			else:
+				# No default
+				destructure_parts.append(param_name)
+
+		# **kwargs (VAR_KEYWORD)
+		if args.kwarg:
+			destructure_parts.append(f"...{args.kwarg.arg}")
+
+		return "{" + ", ".join(destructure_parts) + "}"
 
 	# --- Statements ----------------------------------------------------------
 
@@ -170,19 +240,24 @@ class Transpiler:
 
 		if isinstance(node, ast.AugAssign):
 			if not isinstance(node.target, ast.Name):
-				raise TranspileError("Only simple augmented assignments supported")
+				raise TranspileError(
+					"Only simple augmented assignments supported", node=node
+				)
 			target = node.target.id
 			op_type = type(node.op)
 			if op_type not in ALLOWED_BINOPS:
 				raise TranspileError(
-					f"Unsupported augmented assignment operator: {op_type.__name__}"
+					f"Unsupported augmented assignment operator: {op_type.__name__}",
+					node=node,
 				)
 			value_expr = self.emit_expr(node.value)
 			return Assign(target, value_expr, op=ALLOWED_BINOPS[op_type])
 
 		if isinstance(node, ast.Assign):
 			if len(node.targets) != 1:
-				raise TranspileError("Multiple assignment targets not supported")
+				raise TranspileError(
+					"Multiple assignment targets not supported", node=node
+				)
 			target_node = node.targets[0]
 
 			# Tuple/list unpacking
@@ -190,7 +265,9 @@ class Transpiler:
 				return self._emit_unpacking_assign(target_node, node.value)
 
 			if not isinstance(target_node, ast.Name):
-				raise TranspileError("Only simple assignments to local names supported")
+				raise TranspileError(
+					"Only simple assignments to local names supported", node=node
+				)
 
 			target = target_node.id
 			value_expr = self.emit_expr(node.value)
@@ -233,7 +310,7 @@ class Transpiler:
 		if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
 			return self._emit_nested_function(node)
 
-		raise TranspileError(f"Unsupported statement: {type(node).__name__}")
+		raise TranspileError(f"Unsupported statement: {type(node).__name__}", node=node)
 
 	def _emit_unpacking_assign(
 		self, target: ast.Tuple | ast.List, value: ast.expr
@@ -257,7 +334,7 @@ class Transpiler:
 				self.locals.add(name)
 				stmts.append(Assign(name, sub, declare="let"))
 
-		return Block(stmts)
+		return StmtSequence(stmts)
 
 	def _emit_for_loop(self, node: ast.For) -> Stmt:
 		"""Emit a for loop."""
@@ -405,7 +482,9 @@ class Transpiler:
 		if isinstance(node, ast.Await):
 			return Unary("await", self.emit_expr(node.value))
 
-		raise TranspileError(f"Unsupported expression: {type(node).__name__}")
+		raise TranspileError(
+			f"Unsupported expression: {type(node).__name__}", node=node
+		)
 
 	def _emit_constant(self, node: ast.Constant) -> Expr:
 		"""Emit a constant value."""
@@ -439,7 +518,7 @@ class Transpiler:
 		if name in BUILTINS:
 			return BUILTINS[name]
 
-		raise TranspileError(f"Unbound name referenced: {name}")
+		raise TranspileError(f"Unbound name referenced: {name}", node=node)
 
 	def _emit_list_or_tuple(self, node: ast.List | ast.Tuple) -> Expr:
 		"""Emit a list or tuple literal."""
@@ -472,7 +551,9 @@ class Transpiler:
 		"""Emit a binary operation."""
 		op = type(node.op)
 		if op not in ALLOWED_BINOPS:
-			raise TranspileError(f"Unsupported binary operator: {op.__name__}")
+			raise TranspileError(
+				f"Unsupported binary operator: {op.__name__}", node=node
+			)
 		left = self.emit_expr(node.left)
 		right = self.emit_expr(node.right)
 		return Binary(left, ALLOWED_BINOPS[op], right)
@@ -481,7 +562,9 @@ class Transpiler:
 		"""Emit a unary operation."""
 		op = type(node.op)
 		if op not in ALLOWED_UNOPS:
-			raise TranspileError(f"Unsupported unary operator: {op.__name__}")
+			raise TranspileError(
+				f"Unsupported unary operator: {op.__name__}", node=node
+			)
 		return Unary(ALLOWED_UNOPS[op], self.emit_expr(node.operand))
 
 	def _emit_boolop(self, node: ast.BoolOp) -> Expr:
@@ -626,11 +709,6 @@ class Transpiler:
 		if isinstance(node.slice, ast.UnaryOp) and isinstance(node.slice.op, ast.USub):
 			idx_expr = self.emit_expr(node.slice.operand)
 			return Call(Member(value, "at"), [Unary("-", idx_expr)])
-
-		# Standard subscript
-		if isinstance(node.slice, ast.Tuple):
-			# Multiple indices not typically supported in JS
-			raise TranspileError("Multiple indices not supported in subscript")
 
 		# Delegate to Expr.transpile_subscript (default returns Subscript)
 		return value.transpile_subscript(node.slice, self)

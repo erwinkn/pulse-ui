@@ -26,7 +26,7 @@ from pulse.dom.tags import (
 	style,
 	ul,
 )
-from pulse.transpiler_v2.nodes import Element
+from pulse.transpiler.nodes import Element
 
 from .test_utils import assert_node_equal
 

@@ -1,10 +1,10 @@
-"""Route code generation using transpiler_v2."""
+"""Route code generation using transpiler."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from pulse.transpiler_v2 import (
+from pulse.transpiler import (
 	Constant,
 	Import,
 	JsFunction,

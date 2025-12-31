@@ -2,21 +2,22 @@
 JavaScript Map builtin module.
 
 Usage:
-    import pulse.js.map as Map
+    from pulse.js import Map
     Map()                         # -> new Map()
     Map([["a", 1]])              # -> new Map([["a", 1]])
 
+    # Or import from module directly:
     from pulse.js.map import Map
-    Map()                         # -> new Map()
 """
 
 from collections.abc import Callable as _Callable
 from collections.abc import Iterable as _Iterable
+from collections.abc import Iterator as _Iterator
 from typing import Any as _Any
 from typing import Generic as _Generic
 from typing import TypeVar as _TypeVar
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 K = _TypeVar("K")
 V = _TypeVar("V")
@@ -28,7 +29,7 @@ class Map(_Generic[K, V]):
 	Map[K, V] preserves insertion order and allows keys of any type.
 	"""
 
-	def __init__(self, iterable: _Iterable[tuple[K, V]] | None = None) -> None: ...
+	def __init__(self, iterable: _Iterable[tuple[K, V]] | None = None, /) -> None: ...
 
 	@property
 	def size(self) -> int:
@@ -59,6 +60,7 @@ class Map(_Generic[K, V]):
 		self,
 		callback: _Callable[[V, K, "Map[K, V]"], None],
 		thisArg: _Any | None = None,
+		/,
 	) -> None:
 		"""Execute a function for each key/value pair."""
 		...
@@ -75,10 +77,18 @@ class Map(_Generic[K, V]):
 		"""Return an iterator of [key, value] pairs."""
 		...
 
-	def __iter__(self) -> _Iterable[tuple[K, V]]:
+	def __iter__(self) -> _Iterator[tuple[K, V]]:
 		"""Iterate over [key, value] pairs."""
 		...
 
+	def __len__(self) -> int:
+		"""Return the number of key/value pairs (same as size)."""
+		...
 
-# Self-register this module as a JS builtin in global scope
-_register_js_module(name="Map", global_scope=True)
+	def __contains__(self, key: K) -> bool:
+		"""Check if key exists in the Map (same as has)."""
+		...
+
+
+# Self-register this module as a JS builtin (global identifiers)
+JsModule.register(name=None)

@@ -5,14 +5,14 @@ from inspect import Parameter, signature
 from typing import Any, Generic, ParamSpec, TypeAlias, TypeVar, overload, override
 
 from pulse.hooks.init import rewrite_init_blocks
-from pulse.transpiler_v2.nodes import Element as Element
-from pulse.transpiler_v2.nodes import (
+from pulse.transpiler.nodes import Element as Element
+from pulse.transpiler.nodes import (
 	Node,
 	Primitive,
 	PulseNode,
 	_flatten_children,
 )
-from pulse.transpiler_v2.vdom import VDOMNode
+from pulse.transpiler.vdom import VDOMNode
 
 P = ParamSpec("P")
 _T = TypeVar("_T")

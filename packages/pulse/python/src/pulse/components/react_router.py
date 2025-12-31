@@ -1,9 +1,9 @@
 from typing import Literal, TypedDict, Unpack
 
 from pulse.dom.props import HTMLAnchorProps
-from pulse.transpiler_v2 import Import
-from pulse.transpiler_v2.nodes import Node
-from pulse.transpiler_v2.react_component import react_component
+from pulse.transpiler import Import
+from pulse.transpiler.nodes import Node
+from pulse.transpiler.react_component import react_component
 
 
 class LinkPath(TypedDict):

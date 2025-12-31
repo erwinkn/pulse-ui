@@ -1,437 +1,319 @@
-"""Unified JS import system for javascript_v2."""
+"""Import with auto-registration for transpiler."""
+
+from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import (
 	Any,
-	ClassVar,
+	ParamSpec,
 	TypeAlias,
 	TypeVar,
-	TypeVarTuple,
-	overload,
 	override,
 )
+from typing import Literal as Lit
 
-from pulse.transpiler.context import is_interpreted_mode
-from pulse.transpiler.ids import generate_id
-from pulse.transpiler.jsx import JSXCallExpr, build_jsx_props, convert_jsx_child
-from pulse.transpiler.nodes import JSCall, JSExpr
+from pulse.cli.packages import pick_more_specific
+from pulse.transpiler.id import next_id
+from pulse.transpiler.nodes import Call, Expr, to_js_identifier
+from pulse.transpiler.vdom import VDOMNode
 
-T = TypeVar("T")
-Args = TypeVarTuple("Args")
-R = TypeVar("R")
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
-# Registry key: (name, src, is_default)
-# - Named imports: (name, src, False)
-# - Default/side-effect imports: ("", src, is_default) - dedupe by src only
-_ImportKey: TypeAlias = tuple[str, str, bool]
-_REGISTRY: dict[_ImportKey, "Import"] = {}
+ImportKind: TypeAlias = Lit["named", "default", "namespace", "side_effect"]
+
+# JS-like extensions to try when resolving imports without extension (ESM convention)
+_JS_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".mts")
 
 
-def _caller_file(depth: int = 2) -> Path:
-	"""Get the file path of the caller.
-
-	Args:
-		depth: How many frames to go back (2 = caller of the function that calls this)
-	"""
+def caller_file(depth: int = 2) -> Path:
+	"""Get the file path of the caller."""
 	frame = inspect.currentframe()
 	try:
-		# Walk up the call stack
 		for _ in range(depth):
 			if frame is None:
-				raise RuntimeError("Cannot determine caller frame")
+				raise RuntimeError("Could not determine caller file")
 			frame = frame.f_back
 		if frame is None:
-			raise RuntimeError("Cannot determine caller frame")
-		return Path(frame.f_code.co_filename).resolve()
+			raise RuntimeError("Could not determine caller file")
+		return Path(frame.f_code.co_filename)
 	finally:
 		del frame
 
 
-def _is_local_css_path(path: str) -> bool:
-	"""Check if a CSS path refers to a local file vs a package import.
+def is_relative_path(path: str) -> bool:
+	"""Check if path is a relative import (starts with ./ or ../)."""
+	return path.startswith("./") or path.startswith("../")
 
-	Local paths:
-	- Start with './' or '../' (relative)
-	- Start with '/' (absolute)
-	- Don't start with '@' (scoped npm package)
-	- Don't look like a bare module specifier
 
-	Package imports:
-	- Start with '@' (e.g., '@mantine/core/styles.css')
-	- Bare specifiers (e.g., 'some-package/styles.css')
+def is_absolute_path(path: str) -> bool:
+	"""Check if path is an absolute filesystem path."""
+	return path.startswith("/")
+
+
+def is_local_path(path: str) -> bool:
+	"""Check if path is a local file path (relative or absolute)."""
+	return is_relative_path(path) or is_absolute_path(path)
+
+
+def resolve_js_file(base_path: Path) -> Path | None:
+	"""Resolve a JS-like import path to an actual file.
+
+	Follows ESM resolution order:
+	1. Exact path (if has extension)
+	2. Try JS extensions: .ts, .tsx, .js, .jsx, .mjs, .mts
+	3. Try /index with each extension
+
+	Returns None if no file is found.
 	"""
-	# Relative paths are local
-	if path.startswith("./") or path.startswith("../"):
-		return True
-	# Absolute paths are local
-	if path.startswith("/"):
-		return True
-	# Scoped packages
-	if path.startswith("@"):
-		return False
-	# If it contains no slashes, it could be a local file in current dir
-	# But without './' prefix, treat bare names as package imports for safety
-	# Exception: if it ends with .css and doesn't look like a package
-	if "/" not in path and path.endswith(".css"):
-		# Ambiguous - could be local or package. Require explicit ./
-		return False
-	# Everything else (bare specifiers with paths) are package imports
-	return False
+	# If path already has an extension that exists, use it
+	if base_path.suffix and base_path.exists():
+		return base_path
+
+	# If no extension, try JS-like extensions
+	if not base_path.suffix:
+		for ext in _JS_EXTENSIONS:
+			candidate = base_path.with_suffix(ext)
+			if candidate.exists():
+				return candidate
+
+		# Try /index with each extension
+		for ext in _JS_EXTENSIONS:
+			candidate = base_path / f"index{ext}"
+			if candidate.exists():
+				return candidate
+
+	return None
 
 
-class Import(JSExpr):
-	"""Universal import descriptor.
+def resolve_local_path(path: str, caller: Path | None = None) -> Path | None:
+	"""Resolve a local import path to an actual file.
 
-	Import identity is determined by (name, src, is_default):
-	- Named imports: unique by (name, src)
-	- Default imports: unique by src (name is the local binding)
-	- Side-effect imports: unique by src (name is empty)
+	For relative paths, resolves relative to caller.
+	For absolute paths, uses the path directly.
 
-	When two Import objects reference the same underlying import, they share
-	the same ID, allowing multiple Import objects to target different properties
-	of the same import.
+	For paths without extensions, tries JS-like resolution.
+	Falls back to the raw resolved path if the file doesn't exist
+	(might be a generated file or future file).
+
+	Returns None only for non-local paths or relative paths without a caller.
+	"""
+	if is_relative_path(path):
+		if caller is None:
+			return None
+		base_path = (caller.parent / Path(path)).resolve()
+	elif is_absolute_path(path):
+		base_path = Path(path).resolve()
+	else:
+		return None
+
+	# If the path has an extension, return it (even if it doesn't exist)
+	if base_path.suffix:
+		return base_path
+
+	# Try JS-like resolution for existing files
+	resolved = resolve_js_file(base_path)
+	if resolved is not None:
+		return resolved
+
+	# Fallback: return the base path even if the file doesn't exist
+	return base_path
+
+
+# Registry key depends on kind:
+# - named: (name, src, "named")
+# - default/namespace/side_effect: ("", src, kind) - only one per src
+_ImportKey: TypeAlias = tuple[str, str, str]
+_IMPORT_REGISTRY: dict[_ImportKey, "Import"] = {}
+
+
+def get_registered_imports() -> list["Import"]:
+	"""Get all registered imports."""
+	return list(_IMPORT_REGISTRY.values())
+
+
+def clear_import_registry() -> None:
+	"""Clear the import registry."""
+	_IMPORT_REGISTRY.clear()
+
+
+@dataclass(slots=True, init=False)
+class Import(Expr):
+	"""JS import that auto-registers and dedupes.
+
+	An Expr that emits as its unique identifier (e.g., useState_1).
+	Overrides transpile_call for JSX component behavior and transpile_getattr for
+	member access.
 
 	Examples:
-		# Named import: import { foo } from "./module"
-		foo = Import("foo", "./module")
+		# Named import: import { useState } from "react"
+		useState = Import("useState", "react")
 
 		# Default import: import React from "react"
-		React = Import("React", "react", is_default=True)
+		React = Import("React", "react", kind="default")
 
-		# Type-only import: import type { Foo } from "./types"
-		Foo = Import("Foo", "./types", is_type_only=True)
+		# Namespace import: import * as utils from "./utils"
+		utils = Import("utils", "./utils", kind="namespace")
 
 		# Side-effect import: import "./styles.css"
-		Import.side_effect("./styles.css")
+		Import("", "./styles.css", kind="side_effect")
 
-		# CSS module import with class access
-		styles = Import.css_module("./styles.module.css", relative=True)
-		styles.container  # Returns JSMember for 'container' class
+		# Type-only import: import type { Props } from "./types"
+		Props = Import("Props", "./types", is_type=True)
+
+		# JSX component import - wrap in Jsx() to create elements
+		Button = Jsx(Import("Button", "@mantine/core"))
+		# Button("Click me", disabled=True) -> <Button_1 disabled={true}>Click me</Button_1>
+
+		# Local file imports (relative or absolute paths)
+		Import("", "./styles.css", kind="side_effect")  # Local CSS
+		utils = Import("utils", "./utils", kind="namespace")  # Local JS (resolves extension)
+		config = Import("config", "/absolute/path/config", kind="default")  # Absolute path
 	"""
-
-	__slots__ = (  # pyright: ignore[reportUnannotatedClassAttribute]
-		"name",
-		"src",
-		"is_default",
-		"is_namespace",
-		"is_type_only",
-		"before",
-		"id",
-		"source_path",
-		"jsx",
-	)
-
-	is_primary: ClassVar[bool] = True
 
 	name: str
 	src: str
-	is_default: bool
-	is_namespace: bool
-	is_type_only: bool
+	kind: ImportKind
+	is_type: bool
 	before: tuple[str, ...]
 	id: str
-	source_path: Path | None  # For local CSS files that need to be copied
-	jsx: bool
+	version: str | None = None
+	source_path: Path | None = (
+		None  # Resolved local file path (for copying during codegen)
+	)
 
 	def __init__(
 		self,
 		name: str,
 		src: str,
 		*,
-		is_default: bool = False,
-		is_namespace: bool = False,
-		is_type_only: bool = False,
-		before: Sequence[str] = (),
-		source_path: Path | None = None,
-		jsx: bool = False,
+		kind: ImportKind | None = None,
+		is_type: bool = False,
+		version: str | None = None,
+		before: tuple[str, ...] | list[str] = (),
+		_caller_depth: int = 2,
 	) -> None:
+		# Auto-resolve local paths (relative or absolute) to actual files
+		source_path: Path | None = None
+		import_src = src
+
+		if is_local_path(src):
+			# Resolve to actual file (handles JS extension resolution)
+			caller = caller_file(depth=_caller_depth) if is_relative_path(src) else None
+			resolved = resolve_local_path(src, caller)
+			if resolved is not None:
+				source_path = resolved
+				import_src = str(resolved)
+
+		# Default kind to "named" if not specified
+		if kind is None:
+			kind = "named"
+
 		self.name = name
-		self.src = src
-		self.is_default = is_default
-		self.is_namespace = is_namespace
+		self.src = import_src
+		self.kind = kind
+		self.version = version
 		self.source_path = source_path
-		self.jsx = jsx
 
-		before_tuple = tuple(before)
+		before_tuple = tuple(before) if isinstance(before, list) else before
 
-		# Dedupe key: for default/side-effect/namespace imports, only src matters
-		key: _ImportKey = (
-			("", src, is_default or is_namespace)
-			if (is_default or is_namespace or name == "")
-			else (name, src, False)
-		)
+		# Dedupe key: for named imports use (name, src, "named")
+		# For default/namespace/side_effect, only one per src: ("", src, kind)
+		if kind == "named":
+			key: _ImportKey = (name, import_src, "named")
+		else:
+			key = ("", import_src, kind)
 
-		if key in _REGISTRY:
-			existing = _REGISTRY[key]
+		if key in _IMPORT_REGISTRY:
+			existing = _IMPORT_REGISTRY[key]
 
 			# Merge: type-only + regular = regular
-			if existing.is_type_only and not is_type_only:
-				existing.is_type_only = False
+			if existing.is_type and not is_type:
+				existing.is_type = False
 
 			# Merge: union of before constraints
 			if before_tuple:
 				merged_before = set(existing.before) | set(before_tuple)
 				existing.before = tuple(sorted(merged_before))
 
+			# Merge: version
+			existing.version = pick_more_specific(existing.version, version)
+
 			# Reuse ID and merged values
 			self.id = existing.id
-			self.is_type_only = existing.is_type_only
+			self.is_type = existing.is_type
 			self.before = existing.before
+			self.version = existing.version
 		else:
 			# New import
-			self.id = generate_id()
-			self.is_type_only = is_type_only
+			self.id = next_id()
+			self.is_type = is_type
 			self.before = before_tuple
-			_REGISTRY[key] = self
-
-	@classmethod
-	def default(
-		cls,
-		name: str,
-		src: str,
-		*,
-		is_type_only: bool = False,
-		before: Sequence[str] = (),
-	) -> "Import":
-		"""Create a default import."""
-		return cls(
-			name,
-			src,
-			is_default=True,
-			is_type_only=is_type_only,
-			before=before,
-		)
-
-	@classmethod
-	def named(
-		cls,
-		name: str,
-		src: str,
-		*,
-		is_type_only: bool = False,
-		before: Sequence[str] = (),
-	) -> "Import":
-		"""Create a named import."""
-		return cls(
-			name,
-			src,
-			is_default=False,
-			is_type_only=is_type_only,
-			before=before,
-		)
-
-	@classmethod
-	def namespace(
-		cls,
-		name: str,
-		src: str,
-		*,
-		before: Sequence[str] = (),
-	) -> "Import":
-		"""Create a namespace import: import * as name from src."""
-		return cls(
-			name,
-			src,
-			is_namespace=True,
-			before=before,
-		)
-
-	@classmethod
-	def type_(
-		cls,
-		name: str,
-		src: str,
-		*,
-		is_default: bool = False,
-		before: Sequence[str] = (),
-	) -> "Import":
-		"""Create a type-only import."""
-		return cls(name, src, is_default=is_default, is_type_only=True, before=before)
-
-	@property
-	def is_side_effect(self) -> bool:
-		"""True if this is a side-effect only import (no bindings)."""
-		return self.name == "" and not self.is_default
+			_IMPORT_REGISTRY[key] = self
 
 	@property
 	def js_name(self) -> str:
 		"""Unique JS identifier for this import."""
-		return f"{self.name}_{self.id}"
-
-	@override
-	def emit(self) -> str:
-		"""Emit JS code for this import.
-
-		In normal mode: returns the unique JS name (e.g., "Button_1")
-		In interpreted mode: returns a get_object call (e.g., "get_object('Button_1')")
-		"""
-		base = self.js_name
-		if is_interpreted_mode():
-			return f"get_object('{base}')"
-		return base
-
-	@override
-	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
-		"""Handle Import calls - JSX if jsx=True, regular call otherwise."""
-		if not self.jsx:
-			if kwargs:
-				from pulse.transpiler.errors import JSCompilationError
-
-				raise JSCompilationError(
-					"Keyword arguments not supported in default function call"
-				)
-			return JSCall(self, [JSExpr.of(a) for a in args])
-
-		# JSX mode: positional args are children, kwargs are props
-		props = build_jsx_props(kwargs)
-		children = [convert_jsx_child(c) for c in args]
-		return JSXCallExpr(self, tuple(props), tuple(children))
-
-	@override
-	def __repr__(self) -> str:
-		parts = [f"name={self.name!r}", f"src={self.src!r}"]
-		if self.is_default:
-			parts.append("is_default=True")
-		if self.is_namespace:
-			parts.append("is_namespace=True")
-		if self.is_type_only:
-			parts.append("is_type_only=True")
-		if self.source_path:
-			parts.append(f"source_path={self.source_path!r}")
-		return f"Import({', '.join(parts)})"
-
-
-class CssImport(Import):
-	"""Import for CSS files (both local files and npm packages).
-
-	For local files, tracks the source path and provides a generated filename
-	for the output directory. For npm packages, acts as a regular import.
-
-	Args:
-		path: Path to CSS file. Can be:
-			- Package path (e.g., "@mantine/core/styles.css")
-			- Relative path with relative=True (e.g., "./global.css")
-			- Absolute path (e.g., "/path/to/styles.css")
-		module: If True, import as a CSS module (default export for class access).
-			If False, import for side effects only (global styles).
-			Automatically set to True if path ends with ".module.css".
-		relative: If True, resolve path relative to the caller's file.
-		before: List of import sources that should come after this import.
-
-	Examples:
-		# Side-effect CSS import (global styles)
-		CssImport("@mantine/core/styles.css")
-
-		# CSS module for class access (module=True auto-detected from .module.css)
-		styles = CssImport("./styles.module.css", relative=True)
-		styles.container  # Returns JSMember for 'container' class
-
-		# Local CSS file (will be copied during codegen)
-		CssImport("./global.css", relative=True)
-	"""
-
-	def __init__(
-		self,
-		path: str,
-		*,
-		module: bool = False,
-		relative: bool = False,
-		before: Sequence[str] = (),
-	) -> None:
-		# Auto-detect CSS modules based on filename
-		if path.endswith(".module.css"):
-			module = True
-
-		source_path: Path | None = None
-		import_src = path
-
-		if relative:
-			# Resolve relative to caller's file (depth=2: _caller_file -> __init__ -> caller)
-			caller = _caller_file(depth=2)
-			source_path = (caller.parent / Path(path)).resolve()
-			if not source_path.exists():
-				kind = "CSS module" if module else "CSS file"
-				raise FileNotFoundError(
-					f"{kind} '{path}' not found relative to {caller.parent}"
-				)
-			import_src = str(source_path)
-		elif _is_local_css_path(path):
-			# Absolute local path
-			source_path = Path(path).resolve()
-			if not source_path.exists():
-				kind = "CSS module" if module else "CSS file"
-				raise FileNotFoundError(f"{kind} '{path}' not found")
-			import_src = str(source_path)
-
-		# CSS modules are default imports with "css" name prefix
-		# Side-effect imports have empty name and is_default=False
-		name = "css" if module else ""
-		is_default = module
-
-		super().__init__(
-			name,
-			import_src,
-			is_default=is_default,
-			is_type_only=False,
-			before=before,
-			source_path=source_path,
-		)
+		return f"{to_js_identifier(self.name)}_{self.id}"
 
 	@property
 	def is_local(self) -> bool:
-		"""True if this is a local CSS file (not an npm package)."""
+		"""Check if this is a local file import (has resolved source_path)."""
 		return self.source_path is not None
 
+	# Convenience properties for kind checks
 	@property
-	def generated_filename(self) -> str | None:
-		"""Generated filename for local CSS files, or None for package imports."""
+	def is_default(self) -> bool:
+		return self.kind == "default"
+
+	@property
+	def is_namespace(self) -> bool:
+		return self.kind == "namespace"
+
+	@property
+	def is_side_effect(self) -> bool:
+		return self.kind == "side_effect"
+
+	def asset_filename(self) -> str:
+		"""Get the filename for this import when copied to assets folder.
+
+		Uses the import ID for uniqueness and preserves the original extension.
+		For JS-like files, uses the resolved extension.
+		"""
 		if self.source_path is None:
-			return None
-		if self.source_path.name.endswith(".module.css"):
-			return f"css_{self.id}.module.css"
-		return f"css_{self.id}.css"
+			raise ValueError("Cannot get asset filename for non-local import")
+		stem = self.source_path.stem
+		suffix = self.source_path.suffix
+		return f"{stem}_{self.id}{suffix}"
 
+	# -------------------------------------------------------------------------
+	# Expr.emit: outputs the unique identifier
+	# -------------------------------------------------------------------------
 
-def registered_imports() -> list[Import]:
-	"""Get all registered imports."""
-	return list(_REGISTRY.values())
+	@override
+	def emit(self, out: list[str]) -> None:
+		"""Emit this import as its unique JS identifier."""
+		out.append(self.js_name)
 
+	@override
+	def render(self) -> VDOMNode:
+		"""Render as a registry reference."""
+		return {"t": "ref", "key": self.id}
 
-def clear_import_registry() -> None:
-	"""Clear the import registry."""
-	_REGISTRY.clear()
+	# -------------------------------------------------------------------------
+	# Python dunder methods: allow natural syntax in @javascript functions
+	# -------------------------------------------------------------------------
 
+	# Overloads for __call__:
+	# 1. Decorator usage: @Import(...) def fn(...) -> returns fn's type
+	# 2. Expression usage: Import(...)(...) -> returns Call
 
-# =============================================================================
-# js_import decorator/function
-# =============================================================================
+	@override
+	def __call__(self, *args: Any, **kwargs: Any) -> "Call":
+		"""Allow calling Import objects in Python code.
 
-
-@overload
-def import_js(
-	name: str, src: str, *, is_default: bool = False
-) -> Callable[[Callable[[*Args], R]], Callable[[*Args], R]]:
-	"Import a JS function for use in `@javascript` functions"
-	...
-
-
-@overload
-def import_js(name: str, src: str, type_: type[T], *, is_default: bool = False) -> T:
-	"Import a JS value for use in `@javascript` functions"
-	...
-
-
-def import_js(
-	name: str, src: str, type_: type[T] | None = None, *, is_default: bool = False
-) -> T | Callable[[Callable[[*Args], R]], Callable[[*Args], R]]:
-	imp = Import.default(name, src) if is_default else Import.named(name, src)
-
-	if type_ is not None:
-		return imp  # pyright: ignore[reportReturnType]
-
-	def decorator(fn: Callable[[*Args], R]) -> Callable[[*Args], R]:
-		return imp  # pyright: ignore[reportReturnType]
-
-	return decorator
+		Returns a Call expression.
+		"""
+		return Expr.__call__(self, *args, **kwargs)

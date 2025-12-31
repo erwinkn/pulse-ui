@@ -2,7 +2,7 @@ from collections.abc import Callable, Iterable
 from inspect import Parameter, signature
 from typing import TypeVar, overload
 
-from pulse.transpiler_v2.nodes import Element
+from pulse.transpiler.nodes import Element
 
 T = TypeVar("T")
 

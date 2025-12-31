@@ -10,7 +10,7 @@ from pulse.routing import (
 	Route,
 	RouteTree,
 )
-from pulse.transpiler_v2.nodes import Element
+from pulse.transpiler.nodes import Element
 
 # --- PathSegment Tests ---
 

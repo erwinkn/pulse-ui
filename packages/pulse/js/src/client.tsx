@@ -15,7 +15,7 @@ import type {
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
-import type { VDOMUpdate2 } from "./vdom2";
+import type { VDOMUpdate } from "./vdom";
 
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
@@ -28,7 +28,7 @@ export interface Directives {
 export interface MountedView {
 	routeInfo: RouteInfo;
 	onInit: (view: PulsePrerenderView) => void;
-	onUpdate: (ops: VDOMUpdate2[]) => void;
+	onUpdate: (ops: VDOMUpdate[]) => void;
 	onJsExec: (msg: ServerJsExecMessage) => void;
 	onServerError: (error: ServerError) => void;
 }

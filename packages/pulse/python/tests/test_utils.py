@@ -4,8 +4,8 @@ Test utilities for comparing VDOM trees and Node structures.
 
 from typing import Any
 
-from pulse.transpiler_v2.nodes import Element, Primitive, PulseNode
-from pulse.transpiler_v2.vdom import VDOMNode
+from pulse.transpiler.nodes import Element, Primitive, PulseNode
+from pulse.transpiler.vdom import VDOMNode
 
 
 def normalize_vdom_node(node: VDOMNode) -> dict[str, Any]:

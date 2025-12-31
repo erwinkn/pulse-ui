@@ -39,7 +39,7 @@ from pulse.channel import (
 # Codegen
 from pulse.codegen.codegen import CodegenConfig as CodegenConfig
 
-# VDOM (transpiler_v2)
+# VDOM (transpiler)
 from pulse.component import (
 	Component as Component,
 )
@@ -1423,23 +1423,23 @@ from pulse.serializer import serialize as serialize
 from pulse.state import State as State
 
 # Transpiler v2
-from pulse.transpiler_v2.function import JsFunction as JsFunction
-from pulse.transpiler_v2.function import javascript as javascript
-from pulse.transpiler_v2.imports import Import as Import
-from pulse.transpiler_v2.nodes import (
+from pulse.transpiler.function import JsFunction as JsFunction
+from pulse.transpiler.function import javascript as javascript
+from pulse.transpiler.imports import Import as Import
+from pulse.transpiler.nodes import (
 	Element as Element,
 )
-from pulse.transpiler_v2.nodes import Jsx as Jsx
-from pulse.transpiler_v2.nodes import (
+from pulse.transpiler.nodes import Jsx as Jsx
+from pulse.transpiler.nodes import (
 	Node as Node,
 )
-from pulse.transpiler_v2.nodes import (
+from pulse.transpiler.nodes import (
 	Primitive as Primitive,
 )
-from pulse.transpiler_v2.nodes import (
+from pulse.transpiler.nodes import (
 	PulseNode as PulseNode,
 )
-from pulse.transpiler_v2.vdom import (
+from pulse.transpiler.vdom import (
 	VDOMNode as VDOMNode,
 )
 

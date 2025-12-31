@@ -3,7 +3,7 @@
 // =================================================================
 
 import type { RouteInfo } from "./helpers";
-import type { VDOM, VDOMUpdate2 } from "./vdom2";
+import type { VDOM, VDOMUpdate } from "./vdom";
 
 // Based on pulse/messages.py
 export interface ServerInitMessage {
@@ -15,7 +15,7 @@ export interface ServerInitMessage {
 export interface ServerUpdateMessage {
 	type: "vdom_update";
 	path: string;
-	ops: VDOMUpdate2[];
+	ops: VDOMUpdate[];
 }
 
 export interface ServerError {

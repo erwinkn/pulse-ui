@@ -23,8 +23,8 @@ from pulse.hooks.stable import stable
 from pulse.react_component import react_component
 from pulse.reactive import Signal
 from pulse.serializer import deserialize
-from pulse.transpiler_v2.imports import Import
-from pulse.transpiler_v2.nodes import Node
+from pulse.transpiler.imports import Import
+from pulse.transpiler.nodes import Node
 from pulse.types.event_handler import EventHandler1
 
 if TYPE_CHECKING:

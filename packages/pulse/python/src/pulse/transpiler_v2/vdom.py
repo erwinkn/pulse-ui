@@ -60,50 +60,50 @@ class UndefinedExpr(TypedDict):
 
 class ArrayExpr(TypedDict):
 	t: Literal["array"]
-	items: list[VDOMExpr]
+	items: list["VDOMNode"]
 
 
 class ObjectExpr(TypedDict):
 	t: Literal["object"]
-	props: dict[str, VDOMExpr]
+	props: dict[str, "VDOMNode"]
 
 
 class MemberExpr(TypedDict):
 	t: Literal["member"]
-	obj: VDOMExpr
+	obj: "VDOMNode"
 	prop: str
 
 
 class SubscriptExpr(TypedDict):
 	t: Literal["sub"]
-	obj: VDOMExpr
-	key: VDOMExpr
+	obj: "VDOMNode"
+	key: "VDOMNode"
 
 
 class CallExpr(TypedDict):
 	t: Literal["call"]
-	callee: VDOMExpr
-	args: list[VDOMExpr]
+	callee: "VDOMNode"
+	args: list["VDOMNode"]
 
 
 class UnaryExpr(TypedDict):
 	t: Literal["unary"]
 	op: str
-	arg: VDOMExpr
+	arg: "VDOMNode"
 
 
 class BinaryExpr(TypedDict):
 	t: Literal["binary"]
 	op: str
-	left: VDOMExpr
-	right: VDOMExpr
+	left: "VDOMNode"
+	right: "VDOMNode"
 
 
 class TernaryExpr(TypedDict):
 	t: Literal["ternary"]
-	cond: VDOMExpr
-	then: VDOMExpr
-	else_: VDOMExpr
+	cond: "VDOMNode"
+	then: "VDOMNode"
+	else_: "VDOMNode"
 
 
 class TemplateExpr(TypedDict):
@@ -114,19 +114,19 @@ class TemplateExpr(TypedDict):
 	"""
 
 	t: Literal["template"]
-	parts: list[str | VDOMExpr]
+	parts: list["str | VDOMNode"]
 
 
 class ArrowExpr(TypedDict):
 	t: Literal["arrow"]
 	params: list[str]
-	body: VDOMExpr
+	body: "VDOMNode"
 
 
 class NewExpr(TypedDict):
 	t: Literal["new"]
-	ctor: VDOMExpr
-	args: list[VDOMExpr]
+	ctor: "VDOMNode"
+	args: list["VDOMNode"]
 
 
 VDOMExpr: TypeAlias = (

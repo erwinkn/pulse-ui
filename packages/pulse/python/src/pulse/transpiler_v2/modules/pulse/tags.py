@@ -19,7 +19,7 @@ from typing import Any, final, override
 from pulse.transpiler_v2.nodes import Element, Expr, Literal, Node, Prop
 from pulse.transpiler_v2.py_module import PyModule
 from pulse.transpiler_v2.transpiler import Transpiler
-from pulse.transpiler_v2.vdom import VDOMExpr
+from pulse.transpiler_v2.vdom import VDOMNode
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,8 +37,8 @@ class TagExpr(Expr):
 		out.append(f'"{self.tag}"')
 
 	@override
-	def render(self) -> VDOMExpr:
-		return {"t": "lit", "value": self.tag}
+	def render(self) -> VDOMNode:
+		return self.tag
 
 	@override
 	def transpile_call(

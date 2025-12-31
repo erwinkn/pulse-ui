@@ -11,7 +11,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any, ClassVar, cast, override
 
 from pulse.transpiler_v2.nodes import Expr, Primitive, Transformer
-from pulse.transpiler_v2.vdom import VDOMExpr
+from pulse.transpiler_v2.vdom import VDOMNode
 
 if TYPE_CHECKING:
 	from pulse.transpiler_v2.transpiler import Transpiler
@@ -62,7 +62,7 @@ class PyModule(Expr):
 		raise TypeError(f"{label} cannot be emitted directly")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		label = self.name or "PyModule"
 		raise TypeError(f"{label} cannot be rendered directly")
 

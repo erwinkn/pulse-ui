@@ -17,7 +17,7 @@ from typing import Literal as Lit
 from pulse.cli.packages import pick_more_specific
 from pulse.transpiler_v2.id import next_id
 from pulse.transpiler_v2.nodes import Call, Expr, to_js_identifier
-from pulse.transpiler_v2.vdom import VDOMExpr
+from pulse.transpiler_v2.vdom import VDOMNode
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -298,7 +298,7 @@ class Import(Expr):
 		out.append(self.js_name)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		"""Render as a registry reference."""
 		return {"t": "ref", "key": self.id}
 

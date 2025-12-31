@@ -57,67 +57,67 @@ export interface UndefinedExpr {
 
 export interface ArrayExpr {
 	t: "array";
-	items: VDOMExpr[];
+	items: VDOMNode[];
 }
 
 export interface ObjectExpr {
 	t: "object";
-	props: Record<string, VDOMExpr>;
+	props: Record<string, VDOMNode>;
 }
 
 export interface MemberExpr {
 	t: "member";
-	obj: VDOMExpr;
+	obj: VDOMNode;
 	prop: string;
 }
 
 export interface SubscriptExpr {
 	t: "sub";
-	obj: VDOMExpr;
-	key: VDOMExpr;
+	obj: VDOMNode;
+	key: VDOMNode;
 }
 
 export interface CallExpr {
 	t: "call";
-	callee: VDOMExpr;
-	args: VDOMExpr[];
+	callee: VDOMNode;
+	args: VDOMNode[];
 }
 
 export interface UnaryExpr {
 	t: "unary";
 	op: string;
-	arg: VDOMExpr;
+	arg: VDOMNode;
 }
 
 export interface BinaryExpr {
 	t: "binary";
 	op: string;
-	left: VDOMExpr;
-	right: VDOMExpr;
+	left: VDOMNode;
+	right: VDOMNode;
 }
 
 export interface TernaryExpr {
 	t: "ternary";
-	cond: VDOMExpr;
-	then: VDOMExpr;
-	else_: VDOMExpr;
+	cond: VDOMNode;
+	then: VDOMNode;
+	else_: VDOMNode;
 }
 
 export interface TemplateExpr {
 	t: "template";
-	parts: Array<string | VDOMExpr>;
+	parts: Array<string | VDOMNode>;
 }
 
 export interface ArrowExpr {
 	t: "arrow";
 	params: string[];
-	body: VDOMExpr;
+	body: VDOMNode;
 }
 
 export interface NewExpr {
 	t: "new";
-	ctor: VDOMExpr;
-	args: VDOMExpr[];
+	ctor: VDOMNode;
+	args: VDOMNode[];
 }
 
 // -----------------------------------------------------------------------------

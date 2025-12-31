@@ -11,6 +11,7 @@ import type { PulseSocketIOClient } from "./client";
 import type { PulsePrerenderView } from "./pulse";
 import type {
 	ComponentRegistry,
+	JsonPrimitive,
 	JsonValue,
 	VDOM,
 	VDOMExpr,
@@ -72,7 +73,15 @@ export class VDOMRenderer2 {
 		return v;
 	}
 
-	#evalExpr(expr: VDOMExpr, env: Env): unknown {
+	#evalExpr(expr: VDOMNode, env: Env): unknown {
+		// Handle primitives directly (wire format optimization)
+		if (expr === null || typeof expr !== "object") {
+			return expr;
+		}
+		// Handle VDOMElement (has "tag" instead of "t")
+		if ("tag" in expr) {
+			return this.renderNode(expr, "");
+		}
 		switch (expr.t) {
 			case "ref":
 				return this.getObject(expr.key);

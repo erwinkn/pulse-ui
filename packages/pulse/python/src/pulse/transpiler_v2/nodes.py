@@ -23,7 +23,7 @@ from typing import Literal as Lit
 
 from pulse.env import env
 from pulse.transpiler_v2.errors import TranspileError
-from pulse.transpiler_v2.vdom import VDOMExpr
+from pulse.transpiler_v2.vdom import VDOMExpr, VDOMNode
 
 if TYPE_CHECKING:
 	from pulse.transpiler_v2.transpiler import Transpiler
@@ -128,11 +128,11 @@ class Expr(ABC):
 	# -------------------------------------------------------------------------
 
 	@abstractmethod
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		"""Serialize this expression node for client-side rendering.
 
-		Returns a VDOMExpr dict that can be JSON-serialized and evaluated
-		on the client. Override in each concrete Expr subclass.
+		Returns a VDOMNode (primitive or dict) that can be JSON-serialized and
+		evaluated on the client. Override in each concrete Expr subclass.
 
 		Raises TypeError for nodes that cannot be serialized (e.g., Transformer).
 		"""
@@ -330,7 +330,7 @@ class ExprWrapper(Expr):
 		self.expr.emit(out)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return self.expr.render()
 
 	@override
@@ -491,7 +491,7 @@ class Value(Expr):
 		_emit_value(self.value, out)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		raise TypeError("Value cannot be rendered as VDOMExpr; use coerce_json instead")
 
 
@@ -685,7 +685,7 @@ class Element(Expr):
 		)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		"""Element rendering is handled by Renderer.render_node(), not render().
 
 		This method validates render-time constraints and raises TypeError
@@ -868,7 +868,7 @@ class Identifier(Expr):
 		out.append(self.name)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {"t": "id", "name": self.name}
 
 
@@ -892,8 +892,8 @@ class Literal(Expr):
 			out.append(str(self.value))
 
 	@override
-	def render(self) -> VDOMExpr:
-		return {"t": "lit", "value": self.value}
+	def render(self) -> VDOMNode:
+		return self.value
 
 
 class Undefined(Expr):
@@ -910,7 +910,7 @@ class Undefined(Expr):
 		out.append("undefined")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {"t": "undef"}
 
 
@@ -934,7 +934,7 @@ class Array(Expr):
 		out.append("]")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {"t": "array", "items": [e.render() for e in self.elements]}
 
 
@@ -957,7 +957,7 @@ class Object(Expr):
 		out.append("}")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {"t": "object", "props": {k: v.render() for k, v in self.props}}
 
 
@@ -975,7 +975,7 @@ class Member(Expr):
 		out.append(self.prop)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {"t": "member", "obj": self.obj.render(), "prop": self.prop}
 
 
@@ -994,7 +994,7 @@ class Subscript(Expr):
 		out.append("]")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {"t": "sub", "obj": self.obj.render(), "key": self.key.render()}
 
 
@@ -1016,7 +1016,7 @@ class Call(Expr):
 		out.append(")")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {
 			"t": "call",
 			"callee": self.callee.render(),
@@ -1047,7 +1047,7 @@ class Unary(Expr):
 		_emit_paren(self.operand, self.op, "unary", out)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		if self.op == "await":
 			raise TypeError("await is not supported in VDOM expressions")
 		return {"t": "unary", "op": self.op, "arg": self.operand.render()}
@@ -1085,7 +1085,7 @@ class Binary(Expr):
 		_emit_paren(self.right, self.op, "right", out)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {
 			"t": "binary",
 			"op": self.op,
@@ -1115,7 +1115,7 @@ class Ternary(Expr):
 		self.else_.emit(out)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {
 			"t": "ternary",
 			"cond": self.cond.render(),
@@ -1161,7 +1161,7 @@ class Arrow(Expr):
 			out.append("}")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		if not isinstance(self.body, Expr):
 			raise TypeError("Arrow with statement body cannot be rendered as VDOMExpr")
 		return {"t": "arrow", "params": list(self.params), "body": self.body.render()}
@@ -1190,8 +1190,8 @@ class Template(Expr):
 		out.append("`")
 
 	@override
-	def render(self) -> VDOMExpr:
-		rendered_parts: list[str | VDOMExpr] = []
+	def render(self) -> VDOMNode:
+		rendered_parts: list[str | VDOMNode] = []
 		for p in self.parts:
 			if isinstance(p, str):
 				rendered_parts.append(p)
@@ -1212,7 +1212,7 @@ class Spread(Expr):
 		self.expr.emit(out)
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		raise TypeError("Spread cannot be rendered as VDOMExpr directly")
 
 
@@ -1235,7 +1235,7 @@ class New(Expr):
 		out.append(")")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		return {
 			"t": "new",
 			"ctor": self.ctor.render(),
@@ -1292,7 +1292,7 @@ class Transformer(Expr, Generic[_F]):
 		raise TypeError(f"{label} cannot be subscripted")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		label = self.name or "Transformer"
 		raise TypeError(f"{label} cannot be rendered - must be called")
 
@@ -1592,7 +1592,7 @@ class Function(Expr):
 		out.append("}")
 
 	@override
-	def render(self) -> VDOMExpr:
+	def render(self) -> VDOMNode:
 		raise TypeError("Function cannot be rendered as VDOMExpr")
 
 

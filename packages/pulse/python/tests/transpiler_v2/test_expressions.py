@@ -171,6 +171,124 @@ class TestOperators:
 		code = emit(fn)
 		assert code == "function either_1(a, b) {\nreturn a || b;\n}"
 
+	def test_floor_division(self):
+		"""Floor division (//) should use Math.floor(x / y)."""
+
+		@javascript
+		def div(a: int, b: int) -> int:
+			return a // b
+
+		fn = div.transpile()
+		code = emit(fn)
+		assert code == "function div_1(a, b) {\nreturn Math.floor(a / b);\n}"
+
+	def test_floor_division_in_expression(self):
+		"""Floor division in a larger expression."""
+
+		@javascript
+		def quotient_and_rem(a: int, b: int) -> tuple[int, int]:
+			return (a // b, a % b)
+
+		fn = quotient_and_rem.transpile()
+		code = emit(fn)
+		assert "Math.floor(a / b)" in code
+		assert "a % b" in code
+
+
+# =============================================================================
+# Bitwise Operators
+# =============================================================================
+
+
+class TestBitwiseOperators:
+	"""Test bitwise operator transpilation."""
+
+	def test_bitwise_and(self):
+		"""Bitwise AND (&)."""
+
+		@javascript
+		def band(a: int, b: int) -> int:
+			return a & b
+
+		fn = band.transpile()
+		code = emit(fn)
+		assert "a & b" in code
+
+	def test_bitwise_or(self):
+		"""Bitwise OR (|)."""
+
+		@javascript
+		def bor(a: int, b: int) -> int:
+			return a | b
+
+		fn = bor.transpile()
+		code = emit(fn)
+		assert "a | b" in code
+
+	def test_bitwise_xor(self):
+		"""Bitwise XOR (^)."""
+
+		@javascript
+		def bxor(a: int, b: int) -> int:
+			return a ^ b
+
+		fn = bxor.transpile()
+		code = emit(fn)
+		assert "a ^ b" in code
+
+	def test_bitwise_not(self):
+		"""Bitwise NOT (~)."""
+
+		@javascript
+		def bnot(a: int) -> int:
+			return ~a
+
+		fn = bnot.transpile()
+		code = emit(fn)
+		assert "~a" in code
+
+	def test_left_shift(self):
+		"""Left shift (<<)."""
+
+		@javascript
+		def lshift(a: int, b: int) -> int:
+			return a << b
+
+		fn = lshift.transpile()
+		code = emit(fn)
+		assert "a << b" in code
+
+	def test_right_shift(self):
+		"""Right shift (>>)."""
+
+		@javascript
+		def rshift(a: int, b: int) -> int:
+			return a >> b
+
+		fn = rshift.transpile()
+		code = emit(fn)
+		assert "a >> b" in code
+
+	def test_bitwise_augmented_assign(self):
+		"""Bitwise operators with augmented assignment."""
+
+		@javascript
+		def augment(x: int, y: int) -> int:
+			x &= y
+			x |= y
+			x ^= y
+			x <<= 1
+			x >>= 1
+			return x
+
+		fn = augment.transpile()
+		code = emit(fn)
+		assert "x &= y" in code
+		assert "x |= y" in code
+		assert "x ^= y" in code
+		assert "x <<= 1" in code
+		assert "x >>= 1" in code
+
 
 # =============================================================================
 # Ternary / Conditional

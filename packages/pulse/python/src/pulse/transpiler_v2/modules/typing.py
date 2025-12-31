@@ -9,6 +9,7 @@ from typing import final, override
 from pulse.transpiler_v2.nodes import Expr
 from pulse.transpiler_v2.py_module import PyModule
 from pulse.transpiler_v2.transpiler import Transpiler
+from pulse.transpiler_v2.vdom import VDOMExpr
 
 
 @dataclass(slots=True)
@@ -25,6 +26,13 @@ class TypeHint(Expr):
 	def emit(self, out: list[str]) -> None:
 		raise TypeError(
 			f"Type hint '{self.name}' cannot be emitted as JavaScript. "
+			+ "It should only be used with typing.cast() or similar."
+		)
+
+	@override
+	def render(self) -> VDOMExpr:
+		raise TypeError(
+			f"Type hint '{self.name}' cannot be rendered. "
 			+ "It should only be used with typing.cast() or similar."
 		)
 

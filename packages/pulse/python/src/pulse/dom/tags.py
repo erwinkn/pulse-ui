@@ -171,7 +171,7 @@ track = define_self_closing_tag("track")
 wbr = define_self_closing_tag("wbr")
 
 # React fragment
-fragment = define_tag("$$fragment")
+fragment = define_tag("")
 
 
 # SVG tags

@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing import final, override
+from typing import Any, final, override
 
-from pulse.transpiler_v2.errors import TranspileError
 from pulse.transpiler_v2.nodes import Element, Expr, Literal, Node, Prop
 from pulse.transpiler_v2.py_module import PyModule
 from pulse.transpiler_v2.transpiler import Transpiler
+from pulse.transpiler_v2.vdom import VDOMExpr
 
 
 @dataclass(slots=True, frozen=True)
@@ -34,7 +34,11 @@ class TagExpr(Expr):
 
 	@override
 	def emit(self, out: list[str]) -> None:
-		raise TypeError(f"Tag '{self.tag}' cannot be emitted directly - must be called")
+		out.append(f'"{self.tag}"')
+
+	@override
+	def render(self) -> VDOMExpr:
+		return {"t": "lit", "value": self.tag}
 
 	@override
 	def transpile_call(
@@ -51,25 +55,22 @@ class TagExpr(Expr):
 
 		# Build props from kwargs
 		props: dict[str, Prop] = {}
-		key: str | None = None
+		key: str | Expr | None = None
 		for k, v in kwargs.items():
 			prop_value = ctx.emit_expr(v)
 			if k == "key":
-				# Extract key prop
+				# Accept any expression as key for transpilation
 				if isinstance(prop_value, Literal) and isinstance(
 					prop_value.value, str
 				):
-					key = prop_value.value
+					key = prop_value.value  # Optimize string literals
 				else:
-					raise TranspileError("key prop must be a string literal")
+					key = prop_value  # Keep as expression
 			else:
 				props[k] = prop_value
 
-		# Handle fragment specially
-		tag = "" if self.tag == "$$fragment" else self.tag
-
 		return Element(
-			tag=tag,
+			tag=self.tag,
 			props=props if props else None,
 			children=children if children else None,
 			key=key,
@@ -80,19 +81,15 @@ class TagExpr(Expr):
 	# -------------------------------------------------------------------------
 
 	@override
-	def __call__(self, *args: object, **kwargs: object) -> Element:  # pyright: ignore[reportIncompatibleMethodOverride]
+	def __call__(self, *args: Any, **kwargs: Any):  # pyright: ignore[reportIncompatibleMethodOverride]
 		"""Allow calling TagExpr objects in Python code.
 
 		Returns a placeholder Element for type checking. The actual transpilation
 		happens via transpile_call when the transpiler processes the AST.
 		"""
-		tag = "" if self.tag == "$$fragment" else self.tag
-		return Element(tag=tag, props=None, children=None, key=None)
+		return Element(tag=self.tag, props=None, children=None, key=None)
 
 
-def _create_tag(tag_name: str) -> TagExpr:
-	"""Create a TagExpr for an HTML tag."""
-	return TagExpr(tag_name)
 
 
 @final
@@ -100,137 +97,137 @@ class PulseTags(PyModule):
 	"""Provides transpilation for pulse.dom.tags to JSX elements."""
 
 	# Regular tags
-	a = _create_tag("a")
-	abbr = _create_tag("abbr")
-	address = _create_tag("address")
-	article = _create_tag("article")
-	aside = _create_tag("aside")
-	audio = _create_tag("audio")
-	b = _create_tag("b")
-	bdi = _create_tag("bdi")
-	bdo = _create_tag("bdo")
-	blockquote = _create_tag("blockquote")
-	body = _create_tag("body")
-	button = _create_tag("button")
-	canvas = _create_tag("canvas")
-	caption = _create_tag("caption")
-	cite = _create_tag("cite")
-	code = _create_tag("code")
-	colgroup = _create_tag("colgroup")
-	data = _create_tag("data")
-	datalist = _create_tag("datalist")
-	dd = _create_tag("dd")
-	del_ = _create_tag("del")
-	details = _create_tag("details")
-	dfn = _create_tag("dfn")
-	dialog = _create_tag("dialog")
-	div = _create_tag("div")
-	dl = _create_tag("dl")
-	dt = _create_tag("dt")
-	em = _create_tag("em")
-	fieldset = _create_tag("fieldset")
-	figcaption = _create_tag("figcaption")
-	figure = _create_tag("figure")
-	footer = _create_tag("footer")
-	form = _create_tag("form")
-	h1 = _create_tag("h1")
-	h2 = _create_tag("h2")
-	h3 = _create_tag("h3")
-	h4 = _create_tag("h4")
-	h5 = _create_tag("h5")
-	h6 = _create_tag("h6")
-	head = _create_tag("head")
-	header = _create_tag("header")
-	hgroup = _create_tag("hgroup")
-	html = _create_tag("html")
-	i = _create_tag("i")
-	iframe = _create_tag("iframe")
-	ins = _create_tag("ins")
-	kbd = _create_tag("kbd")
-	label = _create_tag("label")
-	legend = _create_tag("legend")
-	li = _create_tag("li")
-	main = _create_tag("main")
-	map_ = _create_tag("map")
-	mark = _create_tag("mark")
-	menu = _create_tag("menu")
-	meter = _create_tag("meter")
-	nav = _create_tag("nav")
-	noscript = _create_tag("noscript")
-	object_ = _create_tag("object")
-	ol = _create_tag("ol")
-	optgroup = _create_tag("optgroup")
-	option = _create_tag("option")
-	output = _create_tag("output")
-	p = _create_tag("p")
-	picture = _create_tag("picture")
-	pre = _create_tag("pre")
-	progress = _create_tag("progress")
-	q = _create_tag("q")
-	rp = _create_tag("rp")
-	rt = _create_tag("rt")
-	ruby = _create_tag("ruby")
-	s = _create_tag("s")
-	samp = _create_tag("samp")
-	script = _create_tag("script")
-	section = _create_tag("section")
-	select = _create_tag("select")
-	small = _create_tag("small")
-	span = _create_tag("span")
-	strong = _create_tag("strong")
-	style = _create_tag("style")
-	sub = _create_tag("sub")
-	summary = _create_tag("summary")
-	sup = _create_tag("sup")
-	table = _create_tag("table")
-	tbody = _create_tag("tbody")
-	td = _create_tag("td")
-	template = _create_tag("template")
-	textarea = _create_tag("textarea")
-	tfoot = _create_tag("tfoot")
-	th = _create_tag("th")
-	thead = _create_tag("thead")
-	time = _create_tag("time")
-	title = _create_tag("title")
-	tr = _create_tag("tr")
-	u = _create_tag("u")
-	ul = _create_tag("ul")
-	var = _create_tag("var")
-	video = _create_tag("video")
+	a = TagExpr("a")
+	abbr = TagExpr("abbr")
+	address = TagExpr("address")
+	article = TagExpr("article")
+	aside = TagExpr("aside")
+	audio = TagExpr("audio")
+	b = TagExpr("b")
+	bdi = TagExpr("bdi")
+	bdo = TagExpr("bdo")
+	blockquote = TagExpr("blockquote")
+	body = TagExpr("body")
+	button = TagExpr("button")
+	canvas = TagExpr("canvas")
+	caption = TagExpr("caption")
+	cite = TagExpr("cite")
+	code = TagExpr("code")
+	colgroup = TagExpr("colgroup")
+	data = TagExpr("data")
+	datalist = TagExpr("datalist")
+	dd = TagExpr("dd")
+	del_ = TagExpr("del")
+	details = TagExpr("details")
+	dfn = TagExpr("dfn")
+	dialog = TagExpr("dialog")
+	div = TagExpr("div")
+	dl = TagExpr("dl")
+	dt = TagExpr("dt")
+	em = TagExpr("em")
+	fieldset = TagExpr("fieldset")
+	figcaption = TagExpr("figcaption")
+	figure = TagExpr("figure")
+	footer = TagExpr("footer")
+	form = TagExpr("form")
+	h1 = TagExpr("h1")
+	h2 = TagExpr("h2")
+	h3 = TagExpr("h3")
+	h4 = TagExpr("h4")
+	h5 = TagExpr("h5")
+	h6 = TagExpr("h6")
+	head = TagExpr("head")
+	header = TagExpr("header")
+	hgroup = TagExpr("hgroup")
+	html = TagExpr("html")
+	i = TagExpr("i")
+	iframe = TagExpr("iframe")
+	ins = TagExpr("ins")
+	kbd = TagExpr("kbd")
+	label = TagExpr("label")
+	legend = TagExpr("legend")
+	li = TagExpr("li")
+	main = TagExpr("main")
+	map_ = TagExpr("map")
+	mark = TagExpr("mark")
+	menu = TagExpr("menu")
+	meter = TagExpr("meter")
+	nav = TagExpr("nav")
+	noscript = TagExpr("noscript")
+	object_ = TagExpr("object")
+	ol = TagExpr("ol")
+	optgroup = TagExpr("optgroup")
+	option = TagExpr("option")
+	output = TagExpr("output")
+	p = TagExpr("p")
+	picture = TagExpr("picture")
+	pre = TagExpr("pre")
+	progress = TagExpr("progress")
+	q = TagExpr("q")
+	rp = TagExpr("rp")
+	rt = TagExpr("rt")
+	ruby = TagExpr("ruby")
+	s = TagExpr("s")
+	samp = TagExpr("samp")
+	script = TagExpr("script")
+	section = TagExpr("section")
+	select = TagExpr("select")
+	small = TagExpr("small")
+	span = TagExpr("span")
+	strong = TagExpr("strong")
+	style = TagExpr("style")
+	sub = TagExpr("sub")
+	summary = TagExpr("summary")
+	sup = TagExpr("sup")
+	table = TagExpr("table")
+	tbody = TagExpr("tbody")
+	td = TagExpr("td")
+	template = TagExpr("template")
+	textarea = TagExpr("textarea")
+	tfoot = TagExpr("tfoot")
+	th = TagExpr("th")
+	thead = TagExpr("thead")
+	time = TagExpr("time")
+	title = TagExpr("title")
+	tr = TagExpr("tr")
+	u = TagExpr("u")
+	ul = TagExpr("ul")
+	var = TagExpr("var")
+	video = TagExpr("video")
 
 	# Self-closing tags
-	area = _create_tag("area")
-	base = _create_tag("base")
-	br = _create_tag("br")
-	col = _create_tag("col")
-	embed = _create_tag("embed")
-	hr = _create_tag("hr")
-	img = _create_tag("img")
-	input = _create_tag("input")
-	link = _create_tag("link")
-	meta = _create_tag("meta")
-	param = _create_tag("param")
-	source = _create_tag("source")
-	track = _create_tag("track")
-	wbr = _create_tag("wbr")
+	area = TagExpr("area")
+	base = TagExpr("base")
+	br = TagExpr("br")
+	col = TagExpr("col")
+	embed = TagExpr("embed")
+	hr = TagExpr("hr")
+	img = TagExpr("img")
+	input = TagExpr("input")
+	link = TagExpr("link")
+	meta = TagExpr("meta")
+	param = TagExpr("param")
+	source = TagExpr("source")
+	track = TagExpr("track")
+	wbr = TagExpr("wbr")
 
 	# SVG tags
-	svg = _create_tag("svg")
-	circle = _create_tag("circle")
-	ellipse = _create_tag("ellipse")
-	g = _create_tag("g")
-	line = _create_tag("line")
-	path = _create_tag("path")
-	polygon = _create_tag("polygon")
-	polyline = _create_tag("polyline")
-	rect = _create_tag("rect")
-	text = _create_tag("text")
-	tspan = _create_tag("tspan")
-	defs = _create_tag("defs")
-	clipPath = _create_tag("clipPath")
-	mask = _create_tag("mask")
-	pattern = _create_tag("pattern")
-	use = _create_tag("use")
+	svg = TagExpr("svg")
+	circle = TagExpr("circle")
+	ellipse = TagExpr("ellipse")
+	g = TagExpr("g")
+	line = TagExpr("line")
+	path = TagExpr("path")
+	polygon = TagExpr("polygon")
+	polyline = TagExpr("polyline")
+	rect = TagExpr("rect")
+	text = TagExpr("text")
+	tspan = TagExpr("tspan")
+	defs = TagExpr("defs")
+	clipPath = TagExpr("clipPath")
+	mask = TagExpr("mask")
+	pattern = TagExpr("pattern")
+	use = TagExpr("use")
 
 	# React fragment
-	fragment = _create_tag("$$fragment")
+	fragment = TagExpr("")

@@ -251,8 +251,10 @@ class TestRange:
 
 		fn = get_range.transpile()
 		code = emit(fn)
-		assert "Math.ceil" in code
-		assert "start + i * 1" in code
+		assert (
+			code
+			== "function get_range_1(start, stop) {\nreturn Array.from(new Array(Math.max(0, Math.ceil((stop - start) / 1))).keys(), i => start + i * 1);\n}"
+		)
 
 	def test_range_with_step(self):
 		@javascript
@@ -261,8 +263,10 @@ class TestRange:
 
 		fn = get_range.transpile()
 		code = emit(fn)
-		assert "Math.ceil" in code
-		assert "start + i * step" in code
+		assert (
+			code
+			== "function get_range_1(start, stop, step) {\nreturn Array.from(new Array(Math.max(0, Math.ceil((stop - start) / step))).keys(), i => start + i * step);\n}"
+		)
 
 
 class TestEnumerate:
@@ -299,8 +303,10 @@ class TestZip:
 
 		fn = combine.transpile()
 		code = emit(fn)
-		assert "Math.min(a.length, b.length)" in code
-		assert "[a[i], b[i]]" in code
+		assert (
+			code
+			== "function combine_1(a, b) {\nreturn Array.from(new Array(Math.min(a.length, b.length)).keys(), i => [a[i], b[i]]);\n}"
+		)
 
 	def test_zip_three_arrays(self):
 		@javascript
@@ -309,8 +315,10 @@ class TestZip:
 
 		fn = combine.transpile()
 		code = emit(fn)
-		assert "Math.min(Math.min(a.length, b.length), c.length)" in code
-		assert "[a[i], b[i], c[i]]" in code
+		assert (
+			code
+			== "function combine_1(a, b, c) {\nreturn Array.from(new Array(Math.min(Math.min(a.length, b.length), c.length)).keys(), i => [a[i], b[i], c[i]]);\n}"
+		)
 
 
 class TestMapFilter:
@@ -440,7 +448,10 @@ class TestMathBuiltins:
 
 		fn = divmod_it.transpile()
 		code = emit(fn)
-		assert "Math.floor(x / y)" in code
+		assert (
+			code
+			== "function divmod_it_1(x, y) {\nreturn [Math.floor(x / y), x - Math.floor(x / y) * y];\n}"
+		)
 
 
 class TestCharOrdBuiltins:
@@ -471,7 +482,10 @@ class TestSortingBuiltins:
 
 		fn = sort_items.transpile()
 		code = emit(fn)
-		assert "items.slice().sort((a, b) => (a > b) - (a < b))" in code
+		assert (
+			code
+			== "function sort_items_1(items) {\nreturn items.slice().sort((a, b) => (a > b) - (a < b));\n}"
+		)
 
 	def test_reversed(self):
 		@javascript
@@ -639,8 +653,10 @@ class TestStringMethodsUnknownType:
 
 		fn = cap.transpile()
 		code = emit(fn)
-		assert 'typeof s === "string"' in code
-		assert "s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()" in code
+		assert (
+			code
+			== 'function cap_1(s) {\nreturn typeof s === "string" ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s.capitalize();\n}'
+		)
 
 	def test_zfill_runtime_check(self):
 		@javascript
@@ -649,8 +665,10 @@ class TestStringMethodsUnknownType:
 
 		fn = pad.transpile()
 		code = emit(fn)
-		assert 'typeof s === "string"' in code
-		assert 's.padStart(width, "0")' in code
+		assert (
+			code
+			== 'function pad_1(s, width) {\nreturn typeof s === "string" ? s.padStart(width, "0") : s.zfill(width);\n}'
+		)
 
 	def test_join_runtime_check(self):
 		"""join is reversed: sep.join(items) -> items.join(sep)"""
@@ -661,11 +679,13 @@ class TestStringMethodsUnknownType:
 
 		fn = join_them.transpile()
 		code = emit(fn)
-		assert 'typeof sep === "string"' in code
-		assert "items.join(sep)" in code
+		assert (
+			code
+			== 'function join_them_1(sep, items) {\nreturn typeof sep === "string" ? items.join(sep) : sep.join(items);\n}'
+		)
 
-	def test_split_no_transformation(self):
-		"""split doesn't need transformation."""
+	def test_split_with_separator(self):
+		"""split with separator falls through to default."""
 
 		@javascript
 		def split_it(s: str):
@@ -675,6 +695,26 @@ class TestStringMethodsUnknownType:
 		code = emit(fn)
 		# split falls through to default, no ternary needed
 		assert code == 'function split_it_1(s) {\nreturn s.split(",");\n}'
+
+	def test_split_without_args_uses_whitespace_semantics(self):
+		"""split() without args should use Python whitespace semantics.
+
+		Python: "a  b".split() -> ["a", "b"] (splits on whitespace, removes empty)
+		JS: "a  b".split() -> ["a  b"] (returns whole string)
+
+		Fix: str.trim().split(/\\s+/)
+		"""
+
+		@javascript
+		def split_whitespace(s: str):
+			return s.split()
+
+		fn = split_whitespace.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function split_whitespace_1(s) {\nreturn typeof s === "string" ? s.trim().split(/\\s+/) : s.split();\n}'
+		)
 
 
 # =============================================================================
@@ -719,8 +759,10 @@ class TestListMethodsUnknownType:
 
 		fn = add_item.transpile()
 		code = emit(fn)
-		assert "Array.isArray(items)" in code
-		assert "[items.push(val), undefined][1]" in code
+		assert (
+			code
+			== "function add_item_1(items, val) {\nreturn Array.isArray(items) ? [items.push(val), undefined][1] : items.append(val);\n}"
+		)
 
 	def test_extend_runtime_check(self):
 		@javascript
@@ -729,8 +771,10 @@ class TestListMethodsUnknownType:
 
 		fn = extend_items.transpile()
 		code = emit(fn)
-		assert "Array.isArray(items)" in code
-		assert "[items.push(...more), undefined][1]" in code
+		assert (
+			code
+			== "function extend_items_1(items, more) {\nreturn Array.isArray(items) ? [items.push(...more), undefined][1] : items.extend(more);\n}"
+		)
 
 	def test_pop_no_index_has_set_check(self):
 		"""pop() without index checks for Set to handle set.pop() semantics."""
@@ -741,9 +785,10 @@ class TestListMethodsUnknownType:
 
 		fn = remove_last.transpile()
 		code = emit(fn)
-		# Set.pop() requires special handling (get first value, delete it)
-		assert "items instanceof Set" in code
-		assert "items.pop()" in code
+		assert (
+			code
+			== "function remove_last_1(items) {\nreturn items instanceof Set ? ($v => [items.delete($v), $v][1])(items.values().next().value) : items.pop();\n}"
+		)
 
 	def test_pop_with_index_runtime_check(self):
 		"""pop(idx) -> splice(idx, 1)[0]"""
@@ -754,8 +799,10 @@ class TestListMethodsUnknownType:
 
 		fn = remove_at.transpile()
 		code = emit(fn)
-		assert "Array.isArray(items)" in code
-		assert "items.splice(idx, 1)[0]" in code
+		assert (
+			code
+			== "function remove_at_1(items, idx) {\nreturn Array.isArray(items) ? items.splice(idx, 1)[0] : items instanceof Map ? ($v => [items.delete(idx), $v][1])(items.get(idx)) : items.pop(idx);\n}"
+		)
 
 	def test_copy_runtime_check(self):
 		@javascript
@@ -764,9 +811,10 @@ class TestListMethodsUnknownType:
 
 		fn = clone.transpile()
 		code = emit(fn)
-		# copy exists on List, Set, and Dict - should have all checks
-		assert "Array.isArray(items)" in code
-		assert "items.slice()" in code
+		assert (
+			code
+			== "function clone_1(items) {\nreturn Array.isArray(items) ? items.slice() : items instanceof Set ? new Set(items) : items instanceof Map ? new Map(items.entries()) : items.copy();\n}"
+		)
 
 	def test_index_runtime_check(self):
 		@javascript
@@ -775,8 +823,10 @@ class TestListMethodsUnknownType:
 
 		fn = find_idx.transpile()
 		code = emit(fn)
-		assert "Array.isArray(items)" in code
-		assert "items.indexOf(val)" in code
+		assert (
+			code
+			== "function find_idx_1(items, val) {\nreturn Array.isArray(items) ? items.indexOf(val) : items.index(val);\n}"
+		)
 
 	def test_count_runtime_check(self):
 		@javascript
@@ -785,8 +835,10 @@ class TestListMethodsUnknownType:
 
 		fn = count_val.transpile()
 		code = emit(fn)
-		assert "Array.isArray(items)" in code
-		assert "items.filter(v => v === val).length" in code
+		assert (
+			code
+			== 'function count_val_1(items, val) {\nreturn typeof items === "string" ? items.split(val).length - 1 : Array.isArray(items) ? items.filter(v => v === val).length : items.count(val);\n}'
+		)
 
 	def test_reverse_runtime_check(self):
 		@javascript
@@ -795,9 +847,10 @@ class TestListMethodsUnknownType:
 
 		fn = rev.transpile()
 		code = emit(fn)
-		assert "Array.isArray(items)" in code
-		# Uses [expr, undefined][1] pattern
-		assert "[items.reverse(), undefined][1]" in code
+		assert (
+			code
+			== "function rev_1(items) {\nreturn Array.isArray(items) ? [items.reverse(), undefined][1] : items.reverse();\n}"
+		)
 
 	def test_sort_runtime_check(self):
 		@javascript
@@ -806,8 +859,28 @@ class TestListMethodsUnknownType:
 
 		fn = sort_them.transpile()
 		code = emit(fn)
-		assert "Array.isArray(items)" in code
-		assert "[items.sort(), undefined][1]" in code
+		assert (
+			code
+			== "function sort_them_1(items) {\nreturn Array.isArray(items) ? [items.sort(), undefined][1] : items.sort();\n}"
+		)
+
+	def test_remove_throws_when_not_found(self):
+		"""list.remove(value) should throw error when value not found.
+
+		Python raises ValueError if value not in list. The JS implementation
+		must check indexOf result and throw, not silently remove last element.
+		"""
+
+		@javascript
+		def remove_item(items: list[Any], val: Any):
+			items.remove(val)
+
+		fn = remove_item.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function remove_item_1(items, val) {\nreturn Array.isArray(items) ? ($i => $i < 0 ? (() => { throw new Error("list.remove(x): x not in list"); })() : items.splice($i, 1))(items.indexOf(val)) : items instanceof Set ? items.delete(val) : items.remove(val);\n}'
+		)
 
 
 # =============================================================================
@@ -827,8 +900,10 @@ class TestDictMethodsKnownType:
 		code = emit(fn)
 		# Dict literal becomes Map(...) call, but since it's a call (not JSNew),
 		# the type isn't known at compile time, so runtime check is used
-		assert "Map(" in code
-		assert ".keys()" in code
+		assert (
+			code
+			== 'function get_keys_1() {\nreturn Map([["a", 1]]) instanceof Map ? [...Map([["a", 1]]).keys()] : Map([["a", 1]]).keys();\n}'
+		)
 
 
 # =============================================================================
@@ -857,8 +932,10 @@ class TestDictMethodsUnknownType:
 
 		fn = safe_get.transpile()
 		code = emit(fn)
-		assert "d instanceof Map" in code
-		assert "d.get(key) ?? default" in code
+		assert (
+			code
+			== "function safe_get_1(d, key, default) {\nreturn d instanceof Map ? d.get(key) ?? default : d.get(key, default);\n}"
+		)
 
 	def test_keys_runtime_check(self):
 		@javascript
@@ -867,8 +944,10 @@ class TestDictMethodsUnknownType:
 
 		fn = get_keys.transpile()
 		code = emit(fn)
-		assert "d instanceof Map" in code
-		assert "[...d.keys()]" in code
+		assert (
+			code
+			== "function get_keys_1(d) {\nreturn d instanceof Map ? [...d.keys()] : d.keys();\n}"
+		)
 
 	def test_values_runtime_check(self):
 		@javascript
@@ -877,8 +956,10 @@ class TestDictMethodsUnknownType:
 
 		fn = get_values.transpile()
 		code = emit(fn)
-		assert "d instanceof Map" in code
-		assert "[...d.values()]" in code
+		assert (
+			code
+			== "function get_values_1(d) {\nreturn d instanceof Map ? [...d.values()] : d.values();\n}"
+		)
 
 	def test_items_runtime_check(self):
 		@javascript
@@ -887,8 +968,10 @@ class TestDictMethodsUnknownType:
 
 		fn = get_items.transpile()
 		code = emit(fn)
-		assert "d instanceof Map" in code
-		assert "[...d.entries()]" in code
+		assert (
+			code
+			== "function get_items_1(d) {\nreturn d instanceof Map ? [...d.entries()] : d.items();\n}"
+		)
 
 	def test_clear_has_array_check(self):
 		"""clear() has special array handling (length = 0)."""
@@ -899,9 +982,10 @@ class TestDictMethodsUnknownType:
 
 		fn = clear_dict.transpile()
 		code = emit(fn)
-		# Array.clear isn't standard JS so it uses length = 0
-		assert "Array.isArray(d)" in code
-		assert "d.length = 0" in code
+		assert (
+			code
+			== "function clear_dict_1(d) {\nreturn Array.isArray(d) ? [d.length = 0, undefined][1] : d.clear();\n}"
+		)
 
 
 # =============================================================================
@@ -930,8 +1014,10 @@ class TestSetMethods:
 
 		fn = remove_item.transpile()
 		code = emit(fn)
-		assert "s instanceof Set" in code
-		assert "s.delete(val)" in code
+		assert (
+			code
+			== 'function remove_item_1(s, val) {\nreturn Array.isArray(s) ? ($i => $i < 0 ? (() => { throw new Error("list.remove(x): x not in list"); })() : s.splice($i, 1))(s.indexOf(val)) : s instanceof Set ? s.delete(val) : s.remove(val);\n}'
+		)
 
 	def test_discard_runtime_check(self):
 		"""discard() -> delete()"""
@@ -942,8 +1028,10 @@ class TestSetMethods:
 
 		fn = discard_item.transpile()
 		code = emit(fn)
-		assert "s instanceof Set" in code
-		assert "s.delete(val)" in code
+		assert (
+			code
+			== "function discard_item_1(s, val) {\nreturn s instanceof Set ? s.delete(val) : s.discard(val);\n}"
+		)
 
 	def test_clear_has_array_check(self):
 		"""clear() has array handling."""
@@ -954,8 +1042,10 @@ class TestSetMethods:
 
 		fn = clear_set.transpile()
 		code = emit(fn)
-		# Array special case comes first
-		assert "Array.isArray(s)" in code
+		assert (
+			code
+			== "function clear_set_1(s) {\nreturn Array.isArray(s) ? [s.length = 0, undefined][1] : s.clear();\n}"
+		)
 
 
 # =============================================================================
@@ -975,17 +1065,10 @@ class TestMultiTypeMethodDispatch:
 
 		fn = clone.transpile()
 		code = emit(fn)
-		# Should check all types
-		assert "Array.isArray(x)" in code
-		assert "x instanceof Map" in code
-		assert "x instanceof Set" in code
-		# All transformations
-		assert "x.slice()" in code
-		assert "new Map(x.entries())" in code
-		assert "new Set(x)" in code
-		# Priority order: List (Array) checked first (outermost)
-		assert code.index("Array.isArray") < code.index("instanceof Set")
-		assert code.index("instanceof Set") < code.index("instanceof Map")
+		assert (
+			code
+			== "function clone_1(x) {\nreturn Array.isArray(x) ? x.slice() : x instanceof Set ? new Set(x) : x instanceof Map ? new Map(x.entries()) : x.copy();\n}"
+		)
 
 	def test_clear_array_vs_others(self):
 		"""clear() has special array handling, then falls through."""
@@ -996,9 +1079,10 @@ class TestMultiTypeMethodDispatch:
 
 		fn = clear_it.transpile()
 		code = emit(fn)
-		# Array.clear handled specially
-		assert "Array.isArray(x)" in code
-		assert "x.length = 0" in code
+		assert (
+			code
+			== "function clear_it_1(x) {\nreturn Array.isArray(x) ? [x.length = 0, undefined][1] : x.clear();\n}"
+		)
 
 	def test_keys_is_dict_only(self):
 		"""keys() only exists on dict, so only Map check."""
@@ -1009,10 +1093,10 @@ class TestMultiTypeMethodDispatch:
 
 		fn = get_keys.transpile()
 		code = emit(fn)
-		assert "x instanceof Map" in code
-		# No array type check
-		assert "Array.isArray" not in code
-		assert "typeof" not in code
+		assert (
+			code
+			== "function get_keys_1(x) {\nreturn x instanceof Map ? [...x.keys()] : x.keys();\n}"
+		)
 
 	def test_pop_is_list_and_set(self):
 		"""pop(idx) only on list, pop() also on set."""
@@ -1023,8 +1107,10 @@ class TestMultiTypeMethodDispatch:
 
 		fn = remove.transpile()
 		code = emit(fn)
-		assert "Array.isArray(x)" in code
-		assert "x.splice(idx, 1)[0]" in code
+		assert (
+			code
+			== "function remove_1(x, idx) {\nreturn Array.isArray(x) ? x.splice(idx, 1)[0] : x instanceof Map ? ($v => [x.delete(idx), $v][1])(x.get(idx)) : x.pop(idx);\n}"
+		)
 
 	def test_upper_is_string_only(self):
 		"""upper() only exists on string."""
@@ -1035,10 +1121,10 @@ class TestMultiTypeMethodDispatch:
 
 		fn = up.transpile()
 		code = emit(fn)
-		assert 'typeof x === "string"' in code
-		assert "x.toUpperCase()" in code
-		# No other type checks
-		assert "Array.isArray" not in code
+		assert (
+			code
+			== 'function up_1(x) {\nreturn typeof x === "string" ? x.toUpperCase() : x.upper();\n}'
+		)
 
 
 # =============================================================================
@@ -1058,13 +1144,10 @@ class TestTernaryPriority:
 
 		fn = clone.transpile()
 		code = emit(fn)
-		# Array.isArray should be outermost (checked first)
-		# instanceof Set in middle
-		# instanceof Map innermost (fallback before final x.copy())
-		array_pos = code.index("Array.isArray")
-		set_pos = code.index("instanceof Set")
-		map_pos = code.index("instanceof Map")
-		assert array_pos < set_pos < map_pos
+		assert (
+			code
+			== "function clone_1(x) {\nreturn Array.isArray(x) ? x.slice() : x instanceof Set ? new Set(x) : x instanceof Map ? new Map(x.entries()) : x.copy();\n}"
+		)
 
 	def test_remove_set_only(self):
 		"""remove/discard only exist on Set."""
@@ -1075,7 +1158,7 @@ class TestTernaryPriority:
 
 		fn = rem.transpile()
 		code = emit(fn)
-		assert "x instanceof Set" in code
-		assert "x.delete(v)" in code
-		# Fallback is regular method call
-		assert "x.remove(v)" in code
+		assert (
+			code
+			== 'function rem_1(x, v) {\nreturn Array.isArray(x) ? ($i => $i < 0 ? (() => { throw new Error("list.remove(x): x not in list"); })() : x.splice($i, 1))(x.indexOf(v)) : x instanceof Set ? x.delete(v) : x.remove(v);\n}'
+		)

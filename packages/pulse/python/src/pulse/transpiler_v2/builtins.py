@@ -26,6 +26,7 @@ from pulse.transpiler_v2.nodes import (
 	Subscript,
 	Template,
 	Ternary,
+	Throw,
 	Transformer,
 	Unary,
 	Undefined,
@@ -408,6 +409,30 @@ def emit_isinstance(*args: Any, ctx: Transpiler) -> Expr:
 	raise TranspileError("isinstance() is not supported in JavaScript transpilation")
 
 
+@transformer("Exception")
+def emit_exception(*args: Any, ctx: Transpiler) -> Expr:
+	"""Exception(msg) -> new Error(msg)"""
+	return New(Identifier("Error"), [ctx.emit_expr(a) for a in args])
+
+
+@transformer("ValueError")
+def emit_value_error(*args: Any, ctx: Transpiler) -> Expr:
+	"""ValueError(msg) -> new Error(msg)"""
+	return New(Identifier("Error"), [ctx.emit_expr(a) for a in args])
+
+
+@transformer("TypeError")
+def emit_type_error(*args: Any, ctx: Transpiler) -> Expr:
+	"""TypeError(msg) -> new TypeError(msg)"""
+	return New(Identifier("TypeError"), [ctx.emit_expr(a) for a in args])
+
+
+@transformer("RuntimeError")
+def emit_runtime_error(*args: Any, ctx: Transpiler) -> Expr:
+	"""RuntimeError(msg) -> new Error(msg)"""
+	return New(Identifier("Error"), [ctx.emit_expr(a) for a in args])
+
+
 # Registry of builtin transformers
 # Note: @transformer decorator returns Transformer but lies about the type
 # for ergonomic reasons. These are all Transformer instances at runtime.
@@ -441,6 +466,11 @@ BUILTINS: dict[str, Transformer[Any]] = dict(
 	sum=emit_sum,
 	divmod=emit_divmod,
 	isinstance=emit_isinstance,
+	# Exception types
+	Exception=emit_exception,
+	ValueError=emit_value_error,
+	TypeError=emit_type_error,
+	RuntimeError=emit_runtime_error,
 )  # pyright: ignore[reportAssignmentType]
 
 
@@ -533,9 +563,22 @@ class StringMethods(BuiltinMethods):
 		)
 		return Binary(left, "+", right)
 
-	def split(self, sep: Expr) -> Expr | None:
-		"""str.split() doesn't need transformation."""
-		return None
+	def split(self, sep: Expr | None = None) -> Expr | None:
+		"""str.split(sep) -> str.split(sep) or special whitespace handling.
+
+		Python's split() without args splits on whitespace and removes empties:
+		"a  b".split() -> ["a", "b"]
+
+		JavaScript's split() without args returns the whole string:
+		"a  b".split() -> ["a  b"]
+
+		Fix: str.trim().split(/\\s+/)
+		"""
+		if sep is None:
+			# Python's default: split on whitespace and filter empties
+			trimmed = Call(Member(self.this, "trim"), [])
+			return Call(Member(trimmed, "split"), [Identifier(r"/\s+/")])
+		return None  # Fall through for explicit separator
 
 	def join(self, iterable: Expr) -> Expr:
 		"""str.join(iterable) -> iterable.join(str)"""
@@ -671,11 +714,27 @@ class ListMethods(BuiltinMethods):
 		)
 
 	def remove(self, value: Expr) -> Expr:
-		"""list.remove(value) -> list.splice(list.indexOf(value), 1)"""
-		return Call(
-			Member(self.this, "splice"),
-			[Call(Member(self.this, "indexOf"), [value]), Literal(1)],
+		"""list.remove(value) -> safe removal with error on not found.
+
+		Python raises ValueError if value not in list. We generate:
+		(($i) => $i < 0 ? (() => { throw new Error(...) })() : list.splice($i, 1))(list.indexOf(value))
+		"""
+		idx = Identifier("$i")
+		index_call = Call(Member(self.this, "indexOf"), [value])
+		# IIFE that throws using Arrow with statement body
+		throw_iife = Call(
+			Arrow(
+				[],
+				[Throw(New(Identifier("Error"), [Literal("list.remove(x): x not in list")]))],
+			),
+			[],
 		)
+		safe_splice = Ternary(
+			Binary(idx, "<", Literal(0)),
+			throw_iife,
+			Call(Member(self.this, "splice"), [idx, Literal(1)]),
+		)
+		return Call(Arrow(["$i"], safe_splice), [index_call])
 
 
 LIST_METHODS = {k for k in ListMethods.__dict__ if not k.startswith("_")}

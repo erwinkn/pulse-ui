@@ -10,25 +10,11 @@ from pulse.hooks.core import HookContext
 from pulse.transpiler_v2 import Import
 from pulse.transpiler_v2.function import Constant, JsFunction, JsxFunction
 from pulse.transpiler_v2.nodes import (
-	Array,
-	Arrow,
-	Binary,
-	Call,
 	Element,
 	Expr,
-	Identifier,
-	Jsx,
 	Literal,
-	Member,
-	New,
-	Object,
 	Primitive,
 	PulseNode,
-	Subscript,
-	Template,
-	Ternary,
-	Unary,
-	Undefined,
 	Value,
 )
 from pulse.transpiler_v2.vdom import (
@@ -41,7 +27,6 @@ from pulse.transpiler_v2.vdom import (
 	UpdatePropsDelta,
 	UpdatePropsOperation,
 	VDOMElement,
-	VDOMExpr,
 	VDOMNode,
 	VDOMOperation,
 	VDOMPropValue,
@@ -155,7 +140,7 @@ class Renderer:
 			json_value = coerce_json(cast(JsonCoercible, node.value), path)
 			return json_value, json_value
 		if isinstance(node, Expr):
-			return self.render_expr(node), node
+			return node.render(), node
 		if is_json_primitive(node):
 			return node, node
 		raise TypeError(f"Unsupported node type: {type(node).__name__}")
@@ -442,7 +427,7 @@ class Renderer:
 					normalized = cast(dict[str, NormalizedPropValue], current.copy())
 				normalized[key] = value
 				if not (isinstance(old_value, Expr) and values_equal(old_value, value)):
-					updated[key] = self.render_expr(value)
+					updated[key] = value.render()
 				continue
 
 			if callable(value):
@@ -451,8 +436,8 @@ class Renderer:
 					unmount_element(old_value)
 				if normalized is None:
 					normalized = cast(dict[str, NormalizedPropValue], current.copy())
-				normalized[key] = cast(CallbackFn, value)
-				register_callback(self.callbacks, prop_path, cast(CallbackFn, value))
+				normalized[key] = value
+				register_callback(self.callbacks, prop_path, value)
 				if not callable(old_value):
 					updated[key] = CALLBACK_PLACEHOLDER
 				continue
@@ -511,84 +496,6 @@ class Renderer:
 				+ "(Import/JsFunction/Constant/JsxFunction)."
 			)
 		return ref["key"]
-
-	def render_expr(self, expr: Expr) -> VDOMExpr:
-		if ref := registry_ref(expr):
-			return ref
-		if isinstance(expr, Jsx):
-			return self.render_expr(expr.expr)
-		if isinstance(expr, Identifier):
-			return {"t": "id", "name": expr.name}
-		if isinstance(expr, Literal):
-			if not is_json_primitive(expr.value):
-				raise TypeError("Literal value must be JSON-primitive")
-			return {"t": "lit", "value": expr.value}
-		if isinstance(expr, Undefined):
-			return {"t": "undef"}
-		if isinstance(expr, Array):
-			return {"t": "array", "items": [self.render_expr(e) for e in expr.elements]}
-		if isinstance(expr, Object):
-			return {
-				"t": "object",
-				"props": {k: self.render_expr(v) for k, v in expr.props},
-			}
-		if isinstance(expr, Member):
-			return {
-				"t": "member",
-				"obj": self.render_expr(expr.obj),
-				"prop": expr.prop,
-			}
-		if isinstance(expr, Subscript):
-			return {
-				"t": "sub",
-				"obj": self.render_expr(expr.obj),
-				"key": self.render_expr(expr.key),
-			}
-		if isinstance(expr, Call):
-			return {
-				"t": "call",
-				"callee": self.render_expr(expr.callee),
-				"args": [self.render_expr(a) for a in expr.args],
-			}
-		if isinstance(expr, Unary):
-			if expr.op == "await":
-				raise TypeError("await is not supported in VDOM expressions")
-			return {"t": "unary", "op": expr.op, "arg": self.render_expr(expr.arg)}
-		if isinstance(expr, Binary):
-			return {
-				"t": "binary",
-				"op": expr.op,
-				"left": self.render_expr(expr.left),
-				"right": self.render_expr(expr.right),
-			}
-		if isinstance(expr, Ternary):
-			return {
-				"t": "ternary",
-				"cond": self.render_expr(expr.cond),
-				"then": self.render_expr(expr.then),
-				"else_": self.render_expr(expr.else_),
-			}
-		if isinstance(expr, Template):
-			parts: list[str | VDOMExpr] = []
-			for part in expr.parts:
-				if isinstance(part, str):
-					parts.append(part)
-				else:
-					parts.append(self.render_expr(part))
-			return {"t": "template", "parts": parts}
-		if isinstance(expr, Arrow):
-			return {
-				"t": "arrow",
-				"params": list(expr.params),
-				"body": self.render_expr(expr.body),
-			}
-		if isinstance(expr, New):
-			return {
-				"t": "new",
-				"ctor": self.render_expr(expr.ctor),
-				"args": [self.render_expr(a) for a in expr.args],
-			}
-		raise TypeError(f"Unsupported expression for VDOM: {type(expr).__name__}")
 
 	# ------------------------------------------------------------------
 	# Unmount helper

@@ -106,7 +106,7 @@ class TestTagsModule:
 		"""Fragment produces <>...</> JSX."""
 		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
 
-		fragment = TagExpr("$$fragment")
+		fragment = TagExpr("")
 
 		@javascript
 		def render() -> Any:
@@ -132,14 +132,20 @@ class TestTagsModule:
 			code == 'function render_1() {\nreturn <li key="item-1">{"item"}</li>;\n}'
 		)
 
-	def test_tag_expr_cannot_emit_directly(self):
-		"""TagExpr raises when emitted directly (not called)."""
+	def test_tag_expr_emit_directly(self):
+		"""TagExpr emits as string literal when not called (for render props)."""
 		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
 
 		div = TagExpr("div")
 		out: list[str] = []
-		with pytest.raises(TypeError, match="must be called"):
-			div.emit(out)
+		div.emit(out)
+		assert out == ['"div"']
+
+		# Fragment emits as empty string
+		fragment = TagExpr("")
+		out = []
+		fragment.emit(out)
+		assert out == ['""']
 
 	def test_pytags_module_registration(self):
 		"""PyTags registers all standard tags."""
@@ -633,3 +639,68 @@ class TestJsxStandalone:
 
 		# emit should delegate to the import
 		assert emit(jsx_button) == button.js_name
+
+
+# =============================================================================
+# Expression Keys in JSX
+# =============================================================================
+
+
+class TestExpressionKeys:
+	"""Test expression keys in JSX elements."""
+
+	def test_numeric_key(self):
+		"""Numeric keys are supported."""
+		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
+
+		li = TagExpr("li")
+
+		@javascript
+		def render(index: int) -> Any:
+			return li("item", key=index)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "key={index}" in code
+
+	def test_variable_key(self):
+		"""Variable keys are supported."""
+		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
+
+		li = TagExpr("li")
+
+		@javascript
+		def render(item_id: str) -> Any:
+			return li("item", key=item_id)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "key={item_id}" in code
+
+	def test_expression_key(self):
+		"""Expression keys (like member access) are supported."""
+		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
+
+		li = TagExpr("li")
+
+		@javascript
+		def render(item: Any) -> Any:
+			return li(item.name, key=item.id)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "key={item.id}" in code
+
+	def test_fstring_key(self):
+		"""F-string keys are supported."""
+		from pulse.transpiler_v2.modules.pulse.tags import TagExpr
+
+		li = TagExpr("li")
+
+		@javascript
+		def render(prefix: str, index: int) -> Any:
+			return li("item", key=f"{prefix}-{index}")
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "key={`${prefix}-${index}`}" in code

@@ -38,6 +38,8 @@ from pulse.transpiler_v2.nodes import (
 	Subscript,
 	Template,
 	Ternary,
+	Throw,
+	TryStmt,
 	Unary,
 	While,
 )
@@ -49,12 +51,19 @@ ALLOWED_BINOPS: dict[type[ast.operator], str] = {
 	ast.Div: "/",
 	ast.Mod: "%",
 	ast.Pow: "**",
+	# Bitwise operators
+	ast.BitAnd: "&",
+	ast.BitOr: "|",
+	ast.BitXor: "^",
+	ast.LShift: "<<",
+	ast.RShift: ">>",
 }
 
 ALLOWED_UNOPS: dict[type[ast.unaryop], str] = {
 	ast.UAdd: "+",
 	ast.USub: "-",
 	ast.Not: "!",
+	ast.Invert: "~",  # Bitwise NOT
 }
 
 ALLOWED_CMPOPS: dict[type[ast.cmpop], str] = {
@@ -310,6 +319,12 @@ class Transpiler:
 		if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
 			return self._emit_nested_function(node)
 
+		if isinstance(node, ast.Try):
+			return self._emit_try(node)
+
+		if isinstance(node, ast.Raise):
+			return self._emit_raise(node)
+
 		raise TranspileError(f"Unsupported statement: {type(node).__name__}", node=node)
 
 	def _emit_unpacking_assign(
@@ -393,6 +408,42 @@ class Transpiler:
 		is_async = isinstance(node, ast.AsyncFunctionDef)
 		fn = Function(params, stmts, is_async=is_async)
 		return Assign(name, fn, declare="const")
+
+	def _emit_try(self, node: ast.Try) -> Stmt:
+		"""Emit a try/except/finally statement."""
+		body = [self.emit_stmt(s) for s in node.body]
+
+		# Handle except handlers - JS only supports single catch
+		catch_param: str | None = None
+		catch_body: list[Stmt] | None = None
+
+		if node.handlers:
+			if len(node.handlers) > 1:
+				raise TranspileError(
+					"Multiple except clauses not supported; JS only has one catch block",
+					node=node.handlers[1],
+				)
+			handler = node.handlers[0]
+			if handler.name:
+				catch_param = handler.name
+				self.locals.add(catch_param)
+			catch_body = [self.emit_stmt(s) for s in handler.body]
+
+		# Handle finally
+		finally_body: list[Stmt] | None = None
+		if node.finalbody:
+			finally_body = [self.emit_stmt(s) for s in node.finalbody]
+
+		return TryStmt(body, catch_param, catch_body, finally_body)
+
+	def _emit_raise(self, node: ast.Raise) -> Stmt:
+		"""Emit a raise statement as throw."""
+		if node.exc is None:
+			raise TranspileError(
+				"Bare raise not supported; use explicit 'raise e' instead", node=node
+			)
+
+		return Throw(self.emit_expr(node.exc))
 
 	# --- Expressions ---------------------------------------------------------
 
@@ -550,6 +601,16 @@ class Transpiler:
 	def _emit_binop(self, node: ast.BinOp) -> Expr:
 		"""Emit a binary operation."""
 		op = type(node.op)
+
+		# Special case: floor division -> Math.floor(x / y)
+		if op is ast.FloorDiv:
+			left = self.emit_expr(node.left)
+			right = self.emit_expr(node.right)
+			return Call(
+				Member(Identifier("Math"), "floor"),
+				[Binary(left, "/", right)],
+			)
+
 		if op not in ALLOWED_BINOPS:
 			raise TranspileError(
 				f"Unsupported binary operator: {op.__name__}", node=node
@@ -788,6 +849,7 @@ class Transpiler:
 		alt_form = match.group(3)
 		zero_pad = match.group(4)
 		width_str = match.group(5)
+		grouping = match.group(6) or ""
 		precision_str = match.group(8)
 		type_char = match.group(9) or ""
 
@@ -855,9 +917,45 @@ class Transpiler:
 				),
 				[],
 			)
+		elif type_char == "g":
+			# General format: uses toPrecision
+			prec = precision if precision is not None else 6
+			expr = Call(Member(expr, "toPrecision"), [Literal(prec)])
+		elif type_char == "G":
+			# General format uppercase
+			prec = precision if precision is not None else 6
+			expr = Call(
+				Member(
+					Call(Member(expr, "toPrecision"), [Literal(prec)]), "toUpperCase"
+				),
+				[],
+			)
+		elif type_char == "%":
+			# Percentage: multiply by 100, format as fixed, append %
+			prec = precision if precision is not None else 6
+			multiplied = Binary(expr, "*", Literal(100))
+			fixed = Call(Member(multiplied, "toFixed"), [Literal(prec)])
+			expr = Binary(fixed, "+", Literal("%"))
+		elif type_char == "c":
+			# Character: convert code point to character
+			expr = Call(Member(Identifier("String"), "fromCharCode"), [expr])
+		elif type_char == "n":
+			# Locale-aware number format
+			expr = Call(Member(expr, "toLocaleString"), [])
 		elif type_char == "s" or type_char == "":
 			if type_char == "s" or (width is not None and align):
 				expr = Call(Identifier("String"), [expr])
+
+		# Apply thousand separator grouping
+		if grouping == ",":
+			# Use toLocaleString with en-US to get comma separators
+			expr = Call(Member(expr, "toLocaleString"), [Literal("en-US")])
+		elif grouping == "_":
+			# Use toLocaleString then replace commas with underscores
+			locale_expr = Call(Member(expr, "toLocaleString"), [Literal("en-US")])
+			expr = Call(
+				Member(locale_expr, "replace"), [Identifier(r"/,/g"), Literal("_")]
+			)
 
 		# Apply width/padding
 		if width is not None:

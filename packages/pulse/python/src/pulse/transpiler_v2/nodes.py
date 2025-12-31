@@ -23,6 +23,7 @@ from typing import Literal as Lit
 
 from pulse.env import env
 from pulse.transpiler_v2.errors import TranspileError
+from pulse.transpiler_v2.vdom import VDOMExpr
 
 if TYPE_CHECKING:
 	from pulse.transpiler_v2.transpiler import Transpiler
@@ -123,18 +124,18 @@ class Expr(ABC):
 		return Subscript(self, ctx.emit_expr(key))
 
 	# -------------------------------------------------------------------------
-	# Serialization for client-side rendering (stub for now)
+	# Serialization for client-side rendering
 	# -------------------------------------------------------------------------
 
-	def render(self) -> dict[str, Any]:
-		"""Serialize this node for client-side rendering.
+	@abstractmethod
+	def render(self) -> VDOMExpr:
+		"""Serialize this expression node for client-side rendering.
 
-		Override in concrete serializable nodes.
-		Raises NotImplementedError for nodes that cannot be serialized.
+		Returns a VDOMExpr dict that can be JSON-serialized and evaluated
+		on the client. Override in each concrete Expr subclass.
+
+		Raises TypeError for nodes that cannot be serialized (e.g., Transformer).
 		"""
-		raise NotImplementedError(
-			f"{type(self).__name__} cannot be serialized for client rendering"
-		)
 
 	# -------------------------------------------------------------------------
 	# Python dunder methods for natural syntax in @javascript functions
@@ -329,6 +330,10 @@ class ExprWrapper(Expr):
 		self.expr.emit(out)
 
 	@override
+	def render(self) -> VDOMExpr:
+		return self.expr.render()
+
+	@override
 	def precedence(self) -> int:
 		return self.expr.precedence()
 
@@ -401,14 +406,15 @@ class Jsx(ExprWrapper):
 		children: list[Node] = [ctx.emit_expr(a) for a in args]
 
 		props: dict[str, Prop] = {}
-		key: str | None = None
+		key: str | Expr | None = None
 		for k, v in kwargs.items():
 			v = ctx.emit_expr(v)
 			if k == "key":
+				# Accept any expression as key for transpilation
 				if isinstance(v, Literal) and isinstance(v.value, str):
-					key = v.value
+					key = v.value  # Optimize string literals
 				else:
-					raise TranspileError("key prop must be a string literal")
+					key = v  # Keep as expression
 			else:
 				props[k] = v
 
@@ -420,7 +426,7 @@ class Jsx(ExprWrapper):
 		)
 
 	@override
-	def __call__(  # pyright: ignore[reportIncompatibleMethodOverride]
+	def __call__(
 		self, *args: Any, **kwargs: Any
 	) -> Element:
 		"""Allow calling Jsx in Python code.
@@ -484,6 +490,10 @@ class Value(Expr):
 	def emit(self, out: list[str]) -> None:
 		_emit_value(self.value, out)
 
+	@override
+	def render(self) -> VDOMExpr:
+		raise TypeError("Value cannot be rendered as VDOMExpr; use coerce_json instead")
+
 
 class Element(Expr):
 	"""A React element: built-in tag, fragment, or client component.
@@ -500,14 +510,14 @@ class Element(Expr):
 	tag: str | Expr
 	props: dict[str, Any] | None
 	children: Sequence[Node] | None
-	key: str | None
+	key: str | Expr | None
 
 	def __init__(
 		self,
 		tag: str | Expr,
 		props: dict[str, Any] | None = None,
 		children: Sequence[Node] | None = None,
-		key: str | None = None,
+		key: str | Expr | None = None,
 	) -> None:
 		self.tag = tag
 		self.props = props
@@ -529,10 +539,19 @@ class Element(Expr):
 		if self.key is None and self.props:
 			self.key = self.props.pop("key", None)
 
-		is_key_str = isinstance(key, str)
-		is_key_lit_str = isinstance(key, Literal) and isinstance(key.value, str)
-		if key is not None and not (is_key_str or is_key_lit_str):
-			raise ValueError("Non-string keys are not supported yet")
+	def _emit_key(self, out: list[str]) -> None:
+		"""Emit key prop (string or expression)."""
+		if self.key is None:
+			return
+		if isinstance(self.key, str):
+			out.append('key="')
+			out.append(_escape_jsx_attr(self.key))
+			out.append('"')
+		else:
+			# Expression key: key={expr}
+			out.append("key={")
+			self.key.emit(out)
+			out.append("}")
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -540,9 +559,9 @@ class Element(Expr):
 		if self.tag == "":
 			if self.key is not None:
 				# Fragment with key needs explicit Fragment component
-				out.append('<Fragment key="')
-				out.append(_escape_jsx_attr(self.key))
-				out.append('">')
+				out.append("<Fragment ")
+				self._emit_key(out)
+				out.append(">")
 				for c in self.children or []:
 					_emit_jsx_child(c, out)
 				out.append("</Fragment>")
@@ -564,9 +583,7 @@ class Element(Expr):
 		# Build props into a separate buffer to check if empty
 		props_out: list[str] = []
 		if self.key is not None:
-			props_out.append('key="')
-			props_out.append(_escape_jsx_attr(self.key))
-			props_out.append('"')
+			self._emit_key(props_out)
 		if self.props:
 			for name, value in self.props.items():
 				if props_out:
@@ -665,6 +682,23 @@ class Element(Expr):
 			props=self.props,
 			children=list(children),
 			key=self.key,
+		)
+
+	@override
+	def render(self) -> VDOMExpr:
+		"""Element rendering is handled by Renderer.render_node(), not render().
+
+		This method validates render-time constraints and raises TypeError
+		because Element produces VDOMElement, not VDOMExpr.
+		"""
+		# Validate key is string or numeric (not arbitrary Expr) during rendering
+		if self.key is not None and not isinstance(self.key, (str, int)):
+			raise TypeError(
+				f"Element key must be a string or int for rendering, got {type(self.key).__name__}. " +
+				"Expression keys are only valid during transpilation (emit)."
+			)
+		raise TypeError(
+			"Element cannot be rendered as VDOMExpr; use Renderer.render_node() instead"
 		)
 
 
@@ -833,6 +867,10 @@ class Identifier(Expr):
 	def emit(self, out: list[str]) -> None:
 		out.append(self.name)
 
+	@override
+	def render(self) -> VDOMExpr:
+		return {"t": "id", "name": self.name}
+
 
 @dataclass(slots=True)
 class Literal(Expr):
@@ -853,6 +891,10 @@ class Literal(Expr):
 		else:
 			out.append(str(self.value))
 
+	@override
+	def render(self) -> VDOMExpr:
+		return {"t": "lit", "value": self.value}
+
 
 class Undefined(Expr):
 	"""JS undefined literal.
@@ -866,6 +908,10 @@ class Undefined(Expr):
 	@override
 	def emit(self, out: list[str]) -> None:
 		out.append("undefined")
+
+	@override
+	def render(self) -> VDOMExpr:
+		return {"t": "undef"}
 
 
 # Singleton instance for convenience
@@ -887,6 +933,10 @@ class Array(Expr):
 			e.emit(out)
 		out.append("]")
 
+	@override
+	def render(self) -> VDOMExpr:
+		return {"t": "array", "items": [e.render() for e in self.elements]}
+
 
 @dataclass(slots=True)
 class Object(Expr):
@@ -906,6 +956,10 @@ class Object(Expr):
 			v.emit(out)
 		out.append("}")
 
+	@override
+	def render(self) -> VDOMExpr:
+		return {"t": "object", "props": {k: v.render() for k, v in self.props}}
+
 
 @dataclass(slots=True)
 class Member(Expr):
@@ -919,6 +973,10 @@ class Member(Expr):
 		_emit_primary(self.obj, out)
 		out.append(".")
 		out.append(self.prop)
+
+	@override
+	def render(self) -> VDOMExpr:
+		return {"t": "member", "obj": self.obj.render(), "prop": self.prop}
 
 
 @dataclass(slots=True)
@@ -934,6 +992,10 @@ class Subscript(Expr):
 		out.append("[")
 		self.key.emit(out)
 		out.append("]")
+
+	@override
+	def render(self) -> VDOMExpr:
+		return {"t": "sub", "obj": self.obj.render(), "key": self.key.render()}
 
 
 @dataclass(slots=True)
@@ -952,6 +1014,14 @@ class Call(Expr):
 				out.append(", ")
 			a.emit(out)
 		out.append(")")
+
+	@override
+	def render(self) -> VDOMExpr:
+		return {
+			"t": "call",
+			"callee": self.callee.render(),
+			"args": [a.render() for a in self.args],
+		}
 
 
 @dataclass(slots=True)
@@ -975,6 +1045,12 @@ class Unary(Expr):
 		else:
 			out.append(self.op)
 		_emit_paren(self.operand, self.op, "unary", out)
+
+	@override
+	def render(self) -> VDOMExpr:
+		if self.op == "await":
+			raise TypeError("await is not supported in VDOM expressions")
+		return {"t": "unary", "op": self.op, "arg": self.operand.render()}
 
 
 @dataclass(slots=True)
@@ -1008,6 +1084,15 @@ class Binary(Expr):
 		out.append(" ")
 		_emit_paren(self.right, self.op, "right", out)
 
+	@override
+	def render(self) -> VDOMExpr:
+		return {
+			"t": "binary",
+			"op": self.op,
+			"left": self.left.render(),
+			"right": self.right.render(),
+		}
+
 
 @dataclass(slots=True)
 class Ternary(Expr):
@@ -1029,13 +1114,33 @@ class Ternary(Expr):
 		out.append(" : ")
 		self.else_.emit(out)
 
+	@override
+	def render(self) -> VDOMExpr:
+		return {
+			"t": "ternary",
+			"cond": self.cond.render(),
+			"then": self.then.render(),
+			"else_": self.else_.render(),
+		}
+
 
 @dataclass(slots=True)
 class Arrow(Expr):
-	"""JS arrow function: (x) => expr or (x) => { ... }"""
+	"""JS arrow function: (x) => expr or (x) => { ... }
+
+	body can be:
+	- Expr: expression body, emits as `() => expr`
+	- Sequence[Stmt]: statement body, emits as `() => { stmt1; stmt2; }`
+	"""
 
 	params: Sequence[str]
-	body: Expr
+	body: Expr | Sequence[Stmt]
+
+	@override
+	def precedence(self) -> int:
+		# Arrow functions have very low precedence (assignment level)
+		# This ensures they get wrapped in parens when used as callee in Call
+		return 3
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -1046,7 +1151,20 @@ class Arrow(Expr):
 			out.append(", ".join(self.params))
 			out.append(")")
 		out.append(" => ")
-		self.body.emit(out)
+		if isinstance(self.body, Expr):
+			self.body.emit(out)
+		else:
+			out.append("{ ")
+			for stmt in self.body:
+				stmt.emit(out)
+				out.append(" ")
+			out.append("}")
+
+	@override
+	def render(self) -> VDOMExpr:
+		if not isinstance(self.body, Expr):
+			raise TypeError("Arrow with statement body cannot be rendered as VDOMExpr")
+		return {"t": "arrow", "params": list(self.params), "body": self.body.render()}
 
 
 @dataclass(slots=True)
@@ -1071,6 +1189,16 @@ class Template(Expr):
 				out.append("}")
 		out.append("`")
 
+	@override
+	def render(self) -> VDOMExpr:
+		rendered_parts: list[str | VDOMExpr] = []
+		for p in self.parts:
+			if isinstance(p, str):
+				rendered_parts.append(p)
+			else:
+				rendered_parts.append(p.render())
+		return {"t": "template", "parts": rendered_parts}
+
 
 @dataclass(slots=True)
 class Spread(Expr):
@@ -1082,6 +1210,10 @@ class Spread(Expr):
 	def emit(self, out: list[str]) -> None:
 		out.append("...")
 		self.expr.emit(out)
+
+	@override
+	def render(self) -> VDOMExpr:
+		raise TypeError("Spread cannot be rendered as VDOMExpr directly")
 
 
 @dataclass(slots=True)
@@ -1101,6 +1233,14 @@ class New(Expr):
 				out.append(", ")
 			a.emit(out)
 		out.append(")")
+
+	@override
+	def render(self) -> VDOMExpr:
+		return {
+			"t": "new",
+			"ctor": self.ctor.render(),
+			"args": [a.render() for a in self.args],
+		}
 
 
 class TransformerFn(Protocol):
@@ -1150,6 +1290,11 @@ class Transformer(Expr, Generic[_F]):
 	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
 		label = self.name or "Transformer"
 		raise TypeError(f"{label} cannot be subscripted")
+
+	@override
+	def render(self) -> VDOMExpr:
+		label = self.name or "Transformer"
+		raise TypeError(f"{label} cannot be rendered - must be called")
 
 
 @overload
@@ -1381,6 +1526,44 @@ class Throw(Stmt):
 
 
 @dataclass(slots=True)
+class TryStmt(Stmt):
+	"""JS try/catch/finally statement.
+
+	try { body } catch (param) { handler } finally { finalizer }
+	"""
+
+	body: Sequence[Stmt]
+	catch_param: str | None = None  # None for bare except
+	catch_body: Sequence[Stmt] | None = None
+	finally_body: Sequence[Stmt] | None = None
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("try {\n")
+		for stmt in self.body:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
+
+		if self.catch_body is not None:
+			if self.catch_param:
+				out.append(f" catch ({self.catch_param}) {{\n")
+			else:
+				out.append(" catch {\n")
+			for stmt in self.catch_body:
+				stmt.emit(out)
+				out.append("\n")
+			out.append("}")
+
+		if self.finally_body is not None:
+			out.append(" finally {\n")
+			for stmt in self.finally_body:
+				stmt.emit(out)
+				out.append("\n")
+			out.append("}")
+
+
+@dataclass(slots=True)
 class Function(Expr):
 	"""JS function: function name(params) { ... } or async function ...
 
@@ -1407,6 +1590,10 @@ class Function(Expr):
 			stmt.emit(out)
 			out.append("\n")
 		out.append("}")
+
+	@override
+	def render(self) -> VDOMExpr:
+		raise TypeError("Function cannot be rendered as VDOMExpr")
 
 
 Node: TypeAlias = Primitive | Expr | PulseNode

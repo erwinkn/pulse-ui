@@ -465,6 +465,68 @@ class TestArrowEmit:
 		outer = Arrow(["x"], inner)
 		assert emit(outer) == "x => y => y"
 
+	def test_single_statement(self):
+		from pulse.transpiler_v2.nodes import Return
+
+		arrow = Arrow([], [Return(Literal(42))])
+		assert emit(arrow) == "() => { return 42; }"
+
+	def test_multiple_statements(self):
+		from pulse.transpiler_v2.nodes import Assign, Return
+
+		arrow = Arrow(
+			["x"],
+			[
+				Assign("y", Binary(Identifier("x"), "*", Literal(2)), declare="const"),
+				Return(Identifier("y")),
+			],
+		)
+		assert emit(arrow) == "x => { const y = x * 2; return y; }"
+
+	def test_throw_statement(self):
+		from pulse.transpiler_v2.nodes import New, Throw
+
+		arrow = Arrow([], [Throw(New(Identifier("Error"), [Literal("oops")]))])
+		assert emit(arrow) == '() => { throw new Error("oops"); }'
+
+	def test_throw_iife_pattern(self):
+		"""Test IIFE pattern used for throwing in expressions."""
+		from pulse.transpiler_v2.nodes import New, Throw
+
+		# (() => { throw new Error(...); })()
+		throw_arrow = Arrow(
+			[], [Throw(New(Identifier("Error"), [Literal("not found")]))]
+		)
+		iife = Call(throw_arrow, [])
+		assert emit(iife) == '(() => { throw new Error("not found"); })()'
+
+	def test_statement_body_with_multiple_params(self):
+		from pulse.transpiler_v2.nodes import Return
+
+		arrow = Arrow(
+			["a", "b"], [Return(Binary(Identifier("a"), "+", Identifier("b")))]
+		)
+		assert emit(arrow) == "(a, b) => { return a + b; }"
+
+	def test_if_statement_in_arrow(self):
+		from pulse.transpiler_v2.nodes import If, Return
+
+		arrow = Arrow(
+			["x"],
+			[
+				If(
+					Binary(Identifier("x"), ">", Literal(0)),
+					[Return(Literal("positive"))],
+					[Return(Literal("non-positive"))],
+				)
+			],
+		)
+		result = emit(arrow)
+		assert "x => {" in result
+		assert "if (x > 0)" in result
+		assert 'return "positive";' in result
+		assert 'return "non-positive";' in result
+
 
 # =============================================================================
 # Template Literal Tests

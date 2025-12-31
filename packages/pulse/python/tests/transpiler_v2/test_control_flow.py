@@ -179,3 +179,108 @@ class TestMultiStatement:
 			code
 			== "function unpack_1(t) {\nconst $tmp0 = t;\nlet a = $tmp0[0];\nlet b = $tmp0[1];\nreturn a + b;\n}"
 		)
+
+
+# =============================================================================
+# Exception Handling
+# =============================================================================
+
+
+class TestExceptionHandling:
+	"""Test try/except/finally/raise transpilation."""
+
+	def test_simple_try_except(self):
+		"""Basic try/except block."""
+
+		@javascript
+		def safe_parse(s: str) -> int:
+			try:
+				return int(s)
+			except:
+				return 0
+
+		fn = safe_parse.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function safe_parse_1(s) {\ntry {\nreturn parseInt(s);\n} catch {\nreturn 0;\n}\n}"
+		)
+
+	def test_try_except_with_variable(self):
+		"""Try/except with exception variable."""
+
+		@javascript
+		def safe_divide(a: int, b: int) -> int:
+			try:
+				return a // b
+			except Exception as e:
+				print(e)
+				return 0
+
+		fn = safe_divide.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function safe_divide_1(a, b) {\ntry {\nreturn Math.floor(a / b);\n} catch (e) {\nconsole.log(e);\nreturn 0;\n}\n}"
+		)
+
+	def test_try_finally(self):
+		"""Try/finally without except."""
+
+		@javascript
+		def cleanup(x: int) -> int:
+			try:
+				return x * 2
+			finally:
+				print("done")
+
+		fn = cleanup.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function cleanup_1(x) {\ntry {\nreturn x * 2;\n} finally {\nconsole.log("done");\n}\n}'
+		)
+
+	def test_try_except_finally(self):
+		"""Try/except/finally block."""
+
+		@javascript
+		def full_block(x: int) -> int:
+			try:
+				return x // 0
+			except:
+				return -1
+			finally:
+				print("cleanup")
+
+		fn = full_block.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function full_block_1(x) {\ntry {\nreturn Math.floor(x / 0);\n} catch {\nreturn -1;\n} finally {\nconsole.log("cleanup");\n}\n}'
+		)
+
+	def test_raise_error(self):
+		"""Raise an error."""
+
+		@javascript
+		def fail():
+			raise Exception("something went wrong")
+
+		fn = fail.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function fail_1() {\nthrow new Error("something went wrong");\n}'
+		)
+
+	def test_raise_with_variable(self):
+		"""Raise with a variable."""
+
+		@javascript
+		def rethrow(e: Exception):
+			raise e
+
+		fn = rethrow.transpile()
+		code = emit(fn)
+		assert code == "function rethrow_1(e) {\nthrow e;\n}"

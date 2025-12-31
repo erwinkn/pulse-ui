@@ -38,6 +38,7 @@ from pulse.transpiler_v2.nodes import (
 	to_js_identifier,
 )
 from pulse.transpiler_v2.transpiler import Transpiler
+from pulse.transpiler_v2.vdom import RegistryRef
 
 Args = TypeVarTuple("Args")
 P = ParamSpec("P")
@@ -108,6 +109,11 @@ class Constant(Expr):
 	def emit(self, out: list[str]) -> None:
 		"""Emit the unique JS identifier."""
 		out.append(self.js_name)
+
+	@override
+	def render(self) -> RegistryRef:
+		"""Render as a registry reference."""
+		return {"t": "ref", "key": self.id}
 
 	@staticmethod
 	def wrap(value: Any, name: str = "") -> "Constant":
@@ -210,6 +216,11 @@ class JsFunction(Expr, Generic[*Args, R]):
 		"""Emit this function as its unique JS identifier."""
 		out.append(self.js_name)
 
+	@override
+	def render(self) -> RegistryRef:
+		"""Render as a registry reference."""
+		return {"t": "ref", "key": self.id}
+
 	def transpile(self) -> Function:
 		"""Transpile this function to a v2 Function node.
 
@@ -232,7 +243,7 @@ class JsFunction(Expr, Generic[*Args, R]):
 			# Arrow - wrap in Function with name
 			result = Function(
 				params=list(result.params),
-				body=[Return(result.body)],
+				body=[Return(result.body)] if isinstance(result.body, Expr) else result.body,
 				name=self.js_name,
 				is_async=False,
 			)
@@ -290,6 +301,11 @@ class JsxFunction(Expr, Generic[P, R]):
 	def emit(self, out: list[str]) -> None:
 		"""Emit this function as its unique JS identifier."""
 		out.append(self.js_name)
+
+	@override
+	def render(self) -> RegistryRef:
+		"""Render as a registry reference."""
+		return {"t": "ref", "key": self.id}
 
 	def transpile(self) -> Function:
 		"""Transpile this JSX function to a React component.

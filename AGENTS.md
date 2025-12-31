@@ -8,6 +8,11 @@
 - Avoid single-use helper functions, unless the goal is to have single main function with clear control that performs multiple tasks in sequence by calling helpers
 - Avoid use of `typing.TYPE_CHECKING` and non-global imports unless they are necessary to avoid an import cycle
 
+## Tools
+- Always use context7 when I need code generation, setup or configuration steps, or
+library/API documentation. This means you should automatically use the Context7 MCP
+tools to resolve library id and get library docs without me having to explicitly ask.
+
 ## Development Commands
 ### Running code
 - Run Python code: `uv run path/to/script.py`

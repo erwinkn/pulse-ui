@@ -9,7 +9,7 @@ class TranspileError(Exception):
 	"""Error during transpilation with optional source location."""
 
 	message: str
-	node: ast.expr | ast.stmt | None
+	node: ast.expr | ast.stmt | ast.excepthandler | None
 	source: str | None
 	filename: str | None
 	func_name: str | None
@@ -18,7 +18,7 @@ class TranspileError(Exception):
 		self,
 		message: str,
 		*,
-		node: ast.expr | ast.stmt | None = None,
+		node: ast.expr | ast.stmt | ast.excepthandler | None = None,
 		source: str | None = None,
 		filename: str | None = None,
 		func_name: str | None = None,
@@ -63,7 +63,7 @@ class TranspileError(Exception):
 	def with_context(
 		self,
 		*,
-		node: ast.expr | ast.stmt | None = None,
+		node: ast.expr | ast.stmt | ast.excepthandler | None = None,
 		source: str | None = None,
 		filename: str | None = None,
 		func_name: str | None = None,

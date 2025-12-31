@@ -1,7 +1,8 @@
-.PHONY: help lint lint-fix format format-check typecheck test all
+.PHONY: help init lint lint-fix format format-check typecheck test all
 
 help:
 	@echo "Available commands:"
+	@echo "  make init          - Initialize environment (sync packages, install deps, build)"
 	@echo "  make lint          - Run all linters (Biome for JS/TS, Ruff for Python)"
 	@echo "  make lint-fix      - Run all linters with auto-fix"
 	@echo "  make format        - Format all code (Biome for JS/TS, Ruff for Python)"
@@ -9,6 +10,16 @@ help:
 	@echo "  make typecheck     - Run type checking (Basedpyright for Python)"
 	@echo "  make test          - Run all tests (pytest for Python, bun test for JS)"
 	@echo "  make all           - Run format, lint, typecheck, and test"
+
+# Initialization
+init:
+	@echo "Syncing Python packages..."
+	@uv sync --all-packages --dev
+	@echo "Installing JS dependencies..."
+	@bun i
+	@echo "Building JS packages..."
+	@bun run build
+	@echo "Environment initialized!"
 
 # Linting
 lint:

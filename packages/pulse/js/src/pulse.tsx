@@ -11,8 +11,8 @@ import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
 import type { ServerError } from "./messages";
-import { VDOMRenderer2 } from "./renderer2";
-import type { VDOM } from "./vdom2";
+import { VDOMRenderer } from "./renderer";
+import type { VDOM } from "./vdom";
 
 // =================================================================
 // Types
@@ -165,7 +165,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	const client = usePulseClient();
 	const initialView = usePulsePrerender(path);
 	const renderer = useMemo(
-		() => new VDOMRenderer2(client, path, registry),
+		() => new VDOMRenderer(client, path, registry),
 		[client, path, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));

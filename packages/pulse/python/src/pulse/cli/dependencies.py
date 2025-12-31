@@ -15,7 +15,7 @@ from pulse.cli.packages import (
 	resolve_versions,
 	spec_satisfies,
 )
-from pulse.transpiler_v2.imports import get_registered_imports
+from pulse.transpiler.imports import get_registered_imports
 
 
 def convert_pep440_to_semver(python_version: str) -> str:

@@ -1,473 +1,706 @@
-"""Tests for JSX transpilation with Import(jsx=True) and @javascript(component=True) decorator."""
+"""
+Tests for JSX support: tags, JsxFunction, ReactComponent, and related functionality.
+"""
 
-from __future__ import annotations
+# pyright: reportPrivateUsage=false
+
+from typing import Any
 
 import pytest
-from pulse.dom import tags
-from pulse.transpiler.errors import JSCompilationError
-from pulse.transpiler.function import (
-	FUNCTION_CACHE,
-	JSX_FUNCTION_CACHE,
-	JsxFunction,
+from pulse.transpiler import (
+	clear_function_cache,
+	clear_import_registry,
+	emit,
 	javascript,
 )
-from pulse.transpiler.imports import Import, clear_import_registry
-from pulse.transpiler.jsx import JSXCallExpr
-from pulse.transpiler.nodes import JSXElement
+from pulse.transpiler.imports import Import
+from pulse.transpiler.nodes import (
+	Element,
+	Jsx,
+	Member,
+)
 
 
-# Clear caches between tests
 @pytest.fixture(autouse=True)
-def clear_caches() -> None:
-	FUNCTION_CACHE.clear()
-	JSX_FUNCTION_CACHE.clear()
+def reset_caches():
+	"""Reset caches before each test."""
+	clear_function_cache()
+	clear_import_registry()
+	yield
+	clear_function_cache()
 	clear_import_registry()
 
 
-class TestImportWithJsx:
-	"""Tests for Import with jsx=True parameter."""
+# =============================================================================
+# JSX Support - Tags
+# =============================================================================
 
-	def test_import_jsx_basic_props(self) -> None:
-		"""Test: Import(..., jsx=True)(label="Click") emits <Button label="Click" />"""
-		Button = Import("Button", "ui", jsx=True)
 
-		@javascript
-		def fn():
-			return Button(label="Click")
+class TestTagsModule:
+	"""Test pulse.dom.tags transpilation via PyTags."""
 
-		js = fn.transpile()
-		assert "<Button" in js
-		assert 'label="Click"' in js
-		assert "/>" in js
+	def test_div_simple(self):
+		"""div() produces Element."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
 
-	def test_import_jsx_with_children(self) -> None:
-		"""Test: Import(..., jsx=True)("child1", "child2", disabled=True) emits <Component disabled={true}>child1child2</Component>"""
-		Component = Import("Component", "ui", jsx=True)
+		div = TagExpr("div")
 
 		@javascript
-		def fn():
-			return Component("child1", "child2", disabled=True)
+		def render() -> Any:
+			return div("Hello")
 
-		js = fn.transpile()
-		assert "<Component" in js
-		assert "disabled={true}" in js
-		assert "child1" in js
-		assert "child2" in js
-		assert "</Component" in js  # Allow for unique IDs
+		fn = render.transpile()
+		code = emit(fn)
+		assert code == 'function render_1() {\nreturn <div>{"Hello"}</div>;\n}'
 
-	def test_import_jsx_with_spread_props(self) -> None:
-		"""Test: Import(..., jsx=True)(**props) emits <Component {...props} />"""
-		Component = Import("Component", "ui", jsx=True)
+	def test_div_with_props(self):
+		"""div(className=...) produces Element with props."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
 
-		@javascript
-		def fn(props: dict):
-			return Component(**props)
-
-		js = fn.transpile()
-		assert "<Component" in js
-		assert "{...props}" in js
-
-	def test_import_jsx_props_via_call_children_via_subscript(self) -> None:
-		"""Test: Import(..., jsx=True)(className="box")[children]"""
-		Component = Import("Component", "ui", jsx=True)
+		div = TagExpr("div")
 
 		@javascript
-		def fn():
-			return Component(className="box")[tags.span("Hello")]
+		def render() -> Any:
+			return div("Hello", className="container")
 
-		js = fn.transpile()
-		assert "<Component" in js
-		assert 'className="box"' in js
-		assert "<span>Hello</span>" in js
-		assert "</Component" in js  # Allow for unique IDs
+		fn = render.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function render_1() {\nreturn <div className="container">{"Hello"}</div>;\n}'
+		)
 
-	def test_import_jsx_nested_components(self) -> None:
-		"""Test nested components."""
-		Container = Import("Container", "ui", jsx=True)
-		Item = Import("Item", "ui", jsx=True)
+	def test_nested_tags(self):
+		"""Nested tag calls produce nested JSX."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
 
-		@javascript
-		def fn():
-			return Container()[Item(key="1")]
-
-		js = fn.transpile()
-		assert "<Container" in js
-		assert "<Item" in js
-		assert 'key="1"' in js
-		# Item might be self-closing, so check for either /> or </Item
-		assert "/>" in js or "</Item" in js
-		assert "</Container" in js  # Allow for unique IDs
-
-	def test_import_jsx_spread_children(self) -> None:
-		"""Test spread children *items"""
-		Container = Import("Container", "ui", jsx=True)
+		div = TagExpr("div")
+		span = TagExpr("span")
 
 		@javascript
-		def fn(items: list):
-			return Container(*items)
+		def render() -> Any:
+			return div(span("inner"))
 
-		js = fn.transpile()
-		assert "<Container" in js
-		# Spread children should be handled
-		assert "{items}" in js
+		fn = render.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function render_1() {\nreturn <div><span>{"inner"}</span></div>;\n}'
+		)
 
-	def test_import_jsx_empty_props_with_children(self) -> None:
-		"""Test: Import(..., jsx=True)()[children]"""
-		Component = Import("Component", "ui", jsx=True)
+	def test_self_closing_tag(self):
+		"""Tag with no children produces self-closing JSX."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
 
-		@javascript
-		def fn():
-			return Component()[tags.span("Hello")]
-
-		js = fn.transpile()
-		assert "<Component" in js
-		assert "<span>Hello</span>" in js
-		assert "</Component" in js  # Allow for unique IDs
-
-	def test_import_jsx_returns_jsxcallexpr(self) -> None:
-		"""Test that Import(jsx=True) returns JSXCallExpr when called."""
-		Button = Import("Button", "ui", jsx=True)
-		result = Button(label="Click")
-		assert isinstance(result, JSXCallExpr)
-		assert result.tag is Button
-
-	def test_import_jsx_subscript_adds_children(self) -> None:
-		"""Test that subscript on JSXCallExpr adds children."""
-
-		Component = Import("Component", "ui", jsx=True)
-		call_expr = Component(className="test")
-		# Use JSString directly instead of tags.span which returns VDOM Node
-		result = call_expr["Child"]
-		assert isinstance(result, JSXElement)
-		assert len(result.children) >= 1
-
-
-class TestJsxFunctionComponent:
-	"""Tests for JsxFunction and @javascript(component=True) decorator."""
-
-	def test_basic_component_transpilation(self) -> None:
-		"""Test basic component transpilation."""
-		from pulse.dom.tags import div
-
-		@javascript(component=True)
-		def MyComp(name: str):
-			return div()[f"Hello {name}"]
-
-		assert isinstance(MyComp, JsxFunction)
-		js = MyComp.transpile()
-		assert "function" in js
-		assert "MyComp" in js
-		# Should return JSX
-		assert "<div>" in js or "return" in js
-
-	def test_calling_component_from_another_component(self) -> None:
-		"""Test: calling component from another component emits JSX."""
-		from pulse.dom.tags import div
-
-		@javascript(component=True)
-		def MyComp(name: str):
-			return div()[f"Hello {name}"]
-
-		@javascript(component=True)
-		def App():
-			return MyComp(name="World")
-
-		js = App.transpile()
-		# Should emit <MyComp name="World" /> not MyComp({name: "World"})
-		assert "<MyComp" in js
-		assert 'name="World"' in js
-		assert "/>" in js or "</MyComp>" in js
-
-	def test_props_via_call_children_via_subscript(self) -> None:
-		"""Test: MyComp(className="wrapper")[span("Hello")]"""
-		from pulse.dom.tags import div, span
-
-		@javascript(component=True)
-		def MyComp(name: str):
-			return div()[f"Hello {name}"]
-
-		@javascript(component=True)
-		def App():
-			return MyComp(className="wrapper")[span("Hello")]
-
-		js = App.transpile()
-		assert "<MyComp" in js
-		assert 'className="wrapper"' in js
-		assert "<span>Hello</span>" in js
-		assert "</MyComp" in js  # Allow for unique IDs
-
-	def test_children_passing(self) -> None:
-		"""Test: Container("child1", "child2", className="wrapper")"""
-		from pulse.dom.tags import div
-
-		@javascript(component=True)
-		def Container(name: str):
-			return div()[f"Container: {name}"]
-
-		@javascript(component=True)
-		def App():
-			return Container("child1", "child2", className="wrapper")
-
-		js = App.transpile()
-		assert "<Container" in js
-		assert 'className="wrapper"' in js
-		# Children should be passed
-		assert "child1" in js or "child2" in js
-
-	def test_component_with_hooks(self) -> None:
-		"""Test component using hooks."""
-		useState = Import("useState", "react")
-		from pulse.dom.tags import button, div
-
-		@javascript(component=True)
-		def Counter():
-			count, set_count = useState(0)
-			return div()[
-				button(onClick=lambda: set_count(count + 1))[f"Count: {count}"]
-			]
-
-		js = Counter.transpile()
-		assert "useState" in js
-		assert "function" in js
-
-	def test_nested_components(self) -> None:
-		"""Test nested components."""
-		from pulse.dom.tags import div
-
-		@javascript(component=True)
-		def Inner(name: str):
-			return div()[f"Inner: {name}"]
-
-		@javascript(component=True)
-		def Outer():
-			return Inner(name="test")
-
-		js = Outer.transpile()
-		assert "<Inner" in js
-		assert 'name="test"' in js
-
-	def test_component_with_spread_children(self) -> None:
-		"""Test component with spread children *items"""
-		from pulse.dom.tags import div
-
-		@javascript(component=True)
-		def Container(name: str):
-			return div()[f"Container: {name}"]
-
-		@javascript(component=True)
-		def App(items: list):
-			return Container(*items, className="wrapper")
-
-		js = App.transpile()
-		assert "<Container" in js
-		assert 'className="wrapper"' in js
-
-	def test_component_empty_props_with_children(self) -> None:
-		"""Test: Component()[children]"""
-		from pulse.dom.tags import div, span
-
-		@javascript(component=True)
-		def Container(name: str):
-			return div()[f"Container: {name}"]
-
-		@javascript(component=True)
-		def App():
-			return Container()[span("Hello")]
-
-		js = App.transpile()
-		assert "<Container" in js
-		assert "<span>Hello</span>" in js
-		assert "</Container" in js  # Allow for unique IDs
-
-	def test_component_returns_jsxcallexpr(self) -> None:
-		"""Test that calling a component returns JSXCallExpr."""
-		from pulse.dom.tags import div
-
-		@javascript(component=True)
-		def MyComp(name: str):
-			return div()[f"Hello {name}"]
-
-		result = MyComp(name="World")
-		assert isinstance(result, JSXCallExpr)
-		assert result.tag is MyComp
-
-	def test_component_subscript_adds_children(self) -> None:
-		"""Test that subscript on component call adds children."""
-		from pulse.dom.tags import div
-
-		@javascript(component=True)
-		def MyComp(name: str):
-			return div()[f"Hello {name}"]
-
-		call_expr = MyComp(name="Test")
-		# Use string directly instead of tags.span which returns VDOM Node
-		result = call_expr["Child"]
-		assert isinstance(result, JSXElement)
-		assert len(result.children) >= 1
-
-
-class TestHooksRegularImport:
-	"""Tests for hooks (regular Import, no jsx)."""
-
-	def test_usestate_regular_call(self) -> None:
-		"""Test: useState = Import("useState", "react") called as useState(0) emits useState(0)"""
-		useState = Import("useState", "react")
+		img = TagExpr("img")
 
 		@javascript
-		def fn():
-			return useState(0)
+		def render() -> Any:
+			return img(src="photo.jpg")
 
-		js = fn.transpile()
-		# Should be a regular function call, not JSX
-		# Note: Import names get unique IDs, so it will be useState_<id>(0)
-		assert "useState" in js
-		assert "(0)" in js
-		# Should not be JSX
-		assert "<useState" not in js
+		fn = render.transpile()
+		code = emit(fn)
+		assert code == 'function render_1() {\nreturn <img src="photo.jpg" />;\n}'
 
-	def test_hooks_inside_components(self) -> None:
-		"""Test hooks inside components transpile correctly."""
-		useState = Import("useState", "react")
-		useEffect = Import("useEffect", "react")
-		from pulse.dom.tags import div
+	def test_fragment(self):
+		"""Fragment produces <>...</> JSX."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
 
-		@javascript(component=True)
-		def MyComponent():
-			count, set_count = useState(0)
-			useEffect(lambda: None, [])
-			return div()[f"Count: {count}"]
-
-		js = MyComponent.transpile()
-		assert "useState" in js
-		assert "useEffect" in js
-		assert "function" in js
-
-
-class TestJsxEdgeCases:
-	"""Tests for edge cases in JSX transpilation."""
-
-	def test_props_via_call_children_via_subscript_complex(self) -> None:
-		"""Test: Component(className="box", onClick=handler)["Hello", span("World")]"""
-		from pulse.dom.tags import span
-
-		@javascript(component=True)
-		def Component(name: str):
-			return span()[f"Component: {name}"]
+		fragment = TagExpr("")
 
 		@javascript
-		def handler():
-			pass
+		def render() -> Any:
+			return fragment("one", "two")
 
-		@javascript(component=True)
-		def App():
-			return Component(className="box", onClick=handler)["Hello", span("World")]
+		fn = render.transpile()
+		code = emit(fn)
+		assert code == 'function render_1() {\nreturn <>{"one"}{"two"}</>;\n}'
 
-		js = App.transpile()
-		assert "<Component" in js
-		assert 'className="box"' in js
-		assert "onClick={handler" in js
-		assert "Hello" in js
-		assert "<span>World</span>" in js
-		assert "</Component" in js  # Allow for unique IDs
+	def test_tag_with_key(self):
+		"""Tag with key=... extracts key prop."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
 
-	def test_mixed_children_and_props(self) -> None:
-		"""Test mixed children and props."""
-		from pulse.dom.tags import div
+		li = TagExpr("li")
 
-		@javascript(component=True)
-		def Container(name: str):
-			return div()[f"Container: {name}"]
+		@javascript
+		def render() -> Any:
+			return li("item", key="item-1")
 
-		@javascript(component=True)
-		def App():
-			return Container("child1", "child2", className="wrapper", id="main")
+		fn = render.transpile()
+		code = emit(fn)
+		assert (
+			code == 'function render_1() {\nreturn <li key="item-1">{"item"}</li>;\n}'
+		)
 
-		js = App.transpile()
-		assert "<Container" in js
-		assert 'className="wrapper"' in js
-		assert 'id="main"' in js
-		# Children should be present
-		assert "child1" in js or "child2" in js
+	def test_tag_expr_emit_directly(self):
+		"""TagExpr emits as string literal when not called (for render props)."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
 
-	def test_component_cannot_be_called_twice(self) -> None:
-		"""Test that calling an already-called component raises error."""
-		from pulse.dom.tags import div
+		div = TagExpr("div")
+		out: list[str] = []
+		div.emit(out)
+		assert out == ['"div"']
 
-		@javascript(component=True)
-		def MyComp(name: str):
-			return div()[f"Hello {name}"]
+		# Fragment emits as empty string
+		fragment = TagExpr("")
+		out = []
+		fragment.emit(out)
+		assert out == ['""']
 
-		call_expr = MyComp(name="Test")
-		# Calling again should raise error
-		with pytest.raises(JSCompilationError, match="already called"):
-			call_expr(name="Again")  # pyright: ignore[reportCallIssue]
+	def test_pytags_module_registration(self):
+		"""PyTags registers all standard tags."""
+		from pulse.transpiler.modules.pulse.tags import PulseTags, TagExpr
+
+		# Check a few standard tags exist
+		assert isinstance(PulseTags._transpiler.get("div"), TagExpr)
+		assert isinstance(PulseTags._transpiler.get("span"), TagExpr)
+		assert isinstance(PulseTags._transpiler.get("a"), TagExpr)
+		assert isinstance(PulseTags._transpiler.get("button"), TagExpr)
+		assert isinstance(PulseTags._transpiler.get("img"), TagExpr)
+		assert isinstance(PulseTags._transpiler.get("fragment"), TagExpr)
+
+	def test_pytags_svg_tags(self):
+		"""PyTags includes SVG tags."""
+		from pulse.transpiler.modules.pulse.tags import PulseTags, TagExpr
+
+		assert isinstance(PulseTags._transpiler.get("svg"), TagExpr)
+		assert isinstance(PulseTags._transpiler.get("path"), TagExpr)
+		assert isinstance(PulseTags._transpiler.get("circle"), TagExpr)
 
 
-class TestRegression:
-	"""Regression tests to ensure existing functionality still works."""
+class TestTagsIntegration:
+	"""Test pulse.dom.tags integration with the full system."""
 
-	def test_tags_py_functionality_still_works(self) -> None:
-		"""Test that existing tags.py functionality still works after refactor."""
+	def test_tags_registered_in_expr_registry(self):
+		"""pulse.dom.tags values are registered in EXPR_REGISTRY."""
+		import pulse.transpiler.modules  # noqa: F401 - triggers registration
 		from pulse.dom import tags
+		from pulse.transpiler.nodes import EXPR_REGISTRY
+
+		# div should be registered
+		assert id(tags.div) in EXPR_REGISTRY
+
+	def test_tags_via_pymodule(self):
+		"""Can access tags via PyModule.transpile_getattr."""
+		import pulse.transpiler.modules  # noqa: F401 - triggers registration
+		from pulse.dom import tags
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+		from pulse.transpiler.nodes import EXPR_REGISTRY
+
+		tags_module = EXPR_REGISTRY[id(tags)]
+		# Access div through the module
+		div_expr = tags_module.transpile_getattr("div", None)  # pyright: ignore[reportArgumentType]
+		assert isinstance(div_expr, TagExpr)
+		assert div_expr.tag == "div"
+
+
+class TestPulseModuleIntegration:
+	"""Test main pulse module integration for `import pulse as ps` pattern."""
+
+	def test_pulse_module_registered_in_expr_registry(self):
+		"""Main pulse module is registered in EXPR_REGISTRY."""
+		import pulse as ps
+		import pulse.transpiler.modules  # noqa: F401 - triggers registration
+		from pulse.transpiler.nodes import EXPR_REGISTRY
+
+		# pulse module should be registered
+		assert id(ps) in EXPR_REGISTRY
+
+	def test_pulse_div_registered_in_expr_registry(self):
+		"""pulse.div is registered in EXPR_REGISTRY."""
+		import pulse as ps
+		import pulse.transpiler.modules  # noqa: F401 - triggers registration
+		from pulse.transpiler.nodes import EXPR_REGISTRY
+
+		# pulse.div should be registered (same as pulse.dom.tags.div)
+		assert id(ps.div) in EXPR_REGISTRY
+
+	def test_pulse_module_tags_via_pymodule(self):
+		"""Can access tags via main pulse module PyModule.transpile_getattr."""
+		import pulse as ps
+		import pulse.transpiler.modules  # noqa: F401 - triggers registration
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+		from pulse.transpiler.nodes import EXPR_REGISTRY
+
+		pulse_module = EXPR_REGISTRY[id(ps)]
+		# Access div through the pulse module
+		div_expr = pulse_module.transpile_getattr("div", None)  # pyright: ignore[reportArgumentType]
+		assert isinstance(div_expr, TagExpr)
+		assert div_expr.tag == "div"
+
+	def test_pulse_as_ps_div_in_transpiled_function(self):
+		"""ps.div() works in @javascript(jsx=True) function with import pulse as ps."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.div("Hello")
+
+		fn = render.transpile()
+		code = emit(fn)
+		# JSX functions use props destructuring for React compatibility
+		assert code == 'function render_1({}) {\nreturn <div>{"Hello"}</div>;\n}'
+
+	def test_pulse_as_ps_nested_tags(self):
+		"""Nested ps.div/ps.span calls work in transpiled function."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.div(ps.span("inner"))
+
+		fn = render.transpile()
+		code = emit(fn)
+		# JSX functions use props destructuring for React compatibility
+		assert (
+			code
+			== 'function render_1({}) {\nreturn <div><span>{"inner"}</span></div>;\n}'
+		)
+
+	def test_pulse_as_ps_with_props(self):
+		"""ps.div(className=...) produces Element with props."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.div("Hello", className="container")
+
+		fn = render.transpile()
+		code = emit(fn)
+		# JSX functions use props destructuring for React compatibility
+		assert (
+			code
+			== 'function render_1({}) {\nreturn <div className="container">{"Hello"}</div>;\n}'
+		)
+
+	def test_pulse_as_ps_button_with_onclick(self):
+		"""ps.button with onClick handler works in transpiled function."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.button(
+				"Click me",
+				onClick=lambda e: None,  # type: ignore
+			)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "<button" in code
+		assert "onClick=" in code
+		assert "Click me" in code
+
+	def test_pulse_as_ps_self_closing_tag(self):
+		"""ps.img() produces self-closing JSX element."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.img(src="photo.jpg")
+
+		fn = render.transpile()
+		code = emit(fn)
+		# JSX functions use props destructuring for React compatibility
+		assert code == 'function render_1({}) {\nreturn <img src="photo.jpg" />;\n}'
+
+
+# =============================================================================
+# JSX Support - Jsx(JsFunction)
+# =============================================================================
+
+
+class TestJsxFunction:
+	"""Test @javascript(jsx=True) returns JsxFunction."""
+
+	def test_jsx_function_basic(self):
+		"""@javascript(jsx=True) creates JsxFunction."""
+		from pulse.transpiler.function import JsxFunction
+
+		@javascript(jsx=True)
+		def MyComponent(name: str) -> str:
+			return name
+
+		assert isinstance(MyComponent, JsxFunction)
+		# JsxFunction is a parallel implementation, not a wrapper
+		assert hasattr(MyComponent, "fn")
+		assert hasattr(MyComponent, "id")
+		assert hasattr(MyComponent, "deps")
+
+	def test_jsx_function_call_produces_element(self):
+		"""JsxFunction called produces Element."""
+
+		@javascript(jsx=True)
+		def Button(label: str) -> str:
+			return label
 
 		@javascript
-		def fn():
-			return tags.div(className="container")[tags.span("Hello")]
+		def render() -> Any:
+			return Button("Click")
 
-		js = fn.transpile()
-		assert '<div className="container">' in js
-		assert "<span>Hello</span>" in js
-		assert "</div>" in js
+		fn = render.transpile()
+		code = emit(fn)
+		assert (
+			code == 'function render_2() {\nreturn <Button_1>{"Click"}</Button_1>;\n}'
+		)
 
-	def test_jsfunction_non_jsx_still_works(self) -> None:
-		"""Test that JsFunction (non-JSX) still works as before."""
+	def test_jsx_function_with_props(self):
+		"""JsxFunction call with kwargs produces props."""
 
-		@javascript
-		def add(a: int, b: int) -> int:
-			return a + b
-
-		@javascript
-		def fn(x: int) -> int:
-			return add(x, 1)
-
-		js = fn.transpile()
-		assert "function" in js
-		assert "add" in js
-		assert "return" in js
-		# Should not have JSX syntax
-		assert "<" not in js or "function" in js.split("<")[0]
-
-	def test_import_without_jsx_still_works(self) -> None:
-		"""Test that Import without jsx=True still works as before."""
-		Button = Import("Button", "ui")
+		@javascript(jsx=True)
+		def Card(title: str) -> str:
+			return title
 
 		@javascript
-		def fn():
-			return Button("click")
+		def render() -> Any:
+			return Card("content", title="Hello")
 
-		js = fn.transpile()
-		# Should be a regular function call
-		# Note: Import names get unique IDs, so it will be Button_<id>("click")
-		assert "Button" in js
-		assert '("click")' in js
-		# Should not be JSX
-		assert "<Button" not in js
+		fn = render.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function render_2() {\nreturn <Card_1 title="Hello">{"content"}</Card_1>;\n}'
+		)
 
-	def test_component_cache_separate_from_function_cache(self) -> None:
-		"""Test that component cache is separate from function cache."""
+	def test_jsx_function_with_key(self):
+		"""JsxFunction call with key= extracts key."""
+
+		@javascript(jsx=True)
+		def Item(text: str) -> str:
+			return text
 
 		@javascript
-		def regular_fn(x: int) -> int:
-			return x + 1
+		def render() -> Any:
+			return Item("hello", key="item-1")
 
-		@javascript(component=True)
-		def comp_fn(x: int):
-			return regular_fn(x)
+		fn = render.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function render_2() {\nreturn <Item_1 key="item-1">{"hello"}</Item_1>;\n}'
+		)
 
-		# Check that the original function objects (keys) are in the correct caches
-		# After decoration, regular_fn is a JsFunction, comp_fn is a JsxFunction
-		# The cache keys are the original functions: regular_fn.fn and comp_fn.fn
-		assert regular_fn.fn in FUNCTION_CACHE
-		assert regular_fn.fn not in JSX_FUNCTION_CACHE
-		assert comp_fn.fn in JSX_FUNCTION_CACHE
-		assert comp_fn.fn not in FUNCTION_CACHE
+	def test_jsx_function_transpile(self):
+		"""JsxFunction.transpile() wraps in React component with props destructuring."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def Greeting(name: str) -> Any:
+			return div(name)
+
+		fn = Greeting.transpile()
+		code = emit(fn)
+		# JSX functions use props destructuring: {name} instead of name
+		assert code == "function Greeting_1({name}) {\nreturn <div>{name}</div>;\n}"
+
+	def test_jsx_function_caching(self):
+		"""JsxFunction is cached in FUNCTION_CACHE."""
+		from pulse.transpiler.function import FUNCTION_CACHE, JsxFunction
+
+		def MyComp() -> str:
+			return "hi"
+
+		comp1 = javascript(jsx=True)(MyComp)
+		comp2 = javascript(jsx=True)(MyComp)
+		# JsxFunction is cached directly
+		assert comp1 is comp2
+		assert MyComp in FUNCTION_CACHE
+		assert isinstance(FUNCTION_CACHE[MyComp], JsxFunction)
+
+	def test_jsx_function_as_dependency(self):
+		"""JsxFunction can be used as dependency in another function."""
+		from pulse.transpiler.function import JsxFunction
+
+		@javascript(jsx=True)
+		def Inner() -> str:
+			return "inner"
+
+		@javascript
+		def outer() -> Any:
+			return Inner()
+
+		assert "Inner" in outer.deps
+		assert isinstance(outer.deps["Inner"], JsxFunction)
+
+	def test_jsx_function_imports(self):
+		"""JsxFunction.imports() returns Import deps."""
+		from pulse.transpiler.function import JsxFunction
+
+		Button = Import("Button", "@ui/core")
+
+		@javascript(jsx=True)
+		def Card() -> Any:
+			from pulse.transpiler.nodes import Jsx
+
+			return Jsx(Button)("click")
+
+		assert isinstance(Card, JsxFunction)
+		imports = Card.imports()
+		assert "Button" in imports
+
+	def test_jsx_function_no_children(self):
+		"""JsxFunction call with only props, no children."""
+
+		@javascript(jsx=True)
+		def Icon(name: str) -> str:
+			return name
+
+		@javascript
+		def render() -> Any:
+			return Icon(name="check")
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert code == 'function render_2() {\nreturn <Icon_1 name="check" />;\n}'
+
+	def test_regular_vs_jsx_decorator(self):
+		"""@javascript vs @javascript(jsx=True) produce different types."""
+		from pulse.transpiler.function import JsFunction, JsxFunction
+
+		@javascript
+		def regular() -> int:
+			return 1
+
+		@javascript(jsx=True)
+		def jsx_fn() -> int:
+			return 1
+
+		assert isinstance(regular, JsFunction)
+		assert isinstance(jsx_fn, JsxFunction)
+		# JsxFunction is a parallel implementation, not a wrapper
+
+	def test_jsx_function_js_name(self):
+		"""Underlying JsFunction.js_name is unique."""
+
+		@javascript(jsx=True)
+		def Widget() -> str:
+			return "w"
+
+		assert Widget.js_name.startswith("Widget_")
+		assert Widget.js_name == f"Widget_{Widget.id}"
+
+	def test_jsx_function_with_default_values(self):
+		"""JsxFunction with default param values uses props destructuring."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def Toggle(visible: bool = True) -> Any:
+			return div("content" if visible else "hidden")
+
+		fn = Toggle.transpile()
+		code = emit(fn)
+		# Should destructure with default value
+		assert "{visible = true}" in code
+		assert "function Toggle_" in code
+
+	def test_jsx_function_with_children_and_defaults(self):
+		"""JsxFunction with *children and default kwargs works as React component."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def Container(*children: Any, className: str = "default") -> Any:
+			return div(className=className)
+
+		fn = Container.transpile()
+		code = emit(fn)
+		# Should have both children and className with default
+		assert "{children, className = " in code
+		assert '"default"' in code
+
+
+# =============================================================================
+# ReactComponent Tests
+# =============================================================================
+
+
+class TestReactComponent:
+	"""Test Jsx(expr) pattern for React components."""
+
+	def test_jsx_with_import(self):
+		"""Jsx(Import) uses the import's js_name in emission."""
+
+		button_import = Import("Button", "@mantine/core")
+		Button = Jsx(button_import)
+
+		# Check emit outputs the import's js_name
+		assert emit(Button) == button_import.js_name
+
+	def test_jsx_with_member(self):
+		"""Jsx(Member) for AppShell.Header patterns."""
+
+		app_shell = Import("AppShell", "@mantine/core")
+		header_expr = Member(app_shell, "Header")
+		Header = Jsx(header_expr)
+
+		# Check emit includes member access
+		assert ".Header" in emit(Header)
+		assert "AppShell_" in emit(Header)
+
+	def test_jsx_call_produces_element(self):
+		"""Calling Jsx(expr) produces Element with expr as tag."""
+
+		button_import = Import("Button", "@mantine/core")
+		Button = Jsx(button_import)
+
+		elem = Button("Click me", variant="primary")
+		# tag is now the underlying expr (e.g. Import)
+		assert elem.tag is button_import
+		assert elem.children == ["Click me"]
+		assert elem.props is not None
+		assert elem.props["variant"] == "primary"
+
+	def test_jsx_transpile_call(self):
+		"""Jsx(expr).transpile_call produces Element with expr as tag."""
+
+		card_import = Import("Card", "@mantine/core")
+		Card = Jsx(card_import)
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return Card("Content", shadow="sm")
+
+		fn = render.transpile()
+		code = emit(fn)
+		# Should produce Element with the import's js_name as tag
+		assert f"<{card_import.js_name}" in code
+		assert 'shadow="sm"' in code
+		assert "Content" in code
+
+	def test_jsx_member_transpile_call(self):
+		"""Member-based Jsx produces correct JSX in transpilation."""
+
+		app_shell = Import("AppShell", "@mantine/core")
+		Header = Jsx(Member(app_shell, "Header"))
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return Header(height=60)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert f"<{app_shell.js_name}.Header height={{60}} />" in code
+
+	def test_react_component_decorator(self):
+		"""The @react_component decorator returns a Jsx(expr)."""
+		from pulse.transpiler.react_component import react_component
+
+		@react_component(Import("Button", "@mantine/core"))
+		def Button(children: str, variant: str = "default") -> Element: ...
+
+		# Should be a Jsx
+		assert isinstance(Button, Jsx)
+
+
+# =============================================================================
+# Jsx Standalone Behavior
+# =============================================================================
+
+
+class TestJsxStandalone:
+	"""Test Jsx wrapper behavior."""
+
+	def test_jsx_transpile_getattr(self):
+		"""Jsx.transpile_getattr delegates to wrapped expr."""
+
+		app_shell = Import("AppShell", "@mantine/core")
+		jsx_shell = Jsx(app_shell)
+
+		# Access .Header via transpile_getattr
+		header = jsx_shell.transpile_getattr("Header", None)  # pyright: ignore[reportArgumentType]
+		# Delegates to wrapped expr, so Member wraps the Import, not the Jsx
+		assert isinstance(header, Member)
+		assert header.obj is app_shell
+		assert header.prop == "Header"
+
+	def test_jsx_runtime_call_produces_element(self):
+		"""Jsx.__call__ produces Element at runtime."""
+
+		button = Import("Button", "@mantine/core")
+		jsx_button = Jsx(button)
+
+		# Direct runtime call
+		result = jsx_button("Click", variant="primary")
+		assert isinstance(result, Element)
+		assert result.tag is button
+		assert result.children == ["Click"]
+		assert result.props is not None
+		assert result.props["variant"] == "primary"
+
+	def test_jsx_emit_defers_to_wrapped_expr(self):
+		"""Jsx.emit() defers to wrapped expr's emit."""
+
+		button = Import("Button", "@ui/button")
+		jsx_button = Jsx(button)
+
+		# emit should delegate to the import
+		assert emit(jsx_button) == button.js_name
+
+
+# =============================================================================
+# Expression Keys in JSX
+# =============================================================================
+
+
+class TestExpressionKeys:
+	"""Test expression keys in JSX elements."""
+
+	def test_numeric_key(self):
+		"""Numeric keys are supported."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		li = TagExpr("li")
+
+		@javascript
+		def render(index: int) -> Any:
+			return li("item", key=index)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "key={index}" in code
+
+	def test_variable_key(self):
+		"""Variable keys are supported."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		li = TagExpr("li")
+
+		@javascript
+		def render(item_id: str) -> Any:
+			return li("item", key=item_id)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "key={item_id}" in code
+
+	def test_expression_key(self):
+		"""Expression keys (like member access) are supported."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		li = TagExpr("li")
+
+		@javascript
+		def render(item: Any) -> Any:
+			return li(item.name, key=item.id)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "key={item.id}" in code
+
+	def test_fstring_key(self):
+		"""F-string keys are supported."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		li = TagExpr("li")
+
+		@javascript
+		def render(prefix: str, index: int) -> Any:
+			return li("item", key=f"{prefix}-{index}")
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "key={`${prefix}-${index}`}" in code

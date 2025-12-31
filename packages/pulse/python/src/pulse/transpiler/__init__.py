@@ -1,134 +1,101 @@
-"""Python -> JavaScript transpiler system.
+"""v2 transpiler with pure data node AST."""
 
-This module provides the full transpilation API for converting Python functions
-to JavaScript. For basic usage, use the exports from the main `pulse` module:
+# Ensure built-in Python modules (e.g., math) are registered on import.
+from pulse.transpiler import modules as _modules  # noqa: F401
 
-    from pulse import javascript, Import, CssImport, import_js
-
-For advanced use cases (custom transpilers, AST manipulation, module registration),
-import from this module:
-
-    from pulse.transpiler import JSExpr, JsTranspiler, register_module, ...
-"""
-
-# Core types
-# Builtins system
-from pulse.transpiler.builtins import ALL_METHODS as ALL_METHODS
+# Builtins
 from pulse.transpiler.builtins import BUILTINS as BUILTINS
-from pulse.transpiler.builtins import DICT_METHODS as DICT_METHODS
-from pulse.transpiler.builtins import LIST_METHODS as LIST_METHODS
-from pulse.transpiler.builtins import METHOD_CLASSES as METHOD_CLASSES
-from pulse.transpiler.builtins import SET_METHODS as SET_METHODS
-from pulse.transpiler.builtins import STR_METHODS as STR_METHODS
-from pulse.transpiler.builtins import BuiltinMethods as BuiltinMethods
-from pulse.transpiler.builtins import DictMethods as DictMethods
-from pulse.transpiler.builtins import ListMethods as ListMethods
-from pulse.transpiler.builtins import SetMethods as SetMethods
-from pulse.transpiler.builtins import StringMethods as StringMethods
 from pulse.transpiler.builtins import emit_method as emit_method
 
-# Constants system
-from pulse.transpiler.constants import CONSTANTS_CACHE as CONSTANTS_CACHE
-from pulse.transpiler.constants import JsConstant as JsConstant
-from pulse.transpiler.constants import JsPrimitive as JsPrimitive
-from pulse.transpiler.constants import JsValue as JsValue
-from pulse.transpiler.constants import JsVar as JsVar
-from pulse.transpiler.constants import const_to_js as const_to_js
-from pulse.transpiler.constants import jsify as jsify
-
-# Context
-from pulse.transpiler.context import interpreted_mode as interpreted_mode
-from pulse.transpiler.context import is_interpreted_mode as is_interpreted_mode
-from pulse.transpiler.errors import JSCompilationError as JSCompilationError
+# Errors
+from pulse.transpiler.errors import TranspileError as TranspileError
 
 # Function system
 from pulse.transpiler.function import FUNCTION_CACHE as FUNCTION_CACHE
-from pulse.transpiler.function import JSX_FUNCTION_CACHE as JSX_FUNCTION_CACHE
+
+# Constant hoisting
+from pulse.transpiler.function import Constant as Constant
 from pulse.transpiler.function import JsFunction as JsFunction
-from pulse.transpiler.function import JsxFunction as JsxFunction
+from pulse.transpiler.function import analyze_deps as analyze_deps
+from pulse.transpiler.function import clear_function_cache as clear_function_cache
+from pulse.transpiler.function import (
+	collect_function_graph as collect_function_graph,
+)
 from pulse.transpiler.function import javascript as javascript
+from pulse.transpiler.function import registered_constants as registered_constants
+from pulse.transpiler.function import registered_functions as registered_functions
 
-# Utilities
-from pulse.transpiler.ids import generate_id as generate_id
-from pulse.transpiler.ids import reset_id_counter as reset_id_counter
-from pulse.transpiler.imports import CssImport as CssImport
+# ID generator
+from pulse.transpiler.id import next_id as next_id
+from pulse.transpiler.id import reset_id_counter as reset_id_counter
+
+# Import utilities
 from pulse.transpiler.imports import Import as Import
-
-# Import system
+from pulse.transpiler.imports import ImportKind as ImportKind
+from pulse.transpiler.imports import caller_file as caller_file
 from pulse.transpiler.imports import clear_import_registry as clear_import_registry
-from pulse.transpiler.imports import import_js as import_js
-from pulse.transpiler.imports import registered_imports as registered_imports
+from pulse.transpiler.imports import get_registered_imports as get_registered_imports
+from pulse.transpiler.imports import is_absolute_path as is_absolute_path
+from pulse.transpiler.imports import is_local_path as is_local_path
+from pulse.transpiler.imports import is_relative_path as is_relative_path
 
-# Module registration - JS modules
-from pulse.transpiler.js_module import JS_MODULES as JS_MODULES
+# JS module system
 from pulse.transpiler.js_module import JsModule as JsModule
-from pulse.transpiler.js_module import register_js_module as register_js_module
-from pulse.transpiler.jsx import JSXCallExpr as JSXCallExpr
 
-# JS AST Utilities
-from pulse.transpiler.nodes import ALLOWED_BINOPS as ALLOWED_BINOPS
-from pulse.transpiler.nodes import ALLOWED_CMPOPS as ALLOWED_CMPOPS
-from pulse.transpiler.nodes import ALLOWED_UNOPS as ALLOWED_UNOPS
-from pulse.transpiler.nodes import JSEXPR_REGISTRY as JSEXPR_REGISTRY
+# Global registry
+from pulse.transpiler.nodes import EXPR_REGISTRY as EXPR_REGISTRY
+from pulse.transpiler.nodes import UNDEFINED as UNDEFINED
 
-# JS AST Nodes - Expressions
-from pulse.transpiler.nodes import JSArray as JSArray
-from pulse.transpiler.nodes import JSArrowFunction as JSArrowFunction
+# Expression nodes
+from pulse.transpiler.nodes import Array as Array
+from pulse.transpiler.nodes import Arrow as Arrow
 
-# JS AST Nodes - Statements
-from pulse.transpiler.nodes import JSAssign as JSAssign
-from pulse.transpiler.nodes import JSAugAssign as JSAugAssign
-from pulse.transpiler.nodes import JSBinary as JSBinary
-from pulse.transpiler.nodes import JSBlock as JSBlock
-from pulse.transpiler.nodes import JSBoolean as JSBoolean
-from pulse.transpiler.nodes import JSBreak as JSBreak
-from pulse.transpiler.nodes import JSCall as JSCall
-from pulse.transpiler.nodes import JSComma as JSComma
-from pulse.transpiler.nodes import JSComputedProp as JSComputedProp
-from pulse.transpiler.nodes import JSConstAssign as JSConstAssign
-from pulse.transpiler.nodes import JSContinue as JSContinue
-from pulse.transpiler.nodes import JSExpr as JSExpr
-from pulse.transpiler.nodes import JSForOf as JSForOf
-from pulse.transpiler.nodes import JSFunctionDef as JSFunctionDef
-from pulse.transpiler.nodes import JSIdentifier as JSIdentifier
-from pulse.transpiler.nodes import JSIf as JSIf
+# Statement nodes
+from pulse.transpiler.nodes import Assign as Assign
+from pulse.transpiler.nodes import Binary as Binary
+from pulse.transpiler.nodes import Block as Block
+from pulse.transpiler.nodes import Break as Break
+from pulse.transpiler.nodes import Call as Call
 
-# JS AST Nodes - JSX
-from pulse.transpiler.nodes import JSImport as JSImport
-from pulse.transpiler.nodes import JSLogicalChain as JSLogicalChain
-from pulse.transpiler.nodes import JSMember as JSMember
-from pulse.transpiler.nodes import JSMemberCall as JSMemberCall
-from pulse.transpiler.nodes import JSMultiStmt as JSMultiStmt
-from pulse.transpiler.nodes import JSNew as JSNew
-from pulse.transpiler.nodes import JSNode as JSNode
-from pulse.transpiler.nodes import JSNull as JSNull
-from pulse.transpiler.nodes import JSNumber as JSNumber
-from pulse.transpiler.nodes import JSObjectExpr as JSObjectExpr
-from pulse.transpiler.nodes import JSProp as JSProp
-from pulse.transpiler.nodes import JSRaw as JSRaw
-from pulse.transpiler.nodes import JSReturn as JSReturn
-from pulse.transpiler.nodes import JSSingleStmt as JSSingleStmt
-from pulse.transpiler.nodes import JSSpread as JSSpread
-from pulse.transpiler.nodes import JSStmt as JSStmt
-from pulse.transpiler.nodes import JSString as JSString
-from pulse.transpiler.nodes import JSSubscript as JSSubscript
-from pulse.transpiler.nodes import JSTemplate as JSTemplate
-from pulse.transpiler.nodes import JSTertiary as JSTertiary
-from pulse.transpiler.nodes import JSTransformer as JSTransformer
-from pulse.transpiler.nodes import JSUnary as JSUnary
-from pulse.transpiler.nodes import JSUndefined as JSUndefined
-from pulse.transpiler.nodes import JSWhile as JSWhile
-from pulse.transpiler.nodes import JSXElement as JSXElement
-from pulse.transpiler.nodes import JSXFragment as JSXFragment
-from pulse.transpiler.nodes import JSXProp as JSXProp
-from pulse.transpiler.nodes import JSXSpreadProp as JSXSpreadProp
-from pulse.transpiler.nodes import is_primary as is_primary
+# Type aliases
+from pulse.transpiler.nodes import Continue as Continue
 
-# Module registration - Python modules
-from pulse.transpiler.py_module import PY_MODULES as PY_MODULES
-from pulse.transpiler.py_module import PyModule as PyModule
-from pulse.transpiler.py_module import PyModuleExpr as PyModuleExpr
-from pulse.transpiler.py_module import register_module as register_module
+# Data nodes
+from pulse.transpiler.nodes import Element as Element
+from pulse.transpiler.nodes import Expr as Expr
+from pulse.transpiler.nodes import ExprStmt as ExprStmt
+from pulse.transpiler.nodes import ForOf as ForOf
+from pulse.transpiler.nodes import Function as Function
+from pulse.transpiler.nodes import Identifier as Identifier
+from pulse.transpiler.nodes import If as If
+
+# JSX wrapper
+from pulse.transpiler.nodes import Jsx as Jsx
+from pulse.transpiler.nodes import Literal as Literal
+from pulse.transpiler.nodes import Member as Member
+from pulse.transpiler.nodes import New as New
+from pulse.transpiler.nodes import Node as Node
+from pulse.transpiler.nodes import Object as Object
+from pulse.transpiler.nodes import Prop as Prop
+from pulse.transpiler.nodes import PulseNode as PulseNode
+from pulse.transpiler.nodes import Return as Return
+from pulse.transpiler.nodes import Spread as Spread
+from pulse.transpiler.nodes import Stmt as Stmt
+from pulse.transpiler.nodes import Subscript as Subscript
+from pulse.transpiler.nodes import Template as Template
+from pulse.transpiler.nodes import Ternary as Ternary
+from pulse.transpiler.nodes import Throw as Throw
+from pulse.transpiler.nodes import Unary as Unary
+from pulse.transpiler.nodes import Undefined as Undefined
+from pulse.transpiler.nodes import Value as Value
+from pulse.transpiler.nodes import While as While
+
+# Emit
+from pulse.transpiler.nodes import emit as emit
+
+# React components (JSX imports with typed call signature)
+from pulse.transpiler.react_component import react_component as react_component
 
 # Transpiler
-from pulse.transpiler.transpiler import JsTranspiler as JsTranspiler
+from pulse.transpiler.transpiler import Transpiler as Transpiler
+from pulse.transpiler.transpiler import transpile as transpile

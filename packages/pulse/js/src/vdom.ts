@@ -1,46 +1,183 @@
-import type { ComponentType } from "react";
+// =============================================================================
+// VDOM (structural expressions + eval-keyed props)
+// =============================================================================
 
-// Special prefixes for reserved node types
 export const FRAGMENT_TAG = "";
 export const MOUNT_POINT_PREFIX = "$$";
 
-// export type LazyComponent = () => Promise<{ default: ComponentType<any> }>;
-export type RegistryEntry = ComponentType<any>;
-export type ComponentRegistry = Record<string, ComponentType<any>>;
+// Unified registry: mount-point key -> React component (or any registry object).
+export type ComponentRegistry = Record<string, unknown>;
+
+// -----------------------------------------------------------------------------
+// JSON types
+// -----------------------------------------------------------------------------
+
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue };
+
+// -----------------------------------------------------------------------------
+// Expression tree (client-evaluable)
+// -----------------------------------------------------------------------------
+
+export type VDOMExpr =
+	| RegistryRefExpr
+	| IdentifierExpr
+	| LiteralExpr
+	| UndefinedExpr
+	| ArrayExpr
+	| ObjectExpr
+	| MemberExpr
+	| SubscriptExpr
+	| CallExpr
+	| UnaryExpr
+	| BinaryExpr
+	| TernaryExpr
+	| TemplateExpr
+	| ArrowExpr
+	| NewExpr;
+
+export interface RegistryRefExpr {
+	t: "ref";
+	key: string;
+}
+
+export interface IdentifierExpr {
+	t: "id";
+	name: string;
+}
+
+export interface LiteralExpr {
+	t: "lit";
+	value: JsonPrimitive;
+}
+
+export interface UndefinedExpr {
+	t: "undef";
+}
+
+export interface ArrayExpr {
+	t: "array";
+	items: VDOMNode[];
+}
+
+export interface ObjectExpr {
+	t: "object";
+	props: Record<string, VDOMNode>;
+}
+
+export interface MemberExpr {
+	t: "member";
+	obj: VDOMNode;
+	prop: string;
+}
+
+export interface SubscriptExpr {
+	t: "sub";
+	obj: VDOMNode;
+	key: VDOMNode;
+}
+
+export interface CallExpr {
+	t: "call";
+	callee: VDOMNode;
+	args: VDOMNode[];
+}
+
+export interface UnaryExpr {
+	t: "unary";
+	op: string;
+	arg: VDOMNode;
+}
+
+export interface BinaryExpr {
+	t: "binary";
+	op: string;
+	left: VDOMNode;
+	right: VDOMNode;
+}
+
+export interface TernaryExpr {
+	t: "ternary";
+	cond: VDOMNode;
+	then: VDOMNode;
+	else_: VDOMNode;
+}
+
+export interface TemplateExpr {
+	t: "template";
+	parts: Array<string | VDOMNode>;
+}
+
+export interface ArrowExpr {
+	t: "arrow";
+	params: string[];
+	body: VDOMNode;
+}
+
+export interface NewExpr {
+	t: "new";
+	ctor: VDOMNode;
+	args: VDOMNode[];
+}
+
+// -----------------------------------------------------------------------------
+// VDOM tree
+// -----------------------------------------------------------------------------
+
+export type CallbackPlaceholder = "$cb";
+
+export type VDOMPropValue = JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder;
 
 export interface VDOMElement {
 	tag: string;
-	props?: Record<string, any>;
-	children?: VDOMNode[];
 	key?: string;
-	lazy?: boolean;
+	props?: Record<string, VDOMPropValue>;
+	children?: VDOMNode[];
+	// Prop keys that should be interpreted (expr / render-prop subtree / callback binding).
+	// When absent, props are treated as plain JSON.
+	eval?: string[];
 }
 
-// Primitive nodes that can be rendered
-export type PrimitiveNode = string | number | boolean;
-
-// VDOMNode is either a primitive (string, number, boolean) or an element node.
-// Booleans are valid children in React but do not render anything.
-// Mount points are just UIElementNodes with tags starting with $$ComponentKey
-export type VDOMNode = PrimitiveNode | VDOMElement;
-
+export type VDOMNode = JsonPrimitive | VDOMElement | VDOMExpr;
 export type VDOM = VDOMNode;
+
+export function isElementNode(node: VDOMNode): node is VDOMElement {
+	return typeof node === "object" && node !== null && "tag" in node;
+}
+
+export function isExprNode(node: unknown): node is VDOMExpr {
+	return typeof node === "object" && node !== null && "t" in (node as any);
+}
+
+export function isMountPointNode(node: VDOMNode): node is VDOMElement {
+	return (
+		isElementNode(node) && node.tag.startsWith(MOUNT_POINT_PREFIX) && node.tag !== FRAGMENT_TAG
+	);
+}
+
+// -----------------------------------------------------------------------------
+// Updates
+// -----------------------------------------------------------------------------
 
 export interface VDOMUpdateBase {
 	type: string;
-	path: string; // Dot-separated path to the node
+	path: string;
 }
 
 export interface ReplaceUpdate extends VDOMUpdateBase {
 	type: "replace";
-	data: VDOMNode; // The new node
+	data: VDOM;
 }
 
 export interface UpdatePropsUpdate extends VDOMUpdateBase {
 	type: "update_props";
 	data: {
-		set?: Record<string, any>;
+		set?: Record<string, VDOMPropValue>;
 		remove?: string[];
+		// Replace the eval list for this element.
+		// - absent/undefined: keep previous
+		// - []: clear
+		eval?: string[];
 	};
 }
 
@@ -52,55 +189,4 @@ export interface ReconciliationUpdate {
 	reuse: [number[], number[]];
 }
 
-export interface PathDelta {
-	add?: string[];
-	remove?: string[];
-}
-
-export interface UpdateCallbacksUpdate extends VDOMUpdateBase {
-	type: "update_callbacks";
-	data: PathDelta;
-}
-
-export interface UpdateRenderPropsUpdate extends VDOMUpdateBase {
-	type: "update_render_props";
-	data: PathDelta;
-}
-
-export interface UpdateJsExprPathsUpdate extends VDOMUpdateBase {
-	type: "update_jsexpr_paths";
-	data: PathDelta;
-}
-
-export type VDOMUpdate =
-	| ReplaceUpdate
-	| UpdatePropsUpdate
-	| ReconciliationUpdate
-	| UpdateCallbacksUpdate
-	| UpdateRenderPropsUpdate
-	| UpdateJsExprPathsUpdate;
-
-export type UpdateType = VDOMUpdate["type"];
-
-// Utility functions for working with the UI tree structure
-export function isElementNode(node: VDOMNode): node is VDOMElement {
-	// Matches all non-text nodes
-	return typeof node === "object" && node !== null;
-}
-
-export function isMountPointNode(node: VDOMNode): node is VDOMElement {
-	return (
-		typeof node === "object" &&
-		node !== null &&
-		node.tag.startsWith(MOUNT_POINT_PREFIX) &&
-		node.tag !== FRAGMENT_TAG
-	);
-}
-
-export function isTextNode(node: VDOMNode): node is string {
-	return typeof node === "string";
-}
-
-export function isFragment(node: VDOMNode): boolean {
-	return typeof node === "object" && node !== null && node.tag === FRAGMENT_TAG;
-}
+export type VDOMUpdate = ReplaceUpdate | UpdatePropsUpdate | ReconciliationUpdate;

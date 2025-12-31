@@ -16,7 +16,7 @@ from pulse.codegen.templates.route import generate_route
 from pulse.component import Component, component
 from pulse.components.react_router import Outlet
 from pulse.routing import Route, RouteTree
-from pulse.transpiler_v2 import Import, Jsx, clear_function_cache
+from pulse.transpiler import Import, Jsx, clear_function_cache
 
 SERVER_ADDRESS = "http://localhost:8000"
 
@@ -104,7 +104,7 @@ class TestCodegen:
 
 	def test_generate_route_page_with_property_components(self, tmp_path: Path):
 		"""Test generating route with prop-accessed components (nested component access)."""
-		from pulse.transpiler_v2.nodes import Member
+		from pulse.transpiler.nodes import Member
 
 		# Use Member to access properties on an import
 		app_shell_import = Import("AppShell", "@mantine/core")
@@ -424,7 +424,7 @@ class TestLocalFileImports:
 
 	def test_local_css_file_copied_to_assets(self, tmp_path: Path):
 		"""Local CSS file is copied to assets folder."""
-		from pulse.transpiler_v2.imports import clear_import_registry
+		from pulse.transpiler.imports import clear_import_registry
 
 		clear_import_registry()
 
@@ -452,7 +452,7 @@ class TestLocalFileImports:
 
 	def test_local_js_file_copied_to_assets(self, tmp_path: Path):
 		"""Local JS/TS file is copied to assets folder."""
-		from pulse.transpiler_v2.imports import clear_import_registry
+		from pulse.transpiler.imports import clear_import_registry
 
 		clear_import_registry()
 
@@ -477,7 +477,7 @@ class TestLocalFileImports:
 
 	def test_route_imports_from_assets_folder(self, tmp_path: Path):
 		"""Generated routes import local files from assets folder."""
-		from pulse.transpiler_v2.imports import clear_import_registry
+		from pulse.transpiler.imports import clear_import_registry
 
 		clear_import_registry()
 
@@ -505,7 +505,7 @@ class TestLocalFileImports:
 
 	def test_nested_route_imports_from_assets_folder(self, tmp_path: Path):
 		"""Nested routes also import from assets folder with correct relative path."""
-		from pulse.transpiler_v2.imports import clear_import_registry
+		from pulse.transpiler.imports import clear_import_registry
 
 		clear_import_registry()
 
@@ -545,7 +545,7 @@ class TestLocalFileImports:
 
 	def test_multiple_local_files_all_copied(self, tmp_path: Path):
 		"""Multiple local files are all copied to assets folder."""
-		from pulse.transpiler_v2.imports import clear_import_registry
+		from pulse.transpiler.imports import clear_import_registry
 
 		clear_import_registry()
 
@@ -575,7 +575,7 @@ class TestLocalFileImports:
 
 	def test_package_imports_not_affected(self, tmp_path: Path):
 		"""Package imports are not affected by local file handling."""
-		from pulse.transpiler_v2.imports import clear_import_registry
+		from pulse.transpiler.imports import clear_import_registry
 
 		clear_import_registry()
 
@@ -602,7 +602,7 @@ class TestLocalFileImports:
 
 	def test_layout_imports_from_assets_folder(self, tmp_path: Path):
 		"""Layout files also import from assets folder with correct relative path."""
-		from pulse.transpiler_v2.imports import clear_import_registry
+		from pulse.transpiler.imports import clear_import_registry
 
 		clear_import_registry()
 
@@ -635,7 +635,7 @@ class TestLocalFileImports:
 
 	def test_deeply_nested_route_correct_relative_path(self, tmp_path: Path):
 		"""Deeply nested routes compute correct relative paths to assets."""
-		from pulse.transpiler_v2.imports import clear_import_registry
+		from pulse.transpiler.imports import clear_import_registry
 
 		clear_import_registry()
 

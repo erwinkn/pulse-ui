@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 from pulse.react_component import react_component
-from pulse.transpiler_v2.imports import Import
-from pulse.transpiler_v2.nodes import Element, Jsx, Member, Node
+from pulse.transpiler.imports import Import
+from pulse.transpiler.nodes import Element, Jsx, Member, Node
 
 
 def test_react_component_import_expr():

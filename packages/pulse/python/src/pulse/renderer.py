@@ -7,9 +7,9 @@ from typing import Any, NamedTuple, TypeAlias, cast
 
 from pulse.helpers import values_equal
 from pulse.hooks.core import HookContext
-from pulse.transpiler_v2 import Import
-from pulse.transpiler_v2.function import Constant, JsFunction, JsxFunction
-from pulse.transpiler_v2.nodes import (
+from pulse.transpiler import Import
+from pulse.transpiler.function import Constant, JsFunction, JsxFunction
+from pulse.transpiler.nodes import (
 	Element,
 	Expr,
 	Literal,
@@ -17,7 +17,7 @@ from pulse.transpiler_v2.nodes import (
 	PulseNode,
 	Value,
 )
-from pulse.transpiler_v2.vdom import (
+from pulse.transpiler.vdom import (
 	VDOM,
 	JsonPrimitive,
 	JsonValue,

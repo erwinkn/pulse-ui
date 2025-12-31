@@ -40,9 +40,8 @@ export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 // Core React bindings
 export { PulseProvider, PulseView, usePulseClient } from "./pulse";
 // Renderer helpers
-export { RenderLazy } from "./renderer";
-// Renderer v2 (structural expressions + eval-keyed props)
-export { VDOMRenderer2 } from "./renderer2";
+// Renderer (structural expressions + eval-keyed props)
+export { RenderLazy, VDOMRenderer } from "./renderer";
 // Serialization helpers
 // export { extractEvent } from "./serialize/events";
 // export {
@@ -57,18 +56,15 @@ export { usePulseChannel } from "./usePulseChannel";
 // VDOM types and helpers
 export type {
 	ComponentRegistry,
-	VDOM,
-	VDOMElement,
-	VDOMNode,
-	VDOMUpdate,
-} from "./vdom";
-
-export type {
 	ComponentRegistry as ComponentRegistry2,
+	VDOM,
 	VDOM as VDOM2,
+	VDOMElement,
 	VDOMElement as VDOMElement2,
 	VDOMExpr as VDOMExpr2,
+	VDOMNode,
 	VDOMNode as VDOMNode2,
 	VDOMPropValue as VDOMPropValue2,
-	VDOMUpdate2,
-} from "./vdom2";
+	VDOMUpdate,
+	VDOMUpdate,
+} from "./vdom";

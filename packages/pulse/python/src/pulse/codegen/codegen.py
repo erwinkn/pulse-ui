@@ -14,7 +14,7 @@ from pulse.codegen.templates.routes_ts import (
 )
 from pulse.env import env
 from pulse.routing import Layout, Route, RouteTree
-from pulse.transpiler_v2 import get_registered_imports
+from pulse.transpiler import get_registered_imports
 
 if TYPE_CHECKING:
 	from pulse.app import ConnectionStatusConfig

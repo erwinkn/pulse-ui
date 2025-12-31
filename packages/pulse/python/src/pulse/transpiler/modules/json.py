@@ -1,20 +1,24 @@
 """Python json module transpilation to JavaScript JSON."""
 
-from pulse.transpiler.nodes import JSExpr, JSIdentifier, JSMemberCall
+from __future__ import annotations
+
+from typing import Any, final
+
+from pulse.transpiler.nodes import Call, Expr, Identifier, Member
 from pulse.transpiler.py_module import PyModule
+from pulse.transpiler.transpiler import Transpiler
+
+_JSON = Identifier("JSON")
 
 
-def JSONCall(name: str, *args: JSExpr) -> JSExpr:
-	return JSMemberCall(JSIdentifier("JSON"), name, list(args))
-
-
+@final
 class PyJson(PyModule):
 	"""Provides transpilation for Python json functions to JavaScript."""
 
 	@staticmethod
-	def dumps(obj: JSExpr) -> JSExpr:
-		return JSONCall("stringify", obj)
+	def dumps(obj: Any, *, ctx: Transpiler) -> Expr:
+		return Call(Member(_JSON, "stringify"), [ctx.emit_expr(obj)])
 
 	@staticmethod
-	def loads(s: JSExpr) -> JSExpr:
-		return JSONCall("parse", s)
+	def loads(s: Any, *, ctx: Transpiler) -> Expr:
+		return Call(Member(_JSON, "parse"), [ctx.emit_expr(s)])

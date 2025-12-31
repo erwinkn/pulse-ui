@@ -1,7 +1,7 @@
 from typing import Any, Literal, NotRequired, TypedDict
 
 from pulse.routing import RouteInfo
-from pulse.transpiler_v2.vdom import VDOM, VDOMOperation
+from pulse.transpiler.vdom import VDOM, VDOMOperation
 
 
 # ====================

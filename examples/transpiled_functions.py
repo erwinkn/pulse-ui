@@ -4,7 +4,7 @@ Comprehensive example demonstrating Python -> JavaScript transpilation.
 This example showcases ALL transpilation features:
 1. Basic Python to JavaScript conversion
 2. PyModule support (Python stdlib -> JS Math)
-3. JsModule support (pulse.js2.* modules)
+3. JsModule support (pulse.js.* modules)
 4. import_js for typed JS imports
 5. Cross-module function transpilation
 6. Builtin functions (len, max, min, sum, etc.)
@@ -24,10 +24,10 @@ import pulse as ps
 from pulse._examples import clamp, cube, factorial, is_even, square
 
 # Import JS modules (the new pulse.js.* system)
-from pulse.js2 import Math, console, obj
-from pulse.js2.math import PI, floor, sin
-from pulse.js2.math import abs as js_abs
-from pulse.js2.number import Number
+from pulse.js import Math, console, obj
+from pulse.js.math import PI, floor, sin
+from pulse.js.math import abs as js_abs
+from pulse.js.number import Number
 
 # =============================================================================
 # Using Import as a typed decorator
@@ -155,50 +155,50 @@ def use_math_constants() -> float:
 
 
 # =============================================================================
-# Section 3: JsModule Support (pulse.js2.* modules)
+# Section 3: JsModule Support (pulse.js.* modules)
 # =============================================================================
 
 
 @ps.javascript
 def js_math_module(x: float) -> float:
-	"""Using pulse.js2.math as a module."""
+	"""Using pulse.js.math as a module."""
 	return Math.floor(x) + Math.ceil(x)
 
 
 @ps.javascript
 def js_math_imports(x: float) -> float:
-	"""Using individual imports from pulse.js2.math."""
+	"""Using individual imports from pulse.js.math."""
 	return floor(sin(x) * 100)
 
 
 @ps.javascript
 def js_math_constants() -> float:
-	"""Using constants from pulse.js2.math."""
+	"""Using constants from pulse.js.math."""
 	return PI * 2
 
 
 @ps.javascript
 def js_math_abs(x: float) -> float:
-	"""Using abs from pulse.js2.math."""
+	"""Using abs from pulse.js.math."""
 	return js_abs(x)
 
 
 @ps.javascript
 def js_number_module(x: float) -> bool:
-	"""Using pulse.js2.number module functions."""
+	"""Using pulse.js.number module functions."""
 	return Number.isFinite(x) and not Number.isNaN(x)
 
 
 @ps.javascript
 def js_number_imports(s: str) -> bool:
-	"""Using individual imports from pulse.js2.number."""
+	"""Using individual imports from pulse.js.number."""
 	val = Number.parseInt(s, 10)
 	return Number.isFinite(val) and not Number.isNaN(val)
 
 
 @ps.javascript
 def js_number_constants() -> float:
-	"""Using constants from pulse.js2.number."""
+	"""Using constants from pulse.js.number."""
 	return Number.MAX_SAFE_INTEGER
 
 
@@ -558,7 +558,7 @@ def ReactHooksDemo():
 			)["← Back to Transpiler Demo"],
 			ps.h1("React Components with Hooks", className="text-3xl font-bold mb-4"),
 			ps.p(
-				"This example shows a React component created in Python using the transpiler_v2 system. "
+				"This example shows a React component created in Python using the transpiler system. "
 				+ "The component uses useState and useEffect hooks imported from React.",
 				className="text-slate-400 mb-8",
 			),
@@ -730,8 +730,8 @@ def TranspilerDemo():
 			],
 			# JsModule Support
 			Section(
-				title="3. JsModule Support (pulse.js2.* modules)",
-				description="Direct access to JavaScript globals like Math and Number via pulse.js2.*.",
+				title="3. JsModule Support (pulse.js.* modules)",
+				description="Direct access to JavaScript globals like Math and Number via pulse.js.*.",
 			)[
 				FunctionTester(
 					fn=js_math_module,

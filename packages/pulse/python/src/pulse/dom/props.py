@@ -68,12 +68,12 @@ from pulse.dom.events import (
 	TextAreaDOMEvents,
 )
 from pulse.helpers import CSSProperties
-from pulse.transpiler.nodes import JSExpr
+from pulse.transpiler.nodes import Expr
 
 Booleanish = Literal[True, False, "true", "false"]
 CrossOrigin = Literal["anonymous", "use-credentials", ""] | None
-# ClassName can be a string or any JSExpr (e.g., JSMember from CssModule.classname)
-ClassName = str | JSExpr
+# ClassName can be a string or any Expr (e.g., Member from CssModule.classname)
+ClassName = str | Expr
 
 
 class BaseHTMLProps(TypedDict, total=False):

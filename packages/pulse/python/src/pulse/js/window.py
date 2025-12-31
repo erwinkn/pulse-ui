@@ -1,4 +1,4 @@
-"""Browser window global Any.
+"""Browser window global object.
 
 Usage:
     from pulse.js import window
@@ -11,7 +11,7 @@ from typing import Any as _Any
 
 from pulse.js._types import Element as _Element
 from pulse.js._types import Selection as _Selection
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 # Dimensions
 innerWidth: int
@@ -43,33 +43,33 @@ performance: _Any
 
 
 # Dialog methods
-def alert(message: str = "") -> None:
+def alert(message: str = "", /) -> None:
 	"""Display an alert dialog with the given message."""
 	...
 
 
-def confirm(message: str = "") -> bool:
+def confirm(message: str = "", /) -> bool:
 	"""Display a confirmation dialog. Returns True if user clicks OK."""
 	...
 
 
-def prompt(message: str = "", default: str = "") -> str | None:
+def prompt(message: str = "", default: str = "", /) -> str | None:
 	"""Display a prompt dialog. Returns input or None if cancelled."""
 	...
 
 
 # Scroll methods
-def scrollTo(x: float | dict[str, float], y: float | None = None) -> None:
+def scrollTo(x: float | dict[str, float], y: float | None = None, /) -> None:
 	"""Scroll to the given position."""
 	...
 
 
-def scrollBy(x: float | dict[str, float], y: float | None = None) -> None:
+def scrollBy(x: float | dict[str, float], y: float | None = None, /) -> None:
 	"""Scroll by the given amount."""
 	...
 
 
-def scroll(x: float | dict[str, float], y: float | None = None) -> None:
+def scroll(x: float | dict[str, float], y: float | None = None, /) -> None:
 	"""Alias for scrollTo."""
 	...
 
@@ -80,7 +80,7 @@ def getSelection() -> _Selection | None:
 	...
 
 
-def getComputedStyle(element: _Element, pseudoElt: str | None = None) -> _Any:
+def getComputedStyle(element: _Element, pseudoElt: str | None = None, /) -> _Any:
 	"""Return the computed style of an element."""
 	...
 
@@ -101,8 +101,9 @@ def open(
 	url: str = "",
 	target: str = "_blank",
 	features: str = "",
+	/,
 ) -> _Any | None:
-	"""Open a new window. Returns the new window Any or None."""
+	"""Open a new window. Returns the new window object or None."""
 	...
 
 
@@ -112,7 +113,7 @@ def close() -> None:
 
 
 # Timers (these return timer IDs)
-def setTimeout(handler: _Callable[..., None], timeout: int = 0, *args: _Any) -> int:
+def setTimeout(handler: _Callable[..., None], timeout: int = 0, /, *args: _Any) -> int:
 	"""Schedule a function to run after a delay. Returns timer ID."""
 	...
 
@@ -122,7 +123,7 @@ def clearTimeout(timeoutId: int) -> None:
 	...
 
 
-def setInterval(handler: _Callable[..., None], timeout: int = 0, *args: _Any) -> int:
+def setInterval(handler: _Callable[..., None], timeout: int = 0, /, *args: _Any) -> int:
 	"""Schedule a function to run repeatedly. Returns timer ID."""
 	...
 
@@ -148,6 +149,7 @@ def addEventListener(
 	type: str,
 	listener: _Callable[..., None],
 	options: bool | dict[str, bool] | None = None,
+	/,
 ) -> None:
 	"""Add an event listener to the window."""
 	...
@@ -157,6 +159,7 @@ def removeEventListener(
 	type: str,
 	listener: _Callable[..., None],
 	options: bool | dict[str, bool] | None = None,
+	/,
 ) -> None:
 	"""Remove an event listener from the window."""
 	...
@@ -190,10 +193,10 @@ def print_() -> None:
 
 
 def postMessage(
-	message: _Any, targetOrigin: str, transfer: list[_Any] | None = None
+	message: _Any, targetOrigin: str, transfer: list[_Any] | None = None, /
 ) -> None:
 	"""Post a message to another window."""
 	...
 
 
-_register_js_module(name="window")
+JsModule.register(name="window")

@@ -1,6 +1,6 @@
 from typing import Any, ParamSpec
 
-from pulse.transpiler_v2.nodes import Element, Node
+from pulse.transpiler.nodes import Element, Node
 
 P = ParamSpec("P")
 

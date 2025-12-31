@@ -8,7 +8,7 @@ from pulse.component import component
 from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
 from pulse.renderer import RenderTree
-from pulse.transpiler_v2.nodes import Element, PulseNode
+from pulse.transpiler.nodes import Element, PulseNode
 
 
 # Helpers for reconciliation-based updates
@@ -254,8 +254,8 @@ def test_diff_props_unmounts_render_prop_when_removed():
 
 
 def test_diff_props_unmounts_render_prop_when_replaced_with_jsexpr(tmp_path: Path):
-	from pulse.transpiler_v2.imports import Import, clear_import_registry
-	from pulse.transpiler_v2.nodes import Member
+	from pulse.transpiler.imports import Import, clear_import_registry
+	from pulse.transpiler.nodes import Member
 
 	clear_import_registry()
 
@@ -827,8 +827,8 @@ def test_render_props():
 
 def test_css_module_with_jsexpr(tmp_path: Path):
 	"""Test CSS module Import/Member integrates with renderer expressions."""
-	from pulse.transpiler_v2.imports import Import, clear_import_registry
-	from pulse.transpiler_v2.nodes import Member
+	from pulse.transpiler.imports import Import, clear_import_registry
+	from pulse.transpiler.nodes import Member
 
 	clear_import_registry()
 

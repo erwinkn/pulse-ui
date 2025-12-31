@@ -10,10 +10,9 @@ from unittest.mock import MagicMock
 import pytest
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.render_session import RenderSession, run_js
-from pulse.transpiler.context import interpreted_mode
 from pulse.transpiler.function import javascript
-from pulse.transpiler.ids import generate_id, reset_id_counter
-from pulse.transpiler.nodes import JSExpr
+from pulse.transpiler.id import next_id, reset_id_counter
+from pulse.transpiler.nodes import Expr, emit
 
 
 @dataclass
@@ -48,17 +47,16 @@ class MockRenderSession:
 			)
 
 	def run_js(
-		self, expr: JSExpr | str, *, result: bool = False
+		self, expr: Expr | str, *, result: bool = False
 	) -> asyncio.Future[object] | None:
 		"""Mock implementation of RenderSession.run_js."""
 		ctx = PulseContext.get()
-		exec_id = generate_id()
+		exec_id = next_id()
 
 		if isinstance(expr, str):
 			code = expr
 		else:
-			with interpreted_mode():
-				code = expr.emit()
+			code = emit(expr)
 
 		path = ctx.route.pathname if ctx.route else "/"
 
@@ -134,7 +132,7 @@ class TestRunJs:
 			assert mock.sent_commands[0].id in mock.pending_js_results
 
 	def test_run_js_with_js_function(self) -> None:
-		"""run_js with a @javascript function call should emit interpreted code."""
+		"""run_js with a @javascript function call should emit code."""
 
 		@javascript
 		def greet(name: str) -> str:
@@ -146,8 +144,7 @@ class TestRunJs:
 
 			assert len(mock.sent_commands) == 1
 			code = mock.sent_commands[0].code
-			# Should use get_object to retrieve the function
-			assert "get_object(" in code
+			# Should call the greet function with "World"
 			assert "greet_" in code
 			assert '"World"' in code
 

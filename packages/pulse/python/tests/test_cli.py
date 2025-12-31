@@ -22,7 +22,7 @@ from pulse.cli.packages import (
 from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.env import env
-from pulse.transpiler_v2.imports import Import, clear_import_registry
+from pulse.transpiler.imports import Import, clear_import_registry
 
 
 def test_parse_app_target_file_default(tmp_path: Path):

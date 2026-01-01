@@ -531,7 +531,8 @@ def test_keyed_component_state_preservation():
 
 	@component
 	def CounterComponent(label: str, key: str | None = None) -> Element:
-		counter = ps.states(Counter(label))
+		with ps.init():
+			counter = Counter(label)
 
 		def handle_click():
 			counter.inc()
@@ -585,7 +586,8 @@ def test_keyed_parent_node_move_preserves_child_state():
 
 	@component
 	def CounterComponent(label: str) -> Element:
-		counter = ps.states(Counter(label))
+		with ps.init():
+			counter = Counter(label)
 
 		def handle_click():
 			counter.inc()
@@ -626,17 +628,22 @@ def test_keyed_parent_node_move_preserves_child_state():
 	assert isinstance(a_component, PulseNode)
 	assert a_component.hooks is not None
 
-	# Inspect stored Counter state inside the component after the move
-	states_ns = a_component.hooks.namespaces.get("pulse:core.states")
-	assert states_ns is not None
-	stored_hook_state = next(iter(states_ns.states.values()))
-	# StatesHookState now uses namespaces dict, key=None for states() without key
-	state_namespace = stored_hook_state.namespaces.get(None)
-	assert state_namespace is not None
-	stored_counter = state_namespace.states[0]
-	assert isinstance(stored_counter, Counter)
-	assert stored_counter.label == "A"
-	assert stored_counter.count == 1
+	# Inspect stored Counter state inside the component after the move using init hook
+	init_ns = a_component.hooks.namespaces.get("init_storage")
+	assert init_ns is not None
+	stored_hook_state = next(iter(init_ns.states.values()))
+	# InitState stores captured variables keyed by callsite
+	assert hasattr(stored_hook_state, "storage")
+	# Find the captured counter in the storage
+	for entry in stored_hook_state.storage.values():
+		if "counter" in entry["vars"]:
+			stored_counter = entry["vars"]["counter"]
+			assert isinstance(stored_counter, Counter)
+			assert stored_counter.label == "A"
+			assert stored_counter.count == 1
+			break
+	else:
+		raise AssertionError("Counter not found in init storage")
 
 	# Click A's button again at the new location; state should increment to 2
 	tree.callbacks["1.0.1.onClick"].fn()
@@ -697,7 +704,8 @@ def test_keyed_remove_then_readd_resets_state():
 
 	@component
 	def CounterComponent(label: str, key: str | None = None) -> Element:
-		counter = ps.states(Counter)
+		with ps.init():
+			counter = Counter()
 
 		def handle_click():
 			counter.inc()
@@ -754,7 +762,8 @@ def test_keyed_complex_reorder():
 
 	@component
 	def CounterComponent(label: str, key: str | None = None) -> Element:
-		counter = ps.states(Counter(label))
+		with ps.init():
+			counter = Counter(label)
 
 		def handle_click():
 			counter.inc()

@@ -103,8 +103,8 @@ from pulse_mantine import (
 
 @ps.component
 def Demo():
-    form = ps.states(
-        lambda: MantineForm(
+    with ps.init():
+        form = MantineForm(
             mode="uncontrolled",
             initialValues={"email": "", "termsofService": False},
             validate={
@@ -112,7 +112,6 @@ def Demo():
                 "email": IsEmail("Invalid email")
             },
         )
-    )
 
     # `MantineForm.render` accepts all the regular <form> attributes
     return form.render(

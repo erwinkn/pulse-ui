@@ -26,7 +26,8 @@ class ToggleState(ps.State):
 
 @ps.component
 def Toggle(label: str):
-	state = ps.states(ToggleState(label))
+	with ps.init():
+		state = ToggleState(label)
 
 	return ps.div(className="flex flex-col")[
 		ps.div(className="flex items-center gap-2")[

@@ -1286,9 +1286,9 @@ from pulse.hooks.stable import (
 	stable as stable,
 )
 
-# Hooks - States
-from pulse.hooks.states import StatesHookState as StatesHookState
-from pulse.hooks.states import states as states
+# Hooks - State
+from pulse.hooks.state import StateHookState as StateHookState
+from pulse.hooks.state import state as state
 from pulse.messages import ClientMessage as ClientMessage
 from pulse.messages import Directives as Directives
 from pulse.messages import Prerender as Prerender

@@ -166,7 +166,8 @@ class UserApi(ps.State):
 
 @ps.component
 def QueryExample():
-	s = ps.states(UserApi)
+	with ps.init():
+		s = UserApi()
 
 	def prev():
 		s.user_id = max(1, s.user_id - 1)

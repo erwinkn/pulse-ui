@@ -15,7 +15,8 @@ class CounterState(ps.State):
 
 @ps.component
 def Counter():
-	state = ps.states(CounterState)
+	with ps.init():
+		state = CounterState()
 	print(f"Rendering counter, count is {state.count}")
 
 	def decrement():

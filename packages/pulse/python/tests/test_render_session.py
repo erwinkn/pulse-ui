@@ -33,7 +33,7 @@ class CounterState(ps.State):
 
 
 def Counter(session_name: str, key_prefix: str):
-	state = ps.states(CounterState)
+	state = ps.setup(CounterState)
 
 	def inc():
 		state.count = state.count + 1
@@ -456,7 +456,8 @@ def test_route_info_updated_on_reconnect():
 
 @ps.component
 def StatefulCounter():
-	state = ps.states(CounterState)
+	with ps.init():
+		state = CounterState()
 
 	def increment():
 		state.count += 1

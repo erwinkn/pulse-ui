@@ -30,7 +30,8 @@ class AsyncEffectState(ps.State):
 
 @ps.component
 def AsyncEffectDemo():
-	state = ps.states(AsyncEffectState)
+	with ps.init():
+		state = AsyncEffectState()
 
 	return ps.div(
 		className="h-screen w-fit mx-auto flex flex-col justify-center items-start"

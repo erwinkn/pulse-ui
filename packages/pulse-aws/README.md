@@ -2,6 +2,31 @@
 
 AWS deployment utilities for Pulse applications on ECS Fargate.
 
+## Folder Structure
+
+```
+src/pulse_aws/
+├── __init__.py        # Public exports
+├── config.py          # TaskConfig, HealthCheckConfig, ReaperConfig, DockerBuild
+├── deployment.py      # Core deployment orchestration, deploy()
+├── plugin.py          # AWSECSPlugin for Pulse integration
+├── baseline.py        # VPC, ALB, ECS cluster setup
+├── certificate.py     # ACM certificate management
+├── teardown.py        # Infrastructure cleanup
+├── reporting.py       # Deployment status reporting
+├── reaper_lambda.py   # Lambda for graceful task draining
+│
+├── cdk/               # AWS CDK infrastructure
+│   ├── app.py         # CDK app entrypoint
+│   ├── baseline.py    # Baseline stack definition
+│   └── helpers.py     # CDK utilities
+│
+scripts/
+├── deploy.py          # Deployment script
+├── teardown.py        # Teardown script
+└── verify.py          # Verification script
+```
+
 ## Features
 
 - **Zero-downtime deployments** with header-based sticky sessions

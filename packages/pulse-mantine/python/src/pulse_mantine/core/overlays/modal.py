@@ -2,38 +2,40 @@ from typing import Any
 
 import pulse as ps
 
+_Modal = ps.Import("Modal", "@mantine/core")
 
-@ps.react_component(ps.Import("Modal", "@mantine/core"))
+
+@ps.react_component(_Modal)
 def Modal(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Modal", "@mantine/core", prop="Root"))
+@ps.react_component(_Modal.Root)
 def ModalRoot(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Modal", "@mantine/core", prop="Overlay"))
+@ps.react_component(_Modal.Overlay)
 def ModalOverlay(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Modal", "@mantine/core", prop="Content"))
+@ps.react_component(_Modal.Content)
 def ModalContent(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Modal", "@mantine/core", prop="Body"))
+@ps.react_component(_Modal.Body)
 def ModalBody(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Modal", "@mantine/core", prop="Header"))
+@ps.react_component(_Modal.Header)
 def ModalHeader(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Modal", "@mantine/core", prop="Title"))
+@ps.react_component(_Modal.Title)
 def ModalTitle(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Modal", "@mantine/core", prop="CloseButton"))
+@ps.react_component(_Modal.CloseButton)
 def ModalCloseButton(key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Modal", "@mantine/core", prop="Stack"))
+@ps.react_component(_Modal.Stack)
 def ModalStack(*children: ps.Node, key: str | None = None, **props: Any): ...

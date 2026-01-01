@@ -1,5 +1,5 @@
 """
-Tests for Python module transpilation in v2 transpiler.
+Tests for Python module transpilation
 
 Tests module registration, PyModule, Transformer, and built-in module transpilation.
 """

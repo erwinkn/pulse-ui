@@ -1,5 +1,5 @@
 """
-Tests for React component integration in v2.
+Tests for React component integration
 
 Focuses on the @react_component decorator behavior with Expr-backed components.
 """
@@ -60,8 +60,8 @@ def test_react_component_rejects_non_expr():
 	"""@react_component enforces Expr-only inputs."""
 	with pytest.raises(TypeError, match="expects an Expr"):
 
-		@react_component("Button")  # type: ignore[arg-type]
-		def Button(
+		@react_component("Button")  # pyright: ignore[reportArgumentType]
+		def Button(  # pyright: ignore[reportUnusedFunction]
 			*children: Node, key: str | None = None, **props: Any
 		) -> Element: ...
 
@@ -74,7 +74,7 @@ def test_react_component_key_validation():
 	def Box(*children: Node, key: str | None = None, **props: Any) -> Element: ...
 
 	with pytest.raises(ValueError, match="key must be a string"):
-		Box(key=123)  # type: ignore[arg-type]
+		Box(key=123)  # pyright: ignore[reportArgumentType]
 
 	node = Box(key="k1")
 	assert node.key == "k1"

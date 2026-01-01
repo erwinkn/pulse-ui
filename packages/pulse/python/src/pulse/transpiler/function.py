@@ -457,9 +457,9 @@ def analyze_deps(fn: Callable[..., Any]) -> dict[str, Expr]:
 			continue
 
 		# Other callables (classes, methods, etc.) - not supported
-		if callable(value):
+		if callable(value):  # pyright: ignore[reportUnknownArgumentType]
 			raise TranspileError(
-				f"Callable '{name}' (type: {type(value).__name__}) is not supported. "
+				f"Callable '{name}' (type: {type(value).__name__}) is not supported. "  # pyright: ignore[reportUnknownArgumentType]
 				+ "Only functions can be transpiled."
 			)
 

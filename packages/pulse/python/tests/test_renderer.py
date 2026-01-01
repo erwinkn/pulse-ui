@@ -9,6 +9,7 @@ from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
 from pulse.renderer import RenderTree
 from pulse.transpiler.nodes import Element, PulseNode
+from pulse.transpiler.vdom import VDOMElement
 
 
 # Helpers for reconciliation-based updates
@@ -481,8 +482,9 @@ def test_keyed_move_preserves_component_nodes():
 	assert updated_second_child.kwargs["label"] == "A"
 
 	# Verify the rendered DOM content matches the labels
-	vdom = tree.render()
-	assert isinstance(vdom, dict)
+	vdom_raw = tree.render()
+	assert isinstance(vdom_raw, dict)
+	vdom = cast(VDOMElement, vdom_raw)
 	assert vdom["tag"] == "ul"
 	children = vdom.get("children")
 	assert isinstance(children, list)
@@ -807,9 +809,11 @@ def test_render_props():
 
 	# Create a div with render prop
 	tree = RenderTree(div(render=ChildComponent()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
-	vdom = tree.render()
-	assert vdom["props"]["render"]["tag"] == "span"
-	assert vdom["eval"] == ["render"]
+	vdom = cast(VDOMElement, tree.render())
+	props = cast(dict[str, Any], vdom.get("props", {}))
+	render_elem = cast(VDOMElement, props.get("render"))
+	assert render_elem["tag"] == "span"
+	assert vdom.get("eval") == ["render"]
 
 	# Change render prop
 	@component
@@ -820,7 +824,7 @@ def test_render_props():
 	assert any(
 		op["type"] == "replace"
 		and op["path"] == "render"
-		and op["data"]["tag"] == "span"
+		and cast(dict[str, Any], cast(object, op.get("data", {}))).get("tag") == "span"
 		for op in ops
 	)
 
@@ -840,10 +844,11 @@ def test_css_module_with_jsexpr(tmp_path: Path):
 	css_ref = Member(css_module, "test")
 
 	tree = RenderTree(div(className=css_ref))
-	vdom = tree.render()
+	vdom = cast(VDOMElement, tree.render())
 
-	assert vdom["eval"] == ["className"]
-	class_value = vdom["props"]["className"]  # pyright: ignore[reportIndexIssue,reportArgumentType,reportOptionalSubscript,reportTypedDictNotRequiredAccess]
+	assert vdom.get("eval") == ["className"]
+	props = cast(dict[str, Any], vdom.get("props", {}))
+	class_value = cast(dict[str, Any], props.get("className"))
 	assert class_value["t"] == "member"
 	assert class_value["prop"] == "test"
 	clear_import_registry()

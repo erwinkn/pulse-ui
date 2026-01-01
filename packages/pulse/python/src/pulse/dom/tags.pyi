@@ -52,8 +52,8 @@ from pulse.dom.props import (
 	HTMLTrackProps,
 	HTMLVideoProps,
 )
-from pulse.transpiler_v2.nodes import Element
-from pulse.transpiler_v2.nodes import Node as Child
+from pulse.transpiler.nodes import Element
+from pulse.transpiler.nodes import Node as Child
 
 class Tag(Protocol):
 	def __call__(self, *children: Child, **props: Any) -> Element: ...

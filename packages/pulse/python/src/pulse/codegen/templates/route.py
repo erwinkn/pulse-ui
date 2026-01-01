@@ -7,15 +7,12 @@ from collections.abc import Sequence
 from pulse.transpiler import (
 	Constant,
 	Import,
-	JsFunction,
 	collect_function_graph,
 	emit,
 	get_registered_imports,
 	registered_functions,
 )
-
-# Type alias for function types
-AnyJsFunction = JsFunction[*tuple[object, ...], object]
+from pulse.transpiler.function import AnyJsFunction
 
 
 def _generate_import_statement(

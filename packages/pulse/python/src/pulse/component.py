@@ -10,7 +10,7 @@ from pulse.transpiler.nodes import (
 	Node,
 	Primitive,
 	PulseNode,
-	_flatten_children,
+	flatten_children,
 )
 from pulse.transpiler.vdom import VDOMNode
 
@@ -36,12 +36,12 @@ class Component(Generic[P]):
 			raise ValueError("key must be a string or None")
 
 		if self._takes_children and args:
-			flattened = _flatten_children(
-				args,  # type: ignore[arg-type]
+			flattened = flatten_children(
+				args,  # pyright: ignore[reportArgumentType]
 				parent_name=f"<{self.name}>",
 				warn_stacklevel=4,
 			)
-			args = tuple(flattened)  # type: ignore[assignment]
+			args = tuple(flattened)  # pyright: ignore[reportAssignmentType]
 
 		return PulseNode(fn=self.fn, args=args, kwargs=kwargs, key=key, name=self.name)
 

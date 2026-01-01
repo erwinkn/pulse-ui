@@ -13,14 +13,12 @@ from pulse.transpiler.nodes import (
 	Element,
 	Expr,
 	Literal,
-	Primitive,
+	Node,
 	PulseNode,
 	Value,
 )
 from pulse.transpiler.vdom import (
 	VDOM,
-	JsonPrimitive,
-	JsonValue,
 	ReconciliationOperation,
 	RegistryRef,
 	ReplaceOperation,
@@ -32,19 +30,8 @@ from pulse.transpiler.vdom import (
 	VDOMPropValue,
 )
 
-RenderPath: TypeAlias = str
-RenderInput: TypeAlias = Primitive | Expr | PulseNode
-NormalizedNode: TypeAlias = PulseNode | Expr | JsonValue
-JsonCoercible: TypeAlias = (
-	JsonPrimitive
-	| list["JsonCoercible"]
-	| tuple["JsonCoercible", ...]
-	| dict[str, "JsonCoercible"]
-)
-CallbackFn: TypeAlias = Callable[..., Any]
-PropInput: TypeAlias = JsonCoercible | Expr | Element | PulseNode | CallbackFn
-NormalizedPropValue: TypeAlias = JsonValue | Expr | Element | PulseNode | CallbackFn
-ChildInput: TypeAlias = NormalizedNode | Iterable["ChildInput"]
+PropValue: TypeAlias = Node | Callable[..., Any]
+Child: TypeAlias = Node | Iterable["Child"]
 
 FRAGMENT_TAG = ""
 MOUNT_PREFIX = "$$"
@@ -52,7 +39,7 @@ CALLBACK_PLACEHOLDER = "$cb"
 
 
 class Callback(NamedTuple):
-	fn: CallbackFn
+	fn: Callable[..., Any]
 	n_args: int
 
 
@@ -61,7 +48,7 @@ Callbacks = dict[str, Callback]
 
 @dataclass(slots=True)
 class DiffPropsResult:
-	normalized: dict[str, NormalizedPropValue]
+	normalized: dict[str, PropValue]
 	delta_set: dict[str, VDOMPropValue]
 	delta_remove: set[str]
 	render_prop_reconciles: list["RenderPropTask"]
@@ -73,16 +60,16 @@ class RenderPropTask(NamedTuple):
 	key: str
 	previous: Element | PulseNode
 	current: Element | PulseNode
-	path: RenderPath
+	path: str
 
 
 class RenderTree:
-	root: RenderInput
+	root: Node
 	callbacks: Callbacks
 	operations: list[VDOMOperation]
-	_normalized: NormalizedNode | None
+	_normalized: Node | None
 
-	def __init__(self, root: RenderInput) -> None:
+	def __init__(self, root: Node) -> None:
 		self.root = root
 		self.callbacks = {}
 		self.operations = []
@@ -96,7 +83,7 @@ class RenderTree:
 		self._normalized = normalized
 		return vdom
 
-	def diff(self, new_tree: RenderInput) -> list[VDOMOperation]:
+	def diff(self, new_tree: Node) -> list[VDOMOperation]:
 		if self._normalized is None:
 			raise RuntimeError("RenderTree.render must be called before diff")
 
@@ -116,7 +103,7 @@ class RenderTree:
 		self.callbacks.clear()
 
 	@property
-	def normalized(self) -> NormalizedNode | None:
+	def normalized(self) -> Node | None:
 		return self._normalized
 
 
@@ -129,15 +116,13 @@ class Renderer:
 	# Rendering helpers
 	# ------------------------------------------------------------------
 
-	def render_tree(
-		self, node: RenderInput, path: RenderPath = ""
-	) -> tuple[VDOM, NormalizedNode]:
+	def render_tree(self, node: Node, path: str = "") -> tuple[Any, Node]:
 		if isinstance(node, PulseNode):
 			return self.render_component(node, path)
 		if isinstance(node, Element):
 			return self.render_node(node, path)
 		if isinstance(node, Value):
-			json_value = coerce_json(cast(JsonCoercible, node.value), path)
+			json_value = coerce_json(node.value, path)
 			return json_value, json_value
 		if isinstance(node, Expr):
 			return node.render(), node
@@ -146,7 +131,7 @@ class Renderer:
 		raise TypeError(f"Unsupported node type: {type(node).__name__}")
 
 	def render_component(
-		self, component: PulseNode, path: RenderPath
+		self, component: PulseNode, path: str
 	) -> tuple[VDOM, PulseNode]:
 		if component.hooks is None:
 			component.hooks = HookContext()
@@ -156,9 +141,7 @@ class Renderer:
 		component.contents = normalized_child
 		return vdom, component
 
-	def render_node(
-		self, element: Element, path: RenderPath
-	) -> tuple[VDOMNode, Element]:
+	def render_node(self, element: Element, path: str) -> tuple[VDOMNode, Element]:
 		tag = self.render_tag(element.tag)
 		vdom_node: VDOMElement = {"tag": tag}
 		if (key_val := key_value(element)) is not None:
@@ -180,7 +163,7 @@ class Renderer:
 		element.props = props_result.normalized or None
 
 		children_vdom: list[VDOM] = []
-		normalized_children: list[NormalizedNode] = []
+		normalized_children: list[Node] = []
 		for idx, child in enumerate(normalize_children(element.children)):
 			child_path = join_path(path, idx)
 			child_vdom, normalized_child = self.render_tree(child, child_path)
@@ -199,10 +182,10 @@ class Renderer:
 
 	def reconcile_tree(
 		self,
-		previous: NormalizedNode,
-		current: RenderInput,
-		path: RenderPath = "",
-	) -> NormalizedNode:
+		previous: Node,
+		current: Node,
+		path: str = "",
+	) -> Node:
 		if isinstance(current, Value):
 			current = coerce_json(current.value, path)
 		if isinstance(previous, Value):
@@ -227,7 +210,7 @@ class Renderer:
 		self,
 		previous: PulseNode,
 		current: PulseNode,
-		path: RenderPath,
+		path: str,
 	) -> PulseNode:
 		current.hooks = previous.hooks
 		current.contents = previous.contents
@@ -253,7 +236,7 @@ class Renderer:
 		self,
 		previous: Element,
 		current: Element,
-		path: RenderPath,
+		path: str,
 	) -> Element:
 		prev_props = previous.props or {}
 		new_props = current.props or {}
@@ -294,16 +277,16 @@ class Renderer:
 
 	def reconcile_children(
 		self,
-		c1: list[NormalizedNode],
-		c2: list[RenderInput],
-		path: RenderPath,
-	) -> list[NormalizedNode]:
+		c1: list[Node],
+		c2: list[Node],
+		path: str,
+	) -> list[Node]:
 		if not c1 and not c2:
 			return []
 
 		N1 = len(c1)
 		N2 = len(c2)
-		norm: list[NormalizedNode | None] = [None] * N2
+		norm: list[Node | None] = [None] * N2
 		N = min(N1, N2)
 		i = 0
 		while i < N:
@@ -367,13 +350,13 @@ class Renderer:
 
 	def diff_props(
 		self,
-		previous: dict[str, NormalizedPropValue],
-		current: dict[str, PropInput],
-		path: RenderPath,
+		previous: dict[str, PropValue],
+		current: dict[str, PropValue],
+		path: str,
 		prev_eval: set[str],
 	) -> DiffPropsResult:
 		updated: dict[str, VDOMPropValue] = {}
-		normalized: dict[str, NormalizedPropValue] | None = None
+		normalized: dict[str, PropValue] | None = None
 		render_prop_tasks: list[RenderPropTask] = []
 		eval_keys: set[str] = set()
 		removed_keys = set(previous.keys()) - set(current.keys())
@@ -386,9 +369,7 @@ class Renderer:
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					if normalized is None:
-						normalized = cast(
-							dict[str, NormalizedPropValue], current.copy()
-						)
+						normalized = current.copy()
 					normalized[key] = old_value
 					render_prop_tasks.append(
 						RenderPropTask(
@@ -401,17 +382,15 @@ class Renderer:
 				else:
 					vdom_value, normalized_value = self.render_tree(value, prop_path)
 					if normalized is None:
-						normalized = cast(
-							dict[str, NormalizedPropValue], current.copy()
-						)
+						normalized = current.copy()
 					normalized[key] = normalized_value
 					updated[key] = cast(VDOMPropValue, vdom_value)
 				continue
 
 			if isinstance(value, Value):
-				json_value = coerce_json(cast(JsonCoercible, value.value), prop_path)
+				json_value = coerce_json(value.value, prop_path)
 				if normalized is None:
-					normalized = cast(dict[str, NormalizedPropValue], current.copy())
+					normalized = current.copy()
 				normalized[key] = json_value
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
@@ -424,7 +403,7 @@ class Renderer:
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
 				if normalized is None:
-					normalized = cast(dict[str, NormalizedPropValue], current.copy())
+					normalized = current.copy()
 				normalized[key] = value
 				if not (isinstance(old_value, Expr) and values_equal(old_value, value)):
 					updated[key] = value.render()
@@ -435,7 +414,7 @@ class Renderer:
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
 				if normalized is None:
-					normalized = cast(dict[str, NormalizedPropValue], current.copy())
+					normalized = current.copy()
 				normalized[key] = value
 				register_callback(self.callbacks, prop_path, value)
 				if not callable(old_value):
@@ -448,7 +427,7 @@ class Renderer:
 			if normalized is not None:
 				normalized[key] = json_value
 			elif json_value is not value:
-				normalized = cast(dict[str, NormalizedPropValue], current.copy())
+				normalized = current.copy()
 				normalized[key] = json_value
 			if key not in previous or not values_equal(json_value, old_value):
 				updated[key] = cast(VDOMPropValue, json_value)
@@ -458,11 +437,7 @@ class Renderer:
 			if isinstance(old_value, (Element, PulseNode)):
 				unmount_element(old_value)
 
-		normalized_props = (
-			normalized
-			if normalized is not None
-			else cast(dict[str, NormalizedPropValue], current.copy())
-		)
+		normalized_props = normalized if normalized is not None else current.copy()
 		eval_changed = eval_keys != prev_eval
 		return DiffPropsResult(
 			normalized=normalized_props,
@@ -479,10 +454,6 @@ class Renderer:
 
 	def render_tag(self, tag: str | Expr) -> str:
 		if isinstance(tag, str):
-			if tag == "":
-				return FRAGMENT_TAG
-			if tag.startswith(MOUNT_PREFIX):
-				return tag
 			return tag
 
 		key = self.register_component_expr(tag)
@@ -501,7 +472,7 @@ class Renderer:
 	# Unmount helper
 	# ------------------------------------------------------------------
 
-	def unmount_subtree(self, node: NormalizedNode) -> None:
+	def unmount_subtree(self, node: Node) -> None:
 		unmount_element(node)
 
 
@@ -516,17 +487,23 @@ def registry_ref(expr: Expr) -> RegistryRef | None:
 	return None
 
 
-def is_json_primitive(value: RenderInput | JsonCoercible | Primitive) -> bool:
+def is_json_primitive(value: Any) -> bool:
 	return value is None or isinstance(value, (str, int, float, bool))
 
 
-def coerce_json(value: JsonCoercible, path: str) -> JsonValue:
+def coerce_json(value: Any, path: str) -> Any:
+	"""Convert Python value to JSON-compatible structure.
+
+	Performs runtime conversions:
+	- tuple → list
+	- validates dict keys are strings
+	"""
 	if is_json_primitive(value):
-		return cast(JsonPrimitive, value)
+		return value
 	if isinstance(value, (list, tuple)):
 		return [coerce_json(v, path) for v in value]
 	if isinstance(value, dict):
-		out: dict[str, JsonValue] = {}
+		out: dict[str, Any] = {}
 		for k, v in value.items():
 			if not isinstance(k, str):
 				raise TypeError(f"Non-string prop key at {path}: {k!r}")
@@ -535,7 +512,7 @@ def coerce_json(value: JsonCoercible, path: str) -> JsonValue:
 	raise TypeError(f"Unsupported JSON value at {path}: {type(value).__name__}")
 
 
-def prop_requires_eval(value: NormalizedPropValue) -> bool:
+def prop_requires_eval(value: PropValue) -> bool:
 	if isinstance(value, Value):
 		return False
 	if isinstance(value, (Element, PulseNode)):
@@ -545,7 +522,7 @@ def prop_requires_eval(value: NormalizedPropValue) -> bool:
 	return callable(value)
 
 
-def eval_keys_for_props(props: dict[str, NormalizedPropValue]) -> set[str]:
+def eval_keys_for_props(props: dict[str, PropValue]) -> set[str]:
 	eval_keys: set[str] = set()
 	for key, value in props.items():
 		if prop_requires_eval(value):
@@ -553,14 +530,14 @@ def eval_keys_for_props(props: dict[str, NormalizedPropValue]) -> set[str]:
 	return eval_keys
 
 
-def normalize_children(children: Sequence[ChildInput] | None) -> list[NormalizedNode]:
+def normalize_children(children: Sequence[Child] | None) -> list[Node]:
 	if not children:
 		return []
 
-	out: list[NormalizedNode] = []
+	out: list[Node] = []
 	seen_keys: set[str] = set()
 
-	def register_key(item: NormalizedNode) -> None:
+	def register_key(item: Node) -> None:
 		key: str | None = None
 		if isinstance(item, PulseNode):
 			key = item.key
@@ -572,15 +549,16 @@ def normalize_children(children: Sequence[ChildInput] | None) -> list[Normalized
 			raise ValueError(f"Duplicate key '{key}'")
 		seen_keys.add(key)
 
-	def visit(item: ChildInput) -> None:
+	def visit(item: Child) -> None:
 		if isinstance(item, dict):
 			raise TypeError("Dict is not a valid child; wrap in Value for props")
 		if isinstance(item, Iterable) and not isinstance(item, (str, bytes)):
 			for sub in item:
 				visit(sub)
 		else:
-			register_key(item)
-			out.append(item)
+			node = cast(Node, item)
+			register_key(node)
+			out.append(node)
 
 	for child in children:
 		visit(child)
@@ -590,20 +568,20 @@ def normalize_children(children: Sequence[ChildInput] | None) -> list[Normalized
 
 def register_callback(
 	callbacks: Callbacks,
-	path: RenderPath,
-	fn: CallbackFn,
+	path: str,
+	fn: Callable[..., Any],
 ) -> None:
 	n_args = len(inspect.signature(fn).parameters)
 	callbacks[path] = Callback(fn=fn, n_args=n_args)
 
 
-def join_path(prefix: RenderPath, path: str | int) -> RenderPath:
+def join_path(prefix: str, path: str | int) -> str:
 	if prefix:
 		return f"{prefix}.{path}"
 	return str(path)
 
 
-def same_node(left: NormalizedNode, right: RenderInput) -> bool:
+def same_node(left: Node, right: Node) -> bool:
 	if values_equal(left, right):
 		return True
 	if isinstance(left, Element) and isinstance(right, Element):
@@ -613,7 +591,7 @@ def same_node(left: NormalizedNode, right: RenderInput) -> bool:
 	return False
 
 
-def key_value(node: NormalizedNode | RenderInput) -> str | None:
+def key_value(node: Node | Node) -> str | None:
 	key = getattr(node, "key", None)
 	if isinstance(key, Literal):
 		if not isinstance(key.value, str):
@@ -622,7 +600,7 @@ def key_value(node: NormalizedNode | RenderInput) -> str | None:
 	return cast(str | None, key)
 
 
-def unmount_element(element: NormalizedNode) -> None:
+def unmount_element(element: Node) -> None:
 	if isinstance(element, PulseNode):
 		if element.contents is not None:
 			unmount_element(element.contents)

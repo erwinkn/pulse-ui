@@ -1,7 +1,7 @@
 // Public API surface for pulse-client
 
 export type { ChannelBridge } from "./channel";
-export { PulseChannelResetError } from "./channel";
+export { PulseChannelResetError, usePulseChannel } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {
 	ConnectionStatusListener,
@@ -41,7 +41,7 @@ export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 export { PulseProvider, PulseView, usePulseClient } from "./pulse";
 // Renderer helpers
 // Renderer (structural expressions + eval-keyed props)
-export { RenderLazy, VDOMRenderer } from "./renderer";
+export { VDOMRenderer } from "./renderer";
 // Serialization helpers
 // export { extractEvent } from "./serialize/events";
 // export {
@@ -52,19 +52,14 @@ export { RenderLazy, VDOMRenderer } from "./renderer";
 export { deserialize, serialize } from "./serialize/serializer";
 // Transports (types only - implementation is internal)
 export type { MessageListener, Transport } from "./transport";
-export { usePulseChannel } from "./usePulseChannel";
 // VDOM types and helpers
 export type {
 	ComponentRegistry,
 	ComponentRegistry as ComponentRegistry2,
 	VDOM,
-	VDOM as VDOM2,
 	VDOMElement,
-	VDOMElement as VDOMElement2,
-	VDOMExpr as VDOMExpr2,
+	VDOMExpr,
 	VDOMNode,
-	VDOMNode as VDOMNode2,
-	VDOMPropValue as VDOMPropValue2,
-	VDOMUpdate,
+	VDOMPropValue,
 	VDOMUpdate,
 } from "./vdom";

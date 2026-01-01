@@ -2,10 +2,12 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("Timeline", "@mantine/core")
-def Timeline(*children: ps.Child, key: str | None = None, **props: Any): ...
+_Timeline = ps.Import("Timeline", "@mantine/core")
 
 
-@ps.react_component("Timeline", "@mantine/core", prop="Item")
-def TimelineItem(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Timeline)
+def Timeline(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_Timeline.Item)
+def TimelineItem(*children: ps.Node, key: str | None = None, **props: Any): ...

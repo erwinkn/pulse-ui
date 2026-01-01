@@ -2,21 +2,22 @@
 JavaScript Set builtin module.
 
 Usage:
-    import pulse.js.set as Set
+    from pulse.js import Set
     Set()                         # -> new Set()
     Set([1, 2, 3])               # -> new Set([1, 2, 3])
 
+    # Or import from module directly:
     from pulse.js.set import Set
-    Set()                         # -> new Set()
 """
 
 from collections.abc import Callable as _Callable
 from collections.abc import Iterable as _Iterable
+from collections.abc import Iterator as _Iterator
 from typing import Any as _Any
 from typing import Generic as _Generic
 from typing import TypeVar as _TypeVar
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 T = _TypeVar("T")
 
@@ -27,7 +28,7 @@ class Set(_Generic[T]):
 	Set[T] stores unique values of type T in insertion order.
 	"""
 
-	def __init__(self, iterable: _Iterable[T] | None = None) -> None: ...
+	def __init__(self, iterable: _Iterable[T] | None = None, /) -> None: ...
 
 	@property
 	def size(self) -> int:
@@ -51,7 +52,10 @@ class Set(_Generic[T]):
 		...
 
 	def forEach(
-		self, callback: _Callable[[T, T, "Set[T]"], None], thisArg: _Any | None = None
+		self,
+		callback: _Callable[[T, T, "Set[T]"], None],
+		thisArg: _Any | None = None,
+		/,
 	) -> None:
 		"""Execute a function for each value.
 
@@ -71,8 +75,16 @@ class Set(_Generic[T]):
 		"""Return an iterator of [value, value] pairs."""
 		...
 
-	def __iter__(self) -> _Iterable[T]:
+	def __iter__(self) -> _Iterator[T]:
 		"""Iterate over values."""
+		...
+
+	def __len__(self) -> int:
+		"""Return the number of values (same as size)."""
+		...
+
+	def __contains__(self, value: T) -> bool:
+		"""Check if value exists in the Set (same as has)."""
 		...
 
 	# ES2024 Set methods
@@ -105,5 +117,5 @@ class Set(_Generic[T]):
 		...
 
 
-# Self-register this module as a JS builtin in global scope
-_register_js_module(name="Set", global_scope=True)
+# Self-register this module as a JS builtin (global identifiers)
+JsModule.register(name=None)

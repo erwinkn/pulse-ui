@@ -46,6 +46,15 @@ from pulse.js._types import (
 	JSIteratorResult as JSIteratorResult,
 )
 from pulse.js._types import (
+	JSONReplacer as JSONReplacer,
+)
+from pulse.js._types import (
+	JSONReviver as JSONReviver,
+)
+from pulse.js._types import (
+	JSONValue as JSONValue,
+)
+from pulse.js._types import (
 	NodeList as NodeList,
 )
 from pulse.js._types import (
@@ -76,7 +85,7 @@ from pulse.js.set import Set as Set
 from pulse.js.string import String as String
 from pulse.js.weakmap import WeakMap as WeakMap
 from pulse.js.weakset import WeakSet as WeakSet
-from pulse.transpiler.nodes import JSUndefined
+from pulse.transpiler.nodes import Undefined
 
 # Re-export namespace modules
 console = pulse.js.console
@@ -91,5 +100,16 @@ def throw(x: _Any) -> _NoReturn:
 	"""Throw a JavaScript error."""
 	...
 
+def obj(**kwargs: _Any) -> _Any:
+	"""Create a plain JavaScript object literal.
+
+	Use this instead of dict() when you need a plain JS object (e.g., for React style prop).
+
+	Example:
+		style=obj(display="block", color="red")
+		# Transpiles to: style={{ display: "block", color: "red" }}
+	"""
+	...
+
 # Primitive values
-undefined: JSUndefined
+undefined: Undefined

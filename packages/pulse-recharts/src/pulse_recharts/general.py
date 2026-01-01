@@ -9,8 +9,8 @@ from typing import (
 )
 
 import pulse as ps
-from pulse.html.elements import GenericHTMLElement
-from pulse.html.props import HTMLSVGProps
+from pulse.dom.elements import GenericHTMLElement
+from pulse.dom.props import HTMLSVGProps
 
 from .common import DataKey
 
@@ -105,9 +105,9 @@ class ResponsiveContainerProps(ps.HTMLProps, total=False):
     where the container size cannot be determined automatically."""
 
 
-@ps.react_component("ResponsiveContainer", "recharts")
+@ps.react_component(ps.Import("ResponsiveContainer", "recharts"))
 def ResponsiveContainer(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	**props: Unpack[ResponsiveContainerProps],
 ): ...
@@ -186,7 +186,7 @@ class LegendProps(ps.HTMLProps, Generic[T], total=False):
 	payload: list[LegendPayload[T]]
 	"""The source data of the content to be displayed in the legend. Default: []"""
 
-	# content: NotRequired[ps.Child]
+	# content: NotRequired[ps.Node]
 	"""React element or function to render custom legend content"""
 
 	# formatter: Callable[[str, Any, int], Any]
@@ -220,7 +220,7 @@ class LegendProps(ps.HTMLProps, Generic[T], total=False):
 	"""The customized event handler of mouseleave on the items"""
 
 
-@ps.react_component("Legend", "recharts")
+@ps.react_component(ps.Import("Legend", "recharts"))
 def Legend(
 	key: str | None = None,
 	**props: Unpack[LegendProps[Any]],
@@ -281,7 +281,7 @@ class TooltipProps(TypedDict, total=False):
 	label: str | int
 	"""The label value which is active now, usually calculated internally."""
 
-	# content: Union[ps.Child, Callable]
+	# content: Union[ps.Node, Callable]
 	"""If set a React element, the option is the custom react element of rendering tooltip. If set a function, the function will be called to render tooltip content."""
 
 	# formatter: Callable[[Any, str, Any], Union[str, list[str]]]
@@ -322,7 +322,7 @@ class TooltipProps(TypedDict, total=False):
     Tooltip will use the default axis for the layout, unless you specify an axisId."""
 
 
-@ps.react_component("Tooltip", "recharts")
+@ps.react_component(ps.Import("Tooltip", "recharts"))
 def Tooltip(
 	key: str | None = None,
 	**props: Unpack[TooltipProps],
@@ -352,7 +352,7 @@ class TextProps(TypedDict, total=False):
 	"""Vertical anchor. Default: 'end'"""
 
 
-@ps.react_component("Text", "recharts")
+@ps.react_component(ps.Import("Text", "recharts"))
 def Text(
 	key: str | None = None,
 	**props: Unpack[TextProps],
@@ -403,7 +403,7 @@ class LabelProps(HTMLSVGProps[GenericHTMLElement], Generic[T], total=False):
 	# labelRef?: React.RefObject<Element>;
 
 
-@ps.react_component("Label", "recharts")
+@ps.react_component(ps.Import("Label", "recharts"))
 def Label(
 	key: str | None = None,
 	**props: Unpack[LabelProps[Any]],
@@ -445,7 +445,7 @@ Examples:
 <LabelList content={renderLabel} />"""
 
 
-@ps.react_component("LabelList", "recharts")
+@ps.react_component(ps.Import("LabelList", "recharts"))
 def LabelList(
 	key: str | None = None,
 	**props: Unpack[LabelListProps[Any]],

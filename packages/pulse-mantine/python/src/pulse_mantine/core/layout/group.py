@@ -60,5 +60,5 @@ class GroupProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[rep
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("Group", "@mantine/core")
-def Group(*children: ps.Child, key: str | None = None, **props: Unpack[GroupProps]): ...
+@ps.react_component(ps.Import("Group", "@mantine/core"))
+def Group(*children: ps.Node, key: str | None = None, **props: Unpack[GroupProps]): ...

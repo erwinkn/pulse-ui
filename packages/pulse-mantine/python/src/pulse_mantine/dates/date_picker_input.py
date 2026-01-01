@@ -3,5 +3,5 @@ from typing import Any
 import pulse as ps
 
 
-@ps.react_component("DatePickerInput", "pulse-mantine")
+@ps.react_component(ps.Import("DatePickerInput", "pulse-mantine"))
 def DatePickerInput(key: str | None = None, **props: Any): ...

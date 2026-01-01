@@ -39,6 +39,14 @@ from pulse.channel import (
 # Codegen
 from pulse.codegen.codegen import CodegenConfig as CodegenConfig
 
+# VDOM (transpiler)
+from pulse.component import (
+	Component as Component,
+)
+from pulse.component import (
+	component as component,
+)
+
 # Built-in components
 from pulse.components.for_ import For as For
 from pulse.components.if_ import If as If
@@ -55,6 +63,1070 @@ from pulse.cookies import SetCookie as SetCookie
 # Decorators
 from pulse.decorators import computed as computed
 from pulse.decorators import effect as effect
+from pulse.dom.elements import (
+	GenericHTMLElement as GenericHTMLElement,
+)
+from pulse.dom.elements import (
+	HTMLAnchorElement as HTMLAnchorElement,
+)
+from pulse.dom.elements import (
+	HTMLAreaElement as HTMLAreaElement,
+)
+from pulse.dom.elements import (
+	HTMLAudioElement as HTMLAudioElement,
+)
+from pulse.dom.elements import (
+	HTMLBaseElement as HTMLBaseElement,
+)
+from pulse.dom.elements import (
+	HTMLBodyElement as HTMLBodyElement,
+)
+from pulse.dom.elements import (
+	HTMLBRElement as HTMLBRElement,
+)
+from pulse.dom.elements import (
+	HTMLButtonElement as HTMLButtonElement,
+)
+from pulse.dom.elements import (
+	HTMLCiteElement as HTMLCiteElement,
+)
+from pulse.dom.elements import (
+	HTMLDataElement as HTMLDataElement,
+)
+from pulse.dom.elements import (
+	HTMLDetailsElement as HTMLDetailsElement,
+)
+from pulse.dom.elements import (
+	HTMLDialogElement as HTMLDialogElement,
+)
+from pulse.dom.elements import (
+	HTMLDivElement as HTMLDivElement,
+)
+from pulse.dom.elements import (
+	HTMLDListElement as HTMLDListElement,
+)
+from pulse.dom.elements import (
+	HTMLElement as HTMLElement,
+)
+from pulse.dom.elements import (
+	HTMLElementBase as HTMLElementBase,
+)
+from pulse.dom.elements import (
+	HTMLEmbedElement as HTMLEmbedElement,
+)
+from pulse.dom.elements import (
+	HTMLFieldSetElement as HTMLFieldSetElement,
+)
+from pulse.dom.elements import (
+	HTMLFormElement as HTMLFormElement,
+)
+from pulse.dom.elements import (
+	HTMLHeadElement as HTMLHeadElement,
+)
+from pulse.dom.elements import (
+	HTMLHeadingElement as HTMLHeadingElement,
+)
+from pulse.dom.elements import (
+	HTMLHRElement as HTMLHRElement,
+)
+from pulse.dom.elements import (
+	HTMLHtmlElement as HTMLHtmlElement,
+)
+from pulse.dom.elements import (
+	HTMLIFrameElement as HTMLIFrameElement,
+)
+from pulse.dom.elements import (
+	HTMLImageElement as HTMLImageElement,
+)
+from pulse.dom.elements import (
+	HTMLInputElement as HTMLInputElement,
+)
+from pulse.dom.elements import (
+	HTMLLabelElement as HTMLLabelElement,
+)
+from pulse.dom.elements import (
+	HTMLLiElement as HTMLLiElement,
+)
+from pulse.dom.elements import (
+	HTMLLinkElement as HTMLLinkElement,
+)
+from pulse.dom.elements import (
+	HTMLMapElement as HTMLMapElement,
+)
+from pulse.dom.elements import (
+	HTMLMediaElement as HTMLMediaElement,
+)
+from pulse.dom.elements import (
+	HTMLMenuElement as HTMLMenuElement,
+)
+from pulse.dom.elements import (
+	HTMLMetaElement as HTMLMetaElement,
+)
+from pulse.dom.elements import (
+	HTMLMeterElement as HTMLMeterElement,
+)
+from pulse.dom.elements import (
+	HTMLModElement as HTMLModElement,
+)
+from pulse.dom.elements import (
+	HTMLObjectElement as HTMLObjectElement,
+)
+from pulse.dom.elements import (
+	HTMLOListElement as HTMLOListElement,
+)
+from pulse.dom.elements import (
+	HTMLOptGroupElement as HTMLOptGroupElement,
+)
+from pulse.dom.elements import (
+	HTMLOptionElement as HTMLOptionElement,
+)
+
+# HTML Elements
+from pulse.dom.elements import (
+	HTMLOrSVGElement as HTMLOrSVGElement,
+)
+from pulse.dom.elements import (
+	HTMLOutputElement as HTMLOutputElement,
+)
+from pulse.dom.elements import (
+	HTMLParagraphElement as HTMLParagraphElement,
+)
+from pulse.dom.elements import (
+	HTMLPictureElement as HTMLPictureElement,
+)
+from pulse.dom.elements import (
+	HTMLPreElement as HTMLPreElement,
+)
+from pulse.dom.elements import (
+	HTMLProgressElement as HTMLProgressElement,
+)
+from pulse.dom.elements import (
+	HTMLQuoteElement as HTMLQuoteElement,
+)
+from pulse.dom.elements import (
+	HTMLScriptElement as HTMLScriptElement,
+)
+from pulse.dom.elements import (
+	HTMLSelectElement as HTMLSelectElement,
+)
+from pulse.dom.elements import (
+	HTMLSlotElement as HTMLSlotElement,
+)
+from pulse.dom.elements import (
+	HTMLSourceElement as HTMLSourceElement,
+)
+from pulse.dom.elements import (
+	HTMLSpanElement as HTMLSpanElement,
+)
+from pulse.dom.elements import (
+	HTMLStyleElement as HTMLStyleElement,
+)
+from pulse.dom.elements import (
+	HTMLTableCaptionElement as HTMLTableCaptionElement,
+)
+from pulse.dom.elements import (
+	HTMLTableCellElement as HTMLTableCellElement,
+)
+from pulse.dom.elements import (
+	HTMLTableColElement as HTMLTableColElement,
+)
+from pulse.dom.elements import (
+	HTMLTableElement as HTMLTableElement,
+)
+from pulse.dom.elements import (
+	HTMLTableRowElement as HTMLTableRowElement,
+)
+from pulse.dom.elements import (
+	HTMLTableSectionElement as HTMLTableSectionElement,
+)
+from pulse.dom.elements import (
+	HTMLTemplateElement as HTMLTemplateElement,
+)
+from pulse.dom.elements import (
+	HTMLTextAreaElement as HTMLTextAreaElement,
+)
+from pulse.dom.elements import (
+	HTMLTimeElement as HTMLTimeElement,
+)
+from pulse.dom.elements import (
+	HTMLTitleElement as HTMLTitleElement,
+)
+from pulse.dom.elements import (
+	HTMLTrackElement as HTMLTrackElement,
+)
+from pulse.dom.elements import (
+	HTMLUListElement as HTMLUListElement,
+)
+from pulse.dom.elements import (
+	HTMLVideoElement as HTMLVideoElement,
+)
+from pulse.dom.events import (
+	AnimationEvent as AnimationEvent,
+)
+from pulse.dom.events import (
+	ChangeEvent as ChangeEvent,
+)
+from pulse.dom.events import (
+	ClipboardEvent as ClipboardEvent,
+)
+from pulse.dom.events import (
+	CompositionEvent as CompositionEvent,
+)
+from pulse.dom.events import (
+	DataTransfer as DataTransfer,
+)
+
+# HTML Events
+from pulse.dom.events import (
+	DataTransferItem as DataTransferItem,
+)
+from pulse.dom.events import (
+	DialogDOMEvents as DialogDOMEvents,
+)
+from pulse.dom.events import (
+	DOMEvents as DOMEvents,
+)
+from pulse.dom.events import (
+	DragEvent as DragEvent,
+)
+from pulse.dom.events import (
+	FocusEvent as FocusEvent,
+)
+from pulse.dom.events import (
+	FormControlDOMEvents as FormControlDOMEvents,
+)
+from pulse.dom.events import (
+	FormEvent as FormEvent,
+)
+from pulse.dom.events import (
+	InputDOMEvents as InputDOMEvents,
+)
+from pulse.dom.events import (
+	InvalidEvent as InvalidEvent,
+)
+from pulse.dom.events import (
+	KeyboardEvent as KeyboardEvent,
+)
+from pulse.dom.events import (
+	MouseEvent as MouseEvent,
+)
+from pulse.dom.events import (
+	PointerEvent as PointerEvent,
+)
+from pulse.dom.events import (
+	SelectDOMEvents as SelectDOMEvents,
+)
+from pulse.dom.events import (
+	SyntheticEvent as SyntheticEvent,
+)
+from pulse.dom.events import (
+	TextAreaDOMEvents as TextAreaDOMEvents,
+)
+from pulse.dom.events import (
+	ToggleEvent as ToggleEvent,
+)
+from pulse.dom.events import (
+	Touch as Touch,
+)
+from pulse.dom.events import (
+	TouchEvent as TouchEvent,
+)
+from pulse.dom.events import (
+	TransitionEvent as TransitionEvent,
+)
+from pulse.dom.events import (
+	UIEvent as UIEvent,
+)
+from pulse.dom.events import (
+	WheelEvent as WheelEvent,
+)
+from pulse.dom.props import (
+	BaseHTMLProps as BaseHTMLProps,
+)
+
+# HTML Props
+from pulse.dom.props import (
+	ClassName as ClassName,
+)
+from pulse.dom.props import (
+	HTMLAbbrProps as HTMLAbbrProps,
+)
+from pulse.dom.props import (
+	HTMLAddressProps as HTMLAddressProps,
+)
+from pulse.dom.props import (
+	HTMLAnchorProps as HTMLAnchorProps,
+)
+from pulse.dom.props import (
+	HTMLAreaProps as HTMLAreaProps,
+)
+from pulse.dom.props import (
+	HTMLArticleProps as HTMLArticleProps,
+)
+from pulse.dom.props import (
+	HTMLAsideProps as HTMLAsideProps,
+)
+from pulse.dom.props import (
+	HTMLAudioProps as HTMLAudioProps,
+)
+from pulse.dom.props import (
+	HTMLBaseProps as HTMLBaseProps,
+)
+from pulse.dom.props import (
+	HTMLBDIProps as HTMLBDIProps,
+)
+from pulse.dom.props import (
+	HTMLBDOProps as HTMLBDOProps,
+)
+from pulse.dom.props import (
+	HTMLBlockquoteProps as HTMLBlockquoteProps,
+)
+from pulse.dom.props import (
+	HTMLBodyProps as HTMLBodyProps,
+)
+from pulse.dom.props import (
+	HTMLBProps as HTMLBProps,
+)
+from pulse.dom.props import (
+	HTMLBRProps as HTMLBRProps,
+)
+from pulse.dom.props import (
+	HTMLButtonProps as HTMLButtonProps,
+)
+from pulse.dom.props import (
+	HTMLCanvasProps as HTMLCanvasProps,
+)
+from pulse.dom.props import (
+	HTMLCaptionProps as HTMLCaptionProps,
+)
+from pulse.dom.props import (
+	HTMLCircleProps as HTMLCircleProps,
+)
+from pulse.dom.props import (
+	HTMLCiteProps as HTMLCiteProps,
+)
+from pulse.dom.props import (
+	HTMLClipPathProps as HTMLClipPathProps,
+)
+from pulse.dom.props import (
+	HTMLCodeProps as HTMLCodeProps,
+)
+from pulse.dom.props import (
+	HTMLColgroupProps as HTMLColgroupProps,
+)
+from pulse.dom.props import (
+	HTMLColProps as HTMLColProps,
+)
+from pulse.dom.props import (
+	HTMLDatalistProps as HTMLDatalistProps,
+)
+from pulse.dom.props import (
+	HTMLDataProps as HTMLDataProps,
+)
+from pulse.dom.props import (
+	HTMLDDProps as HTMLDDProps,
+)
+from pulse.dom.props import (
+	HTMLDefsProps as HTMLDefsProps,
+)
+from pulse.dom.props import (
+	HTMLDelProps as HTMLDelProps,
+)
+from pulse.dom.props import (
+	HTMLDetailsProps as HTMLDetailsProps,
+)
+from pulse.dom.props import (
+	HTMLDFNProps as HTMLDFNProps,
+)
+from pulse.dom.props import (
+	HTMLDialogProps as HTMLDialogProps,
+)
+from pulse.dom.props import (
+	HTMLDivProps as HTMLDivProps,
+)
+from pulse.dom.props import (
+	HTMLDLProps as HTMLDLProps,
+)
+from pulse.dom.props import (
+	HTMLDTProps as HTMLDTProps,
+)
+from pulse.dom.props import (
+	HTMLEllipseProps as HTMLEllipseProps,
+)
+from pulse.dom.props import (
+	HTMLEmbedProps as HTMLEmbedProps,
+)
+from pulse.dom.props import (
+	HTMLEMProps as HTMLEMProps,
+)
+from pulse.dom.props import (
+	HTMLFieldsetProps as HTMLFieldsetProps,
+)
+from pulse.dom.props import (
+	HTMLFigcaptionProps as HTMLFigcaptionProps,
+)
+from pulse.dom.props import (
+	HTMLFigureProps as HTMLFigureProps,
+)
+from pulse.dom.props import (
+	HTMLFooterProps as HTMLFooterProps,
+)
+from pulse.dom.props import (
+	HTMLFormProps as HTMLFormProps,
+)
+from pulse.dom.props import (
+	HTMLFragmentProps as HTMLFragmentProps,
+)
+from pulse.dom.props import (
+	HTMLGProps as HTMLGProps,
+)
+from pulse.dom.props import (
+	HTMLH1Props as HTMLH1Props,
+)
+from pulse.dom.props import (
+	HTMLH2Props as HTMLH2Props,
+)
+from pulse.dom.props import (
+	HTMLH3Props as HTMLH3Props,
+)
+from pulse.dom.props import (
+	HTMLH4Props as HTMLH4Props,
+)
+from pulse.dom.props import (
+	HTMLH5Props as HTMLH5Props,
+)
+from pulse.dom.props import (
+	HTMLH6Props as HTMLH6Props,
+)
+from pulse.dom.props import (
+	HTMLHeaderProps as HTMLHeaderProps,
+)
+from pulse.dom.props import (
+	HTMLHeadProps as HTMLHeadProps,
+)
+from pulse.dom.props import (
+	HTMLHgroupProps as HTMLHgroupProps,
+)
+from pulse.dom.props import (
+	HTMLHRProps as HTMLHRProps,
+)
+from pulse.dom.props import (
+	HTMLHtmlProps as HTMLHtmlProps,
+)
+from pulse.dom.props import (
+	HTMLIframeProps as HTMLIframeProps,
+)
+from pulse.dom.props import (
+	HTMLImgProps as HTMLImgProps,
+)
+from pulse.dom.props import (
+	HTMLInputProps as HTMLInputProps,
+)
+from pulse.dom.props import (
+	HTMLInsProps as HTMLInsProps,
+)
+from pulse.dom.props import (
+	HTMLIProps as HTMLIProps,
+)
+from pulse.dom.props import (
+	HTMLKBDProps as HTMLKBDProps,
+)
+from pulse.dom.props import (
+	HTMLKeygenProps as HTMLKeygenProps,
+)
+from pulse.dom.props import (
+	HTMLLabelProps as HTMLLabelProps,
+)
+from pulse.dom.props import (
+	HTMLLegendProps as HTMLLegendProps,
+)
+from pulse.dom.props import (
+	HTMLLineProps as HTMLLineProps,
+)
+from pulse.dom.props import (
+	HTMLLinkProps as HTMLLinkProps,
+)
+from pulse.dom.props import (
+	HTMLLiProps as HTMLLiProps,
+)
+from pulse.dom.props import (
+	HTMLMainProps as HTMLMainProps,
+)
+from pulse.dom.props import (
+	HTMLMapProps as HTMLMapProps,
+)
+from pulse.dom.props import (
+	HTMLMarkProps as HTMLMarkProps,
+)
+from pulse.dom.props import (
+	HTMLMaskProps as HTMLMaskProps,
+)
+from pulse.dom.props import (
+	HTMLMediaProps as HTMLMediaProps,
+)
+from pulse.dom.props import (
+	HTMLMenuProps as HTMLMenuProps,
+)
+from pulse.dom.props import (
+	HTMLMetaProps as HTMLMetaProps,
+)
+from pulse.dom.props import (
+	HTMLMeterProps as HTMLMeterProps,
+)
+from pulse.dom.props import (
+	HTMLNavProps as HTMLNavProps,
+)
+from pulse.dom.props import (
+	HTMLNoscriptProps as HTMLNoscriptProps,
+)
+from pulse.dom.props import (
+	HTMLObjectProps as HTMLObjectProps,
+)
+from pulse.dom.props import (
+	HTMLOlProps as HTMLOlProps,
+)
+from pulse.dom.props import (
+	HTMLOptgroupProps as HTMLOptgroupProps,
+)
+from pulse.dom.props import (
+	HTMLOptionProps as HTMLOptionProps,
+)
+from pulse.dom.props import (
+	HTMLOutputProps as HTMLOutputProps,
+)
+from pulse.dom.props import (
+	HTMLParamProps as HTMLParamProps,
+)
+from pulse.dom.props import (
+	HTMLPathProps as HTMLPathProps,
+)
+from pulse.dom.props import (
+	HTMLPatternProps as HTMLPatternProps,
+)
+from pulse.dom.props import (
+	HTMLPictureProps as HTMLPictureProps,
+)
+from pulse.dom.props import (
+	HTMLPolygonProps as HTMLPolygonProps,
+)
+from pulse.dom.props import (
+	HTMLPolylineProps as HTMLPolylineProps,
+)
+from pulse.dom.props import (
+	HTMLPProps as HTMLPProps,
+)
+from pulse.dom.props import (
+	HTMLPreProps as HTMLPreProps,
+)
+from pulse.dom.props import (
+	HTMLProgressProps as HTMLProgressProps,
+)
+from pulse.dom.props import (
+	HTMLProps as HTMLProps,
+)
+from pulse.dom.props import (
+	HTMLQProps as HTMLQProps,
+)
+from pulse.dom.props import (
+	HTMLQuoteProps as HTMLQuoteProps,
+)
+from pulse.dom.props import (
+	HTMLRectProps as HTMLRectProps,
+)
+from pulse.dom.props import (
+	HTMLRPProps as HTMLRPProps,
+)
+from pulse.dom.props import (
+	HTMLRTProps as HTMLRTProps,
+)
+from pulse.dom.props import (
+	HTMLRubyProps as HTMLRubyProps,
+)
+from pulse.dom.props import (
+	HTMLSampProps as HTMLSampProps,
+)
+from pulse.dom.props import (
+	HTMLScriptProps as HTMLScriptProps,
+)
+from pulse.dom.props import (
+	HTMLSectionProps as HTMLSectionProps,
+)
+from pulse.dom.props import (
+	HTMLSelectProps as HTMLSelectProps,
+)
+from pulse.dom.props import (
+	HTMLSlotProps as HTMLSlotProps,
+)
+from pulse.dom.props import (
+	HTMLSmallProps as HTMLSmallProps,
+)
+from pulse.dom.props import (
+	HTMLSourceProps as HTMLSourceProps,
+)
+from pulse.dom.props import (
+	HTMLSpanProps as HTMLSpanProps,
+)
+from pulse.dom.props import (
+	HTMLSProps as HTMLSProps,
+)
+from pulse.dom.props import (
+	HTMLStrongProps as HTMLStrongProps,
+)
+from pulse.dom.props import (
+	HTMLStyleProps as HTMLStyleProps,
+)
+from pulse.dom.props import (
+	HTMLSubProps as HTMLSubProps,
+)
+from pulse.dom.props import (
+	HTMLSummaryProps as HTMLSummaryProps,
+)
+from pulse.dom.props import (
+	HTMLSupProps as HTMLSupProps,
+)
+from pulse.dom.props import (
+	HTMLSVGProps as HTMLSVGProps,
+)
+from pulse.dom.props import (
+	HTMLTableProps as HTMLTableProps,
+)
+from pulse.dom.props import (
+	HTMLTBODYProps as HTMLTBODYProps,
+)
+from pulse.dom.props import (
+	HTMLTdProps as HTMLTdProps,
+)
+from pulse.dom.props import (
+	HTMLTemplateProps as HTMLTemplateProps,
+)
+from pulse.dom.props import (
+	HTMLTextareaProps as HTMLTextareaProps,
+)
+from pulse.dom.props import (
+	HTMLTextProps as HTMLTextProps,
+)
+from pulse.dom.props import (
+	HTMLThProps as HTMLThProps,
+)
+from pulse.dom.props import (
+	HTMLTimeProps as HTMLTimeProps,
+)
+from pulse.dom.props import (
+	HTMLTitleProps as HTMLTitleProps,
+)
+from pulse.dom.props import (
+	HTMLTrackProps as HTMLTrackProps,
+)
+from pulse.dom.props import (
+	HTMLTspanProps as HTMLTspanProps,
+)
+from pulse.dom.props import (
+	HTMLULProps as HTMLULProps,
+)
+from pulse.dom.props import (
+	HTMLUProps as HTMLUProps,
+)
+from pulse.dom.props import (
+	HTMLUseProps as HTMLUseProps,
+)
+from pulse.dom.props import (
+	HTMLVarProps as HTMLVarProps,
+)
+from pulse.dom.props import (
+	HTMLVideoProps as HTMLVideoProps,
+)
+from pulse.dom.props import (
+	HTMLWBRProps as HTMLWBRProps,
+)
+from pulse.dom.props import (
+	WebViewAttributes as WebViewAttributes,
+)
+
+# HTML Tags
+from pulse.dom.tags import (
+	a as a,
+)
+from pulse.dom.tags import (
+	abbr as abbr,
+)
+from pulse.dom.tags import (
+	address as address,
+)
+from pulse.dom.tags import (
+	area as area,
+)
+from pulse.dom.tags import (
+	article as article,
+)
+from pulse.dom.tags import (
+	aside as aside,
+)
+from pulse.dom.tags import (
+	audio as audio,
+)
+from pulse.dom.tags import (
+	b as b,
+)
+from pulse.dom.tags import (
+	base as base,
+)
+from pulse.dom.tags import (
+	bdi as bdi,
+)
+from pulse.dom.tags import (
+	bdo as bdo,
+)
+from pulse.dom.tags import (
+	blockquote as blockquote,
+)
+from pulse.dom.tags import (
+	body as body,
+)
+from pulse.dom.tags import (
+	br as br,
+)
+from pulse.dom.tags import (
+	button as button,
+)
+from pulse.dom.tags import (
+	canvas as canvas,
+)
+from pulse.dom.tags import (
+	caption as caption,
+)
+from pulse.dom.tags import (
+	circle as circle,
+)
+from pulse.dom.tags import (
+	cite as cite,
+)
+from pulse.dom.tags import (
+	clipPath as clipPath,
+)
+from pulse.dom.tags import (
+	code as code,
+)
+from pulse.dom.tags import (
+	col as col,
+)
+from pulse.dom.tags import (
+	colgroup as colgroup,
+)
+from pulse.dom.tags import (
+	data as data,
+)
+from pulse.dom.tags import (
+	datalist as datalist,
+)
+from pulse.dom.tags import (
+	dd as dd,
+)
+from pulse.dom.tags import (
+	defs as defs,
+)
+from pulse.dom.tags import (
+	del_ as del_,
+)
+from pulse.dom.tags import (
+	details as details,
+)
+from pulse.dom.tags import (
+	dfn as dfn,
+)
+from pulse.dom.tags import (
+	dialog as dialog,
+)
+from pulse.dom.tags import (
+	div as div,
+)
+from pulse.dom.tags import (
+	dl as dl,
+)
+from pulse.dom.tags import (
+	dt as dt,
+)
+from pulse.dom.tags import (
+	ellipse as ellipse,
+)
+from pulse.dom.tags import (
+	em as em,
+)
+from pulse.dom.tags import (
+	embed as embed,
+)
+from pulse.dom.tags import (
+	fieldset as fieldset,
+)
+from pulse.dom.tags import (
+	figcaption as figcaption,
+)
+from pulse.dom.tags import (
+	figure as figure,
+)
+from pulse.dom.tags import (
+	footer as footer,
+)
+from pulse.dom.tags import (
+	form as form,
+)
+from pulse.dom.tags import (
+	fragment as fragment,
+)
+from pulse.dom.tags import (
+	g as g,
+)
+from pulse.dom.tags import (
+	h1 as h1,
+)
+from pulse.dom.tags import (
+	h2 as h2,
+)
+from pulse.dom.tags import (
+	h3 as h3,
+)
+from pulse.dom.tags import (
+	h4 as h4,
+)
+from pulse.dom.tags import (
+	h5 as h5,
+)
+from pulse.dom.tags import (
+	h6 as h6,
+)
+from pulse.dom.tags import (
+	head as head,
+)
+from pulse.dom.tags import (
+	header as header,
+)
+from pulse.dom.tags import (
+	hgroup as hgroup,
+)
+from pulse.dom.tags import (
+	hr as hr,
+)
+from pulse.dom.tags import (
+	html as html,
+)
+from pulse.dom.tags import (
+	i as i,
+)
+from pulse.dom.tags import (
+	iframe as iframe,
+)
+from pulse.dom.tags import (
+	img as img,
+)
+from pulse.dom.tags import (
+	input as input,
+)
+from pulse.dom.tags import (
+	ins as ins,
+)
+from pulse.dom.tags import (
+	kbd as kbd,
+)
+from pulse.dom.tags import (
+	label as label,
+)
+from pulse.dom.tags import (
+	legend as legend,
+)
+from pulse.dom.tags import (
+	li as li,
+)
+from pulse.dom.tags import (
+	line as line,
+)
+from pulse.dom.tags import (
+	link as link,
+)
+from pulse.dom.tags import (
+	main as main,
+)
+from pulse.dom.tags import (
+	map_ as map_,
+)
+from pulse.dom.tags import (
+	mark as mark,
+)
+from pulse.dom.tags import (
+	mask as mask,
+)
+from pulse.dom.tags import (
+	menu as menu,
+)
+from pulse.dom.tags import (
+	meta as meta,
+)
+from pulse.dom.tags import (
+	meter as meter,
+)
+from pulse.dom.tags import (
+	nav as nav,
+)
+from pulse.dom.tags import (
+	noscript as noscript,
+)
+from pulse.dom.tags import (
+	object_ as object_,
+)
+from pulse.dom.tags import (
+	ol as ol,
+)
+from pulse.dom.tags import (
+	optgroup as optgroup,
+)
+from pulse.dom.tags import (
+	option as option,
+)
+from pulse.dom.tags import (
+	output as output,
+)
+from pulse.dom.tags import (
+	p as p,
+)
+from pulse.dom.tags import (
+	param as param,
+)
+from pulse.dom.tags import (
+	path as path,
+)
+from pulse.dom.tags import (
+	pattern as pattern,
+)
+from pulse.dom.tags import (
+	picture as picture,
+)
+from pulse.dom.tags import (
+	polygon as polygon,
+)
+from pulse.dom.tags import (
+	polyline as polyline,
+)
+from pulse.dom.tags import (
+	pre as pre,
+)
+from pulse.dom.tags import (
+	progress as progress,
+)
+from pulse.dom.tags import (
+	q as q,
+)
+from pulse.dom.tags import (
+	rect as rect,
+)
+from pulse.dom.tags import (
+	rp as rp,
+)
+from pulse.dom.tags import (
+	rt as rt,
+)
+from pulse.dom.tags import (
+	ruby as ruby,
+)
+from pulse.dom.tags import (
+	s as s,
+)
+from pulse.dom.tags import (
+	samp as samp,
+)
+from pulse.dom.tags import (
+	script as script,
+)
+from pulse.dom.tags import (
+	section as section,
+)
+from pulse.dom.tags import (
+	select as select,
+)
+from pulse.dom.tags import (
+	small as small,
+)
+from pulse.dom.tags import (
+	source as source,
+)
+from pulse.dom.tags import (
+	span as span,
+)
+from pulse.dom.tags import (
+	strong as strong,
+)
+from pulse.dom.tags import (
+	style as style,
+)
+from pulse.dom.tags import (
+	sub as sub,
+)
+from pulse.dom.tags import (
+	summary as summary,
+)
+from pulse.dom.tags import (
+	sup as sup,
+)
+from pulse.dom.tags import (
+	svg as svg,
+)
+from pulse.dom.tags import (
+	table as table,
+)
+from pulse.dom.tags import (
+	tbody as tbody,
+)
+from pulse.dom.tags import (
+	td as td,
+)
+from pulse.dom.tags import (
+	template as template,
+)
+from pulse.dom.tags import (
+	text as text,
+)
+from pulse.dom.tags import (
+	textarea as textarea,
+)
+from pulse.dom.tags import (
+	tfoot as tfoot,
+)
+from pulse.dom.tags import (
+	th as th,
+)
+from pulse.dom.tags import (
+	thead as thead,
+)
+from pulse.dom.tags import (
+	time as time,
+)
+from pulse.dom.tags import (
+	title as title,
+)
+from pulse.dom.tags import (
+	tr as tr,
+)
+from pulse.dom.tags import (
+	track as track,
+)
+from pulse.dom.tags import (
+	tspan as tspan,
+)
+from pulse.dom.tags import (
+	u as u,
+)
+from pulse.dom.tags import (
+	ul as ul,
+)
+from pulse.dom.tags import (
+	use as use,
+)
+from pulse.dom.tags import (
+	var as var,
+)
+from pulse.dom.tags import (
+	video as video,
+)
+from pulse.dom.tags import (
+	wbr as wbr,
+)
 
 # Environment
 from pulse.env import PulseEnv as PulseEnv
@@ -217,1070 +1289,6 @@ from pulse.hooks.stable import (
 # Hooks - States
 from pulse.hooks.states import StatesHookState as StatesHookState
 from pulse.hooks.states import states as states
-from pulse.html.elements import (
-	GenericHTMLElement as GenericHTMLElement,
-)
-from pulse.html.elements import (
-	HTMLAnchorElement as HTMLAnchorElement,
-)
-from pulse.html.elements import (
-	HTMLAreaElement as HTMLAreaElement,
-)
-from pulse.html.elements import (
-	HTMLAudioElement as HTMLAudioElement,
-)
-from pulse.html.elements import (
-	HTMLBaseElement as HTMLBaseElement,
-)
-from pulse.html.elements import (
-	HTMLBodyElement as HTMLBodyElement,
-)
-from pulse.html.elements import (
-	HTMLBRElement as HTMLBRElement,
-)
-from pulse.html.elements import (
-	HTMLButtonElement as HTMLButtonElement,
-)
-from pulse.html.elements import (
-	HTMLCiteElement as HTMLCiteElement,
-)
-from pulse.html.elements import (
-	HTMLDataElement as HTMLDataElement,
-)
-from pulse.html.elements import (
-	HTMLDetailsElement as HTMLDetailsElement,
-)
-from pulse.html.elements import (
-	HTMLDialogElement as HTMLDialogElement,
-)
-from pulse.html.elements import (
-	HTMLDivElement as HTMLDivElement,
-)
-from pulse.html.elements import (
-	HTMLDListElement as HTMLDListElement,
-)
-from pulse.html.elements import (
-	HTMLElement as HTMLElement,
-)
-from pulse.html.elements import (
-	HTMLElementBase as HTMLElementBase,
-)
-from pulse.html.elements import (
-	HTMLEmbedElement as HTMLEmbedElement,
-)
-from pulse.html.elements import (
-	HTMLFieldSetElement as HTMLFieldSetElement,
-)
-from pulse.html.elements import (
-	HTMLFormElement as HTMLFormElement,
-)
-from pulse.html.elements import (
-	HTMLHeadElement as HTMLHeadElement,
-)
-from pulse.html.elements import (
-	HTMLHeadingElement as HTMLHeadingElement,
-)
-from pulse.html.elements import (
-	HTMLHRElement as HTMLHRElement,
-)
-from pulse.html.elements import (
-	HTMLHtmlElement as HTMLHtmlElement,
-)
-from pulse.html.elements import (
-	HTMLIFrameElement as HTMLIFrameElement,
-)
-from pulse.html.elements import (
-	HTMLImageElement as HTMLImageElement,
-)
-from pulse.html.elements import (
-	HTMLInputElement as HTMLInputElement,
-)
-from pulse.html.elements import (
-	HTMLLabelElement as HTMLLabelElement,
-)
-from pulse.html.elements import (
-	HTMLLiElement as HTMLLiElement,
-)
-from pulse.html.elements import (
-	HTMLLinkElement as HTMLLinkElement,
-)
-from pulse.html.elements import (
-	HTMLMapElement as HTMLMapElement,
-)
-from pulse.html.elements import (
-	HTMLMediaElement as HTMLMediaElement,
-)
-from pulse.html.elements import (
-	HTMLMenuElement as HTMLMenuElement,
-)
-from pulse.html.elements import (
-	HTMLMetaElement as HTMLMetaElement,
-)
-from pulse.html.elements import (
-	HTMLMeterElement as HTMLMeterElement,
-)
-from pulse.html.elements import (
-	HTMLModElement as HTMLModElement,
-)
-from pulse.html.elements import (
-	HTMLObjectElement as HTMLObjectElement,
-)
-from pulse.html.elements import (
-	HTMLOListElement as HTMLOListElement,
-)
-from pulse.html.elements import (
-	HTMLOptGroupElement as HTMLOptGroupElement,
-)
-from pulse.html.elements import (
-	HTMLOptionElement as HTMLOptionElement,
-)
-
-# HTML Elements
-from pulse.html.elements import (
-	HTMLOrSVGElement as HTMLOrSVGElement,
-)
-from pulse.html.elements import (
-	HTMLOutputElement as HTMLOutputElement,
-)
-from pulse.html.elements import (
-	HTMLParagraphElement as HTMLParagraphElement,
-)
-from pulse.html.elements import (
-	HTMLPictureElement as HTMLPictureElement,
-)
-from pulse.html.elements import (
-	HTMLPreElement as HTMLPreElement,
-)
-from pulse.html.elements import (
-	HTMLProgressElement as HTMLProgressElement,
-)
-from pulse.html.elements import (
-	HTMLQuoteElement as HTMLQuoteElement,
-)
-from pulse.html.elements import (
-	HTMLScriptElement as HTMLScriptElement,
-)
-from pulse.html.elements import (
-	HTMLSelectElement as HTMLSelectElement,
-)
-from pulse.html.elements import (
-	HTMLSlotElement as HTMLSlotElement,
-)
-from pulse.html.elements import (
-	HTMLSourceElement as HTMLSourceElement,
-)
-from pulse.html.elements import (
-	HTMLSpanElement as HTMLSpanElement,
-)
-from pulse.html.elements import (
-	HTMLStyleElement as HTMLStyleElement,
-)
-from pulse.html.elements import (
-	HTMLTableCaptionElement as HTMLTableCaptionElement,
-)
-from pulse.html.elements import (
-	HTMLTableCellElement as HTMLTableCellElement,
-)
-from pulse.html.elements import (
-	HTMLTableColElement as HTMLTableColElement,
-)
-from pulse.html.elements import (
-	HTMLTableElement as HTMLTableElement,
-)
-from pulse.html.elements import (
-	HTMLTableRowElement as HTMLTableRowElement,
-)
-from pulse.html.elements import (
-	HTMLTableSectionElement as HTMLTableSectionElement,
-)
-from pulse.html.elements import (
-	HTMLTemplateElement as HTMLTemplateElement,
-)
-from pulse.html.elements import (
-	HTMLTextAreaElement as HTMLTextAreaElement,
-)
-from pulse.html.elements import (
-	HTMLTimeElement as HTMLTimeElement,
-)
-from pulse.html.elements import (
-	HTMLTitleElement as HTMLTitleElement,
-)
-from pulse.html.elements import (
-	HTMLTrackElement as HTMLTrackElement,
-)
-from pulse.html.elements import (
-	HTMLUListElement as HTMLUListElement,
-)
-from pulse.html.elements import (
-	HTMLVideoElement as HTMLVideoElement,
-)
-from pulse.html.events import (
-	AnimationEvent as AnimationEvent,
-)
-from pulse.html.events import (
-	ChangeEvent as ChangeEvent,
-)
-from pulse.html.events import (
-	ClipboardEvent as ClipboardEvent,
-)
-from pulse.html.events import (
-	CompositionEvent as CompositionEvent,
-)
-from pulse.html.events import (
-	DataTransfer as DataTransfer,
-)
-
-# HTML Events
-from pulse.html.events import (
-	DataTransferItem as DataTransferItem,
-)
-from pulse.html.events import (
-	DialogDOMEvents as DialogDOMEvents,
-)
-from pulse.html.events import (
-	DOMEvents as DOMEvents,
-)
-from pulse.html.events import (
-	DragEvent as DragEvent,
-)
-from pulse.html.events import (
-	FocusEvent as FocusEvent,
-)
-from pulse.html.events import (
-	FormControlDOMEvents as FormControlDOMEvents,
-)
-from pulse.html.events import (
-	FormEvent as FormEvent,
-)
-from pulse.html.events import (
-	InputDOMEvents as InputDOMEvents,
-)
-from pulse.html.events import (
-	InvalidEvent as InvalidEvent,
-)
-from pulse.html.events import (
-	KeyboardEvent as KeyboardEvent,
-)
-from pulse.html.events import (
-	MouseEvent as MouseEvent,
-)
-from pulse.html.events import (
-	PointerEvent as PointerEvent,
-)
-from pulse.html.events import (
-	SelectDOMEvents as SelectDOMEvents,
-)
-from pulse.html.events import (
-	SyntheticEvent as SyntheticEvent,
-)
-from pulse.html.events import (
-	TextAreaDOMEvents as TextAreaDOMEvents,
-)
-from pulse.html.events import (
-	ToggleEvent as ToggleEvent,
-)
-from pulse.html.events import (
-	Touch as Touch,
-)
-from pulse.html.events import (
-	TouchEvent as TouchEvent,
-)
-from pulse.html.events import (
-	TransitionEvent as TransitionEvent,
-)
-from pulse.html.events import (
-	UIEvent as UIEvent,
-)
-from pulse.html.events import (
-	WheelEvent as WheelEvent,
-)
-from pulse.html.props import (
-	BaseHTMLProps as BaseHTMLProps,
-)
-
-# HTML Props
-from pulse.html.props import (
-	ClassName as ClassName,
-)
-from pulse.html.props import (
-	HTMLAbbrProps as HTMLAbbrProps,
-)
-from pulse.html.props import (
-	HTMLAddressProps as HTMLAddressProps,
-)
-from pulse.html.props import (
-	HTMLAnchorProps as HTMLAnchorProps,
-)
-from pulse.html.props import (
-	HTMLAreaProps as HTMLAreaProps,
-)
-from pulse.html.props import (
-	HTMLArticleProps as HTMLArticleProps,
-)
-from pulse.html.props import (
-	HTMLAsideProps as HTMLAsideProps,
-)
-from pulse.html.props import (
-	HTMLAudioProps as HTMLAudioProps,
-)
-from pulse.html.props import (
-	HTMLBaseProps as HTMLBaseProps,
-)
-from pulse.html.props import (
-	HTMLBDIProps as HTMLBDIProps,
-)
-from pulse.html.props import (
-	HTMLBDOProps as HTMLBDOProps,
-)
-from pulse.html.props import (
-	HTMLBlockquoteProps as HTMLBlockquoteProps,
-)
-from pulse.html.props import (
-	HTMLBodyProps as HTMLBodyProps,
-)
-from pulse.html.props import (
-	HTMLBProps as HTMLBProps,
-)
-from pulse.html.props import (
-	HTMLBRProps as HTMLBRProps,
-)
-from pulse.html.props import (
-	HTMLButtonProps as HTMLButtonProps,
-)
-from pulse.html.props import (
-	HTMLCanvasProps as HTMLCanvasProps,
-)
-from pulse.html.props import (
-	HTMLCaptionProps as HTMLCaptionProps,
-)
-from pulse.html.props import (
-	HTMLCircleProps as HTMLCircleProps,
-)
-from pulse.html.props import (
-	HTMLCiteProps as HTMLCiteProps,
-)
-from pulse.html.props import (
-	HTMLClipPathProps as HTMLClipPathProps,
-)
-from pulse.html.props import (
-	HTMLCodeProps as HTMLCodeProps,
-)
-from pulse.html.props import (
-	HTMLColgroupProps as HTMLColgroupProps,
-)
-from pulse.html.props import (
-	HTMLColProps as HTMLColProps,
-)
-from pulse.html.props import (
-	HTMLDatalistProps as HTMLDatalistProps,
-)
-from pulse.html.props import (
-	HTMLDataProps as HTMLDataProps,
-)
-from pulse.html.props import (
-	HTMLDDProps as HTMLDDProps,
-)
-from pulse.html.props import (
-	HTMLDefsProps as HTMLDefsProps,
-)
-from pulse.html.props import (
-	HTMLDelProps as HTMLDelProps,
-)
-from pulse.html.props import (
-	HTMLDetailsProps as HTMLDetailsProps,
-)
-from pulse.html.props import (
-	HTMLDFNProps as HTMLDFNProps,
-)
-from pulse.html.props import (
-	HTMLDialogProps as HTMLDialogProps,
-)
-from pulse.html.props import (
-	HTMLDivProps as HTMLDivProps,
-)
-from pulse.html.props import (
-	HTMLDLProps as HTMLDLProps,
-)
-from pulse.html.props import (
-	HTMLDTProps as HTMLDTProps,
-)
-from pulse.html.props import (
-	HTMLEllipseProps as HTMLEllipseProps,
-)
-from pulse.html.props import (
-	HTMLEmbedProps as HTMLEmbedProps,
-)
-from pulse.html.props import (
-	HTMLEMProps as HTMLEMProps,
-)
-from pulse.html.props import (
-	HTMLFieldsetProps as HTMLFieldsetProps,
-)
-from pulse.html.props import (
-	HTMLFigcaptionProps as HTMLFigcaptionProps,
-)
-from pulse.html.props import (
-	HTMLFigureProps as HTMLFigureProps,
-)
-from pulse.html.props import (
-	HTMLFooterProps as HTMLFooterProps,
-)
-from pulse.html.props import (
-	HTMLFormProps as HTMLFormProps,
-)
-from pulse.html.props import (
-	HTMLFragmentProps as HTMLFragmentProps,
-)
-from pulse.html.props import (
-	HTMLGProps as HTMLGProps,
-)
-from pulse.html.props import (
-	HTMLH1Props as HTMLH1Props,
-)
-from pulse.html.props import (
-	HTMLH2Props as HTMLH2Props,
-)
-from pulse.html.props import (
-	HTMLH3Props as HTMLH3Props,
-)
-from pulse.html.props import (
-	HTMLH4Props as HTMLH4Props,
-)
-from pulse.html.props import (
-	HTMLH5Props as HTMLH5Props,
-)
-from pulse.html.props import (
-	HTMLH6Props as HTMLH6Props,
-)
-from pulse.html.props import (
-	HTMLHeaderProps as HTMLHeaderProps,
-)
-from pulse.html.props import (
-	HTMLHeadProps as HTMLHeadProps,
-)
-from pulse.html.props import (
-	HTMLHgroupProps as HTMLHgroupProps,
-)
-from pulse.html.props import (
-	HTMLHRProps as HTMLHRProps,
-)
-from pulse.html.props import (
-	HTMLHtmlProps as HTMLHtmlProps,
-)
-from pulse.html.props import (
-	HTMLIframeProps as HTMLIframeProps,
-)
-from pulse.html.props import (
-	HTMLImgProps as HTMLImgProps,
-)
-from pulse.html.props import (
-	HTMLInputProps as HTMLInputProps,
-)
-from pulse.html.props import (
-	HTMLInsProps as HTMLInsProps,
-)
-from pulse.html.props import (
-	HTMLIProps as HTMLIProps,
-)
-from pulse.html.props import (
-	HTMLKBDProps as HTMLKBDProps,
-)
-from pulse.html.props import (
-	HTMLKeygenProps as HTMLKeygenProps,
-)
-from pulse.html.props import (
-	HTMLLabelProps as HTMLLabelProps,
-)
-from pulse.html.props import (
-	HTMLLegendProps as HTMLLegendProps,
-)
-from pulse.html.props import (
-	HTMLLineProps as HTMLLineProps,
-)
-from pulse.html.props import (
-	HTMLLinkProps as HTMLLinkProps,
-)
-from pulse.html.props import (
-	HTMLLiProps as HTMLLiProps,
-)
-from pulse.html.props import (
-	HTMLMainProps as HTMLMainProps,
-)
-from pulse.html.props import (
-	HTMLMapProps as HTMLMapProps,
-)
-from pulse.html.props import (
-	HTMLMarkProps as HTMLMarkProps,
-)
-from pulse.html.props import (
-	HTMLMaskProps as HTMLMaskProps,
-)
-from pulse.html.props import (
-	HTMLMediaProps as HTMLMediaProps,
-)
-from pulse.html.props import (
-	HTMLMenuProps as HTMLMenuProps,
-)
-from pulse.html.props import (
-	HTMLMetaProps as HTMLMetaProps,
-)
-from pulse.html.props import (
-	HTMLMeterProps as HTMLMeterProps,
-)
-from pulse.html.props import (
-	HTMLNavProps as HTMLNavProps,
-)
-from pulse.html.props import (
-	HTMLNoscriptProps as HTMLNoscriptProps,
-)
-from pulse.html.props import (
-	HTMLObjectProps as HTMLObjectProps,
-)
-from pulse.html.props import (
-	HTMLOlProps as HTMLOlProps,
-)
-from pulse.html.props import (
-	HTMLOptgroupProps as HTMLOptgroupProps,
-)
-from pulse.html.props import (
-	HTMLOptionProps as HTMLOptionProps,
-)
-from pulse.html.props import (
-	HTMLOutputProps as HTMLOutputProps,
-)
-from pulse.html.props import (
-	HTMLParamProps as HTMLParamProps,
-)
-from pulse.html.props import (
-	HTMLPathProps as HTMLPathProps,
-)
-from pulse.html.props import (
-	HTMLPatternProps as HTMLPatternProps,
-)
-from pulse.html.props import (
-	HTMLPictureProps as HTMLPictureProps,
-)
-from pulse.html.props import (
-	HTMLPolygonProps as HTMLPolygonProps,
-)
-from pulse.html.props import (
-	HTMLPolylineProps as HTMLPolylineProps,
-)
-from pulse.html.props import (
-	HTMLPProps as HTMLPProps,
-)
-from pulse.html.props import (
-	HTMLPreProps as HTMLPreProps,
-)
-from pulse.html.props import (
-	HTMLProgressProps as HTMLProgressProps,
-)
-from pulse.html.props import (
-	HTMLProps as HTMLProps,
-)
-from pulse.html.props import (
-	HTMLQProps as HTMLQProps,
-)
-from pulse.html.props import (
-	HTMLQuoteProps as HTMLQuoteProps,
-)
-from pulse.html.props import (
-	HTMLRectProps as HTMLRectProps,
-)
-from pulse.html.props import (
-	HTMLRPProps as HTMLRPProps,
-)
-from pulse.html.props import (
-	HTMLRTProps as HTMLRTProps,
-)
-from pulse.html.props import (
-	HTMLRubyProps as HTMLRubyProps,
-)
-from pulse.html.props import (
-	HTMLSampProps as HTMLSampProps,
-)
-from pulse.html.props import (
-	HTMLScriptProps as HTMLScriptProps,
-)
-from pulse.html.props import (
-	HTMLSectionProps as HTMLSectionProps,
-)
-from pulse.html.props import (
-	HTMLSelectProps as HTMLSelectProps,
-)
-from pulse.html.props import (
-	HTMLSlotProps as HTMLSlotProps,
-)
-from pulse.html.props import (
-	HTMLSmallProps as HTMLSmallProps,
-)
-from pulse.html.props import (
-	HTMLSourceProps as HTMLSourceProps,
-)
-from pulse.html.props import (
-	HTMLSpanProps as HTMLSpanProps,
-)
-from pulse.html.props import (
-	HTMLSProps as HTMLSProps,
-)
-from pulse.html.props import (
-	HTMLStrongProps as HTMLStrongProps,
-)
-from pulse.html.props import (
-	HTMLStyleProps as HTMLStyleProps,
-)
-from pulse.html.props import (
-	HTMLSubProps as HTMLSubProps,
-)
-from pulse.html.props import (
-	HTMLSummaryProps as HTMLSummaryProps,
-)
-from pulse.html.props import (
-	HTMLSupProps as HTMLSupProps,
-)
-from pulse.html.props import (
-	HTMLSVGProps as HTMLSVGProps,
-)
-from pulse.html.props import (
-	HTMLTableProps as HTMLTableProps,
-)
-from pulse.html.props import (
-	HTMLTBODYProps as HTMLTBODYProps,
-)
-from pulse.html.props import (
-	HTMLTdProps as HTMLTdProps,
-)
-from pulse.html.props import (
-	HTMLTemplateProps as HTMLTemplateProps,
-)
-from pulse.html.props import (
-	HTMLTextareaProps as HTMLTextareaProps,
-)
-from pulse.html.props import (
-	HTMLTextProps as HTMLTextProps,
-)
-from pulse.html.props import (
-	HTMLThProps as HTMLThProps,
-)
-from pulse.html.props import (
-	HTMLTimeProps as HTMLTimeProps,
-)
-from pulse.html.props import (
-	HTMLTitleProps as HTMLTitleProps,
-)
-from pulse.html.props import (
-	HTMLTrackProps as HTMLTrackProps,
-)
-from pulse.html.props import (
-	HTMLTspanProps as HTMLTspanProps,
-)
-from pulse.html.props import (
-	HTMLULProps as HTMLULProps,
-)
-from pulse.html.props import (
-	HTMLUProps as HTMLUProps,
-)
-from pulse.html.props import (
-	HTMLUseProps as HTMLUseProps,
-)
-from pulse.html.props import (
-	HTMLVarProps as HTMLVarProps,
-)
-from pulse.html.props import (
-	HTMLVideoProps as HTMLVideoProps,
-)
-from pulse.html.props import (
-	HTMLWBRProps as HTMLWBRProps,
-)
-from pulse.html.props import (
-	WebViewAttributes as WebViewAttributes,
-)
-
-# HTML Tags
-from pulse.html.tags import (
-	a as a,
-)
-from pulse.html.tags import (
-	abbr as abbr,
-)
-from pulse.html.tags import (
-	address as address,
-)
-from pulse.html.tags import (
-	area as area,
-)
-from pulse.html.tags import (
-	article as article,
-)
-from pulse.html.tags import (
-	aside as aside,
-)
-from pulse.html.tags import (
-	audio as audio,
-)
-from pulse.html.tags import (
-	b as b,
-)
-from pulse.html.tags import (
-	base as base,
-)
-from pulse.html.tags import (
-	bdi as bdi,
-)
-from pulse.html.tags import (
-	bdo as bdo,
-)
-from pulse.html.tags import (
-	blockquote as blockquote,
-)
-from pulse.html.tags import (
-	body as body,
-)
-from pulse.html.tags import (
-	br as br,
-)
-from pulse.html.tags import (
-	button as button,
-)
-from pulse.html.tags import (
-	canvas as canvas,
-)
-from pulse.html.tags import (
-	caption as caption,
-)
-from pulse.html.tags import (
-	circle as circle,
-)
-from pulse.html.tags import (
-	cite as cite,
-)
-from pulse.html.tags import (
-	clipPath as clipPath,
-)
-from pulse.html.tags import (
-	code as code,
-)
-from pulse.html.tags import (
-	col as col,
-)
-from pulse.html.tags import (
-	colgroup as colgroup,
-)
-from pulse.html.tags import (
-	data as data,
-)
-from pulse.html.tags import (
-	datalist as datalist,
-)
-from pulse.html.tags import (
-	dd as dd,
-)
-from pulse.html.tags import (
-	defs as defs,
-)
-from pulse.html.tags import (
-	del_ as del_,
-)
-from pulse.html.tags import (
-	details as details,
-)
-from pulse.html.tags import (
-	dfn as dfn,
-)
-from pulse.html.tags import (
-	dialog as dialog,
-)
-from pulse.html.tags import (
-	div as div,
-)
-from pulse.html.tags import (
-	dl as dl,
-)
-from pulse.html.tags import (
-	dt as dt,
-)
-from pulse.html.tags import (
-	ellipse as ellipse,
-)
-from pulse.html.tags import (
-	em as em,
-)
-from pulse.html.tags import (
-	embed as embed,
-)
-from pulse.html.tags import (
-	fieldset as fieldset,
-)
-from pulse.html.tags import (
-	figcaption as figcaption,
-)
-from pulse.html.tags import (
-	figure as figure,
-)
-from pulse.html.tags import (
-	footer as footer,
-)
-from pulse.html.tags import (
-	form as form,
-)
-from pulse.html.tags import (
-	fragment as fragment,
-)
-from pulse.html.tags import (
-	g as g,
-)
-from pulse.html.tags import (
-	h1 as h1,
-)
-from pulse.html.tags import (
-	h2 as h2,
-)
-from pulse.html.tags import (
-	h3 as h3,
-)
-from pulse.html.tags import (
-	h4 as h4,
-)
-from pulse.html.tags import (
-	h5 as h5,
-)
-from pulse.html.tags import (
-	h6 as h6,
-)
-from pulse.html.tags import (
-	head as head,
-)
-from pulse.html.tags import (
-	header as header,
-)
-from pulse.html.tags import (
-	hgroup as hgroup,
-)
-from pulse.html.tags import (
-	hr as hr,
-)
-from pulse.html.tags import (
-	html as html,
-)
-from pulse.html.tags import (
-	i as i,
-)
-from pulse.html.tags import (
-	iframe as iframe,
-)
-from pulse.html.tags import (
-	img as img,
-)
-from pulse.html.tags import (
-	input as input,
-)
-from pulse.html.tags import (
-	ins as ins,
-)
-from pulse.html.tags import (
-	kbd as kbd,
-)
-from pulse.html.tags import (
-	label as label,
-)
-from pulse.html.tags import (
-	legend as legend,
-)
-from pulse.html.tags import (
-	li as li,
-)
-from pulse.html.tags import (
-	line as line,
-)
-from pulse.html.tags import (
-	link as link,
-)
-from pulse.html.tags import (
-	main as main,
-)
-from pulse.html.tags import (
-	map_ as map_,
-)
-from pulse.html.tags import (
-	mark as mark,
-)
-from pulse.html.tags import (
-	mask as mask,
-)
-from pulse.html.tags import (
-	menu as menu,
-)
-from pulse.html.tags import (
-	meta as meta,
-)
-from pulse.html.tags import (
-	meter as meter,
-)
-from pulse.html.tags import (
-	nav as nav,
-)
-from pulse.html.tags import (
-	noscript as noscript,
-)
-from pulse.html.tags import (
-	object_ as object_,
-)
-from pulse.html.tags import (
-	ol as ol,
-)
-from pulse.html.tags import (
-	optgroup as optgroup,
-)
-from pulse.html.tags import (
-	option as option,
-)
-from pulse.html.tags import (
-	output as output,
-)
-from pulse.html.tags import (
-	p as p,
-)
-from pulse.html.tags import (
-	param as param,
-)
-from pulse.html.tags import (
-	path as path,
-)
-from pulse.html.tags import (
-	pattern as pattern,
-)
-from pulse.html.tags import (
-	picture as picture,
-)
-from pulse.html.tags import (
-	polygon as polygon,
-)
-from pulse.html.tags import (
-	polyline as polyline,
-)
-from pulse.html.tags import (
-	pre as pre,
-)
-from pulse.html.tags import (
-	progress as progress,
-)
-from pulse.html.tags import (
-	q as q,
-)
-from pulse.html.tags import (
-	rect as rect,
-)
-from pulse.html.tags import (
-	rp as rp,
-)
-from pulse.html.tags import (
-	rt as rt,
-)
-from pulse.html.tags import (
-	ruby as ruby,
-)
-from pulse.html.tags import (
-	s as s,
-)
-from pulse.html.tags import (
-	samp as samp,
-)
-from pulse.html.tags import (
-	script as script,
-)
-from pulse.html.tags import (
-	section as section,
-)
-from pulse.html.tags import (
-	select as select,
-)
-from pulse.html.tags import (
-	small as small,
-)
-from pulse.html.tags import (
-	source as source,
-)
-from pulse.html.tags import (
-	span as span,
-)
-from pulse.html.tags import (
-	strong as strong,
-)
-from pulse.html.tags import (
-	style as style,
-)
-from pulse.html.tags import (
-	sub as sub,
-)
-from pulse.html.tags import (
-	summary as summary,
-)
-from pulse.html.tags import (
-	sup as sup,
-)
-from pulse.html.tags import (
-	svg as svg,
-)
-from pulse.html.tags import (
-	table as table,
-)
-from pulse.html.tags import (
-	tbody as tbody,
-)
-from pulse.html.tags import (
-	td as td,
-)
-from pulse.html.tags import (
-	template as template,
-)
-from pulse.html.tags import (
-	text as text,
-)
-from pulse.html.tags import (
-	textarea as textarea,
-)
-from pulse.html.tags import (
-	tfoot as tfoot,
-)
-from pulse.html.tags import (
-	th as th,
-)
-from pulse.html.tags import (
-	thead as thead,
-)
-from pulse.html.tags import (
-	time as time,
-)
-from pulse.html.tags import (
-	title as title,
-)
-from pulse.html.tags import (
-	tr as tr,
-)
-from pulse.html.tags import (
-	track as track,
-)
-from pulse.html.tags import (
-	tspan as tspan,
-)
-from pulse.html.tags import (
-	u as u,
-)
-from pulse.html.tags import (
-	ul as ul,
-)
-from pulse.html.tags import (
-	use as use,
-)
-from pulse.html.tags import (
-	var as var,
-)
-from pulse.html.tags import (
-	video as video,
-)
-from pulse.html.tags import (
-	wbr as wbr,
-)
 from pulse.messages import ClientMessage as ClientMessage
 from pulse.messages import Directives as Directives
 from pulse.messages import Prerender as Prerender
@@ -1337,30 +1345,12 @@ from pulse.queries.mutation import mutation as mutation
 from pulse.queries.protocol import QueryResult as QueryResult
 from pulse.queries.query import query as query
 
-# React component registry
+# React components (v2)
 from pulse.react_component import (
-	COMPONENT_REGISTRY as COMPONENT_REGISTRY,
-)
-from pulse.react_component import (
-	DEFAULT as DEFAULT,
-)
-from pulse.react_component import (
-	ComponentRegistry as ComponentRegistry,
-)
-from pulse.react_component import (
-	Prop as Prop,
-)
-from pulse.react_component import (
-	ReactComponent as ReactComponent,
-)
-from pulse.react_component import (
-	prop as prop,
+	default_signature as default_signature,
 )
 from pulse.react_component import (
 	react_component as react_component,
-)
-from pulse.react_component import (
-	registered_react_components as registered_react_components,
 )
 
 # Reactivity primitives
@@ -1431,11 +1421,27 @@ from pulse.serializer import serialize as serialize
 
 # State and routing
 from pulse.state import State as State
+
+# Transpiler v2
 from pulse.transpiler.function import JsFunction as JsFunction
 from pulse.transpiler.function import javascript as javascript
-from pulse.transpiler.imports import CssImport as CssImport
 from pulse.transpiler.imports import Import as Import
-from pulse.transpiler.imports import import_js as import_js
+from pulse.transpiler.nodes import (
+	Element as Element,
+)
+from pulse.transpiler.nodes import Jsx as Jsx
+from pulse.transpiler.nodes import (
+	Node as Node,
+)
+from pulse.transpiler.nodes import (
+	Primitive as Primitive,
+)
+from pulse.transpiler.nodes import (
+	PulseNode as PulseNode,
+)
+from pulse.transpiler.vdom import (
+	VDOMNode as VDOMNode,
+)
 
 # Types
 from pulse.types.event_handler import (
@@ -1484,31 +1490,5 @@ from pulse.user_session import (
 )
 from pulse.user_session import (
 	UserSession as UserSession,
-)
-
-# VDOM
-from pulse.vdom import (
-	Child as Child,
-)
-from pulse.vdom import (
-	Component as Component,
-)
-from pulse.vdom import (
-	ComponentNode as ComponentNode,
-)
-from pulse.vdom import (
-	Element as Element,
-)
-from pulse.vdom import (
-	Node as Node,
-)
-from pulse.vdom import (
-	Primitive as Primitive,
-)
-from pulse.vdom import (
-	VDOMNode as VDOMNode,
-)
-from pulse.vdom import (
-	component as component,
 )
 from pulse.version import __version__ as __version__

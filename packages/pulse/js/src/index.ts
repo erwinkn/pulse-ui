@@ -1,13 +1,12 @@
 // Public API surface for pulse-client
 
 export type { ChannelBridge } from "./channel";
-export { PulseChannelResetError } from "./channel";
+export { PulseChannelResetError, usePulseChannel } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {
 	ConnectionStatusListener,
 	MountedView,
 	PulseClient,
-	ServerErrorListener,
 } from "./client";
 export type { PulseFormProps } from "./form";
 // Form helpers
@@ -30,7 +29,7 @@ export type {
 	ServerChannelMessage,
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
-	ServerErrorInfo,
+	ServerError,
 	ServerErrorMessage,
 	ServerInitMessage,
 	ServerMessage,
@@ -41,7 +40,8 @@ export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 // Core React bindings
 export { PulseProvider, PulseView, usePulseClient } from "./pulse";
 // Renderer helpers
-export { RenderLazy } from "./renderer";
+// Renderer (structural expressions + eval-keyed props)
+export { VDOMRenderer } from "./renderer";
 // Serialization helpers
 // export { extractEvent } from "./serialize/events";
 // export {
@@ -49,18 +49,17 @@ export { RenderLazy } from "./renderer";
 //   decodeFromWire,
 //   cleanForSerialization,
 // } from "./serialize/clean";
-export {
-	deserialize,
-	serialize,
-} from "./serialize/serializer";
+export { deserialize, serialize } from "./serialize/serializer";
 // Transports (types only - implementation is internal)
 export type { MessageListener, Transport } from "./transport";
-export { usePulseChannel } from "./usePulseChannel";
 // VDOM types and helpers
 export type {
 	ComponentRegistry,
+	ComponentRegistry as ComponentRegistry2,
 	VDOM,
 	VDOMElement,
+	VDOMExpr,
 	VDOMNode,
+	VDOMPropValue,
 	VDOMUpdate,
 } from "./vdom";

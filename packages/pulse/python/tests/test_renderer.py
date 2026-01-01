@@ -4,10 +4,12 @@ from typing import Any, cast, override
 
 import pulse as ps
 import pytest
+from pulse.component import component
+from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
-from pulse.html.tags import button, div, li, span, ul
 from pulse.renderer import RenderTree
-from pulse.vdom import Node, component
+from pulse.transpiler.nodes import Element, PulseNode
+from pulse.transpiler.vdom import VDOMElement
 
 
 # Helpers for reconciliation-based updates
@@ -91,8 +93,8 @@ class TrackingHookContext(HookContext):
 
 
 def test_keyed_reorder_applies_operations_in_correct_order():
-	def keyed_item(label: str) -> Node:
-		return Node("li", key=label.lower(), children=[label])
+	def keyed_item(label: str) -> Element:
+		return Element("li", key=label.lower(), children=[label])
 
 	initial_children = [
 		keyed_item("A"),
@@ -113,9 +115,9 @@ def test_keyed_reorder_applies_operations_in_correct_order():
 	ops = tree.diff(ul(*reordered_children))
 
 	normalized_root = tree.normalized
-	assert isinstance(normalized_root, Node)
+	assert isinstance(normalized_root, Element)
 	assert isinstance(normalized_root.children, list)
-	current_order = [cast(Node, child).key for child in normalized_root.children]
+	current_order = [cast(Element, child).key for child in normalized_root.children]
 	assert current_order == ["d", "b", "e", "a"], "sanity check normalized order"
 
 	recon_ops = _get_reconciliation_ops(ops, path="")
@@ -127,15 +129,15 @@ def test_keyed_reorder_applies_operations_in_correct_order():
 
 
 def test_nested_keyed_reorder_in_subtree():
-	def inner_span(label: str) -> Node:
-		return Node("span", key=label.lower(), children=[label])
+	def inner_span(label: str) -> Element:
+		return Element("span", key=label.lower(), children=[label])
 
-	def outer_item(label: str, inner_labels: list[str]) -> Node:
-		return Node(
+	def outer_item(label: str, inner_labels: list[str]) -> Element:
+		return Element(
 			"li",
 			key=f"outer-{label.lower()}",
 			children=[
-				Node(
+				Element(
 					"ul",
 					children=[inner_span(inner_label) for inner_label in inner_labels],
 				)
@@ -160,42 +162,42 @@ def test_nested_keyed_reorder_in_subtree():
 	assert final_order == expected_final
 
 	normalized_root = tree.normalized
-	assert isinstance(normalized_root, Node)
+	assert isinstance(normalized_root, Element)
 	outer = normalized_root.children
 	assert isinstance(outer, list)
 	first_outer = outer[0]
-	assert isinstance(first_outer, Node)
+	assert isinstance(first_outer, Element)
 	inner_list = first_outer.children
 	assert isinstance(inner_list, list)
 	assert len(inner_list) == 1
 	inner_ul = inner_list[0]
-	assert isinstance(inner_ul, Node)
+	assert isinstance(inner_ul, Element)
 	assert isinstance(inner_ul.children, list)
-	inner_keys = [cast(Node, child).key for child in inner_ul.children]
+	inner_keys = [cast(Element, child).key for child in inner_ul.children]
 	assert inner_keys == expected_final
 
 
 def test_duplicate_key_detection_raises_error():
-	first = Node("li", key="a")
-	duplicate = Node("li", key="dup")
+	first = Element("li", key="a")
+	duplicate = Element("li", key="dup")
 
 	tree = RenderTree(ul(first, duplicate))
 	tree.render()
 
 	with pytest.raises(ValueError, match="Duplicate key 'dup'"):
-		tree.diff(ul(first, duplicate, Node("li", key="dup")))
+		tree.diff(ul(first, duplicate, Element("li", key="dup")))
 
 
 def test_component_replaced_with_text_unmounts_and_replaces():
 	@component
-	def Child() -> Node:
+	def Child() -> Element:
 		return span("child")
 
 	child = Child()
 	child.key = "child"  # Ensure consistent key
 	child.hooks = TrackingHookContext()
 
-	sibling = Node("span", key="sibling", children=["sib"])
+	sibling = Element("span", key="sibling", children=["sib"])
 
 	tree = RenderTree(div(child, sibling))
 	tree.render()
@@ -203,7 +205,7 @@ def test_component_replaced_with_text_unmounts_and_replaces():
 	assert isinstance(child.hooks, TrackingHookContext)
 	assert child.hooks.did_unmount is False
 
-	ops = tree.diff(div("plain", Node("span", key="sibling", children=["sib"])))
+	ops = tree.diff(div("plain", Element("span", key="sibling", children=["sib"])))
 
 	# With the new reconciliation algorithm, this generates a reconciliation operation
 	recon_ops = _get_reconciliation_ops(ops, path="")
@@ -213,7 +215,7 @@ def test_component_replaced_with_text_unmounts_and_replaces():
 
 def test_diff_props_unmounts_render_prop_when_replaced_with_callback():
 	@component
-	def Child() -> Node:
+	def Child() -> Element:
 		return span("child")
 
 	child = Child()
@@ -235,7 +237,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_callback():
 
 def test_diff_props_unmounts_render_prop_when_removed():
 	@component
-	def Child() -> Node:
+	def Child() -> Element:
 		return span("child")
 
 	child = Child()
@@ -253,16 +255,13 @@ def test_diff_props_unmounts_render_prop_when_removed():
 
 
 def test_diff_props_unmounts_render_prop_when_replaced_with_jsexpr(tmp_path: Path):
-	from pulse.transpiler.imports import (
-		CssImport,
-		clear_import_registry,
-	)
+	from pulse.transpiler.imports import Import, clear_import_registry
+	from pulse.transpiler.nodes import Member
 
-	# Clean up registries
 	clear_import_registry()
 
 	@component
-	def Child() -> Node:
+	def Child() -> Element:
 		return span("child")
 
 	child = Child()
@@ -278,15 +277,13 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_jsexpr(tmp_path: Pat
 	test_css_file = tmp_path / "test.module.css"
 	test_css_file.write_text(".foo { color: red; }")
 
-	# Use CssImport to create the CSS module import
-	css_module = CssImport(str(test_css_file), module=True)
-	css_ref = css_module.foo  # Returns JSMember
+	css_module = Import("styles", str(test_css_file), kind="default")
+	css_ref = Member(css_module, "foo")
 
 	tree.diff(div(render=css_ref))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 
 	assert child.hooks.did_unmount is True
 
-	# Clean up
 	clear_import_registry()
 
 
@@ -294,10 +291,10 @@ def test_render_tree_initial_callbacks():
 	def on_click() -> None:
 		pass
 
-	root = Node(
+	root = Element(
 		"div",
 		props={"id": "root"},
-		children=[Node("button", props={"onClick": on_click}, children=["Click"])],
+		children=[Element("button", props={"onClick": on_click}, children=["Click"])],
 	)
 
 	tree = RenderTree(root)
@@ -307,31 +304,32 @@ def test_render_tree_initial_callbacks():
 		"tag": "div",
 		"props": {"id": "root"},
 		"children": [
-			{"tag": "button", "props": {"onClick": "$cb"}, "children": ["Click"]}
+			{
+				"tag": "button",
+				"props": {"onClick": "$cb"},
+				"children": ["Click"],
+				"eval": ["onClick"],
+			}
 		],
 	}
 	assert set(tree.callbacks.keys()) == {"0.onClick"}
-	assert tree.render_props == set()
 
 
-def test_callback_removal_emits_update_callbacks_delta():
+def test_callback_removal_clears_callbacks():
 	def on_click() -> None:
 		pass
 
 	tree = RenderTree(div(button(onClick=on_click)["Click"]))
 	tree.render()
+	assert "0.onClick" in tree.callbacks
 
-	ops = tree.diff(div())
-
-	update_callbacks = [op for op in ops if op["type"] == "update_callbacks"]
-	assert update_callbacks == [
-		{"type": "update_callbacks", "path": "", "data": {"remove": ["0.onClick"]}}
-	]
+	tree.diff(div())
+	assert "0.onClick" not in tree.callbacks
 
 
-def test_render_prop_removal_emits_update_render_props_delta():
+def test_render_prop_removal_emits_update_props_delta():
 	@component
-	def Child() -> Node:
+	def Child() -> Element:
 		return span("child")
 
 	tree = RenderTree(div(render=Child()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
@@ -339,15 +337,16 @@ def test_render_prop_removal_emits_update_render_props_delta():
 
 	ops = tree.diff(div())
 
-	update_render_props = [op for op in ops if op["type"] == "update_render_props"]
-	assert update_render_props == [
-		{"type": "update_render_props", "path": "", "data": {"remove": ["render"]}}
-	]
+	update_props = [op for op in ops if op["type"] == "update_props"]
+	assert any(
+		op["data"].get("remove") == ["render"] and op["data"].get("eval") == []
+		for op in update_props
+	)
 
 
 def test_callback_render_prop_churn_updates_deltas():
 	@component
-	def Child() -> Node:
+	def Child() -> Element:
 		return span("child")
 
 	def handle_click() -> None:
@@ -357,38 +356,30 @@ def test_callback_render_prop_churn_updates_deltas():
 	tree.render()
 
 	ops = tree.diff(div(render=Child()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
+	assert "0.onClick" not in tree.callbacks
 	assert any(
-		op
-		== {"type": "update_callbacks", "path": "", "data": {"remove": ["0.onClick"]}}
-		for op in ops
-	)
-	assert any(
-		op == {"type": "update_render_props", "path": "", "data": {"add": ["render"]}}
+		op["type"] == "update_props" and "render" in op["data"].get("set", {})
 		for op in ops
 	)
 
 	ops = tree.diff(div(button(onClick=handle_click)["Click"]))
+	assert "0.onClick" in tree.callbacks
 	assert any(
-		op == {"type": "update_callbacks", "path": "", "data": {"add": ["0.onClick"]}}
-		for op in ops
-	)
-	assert any(
-		op
-		== {"type": "update_render_props", "path": "", "data": {"remove": ["render"]}}
+		op["type"] == "update_props" and "render" in op["data"].get("remove", [])
 		for op in ops
 	)
 
 
 def test_render_prop_nested_components_unmount_on_type_change():
 	@component
-	def Leaf() -> Node:
+	def Leaf() -> Element:
 		return span("leaf")
 
 	inner = Leaf()
 	inner.hooks = TrackingHookContext()
 
 	@component
-	def Wrapper() -> Node:
+	def Wrapper() -> Element:
 		return div(inner)
 
 	outer = Wrapper()
@@ -413,7 +404,7 @@ def test_render_prop_nested_components_unmount_on_type_change():
 
 def test_render_tree_unmount_clears_state_and_unmounts_children():
 	@component
-	def Child() -> Node:
+	def Child() -> Element:
 		return span("child")
 
 	child = Child()
@@ -429,15 +420,14 @@ def test_render_tree_unmount_clears_state_and_unmounts_children():
 
 	assert child.hooks.did_unmount is True
 	assert tree.callbacks == {}
-	assert tree.render_props == set()
 	assert tree.normalized is None
 
 
 def test_diff_updates_props():
-	tree = RenderTree(Node("div", props={"class": "one"}))
+	tree = RenderTree(Element("div", props={"class": "one"}))
 	tree.render()
 
-	ops = tree.diff(Node("div", props={"class": "two"}))
+	ops = tree.diff(Element("div", props={"class": "two"}))
 	assert ops == [
 		{
 			"type": "update_props",
@@ -449,7 +439,7 @@ def test_diff_updates_props():
 
 def test_keyed_move_preserves_component_nodes():
 	@component
-	def Item(label: str, key: str | None = None) -> Node:
+	def Item(label: str, key: str | None = None) -> Element:
 		return li(label)
 
 	first = Item(label="A", key="a")
@@ -460,15 +450,15 @@ def test_keyed_move_preserves_component_nodes():
 
 	# Verify initial order
 	normalized_root = tree.normalized
-	assert isinstance(normalized_root, Node)
+	assert isinstance(normalized_root, Element)
 	assert isinstance(normalized_root.children, list)
 	assert len(normalized_root.children) == 2
 
 	# Check that the initial labels are correct
 	first_child = normalized_root.children[0]
 	second_child = normalized_root.children[1]
-	assert isinstance(first_child, ps.ComponentNode)
-	assert isinstance(second_child, ps.ComponentNode)
+	assert isinstance(first_child, PulseNode)
+	assert isinstance(second_child, PulseNode)
 	assert first_child.kwargs["label"] == "A"
 	assert second_child.kwargs["label"] == "B"
 
@@ -479,21 +469,22 @@ def test_keyed_move_preserves_component_nodes():
 
 	# Verify labels moved correctly after reordering
 	updated_root = tree.normalized
-	assert isinstance(updated_root, Node)
+	assert isinstance(updated_root, Element)
 	assert isinstance(updated_root.children, list)
 	assert len(updated_root.children) == 2
 
 	# After move: B should be first, A should be second
 	updated_first_child = updated_root.children[0]
 	updated_second_child = updated_root.children[1]
-	assert isinstance(updated_first_child, ps.ComponentNode)
-	assert isinstance(updated_second_child, ps.ComponentNode)
+	assert isinstance(updated_first_child, PulseNode)
+	assert isinstance(updated_second_child, PulseNode)
 	assert updated_first_child.kwargs["label"] == "B"
 	assert updated_second_child.kwargs["label"] == "A"
 
 	# Verify the rendered DOM content matches the labels
-	vdom = tree.render()
-	assert isinstance(vdom, dict)
+	vdom_raw = tree.render()
+	assert isinstance(vdom_raw, dict)
+	vdom = cast(VDOMElement, vdom_raw)
 	assert vdom["tag"] == "ul"
 	children = vdom.get("children")
 	assert isinstance(children, list)
@@ -508,7 +499,7 @@ def test_keyed_move_preserves_component_nodes():
 
 def test_unmount_invokes_component_hooks():
 	@component
-	def Item(label: str, key: str | None = None) -> Node:
+	def Item(label: str, key: str | None = None) -> Element:
 		return li(label)
 
 	first = Item(label="A", key="a")
@@ -539,7 +530,7 @@ def test_keyed_component_state_preservation():
 			self.count += 1
 
 	@component
-	def CounterComponent(label: str, key: str | None = None) -> Node:
+	def CounterComponent(label: str, key: str | None = None) -> Element:
 		counter = ps.states(Counter(label))
 
 		def handle_click():
@@ -570,17 +561,17 @@ def test_keyed_component_state_preservation():
 
 	# Verify state is preserved - A should still have count 1
 	normalized_root = tree.normalized
-	assert isinstance(normalized_root, Node)
+	assert isinstance(normalized_root, Element)
 	assert isinstance(normalized_root.children, list)
 	# A is now at index 1
 	a_component = normalized_root.children[1]
-	assert isinstance(a_component, ps.ComponentNode)
+	assert isinstance(a_component, PulseNode)
 	# The component should still have its state preserved
 	assert a_component.hooks is not None
 
 
 def test_keyed_parent_node_move_preserves_child_state():
-	"""Test that component state is preserved when a parent Node is moved due to its key."""
+	"""Test that component state is preserved when a parent Element is moved due to its key."""
 
 	class Counter(ps.State):
 		count: int = 0
@@ -593,7 +584,7 @@ def test_keyed_parent_node_move_preserves_child_state():
 			self.count += 1
 
 	@component
-	def CounterComponent(label: str) -> Node:
+	def CounterComponent(label: str) -> Element:
 		counter = ps.states(Counter(label))
 
 		def handle_click():
@@ -604,8 +595,8 @@ def test_keyed_parent_node_move_preserves_child_state():
 		)
 
 	# Create parent nodes with keys containing components
-	parent_a = Node("div", children=[CounterComponent("A")], key="parent-a")
-	parent_b = Node("div", children=[CounterComponent("B")], key="parent-b")
+	parent_a = Element("div", children=[CounterComponent("A")], key="parent-a")
+	parent_b = Element("div", children=[CounterComponent("B")], key="parent-b")
 
 	tree = RenderTree(div(parent_a, parent_b))
 	tree.render()
@@ -624,15 +615,15 @@ def test_keyed_parent_node_move_preserves_child_state():
 
 	# Verify the component state is preserved - A should still have count 1
 	normalized_root = tree.normalized
-	assert isinstance(normalized_root, Node)
+	assert isinstance(normalized_root, Element)
 	assert isinstance(normalized_root.children, list)
 	# Parent A is now at index 1
 	parent_a_node = normalized_root.children[1]
-	assert isinstance(parent_a_node, Node)
+	assert isinstance(parent_a_node, Element)
 	assert isinstance(parent_a_node.children, list)
 	# The component should still have its state preserved
 	a_component = parent_a_node.children[0]
-	assert isinstance(a_component, ps.ComponentNode)
+	assert isinstance(a_component, PulseNode)
 	assert a_component.hooks is not None
 
 	# Inspect stored Counter state inside the component after the move
@@ -705,7 +696,7 @@ def test_keyed_remove_then_readd_resets_state():
 			self.count += 1
 
 	@component
-	def CounterComponent(label: str, key: str | None = None) -> Node:
+	def CounterComponent(label: str, key: str | None = None) -> Element:
 		counter = ps.states(Counter)
 
 		def handle_click():
@@ -730,11 +721,7 @@ def test_keyed_remove_then_readd_resets_state():
 	# Remove first component -> expect callback removal delta and a reconciliation op
 	ops = tree.diff(div(second))
 	assert len(ops) >= 1
-	# Callback path for the moved second (1.1.onClick) is removed; 0.1.onClick remains (reused at new index)
-	assert any(
-		op["type"] == "update_callbacks" and op["data"].get("remove") == ["1.1.onClick"]
-		for op in ops
-	)
+	assert set(tree.callbacks.keys()) == {"0.1.onClick"}
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 	dom = ["a", "b"]
@@ -744,14 +731,8 @@ def test_keyed_remove_then_readd_resets_state():
 	# Re-add first component - should reset state
 	new_first = CounterComponent("A", key="a")
 	ops = tree.diff(div(second, new_first))
-	assert len(ops) >= 2
-	# Expect callback add for the newly added first at index 1
-	assert any(
-		op["type"] == "update_callbacks"
-		and "add" in op["data"]
-		and "1.1.onClick" in op["data"]["add"]
-		for op in ops
-	)
+	assert len(ops) >= 1
+	assert set(tree.callbacks.keys()) == {"0.1.onClick", "1.1.onClick"}
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 	new_indices, _ = recon_ops[0]["new"]
@@ -772,7 +753,7 @@ def test_keyed_complex_reorder():
 			self.count += 1
 
 	@component
-	def CounterComponent(label: str, key: str | None = None) -> Node:
+	def CounterComponent(label: str, key: str | None = None) -> Element:
 		counter = ps.states(Counter(label))
 
 		def handle_click():
@@ -823,63 +804,53 @@ def test_render_props():
 	"""Test render props functionality."""
 
 	@component
-	def ChildComponent() -> Node:
+	def ChildComponent() -> Element:
 		return span("child")
 
 	# Create a div with render prop
 	tree = RenderTree(div(render=ChildComponent()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
-	tree.render()
-
-	assert tree.render_props == {"render"}
+	vdom = cast(VDOMElement, tree.render())
+	props = cast(dict[str, Any], vdom.get("props", {}))
+	render_elem = cast(VDOMElement, props.get("render"))
+	assert render_elem["tag"] == "span"
+	assert vdom.get("eval") == ["render"]
 
 	# Change render prop
 	@component
-	def NewChildComponent() -> Node:
+	def NewChildComponent() -> Element:
 		return span("new child")
 
 	ops = tree.diff(div(render=NewChildComponent()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
-	assert ops == [
-		{
-			"type": "replace",
-			"path": "render",
-			"data": {"tag": "span", "children": ["new child"]},
-		}
-	]
+	assert any(
+		op["type"] == "replace"
+		and op["path"] == "render"
+		and cast(dict[str, Any], cast(object, op.get("data", {}))).get("tag") == "span"
+		for op in ops
+	)
 
 
 def test_css_module_with_jsexpr(tmp_path: Path):
-	"""Test CSS module via CssImport returns JSExpr that integrates with renderer."""
-	from pulse.transpiler.imports import (
-		CssImport,
-		clear_import_registry,
-	)
+	"""Test CSS module Import/Member integrates with renderer expressions."""
+	from pulse.transpiler.imports import Import, clear_import_registry
+	from pulse.transpiler.nodes import Member
 
-	# Clean up first
 	clear_import_registry()
 
 	# Create a temporary CSS file for testing
 	test_css_file = tmp_path / "test.module.css"
 	test_css_file.write_text(".test { color: red; }")
 
-	# Create a CSS module using CssImport
-	css_module = CssImport(str(test_css_file), module=True)
-
-	# Accessing a property returns a JSMember
-	css_ref = css_module.test
+	css_module = Import("styles", str(test_css_file), kind="default")
+	css_ref = Member(css_module, "test")
 
 	tree = RenderTree(div(className=css_ref))
-	vdom = tree.render()
+	vdom = cast(VDOMElement, tree.render())
 
-	# CSS references go through jsexpr_paths
-	assert "className" in tree.jsexpr_paths
-
-	# VDOM should have the $js:code value with code embedded
-	class_value = vdom["props"]["className"]  # pyright: ignore[reportIndexIssue,reportArgumentType,reportOptionalSubscript,reportTypedDictNotRequiredAccess]
-	assert class_value.startswith("$js:")
-	assert "css_" in class_value
-	assert ".test" in class_value
-
-	# Clean up
+	assert vdom.get("eval") == ["className"]
+	props = cast(dict[str, Any], vdom.get("props", {}))
+	class_value = cast(dict[str, Any], props.get("className"))
+	assert class_value["t"] == "member"
+	assert class_value["prop"] == "test"
 	clear_import_registry()
 
 

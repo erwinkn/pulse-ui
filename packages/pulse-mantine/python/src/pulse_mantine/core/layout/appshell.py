@@ -9,6 +9,8 @@ from ..styles import StyleFn
 from ..theme import MantineSpacing
 from ..types import MantineBreakpoint, MantineSize
 
+_AppShell = ps.Import("AppShell", "@mantine/core")
+
 
 class AppShellCompoundProps(TypedDict, total=False):
 	withBorder: bool
@@ -126,9 +128,9 @@ class AppShellProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("AppShell", "@mantine/core")
+@ps.react_component(_AppShell)
 def AppShell(
-	*children: ps.Child, key: str | None = None, **props: Unpack[AppShellProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[AppShellProps]
 ): ...
 
 
@@ -158,9 +160,9 @@ class AppShellAsideProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("AppShell", "@mantine/core", prop="Aside")
+@ps.react_component(_AppShell.Aside)
 def AppShellAside(
-	*children: ps.Child, key: str | None = None, **props: Unpack[AppShellAsideProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[AppShellAsideProps]
 ): ...
 
 
@@ -192,9 +194,9 @@ class AppShellHeaderProps(  # pyright: ignore[reportIncompatibleVariableOverride
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("AppShell", "@mantine/core", prop="Header")
+@ps.react_component(_AppShell.Header)
 def AppShellHeader(
-	*children: ps.Child, key: str | None = None, **props: Unpack[AppShellHeaderProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[AppShellHeaderProps]
 ): ...
 
 
@@ -226,9 +228,9 @@ class AppShellNavbarProps(  # pyright: ignore[reportIncompatibleVariableOverride
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("AppShell", "@mantine/core", prop="Navbar")
+@ps.react_component(_AppShell.Navbar)
 def AppShellNavbar(
-	*children: ps.Child, key: str | None = None, **props: Unpack[AppShellNavbarProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[AppShellNavbarProps]
 ): ...
 
 
@@ -254,9 +256,9 @@ class AppShellMainProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 	# attributes -> compound component, skip
 
 
-@ps.react_component("AppShell", "@mantine/core", prop="Main")
+@ps.react_component(_AppShell.Main)
 def AppShellMain(
-	*children: ps.Child, key: str | None = None, **props: Unpack[AppShellMainProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[AppShellMainProps]
 ): ...
 
 
@@ -283,9 +285,9 @@ class AppShellFooterProps(  # pyright: ignore[reportIncompatibleVariableOverride
 	attributes: AppShellFooterAttributes
 
 
-@ps.react_component("AppShell", "@mantine/core", prop="Footer")
+@ps.react_component(_AppShell.Footer)
 def AppShellFooter(
-	*children: ps.Child, key: str | None = None, **props: Unpack[AppShellFooterProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[AppShellFooterProps]
 ): ...
 
 
@@ -318,9 +320,9 @@ class AppShellSectionProps(  # pyright: ignore[reportIncompatibleVariableOverrid
 	# attributes -> compound component, skip
 
 
-@ps.react_component("AppShell", "@mantine/core", prop="Section")
+@ps.react_component(_AppShell.Section)
 def AppShellSection(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	**props: Unpack[AppShellSectionProps],
 ): ...

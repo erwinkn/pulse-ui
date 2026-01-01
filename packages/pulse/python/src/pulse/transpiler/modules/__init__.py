@@ -1,30 +1,33 @@
 """Central registration point for all module transpilers.
 
-This module registers all built-in Python and JavaScript modules for transpilation.
+This module registers all built-in Python modules for transpilation.
 Import this module to ensure all transpilers are available.
 """
 
 import asyncio as asyncio_builtin
 import json as json_builtin
 import math as math_builtin
-import re as re_builtin
 import typing as typing_builtin
 
-import pulse.html.tags as pulse_tags
+import pulse as pulse_module
+import pulse.dom.tags as pulseTags
 from pulse.transpiler.modules.asyncio import PyAsyncio
 from pulse.transpiler.modules.json import PyJson
 from pulse.transpiler.modules.math import PyMath
-from pulse.transpiler.modules.re import PyRe
-from pulse.transpiler.modules.tags import PyTags
+from pulse.transpiler.modules.pulse.tags import PulseTags
 from pulse.transpiler.modules.typing import PyTyping
-from pulse.transpiler.py_module import register_module
+from pulse.transpiler.py_module import PyModule
 
 # Register built-in Python modules
-register_module(asyncio_builtin, PyAsyncio)
-register_module(json_builtin, PyJson)
-register_module(math_builtin, PyMath)
-register_module(re_builtin, PyRe)
-register_module(typing_builtin, PyTyping)
+PyModule.register(math_builtin, PyMath)
+PyModule.register(json_builtin, PyJson)
+PyModule.register(asyncio_builtin, PyAsyncio)
+PyModule.register(typing_builtin, PyTyping)
 
-# Register Pulse HTML tags for JSX transpilation
-register_module(pulse_tags, PyTags)
+# Register Pulse DOM tags for JSX transpilation
+# This covers `from pulse.dom import tags; tags.div(...)`
+PyModule.register(pulseTags, PulseTags)
+
+# Register main pulse module for transpilation
+# This covers `import pulse as ps; ps.div(...)`
+PyModule.register(pulse_module, PulseTags)

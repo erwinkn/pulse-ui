@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Callable, cast
 
 import typer
-from rich.console import Console
 
 from pulse.cli.dependencies import (
 	DependencyError,
@@ -26,6 +25,7 @@ from pulse.cli.dependencies import (
 )
 from pulse.cli.folder_lock import FolderLock
 from pulse.cli.helpers import load_app_from_target
+from pulse.cli.logging import CLILogger
 from pulse.cli.models import AppLoadResult, CommandSpec
 from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
@@ -65,9 +65,11 @@ def run(
 	),
 	port: int = typer.Option(8000, "--port", help="Port uvicorn binds to"),
 	# Env flags
-	dev: bool = typer.Option(False, "--dev", help="Run in development env"),
-	ci: bool = typer.Option(False, "--ci", help="Run in CI env"),
-	prod: bool = typer.Option(False, "--prod", help="Run in production env"),
+	dev: bool = typer.Option(False, "--dev", help="Run in development mode"),
+	prod: bool = typer.Option(False, "--prod", help="Run in production mode"),
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
 	server_only: bool = typer.Option(False, "--server-only", "--backend-only"),
 	web_only: bool = typer.Option(False, "--web-only"),
 	react_server_address: str | None = typer.Option(
@@ -84,53 +86,49 @@ def run(
 	"""Run the Pulse server and web development server together."""
 	extra_flags = list(ctx.args)
 
-	env_flags = [
-		name for flag, name in [(dev, "dev"), (ci, "ci"), (prod, "prod")] if flag
-	]
-	if len(env_flags) > 1:
-		typer.echo("❌ Please specify only one of --dev, --ci, or --prod.")
+	# Validate mode flags (dev is default if neither specified)
+	if dev and prod:
+		logger = CLILogger("dev", plain=plain)
+		logger.error("Please specify only one of --dev or --prod.")
 		raise typer.Exit(1)
-	if ci:
-		typer.echo(
-			"❌ --ci is not supported for 'pulse run'. Use 'pulse generate --ci' instead."
-		)
-		raise typer.Exit(1)
-	if len(env_flags) == 1:
-		env.pulse_env = cast(PulseEnv, env_flags[0])
+
+	# Set mode: prod if specified, otherwise dev (default)
+	mode: PulseEnv = "prod" if prod else "dev"
+	env.pulse_env = mode
+	logger = CLILogger(mode, plain=plain)
 
 	# Turn on reload in dev only
 	if reload is None:
 		reload = env.pulse_env == "dev"
 
 	if server_only and web_only:
-		typer.echo("❌ Cannot use --server-only and --web-only at the same time.")
+		logger.error("Cannot use --server-only and --web-only at the same time.")
 		raise typer.Exit(1)
 
 	if find_port:
 		port = find_available_port(port)
 
-	console = Console()
-	console.print(f"📁 Loading app from: {app_file}")
-	app_ctx = load_app_from_target(app_file)
+	logger.print(f"Loading app from {app_file}")
+	app_ctx = load_app_from_target(app_file, logger)
 	_apply_app_context_to_env(app_ctx)
 	app_instance = app_ctx.app
 
 	is_single_server = app_instance.mode == "single-server"
 	if is_single_server:
-		console.print("🔧 [cyan]Single-server mode[/cyan]")
+		logger.print("Single-server mode")
 
 	# In single-server + server-only mode, require explicit React server address
 	if is_single_server and server_only:
 		if not react_server_address:
-			typer.echo(
-				"❌ --react-server-address is required when using single-server mode with --server-only."
+			logger.error(
+				"--react-server-address is required when using single-server mode with --server-only."
 			)
 			raise typer.Exit(1)
 		os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = react_server_address
 
 	web_root = app_instance.codegen.cfg.web_root
 	if not web_root.exists() and not server_only:
-		console.log(f"❌ Directory not found: {web_root.absolute()}")
+		logger.error(f"Directory not found: {web_root.absolute()}")
 		raise typer.Exit(1)
 
 	dev_secret: str | None = None
@@ -146,10 +144,10 @@ def run(
 				pulse_version=PULSE_PY_VERSION,
 			)
 		except DependencyResolutionError as exc:
-			console.log(f"❌ {exc}")
+			logger.error(str(exc))
 			raise typer.Exit(1) from None
 		except DependencyError as exc:
-			console.log(f"❌ {exc}")
+			logger.error(str(exc))
 			raise typer.Exit(1) from None
 
 		if to_add:
@@ -159,9 +157,9 @@ def run(
 					pulse_version=PULSE_PY_VERSION,
 				)
 				if dep_plan:
-					_run_dependency_plan(console, web_root, dep_plan)
+					_run_dependency_plan(logger, web_root, dep_plan)
 			except subprocess.CalledProcessError:
-				console.log("❌ Failed to install web dependencies with Bun.")
+				logger.error("Failed to install web dependencies with Bun.")
 				raise typer.Exit(1) from None
 
 	server_args = extra_flags if not web_only else []
@@ -199,12 +197,7 @@ def run(
 		announced = True
 		protocol = "http" if address in ("127.0.0.1", "localhost") else "https"
 		server_url = f"{protocol}://{address}:{port}"
-		console.print("")
-		console.print(
-			f"✨ [bold green]Pulse running at:[/bold green] [bold cyan][link={server_url}]{server_url}[/link][/bold cyan]"
-		)
-		console.print(f"   [dim]API: {server_url}/_pulse/...[/dim]")
-		console.print("")
+		logger.write_ready_announcement(address, port, server_url)
 
 	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
 	# before building the uvicorn command, which needs that env var
@@ -231,7 +224,6 @@ def run(
 			extra_args=server_args,
 			dev_secret=dev_secret,
 			server_only=server_only,
-			console=console,
 			web_root=web_root,
 			verbose=verbose,
 			ready_pattern=r"Application startup complete",
@@ -239,21 +231,15 @@ def run(
 		)
 		commands.append(server_cmd)
 
-	# Only add tags in dev mode to avoid breaking structured output (e.g., CloudWatch EMF metrics)
-	tag_colors = (
-		{"server": "cyan", "web": "orange1"} if env.pulse_env == "dev" else None
-	)
-
 	with FolderLock(web_root):
 		try:
 			exit_code = execute_commands(
 				commands,
-				console=console,
-				tag_colors=tag_colors,
+				tag_mode=logger.get_tag_mode(),
 			)
 			raise typer.Exit(exit_code)
 		except RuntimeError as exc:
-			console.log(f"❌ {exc}")
+			logger.error(str(exc))
 			raise typer.Exit(1) from None
 
 
@@ -266,42 +252,54 @@ def generate(
 	dev: bool = typer.Option(False, "--dev", help="Generate in development mode"),
 	ci: bool = typer.Option(False, "--ci", help="Generate in CI mode"),
 	prod: bool = typer.Option(False, "--prod", help="Generate in production mode"),
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
 ):
 	"""Generate TypeScript routes without starting the server."""
-	console = Console()
-	console.log("🔄 Generating TypeScript routes...")
-
+	# Validate mode flags
 	mode_flags = [
 		name for flag, name in [(dev, "dev"), (ci, "ci"), (prod, "prod")] if flag
 	]
 	if len(mode_flags) > 1:
-		typer.echo("❌ Please specify only one of --dev, --ci, or --prod.")
+		logger = CLILogger("dev", plain=plain)
+		logger.error("Please specify only one of --dev, --ci, or --prod.")
 		raise typer.Exit(1)
-	if len(mode_flags) == 1:
-		env.pulse_env = cast(PulseEnv, mode_flags[0])
 
-	console.log(f"📁 Loading routes from: {app_file}")
+	# Set mode: use specified mode, otherwise dev (default)
+	mode: PulseEnv = cast(PulseEnv, mode_flags[0]) if mode_flags else "dev"
+	env.pulse_env = mode
+	logger = CLILogger(mode, plain=plain)
+
+	logger.print(f"Generating routes from {app_file}")
 	env.codegen_disabled = False
-	app_ctx = load_app_from_target(app_file)
+	app_ctx = load_app_from_target(app_file, logger)
 	_apply_app_context_to_env(app_ctx)
 	app = app_ctx.app
-	console.log(f"📋 Found {len(app.routes.flat_tree)} routes")
 
 	# In CI or prod mode, server_address must be provided
 	if (ci or prod) and not app.server_address:
-		typer.echo(
-			"❌ server_address must be provided when generating in CI or production mode. "
+		logger.error(
+			"server_address must be provided when generating in CI or production mode. "
 			+ "Set it in your App constructor or via the PULSE_SERVER_ADDRESS environment variable."
 		)
 		raise typer.Exit(1)
 
 	addr = app.server_address or "http://localhost:8000"
-	app.run_codegen(addr)
+	try:
+		app.run_codegen(addr)
+	except Exception:
+		logger.error("Failed to generate routes")
+		logger.print_exception()
+		raise typer.Exit(1) from None
 
-	if len(app.routes.flat_tree) > 0:
-		console.log(f"✅ Generated {len(app.routes.flat_tree)} routes successfully!")
+	route_count = len(app.routes.flat_tree)
+	if route_count > 0:
+		logger.success(
+			f"Generated {route_count} route{'s' if route_count != 1 else ''}"
+		)
 	else:
-		console.log("⚠️  No routes found to generate")
+		logger.warning("No routes found")
 
 
 @cli.command("check")
@@ -312,18 +310,37 @@ def check(
 	fix: bool = typer.Option(
 		False, "--fix", help="Install missing or outdated dependencies"
 	),
+	# Mode flags
+	dev: bool = typer.Option(False, "--dev", help="Run in development mode"),
+	ci: bool = typer.Option(False, "--ci", help="Run in CI mode"),
+	prod: bool = typer.Option(False, "--prod", help="Run in production mode"),
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
 ):
 	"""Check if web project dependencies are in sync with Pulse app requirements."""
-	console = Console()
+	# Validate mode flags
+	mode_flags = [
+		name for flag, name in [(dev, "dev"), (ci, "ci"), (prod, "prod")] if flag
+	]
+	if len(mode_flags) > 1:
+		logger = CLILogger("dev", plain=plain)
+		logger.error("Please specify only one of --dev, --ci, or --prod.")
+		raise typer.Exit(1)
 
-	console.log(f"📁 Loading app from: {app_file}")
-	app_ctx = load_app_from_target(app_file)
+	# Set mode: use specified mode, otherwise dev (default)
+	mode: PulseEnv = cast(PulseEnv, mode_flags[0]) if mode_flags else "dev"
+	env.pulse_env = mode
+	logger = CLILogger(mode, plain=plain)
+
+	logger.print(f"Checking dependencies for {app_file}")
+	app_ctx = load_app_from_target(app_file, logger)
 	_apply_app_context_to_env(app_ctx)
 	app_instance = app_ctx.app
 
 	web_root = app_instance.codegen.cfg.web_root
 	if not web_root.exists():
-		console.log(f"❌ Directory not found: {web_root.absolute()}")
+		logger.error(f"Directory not found: {web_root.absolute()}")
 		raise typer.Exit(1)
 
 	try:
@@ -332,22 +349,22 @@ def check(
 			pulse_version=PULSE_PY_VERSION,
 		)
 	except DependencyResolutionError as exc:
-		console.log(f"❌ {exc}")
+		logger.error(str(exc))
 		raise typer.Exit(1) from None
 	except DependencyError as exc:
-		console.log(f"❌ {exc}")
+		logger.error(str(exc))
 		raise typer.Exit(1) from None
 
 	if not to_add:
-		console.log("✅ Web dependencies are in sync")
+		logger.success("Dependencies in sync")
 		return
 
-	console.log("📦 Web dependencies are out of sync:")
+	logger.print("Missing dependencies:")
 	for pkg in to_add:
-		console.log(f"  - {pkg}")
+		logger.print(f"  {pkg}")
 
 	if not fix:
-		console.log("💡 Run 'pulse check --fix' to install missing dependencies")
+		logger.print("Run 'pulse check --fix' to install")
 		return
 
 	# Apply fix
@@ -357,10 +374,10 @@ def check(
 			pulse_version=PULSE_PY_VERSION,
 		)
 		if dep_plan:
-			_run_dependency_plan(console, web_root, dep_plan)
-		console.log("✅ Web dependencies synced successfully")
+			_run_dependency_plan(logger, web_root, dep_plan)
+		logger.success("Dependencies synced")
 	except subprocess.CalledProcessError:
-		console.log("❌ Failed to install web dependencies with Bun.")
+		logger.error("Failed to install web dependencies with Bun.")
 		raise typer.Exit(1) from None
 
 
@@ -373,7 +390,6 @@ def build_uvicorn_command(
 	extra_args: Sequence[str],
 	dev_secret: str | None,
 	server_only: bool,
-	console: Console,
 	web_root: Path,
 	verbose: bool = False,
 	ready_pattern: str | None = None,
@@ -500,13 +516,10 @@ def _apply_app_context_to_env(app_ctx: AppLoadResult) -> None:
 
 
 def _run_dependency_plan(
-	console: Console, web_root: Path, plan: DependencyPlan
+	logger: CLILogger, web_root: Path, plan: DependencyPlan
 ) -> None:
-	# command_display = " ".join(plan.command)
 	if plan.to_add:
-		console.log(f"📦 Adding/updating web dependencies in {web_root}")
-	else:
-		console.log(f"📦 Installing web dependencies in {web_root}")
+		logger.print(f"Installing dependencies in {web_root}")
 	subprocess.run(plan.command, cwd=web_root, check=True)
 
 
@@ -514,10 +527,13 @@ def main():
 	"""Main CLI entry point."""
 	try:
 		cli()
+	except SystemExit:
+		# Let typer.Exit and sys.exit propagate normally (no traceback)
+		raise
 	except Exception:
-		console = Console()
-		console.print_exception()
-		raise typer.Exit(1) from None
+		logger = CLILogger(env.pulse_env)
+		logger.print_exception()
+		sys.exit(1)
 
 
 def production_flags():

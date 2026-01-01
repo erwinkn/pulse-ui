@@ -1,9 +1,9 @@
 import pulse as ps
 
 
-@ps.react_component("RenderPropComponent", "~/components/render-prop")
+@ps.react_component(ps.Import("RenderPropComponent", "~/components/render-prop"))
 def RenderPropComponent(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	left: ps.Element = None,
 	right: ps.Element = None,

@@ -9,7 +9,10 @@
     "packages/pulse-recharts/src",
     "packages/pulse-aws/src"
   ],
-  "exclude": ["packages/pulse/python/tests/javascript"],
+  "exclude": [
+    "packages/pulse/python/tests/javascript",
+    "packages/pulse/python/tests/transpiler"
+  ],
   "pythonVersion": "3.12",
   "allowedUntypedLibraries": [
     "socketio",

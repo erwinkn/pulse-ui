@@ -12,7 +12,7 @@ from ..styles import StyleFn
 from ..theme import MantineRadius
 from ..types import MantineColor
 
-ps.CssImport("@mantine/notifications/styles.css")
+ps.Import("", "@mantine/notifications/styles.css", kind="side_effect")
 
 
 NotificationRootCSSVariables = Literal["--notification-radius", "--notification-color"]
@@ -77,9 +77,9 @@ class NotificationProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("Notification", "@mantine/core")
+@ps.react_component(ps.Import("Notification", "@mantine/core"))
 def Notification(
-	*children: ps.Child, key: str | None = None, **props: Unpack[NotificationProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[NotificationProps]
 ): ...
 
 
@@ -169,9 +169,9 @@ class NotificationData(NotificationDataWithoutId):
 	"""Called when notification opens"""
 
 
-@ps.react_component("Notifications", "pulse-mantine")
+@ps.react_component(ps.Import("Notifications", "pulse-mantine"))
 def NotificationsInternal(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	channelId: str | None = None,
 	**props: Unpack[NotificationsProps],
@@ -300,7 +300,7 @@ class NotificationsStore(ps.State):
 
 
 def Notifications(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	**props: Unpack[NotificationsProps],
 ):

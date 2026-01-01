@@ -2,18 +2,20 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("Tabs", "@mantine/core")
-def Tabs(*children: ps.Child, key: str | None = None, **props: Any): ...
+_Tabs = ps.Import("Tabs", "@mantine/core")
 
 
-@ps.react_component("Tabs", "@mantine/core", prop="Tab")
-def TabsTab(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Tabs)
+def Tabs(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Tabs", "@mantine/core", prop="Panel")
-def TabsPanel(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Tabs.Tab)
+def TabsTab(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Tabs", "@mantine/core", prop="List")
-def TabsList(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Tabs.Panel)
+def TabsPanel(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_Tabs.List)
+def TabsList(*children: ps.Node, key: str | None = None, **props: Any): ...

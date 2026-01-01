@@ -3,13 +3,17 @@
 Bump package version and sync everything.
 
 Usage:
-    python scripts/bump_version.py <package-name> [--major | --minor | --version <version>]
+    python scripts/bump_version.py <package-name> [--patch | --minor | --major | --alpha | --beta | --rc | --version <version>]
 
 Examples:
     python scripts/bump_version.py pulse                    # patch bump (default)
-    python scripts/bump_version.py pulse --minor             # minor bump
-    python scripts/bump_version.py pulse --major             # major bump
-    python scripts/bump_version.py pulse --version 0.2.5     # exact version
+    python scripts/bump_version.py pulse --patch            # patch bump (explicit)
+    python scripts/bump_version.py pulse --minor            # minor bump
+    python scripts/bump_version.py pulse --major            # major bump
+    python scripts/bump_version.py pulse --alpha            # alpha bump (0.1.44 -> 0.1.45a1, 0.1.45a1 -> 0.1.45a2)
+    python scripts/bump_version.py pulse --beta             # beta bump (0.1.45a2 -> 0.1.45b1, 0.1.45b1 -> 0.1.45b2)
+    python scripts/bump_version.py pulse --rc               # rc bump (0.1.45b2 -> 0.1.45rc1, 0.1.45rc1 -> 0.1.45rc2)
+    python scripts/bump_version.py pulse --version 0.2.5    # exact version
 """
 
 import json
@@ -134,6 +138,59 @@ def bump_major(version: str) -> str:
 	return ".".join(parts)
 
 
+def bump_alpha(version: str) -> str:
+	"""Bump alpha version (e.g., 0.1.44 -> 0.1.45a1, 0.1.45a1 -> 0.1.45a2)."""
+	# Check if already an alpha version
+	alpha_match = re.match(r"^(\d+\.\d+\.\d+)a(\d+)$", version)
+	if alpha_match:
+		base = alpha_match.group(1)
+		num = int(alpha_match.group(2)) + 1
+		return f"{base}a{num}"
+
+	# Not an alpha - bump patch and start at a1
+	base_version = re.match(r"^(\d+\.\d+\.\d+)", version)
+	if not base_version:
+		raise ValueError(f"Invalid version format: {version}")
+
+	parts = base_version.group(1).split(".")
+	parts[2] = str(int(parts[2]) + 1)
+	return ".".join(parts) + "a1"
+
+
+def bump_beta(version: str) -> str:
+	"""Bump beta version (e.g., 0.1.45a2 -> 0.1.45b1, 0.1.45b1 -> 0.1.45b2)."""
+	# Check if already a beta version
+	beta_match = re.match(r"^(\d+\.\d+\.\d+)b(\d+)$", version)
+	if beta_match:
+		base = beta_match.group(1)
+		num = int(beta_match.group(2)) + 1
+		return f"{base}b{num}"
+
+	# Extract base version (handles alpha, or plain version)
+	base_version = re.match(r"^(\d+\.\d+\.\d+)", version)
+	if not base_version:
+		raise ValueError(f"Invalid version format: {version}")
+
+	return f"{base_version.group(1)}b1"
+
+
+def bump_rc(version: str) -> str:
+	"""Bump rc version (e.g., 0.1.45b2 -> 0.1.45rc1, 0.1.45rc1 -> 0.1.45rc2)."""
+	# Check if already an rc version
+	rc_match = re.match(r"^(\d+\.\d+\.\d+)rc(\d+)$", version)
+	if rc_match:
+		base = rc_match.group(1)
+		num = int(rc_match.group(2)) + 1
+		return f"{base}rc{num}"
+
+	# Extract base version (handles alpha, beta, or plain version)
+	base_version = re.match(r"^(\d+\.\d+\.\d+)", version)
+	if not base_version:
+		raise ValueError(f"Invalid version format: {version}")
+
+	return f"{base_version.group(1)}rc1"
+
+
 def get_version_from_package_json(package_json_path: Path) -> str:
 	"""Extract version from package.json file."""
 	with open(package_json_path, "r") as f:
@@ -227,7 +284,7 @@ def main() -> int:
 	"""Main function."""
 	if len(sys.argv) < 2:
 		print(
-			"Usage: python scripts/bump_version.py <package-name> [--major | --minor | --version <version>]",
+			"Usage: python scripts/bump_version.py <package-name> [--patch | --minor | --major | --alpha | --beta | --rc | --version <version>]",
 			file=sys.stderr,
 		)
 		print("\nAvailable packages:", file=sys.stderr)
@@ -261,6 +318,26 @@ def main() -> int:
 				print("Error: Cannot specify multiple bump types", file=sys.stderr)
 				return 1
 			bump_type = "minor"
+		elif args[i] == "--patch":
+			if bump_type is not None or exact_version is not None:
+				print("Error: Cannot specify multiple bump types", file=sys.stderr)
+				return 1
+			bump_type = "patch"
+		elif args[i] == "--alpha":
+			if bump_type is not None or exact_version is not None:
+				print("Error: Cannot specify multiple bump types", file=sys.stderr)
+				return 1
+			bump_type = "alpha"
+		elif args[i] == "--beta":
+			if bump_type is not None or exact_version is not None:
+				print("Error: Cannot specify multiple bump types", file=sys.stderr)
+				return 1
+			bump_type = "beta"
+		elif args[i] == "--rc":
+			if bump_type is not None or exact_version is not None:
+				print("Error: Cannot specify multiple bump types", file=sys.stderr)
+				return 1
+			bump_type = "rc"
 		elif args[i] == "--version":
 			if bump_type is not None or exact_version is not None:
 				print("Error: Cannot specify multiple bump types", file=sys.stderr)
@@ -292,8 +369,14 @@ def main() -> int:
 			new_version = bump_major(current_version)
 		elif bump_type == "minor":
 			new_version = bump_minor(current_version)
+		elif bump_type == "alpha":
+			new_version = bump_alpha(current_version)
+		elif bump_type == "beta":
+			new_version = bump_beta(current_version)
+		elif bump_type == "rc":
+			new_version = bump_rc(current_version)
 		else:
-			# Default to patch bump
+			# Default to patch bump (also handles explicit --patch)
 			new_version = bump_patch(current_version)
 
 		# Step 1: Update pyproject.toml version

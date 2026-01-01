@@ -1,4 +1,4 @@
-.PHONY: help init lint lint-fix format format-check typecheck test all
+.PHONY: help init lint lint-fix format format-check typecheck test all bump
 
 help:
 	@echo "Available commands:"
@@ -10,6 +10,7 @@ help:
 	@echo "  make typecheck     - Run type checking (Basedpyright for Python)"
 	@echo "  make test          - Run all tests (pytest for Python, bun test for JS)"
 	@echo "  make all           - Run format, lint, typecheck, and test"
+	@echo "  make bump          - Bump package version (PKG=name ARGS='--patch|--alpha|...')"
 
 # Initialization
 init:
@@ -68,3 +69,14 @@ test:
 # Run everything
 all: format lint typecheck test
 	@echo "All checks passed!"
+
+# Version bumping
+bump:
+ifndef PKG
+	@echo "Usage: make bump PKG=<package-name> [ARGS='--patch|--minor|--major|--alpha|--beta|--rc|--version X.Y.Z']"
+	@echo "Example: make bump PKG=pulse ARGS='--alpha'"
+	@echo "Example: make bump PKG=pulse ARGS='--beta'"
+	@python scripts/bump_version.py
+else
+	@python scripts/bump_version.py $(PKG) $(ARGS)
+endif

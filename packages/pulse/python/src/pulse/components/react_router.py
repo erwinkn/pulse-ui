@@ -1,8 +1,9 @@
 from typing import Literal, TypedDict, Unpack
 
-from pulse.html.props import HTMLAnchorProps
-from pulse.react_component import DEFAULT, react_component
-from pulse.vdom import Child
+from pulse.dom.props import HTMLAnchorProps
+from pulse.transpiler import Import
+from pulse.transpiler.nodes import Node
+from pulse.transpiler.react_component import react_component
 
 
 class LinkPath(TypedDict):
@@ -11,33 +12,26 @@ class LinkPath(TypedDict):
 	hash: str
 
 
-@react_component("Link", "react-router", version="^7")
+# @react_component(Import("Link", "react-router", version="^7"))
+@react_component(Import("Link", "react-router"))
 def Link(
-	*children: Child,
+	*children: Node,
 	key: str | None = None,
 	to: str,
-	# Default: render
-	discover: Literal["render", "none"] = DEFAULT,
-	# The React Router default is 'none' to match the behavior of regular links,
-	# but 'intent' is more desirable in general
+	discover: Literal["render", "none"] | None = None,
 	prefetch: Literal["none", "intent", "render", "viewport"] = "intent",
-	# Default: False
-	preventScrollReset: bool = DEFAULT,
-	# Default: 'route'
-	relative: Literal["route", "path"] = DEFAULT,
-	# Default: False
-	reloadDocument: bool = DEFAULT,
-	# Default: False
-	replace: bool = DEFAULT,
-	# Default: undefined
-	state: dict[str, object] = DEFAULT,
-	# Default: False
-	viewTransition: bool = DEFAULT,
+	preventScrollReset: bool | None = None,
+	relative: Literal["route", "path"] | None = None,
+	reloadDocument: bool | None = None,
+	replace: bool | None = None,
+	state: dict[str, object] | None = None,
+	viewTransition: bool | None = None,
 	**props: Unpack[HTMLAnchorProps],
 ): ...
 
 
-@react_component("Outlet", "react-router", version="^7")
+# @react_component(Import("Outlet", "react-router", version="^7"))
+@react_component(Import("Outlet", "react-router"))
 def Outlet(key: str | None = None): ...
 
 

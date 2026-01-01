@@ -11,6 +11,7 @@
 	"dependencies": {
 		"@react-router/node": "^7.7.1",
 		"@react-router/serve": "^7.7.1",
+		"clsx": "^2.1.1",
 		"isbot": "^5",
 		"pulse-ui-client": "workspace:*",
 		"react": "^19.1.0",
@@ -25,6 +26,7 @@
 		"@types/react": "^19.1.2",
 		"@types/react-datepicker": "^7.0.0",
 		"@types/react-dom": "^19.1.2",
+		"baseline-browser-mapping": "^2.9.7",
 		"tailwindcss": "^4.1.11",
 		"typescript": "^5.8.3",
 		"vite": "^6.3.3",

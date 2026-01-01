@@ -61,7 +61,8 @@ class FormState(MantineForm):
 
 @ps.component
 def FormValidation():
-	form = ps.states(FormState)
+	with ps.init():
+		form = FormState()
 	return Card(withBorder=True, shadow="sm", p="lg")[
 		Stack(gap="lg")[
 			Title("Built-in validators", order=3),

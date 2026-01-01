@@ -10,7 +10,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
-import type { ServerErrorInfo } from "./messages";
+import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import type { VDOM } from "./vdom";
 
@@ -31,9 +31,6 @@ export interface PulseConfig {
 
 export type PulsePrerenderView = {
 	vdom: VDOM;
-	callbacks: string[];
-	render_props: string[];
-	jsexpr_paths: string[]; // paths containing JS expressions
 };
 
 export type PulsePrerender = {
@@ -167,21 +164,12 @@ export interface PulseViewProps {
 export function PulseView({ path, registry }: PulseViewProps) {
 	const client = usePulseClient();
 	const initialView = usePulsePrerender(path);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: We only want to lose the renderer on unmount. initialView will change on every navigation with our current setup, so we hack around it with another useEffect below. This is not ideal and will be fixed in the future.
 	const renderer = useMemo(
-		() =>
-			new VDOMRenderer(
-				client,
-				path,
-				initialView.callbacks,
-				initialView.render_props,
-				registry,
-				initialView.jsexpr_paths,
-			),
+		() => new VDOMRenderer(client, path, registry),
 		[client, path, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
-	const [serverError, setServerError] = useState<ServerErrorInfo | null>(null);
+	const [serverError, setServerError] = useState<ServerError | null>(null);
 
 	const location = useLocation();
 	const params = useParams();
@@ -207,9 +195,11 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				routeInfo,
 				onInit: (view) => {
 					setTree(renderer.init(view));
+					setServerError(null);
 				},
 				onUpdate: (ops) => {
 					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
+					setServerError(null);
 				},
 				onJsExec: (msg) => {
 					let result: any;
@@ -221,12 +211,9 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					}
 					client.sendJsResult(msg.id, result, error);
 				},
-			});
-			const offErr = client.onServerError((p, err) => {
-				if (p === path) setServerError(err);
+				onServerError: setServerError,
 			});
 			return () => {
-				offErr();
 				client.unmount(path);
 			};
 		}
@@ -255,13 +242,13 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	}, [initialView, renderer]);
 
 	if (serverError) {
-		return <ServerError error={serverError} />;
+		return <ServerErrorPopup error={serverError} />;
 	}
 
 	return tree;
 }
 
-function ServerError({ error }: { error: ServerErrorInfo }) {
+function ServerErrorPopup({ error }: { error: ServerError }) {
 	return (
 		<div
 			style={{

@@ -65,7 +65,8 @@ class Feed(ps.State):
 
 @ps.component
 def InfiniteQueryDemo():
-	state = ps.states(Feed)
+	with ps.init():
+		state = Feed()
 	query = state.feed_page
 
 	async def load_next():

@@ -2,10 +2,12 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("FocusTrap", "@mantine/core")
-def FocusTrap(*children: ps.Child, key: str | None = None, **props: Any): ...
+_FocusTrap = ps.Import("FocusTrap", "@mantine/core")
 
 
-@ps.react_component("FocusTrap", "@mantine/core", prop="InitialFocus")
+@ps.react_component(_FocusTrap)
+def FocusTrap(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_FocusTrap.InitialFocus)
 def FocusTrapInitialFocus(key: str | None = None, **props: Any): ...

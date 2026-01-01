@@ -2,19 +2,19 @@
 JavaScript Number builtin module.
 
 Usage:
-    import pulse.js.number as Number
+    from pulse.js import Number
     Number.isFinite(42)       # -> Number.isFinite(42)
     Number.MAX_SAFE_INTEGER   # -> Number.MAX_SAFE_INTEGER
+    Number(x)                 # -> new Number(x)
 
-    from pulse.js.number import isFinite, EPSILON
-    isFinite(42)              # -> Number.isFinite(42)
-    EPSILON                   # -> Number.EPSILON
+    # Or import from module directly:
+    from pulse.js.number import Number
 """
 
 from typing import Any as _Any
 from typing import ClassVar as _ClassVar
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 
 class Number:
@@ -47,8 +47,8 @@ class Number:
 	def parseFloat(string: str) -> float: ...
 
 	@staticmethod
-	def parseInt(string: str, radix: int = 10) -> int: ...
+	def parseInt(string: str, radix: int = 10, /) -> int: ...
 
 
-# Self-register this module as a JS builtin
-_register_js_module(name="Number")
+# Self-register this module as a JS builtin (global identifier)
+JsModule.register(name=None)

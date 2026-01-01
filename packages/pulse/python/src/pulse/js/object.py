@@ -2,18 +2,13 @@
 JavaScript Object builtin module.
 
 Usage:
-    import pulse.js.object as Object
+    from pulse.js import Object
     Object.keys({"a": 1})         # -> Object.keys({"a": 1})
     Object.assign({}, {"a": 1})   # -> Object.assign({}, {"a": 1})
-    Object.is(x, y)                # -> Object.is(x, y)
+    Object.is_(x, y)              # -> Object.is(x, y)
 
-    # Note: For 'is' (Python keyword), use namespace import:
-    # import pulse.js.object as Object; Object.is(...)
-    # Or use the underscore version for direct import:
-    from pulse.js.object import keys, assign, is_
-    keys({"a": 1})                # -> Object.keys({"a": 1})
-    assign({}, {"a": 1})          # -> Object.assign({}, {"a": 1})
-    is_(x, y)                     # -> Object.is(x, y)
+    # Or import from module directly:
+    from pulse.js.object import Object
 """
 
 from collections.abc import Iterable as _Iterable
@@ -21,7 +16,7 @@ from typing import Any as _Any
 from typing import TypedDict as _TypedDict
 from typing import TypeVar as _TypeVar
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 T = _TypeVar("T")
 K = _TypeVar("K", bound=str)  # Object keys are always strings in JS
@@ -55,6 +50,7 @@ class Object:
 	def create(
 		proto: _Any | None,
 		propertiesObject: dict[str, PropertyDescriptor] | None = None,
+		/,
 	) -> _Any:
 		"""Create a new object with the specified prototype."""
 		...
@@ -169,5 +165,5 @@ class Object:
 		...
 
 
-# Self-register this module as a JS builtin
-_register_js_module(name="Object", global_scope=True)
+# Self-register this module as a JS builtin (global identifier)
+JsModule.register(name=None)

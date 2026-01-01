@@ -8,7 +8,7 @@ import type {
 	ClientMessage,
 	ServerApiCallMessage,
 	ServerChannelMessage,
-	ServerErrorInfo,
+	ServerError,
 	ServerJsExecMessage,
 	ServerMessage,
 } from "./messages";
@@ -30,10 +30,10 @@ export interface MountedView {
 	onInit: (view: PulsePrerenderView) => void;
 	onUpdate: (ops: VDOMUpdate[]) => void;
 	onJsExec: (msg: ServerJsExecMessage) => void;
+	onServerError: (error: ServerError) => void;
 }
 export type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
 export type ConnectionStatusListener = (status: ConnectionStatus) => void;
-export type ServerErrorListener = (path: string, error: ServerErrorInfo | null) => void;
 
 export interface PulseClient {
 	// Connection management
@@ -54,8 +54,6 @@ export class PulseSocketIOClient {
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
-	#serverErrors: Map<string, ServerErrorInfo> = new Map();
-	#serverErrorListeners: Set<ServerErrorListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
@@ -228,19 +226,6 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	public onServerError(listener: ServerErrorListener): () => void {
-		this.#serverErrorListeners.add(listener);
-		// Emit current errors to new listener
-		for (const [path, err] of this.#serverErrors) listener(path, err);
-		return () => {
-			this.#serverErrorListeners.delete(listener);
-		};
-	}
-
-	#notifyServerError(path: string, error: ServerErrorInfo | null) {
-		for (const listener of this.#serverErrorListeners) listener(path, error);
-	}
-
 	public sendMessage(payload: ClientMessage) {
 		if (this.isConnected()) {
 			// console.log("[SocketIOTransport] Sending:", payload);
@@ -283,8 +268,6 @@ export class PulseSocketIOClient {
 		this.#messageQueue = [];
 		this.#connectionListeners.clear();
 		this.#activeViews.clear();
-		this.#serverErrors.clear();
-		this.#serverErrorListeners.clear();
 		for (const { bridge } of this.#channels.values()) {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
 		}
@@ -300,31 +283,19 @@ export class PulseSocketIOClient {
 				const route = this.#activeViews.get(message.path);
 				// Ignore messages for paths that are not mounted
 				if (!route) return;
-				if (route) {
-					route.onInit(message);
-				}
-				// Clear any prior error for this path on successful init
-				if (this.#serverErrors.has(message.path)) {
-					this.#serverErrors.delete(message.path);
-					this.#notifyServerError(message.path, null);
-				}
+				route.onInit(message);
 				break;
 			}
 			case "vdom_update": {
 				const route = this.#activeViews.get(message.path);
 				if (!route) return; // Not an active path; discard
 				route.onUpdate(message.ops);
-				// Clear any prior error for this path on successful update
-				if (this.#serverErrors.has(message.path)) {
-					this.#serverErrors.delete(message.path);
-					this.#notifyServerError(message.path, null);
-				}
 				break;
 			}
 			case "server_error": {
-				if (!this.#activeViews.has(message.path)) return; // discard for inactive paths
-				this.#serverErrors.set(message.path, message.error);
-				this.#notifyServerError(message.path, message.error);
+				const route = this.#activeViews.get(message.path);
+				if (!route) return; // discard for inactive paths
+				route.onServerError(message.error);
 				break;
 			}
 			case "api_call": {

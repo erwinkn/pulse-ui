@@ -2,13 +2,13 @@
 JavaScript Promise builtin module.
 
 Usage:
-    import pulse.js.promise as Promise
+    from pulse.js import Promise
+    Promise(executor)             # -> new Promise(executor)
     Promise.resolve(value)        # -> Promise.resolve(value)
     Promise.reject(reason)        # -> Promise.reject(reason)
 
-    from pulse.js.promise import resolve, reject, all, allSettled, race, any
-    resolve(value)                # -> Promise.resolve(value)
-    reject(reason)                 # -> Promise.reject(reason)
+    # Or import from module directly:
+    from pulse.js.promise import Promise
 
 The Promise class is generic and supports async/await via the Awaitable protocol.
 """
@@ -16,10 +16,12 @@ The Promise class is generic and supports async/await via the Awaitable protocol
 from collections.abc import Callable as _Callable
 from collections.abc import Generator as _Generator
 from collections.abc import Iterable as _Iterable
+from typing import Any as _Any
 from typing import Generic as _Generic
 from typing import TypeVar as _TypeVar
+from typing import overload as _overload
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 T = _TypeVar("T")
 T_co = _TypeVar("T_co", covariant=True)
@@ -52,6 +54,7 @@ class Promise(_Generic[T_co]):
 			[_Callable[[T_co], None], _Callable[[Exception], None]], None
 		]
 		| None = None,
+		/,
 	) -> None:
 		"""Create a Promise.
 
@@ -65,6 +68,7 @@ class Promise(_Generic[T_co]):
 		self,
 		on_fulfilled: _Callable[[T_co], U | "Promise[U]"] | None = None,
 		on_rejected: _Callable[[Exception], U | "Promise[U]"] | None = None,
+		/,
 	) -> "Promise[U]":
 		"""Attach callbacks to handle fulfillment and/or rejection."""
 		...
@@ -85,12 +89,24 @@ class Promise(_Generic[T_co]):
 
 	# Static methods for Promise construction
 	@staticmethod
-	def resolve(value: U | None = None) -> "Promise[U] | Promise[None]":
+	@_overload
+	def resolve() -> "Promise[None]":
+		"""Create a Promise that resolves with None."""
+		...
+
+	@staticmethod
+	@_overload
+	def resolve(value: U, /) -> "Promise[U]":
 		"""Create a Promise that resolves with the given value."""
 		...
 
 	@staticmethod
-	def reject(reason: Exception | str) -> "Promise[T]":
+	def resolve(value: U | None = None, /) -> "Promise[U] | Promise[None]":
+		"""Create a Promise that resolves with the given value."""
+		...
+
+	@staticmethod
+	def reject(reason: Exception | str) -> "Promise[_Any]":
 		"""Create a Promise that rejects with the given reason."""
 		...
 
@@ -146,5 +162,5 @@ class PromiseWithResolvers(_Generic[T]):
 	def reject(self) -> _Callable[[Exception | str], None]: ...
 
 
-# Self-register this module as a JS builtin
-_register_js_module(name="Promise", global_scope=True)
+# Self-register this module as a JS builtin (global identifier)
+JsModule.register(name=None)

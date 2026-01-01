@@ -86,7 +86,8 @@ class LoginState(ps.State):
 
 @ps.component
 def login():
-	state = ps.states(LoginState)
+	with ps.init():
+		state = LoginState()
 
 	async def submit():
 		# Use call_api helper to set the cookie without page reload

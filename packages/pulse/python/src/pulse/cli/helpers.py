@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 import importlib
 import importlib.util
 import platform
 import sys
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 import typer
-from rich.console import Console
 
 from pulse.cli.models import AppLoadResult
+
+if TYPE_CHECKING:
+	from pulse.cli.logging import CLILogger
 
 
 def os_family() -> Literal["windows", "mac", "linux"]:
@@ -110,66 +114,35 @@ def parse_app_target(target: str) -> ParsedAppTarget:
 	}
 
 
-def load_app_from_file(file_path: str | Path) -> AppLoadResult:
-	"""Load routes from a Python file and return app context details."""
+def load_app_from_target(target: str, logger: CLILogger | None = None) -> AppLoadResult:
+	"""Load an App instance from either a file path (with optional :var) or a module path (uvicorn style).
+
+	Args:
+		target: The app target string (file path or module path)
+		logger: Optional CLILogger for error output. If not provided, uses basic print/traceback.
+	"""
 	# Avoid circular import
 	from pulse.app import App
 
-	file_path = Path(file_path)
+	def _log_error(message: str) -> None:
+		if logger:
+			logger.error(message)
+		else:
+			print(f"Error: {message}")
 
-	if not file_path.exists():
-		typer.echo(f"❌ File not found: {file_path}")
-		raise typer.Exit(1)
+	def _log_warning(message: str) -> None:
+		if logger:
+			logger.warning(message)
+		else:
+			print(f"Warning: {message}")
 
-	if not file_path.suffix == ".py":
-		typer.echo(f"❌ File must be a Python file (.py): {file_path}")
-		raise typer.Exit(1)
+	def _print_exception() -> None:
+		if logger:
+			logger.print_exception()
+		else:
+			import traceback
 
-	# clear_routes()
-	sys.path.insert(0, str(file_path.parent.absolute()))
-
-	try:
-		spec = importlib.util.spec_from_file_location("user_app", file_path)
-		if spec is None or spec.loader is None:
-			typer.echo(f"❌ Could not load module from: {file_path}")
-			raise typer.Exit(1)
-
-		module = importlib.util.module_from_spec(spec)
-		spec.loader.exec_module(module)
-
-		if hasattr(module, "app") and isinstance(module.app, App):
-			app_instance = module.app
-			if not app_instance.routes:
-				typer.echo(f"⚠️  No routes found in {file_path}")
-			return AppLoadResult(
-				target=str(file_path),
-				mode="path",
-				app=app_instance,
-				module_name="user_app",
-				app_var="app",
-				app_file=file_path.resolve(),
-				app_dir=file_path.parent.resolve(),
-				server_cwd=file_path.parent.resolve(),
-			)
-
-		typer.echo(f"⚠️  No app found in {file_path}")
-		raise typer.Exit(1)
-
-	except Exception:
-		console = Console()
-		console.log(f"❌ Error loading {file_path}")
-		console.print_exception()
-		raise typer.Exit(1) from None
-	finally:
-		if str(file_path.parent.absolute()) in sys.path:
-			sys.path.remove(str(file_path.parent.absolute()))
-
-
-def load_app_from_target(target: str) -> AppLoadResult:
-	"""Load an App instance from either a file path (with optional :var) or a module path (uvicorn style)."""
-
-	# Avoid circulart import
-	from pulse.app import App
+			traceback.print_exc()
 
 	parsed = parse_app_target(target)
 
@@ -181,22 +154,23 @@ def load_app_from_target(target: str) -> AppLoadResult:
 	if parsed["mode"] == "path":
 		file_path = parsed["file_path"]
 		if file_path is None:
-			typer.echo(f"❌ Could not determine a Python file from: {target}")
+			_log_error(f"Could not determine a Python file from: {target}")
 			raise typer.Exit(1)
 
 		sys.path.insert(0, str(file_path.parent.absolute()))
 		try:
 			spec = importlib.util.spec_from_file_location(module_name, file_path)
 			if spec is None or spec.loader is None:
-				typer.echo(f"❌ Could not load module from: {file_path}")
+				_log_error(f"Could not load module from: {file_path}")
 				raise typer.Exit(1)
 			module = importlib.util.module_from_spec(spec)
 			sys.modules[spec.name] = module
 			spec.loader.exec_module(module)
+		except typer.Exit:
+			raise
 		except Exception:
-			console = Console()
-			console.log(f"❌ Error loading {file_path}")
-			console.print_exception()
+			_log_error(f"Error loading {file_path}")
+			_print_exception()
 			raise typer.Exit(1) from None
 		finally:
 			if str(file_path.parent.absolute()) in sys.path:
@@ -210,9 +184,8 @@ def load_app_from_target(target: str) -> AppLoadResult:
 		try:
 			module = importlib.import_module(module_name)  # type: ignore[name-defined]
 		except Exception:
-			console = Console()
-			console.log(f"❌ Error importing module: {module_name}")
-			console.print_exception()
+			_log_error(f"Error importing module: {module_name}")
+			_print_exception()
 			raise typer.Exit(1) from None
 
 		# Try to set env paths from the resolved module file
@@ -225,14 +198,14 @@ def load_app_from_target(target: str) -> AppLoadResult:
 
 	# Fetch the app attribute
 	if not hasattr(loaded_module, app_var):
-		typer.echo(f"❌ App variable '{app_var}' not found in {module_name}")
+		_log_error(f"App variable '{app_var}' not found in {module_name}")
 		raise typer.Exit(1)
 	app_candidate = getattr(loaded_module, app_var)
 	if not isinstance(app_candidate, App):
-		typer.echo(f"❌ '{app_var}' in {module_name} is not a pulse.App instance")
+		_log_error(f"'{app_var}' in {module_name} is not a pulse.App instance")
 		raise typer.Exit(1)
 	if not app_candidate.routes:
-		typer.echo("⚠️  No routes found")
+		_log_warning("No routes found")
 	return AppLoadResult(
 		target=target,
 		mode=parsed["mode"],

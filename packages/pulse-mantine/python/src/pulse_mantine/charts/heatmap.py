@@ -3,5 +3,5 @@ from typing import Any
 import pulse as ps
 
 
-@ps.react_component("Heatmap", "@mantine/charts")
+@ps.react_component(ps.Import("Heatmap", "@mantine/charts"))
 def Heatmap(key: str | None = None, **props: Any): ...

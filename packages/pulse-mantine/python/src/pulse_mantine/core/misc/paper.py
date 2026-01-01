@@ -3,5 +3,5 @@ from typing import Any
 import pulse as ps
 
 
-@ps.react_component("Paper", "@mantine/core")
-def Paper(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(ps.Import("Paper", "@mantine/core"))
+def Paper(*children: ps.Node, key: str | None = None, **props: Any): ...

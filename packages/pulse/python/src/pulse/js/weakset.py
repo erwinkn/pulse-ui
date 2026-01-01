@@ -2,19 +2,19 @@
 JavaScript WeakSet builtin module.
 
 Usage:
-    import pulse.js.weakset as WeakSet
+    from pulse.js import WeakSet
     WeakSet()                     # -> new WeakSet()
     WeakSet([obj1, obj2])        # -> new WeakSet([obj1, obj2])
 
+    # Or import from module directly:
     from pulse.js.weakset import WeakSet
-    WeakSet()                     # -> new WeakSet()
 """
 
 from collections.abc import Iterable as _Iterable
 from typing import Generic as _Generic
 from typing import TypeVar as _TypeVar
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 T = _TypeVar("T")  # Values must be objects in JS, but we can't enforce that statically
 
@@ -26,7 +26,7 @@ class WeakSet(_Generic[T]):
 	Values must be objects (not primitives).
 	"""
 
-	def __init__(self, iterable: _Iterable[T] | None = None) -> None: ...
+	def __init__(self, iterable: _Iterable[T] | None = None, /) -> None: ...
 
 	def add(self, value: T) -> "WeakSet[T]":
 		"""Add a value to the WeakSet. Returns the WeakSet for chaining."""
@@ -41,5 +41,5 @@ class WeakSet(_Generic[T]):
 		...
 
 
-# Self-register this module as a JS builtin in global scope
-_register_js_module(name="WeakSet", global_scope=True)
+# Self-register this module as a JS builtin (global identifiers)
+JsModule.register(name=None)

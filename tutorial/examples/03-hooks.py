@@ -54,14 +54,13 @@ def debug_toggle(label: str, state: DebugState):
 
 @ps.component
 def HooksDemo():
-	# Three ways of creating states with `ps.states`:
-	# - Pass an instance: `Counter()`
-	# - Pass a function returning a state.
-	# If a state doesn't have a constructor, or it takes no arguments, passing in
-	# the state class is like passing in a function.
-	counter1, counter2, debug1 = ps.states(
-		CounterState, CounterState(), lambda: DebugState(False)
-	)
+	# Use `ps.init()` to create state that persists across renders.
+	# Any variables assigned inside the block are captured on the first render
+	# and restored on subsequent renders.
+	with ps.init():
+		counter1 = CounterState()
+		counter2 = CounterState()
+		debug1 = DebugState(False)
 
 	# `ps.setup` can also be used to create states and perform anything else you
 	# need to set up on the first render. Note that the setup function has to be

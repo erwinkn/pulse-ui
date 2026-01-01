@@ -72,7 +72,8 @@ class DynamicHouseholdForm(MantineForm):
 
 @ps.component
 def HouseholdFormDemo():
-	form = ps.states(DynamicHouseholdForm)
+	with ps.init():
+		form = DynamicHouseholdForm()
 
 	members = form.values.get("members") or []
 

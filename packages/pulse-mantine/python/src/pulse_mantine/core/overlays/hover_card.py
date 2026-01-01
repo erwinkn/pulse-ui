@@ -2,18 +2,20 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("HoverCard", "@mantine/core")
-def HoverCard(*children: ps.Child, key: str | None = None, **props: Any): ...
+_HoverCard = ps.Import("HoverCard", "@mantine/core")
 
 
-@ps.react_component("HoverCard", "@mantine/core", prop="Target")
-def HoverCardTarget(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_HoverCard)
+def HoverCard(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("HoverCard", "@mantine/core", prop="Dropdown")
-def HoverCardDropdown(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_HoverCard.Target)
+def HoverCardTarget(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("HoverCard", "@mantine/core", prop="Group")
-def HoverCardGroup(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_HoverCard.Dropdown)
+def HoverCardDropdown(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_HoverCard.Group)
+def HoverCardGroup(*children: ps.Node, key: str | None = None, **props: Any): ...

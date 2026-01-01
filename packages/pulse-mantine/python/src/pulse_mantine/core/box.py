@@ -39,7 +39,7 @@ class BoxComponentProps(BoxProps, MantineComponentProps, total=False):
 	"Size passed from parent component, sets `data-size` if value is not number like"
 
 
-@ps.react_component("Box", "@mantine/core")
+@ps.react_component(ps.Import("Box", "@mantine/core"))
 def Box(
-	*children: ps.Child, key: str | None = None, **props: Unpack[BoxComponentProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[BoxComponentProps]
 ): ...

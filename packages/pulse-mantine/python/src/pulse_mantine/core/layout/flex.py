@@ -44,5 +44,5 @@ class FlexProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[repo
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("Flex", "@mantine/core")
-def Flex(*children: ps.Child, key: str | None = None, **props: Unpack[FlexProps]): ...
+@ps.react_component(ps.Import("Flex", "@mantine/core"))
+def Flex(*children: ps.Node, key: str | None = None, **props: Unpack[FlexProps]): ...

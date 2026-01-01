@@ -161,28 +161,28 @@ class NestedDemoState(ps.State):
 def home():
 	"""A simple and welcoming home page."""
 	sess = ps.session()
-	content = [
+	# Avoid prerender flash of None by only rendering once we have values
+	has_info = bool(
+		sess.get("connected_at") or sess.get("ip") or sess.get("user_agent")
+	)
+	return ps.div(className="text-center")[
 		ps.h1("Welcome to Pulse UI!", className="text-4xl font-bold mb-4"),
 		ps.p(
 			"This is a demonstration of a web application built with Python and Pulse.",
 			className="text-lg text-gray-700",
 		),
+		has_info
+		and ps.div(
+			ps.h3("Session Context", className="text-2xl font-semibold mb-2"),
+			ps.ul(
+				ps.li(f"connected_at: {sess.get('connected_at') or ''}"),
+				ps.li(f"ip: {sess.get('ip') or ''}"),
+				ps.li(f"user_agent: {sess.get('user_agent') or ''}"),
+				className="list-disc list-inside text-left mx-auto max-w-md",
+			),
+			className="mt-6 p-4 bg-gray-50 rounded border",
+		),
 	]
-	# Avoid prerender flash of None by only rendering once we have values
-	if sess.get("connected_at") or sess.get("ip") or sess.get("user_agent"):
-		content.append(
-			ps.div(
-				ps.h3("Session Context", className="text-2xl font-semibold mb-2"),
-				ps.ul(
-					ps.li(f"connected_at: {sess.get('connected_at') or ''}"),
-					ps.li(f"ip: {sess.get('ip') or ''}"),
-					ps.li(f"user_agent: {sess.get('user_agent') or ''}"),
-					className="list-disc list-inside text-left mx-auto max-w-md",
-				),
-				className="mt-6 p-4 bg-gray-50 rounded border",
-			)
-		)
-	return ps.div(*content, className="text-center")
 
 
 @ps.component
@@ -472,21 +472,18 @@ def dynamic_route():
 
 
 @ps.react_component(
-	"CustomDatePicker",
-	"~/components/date-picker",
-	is_default=True,
+	ps.Import("CustomDatePicker", "~/components/date-picker", kind="default"),
 	lazy=True,
 )
 def DatePicker(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	value: datetime | None = None,
 	onChange: ps.EventHandler1[datetime | None] | None = None,
 	placeholder: str = "Select a date",
 	className: str = "",
 	showTimeSelect: bool = False,
-) -> ps.Element:
-	return None  # signature-only; parsed for prop spec
+) -> ps.Element: ...
 
 
 class DatePickerState(ps.State):

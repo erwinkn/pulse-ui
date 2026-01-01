@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict, Unpack
 
 import pulse as ps
-from pulse.transpiler.imports import CssImport
 
 from .styles import CSSVariables
 from .theme import MantineTheme, MantineThemeOverride
@@ -48,17 +47,9 @@ class MantineProviderProps(TypedDict, total=False):
 
 
 @ps.react_component(
-	"MantineProvider",
-	"@mantine/core",
-	extra_imports=[
-		CssImport(
-			"@mantine/core/styles.css",
-			# Ensure core styles load before dates/charts styles if present
-			before=["@mantine/dates/styles.css", "@mantine/charts/styles.css"],
-		)
-	],
+	ps.Import("MantineProvider", "@mantine/core"),
 )
-def MantineProvider(*children: ps.Child, key: str | None = None, **props: Any): ...
+def MantineProvider(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
 class MantineStylesTransform(TypedDict, total=False):
@@ -113,9 +104,9 @@ class HeadlessMantineProviderProps(TypedDict, total=False):
 	"""Environment at which the provider is used, 'test' environment disables all transitions and portals"""
 
 
-@ps.react_component("HeadlessMantineProvider", "@mantine/core")
+@ps.react_component(ps.Import("HeadlessMantineProvider", "@mantine/core"))
 def HeadlessMantineProvider(
-	*children: ps.Child,
+	*children: ps.Node,
 	key: str | None = None,
 	**props: Unpack[HeadlessMantineProviderProps],
 ): ...

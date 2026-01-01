@@ -8,7 +8,7 @@ Usage:
 from typing import Any as _Any
 
 from pulse.js._types import Clipboard as _Clipboard
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 # User agent and browser info
 userAgent: str
@@ -63,14 +63,14 @@ def share(data: dict[str, str]) -> _Any:
 	...
 
 
-def sendBeacon(url: str, data: str | bytes | _Any | None = None) -> bool:
+def sendBeacon(url: str, data: str | bytes | _Any | None = None, /) -> bool:
 	"""Send data to a URL asynchronously. Returns True if successful."""
 	...
 
 
-def canShare(data: dict[str, str] | None = None) -> bool:
+def canShare(data: dict[str, str] | None = None, /) -> bool:
 	"""Check if data can be shared via the Web Share API."""
 	...
 
 
-_register_js_module(name="navigator")
+JsModule.register(name="navigator")

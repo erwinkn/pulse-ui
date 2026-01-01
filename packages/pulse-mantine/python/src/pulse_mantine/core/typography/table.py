@@ -2,42 +2,44 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("Table", "@mantine/core")
-def Table(*children: ps.Child, key: str | None = None, **props: Any): ...
+_Table = ps.Import("Table", "@mantine/core")
 
 
-@ps.react_component("Table", "@mantine/core", prop="Thead")
-def TableThead(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Table)
+def Table(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Table", "@mantine/core", prop="Tbody")
-def TableTbody(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Table.Thead)
+def TableThead(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Table", "@mantine/core", prop="Tfoot")
-def TableTfoot(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Table.Tbody)
+def TableTbody(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Table", "@mantine/core", prop="Td")
-def TableTd(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Table.Tfoot)
+def TableTfoot(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Table", "@mantine/core", prop="Th")
-def TableTh(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Table.Td)
+def TableTd(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Table", "@mantine/core", prop="Tr")
-def TableTr(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Table.Th)
+def TableTh(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Table", "@mantine/core", prop="Caption")
-def TableCaption(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Table.Tr)
+def TableTr(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Table", "@mantine/core", prop="ScrollContainer")
-def TableScrollContainer(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Table.Caption)
+def TableCaption(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Table", "@mantine/core", prop="DataRenderer")
+@ps.react_component(_Table.ScrollContainer)
+def TableScrollContainer(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_Table.DataRenderer)
 def TableDataRenderer(key: str | None = None, **props: Any): ...

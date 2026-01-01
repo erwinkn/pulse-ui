@@ -12,7 +12,7 @@ from pulse.js._types import Element as _Element
 from pulse.js._types import HTMLCollection as _HTMLCollection
 from pulse.js._types import HTMLElement as _HTMLElement
 from pulse.js._types import NodeList as _NodeList
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 # Read-only properties
 body: _HTMLElement
@@ -59,7 +59,9 @@ def getElementsByName(elementName: str) -> _NodeList[_Element]:
 
 
 # Element creation
-def createElement(tagName: str, options: dict[str, str] | None = None) -> _HTMLElement:
+def createElement(
+	tagName: str, options: dict[str, str] | None = None, /
+) -> _HTMLElement:
 	"""Create a new element with the given tag name."""
 	...
 
@@ -84,6 +86,7 @@ def addEventListener(
 	type: str,
 	listener: _Callable[..., None],
 	options: bool | dict[str, bool] | None = None,
+	/,
 ) -> None:
 	"""Add an event listener to the document."""
 	...
@@ -93,6 +96,7 @@ def removeEventListener(
 	type: str,
 	listener: _Callable[..., None],
 	options: bool | dict[str, bool] | None = None,
+	/,
 ) -> None:
 	"""Remove an event listener from the document."""
 	...
@@ -116,7 +120,7 @@ def getSelection() -> _Any:
 
 
 # Node tree methods
-def importNode(node: _Element, deep: bool = False) -> _Element:
+def importNode(node: _Element, deep: bool = False, /) -> _Element:
 	"""Import a node from another document."""
 	...
 
@@ -135,4 +139,4 @@ def exitFullscreen() -> _Any:
 fullscreenElement: _Element | None
 
 
-_register_js_module(name="document")
+JsModule.register(name="document")

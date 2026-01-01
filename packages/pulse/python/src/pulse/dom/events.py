@@ -13,7 +13,7 @@ from typing import (
 	TypeVar,
 )
 
-from pulse.html.elements import (
+from pulse.dom.elements import (
 	HTMLDialogElement,
 	HTMLElement,
 	HTMLInputElement,

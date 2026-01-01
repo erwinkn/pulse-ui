@@ -139,7 +139,7 @@ class MantineForm(ps.State, Generic[TForm]):
 	# Mount the React component, wiring messages and passing through props
 	def render(
 		self,
-		*children: ps.Child,
+		*children: ps.Node,
 		key: str | None = None,
 		onSubmit: ps.EventHandler1[TForm] | None = None,
 		**props: Unpack[ps.HTMLFormProps],  # pyright: ignore[reportGeneralTypeIssues]

@@ -2,10 +2,12 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("ScrollArea", "@mantine/core")
-def ScrollArea(*children: ps.Child, key: str | None = None, **props: Any): ...
+_ScrollArea = ps.Import("ScrollArea", "@mantine/core")
 
 
-@ps.react_component("ScrollArea", "@mantine/core", prop="Autosize")
-def ScrollAreaAutosize(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_ScrollArea)
+def ScrollArea(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_ScrollArea.Autosize)
+def ScrollAreaAutosize(*children: ps.Node, key: str | None = None, **props: Any): ...

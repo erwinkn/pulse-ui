@@ -2,16 +2,18 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("ActionIcon", "@mantine/core")
-def ActionIcon(*children: ps.Child, key: str | None = None, **props: Any): ...
+_ActionIcon = ps.Import("ActionIcon", "@mantine/core")
 
 
-@ps.react_component("ActionIcon", "@mantine/core", prop="Group")
-def ActionIconGroup(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_ActionIcon)
+def ActionIcon(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("ActionIcon", "@mantine/core", prop="GroupSection")
+@ps.react_component(_ActionIcon.Group)
+def ActionIconGroup(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_ActionIcon.GroupSection)
 def ActionIconGroupSection(
-	*children: ps.Child, key: str | None = None, **props: Any
+	*children: ps.Node, key: str | None = None, **props: Any
 ): ...

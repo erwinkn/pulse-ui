@@ -2,134 +2,217 @@ import {
 	type ComponentType,
 	cloneElement,
 	createElement,
-	type FC,
 	Fragment,
 	isValidElement,
-	lazy,
-	type PropsWithChildren,
 	type ReactElement,
 	type ReactNode,
-	Suspense,
 } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type { PulsePrerenderView } from "./pulse";
-import type { ComponentRegistry, PathDelta, VDOMNode, VDOMUpdate } from "./vdom";
-import { FRAGMENT_TAG, isElementNode, isMountPointNode, MOUNT_POINT_PREFIX } from "./vdom";
+import type {
+	ComponentRegistry,
+	JsonValue,
+	VDOM,
+	VDOMNode,
+	VDOMPropValue,
+	VDOMUpdate,
+} from "./vdom";
+import {
+	FRAGMENT_TAG,
+	isElementNode,
+	isExprNode,
+	isMountPointNode,
+	MOUNT_POINT_PREFIX,
+} from "./vdom";
 
-// Prefix for JSExpr values - code is embedded after the colon
-const JSEXPR_PREFIX = "$js:";
+type Env = Record<string, unknown>;
+
+function isCallbackPlaceholder(v: unknown): v is "$cb" {
+	return v === "$cb";
+}
+
+type ElementMeta = {
+	eval?: Set<string>;
+	cbKeys?: Set<string>;
+};
 
 export class VDOMRenderer {
-	#callbacks: Set<string>;
-	#callbackCache: Map<string, (...args: any) => void>;
-	#renderPropKeys: Set<string>;
-	#jsexprPaths: Set<string>; // paths containing JS expressions
-	#callbackList: string[];
 	#client: PulseSocketIOClient;
 	#path: string;
-	#registry: Record<string, unknown>;
+	#registry: ComponentRegistry;
 
-	constructor(
-		client: PulseSocketIOClient,
-		path: string,
-		initialCallbacks: string[] = [],
-		initialRenderProps: string[] = [],
-		registry: Record<string, unknown> = {},
-		initialJsExprPaths: string[] = [],
-	) {
+	// Cache callback functions keyed by "path.prop"
+	#callbackCache: Map<string, (...args: any[]) => void>;
+
+	// Track eval keys + callback keys per ReactElement (not real props).
+	#metaMap: WeakMap<ReactElement, ElementMeta>;
+
+	constructor(client: PulseSocketIOClient, path: string, registry: ComponentRegistry = {}) {
 		this.#client = client;
 		this.#path = path;
 		this.#registry = registry;
-		this.#callbacks = new Set(initialCallbacks);
 		this.#callbackCache = new Map();
-		this.#renderPropKeys = new Set(initialRenderProps);
-		this.#jsexprPaths = new Set(initialJsExprPaths);
-		this.#callbackList = [...this.#callbacks].sort();
+		this.#metaMap = new WeakMap();
 	}
 
-	/**
-	 * Get an object from the unified registry by its key (e.g., "Button_1").
-	 */
 	getObject(key: string): unknown {
-		const obj = this.#registry[key];
+		const obj = (this.#registry as any)[key];
 		if (obj === undefined) {
 			throw new Error(`[Pulse] Unknown registry key: ${key}`);
 		}
 		return obj;
 	}
 
-	/**
-	 * Evaluate a JSExpr code string.
-	 * The code is expected to use get_object('key') calls to retrieve values from the registry.
-	 */
-	evaluateJsExpr(code: string): unknown {
-		// Create the get_object function that the code will call
-		const get_object = (key: string) => this.getObject(key);
-		// Use Function constructor to avoid direct eval
-		// The code is trusted (generated server-side) and uses get_object to access values
-		return new Function("get_object", `return ${code}`)(get_object);
-	}
-
-	// Accessors used by update logic to determine which props need rebinding
-	hasCallbackPath(path: string) {
-		return this.#callbacks.has(path);
-	}
-
-	hasRenderPropPath(path: string) {
-		return this.#renderPropKeys.has(path);
-	}
-
-	hasAnyCallbackUnder(prefix: string): boolean {
-		if (prefix === "") return this.#callbackList.length > 0;
-		const i = this.#lowerBound(this.#callbackList, prefix);
-		return i < this.#callbackList.length && this.#callbackList[i]!.startsWith(prefix);
-	}
-
-	applyCallbackDelta(delta: PathDelta) {
-		// Only update the internal callback path registry and cache. We rely on
-		// accompanying update_props operations that contain the "$cb" placeholder
-		// to trigger prop updates; transformValue will resolve to functions.
-		if (delta.remove) {
-			for (const key of delta.remove) {
-				this.#callbacks.delete(key);
-				this.#callbackCache.delete(key);
-			}
+	#resolveIdentifier(name: string): unknown {
+		const v = (globalThis as any)[name];
+		if (v === undefined) {
+			throw new Error(`[Pulse] Unknown identifier in expr: ${name}`);
 		}
-		if (delta.add) {
-			for (const key of delta.add) {
-				this.#callbacks.add(key);
-			}
-		}
-		this.#callbackList = [...this.#callbacks].sort();
+		return v;
 	}
 
-	applyRenderPropsDelta(delta: PathDelta) {
-		if (delta.remove) {
-			for (const key of delta.remove) {
-				this.#renderPropKeys.delete(key);
-			}
+	#evalExpr(expr: VDOMNode, env: Env): unknown {
+		// Handle primitives directly (wire format optimization)
+		if (expr === null || typeof expr !== "object") {
+			return expr;
 		}
-		if (delta.add) {
-			for (const key of delta.add) {
-				this.#renderPropKeys.add(key);
+		// Handle VDOMElement (has "tag" instead of "t")
+		if ("tag" in expr) {
+			return this.renderNode(expr, "");
+		}
+		switch (expr.t) {
+			case "ref":
+				return this.getObject(expr.key);
+			case "id":
+				if (Object.hasOwn(env, expr.name)) return env[expr.name];
+				return this.#resolveIdentifier(expr.name);
+			case "lit":
+				return expr.value;
+			case "undef":
+				return undefined;
+			case "array": {
+				const out: unknown[] = [];
+				for (const it of expr.items) {
+					out.push(this.#evalExpr(it, env));
+				}
+				return out;
 			}
+			case "object": {
+				const out: Record<string, unknown> = {};
+				for (const [k, vexpr] of Object.entries(expr.props)) {
+					out[k] = this.#evalExpr(vexpr, env);
+				}
+				return out;
+			}
+			case "member": {
+				const obj = this.#evalExpr(expr.obj, env) as any;
+				return obj?.[expr.prop];
+			}
+			case "sub": {
+				const obj = this.#evalExpr(expr.obj, env) as any;
+				const key = this.#evalExpr(expr.key, env) as any;
+				return obj?.[key];
+			}
+			case "call": {
+				const fn = this.#evalExpr(expr.callee, env) as any;
+				const args = expr.args.map((a) => this.#evalExpr(a, env));
+				if (typeof fn !== "function") throw new Error("[Pulse] call callee is not a function");
+				return fn(...args);
+			}
+			case "unary": {
+				const v = this.#evalExpr(expr.arg, env) as any;
+				switch (expr.op) {
+					case "!":
+						return !v;
+					case "+":
+						return +v;
+					case "-":
+						return -v;
+					case "typeof":
+						return typeof v;
+					case "void":
+						return void v;
+					default:
+						throw new Error(`[Pulse] Unsupported unary op: ${expr.op}`);
+				}
+			}
+			case "binary": {
+				const l = this.#evalExpr(expr.left, env) as any;
+				const r = this.#evalExpr(expr.right, env) as any;
+				switch (expr.op) {
+					case "+":
+						return l + r;
+					case "-":
+						return l - r;
+					case "*":
+						return l * r;
+					case "/":
+						return l / r;
+					case "%":
+						return l % r;
+					case "&&":
+						return l && r;
+					case "||":
+						return l || r;
+					case "??":
+						return l ?? r;
+					case "**":
+						return l ** r;
+					case "in":
+						return l in r;
+					case "instanceof":
+						return l instanceof r;
+					case "===":
+						return l === r;
+					case "!==":
+						return l !== r;
+					case "<":
+						return l < r;
+					case "<=":
+						return l <= r;
+					case ">":
+						return l > r;
+					case ">=":
+						return l >= r;
+					default:
+						throw new Error(`[Pulse] Unsupported binary op: ${expr.op}`);
+				}
+			}
+			case "ternary":
+				return this.#evalExpr(expr.cond, env)
+					? this.#evalExpr(expr.then, env)
+					: this.#evalExpr(expr.else_, env);
+			case "template": {
+				let s = "";
+				for (const part of expr.parts) {
+					if (typeof part === "string") s += part;
+					else s += String(this.#evalExpr(part, env));
+				}
+				return s;
+			}
+			case "arrow": {
+				const params = expr.params;
+				return (...args: unknown[]) => {
+					const nextEnv: Env = { ...env };
+					for (let i = 0; i < params.length; i += 1) nextEnv[params[i]!] = args[i];
+					return this.#evalExpr(expr.body, nextEnv);
+				};
+			}
+			case "new": {
+				const Ctor = this.#evalExpr(expr.ctor, env) as any;
+				const args = expr.args.map((a) => this.#evalExpr(a, env));
+				return new Ctor(...args);
+			}
+			default:
+				throw new Error(`[Pulse] Unknown expr node: ${(expr as any).t}`);
 		}
 	}
 
-	applyJsExprPathsDelta(delta: PathDelta) {
-		if (delta.remove) {
-			for (const key of delta.remove) {
-				this.#jsexprPaths.delete(key);
-			}
-		}
-		if (delta.add) {
-			for (const key of delta.add) {
-				this.#jsexprPaths.add(key);
-			}
-		}
+	#propPath(path: string, prop: string) {
+		return path ? `${path}.${prop}` : prop;
 	}
 
-	getCallback(path: string, prop: string) {
+	#getCallback(path: string, prop: string) {
 		const key = this.#propPath(path, prop);
 		let fn = this.#callbackCache.get(key);
 		if (!fn) {
@@ -139,102 +222,99 @@ export class VDOMRenderer {
 		return fn;
 	}
 
+	#transformEvalProp(path: string, prop: string, value: VDOMPropValue) {
+		if (isCallbackPlaceholder(value)) return this.#getCallback(path, prop);
+		if (isExprNode(value)) return this.#evalExpr(value, {});
+		if (typeof value === "object" && value !== null && "tag" in value) {
+			// Render-prop subtree; traverse as a prop path segment (non-numeric).
+			return this.renderNode(value as VDOMNode, this.#propPath(path, prop));
+		}
+		// Eval-marked but still JSON => pass through.
+		return value as JsonValue;
+	}
+
+	#rememberMeta(el: ReactElement, meta: ElementMeta) {
+		this.#metaMap.set(el, meta);
+		return el;
+	}
+
 	renderNode(node: VDOMNode, currentPath = ""): ReactNode {
-		// Handle primitives early
-		if (
-			node == null || // catches both null and undefined
-			typeof node === "boolean" ||
-			typeof node === "number"
-		) {
-			return node;
-		}
+		// primitives
+		if (node == null || typeof node === "boolean" || typeof node === "number") return node;
+		if (typeof node === "string") return node;
 
-		// Check for JSExpr - "$js:code" format has code embedded in the value
-		if (typeof node === "string") {
-			if (node.startsWith(JSEXPR_PREFIX)) {
-				const jsExprCode = node.slice(JSEXPR_PREFIX.length);
-				return this.evaluateJsExpr(jsExprCode) as ReactNode;
-			}
-			return node;
-		}
+		// expr
+		if (isExprNode(node)) return this.#evalExpr(node, {}) as ReactNode;
 
-		// Element nodes
+		// element
 		if (isElementNode(node)) {
-			const { tag, props = {}, children = [] } = node;
+			const { tag, props = {}, children = [], eval: evalKeys } = node;
 
+			let cbKeys: Set<string> | undefined;
 			const newProps: Record<string, any> = {};
-			for (const [propName, propValue] of Object.entries(props)) {
-				newProps[propName] = this.transformValue(currentPath, propName, propValue);
+			let evalSet: Set<string> | undefined;
+			if (!evalKeys) {
+				// Hot path: no eval -> props are plain JSON; copy as-is.
+				for (const [propName, propValue] of Object.entries(props)) {
+					newProps[propName] = propValue;
+				}
+			} else {
+				evalSet = new Set(evalKeys);
+				for (const [propName, propValue] of Object.entries(props)) {
+					if (!evalSet.has(propName)) {
+						newProps[propName] = propValue;
+						continue;
+					}
+					if (propValue === "$cb") {
+						if (!cbKeys) cbKeys = new Set();
+						cbKeys.add(propName);
+					}
+					newProps[propName] = this.#transformEvalProp(currentPath, propName, propValue);
+				}
 			}
+			if (node.key) newProps.key = node.key;
 
-			if (node.key) {
-				newProps.key = node.key;
-			}
-
-			const renderedChildren = [];
-			for (let index = 0; index < children.length; index += 1) {
-				const child = children[index]!;
-				const childPath = currentPath ? `${currentPath}.${index}` : String(index);
+			const renderedChildren: ReactNode[] = [];
+			for (let i = 0; i < children.length; i += 1) {
+				const child = children[i]!;
+				const childPath = currentPath ? `${currentPath}.${i}` : String(i);
 				renderedChildren.push(this.renderNode(child, childPath));
 			}
 
 			if (isMountPointNode(node)) {
-				const componentKey = node.tag.slice(MOUNT_POINT_PREFIX.length);
-				const Component = this.#registry[componentKey] as ComponentRegistry[string];
+				const componentKey = tag.slice(MOUNT_POINT_PREFIX.length);
+				const Component = this.#registry[componentKey] as ComponentType<any>;
 				if (!Component) {
-					throw new Error(
-						`Could not find component ${componentKey}. This is a Pulse internal error.`,
-					);
+					throw new Error(`[Pulse] Missing component for mount point: ${componentKey}`);
 				}
-				return createElement(Component, newProps, ...renderedChildren);
+				return this.#rememberMeta(createElement(Component, newProps, ...renderedChildren), {
+					eval: evalSet,
+					cbKeys,
+				});
 			}
 
-			return createElement(tag === FRAGMENT_TAG ? Fragment : tag, newProps, ...renderedChildren);
+			return this.#rememberMeta(
+				createElement(tag === FRAGMENT_TAG ? Fragment : tag, newProps, ...renderedChildren),
+				{ eval: evalSet, cbKeys },
+			);
 		}
 
-		// Fallback for unknown node types
 		if (process.env.NODE_ENV !== "production") {
-			console.error("Unknown VDOM node type:", node);
+			console.error("Unknown VDOM node:", node);
 		}
 		return null;
 	}
 
-	#propPath(path: string, prop: string) {
-		return path ? `${path}.${prop}` : prop;
-	}
-
-	transformValue(path: string, key: string, value: any) {
-		const propPath = this.#propPath(path, key);
-		if (this.#callbacks.has(propPath)) {
-			return this.getCallback(path, key);
-		}
-		if (this.#renderPropKeys.has(propPath)) {
-			return this.renderNode(value, propPath);
-		}
-		// Check for JSExpr - "$js:code" format has code embedded in the value
-		if (typeof value === "string" && value.startsWith(JSEXPR_PREFIX)) {
-			const jsExprCode = value.slice(JSEXPR_PREFIX.length);
-			return this.evaluateJsExpr(jsExprCode);
-		}
-		return value;
-	}
-
-	init(view: PulsePrerenderView): ReactNode {
-		// Set callbacks
-		this.#callbacks = new Set(view.callbacks);
-		// prune stale cached callbacks
-		for (const k of Array.from(this.#callbackCache.keys())) {
-			if (!this.#callbacks.has(k)) this.#callbackCache.delete(k);
-		}
-		this.#callbackList = [...this.#callbacks].sort();
-
-		// Set render props
-		this.#renderPropKeys = new Set(view.render_props);
-
-		// Set JSExpr paths
-		this.#jsexprPaths = new Set(view.jsexpr_paths);
-
+	init(view: PulsePrerenderView & { vdom: VDOM }): ReactNode {
 		return this.renderNode(view.vdom);
+	}
+
+	/**
+	 * Evaluate a JSExpr code string (legacy run_js support).
+	 */
+	evaluateJsExpr(code: string): unknown {
+		const get_object = (key: string) => this.getObject(key);
+		return new Function("get_object", `return ${code}`)(get_object);
 	}
 
 	#ensureChildrenArray(el: ReactElement): ReactNode[] {
@@ -243,22 +323,45 @@ export class VDOMRenderer {
 		return Array.isArray(children) ? children.slice() : [children];
 	}
 
+	#cloneWithMeta(prev: ReactElement, next: ReactElement) {
+		const meta = this.#metaMap.get(prev);
+		if (meta) this.#metaMap.set(next, meta);
+		return next;
+	}
+
+	// Rebind callback function props within a subtree after a path-changing move.
+	#rebindCallbacksInSubtree(node: ReactNode, path: string): ReactNode {
+		if (!isValidElement(node)) return node;
+		const element = node as ReactElement<Record<string, any> | null>;
+
+		const baseProps = (element.props ?? {}) as Record<string, any>;
+		const nextProps: Record<string, any> = { ...baseProps };
+
+		const meta = this.#metaMap.get(element);
+		const cbKeys = meta?.cbKeys;
+		if (cbKeys && cbKeys.size > 0) {
+			for (const k of cbKeys) {
+				nextProps[k] = this.#getCallback(path, k);
+			}
+		}
+		for (const key of Object.keys(baseProps)) {
+			const v = baseProps[key];
+			if (isValidElement(v)) {
+				nextProps[key] = this.#rebindCallbacksInSubtree(v, this.#propPath(path, key));
+			}
+		}
+
+		const children = this.#ensureChildrenArray(element).map((child, idx) => {
+			const childPath = path ? `${path}.${idx}` : String(idx);
+			return this.#rebindCallbacksInSubtree(child, childPath);
+		});
+
+		return this.#cloneWithMeta(element, cloneElement(element, nextProps, ...children));
+	}
+
 	applyUpdates(initialTree: ReactNode, updates: VDOMUpdate[]): ReactNode {
 		let newTree: ReactNode = initialTree;
 		for (const update of updates) {
-			if (update.type === "update_callbacks") {
-				this.applyCallbackDelta(update.data);
-				continue;
-			}
-			if (update.type === "update_render_props") {
-				this.applyRenderPropsDelta(update.data);
-				continue;
-			}
-			if (update.type === "update_jsexpr_paths") {
-				this.applyJsExprPathsDelta(update.data);
-				continue;
-			}
-
 			const parts = update.path.split(".").filter((s) => s.length > 0);
 
 			const descend = (node: ReactNode, depth: number, path: string): ReactNode => {
@@ -269,64 +372,99 @@ export class VDOMRenderer {
 					const childIdx = +childKey;
 					const childPath = path ? `${path}.${childKey}` : childKey;
 					if (!Number.isNaN(childIdx)) {
-						// Regular child traversal
 						const childrenArr = this.#ensureChildrenArray(element);
 						const child = childrenArr[childIdx];
 						childrenArr[childIdx] = descend(child, depth + 1, childPath) as any;
-						return cloneElement(element, undefined, ...childrenArr);
+						return this.#cloneWithMeta(element, cloneElement(element, undefined, ...childrenArr));
 					} else {
-						// Render prop traversal
 						const baseProps = (element.props ?? {}) as Record<string, any>;
 						const child = baseProps[childKey];
-						const props = {
-							...baseProps,
-							[childKey]: descend(child, depth + 1, childPath),
-						};
-						return cloneElement(element, props);
+						const props = { ...baseProps, [childKey]: descend(child, depth + 1, childPath) };
+						return this.#cloneWithMeta(element, cloneElement(element, props));
 					}
 				}
+
 				switch (update.type) {
-					case "replace": {
+					case "replace":
 						return this.renderNode(update.data, update.path);
-					}
+
 					case "update_props": {
 						this.#assertIsElement(node, parts, depth);
 						const element = node as ReactElement;
 						const currentProps = (element.props ?? {}) as Record<string, any>;
 						const nextProps: Record<string, any> = { ...currentProps };
-						const delta = update.data;
-						if (delta.remove && delta.remove.length > 0) {
-							for (const key of delta.remove) {
-								if (key in nextProps) {
-									delete nextProps[key];
+
+						const prevMeta = this.#metaMap.get(element);
+						const prevEval = prevMeta?.eval;
+						const prevCbKeys = prevMeta?.cbKeys;
+						const evalPatch = update.data.eval;
+						const nextEval: Set<string> | undefined =
+							evalPatch === undefined
+								? prevEval
+								: evalPatch.length === 0
+									? undefined
+									: new Set(evalPatch);
+						const evalCleared = evalPatch !== undefined && evalPatch.length === 0;
+
+						// Maintain callback-keys metadata incrementally (for path rebinding after moves).
+						// If eval is cleared, callbacks must disappear unless explicitly re-set.
+						let nextCbKeys: Set<string> | undefined;
+						if (nextEval) {
+							const cbSet = new Set<string>();
+							if (prevCbKeys) {
+								for (const k of prevCbKeys) {
+									if (nextEval.has(k)) cbSet.add(k);
+								}
+							}
+							nextCbKeys = cbSet;
+						}
+						if (evalCleared && prevCbKeys) {
+							for (const k of prevCbKeys) delete nextProps[k];
+						}
+
+						if (update.data.remove && update.data.remove.length > 0) {
+							for (const key of update.data.remove) {
+								delete nextProps[key];
+								nextCbKeys?.delete(key);
+							}
+						}
+						if (update.data.set) {
+							for (const [k, v] of Object.entries(update.data.set)) {
+								// Only interpret eval-marked keys; otherwise treat as JSON.
+								const isEval = nextEval?.has(k) === true;
+								nextProps[k] = isEval ? this.#transformEvalProp(path, k, v as any) : (v as any);
+
+								// Update cbKeys based on placeholder sentinel in the payload.
+								if (nextCbKeys) {
+									if (isEval && v === "$cb") nextCbKeys.add(k);
+									else nextCbKeys.delete(k);
 								}
 							}
 						}
-						if (delta.set) {
-							for (const [k, v] of Object.entries(delta.set)) {
-								nextProps[k] = this.transformValue(path, k, v);
-							}
-						}
 
-						// If some props were removed, use `createElement` to fully override
-						// the props, as `cloneElement` shallowly merges the new props with
-						// the old ones.
-						const removedSomething = (delta.remove?.length ?? 0) > 0;
+						if (nextCbKeys && nextCbKeys.size === 0) nextCbKeys = undefined;
+
+						const removedSomething = (update.data.remove?.length ?? 0) > 0;
 						if (removedSomething) {
-							// Preserve key + ref
-							nextProps.key = element.key;
+							nextProps.key = (element as any).key;
 							nextProps.ref = (element as any).ref;
-							return createElement(element.type, nextProps, ...this.#ensureChildrenArray(element));
+							return this.#rememberMeta(
+								createElement(element.type, nextProps, ...this.#ensureChildrenArray(element)),
+								{ eval: nextEval, cbKeys: nextCbKeys },
+							);
 						} else {
-							// Don't touch children. Key and ref are transferred by cloneElement.
-							return cloneElement(element, nextProps);
+							return this.#rememberMeta(cloneElement(element, nextProps), {
+								eval: nextEval,
+								cbKeys: nextCbKeys,
+							});
 						}
 					}
+
 					case "reconciliation": {
 						this.#assertIsElement(node, parts, depth);
 						const element = node as ReactElement;
 						const prevChildren = this.#ensureChildrenArray(element);
-						const nextChildren = [];
+						const nextChildren: ReactNode[] = [];
 
 						const [newIndices, newContents] = update.new;
 						const [reuseIndices, reuseSources] = update.reuse;
@@ -336,37 +474,36 @@ export class VDOMRenderer {
 							newIdx = -1,
 							reuseIdx = -1;
 						if (newIndices.length > 0) {
-							nextNew = newIndices[0];
+							nextNew = newIndices[0]!;
 							newIdx = 0;
 						}
 						if (reuseIndices.length > 0) {
-							nextReuse = reuseIndices[0];
+							nextReuse = reuseIndices[0]!;
 							reuseIdx = 0;
 						}
-						for (let i = 0; i < update.N; ++i) {
+
+						for (let i = 0; i < update.N; i += 1) {
 							if (i === nextNew) {
-								const contents = newContents[newIdx];
+								const contents = newContents[newIdx]!;
 								const childPath = path ? `${path}.${i}` : String(i);
 								nextChildren.push(this.renderNode(contents, childPath));
-								nextNew = newIdx < newIndices.length - 1 ? newIndices[++newIdx] : -1;
+								nextNew = newIdx < newIndices.length - 1 ? newIndices[++newIdx]! : -1;
 							} else if (i === nextReuse) {
-								const srcIdx = reuseSources[reuseIdx];
+								const srcIdx = reuseSources[reuseIdx]!;
 								let src = prevChildren[srcIdx];
 								const childPath = path ? `${path}.${i}` : String(i);
-								// The node may have callbacks that need to be updated for this new path
-								if (this.hasAnyCallbackUnder(childPath)) {
-									src = this.#rebindCallbacksInSubtree(src, childPath);
-								}
+								// If the node moved, callbacks inside need new paths.
+								src = this.#rebindCallbacksInSubtree(src, childPath);
 								nextChildren.push(src);
-								nextReuse = reuseIdx < reuseIndices.length - 1 ? reuseIndices[++reuseIdx] : -1;
+								nextReuse = reuseIdx < reuseIndices.length - 1 ? reuseIndices[++reuseIdx]! : -1;
 							} else {
-								// No need to rebind callbacks, the node hasn't moved
 								nextChildren.push(prevChildren[i]);
 							}
 						}
-						// Pass null to reuse previous props
-						return cloneElement(element, null!, ...nextChildren);
+
+						return this.#cloneWithMeta(element, cloneElement(element, null!, ...nextChildren));
 					}
+
 					default:
 						throw new Error(`[Pulse renderer] Unknown update type: ${(update as any)?.type}`);
 				}
@@ -384,66 +521,4 @@ export class VDOMRenderer {
 		}
 		return true;
 	}
-
-	// Rebind callback function props within a subtree after a path-changing move
-	#rebindCallbacksInSubtree(node: ReactNode, path: string): ReactNode {
-		if (!isValidElement(node)) return node;
-		const element = node as ReactElement<Record<string, any> | null>;
-		const baseProps = (element.props ?? {}) as Record<string, any>;
-		const nextProps: Record<string, any> = { ...baseProps };
-
-		// Rebind only callback props; CSS refs are path-agnostic and render-props
-		// are handled by the server-side renderer via explicit updates
-		for (const key of Object.keys(baseProps)) {
-			const propPath = path ? `${path}.${key}` : key;
-			if (this.hasCallbackPath(propPath)) {
-				nextProps[key] = this.getCallback(path, key);
-			}
-			if (this.hasRenderPropPath(propPath) && this.hasAnyCallbackUnder(propPath)) {
-				nextProps[key] = this.#rebindCallbacksInSubtree(baseProps[key], propPath);
-			}
-		}
-
-		const children = this.#ensureChildrenArray(element).map((child, idx) => {
-			const childPath = path ? `${path}.${idx}` : String(idx);
-			if (this.hasAnyCallbackUnder(childPath)) {
-				return this.#rebindCallbacksInSubtree(child, childPath);
-			} else {
-				return child;
-			}
-		});
-
-		return cloneElement(element, nextProps, ...children);
-	}
-
-	// Binary-search lower bound for prefix matching on sorted callback paths
-	#lowerBound(arr: string[], target: string): number {
-		let lo = 0;
-		let hi = arr.length;
-		while (lo < hi) {
-			const mid = (lo + hi) >>> 1;
-			if (arr[mid]! < target) {
-				lo = mid + 1;
-			} else {
-				hi = mid;
-			}
-		}
-		return lo;
-	}
-}
-
-// The `component` prop should be something like `() =>
-// import('~/path/to/component') (we'll need to remap if we're importing a named export and not the default)
-export function RenderLazy(
-	component: () => Promise<{ default: ComponentType<any> }>,
-	fallback?: ReactNode,
-): FC<PropsWithChildren<unknown>> {
-	const Component = lazy(component);
-	return ({ children, ...props }: PropsWithChildren<unknown>) => {
-		return (
-			<Suspense fallback={fallback}>
-				<Component {...props}>{children}</Component>
-			</Suspense>
-		);
-	};
 }

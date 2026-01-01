@@ -1,119 +1,142 @@
-"""Python module transpilation system for javascript_v2.
+"""Python module transpilation system for transpiler.
 
 Provides infrastructure for mapping Python modules (like `math`) to JavaScript equivalents.
-For direct JavaScript module bindings, use the pulse.js.* module system instead.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+import ast
+from collections.abc import Callable, Iterable
 from types import ModuleType
-from typing import Any, TypeAlias, cast, override
+from typing import TYPE_CHECKING, Any, ClassVar, cast, override
 
-from pulse.transpiler.errors import JSCompilationError
-from pulse.transpiler.nodes import JSExpr, JSTransformer
+from pulse.transpiler.nodes import Expr, Primitive, Transformer
+from pulse.transpiler.vdom import VDOMNode
 
-# Type alias for module transpilers - either a PyModule class or a dict
-# The dict can contain JSExpr or Callable[..., JSExpr] during construction,
-# but will be normalized to only JSExpr before storage
-PyModuleTranspiler: TypeAlias = dict[str, JSExpr]
+if TYPE_CHECKING:
+	from pulse.transpiler.transpiler import Transpiler
 
 
-@dataclass
-class PyModuleExpr(JSExpr):
-	"""JSExpr for a Python module imported as a whole (e.g., `import math`).
+class PyModule(Expr):
+	"""Expr for a Python module imported as a whole (e.g., `import math`).
 
-	Holds a transpiler dict mapping attribute names to JSExpr.
-	Attribute access looks up the attr in the dict and returns the result.
+	Subclasses can define transpiler mappings as class attributes:
+	- Expr attributes are used directly
+	- Callable attributes are wrapped in Transformer
+	- Primitives are converted via Expr.of()
+
+	The transpiler dict is built automatically via __init_subclass__.
 	"""
 
-	transpiler: dict[str, JSExpr]
+	__slots__: tuple[str, str] = ("transpiler", "name")
+
+	# Class-level transpiler template, built by __init_subclass__
+	_transpiler: ClassVar[dict[str, Expr]] = {}
+
+	transpiler: dict[str, Expr]
+	name: str
+
+	def __init__(self, transpiler: dict[str, Expr] | None = None, name: str = ""):
+		self.transpiler = transpiler if transpiler is not None else {}
+		self.name = name
+
+	def __init_subclass__(cls, **kwargs: Any) -> None:
+		super().__init_subclass__(**kwargs)
+		cls._transpiler = {}
+		for attr_name in dir(cls):
+			if attr_name.startswith("_"):
+				continue
+			attr = getattr(cls, attr_name)
+			if isinstance(attr, Expr):
+				cls._transpiler[attr_name] = attr
+			elif callable(attr):
+				cls._transpiler[attr_name] = Transformer(
+					cast(Callable[..., Expr], attr), name=attr_name
+				)
+			elif isinstance(attr, (bool, int, float, str)) or attr is None:
+				cls._transpiler[attr_name] = Expr.of(attr)
 
 	@override
-	def emit(self) -> str:
-		raise JSCompilationError("PyModuleExpr cannot be emitted directly")
+	def emit(self, out: list[str]) -> None:
+		label = self.name or "PyModule"
+		raise TypeError(f"{label} cannot be emitted directly")
 
 	@override
-	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
-		raise JSCompilationError("PyModuleExpr cannot be called directly")
+	def render(self) -> VDOMNode:
+		label = self.name or "PyModule"
+		raise TypeError(f"{label} cannot be rendered directly")
 
 	@override
-	def emit_subscript(self, indices: list[Any]) -> JSExpr:
-		raise JSCompilationError("PyModuleExpr cannot be subscripted")
+	def transpile_call(
+		self,
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
+		ctx: Transpiler,
+	) -> Expr:
+		label = self.name or "PyModule"
+		raise TypeError(f"{label} cannot be called directly")
 
 	@override
-	def emit_getattr(self, attr: str) -> JSExpr:
-		value = self.transpiler.get(attr)
-		if value is None:
-			raise JSCompilationError(f"Module has no attribute '{attr}'")
-		# transpiler always contains JSExpr (wrapping happens in register_module)
-		return value
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+		if attr not in self.transpiler:
+			label = self.name or "Module"
+			raise TypeError(f"{label} has no attribute '{attr}'")
+		return self.transpiler[attr]
 
+	@override
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+		label = self.name or "PyModule"
+		raise TypeError(f"{label} cannot be subscripted")
 
-class PyModule:
-	"""Base class for Python module transpilation mappings.
+	@staticmethod
+	def _build_transpiler(items: Iterable[tuple[str, Any]]) -> dict[str, Expr]:
+		"""Build transpiler dict from name/value pairs."""
+		result: dict[str, Expr] = {}
+		for attr_name, attr in items:
+			if isinstance(attr, Expr):
+				result[attr_name] = attr
+			elif callable(attr):
+				result[attr_name] = Transformer(
+					cast(Callable[..., Expr], attr), name=attr_name
+				)
+			elif isinstance(attr, (bool, int, float, str)) or attr is None:
+				result[attr_name] = Expr.of(attr)
+		return result
 
-	Subclasses define static methods and class attributes that map Python module
-	functions and constants to their JavaScript equivalents.
+	@staticmethod
+	def register(  # pyright: ignore[reportIncompatibleMethodOverride, reportImplicitOverride]
+		module: ModuleType,
+		transpilation: type[PyModule]
+		| dict[str, Expr | Primitive | Callable[..., Expr]],
+	) -> None:
+		"""Register a Python module for transpilation.
 
-	Example:
-		class PyMath(PyModule):
-			# Constants - JSExpr values
-			pi = JSMember(JSIdentifier("Math"), "PI")
-
-			# Functions - return JSExpr
-			@staticmethod
-			def floor(x: JSExpr) -> JSExpr:
-				return JSMemberCall(JSIdentifier("Math"), "floor", [x])
-	"""
-
-
-PY_MODULES: dict[ModuleType, PyModuleTranspiler] = {}
-
-
-def register_module(
-	module: ModuleType,
-	transpilation: type[PyModule] | dict[str, JSExpr | Callable[..., JSExpr]],
-) -> None:
-	"""Register a Python module for transpilation.
-
-	Args:
-		module: The Python module to register (e.g., `math`, `pulse.html.tags`)
-		transpilation: Either a PyModule subclass or a dict mapping attribute names
-			to JSExpr (for constants) or Callable[..., JSExpr] (for functions).
-			Callables will be wrapped in JSTransformer during registration.
-	"""
-	# Convert PyModule class to dict if needed (wraps callables)
-	transpiler_dict: PyModuleTranspiler = {}
-
-	# Get items to iterate over - either from dict or PyModule class
-	if isinstance(transpilation, dict):
-		items = transpilation.items()
-	else:
-		# Convert PyModule class to (name, attr) pairs
-		items = (
-			(attr_name, getattr(transpilation, attr_name, None))
-			for attr_name in dir(transpilation)
-			if not attr_name.startswith("_")
-		)
-
-	# Normalize: wrap callables in JSTransformer and register via JSExpr.register
-	for attr_name, attr in items:
-		if isinstance(attr, JSExpr):
-			pass
-		elif callable(attr):
-			# Wrap callables in JSTransformer so result always contains JSExpr
-			attr = JSTransformer(cast(Callable[..., JSExpr], attr))
+		Args:
+			module: The Python module to register (e.g., `math`)
+			transpilation: Either a PyModule subclass or a dict mapping attribute names to:
+				- Expr: used directly
+				- Primitive (bool, int, float, str, None): converted via Expr.of()
+				- Callable[..., Expr]: wrapped in Transformer
+		"""
+		# Get transpiler dict - use pre-built _transpiler for PyModule subclasses
+		if isinstance(transpilation, dict):
+			transpiler_dict = PyModule._build_transpiler(transpilation.items())
+		elif hasattr(transpilation, "_transpiler"):
+			transpiler_dict = transpilation._transpiler
 		else:
-			# Skip non-JSExpr, non-callable values
-			continue
+			# Legacy: class namespace without PyModule inheritance
+			items = (
+				(name, getattr(transpilation, name))
+				for name in dir(transpilation)
+				if not name.startswith("_")
+			)
+			transpiler_dict = PyModule._build_transpiler(items)
 
-		transpiler_dict[attr_name] = attr
-		# Register the module attribute value for lookup by id
-		module_value = getattr(module, attr_name, None)
-		if module_value is not None:
-			JSExpr.register(module_value, attr)
+		# Register individual values for lookup by id
+		for attr_name, expr in transpiler_dict.items():
+			module_value = getattr(module, attr_name, None)
+			if module_value is not None:
+				Expr.register(module_value, expr)
 
-	# Store as dict (now normalized to only JSExpr)
-	PY_MODULES[module] = transpiler_dict
+		# Register the module object itself
+		Expr.register(module, PyModule(transpiler_dict, name=module.__name__))

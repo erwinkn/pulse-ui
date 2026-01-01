@@ -2,10 +2,12 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("Pill", "@mantine/core")
-def Pill(*children: ps.Child, key: str | None = None, **props: Any): ...
+_Pill = ps.Import("Pill", "@mantine/core")
 
 
-@ps.react_component("Pill", "@mantine/core", prop="Group")
-def PillGroup(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Pill)
+def Pill(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_Pill.Group)
+def PillGroup(*children: ps.Node, key: str | None = None, **props: Any): ...

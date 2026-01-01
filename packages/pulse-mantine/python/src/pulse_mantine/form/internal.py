@@ -35,7 +35,7 @@ class FormInternalProps(ps.HTMLFormProps, total=False):
 	onReset: ps.EventHandler1[ps.FormEvent[ps.HTMLFormElement]]
 
 
-@ps.react_component("Form", "pulse-mantine")
+@ps.react_component(ps.Import("Form", "pulse-mantine"))
 def FormInternal(
-	*children: ps.Child, key: str | None = None, **props: Unpack[FormInternalProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[FormInternalProps]
 ): ...

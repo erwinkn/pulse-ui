@@ -1,6 +1,6 @@
 from typing import Any, ParamSpec
 
-from pulse.vdom import Element, Node
+from pulse.transpiler.nodes import Element, Node
 
 P = ParamSpec("P")
 
@@ -17,12 +17,13 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
 	    A function that creates UITreeNode instances
 	"""
 
-	def create_element(*children: Element, **props: Any) -> Node:
-		"""Create a UITreeNode for this tag."""
+	def create_element(*children: Node, **props: Any) -> Element:
+		"""Create a UI element for this tag."""
 		if default_props:
 			props = default_props | props
 		key = props.pop("key", None)
-		return Node(tag=name, key=key, props=props, children=children)
+		child_list = list(children) if children else None
+		return Element(tag=name, key=key, props=props or None, children=child_list)
 
 	return create_element
 
@@ -40,17 +41,16 @@ def define_self_closing_tag(name: str, default_props: dict[str, Any] | None = No
 	"""
 	default_props = default_props
 
-	def create_element(**props: Any) -> Node:
-		"""Create a self-closing UITreeNode for this tag."""
+	def create_element(**props: Any) -> Element:
+		"""Create a self-closing UI element for this tag."""
 		if default_props:
 			props = default_props | props
 		key = props.pop("key", None)
-		return Node(
+		return Element(
 			tag=name,
 			key=key,
-			props=props,
-			children=(),  # Self-closing tags never have children
-			allow_children=False,
+			props=props or None,
+			children=None,
 		)
 
 	return create_element
@@ -171,7 +171,7 @@ track = define_self_closing_tag("track")
 wbr = define_self_closing_tag("wbr")
 
 # React fragment
-fragment = define_tag("$$fragment")
+fragment = define_tag("")
 
 
 # SVG tags

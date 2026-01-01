@@ -2,18 +2,18 @@
 JavaScript String builtin module.
 
 Usage:
-    import pulse.js.string as String
+    from pulse.js import String
+    String(x)                      # -> new String(x)
     String.fromCharCode(65)        # -> String.fromCharCode(65)
     String.fromCodePoint(0x1F600)  # -> String.fromCodePoint(0x1F600)
 
-    from pulse.js.string import fromCharCode, fromCodePoint
-    fromCharCode(65)               # -> String.fromCharCode(65)
-    fromCodePoint(0x1F600)         # -> String.fromCodePoint(0x1F600)
+    # Or import from module directly:
+    from pulse.js.string import String
 """
 
 from typing import Any as _Any
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 
 class String:
@@ -31,5 +31,5 @@ class String:
 	def raw(template: str, *substitutions: str) -> str: ...
 
 
-# Self-register this module as a JS builtin
-_register_js_module(name="String", global_scope=True)
+# Self-register this module as a JS builtin (global identifier)
+JsModule.register(name=None)

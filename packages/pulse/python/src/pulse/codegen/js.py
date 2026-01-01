@@ -43,10 +43,8 @@ class ExternalJsFunction(Generic[*Args, R]):
 		is_default: bool,
 		hint: Callable[[*Args], R],
 	) -> None:
-		if is_default:
-			self.import_ = Import.default(name, src)
-		else:
-			self.import_ = Import.named(name, src)
+		kind = "default" if is_default else "named"
+		self.import_ = Import(name, src, kind=kind)
 		self._prop = prop
 		self.hint = hint
 

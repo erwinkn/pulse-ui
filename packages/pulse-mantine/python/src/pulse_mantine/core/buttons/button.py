@@ -2,14 +2,16 @@ from typing import Any
 
 import pulse as ps
 
-
-@ps.react_component("Button", "@mantine/core")
-def Button(*children: ps.Child, key: str | None = None, **props: Any): ...
+_Button = ps.Import("Button", "@mantine/core")
 
 
-@ps.react_component("Button", "@mantine/core", prop="Group")
-def ButtonGroup(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Button)
+def Button(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component("Button", "@mantine/core", prop="GroupSection")
-def ButtonGroupSection(*children: ps.Child, key: str | None = None, **props: Any): ...
+@ps.react_component(_Button.Group)
+def ButtonGroup(*children: ps.Node, key: str | None = None, **props: Any): ...
+
+
+@ps.react_component(_Button.GroupSection)
+def ButtonGroupSection(*children: ps.Node, key: str | None = None, **props: Any): ...

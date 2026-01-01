@@ -1,58 +1,60 @@
-# AGENTS.md
+# Pulse
 
-## Code style
-- Never use `getattr` / `setattr` unless absolutely necessary
-- Prioritize agressive programming: code that fails early is better than code that silently accepts an invalid state or broken assumption
-- Minimize the amount of state and data structures 
-- Do not worry about backwards compatibility unless explicitly instructed to do so
-- Avoid single-use helper functions, unless the goal is to have single main function with clear control that performs multiple tasks in sequence by calling helpers
-- Avoid use of `typing.TYPE_CHECKING` and non-global imports unless they are necessary to avoid an import cycle
+Full-stack Python framework for interactive web apps. Runs on React with WebSocket-driven UI updates.
 
-## Development Commands
-### Running code
-- Run Python code: `uv run path/to/script.py`
-- Run JavaScript / TypeScript code: `bun path/to/file.ts`
+## Issue Tracking (Beads)
 
-### Formatting
-- Format all code: `make format`
-- Check formatting: `make format-check`
+```bash
+bd ready                           # Find unblocked work
+bd create "Title" -t task -p 2     # Create issue
+bd update <id> --status in_progress
+bd close <id> --reason "Done"
+bd export -o .beads/issues.jsonl   # Before committing
+```
 
-### Linting
-- Run all linters: `make lint`
-- Run linters with auto-fix: `make lint-fix`
+## Code Style
 
-### Type Checking
-- Run type checking: `make typecheck`
-- Python-only: use `basedpyright` directly
+- No `getattr`/`setattr` unless necessary
+- Fail early over silent failures
+- Minimize state and data structures
+- No backwards compatibility unless instructed
+- Avoid single-use helpers (except for sequential task orchestration)
+- Avoid `typing.TYPE_CHECKING` and non-global imports unless avoiding import cycles
 
-### Testing
-- Python tests: `uv run pytest`
-- JS tests: `bun test`
-- All tests: `make test`
+## Commands
 
-### All Checks
-- Run everything (format, lint, typecheck, test): `make all`
+```bash
+make init          # First-time setup in a new worktree
+make all           # Format, lint, typecheck, test
+make format        # Biome + Ruff
+make lint-fix      # Lint with auto-fix
+make typecheck     # Basedpyright + tsc
+make test          # pytest + bun test
+```
 
-## Pre-commit Hooks
+```bash
+uv run <script.py>                # Run Python
+bun <file.ts>                     # Run JS/TS
+```
 
-Pre-commit hooks are set up using prek and will run automatically on `git commit`:
+## Structure
 
-- **Setup**: `uv run prek install`
-- **Manual run on all files**: `uv run prek run --all-files`
-- **Bypass hooks** (not recommended): `git commit --no-verify`
+```
+packages/
+├── pulse/python/src/pulse/   # Core Python (app, state, component, renderer, vdom, hooks/, queries/)
+├── pulse/js/src/             # JS client (client.tsx, renderer.tsx, serialize/)
+├── pulse-mantine/            # Mantine UI
+├── pulse-ag-grid/            # AG Grid
+├── pulse-recharts/           # Charts
+├── pulse-lucide/             # Icons
+├── pulse-msal/               # MS auth
+└── pulse-aws/                # AWS deploy
+examples/                     # Example apps
+```
 
-The hooks run:
-- Ruff formatting and linting (Python) with auto-fix
-- Biome formatting and linting (JS/TS) with auto-fix
+## Tips
 
-Hooks only run on staged files and are fast (~1-3 seconds).
-
-## CI/CD
-
-GitHub Actions CI runs on all PRs and must pass before merging:
-- Format checking
-- Linting
-- Type checking  
-- All tests
-
-Run `make all` locally before pushing to catch issues early.
+- Run `make all` before committing
+- Both `basedpyright` and `tsc` must pass
+- Check `examples/` for patterns
+- Serialization matters: data crosses Python-JS via `serialize/`

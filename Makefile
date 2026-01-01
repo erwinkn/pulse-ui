@@ -1,7 +1,8 @@
-.PHONY: help lint lint-fix format format-check typecheck test all
+.PHONY: help init lint lint-fix format format-check typecheck test all bump
 
 help:
 	@echo "Available commands:"
+	@echo "  make init          - Initialize environment (sync packages, install deps, build)"
 	@echo "  make lint          - Run all linters (Biome for JS/TS, Ruff for Python)"
 	@echo "  make lint-fix      - Run all linters with auto-fix"
 	@echo "  make format        - Format all code (Biome for JS/TS, Ruff for Python)"
@@ -9,6 +10,19 @@ help:
 	@echo "  make typecheck     - Run type checking (Basedpyright for Python)"
 	@echo "  make test          - Run all tests (pytest for Python, bun test for JS)"
 	@echo "  make all           - Run format, lint, typecheck, and test"
+	@echo "  make bump          - Bump package version (PKG=name ARGS='--patch|--alpha|...')"
+
+# Initialization
+init:
+	@echo "Syncing Python packages..."
+	@uv sync --all-packages --dev
+	@echo "Installing JS dependencies..."
+	@bun i
+	@echo "Building JS packages..."
+	@bun run build
+	@echo "Installing pre-commit hooks"
+	@uv run prek install
+	@echo "Environment initialized!"
 
 # Linting
 lint:
@@ -55,3 +69,14 @@ test:
 # Run everything
 all: format lint typecheck test
 	@echo "All checks passed!"
+
+# Version bumping
+bump:
+ifndef PKG
+	@echo "Usage: make bump PKG=<package-name> [ARGS='--patch|--minor|--major|--alpha|--beta|--rc|--version X.Y.Z']"
+	@echo "Example: make bump PKG=pulse ARGS='--alpha'"
+	@echo "Example: make bump PKG=pulse ARGS='--beta'"
+	@python scripts/bump_version.py
+else
+	@python scripts/bump_version.py $(PKG) $(ARGS)
+endif

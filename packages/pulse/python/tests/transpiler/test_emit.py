@@ -1,5 +1,5 @@
 """
-Tests for Node tree -> JavaScript code emission (nodes_v2.emit).
+Tests for Node tree -> JavaScript code emission (pulse.transpiler.nodes.emit).
 
 This module covers:
 - Expression nodes (Literal, Identifier, Binary, etc.)
@@ -935,7 +935,7 @@ class TestPulseNodeEmitError:
 	def test_pulse_node_in_emit_raises(self):
 		node = PulseNode(fn=lambda: ...)
 		with pytest.raises(TypeError, match="Cannot transpile PulseNode"):
-			emit(node)
+			emit(node)  # pyright: ignore[reportArgumentType]
 
 	def test_pulse_node_as_child_raises(self):
 		pulse_child = PulseNode(fn=lambda: ...)

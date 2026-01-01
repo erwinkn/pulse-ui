@@ -350,7 +350,7 @@ class TestMissingKeyWarnings:
 			UserWarning,
 			match=r"\[Pulse\] Iterable children of <div> contain elements without 'key'",
 		):
-			div(items)
+			div(items)  # pyright: ignore[reportArgumentType]
 
 	def test_tag_factory_no_warning_with_keys(self, monkeypatch: pytest.MonkeyPatch):
 		"""Test that no warning is emitted when all items have keys."""
@@ -360,7 +360,7 @@ class TestMissingKeyWarnings:
 		with warnings.catch_warnings():
 			warnings.simplefilter("error")
 			items = [span(key=f"item-{i}") for i in range(3)]
-			div(items)  # Should not raise
+			div(items)  # Should not raise  # pyright: ignore[reportArgumentType]
 
 	def test_tag_factory_no_warning_in_prod(self, monkeypatch: pytest.MonkeyPatch):
 		"""Test that no warning is emitted in prod mode."""
@@ -370,7 +370,8 @@ class TestMissingKeyWarnings:
 		with warnings.catch_warnings():
 			warnings.simplefilter("error")
 			items = [span() for _ in range(3)]
-			div(items)  # Should not raise in prod
+			# Should not raise in prod
+			div(items)  # pyright: ignore[reportArgumentType]
 
 	def test_component_bracket_syntax_warns(self, monkeypatch: pytest.MonkeyPatch):
 		"""Bracket syntax on components warns for unkeyed iterables."""
@@ -387,7 +388,7 @@ class TestMissingKeyWarnings:
 			UserWarning,
 			match=r"\[Pulse\] Iterable children of <MyComponent> contain elements without 'key'",
 		):
-			MyComponent()[items]
+			MyComponent()[items]  # pyright: ignore[reportArgumentType]
 
 	def test_component_positional_args_warns(self, monkeypatch: pytest.MonkeyPatch):
 		"""Components with `*children` flatten and warn for unkeyed iterables."""

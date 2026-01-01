@@ -1595,6 +1595,8 @@ class Function(Expr):
 
 
 Node: TypeAlias = Primitive | Expr | PulseNode
+Child: TypeAlias = Node | Iterable[Node]
+Children: TypeAlias = Sequence[Child]
 Prop: TypeAlias = Primitive | Expr
 
 

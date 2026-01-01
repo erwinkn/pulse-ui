@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, NamedTuple, TypeAlias, cast
 
@@ -10,6 +10,8 @@ from pulse.hooks.core import HookContext
 from pulse.transpiler import Import
 from pulse.transpiler.function import Constant, JsFunction, JsxFunction
 from pulse.transpiler.nodes import (
+	Child,
+	Children,
 	Element,
 	Expr,
 	Literal,
@@ -31,7 +33,6 @@ from pulse.transpiler.vdom import (
 )
 
 PropValue: TypeAlias = Node | Callable[..., Any]
-Child: TypeAlias = Node | Iterable["Child"]
 
 FRAGMENT_TAG = ""
 MOUNT_PREFIX = "$$"
@@ -530,7 +531,7 @@ def eval_keys_for_props(props: dict[str, PropValue]) -> set[str]:
 	return eval_keys
 
 
-def normalize_children(children: Sequence[Child] | None) -> list[Node]:
+def normalize_children(children: Children | None) -> list[Node]:
 	if not children:
 		return []
 

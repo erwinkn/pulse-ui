@@ -20,14 +20,14 @@ def test_init_block_runs_once_and_restores_locals():
 
 
 def test_init_preserves_object_identity_and_runs_once():
-	@ps.component  # pyright: ignore[reportCallIssue, reportArgumentType, reportUntypedFunctionDecorator]
+	@ps.component
 	def Example() -> tuple[int, list[int]]:
 		with ps.init():
 			obj: list[int] = []
 		obj.append(len(obj))
 		return id(obj), list(obj)
 
-	example = cast(ps.Component[[]], Example)
+	example = Example
 	with HookContext():
 		result1 = cast(tuple[int, list[int]], cast(object, example.fn()))
 		result2 = cast(tuple[int, list[int]], cast(object, example.fn()))
@@ -42,7 +42,7 @@ def test_init_preserves_object_identity_and_runs_once():
 
 
 def test_init_restores_functions_and_classes():
-	@ps.component  # pyright: ignore[reportCallIssue, reportArgumentType, reportUntypedFunctionDecorator]
+	@ps.component
 	def Example() -> tuple[Callable[[int], int], type[Any]]:
 		with ps.init():
 
@@ -55,7 +55,7 @@ def test_init_restores_functions_and_classes():
 
 		return helper, Box
 
-	example = cast(Component[[]], Example)
+	example = Example
 	with HookContext():
 		result1 = cast(
 			tuple[Callable[[int], int], type[Any]], cast(object, example.fn())
@@ -116,7 +116,7 @@ def test_fallback_preserves_identity_and_runs_once(
 
 	monkeypatch.setattr(init_mod, "_CAN_USE_CPYTHON", False)
 
-	@ps.component  # pyright: ignore[reportCallIssue, reportArgumentType, reportUntypedFunctionDecorator]
+	@ps.component
 	def Example() -> tuple[Callable[[float], float], dict[str, int]]:
 		with ps.init():
 
@@ -128,7 +128,7 @@ def test_fallback_preserves_identity_and_runs_once(
 		obj["x"] += 1
 		return helper, obj
 
-	example = cast(Component[[]], Example)
+	example = Example
 	with HookContext():
 		result1 = cast(
 			tuple[Callable[[float], float], dict[str, int]], cast(object, example.fn())

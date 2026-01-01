@@ -2,8 +2,10 @@ from typing import Any
 
 import pulse as ps
 
+_Radio = ps.Import("Radio", "@mantine/core")
 
-@ps.react_component(ps.Import("Radio", "@mantine/core"))
+
+@ps.react_component(_Radio)
 def Radio(key: str | None = None, **props: Any): ...
 
 
@@ -12,9 +14,9 @@ def Radio(key: str | None = None, **props: Any): ...
 def RadioGroup(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Radio", "@mantine/core", prop="Card"))
+@ps.react_component(_Radio.Card)
 def RadioCard(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(ps.Import("Radio", "@mantine/core", prop="Indicator"))
+@ps.react_component(_Radio.Indicator)
 def RadioIndicator(*children: ps.Node, key: str | None = None, **props: Any): ...

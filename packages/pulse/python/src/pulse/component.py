@@ -1,23 +1,22 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable
 from inspect import Parameter, signature
-from typing import Any, Generic, ParamSpec, TypeAlias, TypeVar, overload, override
+from typing import Any, Generic, ParamSpec, TypeVar, overload, override
 
 from pulse.hooks.init import rewrite_init_blocks
-from pulse.transpiler.nodes import Element as Element
 from pulse.transpiler.nodes import (
+	Children,
 	Node,
 	Primitive,
 	PulseNode,
 	flatten_children,
 )
+from pulse.transpiler.nodes import Element as Element
 from pulse.transpiler.vdom import VDOMNode
 
 P = ParamSpec("P")
 _T = TypeVar("_T")
-
-Children: TypeAlias = Sequence[Node | Iterable[Node]]
 
 
 class Component(Generic[P]):

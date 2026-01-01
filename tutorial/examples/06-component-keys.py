@@ -28,7 +28,8 @@ class ItemState(ps.State):
 
 @ps.component
 def Item(label: str, onRemove, key=None):
-	state = ps.states(ItemState)
+	with ps.init():
+		state = ItemState()
 	return ps.div(className="flex items-center mb-2")[
 		ps.input(
 			type="checkbox",
@@ -54,7 +55,8 @@ def Item(label: str, onRemove, key=None):
 
 @ps.component
 def KeysDemo():
-	state = ps.states(ListState)
+	with ps.init():
+		state = ListState()
 	# Prepend new items to the beginning to demonstrate diffing
 	controls = ps.div(className="mb-4")[
 		ps.button(

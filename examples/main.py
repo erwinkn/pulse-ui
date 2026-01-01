@@ -101,7 +101,8 @@ class AsyncEffectState(ps.State):
 # Async effect demo component illustrating batch updates and cancellation
 @ps.component
 def AsyncEffectDemo():
-	state = ps.states(AsyncEffectState)
+	with ps.init():
+		state = AsyncEffectState()
 
 	return ps.div(
 		ps.div(
@@ -229,7 +230,8 @@ def Leaf(label: str, key: str | None = None):
 	meta = ps.setup(_init, label)
 
 	# states: called once per component instance
-	state = ps.states(LeafState(meta["label"]))
+	with ps.init():
+		state = LeafState(meta["label"])
 
 	# effects: register a mount-only effect for the component instance
 	ps.effects(lambda: print(f"[Leaf effects] ready: {meta['label']}"))
@@ -256,7 +258,8 @@ def Row(use_keys: bool, swapped: bool):
 
 @ps.component
 def components_demo():
-	state = ps.states(NestedDemoState)
+	with ps.init():
+		state = NestedDemoState()
 
 	return ps.div(
 		ps.h1("Nested Components & Keys", className="text-2xl font-bold mb-4"),
@@ -292,7 +295,9 @@ def components_demo():
 @ps.component
 def counter():
 	"""An interactive counter page demonstrating state management."""
-	state1, state2 = ps.states(CounterState("Counter 1"), CounterState("Counter2"))
+	with ps.init():
+		state1 = CounterState("Counter 1")
+		state2 = CounterState("Counter2")
 	route_info = ps.route()
 
 	return ps.div(
@@ -394,7 +399,8 @@ class QueryDemoState(ps.State):
 
 @ps.component
 def query_demo():
-	state = ps.states(QueryDemoState)
+	with ps.init():
+		state = QueryDemoState()
 
 	def prev():
 		state.user_id = max(1, state.user_id - 1)
@@ -496,7 +502,8 @@ class DatePickerState(ps.State):
 
 @ps.component
 def datepicker_demo():
-	state = ps.states(DatePickerState)
+	with ps.init():
+		state = DatePickerState()
 
 	return ps.div(
 		ps.h2("Date Picker", className="text-2xl font-bold mb-4"),
@@ -515,7 +522,8 @@ def datepicker_demo():
 @ps.component
 def app_layout():
 	"""The main layout for the application, including navigation and a persistent counter."""
-	state = ps.states(LayoutState)
+	with ps.init():
+		state = LayoutState()
 
 	return ps.div(
 		ps.header(

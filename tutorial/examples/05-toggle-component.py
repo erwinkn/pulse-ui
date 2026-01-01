@@ -12,7 +12,8 @@ class ToggleState(ps.State):
 
 @ps.component
 def Toggle(label: str):
-	state = ps.states(ToggleState)
+	with ps.init():
+		state = ToggleState()
 	return ps.div(
 		ps.button(
 			f"{label}: {'ON' if state.on else 'OFF'}",

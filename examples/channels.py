@@ -173,7 +173,8 @@ def ChannelInstance(
 	on_remove: ps.EventHandler0 | None = None,
 	key: str | None = None,
 ):
-	state = ps.states(ChannelInstanceState(instance_id, label))
+	with ps.init():
+		state = ChannelInstanceState(instance_id, label)
 	channel = state.channel
 
 	header_actions = [
@@ -357,7 +358,8 @@ class ChannelsDemoState(ps.State):
 
 @ps.component
 def ChannelPlayground():
-	state = ps.states(ChannelsDemoState)
+	with ps.init():
+		state = ChannelsDemoState()
 
 	def render_instance(identifier: int, idx: int):
 		return ChannelInstance(

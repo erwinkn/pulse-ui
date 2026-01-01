@@ -5,7 +5,7 @@ from pulse.hooks.core import HookContext
 from pulse.hooks.effects import effects
 from pulse.hooks.setup import setup, setup_key
 from pulse.hooks.stable import stable
-from pulse.hooks.states import states
+from pulse.hooks.state import state
 from pulse.state import State
 
 
@@ -82,55 +82,55 @@ def test_setup_key_must_precede_setup():
 			setup_key("late")
 
 
-def test_states_reuses_instances_without_key():
+def test_state_reuses_instances_with_same_key():
 	ctx = HookContext()
 
 	with ctx:
-		first = states(DummyState)
+		first = state("test", DummyState)
 
 	with ctx:
-		second = states(DummyState)
+		second = state("test", DummyState)
 
 	assert first is second
 
 
-def test_states_persists_when_key_changes():
+def test_state_creates_different_instances_for_different_keys():
 	ctx = HookContext()
 
 	with ctx:
-		first = states(DummyState, key="a")
+		first = state("a", DummyState)
 
 	with ctx:
-		second = states(DummyState, key="b")
+		second = state("b", DummyState)
 
 	assert first is not second
 	assert first.dispose_calls == 0  # States not disposed on key change
 
 
-def test_states_disposes_direct_instances():
+def test_state_disposes_direct_instances():
 	ctx = HookContext()
 
 	with ctx:
 		direct = DummyState()
-		retained = states(direct)
+		retained = state("test", direct)
 		assert retained is direct
 
 	with ctx:
 		transient = DummyState()
 		# When reusing states, State instances passed as args are disposed if not being used
-		result = states(transient)
+		result = state("test", transient)
 		assert result is direct  # Should return the existing state
 		# transient should be disposed since it's not being used
 		assert transient.dispose_calls == 1
 
 
-def test_states_allows_multiple_calls_with_different_keys():
+def test_state_allows_multiple_calls_with_different_keys():
 	ctx = HookContext()
 
 	with ctx:
-		state_a = states(DummyState, key="a")
-		state_b = states(DummyState, key="b")
-		state_c = states(DummyState, key="c")
+		state_a = state("a", DummyState)
+		state_b = state("b", DummyState)
+		state_c = state("c", DummyState)
 
 	assert state_a is not state_b
 	assert state_b is not state_c
@@ -139,90 +139,45 @@ def test_states_allows_multiple_calls_with_different_keys():
 	assert state_c.dispose_calls == 0
 
 
-def test_states_enforces_single_call_per_key():
+def test_state_enforces_single_call_per_key():
 	ctx = HookContext()
 
 	with ctx:
-		states(DummyState, key="a")
+		state("a", DummyState)
 		with pytest.raises(
 			RuntimeError,
 			match="can only be called once per component render with key='a'",
 		):
-			states(DummyState, key="a")
+			state("a", DummyState)
 
 
-def test_states_enforces_single_call_without_key():
+def test_state_allows_same_key_across_renders():
 	ctx = HookContext()
 
 	with ctx:
-		states(DummyState)
-		with pytest.raises(
-			RuntimeError,
-			match="can only be called once per component render without a key",
-		):
-			states(DummyState)
-
-
-def test_states_allows_same_key_across_renders():
-	ctx = HookContext()
+		first = state("a", DummyState)
 
 	with ctx:
-		first = states(DummyState, key="a")
-
-	with ctx:
-		second = states(DummyState, key="a")
+		second = state("a", DummyState)
 
 	assert first is second
 
 
-def test_states_enforces_same_argument_count_without_key():
+def test_state_requires_non_empty_key():
 	ctx = HookContext()
 
 	with ctx:
-		states(DummyState)
-
-	with ctx:
-		with pytest.raises(
-			RuntimeError,
-			match=r"called with 2 argument\(s\) but was previously called with 1 argument\(s\) without a key",
-		):
-			states(DummyState, DummyState)
+		with pytest.raises(ValueError, match="requires a non-empty string key"):
+			state("", DummyState)
 
 
-def test_states_enforces_same_argument_count_with_key():
+def test_state_disposes_all_on_unmount():
 	ctx = HookContext()
 
 	with ctx:
-		states(DummyState, key="a")
-
-	with ctx:
-		with pytest.raises(
-			RuntimeError,
-			match=r"called with 2 argument\(s\) but was previously called with 1 argument\(s\) with key='a'",
-		):
-			states(DummyState, DummyState, key="a")
-
-
-def test_states_allows_same_argument_count_across_renders():
-	ctx = HookContext()
-
-	with ctx:
-		first_a, first_b = states(DummyState, DummyState, key="multi")
-
-	with ctx:
-		second_a, second_b = states(DummyState, DummyState, key="multi")
-
-	assert first_a is second_a
-	assert first_b is second_b
-
-
-def test_states_disposes_all_on_unmount():
-	ctx = HookContext()
-
-	with ctx:
-		state_a = states(DummyState, key="a")
-		state_b = states(DummyState, key="b")
-		state_c = states(DummyState)  # no key
+		state_a = state("a", DummyState)
+		state_b = state("b", DummyState)
+		state_c = state("c", DummyState)
 
 	# Unmount disposes all hooks
 	ctx.unmount()

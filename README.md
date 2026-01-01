@@ -47,7 +47,8 @@ class Todos(ps.State):
 
 @ps.component
 def TodoApp():
-    state = ps.states(Todos)
+    with ps.init():
+        state = Todos()
 
     return ps.div(className="min-h-screen bg-slate-950 text-slate-100 p-8")[
         ps.div(className="mx-auto max-w-sm space-y-4")[

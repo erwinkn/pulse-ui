@@ -13,15 +13,14 @@ from pulse_mantine import (
 
 @ps.component
 def Demo():
-	form = ps.states(
-		lambda: MantineForm(
+	with ps.init():
+		form = MantineForm(
 			initialValues={"email": "", "termsOfService": False},
 			validate={
 				# Equivalent to Mantine's built-in `isEmail` validator
 				"email": IsEmail("Invalid email")
 			},
 		)
-	)
 
 	async def printFormValues():
 		values = await form.get_form_values()

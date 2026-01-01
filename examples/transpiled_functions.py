@@ -518,7 +518,8 @@ class CounterState(ps.State):
 @ps.component
 def CounterComponent():
 	"""Pulse server-side component with its own state (counter)."""
-	state = ps.states(CounterState)
+	with ps.init():
+		state = CounterState()
 
 	return ps.div(className="p-4 bg-slate-800 rounded-lg")[
 		ps.h3(

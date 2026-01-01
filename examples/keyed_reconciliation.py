@@ -146,7 +146,8 @@ def Controls(state: Steps):
 
 @ps.component
 def KeyedReconciliationPage():
-	state = ps.states(Steps)
+	with ps.init():
+		state = Steps()
 	return ps.div(className="max-w-3xl mx-auto py-8 space-y-4")[
 		ps.h1("Keyed reconciliation scenarios", className="text-2xl font-bold"),
 		ps.p(

@@ -182,7 +182,8 @@ class AsyncServerValidationForm(MantineForm):
 
 @ps.component
 def ServerValidationPage():
-	form = ps.states(AsyncServerValidationForm)
+	with ps.init():
+		form = AsyncServerValidationForm()
 
 	return Card(withBorder=True, shadow="sm", p="lg")[
 		Stack(gap="lg")[
@@ -314,7 +315,8 @@ def ValidationModesPage():
 	if mode_str not in ("submit", "blur", "change"):
 		mode_str = "submit"
 	mode = cast(Literal["submit", "blur", "change"], mode_str)
-	form = ps.states(lambda: ValidationModesForm(validation_mode=mode))
+	with ps.init():
+		form = ValidationModesForm(validation_mode=mode)
 
 	return Card(withBorder=True, shadow="sm", p="lg")[
 		Stack(gap="lg")[
@@ -406,7 +408,8 @@ BUILT_IN_INITIAL_VALUES = {
 
 @ps.component
 def BuiltInValidatorsPage():
-	form = ps.states(BuiltInValidatorsForm)
+	with ps.init():
+		form = BuiltInValidatorsForm()
 
 	return Card(withBorder=True, shadow="sm", p="lg")[
 		Stack(gap="lg")[
@@ -494,7 +497,8 @@ FILE_INITIAL_VALUES = {
 
 @ps.component
 def FileUploadsPage():
-	form = ps.states(FileUploadsForm)
+	with ps.init():
+		form = FileUploadsForm()
 
 	return Card(withBorder=True, shadow="sm", p="lg")[
 		Stack(gap="lg")[
@@ -546,7 +550,8 @@ DATE_INITIAL_VALUES = {
 
 @ps.component
 def DatesPage():
-	form = ps.states(DatesState)
+	with ps.init():
+		form = DatesState()
 
 	return Card(withBorder=True, shadow="sm", p="lg")[
 		Stack(gap="lg")[

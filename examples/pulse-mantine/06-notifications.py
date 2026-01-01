@@ -113,7 +113,8 @@ class NotificationsDemoState(ps.State):
 
 @ps.component
 def NotificationsDemo():
-	state = ps.states(NotificationsDemoState)
+	with ps.init():
+		state = NotificationsDemoState()
 	visible = notifications.getVisible()
 	queued = notifications.getQueued()
 	snapshot = notifications.getState()

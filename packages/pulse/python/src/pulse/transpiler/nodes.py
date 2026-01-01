@@ -322,7 +322,7 @@ class ExprWrapper(Expr):
 	methods to customize behavior.
 	"""
 
-	__slots__ = ("expr",)
+	__slots__: tuple[str, ...] = ("expr",)
 	expr: Expr
 
 	@override
@@ -503,7 +503,7 @@ class Element(Expr):
 	- Expr (Import, Member, etc.): Direct component reference for transpilation
 	"""
 
-	__slots__ = ("tag", "props", "children", "key")
+	__slots__: tuple[str, ...] = ("tag", "props", "children", "key")
 
 	tag: str | Expr
 	props: dict[str, Any] | None
@@ -528,7 +528,7 @@ class Element(Expr):
 				tag_out: list[str] = []
 				tag.emit(tag_out)
 				parent_name = "".join(tag_out)
-			self.children = _flatten_children(
+			self.children = flatten_children(
 				children,
 				parent_name=parent_name,
 				warn_stacklevel=5,
@@ -655,7 +655,7 @@ class Element(Expr):
 
 		# Convert key to sequence of children
 		if isinstance(key, (list, tuple)):
-			children = list(key)
+			children = list(cast(list[Any] | tuple[Any, ...], key))
 		else:
 			children = [key]
 
@@ -734,7 +734,7 @@ class PulseNode:
 		parent_name = self.name
 		if parent_name is None:
 			parent_name = getattr(self.fn, "__name__", "Component")
-		flat = _flatten_children(
+		flat = flatten_children(
 			children_arg,
 			parent_name=parent_name,
 			warn_stacklevel=5,
@@ -751,7 +751,7 @@ class PulseNode:
 # =============================================================================
 # Children normalization helpers
 # =============================================================================
-def _flatten_children(
+def flatten_children(
 	children: Sequence[Node | Iterable[Node]],
 	*,
 	parent_name: str,
@@ -770,11 +770,11 @@ def _flatten_children_prod(children: Sequence[Node | Iterable[Node]]) -> list[No
 	def visit(item: Node | Iterable[Node]) -> None:
 		if isinstance(item, dict):
 			raise TypeError("Dict is not a valid child")
-		if isinstance(item, Iterable) and not isinstance(item, (str, bytes)):
+		if isinstance(item, Iterable) and not isinstance(item, str):
 			for sub in item:
-				visit(sub)  # type: ignore[arg-type]
+				visit(sub)
 		else:
-			flat.append(item)  # type: ignore[arg-type]
+			flat.append(item)
 
 	for child in children:
 		visit(child)
@@ -794,7 +794,7 @@ def _flatten_children_dev(
 	def visit(item: Node | Iterable[Node]) -> None:
 		if isinstance(item, dict):
 			raise TypeError("Dict is not a valid child")
-		if isinstance(item, Iterable) and not isinstance(item, (str, bytes)):
+		if isinstance(item, Iterable) and not isinstance(item, str):
 			missing_key = False
 			for sub in item:
 				if isinstance(sub, PulseNode) and sub.key is None:
@@ -830,7 +830,7 @@ def _flatten_children_dev(
 							+ "Keys must be unique per sibling set."
 						)
 					seen_keys.add(key)
-			flat.append(item)  # type: ignore[arg-type]
+			flat.append(item)
 
 	for child in children:
 		visit(child)

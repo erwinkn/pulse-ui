@@ -31,7 +31,7 @@ from pulse.routing import (
 )
 from pulse.state import State
 from pulse.transpiler.id import next_id
-from pulse.transpiler.nodes import Element, Expr, emit
+from pulse.transpiler.nodes import Expr, Node, emit
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
@@ -67,7 +67,7 @@ class RouteMount:
 	tree: RenderTree
 	effect: Effect | None
 	_pulse_ctx: PulseContext | None
-	element: Element
+	element: Node
 	rendered: bool
 
 	def __init__(

@@ -404,7 +404,7 @@ def analyze_code_object(
 	return effective_globals, all_names
 
 
-def analyze_deps(fn: Callable[..., object]) -> dict[str, Expr]:
+def analyze_deps(fn: Callable[..., Any]) -> dict[str, Expr]:
 	"""Analyze a function and return its dependencies as Expr instances.
 
 	Walks the function's code object to find all referenced names,

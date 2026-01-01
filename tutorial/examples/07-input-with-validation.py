@@ -28,7 +28,8 @@ class ValidatedInputState(ps.State):
 @ps.component
 def ValidatedInput(label: str, validate, onValid):
 	# Warning: the state will not update if `validate` or `onValid` change here!
-	state = ps.states(ValidatedInputState(validate, onValid))
+	with ps.init():
+		state = ValidatedInputState(validate, onValid)
 
 	return ps.div(
 		ps.label(label, className="block mb-1"),
@@ -71,7 +72,8 @@ def validate_email(s: str) -> str | None:
 
 @ps.component
 def ValidatedInputDemo():
-	state = ps.states(DemoState)
+	with ps.init():
+		state = DemoState()
 	return ps.div(className="max-w-xl mx-auto mt-8")[
 		ValidatedInput(label="Email", validate=validate_email, onValid=state.on_valid),
 		ps.div(

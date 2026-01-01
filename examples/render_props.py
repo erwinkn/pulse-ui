@@ -29,7 +29,8 @@ class CounterState(ps.State):
 
 @ps.component
 def RenderPropCounter(label: str):
-	state = ps.states(CounterState(label))
+	with ps.init():
+		state = CounterState(label)
 	return ps.div(className="flex items-center gap-2")[
 		ps.button("−", onClick=state.decrement, className="btn-secondary"),
 		ps.span(
@@ -53,7 +54,8 @@ class SwapDemoState(ps.State):
 
 @ps.component
 def UnkeyedVsKeyedSwapSection():
-	state = ps.states(SwapDemoState)
+	with ps.init():
+		state = SwapDemoState()
 	labels = ["Alpha", "Beta"]
 
 	def render_item(label: str, *, use_key: bool) -> ps.Element:
@@ -117,7 +119,8 @@ def UnkeyedVsKeyedSwapSection():
 
 @ps.component
 def CounterWithControlRenderProps():
-	state = ps.states(CounterState("control"))
+	with ps.init():
+		state = CounterState("control")
 	return ps.div(className="space-y-3")[
 		ps.h2(
 			"Buttons supplied through render props", className="text-xl font-semibold"
@@ -153,7 +156,8 @@ class DynamicRenderPropState(ps.State):
 
 @ps.component
 def DynamicRenderPropUpdates():
-	state = ps.states(DynamicRenderPropState)
+	with ps.init():
+		state = DynamicRenderPropState()
 	label = state.labels[state.index]
 	button_class = "btn-primary" if state.active else "btn-secondary"
 	return ps.div(className="space-y-3")[
@@ -189,7 +193,8 @@ class NestedRenderPropState(ps.State):
 
 @ps.component
 def NestedRenderPropsSection():
-	state = ps.states(NestedRenderPropState)
+	with ps.init():
+		state = NestedRenderPropState()
 
 	def inner(label: str) -> ps.Element:
 		return RenderPropComponent(

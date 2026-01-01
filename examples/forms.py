@@ -86,7 +86,8 @@ def render_submission_list(title: str, entries: list[dict[str, Any]]):
 
 @ps.component
 def FormsPage():
-	state = ps.states(FormLogState)
+	with ps.init():
+		state = FormLogState()
 
 	manual_form = ps.setup(lambda: ps.ManualForm(state.handle_manual))
 	manual_props = manual_form.props()

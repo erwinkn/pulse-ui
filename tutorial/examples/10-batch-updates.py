@@ -22,7 +22,8 @@ class CounterState(ps.State):
 
 @ps.component
 def Counter():
-	state = ps.states(CounterState)
+	with ps.init():
+		state = CounterState()
 
 	return ps.div(
 		className="w-screen h-screen flex flex-col items-center justify-center space-y-4"

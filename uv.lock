@@ -933,7 +933,7 @@ requires-dist = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.52"
+version = "0.1.53"
 source = { editable = "packages/pulse/python" }
 dependencies = [
     { name = "fastapi" },
@@ -991,7 +991,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-mantine"
-version = "0.1.21"
+version = "0.1.22"
 source = { editable = "packages/pulse-mantine/python" }
 dependencies = [
     { name = "pulse-framework" },

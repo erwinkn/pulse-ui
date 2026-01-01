@@ -19,6 +19,8 @@ init:
 	@bun i
 	@echo "Building JS packages..."
 	@bun run build
+	@echo "Installing pre-commit hooks"
+	@uv run prek install
 	@echo "Environment initialized!"
 
 # Linting

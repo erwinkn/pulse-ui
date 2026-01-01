@@ -44,7 +44,7 @@ class ContainerProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("Container", "@mantine/core")
+@ps.react_component(ps.Import("Container", "@mantine/core"))
 def Container(
-	*children: ps.Child, key: str | None = None, **props: Unpack[ContainerProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[ContainerProps]
 ): ...

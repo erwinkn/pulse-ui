@@ -69,7 +69,6 @@ from pulse.middleware import (
 )
 from pulse.plugin import Plugin
 from pulse.proxy import ReactProxy
-from pulse.react_component import ReactComponent, registered_react_components
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree
@@ -208,8 +207,6 @@ class App:
 		for plugin in self.plugins:
 			all_routes.extend(plugin.routes())
 
-		# Auto-add React components to all routes
-		add_react_components(all_routes, registered_react_components())
 		# RouteTree filters routes based on dev flag and environment during construction
 		self.routes = RouteTree(all_routes)
 		self.not_found = not_found
@@ -988,14 +985,3 @@ class App:
 		# We don't want to wait for this to resolve
 		create_task(render.call_api(f"{self.api_prefix}/set-cookies", method="GET"))
 		sess.scheduled_cookie_refresh = True
-
-
-def add_react_components(
-	routes: Sequence[Route | Layout],
-	components: list[ReactComponent[Any]],
-):
-	for route in routes:
-		if route.components is None:
-			route.components = components
-		if route.children:
-			add_react_components(route.children, components)

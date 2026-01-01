@@ -1,1216 +1,1900 @@
 from __future__ import annotations
 
 import ast
+import datetime as dt
+import string
+import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
-from typing import Any, ClassVar, TypeVar, cast, overload, override
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
+from inspect import isfunction, signature
+from typing import (
+	TYPE_CHECKING,
+	Any,
+	Generic,
+	Protocol,
+	TypeAlias,
+	TypeVar,
+	cast,
+	overload,
+	override,
+)
+from typing import Literal as Lit
 
-from pulse.transpiler.context import is_interpreted_mode
-from pulse.transpiler.errors import JSCompilationError
+from pulse.env import env
+from pulse.transpiler.errors import TranspileError
+from pulse.transpiler.vdom import VDOMNode
 
-# Global registry: id(value) -> JSExpr
-# Used by JSExpr.of() to resolve registered Python values
-JSEXPR_REGISTRY: dict[int, JSExpr] = {}
+if TYPE_CHECKING:
+	from pulse.transpiler.transpiler import Transpiler
 
-ALLOWED_BINOPS: dict[type[ast.operator], str] = {
-	ast.Add: "+",
-	ast.Sub: "-",
-	ast.Mult: "*",
-	ast.Div: "/",
-	ast.Mod: "%",
-	ast.Pow: "**",
-}
+_T = TypeVar("_T")
+Primitive: TypeAlias = bool | int | float | str | dt.datetime | None
 
-ALLOWED_UNOPS: dict[type[ast.unaryop], str] = {
-	ast.UAdd: "+",
-	ast.USub: "-",
-	ast.Not: "!",
-}
-
-ALLOWED_CMPOPS: dict[type[ast.cmpop], str] = {
-	ast.Eq: "===",
-	ast.NotEq: "!==",
-	ast.Lt: "<",
-	ast.LtE: "<=",
-	ast.Gt: ">",
-	ast.GtE: ">=",
-}
+_JS_IDENTIFIER_START = set(string.ascii_letters + "_")
+_JS_IDENTIFIER_CONTINUE = set(string.ascii_letters + string.digits + "_")
 
 
-###############################################################################
-# JS AST
-###############################################################################
+def to_js_identifier(name: str) -> str:
+	"""Normalize a string to a JS-compatible identifier."""
+	if not name:
+		return "_"
+	out: list[str] = []
+	for ch in name:
+		out.append(ch if ch in _JS_IDENTIFIER_CONTINUE else "_")
+	if not out or out[0] not in _JS_IDENTIFIER_START:
+		out.insert(0, "_")
+	return "".join(out)
 
 
-class JSNode(ABC):
-	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
+# =============================================================================
+# Global registries
+# =============================================================================
 
-	@abstractmethod
-	def emit(self) -> str:
-		raise NotImplementedError
+# Global registry: id(value) -> Expr
+# Used by Expr.of() to resolve registered Python values
+EXPR_REGISTRY: dict[int, "Expr"] = {}
 
 
-class JSExpr(JSNode, ABC):
-	"""Base class for JavaScript expressions.
+# =============================================================================
+# Base classes
+# =============================================================================
+class Expr(ABC):
+	"""Base class for expression nodes.
 
-	Subclasses can override emit_call, emit_subscript, and emit_getattr to
-	customize how the expression behaves when called, indexed, or accessed.
-	This enables extensibility for things like JSX elements.
+	Provides hooks for custom transpilation behavior:
+	- transpile_call: customize behavior when called as a function
+	- transpile_getattr: customize attribute access
+	- transpile_subscript: customize subscript access
+
+	And serialization for client-side rendering:
+	- render: serialize to dict for client renderer (stub for now)
 	"""
 
-	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
+	__slots__: tuple[str, ...] = ()
 
-	# Set to True for expressions that emit JSX (should not be wrapped in {})
-	is_jsx: ClassVar[bool] = False
+	@abstractmethod
+	def emit(self, out: list[str]) -> None:
+		"""Emit this expression as JavaScript/JSX code into the output buffer."""
 
-	# Set to True for expressions that have primary precedence (identifiers, literals, etc.)
-	# Used by expr_precedence to determine if parenthesization is needed
-	is_primary: ClassVar[bool] = False
+	def precedence(self) -> int:
+		"""Operator precedence (higher = binds tighter). Default: primary (20)."""
+		return 20
 
-	@classmethod
-	def of(cls, value: Any) -> JSExpr:
-		"""Convert a Python value to a JSExpr.
+	# -------------------------------------------------------------------------
+	# Transpilation hooks (override to customize behavior)
+	# -------------------------------------------------------------------------
+
+	def transpile_call(
+		self,
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
+		ctx: Transpiler,
+	) -> Expr:
+		"""Called when this expression is used as a function: expr(args).
+
+		Override to customize call behavior.
+		Default raises - most expressions are not callable.
+
+		Args and kwargs are raw Python `ast.expr` nodes (not yet transpiled).
+		Use ctx.emit_expr() to convert them to Expr as needed.
+		"""
+		if kwargs:
+			raise TranspileError("Keyword arguments not yet supported in v2 transpiler")
+		return Call(self, [ctx.emit_expr(a) for a in args])
+
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+		"""Called when an attribute is accessed: expr.attr.
+
+		Override to customize attribute access.
+		Default returns Member(self, attr).
+		"""
+		return Member(self, attr)
+
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+		"""Called when subscripted: expr[key].
+
+		Override to customize subscript behavior.
+		Default returns Subscript(self, emitted_key).
+		"""
+		if isinstance(key, ast.Tuple):
+			raise TranspileError(
+				"Multiple indices not supported in subscript", node=key
+			)
+		return Subscript(self, ctx.emit_expr(key))
+
+	# -------------------------------------------------------------------------
+	# Serialization for client-side rendering
+	# -------------------------------------------------------------------------
+
+	@abstractmethod
+	def render(self) -> VDOMNode:
+		"""Serialize this expression node for client-side rendering.
+
+		Returns a VDOMNode (primitive or dict) that can be JSON-serialized and
+		evaluated on the client. Override in each concrete Expr subclass.
+
+		Raises TypeError for nodes that cannot be serialized (e.g., Transformer).
+		"""
+
+	# -------------------------------------------------------------------------
+	# Python dunder methods for natural syntax in @javascript functions
+	# These return Expr nodes that represent the operations at transpile time.
+	# -------------------------------------------------------------------------
+
+	def __call__(self, *args: object, **kwargs: object) -> "Call":
+		"""Allow calling Expr objects in Python code.
+
+		Returns a Call expression. Subclasses may override to return more
+		specific types (e.g., Element for JSX components).
+		"""
+		return Call(self, [Expr.of(a) for a in args])
+
+	def __getitem__(self, key: object) -> "Subscript":
+		"""Allow subscript access on Expr objects in Python code.
+
+		Returns a Subscript expression for type checking.
+		"""
+		return Subscript(self, Expr.of(key))
+
+	def __getattr__(self, attr: str) -> "Member":
+		"""Allow attribute access on Expr objects in Python code.
+
+		Returns a Member expression for type checking.
+		"""
+		return Member(self, attr)
+
+	def __add__(self, other: object) -> "Binary":
+		"""Allow + operator on Expr objects."""
+		return Binary(self, "+", Expr.of(other))
+
+	def __sub__(self, other: object) -> "Binary":
+		"""Allow - operator on Expr objects."""
+		return Binary(self, "-", Expr.of(other))
+
+	def __mul__(self, other: object) -> "Binary":
+		"""Allow * operator on Expr objects."""
+		return Binary(self, "*", Expr.of(other))
+
+	def __truediv__(self, other: object) -> "Binary":
+		"""Allow / operator on Expr objects."""
+		return Binary(self, "/", Expr.of(other))
+
+	def __mod__(self, other: object) -> "Binary":
+		"""Allow % operator on Expr objects."""
+		return Binary(self, "%", Expr.of(other))
+
+	def __and__(self, other: object) -> "Binary":
+		"""Allow & operator on Expr objects (maps to &&)."""
+		return Binary(self, "&&", Expr.of(other))
+
+	def __or__(self, other: object) -> "Binary":
+		"""Allow | operator on Expr objects (maps to ||)."""
+		return Binary(self, "||", Expr.of(other))
+
+	def __neg__(self) -> "Unary":
+		"""Allow unary - operator on Expr objects."""
+		return Unary("-", self)
+
+	def __pos__(self) -> "Unary":
+		"""Allow unary + operator on Expr objects."""
+		return Unary("+", self)
+
+	def __invert__(self) -> "Unary":
+		"""Allow ~ operator on Expr objects (maps to !)."""
+		return Unary("!", self)
+
+	# -------------------------------------------------------------------------
+	# Type casting and wrapper methods
+	# -------------------------------------------------------------------------
+
+	def as_(self, typ_: "_T | type[_T]") -> "_T":
+		"""Cast this expression to a type or use as a decorator.
+
+		Usage as decorator:
+			@Import(...).as_
+			def fn(): ...
+
+		Usage for type casting:
+			clsx = Import(...).as_(Callable[[str, ...], str])
+
+		If typ_ is a user-defined callable (function or lambda),
+		wraps the expression in a Signature node that stores the callable's
+		signature for type introspection.
+		"""
+		# Only wrap for user-defined functions (lambdas, def functions)
+		# Skip for types (str, int, etc.) used as type annotations
+		if isfunction(typ_):
+			try:
+				sig = signature(typ_)
+				return cast("_T", Signature(self, sig))
+			except (ValueError, TypeError):
+				# Signature not available (e.g., for built-ins), return self
+				pass
+
+		return cast("_T", self)
+
+	def jsx(self) -> "Jsx":
+		"""Wrap this expression as a JSX component.
+
+		When called in transpiled code, produces Element(tag=self, ...).
+		"""
+		return Jsx(self)
+
+	# -------------------------------------------------------------------------
+	# Registry for Python value -> Expr mapping
+	# -------------------------------------------------------------------------
+
+	@staticmethod
+	def of(value: Any) -> Expr:
+		"""Convert a Python value to an Expr.
 
 		Resolution order:
-		1. Already a JSExpr: returned as-is
-		2. Registered in JSEXPR_REGISTRY: return the registered expr
-		3. Primitives: str->JSString, int/float->JSNumber, bool->JSBoolean, None->JSNull
-		4. Collections: list/tuple->JSArray, dict->JSObjectExpr (recursively converted)
+		1. Already an Expr: returned as-is
+		2. Registered in EXPR_REGISTRY: return the registered expr
+		3. Primitives: str/int/float -> Literal, bool -> Literal, None -> Literal(None)
+		4. Collections: list/tuple -> Array, dict -> Object (recursively converted)
+		5. set -> Call(Identifier("Set"), [Array(...)])
+
+		Raises TypeError for unconvertible values.
 		"""
-		# Already a JSExpr
-		if isinstance(value, JSExpr):
+		# Already an Expr
+		if isinstance(value, Expr):
 			return value
 
 		# Check registry (for modules, functions, etc.)
-		if (expr := JSEXPR_REGISTRY.get(id(value))) is not None:
+		if (expr := EXPR_REGISTRY.get(id(value))) is not None:
 			return expr
 
-		# Primitives
-		if isinstance(value, str):
-			return JSString(value)
-		if isinstance(
-			value, bool
-		):  # Must check before int since bool is subclass of int
-			return JSBoolean(value)
-		if isinstance(value, (int, float)):
-			return JSNumber(value)
+		# Primitives - must check bool before int since bool is subclass of int
+		if isinstance(value, bool):
+			return Literal(value)
+		if isinstance(value, (int, float, str)):
+			return Literal(value)
 		if value is None:
-			return JSNull()
+			return Literal(None)
 
 		# Collections
 		if isinstance(value, (list, tuple)):
-			return JSArray([cls.of(v) for v in value])
+			return Array([Expr.of(v) for v in value])
 		if isinstance(value, dict):
-			props = [JSProp(JSString(str(k)), cls.of(v)) for k, v in value.items()]  # pyright: ignore[reportUnknownArgumentType]
-			return JSObjectExpr(props)
+			props = [(str(k), Expr.of(v)) for k, v in value.items()]  # pyright: ignore[reportUnknownArgumentType]
+			return Object(props)
+		if isinstance(value, set):
+			# new Set([...])
+			return New(Identifier("Set"), [Array([Expr.of(v) for v in value])])
 
-		raise TypeError(f"Cannot convert {type(value).__name__} to JSExpr")
+		raise TypeError(f"Cannot convert {type(value).__name__} to Expr")
 
-	@classmethod
-	def register(cls, value: Any, expr: JSExpr | Callable[..., JSExpr]) -> None:
-		"""Register a Python value for conversion via JSExpr.of().
+	@staticmethod
+	def register(value: Any, expr: Expr | Callable[..., Expr]) -> None:
+		"""Register a Python value for conversion via Expr.of().
 
 		Args:
 			value: The Python object to register (function, constant, etc.)
-			expr: Either a JSExpr or a Callable[..., JSExpr] (will be wrapped in JSTransformer)
+			expr: Either an Expr or a Callable[..., Expr] (will be wrapped in Transformer)
 		"""
-		if callable(expr) and not isinstance(expr, JSExpr):
-			expr = JSTransformer(expr)
-		JSEXPR_REGISTRY[id(value)] = expr
-
-	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
-		"""Called when this expression is used as a function: expr(args).
-
-		Override to customize call behavior. Default converts args/kwargs to
-		JSExpr via JSExpr.of() and emits JSCall(self, args).
-		Rejects keyword arguments by default.
-
-		Args receive raw Python values. Use JSExpr.of() to convert as needed.
-
-		The kwargs dict maps prop names to values:
-		- "propName" -> value for named kwargs
-		- "$spread{N}" -> JSSpread(expr) for **spread kwargs (already JSExpr)
-
-		Dict order is preserved, so iteration order matches source order.
-		"""
-		if kwargs:
-			raise JSCompilationError(
-				"Keyword arguments not supported in default function call"
-			)
-		return JSCall(self, [JSExpr.of(a) for a in args])
-
-	def emit_subscript(self, indices: list[Any]) -> JSExpr:
-		"""Called when this expression is indexed: expr[a, b, c].
-
-		Override to customize subscript behavior. Default requires single index
-		and emits JSSubscript(self, index).
-
-		Args receive raw Python values. Use JSExpr.of() to convert as needed.
-		"""
-		if len(indices) != 1:
-			raise JSCompilationError("Multiple indices not supported in subscript")
-		return JSSubscript(self, JSExpr.of(indices[0]))
-
-	def emit_getattr(self, attr: str) -> JSExpr:
-		"""Called when an attribute is accessed: expr.attr.
-
-		Override to customize attribute access. Default emits JSMember(self, attr).
-		"""
-		return JSMember(self, attr)
-
-	def __getattr__(self, attr: str) -> JSExpr:
-		"""Support attribute access at Python runtime.
-
-		Allows: expr.attr where expr is any JSExpr.
-		Delegates to emit_getattr for transpilation.
-		"""
-		return self.emit_getattr(attr)
-
-	def __call__(self, *args: Any, **kwargs: Any) -> JSExpr:
-		"""Support function calls at Python runtime.
-
-		Allows: expr(*args, **kwargs) where expr is any JSExpr.
-		Delegates to emit_call for transpilation.
-		"""
-		return self.emit_call(list(args), kwargs)
-
-	def __getitem__(self, key: Any) -> JSExpr:
-		"""Support subscript access at Python runtime.
-
-		Allows: expr[key] where expr is any JSExpr.
-		Delegates to emit_subscript for transpilation.
-		"""
-		return self.emit_subscript([key])
+		if callable(expr) and not isinstance(expr, Expr):
+			expr = Transformer(expr)
+		EXPR_REGISTRY[id(value)] = expr
 
 
-class JSStmt(JSNode, ABC):
-	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
+class Stmt(ABC):
+	"""Base class for statement nodes."""
+
+	__slots__: tuple[str, ...] = ()
+
+	@abstractmethod
+	def emit(self, out: list[str]) -> None:
+		"""Emit this statement as JavaScript code into the output buffer."""
 
 
-class JSIdentifier(JSExpr):
-	__slots__ = ("name",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-	name: str
+# =============================================================================
+# Data Nodes
+# =============================================================================
 
-	def __init__(self, name: str):
-		self.name = name
+
+class ExprWrapper(Expr):
+	"""Base class for Expr wrappers that delegate to an underlying expression.
+
+	Subclasses must define an `expr` attribute (via __slots__ or dataclass).
+	All Expr methods delegate to self.expr by default. Override specific
+	methods to customize behavior.
+	"""
+
+	__slots__: tuple[str, ...] = ("expr",)
+	expr: Expr
 
 	@override
-	def emit(self) -> str:
-		return self.name
-
-
-class JSString(JSExpr):
-	__slots__ = ("value",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-	value: str
-
-	def __init__(self, value: str):
-		self.value = value
+	def emit(self, out: list[str]) -> None:
+		self.expr.emit(out)
 
 	@override
-	def emit(self) -> str:
-		s = self.value
-		# Escape for double-quoted JS string literals
-		s = (
-			s.replace("\\", "\\\\")
-			.replace('"', '\\"')
-			.replace("\n", "\\n")
-			.replace("\r", "\\r")
-			.replace("\t", "\\t")
-			.replace("\b", "\\b")
-			.replace("\f", "\\f")
-			.replace("\v", "\\v")
-			.replace("\x00", "\\x00")
-			.replace("\u2028", "\\u2028")
-			.replace("\u2029", "\\u2029")
-		)
-		return f'"{s}"'
-
-
-class JSNumber(JSExpr):
-	__slots__ = ("value",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-	value: int | float
-
-	def __init__(self, value: int | float):
-		self.value = value
+	def render(self) -> VDOMNode:
+		return self.expr.render()
 
 	@override
-	def emit(self) -> str:
-		return str(self.value)
-
-
-class JSBoolean(JSExpr):
-	__slots__ = ("value",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-	value: bool
-
-	def __init__(self, value: bool):
-		self.value = value
+	def precedence(self) -> int:
+		return self.expr.precedence()
 
 	@override
-	def emit(self) -> str:
-		return "true" if self.value else "false"
-
-
-class JSNull(JSExpr):
-	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-
-	@override
-	def emit(self) -> str:
-		return "null"
-
-
-class JSUndefined(JSExpr):
-	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
+	def transpile_call(
+		self,
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
+		ctx: Transpiler,
+	) -> Expr:
+		return self.expr.transpile_call(args, kwargs, ctx)
 
 	@override
-	def emit(self) -> str:
-		return "undefined"
-
-
-class JSArray(JSExpr):
-	__slots__ = ("elements",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-	elements: Sequence[JSExpr]
-
-	def __init__(self, elements: Sequence[JSExpr]):
-		self.elements = elements
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+		return self.expr.transpile_getattr(attr, ctx)
 
 	@override
-	def emit(self) -> str:
-		inner = ", ".join(e.emit() for e in self.elements)
-		return f"[{inner}]"
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+		return self.expr.transpile_subscript(key, ctx)
+
+	@override
+	def __call__(self, *args: object, **kwargs: object) -> Expr:  # pyright: ignore[reportIncompatibleMethodOverride]
+		return self.expr(*args, **kwargs)
+
+	@override
+	def __getitem__(self, key: object) -> Expr:  # pyright: ignore[reportIncompatibleMethodOverride]
+		return self.expr[key]
+
+	@override
+	def __getattr__(self, attr: str) -> Expr:  # pyright: ignore[reportIncompatibleMethodOverride]
+		return getattr(self.expr, attr)
 
 
-class JSSpread(JSExpr):
-	__slots__ = ("expr",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	expr: JSExpr
+@dataclass(slots=True, init=False)
+class Jsx(ExprWrapper):
+	"""JSX wrapper that makes any Expr callable as a component.
 
-	def __init__(self, expr: JSExpr):
+	When called in transpiled code, produces Element(tag=expr, ...).
+	This enables patterns like `Jsx(Member(AppShell, "Header"))` to emit
+	`<AppShell.Header ... />`.
+
+	Example:
+		app_shell = Import("AppShell", "@mantine/core")
+		Header = Jsx(Member(app_shell, "Header"))
+		# In @javascript:
+		# Header(height=60) -> <AppShell_1.Header height={60} />
+	"""
+
+	expr: Expr
+	id: str
+
+	def __init__(self, expr: Expr) -> None:
+		from pulse.transpiler.id import next_id
+
 		self.expr = expr
+		self.id = next_id()
 
 	@override
-	def emit(self) -> str:
-		return f"...{self.expr.emit()}"
+	def transpile_call(
+		self,
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
+		ctx: "Transpiler",
+	) -> Expr:
+		"""Transpile a call to this JSX wrapper into an Element.
 
+		Positional args become children, keyword args become props.
+		The `key` kwarg is extracted specially.
+		"""
+		children: list[Node] = [ctx.emit_expr(a) for a in args]
 
-class JSProp(JSExpr):
-	__slots__ = ("key", "value")  # pyright: ignore[reportUnannotatedClassAttribute]
-	key: JSString
-	value: JSExpr
+		props: dict[str, Prop] = {}
+		key: str | Expr | None = None
+		for k, v in kwargs.items():
+			v = ctx.emit_expr(v)
+			if k == "key":
+				# Accept any expression as key for transpilation
+				if isinstance(v, Literal) and isinstance(v.value, str):
+					key = v.value  # Optimize string literals
+				else:
+					key = v  # Keep as expression
+			else:
+				props[k] = v
 
-	def __init__(self, key: JSString, value: JSExpr):
-		self.key = key
-		self.value = value
-
-	@override
-	def emit(self) -> str:
-		return f"{self.key.emit()}: {self.value.emit()}"
-
-
-class JSComputedProp(JSExpr):
-	__slots__ = ("key", "value")  # pyright: ignore[reportUnannotatedClassAttribute]
-	key: JSExpr
-	value: JSExpr
-
-	def __init__(self, key: JSExpr, value: JSExpr):
-		self.key = key
-		self.value = value
-
-	@override
-	def emit(self) -> str:
-		return f"[{self.key.emit()}]: {self.value.emit()}"
-
-
-class JSObjectExpr(JSExpr):
-	__slots__ = ("props",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-	props: Sequence[JSProp | JSComputedProp | JSSpread]
-
-	def __init__(self, props: Sequence[JSProp | JSComputedProp | JSSpread]):
-		self.props = props
-
-	@override
-	def emit(self) -> str:
-		inner = ", ".join(p.emit() for p in self.props)
-		return "{" + inner + "}"
-
-
-class JSUnary(JSExpr):
-	__slots__ = ("op", "operand")  # pyright: ignore[reportUnannotatedClassAttribute]
-	op: str  # '-', '+', '!', 'typeof', 'await'
-	operand: JSExpr
-
-	def __init__(self, op: str, operand: JSExpr):
-		self.op = op
-		self.operand = operand
-
-	@override
-	def emit(self) -> str:
-		operand_code = _emit_child_for_binary_like(
-			self.operand, parent_op=self.op, side="unary"
+		return Element(
+			tag=self.expr,
+			props=props if props else None,
+			children=children if children else None,
+			key=key,
 		)
-		if self.op == "typeof":
-			return f"typeof {operand_code}"
-		return f"{self.op}{operand_code}"
-
-
-class JSAwait(JSExpr):
-	__slots__ = ("operand",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	operand: JSExpr
-
-	def __init__(self, operand: JSExpr):
-		self.operand = operand
 
 	@override
-	def emit(self) -> str:
-		operand_code = _emit_child_for_binary_like(
-			self.operand, parent_op="await", side="unary"
+	def __call__(self, *args: Any, **kwargs: Any) -> Element:
+		"""Allow calling Jsx in Python code.
+
+		Supports two usage patterns:
+		1. Decorator: @Jsx(expr) def Component(...): ...
+		2. Call: Jsx(expr)(props, children) -> Element
+		"""
+
+		# Normal call: build Element
+		props: dict[str, object] = {}
+		key: str | None = None
+		children: list[Node] = list(args)
+
+		for k, v in kwargs.items():
+			if k == "key":
+				if not isinstance(v, str):
+					raise ValueError("key must be a string")
+				key = v
+			else:
+				props[k] = v
+
+		return Element(
+			tag=self.expr,
+			props=props if props else None,
+			children=children if children else None,
+			key=key,
 		)
-		return f"await {operand_code}"
 
 
-class JSBinary(JSExpr):
-	__slots__ = ("left", "op", "right")  # pyright: ignore[reportUnannotatedClassAttribute]
-	left: JSExpr
-	op: str
-	right: JSExpr
+@dataclass(slots=True)
+class Signature(ExprWrapper):
+	"""Wraps an Expr with signature information for type checking.
 
-	def __init__(self, left: JSExpr, op: str, right: JSExpr):
-		self.left = left
-		self.op = op
-		self.right = right
+	When you call expr.as_(callable_type), this creates a Signature wrapper
+	that stores the callable's signature for introspection, while delegating
+	all other behavior to the wrapped expression.
 
-	@override
-	def emit(self) -> str:
-		# Left child
-		force_left_paren = False
-		# Special JS grammar rule: left operand of ** cannot be a unary +/- without parentheses
-		if (
-			self.op == "**"
-			and isinstance(self.left, JSUnary)
-			and self.left.op in {"-", "+"}
-		):
-			force_left_paren = True
-		left_code = _emit_child_for_binary_like(
-			self.left,
-			parent_op=self.op,
-			side="left",
-			force_paren=force_left_paren,
-		)
-		# Right child
-		right_code = _emit_child_for_binary_like(
-			self.right, parent_op=self.op, side="right"
-		)
-		return f"{left_code} {self.op} {right_code}"
+	Example:
+		button = Import("Button", "@mantine/core")
+		typed_button = Signature(button, signature_of_callable)
+	"""
+
+	expr: Expr
+	sig: Any  # inspect.Signature, but use Any for type compatibility
 
 
-class JSLogicalChain(JSExpr):
-	__slots__ = ("op", "values")  # pyright: ignore[reportUnannotatedClassAttribute]
-	op: str  # '&&' or '||'
-	values: Sequence[JSExpr]
+@dataclass(slots=True)
+class Value(Expr):
+	"""Wraps a non-primitive Python value for pass-through serialization.
 
-	def __init__(self, op: str, values: Sequence[JSExpr]):
-		self.op = op
-		self.values = values
+	Use cases:
+	- Complex prop values: options={"a": 1, "b": 2}
+	- Server-computed data passed to client components
+	- Any value that doesn't need expression semantics
+	"""
+
+	value: Any
 
 	@override
-	def emit(self) -> str:
-		if len(self.values) == 1:
-			return self.values[0].emit()
-		parts: list[str] = []
-		for v in self.values:
-			# No strict left/right in chains, but treat as middle
-			code = _emit_child_for_binary_like(v, parent_op=self.op, side="chain")
-			parts.append(code)
-		return f" {self.op} ".join(parts)
-
-
-class JSTertiary(JSExpr):
-	__slots__ = ("test", "if_true", "if_false")  # pyright: ignore[reportUnannotatedClassAttribute]
-	test: JSExpr
-	if_true: JSExpr
-	if_false: JSExpr
-
-	def __init__(self, test: JSExpr, if_true: JSExpr, if_false: JSExpr):
-		self.test = test
-		self.if_true = if_true
-		self.if_false = if_false
+	def emit(self, out: list[str]) -> None:
+		_emit_value(self.value, out)
 
 	@override
-	def emit(self) -> str:
-		return f"{self.test.emit()} ? {self.if_true.emit()} : {self.if_false.emit()}"
+	def render(self) -> VDOMNode:
+		raise TypeError("Value cannot be rendered as VDOMExpr; use coerce_json instead")
 
 
-class JSFunctionDef(JSExpr):
-	__slots__ = ("params", "body", "name", "is_async")  # pyright: ignore[reportUnannotatedClassAttribute]
-	params: Sequence[str]
-	body: Sequence[JSStmt]
-	name: str | None
-	is_async: bool
+class Element(Expr):
+	"""A React element: built-in tag, fragment, or client component.
+
+	Tag conventions:
+	- "" (empty string): Fragment
+	- "div", "span", etc.: HTML element
+	- "$$ComponentId": Client component (registered in JS registry)
+	- Expr (Import, Member, etc.): Direct component reference for transpilation
+	"""
+
+	__slots__: tuple[str, ...] = ("tag", "props", "children", "key")
+
+	tag: str | Expr
+	props: dict[str, Any] | None
+	children: Sequence[Node] | None
+	key: str | Expr | None
 
 	def __init__(
 		self,
-		params: Sequence[str],
-		body: Sequence[JSStmt],
-		name: str | None = None,
-		is_async: bool = False,
-	):
-		self.params = params
-		self.body = body
-		self.name = name
-		self.is_async = is_async
-
-	@override
-	def emit(self) -> str:
-		params = ", ".join(self.params)
-		body_code = "\n".join(s.emit() for s in self.body)
-		prefix = "async " if self.is_async else ""
-		if self.name:
-			return f"{prefix}function {self.name}({params}){{\n{body_code}\n}}"
-		return f"{prefix}function({params}){{\n{body_code}\n}}"
-
-
-class JSTemplate(JSExpr):
-	__slots__ = ("parts",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-	parts: Sequence[str | JSExpr]
-
-	def __init__(self, parts: Sequence[str | JSExpr]):
-		# parts are either raw strings (literal text) or JSExpr instances which are
-		# emitted inside ${...}
-		self.parts = parts
-
-	@override
-	def emit(self) -> str:
-		out: list[str] = ["`"]
-		for p in self.parts:
-			if isinstance(p, str):
-				out.append(
-					p.replace("\\", "\\\\")
-					.replace("`", "\\`")
-					.replace("${", "\\${")
-					.replace("\n", "\\n")
-					.replace("\r", "\\r")
-					.replace("\t", "\\t")
-					.replace("\b", "\\b")
-					.replace("\f", "\\f")
-					.replace("\v", "\\v")
-					.replace("\x00", "\\x00")
-					.replace("\u2028", "\\u2028")
-					.replace("\u2029", "\\u2029")
-				)
+		tag: str | Expr,
+		props: dict[str, Any] | None = None,
+		children: Sequence[Node] | None = None,
+		key: str | Expr | None = None,
+	) -> None:
+		self.tag = tag
+		self.props = props
+		if children is None:
+			self.children = None
+		else:
+			if isinstance(tag, str):
+				parent_name = tag[2:] if tag.startswith("$$") else tag
 			else:
-				out.append("${" + p.emit() + "}")
-		out.append("`")
-		return "".join(out)
+				tag_out: list[str] = []
+				tag.emit(tag_out)
+				parent_name = "".join(tag_out)
+			self.children = flatten_children(
+				children,
+				parent_name=parent_name,
+				warn_stacklevel=5,
+			)
+		self.key = key
+		if self.key is None and self.props:
+			self.key = self.props.pop("key", None)
 
-
-class JSMember(JSExpr):
-	__slots__ = ("obj", "prop")  # pyright: ignore[reportUnannotatedClassAttribute]
-	obj: JSExpr
-	prop: str
-
-	def __init__(self, obj: JSExpr, prop: str):
-		self.obj = obj
-		self.prop = prop
+	def _emit_key(self, out: list[str]) -> None:
+		"""Emit key prop (string or expression)."""
+		if self.key is None:
+			return
+		if isinstance(self.key, str):
+			out.append('key="')
+			out.append(_escape_jsx_attr(self.key))
+			out.append('"')
+		else:
+			# Expression key: key={expr}
+			out.append("key={")
+			self.key.emit(out)
+			out.append("}")
 
 	@override
-	def emit(self) -> str:
-		obj_code = _emit_child_for_primary(self.obj)
-		return f"{obj_code}.{self.prop}"
+	def emit(self, out: list[str]) -> None:
+		# Fragment (only for string tags)
+		if self.tag == "":
+			if self.key is not None:
+				# Fragment with key needs explicit Fragment component
+				out.append("<Fragment ")
+				self._emit_key(out)
+				out.append(">")
+				for c in self.children or []:
+					_emit_jsx_child(c, out)
+				out.append("</Fragment>")
+			else:
+				out.append("<>")
+				for c in self.children or []:
+					_emit_jsx_child(c, out)
+				out.append("</>")
+			return
+
+		# Resolve tag - either emit Expr or use string (strip $$ prefix)
+		tag_out: list[str] = []
+		if isinstance(self.tag, Expr):
+			self.tag.emit(tag_out)
+		else:
+			tag_out.append(self.tag[2:] if self.tag.startswith("$$") else self.tag)
+		tag_str = "".join(tag_out)
+
+		# Build props into a separate buffer to check if empty
+		props_out: list[str] = []
+		if self.key is not None:
+			self._emit_key(props_out)
+		if self.props:
+			for name, value in self.props.items():
+				if props_out:
+					props_out.append(" ")
+				_emit_jsx_prop(name, value, props_out)
+
+		# Build children into a separate buffer to check if empty
+		children_out: list[str] = []
+		for c in self.children or []:
+			_emit_jsx_child(c, children_out)
+
+		# Self-closing if no children
+		if not children_out:
+			out.append("<")
+			out.append(tag_str)
+			if props_out:
+				out.append(" ")
+				out.extend(props_out)
+			out.append(" />")
+			return
+
+		# Open tag
+		out.append("<")
+		out.append(tag_str)
+		if props_out:
+			out.append(" ")
+			out.extend(props_out)
+		out.append(">")
+		# Children
+		out.extend(children_out)
+		# Close tag
+		out.append("</")
+		out.append(tag_str)
+		out.append(">")
 
 	@override
-	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
-		"""Called when this member is used as a function: obj.prop(args).
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+		"""Transpile subscript as adding children to this element.
 
-		Checks for Python builtin method transpilation (e.g., str.upper -> toUpperCase),
-		then falls back to regular JSMemberCall.
+		Handles both single children and tuple of children.
 		"""
-		if kwargs:
-			raise JSCompilationError("Keyword arguments not supported in method call")
-		# Convert args to JSExpr
-		js_args = [JSExpr.of(a) for a in args]
-		# Check for Python builtin method transpilation (late import to avoid cycle)
-		from pulse.transpiler.builtins import emit_method
+		if self.children:
+			raise TranspileError(
+				f"Element '{self.tag}' already has children; cannot add more via subscript"
+			)
 
-		result = emit_method(self.obj, self.prop, js_args)
-		if result is not None:
-			return result
-		return JSMemberCall(self.obj, self.prop, js_args)
+		# Convert key to list of children
+		if isinstance(key, ast.Tuple):
+			children = [ctx.emit_expr(e) for e in key.elts]
+		else:
+			children = [ctx.emit_expr(key)]
 
-
-class JSSubscript(JSExpr):
-	__slots__ = ("obj", "index")  # pyright: ignore[reportUnannotatedClassAttribute]
-	obj: JSExpr
-	index: JSExpr
-
-	def __init__(self, obj: JSExpr, index: JSExpr):
-		self.obj = obj
-		self.index = index
+		return Element(
+			tag=self.tag,
+			props=self.props,
+			children=children,
+			key=self.key,
+		)
 
 	@override
-	def emit(self) -> str:
-		obj_code = _emit_child_for_primary(self.obj)
-		return f"{obj_code}[{self.index.emit()}]"
+	def __getitem__(self, key: Any) -> Element:  # pyright: ignore[reportIncompatibleMethodOverride]
+		"""Return new Element with children set via subscript.
 
+		Raises if this element already has children.
+		Accepts a single child or a Sequence of children.
+		"""
+		if self.children:
+			raise ValueError(
+				f"Element '{self.tag}' already has children; cannot add more via subscript"
+			)
 
-class JSCall(JSExpr):
-	__slots__ = ("callee", "args")  # pyright: ignore[reportUnannotatedClassAttribute]
-	callee: JSExpr  # typically JSIdentifier
-	args: Sequence[JSExpr]
+		# Convert key to sequence of children
+		if isinstance(key, (list, tuple)):
+			children = list(cast(list[Any] | tuple[Any, ...], key))
+		else:
+			children = [key]
 
-	def __init__(self, callee: JSExpr, args: Sequence[JSExpr]):
-		self.callee = callee
-		self.args = args
+		return Element(
+			tag=self.tag,
+			props=self.props,
+			children=children,
+			key=self.key,
+		)
 
-	@override
-	def emit(self) -> str:
-		fn = _emit_child_for_primary(self.callee)
-		return f"{fn}({', '.join(a.emit() for a in self.args)})"
+	def with_children(self, children: Sequence[Node]) -> Element:
+		"""Return new Element with children set.
 
-
-class JSMemberCall(JSExpr):
-	__slots__ = ("obj", "method", "args")  # pyright: ignore[reportUnannotatedClassAttribute]
-	obj: JSExpr
-	method: str
-	args: Sequence[JSExpr]
-
-	def __init__(self, obj: JSExpr, method: str, args: Sequence[JSExpr]):
-		self.obj = obj
-		self.method = method
-		self.args = args
-
-	@override
-	def emit(self) -> str:
-		obj_code = _emit_child_for_primary(self.obj)
-		return f"{obj_code}.{self.method}({', '.join(a.emit() for a in self.args)})"
-
-
-class JSNew(JSExpr):
-	__slots__ = ("ctor", "args")  # pyright: ignore[reportUnannotatedClassAttribute]
-	ctor: JSExpr
-	args: Sequence[JSExpr]
-
-	def __init__(self, ctor: JSExpr, args: Sequence[JSExpr]):
-		self.ctor = ctor
-		self.args = args
+		Raises if this element already has children.
+		"""
+		if self.children:
+			raise ValueError(
+				f"Element '{self.tag}' already has children; cannot add more via subscript"
+			)
+		return Element(
+			tag=self.tag,
+			props=self.props,
+			children=list(children),
+			key=self.key,
+		)
 
 	@override
-	def emit(self) -> str:
-		ctor_code = _emit_child_for_primary(self.ctor)
-		return f"new {ctor_code}({', '.join(a.emit() for a in self.args)})"
+	def render(self) -> VDOMNode:
+		"""Element rendering is handled by Renderer.render_node(), not render().
+
+		This method validates render-time constraints and raises TypeError
+		because Element produces VDOMElement, not VDOMExpr.
+		"""
+		# Validate key is string or numeric (not arbitrary Expr) during rendering
+		if self.key is not None and not isinstance(self.key, (str, int)):
+			raise TypeError(
+				f"Element key must be a string or int for rendering, got {type(self.key).__name__}. "
+				+ "Expression keys are only valid during transpilation (emit)."
+			)
+		raise TypeError(
+			"Element cannot be rendered as VDOMExpr; use Renderer.render_node() instead"
+		)
 
 
-class JSArrowFunction(JSExpr):
-	__slots__ = ("params_code", "body")  # pyright: ignore[reportUnannotatedClassAttribute]
-	params_code: str  # already formatted e.g. 'x' or '(a, b)' or '([k, v])'
-	body: JSExpr | JSBlock
+@dataclass(slots=True)
+class PulseNode:
+	"""A Pulse server-side component instance.
 
-	def __init__(self, params_code: str, body: JSExpr | JSBlock):
-		self.params_code = params_code
-		self.body = body
-
-	@override
-	def emit(self) -> str:
-		return f"{self.params_code} => {self.body.emit()}"
-
-
-class JSComma(JSExpr):
-	__slots__ = ("values",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	values: Sequence[JSExpr]
-
-	def __init__(self, values: Sequence[JSExpr]):
-		self.values = values
-
-	@override
-	def emit(self) -> str:
-		# Always wrap comma expressions in parentheses to avoid precedence surprises
-		inner = ", ".join(v.emit() for v in self.values)
-		return f"({inner})"
-
-
-class JSTransformer(JSExpr):
-	"""JSExpr that wraps a function transforming JSExpr args to JSExpr output.
-
-	Generalizes the pattern of call-only expressions. The wrapped function
-	receives positional and keyword JSExpr arguments and returns a JSExpr.
-
-	Example:
-		emit_len = JSTransformer(lambda x: JSMember(x, "length"), name="len")
-		# When called: emit_len.emit_call([some_expr], {}) -> JSMember(some_expr, "length")
+	During rendering, PulseNode is called and replaced by its returned tree.
+	Can only appear in VDOM context (render path), never in transpiled code.
 	"""
 
-	__slots__ = ("fn", "name")  # pyright: ignore[reportUnannotatedClassAttribute]
-	fn: Callable[..., JSExpr]
-	name: str  # Optional name for error messages
+	fn: Any  # Callable[..., Node]
+	args: tuple[Any, ...] = ()
+	kwargs: dict[str, Any] = field(default_factory=dict)
+	key: str | None = None
+	name: str | None = None  # Optional component name for debug messages.
+	# Renderer state (mutable, set during render)
+	hooks: Any = None  # HookContext
+	contents: Node | None = None
 
-	def __init__(self, fn: Callable[..., JSExpr], name: str = ""):
-		self.fn = fn
-		self.name = name
+	def emit(self, out: list[str]) -> None:
+		fn_name = getattr(self.fn, "__name__", "unknown")
+		raise TypeError(
+			f"Cannot transpile PulseNode '{fn_name}'. "
+			+ "Server components must be rendered, not transpiled."
+		)
+
+	def __getitem__(self, children_arg: "Node | tuple[Node, ...]"):
+		if self.args:
+			raise ValueError(
+				"PulseNode already received positional args; pass children in the call or via brackets, not both."
+			)
+		if not isinstance(children_arg, tuple):
+			children_arg = (children_arg,)
+		parent_name = self.name
+		if parent_name is None:
+			parent_name = getattr(self.fn, "__name__", "Component")
+		flat = flatten_children(
+			children_arg,
+			parent_name=parent_name,
+			warn_stacklevel=5,
+		)
+		return PulseNode(
+			fn=self.fn,
+			args=tuple(flat),
+			kwargs=self.kwargs,
+			key=self.key,
+			name=self.name,
+		)
+
+
+# =============================================================================
+# Children normalization helpers
+# =============================================================================
+def flatten_children(
+	children: Sequence[Node | Iterable[Node]],
+	*,
+	parent_name: str,
+	warn_stacklevel: int = 5,
+) -> list[Node]:
+	if env.pulse_env == "dev":
+		return _flatten_children_dev(
+			children, parent_name=parent_name, warn_stacklevel=warn_stacklevel
+		)
+	return _flatten_children_prod(children)
+
+
+def _flatten_children_prod(children: Sequence[Node | Iterable[Node]]) -> list[Node]:
+	flat: list[Node] = []
+
+	def visit(item: Node | Iterable[Node]) -> None:
+		if isinstance(item, dict):
+			raise TypeError("Dict is not a valid child")
+		if isinstance(item, Iterable) and not isinstance(item, str):
+			for sub in item:
+				visit(sub)
+		else:
+			flat.append(item)
+
+	for child in children:
+		visit(child)
+
+	return flat
+
+
+def _flatten_children_dev(
+	children: Sequence[Node | Iterable[Node]],
+	*,
+	parent_name: str,
+	warn_stacklevel: int = 5,
+) -> list[Node]:
+	flat: list[Node] = []
+	seen_keys: set[str] = set()
+
+	def visit(item: Node | Iterable[Node]) -> None:
+		if isinstance(item, dict):
+			raise TypeError("Dict is not a valid child")
+		if isinstance(item, Iterable) and not isinstance(item, str):
+			missing_key = False
+			for sub in item:
+				if isinstance(sub, PulseNode) and sub.key is None:
+					missing_key = True
+				if isinstance(sub, Element) and _normalize_key(sub.key) is None:
+					missing_key = True
+				visit(sub)  # type: ignore[arg-type]
+			if missing_key:
+				clean_name = clean_element_name(parent_name)
+				warnings.warn(
+					(
+						f"[Pulse] Iterable children of {clean_name} contain elements without 'key'. "
+						"Add a stable 'key' to each element inside iterables to improve reconciliation."
+					),
+					stacklevel=warn_stacklevel,
+				)
+		else:
+			if isinstance(item, PulseNode) and item.key is not None:
+				if item.key in seen_keys:
+					clean_name = clean_element_name(parent_name)
+					raise ValueError(
+						f"[Pulse] Duplicate key '{item.key}' found among children of {clean_name}. "
+						+ "Keys must be unique per sibling set."
+					)
+				seen_keys.add(item.key)
+			if isinstance(item, Element):
+				key = _normalize_key(item.key)
+				if key is not None:
+					if key in seen_keys:
+						clean_name = clean_element_name(parent_name)
+						raise ValueError(
+							f"[Pulse] Duplicate key '{key}' found among children of {clean_name}. "
+							+ "Keys must be unique per sibling set."
+						)
+					seen_keys.add(key)
+			flat.append(item)
+
+	for child in children:
+		visit(child)
+
+	return flat
+
+
+def clean_element_name(parent_name: str) -> str:
+	if parent_name.startswith("<") and parent_name.endswith(">"):
+		return parent_name
+	return f"<{parent_name}>"
+
+
+def _normalize_key(key: object | None) -> str | None:
+	if isinstance(key, Literal):
+		return key.value if isinstance(key.value, str) else None
+	return key if isinstance(key, str) else None
+
+
+# =============================================================================
+# Expression Nodes
+# =============================================================================
+
+
+@dataclass(slots=True)
+class Identifier(Expr):
+	"""JS identifier: x, foo, myFunc"""
+
+	name: str
 
 	@override
-	def emit(self) -> str:
-		label = self.name or "JSTransformer"
-		raise JSCompilationError(f"{label} cannot be emitted directly - must be called")
+	def emit(self, out: list[str]) -> None:
+		out.append(self.name)
 
 	@override
-	def emit_call(self, args: list[Any], kwargs: dict[str, Any]) -> JSExpr:
-		# Pass raw args to the transformer function - it decides what to convert
+	def render(self) -> VDOMNode:
+		return {"t": "id", "name": self.name}
+
+
+@dataclass(slots=True)
+class Literal(Expr):
+	"""JS literal: 42, "hello", true, null"""
+
+	value: int | float | str | bool | None
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		if self.value is None:
+			out.append("null")
+		elif isinstance(self.value, bool):
+			out.append("true" if self.value else "false")
+		elif isinstance(self.value, str):
+			out.append('"')
+			out.append(_escape_string(self.value))
+			out.append('"')
+		else:
+			out.append(str(self.value))
+
+	@override
+	def render(self) -> VDOMNode:
+		return self.value
+
+
+class Undefined(Expr):
+	"""JS undefined literal.
+
+	Use Undefined() for JS `undefined`. Literal(None) emits `null`.
+	This is a singleton-like class with no fields.
+	"""
+
+	__slots__: tuple[str, ...] = ()
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("undefined")
+
+	@override
+	def render(self) -> VDOMNode:
+		return {"t": "undef"}
+
+
+# Singleton instance for convenience
+UNDEFINED = Undefined()
+
+
+@dataclass(slots=True)
+class Array(Expr):
+	"""JS array: [a, b, c]"""
+
+	elements: Sequence[Expr]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("[")
+		for i, e in enumerate(self.elements):
+			if i > 0:
+				out.append(", ")
+			e.emit(out)
+		out.append("]")
+
+	@override
+	def render(self) -> VDOMNode:
+		return {"t": "array", "items": [e.render() for e in self.elements]}
+
+
+@dataclass(slots=True)
+class Object(Expr):
+	"""JS object: { key: value }"""
+
+	props: Sequence[tuple[str, Expr]]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("{")
+		for i, (k, v) in enumerate(self.props):
+			if i > 0:
+				out.append(", ")
+			out.append('"')
+			out.append(_escape_string(k))
+			out.append('": ')
+			v.emit(out)
+		out.append("}")
+
+	@override
+	def render(self) -> VDOMNode:
+		return {"t": "object", "props": {k: v.render() for k, v in self.props}}
+
+
+@dataclass(slots=True)
+class Member(Expr):
+	"""JS member access: obj.prop"""
+
+	obj: Expr
+	prop: str
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		_emit_primary(self.obj, out)
+		out.append(".")
+		out.append(self.prop)
+
+	@override
+	def render(self) -> VDOMNode:
+		return {"t": "member", "obj": self.obj.render(), "prop": self.prop}
+
+
+@dataclass(slots=True)
+class Subscript(Expr):
+	"""JS subscript access: obj[key]"""
+
+	obj: Expr
+	key: Expr
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		_emit_primary(self.obj, out)
+		out.append("[")
+		self.key.emit(out)
+		out.append("]")
+
+	@override
+	def render(self) -> VDOMNode:
+		return {"t": "sub", "obj": self.obj.render(), "key": self.key.render()}
+
+
+@dataclass(slots=True)
+class Call(Expr):
+	"""JS function call: fn(args)"""
+
+	callee: Expr
+	args: Sequence[Expr]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		_emit_primary(self.callee, out)
+		out.append("(")
+		for i, a in enumerate(self.args):
+			if i > 0:
+				out.append(", ")
+			a.emit(out)
+		out.append(")")
+
+	@override
+	def render(self) -> VDOMNode:
+		return {
+			"t": "call",
+			"callee": self.callee.render(),
+			"args": [a.render() for a in self.args],
+		}
+
+
+@dataclass(slots=True)
+class Unary(Expr):
+	"""JS unary expression: -x, !x, typeof x"""
+
+	op: str
+	operand: Expr
+
+	@override
+	def precedence(self) -> int:
+		op = self.op
+		tag = "+u" if op == "+" else ("-u" if op == "-" else op)
+		return _PRECEDENCE.get(tag, 17)
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		if self.op in {"typeof", "await", "void", "delete"}:
+			out.append(self.op)
+			out.append(" ")
+		else:
+			out.append(self.op)
+		_emit_paren(self.operand, self.op, "unary", out)
+
+	@override
+	def render(self) -> VDOMNode:
+		if self.op == "await":
+			raise TypeError("await is not supported in VDOM expressions")
+		return {"t": "unary", "op": self.op, "arg": self.operand.render()}
+
+
+@dataclass(slots=True)
+class Binary(Expr):
+	"""JS binary expression: x + y, a && b"""
+
+	left: Expr
+	op: str
+	right: Expr
+
+	@override
+	def precedence(self) -> int:
+		return _PRECEDENCE.get(self.op, 0)
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		# Special: ** with unary +/- on left needs parens
+		force_left = (
+			self.op == "**"
+			and isinstance(self.left, Unary)
+			and self.left.op in {"-", "+"}
+		)
+		if force_left:
+			out.append("(")
+			self.left.emit(out)
+			out.append(")")
+		else:
+			_emit_paren(self.left, self.op, "left", out)
+		out.append(" ")
+		out.append(self.op)
+		out.append(" ")
+		_emit_paren(self.right, self.op, "right", out)
+
+	@override
+	def render(self) -> VDOMNode:
+		return {
+			"t": "binary",
+			"op": self.op,
+			"left": self.left.render(),
+			"right": self.right.render(),
+		}
+
+
+@dataclass(slots=True)
+class Ternary(Expr):
+	"""JS ternary expression: cond ? a : b"""
+
+	cond: Expr
+	then: Expr
+	else_: Expr
+
+	@override
+	def precedence(self) -> int:
+		return _PRECEDENCE["?:"]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		self.cond.emit(out)
+		out.append(" ? ")
+		self.then.emit(out)
+		out.append(" : ")
+		self.else_.emit(out)
+
+	@override
+	def render(self) -> VDOMNode:
+		return {
+			"t": "ternary",
+			"cond": self.cond.render(),
+			"then": self.then.render(),
+			"else_": self.else_.render(),
+		}
+
+
+@dataclass(slots=True)
+class Arrow(Expr):
+	"""JS arrow function: (x) => expr or (x) => { ... }
+
+	body can be:
+	- Expr: expression body, emits as `() => expr`
+	- Sequence[Stmt]: statement body, emits as `() => { stmt1; stmt2; }`
+	"""
+
+	params: Sequence[str]
+	body: Expr | Sequence[Stmt]
+
+	@override
+	def precedence(self) -> int:
+		# Arrow functions have very low precedence (assignment level)
+		# This ensures they get wrapped in parens when used as callee in Call
+		return 3
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		if len(self.params) == 1:
+			out.append(self.params[0])
+		else:
+			out.append("(")
+			out.append(", ".join(self.params))
+			out.append(")")
+		out.append(" => ")
+		if isinstance(self.body, Expr):
+			self.body.emit(out)
+		else:
+			out.append("{ ")
+			for stmt in self.body:
+				stmt.emit(out)
+				out.append(" ")
+			out.append("}")
+
+	@override
+	def render(self) -> VDOMNode:
+		if not isinstance(self.body, Expr):
+			raise TypeError("Arrow with statement body cannot be rendered as VDOMExpr")
+		return {"t": "arrow", "params": list(self.params), "body": self.body.render()}
+
+
+@dataclass(slots=True)
+class Template(Expr):
+	"""JS template literal: `hello ${name}`
+
+	Parts alternate: [str, Expr, str, Expr, str, ...]
+	Always starts and ends with a string (may be empty).
+	"""
+
+	parts: Sequence[str | Expr]  # alternating, starting with str
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("`")
+		for p in self.parts:
+			if isinstance(p, str):
+				out.append(_escape_template(p))
+			else:
+				out.append("${")
+				p.emit(out)
+				out.append("}")
+		out.append("`")
+
+	@override
+	def render(self) -> VDOMNode:
+		rendered_parts: list[str | VDOMNode] = []
+		for p in self.parts:
+			if isinstance(p, str):
+				rendered_parts.append(p)
+			else:
+				rendered_parts.append(p.render())
+		return {"t": "template", "parts": rendered_parts}
+
+
+@dataclass(slots=True)
+class Spread(Expr):
+	"""JS spread: ...expr"""
+
+	expr: Expr
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("...")
+		self.expr.emit(out)
+
+	@override
+	def render(self) -> VDOMNode:
+		raise TypeError("Spread cannot be rendered as VDOMExpr directly")
+
+
+@dataclass(slots=True)
+class New(Expr):
+	"""JS new expression: new Ctor(args)"""
+
+	ctor: Expr
+	args: Sequence[Expr]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("new ")
+		self.ctor.emit(out)
+		out.append("(")
+		for i, a in enumerate(self.args):
+			if i > 0:
+				out.append(", ")
+			a.emit(out)
+		out.append(")")
+
+	@override
+	def render(self) -> VDOMNode:
+		return {
+			"t": "new",
+			"ctor": self.ctor.render(),
+			"args": [a.render() for a in self.args],
+		}
+
+
+class TransformerFn(Protocol):
+	def __call__(self, *args: Any, ctx: Transpiler, **kwargs: Any) -> Expr: ...
+
+
+_F = TypeVar("_F", bound=TransformerFn)
+
+
+@dataclass(slots=True)
+class Transformer(Expr, Generic[_F]):
+	"""Expr that wraps a function transforming args to Expr output.
+
+	Used for Python->JS transpilation of functions, builtins, and module attrs.
+	The wrapped function receives args/kwargs and ctx, and returns an Expr.
+
+	Example:
+		emit_len = Transformer(lambda x, ctx: Member(ctx.emit_expr(x), "length"), name="len")
+		# When called: emit_len.transpile_call([some_ast], {}, ctx) -> Member(some_expr, "length")
+	"""
+
+	fn: _F
+	name: str = ""  # For error messages
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		label = self.name or "Transformer"
+		raise TypeError(f"{label} cannot be emitted directly - must be called")
+
+	@override
+	def transpile_call(
+		self,
+		args: list[ast.expr],
+		kwargs: dict[str, ast.expr],
+		ctx: Transpiler,
+	) -> Expr:
 		if kwargs:
-			return self.fn(*args, **kwargs)
-		return self.fn(*args)
+			return self.fn(*args, ctx=ctx, **kwargs)
+		return self.fn(*args, ctx=ctx)
 
 	@override
-	def emit_subscript(self, indices: list[Any]) -> JSExpr:
-		label = self.name or "JSTransformer"
-		raise JSCompilationError(f"{label} cannot be subscripted")
+	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+		label = self.name or "Transformer"
+		raise TypeError(f"{label} cannot have attributes")
 
 	@override
-	def emit_getattr(self, attr: str) -> JSExpr:
-		label = self.name or "JSTransformer"
-		raise JSCompilationError(f"{label} cannot have attributes")
+	def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+		label = self.name or "Transformer"
+		raise TypeError(f"{label} cannot be subscripted")
 
-
-_F = TypeVar("_F", bound=Callable[..., Any])
+	@override
+	def render(self) -> VDOMNode:
+		label = self.name or "Transformer"
+		raise TypeError(f"{label} cannot be rendered - must be called")
 
 
 @overload
-def js_transformer(arg: str) -> Callable[[_F], _F]: ...
+def transformer(arg: str) -> Callable[[_F], _F]: ...
 
 
 @overload
-def js_transformer(arg: _F) -> _F: ...
+def transformer(arg: _F) -> _F: ...
 
 
-def js_transformer(arg: str | _F) -> Callable[[_F], _F] | _F:
-	"""Decorator/helper for JSTransformer.
+def transformer(arg: str | _F) -> Callable[[_F], _F] | _F:
+	"""Decorator/helper for Transformer.
 
 	Usage:
-		@js_transformer("len")
-		def emit_len(x): ...
+		@transformer("len")
+		def emit_len(x, *, ctx): ...
 	or:
-		emit_len = js_transformer(lambda x: ...)
+		emit_len = transformer(lambda x, *, ctx: ...)
 
-	Returns a JSTransformer, but the type signature lies and preserves
-	the original function type. This allows decorated functions to have
-	proper return types (e.g., NoReturn for throw).
+	Returns a Transformer, but the type signature lies and preserves
+	the original function type.
 	"""
 	if isinstance(arg, str):
 
 		def decorator(fn: _F) -> _F:
-			return cast(_F, JSTransformer(fn, name=arg))
+			return cast(_F, Transformer(fn, name=arg))
 
 		return decorator
-	elif callable(arg):
-		return cast(_F, JSTransformer(arg))
+	elif isfunction(arg):
+		# Use empty name for lambdas, function name for named functions
+		name = "" if arg.__name__ == "<lambda>" else arg.__name__
+		return cast(_F, Transformer(arg, name=name))
 	else:
 		raise TypeError(
-			"js_transformer expects a function or string (for decorator usage)"
+			"transformer expects a function or string (for decorator usage)"
 		)
 
 
-class JSReturn(JSStmt):
-	__slots__ = ("value",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	value: JSExpr
-
-	def __init__(self, value: JSExpr):
-		self.value = value
-
-	@override
-	def emit(self) -> str:
-		return f"return {self.value.emit()};"
+# =============================================================================
+# Statement Nodes
+# =============================================================================
 
 
-class JSThrow(JSStmt):
-	__slots__ = ("value",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	value: JSExpr
+@dataclass(slots=True)
+class Return(Stmt):
+	"""JS return statement: return expr;"""
 
-	def __init__(self, value: JSExpr):
-		self.value = value
+	value: Expr | None = None
 
 	@override
-	def emit(self) -> str:
-		return f"throw {self.value.emit()};"
+	def emit(self, out: list[str]) -> None:
+		out.append("return")
+		if self.value is not None:
+			out.append(" ")
+			self.value.emit(out)
+		out.append(";")
 
 
-class JSStmtExpr(JSExpr):
-	"""Expression wrapper for a statement (e.g., throw).
+@dataclass(slots=True)
+class If(Stmt):
+	"""JS if statement: if (cond) { ... } else { ... }"""
 
-	Used for constructs like `throw(x)` that syntactically look like function calls
-	but must be emitted as statements. When used as an expression-statement,
-	the transpiler unwraps this and emits the inner statement directly.
+	cond: Expr
+	then: Sequence[Stmt]
+	else_: Sequence[Stmt] = ()
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("if (")
+		self.cond.emit(out)
+		out.append(") {\n")
+		for stmt in self.then:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
+		if self.else_:
+			out.append(" else {\n")
+			for stmt in self.else_:
+				stmt.emit(out)
+				out.append("\n")
+			out.append("}")
+
+
+@dataclass(slots=True)
+class ForOf(Stmt):
+	"""JS for-of loop: for (const x of iter) { ... }
+
+	target can be a single name or array pattern for destructuring: [a, b]
 	"""
 
-	__slots__ = ("stmt", "name")  # pyright: ignore[reportUnannotatedClassAttribute]
-	stmt: JSStmt
-	name: str  # For error messages (e.g., "throw")
-
-	def __init__(self, stmt: JSStmt, name: str = ""):
-		self.stmt = stmt
-		self.name = name
+	target: str
+	iter: Expr
+	body: Sequence[Stmt]
 
 	@override
-	def emit(self) -> str:
-		label = self.name or "statement"
-		raise JSCompilationError(
-			f"'{label}' cannot be used inside an expression. "
-			+ "Use it as a standalone statement instead. "
-			+ f"For example, write `{label}(x)` on its own line, not `y = {label}(x)` or `f({label}(x))`."
-		)
+	def emit(self, out: list[str]) -> None:
+		out.append("for (const ")
+		out.append(self.target)
+		out.append(" of ")
+		self.iter.emit(out)
+		out.append(") {\n")
+		for stmt in self.body:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
 
 
-class JSAssign(JSStmt):
-	__slots__ = ("name", "value", "declare")  # pyright: ignore[reportUnannotatedClassAttribute]
-	name: str
-	value: JSExpr
-	declare: bool  # when True emit 'let name = ...'
+@dataclass(slots=True)
+class While(Stmt):
+	"""JS while loop: while (cond) { ... }"""
 
-	def __init__(self, name: str, value: JSExpr, declare: bool = False):
-		self.name = name
-		self.value = value
-		self.declare = declare
+	cond: Expr
+	body: Sequence[Stmt]
 
 	@override
-	def emit(self) -> str:
+	def emit(self, out: list[str]) -> None:
+		out.append("while (")
+		self.cond.emit(out)
+		out.append(") {\n")
+		for stmt in self.body:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
+
+
+@dataclass(slots=True)
+class Break(Stmt):
+	"""JS break statement."""
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("break;")
+
+
+@dataclass(slots=True)
+class Continue(Stmt):
+	"""JS continue statement."""
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("continue;")
+
+
+@dataclass(slots=True)
+class Assign(Stmt):
+	"""JS assignment: let x = expr; or x = expr; or x += expr;
+
+	declare: "let", "const", or None (reassignment)
+	op: None for =, or "+", "-", etc. for augmented assignment
+	"""
+
+	target: str
+	value: Expr
+	declare: Lit["let", "const"] | None = None
+	op: str | None = None  # For augmented: +=, -=, etc.
+
+	@override
+	def emit(self, out: list[str]) -> None:
 		if self.declare:
-			return f"let {self.name} = {self.value.emit()};"
-		return f"{self.name} = {self.value.emit()};"
+			out.append(self.declare)
+			out.append(" ")
+		out.append(self.target)
+		if self.op:
+			out.append(" ")
+			out.append(self.op)
+			out.append("= ")
+		else:
+			out.append(" = ")
+		self.value.emit(out)
+		out.append(";")
 
 
-class JSRaw(JSExpr):
-	__slots__ = ("content",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_primary: ClassVar[bool] = True
-	content: str
+@dataclass(slots=True)
+class ExprStmt(Stmt):
+	"""JS expression statement: expr;"""
 
-	def __init__(self, content: str):
-		self.content = content
+	expr: Expr
 
 	@override
-	def emit(self) -> str:
-		return self.content
+	def emit(self, out: list[str]) -> None:
+		self.expr.emit(out)
+		out.append(";")
 
 
-###############################################################################
-# JSX AST (minimal)
-###############################################################################
+@dataclass(slots=True)
+class Block(Stmt):
+	"""JS block: { ... } - a sequence of statements."""
+
+	body: Sequence[Stmt]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("{\n")
+		for stmt in self.body:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
 
 
-def _check_not_interpreted_mode(node_type: str) -> None:
-	"""Raise an error if we're in interpreted mode - JSX can't be eval'd."""
-	if is_interpreted_mode():
-		raise ValueError(
-			f"{node_type} cannot be used in interpreted mode (as a prop or child value). "
-			+ "JSX syntax requires transpilation and cannot be evaluated at runtime. "
-			+ "Use standard VDOM elements (ps.div, ps.span, etc.) instead."
+@dataclass(slots=True)
+class StmtSequence(Stmt):
+	"""A sequence of statements without block braces.
+
+	Used for tuple unpacking where we need multiple statements
+	but don't want to create a new scope.
+	"""
+
+	body: Sequence[Stmt]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		for i, stmt in enumerate(self.body):
+			stmt.emit(out)
+			if i < len(self.body) - 1:
+				out.append("\n")
+
+
+@dataclass(slots=True)
+class Throw(Stmt):
+	"""JS throw statement: throw expr;"""
+
+	value: Expr
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("throw ")
+		self.value.emit(out)
+		out.append(";")
+
+
+@dataclass(slots=True)
+class TryStmt(Stmt):
+	"""JS try/catch/finally statement.
+
+	try { body } catch (param) { handler } finally { finalizer }
+	"""
+
+	body: Sequence[Stmt]
+	catch_param: str | None = None  # None for bare except
+	catch_body: Sequence[Stmt] | None = None
+	finally_body: Sequence[Stmt] | None = None
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		out.append("try {\n")
+		for stmt in self.body:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
+
+		if self.catch_body is not None:
+			if self.catch_param:
+				out.append(f" catch ({self.catch_param}) {{\n")
+			else:
+				out.append(" catch {\n")
+			for stmt in self.catch_body:
+				stmt.emit(out)
+				out.append("\n")
+			out.append("}")
+
+		if self.finally_body is not None:
+			out.append(" finally {\n")
+			for stmt in self.finally_body:
+				stmt.emit(out)
+				out.append("\n")
+			out.append("}")
+
+
+@dataclass(slots=True)
+class Function(Expr):
+	"""JS function: function name(params) { ... } or async function ...
+
+	For statement-bodied functions. Use Arrow for expression-bodied.
+	"""
+
+	params: Sequence[str]
+	body: Sequence[Stmt]
+	name: str | None = None
+	is_async: bool = False
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		if self.is_async:
+			out.append("async ")
+		out.append("function")
+		if self.name:
+			out.append(" ")
+			out.append(self.name)
+		out.append("(")
+		out.append(", ".join(self.params))
+		out.append(") {\n")
+		for stmt in self.body:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
+
+	@override
+	def render(self) -> VDOMNode:
+		raise TypeError("Function cannot be rendered as VDOMExpr")
+
+
+Node: TypeAlias = Primitive | Expr | PulseNode
+Child: TypeAlias = Node | Iterable[Node]
+Children: TypeAlias = Sequence[Child]
+Prop: TypeAlias = Primitive | Expr
+
+
+# =============================================================================
+# Emit logic
+# =============================================================================
+
+
+Emittable: TypeAlias = Expr | Stmt
+
+
+def emit(node: Emittable) -> str:
+	"""Emit an expression or statement as JavaScript/JSX code."""
+	out: list[str] = []
+	node.emit(out)
+	return "".join(out)
+
+
+# Operator precedence table (higher = binds tighter)
+_PRECEDENCE: dict[str, int] = {
+	# Primary
+	".": 20,
+	"[]": 20,
+	"()": 20,
+	# Unary
+	"!": 17,
+	"+u": 17,
+	"-u": 17,
+	"typeof": 17,
+	"await": 17,
+	# Exponentiation (right-assoc)
+	"**": 16,
+	# Multiplicative
+	"*": 15,
+	"/": 15,
+	"%": 15,
+	# Additive
+	"+": 14,
+	"-": 14,
+	# Relational
+	"<": 12,
+	"<=": 12,
+	">": 12,
+	">=": 12,
+	"===": 12,
+	"!==": 12,
+	"instanceof": 12,
+	"in": 12,
+	# Logical
+	"&&": 7,
+	"||": 6,
+	"??": 6,
+	# Ternary
+	"?:": 4,
+	# Comma
+	",": 1,
+}
+
+_RIGHT_ASSOC = {"**"}
+
+
+def _escape_string(s: str) -> str:
+	"""Escape for double-quoted JS string literals."""
+	return (
+		s.replace("\\", "\\\\")
+		.replace('"', '\\"')
+		.replace("\n", "\\n")
+		.replace("\r", "\\r")
+		.replace("\t", "\\t")
+		.replace("\b", "\\b")
+		.replace("\f", "\\f")
+		.replace("\v", "\\v")
+		.replace("\x00", "\\x00")
+		.replace("\u2028", "\\u2028")
+		.replace("\u2029", "\\u2029")
+	)
+
+
+def _escape_template(s: str) -> str:
+	"""Escape for template literal strings."""
+	return (
+		s.replace("\\", "\\\\")
+		.replace("`", "\\`")
+		.replace("${", "\\${")
+		.replace("\n", "\\n")
+		.replace("\r", "\\r")
+		.replace("\t", "\\t")
+		.replace("\b", "\\b")
+		.replace("\f", "\\f")
+		.replace("\v", "\\v")
+		.replace("\x00", "\\x00")
+		.replace("\u2028", "\\u2028")
+		.replace("\u2029", "\\u2029")
+	)
+
+
+def _escape_jsx_text(s: str) -> str:
+	"""Escape text content for JSX."""
+	return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _escape_jsx_attr(s: str) -> str:
+	"""Escape attribute value for JSX."""
+	return s.replace("&", "&amp;").replace('"', "&quot;")
+
+
+def _emit_paren(node: Expr, parent_op: str, side: str, out: list[str]) -> None:
+	"""Emit child with parens if needed for precedence."""
+	# Ternary as child of binary always needs parens
+	needs_parens = False
+	if isinstance(node, Ternary):
+		needs_parens = True
+	else:
+		child_prec = node.precedence()
+		parent_prec = _PRECEDENCE.get(parent_op, 0)
+		if child_prec < parent_prec:
+			needs_parens = True
+		elif child_prec == parent_prec and isinstance(node, Binary):
+			# Handle associativity
+			if parent_op in _RIGHT_ASSOC:
+				needs_parens = side == "left"
+			else:
+				needs_parens = side == "right"
+
+	if needs_parens:
+		out.append("(")
+		node.emit(out)
+		out.append(")")
+	else:
+		node.emit(out)
+
+
+def _emit_primary(node: Expr, out: list[str]) -> None:
+	"""Emit with parens if not primary precedence."""
+	if node.precedence() < 20 or isinstance(node, Ternary):
+		out.append("(")
+		node.emit(out)
+		out.append(")")
+	else:
+		node.emit(out)
+
+
+def _emit_value(value: Any, out: list[str]) -> None:
+	"""Emit a Python value as JavaScript literal."""
+	if value is None:
+		out.append("null")
+	elif isinstance(value, bool):
+		out.append("true" if value else "false")
+	elif isinstance(value, str):
+		out.append('"')
+		out.append(_escape_string(value))
+		out.append('"')
+	elif isinstance(value, (int, float)):
+		out.append(str(value))
+	elif isinstance(value, dt.datetime):
+		out.append("new Date(")
+		out.append(str(int(value.timestamp() * 1000)))
+		out.append(")")
+	elif isinstance(value, list):
+		out.append("[")
+		for i, v in enumerate(value):  # pyright: ignore[reportUnknownArgumentType]
+			if i > 0:
+				out.append(", ")
+			_emit_value(v, out)
+		out.append("]")
+	elif isinstance(value, dict):
+		out.append("{")
+		for i, (k, v) in enumerate(value.items()):  # pyright: ignore[reportUnknownArgumentType]
+			if i > 0:
+				out.append(", ")
+			out.append('"')
+			out.append(_escape_string(str(k)))  # pyright: ignore[reportUnknownArgumentType]
+			out.append('": ')
+			_emit_value(v, out)
+		out.append("}")
+	elif isinstance(value, set):
+		out.append("new Set([")
+		for i, v in enumerate(value):  # pyright: ignore[reportUnknownArgumentType]
+			if i > 0:
+				out.append(", ")
+			_emit_value(v, out)
+		out.append("])")
+	else:
+		raise TypeError(f"Cannot emit {type(value).__name__} as JavaScript")
+
+
+def _emit_jsx_prop(name: str, value: Prop, out: list[str]) -> None:
+	"""Emit a single JSX prop."""
+	# Spread props
+	if isinstance(value, Spread):
+		out.append("{...")
+		value.expr.emit(out)
+		out.append("}")
+		return
+	# Expression nodes
+	if isinstance(value, Expr):
+		# String literals can use compact form
+		if isinstance(value, Literal) and isinstance(value.value, str):
+			out.append(name)
+			out.append('="')
+			out.append(_escape_jsx_attr(value.value))
+			out.append('"')
+		else:
+			out.append(name)
+			out.append("={")
+			value.emit(out)
+			out.append("}")
+		return
+	# Primitives
+	if value is None:
+		out.append(name)
+		out.append("={null}")
+		return
+	if isinstance(value, bool):
+		out.append(name)
+		out.append("={true}" if value else "={false}")
+		return
+	if isinstance(value, str):
+		out.append(name)
+		out.append('="')
+		out.append(_escape_jsx_attr(value))
+		out.append('"')
+		return
+	if isinstance(value, (int, float)):
+		out.append(name)
+		out.append("={")
+		out.append(str(value))
+		out.append("}")
+		return
+	# Value
+	if isinstance(value, Value):
+		out.append(name)
+		out.append("={")
+		_emit_value(value.value, out)
+		out.append("}")
+		return
+	# Nested Element (render prop)
+	if isinstance(value, Element):
+		out.append(name)
+		out.append("={")
+		value.emit(out)
+		out.append("}")
+		return
+	# Callable - error
+	if callable(value):
+		raise TypeError("Cannot emit callable in transpile context")
+	# Fallback for other data
+	out.append(name)
+	out.append("={")
+	_emit_value(value, out)
+	out.append("}")
+
+
+def _emit_jsx_child(child: Node, out: list[str]) -> None:
+	"""Emit a single JSX child."""
+	# Primitives
+	if child is None or isinstance(child, bool):
+		return  # React ignores None/bool
+	if isinstance(child, str):
+		out.append(_escape_jsx_text(child))
+		return
+	if isinstance(child, (int, float)):
+		out.append("{")
+		out.append(str(child))
+		out.append("}")
+		return
+	if isinstance(child, dt.datetime):
+		out.append("{")
+		_emit_value(child, out)
+		out.append("}")
+		return
+	# PulseNode - error
+	if isinstance(child, PulseNode):
+		fn_name = getattr(child.fn, "__name__", "unknown")
+		raise TypeError(
+			f"Cannot transpile PulseNode '{fn_name}'. "
+			+ "Server components must be rendered, not transpiled."
 		)
-
-
-def _escape_jsx_text(text: str) -> str:
-	# Minimal escaping for text nodes
-	return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-class JSXProp(JSExpr):
-	__slots__ = ("name", "value")  # pyright: ignore[reportUnannotatedClassAttribute]
-	name: str
-	value: JSExpr | None
-
-	def __init__(self, name: str, value: JSExpr | None = None):
-		self.name = name
-		self.value = value
-
-	@override
-	def emit(self) -> str:
-		_check_not_interpreted_mode("JSXProp")
-		if self.value is None:
-			return self.name
-		# Prefer compact string literal attribute when possible
-		if isinstance(self.value, JSString):
-			return f"{self.name}={self.value.emit()}"
-		return self.name + "={" + self.value.emit() + "}"
-
-
-class JSXSpreadProp(JSExpr):
-	__slots__ = ("value",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	value: JSExpr
-
-	def __init__(self, value: JSExpr):
-		self.value = value
-
-	@override
-	def emit(self) -> str:
-		_check_not_interpreted_mode("JSXSpreadProp")
-		return f"{{...{self.value.emit()}}}"
-
-
-class JSXElement(JSExpr):
-	__slots__ = ("tag", "props", "children")  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_jsx: ClassVar[bool] = True
-	is_primary: ClassVar[bool] = True
-	tag: str | JSExpr
-	props: Sequence[JSXProp | JSXSpreadProp]
-	children: Sequence[str | JSExpr | JSXElement]
-
-	def __init__(
-		self,
-		tag: str | JSExpr,
-		props: Sequence[JSXProp | JSXSpreadProp] = (),
-		children: Sequence[str | JSExpr | JSXElement] = (),
-	):
-		self.tag = tag
-		self.props = props
-		self.children = children
-
-	@override
-	def emit(self) -> str:
-		_check_not_interpreted_mode("JSXElement")
-		tag_code = self.tag if isinstance(self.tag, str) else self.tag.emit()
-		props_code = " ".join(p.emit() for p in self.props) if self.props else ""
-		if not self.children:
-			if props_code:
-				return f"<{tag_code} {props_code} />"
-			return f"<{tag_code} />"
-		# Open tag
-		open_tag = f"<{tag_code}>" if not props_code else f"<{tag_code} {props_code}>"
-		# Children
-		child_parts: list[str] = []
-		for c in self.children:
-			if isinstance(c, str):
-				child_parts.append(_escape_jsx_text(c))
-			elif isinstance(c, JSXElement) or (isinstance(c, JSExpr) and c.is_jsx):
-				child_parts.append(c.emit())
-			else:
-				child_parts.append("{" + c.emit() + "}")
-		inner = "".join(child_parts)
-		return f"{open_tag}{inner}</{tag_code}>"
-
-
-class JSXFragment(JSExpr):
-	__slots__ = ("children",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	is_jsx: ClassVar[bool] = True
-	is_primary: ClassVar[bool] = True
-	children: Sequence[str | JSExpr | JSXElement]
-
-	def __init__(self, children: Sequence[str | JSExpr | JSXElement] = ()):
-		self.children = children
-
-	@override
-	def emit(self) -> str:
-		_check_not_interpreted_mode("JSXFragment")
-		if not self.children:
-			return "<></>"
-		parts: list[str] = []
-		for c in self.children:
-			if isinstance(c, str):
-				parts.append(_escape_jsx_text(c))
-			elif isinstance(c, JSXElement) or (isinstance(c, JSExpr) and c.is_jsx):
-				parts.append(c.emit())
-			else:
-				parts.append("{" + c.emit() + "}")
-		return "<>" + "".join(parts) + "</>"
-
-
-class JSImport:
-	__slots__ = ("src", "default", "named")  # pyright: ignore[reportUnannotatedClassAttribute]
-	src: str
-	default: str | None
-	named: list[str | tuple[str, str]]
-
-	def __init__(
-		self,
-		src: str,
-		default: str | None = None,
-		named: list[str | tuple[str, str]] | None = None,
-	):
-		self.src = src
-		self.default = default
-		self.named = named if named is not None else []
-
-	def emit(self) -> str:
-		parts: list[str] = []
-		if self.default:
-			parts.append(self.default)
-		if self.named:
-			named_parts: list[str] = []
-			for n in self.named:
-				if isinstance(n, tuple):
-					named_parts.append(f"{n[0]} as {n[1]}")
-				else:
-					named_parts.append(n)
-			if named_parts:
-				if self.default:
-					parts.append(",")
-				parts.append("{" + ", ".join(named_parts) + "}")
-		return f"import {' '.join(parts)} from {JSString(self.src).emit()};"
-
-
-# -----------------------------
-# Precedence helpers
-# -----------------------------
-
-PRIMARY_PRECEDENCE = 20
-
-
-def op_precedence(op: str) -> int:
-	# Higher number = binds tighter
-	if op in {".", "[]", "()"}:  # pseudo ops for primary contexts
-		return PRIMARY_PRECEDENCE
-	if op in {"!", "+u", "-u"}:  # unary; we encode + and - as unary with +u/-u
-		return 17
-	if op in {"typeof", "await"}:
-		return 17
-	if op == "**":
-		return 16
-	if op in {"*", "/", "%"}:
-		return 15
-	if op in {"+", "-"}:
-		return 14
-	if op in {"<", "<=", ">", ">=", "===", "!=="}:
-		return 12
-	if op == "instanceof":
-		return 12
-	if op == "in":
-		return 12
-	if op == "&&":
-		return 7
-	if op == "||":
-		return 6
-	if op == "??":
-		return 6
-	if op == "?:":  # ternary
-		return 4
-	if op == ",":
-		return 1
-	return 0
-
-
-def op_is_right_associative(op: str) -> bool:
-	return op == "**"
-
-
-def expr_precedence(e: JSExpr) -> int:
-	if isinstance(e, JSBinary):
-		return op_precedence(e.op)
-	if isinstance(e, JSUnary):
-		# Distinguish unary + and - from binary precedence table by tag
-		tag = "+u" if e.op == "+" else ("-u" if e.op == "-" else e.op)
-		return op_precedence(tag)
-	if isinstance(e, JSAwait):
-		return op_precedence("await")
-	if isinstance(e, JSTertiary):
-		return op_precedence("?:")
-	if isinstance(e, JSLogicalChain):
-		return op_precedence(e.op)
-	if isinstance(e, JSComma):
-		return op_precedence(",")
-	# Nullish now represented as JSBinary with op "??"; precedence resolved below
-	if isinstance(e, (JSMember, JSSubscript, JSCall, JSMemberCall, JSNew)):
-		return op_precedence(".")
-	# Primary expressions (identifiers, literals, containers) don't need parens
-	if e.is_primary:
-		return PRIMARY_PRECEDENCE
-	return 0
-
-
-class JSBlock(JSStmt):
-	__slots__ = ("body",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	body: Sequence[JSStmt]
-
-	def __init__(self, body: Sequence[JSStmt]):
-		self.body = body
-
-	@override
-	def emit(self) -> str:
-		body_code = "\n".join(s.emit() for s in self.body)
-		return f"{{\n{body_code}\n}}"
-
-
-class JSAugAssign(JSStmt):
-	__slots__ = ("name", "op", "value")  # pyright: ignore[reportUnannotatedClassAttribute]
-	name: str
-	op: str
-	value: JSExpr
-
-	def __init__(self, name: str, op: str, value: JSExpr):
-		self.name = name
-		self.op = op
-		self.value = value
-
-	@override
-	def emit(self) -> str:
-		return f"{self.name} {self.op}= {self.value.emit()};"
-
-
-class JSConstAssign(JSStmt):
-	__slots__ = ("name", "value")  # pyright: ignore[reportUnannotatedClassAttribute]
-	name: str
-	value: JSExpr
-
-	def __init__(self, name: str, value: JSExpr):
-		self.name = name
-		self.value = value
-
-	@override
-	def emit(self) -> str:
-		return f"const {self.name} = {self.value.emit()};"
-
-
-class JSSingleStmt(JSStmt):
-	__slots__ = ("expr",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	expr: JSExpr
-
-	def __init__(self, expr: JSExpr):
-		self.expr = expr
-
-	@override
-	def emit(self) -> str:
-		return f"{self.expr.emit()};"
-
-
-class JSMultiStmt(JSStmt):
-	__slots__ = ("stmts",)  # pyright: ignore[reportUnannotatedClassAttribute]
-	stmts: Sequence[JSStmt]
-
-	def __init__(self, stmts: Sequence[JSStmt]):
-		self.stmts = stmts
-
-	@override
-	def emit(self) -> str:
-		return "\n".join(s.emit() for s in self.stmts)
-
-
-class JSIf(JSStmt):
-	__slots__ = ("test", "body", "orelse")  # pyright: ignore[reportUnannotatedClassAttribute]
-	test: JSExpr
-	body: Sequence[JSStmt]
-	orelse: Sequence[JSStmt]
-
-	def __init__(
-		self, test: JSExpr, body: Sequence[JSStmt], orelse: Sequence[JSStmt] = ()
-	):
-		self.test = test
-		self.body = body
-		self.orelse = orelse
-
-	@override
-	def emit(self) -> str:
-		body_code = "\n".join(s.emit() for s in self.body)
-		if not self.orelse:
-			return f"if ({self.test.emit()}){{\n{body_code}\n}}"
-		else_code = "\n".join(s.emit() for s in self.orelse)
-		return f"if ({self.test.emit()}){{\n{body_code}\n}} else {{\n{else_code}\n}}"
-
-
-class JSForOf(JSStmt):
-	__slots__ = ("target", "iter_expr", "body")  # pyright: ignore[reportUnannotatedClassAttribute]
-	target: str | list[str]
-	iter_expr: JSExpr
-	body: Sequence[JSStmt]
-
-	def __init__(
-		self, target: str | list[str], iter_expr: JSExpr, body: Sequence[JSStmt]
-	):
-		self.target = target
-		self.iter_expr = iter_expr
-		self.body = body
-
-	@override
-	def emit(self) -> str:
-		body_code = "\n".join(s.emit() for s in self.body)
-		target = self.target
-		if not isinstance(target, str):
-			target = f"[{', '.join(x for x in target)}]"
-		return f"for (const {target} of {self.iter_expr.emit()}){{\n{body_code}\n}}"
-
-
-class JSWhile(JSStmt):
-	__slots__ = ("test", "body")  # pyright: ignore[reportUnannotatedClassAttribute]
-	test: JSExpr
-	body: Sequence[JSStmt]
-
-	def __init__(self, test: JSExpr, body: Sequence[JSStmt]):
-		self.test = test
-		self.body = body
-
-	@override
-	def emit(self) -> str:
-		body_code = "\n".join(s.emit() for s in self.body)
-		return f"while ({self.test.emit()}){{\n{body_code}\n}}"
-
-
-class JSBreak(JSStmt):
-	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
-
-	@override
-	def emit(self) -> str:
-		return "break;"
-
-
-class JSContinue(JSStmt):
-	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
-
-	@override
-	def emit(self) -> str:
-		return "continue;"
-
-
-def _mixes_nullish_and_logical(parent_op: str, child: JSExpr) -> bool:
-	if parent_op in {"&&", "||"} and isinstance(child, JSBinary) and child.op == "??":
-		return True
-	if parent_op == "??" and isinstance(child, JSLogicalChain):
-		return True
-	return False
-
-
-def _emit_child_for_binary_like(
-	child: JSExpr, parent_op: str, side: str, force_paren: bool = False
-) -> str:
-	# side is one of: 'left', 'right', 'unary', 'chain'
-	code = child.emit()
-	if force_paren:
-		return f"({code})"
-	# Ternary as child should always be wrapped under binary-like contexts
-	if isinstance(child, JSTertiary):
-		return f"({code})"
-	# Explicit parens when mixing ?? with &&/||
-	if _mixes_nullish_and_logical(parent_op, child):
-		return f"({code})"
-	child_prec = expr_precedence(child)
-	parent_prec = op_precedence(parent_op)
-	if child_prec < parent_prec:
-		return f"({code})"
-	if child_prec == parent_prec:
-		# Handle associativity for exact same precedence buckets
-		if isinstance(child, JSBinary):
-			if op_is_right_associative(parent_op):
-				# Need parens on left child for same prec to preserve grouping
-				if side == "left":
-					return f"({code})"
-			else:
-				# Left-associative: protect right child when equal precedence
-				if side == "right":
-					return f"({code})"
-		if isinstance(child, JSLogicalChain):
-			# Same op chains don't need parens; different logical ops rely on precedence
-			if child.op != parent_op:
-				# '&&' has higher precedence than '||'; no parens needed for tighter child
-				# But if equal (shouldn't happen here), remain as-is
-				pass
-		# For other equal-precedence non-binary nodes, keep as-is
-	return code
-
-
-def _emit_child_for_primary(expr: JSExpr) -> str:
-	code = expr.emit()
-	if expr_precedence(expr) < PRIMARY_PRECEDENCE or isinstance(expr, JSTertiary):
-		return f"({code})"
-	return code
-
-
-def is_primary(expr: JSExpr):
-	return isinstance(expr, (JSNumber, JSString, JSUndefined, JSNull, JSIdentifier))
+	# Element - recurse
+	if isinstance(child, Element):
+		child.emit(out)
+		return
+	# Spread - emit as {expr} without the spread operator (arrays are already iterable in JSX)
+	if isinstance(child, Spread):
+		out.append("{")
+		child.expr.emit(out)
+		out.append("}")
+		return
+	# Expr
+	if isinstance(child, Expr):
+		out.append("{")
+		child.emit(out)
+		out.append("}")
+		return
+	# Value
+	if isinstance(child, Value):
+		out.append("{")
+		_emit_value(child.value, out)
+		out.append("}")
+		return
+	raise TypeError(f"Cannot emit {type(child).__name__} as JSX child")

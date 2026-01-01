@@ -1,320 +1,265 @@
 """Python math module transpilation to JavaScript Math.
 
-This module provides transpilation from Python's `math` module to JavaScript's `Math` object.
-For direct JavaScript Math bindings, use `pulse.js.math` instead.
+Provides transpilation from Python's `math` module to JavaScript's `Math` object.
 """
 
-# pyright: reportUnannotatedClassAttribute=false
+from __future__ import annotations
 
-from pulse.transpiler.constants import jsify
+from typing import Any, final
+
 from pulse.transpiler.nodes import (
-	JSBinary,
-	JSExpr,
-	JSIdentifier,
-	JSMember,
-	JSMemberCall,
-	JSNumber,
-	JSUnary,
+	Binary,
+	Call,
+	Expr,
+	Identifier,
+	Literal,
+	Member,
+	Unary,
 )
 from pulse.transpiler.py_module import PyModule
+from pulse.transpiler.transpiler import Transpiler
+
+# Helpers for building Math.* calls
+_Math = Identifier("Math")
+_Number = Identifier("Number")
 
 
-# Helper for generating Math method calls during transpilation
-def MathCall(name: str, *args: int | float | JSExpr) -> JSExpr:
-	return JSMemberCall(JSIdentifier("Math"), name, [jsify(a) for a in args])
+def _math_prop(name: str) -> Expr:
+	return Member(_Math, name)
 
 
-def MathProp(name: str) -> JSExpr:
-	return JSMember(JSIdentifier("Math"), name)
+def _math_call(name: str, args: list[Expr]) -> Expr:
+	return Call(Member(_Math, name), args)
 
 
+def _number_call(name: str, args: list[Expr]) -> Expr:
+	return Call(Member(_Number, name), args)
+
+
+@final
 class PyMath(PyModule):
 	"""Provides transpilation for Python math functions to JavaScript."""
 
-	# Constants (as class attributes returning JSExpr)
-	pi = MathProp("PI")
-	e = MathProp("E")
-	tau = JSBinary(JSNumber(2), "*", MathProp("PI"))  # 2 * PI
-	inf = JSIdentifier("Infinity")
-	nan = JSIdentifier("NaN")
+	# Constants
+	pi = _math_prop("PI")
+	e = _math_prop("E")
+	tau = Binary(Literal(2), "*", _math_prop("PI"))
+	inf = Identifier("Infinity")
+	nan = Identifier("NaN")
+
+	# Basic functions
+	@staticmethod
+	def acos(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("acos", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def acos(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("acos", x)
+	def acosh(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("acosh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def acosh(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("acosh", x)
+	def asin(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("asin", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def asin(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("asin", x)
+	def asinh(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("asinh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def asinh(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("asinh", x)
+	def atan(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("atan", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def atan(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("atan", x)
+	def atan2(y: Any, x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("atan2", [ctx.emit_expr(y), ctx.emit_expr(x)])
 
 	@staticmethod
-	def atan2(y: int | float | JSExpr, x: int | float | JSExpr) -> JSExpr:
-		return MathCall("atan2", y, x)
+	def atanh(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("atanh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def atanh(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("atanh", x)
+	def cbrt(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("cbrt", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def cbrt(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("cbrt", x)
+	def ceil(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("ceil", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def ceil(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("ceil", x)
-
-	@staticmethod
-	def copysign(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
+	def copysign(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
 		# Math.sign(y) * Math.abs(x)
-		return JSBinary(MathCall("sign", y), "*", MathCall("abs", x))
+		return Binary(
+			_math_call("sign", [ctx.emit_expr(y)]),
+			"*",
+			_math_call("abs", [ctx.emit_expr(x)]),
+		)
 
 	@staticmethod
-	def cos(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("cos", x)
+	def cos(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("cos", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def cosh(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("cosh", x)
+	def cosh(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("cosh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def degrees(x: int | float | JSExpr) -> JSExpr:
-		# Convert radians to degrees: x * (180 / π)
-		return JSBinary(jsify(x), "*", JSBinary(JSNumber(180), "/", MathProp("PI")))
+	def degrees(x: Any, *, ctx: Transpiler) -> Expr:
+		# x * (180 / PI)
+		return Binary(
+			ctx.emit_expr(x),
+			"*",
+			Binary(Literal(180), "/", _math_prop("PI")),
+		)
 
 	@staticmethod
-	def dist(
-		p: int | float | JSExpr | list[int | float | JSExpr],
-		q: int | float | JSExpr | list[int | float | JSExpr],
-	) -> JSExpr:
-		raise NotImplementedError("dist requires array/iterable handling")
+	def exp(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("exp", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def erf(x: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("erf requires special function implementation")
-
-	@staticmethod
-	def erfc(x: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("erfc requires special function implementation")
-
-	@staticmethod
-	def exp(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("exp", x)
-
-	@staticmethod
-	def exp2(x: int | float | JSExpr) -> JSExpr:
+	def exp2(x: Any, *, ctx: Transpiler) -> Expr:
 		# 2 ** x
-		return JSBinary(JSNumber(2), "**", jsify(x))
+		return Binary(Literal(2), "**", ctx.emit_expr(x))
 
 	@staticmethod
-	def expm1(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("expm1", x)
+	def expm1(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("expm1", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def fabs(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("abs", x)
+	def fabs(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("abs", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def factorial(x: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("factorial requires iterative implementation")
+	def floor(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("floor", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def floor(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("floor", x)
+	def fmod(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
+		return Binary(ctx.emit_expr(x), "%", ctx.emit_expr(y))
 
 	@staticmethod
-	def fmod(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
-		# JavaScript % operator matches Python fmod for most cases
-		return JSBinary(jsify(x), "%", jsify(y))
-
-	@staticmethod
-	def frexp(x: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("frexp returns tuple, requires special handling")
-
-	@staticmethod
-	def fsum(seq: int | float | JSExpr | list[int | float | JSExpr]) -> JSExpr:
-		raise NotImplementedError("fsum requires iterable handling")
-
-	@staticmethod
-	def gamma(x: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("gamma requires special function implementation")
-
-	@staticmethod
-	def gcd(*integers: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("gcd requires iterative implementation")
-
-	@staticmethod
-	def hypot(*coordinates: int | float | JSExpr) -> JSExpr:
-		return MathCall("hypot", *coordinates)
+	def hypot(*coords: Any, ctx: Transpiler) -> Expr:
+		return _math_call("hypot", [ctx.emit_expr(c) for c in coords])
 
 	@staticmethod
 	def isclose(
-		a: int | float | JSExpr,
-		b: int | float | JSExpr,
-		*,
-		rel_tol: int | float | JSExpr = 1e-09,
-		abs_tol: int | float | JSExpr = 0.0,
-	) -> JSExpr:
+		a: Any, b: Any, *, rel_tol: Any = 1e-9, abs_tol: Any = 0.0, ctx: Transpiler
+	) -> Expr:
 		# abs(a - b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
-		abs_diff = MathCall("abs", JSBinary(jsify(a), "-", jsify(b)))
-		max_abs = JSMemberCall(
-			JSIdentifier("Math"),
-			"max",
-			[MathCall("abs", a), MathCall("abs", b)],
+		a_expr = ctx.emit_expr(a)
+		b_expr = ctx.emit_expr(b)
+		rel_tol_expr = ctx.emit_expr(rel_tol)
+		abs_tol_expr = ctx.emit_expr(abs_tol)
+
+		abs_diff = _math_call("abs", [Binary(a_expr, "-", b_expr)])
+		max_abs = _math_call(
+			"max", [_math_call("abs", [a_expr]), _math_call("abs", [b_expr])]
 		)
-		rel_bound = JSBinary(jsify(rel_tol), "*", max_abs)
-		max_bound = JSMemberCall(
-			JSIdentifier("Math"), "max", [rel_bound, jsify(abs_tol)]
+		rel_bound = Binary(rel_tol_expr, "*", max_abs)
+		max_bound = _math_call("max", [rel_bound, abs_tol_expr])
+		return Binary(abs_diff, "<=", max_bound)
+
+	@staticmethod
+	def isfinite(x: Any, *, ctx: Transpiler) -> Expr:
+		return _number_call("isFinite", [ctx.emit_expr(x)])
+
+	@staticmethod
+	def isinf(x: Any, *, ctx: Transpiler) -> Expr:
+		# !Number.isFinite(x) && !Number.isNaN(x)
+		x_expr = ctx.emit_expr(x)
+		return Binary(
+			Unary("!", _number_call("isFinite", [x_expr])),
+			"&&",
+			Unary("!", _number_call("isNaN", [x_expr])),
 		)
-		return JSBinary(abs_diff, "<=", max_bound)
 
 	@staticmethod
-	def isfinite(x: int | float | JSExpr) -> JSExpr:
-		return JSMemberCall(JSIdentifier("Number"), "isFinite", [jsify(x)])
+	def isnan(x: Any, *, ctx: Transpiler) -> Expr:
+		return _number_call("isNaN", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def isinf(x: int | float | JSExpr) -> JSExpr:
-		is_finite = JSMemberCall(JSIdentifier("Number"), "isFinite", [jsify(x)])
-		is_nan = JSMemberCall(JSIdentifier("Number"), "isNaN", [jsify(x)])
-		return JSBinary(JSUnary("!", is_finite), "&&", JSUnary("!", is_nan))
+	def isqrt(n: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("floor", [_math_call("sqrt", [ctx.emit_expr(n)])])
 
 	@staticmethod
-	def isnan(x: int | float | JSExpr) -> JSExpr:
-		return JSMemberCall(JSIdentifier("Number"), "isNaN", [jsify(x)])
-
-	@staticmethod
-	def isqrt(n: int | float | JSExpr) -> JSExpr:
-		return MathCall("floor", MathCall("sqrt", n))
-
-	@staticmethod
-	def lcm(*integers: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("lcm requires iterative implementation")
-
-	@staticmethod
-	def ldexp(x: int | float | JSExpr, i: int | float | JSExpr) -> JSExpr:
+	def ldexp(x: Any, i: Any, *, ctx: Transpiler) -> Expr:
 		# x * (2 ** i)
-		return JSBinary(jsify(x), "*", JSBinary(JSNumber(2), "**", jsify(i)))
+		return Binary(
+			ctx.emit_expr(x),
+			"*",
+			Binary(Literal(2), "**", ctx.emit_expr(i)),
+		)
 
 	@staticmethod
-	def lgamma(x: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("lgamma requires special function implementation")
-
-	@staticmethod
-	def log(
-		value: int | float | JSExpr,
-		base: int | float | JSExpr | None = None,
-	) -> JSExpr:
+	def log(value: Any, base: Any = None, *, ctx: Transpiler) -> Expr:
 		if base is None:
-			return MathCall("log", value)
-		return JSBinary(MathCall("log", value), "/", MathCall("log", base))
+			return _math_call("log", [ctx.emit_expr(value)])
+		return Binary(
+			_math_call("log", [ctx.emit_expr(value)]),
+			"/",
+			_math_call("log", [ctx.emit_expr(base)]),
+		)
 
 	@staticmethod
-	def log10(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("log10", x)
+	def log10(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("log10", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def log1p(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("log1p", x)
+	def log1p(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("log1p", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def log2(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("log2", x)
+	def log2(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("log2", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def modf(x: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("modf returns tuple, requires special handling")
+	def pow(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("pow", [ctx.emit_expr(x), ctx.emit_expr(y)])
 
 	@staticmethod
-	def nextafter(
-		x: int | float | JSExpr,
-		y: int | float | JSExpr,
-		*,
-		steps: int | float | JSExpr | None = None,
-	) -> JSExpr:
-		raise NotImplementedError("nextafter requires special implementation")
+	def radians(x: Any, *, ctx: Transpiler) -> Expr:
+		# x * (PI / 180)
+		return Binary(
+			ctx.emit_expr(x),
+			"*",
+			Binary(_math_prop("PI"), "/", Literal(180)),
+		)
 
 	@staticmethod
-	def perm(n: int | float | JSExpr, k: int | float | JSExpr | None = None) -> JSExpr:
-		raise NotImplementedError("perm requires factorial implementation")
+	def remainder(x: Any, y: Any, *, ctx: Transpiler) -> Expr:
+		# x - round(x/y) * y
+		x_expr = ctx.emit_expr(x)
+		y_expr = ctx.emit_expr(y)
+		n = _math_call("round", [Binary(x_expr, "/", y_expr)])
+		return Binary(x_expr, "-", Binary(n, "*", y_expr))
 
 	@staticmethod
-	def pow(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
-		return MathCall("pow", x, y)
+	def sin(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("sin", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def prod(
-		iterable: int | float | JSExpr | list[int | float | JSExpr],
-		*,
-		start: int | float | JSExpr = 1,
-	) -> JSExpr:
-		raise NotImplementedError("prod requires iterable handling")
+	def sinh(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("sinh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def radians(x: int | float | JSExpr) -> JSExpr:
-		# Convert degrees to radians: x * (π / 180)
-		return JSBinary(jsify(x), "*", JSBinary(MathProp("PI"), "/", JSNumber(180)))
+	def sqrt(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("sqrt", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def remainder(x: int | float | JSExpr, y: int | float | JSExpr) -> JSExpr:
-		# x - n * y where n is the nearest integer to x/y
-		n = MathCall("round", JSBinary(jsify(x), "/", jsify(y)))
-		return JSBinary(jsify(x), "-", JSBinary(n, "*", jsify(y)))
+	def tan(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("tan", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def sin(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("sin", x)
+	def tanh(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("tanh", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def sinh(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("sinh", x)
+	def trunc(x: Any, *, ctx: Transpiler) -> Expr:
+		return _math_call("trunc", [ctx.emit_expr(x)])
 
 	@staticmethod
-	def sqrt(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("sqrt", x)
-
-	@staticmethod
-	def sumprod(
-		p: int | float | JSExpr | list[int | float | JSExpr],
-		q: int | float | JSExpr | list[int | float | JSExpr],
-	) -> JSExpr:
-		raise NotImplementedError("sumprod requires iterable handling")
-
-	@staticmethod
-	def tan(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("tan", x)
-
-	@staticmethod
-	def tanh(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("tanh", x)
-
-	@staticmethod
-	def trunc(x: int | float | JSExpr) -> JSExpr:
-		return MathCall("trunc", x)
-
-	@staticmethod
-	def ulp(x: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("ulp requires special implementation")
-
-	@staticmethod
-	def fma(
-		x: int | float | JSExpr,
-		y: int | float | JSExpr,
-		z: int | float | JSExpr,
-	) -> JSExpr:
-		# Fused multiply-add: (x * y) + z (with single rounding)
-		# JavaScript doesn't have native fma, so we just do the operation
-		return JSBinary(JSBinary(jsify(x), "*", jsify(y)), "+", jsify(z))
-
-	@staticmethod
-	def comb(n: int | float | JSExpr, k: int | float | JSExpr) -> JSExpr:
-		raise NotImplementedError("comb requires factorial implementation")
+	def fma(x: Any, y: Any, z: Any, *, ctx: Transpiler) -> Expr:
+		# (x * y) + z
+		return Binary(
+			Binary(ctx.emit_expr(x), "*", ctx.emit_expr(y)),
+			"+",
+			ctx.emit_expr(z),
+		)

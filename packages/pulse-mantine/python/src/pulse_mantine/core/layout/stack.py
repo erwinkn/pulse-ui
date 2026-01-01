@@ -41,5 +41,5 @@ class StackProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignore[rep
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("Stack", "@mantine/core")
-def Stack(*children: ps.Child, key: str | None = None, **props: Unpack[StackProps]): ...
+@ps.react_component(ps.Import("Stack", "@mantine/core"))
+def Stack(*children: ps.Node, key: str | None = None, **props: Unpack[StackProps]): ...

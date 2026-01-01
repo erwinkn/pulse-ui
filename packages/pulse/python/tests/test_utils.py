@@ -4,12 +4,13 @@ Test utilities for comparing VDOM trees and Node structures.
 
 from typing import Any
 
-from pulse.vdom import ComponentNode, Element, Node, Primitive, VDOMNode
+from pulse.transpiler.nodes import Element, Node, Primitive, PulseNode
+from pulse.transpiler.vdom import VDOMElement, VDOMNode
 
 
-def normalize_vdom_node(node: VDOMNode) -> dict[str, Any]:
+def normalize_vdom_node(node: VDOMElement) -> dict[str, Any]:
 	"""
-	Normalize a VDOMNode by removing empty/None optional fields.
+	Normalize a VDOMElement by removing empty/None optional fields.
 
 	This helps with comparison by ensuring semantically equivalent
 	nodes compare as equal regardless of whether optional fields
@@ -26,19 +27,19 @@ def normalize_vdom_node(node: VDOMNode) -> dict[str, Any]:
 
 
 def normalize_vdom_tree(
-	tree: VDOMNode | Primitive,
+	tree: VDOMNode,
 ) -> dict[str, Any] | Primitive:
 	"""
 	Normalize a VDOM tree (VDOMNode or primitive) for comparison.
 	"""
-	if isinstance(tree, dict):
-		return normalize_vdom_node(tree)
+	if isinstance(tree, dict) and "tag" in tree:
+		return normalize_vdom_node(tree)  # type: ignore[arg-type]
 	else:
-		# Primitive value - return as-is
-		return tree
+		# Primitive value or expression - return as-is
+		return tree  # pyright: ignore[reportReturnType]
 
 
-def normalize_node(node: Node) -> dict[str, Any]:
+def normalize_node(node: Element) -> dict[str, Any]:
 	"""
 	Normalize a Node by converting it to a comparable dict format.
 	"""
@@ -62,17 +63,17 @@ def normalize_node(node: Node) -> dict[str, Any]:
 
 
 def normalize_node_tree(
-	tree: Element,
+	tree: Node,
 ) -> dict[str, Any] | Primitive:
 	"""
 	Normalize a Node tree (Node or primitive) for comparison.
 	"""
-	if isinstance(tree, ComponentNode):
+	if isinstance(tree, PulseNode):
 		raise NotImplementedError()
-	return normalize_node(tree) if isinstance(tree, Node) else tree
+	return normalize_node(tree) if isinstance(tree, Element) else tree  # pyright: ignore[reportReturnType]
 
 
-def assert_vdom_equal(actual: VDOMNode | Primitive, expected: VDOMNode | Primitive):
+def assert_vdom_equal(actual: VDOMNode, expected: VDOMNode):
 	"""
 	Assert that two VDOM trees are semantically equal.
 
@@ -86,7 +87,7 @@ def assert_vdom_equal(actual: VDOMNode | Primitive, expected: VDOMNode | Primiti
 	)
 
 
-def assert_node_equal(actual: Node | Primitive, expected: Node | Primitive):
+def assert_node_equal(actual: Node, expected: Node):
 	"""
 	Assert that two Node trees are semantically equal.
 

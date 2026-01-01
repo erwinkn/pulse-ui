@@ -2,20 +2,20 @@
 JavaScript RegExp builtin module.
 
 Usage:
-    import pulse.js.regexp as RegExp
+    from pulse.js import RegExp
     RegExp(pattern, flags)        # -> new RegExp(pattern, flags)
 
+    # Or import from module directly:
     from pulse.js.regexp import RegExp
-    RegExp(pattern, flags)        # -> new RegExp(pattern, flags)
 """
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 
 class RegExp:
 	"""Class for JavaScript RegExp instances."""
 
-	def __init__(self, pattern: str, flags: str | None = None): ...
+	def __init__(self, pattern: str, flags: str | None = None, /): ...
 
 	def exec(self, string: str) -> list[str] | None: ...
 	def test(self, string: str) -> bool: ...
@@ -50,5 +50,5 @@ class RegExp:
 	def toString(self) -> str: ...
 
 
-# Self-register this module as a JS builtin
-_register_js_module(name="RegExp", global_scope=True)
+# Self-register this module as a JS builtin (global identifiers)
+JsModule.register(name=None)

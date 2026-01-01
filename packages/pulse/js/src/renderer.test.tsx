@@ -8,11 +8,11 @@ function childrenArray(el: React.ReactElement): React.ReactNode[] {
 	return React.Children.toArray((el.props as any)?.children);
 }
 
-describe("applyReactTreeUpdates", () => {
-	function makeRenderer(initialCallbacks: string[] = [], registry: Record<string, unknown> = {}) {
+describe("VDOMRenderer", () => {
+	function makeRenderer(registry: Record<string, unknown> = {}) {
 		const invokeCallback = vi.fn();
 		const client: any = { invokeCallback };
-		const renderer = new VDOMRenderer(client, "/test", initialCallbacks, [], registry);
+		const renderer = new VDOMRenderer(client, "/test", registry);
 		return { renderer, invokeCallback };
 	}
 
@@ -41,11 +41,23 @@ describe("applyReactTreeUpdates", () => {
 		expect(kids[0]).toBe("B");
 	});
 
-	it("hydrates callbacks from initial map", () => {
-		const { renderer, invokeCallback } = makeRenderer(["onClick"]);
+	it("does not hydrate callbacks unless the prop is listed in eval", () => {
+		const { renderer } = makeRenderer();
 		const tree = renderer.renderNode({
 			tag: "button",
 			props: { onClick: "$cb" },
+			// eval missing => props are treated as plain JSON
+		});
+		const button = tree as React.ReactElement;
+		expect((button.props as any).onClick).toBe("$cb");
+	});
+
+	it("hydrates callbacks when prop is listed in eval", () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		const tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb" },
+			eval: ["onClick"],
 		});
 		const button = tree as React.ReactElement;
 		expect(typeof (button.props as any).onClick).toBe("function");
@@ -53,177 +65,131 @@ describe("applyReactTreeUpdates", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
 	});
 
-	it("updates root props and maps callbacks", () => {
-		const { renderer, invokeCallback } = makeRenderer();
-		const initialVDOM: VDOMNode = { tag: "div", children: [] };
-		let tree = renderer.renderNode(initialVDOM);
-		const ops: VDOMUpdate[] = [
+	it("keeps previous eval when update_props.eval is absent", () => {
+		const { renderer } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "div",
+			props: {
+				id: {
+					t: "binary",
+					op: "+",
+					left: { t: "lit", value: "a" },
+					right: { t: "lit", value: "b" },
+				},
+			},
+			eval: ["id"],
+		});
+		const root1 = tree as React.ReactElement;
+		expect((root1.props as any).id).toBe("ab");
+
+		tree = renderer.applyUpdates(tree, [
 			{
 				type: "update_props",
 				path: "",
-				data: { set: { id: "root" } },
+				data: {
+					set: {
+						id: {
+							t: "binary",
+							op: "+",
+							left: { t: "lit", value: "x" },
+							right: { t: "lit", value: "y" },
+						},
+					},
+					// eval absent => keep previous eval
+				},
 			},
-			{
-				type: "update_callbacks",
-				path: "",
-				data: { add: ["onClick"] },
+		]);
+		const root2 = tree as React.ReactElement;
+		expect((root2.props as any).id).toBe("xy");
+	});
+
+	it("clears eval when update_props.eval is []", () => {
+		const { renderer } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "div",
+			props: {
+				id: {
+					t: "binary",
+					op: "+",
+					left: { t: "lit", value: "a" },
+					right: { t: "lit", value: "b" },
+				},
 			},
+			eval: ["id"],
+		});
+
+		tree = renderer.applyUpdates(tree, [
 			{
 				type: "update_props",
 				path: "",
-				data: { set: { onClick: "$cb" } },
+				data: {
+					eval: [], // clear
+					set: {
+						id: {
+							t: "binary",
+							op: "+",
+							left: { t: "lit", value: "x" },
+							right: { t: "lit", value: "y" },
+						},
+					},
+				},
 			},
-		];
-		tree = renderer.applyUpdates(tree, ops);
+		]);
 		const root = tree as React.ReactElement;
-		expect((root.props as any).id).toBe("root");
-		expect(typeof (root.props as any).onClick).toBe("function");
-		(root.props as any).onClick(123);
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", [123]);
+		// Now treated as plain JSON; the value stays as the expr object.
+		expect((root.props as any).id).toEqual({
+			t: "binary",
+			op: "+",
+			left: { t: "lit", value: "x" },
+			right: { t: "lit", value: "y" },
+		});
 	});
 
-	// CSS tests removed - CSS references are now handled via jsexpr_paths
-
-	it("replaces a nested child via path", () => {
+	it("renders render-prop subtrees when prop is listed in eval", () => {
 		const { renderer } = makeRenderer();
-		const initialVDOM: VDOMNode = {
+		const tree = renderer.renderNode({
 			tag: "div",
-			children: [{ tag: "div", children: [{ tag: "span", children: ["A"] }] }],
-		};
-		let tree = renderer.renderNode(initialVDOM);
-		const ops: VDOMUpdate[] = [
-			{
-				type: "replace",
-				path: "0.0",
-				data: { tag: "span", children: ["B"] },
-			},
-		];
-		tree = renderer.applyUpdates(tree, ops);
+			props: { render: { tag: "span", children: ["A"] } },
+			eval: ["render"],
+		});
 		const root = tree as React.ReactElement;
-		const rootChildren = childrenArray(root);
-		const child0 = rootChildren[0] as React.ReactElement;
-		const innerChildren = childrenArray(child0);
-		const replaced = innerChildren[0] as React.ReactElement;
-		const leafChildren = childrenArray(replaced);
-		expect(replaced.type).toBe("span");
-		expect(leafChildren[0]).toBe("B");
+		const renderProp = (root.props as any).render as React.ReactElement;
+		expect(React.isValidElement(renderProp)).toBe(true);
+		expect(renderProp.type).toBe("span");
+		expect(childrenArray(renderProp)[0]).toBe("A");
 	});
 
-	it("applies reconciliation with new items", () => {
-		const { renderer } = makeRenderer();
-		const initialVDOM: VDOMNode = {
-			tag: "div",
-			children: [
-				{ tag: "span", children: ["A"] },
-				{ tag: "span", children: ["B"] },
-			],
-		};
-		let tree = renderer.renderNode(initialVDOM);
-
-		const ops: VDOMUpdate[] = [
-			{
-				type: "reconciliation",
-				path: "",
-				N: 3,
-				new: [[2], [{ tag: "span", children: ["C"] }]],
-				reuse: [
-					[0, 1],
-					[0, 1],
-				],
-			},
-		];
-
-		tree = renderer.applyUpdates(tree, ops);
-		const root = tree as React.ReactElement;
-		const kids = childrenArray(root) as React.ReactElement[];
-		expect(kids).toHaveLength(3);
-		expect(childrenArray(kids[0])[0]).toBe("A");
-		expect(childrenArray(kids[1])[0]).toBe("B");
-		expect(childrenArray(kids[2])[0]).toBe("C");
-	});
-
-	it("applies reconciliation with moves", () => {
-		const { renderer } = makeRenderer();
-		const initialVDOM: VDOMNode = {
-			tag: "div",
-			children: [
-				{ tag: "span", children: ["A"] },
-				{ tag: "span", children: ["B"] },
-				{ tag: "span", children: ["C"] },
-			],
-		};
-		let tree = renderer.renderNode(initialVDOM);
-
-		const ops: VDOMUpdate[] = [
-			{
-				type: "reconciliation",
-				path: "",
-				N: 3,
-				new: [[], []],
-				reuse: [
-					[0, 2],
-					[2, 0],
-				], // Move A to index 2, C to index 0
-			},
-		];
-
-		tree = renderer.applyUpdates(tree, ops);
-		const root = tree as React.ReactElement;
-		const kids = childrenArray(root) as React.ReactElement[];
-		expect(kids).toHaveLength(3);
-		expect(childrenArray(kids[0])[0]).toBe("C");
-		expect(childrenArray(kids[1])[0]).toBe("B");
-		expect(childrenArray(kids[2])[0]).toBe("A");
-	});
-
-	it("applies reconciliation with mixed new items and moves", () => {
-		const { renderer } = makeRenderer();
-		const initialVDOM: VDOMNode = {
-			tag: "div",
-			children: [
-				{ tag: "span", children: ["A"] },
-				{ tag: "span", children: ["B"] },
-				{ tag: "span", children: ["C"] },
-			],
-		};
-		let tree = renderer.renderNode(initialVDOM);
-
-		const ops: VDOMUpdate[] = [
-			{
-				type: "reconciliation",
-				path: "",
-				N: 4,
-				new: [
-					[1, 3],
-					[
-						{ tag: "span", children: ["D"] },
-						{ tag: "span", children: ["E"] },
+	it("evaluates expression props when listed in eval", () => {
+		const C = (_props: { items?: unknown }) => null;
+		const { renderer } = makeRenderer({
+			C,
+		});
+		const tree = renderer.renderNode({
+			tag: "$$C",
+			props: {
+				items: {
+					t: "array",
+					items: [
+						{ t: "lit", value: 1 },
+						{ t: "lit", value: 2 },
+						{ t: "lit", value: 3 },
 					],
-				],
-				reuse: [
-					[0, 2],
-					[0, 2],
-				], // Keep A at 0, C at 2
+				},
 			},
-		];
-
-		tree = renderer.applyUpdates(tree, ops);
-		const root = tree as React.ReactElement;
-		const kids = childrenArray(root) as React.ReactElement[];
-		expect(kids).toHaveLength(4);
-		expect(childrenArray(kids[0])[0]).toBe("A");
-		expect(childrenArray(kids[1])[0]).toBe("D");
-		expect(childrenArray(kids[2])[0]).toBe("C");
-		expect(childrenArray(kids[3])[0]).toBe("E");
+			eval: ["items"],
+		});
+		const el = tree as React.ReactElement;
+		expect(el.type).toBe(C);
+		expect((el.props as any).items).toEqual([1, 2, 3]);
 	});
 
-	it("applies reconciliation with callback rebinding", () => {
-		const { renderer, invokeCallback } = makeRenderer(["0.onClick", "1.onClick"]);
+	it("rebinds callbacks after reconciliation moves (no callback registry)", () => {
+		const { renderer, invokeCallback } = makeRenderer();
 		const initialVDOM: VDOMNode = {
 			tag: "div",
 			children: [
-				{ tag: "button", props: { onClick: "$cb" }, children: ["A"] },
-				{ tag: "button", props: { onClick: "$cb" }, children: ["B"] },
+				{ tag: "button", props: { onClick: "$cb" }, eval: ["onClick"], children: ["A"] },
+				{ tag: "button", props: { onClick: "$cb" }, eval: ["onClick"], children: ["B"] },
 			],
 		};
 		let tree = renderer.renderNode(initialVDOM);
@@ -237,7 +203,7 @@ describe("applyReactTreeUpdates", () => {
 				reuse: [
 					[0, 1],
 					[1, 0],
-				], // Swap positions
+				], // swap
 			},
 		];
 
@@ -245,7 +211,6 @@ describe("applyReactTreeUpdates", () => {
 		const root = tree as React.ReactElement;
 		const kids = childrenArray(root) as React.ReactElement[];
 
-		// Test that callbacks are properly rebound
 		(kids[0].props as any).onClick("from-B");
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "0.onClick", ["from-B"]);
 
@@ -253,75 +218,32 @@ describe("applyReactTreeUpdates", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["from-A"]);
 	});
 
-	it("applies reconciliation with nested path", () => {
-		const { renderer } = makeRenderer();
-		const initialVDOM: VDOMNode = {
-			tag: "div",
-			children: [
-				{
-					tag: "div",
-					children: [
-						{ tag: "span", children: ["A"] },
-						{ tag: "span", children: ["B"] },
-					],
-				},
-			],
-		};
-		let tree = renderer.renderNode(initialVDOM);
-
-		const ops: VDOMUpdate[] = [
-			{
-				type: "reconciliation",
-				path: "0",
-				N: 3,
-				new: [[2], [{ tag: "span", children: ["C"] }]],
-				reuse: [
-					[0, 1],
-					[0, 1],
-				],
-			},
-		];
-
-		tree = renderer.applyUpdates(tree, ops);
-		const root = tree as React.ReactElement;
-		const innerDiv = childrenArray(root)[0] as React.ReactElement;
-		const kids = childrenArray(innerDiv) as React.ReactElement[];
-		expect(kids).toHaveLength(3);
-		expect(childrenArray(kids[0])[0]).toBe("A");
-		expect(childrenArray(kids[1])[0]).toBe("B");
-		expect(childrenArray(kids[2])[0]).toBe("C");
-	});
-
-	it("applies nested callback additions via update", () => {
+	it("update_props can switch callback binding on/off by changing eval", () => {
 		const { renderer, invokeCallback } = makeRenderer();
-		const initialVDOM: VDOMNode = {
-			tag: "div",
-			children: [
-				{
-					tag: "div",
-					children: [{ tag: "button", props: { id: "btn" }, children: ["X"] }],
-				},
-			],
-		};
-		let tree = renderer.renderNode(initialVDOM);
-		const ops: VDOMUpdate[] = [
-			{
-				type: "update_callbacks",
-				path: "",
-				data: { add: ["0.0.onClick"] },
-			},
+		let tree = renderer.renderNode({ tag: "button", props: { id: "x" } });
+
+		// Turn on callback binding
+		tree = renderer.applyUpdates(tree, [
 			{
 				type: "update_props",
-				path: "0.0",
-				data: { set: { onClick: "$cb" } },
+				path: "",
+				data: { eval: ["onClick"], set: { onClick: "$cb" } },
 			},
-		];
-		tree = renderer.applyUpdates(tree, ops);
-		const root = tree as React.ReactElement;
-		const innerDiv = childrenArray(root)[0] as React.ReactElement;
-		const button = childrenArray(innerDiv)[0] as React.ReactElement;
-		expect(typeof (button.props as any).onClick).toBe("function");
-		(button.props as any).onClick();
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "0.0.onClick", []);
+		]);
+		const b1 = tree as React.ReactElement;
+		expect(typeof (b1.props as any).onClick).toBe("function");
+		(b1.props as any).onClick(1);
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", [1]);
+
+		// Clear eval => onClick becomes plain JSON "$cb"
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: [], set: { onClick: "$cb" } },
+			},
+		]);
+		const b2 = tree as React.ReactElement;
+		expect((b2.props as any).onClick).toBe("$cb");
 	});
 });

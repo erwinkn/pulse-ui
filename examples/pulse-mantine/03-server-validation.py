@@ -55,7 +55,8 @@ class UsernameForm(MantineForm):
 
 @ps.component
 def ServerValidationDemo():
-	form = ps.states(UsernameForm)
+	with ps.init():
+		form = UsernameForm()
 
 	return form.render(onSubmit=lambda values: print("Submitted:", values))[
 		TextInput(

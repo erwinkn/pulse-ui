@@ -2,22 +2,20 @@
 JavaScript Error builtin module.
 
 Usage:
-    import pulse.js.error as Error
+    from pulse.js import Error
     Error("message")              # -> new Error("message")
-    Error.RangeError("message")   # -> new RangeError("message")
 
-    from pulse.js.error import Error, TypeError, RangeError, ReferenceError
-    Error("message")              # -> new Error("message")
+    from pulse.js.error import TypeError, RangeError, ReferenceError
     TypeError("message")         # -> new TypeError("message")
 """
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 
 class Error:
 	"""Class for JavaScript Error instances."""
 
-	def __init__(self, message: str | None = None): ...
+	def __init__(self, message: str | None = None, /): ...
 
 	@property
 	def message(self) -> str: ...
@@ -36,7 +34,7 @@ class Error:
 class EvalError:
 	"""Class for JavaScript EvalError instances."""
 
-	def __init__(self, message: str | None = None): ...
+	def __init__(self, message: str | None = None, /): ...
 
 	@property
 	def message(self) -> str: ...
@@ -53,7 +51,7 @@ class EvalError:
 class RangeError:
 	"""Class for JavaScript RangeError instances."""
 
-	def __init__(self, message: str | None = None): ...
+	def __init__(self, message: str | None = None, /): ...
 
 	@property
 	def message(self) -> str: ...
@@ -70,7 +68,7 @@ class RangeError:
 class ReferenceError:
 	"""Class for JavaScript ReferenceError instances."""
 
-	def __init__(self, message: str | None = None): ...
+	def __init__(self, message: str | None = None, /): ...
 
 	@property
 	def message(self) -> str: ...
@@ -87,7 +85,7 @@ class ReferenceError:
 class SyntaxError:
 	"""Class for JavaScript SyntaxError instances."""
 
-	def __init__(self, message: str | None = None): ...
+	def __init__(self, message: str | None = None, /): ...
 
 	@property
 	def message(self) -> str: ...
@@ -104,7 +102,7 @@ class SyntaxError:
 class TypeError:
 	"""Class for JavaScript TypeError instances."""
 
-	def __init__(self, message: str | None = None): ...
+	def __init__(self, message: str | None = None, /): ...
 
 	@property
 	def message(self) -> str: ...
@@ -121,7 +119,7 @@ class TypeError:
 class URIError:
 	"""Class for JavaScript URIError instances."""
 
-	def __init__(self, message: str | None = None): ...
+	def __init__(self, message: str | None = None, /): ...
 
 	@property
 	def message(self) -> str: ...
@@ -135,5 +133,5 @@ class URIError:
 	def toString(self) -> str: ...
 
 
-# Self-register this module as a JS builtin
-_register_js_module(name="Error", global_scope=True)
+# Self-register this module as a JS builtin (global identifiers)
+JsModule.register(name=None)

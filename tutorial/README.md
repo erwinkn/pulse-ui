@@ -135,7 +135,8 @@ class CounterState(ps.State):
 
 @ps.component
 def counter():
-    state = ps.states(CounterState)
+    with ps.init():
+        state = CounterState()
     print(f"Rendering counter, count is {state.count}")
 
     def decrement():
@@ -181,16 +182,17 @@ So the core loop of Pulse is:
 
 ## 4. Hooks
 
-### 4.1. Introduction: `ps.states`
+### 4.1. Introduction: `ps.init()`
 
-You may have noticed that our earlier state example uses a function called `ps.states`. This function is a **Pulse hook**, providing a special mechanism outside the usual render -> update -> render cycle.
+You may have noticed that our earlier state example uses a context manager called `ps.init()`. This is a **Pulse hook**, providing a special mechanism outside the usual render -> update -> render cycle.
 
-Its purpose is to preserve the same state instance across component rerenders. To see why this matters, try making this change in `02-counter.py`:
+Its purpose is to preserve the same state instance across component rerenders. Any variables assigned inside the `with ps.init():` block are captured on the first render and restored on subsequent renders. To see why this matters, try making this change in `02-counter.py`:
 
 ```diff
 @ps.component
 def counter():
--    state = ps.states(CounterState)
+-    with ps.init():
+-        state = CounterState()
 +    state = CounterState()
 ```
 
@@ -200,18 +202,18 @@ You should notice that clicking the buttons doesn't do anything anymore. Here is
 - Click increment: `count` in `CounterState` is incremented.
 - 2nd render: a new `CounterState` is created. The count is at its default value of 0. The rest of the component uses this state and displays that count is 0.
 
-With `ps.states`, this becomes:
+With `ps.init()`, this becomes:
 
-- 1st render: `CounterState` is created.
+- 1st render: `CounterState` is created and captured by `ps.init()`.
 - Click increment: `count` in `CounterState` is incremented.
-- 2nd render: `ps.states` returns the same state as on the 1st render. The count has been incremented and is now 1. The rest of the component uses this state and thus displays that count is 1.
+- 2nd render: `ps.init()` restores the same state from the 1st render. The count has been incremented and is now 1. The rest of the component uses this state and thus displays that count is 1.
 
 ### 4.2. Rules of hooks
 
 The three main Pulse hooks are:
 
-- `ps.setup`: runs an arbitrary function on first render and returns its result on every render aftewards.
-- `ps.states`: preserves states across rerenders.
+- `ps.setup`: runs an arbitrary function on first render and returns its result on every render afterwards.
+- `ps.init()`: preserves variables (including states) across rerenders.
 - `ps.effects`: sets up effects on first render.
 
 They have one single rule: **you can only call them once per component.**
@@ -220,7 +222,7 @@ Components are functions decorated with `@ps.component`. We will discuss them in
 
 This rule illustrates that the purpose of hooks is to **give you a way to do something exactly once, when a component first renders**.
 
-In practice, you could do everything with `ps.setup`: create your states, set up your effects, initialize something, etc... `ps.states` and `ps.effects` are convenience hooks for common requirements.
+In practice, you could do everything with `ps.setup`: create your states, set up your effects, initialize something, etc... `ps.init()` and `ps.effects` are convenience hooks for common requirements.
 
 ### 4.3. Usage
 
@@ -286,14 +288,13 @@ def debug_toggle(label: str, state: DebugState):
 
 @ps.component
 def HooksDemo():
-    # Three ways of creating states with `ps.states`:
-    # - Pass an instance: `Counter()`
-    # - Pass a function returning a state.
-    # If a state doesn't have a constructor, or it takes no arguments, passing in
-    # the state class is like passing in a function.
-    counter1, counter2, debug1 = ps.states(
-        CounterState, CounterState(), lambda: DebugState(False)
-    )
+    # Use `ps.init()` to create state that persists across renders.
+    # Any variables assigned inside the block are captured on the first render
+    # and restored on subsequent renders.
+    with ps.init():
+        counter1 = CounterState()
+        counter2 = CounterState()
+        debug1 = DebugState(False)
 
     # `ps.setup` can also be used to create states and perform anything else you
     # need to set up on the first render. Note that the setup function has to be
@@ -323,28 +324,25 @@ app = ps.App(
 
 In this example, we can see:
 
-- Using `ps.states` with a function producing a state. The function is executed on first render and its result stored for all subsequent calls. For example:
-  - Example 1: `ps.states(CounterState)`. The constructor takes no arguments, so it works.
-  - Example 2: `ps.states(lambda: DebugState(True))`. This is an easy way to wrap a constructor that takes arguments.
-- Using `ps.states` with a component instance: `CounterState()`. On first render, the state is stored and returned. On subsequent renders, a new `CounterState` is created in our function and disposed immediately within `ps.states`, which returns the stored state
-  - Example: `ps.states(CounterState())`
-  - This pattern works fine and is often convenient.
-  - Keep in mind that a new `CounterState` is constructed on every render, so if the state constructor does resource-intensive work, you should probably wrap it in a function, like above.
+- Using `ps.init()` to create multiple states. All variables assigned inside the block are captured on first render and restored on subsequent renders.
+  - Example: `counter1 = CounterState()`, `debug1 = DebugState(False)`
+  - States are constructed only on the first render and reused on all subsequent renders.
 - Using `ps.setup` with a function that takes in arguments. The function will be called once, its result stored and returned on every render. Arguments to the function can be passed to `ps.setup()` after the function.
-  - Here, we use it to create a `DebugState`, essentially doing the same thing as `ps.states`
+  - Here, we use it to create a `DebugState`, essentially doing the same thing as `ps.init()`
   - This is useful if you have more complex initialization needs. See the [Cookbook](#15-cookbook) for usage examples.
 
 ### 4.4 Hook keys
 
-The three main hooks (`setup`, `states`, and `effects`) accept an optional `key` argument.
+The `ps.setup` and `ps.effects` hooks accept an optional `key` argument.
 
 If the key changes, the hooks will rerun, which results in the following:
 
 - `setup`: the setup function reruns. States and effects created in the previous execution of the setup function are cleaned up.
-- `states`: disposes the previous set of states and creates new ones, either by directly taking a state object passed as argument, or running the functions that were passed as arguments.
 - `effects`: disposes the previous set of effects and creates new ones, based on the provided functions.
 
 Keys are compared using the `!=` operator and thus have to support it. It is recommended to only use primitive values (strings, numbers, booleans) or tuples of primitive values as keys.
+
+For keyed state management, use `ps.state(key, StateClass)` when you need different state instances based on runtime keys.
 
 ### 4.5 `stable` hook
 
@@ -395,7 +393,8 @@ class EditorState(ps.State):
 
 @ps.component
 def Editor(value: str, on_finalized: Callable[[str], None]):
-    st = ps.states(EditorState(value, on_finalized))
+    with ps.init():
+        st = EditorState(value, on_finalized)
     # do stuff, render the component
 ```
 
@@ -431,7 +430,8 @@ class EditorState(ps.State):
 @ps.component
 def Editor(value: str, on_finalized: Callable[[str], None]):
     on_finalized = ps.stable("on_finalized", on_finalized)
-    st = ps.states(EditorState(value, on_finalized))
+    with ps.init():
+        st = EditorState(value, on_finalized)
     # do stuff, render the component
 ```
 
@@ -631,7 +631,8 @@ class CounterState(ps.State):
 
 @ps.component
 def Counter():
-    state = ps.states(CounterState)
+    with ps.init():
+        state = CounterState()
 
     def decrement():
         state.count -= 1
@@ -690,7 +691,8 @@ class ToggleState(ps.State):
 
 @ps.component
 def Toggle(label: str):
-    state = ps.states(ToggleState)
+    with ps.init():
+        state = ToggleState()
     return ps.div(
         ps.button(
             f"{label}: {'ON' if state.on else 'OFF'}",
@@ -912,7 +914,8 @@ class QueryDemoState(ps.State):
 
 @ps.component
 def QueryDemo():
-    state = ps.states(QueryDemoState)
+    with ps.init():
+        state = QueryDemoState()
 
     def prev():
         state.user_id = max(1, state.user_id - 1)
@@ -997,7 +1000,8 @@ class AsyncEffectState(ps.State):
 
 @ps.component
 def AsyncEffectDemo():
-    state = ps.states(AsyncEffectState)
+    with ps.init():
+        state = AsyncEffectState()
 
     return ps.div(
         ps.div(

@@ -2,6 +2,7 @@ from typing import cast
 
 import pulse as ps
 import pytest
+from pulse.component import Component, component
 from pulse.routing import (
 	InvalidRouteError,
 	Layout,
@@ -9,7 +10,7 @@ from pulse.routing import (
 	Route,
 	RouteTree,
 )
-from pulse.vdom import Component, Node, component
+from pulse.transpiler.nodes import Element
 
 # --- PathSegment Tests ---
 
@@ -69,7 +70,7 @@ def test_path_segment_empty():
 
 @component
 def DummyComponent():
-	return Node(tag="div")
+	return Element(tag="div")
 
 
 @pytest.fixture

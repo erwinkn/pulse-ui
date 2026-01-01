@@ -30,10 +30,8 @@ from pulse.routing import (
 	ensure_absolute_path,
 )
 from pulse.state import State
-from pulse.transpiler.context import interpreted_mode
-from pulse.transpiler.ids import generate_id
-from pulse.transpiler.nodes import JSExpr
-from pulse.vdom import Element
+from pulse.transpiler.id import next_id
+from pulse.transpiler.nodes import Expr, Node, emit
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
@@ -48,14 +46,14 @@ class JsExecError(Exception):
 
 # Module-level convenience wrapper
 @overload
-def run_js(expr: JSExpr | str, *, result: Literal[True]) -> asyncio.Future[Any]: ...
+def run_js(expr: Expr | str, *, result: Literal[True]) -> asyncio.Future[Any]: ...
 
 
 @overload
-def run_js(expr: JSExpr | str, *, result: Literal[False] = ...) -> None: ...
+def run_js(expr: Expr | str, *, result: Literal[False] = ...) -> None: ...
 
 
-def run_js(expr: JSExpr | str, *, result: bool = False) -> asyncio.Future[Any] | None:
+def run_js(expr: Expr | str, *, result: bool = False) -> asyncio.Future[Any] | None:
 	"""Execute JavaScript on the client. Convenience wrapper for RenderSession.run_js()."""
 	ctx = PulseContext.get()
 	if ctx.render is None:
@@ -69,7 +67,7 @@ class RouteMount:
 	tree: RenderTree
 	effect: Effect | None
 	_pulse_ctx: PulseContext | None
-	element: Element
+	element: Node
 	rendered: bool
 
 	def __init__(
@@ -316,25 +314,25 @@ class RenderSession:
 	# ---- JS Execution ----
 	@overload
 	def run_js(
-		self, expr: JSExpr | str, *, result: Literal[True], timeout: float = ...
+		self, expr: Expr | str, *, result: Literal[True], timeout: float = ...
 	) -> asyncio.Future[object]: ...
 
 	@overload
 	def run_js(
 		self,
-		expr: JSExpr | str,
+		expr: Expr | str,
 		*,
 		result: Literal[False] = ...,
 		timeout: float = ...,
 	) -> None: ...
 
 	def run_js(
-		self, expr: JSExpr | str, *, result: bool = False, timeout: float = 10.0
+		self, expr: Expr | str, *, result: bool = False, timeout: float = 10.0
 	) -> asyncio.Future[object] | None:
 		"""Execute JavaScript on the client.
 
 		Args:
-			expr: A JSExpr (e.g. from calling a @javascript function) or raw JS string.
+			expr: A Expr (e.g. from calling a @javascript function) or raw JS string.
 			result: If True, returns a Future that resolves with the JS return value.
 			        If False (default), returns None (fire-and-forget).
 			timeout: Maximum seconds to wait for result (default 10s, only applies when
@@ -366,13 +364,12 @@ class RenderSession:
 				run_js("console.log('Hello from Python!')")
 		"""
 		ctx = PulseContext.get()
-		exec_id = generate_id()
+		exec_id = next_id()
 
 		if isinstance(expr, str):
 			code = expr
 		else:
-			with interpreted_mode():
-				code = expr.emit()
+			code = emit(expr)
 
 		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
 		# This must match the path used to key views on the client side
@@ -433,7 +430,7 @@ class RenderSession:
 		initial message instead of sending over a socket.
 
 		Returns a dict:
-		  { "type": "vdom_init", "vdom": VDOM, "callbacks": list[str] } or
+		  { "type": "vdom_init", "vdom": VDOM } or
 		  { "type": "navigate_to", "path": str, "replace": bool }
 		"""
 		# If already mounted (e.g., repeated prerender), do nothing special.
@@ -447,15 +444,7 @@ class RenderSession:
 				if normalized_root is not None:
 					mount.element = normalized_root
 				mount.rendered = True
-				msg = ServerInitMessage(
-					type="vdom_init",
-					path=path,
-					vdom=vdom,
-					callbacks=sorted(mount.tree.callbacks.keys()),
-					render_props=sorted(mount.tree.render_props),
-					jsexpr_paths=sorted(mount.tree.jsexpr_paths),
-				)
-				return msg
+				return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 
 		captured: ServerInitMessage | ServerNavigateToMessage | None = None
 
@@ -466,12 +455,7 @@ class RenderSession:
 				return
 			if msg["type"] == "vdom_init" and msg["path"] == path:
 				captured = ServerInitMessage(
-					type="vdom_init",
-					path=path,
-					vdom=msg.get("vdom"),
-					callbacks=msg.get("callbacks", []),
-					render_props=msg.get("render_props", []),
-					jsexpr_paths=msg.get("jsexpr_paths", []),
+					type="vdom_init", path=path, vdom=msg.get("vdom")
 				)
 			elif msg["type"] == "navigate_to":
 				captured = ServerNavigateToMessage(
@@ -500,15 +484,7 @@ class RenderSession:
 				if normalized_root is not None:
 					mount.element = normalized_root
 				mount.rendered = True
-			msg = ServerInitMessage(
-				type="vdom_init",
-				path=path,
-				vdom=vdom,
-				callbacks=sorted(mount.tree.callbacks.keys()),
-				render_props=sorted(mount.tree.render_props),
-				jsexpr_paths=sorted(mount.tree.jsexpr_paths),
-			)
-			return msg
+			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 
 		return captured
 
@@ -578,15 +554,9 @@ class RenderSession:
 						if normalized_root is not None:
 							mount.element = normalized_root
 						mount.rendered = True
-						msg = ServerInitMessage(
-							type="vdom_init",
-							path=path,
-							vdom=vdom,
-							callbacks=sorted(mount.tree.callbacks.keys()),
-							render_props=sorted(mount.tree.render_props),
-							jsexpr_paths=sorted(mount.tree.jsexpr_paths),
+						self.send(
+							ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 						)
-						self.send(msg)
 					else:
 						ops = mount.tree.diff(mount.element)
 						normalized_root = getattr(mount.tree, "_normalized", None)

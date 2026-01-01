@@ -40,7 +40,7 @@ class SimpleGridProps(ps.HTMLDivProps, BoxProps, total=False):  # pyright: ignor
 	"""Additional attributes passed to elements"""
 
 
-@ps.react_component("SimpleGrid", "@mantine/core")
+@ps.react_component(ps.Import("SimpleGrid", "@mantine/core"))
 def SimpleGrid(
-	*children: ps.Child, key: str | None = None, **props: Unpack[SimpleGridProps]
+	*children: ps.Node, key: str | None = None, **props: Unpack[SimpleGridProps]
 ): ...

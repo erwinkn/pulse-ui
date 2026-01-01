@@ -18,7 +18,9 @@ class Items(ps.State):
 
 @ps.component
 def LateBindingDemo():
-	state1, state2 = ps.states(Items, Items)
+	with ps.init():
+		state1 = Items()
+		state2 = Items()
 
 	bad = ps.div(className="p-3 border rounded mr-6")[
 		ps.h4("Bad (late-bound closures)"),

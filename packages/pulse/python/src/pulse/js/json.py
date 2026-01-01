@@ -15,7 +15,7 @@ from collections.abc import Callable as _Callable
 from collections.abc import Sequence as _Sequence
 from typing import TypeVar as _TypeVar
 
-from pulse.transpiler.js_module import register_js_module as _register_js_module
+from pulse.transpiler.js_module import JsModule
 
 # JSON types
 JSONValue = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
@@ -25,7 +25,7 @@ JSONReviver = _Callable[[str, JSONValue], JSONValue]
 T = _TypeVar("T")
 
 
-def parse(text: str, reviver: JSONReviver | None = None) -> JSONValue:
+def parse(text: str, reviver: JSONReviver | None = None, /) -> JSONValue:
 	"""Parse a JSON string into a JavaScript value.
 
 	Args:
@@ -43,6 +43,7 @@ def stringify(
 	value: JSONValue,
 	replacer: JSONReplacer | None = None,
 	space: int | str | None = None,
+	/,
 ) -> str:
 	"""Convert a JavaScript value to a JSON string.
 
@@ -59,4 +60,4 @@ def stringify(
 
 
 # Self-register this module as a JS builtin
-_register_js_module(name="JSON")
+JsModule.register(name="JSON")

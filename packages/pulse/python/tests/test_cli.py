@@ -1,9 +1,7 @@
-import io
 import json
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from pulse.cli.dependencies import (
@@ -24,7 +22,7 @@ from pulse.cli.packages import (
 from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.env import env
-from rich.console import Console
+from pulse.transpiler.imports import Import, clear_import_registry
 
 
 def test_parse_app_target_file_default(tmp_path: Path):
@@ -114,21 +112,19 @@ def test_prepare_web_dependencies_returns_add_plan(tmp_path: Path):
 	web_root.mkdir()
 	(web_root / "package.json").write_text("{}")
 
-	component = SimpleNamespace(
-		src="react@^18",
-		version="18.2.0",
-		extra_imports=[SimpleNamespace(src="@tanstack/react-query@^5")],
-	)
+	clear_import_registry()
+	Import("React", "react@^18")
+	Import("QueryClient", "@tanstack/react-query@^5")
 
 	plan = prepare_web_dependencies(
 		web_root,
 		pulse_version="9.9.9",
-		component_provider=lambda: [component],  # pyright: ignore[reportArgumentType]
 	)
 	assert plan is not None
 	assert plan.command[:2] == ["bun", "add"]
 	assert any(arg.startswith("pulse-ui-client@9.9.9") for arg in plan.command)
-	assert any("react" in arg for arg in plan.command)
+	assert any(arg.startswith("react@") for arg in plan.command)
+	assert any(arg.startswith("@tanstack/react-query@") for arg in plan.command)
 
 
 def test_prepare_web_dependencies_returns_install_when_up_to_date(tmp_path: Path):
@@ -145,10 +141,10 @@ def test_prepare_web_dependencies_returns_install_when_up_to_date(tmp_path: Path
 	}
 	(web_root / "package.json").write_text(json.dumps(package_json))
 
+	clear_import_registry()
 	plan = prepare_web_dependencies(
 		web_root,
 		pulse_version="9.9.9",
-		component_provider=lambda: [],
 	)
 	assert plan is not None
 	assert plan.command == ["bun", "i"]
@@ -158,16 +154,12 @@ def test_prepare_web_dependencies_returns_install_when_up_to_date(tmp_path: Path
 def test_prepare_web_dependencies_raises_on_conflict(tmp_path: Path):
 	web_root = tmp_path
 	(web_root / "package.json").write_text("{}")
-	conflicting = SimpleNamespace(
-		src="react@18.2.0",
-		version="18.1.0",
-		extra_imports=[],
-	)
+	clear_import_registry()
+	Import("React", "react@18.2.0", version="18.1.0")
 	with pytest.raises(DependencyResolutionError):
 		prepare_web_dependencies(
 			web_root,
 			pulse_version="9.9.9",
-			component_provider=lambda: [conflicting],  # pyright: ignore[reportArgumentType]
 		)
 
 
@@ -210,11 +202,9 @@ def test_execute_commands_streams_output(
 		env=os.environ.copy(),
 		on_spawn=lambda: spawns.append("server"),
 	)
-	console = Console(file=io.StringIO(), force_terminal=False, color_system=None)
 	exit_code = execute_commands(
 		[spec],
-		console=console,
-		tag_colors={"server": "cyan"},
+		tag_mode="plain",  # Use plain mode since capsys captures plain text
 	)
 	assert exit_code == 0
 	output = capsys.readouterr().out

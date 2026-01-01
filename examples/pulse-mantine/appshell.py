@@ -22,7 +22,8 @@ class State(ps.State):
 
 @ps.component
 def Home():
-	state = ps.states(State)
+	with ps.init():
+		state = State()
 	return MantineProvider(
 		AppShell(
 			header={"height": 60},

@@ -27,7 +27,8 @@ class QueryDemoState(ps.State):
 
 @ps.component
 def QueryDemo():
-	state = ps.states(QueryDemoState)
+	with ps.init():
+		state = QueryDemoState()
 
 	def prev():
 		state.user_id = max(1, state.user_id - 1)

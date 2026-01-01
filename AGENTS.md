@@ -52,9 +52,10 @@ packages/
 examples/                     # Example apps
 ```
 
-## Tips
+## Guidelines
 
+- Be extremely concise. Sacrifice grammar for the sake of concision.
+- Read the README.md in the relevant package before starting work
 - Run `make all` before committing
-- Both `basedpyright` and `tsc` must pass
 - Check `examples/` for patterns
-- Serialization matters: data crosses Python-JS via `serialize/`
+- Use `make bump` for changing package versions

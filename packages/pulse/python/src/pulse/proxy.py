@@ -15,6 +15,9 @@ from starlette.responses import PlainTextResponse, Response
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.typing import Subprotocol
 
+from pulse.context import PulseContext
+from pulse.cookies import parse_cookie_header
+
 logger = logging.getLogger(__name__)
 
 
@@ -190,6 +193,17 @@ class ReactProxy:
 
 		# Extract headers, skip host header (will be set by httpx)
 		headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+		ctx = PulseContext.get()
+		session = ctx.session
+		if session is not None:
+			session_cookie = session.get_cookie_value(ctx.app.cookie.name)
+			if session_cookie:
+				existing = parse_cookie_header(headers.get("cookie"))
+				if existing.get(ctx.app.cookie.name) != session_cookie:
+					existing[ctx.app.cookie.name] = session_cookie
+					headers["cookie"] = "; ".join(
+						f"{key}={value}" for key, value in existing.items()
+					)
 
 		try:
 			# Build request

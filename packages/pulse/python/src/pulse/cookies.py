@@ -171,13 +171,13 @@ def compute_cookie_secure(env: PulseEnv, server_address: str | None) -> bool:
 		if env in ("prod", "ci"):
 			raise RuntimeError(
 				"Could not determine cookie security from server_address. "
-				"Use an explicit https:// server_address or set Cookie(secure=True/False)."
+				+ "Use an explicit https:// server_address or set Cookie(secure=True/False)."
 			)
 		return False
 	if env in ("prod", "ci") and not secure:
 		raise RuntimeError(
 			"Refusing to use insecure cookies in prod/ci. "
-			"Use an https server_address or set Cookie(secure=True) explicitly."
+			+ "Use an https server_address or set Cookie(secure=True) explicitly."
 		)
 	return secure
 

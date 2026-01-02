@@ -605,12 +605,14 @@ class App:
 			# Parse cookies from environ and ensure a session exists
 			cookie = self.cookie.get_from_socketio(environ)
 			if cookie is None:
-				raise ConnectionRefusedError()
+				raise ConnectionRefusedError("Socket connect missing cookie")
 			session = await self.get_or_create_session(cookie)
 
 			if not rid:
 				# Still refuse connections without a renderId
-				raise ConnectionRefusedError()
+				raise ConnectionRefusedError(
+					f"Socket connect missing render_id session={session.sid}"
+				)
 
 			# Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
 			render = self.render_sessions.get(rid)
@@ -621,7 +623,10 @@ class App:
 			else:
 				owner = self._render_to_user.get(render.id)
 				if owner != session.sid:
-					raise ConnectionRefusedError()
+					raise ConnectionRefusedError(
+						f"Socket connect session mismatch render={render.id} "
+						+ f"owner={owner} session={session.sid}"
+					)
 
 			def on_message(message: ServerMessage):
 				payload = serialize(message)

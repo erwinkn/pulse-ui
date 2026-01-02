@@ -288,7 +288,12 @@ const HTML_INPUT_KEYS = [
 	"willValidate",
 	"popoverTargetAction",
 ] as const satisfies readonly (keyof HTMLInputElement)[];
-const inputExtractor = withBase<HTMLInputElement>(HTML_INPUT_KEYS);
+const inputExtractor = withBase<HTMLInputElement>(HTML_INPUT_KEYS, {
+	valueAsNumber: (elt) => {
+		const value = elt.valueAsNumber;
+		return Number.isFinite(value) ? value : null;
+	},
+});
 
 const HTML_LABEL_KEYS = ["htmlFor"] as const satisfies readonly (keyof HTMLLabelElement)[];
 const labelExtractor = withBase<HTMLLabelElement>(HTML_LABEL_KEYS);

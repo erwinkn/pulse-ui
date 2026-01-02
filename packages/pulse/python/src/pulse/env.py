@@ -4,7 +4,7 @@ Centralized environment variable definitions and typed accessors for Pulse.
 Preferred usage:
 
     from pulse.env import env
-    env.pulse_mode = "prod"
+    env.pulse_env = "prod"
     if env.running_cli:
         ...
 
@@ -20,7 +20,7 @@ from typing import Literal
 PulseEnv = Literal["dev", "ci", "prod"]
 
 # Keys
-ENV_PULSE_MODE = "PULSE_MODE"
+ENV_PULSE_ENV = "PULSE_ENV"
 ENV_PULSE_APP_FILE = "PULSE_APP_FILE"
 ENV_PULSE_APP_DIR = "PULSE_APP_DIR"
 ENV_PULSE_HOST = "PULSE_HOST"
@@ -42,14 +42,14 @@ class EnvVars:
 
 	@property
 	def pulse_env(self) -> PulseEnv:
-		value = (self._get(ENV_PULSE_MODE) or "dev").lower()
+		value = (self._get(ENV_PULSE_ENV) or "dev").lower()
 		if value not in ("dev", "ci", "prod"):
 			value = "dev"
 		return value
 
 	@pulse_env.setter
 	def pulse_env(self, value: PulseEnv) -> None:
-		self._set(ENV_PULSE_MODE, value)
+		self._set(ENV_PULSE_ENV, value)
 
 	# App file/dir
 	@property

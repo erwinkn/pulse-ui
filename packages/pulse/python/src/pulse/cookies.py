@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from fastapi import Request, Response
 
+from pulse.env import PulseEnv
 from pulse.hooks.runtime import set_cookie
 
 if TYPE_CHECKING:
@@ -16,7 +17,7 @@ class Cookie:
 	name: str
 	_: KW_ONLY
 	domain: str | None = None
-	secure: bool = True
+	secure: bool | None = None
 	samesite: Literal["lax", "strict", "none"] = "lax"
 	max_age_seconds: int = 7 * 24 * 3600
 
@@ -33,6 +34,10 @@ class Cookie:
 		return cookies.get(self.name)
 
 	async def set_through_api(self, value: str):
+		if self.secure is None:
+			raise RuntimeError(
+				"Cookie.secure is not resolved. Ensure App.setup() ran or set Cookie(secure=True/False)."
+			)
 		await set_cookie(
 			name=self.name,
 			value=value,
@@ -44,6 +49,10 @@ class Cookie:
 
 	def set_on_fastapi(self, response: Response, value: str) -> None:
 		"""Set the session cookie on a FastAPI Response-like object."""
+		if self.secure is None:
+			raise RuntimeError(
+				"Cookie.secure is not resolved. Ensure App.setup() ran or set Cookie(secure=True/False)."
+			)
 		response.set_cookie(
 			key=self.name,
 			value=value,
@@ -62,6 +71,10 @@ class SetCookie(Cookie):
 
 	@classmethod
 	def from_cookie(cls, cookie: Cookie, value: str) -> "SetCookie":
+		if cookie.secure is None:
+			raise RuntimeError(
+				"Cookie.secure is not resolved. Ensure App.setup() ran or set Cookie(secure=True/False)."
+			)
 		return cls(
 			name=cookie.name,
 			value=value,
@@ -81,7 +94,7 @@ def session_cookie(
 		return Cookie(
 			name,
 			domain=None,
-			secure=False,
+			secure=None,
 			samesite="lax",
 			max_age_seconds=max_age_seconds,
 		)
@@ -144,6 +157,29 @@ def compute_cookie_domain(mode: "PulseMode", server_address: str) -> str | None:
 	if mode == "subdomains":
 		return "." + _base_domain(host)
 	return None
+
+
+def compute_cookie_secure(env: PulseEnv, server_address: str | None) -> bool:
+	scheme = urlparse(server_address or "").scheme.lower()
+	if scheme in ("https", "wss"):
+		secure = True
+	elif scheme in ("http", "ws"):
+		secure = False
+	else:
+		secure = None
+	if secure is None:
+		if env in ("prod", "ci"):
+			raise RuntimeError(
+				"Could not determine cookie security from server_address. "
+				"Use an explicit https:// server_address or set Cookie(secure=True/False)."
+			)
+		return False
+	if env in ("prod", "ci") and not secure:
+		raise RuntimeError(
+			"Refusing to use insecure cookies in prod/ci. "
+			"Use an https server_address or set Cookie(secure=True) explicitly."
+		)
+	return secure
 
 
 def cors_options(mode: "PulseMode", server_address: str) -> CORSOptions:

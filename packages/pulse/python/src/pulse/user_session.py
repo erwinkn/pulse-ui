@@ -61,6 +61,10 @@ class UserSession(Disposable):
 		# unwrap subscribes the effect to all signals in the session ReactiveDict
 		data = unwrap(self.data)
 		signed_cookie = app.session_store.encode(self.sid, data)
+		if app.cookie.secure is None:
+			raise RuntimeError(
+				"Cookie.secure is not resolved. This is likely an internal error. Ensure App.setup() ran before sessions."
+			)
 		self.set_cookie(
 			name=app.cookie.name,
 			value=signed_cookie,

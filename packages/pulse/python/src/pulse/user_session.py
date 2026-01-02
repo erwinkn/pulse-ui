@@ -83,6 +83,12 @@ class UserSession(Disposable):
 		self._queued_cookies.clear()
 		self.scheduled_cookie_refresh = False
 
+	def get_cookie_value(self, name: str) -> str | None:
+		cookie = self._queued_cookies.get(name)
+		if cookie is None:
+			return None
+		return cookie.value
+
 	def set_cookie(
 		self,
 		name: str,

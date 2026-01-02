@@ -85,17 +85,6 @@ export class PulseSocketIOClient {
 		this.#activeViews = new Map();
 		this.#messageQueue = [];
 		this.#connectionStatusConfig = connectionStatusConfig;
-		// Load directives from sessionStorage
-		if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
-			const stored = sessionStorage.getItem("__PULSE_DIRECTIVES");
-			if (stored) {
-				try {
-					this.#directives = JSON.parse(stored);
-				} catch {
-					// Ignore parse errors
-				}
-			}
-		}
 	}
 	public setDirectives(directives: Directives) {
 		this.#directives = directives;

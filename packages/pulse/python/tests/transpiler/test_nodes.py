@@ -14,7 +14,7 @@ def test_element_rejects_dict_child():
 
 
 def test_element_duplicate_keys_raise_in_dev(monkeypatch: pytest.MonkeyPatch):
-	monkeypatch.setenv("PULSE_MODE", "dev")
+	monkeypatch.setenv("PULSE_ENV", "dev")
 	with pytest.raises(ValueError, match="Duplicate key 'dup'"):
 		Element(
 			"ul",
@@ -25,7 +25,7 @@ def test_element_duplicate_keys_raise_in_dev(monkeypatch: pytest.MonkeyPatch):
 def test_pulsenode_bracket_warns_with_component_name(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	monkeypatch.setenv("PULSE_MODE", "dev")
+	monkeypatch.setenv("PULSE_ENV", "dev")
 
 	def render():
 		return None

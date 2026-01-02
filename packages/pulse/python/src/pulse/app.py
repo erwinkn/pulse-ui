@@ -28,6 +28,7 @@ from pulse.cookies import (
 	Cookie,
 	CORSOptions,
 	compute_cookie_domain,
+	compute_cookie_secure,
 	cors_options,
 	session_cookie,
 )
@@ -364,6 +365,8 @@ class App:
 		# Compute cookie domain from deployment/server address if not explicitly provided
 		if self.cookie.domain is None:
 			self.cookie.domain = compute_cookie_domain(self.mode, self.server_address)
+		if self.cookie.secure is None:
+			self.cookie.secure = compute_cookie_secure(self.env, self.server_address)
 
 		# Add CORS middleware (configurable/overridable)
 		if self.cors is not None:
@@ -850,6 +853,11 @@ class App:
 
 		# Server-backed store path
 		assert isinstance(self.session_store, SessionStore)
+		cookie_secure = self.cookie.secure
+		if cookie_secure is None:
+			raise RuntimeError(
+				"Cookie.secure is not resolved. Ensure App.setup() ran before sessions."
+			)
 		if raw_cookie is not None:
 			sid = raw_cookie
 			data = await self.session_store.get(sid) or await self.session_store.create(
@@ -860,7 +868,7 @@ class App:
 				name=self.cookie.name,
 				value=sid,
 				domain=self.cookie.domain,
-				secure=self.cookie.secure,
+				secure=cookie_secure,
 				samesite=self.cookie.samesite,
 				max_age_seconds=self.cookie.max_age_seconds,
 			)
@@ -876,7 +884,7 @@ class App:
 				name=self.cookie.name,
 				value=sid,
 				domain=self.cookie.domain,
-				secure=self.cookie.secure,
+				secure=cookie_secure,
 				samesite=self.cookie.samesite,
 				max_age_seconds=self.cookie.max_age_seconds,
 			)

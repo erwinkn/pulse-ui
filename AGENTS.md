@@ -2,16 +2,6 @@
 
 Full-stack Python framework for interactive web apps. Runs on React with WebSocket-driven UI updates.
 
-## Issue Tracking (Beads)
-
-```bash
-bd ready                           # Find unblocked work
-bd create "Title" -t task -p 2     # Create issue
-bd update <id> --status in_progress
-bd close <id> --reason "Done"
-bd export -o .beads/issues.jsonl   # Before committing
-```
-
 ## Code Style
 
 - No `getattr`/`setattr` unless necessary

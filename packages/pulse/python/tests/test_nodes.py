@@ -344,7 +344,7 @@ class TestMissingKeyWarnings:
 		self, monkeypatch: pytest.MonkeyPatch
 	):
 		"""Tag factories warn for unkeyed iterables."""
-		monkeypatch.setenv("PULSE_MODE", "dev")
+		monkeypatch.setenv("PULSE_ENV", "dev")
 		items = [span() for _ in range(3)]
 		with pytest.warns(
 			UserWarning,
@@ -354,7 +354,7 @@ class TestMissingKeyWarnings:
 
 	def test_tag_factory_no_warning_with_keys(self, monkeypatch: pytest.MonkeyPatch):
 		"""Test that no warning is emitted when all items have keys."""
-		monkeypatch.setenv("PULSE_MODE", "dev")
+		monkeypatch.setenv("PULSE_ENV", "dev")
 		import warnings
 
 		with warnings.catch_warnings():
@@ -364,7 +364,7 @@ class TestMissingKeyWarnings:
 
 	def test_tag_factory_no_warning_in_prod(self, monkeypatch: pytest.MonkeyPatch):
 		"""Test that no warning is emitted in prod mode."""
-		monkeypatch.setenv("PULSE_MODE", "prod")
+		monkeypatch.setenv("PULSE_ENV", "prod")
 		import warnings
 
 		with warnings.catch_warnings():
@@ -377,7 +377,7 @@ class TestMissingKeyWarnings:
 		"""Bracket syntax on components warns for unkeyed iterables."""
 		from pulse.component import component
 
-		monkeypatch.setenv("PULSE_MODE", "dev")
+		monkeypatch.setenv("PULSE_ENV", "dev")
 
 		@component
 		def MyComponent(*children):  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
@@ -394,7 +394,7 @@ class TestMissingKeyWarnings:
 		"""Components with `*children` flatten and warn for unkeyed iterables."""
 		from pulse.component import component
 
-		monkeypatch.setenv("PULSE_MODE", "dev")
+		monkeypatch.setenv("PULSE_ENV", "dev")
 
 		@component
 		def MyComponent(*children):  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
@@ -424,7 +424,7 @@ class TestMissingKeyWarnings:
 		"""Components without `*children` don't flatten - they're just functions."""
 		from pulse.component import component
 
-		monkeypatch.setenv("PULSE_MODE", "dev")
+		monkeypatch.setenv("PULSE_ENV", "dev")
 
 		@component
 		def MyComponent(data: Any, value_col: str = "value"):

@@ -22,10 +22,7 @@ export function serialize(data: Serializable): Serialized {
 
 		if (typeof value === "number") {
 			if (Number.isNaN(value)) {
-				const ctx = context ? ` in '${context}'` : "";
-				throw new Error(
-					`Cannot serialize NaN${ctx}. NaN and Infinity are not supported because they cannot be serialized to JSON.`,
-				);
+				return null;
 			}
 			if (!Number.isFinite(value)) {
 				const kind = value > 0 ? "Infinity" : "-Infinity";

@@ -1,8 +1,11 @@
+import inspect
+import re
 from typing import Any, Callable, cast
 
 import pulse as ps
 import pytest
 from pulse import Component, HookContext
+from pulse.transpiler import TranspileError
 
 
 def test_init_block_runs_once_and_restores_locals():
@@ -142,3 +145,116 @@ def test_fallback_preserves_identity_and_runs_once(
 	assert h1 is h2
 	assert o1 is o2
 	assert o2["x"] == 3
+
+
+def test_init_allows_control_flow_outside_block() -> None:
+	@ps.component
+	def Example(flag: bool) -> int:
+		with ps.init():
+			value = 1
+		if flag:
+			value += 1
+		return value
+
+	example = Example
+	with HookContext():
+		assert cast(int, cast(object, example.fn(True))) == 2
+		assert cast(int, cast(object, example.fn(False))) == 1
+
+
+def test_init_control_flow_error_has_location() -> None:
+	with pytest.raises(TranspileError) as excinfo:
+
+		@ps.component
+		def Example() -> int:  # pyright: ignore[reportUnusedFunction]
+			with ps.init():
+				if True:
+					value = 1
+			return value
+
+	message = str(excinfo.value)
+	assert "ps.init blocks cannot contain control flow" in message
+	assert "if True:" in message
+	assert "test_init_hook.py" in message
+	assert "^" in message
+	lines, start_line = inspect.getsourcelines(
+		test_init_control_flow_error_has_location
+	)
+	if_index = next(i for i, line in enumerate(lines) if "if True:" in line)
+	expected_line = start_line + if_index
+	line_match = re.search(r"test_init_hook\.py:(\d+):", message)
+	assert line_match is not None
+	assert int(line_match.group(1)) == expected_line
+	lines = message.splitlines()
+	source_index = next(i for i, line in enumerate(lines) if "if True:" in line)
+	caret_line = lines[source_index + 1]
+	source_line = lines[source_index]
+	assert caret_line.index("^") == source_line.index("if True:")
+
+
+def test_init_only_once_per_component_render() -> None:
+	with pytest.raises(TranspileError) as excinfo:
+
+		@ps.component
+		def Example() -> int:  # pyright: ignore[reportUnusedFunction]
+			with ps.init():
+				value = 1
+			with ps.init():
+				other = 2
+			return value + other
+
+	message = str(excinfo.value)
+	assert "ps.init may only be used once per component render" in message
+	lines, start_line = inspect.getsourcelines(test_init_only_once_per_component_render)
+	with_indices = [i for i, line in enumerate(lines) if "with ps.init()" in line]
+	expected_line = start_line + with_indices[1]
+	line_match = re.search(r"test_init_hook\.py:(\d+):", message)
+	assert line_match is not None
+	assert int(line_match.group(1)) == expected_line
+
+
+def test_init_disallows_as_binding() -> None:
+	with pytest.raises(TranspileError) as excinfo:
+
+		@ps.component
+		def Example() -> int:  # pyright: ignore[reportUnusedFunction]
+			with ps.init() as _ctx:
+				value = 1
+			return value
+
+	message = str(excinfo.value)
+	assert "ps.init does not support 'as' bindings" in message
+	lines, start_line = inspect.getsourcelines(test_init_disallows_as_binding)
+	with_index = next(
+		i for i, line in enumerate(lines) if "with ps.init() as _ctx" in line
+	)
+	expected_line = start_line + with_index
+	line_match = re.search(r"test_init_hook\.py:(\d+):", message)
+	assert line_match is not None
+	assert int(line_match.group(1)) == expected_line
+
+
+def test_init_exception_does_not_save_partial_locals() -> None:
+	calls = {"count": 0}
+
+	def maybe_raise(counter: dict[str, int], value: dict[str, int]) -> None:
+		if counter["count"] == 1:
+			value["x"] = 5
+			raise RuntimeError("boom")
+
+	@ps.component
+	def Example() -> int:
+		with ps.init():
+			calls["count"] += 1
+			value = {"x": 0}
+			maybe_raise(calls, value)
+		value["x"] += 1
+		return value["x"]
+
+	example = Example
+	with HookContext():
+		with pytest.raises(RuntimeError, match="boom"):
+			example.fn()
+		assert calls["count"] == 1
+		assert cast(int, cast(object, example.fn())) == 1
+		assert calls["count"] == 2

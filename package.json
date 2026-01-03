@@ -14,5 +14,9 @@
   ],
   "devDependencies": {
     "@biomejs/biome": "2.2.5"
+  },
+  "dependencies": {
+    "playwright-core": "^1.57.0",
+    "playwriter": "^0.0.26"
   }
 }

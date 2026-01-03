@@ -38,6 +38,7 @@ from pulse.transpiler.nodes import Identifier as _Identifier
 _MODULE_EXPORTS_IDENTIFIER: dict[str, str] = {
 	"JSON": "pulse.js.json",
 	"Math": "pulse.js.math",
+	"React": "pulse.js.react",
 	"console": "pulse.js.console",
 	"window": "pulse.js.window",
 	"document": "pulse.js.document",

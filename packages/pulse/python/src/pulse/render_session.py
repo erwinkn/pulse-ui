@@ -61,6 +61,9 @@ def run_js(expr: Expr | str, *, result: bool = False) -> asyncio.Future[Any] | N
 	return ctx.render.run_js(expr, result=result)
 
 
+MountState = Literal["pending", "active", "idle"]
+
+
 class RouteMount:
 	render: "RenderSession"
 	route: RouteContext
@@ -69,6 +72,9 @@ class RouteMount:
 	_pulse_ctx: PulseContext | None
 	element: Node
 	rendered: bool
+	state: MountState
+	queue: list[ServerMessage] | None
+	queue_timeout: asyncio.TimerHandle | None
 
 	def __init__(
 		self, render: "RenderSession", route: Route | Layout, route_info: RouteInfo
@@ -80,6 +86,9 @@ class RouteMount:
 		self.element = route.render()
 		self.tree = RenderTree(self.element)
 		self.rendered = False
+		self.state = "pending"
+		self.queue = None
+		self.queue_timeout = None
 
 
 class RenderSession:
@@ -90,6 +99,8 @@ class RenderSession:
 	query_store: QueryStore
 	route_mounts: dict[str, RouteMount]
 	connected: bool
+	prerender_queue_timeout: float
+	disconnect_queue_timeout: float
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
@@ -104,6 +115,8 @@ class RenderSession:
 		*,
 		server_address: str | None = None,
 		client_address: str | None = None,
+		prerender_queue_timeout: float = 5.0,
+		disconnect_queue_timeout: float = 2.0,
 	) -> None:
 		from pulse.channel import ChannelsManager
 		from pulse.form import FormRegistry
@@ -111,21 +124,18 @@ class RenderSession:
 		self.id = id
 		self.routes = routes
 		self.route_mounts = {}
-		# Base server address for building absolute API URLs (e.g., http://localhost:8000)
 		self._server_address = server_address
-		# Best-effort client address, captured at prerender or socket connect time
 		self._client_address = client_address
 		self._send_message = None
-		# Registry of per-session global singletons (created via ps.global_state without id)
 		self._global_states = {}
 		self.query_store = QueryStore()
-		# Connection state
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
 		self._pending_api = {}
-		# Pending JS execution results (for awaiting run_js().result())
 		self._pending_js_results = {}
+		self.prerender_queue_timeout = prerender_queue_timeout
+		self.disconnect_queue_timeout = disconnect_queue_timeout
 
 	@property
 	def server_address(self) -> str:
@@ -139,34 +149,57 @@ class RenderSession:
 			raise RuntimeError("Client address not set")
 		return self._client_address
 
-	# Effect error handler (batch-level) to surface runtime errors
 	def _on_effect_error(self, effect: Any, exc: Exception):
-		# TODO: wirte into effects created within a Render
-
-		# We don't want to couple effects to routing; broadcast to all active paths
 		details = {"effect": getattr(effect, "name", "<unnamed>")}
 		for path in list(self.route_mounts.keys()):
 			self.report_error(path, "effect", exc, details)
 
+	# ---- Connection lifecycle ----
+
 	def connect(self, send_message: Callable[[ServerMessage], Any]):
+		"""WebSocket connected. Set sender, don't auto-flush (attach does that)."""
 		self._send_message = send_message
 		self.connected = True
-		# Don't flush buffer or resume effects here - mount() handles reconnection
-		# by resetting mount.rendered and resuming effects to send fresh vdom_init
 
 	def disconnect(self):
-		"""Called when client disconnects - pause render effects."""
+		"""WebSocket disconnected. Start queuing briefly before pausing."""
 		self._send_message = None
 		self.connected = False
-		for mount in self.route_mounts.values():
-			if mount.effect:
-				mount.effect.pause()
+
+		for path, mount in self.route_mounts.items():
+			if mount.state == "active":
+				mount.state = "pending"
+				mount.queue = []
+				mount.queue_timeout = self._schedule_timeout(
+					self.disconnect_queue_timeout,
+					lambda p=path: self._transition_to_idle(p),
+				)
+
+	# ---- Message routing ----
 
 	def send(self, message: ServerMessage):
-		# If a sender is available (connected or during prerender capture), send immediately.
-		# Otherwise, drop the message - we'll send full VDOM state on reconnection.
-		if self._send_message:
+		"""Route message based on mount state."""
+		# Global messages (not path-specific) go directly if connected
+		path = message.get("path")
+		if path is None:
+			if self._send_message:
+				self._send_message(message)
+			return
+
+		# Normalize path for lookup
+		path = ensure_absolute_path(path)
+		mount = self.route_mounts.get(path)
+		if not mount:
+			# Unknown path - send directly if connected (for js_exec, etc.)
+			if self._send_message:
+				self._send_message(message)
+			return
+
+		if mount.state == "pending" and mount.queue is not None:
+			mount.queue.append(message)
+		elif mount.state == "active" and self._send_message:
 			self._send_message(message)
+		# idle: drop (effect should be paused anyway)
 
 	def report_error(
 		self,
@@ -195,34 +228,271 @@ class RenderSession:
 			traceback.format_exc(),
 		)
 
+	# ---- State transitions ----
+
+	def _schedule_timeout(
+		self, delay: float, callback: Callable[[], None]
+	) -> asyncio.TimerHandle:
+		loop = asyncio.get_event_loop()
+		return loop.call_later(delay, callback)
+
+	def _cancel_queue_timeout(self, mount: RouteMount):
+		if mount.queue_timeout is not None:
+			mount.queue_timeout.cancel()
+			mount.queue_timeout = None
+
+	def _transition_to_idle(self, path: str):
+		mount = self.route_mounts.get(path)
+		if mount is None or mount.state != "pending":
+			return
+
+		mount.state = "idle"
+		mount.queue = None
+		mount.queue_timeout = None
+		if mount.effect:
+			mount.effect.pause()
+
+	# ---- Prerendering ----
+
+	def prerender(
+		self, path: str, route_info: RouteInfo | None = None
+	) -> ServerInitMessage | ServerNavigateToMessage:
+		"""
+		Synchronous render for SSR. Returns vdom_init or navigate_to message.
+		- First call: creates RouteMount in PENDING state, starts queue
+		- Subsequent calls: re-renders and returns fresh VDOM
+		"""
+		path = ensure_absolute_path(path)
+		mount = self.route_mounts.get(path)
+
+		if mount is not None:
+			# Re-prerender: update route info, re-render, return fresh VDOM
+			if route_info:
+				mount.route.update(route_info)
+			with PulseContext.update(render=self, route=mount.route):
+				try:
+					vdom = mount.tree.render()
+					normalized_root = getattr(mount.tree, "_normalized", None)
+					if normalized_root is not None:
+						mount.element = normalized_root
+					return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+				except RedirectInterrupt as r:
+					return ServerNavigateToMessage(
+						type="navigate_to", path=r.path, replace=r.replace, hard=False
+					)
+				except NotFoundInterrupt:
+					ctx = PulseContext.get()
+					return ServerNavigateToMessage(
+						type="navigate_to",
+						path=ctx.app.not_found,
+						replace=True,
+						hard=False,
+					)
+
+		# First prerender for this path
+		route = self.routes.find(path)
+		info = route_info or route.default_route_info()
+		mount = RouteMount(self, route, info)
+		mount.state = "pending"
+		mount.queue = []
+		self.route_mounts[path] = mount
+
+		# Render synchronously
+		with PulseContext.update(render=self, route=mount.route):
+			try:
+				vdom = mount.tree.render()
+				normalized_root = getattr(mount.tree, "_normalized", None)
+				if normalized_root is not None:
+					mount.element = normalized_root
+				mount.rendered = True
+			except RedirectInterrupt as r:
+				return ServerNavigateToMessage(
+					type="navigate_to", path=r.path, replace=r.replace, hard=False
+				)
+			except NotFoundInterrupt:
+				ctx = PulseContext.get()
+				return ServerNavigateToMessage(
+					type="navigate_to", path=ctx.app.not_found, replace=True, hard=False
+				)
+
+		# Create render effect
+		self._create_render_effect(mount, path)
+
+		# Start timeout → IDLE
+		mount.queue_timeout = self._schedule_timeout(
+			self.prerender_queue_timeout,
+			lambda: self._transition_to_idle(path),
+		)
+
+		return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+
+	# ---- Client lifecycle ----
+
+	def attach(self, path: str, route_info: RouteInfo):
+		"""
+		Client ready to receive updates for path.
+		- PENDING: flush queue, transition to ACTIVE
+		- IDLE: fresh render, transition to ACTIVE
+		- ACTIVE: update route_info
+		- No mount: create fresh
+		"""
+		path = ensure_absolute_path(path)
+		mount = self.route_mounts.get(path)
+
+		if mount is None:
+			# No prerender, create fresh
+			route = self.routes.find(path)
+			mount = RouteMount(self, route, route_info)
+			mount.state = "active"
+			self.route_mounts[path] = mount
+			self._create_render_effect(mount, path)
+			return
+
+		if mount.state == "pending":
+			# Flush queue, go active
+			self._cancel_queue_timeout(mount)
+			if mount.queue:
+				for msg in mount.queue:
+					if self._send_message:
+						self._send_message(msg)
+			mount.queue = None
+			mount.state = "active"
+			mount.route.update(route_info)
+
+		elif mount.state == "idle":
+			# Need fresh render
+			mount.rendered = False
+			mount.state = "active"
+			mount.route.update(route_info)
+			if mount.effect:
+				mount.effect.resume()
+
+		elif mount.state == "active":
+			# Already active, just update route
+			mount.route.update(route_info)
+
+	def update_route(self, path: str, route_info: RouteInfo):
+		"""Update routing state (query params, etc.) for attached path."""
+		path = ensure_absolute_path(path)
+		try:
+			mount = self.get_route_mount(path)
+			mount.route.update(route_info)
+		except Exception as e:
+			self.report_error(path, "navigate", e)
+
+	def detach(self, path: str):
+		"""Client no longer wants updates. Dispose Effect, remove mount."""
+		path = ensure_absolute_path(path)
+		if path not in self.route_mounts:
+			return
+		try:
+			mount = self.route_mounts.pop(path)
+			self._cancel_queue_timeout(mount)
+			mount.tree.unmount()
+			if mount.effect:
+				mount.effect.dispose()
+		except Exception as e:
+			self.report_error(path, "unmount", e)
+
+	# ---- Effect creation ----
+
+	def _create_render_effect(self, mount: RouteMount, path: str):
+		ctx = PulseContext.get()
+		session = ctx.session
+
+		def _render_effect():
+			with PulseContext.update(session=session, render=self, route=mount.route):
+				try:
+					if not mount.rendered:
+						vdom = mount.tree.render()
+						normalized_root = getattr(mount.tree, "_normalized", None)
+						if normalized_root is not None:
+							mount.element = normalized_root
+						mount.rendered = True
+						self.send(
+							ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+						)
+					else:
+						ops = mount.tree.diff(mount.element)
+						normalized_root = getattr(mount.tree, "_normalized", None)
+						if normalized_root is not None:
+							mount.element = normalized_root
+						if ops:
+							self.send(
+								ServerUpdateMessage(
+									type="vdom_update", path=path, ops=ops
+								)
+							)
+				except RedirectInterrupt as r:
+					self.send(
+						ServerNavigateToMessage(
+							type="navigate_to",
+							path=r.path,
+							replace=r.replace,
+							hard=False,
+						)
+					)
+				except NotFoundInterrupt:
+					self.send(
+						ServerNavigateToMessage(
+							type="navigate_to",
+							path=ctx.app.not_found,
+							replace=True,
+							hard=False,
+						)
+					)
+
+		mount.effect = Effect(
+			_render_effect,
+			immediate=True,
+			name=f"{path}:render",
+			on_error=lambda e: self.report_error(path, "render", e),
+		)
+
+	# ---- Helpers ----
+
 	def close(self):
 		self.forms.dispose()
 		for path in list(self.route_mounts.keys()):
-			self.unmount(path)
+			self.detach(path)
 		self.route_mounts.clear()
-		# Dispose per-session global singletons if they expose dispose()
 		for value in self._global_states.values():
 			value.dispose()
 		self._global_states.clear()
-		# Dispose all channels for this render session
 		for channel_id in list(self.channels._channels.keys()):  # pyright: ignore[reportPrivateUsage]
 			channel = self.channels._channels.get(channel_id)  # pyright: ignore[reportPrivateUsage]
 			if channel:
 				channel.closed = True
 				self.channels.dispose_channel(channel, reason="render.close")
-		# Cancel pending API calls
 		for fut in self._pending_api.values():
 			if not fut.done():
 				fut.cancel()
 		self._pending_api.clear()
-		# Cancel pending JS execution results
 		for fut in self._pending_js_results.values():
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
-		# The effect will be garbage collected, and with it the dependencies
 		self._send_message = None
 		self.connected = False
+
+	def get_route_mount(self, path: str) -> RouteMount:
+		path = ensure_absolute_path(path)
+		mount = self.route_mounts.get(path)
+		if not mount:
+			raise ValueError(f"No active route for '{path}'")
+		return mount
+
+	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
+		"""Return a per-session singleton for the provided key."""
+		inst = self._global_states.get(key)
+		if inst is None:
+			inst = factory()
+			self._global_states[key] = inst
+		return inst
+
+	def flush(self):
+		with PulseContext.update(render=self):
+			flush_effects()
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		mount = self.route_mounts[path]
@@ -241,6 +511,8 @@ class RenderSession:
 		except Exception as e:
 			report(e)
 
+	# ---- API calls ----
+
 	async def call_api(
 		self,
 		url_or_path: str,
@@ -251,17 +523,7 @@ class RenderSession:
 		credentials: str = "include",
 		timeout: float = 30.0,
 	) -> dict[str, Any]:
-		"""Request the client to perform a fetch and await the result.
-
-		Accepts either an absolute URL (http/https) or a relative path. When a
-		relative path is provided, it is resolved against this session's
-		server_address.
-
-		Args:
-			timeout: Maximum seconds to wait for response (default 30s).
-			         Raises asyncio.TimeoutError if exceeded.
-		"""
-		# Resolve to absolute URL if a relative path is passed
+		"""Request the client to perform a fetch and await the result."""
 		if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
 			url = url_or_path
 		else:
@@ -270,8 +532,8 @@ class RenderSession:
 				raise RuntimeError(
 					"Server address unavailable. Ensure App.run_codegen/asgi_factory set server_address."
 				)
-			path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
-			url = f"{base}{path}"
+			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
+			url = f"{base}{api_path}"
 		corr_id = uuid.uuid4().hex
 		fut = create_future_on_loop()
 		self._pending_api[corr_id] = fut
@@ -312,6 +574,7 @@ class RenderSession:
 			)
 
 	# ---- JS Execution ----
+
 	@overload
 	def run_js(
 		self, expr: Expr | str, *, result: Literal[True], timeout: float = ...
@@ -329,40 +592,7 @@ class RenderSession:
 	def run_js(
 		self, expr: Expr | str, *, result: bool = False, timeout: float = 10.0
 	) -> asyncio.Future[object] | None:
-		"""Execute JavaScript on the client.
-
-		Args:
-			expr: A Expr (e.g. from calling a @javascript function) or raw JS string.
-			result: If True, returns a Future that resolves with the JS return value.
-			        If False (default), returns None (fire-and-forget).
-			timeout: Maximum seconds to wait for result (default 10s, only applies when
-			         result=True). Future raises asyncio.TimeoutError if exceeded.
-
-		Returns:
-			None if result=False, otherwise a Future resolving to the JS result.
-
-		Example - Fire and forget:
-			@javascript
-			def focus_element(selector: str):
-				document.querySelector(selector).focus()
-
-			def on_save():
-				save_data()
-				run_js(focus_element("#next-input"))
-
-		Example - Await result:
-			@javascript
-			def get_scroll_position():
-				return {"x": window.scrollX, "y": window.scrollY}
-
-			async def on_click():
-				pos = await run_js(get_scroll_position(), result=True)
-				print(pos["x"], pos["y"])
-
-		Example - Raw JS string:
-			def on_click():
-				run_js("console.log('Hello from Python!')")
-		"""
+		"""Execute JavaScript on the client."""
 		ctx = PulseContext.get()
 		exec_id = next_id()
 
@@ -371,8 +601,6 @@ class RenderSession:
 		else:
 			code = emit(expr)
 
-		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
-		# This must match the path used to key views on the client side
 		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
 		self.send(
@@ -389,7 +617,6 @@ class RenderSession:
 			future: asyncio.Future[object] = loop.create_future()
 			self._pending_js_results[exec_id] = future
 
-			# Schedule auto-timeout
 			def _on_timeout() -> None:
 				self._pending_js_results.pop(exec_id, None)
 				if not future.done():
@@ -415,208 +642,3 @@ class RenderSession:
 			fut.set_exception(JsExecError(error))
 		else:
 			fut.set_result(data.get("result"))
-
-	def create_route_mount(self, path: str, route_info: RouteInfo | None = None):
-		route = self.routes.find(path)
-		mount = RouteMount(self, route, route_info or route.default_route_info())
-		self.route_mounts[path] = mount
-		return mount
-
-	def prerender_mount_capture(
-		self, path: str, route_info: RouteInfo | None = None
-	) -> ServerInitMessage | ServerNavigateToMessage:
-		"""
-		Mount the route and run the render effect immediately, capturing the
-		initial message instead of sending over a socket.
-
-		Returns a dict:
-		  { "type": "vdom_init", "vdom": VDOM } or
-		  { "type": "navigate_to", "path": str, "replace": bool }
-		"""
-		# If already mounted (e.g., repeated prerender), do nothing special.
-		if path in self.route_mounts:
-			# Run a diff and synthesize an update; however, for prerender we
-			# expect initial mount. Return current tree as a full VDOM.
-			mount = self.get_route_mount(path)
-			with PulseContext.update(route=mount.route):
-				vdom = mount.tree.render()
-				normalized_root = getattr(mount.tree, "_normalized", None)
-				if normalized_root is not None:
-					mount.element = normalized_root
-				mount.rendered = True
-				return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-
-		captured: ServerInitMessage | ServerNavigateToMessage | None = None
-
-		def _capture(msg: ServerMessage):
-			nonlocal captured
-			# Only capture the first relevant message for this path
-			if captured is not None:
-				return
-			if msg["type"] == "vdom_init" and msg["path"] == path:
-				captured = ServerInitMessage(
-					type="vdom_init", path=path, vdom=msg.get("vdom")
-				)
-			elif msg["type"] == "navigate_to":
-				captured = ServerNavigateToMessage(
-					type="navigate_to",
-					path=msg["path"],
-					replace=msg["replace"],
-					hard=msg.get("hard", False),
-				)
-
-		prev_sender = self._send_message
-		try:
-			self._send_message = _capture
-			# Reuse normal mount flow which creates and runs the effect
-			self.mount(path, route_info or self.routes.find(path).default_route_info())
-			# Flush any scheduled effects to stabilize output
-			self.flush()
-		finally:
-			self._send_message = prev_sender
-
-		# Fallback: if nothing captured (shouldn't happen), return full VDOM
-		if captured is None:
-			mount = self.get_route_mount(path)
-			with PulseContext.update(route=mount.route):
-				vdom = mount.tree.render()
-				normalized_root = getattr(mount.tree, "_normalized", None)
-				if normalized_root is not None:
-					mount.element = normalized_root
-				mount.rendered = True
-			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-
-		return captured
-
-	def get_route_mount(
-		self,
-		path: str,
-	):
-		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		if not mount:
-			raise ValueError(f"No active route for '{path}'")
-		return mount
-
-	# ---- Session-local global state registry ----
-	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
-		"""Return a per-session singleton for the provided key."""
-		inst = self._global_states.get(key)
-		if inst is None:
-			inst = factory()
-			self._global_states[key] = inst
-		return inst
-
-	def render(self, path: str, route_info: RouteInfo | None = None):
-		mount = self.create_route_mount(path, route_info)
-		with PulseContext.update(route=mount.route):
-			vdom = mount.tree.render()
-			normalized_root = getattr(mount.tree, "_normalized", None)
-			if normalized_root is not None:
-				mount.element = normalized_root
-			mount.rendered = True
-			return vdom
-
-	def rerender(self, path: str):
-		mount = self.get_route_mount(path)
-		with PulseContext.update(route=mount.route):
-			ops = mount.tree.diff(mount.element)
-			normalized_root = getattr(mount.tree, "_normalized", None)
-			if normalized_root is not None:
-				mount.element = normalized_root
-			return ops
-
-	def mount(self, path: str, route_info: RouteInfo):
-		if path in self.route_mounts:
-			# Route already mounted - this is a reconnection case.
-			# Reset rendered flag so effect sends vdom_init, update route info,
-			# and resume the paused effect.
-			mount = self.route_mounts[path]
-			mount.rendered = False
-			mount.route.update(route_info)
-			if mount.effect and mount.effect.paused:
-				mount.effect.resume()
-			return
-
-		mount = self.create_route_mount(path, route_info)
-		# Get current context + add RouteContext. Save it to be able to mount it
-		# whenever the render effect reruns.
-		ctx = PulseContext.get()
-		session = ctx.session
-
-		def _render_effect():
-			# Always ensure both render and route are present in context
-			with PulseContext.update(session=session, render=self, route=mount.route):
-				try:
-					if not mount.rendered:
-						vdom = mount.tree.render()
-						normalized_root = getattr(mount.tree, "_normalized", None)
-						if normalized_root is not None:
-							mount.element = normalized_root
-						mount.rendered = True
-						self.send(
-							ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-						)
-					else:
-						ops = mount.tree.diff(mount.element)
-						normalized_root = getattr(mount.tree, "_normalized", None)
-						if normalized_root is not None:
-							mount.element = normalized_root
-						if ops:
-							self.send(
-								ServerUpdateMessage(
-									type="vdom_update", path=path, ops=ops
-								)
-							)
-				except RedirectInterrupt as r:
-					# Prefer client-side navigation over emitting VDOM operations
-					self.send(
-						ServerNavigateToMessage(
-							type="navigate_to",
-							path=r.path,
-							replace=r.replace,
-							hard=False,
-						)
-					)
-				except NotFoundInterrupt:
-					# Use app-configured not-found path; fallback to '/404'
-					self.send(
-						ServerNavigateToMessage(
-							type="navigate_to",
-							path=ctx.app.not_found,
-							replace=True,
-							hard=False,
-						)
-					)
-
-		mount.effect = Effect(
-			_render_effect,
-			immediate=True,
-			name=f"{path}:render",
-			on_error=lambda e: self.report_error(path, "render", e),
-		)
-
-	def flush(self):
-		# Ensure effects (including route render effects) run with this session
-		# bound on the PulseContext so hooks like ps.global_state work
-		with PulseContext.update(render=self):
-			flush_effects()
-
-	def navigate(self, path: str, route_info: RouteInfo):
-		# Route is already mounted, we can just update the routing state
-		try:
-			mount = self.get_route_mount(path)
-			mount.route.update(route_info)
-		except Exception as e:
-			self.report_error(path, "navigate", e)
-
-	def unmount(self, path: str):
-		if path not in self.route_mounts:
-			return
-		try:
-			mount = self.route_mounts.pop(path)
-			mount.tree.unmount()
-			if mount.effect:
-				mount.effect.dispose()
-		except Exception as e:
-			self.report_error(path, "unmount", e)

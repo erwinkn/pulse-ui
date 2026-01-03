@@ -17,14 +17,14 @@ export { extractServerRouteInfo } from "./helpers";
 // Messages (types only)
 export type {
 	ClientApiResultMessage,
+	ClientAttachMessage,
 	ClientCallbackMessage,
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
+	ClientDetachMessage,
 	ClientMessage,
-	ClientMountMessage,
-	ClientNavigateMessage,
-	ClientUnmountMessage,
+	ClientUpdateMessage,
 	ServerApiCallMessage,
 	ServerChannelMessage,
 	ServerChannelRequestMessage,

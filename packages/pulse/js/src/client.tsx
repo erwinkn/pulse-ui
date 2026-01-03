@@ -42,11 +42,11 @@ export interface PulseClient {
 	isConnected(): boolean;
 	onConnectionChange(listener: ConnectionStatusListener): () => void;
 	// Messages
-	navigate(path: string, routeInfo: RouteInfo): Promise<void>;
-	leave(path: string): Promise<void>;
-	invokeCallback(path: string, callback: string, args: any[]): Promise<void>;
+	updateRoute(path: string, routeInfo: RouteInfo): void;
+	invokeCallback(path: string, callback: string, args: any[]): void;
 	// VDOM subscription
-	mountView(path: string, view: MountedView): () => void;
+	attach(path: string, view: MountedView): void;
+	detach(path: string): void;
 }
 
 export class PulseSocketIOClient {
@@ -152,12 +152,12 @@ export class PulseSocketIOClient {
 
 			socket.on("connect", () => {
 				console.log("[SocketIOTransport] Connected:", this.#socket?.id);
-				// Make sure to send a navigate payload for all the routes
+				// Send attach for all active views on connect/reconnect
 				for (const [path, route] of this.#activeViews) {
 					socket.emit(
 						"message",
 						serialize({
-							type: "mount",
+							type: "attach",
 							path: path,
 							routeInfo: route.routeInfo,
 						}),
@@ -166,11 +166,11 @@ export class PulseSocketIOClient {
 
 				for (const payload of this.#messageQueue) {
 					// Already sent above
-					if (payload.type === "mount" && this.#activeViews.has(payload.path)) {
+					if (payload.type === "attach" && this.#activeViews.has(payload.path)) {
 						continue;
 					}
-					// We're remounting all the routes, so no need to navigate
-					if (payload.type === "navigate") {
+					// We're reattaching all the routes, so no need to send update
+					if (payload.type === "update") {
 						continue;
 					}
 					socket.emit("message", serialize(payload));
@@ -225,28 +225,32 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	public mountView(path: string, view: MountedView) {
+	public attach(path: string, view: MountedView) {
 		if (this.#activeViews.has(path)) {
-			throw new Error(`Path ${path} is already mounted`);
+			throw new Error(`Path ${path} is already attached`);
 		}
 		this.#activeViews.set(path, view);
 		void this.sendMessage({
-			type: "mount",
+			type: "attach",
 			path,
 			routeInfo: view.routeInfo,
 		});
 	}
 
-	public navigate(path: string, routeInfo: RouteInfo) {
-		this.sendMessage({
-			type: "navigate",
-			path,
-			routeInfo,
-		});
+	public updateRoute(path: string, routeInfo: RouteInfo) {
+		const view = this.#activeViews.get(path);
+		if (view) {
+			view.routeInfo = routeInfo;
+			this.sendMessage({
+				type: "update",
+				path,
+				routeInfo,
+			});
+		}
 	}
 
-	public unmount(path: string) {
-		void this.sendMessage({ type: "unmount", path });
+	public detach(path: string) {
+		void this.sendMessage({ type: "detach", path });
 		this.#activeViews.delete(path);
 	}
 

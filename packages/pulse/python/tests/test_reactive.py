@@ -180,7 +180,7 @@ async def test_later_does_not_track_dependencies():
 	assert callback_runs == 0
 
 	# Wait for callback to execute
-	await asyncio.sleep(0.02)
+	await asyncio.sleep(0.015)
 	assert callback_runs == 1
 
 	# Change s2 - should NOT trigger effect rerun
@@ -229,7 +229,7 @@ async def test_repeat_does_not_track_dependencies():
 	assert callback_runs == 0
 
 	# Wait for callback to execute
-	await asyncio.sleep(0.02)
+	await asyncio.sleep(0.015)
 	assert callback_runs >= 1
 
 	initial_callback_runs = callback_runs
@@ -240,7 +240,7 @@ async def test_repeat_does_not_track_dependencies():
 	assert effect_runs == 1  # Effect should not rerun
 
 	# Wait a bit more - callback should continue running
-	await asyncio.sleep(0.02)
+	await asyncio.sleep(0.015)
 	assert callback_runs > initial_callback_runs
 
 	# Change s1 - should trigger effect rerun
@@ -2707,11 +2707,11 @@ async def test_async_effect_explicit_deps_rerun_on_external_modification_during_
 	assert e.runs == 0
 
 	# Allow effect to finish its first run
-	await asyncio.sleep(0.02)
+	await asyncio.sleep(0.015)
 	assert e.runs == 1
 
 	s.write(2)
-	await asyncio.sleep(0.02)
+	await asyncio.sleep(0.015)
 	assert e.runs == 2
 
 
@@ -2814,19 +2814,19 @@ async def test_effect_interval_runs_periodically():
 	"""Test that an effect with interval runs periodically."""
 	runs: list[int] = []
 
-	@effect(interval=0.05)
+	@effect(interval=0.01)
 	def e():
 		runs.append(len(runs))
 
 	flush_effects()
 	assert len(runs) == 1
 
-	# Wait for interval to trigger
-	await asyncio.sleep(0.06)
+	# Wait for interval to trigger (just over 1 interval, under 2)
+	await asyncio.sleep(0.012)
 	assert len(runs) == 2
 
 	# Wait for another interval
-	await asyncio.sleep(0.06)
+	await asyncio.sleep(0.012)
 	assert len(runs) == 3
 
 	e.dispose()
@@ -2837,7 +2837,7 @@ async def test_effect_cancel_with_cancel_interval_true():
 	"""Test that cancel(cancel_interval=True) stops the interval."""
 	runs: list[int] = []
 
-	@effect(interval=0.05)
+	@effect(interval=0.01)
 	def e():
 		runs.append(len(runs))
 
@@ -2849,7 +2849,7 @@ async def test_effect_cancel_with_cancel_interval_true():
 	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should not trigger
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	flush_effects()
 	assert len(runs) == 1
 
@@ -2861,7 +2861,7 @@ async def test_effect_cancel_with_cancel_interval_false():
 	"""Test that cancel(cancel_interval=False) preserves the interval."""
 	runs: list[int] = []
 
-	@effect(interval=0.05)
+	@effect(interval=0.01)
 	def e():
 		runs.append(len(runs))
 
@@ -2875,7 +2875,7 @@ async def test_effect_cancel_with_cancel_interval_false():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should still trigger
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	flush_effects()
 	assert len(runs) == 2
 
@@ -2887,7 +2887,7 @@ async def test_effect_run_restarts_cancelled_interval():
 	"""Test that running an effect restarts a cancelled interval."""
 	runs: list[int] = []
 
-	@effect(interval=0.05)
+	@effect(interval=0.01)
 	def e():
 		runs.append(len(runs))
 
@@ -2904,7 +2904,7 @@ async def test_effect_run_restarts_cancelled_interval():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should trigger again
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	flush_effects()
 	assert len(runs) == 3
 
@@ -2916,7 +2916,7 @@ async def test_async_effect_interval_runs_periodically():
 	"""Test that an async effect with interval runs periodically."""
 	runs: list[int] = []
 
-	@effect(interval=0.05, lazy=True)
+	@effect(interval=0.01, lazy=True)
 	async def e():
 		runs.append(len(runs))
 		await asyncio.sleep(0)
@@ -2925,13 +2925,13 @@ async def test_async_effect_interval_runs_periodically():
 	await e.run()
 	assert len(runs) == 1
 
-	# Wait for interval to trigger
-	await asyncio.sleep(0.08)
+	# Wait for interval to trigger (just over 1 interval, under 2)
+	await asyncio.sleep(0.012)
 	await e.wait()
 	assert len(runs) == 2
 
 	# Wait for another interval
-	await asyncio.sleep(0.06)
+	await asyncio.sleep(0.012)
 	await e.wait()
 	assert len(runs) == 3
 
@@ -2943,7 +2943,7 @@ async def test_async_effect_cancel_with_cancel_interval_true():
 	"""Test that async cancel(cancel_interval=True) stops the interval."""
 	runs: list[int] = []
 
-	@effect(interval=0.05, lazy=True)
+	@effect(interval=0.01, lazy=True)
 	async def e():
 		runs.append(len(runs))
 		await asyncio.sleep(0)
@@ -2956,7 +2956,7 @@ async def test_async_effect_cancel_with_cancel_interval_true():
 	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should not trigger
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	assert len(runs) == 1
 
 	e.dispose()
@@ -2967,7 +2967,7 @@ async def test_async_effect_cancel_with_cancel_interval_false():
 	"""Test that async cancel(cancel_interval=False) preserves the interval."""
 	runs: list[int] = []
 
-	@effect(interval=0.05, lazy=True)
+	@effect(interval=0.01, lazy=True)
 	async def e():
 		runs.append(len(runs))
 		await asyncio.sleep(0)
@@ -2982,7 +2982,7 @@ async def test_async_effect_cancel_with_cancel_interval_false():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should still trigger
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	await e.wait()
 	assert len(runs) == 2
 
@@ -2994,7 +2994,7 @@ async def test_async_effect_run_restarts_cancelled_interval():
 	"""Test that running an async effect restarts a cancelled interval."""
 	runs: list[int] = []
 
-	@effect(interval=0.05, lazy=True)
+	@effect(interval=0.01, lazy=True)
 	async def e():
 		runs.append(len(runs))
 		await asyncio.sleep(0)
@@ -3012,7 +3012,7 @@ async def test_async_effect_run_restarts_cancelled_interval():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should trigger again
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	await e.wait()
 	assert len(runs) == 3
 

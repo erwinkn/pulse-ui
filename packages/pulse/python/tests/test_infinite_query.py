@@ -574,7 +574,7 @@ async def test_infinite_query_refetch_interval():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.05)
+		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.01)
 		async def items(self, page_param: int) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -597,12 +597,12 @@ async def test_infinite_query_refetch_interval():
 	assert q.pages == [1]
 
 	# Wait for interval to trigger refetch
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	assert s.calls == 2
 	assert q.pages == [2]
 
 	# Wait for another interval
-	await asyncio.sleep(0.06)
+	await asyncio.sleep(0.015)
 	assert s.calls == 3
 	assert q.pages == [3]
 
@@ -617,7 +617,7 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.05)
+		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.01)
 		async def items(self, page_param: int) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -639,7 +639,7 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	assert s.calls == 1
 
 	# Wait for one interval refetch
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	assert s.calls == 2
 
 	# Dispose - interval should stop
@@ -647,7 +647,7 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	calls_at_dispose = s.calls
 
 	# Wait and verify no more refetches
-	await asyncio.sleep(0.1)
+	await asyncio.sleep(0.01)
 	assert s.calls == calls_at_dispose
 
 
@@ -664,7 +664,7 @@ async def test_infinite_query_cancel_fetch_cancels_inflight_request():
 		async def slow_query(self, page_param: int) -> int:
 			self.fetch_started.append(page_param)
 			# Slow fetch - gives time for cancellation
-			await asyncio.sleep(0.2)
+			await asyncio.sleep(0.015)
 			self.fetch_completed.append(page_param)
 			return page_param
 
@@ -682,7 +682,7 @@ async def test_infinite_query_cancel_fetch_cancels_inflight_request():
 	# Start initial fetch (but don't await it fully)
 	wait_task = asyncio.create_task(q.wait())
 	# Give it time to start the fetch
-	await asyncio.sleep(0.05)
+	await asyncio.sleep(0.01)
 
 	# Verify fetch started
 	assert 0 in s.fetch_started
@@ -718,7 +718,7 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 		@ps.infinite_query(initial_page_param=0, retries=0)
 		async def slow_query(self, page_param: int) -> int:
 			self.fetch_started.append(page_param)
-			await asyncio.sleep(0.2)
+			await asyncio.sleep(0.015)
 			self.fetch_completed.append(page_param)
 			return page_param
 
@@ -741,7 +741,7 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 
 	# Start fetching next page (don't await - we'll cancel it)
 	_fetch_task = asyncio.create_task(q.fetch_next_page())
-	await asyncio.sleep(0.05)
+	await asyncio.sleep(0.01)
 
 	assert 1 in s.fetch_started
 	assert 1 not in s.fetch_completed
@@ -847,7 +847,7 @@ async def test_infinite_query_multiple_observers_use_own_fetch_fn():
 	# Note: invalidate refetches all pages, so the last fetch will be for the last page
 	fetch_log_before = len(fetch_log)
 	q2.invalidate()
-	await asyncio.sleep(0.1)  # Let invalidate trigger refetch
+	await asyncio.sleep(0.01)  # Let invalidate trigger refetch
 	# Check that all new fetches used q2's fetch function
 	new_fetches = fetch_log[fetch_log_before:]
 	for name, suffix, _page in new_fetches:
@@ -980,7 +980,7 @@ async def test_infinite_query_concurrent_fetch_next_uses_correct_fetch_fn():
 		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.suffix, page_param))
-			await asyncio.sleep(0.05)  # Small delay to allow concurrency
+			await asyncio.sleep(0.01)  # Small delay to allow concurrency
 			return f"{self.suffix}-{page_param}"
 
 		@data.get_next_page_param
@@ -1036,7 +1036,7 @@ async def test_infinite_query_refetch_with_cancel_uses_correct_fetch_fn():
 		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
 		async def data(self, page_param: int) -> str:
 			fetch_started.append((self.suffix, page_param))
-			await asyncio.sleep(0.2)  # Long enough to allow cancellation
+			await asyncio.sleep(0.015)  # Long enough to allow cancellation
 			fetch_completed.append((self.suffix, page_param))
 			return f"{self.suffix}-{page_param}"
 
@@ -1056,7 +1056,7 @@ async def test_infinite_query_refetch_with_cancel_uses_correct_fetch_fn():
 
 	# Start q1's wait (which triggers initial fetch)
 	task1 = asyncio.create_task(q1.wait())
-	await asyncio.sleep(0.05)  # Let it start
+	await asyncio.sleep(0.01)  # Let it start
 
 	assert ("A", 0) in fetch_started
 
@@ -1096,7 +1096,7 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 		async def data(self, page_param: int) -> str:
 			fetch_log.append("started")
 			fetch_started.set()
-			await asyncio.sleep(0.5)  # Long running fetch
+			await asyncio.sleep(0.02)  # Long running fetch
 			fetch_log.append("completed")
 			return f"result-{page_param}"
 
@@ -1119,7 +1119,7 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 	q.dispose()
 
 	# Give time for cancellation to propagate
-	await asyncio.sleep(0.1)
+	await asyncio.sleep(0.01)
 
 	# Fetch should have been cancelled, not completed
 	assert "started" in fetch_log
@@ -1152,7 +1152,7 @@ async def test_infinite_query_result_dispose_cancels_pending_actions():
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.name, page_param))
 			fetch_started.set()
-			await asyncio.sleep(0.1)  # Long enough for dispose to happen
+			await asyncio.sleep(0.02)  # Long enough for dispose to happen
 			return f"{self.name}-{page_param}"
 
 		@data.get_next_page_param
@@ -1224,7 +1224,7 @@ async def test_infinite_query_result_dispose_does_not_cancel_other_observer_fetc
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.name, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.1)
+			await asyncio.sleep(0.01)
 			fetch_log.append((self.name, "completed"))
 			return f"{self.name}-{page_param}"
 
@@ -1278,7 +1278,7 @@ async def test_infinite_query_key_change_cancels_pending_actions():
 			uid = self.user_id
 			fetch_log.append((uid, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.5)  # Long running fetch
+			await asyncio.sleep(0.02)  # Long running fetch
 			fetch_log.append((uid, "completed"))
 			return {"items": [uid * 10 + page_param], "next": None}
 
@@ -1301,7 +1301,7 @@ async def test_infinite_query_key_change_cancels_pending_actions():
 	# Change key before fetch completes
 	s.user_id = 2
 	# Allow the reactive system to process the key change
-	await asyncio.sleep(0.05)
+	await asyncio.sleep(0.01)
 
 	# The old fetch (for user_id=1) may have been cancelled or continued
 	# depending on whether it was the currently executing action
@@ -1336,7 +1336,7 @@ async def test_infinite_query_key_change_starts_new_fetch():
 			uid = self.user_id
 			fetch_log.append((uid, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.1)
+			await asyncio.sleep(0.01)
 			fetch_log.append((uid, "completed"))
 			return {"items": [uid * 10 + page_param], "next": None}
 
@@ -1399,7 +1399,7 @@ async def test_infinite_query_key_change_does_not_affect_other_observer():
 			uid = self.user_id
 			fetch_log.append((self.name, uid, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.2)
+			await asyncio.sleep(0.015)
 			fetch_log.append((self.name, uid, "completed"))
 			return {"items": [uid * 10 + page_param], "next": None}
 
@@ -1425,7 +1425,7 @@ async def test_infinite_query_key_change_does_not_affect_other_observer():
 
 	# s2 changes its key - but s1 started the fetch, so it should continue
 	s2.user_id = 2
-	await asyncio.sleep(0.05)  # Let reactive system process
+	await asyncio.sleep(0.01)  # Let reactive system process
 
 	# Wait for s1's fetch to complete
 	await wait_task

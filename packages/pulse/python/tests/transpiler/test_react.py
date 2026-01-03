@@ -704,3 +704,25 @@ class TestPulseJsReactModule:
 			"return count;\n"
 			"}"
 		)
+
+
+# =============================================================================
+# from pulse.js import React
+# =============================================================================
+
+
+class TestPulseJsImportReact:
+	"""Test `from pulse.js import React` generates proper imports."""
+
+	def test_react_usestate_generates_import(self):
+		"""Accessing React.useState should generate import { useState } from 'react'."""
+		from pulse.js import React
+
+		@javascript
+		def use_react_namespace():
+			count, set_count = React.useState(0)
+			return count
+
+		code = transpile_with_imports(use_react_namespace)
+		assert 'from "react"' in code, f"Expected react import, got:\n{code}"
+		assert "useState" in code, f"Expected useState, got:\n{code}"

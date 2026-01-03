@@ -31,11 +31,11 @@ from typing import Any as _Any
 from typing import NoReturn as _NoReturn
 
 from pulse.transpiler.builtins import obj as obj
+from pulse.transpiler.nodes import EXPR_REGISTRY as _EXPR_REGISTRY
 from pulse.transpiler.nodes import UNDEFINED as _UNDEFINED
-from pulse.transpiler.nodes import Identifier as _Identifier
 
-# Namespace modules that resolve to Identifier
-_MODULE_EXPORTS_IDENTIFIER: dict[str, str] = {
+# Namespace modules - return JsModule from registry (handles both builtins and external)
+_MODULE_EXPORTS_NAMESPACE: dict[str, str] = {
 	"JSON": "pulse.js.json",
 	"Math": "pulse.js.math",
 	"React": "pulse.js.react",
@@ -45,7 +45,7 @@ _MODULE_EXPORTS_IDENTIFIER: dict[str, str] = {
 	"navigator": "pulse.js.navigator",
 }
 
-# Regular modules that resolve via getattr
+# Class modules - return via getattr to get Class wrapper (emits `new ...`)
 _MODULE_EXPORTS_ATTRIBUTE: dict[str, str] = {
 	"Array": "pulse.js.array",
 	"Date": "pulse.js.date",
@@ -93,10 +93,11 @@ def __getattr__(name: str) -> _Any:
 	if name in _export_cache:
 		return _export_cache[name]
 
-	# Check which dict contains the name
-	if name in _MODULE_EXPORTS_IDENTIFIER:
-		module = _importlib.import_module(_MODULE_EXPORTS_IDENTIFIER[name])
-		export = _Identifier(name)
+	# Namespace modules: return JsModule (handles attribute access via transpile_getattr)
+	if name in _MODULE_EXPORTS_NAMESPACE:
+		module = _importlib.import_module(_MODULE_EXPORTS_NAMESPACE[name])
+		export = _EXPR_REGISTRY[id(module)]
+	# Class modules: return Class wrapper via getattr (emits `new ...()`)
 	elif name in _MODULE_EXPORTS_ATTRIBUTE:
 		module = _importlib.import_module(_MODULE_EXPORTS_ATTRIBUTE[name])
 		export = getattr(module, name)

@@ -1768,7 +1768,7 @@ async def test_state_query_multiple_observers_lifecycle():
 		uid: int = 1
 		calls: int = 0
 
-		@ps.query(retries=0, gc_time=0.1)
+		@ps.query(retries=0, gc_time=0.01)
 		async def user(self) -> dict[str, Any]:
 			self.calls += 1
 			await asyncio.sleep(0)

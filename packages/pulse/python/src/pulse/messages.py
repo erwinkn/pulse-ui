@@ -1,7 +1,7 @@
 from typing import Any, Literal, NotRequired, TypedDict
 
 from pulse.routing import RouteInfo
-from pulse.transpiler.vdom import VDOM, VDOMOperation
+from pulse.transpiler.vdom import VDOM, VDOMNode, VDOMOperation
 
 
 # ====================
@@ -80,12 +80,12 @@ class ServerChannelResponseMessage(TypedDict):
 
 
 class ServerJsExecMessage(TypedDict):
-	"""Execute JavaScript code on the client."""
+	"""Execute JavaScript expression on the client."""
 
 	type: Literal["js_exec"]
 	path: str
 	id: str
-	code: str
+	expr: VDOMNode
 
 
 # ====================

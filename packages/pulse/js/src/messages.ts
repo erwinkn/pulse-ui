@@ -3,7 +3,7 @@
 // =================================================================
 
 import type { RouteInfo } from "./helpers";
-import type { VDOM, VDOMUpdate } from "./vdom";
+import type { VDOM, VDOMNode, VDOMUpdate } from "./vdom";
 
 // Based on pulse/messages.py
 export interface ServerInitMessage {
@@ -74,7 +74,7 @@ export interface ServerJsExecMessage {
 	type: "js_exec";
 	path: string;
 	id: string;
-	code: string;
+	expr: VDOMNode;
 }
 
 export type ServerMessage =

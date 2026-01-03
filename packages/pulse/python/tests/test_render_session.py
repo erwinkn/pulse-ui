@@ -11,9 +11,15 @@ from typing import Any, cast, override
 
 import pulse as ps
 import pytest
+from pulse import javascript
 from pulse.messages import ServerMessage
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
+
+
+@javascript
+def get_answer() -> int:
+	return 42
 
 
 @pytest.fixture(autouse=True)
@@ -669,7 +675,7 @@ async def test_run_js_timeout():
 
 	# Run JS with result=True and short timeout
 	with ps.PulseContext.update(render=session, route=session.route_mounts["a"].route):
-		future = session.run_js("return 42", result=True, timeout=0.05)
+		future = session.run_js(get_answer(), result=True, timeout=0.05)  # pyright: ignore[reportArgumentType,reportCallIssue]
 
 	assert future is not None
 
@@ -697,7 +703,7 @@ async def test_run_js_success_before_timeout():
 
 	# Run JS with result=True
 	with ps.PulseContext.update(render=session, route=session.route_mounts["a"].route):
-		future = session.run_js("return 42", result=True, timeout=1.0)
+		future = session.run_js(get_answer(), result=True, timeout=1.0)  # pyright: ignore[reportArgumentType,reportCallIssue]
 
 	assert future is not None
 

@@ -39,6 +39,7 @@ _MODULE_EXPORTS_NAMESPACE: dict[str, str] = {
 	"JSON": "pulse.js.json",
 	"Math": "pulse.js.math",
 	"React": "pulse.js.react",
+	"ReactDOM": "pulse.js.react_dom",
 	"console": "pulse.js.console",
 	"window": "pulse.js.window",
 	"document": "pulse.js.document",

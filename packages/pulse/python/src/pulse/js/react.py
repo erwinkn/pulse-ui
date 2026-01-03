@@ -332,20 +332,13 @@ def createContext(default_value: T) -> Context[T]:
 
 
 # =============================================================================
-# Fragments and Portals
+# Fragments
 # =============================================================================
 
 
 class Fragment:
 	"""Lets you group elements without a wrapper node."""
 
-	...
-
-
-def createPortal(
-	children: ReactNode, container: _Any, key: str | None = None
-) -> ReactNode:
-	"""Creates a portal. (from react-dom)"""
 	...
 
 

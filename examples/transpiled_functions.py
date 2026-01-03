@@ -28,6 +28,7 @@ from pulse.js import Math, console, obj
 from pulse.js.math import PI, floor, sin
 from pulse.js.math import abs as js_abs
 from pulse.js.number import Number
+from pulse.js.react import useEffect, useState
 
 # =============================================================================
 # Using Import as a typed decorator
@@ -465,17 +466,12 @@ def full_pipeline(x: float) -> float:
 # =============================================================================
 
 
-# Import React hooks using the Import system
-useState = ps.Import("useState", "react")
-useEffect = ps.Import("useEffect", "react")
-
-
 @ps.javascript(jsx=True)
 def ToggleComponent(*children: ps.Node, initial_visible: bool = True):
 	"""React component with show/hide toggle using useState and useEffect.
 
 	This component demonstrates:
-	- Using React hooks (useState, useEffect) via Import system
+	- Using React hooks (useState, useEffect) via pulse.js.react
 	- JSX transpilation with jsx=True
 	- State management and side effects
 	- Accepting children as regular Pulse server-side components
@@ -592,7 +588,7 @@ def ReactHooksDemo():
 			ps.div(className="mt-8")[
 				ps.h2("How it works", className="text-2xl font-semibold mb-4"),
 				ps.div(className="space-y-4 text-slate-300")[
-					ps.p("1. React hooks are imported using ps.Import()"),
+					ps.p("1. React hooks are imported from pulse.js.react"),
 					ps.p(
 						"2. The @ps.javascript(jsx=True) decorator enables JSX transpilation"
 					),

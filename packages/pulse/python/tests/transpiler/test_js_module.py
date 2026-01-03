@@ -80,12 +80,13 @@ class TestJsModule:
 		assert expr.obj.name == "Math"
 		assert expr.prop == "floor"
 
-	def test_get_value_builtin_same_name(self) -> None:
-		"""get_value returns Identifier when name matches module (not Math.Math)."""
-		module = JsModule(name="Set")
-		expr = module.get_value("Set")
-		assert isinstance(expr, Identifier)
-		assert expr.name == "Set"
+	def test_get_value_builtin_namespace(self) -> None:
+		"""Builtin namespaces always return Member (Math.floor, not floor)."""
+		module = JsModule(name="Math")
+		expr = module.get_value("Math")
+		# Even Math.Math returns Member - builtin namespaces are real JS objects
+		assert isinstance(expr, Member)
+		assert emit(expr) == "Math.Math"
 
 	def test_get_value_name_none(self) -> None:
 		"""get_value for name=None returns Identifier."""

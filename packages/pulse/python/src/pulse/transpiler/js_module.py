@@ -162,9 +162,9 @@ class JsModule(Expr):
 	def get_value(self, name: str) -> Member | Class | Identifier | Import:
 		"""Get a member of this module as an expression.
 
-		For global-identifier modules (name=None): returns Identifier(name) directly (e.g., Set -> Set)
-		For builtins: returns Member (e.g., Math.sin), or Identifier if name
-			matches the module name (e.g., Set -> Set, not Set.Set)
+		For global-identifier modules (name=None): returns Identifier directly (e.g., Set -> Set)
+			These are "virtual" Python modules exposing JS globals - no actual JS module exists.
+		For builtin namespaces (src=None): returns Member (e.g., Math.floor)
 		For external modules with "member" style: returns Member (e.g., React.useState)
 		For external modules with "named_import" style: returns a named Import
 
@@ -176,14 +176,11 @@ class JsModule(Expr):
 
 		expr: Member | Identifier | Import
 		if self.name is None:
-			# No module expression: members are just identifiers, not members of a module
+			# Virtual module exposing JS globals - members are just identifiers
 			expr = Identifier(js_name)
 		elif self.src is None:
-			# Builtins: use identifier when name matches module name (Set.Set -> Set)
-			if name == self.name:
-				expr = Identifier(js_name)
-			else:
-				expr = Member(Identifier(self.name), js_name)
+			# Builtin namespace (Math, console, etc.) - members accessed as properties
+			expr = Member(Identifier(self.name), js_name)
 		elif self.values == "named_import":
 			expr = Import(js_name, self.src)
 		else:

@@ -8,10 +8,154 @@ from typing import Any, Callable, override
 from uuid import uuid4
 
 import pulse as ps
+from pulse.js import Math, obj
+from pulse.js.date import Date
+from pulse.js.json import stringify
+from pulse.js.pulse import usePulseChannel
+
+# React hooks for transpiled components
+useState = ps.Import("useState", "react")
+useEffect = ps.Import("useEffect", "react")
+useCallback = ps.Import("useCallback", "react")
 
 
-@ps.react_component(ps.Import("ChannelTester", "~/components/channel-tester"))
-def ChannelTester(*, channelId: str, label: str): ...
+@ps.javascript(jsx=True)
+def ChannelTester(*, channelId: str, label: str):
+	"""Client-side channel tester component.
+
+	This component runs entirely in the browser and uses the usePulseChannel
+	hook to communicate with the server-side channel.
+	"""
+	bridge = usePulseChannel(channelId)
+
+	# State for logs and counters
+	logs, setLogs = useState([])
+	eventCount, setEventCount = useState(0)
+	requestCount, setRequestCount = useState(0)
+	pendingRequest, setPendingRequest = useState(False)
+
+	# Helper to append a log entry
+	def appendLog(message: str):
+		entry = obj(
+			id=f"{Date.now()}-{Math.random()}",
+			message=message,
+		)
+		setLogs(lambda current: [entry, *current][:50])
+
+	# Mount logging
+	def onMount():
+		appendLog(f'Mounted channel "{label}" ({channelId})')
+
+	useEffect(onMount, [channelId, label])
+
+	# Subscribe to server events
+	def subscribeToEvents():
+		def onNotify(payload: Any):
+			appendLog(f"[server -> client] notify {stringify(payload)}")
+
+		def onAsk(payload: Any):
+			return obj(
+				label=label,
+				received=payload,
+				at=Date().toISOString(),
+			)
+
+		offNotify = bridge.on("server:notify", onNotify)
+		offAsk = bridge.on("server:ask", onAsk)
+
+		def cleanup():
+			offNotify()
+			offAsk()
+
+		return cleanup
+
+	useEffect(subscribeToEvents, [bridge, label])
+
+	# Send ping to server
+	def sendPing():
+		next_count = eventCount + 1
+		setEventCount(next_count)
+		try:
+			bridge.emit(
+				"client:ping",
+				obj(
+					label=label,
+					sequence=next_count,
+					at=Date().toISOString(),
+				),
+			)
+			appendLog(f"[client -> server] ping {label}#{next_count}")
+		except Exception as error:
+			appendLog(f"[client -> server] ping failed: {error}")  # type: ignore
+
+	# Send request to server
+	async def sendRequest():
+		next_count = requestCount + 1
+		setRequestCount(next_count)
+		setPendingRequest(True)
+		try:
+			response = await bridge.request(
+				"client:request",
+				obj(
+					label=label,
+					sequence=next_count,
+					at=Date().toISOString(),
+				),
+			)
+			appendLog(
+				f"[client -> server] request #{next_count} resolved: {stringify(response)}"
+			)
+		except Exception as error:
+			appendLog(f"[client -> server] request #{next_count} failed: {error}")  # type: ignore
+		finally:
+			setPendingRequest(False)
+
+	# Clear all logs
+	def clearLogs():
+		setLogs([])
+
+	# Render the component
+	return ps.div(
+		className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm space-y-3"
+	)[
+		ps.div(className="flex items-start justify-between gap-3")[
+			ps.div(className="space-y-1")[
+				ps.p(
+					"Channel Tester",
+					className="text-sm uppercase tracking-wide text-slate-500",
+				),
+				ps.h3(label, className="text-lg font-semibold text-slate-900"),
+				ps.p(
+					f"channel: {channelId}",
+					className="text-xs font-mono text-slate-500",
+				),
+			],
+			ps.button(onClick=clearLogs, className="btn-light btn-xs")["Clear log"],
+		],
+		ps.div(className="flex flex-wrap gap-2")[
+			ps.button(onClick=sendPing, className="btn-primary btn-sm")["Send ping"],
+			ps.button(
+				onClick=sendRequest,
+				className="btn-secondary btn-sm",
+				disabled=pendingRequest,
+			)["Waiting..." if pendingRequest else "Send request"],
+		],
+		ps.div(
+			className="max-h-56 overflow-auto rounded-md border border-slate-200 bg-slate-950 p-3 text-xs text-slate-100"
+		)[
+			ps.p("No messages yet", className="text-slate-400")
+			if len(logs) == 0
+			else ps.ul(className="space-y-2")[
+				ps.For(
+					logs,
+					lambda entry, idx: ps.li(key=entry.id)[
+						ps.span(f"{len(logs) - idx}.", className="text-slate-500"),
+						f" {entry.message}",
+					],
+				)
+			]
+		],
+	]
 
 
 @dataclass

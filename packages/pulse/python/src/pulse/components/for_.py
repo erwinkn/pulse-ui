@@ -1,10 +1,21 @@
 from collections.abc import Callable, Iterable
 from inspect import Parameter, signature
-from typing import TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
-from pulse.transpiler.nodes import Element
+from pulse.transpiler.nodes import Call, Element, Expr, Member, transformer
+
+if TYPE_CHECKING:
+	from pulse.transpiler.transpiler import Transpiler
 
 T = TypeVar("T")
+
+
+@transformer("For")
+def emit_for(items: Any, fn: Any, *, ctx: "Transpiler") -> Expr:
+	"""For(items, fn) -> items.map(fn)"""
+	items_expr = ctx.emit_expr(items)
+	fn_expr = ctx.emit_expr(fn)
+	return Call(Member(items_expr, "map"), [fn_expr])
 
 
 @overload
@@ -40,3 +51,7 @@ def For(items: Iterable[T], fn: Callable[..., Element]) -> list[Element]:
 	if accepts_two:
 		return [fn(item, idx) for idx, item in enumerate(items)]
 	return [fn(item) for item in items]
+
+
+# Register For in EXPR_REGISTRY so it can be used in transpiled functions
+Expr.register(For, emit_for)

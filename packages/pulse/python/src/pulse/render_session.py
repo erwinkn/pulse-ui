@@ -528,13 +528,15 @@ class RenderSession:
 
 	def mount(self, path: str, route_info: RouteInfo):
 		if path in self.route_mounts:
-			# Route already mounted - this is a reconnection case.
-			# Reset rendered flag so effect sends vdom_init, update route info,
-			# and resume the paused effect.
+			# Route already mounted - update route info.
 			mount = self.route_mounts[path]
-			mount.rendered = False
 			mount.route.update(route_info)
+			# Only reset rendered and resume effect for true reconnection
+			# (when effect was paused due to disconnect). After prerender,
+			# effect is not paused and we should preserve rendered=True to
+			# avoid sending vdom_init on first callback.
 			if mount.effect and mount.effect.paused:
+				mount.rendered = False
 				mount.effect.resume()
 			return
 

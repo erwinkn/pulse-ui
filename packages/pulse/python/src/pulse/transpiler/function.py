@@ -142,6 +142,10 @@ def _transpile_function_body(
 	# Get and parse source
 	src = getsourcecode(fn)
 	src = textwrap.dedent(src)
+	try:
+		source_start_line = inspect.getsourcelines(fn)[1]
+	except (OSError, TypeError):
+		source_start_line = None
 	module = ast.parse(src)
 
 	# Find the function definition
@@ -169,6 +173,7 @@ def _transpile_function_body(
 				source=src,
 				filename=filename,
 				func_name=fn.__name__,
+				source_start_line=source_start_line,
 			) from None
 		raise
 

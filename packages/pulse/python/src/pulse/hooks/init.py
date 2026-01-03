@@ -11,6 +11,7 @@ from typing import Any, Literal, cast, override
 
 from pulse.helpers import getsourcecode
 from pulse.hooks.core import HookState, hooks
+from pulse.transpiler.errors import TranspileError
 
 # Storage keyed by (code object, lineno) of the `with ps.init()` call site.
 _init_hook = hooks.create("init_storage", lambda: InitState())
@@ -312,6 +313,10 @@ def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 	"""Rewrite `with ps.init()` blocks in the provided function, if present."""
 
 	source = textwrap.dedent(getsourcecode(func))  # raises immediately if missing
+	try:
+		source_start_line = inspect.getsourcelines(func)[1]
+	except (OSError, TypeError):
+		source_start_line = None
 
 	if "init" not in source:  # quick prefilter, allow alias detection later
 		return func
@@ -320,6 +325,7 @@ def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 
 	init_names, init_modules = _resolve_init_bindings(func)
 
+	target_def: ast.FunctionDef | ast.AsyncFunctionDef | None = None
 	# Remove decorators so the re-exec'd function isn't double-wrapped.
 	for node in ast.walk(tree):
 		if (
@@ -327,14 +333,59 @@ def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 			and node.name == func.__name__
 		):
 			node.decorator_list = []
+			target_def = node
+
+	if target_def is None:
+		return func
 
 	if not _contains_ps_init(tree, init_names, init_modules):
 		return func
 
-	if _has_disallowed_control_flow(tree, init_names, init_modules):
-		raise RuntimeError(
-			"ps.init blocks cannot contain control flow (if/for/while/try/with/match)"
-		)
+	init_items = _find_init_items(target_def.body, init_names, init_modules)
+	if len(init_items) > 1:
+		try:
+			filename = inspect.getsourcefile(func) or inspect.getfile(func)
+		except (TypeError, OSError):
+			filename = None
+		raise TranspileError(
+			"ps.init may only be used once per component render",
+			node=init_items[1].context_expr,
+			source=source,
+			filename=filename,
+			func_name=func.__name__,
+			source_start_line=source_start_line,
+		) from None
+
+	if init_items and init_items[0].optional_vars is not None:
+		try:
+			filename = inspect.getsourcefile(func) or inspect.getfile(func)
+		except (TypeError, OSError):
+			filename = None
+		raise TranspileError(
+			"ps.init does not support 'as' bindings",
+			node=init_items[0].optional_vars,
+			source=source,
+			filename=filename,
+			func_name=func.__name__,
+			source_start_line=source_start_line,
+		) from None
+
+	disallowed = _find_disallowed_control_flow(
+		target_def.body, init_names, init_modules
+	)
+	if disallowed is not None:
+		try:
+			filename = inspect.getsourcefile(func) or inspect.getfile(func)
+		except (TypeError, OSError):
+			filename = None
+		raise TranspileError(
+			"ps.init blocks cannot contain control flow (if/for/while/try/with/match)",
+			node=disallowed,
+			source=source,
+			filename=filename,
+			func_name=func.__name__,
+			source_start_line=source_start_line,
+		) from None
 
 	rewriter: ast.NodeTransformer
 	if _CAN_USE_CPYTHON:
@@ -373,19 +424,128 @@ def _contains_ps_init(
 	return checker.contains_init(tree)
 
 
-def _has_disallowed_control_flow(
-	tree: ast.AST, init_names: set[str], init_modules: set[str]
-) -> bool:
-	disallowed = (ast.If, ast.For, ast.While, ast.Try, ast.With, ast.Match)
+def _find_disallowed_control_flow(
+	body: Sequence[ast.stmt], init_names: set[str], init_modules: set[str]
+) -> ast.stmt | None:
+	disallowed: tuple[type[ast.AST], ...] = (
+		ast.If,
+		ast.For,
+		ast.AsyncFor,
+		ast.While,
+		ast.Try,
+		ast.With,
+		ast.AsyncWith,
+		ast.Match,
+	)
 	checker = _InitCallChecker(init_names, init_modules)
-	for node in ast.walk(tree):
-		if isinstance(node, ast.With):
+
+	class _Finder(ast.NodeVisitor):
+		found: ast.stmt | None
+
+		def __init__(self) -> None:
+			self.found = None
+
+		@override
+		def visit(self, node: ast.AST) -> Any:  # type: ignore[override]
+			if self.found is not None:
+				return None
+			if isinstance(node, disallowed):
+				self.found = cast(ast.stmt, node)
+				return None
+			return super().visit(node)
+
+		@override
+		def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
+			return None
+
+		@override
+		def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
+			return None
+
+		@override
+		def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+			return None
+
+	finder = _Finder()
+
+	class _WithFinder(ast.NodeVisitor):
+		@override
+		def visit_With(self, node: ast.With) -> Any:  # type: ignore[override]
 			first = node.items[0] if node.items else None
 			if first and checker.is_init_call(first.context_expr):
-				continue
-		if isinstance(node, disallowed):
-			return True
-	return False
+				for stmt in node.body:
+					finder.visit(stmt)
+					if finder.found is not None:
+						return None
+			self.generic_visit(node)
+
+		@override
+		def visit_AsyncWith(self, node: ast.AsyncWith) -> Any:  # type: ignore[override]
+			first = node.items[0] if node.items else None
+			if first and checker.is_init_call(first.context_expr):
+				for stmt in node.body:
+					finder.visit(stmt)
+					if finder.found is not None:
+						return None
+			self.generic_visit(node)
+
+		@override
+		def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
+			return None
+
+		@override
+		def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
+			return None
+
+		@override
+		def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+			return None
+
+	with_finder = _WithFinder()
+	for stmt in body:
+		with_finder.visit(stmt)
+		if finder.found is not None:
+			return finder.found
+	return None
+
+
+def _find_init_items(
+	body: Sequence[ast.stmt], init_names: set[str], init_modules: set[str]
+) -> list[ast.withitem]:
+	checker = _InitCallChecker(init_names, init_modules)
+	items: list[ast.withitem] = []
+
+	class _Finder(ast.NodeVisitor):
+		@override
+		def visit_With(self, node: ast.With) -> Any:  # type: ignore[override]
+			first = node.items[0] if node.items else None
+			if first and checker.is_init_call(first.context_expr):
+				items.append(first)
+			self.generic_visit(node)
+
+		@override
+		def visit_AsyncWith(self, node: ast.AsyncWith) -> Any:  # type: ignore[override]
+			first = node.items[0] if node.items else None
+			if first and checker.is_init_call(first.context_expr):
+				items.append(first)
+			self.generic_visit(node)
+
+		@override
+		def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
+			return None
+
+		@override
+		def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
+			return None
+
+		@override
+		def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+			return None
+
+	finder = _Finder()
+	for stmt in body:
+		finder.visit(stmt)
+	return items
 
 
 class _InitCallChecker:

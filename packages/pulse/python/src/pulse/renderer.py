@@ -123,13 +123,11 @@ class Renderer:
 		if isinstance(node, Element):
 			return self.render_node(node, path)
 		if isinstance(node, Value):
-			json_value = coerce_json(node.value, path)
-			return json_value, json_value
+			return node.value, node.value
 		if isinstance(node, Expr):
 			return node.render(), node
-		if is_json_primitive(node):
-			return node, node
-		raise TypeError(f"Unsupported node type: {type(node).__name__}")
+		# Pass through any other value - serializer will validate
+		return node, node
 
 	def render_component(
 		self, component: PulseNode, path: str
@@ -188,9 +186,9 @@ class Renderer:
 		path: str = "",
 	) -> Node:
 		if isinstance(current, Value):
-			current = coerce_json(current.value, path)
+			current = current.value
 		if isinstance(previous, Value):
-			previous = coerce_json(previous.value, path)
+			previous = previous.value
 		if not same_node(previous, current):
 			unmount_element(previous)
 			new_vdom, normalized = self.render_tree(current, path)
@@ -389,14 +387,14 @@ class Renderer:
 				continue
 
 			if isinstance(value, Value):
-				json_value = coerce_json(value.value, prop_path)
+				unwrapped = value.value
 				if normalized is None:
 					normalized = current.copy()
-				normalized[key] = json_value
+				normalized[key] = unwrapped
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
-				if key not in previous or not values_equal(json_value, old_value):
-					updated[key] = cast(VDOMPropValue, json_value)
+				if key not in previous or not values_equal(unwrapped, old_value):
+					updated[key] = cast(VDOMPropValue, unwrapped)
 				continue
 
 			if isinstance(value, Expr):
@@ -422,16 +420,11 @@ class Renderer:
 					updated[key] = CALLBACK_PLACEHOLDER
 				continue
 
-			json_value = coerce_json(value, prop_path)
 			if isinstance(old_value, (Element, PulseNode)):
 				unmount_element(old_value)
-			if normalized is not None:
-				normalized[key] = json_value
-			elif json_value is not value:
-				normalized = current.copy()
-				normalized[key] = json_value
-			if key not in previous or not values_equal(json_value, old_value):
-				updated[key] = cast(VDOMPropValue, json_value)
+			# No normalization needed - value passes through unchanged
+			if key not in previous or not values_equal(value, old_value):
+				updated[key] = cast(VDOMPropValue, value)
 
 		for key in removed_keys:
 			old_value = previous.get(key)
@@ -486,31 +479,6 @@ def registry_ref(expr: Expr) -> RegistryRef | None:
 	if isinstance(expr, (Import, JsFunction, Constant, JsxFunction)):
 		return {"t": "ref", "key": expr.id}
 	return None
-
-
-def is_json_primitive(value: Any) -> bool:
-	return value is None or isinstance(value, (str, int, float, bool))
-
-
-def coerce_json(value: Any, path: str) -> Any:
-	"""Convert Python value to JSON-compatible structure.
-
-	Performs runtime conversions:
-	- tuple → list
-	- validates dict keys are strings
-	"""
-	if is_json_primitive(value):
-		return value
-	if isinstance(value, (list, tuple)):
-		return [coerce_json(v, path) for v in value]
-	if isinstance(value, dict):
-		out: dict[str, Any] = {}
-		for k, v in value.items():
-			if not isinstance(k, str):
-				raise TypeError(f"Non-string prop key at {path}: {k!r}")
-			out[k] = coerce_json(v, path)
-		return out
-	raise TypeError(f"Unsupported JSON value at {path}: {type(value).__name__}")
 
 
 def prop_requires_eval(value: PropValue) -> bool:

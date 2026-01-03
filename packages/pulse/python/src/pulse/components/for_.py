@@ -11,7 +11,7 @@ T = TypeVar("T")
 
 
 @transformer("For")
-def _emit_for(items: Any, fn: Any, *, ctx: "Transpiler") -> Expr:
+def emit_for(items: Any, fn: Any, *, ctx: "Transpiler") -> Expr:
 	"""For(items, fn) -> items.map(fn)"""
 	items_expr = ctx.emit_expr(items)
 	fn_expr = ctx.emit_expr(fn)
@@ -54,4 +54,4 @@ def For(items: Iterable[T], fn: Callable[..., Element]) -> list[Element]:
 
 
 # Register For in EXPR_REGISTRY so it can be used in transpiled functions
-Expr.register(For, _emit_for)
+Expr.register(For, emit_for)

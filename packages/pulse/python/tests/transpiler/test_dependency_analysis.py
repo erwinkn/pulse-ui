@@ -672,7 +672,7 @@ class TestEdgeCases:
 
 		def fn():
 			obj = {}
-			return obj.method
+			return getattr(obj, "method")  # noqa: B009
 
 		_, all_names = analyze_code_object(fn)
 		assert "getattr" in all_names

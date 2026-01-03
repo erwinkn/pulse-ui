@@ -16,7 +16,7 @@ import ast
 from dataclasses import dataclass
 from typing import Any, final, override
 
-from pulse.components.for_ import _emit_for
+from pulse.components.for_ import emit_for
 from pulse.transpiler.nodes import Element, Expr, Literal, Node, Prop
 from pulse.transpiler.py_module import PyModule
 from pulse.transpiler.transpiler import Transpiler
@@ -232,4 +232,4 @@ class PulseTags(PyModule):
 	fragment = TagExpr("")
 
 	# For component - maps to array.map()
-	For = _emit_for
+	For = emit_for

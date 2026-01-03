@@ -1768,7 +1768,7 @@ async def test_state_query_multiple_observers_lifecycle():
 		uid: int = 1
 		calls: int = 0
 
-		@ps.query(retries=0, gc_time=0.1)
+		@ps.query(retries=0, gc_time=0.01)
 		async def user(self) -> dict[str, Any]:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -1796,7 +1796,7 @@ async def test_state_query_multiple_observers_lifecycle():
 
 	# Dispose second observer - query should be GC'd
 	query_result(q2).dispose()
-	await asyncio.sleep(0.15)  # Wait for GC
+	await asyncio.sleep(0.015)  # Wait for GC
 
 	# New query should be created (old one was GC'd)
 	s3 = S()
@@ -1813,7 +1813,7 @@ async def test_state_query_refetch_interval():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.query(retries=0, refetch_interval=0.05)
+		@ps.query(retries=0, refetch_interval=0.01)
 		async def data(self) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -1832,18 +1832,18 @@ async def test_state_query_refetch_interval():
 	assert q.data == 1
 
 	# Wait for interval to trigger refetch
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	assert s.calls == 2
 	assert q.data == 2
 
 	# Wait for another interval
-	await asyncio.sleep(0.06)
+	await asyncio.sleep(0.015)
 	assert s.calls == 3
 	assert q.data == 3
 
 	# Dispose should stop the interval
 	query_result(q).dispose()
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	assert s.calls == 3  # No more refetches
 
 
@@ -1855,7 +1855,7 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.query(retries=0, refetch_interval=0.05)
+		@ps.query(retries=0, refetch_interval=0.01)
 		async def data(self) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -1873,7 +1873,7 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 	assert s.calls == 1
 
 	# Wait for one interval refetch
-	await asyncio.sleep(0.08)
+	await asyncio.sleep(0.015)
 	assert s.calls == 2
 
 	# Dispose - interval should stop
@@ -1881,7 +1881,7 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 	calls_at_dispose = s.calls
 
 	# Wait and verify no more refetches
-	await asyncio.sleep(0.1)
+	await asyncio.sleep(0.015)
 	assert s.calls == calls_at_dispose
 
 
@@ -2484,7 +2484,7 @@ async def test_query_result_dispose_cancels_in_flight_fetch():
 		async def data(self) -> str:
 			fetch_log.append("started")
 			fetch_started.set()
-			await asyncio.sleep(0.5)  # Long running fetch
+			await asyncio.sleep(0.02)  # Long running fetch
 			fetch_log.append("completed")
 			fetch_completed.set()
 			return "result"
@@ -2504,7 +2504,7 @@ async def test_query_result_dispose_cancels_in_flight_fetch():
 	query_result(q).dispose()
 
 	# Give time for cancellation to propagate
-	await asyncio.sleep(0.1)
+	await asyncio.sleep(0.01)
 
 	# Fetch should have been cancelled, not completed
 	assert "started" in fetch_log
@@ -2512,7 +2512,7 @@ async def test_query_result_dispose_cancels_in_flight_fetch():
 
 	# The wait task should complete (either with error or cancelled)
 	try:
-		await asyncio.wait_for(wait_task, timeout=0.5)
+		await asyncio.wait_for(wait_task, timeout=0.02)
 	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected - task was cancelled
 
@@ -2536,7 +2536,7 @@ async def test_query_result_dispose_does_not_cancel_other_observer_fetch():
 		async def data(self) -> str:
 			fetch_log.append((self.name, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.1)
+			await asyncio.sleep(0.01)
 			fetch_log.append((self.name, "completed"))
 			return f"result-{self.name}"
 
@@ -2587,7 +2587,7 @@ async def test_query_result_dispose_reschedules_fetch_from_other_observer():
 			fetch_log.append((self.name, "started"))
 			fetch_started.set()
 			try:
-				await asyncio.sleep(0.5)
+				await asyncio.sleep(0.01)
 				fetch_log.append((self.name, "completed"))
 				return f"result-{self.name}"
 			except asyncio.CancelledError:
@@ -2631,7 +2631,7 @@ async def test_query_result_dispose_reschedules_fetch_from_other_observer():
 
 	# s1's wait task should have been cancelled
 	try:
-		await asyncio.wait_for(wait_task_s1, timeout=0.1)
+		await asyncio.wait_for(wait_task_s1, timeout=0.02)
 	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected
 
@@ -2656,7 +2656,7 @@ async def test_query_result_dispose_no_reschedule_when_no_other_observers():
 			fetch_log.append("started")
 			fetch_started.set()
 			try:
-				await asyncio.sleep(0.5)
+				await asyncio.sleep(0.01)
 				fetch_log.append("completed")
 				return "result"
 			except asyncio.CancelledError:
@@ -2690,7 +2690,7 @@ async def test_query_result_dispose_no_reschedule_when_no_other_observers():
 
 	# The wait task should complete (cancelled)
 	try:
-		await asyncio.wait_for(wait_task, timeout=0.1)
+		await asyncio.wait_for(wait_task, timeout=0.02)
 	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected
 
@@ -2716,7 +2716,7 @@ async def test_key_change_cancels_in_flight_fetch():
 			uid = self.user_id
 			fetch_log.append((uid, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.5)  # Long running fetch
+			await asyncio.sleep(0.02)  # Long running fetch
 			fetch_log.append((uid, "completed"))
 			return {"id": uid}
 
@@ -2735,7 +2735,7 @@ async def test_key_change_cancels_in_flight_fetch():
 	# Change key before fetch completes
 	s.user_id = 2
 	# Allow the reactive system to process the key change
-	await asyncio.sleep(0.05)
+	await asyncio.sleep(0.01)
 
 	# The old fetch (for user_id=1) should be cancelled
 	assert (1, "started") in fetch_log
@@ -2743,7 +2743,7 @@ async def test_key_change_cancels_in_flight_fetch():
 
 	# The wait task might error or complete - it's for the old key
 	try:
-		await asyncio.wait_for(wait_task, timeout=0.1)
+		await asyncio.wait_for(wait_task, timeout=0.02)
 	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected
 
@@ -2768,7 +2768,7 @@ async def test_key_change_starts_new_fetch():
 			uid = self.user_id
 			fetch_log.append((uid, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.1)
+			await asyncio.sleep(0.01)
 			fetch_log.append((uid, "completed"))
 			return {"id": uid}
 
@@ -2825,7 +2825,7 @@ async def test_key_change_does_not_affect_other_observer():
 			uid = self.user_id
 			fetch_log.append((self.name, uid, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.2)
+			await asyncio.sleep(0.02)
 			fetch_log.append((self.name, uid, "completed"))
 			return {"id": uid}
 
@@ -2847,7 +2847,7 @@ async def test_key_change_does_not_affect_other_observer():
 
 	# s2 changes its key - but s1 started the fetch, so it should continue
 	s2.user_id = 2
-	await asyncio.sleep(0.05)  # Let reactive system process
+	await asyncio.sleep(0.01)  # Let reactive system process
 
 	# Wait for s1's fetch to complete
 	await wait_task

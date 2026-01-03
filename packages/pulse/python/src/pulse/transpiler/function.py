@@ -372,18 +372,40 @@ def analyze_code_object(
 	    - effective_globals: dict mapping names to their values (includes closure vars)
 	    - all_names: set of all names referenced in the code (including nested functions)
 	"""
+	import dis
+
 	code = fn.__code__
 
 	# Collect all names from code object and nested functions in one pass
 	seen_codes: set[int] = set()
 	all_names: set[str] = set()
 
+	# Opcodes that load names from globals/locals (not attributes)
+	GLOBAL_LOAD_OPS = frozenset(
+		{
+			"LOAD_GLOBAL",
+			"LOAD_NAME",
+			"STORE_GLOBAL",
+			"STORE_NAME",
+			"DELETE_GLOBAL",
+			"DELETE_NAME",
+		}
+	)
+
 	def walk_code(c: pytypes.CodeType) -> None:
 		if id(c) in seen_codes:
 			return
 		seen_codes.add(id(c))
-		all_names.update(c.co_names)
+
+		# Only collect names that are actually loaded as globals, not attributes
+		# co_names contains both global names and attribute names, so we need
+		# to check the bytecode to distinguish them
+		for instr in dis.get_instructions(c):
+			if instr.opname in GLOBAL_LOAD_OPS and instr.argval is not None:
+				all_names.add(instr.argval)
+
 		all_names.update(c.co_freevars)  # Include closure variables
+
 		for const in c.co_consts:
 			if isinstance(const, pytypes.CodeType):
 				walk_code(const)

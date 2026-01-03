@@ -111,11 +111,7 @@ class ReactProxy:
 			)
 		}
 
-		# Accept the client WebSocket connection first
-		# We'll accept without subprotocol initially, then update if target accepts one
-		await websocket.accept()
-
-		# Connect to target WebSocket server
+		# Connect to target WebSocket server first to negotiate subprotocol
 		try:
 			async with websockets.connect(
 				target_url,
@@ -123,6 +119,9 @@ class ReactProxy:
 				subprotocols=subprotocols,
 				ping_interval=None,  # Let the target server handle ping/pong
 			) as target_ws:
+				# Accept client connection with the negotiated subprotocol
+				await websocket.accept(subprotocol=target_ws.subprotocol)
+
 				# Forward messages bidirectionally
 				async def forward_client_to_target():
 					try:

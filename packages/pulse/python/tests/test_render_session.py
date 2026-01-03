@@ -11,6 +11,7 @@ from typing import Any, cast, override
 
 import pulse as ps
 import pytest
+from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
@@ -827,5 +828,287 @@ def test_handle_js_result_ignores_unknown_id():
 
 	# Should not raise
 	session.handle_js_result({"id": "unknown-id", "result": 42, "error": None})
+
+	session.close()
+
+
+# =============================================================================
+# Prerender and Interrupt Tests
+# =============================================================================
+
+
+@ps.component
+def redirecting_component():
+	raise RedirectInterrupt("/other", replace=True)
+
+
+@ps.component
+def not_found_component():
+	raise NotFoundInterrupt()
+
+
+def test_prerender_redirect_removes_mount():
+	"""Test that RedirectInterrupt during first prerender removes mount from route_mounts."""
+	routes = RouteTree([Route("redirect", redirecting_component)])
+	session = RenderSession("test-id", routes)
+
+	with ps.PulseContext.update(render=session):
+		result = session.prerender("/redirect")
+
+	# Should return navigate_to message
+	assert result["type"] == "navigate_to"
+	assert result["path"] == "/other"
+	assert result["replace"] is True
+
+	# Mount should NOT be in route_mounts (was removed after interrupt)
+	assert "/redirect" not in session.route_mounts
+
+	session.close()
+
+
+def test_prerender_not_found_removes_mount():
+	"""Test that NotFoundInterrupt during first prerender removes mount from route_mounts."""
+	routes = RouteTree([Route("missing", not_found_component)])
+	session = RenderSession("test-id", routes)
+
+	with ps.PulseContext.update(render=session):
+		result = session.prerender("/missing")
+
+	# Should return navigate_to message pointing to app.not_found
+	assert result["type"] == "navigate_to"
+	assert result["replace"] is True
+
+	# Mount should NOT be in route_mounts
+	assert "/missing" not in session.route_mounts
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_prerender_then_attach_works():
+	"""Test the normal prerender → attach flow."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	# Prerender first
+	with ps.PulseContext.update(render=session):
+		result = session.prerender("/a")
+
+	assert result["type"] == "vdom_init"
+	assert "/a" in session.route_mounts
+	mount = session.route_mounts["/a"]
+	assert mount.state == "pending"
+	assert mount.effect is not None  # Effect created during prerender
+
+	# Now attach
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.attach("/a", make_route_info("/a"))
+
+	# Should transition to active, queue flushed (empty)
+	assert mount.state == "active"
+	assert mount.queue is None
+	assert len(messages) == 0  # No new messages, VDOM already sent during prerender
+
+	session.close()
+
+
+def test_attach_after_redirect_prerender_creates_fresh_mount():
+	"""Test that attaching after a redirecting prerender creates a fresh working mount."""
+	# Route that redirects on first render but not subsequent ones
+	render_count = {"value": 0}
+
+	@ps.component
+	def conditional_redirect():
+		render_count["value"] += 1
+		if render_count["value"] == 1:
+			raise RedirectInterrupt("/other")
+		return ps.div()["Success"]
+
+	routes = RouteTree([Route("cond", conditional_redirect)])
+	session = RenderSession("test-id", routes)
+
+	# First prerender - redirects
+	with ps.PulseContext.update(render=session):
+		result = session.prerender("/cond")
+
+	assert result["type"] == "navigate_to"
+	assert "/cond" not in session.route_mounts
+
+	# Now attach directly (simulating user navigating back)
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.attach("/cond", make_route_info("/cond"))
+
+	# Should create fresh mount with working effect
+	assert "/cond" in session.route_mounts
+	mount = session.route_mounts["/cond"]
+	assert mount.state == "active"
+	assert mount.effect is not None
+
+	# Should have sent vdom_init
+	assert len(messages) == 1
+	assert messages[0]["type"] == "vdom_init"
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_re_prerender_returns_fresh_vdom():
+	"""Test that calling prerender again on same path returns fresh VDOM."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	with ps.PulseContext.update(render=session):
+		result1 = session.prerender("/a")
+		result2 = session.prerender("/a")
+
+	assert result1["type"] == "vdom_init"
+	assert result2["type"] == "vdom_init"
+	# Both should return valid VDOM
+	assert result1["vdom"] is not None
+	assert result2["vdom"] is not None
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_detach_removes_mount_and_disposes_effect():
+	"""Test that detach removes mount and disposes the render effect."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.attach("/a", make_route_info("/a"))
+
+	mount = session.route_mounts["/a"]
+	effect = mount.effect
+	assert effect is not None
+	# Effect has deps before dispose
+	assert len(effect.deps) >= 0  # Just verify effect exists and is valid
+
+	# Detach
+	session.detach("/a")
+
+	# Mount should be removed
+	assert "/a" not in session.route_mounts
+	# Effect should be disposed (deps cleared, removed from parent)
+	assert len(effect.deps) == 0
+	assert effect.parent is None
+
+	session.close()
+
+
+def test_detach_nonexistent_path_is_noop():
+	"""Test that detaching a path that doesn't exist is a no-op."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	# Should not raise
+	session.detach("/nonexistent")
+
+	session.close()
+
+
+def test_update_route_updates_route_context():
+	"""Test that update_route updates the route context for an attached path."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	initial_info: RouteInfo = {
+		"pathname": "/a",
+		"hash": "",
+		"query": "?x=1",
+		"queryParams": {"x": "1"},
+		"pathParams": {},
+		"catchall": [],
+	}
+	with ps.PulseContext.update(render=session):
+		session.attach("/a", initial_info)
+
+	mount = session.route_mounts["/a"]
+	assert mount.route.query == "?x=1"
+
+	# Update route
+	updated_info: RouteInfo = {
+		"pathname": "/a",
+		"hash": "#section",
+		"query": "?y=2",
+		"queryParams": {"y": "2"},
+		"pathParams": {},
+		"catchall": [],
+	}
+	session.update_route("/a", updated_info)
+
+	assert mount.route.query == "?y=2"
+	assert mount.route.hash == "#section"
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_prerender_queue_timeout_transitions_to_idle():
+	"""Test that prerender without attach eventually transitions to idle."""
+	routes = RouteTree([Route("a", simple_component)])
+	# Very short timeout for testing
+	session = RenderSession("test-id", routes, prerender_queue_timeout=0.01)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender("/a")
+
+	mount = session.route_mounts["/a"]
+	assert mount.state == "pending"
+	assert mount.effect is not None
+	assert mount.effect.paused is False
+
+	# Manually trigger the timeout (simulating time passing)
+	session._transition_to_idle("/a")  # pyright: ignore[reportPrivateUsage]
+
+	assert mount.state == "idle"
+	assert mount.effect.paused is True
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_attach_from_idle_resumes_effect_and_sends_vdom():
+	"""Test that attaching to an idle mount resumes effect and sends fresh VDOM."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	# Prerender, then transition to idle
+	with ps.PulseContext.update(render=session):
+		session.prerender("/a")
+
+	mount = session.route_mounts["/a"]
+	session._transition_to_idle("/a")  # pyright: ignore[reportPrivateUsage]
+	assert mount.state == "idle"
+	assert mount.effect is not None
+	assert mount.effect.paused is True
+
+	# Now attach
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.attach("/a", make_route_info("/a"))
+
+	# Should be active with resumed effect
+	assert mount.state == "active"
+	assert mount.effect.paused is False
+
+	# Should send fresh vdom_init (rendered=False triggers full render)
+	assert len(messages) == 1
+	assert messages[0]["type"] == "vdom_init"
 
 	session.close()

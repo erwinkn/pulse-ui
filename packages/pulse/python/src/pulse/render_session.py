@@ -306,10 +306,12 @@ class RenderSession:
 					mount.element = normalized_root
 				mount.rendered = True
 			except RedirectInterrupt as r:
+				del self.route_mounts[path]
 				return ServerNavigateToMessage(
 					type="navigate_to", path=r.path, replace=r.replace, hard=False
 				)
 			except NotFoundInterrupt:
+				del self.route_mounts[path]
 				ctx = PulseContext.get()
 				return ServerNavigateToMessage(
 					type="navigate_to", path=ctx.app.not_found, replace=True, hard=False

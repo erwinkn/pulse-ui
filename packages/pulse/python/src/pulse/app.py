@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp
+from starlette.websockets import WebSocket
 
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
@@ -581,20 +582,20 @@ class App:
 				server_address=server_address,
 			)
 
+			# In dev mode, proxy WebSocket connections to React Router (e.g. Vite HMR)
+			# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
+			if self.env == "dev":
+
+				@self.fastapi.websocket("/{path:path}")
+				async def websocket_proxy(websocket: WebSocket, path: str):  # pyright: ignore[reportUnusedFunction]
+					await proxy_handler.proxy_websocket(websocket)
+
 			@self.fastapi.api_route(
 				"/{path:path}",
 				methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
 				include_in_schema=False,
 			)
 			async def proxy_catch_all(request: Request, path: str):  # pyright: ignore[reportUnusedFunction]
-				# Skip WebSocket upgrades outside the Vite dev server (handled by Socket.IO)
-				is_websocket_upgrade = (
-					request.headers.get("upgrade", "").lower() == "websocket"
-				)
-				is_vite_dev_server = self.env == "dev" and request.url.path == "/"
-				if is_websocket_upgrade and not is_vite_dev_server:
-					raise HTTPException(status_code=404, detail="Not found")
-
 				# Proxy all unmatched HTTP requests to React Router
 				return await proxy_handler(request)
 

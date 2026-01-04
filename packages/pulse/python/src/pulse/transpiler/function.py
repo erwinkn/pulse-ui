@@ -352,10 +352,10 @@ class JsxFunction(Expr, Generic[P, R]):
 
 	@override
 	def transpile_call(
-		self, args: list[ast.expr], kwargs: dict[str, ast.expr], ctx: Transpiler
+		self, args: list[ast.expr], keywords: list[ast.keyword], ctx: Transpiler
 	) -> Expr:
 		# delegate JSX element building to the generic Jsx wrapper
-		return Jsx(self).transpile_call(args, kwargs, ctx)
+		return Jsx(self).transpile_call(args, keywords, ctx)
 
 	@override
 	def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:  # pyright: ignore[reportIncompatibleMethodOverride]

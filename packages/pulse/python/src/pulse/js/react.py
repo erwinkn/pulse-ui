@@ -17,7 +17,13 @@ from typing import Any as _Any
 from typing import Protocol as _Protocol
 from typing import TypeVar as _TypeVar
 
+from pulse.component import component as _component
+from pulse.transpiler import Import as _Import
+from pulse.transpiler.function import Constant as _Constant
 from pulse.transpiler.js_module import JsModule
+from pulse.transpiler.nodes import Call as _Call
+from pulse.transpiler.nodes import Jsx as _Jsx
+from pulse.transpiler.nodes import Node as _PulseNode
 
 # Type variables for hooks
 T = _TypeVar("T")
@@ -321,9 +327,26 @@ def forwardRef(
 	...
 
 
-def lazy(load: _Callable[[], _Any]) -> _Any:
-	"""Lets you defer loading a component's code until it is rendered."""
-	...
+def lazy(factory: _Import) -> _Jsx:
+	"""Create a lazy-loaded component from a factory import.
+
+	Usage:
+		LazyChart = lazy(Import("Chart", "./Chart", lazy=True))
+		# Generates: const LazyChart_1 = lazy(Chart_2);
+
+	Args:
+		factory: An Import with lazy=True that generates a dynamic import factory
+
+	Returns:
+		A Jsx-wrapped lazy component that can be used as LazyChart(props)[children]
+	"""
+	react_lazy = _Import("lazy", "react")
+	# Create: lazy(factory) call expression
+	lazy_call = _Call(react_lazy, [factory])
+	# Register as Constant so it appears in generated JS
+	const = _Constant(lazy_call, lazy_call)
+	# Wrap in Jsx so it's callable as a component
+	return _Jsx(const)
 
 
 def createContext(default_value: T) -> Context[T]:
@@ -332,13 +355,15 @@ def createContext(default_value: T) -> Context[T]:
 
 
 # =============================================================================
-# Fragments
+# Components (stub declarations become Jsx-wrapped imports)
 # =============================================================================
 
 
-class Fragment:
-	"""Lets you group elements without a wrapper node."""
-
+@_component
+def Suspense(
+	*, fallback: ReactNode | _PulseNode | None = None, name: str | None = None
+) -> ReactElement:
+	"""Lets you display a fallback while its children are loading."""
 	...
 
 

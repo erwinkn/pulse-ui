@@ -29,6 +29,7 @@ from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.nodes import Expr, Object, Spread, spread_dict
 from pulse.transpiler.vdom import VDOMNode
 
+# TYPE_CHECKING avoids import cycle: Transpiler -> nodes -> Expr -> obj -> Transpiler
 if TYPE_CHECKING:
 	from pulse.transpiler.transpiler import Transpiler
 

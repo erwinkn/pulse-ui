@@ -101,6 +101,9 @@ class Expr(ABC):
 		Keywords with kw.arg=None are **spread syntax.
 		"""
 		if keywords:
+			has_spread = any(kw.arg is None for kw in keywords)
+			if has_spread:
+				raise TranspileError("Spread (**expr) not supported in this call")
 			raise TranspileError("Keyword arguments not supported in call")
 		return Call(self, [ctx.emit_expr(a) for a in args])
 
@@ -1013,7 +1016,7 @@ class Object(Expr):
 		rendered_props: dict[str, VDOMNode] = {}
 		for prop in self.props:
 			if isinstance(prop, Spread):
-				raise TranspileError("Object spread cannot be rendered to VDOM")
+				raise TypeError("Object spread cannot be rendered to VDOM")
 			k, v = prop
 			rendered_props[k] = v.render()
 		return {"t": "object", "props": rendered_props}

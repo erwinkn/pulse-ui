@@ -116,9 +116,6 @@ def extract_count_from_ctx(session: RenderSession, path: str) -> int:
 	mount = session.route_mounts[path]
 	with ps.PulseContext.update(render=session, route=mount.route):
 		vdom = mount.tree.render()
-		normalized_root = getattr(mount.tree, "_normalized", None)
-		if normalized_root is not None:
-			mount.element = normalized_root
 	vdom_dict = cast(dict[str, Any], cast(object, vdom))
 	children = cast(list[Any], (vdom_dict.get("children", []) or []))
 	span = cast(dict[str, Any], children[0])
@@ -217,9 +214,6 @@ def extract_global_count(session: RenderSession, path: str) -> int:
 	mount = session.route_mounts[path]
 	with ps.PulseContext.update(render=session, route=mount.route):
 		vdom = mount.tree.render()
-		normalized_root = getattr(mount.tree, "_normalized", None)
-		if normalized_root is not None:
-			mount.element = normalized_root
 	vdom_dict = cast(dict[str, Any], cast(object, vdom))
 	children = cast(list[Any], (vdom_dict.get("children", []) or []))
 	span = cast(dict[str, Any], children[0])

@@ -65,47 +65,42 @@ class RenderPropTask(NamedTuple):
 
 
 class RenderTree:
-	root: Node
+	element: Node
 	callbacks: Callbacks
-	operations: list[VDOMOperation]
-	_normalized: Node | None
+	rendered: bool
 
-	def __init__(self, root: Node) -> None:
-		self.root = root
+	def __init__(self, element: Node) -> None:
+		self.element = element
 		self.callbacks = {}
-		self.operations = []
-		self._normalized = None
+		self.rendered = False
 
 	def render(self) -> VDOM:
+		"""First render. Returns VDOM."""
 		renderer = Renderer()
-		vdom, normalized = renderer.render_tree(self.root)
-		self.root = normalized
+		vdom, self.element = renderer.render_tree(self.element)
 		self.callbacks = renderer.callbacks
-		self._normalized = normalized
+		self.rendered = True
 		return vdom
 
-	def diff(self, new_tree: Node) -> list[VDOMOperation]:
-		if self._normalized is None:
-			raise RuntimeError("RenderTree.render must be called before diff")
+	def rerender(self, new_element: Node | None = None) -> list[VDOMOperation]:
+		"""Re-render and return update operations.
 
+		If new_element is provided, reconciles against it (for testing).
+		Otherwise, reconciles against the current element (production use).
+		"""
+		if not self.rendered:
+			raise RuntimeError("render() must be called before rerender()")
+		target = new_element if new_element is not None else self.element
 		renderer = Renderer()
-		normalized = renderer.reconcile_tree(self._normalized, new_tree, path="")
-
+		self.element = renderer.reconcile_tree(self.element, target, path="")
 		self.callbacks = renderer.callbacks
-		self._normalized = normalized
-		self.root = normalized
-
 		return renderer.operations
 
 	def unmount(self) -> None:
-		if self._normalized is not None:
-			unmount_element(self._normalized)
-			self._normalized = None
+		if self.rendered:
+			unmount_element(self.element)
+			self.rendered = False
 		self.callbacks.clear()
-
-	@property
-	def normalized(self) -> Node | None:
-		return self._normalized
 
 
 class Renderer:

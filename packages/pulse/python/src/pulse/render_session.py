@@ -31,7 +31,7 @@ from pulse.routing import (
 )
 from pulse.state import State
 from pulse.transpiler.id import next_id
-from pulse.transpiler.nodes import Expr, Node, emit
+from pulse.transpiler.nodes import Expr, emit
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
@@ -70,8 +70,7 @@ class RouteMount:
 	tree: RenderTree
 	effect: Effect | None
 	_pulse_ctx: PulseContext | None
-	element: Node
-	rendered: bool
+	initialized: bool
 	state: MountState
 	queue: list[ServerMessage] | None
 	queue_timeout: asyncio.TimerHandle | None
@@ -83,9 +82,8 @@ class RouteMount:
 		self.route = RouteContext(route_info, route)
 		self.effect = None
 		self._pulse_ctx = None
-		self.element = route.render()
-		self.tree = RenderTree(self.element)
-		self.rendered = False
+		self.tree = RenderTree(route.render())
+		self.initialized = False
 		self.state = "pending"
 		self.queue = None
 		self.queue_timeout = None
@@ -264,47 +262,23 @@ class RenderSession:
 		"""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
+		is_new = mount is None
 
-		if mount is not None:
-			# Re-prerender: update route info, re-render, return fresh VDOM
-			if route_info:
-				mount.route.update(route_info)
-			with PulseContext.update(render=self, route=mount.route):
-				try:
-					vdom = mount.tree.render()
-					normalized_root = getattr(mount.tree, "_normalized", None)
-					if normalized_root is not None:
-						mount.element = normalized_root
-					return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-				except RedirectInterrupt as r:
-					return ServerNavigateToMessage(
-						type="navigate_to", path=r.path, replace=r.replace, hard=False
-					)
-				except NotFoundInterrupt:
-					ctx = PulseContext.get()
-					return ServerNavigateToMessage(
-						type="navigate_to",
-						path=ctx.app.not_found,
-						replace=True,
-						hard=False,
-					)
+		if is_new:
+			route = self.routes.find(path)
+			info = route_info or route.default_route_info()
+			mount = RouteMount(self, route, info)
+			mount.state = "pending"
+			mount.queue = []
+			self.route_mounts[path] = mount
+		elif route_info:
+			mount.route.update(route_info)
 
-		# First prerender for this path
-		route = self.routes.find(path)
-		info = route_info or route.default_route_info()
-		mount = RouteMount(self, route, info)
-		mount.state = "pending"
-		mount.queue = []
-		self.route_mounts[path] = mount
-
-		# Render synchronously
 		with PulseContext.update(render=self, route=mount.route):
 			try:
 				vdom = mount.tree.render()
-				normalized_root = getattr(mount.tree, "_normalized", None)
-				if normalized_root is not None:
-					mount.element = normalized_root
-				mount.rendered = True
+				if is_new:
+					mount.initialized = True
 			except RedirectInterrupt as r:
 				del self.route_mounts[path]
 				return ServerNavigateToMessage(
@@ -317,14 +291,12 @@ class RenderSession:
 					type="navigate_to", path=ctx.app.not_found, replace=True, hard=False
 				)
 
-		# Create render effect
-		self._create_render_effect(mount, path)
-
-		# Start timeout → IDLE
-		mount.queue_timeout = self._schedule_timeout(
-			self.prerender_queue_timeout,
-			lambda: self._transition_to_idle(path),
-		)
+		if is_new:
+			self._create_render_effect(mount, path)
+			mount.queue_timeout = self._schedule_timeout(
+				self.prerender_queue_timeout,
+				lambda: self._transition_to_idle(path),
+			)
 
 		return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 
@@ -363,7 +335,7 @@ class RenderSession:
 
 		elif mount.state == "idle":
 			# Need fresh render
-			mount.rendered = False
+			mount.initialized = False
 			mount.state = "active"
 			mount.route.update(route_info)
 			if mount.effect:
@@ -405,20 +377,14 @@ class RenderSession:
 		def _render_effect():
 			with PulseContext.update(session=session, render=self, route=mount.route):
 				try:
-					if not mount.rendered:
+					if not mount.initialized:
 						vdom = mount.tree.render()
-						normalized_root = getattr(mount.tree, "_normalized", None)
-						if normalized_root is not None:
-							mount.element = normalized_root
-						mount.rendered = True
+						mount.initialized = True
 						self.send(
 							ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 						)
 					else:
-						ops = mount.tree.diff(mount.element)
-						normalized_root = getattr(mount.tree, "_normalized", None)
-						if normalized_root is not None:
-							mount.element = normalized_root
+						ops = mount.tree.rerender()
 						if ops:
 							self.send(
 								ServerUpdateMessage(

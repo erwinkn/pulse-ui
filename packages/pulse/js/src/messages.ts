@@ -94,18 +94,18 @@ export interface ClientCallbackMessage {
 	args: any[];
 }
 
-export interface ClientMountMessage {
-	type: "mount";
+export interface ClientAttachMessage {
+	type: "attach";
 	path: string;
 	routeInfo: RouteInfo;
 }
-export interface ClientNavigateMessage {
-	type: "navigate";
+export interface ClientUpdateMessage {
+	type: "update";
 	path: string;
 	routeInfo: RouteInfo;
 }
-export interface ClientUnmountMessage {
-	type: "unmount";
+export interface ClientDetachMessage {
+	type: "detach";
 	path: string;
 }
 
@@ -148,10 +148,10 @@ export interface ClientJsResultMessage {
 }
 
 export type ClientMessage =
-	| ClientMountMessage
+	| ClientAttachMessage
 	| ClientCallbackMessage
-	| ClientNavigateMessage
-	| ClientUnmountMessage
+	| ClientUpdateMessage
+	| ClientDetachMessage
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage
 	| ClientChannelResponseMessage

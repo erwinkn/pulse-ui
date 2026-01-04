@@ -112,9 +112,9 @@ def test_keyed_reorder_applies_operations_in_correct_order():
 		keyed_item("A"),
 	]
 
-	ops = tree.diff(ul(*reordered_children))
+	ops = tree.rerender(ul(*reordered_children))
 
-	normalized_root = tree.normalized
+	normalized_root = tree.element
 	assert isinstance(normalized_root, Element)
 	assert isinstance(normalized_root.children, list)
 	current_order = [cast(Element, child).key for child in normalized_root.children]
@@ -152,7 +152,7 @@ def test_nested_keyed_reorder_in_subtree():
 
 	outer_a_reordered = outer_item("A", ["A4", "A2", "A5", "A1"])
 
-	ops = tree.diff(div(outer_a_reordered, outer_b))
+	ops = tree.rerender(div(outer_a_reordered, outer_b))
 
 	recon_ops = _get_reconciliation_ops(ops, path="0.0")
 	assert len(recon_ops) == 1
@@ -161,7 +161,7 @@ def test_nested_keyed_reorder_in_subtree():
 	final_order = _apply_reconciliation(dom_order, recon_ops[0])
 	assert final_order == expected_final
 
-	normalized_root = tree.normalized
+	normalized_root = tree.element
 	assert isinstance(normalized_root, Element)
 	outer = normalized_root.children
 	assert isinstance(outer, list)
@@ -185,7 +185,7 @@ def test_duplicate_key_detection_raises_error():
 	tree.render()
 
 	with pytest.raises(ValueError, match="Duplicate key 'dup'"):
-		tree.diff(ul(first, duplicate, Element("li", key="dup")))
+		tree.rerender(ul(first, duplicate, Element("li", key="dup")))
 
 
 def test_component_replaced_with_text_unmounts_and_replaces():
@@ -205,7 +205,7 @@ def test_component_replaced_with_text_unmounts_and_replaces():
 	assert isinstance(child.hooks, TrackingHookContext)
 	assert child.hooks.did_unmount is False
 
-	ops = tree.diff(div("plain", Element("span", key="sibling", children=["sib"])))
+	ops = tree.rerender(div("plain", Element("span", key="sibling", children=["sib"])))
 
 	# With the new reconciliation algorithm, this generates a reconciliation operation
 	recon_ops = _get_reconciliation_ops(ops, path="")
@@ -230,7 +230,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_callback():
 	def handle_click() -> None:
 		pass
 
-	tree.diff(div(render=handle_click))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
+	tree.rerender(div(render=handle_click))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 
 	assert child.hooks.did_unmount is True
 
@@ -249,7 +249,7 @@ def test_diff_props_unmounts_render_prop_when_removed():
 	assert isinstance(child.hooks, TrackingHookContext)
 	assert child.hooks.did_unmount is False
 
-	tree.diff(div())
+	tree.rerender(div())
 
 	assert child.hooks.did_unmount is True
 
@@ -280,7 +280,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_jsexpr(tmp_path: Pat
 	css_module = Import("styles", str(test_css_file), kind="default")
 	css_ref = Member(css_module, "foo")
 
-	tree.diff(div(render=css_ref))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
+	tree.rerender(div(render=css_ref))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 
 	assert child.hooks.did_unmount is True
 
@@ -323,7 +323,7 @@ def test_callback_removal_clears_callbacks():
 	tree.render()
 	assert "0.onClick" in tree.callbacks
 
-	tree.diff(div())
+	tree.rerender(div())
 	assert "0.onClick" not in tree.callbacks
 
 
@@ -335,7 +335,7 @@ def test_render_prop_removal_emits_update_props_delta():
 	tree = RenderTree(div(render=Child()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	tree.render()
 
-	ops = tree.diff(div())
+	ops = tree.rerender(div())
 
 	update_props = [op for op in ops if op["type"] == "update_props"]
 	assert any(
@@ -355,14 +355,14 @@ def test_callback_render_prop_churn_updates_deltas():
 	tree = RenderTree(div(button(onClick=handle_click)["Click"]))
 	tree.render()
 
-	ops = tree.diff(div(render=Child()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
+	ops = tree.rerender(div(render=Child()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	assert "0.onClick" not in tree.callbacks
 	assert any(
 		op["type"] == "update_props" and "render" in op["data"].get("set", {})
 		for op in ops
 	)
 
-	ops = tree.diff(div(button(onClick=handle_click)["Click"]))
+	ops = tree.rerender(div(button(onClick=handle_click)["Click"]))
 	assert "0.onClick" in tree.callbacks
 	assert any(
 		op["type"] == "update_props" and "render" in op["data"].get("remove", [])
@@ -396,7 +396,7 @@ def test_render_prop_nested_components_unmount_on_type_change():
 	def handle_click() -> None:
 		pass
 
-	tree.diff(div(onClick=handle_click))
+	tree.rerender(div(onClick=handle_click))
 
 	assert inner.hooks.did_unmount is True
 	assert outer.hooks.did_unmount is True
@@ -420,14 +420,14 @@ def test_render_tree_unmount_clears_state_and_unmounts_children():
 
 	assert child.hooks.did_unmount is True
 	assert tree.callbacks == {}
-	assert tree.normalized is None
+	assert tree.rendered is False
 
 
 def test_diff_updates_props():
 	tree = RenderTree(Element("div", props={"class": "one"}))
 	tree.render()
 
-	ops = tree.diff(Element("div", props={"class": "two"}))
+	ops = tree.rerender(Element("div", props={"class": "two"}))
 	assert ops == [
 		{
 			"type": "update_props",
@@ -449,7 +449,7 @@ def test_keyed_move_preserves_component_nodes():
 	tree.render()
 
 	# Verify initial order
-	normalized_root = tree.normalized
+	normalized_root = tree.element
 	assert isinstance(normalized_root, Element)
 	assert isinstance(normalized_root.children, list)
 	assert len(normalized_root.children) == 2
@@ -462,13 +462,13 @@ def test_keyed_move_preserves_component_nodes():
 	assert first_child.kwargs["label"] == "A"
 	assert second_child.kwargs["label"] == "B"
 
-	ops = tree.diff(ul(Item(label="B", key="b"), Item(label="A", key="a")))
+	ops = tree.rerender(ul(Item(label="B", key="b"), Item(label="A", key="a")))
 
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 
 	# Verify labels moved correctly after reordering
-	updated_root = tree.normalized
+	updated_root = tree.element
 	assert isinstance(updated_root, Element)
 	assert isinstance(updated_root.children, list)
 	assert len(updated_root.children) == 2
@@ -510,7 +510,7 @@ def test_unmount_invokes_component_hooks():
 	tree = RenderTree(ul(first, second))
 	tree.render()
 
-	tree.diff(ul(Item(label="A", key="a")))
+	tree.rerender(ul(Item(label="A", key="a")))
 
 	assert isinstance(second.hooks, TrackingHookContext)
 	assert second.hooks.did_unmount is True
@@ -550,18 +550,18 @@ def test_keyed_component_state_preservation():
 
 	# Increment first counter
 	tree.callbacks["0.1.onClick"].fn()
-	ops = tree.diff(div(first, second))
+	ops = tree.rerender(div(first, second))
 	# With the new reconciliation algorithm, this generates a reconciliation operation
 	recon_ops = _get_reconciliation_ops(ops, path="0.0")
 	assert len(recon_ops) == 1
 
 	# Reorder components - move A to end
-	ops = tree.diff(div(second, first))
+	ops = tree.rerender(div(second, first))
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 
 	# Verify state is preserved - A should still have count 1
-	normalized_root = tree.normalized
+	normalized_root = tree.element
 	assert isinstance(normalized_root, Element)
 	assert isinstance(normalized_root.children, list)
 	# A is now at index 1
@@ -605,18 +605,18 @@ def test_keyed_parent_node_move_preserves_child_state():
 
 	# Increment counter in first parent
 	tree.callbacks["0.0.1.onClick"].fn()
-	ops = tree.diff(div(parent_a, parent_b))
+	ops = tree.rerender(div(parent_a, parent_b))
 	# With the new reconciliation algorithm, this generates a reconciliation operation
 	recon_ops = _get_reconciliation_ops(ops, path="0.0.0")
 	assert len(recon_ops) == 1
 
 	# Move parent A to end (swap positions)
-	ops = tree.diff(div(parent_b, parent_a))
+	ops = tree.rerender(div(parent_b, parent_a))
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 
 	# Verify the component state is preserved - A should still have count 1
-	normalized_root = tree.normalized
+	normalized_root = tree.element
 	assert isinstance(normalized_root, Element)
 	assert isinstance(normalized_root.children, list)
 	# Parent A is now at index 1
@@ -647,7 +647,7 @@ def test_keyed_parent_node_move_preserves_child_state():
 
 	# Click A's button again at the new location; state should increment to 2
 	tree.callbacks["1.0.1.onClick"].fn()
-	ops = tree.diff(div(parent_b, parent_a))
+	ops = tree.rerender(div(parent_b, parent_a))
 	# With the new reconciliation algorithm, this generates a reconciliation operation
 	recon_ops = _get_reconciliation_ops(ops, path="1.0.0")
 	assert len(recon_ops) == 1
@@ -659,12 +659,12 @@ def test_unkeyed_reconciliation_insert_remove():
 	tree.render()
 
 	# Remove first child - with the new reconciliation algorithm, this generates reconciliation operations
-	ops = tree.diff(div(span("B")))
+	ops = tree.rerender(div(span("B")))
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 
 	# Add child at end
-	ops = tree.diff(div(span("B"), span("C")))
+	ops = tree.rerender(div(span("B"), span("C")))
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 	new_indices, new_values = recon_ops[0]["new"]
@@ -672,7 +672,7 @@ def test_unkeyed_reconciliation_insert_remove():
 	assert isinstance(new_values[0], dict) and new_values[0].get("tag") == "span"
 
 	# Add child at beginning - with the new reconciliation algorithm, this generates reconciliation operations
-	ops = tree.diff(div(span("A"), span("B"), span("C")))
+	ops = tree.rerender(div(span("A"), span("B"), span("C")))
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 	new_indices, _ = recon_ops[0]["new"]
@@ -685,7 +685,7 @@ def test_unkeyed_multiple_removes_descending_order():
 	tree.render()
 
 	# Remove last two items -> expect a reconciliation op reflecting final length
-	ops = tree.diff(div(span("A"), span("B"), span("C")))
+	ops = tree.rerender(div(span("A"), span("B"), span("C")))
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 	dom = ["A", "B", "C", "D", "E"]
@@ -721,13 +721,13 @@ def test_keyed_remove_then_readd_resets_state():
 
 	# Increment first counter
 	tree.callbacks["0.1.onClick"].fn()
-	ops = tree.diff(div(first, second))
+	ops = tree.rerender(div(first, second))
 	# With the new reconciliation algorithm, this generates a reconciliation operation
 	recon_ops = _get_reconciliation_ops(ops, path="0.0")
 	assert len(recon_ops) == 1
 
 	# Remove first component -> expect callback removal delta and a reconciliation op
-	ops = tree.diff(div(second))
+	ops = tree.rerender(div(second))
 	assert len(ops) >= 1
 	assert set(tree.callbacks.keys()) == {"0.1.onClick"}
 	recon_ops = _get_reconciliation_ops(ops, path="")
@@ -738,7 +738,7 @@ def test_keyed_remove_then_readd_resets_state():
 
 	# Re-add first component - should reset state
 	new_first = CounterComponent("A", key="a")
-	ops = tree.diff(div(second, new_first))
+	ops = tree.rerender(div(second, new_first))
 	assert len(ops) >= 1
 	assert set(tree.callbacks.keys()) == {"0.1.onClick", "1.1.onClick"}
 	recon_ops = _get_reconciliation_ops(ops, path="")
@@ -786,7 +786,7 @@ def test_keyed_complex_reorder():
 	# Increment B and D
 	tree.callbacks["1.1.onClick"].fn()  # B -> 1
 	tree.callbacks["3.1.onClick"].fn()  # D -> 1
-	ops = tree.diff(div(*components))
+	ops = tree.rerender(div(*components))
 	# With the new reconciliation algorithm, this generates reconciliation operations
 	recon_ops = _get_reconciliation_ops(ops, path="1.0")
 	assert len(recon_ops) == 1
@@ -801,7 +801,7 @@ def test_keyed_complex_reorder():
 		CounterComponent("A", key="a"),
 	]
 
-	ops = tree.diff(div(*new_components))
+	ops = tree.rerender(div(*new_components))
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
 	dom = ["a", "b", "c", "d"]
@@ -829,7 +829,7 @@ def test_render_props():
 	def NewChildComponent() -> Element:
 		return span("new child")
 
-	ops = tree.diff(div(render=NewChildComponent()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
+	ops = tree.rerender(div(render=NewChildComponent()))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
 	assert any(
 		op["type"] == "replace"
 		and op["path"] == "render"
@@ -872,7 +872,7 @@ def test_keyed_inserts_from_empty():
 	tree = RenderTree(ul())
 	tree.render()
 
-	ops = tree.diff(ul(li("A", key="a"), li("B", key="b")))
+	ops = tree.rerender(ul(li("A", key="a"), li("B", key="b")))
 
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
@@ -885,7 +885,7 @@ def test_keyed_head_insert_single_insert():
 	tree = RenderTree(ul(li("A", key="a"), li("B", key="b")))
 	tree.render()
 
-	ops = tree.diff(ul(li("X", key="x"), li("A", key="a"), li("B", key="b")))
+	ops = tree.rerender(ul(li("X", key="x"), li("A", key="a"), li("B", key="b")))
 
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
@@ -898,7 +898,7 @@ def test_keyed_tail_insert_single_insert():
 	tree = RenderTree(ul(li("X", key="x"), li("A", key="a"), li("B", key="b")))
 	tree.render()
 
-	ops = tree.diff(
+	ops = tree.rerender(
 		ul(li("X", key="x"), li("A", key="a"), li("B", key="b"), li("C", key="c"))
 	)
 
@@ -915,7 +915,7 @@ def test_keyed_middle_early_deletes_remove_nonpresent():
 	)
 	tree.render()
 
-	ops = tree.diff(ul(li("A", key="a"), li("B", key="b")))
+	ops = tree.rerender(ul(li("A", key="a"), li("B", key="b")))
 
 	# Expect reconciliation leading to the final list
 	recon_ops = _get_reconciliation_ops(ops, path="")
@@ -932,7 +932,7 @@ def test_keyed_insert_and_move_mix():
 	)
 	tree.render()
 
-	ops = tree.diff(
+	ops = tree.rerender(
 		ul(li("B", key="b"), li("A", key="a"), li("E", key="e"), li("D", key="d"))
 	)
 
@@ -950,7 +950,7 @@ def test_keyed_only_removals_when_new_window_exhausted():
 	)
 	tree.render()
 
-	ops = tree.diff(ul(li("A", key="a"), li("D", key="d")))
+	ops = tree.rerender(ul(li("A", key="a"), li("D", key="d")))
 
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
@@ -964,7 +964,7 @@ def test_keyed_head_only_removal():
 	tree = RenderTree(ul(li("X", key="x"), li("A", key="a")))
 	tree.render()
 
-	ops = tree.diff(ul(li("A", key="a")))
+	ops = tree.rerender(ul(li("A", key="a")))
 
 	recon_ops = _get_reconciliation_ops(ops, path="")
 	assert len(recon_ops) == 1
@@ -977,7 +977,7 @@ def test_keyed_same_key_different_tag_triggers_replace():
 	tree = RenderTree(div(li("A", key="a")))
 	tree.render()
 
-	ops = tree.diff(div(span("A", key="a")))
+	ops = tree.rerender(div(span("A", key="a")))
 
 	# With the new reconciliation algorithm, this generates a reconciliation operation
 	recon_ops = _get_reconciliation_ops(ops, path="")
@@ -991,7 +991,7 @@ def test_keyed_head_tail_placeholders_deep_reconcile_props_change():
 	)
 	tree.render()
 
-	ops = tree.diff(
+	ops = tree.rerender(
 		ul(li("A", key="a", className="two"), li("X", key="x"), li("B", key="b"))
 	)
 

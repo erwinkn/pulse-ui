@@ -86,8 +86,11 @@ def serialize(data: Any) -> Serialized:
 		if isinstance(value, dict):
 			result_dict: dict[str, PlainJSON] = {}
 			for key, entry in value.items():
-				key_str = str(key)  # pyright: ignore[reportUnknownArgumentType]
-				result_dict[key_str] = process(entry)
+				if not isinstance(key, str):
+					raise TypeError(
+						f"Dict keys must be strings, got {type(key).__name__}: {key!r}"  # pyright: ignore[reportUnknownArgumentType]
+					)
+				result_dict[key] = process(entry)
 			return result_dict
 
 		if isinstance(value, (list, tuple)):

@@ -206,7 +206,7 @@ export async function askChatGPT({
 		await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
 
 		// Select model
-		const modelTestId = MODEL_MAP[model] || MODEL_MAP["pro"];
+		const modelTestId = MODEL_MAP[model] || MODEL_MAP.pro;
 		log(`Selecting model: ${model}`);
 		await page.locator('button[data-testid="model-switcher-dropdown-button"]').click();
 		await page.waitForTimeout(300);

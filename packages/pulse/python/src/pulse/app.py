@@ -454,7 +454,7 @@ class App:
 			self._schedule_render_cleanup(render_id)
 
 			async def _prerender_one(path: str):
-				captured = render.prerender_mount_capture(path, route_info)
+				captured = render.prerender(path, route_info)
 				if captured["type"] == "vdom_init":
 					return Ok(captured)
 				if captured["type"] == "navigate_to":
@@ -742,14 +742,14 @@ class App:
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
 		async def _next() -> Ok[None]:
-			if msg["type"] == "mount":
-				render.mount(msg["path"], msg["routeInfo"])
-			elif msg["type"] == "navigate":
-				render.navigate(msg["path"], msg["routeInfo"])
+			if msg["type"] == "attach":
+				render.attach(msg["path"], msg["routeInfo"])
+			elif msg["type"] == "update":
+				render.update_route(msg["path"], msg["routeInfo"])
 			elif msg["type"] == "callback":
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
-			elif msg["type"] == "unmount":
-				render.unmount(msg["path"])
+			elif msg["type"] == "detach":
+				render.detach(msg["path"])
 				render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))

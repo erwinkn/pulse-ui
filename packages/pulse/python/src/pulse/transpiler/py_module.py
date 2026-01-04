@@ -70,7 +70,7 @@ class PyModule(Expr):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: Transpiler,
 	) -> Expr:
 		label = self.name or "PyModule"

@@ -17,7 +17,15 @@ from dataclasses import dataclass
 from typing import Any, final, override
 
 from pulse.components.for_ import emit_for
-from pulse.transpiler.nodes import Element, Expr, Literal, Node, Prop
+from pulse.transpiler.nodes import (
+	Element,
+	Expr,
+	Literal,
+	Node,
+	Prop,
+	Spread,
+	spread_dict,
+)
 from pulse.transpiler.py_module import PyModule
 from pulse.transpiler.transpiler import Transpiler
 from pulse.transpiler.vdom import VDOMNode
@@ -45,30 +53,38 @@ class TagExpr(Expr):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: Transpiler,
 	) -> Expr:
-		"""Handle tag calls: positional args are children, kwargs are props."""
+		"""Handle tag calls: positional args are children, kwargs are props.
+
+		Spread (**expr) is supported for prop spreading.
+		"""
 		# Build children from positional args
 		children: list[Node] = []
 		for a in args:
 			children.append(ctx.emit_expr(a))
 
 		# Build props from kwargs
-		props: dict[str, Prop] = {}
+		props: list[tuple[str, Prop] | Spread] = []
 		key: str | Expr | None = None
-		for k, v in kwargs.items():
-			prop_value = ctx.emit_expr(v)
-			if k == "key":
-				# Accept any expression as key for transpilation
-				if isinstance(prop_value, Literal) and isinstance(
-					prop_value.value, str
-				):
-					key = prop_value.value  # Optimize string literals
-				else:
-					key = prop_value  # Keep as expression
+		for kw in keywords:
+			if kw.arg is None:
+				# **spread syntax
+				props.append(spread_dict(ctx.emit_expr(kw.value)))
 			else:
-				props[k] = prop_value
+				k = kw.arg
+				prop_value = ctx.emit_expr(kw.value)
+				if k == "key":
+					# Accept any expression as key for transpilation
+					if isinstance(prop_value, Literal) and isinstance(
+						prop_value.value, str
+					):
+						key = prop_value.value  # Optimize string literals
+					else:
+						key = prop_value  # Keep as expression
+				else:
+					props.append((k, prop_value))
 
 		return Element(
 			tag=self.tag,

@@ -410,17 +410,8 @@ class Jsx(ExprWrapper):
 		key: str | Expr | None = None
 		for kw in keywords:
 			if kw.arg is None:
-				# **spread syntax - wrap in Object.fromEntries if Map (dict literals transpile to Map)
-				spread_expr = ctx.emit_expr(kw.value)
-				# IIFE to evaluate spread_expr once: (($s) => $s instanceof Map ? Object.fromEntries($s) : $s)(spread_expr)
-				s = Identifier("$s")
-				is_map = Binary(s, "instanceof", Identifier("Map"))
-				as_obj = Call(Member(Identifier("Object"), "fromEntries"), [s])
-				props.append(
-					Spread(
-						Call(Arrow(["$s"], Ternary(is_map, as_obj, s)), [spread_expr])
-					)
-				)
+				# **spread syntax
+				props.append(spread_dict(ctx.emit_expr(kw.value)))
 			else:
 				k = kw.arg
 				v = ctx.emit_expr(kw.value)
@@ -603,7 +594,9 @@ class Element(Expr):
 			self._emit_key(props_out)
 		if self.props:
 			# Handle both dict (from render path) and sequence (from transpilation)
-			props_iter: Iterable[tuple[str, Any] | Spread]
+			# Dict case: items() yields tuple[str, Any], never Spread
+			# Sequence case: already list[tuple[str, Prop] | Spread]
+			props_iter: Iterable[tuple[str, Any]] | Sequence[tuple[str, Prop] | Spread]
 			if isinstance(self.props, dict):
 				props_iter = self.props.items()
 			else:
@@ -1279,6 +1272,21 @@ class Spread(Expr):
 	@override
 	def render(self) -> VDOMNode:
 		raise TypeError("Spread cannot be rendered as VDOMExpr directly")
+
+
+def spread_dict(expr: Expr) -> Spread:
+	"""Wrap a spread expression with Map-to-object conversion.
+
+	Python dicts transpile to Map, which has no enumerable own properties.
+	This wraps the spread with an IIFE that converts Map to object:
+		(...expr) -> ...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(expr)
+
+	The IIFE ensures expr is evaluated only once.
+	"""
+	s = Identifier("$s")
+	is_map = Binary(s, "instanceof", Identifier("Map"))
+	as_obj = Call(Member(Identifier("Object"), "fromEntries"), [s])
+	return Spread(Call(Arrow(["$s"], Ternary(is_map, as_obj, s)), [expr]))
 
 
 @dataclass(slots=True)

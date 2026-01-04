@@ -898,7 +898,8 @@ class TestDictMethodsKnownType:
 
 		fn = get_keys.transpile()
 		code = emit(fn)
-		# Dict literal becomes new Map(...), type is known so no runtime check
+		# Dict literal becomes new Map(...), which is known at compile time,
+		# so we can directly use Map.keys() without runtime check
 		assert (
 			code
 			== 'function get_keys_1() {\nreturn [...new Map([["a", 1]]).keys()];\n}'

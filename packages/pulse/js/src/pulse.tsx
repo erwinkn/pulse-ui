@@ -188,10 +188,10 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		} satisfies RouteInfo;
 	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to unmount on navigation, so another useEffect sync the routeInfo on navigation.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the routeInfo on navigation.
 	useEffect(() => {
 		if (inBrowser) {
-			client.mountView(path, {
+			client.attach(path, {
 				routeInfo,
 				onInit: (view) => {
 					setTree(renderer.init(view));
@@ -205,7 +205,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					let result: any;
 					let error: string | null = null;
 					try {
-						result = renderer.evaluateJsExpr(msg.code);
+						result = renderer.evaluateExpr(msg.expr);
 					} catch (e) {
 						error = e instanceof Error ? e.message : String(e);
 					}
@@ -214,7 +214,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				onServerError: setServerError,
 			});
 			return () => {
-				client.unmount(path);
+				client.detach(path);
 			};
 		}
 		//  routeInfo is NOT included here on purpose
@@ -222,7 +222,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 
 	useEffect(() => {
 		if (inBrowser) {
-			client.navigate(path, routeInfo);
+			client.updateRoute(path, routeInfo);
 		}
 	}, [client, path, routeInfo]);
 	// Hack for our current prerendering setup on client-side navigation. Will be improved soon

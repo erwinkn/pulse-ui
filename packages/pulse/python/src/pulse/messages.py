@@ -1,7 +1,7 @@
 from typing import Any, Literal, NotRequired, TypedDict
 
 from pulse.routing import RouteInfo
-from pulse.transpiler.vdom import VDOM, VDOMOperation
+from pulse.transpiler.vdom import VDOM, VDOMNode, VDOMOperation
 
 
 # ====================
@@ -80,12 +80,12 @@ class ServerChannelResponseMessage(TypedDict):
 
 
 class ServerJsExecMessage(TypedDict):
-	"""Execute JavaScript code on the client."""
+	"""Execute JavaScript expression on the client."""
 
 	type: Literal["js_exec"]
 	path: str
 	id: str
-	code: str
+	expr: VDOMNode
 
 
 # ====================
@@ -98,20 +98,20 @@ class ClientCallbackMessage(TypedDict):
 	args: list[Any]
 
 
-class ClientMountMessage(TypedDict):
-	type: Literal["mount"]
+class ClientAttachMessage(TypedDict):
+	type: Literal["attach"]
 	path: str
 	routeInfo: RouteInfo
 
 
-class ClientNavigateMessage(TypedDict):
-	type: Literal["navigate"]
+class ClientUpdateMessage(TypedDict):
+	type: Literal["update"]
 	path: str
 	routeInfo: RouteInfo
 
 
-class ClientUnmountMessage(TypedDict):
-	type: Literal["unmount"]
+class ClientDetachMessage(TypedDict):
+	type: Literal["detach"]
 	path: str
 
 
@@ -165,9 +165,9 @@ ServerMessage = (
 
 ClientPulseMessage = (
 	ClientCallbackMessage
-	| ClientMountMessage
-	| ClientNavigateMessage
-	| ClientUnmountMessage
+	| ClientAttachMessage
+	| ClientUpdateMessage
+	| ClientDetachMessage
 	| ClientApiResultMessage
 	| ClientJsResultMessage
 )
@@ -193,5 +193,5 @@ class Directives(TypedDict):
 
 
 class Prerender(TypedDict):
-	views: dict[str, ServerInitMessage | None]
+	views: dict[str, ServerInitMessage | ServerNavigateToMessage | None]
 	directives: Directives

@@ -502,7 +502,9 @@ class Value(Expr):
 
 	@override
 	def render(self) -> VDOMNode:
-		raise TypeError("Value cannot be rendered as VDOMExpr; use coerce_json instead")
+		raise TypeError(
+			"Value cannot be rendered as VDOMExpr; unwrap with .value instead"
+		)
 
 
 class Element(Expr):

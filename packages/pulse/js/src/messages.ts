@@ -3,7 +3,7 @@
 // =================================================================
 
 import type { RouteInfo } from "./helpers";
-import type { VDOM, VDOMUpdate } from "./vdom";
+import type { VDOM, VDOMNode, VDOMUpdate } from "./vdom";
 
 // Based on pulse/messages.py
 export interface ServerInitMessage {
@@ -74,7 +74,7 @@ export interface ServerJsExecMessage {
 	type: "js_exec";
 	path: string;
 	id: string;
-	code: string;
+	expr: VDOMNode;
 }
 
 export type ServerMessage =
@@ -94,18 +94,18 @@ export interface ClientCallbackMessage {
 	args: any[];
 }
 
-export interface ClientMountMessage {
-	type: "mount";
+export interface ClientAttachMessage {
+	type: "attach";
 	path: string;
 	routeInfo: RouteInfo;
 }
-export interface ClientNavigateMessage {
-	type: "navigate";
+export interface ClientUpdateMessage {
+	type: "update";
 	path: string;
 	routeInfo: RouteInfo;
 }
-export interface ClientUnmountMessage {
-	type: "unmount";
+export interface ClientDetachMessage {
+	type: "detach";
 	path: string;
 }
 
@@ -148,10 +148,10 @@ export interface ClientJsResultMessage {
 }
 
 export type ClientMessage =
-	| ClientMountMessage
+	| ClientAttachMessage
 	| ClientCallbackMessage
-	| ClientNavigateMessage
-	| ClientUnmountMessage
+	| ClientUpdateMessage
+	| ClientDetachMessage
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage
 	| ClientChannelResponseMessage

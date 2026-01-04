@@ -31,7 +31,7 @@ from pulse.routing import (
 )
 from pulse.state import State
 from pulse.transpiler.id import next_id
-from pulse.transpiler.nodes import Expr, emit
+from pulse.transpiler.nodes import Expr
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
@@ -46,14 +46,14 @@ class JsExecError(Exception):
 
 # Module-level convenience wrapper
 @overload
-def run_js(expr: Expr | str, *, result: Literal[True]) -> asyncio.Future[Any]: ...
+def run_js(expr: Expr, *, result: Literal[True]) -> asyncio.Future[Any]: ...
 
 
 @overload
-def run_js(expr: Expr | str, *, result: Literal[False] = ...) -> None: ...
+def run_js(expr: Expr, *, result: Literal[False] = ...) -> None: ...
 
 
-def run_js(expr: Expr | str, *, result: bool = False) -> asyncio.Future[Any] | None:
+def run_js(expr: Expr, *, result: bool = False) -> asyncio.Future[Any] | None:
 	"""Execute JavaScript on the client. Convenience wrapper for RenderSession.run_js()."""
 	ctx = PulseContext.get()
 	if ctx.render is None:
@@ -545,30 +545,56 @@ class RenderSession:
 
 	@overload
 	def run_js(
-		self, expr: Expr | str, *, result: Literal[True], timeout: float = ...
+		self, expr: Expr, *, result: Literal[True], timeout: float = ...
 	) -> asyncio.Future[object]: ...
 
 	@overload
 	def run_js(
 		self,
-		expr: Expr | str,
+		expr: Expr,
 		*,
 		result: Literal[False] = ...,
 		timeout: float = ...,
 	) -> None: ...
 
 	def run_js(
-		self, expr: Expr | str, *, result: bool = False, timeout: float = 10.0
+		self, expr: Expr, *, result: bool = False, timeout: float = 10.0
 	) -> asyncio.Future[object] | None:
-		"""Execute JavaScript on the client."""
+		"""Execute JavaScript on the client.
+
+		Args:
+			expr: An Expr from calling a @javascript function.
+			result: If True, returns a Future that resolves with the JS return value.
+			        If False (default), returns None (fire-and-forget).
+			timeout: Maximum seconds to wait for result (default 10s, only applies when
+			         result=True). Future raises asyncio.TimeoutError if exceeded.
+
+		Returns:
+			None if result=False, otherwise a Future resolving to the JS result.
+
+		Example - Fire and forget:
+			@javascript
+			def focus_element(selector: str):
+				document.querySelector(selector).focus()
+
+			def on_save():
+				save_data()
+				run_js(focus_element("#next-input"))
+
+		Example - Await result:
+			@javascript
+			def get_scroll_position():
+				return {"x": window.scrollX, "y": window.scrollY}
+
+			async def on_click():
+				pos = await run_js(get_scroll_position(), result=True)
+				print(pos["x"], pos["y"])
+		"""
 		ctx = PulseContext.get()
 		exec_id = next_id()
 
-		if isinstance(expr, str):
-			code = expr
-		else:
-			code = emit(expr)
-
+		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
+		# This must match the path used to key views on the client side
 		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
 		self.send(
@@ -576,7 +602,7 @@ class RenderSession:
 				type="js_exec",
 				path=path,
 				id=exec_id,
-				code=code,
+				expr=expr.render(),
 			)
 		)
 

@@ -253,8 +253,11 @@ class TestJsxSpread:
 		fn = render.transpile()
 		code = emit(fn)
 		assert "return <Button_" in code
-		# Verify complete spread expression with Map-to-object conversion
-		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
+		# Verify IIFE-wrapped spread expression (evaluates spread_expr once)
+		assert (
+			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
+			in code
+		)
 
 	def test_jsx_spread_with_override(self):
 		"""Test Component(**base, disabled=True) includes Map check and override."""
@@ -268,7 +271,9 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...base instanceof Map ? Object.fromEntries(base) : base}" in code
+		assert (
+			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)}" in code
+		)
 		assert "disabled={true}" in code
 
 	def test_jsx_override_before_spread(self):
@@ -284,7 +289,10 @@ class TestJsxSpread:
 		fn = render.transpile()
 		code = emit(fn)
 		assert 'size="lg"' in code
-		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
+		assert (
+			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
+			in code
+		)
 
 	def test_jsx_multiple_spreads(self):
 		"""Test Component(**a, x=1, **b) includes Map checks for both spreads."""
@@ -298,9 +306,9 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...a instanceof Map ? Object.fromEntries(a) : a}" in code
+		assert "{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(a)}" in code
 		assert "padding={10}" in code
-		assert "{...b instanceof Map ? Object.fromEntries(b) : b}" in code
+		assert "{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(b)}" in code
 
 	def test_jsx_spread_with_children(self):
 		"""Test Component(**props)["child"] includes Map check and children."""
@@ -314,7 +322,10 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
+		assert (
+			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
+			in code
+		)
 		assert "Click me" in code
 		assert "</Button_" in code
 
@@ -335,8 +346,10 @@ class TestJsxSpread:
 		fn = render.transpile()
 		code = emit(fn)
 		# Dict literal becomes new Map, which is then converted to object for spread
-		assert "{...new Map([" in code  # Dict literal transpiled to new Map with spread
-		assert "instanceof Map ? Object.fromEntries" in code
+		# IIFE wraps the Map for single evaluation
+		assert (
+			"($s => $s instanceof Map ? Object.fromEntries($s) : $s)(new Map([" in code
+		)
 
 
 class TestHtmlTagSpread:
@@ -352,7 +365,10 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
+		assert (
+			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
+			in code
+		)
 
 	def test_div_spread_with_children(self):
 		"""Test div(**props)["content"] includes Map check and children."""
@@ -364,7 +380,10 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
+		assert (
+			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
+			in code
+		)
 		assert "Hello" in code
 		assert "</div>" in code
 
@@ -378,7 +397,9 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...base instanceof Map ? Object.fromEntries(base) : base}" in code
+		assert (
+			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)}" in code
+		)
 		assert 'type="text"' in code
 
 

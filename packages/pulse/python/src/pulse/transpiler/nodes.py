@@ -412,12 +412,15 @@ class Jsx(ExprWrapper):
 			if kw.arg is None:
 				# **spread syntax - wrap in Object.fromEntries if Map (dict literals transpile to Map)
 				spread_expr = ctx.emit_expr(kw.value)
-				# Runtime check: Map -> Object.fromEntries, else passthrough
-				is_map = Binary(spread_expr, "instanceof", Identifier("Map"))
-				as_obj = Call(
-					Member(Identifier("Object"), "fromEntries"), [spread_expr]
+				# IIFE to evaluate spread_expr once: (($s) => $s instanceof Map ? Object.fromEntries($s) : $s)(spread_expr)
+				s = Identifier("$s")
+				is_map = Binary(s, "instanceof", Identifier("Map"))
+				as_obj = Call(Member(Identifier("Object"), "fromEntries"), [s])
+				props.append(
+					Spread(
+						Call(Arrow(["$s"], Ternary(is_map, as_obj, s)), [spread_expr])
+					)
 				)
-				props.append(Spread(Ternary(is_map, as_obj, spread_expr)))
 			else:
 				k = kw.arg
 				v = ctx.emit_expr(kw.value)

@@ -26,7 +26,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 from pulse.transpiler.errors import TranspileError
-from pulse.transpiler.nodes import Expr, Object, Spread
+from pulse.transpiler.nodes import (
+	Arrow,
+	Binary,
+	Call,
+	Expr,
+	Identifier,
+	Member,
+	Object,
+	Spread,
+	Ternary,
+)
 from pulse.transpiler.vdom import VDOMNode
 
 if TYPE_CHECKING:
@@ -65,8 +75,17 @@ class ObjTransformer(Expr):
 		props: list[tuple[str, Expr] | Spread] = []
 		for kw in keywords:
 			if kw.arg is None:
-				# **spread syntax
-				props.append(Spread(ctx.emit_expr(kw.value)))
+				# **spread syntax - wrap in Object.fromEntries if Map (dict literals transpile to Map)
+				spread_expr = ctx.emit_expr(kw.value)
+				# IIFE to evaluate spread_expr once: (($s) => $s instanceof Map ? Object.fromEntries($s) : $s)(spread_expr)
+				s = Identifier("$s")
+				is_map = Binary(s, "instanceof", Identifier("Map"))
+				as_obj = Call(Member(Identifier("Object"), "fromEntries"), [s])
+				props.append(
+					Spread(
+						Call(Arrow(["$s"], Ternary(is_map, as_obj, s)), [spread_expr])
+					)
+				)
 			else:
 				# key=value
 				props.append((kw.arg, ctx.emit_expr(kw.value)))

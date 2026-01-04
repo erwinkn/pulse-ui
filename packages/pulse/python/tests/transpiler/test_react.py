@@ -153,7 +153,7 @@ class TestObjSpread:
 	"""Test obj() with **spread syntax."""
 
 	def test_obj_single_spread(self):
-		"""Test obj(**base) produces {...base}."""
+		"""Test obj(**base) with Map-to-object conversion."""
 
 		@javascript
 		def merge(base: dict):
@@ -161,10 +161,13 @@ class TestObjSpread:
 
 		fn = merge.transpile()
 		code = emit(fn)
-		assert code == "function merge_1(base) {\nreturn {...base};\n}"
+		assert (
+			code
+			== "function merge_1(base) {\nreturn {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)};\n}"
+		)
 
 	def test_obj_spread_with_override(self):
-		"""Test obj(**base, a=2) produces {...base, "a": 2}."""
+		"""Test obj(**base, a=2) with Map-to-object conversion."""
 
 		@javascript
 		def merge(base: dict):
@@ -172,10 +175,13 @@ class TestObjSpread:
 
 		fn = merge.transpile()
 		code = emit(fn)
-		assert code == 'function merge_1(base) {\nreturn {...base, "a": 2};\n}'
+		assert (
+			code
+			== 'function merge_1(base) {\nreturn {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base), "a": 2};\n}'
+		)
 
 	def test_obj_override_before_spread(self):
-		"""Test obj(a=1, **base) produces {"a": 1, ...base}."""
+		"""Test obj(a=1, **base) with Map-to-object conversion."""
 
 		@javascript
 		def merge(base: dict):
@@ -183,10 +189,13 @@ class TestObjSpread:
 
 		fn = merge.transpile()
 		code = emit(fn)
-		assert code == 'function merge_1(base) {\nreturn {"a": 1, ...base};\n}'
+		assert (
+			code
+			== 'function merge_1(base) {\nreturn {"a": 1, ...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)};\n}'
+		)
 
 	def test_obj_multiple_spreads(self):
-		"""Test obj(**a, x=1, **b, y=2) produces {...a, "x": 1, ...b, "y": 2}."""
+		"""Test obj(**a, x=1, **b, y=2) with Map-to-object conversion."""
 
 		@javascript
 		def merge(a: dict, b: dict):
@@ -195,11 +204,12 @@ class TestObjSpread:
 		fn = merge.transpile()
 		code = emit(fn)
 		assert (
-			code == 'function merge_1(a, b) {\nreturn {...a, "x": 1, ...b, "y": 2};\n}'
+			code
+			== 'function merge_1(a, b) {\nreturn {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(a), "x": 1, ...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(b), "y": 2};\n}'
 		)
 
 	def test_obj_spread_expression(self):
-		"""Test obj(**items[0], a=1) with spread of subscript expression."""
+		"""Test obj(**items[0], a=1) with Map-to-object conversion."""
 
 		@javascript
 		def merge(items: list):
@@ -207,7 +217,10 @@ class TestObjSpread:
 
 		fn = merge.transpile()
 		code = emit(fn)
-		assert code == 'function merge_1(items) {\nreturn {...items[0], "a": 1};\n}'
+		assert (
+			code
+			== 'function merge_1(items) {\nreturn {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(items[0]), "a": 1};\n}'
+		)
 
 	def test_obj_empty(self):
 		"""Test obj() with no args produces {}."""

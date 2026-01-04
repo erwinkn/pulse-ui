@@ -205,7 +205,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					let result: any;
 					let error: string | null = null;
 					try {
-						result = renderer.evaluateJsExpr(msg.code);
+						result = renderer.evaluateExpr(msg.expr);
 					} catch (e) {
 						error = e instanceof Error ? e.message : String(e);
 					}

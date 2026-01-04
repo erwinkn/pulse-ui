@@ -310,11 +310,10 @@ export class VDOMRenderer {
 	}
 
 	/**
-	 * Evaluate a JSExpr code string (legacy run_js support).
+	 * Evaluate a VDOMNode expression (for run_js support).
 	 */
-	evaluateJsExpr(code: string): unknown {
-		const get_object = (key: string) => this.getObject(key);
-		return new Function("get_object", `return ${code}`)(get_object);
+	evaluateExpr(expr: VDOMNode): unknown {
+		return this.#evalExpr(expr, {});
 	}
 
 	#ensureChildrenArray(el: ReactElement): ReactNode[] {

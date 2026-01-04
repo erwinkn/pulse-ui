@@ -4,17 +4,17 @@ Run with:
     uv run pulse run examples/js_exec_demo.py
 
 This example demonstrates:
-1. Fire-and-forget with raw JS string
-2. Fire-and-forget with transpiled @javascript function
-3. Awaiting a result from the client
-4. Error handling when JS throws
+1. Fire-and-forget with transpiled @javascript function
+2. Awaiting a result from the client
+3. Error handling when JS throws
 """
 
 from typing import Any, cast
 
 import pulse as ps
-from pulse import App, Route, component, javascript, run_js, states
-from pulse.js import Error, document, navigator, throw, window
+from pulse import App, Route, component, javascript, run_js
+from pulse.js import Error, console, document, navigator, window
+from pulse.render_session import JsExecError
 
 
 class DemoState(ps.State):
@@ -62,9 +62,14 @@ def get_selected_text() -> str:
 
 
 @javascript
+def console_log(message: str):
+	console.log(message)
+
+
+@javascript
 def cause_error():
-	# This will throw an error
-	throw(Error("Intentional error from transpiled function"))
+	# Use Python raise with JS Error - transpiles to: throw Error(...)
+	raise Error("Intentional error from transpiled function")
 
 
 # ============================================================================
@@ -74,11 +79,12 @@ def cause_error():
 
 @component
 def JsExecDemo():
-	state = states(DemoState)
+	with ps.init():
+		state = DemoState()
 
-	# 1. Fire-and-forget with raw JS string
+	# 1. Fire-and-forget with transpiled function
 	def on_console_log():
-		run_js("console.log('Hello from Python! Check your browser console.')")
+		run_js(console_log("Hello from Python! Check your browser console."))
 		state.add_log("Sent: console.log (check browser console)")
 
 	# 2. Fire-and-forget with transpiled function
@@ -107,20 +113,8 @@ def JsExecDemo():
 	async def on_cause_error():
 		state.add_log("Triggering JS error...")
 		try:
-			await run_js(cause_error(), result=True)
-			state.add_log("ERROR: Should have thrown!")
-		except Exception as e:
-			state.error = str(e)
-			state.add_log(f"Caught error: {e}")
-
-	async def on_raw_error():
-		state.add_log("Triggering raw JS error...")
-		try:
-			await run_js(
-				"throw new Error('Intentional error from raw JS')", result=True
-			)
-			state.add_log("ERROR: Should have thrown!")
-		except Exception as e:
+			await run_js(cause_error(), result=True)  # pyright: ignore[reportArgumentType]
+		except JsExecError as e:
 			state.error = str(e)
 			state.add_log(f"Caught error: {e}")
 
@@ -130,7 +124,6 @@ def JsExecDemo():
 		state.error = None
 
 	btn = "px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
-	btn_red = "px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 cursor-pointer"
 	btn_gray = (
 		"px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 cursor-pointer"
 	)
@@ -170,9 +163,11 @@ def JsExecDemo():
 		],
 		# Error handling section
 		ps.h2(className="text-xl font-semibold mb-2")["💥 Error Handling"],
+		ps.p(className="text-gray-600 text-sm mb-2")[
+			"Test catching JS errors in Python callbacks"
+		],
 		ps.div(className="flex gap-2 flex-wrap mb-4")[
-			ps.button(onClick=on_cause_error, className=btn_red)["Trigger JS Error"],
-			ps.button(onClick=on_raw_error, className=btn_red)["Raw JS Error"],
+			ps.button(onClick=on_cause_error, className=btn)["Trigger Error"],
 		],
 		# Results display
 		ps.h2(className="text-xl font-semibold mb-2")["📊 Results"],

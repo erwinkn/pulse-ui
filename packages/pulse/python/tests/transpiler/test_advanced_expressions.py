@@ -177,7 +177,7 @@ class TestComprehensions:
 		code = emit(fn)
 		assert (
 			code
-			== "function unique_doubled_1(items) {\nreturn Set(items.map(x => x * 2));\n}"
+			== "function unique_doubled_1(items) {\nreturn new Set(items.map(x => x * 2));\n}"
 		)
 
 	def test_dict_comp(self):
@@ -189,7 +189,7 @@ class TestComprehensions:
 		code = emit(fn)
 		assert (
 			code
-			== "function double_values_1(pairs) {\nreturn Map(pairs.map(([k, v]) => [k, v * 2]));\n}"
+			== "function double_values_1(pairs) {\nreturn new Map(pairs.map(([k, v]) => [k, v * 2]));\n}"
 		)
 
 

@@ -362,7 +362,9 @@ class TestDataStructures:
 
 		fn = get_dict.transpile()
 		code = emit(fn)
-		assert code == 'function get_dict_1() {\nreturn Map([["a", 1], ["b", 2]]);\n}'
+		assert (
+			code == 'function get_dict_1() {\nreturn new Map([["a", 1], ["b", 2]]);\n}'
+		)
 
 	def test_set_literal(self):
 		@javascript
@@ -371,4 +373,4 @@ class TestDataStructures:
 
 		fn = get_set.transpile()
 		code = emit(fn)
-		assert code == "function get_set_1() {\nreturn Set([1, 2, 3]);\n}"
+		assert code == "function get_set_1() {\nreturn new Set([1, 2, 3]);\n}"

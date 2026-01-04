@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import re
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from pulse.transpiler.builtins import BUILTINS, emit_method
@@ -93,6 +94,7 @@ class Transpiler:
 	deps: Mapping[str, Expr]
 	locals: set[str]
 	jsx: bool
+	source_file: Path | None
 	_temp_counter: int
 
 	def __init__(
@@ -101,8 +103,10 @@ class Transpiler:
 		deps: Mapping[str, Expr],
 		*,
 		jsx: bool = False,
+		source_file: Path | None = None,
 	) -> None:
 		self.fndef = fndef
+		self.source_file = source_file
 		# Collect all argument names (regular, vararg, kwonly, kwarg)
 		args: list[str] = [arg.arg for arg in fndef.args.args]
 		if fndef.args.vararg:

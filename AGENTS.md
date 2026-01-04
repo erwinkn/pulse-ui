@@ -25,6 +25,7 @@ make test          # pytest + bun test
 ```bash
 uv run <script.py>                # Run Python
 bun <file.ts>                     # Run JS/TS
+uv run pulse run examples/app.py  # Run a Pulse app (dev server on :8000)
 ```
 
 ## Structure

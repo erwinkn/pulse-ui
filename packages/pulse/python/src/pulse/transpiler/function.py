@@ -12,6 +12,7 @@ import textwrap
 import types as pytypes
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import (
 	Any,
 	Generic,
@@ -57,11 +58,13 @@ CONSTANT_REGISTRY: dict[int, "Constant"] = {}
 
 def clear_function_cache() -> None:
 	"""Clear function/constant/ref caches and reset the shared ID counters."""
+	from pulse.transpiler.assets import clear_asset_registry
 	from pulse.transpiler.imports import clear_import_registry
 
 	FUNCTION_CACHE.clear()
 	CONSTANT_REGISTRY.clear()
 	clear_import_registry()
+	clear_asset_registry()
 	reset_id_counter()
 
 
@@ -156,7 +159,7 @@ def _transpile_function_body(
 		raise TranspileError("No function definition found in source")
 	fndef = fndefs[-1]
 
-	# Get filename for error messages
+	# Get filename for error messages and source file resolution
 	try:
 		filename = inspect.getfile(fn)
 	except (TypeError, OSError):
@@ -164,7 +167,8 @@ def _transpile_function_body(
 
 	# Transpile with source context for errors
 	try:
-		transpiler = Transpiler(fndef, deps, jsx=jsx)
+		source_file = Path(filename) if filename else None
+		transpiler = Transpiler(fndef, deps, jsx=jsx, source_file=source_file)
 		result = transpiler.transpile()
 	except TranspileError as e:
 		# Re-raise with source context if not already present

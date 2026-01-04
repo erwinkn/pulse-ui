@@ -676,3 +676,27 @@ class TestDynamicImport:
 		fn = load.transpile()
 		js = emit(fn)
 		assert 'import("lodash").then(m => m.default).then(d => d.x)' in js
+
+	def test_dynamic_import_local_with_emit_context(self, tmp_path: Path):
+		"""Local import_() uses asset path from emit context."""
+		from pulse.transpiler import DynamicImport, EmitContext
+		from pulse.transpiler.assets import register_local_asset
+
+		# Create a temp JS file to import
+		chart_file = tmp_path / "Chart.tsx"
+		chart_file.write_text("export default function Chart() {}")
+
+		# Register asset and create DynamicImport directly (bypasses transpiler)
+		asset = register_local_asset(chart_file)
+		dynamic_import = DynamicImport(src=str(chart_file), asset=asset)
+
+		# Without emit context - just filename
+		js_no_ctx = emit(dynamic_import)
+		assert 'import("Chart_' in js_no_ctx
+		assert "assets" not in js_no_ctx
+
+		# With emit context - has correct relative path
+		with EmitContext(route_file_path="routes/users/index.tsx"):
+			js_with_ctx = emit(dynamic_import)
+
+		assert 'import("../../assets/Chart_' in js_with_ctx

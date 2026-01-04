@@ -50,9 +50,8 @@ class DynamicImport(Expr):
 
 	@override
 	def emit(self, out: list[str]) -> None:
-		# Use asset filename if local, otherwise use src directly
 		if self.asset:
-			out.append(f'import("{self.asset.asset_filename}")')
+			out.append(f'import("{self.asset.import_path()}")')
 		else:
 			out.append(f'import("{self.src}")')
 

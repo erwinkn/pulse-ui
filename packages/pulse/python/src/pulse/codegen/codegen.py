@@ -175,20 +175,6 @@ class Codegen:
 				self._copied_files.add(dest_path)
 				logger.debug(f"Copied {asset.source_path} -> {dest_path}")
 
-	def _compute_asset_prefix(self, route_file_path: str) -> str:
-		"""Compute the relative path prefix from a route file to the assets folder.
-
-		Args:
-			route_file_path: The route's file path (e.g., "users/_id_xxx.jsx")
-
-		Returns:
-			The relative path prefix (e.g., "../assets/" or "../../assets/")
-		"""
-		# Count directory depth: each "/" in the path adds one level
-		depth = route_file_path.count("/")
-		# Add 1 for the routes/ or layouts/ folder itself
-		return "../" * (depth + 1) + "assets/"
-
 	def generate_layout_tsx(
 		self,
 		server_address: str,
@@ -270,15 +256,14 @@ class Codegen:
 		route_file_path = route.file_path()
 		if isinstance(route, Layout):
 			output_path = self.output_folder / "layouts" / route_file_path
+			full_route_path = f"layouts/{route_file_path}"
 		else:
 			output_path = self.output_folder / "routes" / route_file_path
-
-		# Compute asset prefix based on route depth
-		asset_prefix = self._compute_asset_prefix(route_file_path)
+			full_route_path = f"routes/{route_file_path}"
 
 		content = generate_route(
 			path=route.unique_path(),
-			asset_prefix=asset_prefix,
+			route_file_path=full_route_path,
 		)
 		return write_file_if_changed(output_path, content)
 

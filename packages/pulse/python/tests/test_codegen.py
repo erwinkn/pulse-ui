@@ -317,7 +317,7 @@ class TestGenerateRoute:
 
 	def test_generate_route_basic(self):
 		"""Test basic route generation."""
-		result = generate_route(path="/test")
+		result = generate_route(path="/test", route_file_path="routes/test.tsx")
 
 		assert "import { PulseView" in result
 		assert 'const path = "/test"' in result
@@ -330,7 +330,9 @@ class TestGenerateRoute:
 		button_import = Import("Button", "@mantine/core")
 		Jsx(button_import)
 
-		result = generate_route(path="/dashboard")
+		result = generate_route(
+			path="/dashboard", route_file_path="routes/dashboard.tsx"
+		)
 
 		assert "import { Button as Button_" in result
 		assert '"@mantine/core"' in result
@@ -345,7 +347,7 @@ class TestGenerateRoute:
 		button_import = Import("Button", "@mantine/core")
 		Jsx(button_import)
 
-		result = generate_route(path="/styled")
+		result = generate_route(path="/styled", route_file_path="routes/styled.tsx")
 
 		assert 'import "@mantine/core/styles.css"' in result
 
@@ -356,7 +358,7 @@ class TestGenerateRoute:
 		Jsx(button_import)
 		Jsx(button_import)  # Same import, different Jsx wrappers
 
-		result = generate_route(path="/test")
+		result = generate_route(path="/test", route_file_path="routes/test.tsx")
 
 		# Should only have one import statement
 		assert result.count('from "@mantine/core"') == 1
@@ -366,7 +368,7 @@ class TestGenerateRoute:
 		# Creating the import auto-registers it (for import generation)
 		Import("Icons", "lucide-react", kind="namespace")
 
-		result = generate_route(path="/icons")
+		result = generate_route(path="/icons", route_file_path="routes/icons.tsx")
 
 		# Should generate: import * as Icons_X from "lucide-react";
 		assert "import * as Icons_" in result

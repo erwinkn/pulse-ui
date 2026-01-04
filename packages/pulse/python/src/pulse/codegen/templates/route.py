@@ -13,27 +13,26 @@ from pulse.transpiler import (
 	registered_constants,
 	registered_functions,
 )
+from pulse.transpiler.emit_context import EmitContext
 from pulse.transpiler.function import AnyJsFunction
 
 
-def _get_import_src(imp: Import, asset_prefix: str = "../assets/") -> str:
-	"""Get the import source path, remapping to asset filename for local imports."""
+def _get_import_src(imp: Import) -> str:
+	"""Get the import source path, remapping to asset path for local imports."""
 	if imp.asset:
-		return asset_prefix + imp.asset.asset_filename
+		return imp.asset.import_path()
 	return imp.src
 
 
 def _generate_import_statement(
 	src: str,
 	imports: list[Import],
-	asset_prefix: str = "../assets/",
 ) -> str:
 	"""Generate import statement(s) for a source module.
 
 	Args:
 		src: The original source path (may be remapped for local imports)
 		imports: List of Import objects for this source
-		asset_prefix: Relative path prefix from route file to assets folder
 	"""
 	default_imports: list[Import] = []
 	namespace_imports: list[Import] = []
@@ -57,11 +56,11 @@ def _generate_import_statement(
 			else:
 				named_imports.append(imp)
 
-	# Remap source path if this is a local import (use first import's asset)
+	# Remap source path if this is a local import
 	import_src = src
 	for imp in imports:
 		if imp.asset:
-			import_src = asset_prefix + imp.asset.asset_filename
+			import_src = imp.asset.import_path()
 			break
 
 	lines: list[str] = []
@@ -106,15 +105,11 @@ def _generate_import_statement(
 	return "\n".join(lines)
 
 
-def _generate_imports_section(
-	imports: Sequence[Import],
-	asset_prefix: str = "../assets/",
-) -> str:
+def _generate_imports_section(imports: Sequence[Import]) -> str:
 	"""Generate the full imports section with deduplication and topological ordering.
 
 	Args:
 		imports: List of Import objects to generate (should be eager imports only)
-		asset_prefix: Relative path prefix from route file to assets folder
 	"""
 	if not imports:
 		return ""
@@ -169,17 +164,14 @@ def _generate_imports_section(
 
 	lines: list[str] = []
 	for src in ordered:
-		stmt = _generate_import_statement(src, grouped[src], asset_prefix)
+		stmt = _generate_import_statement(src, grouped[src])
 		if stmt:
 			lines.append(stmt)
 
 	return "\n".join(lines)
 
 
-def _generate_lazy_imports_section(
-	imports: Sequence[Import],
-	asset_prefix: str = "../assets/",
-) -> str:
+def _generate_lazy_imports_section(imports: Sequence[Import]) -> str:
 	"""Generate lazy import factories for code-splitting.
 
 	Lazy imports are emitted as factory functions compatible with React.lazy.
@@ -190,14 +182,13 @@ def _generate_lazy_imports_section(
 
 	Args:
 		imports: List of lazy Import objects
-		asset_prefix: Relative path prefix from route file to assets folder
 	"""
 	if not imports:
 		return ""
 
 	lines: list[str] = ["// Lazy imports"]
 	for imp in imports:
-		import_src = _get_import_src(imp, asset_prefix)
+		import_src = _get_import_src(imp)
 
 		if imp.is_default or imp.is_namespace:
 			# Default/namespace: () => import("module") - already has { default }
@@ -273,75 +264,76 @@ def _generate_registry_section(
 
 def generate_route(
 	path: str,
-	asset_prefix: str = "../assets/",
+	route_file_path: str,
 ) -> str:
 	"""Generate a route file with all registered imports, functions, and components.
 
 	Args:
 		path: The route path (e.g., "/users/:id")
-		asset_prefix: Relative path prefix from route file to assets folder
+		route_file_path: Path from pulse root (e.g., "routes/users/index.tsx")
 	"""
-	# Add core Pulse imports
-	pulse_view_import = Import("PulseView", "pulse-ui-client")
+	with EmitContext(route_file_path=route_file_path):
+		# Add core Pulse imports
+		pulse_view_import = Import("PulseView", "pulse-ui-client")
 
-	# Collect function graph (constants + functions in dependency order)
-	fn_constants, funcs = collect_function_graph(registered_functions())
+		# Collect function graph (constants + functions in dependency order)
+		fn_constants, funcs = collect_function_graph(registered_functions())
 
-	# Include all registered constants (not just function dependencies)
-	# This ensures constants used as component tags are included
-	fn_const_ids = {c.id for c in fn_constants}
-	all_constants = list(fn_constants)
-	for const in registered_constants():
-		if const.id not in fn_const_ids:
-			all_constants.append(const)
-	constants = all_constants
+		# Include all registered constants (not just function dependencies)
+		# This ensures constants used as component tags are included
+		fn_const_ids = {c.id for c in fn_constants}
+		all_constants = list(fn_constants)
+		for const in registered_constants():
+			if const.id not in fn_const_ids:
+				all_constants.append(const)
+		constants = all_constants
 
-	# Get all registered imports and split by lazy flag
-	all_imports = list(get_registered_imports())
-	eager_imports = [imp for imp in all_imports if not imp.lazy]
-	lazy_imports = [imp for imp in all_imports if imp.lazy]
+		# Get all registered imports and split by lazy flag
+		all_imports = list(get_registered_imports())
+		eager_imports = [imp for imp in all_imports if not imp.lazy]
+		lazy_imports = [imp for imp in all_imports if imp.lazy]
 
-	# Generate output sections
-	output_parts: list[str] = []
+		# Generate output sections
+		output_parts: list[str] = []
 
-	# Eager imports (ES6 import statements)
-	imports_section = _generate_imports_section(eager_imports, asset_prefix)
-	if imports_section:
-		output_parts.append(imports_section)
+		# Eager imports (ES6 import statements)
+		imports_section = _generate_imports_section(eager_imports)
+		if imports_section:
+			output_parts.append(imports_section)
 
-	output_parts.append("")
-
-	# Lazy imports (factory functions)
-	lazy_section = _generate_lazy_imports_section(lazy_imports, asset_prefix)
-	if lazy_section:
-		output_parts.append(lazy_section)
 		output_parts.append("")
 
-	if constants:
-		output_parts.append(_generate_constants_section(constants))
+		# Lazy imports (factory functions)
+		lazy_section = _generate_lazy_imports_section(lazy_imports)
+		if lazy_section:
+			output_parts.append(lazy_section)
+			output_parts.append("")
+
+		if constants:
+			output_parts.append(_generate_constants_section(constants))
+			output_parts.append("")
+
+		if funcs:
+			output_parts.append(_generate_functions_section(funcs))
+			output_parts.append("")
+
+		# Generate the unified registry including all imports, constants and functions
+		output_parts.append(_generate_registry_section(all_imports, constants, funcs))
 		output_parts.append("")
 
-	if funcs:
-		output_parts.append(_generate_functions_section(funcs))
-		output_parts.append("")
-
-	# Generate the unified registry including all imports, constants and functions
-	output_parts.append(_generate_registry_section(all_imports, constants, funcs))
-	output_parts.append("")
-
-	# Route component
-	pulse_view_js = pulse_view_import.js_name
-	output_parts.append(f'''const path = "{path}";
+		# Route component
+		pulse_view_js = pulse_view_import.js_name
+		output_parts.append(f'''const path = "{path}";
 
 export default function RouteComponent() {{
   return (
     <{pulse_view_js} key={{path}} registry={{__registry}} path={{path}} />
   );
 }}''')
-	output_parts.append("")
+		output_parts.append("")
 
-	# Headers function
-	output_parts.append("""// Action and loader headers are not returned automatically
+		# Headers function
+		output_parts.append("""// Action and loader headers are not returned automatically
 function hasAnyHeaders(headers) {
   return [...headers].length > 0;
 }
@@ -350,4 +342,4 @@ export function headers({ actionHeaders, loaderHeaders }) {
   return hasAnyHeaders(actionHeaders) ? actionHeaders : loaderHeaders;
 }""")
 
-	return "\n".join(output_parts)
+		return "\n".join(output_parts)

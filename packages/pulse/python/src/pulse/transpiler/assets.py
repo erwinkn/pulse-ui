@@ -6,9 +6,11 @@ to track local files that should be copied to the assets folder during codegen.
 
 from __future__ import annotations
 
+import posixpath
 from dataclasses import dataclass
 from pathlib import Path
 
+from pulse.transpiler.emit_context import EmitContext
 from pulse.transpiler.id import next_id
 
 
@@ -23,6 +25,22 @@ class LocalAsset:
 	def asset_filename(self) -> str:
 		"""Filename in assets folder: stem_id.ext"""
 		return f"{self.source_path.stem}_{self.id}{self.source_path.suffix}"
+
+	def import_path(self) -> str:
+		"""Get import path for this asset.
+
+		If EmitContext is set, returns path relative to route file.
+		Otherwise returns just the asset filename.
+		"""
+		ctx = EmitContext.get()
+		if ctx is None:
+			return self.asset_filename
+		# Compute relative path from route file directory to asset
+		# route_file_path is like "routes/users/index.tsx"
+		# asset is in "assets/{asset_filename}"
+		route_dir = posixpath.dirname(ctx.route_file_path)
+		asset_path = f"assets/{self.asset_filename}"
+		return posixpath.relpath(asset_path, route_dir)
 
 
 # Registry keyed by resolved source_path (dedupes same file)

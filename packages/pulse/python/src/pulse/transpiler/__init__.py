@@ -17,6 +17,9 @@ from pulse.transpiler.builtins import emit_method as emit_method
 from pulse.transpiler.dynamic_import import DynamicImport as DynamicImport
 from pulse.transpiler.dynamic_import import import_ as import_
 
+# Emit context
+from pulse.transpiler.emit_context import EmitContext as EmitContext
+
 # Errors
 from pulse.transpiler.errors import TranspileError as TranspileError
 

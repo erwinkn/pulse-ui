@@ -10,7 +10,7 @@ from __future__ import annotations
 import ast
 import re
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from pulse.transpiler.builtins import BUILTINS, emit_method
 from pulse.transpiler.errors import TranspileError
@@ -720,37 +720,38 @@ class Transpiler:
 
 	def _emit_call(self, node: ast.Call) -> Expr:
 		"""Emit a function call."""
-		# Collect args and kwargs as raw AST values
-		args_raw = list(node.args)
-		kwargs_raw: dict[str, Any] = {}
-		for kw in node.keywords:
-			if kw.arg is None:
-				raise TranspileError(
-					"Spread props (**kwargs) not yet supported in v2 transpiler"
-				)
-			kwargs_raw[kw.arg] = kw.value
-
 		# Method call: obj.method(args) - try builtin method dispatch
 		if isinstance(node.func, ast.Attribute):
+			# Check for spreads - if present, skip builtin method handling
+			# (let transpile_call decide on spread support)
+			has_spread = any(kw.arg is None for kw in node.keywords)
+
 			obj = self.emit_expr(node.func.value)
 			method = node.func.attr
-			args: list[Expr] = [self.emit_expr(a) for a in args_raw]
-			kwargs: dict[str, Expr] = {
-				k: self.emit_expr(v) for k, v in kwargs_raw.items()
-			}
 
-			# Try builtin method handling with runtime checks
-			result = emit_method(obj, method, args, kwargs)
-			if result is not None:
-				return result
+			# Try builtin method handling only if no spreads
+			if not has_spread:
+				# Safe to cast: has_spread=False means all kw.arg are str (not None)
+				kwargs_raw: dict[str, Any] = {
+					cast(str, kw.arg): kw.value for kw in node.keywords
+				}
+				args: list[Expr] = [self.emit_expr(a) for a in node.args]
+				kwargs: dict[str, Expr] = {
+					k: self.emit_expr(v) for k, v in kwargs_raw.items()
+				}
+				result = emit_method(obj, method, args, kwargs)
+				if result is not None:
+					return result
 
 			# IMPORTANT: derive method expr via transpile_getattr
 			method_expr = obj.transpile_getattr(method, self)
-			return method_expr.transpile_call(args_raw, kwargs_raw, self)
+			return method_expr.transpile_call(
+				list(node.args), list(node.keywords), self
+			)
 
-		# Function call (or other callable expr)
+		# Function call - pass raw keywords (let callee decide on spread support)
 		callee = self.emit_expr(node.func)
-		return callee.transpile_call(args_raw, kwargs_raw, self)
+		return callee.transpile_call(list(node.args), list(node.keywords), self)
 
 	def _emit_attribute(self, node: ast.Attribute) -> Expr:
 		"""Emit an attribute access."""

@@ -148,7 +148,7 @@ class Renderer:
 		if (key_val := key_value(element)) is not None:
 			vdom_node["key"] = key_val
 
-		props = element.props or {}
+		props = element.props_dict()
 		props_result = self.diff_props({}, props, path, prev_eval=set())
 		if props_result.delta_set:
 			vdom_node["props"] = props_result.delta_set
@@ -239,8 +239,8 @@ class Renderer:
 		current: Element,
 		path: str,
 	) -> Element:
-		prev_props = previous.props or {}
-		new_props = current.props or {}
+		prev_props = previous.props_dict()
+		new_props = current.props_dict()
 		prev_eval = eval_keys_for_props(prev_props)
 		props_result = self.diff_props(prev_props, new_props, path, prev_eval)
 
@@ -611,7 +611,7 @@ def unmount_element(element: Node) -> None:
 		return
 
 	if isinstance(element, Element):
-		props = element.props or {}
+		props = element.props_dict()
 		for value in props.values():
 			if isinstance(value, (Element, PulseNode)):
 				unmount_element(value)

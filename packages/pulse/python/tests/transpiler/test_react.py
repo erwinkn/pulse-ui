@@ -145,6 +145,224 @@ class TestUseState:
 
 
 # =============================================================================
+# Object Spread Syntax
+# =============================================================================
+
+
+class TestObjSpread:
+	"""Test obj() with **spread syntax."""
+
+	def test_obj_single_spread(self):
+		"""Test obj(**base) produces {...base}."""
+
+		@javascript
+		def merge(base: dict):
+			return obj(**base)
+
+		fn = merge.transpile()
+		code = emit(fn)
+		assert code == "function merge_1(base) {\nreturn {...base};\n}"
+
+	def test_obj_spread_with_override(self):
+		"""Test obj(**base, a=2) produces {...base, "a": 2}."""
+
+		@javascript
+		def merge(base: dict):
+			return obj(**base, a=2)
+
+		fn = merge.transpile()
+		code = emit(fn)
+		assert code == 'function merge_1(base) {\nreturn {...base, "a": 2};\n}'
+
+	def test_obj_override_before_spread(self):
+		"""Test obj(a=1, **base) produces {"a": 1, ...base}."""
+
+		@javascript
+		def merge(base: dict):
+			return obj(a=1, **base)
+
+		fn = merge.transpile()
+		code = emit(fn)
+		assert code == 'function merge_1(base) {\nreturn {"a": 1, ...base};\n}'
+
+	def test_obj_multiple_spreads(self):
+		"""Test obj(**a, x=1, **b, y=2) produces {...a, "x": 1, ...b, "y": 2}."""
+
+		@javascript
+		def merge(a: dict, b: dict):
+			return obj(**a, x=1, **b, y=2)
+
+		fn = merge.transpile()
+		code = emit(fn)
+		assert (
+			code == 'function merge_1(a, b) {\nreturn {...a, "x": 1, ...b, "y": 2};\n}'
+		)
+
+	def test_obj_spread_expression(self):
+		"""Test obj(**items[0], a=1) with spread of subscript expression."""
+
+		@javascript
+		def merge(items: list):
+			return obj(**items[0], a=1)
+
+		fn = merge.transpile()
+		code = emit(fn)
+		assert code == 'function merge_1(items) {\nreturn {...items[0], "a": 1};\n}'
+
+	def test_obj_empty(self):
+		"""Test obj() with no args produces {}."""
+
+		@javascript
+		def make_obj():
+			return obj()
+
+		fn = make_obj.transpile()
+		code = emit(fn)
+		assert code == "function make_obj_1() {\nreturn {};\n}"
+
+	def test_obj_simple_kwargs(self):
+		"""Test obj(a=1, b=2) produces {"a": 1, "b": 2}."""
+
+		@javascript
+		def make_obj():
+			return obj(a=1, b=2)
+
+		fn = make_obj.transpile()
+		code = emit(fn)
+		assert code == 'function make_obj_1() {\nreturn {"a": 1, "b": 2};\n}'
+
+
+# =============================================================================
+# JSX Spread Props
+# =============================================================================
+
+
+class TestJsxSpread:
+	"""Test JSX components with **spread props syntax."""
+
+	def test_jsx_single_spread(self):
+		"""Test Component(**props) produces <Component {...props} />."""
+		from pulse.transpiler.nodes import Jsx
+
+		Button = Jsx(Import("Button", "@mantine/core"))
+
+		@javascript
+		def render(props: dict):
+			return Button(**props)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "return <Button_" in code
+		assert "{...props}" in code
+
+	def test_jsx_spread_with_override(self):
+		"""Test Component(**base, disabled=True) produces <Component {...base} disabled={true} />."""
+		from pulse.transpiler.nodes import Jsx
+
+		Button = Jsx(Import("Button", "@mantine/core"))
+
+		@javascript
+		def render(base: dict):
+			return Button(**base, disabled=True)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "{...base}" in code
+		assert "disabled={true}" in code
+
+	def test_jsx_override_before_spread(self):
+		"""Test Component(size="lg", **props) produces <Component size="lg" {...props} />."""
+		from pulse.transpiler.nodes import Jsx
+
+		Button = Jsx(Import("Button", "@mantine/core"))
+
+		@javascript
+		def render(props: dict):
+			return Button(size="lg", **props)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert 'size="lg"' in code
+		assert "{...props}" in code
+
+	def test_jsx_multiple_spreads(self):
+		"""Test Component(**a, x=1, **b) produces <Component {...a} x={1} {...b} />."""
+		from pulse.transpiler.nodes import Jsx
+
+		Box = Jsx(Import("Box", "@mantine/core"))
+
+		@javascript
+		def render(a: dict, b: dict):
+			return Box(**a, padding=10, **b)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "{...a}" in code
+		assert "padding={10}" in code
+		assert "{...b}" in code
+
+	def test_jsx_spread_with_children(self):
+		"""Test Component(**props)["child"] produces <Component {...props}>child</Component>."""
+		from pulse.transpiler.nodes import Jsx
+
+		Button = Jsx(Import("Button", "@mantine/core"))
+
+		@javascript
+		def render(props: dict):
+			return Button(**props)["Click me"]
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "{...props}" in code
+		assert "Click me" in code
+		assert "</Button_" in code
+
+
+class TestHtmlTagSpread:
+	"""Test HTML tags with **spread props syntax."""
+
+	def test_div_spread(self):
+		"""Test div(**props) produces <div {...props} />."""
+		from pulse.dom import tags
+
+		@javascript
+		def render(props: dict):
+			return tags.div(**props)
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert code == "function render_1(props) {\nreturn <div {...props} />;\n}"
+
+	def test_div_spread_with_children(self):
+		"""Test div(**props)["content"] produces <div {...props}>content</div>."""
+		from pulse.dom import tags
+
+		@javascript
+		def render(props: dict):
+			return tags.div(**props)["Hello"]
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert "{...props}" in code
+		assert "Hello" in code
+		assert "</div>" in code
+
+	def test_input_spread_with_override(self):
+		"""Test input(**base, type="text") produces <input {...base} type="text" />."""
+		from pulse.dom import tags
+
+		@javascript
+		def render(base: dict):
+			return tags.input(**base, type="text")
+
+		fn = render.transpile()
+		code = emit(fn)
+		assert code == (
+			'function render_1(base) {\nreturn <input {...base} type="text" />;\n}'
+		)
+
+
+# =============================================================================
 # useEffect Hook
 # =============================================================================
 

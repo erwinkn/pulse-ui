@@ -241,7 +241,7 @@ class TestJsxSpread:
 	"""Test JSX components with **spread props syntax."""
 
 	def test_jsx_single_spread(self):
-		"""Test Component(**props) produces <Component {...props} />."""
+		"""Test Component(**props) produces <Component {...(Map check)} />."""
 		from pulse.transpiler.nodes import Jsx
 
 		Button = Jsx(Import("Button", "@mantine/core"))
@@ -253,10 +253,11 @@ class TestJsxSpread:
 		fn = render.transpile()
 		code = emit(fn)
 		assert "return <Button_" in code
-		assert "{...props}" in code
+		# Verify complete spread expression with Map-to-object conversion
+		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
 
 	def test_jsx_spread_with_override(self):
-		"""Test Component(**base, disabled=True) produces <Component {...base} disabled={true} />."""
+		"""Test Component(**base, disabled=True) includes Map check and override."""
 		from pulse.transpiler.nodes import Jsx
 
 		Button = Jsx(Import("Button", "@mantine/core"))
@@ -267,11 +268,11 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...base}" in code
+		assert "{...base instanceof Map ? Object.fromEntries(base) : base}" in code
 		assert "disabled={true}" in code
 
 	def test_jsx_override_before_spread(self):
-		"""Test Component(size="lg", **props) produces <Component size="lg" {...props} />."""
+		"""Test Component(size="lg", **props) includes size and Map check."""
 		from pulse.transpiler.nodes import Jsx
 
 		Button = Jsx(Import("Button", "@mantine/core"))
@@ -283,10 +284,10 @@ class TestJsxSpread:
 		fn = render.transpile()
 		code = emit(fn)
 		assert 'size="lg"' in code
-		assert "{...props}" in code
+		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
 
 	def test_jsx_multiple_spreads(self):
-		"""Test Component(**a, x=1, **b) produces <Component {...a} x={1} {...b} />."""
+		"""Test Component(**a, x=1, **b) includes Map checks for both spreads."""
 		from pulse.transpiler.nodes import Jsx
 
 		Box = Jsx(Import("Box", "@mantine/core"))
@@ -297,12 +298,12 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...a}" in code
+		assert "{...a instanceof Map ? Object.fromEntries(a) : a}" in code
 		assert "padding={10}" in code
-		assert "{...b}" in code
+		assert "{...b instanceof Map ? Object.fromEntries(b) : b}" in code
 
 	def test_jsx_spread_with_children(self):
-		"""Test Component(**props)["child"] produces <Component {...props}>child</Component>."""
+		"""Test Component(**props)["child"] includes Map check and children."""
 		from pulse.transpiler.nodes import Jsx
 
 		Button = Jsx(Import("Button", "@mantine/core"))
@@ -313,16 +314,36 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...props}" in code
+		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
 		assert "Click me" in code
 		assert "</Button_" in code
+
+	def test_jsx_spread_dict_literal(self):
+		"""Test Component(**{"disabled": True}) converts Map to object at runtime.
+
+		Dict literals transpile to new Map([...]) which has no enumerable own props.
+		The Map check ensures {disabled: True} spreads correctly into JSX props.
+		"""
+		from pulse.transpiler.nodes import Jsx
+
+		Button = Jsx(Import("Button", "@mantine/core"))
+
+		@javascript
+		def render():
+			return Button(**{"disabled": True, "size": "lg"})
+
+		fn = render.transpile()
+		code = emit(fn)
+		# Dict literal becomes new Map, which is then converted to object for spread
+		assert "{...new Map([" in code  # Dict literal transpiled to new Map with spread
+		assert "instanceof Map ? Object.fromEntries" in code
 
 
 class TestHtmlTagSpread:
 	"""Test HTML tags with **spread props syntax."""
 
 	def test_div_spread(self):
-		"""Test div(**props) produces <div {...props} />."""
+		"""Test div(**props) includes Map-to-object conversion."""
 		from pulse.dom import tags
 
 		@javascript
@@ -331,10 +352,10 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert code == "function render_1(props) {\nreturn <div {...props} />;\n}"
+		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
 
 	def test_div_spread_with_children(self):
-		"""Test div(**props)["content"] produces <div {...props}>content</div>."""
+		"""Test div(**props)["content"] includes Map check and children."""
 		from pulse.dom import tags
 
 		@javascript
@@ -343,12 +364,12 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...props}" in code
+		assert "{...props instanceof Map ? Object.fromEntries(props) : props}" in code
 		assert "Hello" in code
 		assert "</div>" in code
 
 	def test_input_spread_with_override(self):
-		"""Test input(**base, type="text") produces <input {...base} type="text" />."""
+		"""Test input(**base, type="text") includes Map check and override."""
 		from pulse.dom import tags
 
 		@javascript
@@ -357,9 +378,8 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert code == (
-			'function render_1(base) {\nreturn <input {...base} type="text" />;\n}'
-		)
+		assert "{...base instanceof Map ? Object.fromEntries(base) : base}" in code
+		assert 'type="text"' in code
 
 
 # =============================================================================

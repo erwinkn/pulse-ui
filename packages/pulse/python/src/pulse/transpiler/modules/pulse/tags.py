@@ -17,7 +17,19 @@ from dataclasses import dataclass
 from typing import Any, final, override
 
 from pulse.components.for_ import emit_for
-from pulse.transpiler.nodes import Element, Expr, Literal, Node, Prop, Spread
+from pulse.transpiler.nodes import (
+	Binary,
+	Call,
+	Element,
+	Expr,
+	Identifier,
+	Literal,
+	Member,
+	Node,
+	Prop,
+	Spread,
+	Ternary,
+)
 from pulse.transpiler.py_module import PyModule
 from pulse.transpiler.transpiler import Transpiler
 from pulse.transpiler.vdom import VDOMNode
@@ -62,8 +74,14 @@ class TagExpr(Expr):
 		key: str | Expr | None = None
 		for kw in keywords:
 			if kw.arg is None:
-				# **spread syntax
-				props.append(Spread(ctx.emit_expr(kw.value)))
+				# **spread syntax - wrap in Object.fromEntries if Map (dict literals transpile to Map)
+				spread_expr = ctx.emit_expr(kw.value)
+				# Runtime check: Map -> Object.fromEntries, else passthrough
+				is_map = Binary(spread_expr, "instanceof", Identifier("Map"))
+				as_obj = Call(
+					Member(Identifier("Object"), "fromEntries"), [spread_expr]
+				)
+				props.append(Spread(Ternary(is_map, as_obj, spread_expr)))
 			else:
 				k = kw.arg
 				prop_value = ctx.emit_expr(kw.value)

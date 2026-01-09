@@ -317,7 +317,7 @@
         "`make typecheck` passes"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "Built-in default, configurable/replaceable.",
       "tests": [
         "make all"
@@ -336,7 +336,7 @@
         "All tests pass"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": "Steel wire checkpoint - Link component complete.",
       "tests": [
         "make all"
@@ -357,7 +357,7 @@
         "`make test` passes"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": "Built-in hash scroll to anchor.",
       "tests": [
         "make all"

@@ -3,13 +3,20 @@ Started: 2026-01-09
 
 ## Codebase Patterns
 <!-- Add discovered patterns here -->
+- Bun SSR: Create separate tsconfig.server.json with bun-types and include DOM lib for React component imports
+- Bun SSR: Use ssrRouteLoaders with require() for synchronous module loading in SSR context
 
 ## Key Files
 <!-- Add important files discovered during implementation -->
 - poc/vite.config.ts - Vite configuration with code splitting
 - poc/src/routes/index.ts - Route manifest with dynamic imports
 - poc/src/vdom-renderer.tsx - VDOM to React renderer
+- poc/src/router/prefetch.ts - Route prefetch utilities
+- poc/src/app.tsx - Main App component with navigation
+- poc/src/entry-client.tsx - Client entry with hydration support
+- poc/index.html - HTML template with SSR placeholders
 - poc/server/ssr.ts - Bun SSR server
+- poc/test/bundle-analysis.ts - Bundle analysis test
 
 ---
 ## 2026-01-09 - F-0001
@@ -17,5 +24,86 @@ Started: 2026-01-09
 - Files created: poc/package.json, poc/tsconfig.json, poc/vite.config.ts
 - **Learnings:**
   - Also added scripts (dev, build, preview, ssr, analyze) ahead of F-0015 since they're needed for convenience
+
+---
+## 2026-01-09 - F-0002
+- Created VDOM type definitions and renderer
+- Files: poc/src/vdom-renderer.tsx
+- **Learnings:**
+  - biome-ignore comments must be on the line immediately before the violation
+  - VDOM children have no stable keys, use index with suppression comment
+
+---
+## 2026-01-09 - F-0006
+- Created dynamic chunk loader with module cache
+- Files: poc/src/router/loader.ts
+- **Learnings:**
+  - `loadRouteChunk(pattern)` uses Map cache to prevent duplicate network requests
+  - `getLoadedRegistry()` merges all cached module registries for rendering
+
+---
+## 2026-01-09 - F-0007
+- Created prefetch utilities for route preloading
+- Files: poc/src/router/prefetch.ts
+- **Learnings:**
+  - `prefetchRoute()` fires dynamic import without await, uses Set to dedupe
+  - `createHoverPrefetch()` returns event handler props for link prefetch on hover
+  - `usePrefetchOnViewport()` uses IntersectionObserver with rootMargin for early prefetch
+
+---
+## 2026-01-09 - F-0008
+- Created App component with client-side navigation
+- Files: poc/src/app.tsx
+- **Learnings:**
+  - App takes initialVdom and initialRegistry props for SSR hydration
+  - navigate() sequence: loadRouteChunk -> getLoadedRegistry -> update state -> pushState
+  - Export `getVdomForPath()` for client entry to get initial VDOM from hardcoded map
+
+---
+## 2026-01-09 - F-0009
+- Created client entry with hydration support
+- Files: poc/src/entry-client.tsx
+- **Learnings:**
+  - Must load route chunk BEFORE rendering to prevent hydration mismatch
+  - Use `declare global { interface Window }` for __INITIAL_VDOM__ type extension
+  - hydrateRoot for SSR, createRoot for client-only - decided at runtime by checking window.__INITIAL_VDOM__
+
+---
+## 2026-01-09 - F-0010
+- Updated HTML template with SSR placeholders
+- Files: poc/index.html
+- **Learnings:**
+  - Use `<!--ssr-outlet-->` comment inside #root for SSR content injection
+  - Use placeholder pattern `/*__VDOM_PLACEHOLDER__*/null/*__VDOM_PLACEHOLDER__*/` for easy replacement
+  - Point module script to entry-client.tsx instead of main.tsx
+
+---
+## 2026-01-09 - F-0011
+- Created Bun SSR server with renderToString support
+- Files: poc/server/ssr.ts, poc/tsconfig.server.json, poc/src/vite-env.d.ts
+- **Learnings:**
+  - Bun serves via Bun.serve() with fetch handler for HTTP requests
+  - Import renderToString from react-dom/server for SSR
+  - Need tsconfig.server.json with bun-types for proper TypeScript checking
+  - Add vite-env.d.ts with CSS module declaration for src imports to pass typecheck
+  - Fixed main.tsx casing issue (App.tsx vs app.tsx) during server typecheck
+
+---
+## 2026-01-09 - F-0012
+- Created bundle analysis test
+- Files: poc/test/bundle-analysis.ts
+- **Learnings:**
+  - Use `import.meta.dir` in Bun to get current file's directory
+  - readdirSync/statSync from node:fs for file listing and size checking
+  - Exit with process.exit(1) to fail tests
+
+---
+## 2026-01-09 - F-0013
+- Verified Vite build creates separate chunks
+- Files verified: poc/dist/assets/*.js (4 chunks: index, home, dashboard, settings)
+- **Learnings:**
+  - Vite dynamic imports create separate chunks automatically
+  - Each route chunk contains only its dependencies (date-fns in home, lodash in dashboard, zod in settings)
+  - Main index chunk contains React and shared dependencies (~192KB)
 
 ---

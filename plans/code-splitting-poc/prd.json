@@ -98,7 +98,7 @@
         "TypeScript compiles without errors"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Cache prevents duplicate network requests.",
       "tests": ["cd poc && bunx tsc --noEmit"],
       "dependencies": ["F-0005"]
@@ -115,7 +115,7 @@
         "TypeScript compiles without errors"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Prefetching improves perceived navigation speed.",
       "tests": ["cd poc && bunx tsc --noEmit"],
       "dependencies": ["F-0005"]
@@ -134,7 +134,7 @@
         "TypeScript compiles without errors"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Uses hardcoded VDOM for each route (real Pulse gets from Python).",
       "tests": ["cd poc && bunx tsc --noEmit"],
       "dependencies": ["F-0002", "F-0003", "F-0006", "F-0007"]
@@ -152,7 +152,7 @@
         "TypeScript compiles without errors"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Chunk must load before hydration to prevent mismatch.",
       "tests": ["cd poc && bunx tsc --noEmit"],
       "dependencies": ["F-0008"]
@@ -168,7 +168,7 @@
         "Valid HTML5 document"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Placeholders will be replaced by SSR server.",
       "tests": ["test -f poc/index.html"],
       "dependencies": ["F-0001"]
@@ -187,9 +187,9 @@
         "Server runs on port 3001"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "SSR uses synchronous imports; client uses async.",
-      "tests": ["cd poc && bunx tsc --noEmit server/ssr.ts"],
+      "tests": ["cd poc && bunx tsc -p tsconfig.server.json --noEmit"],
       "dependencies": ["F-0002", "F-0005"]
     },
     {
@@ -203,7 +203,7 @@
         "Passes if multiple chunks created"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Validates code splitting is working.",
       "tests": ["test -f poc/test/bundle-analysis.ts"],
       "dependencies": ["F-0001"]
@@ -220,7 +220,7 @@
         "`bun poc/test/bundle-analysis.ts` passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "This validates Goal 1 from spec.",
       "tests": ["cd poc && bunx vite build && bun test/bundle-analysis.ts"],
       "dependencies": ["F-0009", "F-0010", "F-0012"]

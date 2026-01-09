@@ -1133,6 +1133,12 @@ from pulse.env import PulseEnv as PulseEnv
 from pulse.env import env as env
 from pulse.env import mode as mode
 
+# Error boundary
+from pulse.error_boundary import ErrorBoundary as ErrorBoundary
+from pulse.error_boundary import FallbackFn as FallbackFn
+from pulse.error_boundary import RenderError as RenderError
+from pulse.error_boundary import default_fallback as default_fallback
+
 # Forms
 from pulse.form import (
 	Form as Form,

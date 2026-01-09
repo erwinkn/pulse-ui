@@ -15,6 +15,8 @@ Started: 2026-01-09
 - `packages/pulse/js/src/server/server.ts` - Bun SSR render server
 - `packages/pulse/js/src/server/render.tsx` - SSR renderVdom function, defaultComponentRegistry, resolveComponent
 - `packages/pulse/js/src/server/render.test.tsx` - SSR component registry tests
+- `packages/pulse/js/src/server/__tests__/render.test.tsx` - SSR integration tests (simple/nested VDOM, props)
+- `packages/pulse/python/src/pulse/error_boundary.py` - Python ErrorBoundary component for server-side error catching
 
 ---
 
@@ -327,5 +329,44 @@ Started: 2026-01-09
   - `resolveComponent()` utility throws clear error for unknown components
   - Mount point pattern (`$$ComponentName`) resolves from registry in VDOMRenderer
   - Regular tags pass through directly to createElement (no registry lookup needed)
+
+---
+
+## 2026-01-09 - F-0027
+- Created integration tests for SSR renderVdom function
+- Files: `packages/pulse/js/src/server/__tests__/render.test.tsx`
+- **Learnings:**
+  - VDOM uses `tag` field (not `type`) per VDOMElement interface
+  - TypeScript infers `undefined` for missing props in mixed-shape children arrays; use explicit `: VDOM` type annotation
+  - React SSR converts `className` to `class` and `htmlFor` to `for` in output HTML
+  - Style objects with camelCase (`fontSize`) convert to kebab-case (`font-size`) in HTML
+  - Steel wire checkpoint: basic SSR rendering verified with simple, nested, and props-applied VDOM
+
+---
+
+## 2026-01-10 - F-0028
+- Added comprehensive error handling to SSR server
+- Files: `packages/pulse/js/src/server/server.ts`, `packages/pulse/js/src/server/__tests__/server.test.ts`
+- **Learnings:**
+  - Differentiate JSON parse errors (400) from rendering errors (500) using separate try/catch blocks
+  - `process.env.NODE_ENV !== "production"` for dev/prod error differentiation
+  - Custom `InvalidVDOMError` class for VDOM validation with `name` property set in constructor
+  - VDOM validation must be recursive for children arrays
+  - Valid VDOM types: null, undefined, boolean, string, number, array, object with `tag` string
+  - Test error handling logic directly without network calls when happy-dom blocks HTTP requests
+
+---
+
+## 2026-01-10 - F-0029
+- Created Python ErrorBoundary component for server-side error catching
+- Files: `packages/pulse/python/src/pulse/error_boundary.py`, `packages/pulse/python/src/pulse/__init__.py`
+- **Learnings:**
+  - `__slots__` must have type annotation `tuple[str, ...]` to satisfy basedpyright (reportUnannotatedClassAttribute)
+  - `RenderError` class captures error message and stack trace, with `from_exception()` factory method
+  - `traceback.format_exception(type(exc), exc, exc.__traceback__)` gets full stack trace
+  - ErrorBoundary uses `RenderTree` to test-render children and catch errors during VDOM rendering
+  - Default fallback matches React ErrorBoundary visual style with red border and dev-mode stack trace
+  - `env.pulse_env == "dev"` checks for development mode in Python
+  - Export pattern: `from pulse.error_boundary import ErrorBoundary as ErrorBoundary` for public API
 
 ---

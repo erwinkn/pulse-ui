@@ -542,7 +542,7 @@
         "All tests pass"
       ],
       "priority": 27,
-      "passes": false,
+      "passes": true,
       "notes": "Steel wire checkpoint - basic SSR working.",
       "tests": [
         "make all"
@@ -562,7 +562,7 @@
         "`make test` passes"
       ],
       "priority": 28,
-      "passes": false,
+      "passes": true,
       "notes": "",
       "tests": [
         "make all"
@@ -583,7 +583,7 @@
         "`make typecheck` passes"
       ],
       "priority": 29,
-      "passes": false,
+      "passes": true,
       "notes": "Python-side error boundary for rendering errors.",
       "tests": [
         "make all"

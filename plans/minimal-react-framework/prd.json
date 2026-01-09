@@ -27,7 +27,7 @@
         "`make test` passes for router/match.test.ts"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Dynamic segments start with `:`. Extract param values into params object.",
       "tests": ["make all"],
       "dependencies": ["F-0001"]

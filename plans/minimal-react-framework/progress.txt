@@ -137,3 +137,14 @@ Started: 2026-01-09
   - `"key" in object` returns true even if value is undefined (useful for optional param tests)
 
 ---
+
+## 2026-01-09 - F-0012
+- Created Link component skeleton with click interception
+- Files: `packages/pulse/js/src/router/link.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - Link extends `AnchorHTMLAttributes<HTMLAnchorElement>` with Omit for href (require it)
+  - Don't intercept modified clicks (metaKey, altKey, ctrlKey, shiftKey) to allow new tab behavior
+  - Check `e.defaultPrevented` after calling user's onClick to respect prevented clicks
+  - LinkProps includes `replace` and `state` for NavigateOptions passthrough
+
+---

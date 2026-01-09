@@ -255,7 +255,7 @@
         "`make test` passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "Auto-detect external = starts with http:// or different origin.",
       "tests": [
         "make all"
@@ -276,7 +276,7 @@
         "`make test` passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Viewport prefetch is default behavior. Actual prefetch logic wired later.",
       "tests": [
         "make all"
@@ -296,7 +296,7 @@
         "`make test` passes"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "Hover fallback when viewport prefetch disabled.",
       "tests": [
         "make all"

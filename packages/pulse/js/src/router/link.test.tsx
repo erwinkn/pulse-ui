@@ -271,4 +271,91 @@ describe("Link", () => {
 			expect(observer.observedElements.length).toBe(0);
 		});
 	});
+
+	describe("hover prefetch fallback", () => {
+		let consoleLogSpy: ReturnType<typeof spyOn>;
+
+		beforeEach(() => {
+			cleanup();
+			consoleLogSpy = spyOn(console, "log").mockImplementation(() => {});
+		});
+
+		afterEach(() => {
+			consoleLogSpy.mockRestore();
+			cleanup();
+		});
+
+		it("prefetches on mouseenter when prefetch={false}", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(
+				<Link href="/about" prefetch={false}>
+					About
+				</Link>,
+				{ wrapper: createWrapper(mockNavigate) },
+			);
+
+			fireEvent.mouseEnter(screen.getByRole("link"));
+
+			expect(consoleLogSpy).toHaveBeenCalledWith("[prefetch] /about");
+		});
+
+		it("prefetches only once on multiple mouseenter events", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(
+				<Link href="/about" prefetch={false}>
+					About
+				</Link>,
+				{ wrapper: createWrapper(mockNavigate) },
+			);
+
+			const link = screen.getByRole("link");
+			fireEvent.mouseEnter(link);
+			fireEvent.mouseEnter(link);
+			fireEvent.mouseEnter(link);
+
+			expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not prefetch on hover for external links", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(
+				<Link href="https://google.com" prefetch={false}>
+					External
+				</Link>,
+				{ wrapper: createWrapper(mockNavigate) },
+			);
+
+			fireEvent.mouseEnter(screen.getByRole("link"));
+
+			expect(consoleLogSpy).not.toHaveBeenCalled();
+		});
+
+		it("does not prefetch on hover when prefetch={true}", () => {
+			// Note: When prefetch={true}, viewport prefetch is used instead
+			// This test ensures hover doesn't double-trigger
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(<Link href="/about">About</Link>, { wrapper: createWrapper(mockNavigate) });
+
+			fireEvent.mouseEnter(screen.getByRole("link"));
+
+			// Should not have prefetched via hover (viewport observer handles it)
+			expect(consoleLogSpy).not.toHaveBeenCalled();
+		});
+
+		it("calls user-provided onMouseEnter handler", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			const customOnMouseEnter = mock(() => {});
+			render(
+				<Link href="/about" prefetch={false} onMouseEnter={customOnMouseEnter}>
+					About
+				</Link>,
+				{ wrapper: createWrapper(mockNavigate) },
+			);
+
+			fireEvent.mouseEnter(screen.getByRole("link"));
+
+			expect(customOnMouseEnter).toHaveBeenCalled();
+			expect(consoleLogSpy).toHaveBeenCalledWith("[prefetch] /about");
+		});
+	});
 });

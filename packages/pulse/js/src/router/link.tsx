@@ -48,6 +48,7 @@ export function Link({
 	replace,
 	state,
 	onClick,
+	onMouseEnter,
 	prefetch = true,
 	...rest
 }: LinkProps) {
@@ -88,6 +89,21 @@ export function Link({
 		};
 	}, [href, isExternal, prefetch]);
 
+	function triggerPrefetch() {
+		if (!prefetchedRef.current) {
+			prefetchedRef.current = true;
+			console.log(`[prefetch] ${href}`);
+		}
+	}
+
+	function handleMouseEnter(e: MouseEvent<HTMLAnchorElement>) {
+		onMouseEnter?.(e);
+		// Hover prefetch fallback: when viewport prefetch disabled, prefetch on hover
+		if (!prefetch && !isExternal) {
+			triggerPrefetch();
+		}
+	}
+
 	function handleClick(e: MouseEvent<HTMLAnchorElement>) {
 		// Call any existing onClick handler first
 		onClick?.(e);
@@ -119,7 +135,7 @@ export function Link({
 	}
 
 	return (
-		<a ref={anchorRef} href={href} onClick={handleClick} {...rest}>
+		<a ref={anchorRef} href={href} onClick={handleClick} onMouseEnter={handleMouseEnter} {...rest}>
 			{children}
 		</a>
 	);

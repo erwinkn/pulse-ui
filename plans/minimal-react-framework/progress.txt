@@ -251,3 +251,14 @@ Started: 2026-01-09
   - Default fallback UI uses inline styles for CSS-framework-independence
 
 ---
+
+## 2026-01-09 - F-0021
+- Created DefaultErrorFallback component extracted from ErrorBoundary
+- Files: `packages/pulse/js/src/error-boundary.tsx`, `packages/pulse/js/src/index.ts`
+- **Learnings:**
+  - `process.env.NODE_ENV !== "production"` detects dev mode for showing stack traces
+  - Stack trace displayed in `<pre>` with `whiteSpace: pre-wrap` and `wordBreak: break-word` for long lines
+  - Button text changed from "Try again" to "Retry" per acceptance criteria
+  - Export both component and props type (`DefaultErrorFallbackProps`) for consumers
+
+---

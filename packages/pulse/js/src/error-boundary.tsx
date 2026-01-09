@@ -1,6 +1,70 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 /**
+ * Props for the DefaultErrorFallback component.
+ */
+export interface DefaultErrorFallbackProps {
+	error: Error;
+	reset: () => void;
+}
+
+/**
+ * Default fallback UI for ErrorBoundary.
+ * Shows error message, stack trace (dev mode only), and a retry button.
+ * Minimal styling that works without any CSS framework.
+ */
+export function DefaultErrorFallback({ error, reset }: DefaultErrorFallbackProps): ReactNode {
+	const isDev = process.env.NODE_ENV !== "production";
+
+	return (
+		<div
+			style={{
+				padding: "20px",
+				border: "1px solid #e53e3e",
+				borderRadius: "8px",
+				backgroundColor: "#fff5f5",
+				color: "#c53030",
+				fontFamily: "system-ui, sans-serif",
+			}}
+		>
+			<h2 style={{ margin: "0 0 10px 0", fontSize: "18px" }}>Something went wrong</h2>
+			<p style={{ margin: "0 0 15px 0", fontSize: "14px" }}>{error.message}</p>
+			{isDev && error.stack && (
+				<pre
+					style={{
+						margin: "0 0 15px 0",
+						padding: "10px",
+						backgroundColor: "#fed7d7",
+						borderRadius: "4px",
+						fontSize: "12px",
+						overflow: "auto",
+						whiteSpace: "pre-wrap",
+						wordBreak: "break-word",
+					}}
+				>
+					{error.stack}
+				</pre>
+			)}
+			<button
+				type="button"
+				onClick={reset}
+				style={{
+					padding: "8px 16px",
+					backgroundColor: "#c53030",
+					color: "white",
+					border: "none",
+					borderRadius: "4px",
+					cursor: "pointer",
+					fontSize: "14px",
+				}}
+			>
+				Retry
+			</button>
+		</div>
+	);
+}
+
+/**
  * Props for the ErrorBoundary component.
  */
 export interface ErrorBoundaryProps {
@@ -62,37 +126,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 				return fallback(error, this.reset);
 			}
 
-			// Default fallback UI (minimal, works without CSS framework)
-			return (
-				<div
-					style={{
-						padding: "20px",
-						border: "1px solid #e53e3e",
-						borderRadius: "8px",
-						backgroundColor: "#fff5f5",
-						color: "#c53030",
-						fontFamily: "system-ui, sans-serif",
-					}}
-				>
-					<h2 style={{ margin: "0 0 10px 0", fontSize: "18px" }}>Something went wrong</h2>
-					<p style={{ margin: "0 0 15px 0", fontSize: "14px" }}>{error.message}</p>
-					<button
-						type="button"
-						onClick={this.reset}
-						style={{
-							padding: "8px 16px",
-							backgroundColor: "#c53030",
-							color: "white",
-							border: "none",
-							borderRadius: "4px",
-							cursor: "pointer",
-							fontSize: "14px",
-						}}
-					>
-						Try again
-					</button>
-				</div>
-			);
+			// Use default fallback component
+			return <DefaultErrorFallback error={error} reset={this.reset} />;
 		}
 
 		return children;

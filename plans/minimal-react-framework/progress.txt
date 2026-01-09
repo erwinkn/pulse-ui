@@ -11,6 +11,8 @@ Started: 2026-01-09
 - `packages/pulse/js/src/router/index.ts` - Router public exports
 - `packages/pulse/js/src/router/hash.ts` - Hash scroll utility and hook
 - `packages/pulse/js/src/error-boundary.tsx` - React ErrorBoundary component
+- `packages/pulse/js/src/__tests__/error-boundary.test.tsx` - ErrorBoundary integration tests
+- `packages/pulse/js/src/server/server.ts` - Bun SSR render server
 
 ---
 
@@ -260,5 +262,42 @@ Started: 2026-01-09
   - Stack trace displayed in `<pre>` with `whiteSpace: pre-wrap` and `wordBreak: break-word` for long lines
   - Button text changed from "Try again" to "Retry" per acceptance criteria
   - Export both component and props type (`DefaultErrorFallbackProps`) for consumers
+
+---
+
+## 2026-01-09 - F-0022
+- Added tests for custom fallback support in ErrorBoundary
+- Files: `packages/pulse/js/src/error-boundary.test.tsx`
+- **Learnings:**
+  - Component with return type `: never` for throwing components to satisfy JSX type checking
+  - Mock `console.error` during error boundary tests with `suppressConsoleError()` / `restoreConsoleError()` pattern
+  - Use `try/finally` to ensure `restoreConsoleError()` runs even if test assertions fail
+  - `screen.queryByText()` returns null when not found (use for negative assertions)
+  - Conditional throwing pattern: toggle `shouldThrow` variable before calling reset to test recovery
+
+---
+
+## 2026-01-09 - F-0023
+- Created integration tests verifying ErrorBoundary catches errors
+- Files: `packages/pulse/js/src/__tests__/error-boundary.test.tsx`
+- **Learnings:**
+  - Integration tests for non-router components go in `src/__tests__/` directory
+  - Conditional throwing components must be defined INSIDE test function for closure to work
+  - Defining thrower outside and passing `shouldThrow` as prop doesn't work with ErrorBoundary's internal re-render
+  - Test patterns: error catching, default fallback, custom fallback, reset recovery, multiple/nested boundaries
+  - `beforeEach(() => cleanup())` and `afterEach(() => restoreConsoleError())` for test isolation
+  - Steel wire checkpoint: ErrorBoundary integration verified and working
+
+---
+
+## 2026-01-09 - F-0024
+- Created Bun render server skeleton with /render and /health endpoints
+- Files: `packages/pulse/js/src/server/server.ts`
+- **Learnings:**
+  - `Bun.serve()` returns server instance with `port` property
+  - Port configurable via `PORT` env variable with fallback to 3001
+  - Use `process.env.PORT` (not `Bun.env.PORT`) for broader compatibility
+  - Server files in `server/` subdirectory alongside client code
+  - Placeholder HTML returned for /render, actual rendering logic added in F-0025
 
 ---

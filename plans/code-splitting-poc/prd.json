@@ -81,7 +81,7 @@
         "TypeScript compiles without errors"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Dynamic imports are key for Vite code splitting.",
       "tests": ["cd poc && bunx tsc --noEmit"],
       "dependencies": ["F-0004"]

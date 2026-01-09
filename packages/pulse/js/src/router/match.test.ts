@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { matchPath } from "./match";
+import { compareRoutes, matchPath, selectBestMatch } from "./match";
 
 describe("matchPath", () => {
 	describe("static paths", () => {
@@ -205,5 +205,135 @@ describe("matchPath", () => {
 				params: { "*": [] },
 			});
 		});
+	});
+});
+
+describe("compareRoutes", () => {
+	describe("static vs dynamic", () => {
+		it("static beats dynamic", () => {
+			expect(compareRoutes("/users/admin", "/users/:id")).toBe(-1);
+		});
+
+		it("dynamic loses to static", () => {
+			expect(compareRoutes("/users/:id", "/users/admin")).toBe(1);
+		});
+	});
+
+	describe("dynamic vs optional", () => {
+		it("dynamic beats optional", () => {
+			expect(compareRoutes("/users/:id", "/users/:id?")).toBe(-1);
+		});
+
+		it("optional loses to dynamic", () => {
+			expect(compareRoutes("/users/:id?", "/users/:id")).toBe(1);
+		});
+	});
+
+	describe("optional vs catch-all", () => {
+		it("optional beats catch-all", () => {
+			expect(compareRoutes("/files/:name?", "/files/*")).toBe(-1);
+		});
+
+		it("catch-all loses to optional", () => {
+			expect(compareRoutes("/files/*", "/files/:name?")).toBe(1);
+		});
+	});
+
+	describe("equal specificity", () => {
+		it("equal static routes", () => {
+			expect(compareRoutes("/users/admin", "/users/admin")).toBe(0);
+		});
+
+		it("equal dynamic routes", () => {
+			expect(compareRoutes("/users/:id", "/users/:name")).toBe(0);
+		});
+
+		it("equal optional routes", () => {
+			expect(compareRoutes("/users/:id?", "/users/:name?")).toBe(0);
+		});
+	});
+
+	describe("multi-segment comparison", () => {
+		it("compares segment by segment - first segment differs", () => {
+			expect(compareRoutes("/users/admin/posts", "/users/:id/posts")).toBe(-1);
+		});
+
+		it("compares segment by segment - second segment differs", () => {
+			expect(compareRoutes("/api/:version/users", "/api/:version/:resource")).toBe(-1);
+		});
+	});
+});
+
+describe("selectBestMatch", () => {
+	it("returns most specific match", () => {
+		const routes = [
+			{ pattern: "/users/:id", name: "user-detail" },
+			{ pattern: "/users/admin", name: "admin" },
+			{ pattern: "/users/*", name: "catchall" },
+		];
+
+		const result = selectBestMatch(routes, "/users/admin");
+		expect(result).not.toBeNull();
+		expect(result!.route.name).toBe("admin");
+		expect(result!.params).toEqual({});
+	});
+
+	it("returns dynamic match when no static match", () => {
+		const routes = [
+			{ pattern: "/users/:id", name: "user-detail" },
+			{ pattern: "/users/admin", name: "admin" },
+			{ pattern: "/users/*", name: "catchall" },
+		];
+
+		const result = selectBestMatch(routes, "/users/123");
+		expect(result).not.toBeNull();
+		expect(result!.route.name).toBe("user-detail");
+		expect(result!.params).toEqual({ id: "123" });
+	});
+
+	it("returns catch-all when no other match", () => {
+		const routes = [
+			{ pattern: "/users/:id", name: "user-detail" },
+			{ pattern: "/users/*", name: "catchall" },
+		];
+
+		const result = selectBestMatch(routes, "/users/123/posts/456");
+		expect(result).not.toBeNull();
+		expect(result!.route.name).toBe("catchall");
+		expect(result!.params).toEqual({ "*": ["123", "posts", "456"] });
+	});
+
+	it("returns null when no match", () => {
+		const routes = [
+			{ pattern: "/users/:id", name: "user-detail" },
+			{ pattern: "/posts/:id", name: "post-detail" },
+		];
+
+		const result = selectBestMatch(routes, "/comments/123");
+		expect(result).toBeNull();
+	});
+
+	it("handles empty routes array", () => {
+		const result = selectBestMatch([], "/any/path");
+		expect(result).toBeNull();
+	});
+
+	it("includes params from matched route", () => {
+		const routes = [{ pattern: "/users/:userId/posts/:postId", name: "user-post" }];
+
+		const result = selectBestMatch(routes, "/users/1/posts/2");
+		expect(result).not.toBeNull();
+		expect(result!.params).toEqual({ userId: "1", postId: "2" });
+	});
+
+	it("prefers dynamic over optional", () => {
+		const routes = [
+			{ pattern: "/files/:name?", name: "optional" },
+			{ pattern: "/files/:name", name: "required" },
+		];
+
+		const result = selectBestMatch(routes, "/files/readme.txt");
+		expect(result).not.toBeNull();
+		expect(result!.route.name).toBe("required");
 	});
 });

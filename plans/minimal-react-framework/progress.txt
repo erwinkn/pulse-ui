@@ -111,3 +111,29 @@ Started: 2026-01-09
   - Test for scoped params: nest two providers, verify inner params returned (not merged)
 
 ---
+
+## 2026-01-09 - F-0010
+- Implemented useNavigate hook with relative path resolution
+- Files: `packages/pulse/js/src/router/context.tsx`, `packages/pulse/js/src/router/context.test.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - `useNavigate()` wraps the context's navigate fn to resolve relative paths client-side
+  - `resolvePath(to, basePath)` handles: absolute `/path`, relative `../sibling`, `./child`, `child`
+  - History navigation `navigate(-1)` passes through directly to context navigate
+  - Mock functions for tests: `mock(() => {}) as unknown as NavigateFn`
+  - Biome auto-fixes string concat to template literals on `make all`
+
+---
+
+## 2026-01-09 - F-0011
+- Created integration tests verifying nested PulseRouterProviders (simulating layout > page)
+- Files: `packages/pulse/js/src/router/__tests__/context.integration.test.tsx`
+- **Learnings:**
+  - React context shadowing: inner provider completely replaces outer provider's value
+  - Params are scoped (not merged) - child sees only its own params, parent params via Pulse Context
+  - Location can differ between levels (unusual but valid) - nearest provider wins
+  - Navigate from any level uses nearest provider's navigate function
+  - 3+ levels work identically - always deepest provider wins
+  - Test mixed param types: catch-all `*` arrays, optional `undefined`, regular strings
+  - `"key" in object` returns true even if value is undefined (useful for optional param tests)
+
+---

@@ -193,7 +193,7 @@
         "`make test` passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Full navigation options. Relative paths resolved from current location.",
       "tests": [
         "make all"
@@ -213,7 +213,7 @@
         "All tests pass"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Steel wire checkpoint - context scoping is critical for layouts.",
       "tests": [
         "make all"

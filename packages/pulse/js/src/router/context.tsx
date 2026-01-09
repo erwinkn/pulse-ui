@@ -139,7 +139,7 @@ function resolvePath(to: string, basePath: string): string {
 		}
 	}
 
-	return "/" + resultSegments.join("/");
+	return `/${resultSegments.join("/")}`;
 }
 
 /**

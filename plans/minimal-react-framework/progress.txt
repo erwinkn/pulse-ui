@@ -10,6 +10,7 @@ Started: 2026-01-09
 - `packages/pulse/js/src/router/context.tsx` - Router context provider and types
 - `packages/pulse/js/src/router/index.ts` - Router public exports
 - `packages/pulse/js/src/router/hash.ts` - Hash scroll utility and hook
+- `packages/pulse/js/src/error-boundary.tsx` - React ErrorBoundary component
 
 ---
 
@@ -235,5 +236,18 @@ Started: 2026-01-09
   - Router exports were already complete in `router/index.ts`
   - Main package `index.ts` needed re-exports for router to be accessible via `import { Link } from 'pulse-ui-client'`
   - Alphabetize exports to match Biome formatting expectations
+
+---
+
+## 2026-01-09 - F-0020
+- Created React ErrorBoundary class component for catching JavaScript errors
+- Files: `packages/pulse/js/src/error-boundary.tsx`, `packages/pulse/js/src/index.ts`
+- **Learnings:**
+  - React ErrorBoundary must be a class component (cannot use hooks for error catching)
+  - TypeScript requires `override` modifier on `componentDidCatch` and `render` methods
+  - `getDerivedStateFromError` is static method that updates state when error caught
+  - `componentDidCatch` is instance method for side effects like logging
+  - Reset function uses arrow function syntax to auto-bind `this`
+  - Default fallback UI uses inline styles for CSS-framework-independence
 
 ---

@@ -46,7 +46,7 @@
         "TypeScript compiles without errors"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Simple exact-match for POC; real implementation needs pattern matching.",
       "tests": ["cd poc && bunx tsc --noEmit"],
       "dependencies": ["F-0001"]

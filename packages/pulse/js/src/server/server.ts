@@ -1,4 +1,12 @@
+import type { VDOM } from "../vdom";
+import { type RenderConfig, renderVdom } from "./render";
+
 const PORT = Number(process.env.PORT) || 3001;
+
+interface RenderRequestBody {
+	vdom: VDOM;
+	config?: RenderConfig;
+}
 
 const server = Bun.serve({
 	port: PORT,
@@ -10,10 +18,20 @@ const server = Bun.serve({
 		}
 
 		if (req.method === "POST" && url.pathname === "/render") {
-			return new Response("<div>placeholder</div>", {
-				status: 200,
-				headers: { "Content-Type": "text/html" },
-			});
+			try {
+				const body = (await req.json()) as RenderRequestBody;
+				const html = renderVdom(body.vdom, body.config ?? {});
+				return new Response(html, {
+					status: 200,
+					headers: { "Content-Type": "text/html" },
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message : "Unknown error";
+				return new Response(JSON.stringify({ error: message }), {
+					status: 500,
+					headers: { "Content-Type": "application/json" },
+				});
+			}
 		}
 
 		return new Response("Not Found", { status: 404 });

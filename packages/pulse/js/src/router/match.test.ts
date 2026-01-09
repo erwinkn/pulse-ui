@@ -148,4 +148,62 @@ describe("matchPath", () => {
 			});
 		});
 	});
+
+	describe("catch-all (*)", () => {
+		it("matches catch-all with multiple segments", () => {
+			expect(matchPath("/files/*", "/files/a/b/c")).toEqual({
+				matched: true,
+				params: { "*": ["a", "b", "c"] },
+			});
+		});
+
+		it("matches catch-all with no remaining segments", () => {
+			expect(matchPath("/files/*", "/files")).toEqual({
+				matched: true,
+				params: { "*": [] },
+			});
+		});
+
+		it("matches catch-all with single segment", () => {
+			expect(matchPath("/files/*", "/files/readme.txt")).toEqual({
+				matched: true,
+				params: { "*": ["readme.txt"] },
+			});
+		});
+
+		it("returns false when catch-all is not last segment", () => {
+			expect(matchPath("/files/*/more", "/files/a/b/more")).toEqual({
+				matched: false,
+				params: {},
+			});
+		});
+
+		it("matches catch-all after dynamic param", () => {
+			expect(matchPath("/users/:id/*", "/users/123/posts/456")).toEqual({
+				matched: true,
+				params: { id: "123", "*": ["posts", "456"] },
+			});
+		});
+
+		it("returns false when prefix doesn't match", () => {
+			expect(matchPath("/files/*", "/images/a/b")).toEqual({
+				matched: false,
+				params: {},
+			});
+		});
+
+		it("matches root catch-all", () => {
+			expect(matchPath("/*", "/any/path/here")).toEqual({
+				matched: true,
+				params: { "*": ["any", "path", "here"] },
+			});
+		});
+
+		it("matches root catch-all with no segments", () => {
+			expect(matchPath("/*", "/")).toEqual({
+				matched: true,
+				params: { "*": [] },
+			});
+		});
+	});
 });

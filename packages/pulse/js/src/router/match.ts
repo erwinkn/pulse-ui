@@ -4,15 +4,16 @@
 
 export interface MatchResult {
 	matched: boolean;
-	params: Record<string, string | undefined>;
+	params: Record<string, string | undefined | string[]>;
 }
 
 /**
  * Match a path pattern against an actual path.
- * Supports static paths, dynamic params (e.g., :id), and optional params (e.g., :id?).
+ * Supports static paths, dynamic params (e.g., :id), optional params (e.g., :id?),
+ * and catch-all (*) for matching remaining segments.
  *
- * @param pattern - The route pattern (e.g., '/users/:id?')
- * @param path - The actual path to match (e.g., '/users/123')
+ * @param pattern - The route pattern (e.g., '/files/*')
+ * @param path - The actual path to match (e.g., '/files/a/b/c')
  * @returns MatchResult indicating if matched and extracted params
  */
 export function matchPath(pattern: string, path: string): MatchResult {
@@ -24,18 +25,34 @@ export function matchPath(pattern: string, path: string): MatchResult {
 	const patternSegments = normalizedPattern.split("/").filter(Boolean);
 	const pathSegments = normalizedPath.split("/").filter(Boolean);
 
-	// Count required segments (non-optional)
-	const requiredCount = patternSegments.filter((seg) => !seg.endsWith("?")).length;
+	// Check for catch-all (*) - must be last segment
+	const catchAllIndex = patternSegments.indexOf("*");
+	const hasCatchAll = catchAllIndex !== -1;
 
-	// Path must have at least required segments, at most all pattern segments
-	if (pathSegments.length < requiredCount || pathSegments.length > patternSegments.length) {
+	if (hasCatchAll && catchAllIndex !== patternSegments.length - 1) {
+		// Catch-all must be last segment
 		return { matched: false, params: {} };
 	}
 
-	const params: Record<string, string | undefined> = {};
+	// Segments before catch-all (or all segments if no catch-all)
+	const prefixSegments = hasCatchAll ? patternSegments.slice(0, -1) : patternSegments;
 
-	for (let i = 0; i < patternSegments.length; i++) {
-		const patternSeg = patternSegments[i];
+	// Count required segments (non-optional, excluding catch-all)
+	const requiredCount = prefixSegments.filter((seg) => !seg.endsWith("?")).length;
+
+	// Path must have at least required segments
+	// Without catch-all: also at most all pattern segments
+	if (pathSegments.length < requiredCount) {
+		return { matched: false, params: {} };
+	}
+	if (!hasCatchAll && pathSegments.length > patternSegments.length) {
+		return { matched: false, params: {} };
+	}
+
+	const params: Record<string, string | undefined | string[]> = {};
+
+	for (let i = 0; i < prefixSegments.length; i++) {
+		const patternSeg = prefixSegments[i];
 		const pathSeg = pathSegments[i];
 		const isOptional = patternSeg.endsWith("?");
 
@@ -50,6 +67,11 @@ export function matchPath(pattern: string, path: string): MatchResult {
 			// Missing required static segment
 			return { matched: false, params: {} };
 		}
+	}
+
+	// Handle catch-all: capture remaining segments as array
+	if (hasCatchAll) {
+		params["*"] = pathSegments.slice(prefixSegments.length);
 	}
 
 	return { matched: true, params };

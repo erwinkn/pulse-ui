@@ -15,6 +15,6 @@ export {
 	usePulseRouterContext,
 } from "./context";
 export type { LinkProps } from "./link";
-export { Link } from "./link";
+export { isExternalUrl, Link } from "./link";
 export type { MatchResult, RouteMatch } from "./match";
 export { compareRoutes, matchPath, selectBestMatch } from "./match";

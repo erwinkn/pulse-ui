@@ -113,6 +113,11 @@ class Renderer:
 	# ------------------------------------------------------------------
 
 	def render_tree(self, node: Node, path: str = "") -> tuple[Any, Node]:
+		# Import here to avoid circular import
+		from pulse.error_boundary import ErrorBoundary
+
+		if isinstance(node, ErrorBoundary):
+			return self.render_error_boundary(node, path)
 		if isinstance(node, PulseNode):
 			return self.render_component(node, path)
 		if isinstance(node, Element):
@@ -134,6 +139,42 @@ class Renderer:
 		vdom, normalized_child = self.render_tree(rendered, path)
 		component.contents = normalized_child
 		return vdom, component
+
+	def render_error_boundary(self, boundary: Any, path: str) -> tuple[VDOMNode, Node]:
+		"""Render ErrorBoundary as React ErrorBoundary mount point.
+
+		Server-side errors are caught during render_children() and
+		rendered with Python fallback. The resulting VDOM is wrapped
+		in a React ErrorBoundary for client-side error handling.
+
+		Returns the normalized children node (not the boundary itself)
+		since ErrorBoundary is a wrapper, not a persistent node.
+		"""
+		# render_children catches server-side errors
+		children_node = boundary.render_children()
+
+		# Render children to VDOM
+		children_vdom, normalized_children = self.render_tree(
+			children_node, f"{path}.0" if path else "0"
+		)
+
+		# Build React ErrorBoundary mount point
+		vdom_node: VDOMElement = {"tag": f"{MOUNT_PREFIX}ErrorBoundary"}
+
+		# Pass client_fallback prop if provided
+		if boundary.client_fallback is not None:
+			vdom_node["props"] = {"fallback": CALLBACK_PLACEHOLDER}
+			vdom_node["eval"] = ["fallback"]
+			cb_path = join_path(path, "fallback")
+			register_callback(self.callbacks, cb_path, boundary.client_fallback)
+
+		# Add children
+		vdom_node["children"] = [children_vdom]
+
+		# Return normalized children as the persistent node
+		# The boundary wrapper doesn't need to persist since
+		# the React ErrorBoundary handles client-side errors
+		return vdom_node, normalized_children
 
 	def render_node(self, element: Element, path: str) -> tuple[VDOMNode, Element]:
 		tag = self.render_tag(element.tag)

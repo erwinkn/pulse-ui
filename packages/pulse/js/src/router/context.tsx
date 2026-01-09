@@ -94,3 +94,13 @@ export function usePulseRouterContext(): PulseRouterContextValue {
 export function useLocation(): Location {
 	return usePulseRouterContext().location;
 }
+
+/**
+ * Hook to access route params from the nearest PulseRouterContext.
+ * Returns scoped params - only params extracted at the current route level.
+ * Parent route params are accessed via Pulse Context (server state).
+ * Throws if used outside a PulseRouterProvider.
+ */
+export function useParams(): Params {
+	return usePulseRouterContext().params;
+}

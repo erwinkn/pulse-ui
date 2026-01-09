@@ -10,6 +10,7 @@ export {
 	PulseRouterContext,
 	PulseRouterProvider,
 	useLocation,
+	useParams,
 	usePulseRouterContext,
 } from "./context";
 export type { MatchResult, RouteMatch } from "./match";

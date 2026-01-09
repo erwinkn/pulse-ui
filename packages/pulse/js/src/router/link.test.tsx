@@ -1,9 +1,46 @@
-import { describe, expect, it, mock } from "bun:test";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { NavigateFn } from "./context";
 import { PulseRouterProvider } from "./context";
 import { isExternalUrl, Link } from "./link";
+
+// Mock IntersectionObserver
+type MockIntersectionObserverCallback = (entries: IntersectionObserverEntry[]) => void;
+
+class MockIntersectionObserver {
+	static instances: MockIntersectionObserver[] = [];
+	callback: MockIntersectionObserverCallback;
+	observedElements: Element[] = [];
+
+	constructor(callback: MockIntersectionObserverCallback) {
+		this.callback = callback;
+		MockIntersectionObserver.instances.push(this);
+	}
+
+	observe(element: Element) {
+		this.observedElements.push(element);
+	}
+
+	unobserve(element: Element) {
+		this.observedElements = this.observedElements.filter((el) => el !== element);
+	}
+
+	disconnect() {
+		this.observedElements = [];
+	}
+
+	// Simulate element entering viewport
+	simulateIntersection(isIntersecting: boolean) {
+		for (const element of this.observedElements) {
+			this.callback([{ isIntersecting, target: element } as IntersectionObserverEntry]);
+		}
+	}
+
+	static reset() {
+		MockIntersectionObserver.instances = [];
+	}
+}
 
 describe("isExternalUrl", () => {
 	it("returns false for relative paths", () => {
@@ -135,6 +172,103 @@ describe("Link", () => {
 
 			expect(customOnClick).toHaveBeenCalled();
 			expect(mockNavigate).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("viewport prefetch", () => {
+		let originalIntersectionObserver: typeof IntersectionObserver;
+		let consoleLogSpy: ReturnType<typeof spyOn>;
+
+		beforeEach(() => {
+			// Clean up any previous renders first
+			cleanup();
+			MockIntersectionObserver.reset();
+			originalIntersectionObserver = globalThis.IntersectionObserver;
+			globalThis.IntersectionObserver =
+				MockIntersectionObserver as unknown as typeof IntersectionObserver;
+			consoleLogSpy = spyOn(console, "log").mockImplementation(() => {});
+		});
+
+		afterEach(() => {
+			globalThis.IntersectionObserver = originalIntersectionObserver;
+			consoleLogSpy.mockRestore();
+			cleanup();
+		});
+
+		it("sets up IntersectionObserver for internal links", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(<Link href="/about">About</Link>, { wrapper: createWrapper(mockNavigate) });
+
+			expect(MockIntersectionObserver.instances.length).toBe(1);
+			expect(MockIntersectionObserver.instances[0].observedElements.length).toBe(1);
+		});
+
+		it("fires prefetch event when link enters viewport", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(<Link href="/about">About</Link>, { wrapper: createWrapper(mockNavigate) });
+
+			const observer = MockIntersectionObserver.instances[0];
+			observer.simulateIntersection(true);
+
+			expect(consoleLogSpy).toHaveBeenCalledWith("[prefetch] /about");
+		});
+
+		it("fires prefetch event only once", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(<Link href="/about">About</Link>, { wrapper: createWrapper(mockNavigate) });
+
+			const observer = MockIntersectionObserver.instances[0];
+			observer.simulateIntersection(true);
+			observer.simulateIntersection(true);
+			observer.simulateIntersection(true);
+
+			expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not fire prefetch when not intersecting", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(<Link href="/about">About</Link>, { wrapper: createWrapper(mockNavigate) });
+
+			const observer = MockIntersectionObserver.instances[0];
+			observer.simulateIntersection(false);
+
+			expect(consoleLogSpy).not.toHaveBeenCalled();
+		});
+
+		it("does not set up observer when prefetch={false}", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			render(
+				<Link href="/about" prefetch={false}>
+					About
+				</Link>,
+				{ wrapper: createWrapper(mockNavigate) },
+			);
+
+			expect(MockIntersectionObserver.instances.length).toBe(0);
+		});
+
+		it("does not set up observer for external links", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			// Use a different domain that's definitely external (not same as window.location.origin)
+			render(<Link href="https://google.com">External</Link>, {
+				wrapper: createWrapper(mockNavigate),
+			});
+
+			expect(MockIntersectionObserver.instances.length).toBe(0);
+		});
+
+		it("disconnects observer on unmount", () => {
+			const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+			const { unmount } = render(<Link href="/about">About</Link>, {
+				wrapper: createWrapper(mockNavigate),
+			});
+
+			const observer = MockIntersectionObserver.instances[0];
+			expect(observer.observedElements.length).toBe(1);
+
+			unmount();
+
+			expect(observer.observedElements.length).toBe(0);
 		});
 	});
 });

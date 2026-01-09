@@ -1,4 +1,10 @@
-import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from "react";
+import {
+	type AnchorHTMLAttributes,
+	type MouseEvent,
+	type ReactNode,
+	useEffect,
+	useRef,
+} from "react";
 import { useNavigate } from "./context";
 
 /**
@@ -27,6 +33,8 @@ export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>,
 	children?: ReactNode;
 	replace?: boolean;
 	state?: unknown;
+	/** Enable viewport prefetch. Defaults to true. Set to false to disable. */
+	prefetch?: boolean;
 }
 
 /**
@@ -34,9 +42,51 @@ export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>,
  * Renders an anchor tag but intercepts clicks to use client-side navigation.
  * External links (different origin) are rendered without interception.
  */
-export function Link({ href, children, replace, state, onClick, ...rest }: LinkProps) {
+export function Link({
+	href,
+	children,
+	replace,
+	state,
+	onClick,
+	prefetch = true,
+	...rest
+}: LinkProps) {
 	const navigate = useNavigate();
 	const isExternal = isExternalUrl(href);
+	const anchorRef = useRef<HTMLAnchorElement>(null);
+	const prefetchedRef = useRef(false);
+
+	// Set up IntersectionObserver for viewport prefetch
+	useEffect(() => {
+		// Skip if external, prefetch disabled, or already prefetched
+		if (isExternal || !prefetch || prefetchedRef.current) {
+			return;
+		}
+
+		const element = anchorRef.current;
+		if (!element) {
+			return;
+		}
+
+		const observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					if (entry.isIntersecting && !prefetchedRef.current) {
+						prefetchedRef.current = true;
+						console.log(`[prefetch] ${href}`);
+						observer.disconnect();
+					}
+				}
+			},
+			{ rootMargin: "0px" },
+		);
+
+		observer.observe(element);
+
+		return () => {
+			observer.disconnect();
+		};
+	}, [href, isExternal, prefetch]);
 
 	function handleClick(e: MouseEvent<HTMLAnchorElement>) {
 		// Call any existing onClick handler first
@@ -59,7 +109,7 @@ export function Link({ href, children, replace, state, onClick, ...rest }: LinkP
 		navigate(href, { replace, state });
 	}
 
-	// External links render without click interception
+	// External links render without click interception or prefetch
 	if (isExternal) {
 		return (
 			<a href={href} onClick={onClick} {...rest}>
@@ -69,7 +119,7 @@ export function Link({ href, children, replace, state, onClick, ...rest }: LinkP
 	}
 
 	return (
-		<a href={href} onClick={handleClick} {...rest}>
+		<a ref={anchorRef} href={href} onClick={handleClick} {...rest}>
 			{children}
 		</a>
 	);

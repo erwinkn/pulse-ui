@@ -107,3 +107,12 @@ Started: 2026-01-09
   - Main index chunk contains React and shared dependencies (~192KB)
 
 ---
+## 2026-01-09 - F-0014
+- Verified SSR renders correct HTML for all 3 routes
+- Files tested: poc/server/ssr.ts (no changes needed, already working)
+- **Learnings:**
+  - SSR server correctly renders HomeWidget, DashboardChart, SettingsForm via POST /render
+  - Returns both html (rendered string) and vdom (for client hydration)
+  - Server runs on port 3001, can be stopped with pkill
+
+---

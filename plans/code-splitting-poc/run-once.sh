@@ -7,7 +7,7 @@ echo "🔍 Running single iteration (for testing PRD quality)"
 echo "Plan: $SCRIPT_DIR"
 echo ""
 
-cat "$SCRIPT_DIR/prompt.md" | claude --dangerously-skip-permissions
+claude -p --dangerously-skip-permissions --verbose < "$SCRIPT_DIR/prompt.md"
 
 echo ""
 echo "Single iteration complete."

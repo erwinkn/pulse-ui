@@ -14,9 +14,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   echo "  Iteration $i of $MAX_ITERATIONS"
   echo "═══════════════════════════════════════"
 
-  OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" \
-    | claude --dangerously-skip-permissions 2>&1 \
-    | tee /dev/stderr) || true
+  OUTPUT=$(claude -p --dangerously-skip-permissions --verbose < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr) || true
 
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""

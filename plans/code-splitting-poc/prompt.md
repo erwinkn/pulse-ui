@@ -12,6 +12,7 @@
 8. Commit: `feat: [ID] - [Title]`
 9. Update prd.json: `passes: true`
 10. Append learnings to progress.txt
+11. Stop after implementing this single feature
 
 ## Progress Format
 

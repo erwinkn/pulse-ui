@@ -69,7 +69,7 @@
         "`make test` passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Catch-all returns array of remaining path segments.",
       "tests": [
         "make all"
@@ -90,7 +90,7 @@
         "`make test` passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Specificity: static > dynamic > optional > catch-all. Compare segment-by-segment.",
       "tests": [
         "make all"
@@ -109,7 +109,7 @@
         "All tests pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Steel wire checkpoint - route matching is foundation for everything else.",
       "tests": [
         "make all"

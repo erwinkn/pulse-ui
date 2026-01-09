@@ -116,3 +116,12 @@ Started: 2026-01-09
   - Server runs on port 3001, can be stopped with pkill
 
 ---
+## 2026-01-09 - F-0015
+- Added convenience scripts to package.json
+- Files changed: poc/package.json
+- **Learnings:**
+  - Removed `tsc -b &&` from build script since Vite handles TypeScript
+  - Removed lint script (not needed for POC)
+  - Scripts: dev, build, preview, ssr, analyze
+
+---

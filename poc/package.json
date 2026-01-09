@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "build": "vite build",
+    "preview": "vite preview",
+    "ssr": "bun server/ssr.ts",
+    "analyze": "bun test/bundle-analysis.ts"
   },
   "dependencies": {
     "date-fns": "^4.1.0",

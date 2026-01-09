@@ -7,6 +7,7 @@ Started: 2026-01-09
 
 ## Key Files
 - `packages/pulse/js/src/router/match.ts` - Route matching logic
+- `packages/pulse/js/src/router/context.tsx` - Router context provider and types
 - `packages/pulse/js/src/router/index.ts` - Router public exports
 
 ---
@@ -75,5 +76,16 @@ Started: 2026-01-09
   - Root catch-all `/*` matches `/` with empty array, so avoid using with static `/` route
   - `it.each()` from bun:test supports parameterized tests with `$variable` syntax
   - Steel wire checkpoint: route matching is foundation for router context and navigation
+
+---
+
+## 2026-01-09 - F-0007
+- Created PulseRouterContext provider
+- Files: `packages/pulse/js/src/router/context.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - Context types: `Location` (pathname, search, hash, state), `Params` (matches MatchResult params type)
+  - `NavigateFn` is overloaded: accepts `(to: string, options?)` or `(delta: number)` for history nav
+  - `usePulseRouterContext()` internal hook throws if outside provider (used by future hooks)
+  - PulseRouterProvider takes location, params, navigate as props (will be injected by Python)
 
 ---

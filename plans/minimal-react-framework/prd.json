@@ -129,7 +129,7 @@
         "`make typecheck` passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Single merged context. Will be injected by Python into VDOM.",
       "tests": [
         "make all"

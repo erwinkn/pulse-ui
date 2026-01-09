@@ -1,0 +1,1118 @@
+{
+  "branchName": "minimal-react-framework",
+  "features": [
+    {
+      "id": "F-0001",
+      "title": "Create route matcher for static paths",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/router/match.ts`",
+        "`matchPath('/users', '/users')` returns `{ params: {}, matched: true }`",
+        "`matchPath('/users', '/posts')` returns `{ matched: false }`",
+        "Export `matchPath` function from router module",
+        "`make typecheck` passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Foundation for all routing. Keep it minimal - just static path comparison.",
+      "tests": ["make all"],
+      "dependencies": []
+    },
+    {
+      "id": "F-0002",
+      "title": "Add dynamic param matching (:id)",
+      "acceptanceCriteria": [
+        "`matchPath('/users/:id', '/users/123')` returns `{ params: { id: '123' }, matched: true }`",
+        "`matchPath('/users/:userId/posts/:postId', '/users/1/posts/2')` returns `{ params: { userId: '1', postId: '2' } }`",
+        "`matchPath('/users/:id', '/users')` returns `{ matched: false }` (missing required param)",
+        "`make test` passes for router/match.test.ts"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Dynamic segments start with `:`. Extract param values into params object.",
+      "tests": ["make all"],
+      "dependencies": ["F-0001"]
+    },
+    {
+      "id": "F-0003",
+      "title": "Add optional segment matching (:id?)",
+      "acceptanceCriteria": [
+        "`matchPath('/users/:id?', '/users')` matches with `{ params: { id: undefined } }`",
+        "`matchPath('/users/:id?', '/users/123')` matches with `{ params: { id: '123' } }`",
+        "`matchPath('/a/:b?/:c?', '/a')` matches with `{ params: { b: undefined, c: undefined } }`",
+        "`matchPath('/a/:b?/:c?', '/a/1')` matches with `{ params: { b: '1', c: undefined } }`",
+        "`matchPath('/a/:b?/:c?', '/a/1/2')` matches with `{ params: { b: '1', c: '2' } }`",
+        "`make test` passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Optional segments end with `?`. All permutations must work.",
+      "tests": ["make all"],
+      "dependencies": ["F-0002"]
+    },
+    {
+      "id": "F-0004",
+      "title": "Add catch-all matching (*)",
+      "acceptanceCriteria": [
+        "`matchPath('/files/*', '/files/a/b/c')` returns `{ params: { '*': ['a', 'b', 'c'] } }`",
+        "`matchPath('/files/*', '/files')` returns `{ params: { '*': [] } }`",
+        "Catch-all must be last segment (validation)",
+        "`make test` passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Catch-all returns array of remaining path segments.",
+      "tests": ["make all"],
+      "dependencies": ["F-0003"]
+    },
+    {
+      "id": "F-0005",
+      "title": "Add per-segment specificity comparison",
+      "acceptanceCriteria": [
+        "Create `compareRoutes(a, b)` function returning -1, 0, or 1",
+        "Static segments rank higher than dynamic: `/users/admin` beats `/users/:id`",
+        "Dynamic segments rank higher than optional: `/users/:id` beats `/users/:id?`",
+        "Optional segments rank higher than catch-all: `/files/:name?` beats `/files/*`",
+        "`selectBestMatch([...routes], '/users/admin')` returns the most specific match",
+        "`make test` passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Specificity: static > dynamic > optional > catch-all. Compare segment-by-segment.",
+      "tests": ["make all"],
+      "dependencies": ["F-0004"]
+    },
+    {
+      "id": "F-0006",
+      "title": "Verify route matching with integration test",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/router/__tests__/match.integration.test.ts`",
+        "Test complex route tree: nested routes, layouts, mixed segment types",
+        "Verify correct route selected for 10+ different paths",
+        "All tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Steel wire checkpoint - route matching is foundation for everything else.",
+      "tests": ["make all"],
+      "dependencies": ["F-0005"]
+    },
+    {
+      "id": "F-0007",
+      "title": "Create PulseRouterContext provider",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/router/context.tsx`",
+        "`PulseRouterContext` React context with `{ location, params, navigate }`",
+        "`PulseRouterProvider` component that wraps children with context",
+        "Export from `packages/pulse/js/src/router/index.ts`",
+        "`make typecheck` passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Single merged context. Will be injected by Python into VDOM.",
+      "tests": ["make all"],
+      "dependencies": ["F-0006"]
+    },
+    {
+      "id": "F-0008",
+      "title": "Implement useLocation hook",
+      "acceptanceCriteria": [
+        "Create `useLocation()` hook in context.tsx",
+        "Returns `{ pathname, search, hash, state }` from nearest PulseRouterContext",
+        "Throws error if used outside PulseRouterProvider",
+        "Add test: `router/context.test.tsx`",
+        "`make test` passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "",
+      "tests": ["make all"],
+      "dependencies": ["F-0007"]
+    },
+    {
+      "id": "F-0009",
+      "title": "Implement useParams hook (scoped)",
+      "acceptanceCriteria": [
+        "Create `useParams()` hook in context.tsx",
+        "Returns params from nearest PulseRouterContext (scoped to current route level)",
+        "Returns `Record<string, string | string[] | undefined>`",
+        "Throws error if used outside PulseRouterProvider",
+        "Add tests for scoped params behavior",
+        "`make test` passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Scoped params - each route level sees only its own params. Parent params via Pulse Context.",
+      "tests": ["make all"],
+      "dependencies": ["F-0008"]
+    },
+    {
+      "id": "F-0010",
+      "title": "Implement useNavigate hook",
+      "acceptanceCriteria": [
+        "Create `useNavigate()` hook returning `NavigateFn`",
+        "`navigate('/path')` - basic navigation",
+        "`navigate('/path', { replace: true })` - replace history",
+        "`navigate('/path', { state: {...} })` - with state",
+        "`navigate('../sibling')` - relative path resolution",
+        "`navigate(-1)` - go back in history",
+        "Add tests for all navigation options",
+        "`make test` passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Full navigation options. Relative paths resolved from current location.",
+      "tests": ["make all"],
+      "dependencies": ["F-0009"]
+    },
+    {
+      "id": "F-0011",
+      "title": "Verify router context with nested providers",
+      "acceptanceCriteria": [
+        "Create test with nested PulseRouterProviders (simulating layout > page)",
+        "Verify inner provider shadows outer provider's params",
+        "Verify useLocation returns consistent location across levels",
+        "Verify useNavigate works from any level",
+        "All tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Steel wire checkpoint - context scoping is critical for layouts.",
+      "tests": ["make all"],
+      "dependencies": ["F-0010"]
+    },
+    {
+      "id": "F-0012",
+      "title": "Create Link component skeleton",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/router/link.tsx`",
+        "Link renders `<a>` tag with href attribute",
+        "Click handler calls `navigate()` and prevents default",
+        "Passes through className, children, and standard anchor props",
+        "Export from router/index.ts",
+        "`make typecheck` passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Basic Link first, prefetching added later.",
+      "tests": ["make all"],
+      "dependencies": ["F-0011"]
+    },
+    {
+      "id": "F-0013",
+      "title": "Add external link detection to Link",
+      "acceptanceCriteria": [
+        "Link with `href='https://example.com'` renders normal `<a>` without click handler",
+        "Link with `href='http://...'` detected as external",
+        "Link with different origin detected as external",
+        "External links open normally (no preventDefault)",
+        "Add tests for external URL detection",
+        "`make test` passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Auto-detect external = starts with http:// or different origin.",
+      "tests": ["make all"],
+      "dependencies": ["F-0012"]
+    },
+    {
+      "id": "F-0014",
+      "title": "Add viewport prefetch to Link",
+      "acceptanceCriteria": [
+        "Link uses IntersectionObserver to detect viewport entry",
+        "When Link enters viewport, fire prefetch event (console.log for now)",
+        "`prefetch={false}` disables viewport prefetch",
+        "Cleanup observer on unmount",
+        "Add tests with mock IntersectionObserver",
+        "`make test` passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Viewport prefetch is default behavior. Actual prefetch logic wired later.",
+      "tests": ["make all"],
+      "dependencies": ["F-0013"]
+    },
+    {
+      "id": "F-0015",
+      "title": "Add hover prefetch fallback to Link",
+      "acceptanceCriteria": [
+        "When `prefetch={false}`, Link prefetches on mouseenter",
+        "Immediate trigger (no debounce) matching Next.js behavior",
+        "Prefetch fires only once per Link instance",
+        "Add tests for hover prefetch",
+        "`make test` passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Hover fallback when viewport prefetch disabled.",
+      "tests": ["make all"],
+      "dependencies": ["F-0014"]
+    },
+    {
+      "id": "F-0016",
+      "title": "Create navigation progress indicator",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/router/progress.tsx`",
+        "Thin bar at top of viewport (default styling)",
+        "Shows during navigation (triggered via context)",
+        "Animates width from 0% to ~90%, then completes on navigation end",
+        "Export from router/index.ts",
+        "`make typecheck` passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Built-in default, configurable/replaceable.",
+      "tests": ["make all"],
+      "dependencies": ["F-0015"]
+    },
+    {
+      "id": "F-0017",
+      "title": "Verify Link and progress with manual test",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/router/__tests__/link.integration.test.tsx`",
+        "Test Link renders correctly with all prop combinations",
+        "Test progress indicator shows/hides based on navigation state",
+        "All tests pass"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Steel wire checkpoint - Link component complete.",
+      "tests": ["make all"],
+      "dependencies": ["F-0016"]
+    },
+    {
+      "id": "F-0018",
+      "title": "Add hash scroll support",
+      "acceptanceCriteria": [
+        "Navigation to `/page#section` scrolls to element with id='section'",
+        "Smooth scroll behavior when element exists",
+        "No error when element doesn't exist",
+        "Works on initial page load and client navigation",
+        "Add tests for hash scroll",
+        "`make test` passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Built-in hash scroll to anchor.",
+      "tests": ["make all"],
+      "dependencies": ["F-0017"]
+    },
+    {
+      "id": "F-0019",
+      "title": "Export router as public API",
+      "acceptanceCriteria": [
+        "Update `packages/pulse/js/src/router/index.ts` to export all public APIs",
+        "Exports: matchPath, selectBestMatch, PulseRouterProvider, useLocation, useParams, useNavigate, Link, NavigationProgress",
+        "Update main package exports if needed",
+        "`make typecheck` passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "Public API surface for router module.",
+      "tests": ["make all"],
+      "dependencies": ["F-0018"]
+    },
+    {
+      "id": "F-0020",
+      "title": "Create React ErrorBoundary component",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/error-boundary.tsx`",
+        "React class component implementing componentDidCatch",
+        "Catches errors in child component tree",
+        "Renders fallback UI when error caught",
+        "Provides reset function to clear error state",
+        "`make typecheck` passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Client-side error boundary for React errors.",
+      "tests": ["make all"],
+      "dependencies": ["F-0019"]
+    },
+    {
+      "id": "F-0021",
+      "title": "Create default error fallback UI",
+      "acceptanceCriteria": [
+        "Create DefaultErrorFallback component in error-boundary.tsx",
+        "Shows error message",
+        "Shows stack trace in dev mode only (check NODE_ENV)",
+        "Shows 'Retry' button that calls reset function",
+        "Minimal styling that works without CSS framework",
+        "`make typecheck` passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "Identical visuals planned for Python side later.",
+      "tests": ["make all"],
+      "dependencies": ["F-0020"]
+    },
+    {
+      "id": "F-0022",
+      "title": "Add custom fallback support to ErrorBoundary",
+      "acceptanceCriteria": [
+        "ErrorBoundary accepts `fallback` prop: `(error, reset) => ReactNode`",
+        "Uses custom fallback when provided, default otherwise",
+        "TypeScript types for fallback prop",
+        "Add tests for custom fallback rendering",
+        "`make test` passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "Allows custom error UI per boundary.",
+      "tests": ["make all"],
+      "dependencies": ["F-0021"]
+    },
+    {
+      "id": "F-0023",
+      "title": "Verify ErrorBoundary catches errors",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/__tests__/error-boundary.test.tsx`",
+        "Test: error in child triggers boundary",
+        "Test: default fallback renders with error message",
+        "Test: custom fallback receives error and reset",
+        "Test: reset clears error and re-renders children",
+        "All tests pass"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "Steel wire checkpoint - error boundary working.",
+      "tests": ["make all"],
+      "dependencies": ["F-0022"]
+    },
+    {
+      "id": "F-0024",
+      "title": "Create Bun render server skeleton",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/server/server.ts`",
+        "Bun.serve() with POST /render endpoint",
+        "Returns 200 with placeholder HTML for now",
+        "Health check endpoint: GET /health returns 200",
+        "Server starts on port from env or default 3001",
+        "`bun run packages/pulse/js/src/server/server.ts` starts without error"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "Minimal server first, rendering logic added next.",
+      "tests": ["make all"],
+      "dependencies": ["F-0023"]
+    },
+    {
+      "id": "F-0025",
+      "title": "Implement React SSR rendering",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/server/render.tsx`",
+        "Function `renderVdom(vdom, config)` that calls `renderToString`",
+        "Accepts VDOM JSON and returns HTML string",
+        "Wraps with PulseRouterProvider from config.routeInfo",
+        "Import in server.ts and use in /render endpoint",
+        "`make typecheck` passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": "renderToString, not streaming (future work).",
+      "tests": ["make all"],
+      "dependencies": ["F-0024"]
+    },
+    {
+      "id": "F-0026",
+      "title": "Add component registry to SSR server",
+      "acceptanceCriteria": [
+        "Create component registry in render.tsx",
+        "Registry maps string names to React components",
+        "VDOM nodes with `type: 'ComponentName'` resolve from registry",
+        "Unknown component throws clear error",
+        "Add basic components to registry (div, span, button, etc.)",
+        "`make typecheck` passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": "Python references components by name, Bun resolves from registry.",
+      "tests": ["make all"],
+      "dependencies": ["F-0025"]
+    },
+    {
+      "id": "F-0027",
+      "title": "Verify SSR renders simple VDOM",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/js/src/server/__tests__/render.test.tsx`",
+        "Test: VDOM `{type: 'div', props: {}, children: ['Hello']}` renders `<div>Hello</div>`",
+        "Test: Nested VDOM renders correctly",
+        "Test: Props are applied (className, id, etc.)",
+        "All tests pass"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": "Steel wire checkpoint - basic SSR working.",
+      "tests": ["make all"],
+      "dependencies": ["F-0026"]
+    },
+    {
+      "id": "F-0028",
+      "title": "Add error handling to SSR server",
+      "acceptanceCriteria": [
+        "Invalid VDOM returns HTTP 500 with error message",
+        "Rendering error returns HTTP 500 with stack trace (dev) or generic message (prod)",
+        "Malformed JSON request returns HTTP 400",
+        "Add tests for error responses",
+        "`make test` passes"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": "",
+      "tests": ["make all"],
+      "dependencies": ["F-0027"]
+    },
+    {
+      "id": "F-0029",
+      "title": "Create Python ErrorBoundary component",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/python/src/pulse/error_boundary.py`",
+        "ErrorBoundary(children, fallback=None, client_fallback=None)",
+        "Catches errors during VDOM rendering of children",
+        "Renders fallback(error, reset) when error caught",
+        "Default fallback shows error message",
+        "`make typecheck` passes"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": "Python-side error boundary for rendering errors.",
+      "tests": ["make all"],
+      "dependencies": ["F-0028"]
+    },
+    {
+      "id": "F-0030",
+      "title": "Wire Python ErrorBoundary to React",
+      "acceptanceCriteria": [
+        "ErrorBoundary renders as React ErrorBoundary component in VDOM",
+        "client_fallback prop passed to React component",
+        "Server-side errors show Python fallback",
+        "Client-side errors show React fallback",
+        "Add integration test",
+        "`make test` passes"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": "Both error types displayed with unified component.",
+      "tests": ["make all"],
+      "dependencies": ["F-0029"]
+    },
+    {
+      "id": "F-0031",
+      "title": "Create Pulse Context system",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/python/src/pulse/context.py`",
+        "`pulse_context(**kwargs)` context manager for providing values",
+        "`use_pulse_context(key)` function for consuming values",
+        "Values are immutable snapshots (changes require re-render)",
+        "Raises error if key not found in any parent context",
+        "`make typecheck` passes"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": "Server-side context like React Context but Python-side.",
+      "tests": ["make all"],
+      "dependencies": ["F-0030"]
+    },
+    {
+      "id": "F-0032",
+      "title": "Add context inheritance through route hierarchy",
+      "acceptanceCriteria": [
+        "Child routes inherit parent contexts",
+        "Nested pulse_context() overrides parent values for same keys",
+        "RenderSession tracks context per route path",
+        "Add tests for context inheritance",
+        "`make test` passes"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": "Context flows through layouts to pages.",
+      "tests": ["make all"],
+      "dependencies": ["F-0031"]
+    },
+    {
+      "id": "F-0033",
+      "title": "Verify Pulse Context with nested routes",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/python/tests/test_pulse_context.py`",
+        "Test: provide in layout, consume in page",
+        "Test: nested contexts override correctly",
+        "Test: missing key raises clear error",
+        "Test: parent params accessible via context",
+        "All tests pass"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": "Steel wire checkpoint - context system working.",
+      "tests": ["make all"],
+      "dependencies": ["F-0032"]
+    },
+    {
+      "id": "F-0034",
+      "title": "Update Python renderer for unified VDOM tree",
+      "acceptanceCriteria": [
+        "Python renders full nested route tree as one VDOM",
+        "Layouts + pages merged, Outlets filled in",
+        "Single tree output (not separate per-route)",
+        "RouteMount still tracks per-route state internally",
+        "`make typecheck` passes"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": "Key architectural change - one React tree at root.",
+      "tests": ["make all"],
+      "dependencies": ["F-0033"]
+    },
+    {
+      "id": "F-0035",
+      "title": "Implement Outlet substitution",
+      "acceptanceCriteria": [
+        "Outlet nodes in layout VDOM replaced with child route's VDOM",
+        "Deeply nested routes work (layout > layout > page)",
+        "Missing Outlet in layout raises warning",
+        "Add tests for outlet substitution",
+        "`make test` passes"
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": "Single Outlet for now, multiple Outlets is future work.",
+      "tests": ["make all"],
+      "dependencies": ["F-0034"]
+    },
+    {
+      "id": "F-0036",
+      "title": "Wrap route boundaries with PulseRouterContext in VDOM",
+      "acceptanceCriteria": [
+        "Each route boundary wrapped with PulseRouterContext component in VDOM",
+        "Context receives location and scoped params",
+        "Nested routes have nested contexts (inner shadows outer params)",
+        "Add tests for context injection",
+        "`make test` passes"
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": "How useParams gets scoped values.",
+      "tests": ["make all"],
+      "dependencies": ["F-0035"]
+    },
+    {
+      "id": "F-0037",
+      "title": "Verify unified VDOM tree renders correctly",
+      "acceptanceCriteria": [
+        "Create integration test with layout + nested page",
+        "Verify VDOM structure has merged tree with context wrappers",
+        "Verify SSR produces correct HTML",
+        "All tests pass"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": "Steel wire checkpoint - unified tree working.",
+      "tests": ["make all"],
+      "dependencies": ["F-0036"]
+    },
+    {
+      "id": "F-0038",
+      "title": "Add SSR endpoint to Python app",
+      "acceptanceCriteria": [
+        "Python app has endpoint that receives HTTP request",
+        "Performs route matching",
+        "Prerenders VDOM for matched routes",
+        "POSTs to Bun render server with {vdom, routeInfo, config}",
+        "Returns HTML response to browser",
+        "`make typecheck` passes"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": "Python drives SSR - Bun is stateless renderer.",
+      "tests": ["make all"],
+      "dependencies": ["F-0037"]
+    },
+    {
+      "id": "F-0039",
+      "title": "Implement HTML shell injection",
+      "acceptanceCriteria": [
+        "Python wraps Bun's HTML in full document shell",
+        "Injects `<script id='__PULSE_DATA__'>` with serialized state",
+        "Includes link to client bundle",
+        "Sets correct content-type header",
+        "`make typecheck` passes"
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": "Complete HTML response to browser.",
+      "tests": ["make all"],
+      "dependencies": ["F-0038"]
+    },
+    {
+      "id": "F-0040",
+      "title": "Implement client auto-hydration",
+      "acceptanceCriteria": [
+        "Client reads __PULSE_DATA__ on DOMContentLoaded",
+        "Calls hydrateRoot with parsed VDOM",
+        "No hydration mismatch warnings in console",
+        "Event handlers work after hydration",
+        "Add hydration tests",
+        "`make test` passes"
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": "Auto-hydrate without explicit call from user code.",
+      "tests": ["make all"],
+      "dependencies": ["F-0039"]
+    },
+    {
+      "id": "F-0041",
+      "title": "Verify SSR → hydration roundtrip",
+      "acceptanceCriteria": [
+        "Create E2E test: request page, verify SSR HTML, verify hydration",
+        "No console errors or warnings",
+        "Client navigation works after hydration",
+        "All tests pass"
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": "Steel wire checkpoint - full SSR flow working.",
+      "tests": ["make all"],
+      "dependencies": ["F-0040"]
+    },
+    {
+      "id": "F-0042",
+      "title": "Create codegen layout template without React Router",
+      "acceptanceCriteria": [
+        "Update `packages/pulse/python/src/pulse/codegen/templates/layout.py`",
+        "Template does not import from react-router-dom",
+        "Uses PulseRouterProvider from pulse router",
+        "Generated layouts work with new router",
+        "`make typecheck` passes"
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": "Remove React Router dependency from generated code.",
+      "tests": ["make all"],
+      "dependencies": ["F-0041"]
+    },
+    {
+      "id": "F-0043",
+      "title": "Create codegen route template using custom router",
+      "acceptanceCriteria": [
+        "Update `packages/pulse/python/src/pulse/codegen/templates/route.py`",
+        "Template uses useLocation, useParams, useNavigate from pulse router",
+        "No react-router-dom imports",
+        "Generated routes work with new router",
+        "`make typecheck` passes"
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": "",
+      "tests": ["make all"],
+      "dependencies": ["F-0042"]
+    },
+    {
+      "id": "F-0044",
+      "title": "Update routes.ts generation for custom router",
+      "acceptanceCriteria": [
+        "Update `packages/pulse/python/src/pulse/codegen/templates/routes_ts.py`",
+        "Generated routes.ts uses new route format",
+        "Automatic code splitting per route (dynamic import)",
+        "Route tree structure compatible with matchPath",
+        "`make typecheck` passes"
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": "Each route file becomes its own chunk.",
+      "tests": ["make all"],
+      "dependencies": ["F-0043"]
+    },
+    {
+      "id": "F-0045",
+      "title": "Add managed/exported mode support to codegen",
+      "acceptanceCriteria": [
+        "Add CodegenConfig.mode: 'managed' | 'exported'",
+        "Managed mode: output to .pulse/web/, gitignored",
+        "Exported mode: output to web/, committed",
+        "Mode affects output directory selection",
+        "`make typecheck` passes"
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": "Two modes for different workflows.",
+      "tests": ["make all"],
+      "dependencies": ["F-0044"]
+    },
+    {
+      "id": "F-0046",
+      "title": "Implement checksum-based change detection",
+      "acceptanceCriteria": [
+        "Create .checksums.json in managed mode",
+        "Store hash of each generated file's content",
+        "Only write file if content hash changed",
+        "Add tests for incremental updates",
+        "`make test` passes"
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": "Incremental updates for managed mode.",
+      "tests": ["make all"],
+      "dependencies": ["F-0045"]
+    },
+    {
+      "id": "F-0047",
+      "title": "Add user edit detection in managed mode",
+      "acceptanceCriteria": [
+        "Detect when managed file was edited by user (checksum mismatch)",
+        "Print warning to console about user edits",
+        "Overwrite anyway (warn + overwrite behavior)",
+        "Add tests for edit detection",
+        "`make test` passes"
+      ],
+      "priority": 47,
+      "passes": false,
+      "notes": "User edits to managed files get overwritten with warning.",
+      "tests": ["make all"],
+      "dependencies": ["F-0046"]
+    },
+    {
+      "id": "F-0048",
+      "title": "Verify codegen produces working output",
+      "acceptanceCriteria": [
+        "Create test that runs codegen on sample app",
+        "Generated files pass typecheck",
+        "Generated routes.ts has correct structure",
+        "Code splitting chunks created by Vite build",
+        "All tests pass"
+      ],
+      "priority": 48,
+      "passes": false,
+      "notes": "Steel wire checkpoint - codegen working.",
+      "tests": ["make all"],
+      "dependencies": ["F-0047"]
+    },
+    {
+      "id": "F-0049",
+      "title": "Implement pulse dev command skeleton",
+      "acceptanceCriteria": [
+        "Add `pulse dev <app_file>` command to CLI",
+        "Prints startup message and exits (supervisor logic next)",
+        "--port, --address options parsed",
+        "Remove or deprecate `pulse run`",
+        "`make typecheck` passes"
+      ],
+      "priority": 49,
+      "passes": false,
+      "notes": "Replaces pulse run with dev/build/start pattern.",
+      "tests": ["make all"],
+      "dependencies": ["F-0048"]
+    },
+    {
+      "id": "F-0050",
+      "title": "Implement process supervisor for pulse dev",
+      "acceptanceCriteria": [
+        "`pulse dev` spawns Python server, Vite dev server, Bun SSR server",
+        "Interleaved output with prefixes: [python], [vite], [bun]",
+        "All processes killed if any crashes",
+        "Ctrl+C kills all processes cleanly",
+        "Prints app URL on startup"
+      ],
+      "priority": 50,
+      "passes": false,
+      "notes": "Supervisor manages all three processes.",
+      "tests": ["make all"],
+      "dependencies": ["F-0049"]
+    },
+    {
+      "id": "F-0051",
+      "title": "Add codegen run on pulse dev startup",
+      "acceptanceCriteria": [
+        "`pulse dev` runs codegen before starting servers",
+        "Managed mode: generates to .pulse/web/",
+        "Exported mode: validates existing files, generates pulse/ subdirectory",
+        "Errors in codegen prevent server startup",
+        "`make test` passes"
+      ],
+      "priority": 51,
+      "passes": false,
+      "notes": "",
+      "tests": ["make all"],
+      "dependencies": ["F-0050"]
+    },
+    {
+      "id": "F-0052",
+      "title": "Verify pulse dev starts and serves app",
+      "acceptanceCriteria": [
+        "Create test app in tests/fixtures/",
+        "`pulse dev` starts all three servers",
+        "HTTP request returns SSR HTML",
+        "WebSocket connection established",
+        "Vite HMR working (client changes hot reload)"
+      ],
+      "priority": 52,
+      "passes": false,
+      "notes": "Steel wire checkpoint - dev server working.",
+      "tests": ["make all"],
+      "dependencies": ["F-0051"]
+    },
+    {
+      "id": "F-0053",
+      "title": "Implement pulse build command",
+      "acceptanceCriteria": [
+        "Add `pulse build <app_file>` command",
+        "Runs codegen",
+        "Runs TypeScript + Python type check",
+        "Runs Vite production build",
+        "Output to web/dist/ or .pulse/web/dist/",
+        "`make typecheck` passes"
+      ],
+      "priority": 53,
+      "passes": false,
+      "notes": "Production build step.",
+      "tests": ["make all"],
+      "dependencies": ["F-0052"]
+    },
+    {
+      "id": "F-0054",
+      "title": "Add --compile option to pulse build",
+      "acceptanceCriteria": [
+        "`pulse build --compile` compiles Bun SSR server to single executable",
+        "Executable placed in web/server/ or .pulse/web/server/",
+        "Executable runs standalone without Bun installed",
+        "--no-check option skips type checking"
+      ],
+      "priority": 54,
+      "passes": false,
+      "notes": "Faster cold start with compiled binary.",
+      "tests": ["make all"],
+      "dependencies": ["F-0053"]
+    },
+    {
+      "id": "F-0055",
+      "title": "Implement pulse start command",
+      "acceptanceCriteria": [
+        "Add `pulse start <app_file>` command",
+        "Fails if build artifacts not found (requires prior pulse build)",
+        "Spawns Python server (uvicorn, no reload)",
+        "Spawns Bun SSR server (pre-built assets)",
+        "--port, --address, --workers options",
+        "Default address 0.0.0.0 for production"
+      ],
+      "priority": 55,
+      "passes": false,
+      "notes": "Production server command.",
+      "tests": ["make all"],
+      "dependencies": ["F-0054"]
+    },
+    {
+      "id": "F-0056",
+      "title": "Implement pulse init command",
+      "acceptanceCriteria": [
+        "Add `pulse init [directory]` command",
+        "Creates minimal project structure",
+        "Exported mode by default",
+        "--managed flag for managed mode",
+        "Generates pyproject.toml, app.py, web/ directory",
+        "No UI library included (bare bones)"
+      ],
+      "priority": 56,
+      "passes": false,
+      "notes": "New project scaffolding.",
+      "tests": ["make all"],
+      "dependencies": ["F-0055"]
+    },
+    {
+      "id": "F-0057",
+      "title": "Implement pulse export command",
+      "acceptanceCriteria": [
+        "Add `pulse export` command",
+        "Copies .pulse/web/ to web/",
+        "Adds customization comments to editable files",
+        "Updates .gitignore (removes .pulse/, adds web/pulse/)",
+        "Works only from managed mode project"
+      ],
+      "priority": 57,
+      "passes": false,
+      "notes": "Convert managed to exported mode.",
+      "tests": ["make all"],
+      "dependencies": ["F-0056"]
+    },
+    {
+      "id": "F-0058",
+      "title": "Verify CLI commands with integration tests",
+      "acceptanceCriteria": [
+        "Create `packages/pulse/python/tests/test_cli.py`",
+        "Test: pulse init creates correct structure",
+        "Test: pulse build produces dist/ artifacts",
+        "Test: pulse start fails without build",
+        "Test: pulse export converts mode",
+        "All tests pass"
+      ],
+      "priority": 58,
+      "passes": false,
+      "notes": "Steel wire checkpoint - CLI working.",
+      "tests": ["make all"],
+      "dependencies": ["F-0057"]
+    },
+    {
+      "id": "F-0059",
+      "title": "Implement navigation state sync to Python",
+      "acceptanceCriteria": [
+        "Client navigation sends state object via WebSocket",
+        "Python receives navigation state in handler",
+        "State includes: pathname, search, hash, state object",
+        "Add tests for state sync",
+        "`make test` passes"
+      ],
+      "priority": 59,
+      "passes": false,
+      "notes": "Full navigation state available in Python.",
+      "tests": ["make all"],
+      "dependencies": ["F-0058"]
+    },
+    {
+      "id": "F-0060",
+      "title": "Implement configurable scroll restoration",
+      "acceptanceCriteria": [
+        "Default: browser native scroll restoration",
+        "Route-level config for Pulse-managed scroll",
+        "preventScrollReset option in navigate()",
+        "Add tests for scroll behavior",
+        "`make test` passes"
+      ],
+      "priority": 60,
+      "passes": false,
+      "notes": "Browser default or Pulse override per route.",
+      "tests": ["make all"],
+      "dependencies": ["F-0059"]
+    },
+    {
+      "id": "F-0061",
+      "title": "Add navigation error UI",
+      "acceptanceCriteria": [
+        "Navigation failure shows error component",
+        "Error UI has manual retry button",
+        "Matches Next.js style error handling",
+        "Add tests for error UI",
+        "`make test` passes"
+      ],
+      "priority": 61,
+      "passes": false,
+      "notes": "Error UI with retry on navigation failure.",
+      "tests": ["make all"],
+      "dependencies": ["F-0060"]
+    },
+    {
+      "id": "F-0062",
+      "title": "Implement offline navigation with cached data",
+      "acceptanceCriteria": [
+        "Navigate using prefetched/cached data when offline",
+        "Reconnect in background when connection restored",
+        "Match RenderSession lifecycle on reconnect",
+        "Add tests for offline behavior",
+        "`make test` passes"
+      ],
+      "priority": 62,
+      "passes": false,
+      "notes": "Graceful offline handling.",
+      "tests": ["make all"],
+      "dependencies": ["F-0061"]
+    },
+    {
+      "id": "F-0063",
+      "title": "Implement dev-mode HTML nesting validator",
+      "acceptanceCriteria": [
+        "Update `packages/pulse/python/src/pulse/vdom/element.py`",
+        "Check HTML nesting rules at Element creation (dev mode only)",
+        "Invalid nesting raises error with line number",
+        "Examples: <p> inside <p>, <div> inside <span>",
+        "Add tests for nesting validation",
+        "`make test` passes"
+      ],
+      "priority": 63,
+      "passes": false,
+      "notes": "Catch invalid HTML early with helpful errors.",
+      "tests": ["make all"],
+      "dependencies": ["F-0062"]
+    },
+    {
+      "id": "F-0064",
+      "title": "Update pulse.tsx to use custom router",
+      "acceptanceCriteria": [
+        "Update `packages/pulse/js/src/pulse.tsx`",
+        "Remove React Router imports",
+        "Use useLocation, useParams, useNavigate from pulse router",
+        "Update NavigateFn type for new router",
+        "`make typecheck` passes"
+      ],
+      "priority": 64,
+      "passes": false,
+      "notes": "Main pulse client uses new router.",
+      "tests": ["make all"],
+      "dependencies": ["F-0063"]
+    },
+    {
+      "id": "F-0065",
+      "title": "Update client.tsx for new navigation",
+      "acceptanceCriteria": [
+        "Update `packages/pulse/js/src/client.tsx`",
+        "Navigation state sync uses new router APIs",
+        "WebSocket updates work with unified VDOM tree",
+        "`make typecheck` passes"
+      ],
+      "priority": 65,
+      "passes": false,
+      "notes": "",
+      "tests": ["make all"],
+      "dependencies": ["F-0064"]
+    },
+    {
+      "id": "F-0066",
+      "title": "Remove React Router dependency",
+      "acceptanceCriteria": [
+        "Remove react-router-dom from package.json",
+        "Remove @types/react-router-dom if present",
+        "No imports from react-router-dom anywhere",
+        "`npm ls` shows no react-router packages",
+        "`make all` passes"
+      ],
+      "priority": 66,
+      "passes": false,
+      "notes": "Clean removal of dependency.",
+      "tests": ["make all"],
+      "dependencies": ["F-0065"]
+    },
+    {
+      "id": "F-0067",
+      "title": "Update examples/web to use new system",
+      "acceptanceCriteria": [
+        "Update example app to exported mode",
+        "App works with new router and SSR",
+        "All navigation patterns demonstrated",
+        "Example runs with pulse dev"
+      ],
+      "priority": 67,
+      "passes": false,
+      "notes": "Reference example for users.",
+      "tests": ["make all"],
+      "dependencies": ["F-0066"]
+    },
+    {
+      "id": "F-0068",
+      "title": "Final verification: all goals met",
+      "acceptanceCriteria": [
+        "`make test` passes (all unit + integration tests)",
+        "`pulse dev` starts examples/web and app is navigable",
+        "Browser devtools: no React Router in network/bundle",
+        "React Context works across nested routes (test with Mantine theme)",
+        "Pulse Context works across nested routes",
+        "Parent route params accessible via Pulse Context",
+        "SSR produces valid HTML, hydration has no mismatch warnings",
+        "Root ErrorBoundary catches Python and React errors",
+        "Prefetch works (viewport + hover fallback)",
+        "Navigation state syncs to Python",
+        "Progress indicator shows during navigation",
+        "Dev-mode HTML validator catches nesting errors"
+      ],
+      "priority": 68,
+      "passes": false,
+      "notes": "All spec goals verified.",
+      "tests": ["make all"],
+      "dependencies": ["F-0067"]
+    }
+  ]
+}

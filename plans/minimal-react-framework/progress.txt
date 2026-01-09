@@ -1,0 +1,22 @@
+# Ralph Progress Log
+Started: 2026-01-09
+
+## Codebase Patterns
+- Router files: `packages/pulse/js/src/router/`
+- Biome formats files on `make all` (tabs, not spaces)
+
+## Key Files
+- `packages/pulse/js/src/router/match.ts` - Route matching logic
+- `packages/pulse/js/src/router/index.ts` - Router public exports
+
+---
+
+## 2026-01-09 - F-0001
+- Created route matcher for static paths
+- Files: `packages/pulse/js/src/router/match.ts`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - Created new `router/` directory structure
+  - matchPath normalizes trailing slashes for comparison
+  - MatchResult type with `matched: boolean` and `params: Record<string, string>`
+
+---

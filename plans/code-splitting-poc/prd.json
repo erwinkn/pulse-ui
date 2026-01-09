@@ -63,7 +63,7 @@
         "`cd poc && bun install` succeeds"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Large distinct imports ensure code splitting creates separate chunks.",
       "tests": ["cd poc && bun install && bunx tsc --noEmit"],
       "dependencies": ["F-0001"]

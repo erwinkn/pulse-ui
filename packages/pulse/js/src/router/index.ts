@@ -10,6 +10,7 @@ export {
 	PulseRouterContext,
 	PulseRouterProvider,
 	useLocation,
+	useNavigate,
 	useParams,
 	usePulseRouterContext,
 } from "./context";

@@ -20,3 +20,13 @@ Started: 2026-01-09
   - MatchResult type with `matched: boolean` and `params: Record<string, string>`
 
 ---
+
+## 2026-01-09 - F-0002
+- Added dynamic param matching (:id) to matchPath
+- Files: `packages/pulse/js/src/router/match.ts`, `packages/pulse/js/src/router/match.test.ts`
+- **Learnings:**
+  - Dynamic params prefixed with `:` (e.g., `:id`, `:userId`)
+  - Segment count must match exactly for required params (no extra or missing segments)
+  - Tests use `bun:test` with `describe`, `expect`, `it` imports
+
+---

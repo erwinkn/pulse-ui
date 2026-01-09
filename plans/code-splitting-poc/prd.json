@@ -12,7 +12,7 @@
         "`cd poc && bun install` succeeds"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Use Vite CLI to scaffold project instead of manual setup. Bun as package manager.",
       "tests": ["cd poc && bun install"],
       "dependencies": []

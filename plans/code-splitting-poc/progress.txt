@@ -125,3 +125,14 @@ Started: 2026-01-09
   - Scripts: dev, build, preview, ssr, analyze
 
 ---
+## 2026-01-09 - F-0016
+- Final validation: all POC goals verified
+- Files changed: poc/README.md (replaced template with testing instructions)
+- **Learnings:**
+  - Goal 1: Vite creates 4 chunks (index ~192KB, settings ~57KB with zod, home ~19KB with date-fns, dashboard ~2KB with lodash-es)
+  - Goal 2: SSR correctly renders all 3 routes at POST /render with pathname
+  - Goal 3: entry-client.tsx awaits loadRouteChunk() before render to prevent hydration mismatch
+  - Goal 4: prefetchRoute() fires loader() without await to preload chunks in background
+  - POC successfully validates route-based code splitting with SSR support
+
+---

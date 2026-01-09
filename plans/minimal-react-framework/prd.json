@@ -149,7 +149,7 @@
         "`make test` passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "",
       "tests": [
         "make all"
@@ -170,7 +170,7 @@
         "`make test` passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Scoped params - each route level sees only its own params. Parent params via Pulse Context.",
       "tests": [
         "make all"

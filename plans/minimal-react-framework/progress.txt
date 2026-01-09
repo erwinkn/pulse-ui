@@ -89,3 +89,25 @@ Started: 2026-01-09
   - PulseRouterProvider takes location, params, navigate as props (will be injected by Python)
 
 ---
+
+## 2026-01-09 - F-0008
+- Implemented useLocation hook
+- Files: `packages/pulse/js/src/router/context.tsx`, `packages/pulse/js/src/router/context.test.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - `useLocation()` returns full Location object via `usePulseRouterContext().location`
+  - Hook tests use `@testing-library/react` with `renderHook`
+  - Test wrapper pattern: create factory function returning wrapper component with provider
+  - Context tests live alongside implementation (context.test.tsx) not in __tests__ subdirectory
+
+---
+
+## 2026-01-09 - F-0009
+- Implemented useParams hook returning scoped params from nearest PulseRouterContext
+- Files: `packages/pulse/js/src/router/context.tsx`, `packages/pulse/js/src/router/context.test.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - `useParams()` returns `Params` type (Record<string, string | undefined | string[]>)
+  - Scoped behavior: nested PulseRouterProviders shadow parent params (React context default)
+  - Parent route params accessed via Pulse Context (server-side state), not from client-side router
+  - Test for scoped params: nest two providers, verify inner params returned (not merged)
+
+---

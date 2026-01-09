@@ -14,6 +14,7 @@ export {
 	useParams,
 	usePulseRouterContext,
 } from "./context";
+export { scrollToHash, useHashScroll } from "./hash";
 export type { LinkProps } from "./link";
 export { isExternalUrl, Link } from "./link";
 export type { MatchResult, RouteMatch } from "./match";

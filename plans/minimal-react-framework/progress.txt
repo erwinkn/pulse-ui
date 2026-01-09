@@ -9,6 +9,7 @@ Started: 2026-01-09
 - `packages/pulse/js/src/router/match.ts` - Route matching logic
 - `packages/pulse/js/src/router/context.tsx` - Router context provider and types
 - `packages/pulse/js/src/router/index.ts` - Router public exports
+- `packages/pulse/js/src/router/hash.ts` - Hash scroll utility and hook
 
 ---
 
@@ -184,5 +185,45 @@ Started: 2026-01-09
   - Extract `triggerPrefetch()` helper to share logic between viewport and hover prefetch
   - Must pass user's `onMouseEnter` handler through: destructure from props, call before prefetch logic
   - `fireEvent.mouseEnter()` from @testing-library/react to test hover behavior
+
+---
+
+## 2026-01-09 - F-0016
+- Created NavigationProgress component with provider/context pattern
+- Files: `packages/pulse/js/src/router/progress.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - Progress indicator uses separate context (`NavigationProgressContext`) for navigation state
+  - `NavigationProgressProvider` wraps app and provides `isNavigating`, `startNavigation`, `completeNavigation`
+  - `NavigationProgress` component renders thin fixed bar at top with z-index 9999
+  - Animation: exponential slowdown from 0% to ~90%, then immediate 100% on completion
+  - Use `useRef` for intervals/timeouts, define cleanup inside useEffect to satisfy exhaustive-deps
+  - Extract `isNavigating = progressCtx?.isNavigating ?? false` outside effect to simplify dependencies
+  - `pointerEvents: "none"` on container so bar doesn't block clicks
+
+---
+
+## 2026-01-09 - F-0017
+- Created integration tests for Link component and NavigationProgress
+- Files: `packages/pulse/js/src/router/__tests__/link.integration.test.tsx`, `packages/pulse/js/src/router/context.tsx`
+- **Learnings:**
+  - happy-dom returns hex color format (e.g., `#0070f3`), not rgb format like jsdom
+  - MockIntersectionObserver static instances array can pollute across test blocks; test behavior instead
+  - Test NavigationProgress visibility via `[style*="position: fixed"]` selector
+  - Use `act()` wrapper around state-changing operations like `fireEvent.click` for async updates
+  - `waitFor` useful for testing async state changes with configurable timeout
+  - Steel wire checkpoint: Link + NavigationProgress components complete and verified
+
+---
+
+## 2026-01-09 - F-0018
+- Added hash scroll support with `scrollToHash()` utility and `useHashScroll()` hook
+- Files: `packages/pulse/js/src/router/hash.ts`, `packages/pulse/js/src/router/hash.test.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - `scrollToHash(hash)` strips `#` prefix and calls `element.scrollIntoView({ behavior: "smooth" })`
+  - `useHashScroll()` hook tracks `location.hash` and scrolls on change (initial load + navigation)
+  - Use `requestAnimationFrame` to delay scroll until DOM is ready after navigation
+  - `useRef` to track previous hash prevents double-scrolling on re-renders
+  - Test stateful wrapper pattern: define `let setHashExternal` outside wrapper, assign inside useState, call in test
+  - Wrap state updates in `act()` when testing hooks to avoid React warning
 
 ---

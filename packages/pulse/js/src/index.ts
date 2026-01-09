@@ -8,6 +8,9 @@ export type {
 	MountedView,
 	PulseClient,
 } from "./client";
+// Error handling
+export type { ErrorBoundaryProps } from "./error-boundary";
+export { ErrorBoundary } from "./error-boundary";
 export type { PulseFormProps } from "./form";
 // Form helpers
 export { PulseForm, submitForm } from "./form";

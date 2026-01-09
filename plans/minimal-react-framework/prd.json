@@ -397,7 +397,7 @@
         "`make typecheck` passes"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "Client-side error boundary for React errors.",
       "tests": [
         "make all"

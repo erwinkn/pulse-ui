@@ -1,4 +1,5 @@
 import { renderToString } from "react-dom/server";
+import { ErrorBoundary } from "../error-boundary";
 import { VDOMRenderer } from "../renderer";
 import {
 	type Location,
@@ -119,6 +120,8 @@ export const defaultComponentRegistry: ComponentRegistry = {
 	meter: "meter",
 	output: "output",
 	datalist: "datalist",
+	// Pulse components
+	ErrorBoundary: ErrorBoundary,
 };
 
 /**

@@ -253,7 +253,7 @@
         "`cd poc && bun run build` succeeds"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "Convenience scripts for development.",
       "tests": ["cd poc && bun run build"],
       "dependencies": ["F-0013"]

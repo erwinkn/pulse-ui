@@ -148,3 +148,41 @@ Started: 2026-01-09
   - LinkProps includes `replace` and `state` for NavigateOptions passthrough
 
 ---
+
+## 2026-01-09 - F-0013
+- Added external link detection to Link component
+- Files: `packages/pulse/js/src/router/link.tsx`, `packages/pulse/js/src/router/link.test.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - `isExternalUrl()` checks if URL starts with `http://` or `https://` and has different origin
+  - External links render without the click handler (skip `handleClick`, just pass through `onClick`)
+  - `window.location.origin` in happy-dom is dynamic - use it directly in tests, don't hardcode
+  - Malformed URLs (e.g., `https://`) are treated as external for safety (try/catch around `new URL()`)
+  - Use `fireEvent.click` from `@testing-library/react` (not `userEvent` which isn't installed)
+
+---
+
+## 2026-01-09 - F-0014
+- Added viewport prefetch using IntersectionObserver to Link component
+- Files: `packages/pulse/js/src/router/link.tsx`, `packages/pulse/js/src/router/link.test.tsx`
+- **Learnings:**
+  - IntersectionObserver fires callback when element enters/exits viewport
+  - Use `useRef(false)` to track if prefetch already fired (prevents double-fire)
+  - Observer must be disconnected in useEffect cleanup to prevent memory leaks
+  - Mock IntersectionObserver in tests using class that stores instances array
+  - happy-dom sets `window.location.origin` to `https://example.com` - use different domain for external link tests
+  - Call `cleanup()` from @testing-library/react before each test to ensure test isolation
+  - `spyOn(console, "log").mockImplementation(() => {})` suppresses console.log output in tests
+
+---
+
+## 2026-01-09 - F-0015
+- Added hover prefetch fallback when viewport prefetch is disabled
+- Files: `packages/pulse/js/src/router/link.tsx`, `packages/pulse/js/src/router/link.test.tsx`
+- **Learnings:**
+  - Hover prefetch fires on `mouseenter` event when `prefetch={false}`
+  - Reuse `prefetchedRef` to ensure prefetch fires only once (same ref used by viewport prefetch)
+  - Extract `triggerPrefetch()` helper to share logic between viewport and hover prefetch
+  - Must pass user's `onMouseEnter` handler through: destructure from props, call before prefetch logic
+  - `fireEvent.mouseEnter()` from @testing-library/react to test hover behavior
+
+---

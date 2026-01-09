@@ -85,3 +85,12 @@ export function usePulseRouterContext(): PulseRouterContextValue {
 	}
 	return ctx;
 }
+
+/**
+ * Hook to access the current location.
+ * Returns { pathname, search, hash, state } from the nearest PulseRouterContext.
+ * Throws if used outside a PulseRouterProvider.
+ */
+export function useLocation(): Location {
+	return usePulseRouterContext().location;
+}

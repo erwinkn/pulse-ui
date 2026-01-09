@@ -115,68 +115,138 @@ Always include verification commands. Use project's actual commands:
 
 For this codebase, standard verification is `make all` (format, lint, typecheck, test).
 
-### 5. Include Setup Stories
+### 5. Steel Wire First - CRITICAL
+
+**Get one thin vertical slice working end-to-end before expanding horizontally.**
+
+The first 3-5 stories should establish a minimal but complete working system:
+
+```
+❌ WRONG (Horizontal Layering):
+F-0001: Create all type definitions
+F-0002: Create all components
+F-0003: Create all utilities
+...
+F-0015: Build and test everything
+
+✅ RIGHT (Steel Wire / Vertical Slice):
+F-0001: Scaffold project
+F-0002: Create ONE component with ONE dependency
+F-0003: Build and verify chunk exists  ← EARLY VALIDATION
+F-0004: Add second component
+F-0005: Verify two chunks exist  ← INCREMENTAL VALIDATION
+...
+```
+
+**Steel wire validates the architecture early.** If the build fails or chunks aren't created, you find out at story 3, not story 15.
+
+### 6. Test Early and Often
+
+**Every 2-3 implementation stories should be followed by a verification story.**
+
+Interleave testing throughout:
+
+```json
+[
+  { "id": "F-0001", "title": "Scaffold project" },
+  { "id": "F-0002", "title": "Create home component with date-fns" },
+  { "id": "F-0003", "title": "Build and verify single chunk works" },  // ← TEST
+  { "id": "F-0004", "title": "Add dashboard component with lodash" },
+  { "id": "F-0005", "title": "Verify two separate chunks in build" },  // ← TEST
+  { "id": "F-0006", "title": "Add SSR rendering" },
+  { "id": "F-0007", "title": "Verify SSR outputs correct HTML" },      // ← TEST
+  ...
+]
+```
+
+**Benefits:**
+- Catch integration issues early
+- Smaller debugging surface when tests fail
+- Each verified story is a stable checkpoint
+- Agent can stop at any green state
+
+### 7. Include Setup Stories
 
 First stories should handle project scaffolding:
 - Create new files/directories
 - Add dependencies
 - Set up test fixtures
 
-### 6. End-to-End Verification
+### 8. Final Integration Story
 
-Final story should be integration/E2E verification:
+Last story should verify all goals together:
 - All components work together
 - Example app runs successfully
+- This should be EASY because everything was tested incrementally
 
 ## Workflow
 
 1. **Read the spec document** - Understand the full scope
-2. **Identify major components** - Group related functionality
-3. **Break into atomic stories** - Each story = one focused change
-4. **Order by dependencies** - Foundation first, features second
-5. **Write explicit criteria** - Testable, specific, measurable
-6. **Add verification commands** - How does Ralph know it worked?
-7. **Review story sizes** - Split any that seem too large
+2. **Identify the steel wire** - What's the minimal end-to-end path?
+3. **Plan first 3-5 stories as vertical slice** - Scaffold → minimal impl → verify it works
+4. **Interleave verification stories** - After every 2-3 implementation stories, add a test story
+5. **Break into atomic stories** - Each story = one focused change
+6. **Order by dependencies** - Foundation first, but TEST throughout (not just at the end)
+7. **Write explicit criteria** - Testable, specific, measurable
+8. **Add verification commands** - How does Ralph know it worked?
+9. **Review story sizes** - Split any that seem too large
 
 ## Story Decomposition Patterns
+
+### Steel Wire Pattern (PREFERRED)
+
+Use this when building a new system or subsystem:
+
+```
+1. Scaffold / setup
+2. Implement ONE minimal vertical slice
+3. ✓ VERIFY: Build/run and confirm it works
+4. Add second feature
+5. ✓ VERIFY: Both features work together
+6. Add remaining features...
+7. ✓ VERIFY: after each major addition
+8. Final integration verification
+```
 
 ### For New Components
 
 ```
 1. Create file with type stubs / interfaces
 2. Implement core logic
-3. Add error handling
-4. Add tests
+3. ✓ VERIFY: typecheck and basic functionality
+4. Add error handling
 5. Wire into existing system
+6. ✓ VERIFY: integration works
 ```
 
 ### For Algorithms
 
 ```
 1. Implement base case
-2. Add edge case handling
-3. Add complex case handling
-4. Optimize if needed
+2. ✓ VERIFY: base case works
+3. Add edge case handling
+4. Add complex case handling
+5. ✓ VERIFY: all cases pass
 ```
 
 ### For UI Components
 
 ```
-1. Create component skeleton
-2. Add props/types
-3. Add rendering logic
+1. Create component skeleton with props/types
+2. Add rendering logic
+3. ✓ VERIFY: renders correctly
 4. Add interactivity
-5. Add styling
+5. ✓ VERIFY: interactions work
 ```
 
 ### For CLI Commands
 
 ```
-1. Add command registration
-2. Implement core logic
+1. Add command registration + minimal implementation
+2. ✓ VERIFY: command runs
 3. Add options/flags
 4. Add error handling
-5. Add tests
+5. ✓ VERIFY: all options work
 ```
 
 ## Example Transformation
@@ -249,11 +319,13 @@ Use `notes` for Ralph-relevant context:
 
 ## Final Checklist Before Output
 
+- [ ] **Steel wire first**: Stories 1-5 establish a minimal working end-to-end system
+- [ ] **Test early and often**: Verification stories appear throughout (not just at end)
 - [ ] Every story fits in one context window
 - [ ] No vague criteria like "works correctly"
 - [ ] Dependencies form a valid DAG
 - [ ] First stories are foundational (files, types)
-- [ ] Last story is integration verification
+- [ ] Last story is integration verification (should be easy if tested incrementally)
 - [ ] All stories have `make all` or specific tests
 - [ ] Branch name is kebab-case
 - [ ] IDs are sequential: F-0001, F-0002, etc.
@@ -273,6 +345,20 @@ The script checks:
 - **Unknown dependencies** - all referenced IDs exist
 - **Shows components** - visualizes disjoint subgraphs
 - **Shows execution order** - both topological and by priority
+
+## Available Tasks Script
+
+The agent uses this script to find tasks ready to work on:
+
+```bash
+python .claude/skills/prd-gen/available_tasks.py plans/<spec-name>/prd.json
+```
+
+A task is available if:
+- `passes: false` (not yet completed)
+- No dependencies, OR all dependencies have `passes: true`
+
+The script shows all available tasks and suggests the highest-priority one.
 
 ## Execute
 
@@ -300,16 +386,17 @@ The script checks:
 
 ## Your Task
 
-1. Read `{{PLAN_DIR}}/prd.json`
-2. Read `{{PLAN_DIR}}/progress.txt` (check Codebase Patterns first)
-3. Check you're on the correct branch: `{{BRANCH_NAME}}`
-4. Pick highest priority feature where `passes: false`
+1. Read `{{PLAN_DIR}}/progress.txt` (check Codebase Patterns first)
+2. Check you're on the correct branch: `{{BRANCH_NAME}}`
+3. Run: `python .claude/skills/prd-gen/available_tasks.py {{PLAN_DIR}}/prd.json`
+4. Pick any task from the available list (all shown tasks have satisfied dependencies)
 5. Implement that ONE feature
 6. Run typecheck and tests: `make all`
 7. Update AGENTS.md files with learnings (if discovered reusable patterns)
 8. Commit: `feat: [ID] - [Title]`
 9. Update prd.json: `passes: true`
 10. Append learnings to progress.txt
+11. Stop after implementing this single feature
 
 ## Progress Format
 
@@ -385,9 +472,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   echo "  Iteration $i of $MAX_ITERATIONS"
   echo "═══════════════════════════════════════"
 
-  OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" \
-    | claude --dangerously-skip-permissions 2>&1 \
-    | tee /dev/stderr) || true
+  OUTPUT=$(claude -p --dangerously-skip-permissions --verbose < "$SCRIPT_DIR/prompt.md" 2>&1 | tee /dev/stderr) || true
 
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
@@ -416,7 +501,7 @@ echo "🔍 Running single iteration (for testing PRD quality)"
 echo "Plan: $SCRIPT_DIR"
 echo ""
 
-cat "$SCRIPT_DIR/prompt.md" | claude --dangerously-skip-permissions
+claude -p --dangerously-skip-permissions --verbose < "$SCRIPT_DIR/prompt.md"
 
 echo ""
 echo "Single iteration complete."

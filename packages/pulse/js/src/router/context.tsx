@@ -104,3 +104,69 @@ export function useLocation(): Location {
 export function useParams(): Params {
 	return usePulseRouterContext().params;
 }
+
+/**
+ * Resolves a relative path against a base path.
+ * Handles: "../sibling", "./child", "child", absolute paths
+ */
+function resolvePath(to: string, basePath: string): string {
+	// Absolute paths are returned as-is
+	if (to.startsWith("/")) {
+		return to;
+	}
+
+	// Split base path into segments, removing empty strings
+	const baseSegments = basePath.split("/").filter(Boolean);
+
+	// Handle "./" prefix - relative to current directory
+	if (to.startsWith("./")) {
+		to = to.slice(2);
+	}
+
+	// Split the target path
+	const toSegments = to.split("/").filter(Boolean);
+
+	// Start from base segments
+	const resultSegments = [...baseSegments];
+
+	for (const segment of toSegments) {
+		if (segment === "..") {
+			// Go up one level
+			resultSegments.pop();
+		} else if (segment !== ".") {
+			// Add the segment (ignore ".")
+			resultSegments.push(segment);
+		}
+	}
+
+	return "/" + resultSegments.join("/");
+}
+
+/**
+ * Hook to get the navigate function.
+ * Returns a function that handles both absolute and relative paths.
+ * - `navigate('/path')` - absolute navigation
+ * - `navigate('/path', { replace: true })` - replace history
+ * - `navigate('/path', { state: {...} })` - with state
+ * - `navigate('../sibling')` - relative path resolution
+ * - `navigate(-1)` - go back in history
+ * Throws if used outside a PulseRouterProvider.
+ */
+export function useNavigate(): NavigateFn {
+	const { navigate, location } = usePulseRouterContext();
+
+	// Create a wrapped navigate function that resolves relative paths
+	const wrappedNavigate: NavigateFn = ((toOrDelta: string | number, options?: NavigateOptions) => {
+		// History navigation (number) - pass through directly
+		if (typeof toOrDelta === "number") {
+			navigate(toOrDelta);
+			return;
+		}
+
+		// Path navigation - resolve relative paths first
+		const resolvedPath = resolvePath(toOrDelta, location.pathname);
+		navigate(resolvedPath, options);
+	}) as NavigateFn;
+
+	return wrappedNavigate;
+}

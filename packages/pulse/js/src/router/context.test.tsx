@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import {
@@ -7,6 +7,7 @@ import {
 	type Params,
 	PulseRouterProvider,
 	useLocation,
+	useNavigate,
 	useParams,
 } from "./context";
 
@@ -138,5 +139,181 @@ describe("useParams", () => {
 		expect(() => {
 			renderHook(() => useParams());
 		}).toThrow("useLocation/useParams/useNavigate must be used within a PulseRouterProvider");
+	});
+});
+
+describe("useNavigate", () => {
+	const defaultLocation: Location = {
+		pathname: "/users/123",
+		search: "",
+		hash: "",
+		state: null,
+	};
+
+	it("returns a navigate function", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		expect(typeof result.current).toBe("function");
+	});
+
+	it("navigates to absolute path", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current("/posts");
+
+		expect(mockNavigate).toHaveBeenCalledWith("/posts", undefined);
+	});
+
+	it("navigates with replace option", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current("/posts", { replace: true });
+
+		expect(mockNavigate).toHaveBeenCalledWith("/posts", { replace: true });
+	});
+
+	it("navigates with state option", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+		const state = { from: "/home" };
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current("/posts", { state });
+
+		expect(mockNavigate).toHaveBeenCalledWith("/posts", { state });
+	});
+
+	it("navigates with replace and state options", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+		const state = { from: "/home" };
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current("/posts", { replace: true, state });
+
+		expect(mockNavigate).toHaveBeenCalledWith("/posts", { replace: true, state });
+	});
+
+	it("resolves relative path with ../", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+		// Current: /users/123
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current("../posts");
+
+		// /users/123 -> ../posts -> /users/posts
+		expect(mockNavigate).toHaveBeenCalledWith("/users/posts", undefined);
+	});
+
+	it("resolves relative path with multiple ../", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+		const location: Location = {
+			pathname: "/org/acme/users/123",
+			search: "",
+			hash: "",
+			state: null,
+		};
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(location, {}, mockNavigate),
+		});
+
+		result.current("../../settings");
+
+		// /org/acme/users/123 -> ../../settings -> /org/acme/settings
+		expect(mockNavigate).toHaveBeenCalledWith("/org/acme/settings", undefined);
+	});
+
+	it("resolves relative path with ./ (current directory)", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+		// Current: /users/123
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current("./posts");
+
+		// /users/123 -> ./posts -> /users/123/posts
+		expect(mockNavigate).toHaveBeenCalledWith("/users/123/posts", undefined);
+	});
+
+	it("resolves relative path without prefix (same as ./)", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+		// Current: /users/123
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current("posts");
+
+		// /users/123 -> posts -> /users/123/posts
+		expect(mockNavigate).toHaveBeenCalledWith("/users/123/posts", undefined);
+	});
+
+	it("handles history navigation with negative number", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current(-1);
+
+		expect(mockNavigate).toHaveBeenCalledWith(-1);
+	});
+
+	it("handles history navigation with positive number", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(defaultLocation, {}, mockNavigate),
+		});
+
+		result.current(2);
+
+		expect(mockNavigate).toHaveBeenCalledWith(2);
+	});
+
+	it("throws when used outside PulseRouterProvider", () => {
+		expect(() => {
+			renderHook(() => useNavigate());
+		}).toThrow("useLocation/useParams/useNavigate must be used within a PulseRouterProvider");
+	});
+
+	it("resolves to root when going up from root", () => {
+		const mockNavigate = mock(() => {}) as unknown as NavigateFn;
+		const location: Location = {
+			pathname: "/users",
+			search: "",
+			hash: "",
+			state: null,
+		};
+
+		const { result } = renderHook(() => useNavigate(), {
+			wrapper: createWrapper(location, {}, mockNavigate),
+		});
+
+		result.current("../../..");
+
+		// Going above root should still result in /
+		expect(mockNavigate).toHaveBeenCalledWith("/", undefined);
 	});
 });

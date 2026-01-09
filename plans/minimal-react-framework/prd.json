@@ -501,7 +501,7 @@
         "`make typecheck` passes"
       ],
       "priority": 25,
-      "passes": false,
+      "passes": true,
       "notes": "renderToString, not streaming (future work).",
       "tests": [
         "make all"
@@ -522,7 +522,7 @@
         "`make typecheck` passes"
       ],
       "priority": 26,
-      "passes": false,
+      "passes": true,
       "notes": "Python references components by name, Bun resolves from registry.",
       "tests": [
         "make all"

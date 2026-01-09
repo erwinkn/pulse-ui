@@ -1,0 +1,279 @@
+{
+  "branchName": "code-splitting-poc",
+  "features": [
+    {
+      "id": "F-0001",
+      "title": "Initialize POC project with Vite + React + TypeScript",
+      "acceptanceCriteria": [
+        "Run `bun create vite poc --template react-ts` to scaffold project",
+        "`poc/package.json` has react, react-dom as dependencies",
+        "`poc/package.json` has vite, @vitejs/plugin-react, typescript, @types/react, @types/react-dom as devDependencies",
+        "Modify `poc/vite.config.ts` to add manifest: true, ssrManifest: true",
+        "`cd poc && bun install` succeeds"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Use Vite CLI to scaffold project instead of manual setup. Bun as package manager.",
+      "tests": ["cd poc && bun install"],
+      "dependencies": []
+    },
+    {
+      "id": "F-0002",
+      "title": "Create VDOM type definitions and renderer",
+      "acceptanceCriteria": [
+        "Create `poc/src/vdom-renderer.tsx`",
+        "Export `VdomNode` type: string | number | null | { type, props, children }",
+        "Export `renderVdom(node, registry)` function",
+        "Returns string/number/null as-is",
+        "Looks up component type in registry, falls back to HTML element string",
+        "Recursively renders children with React.Fragment keys",
+        "TypeScript compiles without errors"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Simplified version of Pulse's VDOM rendering pattern.",
+      "tests": ["cd poc && bunx tsc --noEmit"],
+      "dependencies": ["F-0001"]
+    },
+    {
+      "id": "F-0003",
+      "title": "Create route matching utility",
+      "acceptanceCriteria": [
+        "Create `poc/src/router/match.ts`",
+        "Export `matchRoute(pathname, patterns)` function",
+        "Returns exact match if pathname is in patterns array",
+        "Returns null if no match found",
+        "TypeScript compiles without errors"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Simple exact-match for POC; real implementation needs pattern matching.",
+      "tests": ["cd poc && bunx tsc --noEmit"],
+      "dependencies": ["F-0001"]
+    },
+    {
+      "id": "F-0004",
+      "title": "Create test components with distinct dependencies",
+      "acceptanceCriteria": [
+        "Add date-fns, lodash-es, zod to poc/package.json",
+        "Create `poc/src/components/home-widget.tsx` that imports date-fns and uses `format()`",
+        "Create `poc/src/components/dashboard-chart.tsx` that imports lodash-es and uses `chunk()`",
+        "Create `poc/src/components/settings-form.tsx` that imports zod and uses `z.object()`",
+        "Each component renders distinct UI",
+        "`cd poc && bun install` succeeds"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Large distinct imports ensure code splitting creates separate chunks.",
+      "tests": ["cd poc && bun install && bunx tsc --noEmit"],
+      "dependencies": ["F-0001"]
+    },
+    {
+      "id": "F-0005",
+      "title": "Create route registry files with dynamic imports",
+      "acceptanceCriteria": [
+        "Create `poc/src/routes/home.tsx` exporting registry with HomeWidget and path '/'",
+        "Create `poc/src/routes/dashboard.tsx` exporting registry with DashboardChart and path '/dashboard'",
+        "Create `poc/src/routes/settings.tsx` exporting registry with SettingsForm and path '/settings'",
+        "Create `poc/src/routes/index.ts` with RouteModule type",
+        "Export `routeLoaders` object mapping paths to `() => import('./route')`",
+        "Export `ssrRouteLoaders` object mapping paths to `() => require('./route')`",
+        "TypeScript compiles without errors"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Dynamic imports are key for Vite code splitting.",
+      "tests": ["cd poc && bunx tsc --noEmit"],
+      "dependencies": ["F-0004"]
+    },
+    {
+      "id": "F-0006",
+      "title": "Create dynamic chunk loader with cache",
+      "acceptanceCriteria": [
+        "Create `poc/src/router/loader.ts`",
+        "Export `loadRouteChunk(pattern)` async function",
+        "Caches loaded modules to avoid re-fetching",
+        "Throws Error if no loader exists for pattern",
+        "Export `getLoadedRegistry()` merging all loaded module registries",
+        "TypeScript compiles without errors"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Cache prevents duplicate network requests.",
+      "tests": ["cd poc && bunx tsc --noEmit"],
+      "dependencies": ["F-0005"]
+    },
+    {
+      "id": "F-0007",
+      "title": "Create prefetch utilities",
+      "acceptanceCriteria": [
+        "Create `poc/src/router/prefetch.ts`",
+        "Export `prefetchRoute(pattern)` that triggers dynamic import without awaiting",
+        "Tracks prefetched routes in Set to avoid duplicate calls",
+        "Export `createHoverPrefetch(pattern)` returning `{ onMouseEnter }` handler",
+        "Export `usePrefetchOnViewport(pattern, ref)` hook using IntersectionObserver",
+        "TypeScript compiles without errors"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Prefetching improves perceived navigation speed.",
+      "tests": ["cd poc && bunx tsc --noEmit"],
+      "dependencies": ["F-0005"]
+    },
+    {
+      "id": "F-0008",
+      "title": "Create App component with navigation",
+      "acceptanceCriteria": [
+        "Create `poc/src/app.tsx`",
+        "Accepts `initialVdom` and `initialRegistry` props",
+        "Renders nav with links to /, /dashboard, /settings",
+        "Links have onClick that calls navigate() and hover prefetch",
+        "navigate() loads chunk, updates registry, gets VDOM, updates URL",
+        "Renders VDOM using renderVdom with current registry",
+        "Shows loading state during navigation",
+        "TypeScript compiles without errors"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Uses hardcoded VDOM for each route (real Pulse gets from Python).",
+      "tests": ["cd poc && bunx tsc --noEmit"],
+      "dependencies": ["F-0002", "F-0003", "F-0006", "F-0007"]
+    },
+    {
+      "id": "F-0009",
+      "title": "Create client entry with hydration support",
+      "acceptanceCriteria": [
+        "Create `poc/src/entry-client.tsx`",
+        "Reads pathname from window.location",
+        "Loads required chunk before rendering",
+        "If window.__INITIAL_VDOM__ exists, uses hydrateRoot",
+        "Otherwise uses createRoot for client-only render",
+        "Renders App with loaded registry",
+        "TypeScript compiles without errors"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Chunk must load before hydration to prevent mismatch.",
+      "tests": ["cd poc && bunx tsc --noEmit"],
+      "dependencies": ["F-0008"]
+    },
+    {
+      "id": "F-0010",
+      "title": "Create HTML template",
+      "acceptanceCriteria": [
+        "Create `poc/index.html`",
+        "Has #root div with <!--ssr-outlet--> comment",
+        "Has script setting window.__INITIAL_VDOM__ with placeholder",
+        "Has module script loading /src/entry-client.tsx",
+        "Valid HTML5 document"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Placeholders will be replaced by SSR server.",
+      "tests": ["test -f poc/index.html"],
+      "dependencies": ["F-0001"]
+    },
+    {
+      "id": "F-0011",
+      "title": "Create Bun SSR server",
+      "acceptanceCriteria": [
+        "Create `poc/server/ssr.ts`",
+        "Uses require() to synchronously load route registries",
+        "POST /render endpoint accepts { pathname } JSON",
+        "Looks up registry and VDOM for pathname",
+        "Returns 404 if route not found",
+        "Uses renderToString to render VDOM with registry",
+        "Returns { html, vdom } JSON response",
+        "Server runs on port 3001"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "SSR uses synchronous imports; client uses async.",
+      "tests": ["cd poc && bunx tsc --noEmit server/ssr.ts"],
+      "dependencies": ["F-0002", "F-0005"]
+    },
+    {
+      "id": "F-0012",
+      "title": "Create bundle analysis test",
+      "acceptanceCriteria": [
+        "Create `poc/test/bundle-analysis.ts`",
+        "Reads poc/dist/assets directory",
+        "Lists all .js files with sizes in KB",
+        "Fails if fewer than 3 JS chunks exist",
+        "Passes if multiple chunks created"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Validates code splitting is working.",
+      "tests": ["test -f poc/test/bundle-analysis.ts"],
+      "dependencies": ["F-0001"]
+    },
+    {
+      "id": "F-0013",
+      "title": "Verify Vite build creates separate chunks",
+      "acceptanceCriteria": [
+        "`cd poc && bunx vite build` succeeds",
+        "`poc/dist/assets/` contains at least 3 separate .js files",
+        "Home chunk contains date-fns (grep 'PPPP' or date formatting code)",
+        "Dashboard chunk contains lodash (grep 'chunk' function)",
+        "Settings chunk contains zod (grep 'safeParse' or schema code)",
+        "`bun poc/test/bundle-analysis.ts` passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "This validates Goal 1 from spec.",
+      "tests": ["cd poc && bunx vite build && bun test/bundle-analysis.ts"],
+      "dependencies": ["F-0009", "F-0010", "F-0012"]
+    },
+    {
+      "id": "F-0014",
+      "title": "Verify SSR renders correct HTML",
+      "acceptanceCriteria": [
+        "Start SSR server: `bun poc/server/ssr.ts &`",
+        "`curl -X POST http://localhost:3001/render -d '{\"pathname\":\"/\"}' -H 'Content-Type: application/json'` returns HTML containing 'HomeWidget' content",
+        "`curl -X POST http://localhost:3001/render -d '{\"pathname\":\"/dashboard\"}' -H 'Content-Type: application/json'` returns HTML containing 'DashboardChart' content",
+        "`curl -X POST http://localhost:3001/render -d '{\"pathname\":\"/settings\"}' -H 'Content-Type: application/json'` returns HTML containing 'SettingsForm' content",
+        "Server can be stopped cleanly"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "This validates Goal 2 from spec.",
+      "tests": ["cd poc && timeout 10 bun server/ssr.ts &; sleep 2; curl -s -X POST http://localhost:3001/render -d '{\"pathname\":\"/\"}' -H 'Content-Type: application/json' | grep -q html"],
+      "dependencies": ["F-0011", "F-0013"]
+    },
+    {
+      "id": "F-0015",
+      "title": "Add Vite dev and preview scripts",
+      "acceptanceCriteria": [
+        "Add 'dev' script to package.json: `vite`",
+        "Add 'build' script: `vite build`",
+        "Add 'preview' script: `vite preview`",
+        "Add 'ssr' script: `bun server/ssr.ts`",
+        "Add 'analyze' script: `bun test/bundle-analysis.ts`",
+        "`cd poc && bun run build` succeeds"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Convenience scripts for development.",
+      "tests": ["cd poc && bun run build"],
+      "dependencies": ["F-0013"]
+    },
+    {
+      "id": "F-0016",
+      "title": "Final validation: all POC goals verified",
+      "acceptanceCriteria": [
+        "Goal 1: `bun run build && bun run analyze` shows 3+ separate chunks",
+        "Goal 2: SSR server renders all 3 routes correctly",
+        "Goal 3: Client entry loads chunk before hydration (code review)",
+        "Goal 4: Prefetch functions trigger dynamic import (code review)",
+        "All TypeScript compiles: `bunx tsc --noEmit`",
+        "README or docs explain how to test manually"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Final integration check. E2E browser test optional for POC.",
+      "tests": ["cd poc && bun run build && bun run analyze && bunx tsc --noEmit"],
+      "dependencies": ["F-0014", "F-0015"]
+    }
+  ]
+}

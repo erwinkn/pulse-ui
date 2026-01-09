@@ -1,0 +1,21 @@
+# Ralph Progress Log
+Started: 2026-01-09
+
+## Codebase Patterns
+<!-- Add discovered patterns here -->
+
+## Key Files
+<!-- Add important files discovered during implementation -->
+- poc/vite.config.ts - Vite configuration with code splitting
+- poc/src/routes/index.ts - Route manifest with dynamic imports
+- poc/src/vdom-renderer.tsx - VDOM to React renderer
+- poc/server/ssr.ts - Bun SSR server
+
+---
+## 2026-01-09 - F-0001
+- Initialized POC project with Vite + React + TypeScript
+- Files created: poc/package.json, poc/tsconfig.json, poc/vite.config.ts
+- **Learnings:**
+  - Also added scripts (dev, build, preview, ssr, analyze) ahead of F-0015 since they're needed for convenience
+
+---

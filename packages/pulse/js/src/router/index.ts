@@ -18,3 +18,13 @@ export type { LinkProps } from "./link";
 export { isExternalUrl, Link } from "./link";
 export type { MatchResult, RouteMatch } from "./match";
 export { compareRoutes, matchPath, selectBestMatch } from "./match";
+export type {
+	NavigationProgressContextValue,
+	NavigationProgressProps,
+	NavigationProgressProviderProps,
+} from "./progress";
+export {
+	NavigationProgress,
+	NavigationProgressProvider,
+	useNavigationProgress,
+} from "./progress";

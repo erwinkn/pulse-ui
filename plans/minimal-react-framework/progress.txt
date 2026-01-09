@@ -13,6 +13,8 @@ Started: 2026-01-09
 - `packages/pulse/js/src/error-boundary.tsx` - React ErrorBoundary component
 - `packages/pulse/js/src/__tests__/error-boundary.test.tsx` - ErrorBoundary integration tests
 - `packages/pulse/js/src/server/server.ts` - Bun SSR render server
+- `packages/pulse/js/src/server/render.tsx` - SSR renderVdom function, defaultComponentRegistry, resolveComponent
+- `packages/pulse/js/src/server/render.test.tsx` - SSR component registry tests
 
 ---
 
@@ -299,5 +301,31 @@ Started: 2026-01-09
   - Use `process.env.PORT` (not `Bun.env.PORT`) for broader compatibility
   - Server files in `server/` subdirectory alongside client code
   - Placeholder HTML returned for /render, actual rendering logic added in F-0025
+
+---
+
+## 2026-01-09 - F-0025
+- Implemented React SSR rendering with renderVdom function
+- Files: `packages/pulse/js/src/server/render.tsx`, `packages/pulse/js/src/server/server.ts`
+- **Learnings:**
+  - `renderToString` from `react-dom/server` for synchronous SSR (not streaming)
+  - VDOMRenderer reusable for SSR: create mock client with no-op invokeCallback
+  - RouteInfo type holds Location and Params for PulseRouterProvider wrapping
+  - SSR navigate is a no-op (navigation only happens on client)
+  - Server receives VDOM JSON + optional config, returns HTML string
+  - Error handling in /render endpoint returns JSON with error message (status 500)
+
+---
+
+## 2026-01-09 - F-0026
+- Added component registry to SSR server
+- Files: `packages/pulse/js/src/server/render.tsx`, `packages/pulse/js/src/server/render.test.tsx`
+- **Learnings:**
+  - `defaultComponentRegistry` maps HTML element names to their string tags for createElement
+  - For HTML intrinsic elements, string tag names (e.g., "div") work directly with createElement
+  - Custom registry merges with default: `{ ...defaultComponentRegistry, ...config.registry }`
+  - `resolveComponent()` utility throws clear error for unknown components
+  - Mount point pattern (`$$ComponentName`) resolves from registry in VDOMRenderer
+  - Regular tags pass through directly to createElement (no registry lookup needed)
 
 ---

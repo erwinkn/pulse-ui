@@ -376,7 +376,7 @@
         "`make typecheck` passes"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "Public API surface for router module.",
       "tests": [
         "make all"

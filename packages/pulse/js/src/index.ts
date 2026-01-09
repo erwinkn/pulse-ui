@@ -42,6 +42,39 @@ export { PulseProvider, PulseView, usePulseClient } from "./pulse";
 // Renderer helpers
 // Renderer (structural expressions + eval-keyed props)
 export { VDOMRenderer } from "./renderer";
+// Router - public API
+export type {
+	LinkProps,
+	Location,
+	MatchResult,
+	NavigateFn,
+	NavigateOptions,
+	NavigationProgressContextValue,
+	NavigationProgressProps,
+	NavigationProgressProviderProps,
+	Params,
+	PulseRouterContextValue,
+	PulseRouterProviderProps,
+	RouteMatch,
+} from "./router";
+export {
+	compareRoutes,
+	isExternalUrl,
+	Link,
+	matchPath,
+	NavigationProgress,
+	NavigationProgressProvider,
+	PulseRouterContext,
+	PulseRouterProvider,
+	scrollToHash,
+	selectBestMatch,
+	useHashScroll,
+	useLocation,
+	useNavigate,
+	useNavigationProgress,
+	useParams,
+	usePulseRouterContext,
+} from "./router";
 // Serialization helpers
 // export { extractEvent } from "./serialize/events";
 // export {

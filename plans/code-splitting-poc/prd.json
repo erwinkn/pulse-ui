@@ -270,7 +270,7 @@
         "README or docs explain how to test manually"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "Final integration check. E2E browser test optional for POC.",
       "tests": ["cd poc && bun run build && bun run analyze && bunx tsc --noEmit"],
       "dependencies": ["F-0014", "F-0015"]

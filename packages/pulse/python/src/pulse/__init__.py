@@ -55,6 +55,9 @@ from pulse.components.if_ import If as If
 from pulse.components.react_router import Link as Link
 from pulse.components.react_router import Outlet as Outlet
 from pulse.context import PulseContext as PulseContext
+from pulse.context import PulseUserContextError as PulseUserContextError
+from pulse.context import pulse_context as pulse_context
+from pulse.context import use_pulse_context as use_pulse_context
 
 # Cookies
 from pulse.cookies import Cookie as Cookie

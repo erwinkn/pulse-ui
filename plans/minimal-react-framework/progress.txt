@@ -41,3 +41,39 @@ Started: 2026-01-09
   - Optional params return `undefined` when not provided (not empty string)
 
 ---
+
+## 2026-01-09 - F-0004
+- Added catch-all matching (*) to matchPath
+- Files: `packages/pulse/js/src/router/match.ts`, `packages/pulse/js/src/router/match.test.ts`
+- **Learnings:**
+  - Catch-all `*` captures remaining path segments as `string[]`
+  - MatchResult params type expanded to `Record<string, string | undefined | string[]>`
+  - Catch-all must be the last segment (validated, returns `matched: false` otherwise)
+  - Empty path after prefix returns `{ '*': [] }` (empty array, not undefined)
+  - Works with dynamic params before catch-all (e.g., `/users/:id/*`)
+
+---
+
+## 2026-01-09 - F-0005
+- Added per-segment specificity comparison
+- Files: `packages/pulse/js/src/router/match.ts`, `packages/pulse/js/src/router/match.test.ts`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - Specificity ranking: static (3) > dynamic (2) > optional (1) > catch-all (0)
+  - `compareRoutes(a, b)` returns -1/0/1 like sort comparator (a wins = -1)
+  - `selectBestMatch` iterates routes and picks most specific match
+  - RouteMatch<T> interface allows typed route objects with generic parameter
+  - Comparison is segment-by-segment; first differing segment determines winner
+
+---
+
+## 2026-01-09 - F-0006
+- Created integration test for route matching
+- Files: `packages/pulse/js/src/router/__tests__/match.integration.test.ts`
+- **Learnings:**
+  - Integration tests go in `__tests__/` subdirectory with `.integration.test.ts` suffix
+  - Longer patterns (even with optional segments) are more specific than shorter ones
+  - Root catch-all `/*` matches `/` with empty array, so avoid using with static `/` route
+  - `it.each()` from bun:test supports parameterized tests with `$variable` syntax
+  - Steel wire checkpoint: route matching is foundation for router context and navigation
+
+---

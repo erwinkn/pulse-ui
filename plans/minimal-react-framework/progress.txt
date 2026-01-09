@@ -227,3 +227,13 @@ Started: 2026-01-09
   - Wrap state updates in `act()` when testing hooks to avoid React warning
 
 ---
+
+## 2026-01-09 - F-0019
+- Exported router as public API from main package entry point
+- Files: `packages/pulse/js/src/index.ts`
+- **Learnings:**
+  - Router exports were already complete in `router/index.ts`
+  - Main package `index.ts` needed re-exports for router to be accessible via `import { Link } from 'pulse-ui-client'`
+  - Alphabetize exports to match Biome formatting expectations
+
+---

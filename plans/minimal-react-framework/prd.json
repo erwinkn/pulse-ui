@@ -418,7 +418,7 @@
         "`make typecheck` passes"
       ],
       "priority": 21,
-      "passes": false,
+      "passes": true,
       "notes": "Identical visuals planned for Python side later.",
       "tests": [
         "make all"

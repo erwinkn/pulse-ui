@@ -9,8 +9,11 @@ export type {
 	PulseClient,
 } from "./client";
 // Error handling
-export type { ErrorBoundaryProps } from "./error-boundary";
-export { ErrorBoundary } from "./error-boundary";
+export type {
+	DefaultErrorFallbackProps,
+	ErrorBoundaryProps,
+} from "./error-boundary";
+export { DefaultErrorFallback, ErrorBoundary } from "./error-boundary";
 export type { PulseFormProps } from "./form";
 // Form helpers
 export { PulseForm, submitForm } from "./form";

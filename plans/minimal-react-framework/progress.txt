@@ -30,3 +30,14 @@ Started: 2026-01-09
   - Tests use `bun:test` with `describe`, `expect`, `it` imports
 
 ---
+
+## 2026-01-09 - F-0003
+- Added optional segment matching (:id?) to matchPath
+- Files: `packages/pulse/js/src/router/match.ts`, `packages/pulse/js/src/router/match.test.ts`
+- **Learnings:**
+  - Optional params end with `?` (e.g., `:id?`)
+  - MatchResult params type updated to `Record<string, string | undefined>` for optional params
+  - Count required segments to determine minimum path length
+  - Optional params return `undefined` when not provided (not empty string)
+
+---

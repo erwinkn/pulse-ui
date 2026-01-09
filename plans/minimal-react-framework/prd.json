@@ -14,7 +14,9 @@
       "priority": 1,
       "passes": true,
       "notes": "Foundation for all routing. Keep it minimal - just static path comparison.",
-      "tests": ["make all"],
+      "tests": [
+        "make all"
+      ],
       "dependencies": []
     },
     {
@@ -29,8 +31,12 @@
       "priority": 2,
       "passes": true,
       "notes": "Dynamic segments start with `:`. Extract param values into params object.",
-      "tests": ["make all"],
-      "dependencies": ["F-0001"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0001"
+      ]
     },
     {
       "id": "F-0003",
@@ -44,10 +50,14 @@
         "`make test` passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Optional segments end with `?`. All permutations must work.",
-      "tests": ["make all"],
-      "dependencies": ["F-0002"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0002"
+      ]
     },
     {
       "id": "F-0004",
@@ -61,8 +71,12 @@
       "priority": 4,
       "passes": false,
       "notes": "Catch-all returns array of remaining path segments.",
-      "tests": ["make all"],
-      "dependencies": ["F-0003"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0003"
+      ]
     },
     {
       "id": "F-0005",
@@ -78,8 +92,12 @@
       "priority": 5,
       "passes": false,
       "notes": "Specificity: static > dynamic > optional > catch-all. Compare segment-by-segment.",
-      "tests": ["make all"],
-      "dependencies": ["F-0004"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0004"
+      ]
     },
     {
       "id": "F-0006",
@@ -93,8 +111,12 @@
       "priority": 6,
       "passes": false,
       "notes": "Steel wire checkpoint - route matching is foundation for everything else.",
-      "tests": ["make all"],
-      "dependencies": ["F-0005"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0005"
+      ]
     },
     {
       "id": "F-0007",
@@ -109,8 +131,12 @@
       "priority": 7,
       "passes": false,
       "notes": "Single merged context. Will be injected by Python into VDOM.",
-      "tests": ["make all"],
-      "dependencies": ["F-0006"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0006"
+      ]
     },
     {
       "id": "F-0008",
@@ -125,8 +151,12 @@
       "priority": 8,
       "passes": false,
       "notes": "",
-      "tests": ["make all"],
-      "dependencies": ["F-0007"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0007"
+      ]
     },
     {
       "id": "F-0009",
@@ -142,8 +172,12 @@
       "priority": 9,
       "passes": false,
       "notes": "Scoped params - each route level sees only its own params. Parent params via Pulse Context.",
-      "tests": ["make all"],
-      "dependencies": ["F-0008"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0008"
+      ]
     },
     {
       "id": "F-0010",
@@ -161,8 +195,12 @@
       "priority": 10,
       "passes": false,
       "notes": "Full navigation options. Relative paths resolved from current location.",
-      "tests": ["make all"],
-      "dependencies": ["F-0009"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0009"
+      ]
     },
     {
       "id": "F-0011",
@@ -177,8 +215,12 @@
       "priority": 11,
       "passes": false,
       "notes": "Steel wire checkpoint - context scoping is critical for layouts.",
-      "tests": ["make all"],
-      "dependencies": ["F-0010"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0010"
+      ]
     },
     {
       "id": "F-0012",
@@ -194,8 +236,12 @@
       "priority": 12,
       "passes": false,
       "notes": "Basic Link first, prefetching added later.",
-      "tests": ["make all"],
-      "dependencies": ["F-0011"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0011"
+      ]
     },
     {
       "id": "F-0013",
@@ -211,8 +257,12 @@
       "priority": 13,
       "passes": false,
       "notes": "Auto-detect external = starts with http:// or different origin.",
-      "tests": ["make all"],
-      "dependencies": ["F-0012"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0012"
+      ]
     },
     {
       "id": "F-0014",
@@ -228,8 +278,12 @@
       "priority": 14,
       "passes": false,
       "notes": "Viewport prefetch is default behavior. Actual prefetch logic wired later.",
-      "tests": ["make all"],
-      "dependencies": ["F-0013"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0013"
+      ]
     },
     {
       "id": "F-0015",
@@ -244,8 +298,12 @@
       "priority": 15,
       "passes": false,
       "notes": "Hover fallback when viewport prefetch disabled.",
-      "tests": ["make all"],
-      "dependencies": ["F-0014"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0014"
+      ]
     },
     {
       "id": "F-0016",
@@ -261,8 +319,12 @@
       "priority": 16,
       "passes": false,
       "notes": "Built-in default, configurable/replaceable.",
-      "tests": ["make all"],
-      "dependencies": ["F-0015"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0015"
+      ]
     },
     {
       "id": "F-0017",
@@ -276,8 +338,12 @@
       "priority": 17,
       "passes": false,
       "notes": "Steel wire checkpoint - Link component complete.",
-      "tests": ["make all"],
-      "dependencies": ["F-0016"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0016"
+      ]
     },
     {
       "id": "F-0018",
@@ -293,8 +359,12 @@
       "priority": 18,
       "passes": false,
       "notes": "Built-in hash scroll to anchor.",
-      "tests": ["make all"],
-      "dependencies": ["F-0017"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0017"
+      ]
     },
     {
       "id": "F-0019",
@@ -308,8 +378,12 @@
       "priority": 19,
       "passes": false,
       "notes": "Public API surface for router module.",
-      "tests": ["make all"],
-      "dependencies": ["F-0018"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0018"
+      ]
     },
     {
       "id": "F-0020",
@@ -325,8 +399,12 @@
       "priority": 20,
       "passes": false,
       "notes": "Client-side error boundary for React errors.",
-      "tests": ["make all"],
-      "dependencies": ["F-0019"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0019"
+      ]
     },
     {
       "id": "F-0021",
@@ -342,8 +420,12 @@
       "priority": 21,
       "passes": false,
       "notes": "Identical visuals planned for Python side later.",
-      "tests": ["make all"],
-      "dependencies": ["F-0020"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0020"
+      ]
     },
     {
       "id": "F-0022",
@@ -358,8 +440,12 @@
       "priority": 22,
       "passes": false,
       "notes": "Allows custom error UI per boundary.",
-      "tests": ["make all"],
-      "dependencies": ["F-0021"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0021"
+      ]
     },
     {
       "id": "F-0023",
@@ -375,8 +461,12 @@
       "priority": 23,
       "passes": false,
       "notes": "Steel wire checkpoint - error boundary working.",
-      "tests": ["make all"],
-      "dependencies": ["F-0022"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0022"
+      ]
     },
     {
       "id": "F-0024",
@@ -392,8 +482,12 @@
       "priority": 24,
       "passes": false,
       "notes": "Minimal server first, rendering logic added next.",
-      "tests": ["make all"],
-      "dependencies": ["F-0023"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0023"
+      ]
     },
     {
       "id": "F-0025",
@@ -409,8 +503,12 @@
       "priority": 25,
       "passes": false,
       "notes": "renderToString, not streaming (future work).",
-      "tests": ["make all"],
-      "dependencies": ["F-0024"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0024"
+      ]
     },
     {
       "id": "F-0026",
@@ -426,8 +524,12 @@
       "priority": 26,
       "passes": false,
       "notes": "Python references components by name, Bun resolves from registry.",
-      "tests": ["make all"],
-      "dependencies": ["F-0025"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0025"
+      ]
     },
     {
       "id": "F-0027",
@@ -442,8 +544,12 @@
       "priority": 27,
       "passes": false,
       "notes": "Steel wire checkpoint - basic SSR working.",
-      "tests": ["make all"],
-      "dependencies": ["F-0026"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0026"
+      ]
     },
     {
       "id": "F-0028",
@@ -458,8 +564,12 @@
       "priority": 28,
       "passes": false,
       "notes": "",
-      "tests": ["make all"],
-      "dependencies": ["F-0027"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0027"
+      ]
     },
     {
       "id": "F-0029",
@@ -475,8 +585,12 @@
       "priority": 29,
       "passes": false,
       "notes": "Python-side error boundary for rendering errors.",
-      "tests": ["make all"],
-      "dependencies": ["F-0028"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0028"
+      ]
     },
     {
       "id": "F-0030",
@@ -492,8 +606,12 @@
       "priority": 30,
       "passes": false,
       "notes": "Both error types displayed with unified component.",
-      "tests": ["make all"],
-      "dependencies": ["F-0029"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0029"
+      ]
     },
     {
       "id": "F-0031",
@@ -509,8 +627,12 @@
       "priority": 31,
       "passes": false,
       "notes": "Server-side context like React Context but Python-side.",
-      "tests": ["make all"],
-      "dependencies": ["F-0030"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0030"
+      ]
     },
     {
       "id": "F-0032",
@@ -525,8 +647,12 @@
       "priority": 32,
       "passes": false,
       "notes": "Context flows through layouts to pages.",
-      "tests": ["make all"],
-      "dependencies": ["F-0031"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0031"
+      ]
     },
     {
       "id": "F-0033",
@@ -542,8 +668,12 @@
       "priority": 33,
       "passes": false,
       "notes": "Steel wire checkpoint - context system working.",
-      "tests": ["make all"],
-      "dependencies": ["F-0032"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0032"
+      ]
     },
     {
       "id": "F-0034",
@@ -558,8 +688,12 @@
       "priority": 34,
       "passes": false,
       "notes": "Key architectural change - one React tree at root.",
-      "tests": ["make all"],
-      "dependencies": ["F-0033"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0033"
+      ]
     },
     {
       "id": "F-0035",
@@ -574,8 +708,12 @@
       "priority": 35,
       "passes": false,
       "notes": "Single Outlet for now, multiple Outlets is future work.",
-      "tests": ["make all"],
-      "dependencies": ["F-0034"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0034"
+      ]
     },
     {
       "id": "F-0036",
@@ -590,8 +728,12 @@
       "priority": 36,
       "passes": false,
       "notes": "How useParams gets scoped values.",
-      "tests": ["make all"],
-      "dependencies": ["F-0035"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0035"
+      ]
     },
     {
       "id": "F-0037",
@@ -605,8 +747,12 @@
       "priority": 37,
       "passes": false,
       "notes": "Steel wire checkpoint - unified tree working.",
-      "tests": ["make all"],
-      "dependencies": ["F-0036"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0036"
+      ]
     },
     {
       "id": "F-0038",
@@ -622,8 +768,12 @@
       "priority": 38,
       "passes": false,
       "notes": "Python drives SSR - Bun is stateless renderer.",
-      "tests": ["make all"],
-      "dependencies": ["F-0037"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0037"
+      ]
     },
     {
       "id": "F-0039",
@@ -638,8 +788,12 @@
       "priority": 39,
       "passes": false,
       "notes": "Complete HTML response to browser.",
-      "tests": ["make all"],
-      "dependencies": ["F-0038"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0038"
+      ]
     },
     {
       "id": "F-0040",
@@ -655,12 +809,16 @@
       "priority": 40,
       "passes": false,
       "notes": "Auto-hydrate without explicit call from user code.",
-      "tests": ["make all"],
-      "dependencies": ["F-0039"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0039"
+      ]
     },
     {
       "id": "F-0041",
-      "title": "Verify SSR → hydration roundtrip",
+      "title": "Verify SSR \u2192 hydration roundtrip",
       "acceptanceCriteria": [
         "Create E2E test: request page, verify SSR HTML, verify hydration",
         "No console errors or warnings",
@@ -670,8 +828,12 @@
       "priority": 41,
       "passes": false,
       "notes": "Steel wire checkpoint - full SSR flow working.",
-      "tests": ["make all"],
-      "dependencies": ["F-0040"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0040"
+      ]
     },
     {
       "id": "F-0042",
@@ -686,8 +848,12 @@
       "priority": 42,
       "passes": false,
       "notes": "Remove React Router dependency from generated code.",
-      "tests": ["make all"],
-      "dependencies": ["F-0041"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0041"
+      ]
     },
     {
       "id": "F-0043",
@@ -702,8 +868,12 @@
       "priority": 43,
       "passes": false,
       "notes": "",
-      "tests": ["make all"],
-      "dependencies": ["F-0042"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0042"
+      ]
     },
     {
       "id": "F-0044",
@@ -718,8 +888,12 @@
       "priority": 44,
       "passes": false,
       "notes": "Each route file becomes its own chunk.",
-      "tests": ["make all"],
-      "dependencies": ["F-0043"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0043"
+      ]
     },
     {
       "id": "F-0045",
@@ -734,8 +908,12 @@
       "priority": 45,
       "passes": false,
       "notes": "Two modes for different workflows.",
-      "tests": ["make all"],
-      "dependencies": ["F-0044"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0044"
+      ]
     },
     {
       "id": "F-0046",
@@ -750,8 +928,12 @@
       "priority": 46,
       "passes": false,
       "notes": "Incremental updates for managed mode.",
-      "tests": ["make all"],
-      "dependencies": ["F-0045"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0045"
+      ]
     },
     {
       "id": "F-0047",
@@ -766,8 +948,12 @@
       "priority": 47,
       "passes": false,
       "notes": "User edits to managed files get overwritten with warning.",
-      "tests": ["make all"],
-      "dependencies": ["F-0046"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0046"
+      ]
     },
     {
       "id": "F-0048",
@@ -782,8 +968,12 @@
       "priority": 48,
       "passes": false,
       "notes": "Steel wire checkpoint - codegen working.",
-      "tests": ["make all"],
-      "dependencies": ["F-0047"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0047"
+      ]
     },
     {
       "id": "F-0049",
@@ -798,8 +988,12 @@
       "priority": 49,
       "passes": false,
       "notes": "Replaces pulse run with dev/build/start pattern.",
-      "tests": ["make all"],
-      "dependencies": ["F-0048"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0048"
+      ]
     },
     {
       "id": "F-0050",
@@ -814,8 +1008,12 @@
       "priority": 50,
       "passes": false,
       "notes": "Supervisor manages all three processes.",
-      "tests": ["make all"],
-      "dependencies": ["F-0049"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0049"
+      ]
     },
     {
       "id": "F-0051",
@@ -830,8 +1028,12 @@
       "priority": 51,
       "passes": false,
       "notes": "",
-      "tests": ["make all"],
-      "dependencies": ["F-0050"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0050"
+      ]
     },
     {
       "id": "F-0052",
@@ -846,8 +1048,12 @@
       "priority": 52,
       "passes": false,
       "notes": "Steel wire checkpoint - dev server working.",
-      "tests": ["make all"],
-      "dependencies": ["F-0051"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0051"
+      ]
     },
     {
       "id": "F-0053",
@@ -863,8 +1069,12 @@
       "priority": 53,
       "passes": false,
       "notes": "Production build step.",
-      "tests": ["make all"],
-      "dependencies": ["F-0052"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0052"
+      ]
     },
     {
       "id": "F-0054",
@@ -878,8 +1088,12 @@
       "priority": 54,
       "passes": false,
       "notes": "Faster cold start with compiled binary.",
-      "tests": ["make all"],
-      "dependencies": ["F-0053"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0053"
+      ]
     },
     {
       "id": "F-0055",
@@ -895,8 +1109,12 @@
       "priority": 55,
       "passes": false,
       "notes": "Production server command.",
-      "tests": ["make all"],
-      "dependencies": ["F-0054"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0054"
+      ]
     },
     {
       "id": "F-0056",
@@ -912,8 +1130,12 @@
       "priority": 56,
       "passes": false,
       "notes": "New project scaffolding.",
-      "tests": ["make all"],
-      "dependencies": ["F-0055"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0055"
+      ]
     },
     {
       "id": "F-0057",
@@ -928,8 +1150,12 @@
       "priority": 57,
       "passes": false,
       "notes": "Convert managed to exported mode.",
-      "tests": ["make all"],
-      "dependencies": ["F-0056"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0056"
+      ]
     },
     {
       "id": "F-0058",
@@ -945,8 +1171,12 @@
       "priority": 58,
       "passes": false,
       "notes": "Steel wire checkpoint - CLI working.",
-      "tests": ["make all"],
-      "dependencies": ["F-0057"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0057"
+      ]
     },
     {
       "id": "F-0059",
@@ -961,8 +1191,12 @@
       "priority": 59,
       "passes": false,
       "notes": "Full navigation state available in Python.",
-      "tests": ["make all"],
-      "dependencies": ["F-0058"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0058"
+      ]
     },
     {
       "id": "F-0060",
@@ -977,8 +1211,12 @@
       "priority": 60,
       "passes": false,
       "notes": "Browser default or Pulse override per route.",
-      "tests": ["make all"],
-      "dependencies": ["F-0059"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0059"
+      ]
     },
     {
       "id": "F-0061",
@@ -993,8 +1231,12 @@
       "priority": 61,
       "passes": false,
       "notes": "Error UI with retry on navigation failure.",
-      "tests": ["make all"],
-      "dependencies": ["F-0060"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0060"
+      ]
     },
     {
       "id": "F-0062",
@@ -1009,8 +1251,12 @@
       "priority": 62,
       "passes": false,
       "notes": "Graceful offline handling.",
-      "tests": ["make all"],
-      "dependencies": ["F-0061"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0061"
+      ]
     },
     {
       "id": "F-0063",
@@ -1026,8 +1272,12 @@
       "priority": 63,
       "passes": false,
       "notes": "Catch invalid HTML early with helpful errors.",
-      "tests": ["make all"],
-      "dependencies": ["F-0062"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0062"
+      ]
     },
     {
       "id": "F-0064",
@@ -1042,8 +1292,12 @@
       "priority": 64,
       "passes": false,
       "notes": "Main pulse client uses new router.",
-      "tests": ["make all"],
-      "dependencies": ["F-0063"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0063"
+      ]
     },
     {
       "id": "F-0065",
@@ -1057,8 +1311,12 @@
       "priority": 65,
       "passes": false,
       "notes": "",
-      "tests": ["make all"],
-      "dependencies": ["F-0064"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0064"
+      ]
     },
     {
       "id": "F-0066",
@@ -1073,8 +1331,12 @@
       "priority": 66,
       "passes": false,
       "notes": "Clean removal of dependency.",
-      "tests": ["make all"],
-      "dependencies": ["F-0065"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0065"
+      ]
     },
     {
       "id": "F-0067",
@@ -1088,8 +1350,12 @@
       "priority": 67,
       "passes": false,
       "notes": "Reference example for users.",
-      "tests": ["make all"],
-      "dependencies": ["F-0066"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0066"
+      ]
     },
     {
       "id": "F-0068",
@@ -1111,8 +1377,12 @@
       "priority": 68,
       "passes": false,
       "notes": "All spec goals verified.",
-      "tests": ["make all"],
-      "dependencies": ["F-0067"]
+      "tests": [
+        "make all"
+      ],
+      "dependencies": [
+        "F-0067"
+      ]
     }
   ]
 }

@@ -257,10 +257,16 @@ def generate_route(
 	# Generate output sections
 	output_parts: list[str] = []
 
+	# Add router hook imports
+	output_parts.append(
+		'import { useLocation, useParams, useNavigate } from "pulse-ui-client";'
+	)
+
 	imports_section = _generate_imports_section(
 		all_imports, asset_filenames, asset_prefix
 	)
 	if imports_section:
+		output_parts.append("")
 		output_parts.append(imports_section)
 
 	output_parts.append("")
@@ -277,25 +283,26 @@ def generate_route(
 	output_parts.append(_generate_registry_section(all_imports, constants, funcs))
 	output_parts.append("")
 
-	# Route component
+	# Route component using Pulse router hooks
 	pulse_view_js = pulse_view_import.js_name
 	output_parts.append(f'''const path = "{path}";
 
 export default function RouteComponent() {{
+  const location = useLocation();
+  const params = useParams();
+  const navigate = useNavigate();
+
   return (
-    <{pulse_view_js} key={{path}} registry={{__registry}} path={{path}} />
+    <{pulse_view_js}
+      key={{path}}
+      registry={{__registry}}
+      path={{path}}
+      location={{location}}
+      params={{params}}
+      navigate={{navigate}}
+    />
   );
 }}''')
 	output_parts.append("")
-
-	# Headers function
-	output_parts.append("""// Action and loader headers are not returned automatically
-function hasAnyHeaders(headers) {
-  return [...headers].length > 0;
-}
-
-export function headers({ actionHeaders, loaderHeaders }) {
-  return hasAnyHeaders(actionHeaders) ? actionHeaders : loaderHeaders;
-}""")
 
 	return "\n".join(output_parts)

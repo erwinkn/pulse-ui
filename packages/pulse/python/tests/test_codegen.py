@@ -43,11 +43,15 @@ class TestCodegen:
 
 		assert "import { PulseView" in result
 		assert '"pulse-ui-client"' in result
+		# Router hooks imported
+		assert "import { useLocation, useParams, useNavigate }" in result
 		# Unified registry only
 		assert "const __registry = {" in result
 		assert 'const path = "/simple"' in result
-		assert "export function headers" in result
 		assert "export default function RouteComponent()" in result
+		assert "const location = useLocation()" in result
+		assert "const params = useParams()" in result
+		assert "const navigate = useNavigate()" in result
 		assert "registry={__registry}" in result
 		assert "path={path}" in result
 
@@ -356,10 +360,13 @@ class TestGenerateRoute:
 		"""Test basic route generation."""
 		result = generate_route(path="/test")
 
+		assert "import { useLocation, useParams, useNavigate }" in result
 		assert "import { PulseView" in result
 		assert 'const path = "/test"' in result
 		assert "export default function RouteComponent()" in result
-		assert "export function headers" in result
+		assert "const location = useLocation()" in result
+		assert "const params = useParams()" in result
+		assert "const navigate = useNavigate()" in result
 		assert "const __registry = {" in result
 
 	def test_generate_route_with_component(self):

@@ -519,3 +519,18 @@ Started: 2026-01-09
   - Tests updated to verify shell components: DOCTYPE, lang attribute, __PULSE_DATA__ script tag, rendered content, content-type
   - All 5 SSR endpoint tests pass with new wrapped HTML format
   - Steel wire checkpoint: Complete HTML response ready for client hydration
+
+## 2026-01-10 - F-0040
+- Implemented client auto-hydration entry point
+- Files: `packages/pulse/js/src/entry-client.ts`, `packages/pulse/js/src/__tests__/entry-client.integration.test.tsx`, `packages/pulse/js/src/index.ts`
+- **Learnings:**
+  - Entry client reads __PULSE_DATA__ script tag injected by Python SSR
+  - Initializes on DOMContentLoaded event for safety (DOM fully ready)
+  - Uses hydrateRoot from react-dom/client for React hydration (no mismatch warnings)
+  - Creates NavigateFunction for client-side navigation (history.go, location.replace, location.href)
+  - Initializes PulseSocketIOClient with navigate fn and connection config
+  - Attaches "/" route with hydrate data's routeInfo for server sync
+  - Comprehensive tests verify: simple/complex VDOM rendering, null/undefined/boolean/numeric children, props, style objects, attributes
+  - All 14 hydration tests pass without console warnings
+  - PulseSocketIOClient exported from main index for client initialization
+  - Steel wire checkpoint: Complete SSR→client hydration flow verified end-to-end

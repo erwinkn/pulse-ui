@@ -121,7 +121,7 @@ def extract_count_from_ctx(session: RenderSession, path: str) -> int:
 	# Read latest VDOM by re-rendering from the RenderTree and inspecting it
 	mount = session.route_mounts[path]
 	with ps.PulseContext.update(render=session, route=mount.route):
-		vdom = mount.tree.render()
+		vdom = mount.tree.render()  # pyright: ignore[reportOptionalMemberAccess]
 	vdom_dict = cast(dict[str, Any], cast(object, vdom))
 	children = cast(list[Any], (vdom_dict.get("children", []) or []))
 	span = cast(dict[str, Any], children[0])
@@ -219,7 +219,7 @@ def make_global_routes() -> RouteTree:
 def extract_global_count(session: RenderSession, path: str) -> int:
 	mount = session.route_mounts[path]
 	with ps.PulseContext.update(render=session, route=mount.route):
-		vdom = mount.tree.render()
+		vdom = mount.tree.render()  # pyright: ignore[reportOptionalMemberAccess]
 	vdom_dict = cast(dict[str, Any], cast(object, vdom))
 	children = cast(list[Any], (vdom_dict.get("children", []) or []))
 	span = cast(dict[str, Any], children[0])
@@ -523,7 +523,7 @@ def test_state_preserved_across_reconnect():
 	assert messages2[0]["type"] == "vdom_update"
 
 	# Verify the count is now 2 (two increments)
-	vdom = mount.tree.render()
+	vdom = mount.tree.render()  # pyright: ignore[reportOptionalMemberAccess]
 	assert "2" in str(vdom)
 
 	session.close()

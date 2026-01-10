@@ -564,3 +564,17 @@ Started: 2026-01-09
   - Test assertions updated to verify new template structure (PulseRouterProvider, prop passing)
   - Codegen test now passes with updated layout template
   - All acceptance criteria met: no react-router imports, uses PulseRouterProvider, make typecheck passes
+
+## 2026-01-10 - F-0043
+- Updated codegen route template to use Pulse router hooks instead of React Router
+- Files: `packages/pulse/python/src/pulse/codegen/templates/route.py`, `packages/pulse/python/tests/test_codegen.py`
+- **Learnings:**
+  - Route template uses `useLocation()`, `useParams()`, `useNavigate()` hooks from "pulse-ui-client"
+  - Hooks are imported as named imports at top: `import { useLocation, useParams, useNavigate } from "pulse-ui-client";`
+  - RouteComponent calls hooks and passes location, params, navigate as props to PulseView component
+  - Removed "export function headers" from template (no longer needed for custom router)
+  - Test assertions updated to verify router hook usage instead of headers function
+  - PulseView now receives all router context: `location`, `params`, `navigate`, `path`, `registry`
+  - All codegen tests pass (23 passed, 2 skipped)
+  - All acceptance criteria met: uses Pulse router hooks, no react-router-dom imports, make typecheck passes
+  - Steel wire checkpoint: Route template updated for custom router

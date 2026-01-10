@@ -304,6 +304,18 @@ def dev(
 			logger.error("Failed to install web dependencies with Bun.")
 			raise typer.Exit(1) from None
 
+	# Run codegen before starting servers
+	try:
+		logger.print("Generating routes...")
+		app_instance.run_codegen(
+			f"http://{address}:{port}",
+			f"http://{address}:{port}",
+		)
+		logger.success("Routes generated")
+	except Exception as exc:
+		logger.error(f"Failed to generate routes: {exc}")
+		raise typer.Exit(1) from None
+
 	# Track readiness for announcement
 	server_ready = {"server": False, "vite": False, "bun": False}
 	announced = False

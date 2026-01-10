@@ -1,0 +1,10 @@
+[project]
+name = "pulse-test-app"
+version = "0.1.0"
+dependencies = [
+    "pulse @ file:///Users/erwin/Code/pulse-ui.minimal-react/packages/pulse/python",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

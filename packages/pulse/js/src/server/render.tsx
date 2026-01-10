@@ -122,6 +122,7 @@ export const defaultComponentRegistry: ComponentRegistry = {
 	datalist: "datalist",
 	// Pulse components
 	ErrorBoundary: ErrorBoundary,
+	PulseRouterProvider: PulseRouterProvider,
 };
 
 /**

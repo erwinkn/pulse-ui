@@ -176,7 +176,50 @@ class Renderer:
 		# the React ErrorBoundary handles client-side errors
 		return vdom_node, normalized_children
 
+	def render_router_provider(
+		self, element: Element, path: str
+	) -> tuple[VDOMNode, Element]:
+		"""Render PulseRouterProvider wrapper as a mount point.
+
+		F-0036: Route boundaries are wrapped with PulseRouterProvider
+		to provide scoped params to nested routes via useParams().
+
+		Returns the PulseRouterProvider mount point with children rendered.
+		The wrapper element is normalized as the persistent node.
+		"""
+		# Render children
+		children_vdom, _normalized_children = self.render_tree(
+			element.children[0] if element.children else None,
+			f"{path}.0" if path else "0",
+		)
+
+		# Build PulseRouterProvider mount point
+		vdom_node: VDOMElement = {"tag": f"{MOUNT_PREFIX}PulseRouterProvider"}
+
+		# Add hierarchy index as a data attribute for debugging
+		if element.props:
+			props_dict = (
+				element.props_dict()
+				if hasattr(element, "props_dict")
+				else element.props
+			)
+			if isinstance(props_dict, dict) and "_hierarchyIndex" in props_dict:
+				vdom_node["props"] = {
+					"_hierarchyIndex": props_dict.get("_hierarchyIndex")
+				}
+
+		# Add children
+		vdom_node["children"] = [children_vdom]
+
+		# Return the element as the persistent node (unlike ErrorBoundary)
+		# since we need to track it for context flow
+		return vdom_node, element
+
 	def render_node(self, element: Element, path: str) -> tuple[VDOMNode, Element]:
+		# Handle special route provider wrapper (F-0036)
+		if element.tag == "$$PulseRouterProvider":
+			return self.render_router_provider(element, path)
+
 		tag = self.render_tag(element.tag)
 		vdom_node: VDOMElement = {"tag": tag}
 		if (key_val := key_value(element)) is not None:

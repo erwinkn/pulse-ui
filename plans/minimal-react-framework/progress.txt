@@ -578,3 +578,22 @@ Started: 2026-01-09
   - All codegen tests pass (23 passed, 2 skipped)
   - All acceptance criteria met: uses Pulse router hooks, no react-router-dom imports, make typecheck passes
   - Steel wire checkpoint: Route template updated for custom router
+
+## 2026-01-10 - F-0044
+- Updated routes.ts generation to use custom Pulse router with automatic code splitting
+- Files: `packages/pulse/python/src/pulse/codegen/templates/routes_ts.py`, `packages/pulse/python/src/pulse/codegen/codegen.py`, `packages/pulse/python/tests/test_codegen.py`
+- **Learnings:**
+  - Routes.ts changed from React Router DSL (route/layout/index functions) to RouteNode interface
+  - RouteNode has: path (string), component (dynamic import function), optional children array
+  - Dynamic imports: `component: () => import("pulse/routes/...").then(m => ({ default: m.default }))`
+  - Layout routes have path="" (pathless), regular routes have their path string
+  - Index routes (/) also use path="" after normalization
+  - _render_routes_ts now generates object literals compatible with matchPath
+  - Each route file becomes its own chunk via dynamic import for automatic code splitting
+  - Component property is optional (layout nodes might not need component)
+  - Template removed React Router imports (@react-router/dev/routes, RouteConfig, route, layout, index)
+  - Test assertions updated to verify RouteNode interface and dynamic import syntax
+  - All codegen tests pass (23 passed, 2 skipped) - format verified working
+  - TypeScript compilation passes - RouteNode interface properly typed
+  - Acceptance criteria met: routes.ts uses new format, dynamic imports for code splitting, compatible with matchPath, make typecheck passes
+  - Steel wire checkpoint: Routes.ts generation migrated to custom router with code splitting

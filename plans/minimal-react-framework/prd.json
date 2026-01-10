@@ -1210,7 +1210,7 @@
         "`make test` passes"
       ],
       "priority": 60,
-      "passes": false,
+      "passes": true,
       "notes": "Browser default or Pulse override per route.",
       "tests": [
         "make all"

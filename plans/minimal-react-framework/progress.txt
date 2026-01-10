@@ -934,3 +934,19 @@ Started: 2026-01-09
   - Acceptance criteria met: client sends navigation state, Python receives and stores it
   - Steel wire checkpoint: Client-server navigation state sync verified working
 
+
+## 2026-01-10 - F-0060
+- Implemented configurable scroll restoration for navigation
+- Files: `packages/pulse/js/src/router/scroll.ts`, `packages/pulse/js/src/router/scroll.test.tsx`, `packages/pulse/js/src/router/context.tsx`, `packages/pulse/js/src/router/index.ts`
+- **Learnings:**
+  - NavigateOptions extended with preventScrollReset?: boolean field
+  - saveScrollPosition(pathname) stores {x, y} coordinates in Map keyed by pathname
+  - restoreScrollPosition(pathname, preventReset?) restores saved position or scrolls to top
+  - preventReset flag skips restoration entirely (browser handles naturally)
+  - useScrollRestoration() hook tracks pathname changes and manages scroll
+  - prevPathnameRef used to detect navigation and save previous page's scroll position
+  - setScrollResetPrevention() function communicates intent from navigate() to hook
+  - Dynamic import in useNavigate to avoid circular dependency between context and scroll
+  - Tests verify scrollTo is called correctly and preventReset flag works
+  - useScrollRestoration calls requestAnimationFrame to ensure DOM is ready after navigation
+  - Steel wire checkpoint: configurable scroll restoration complete and tested

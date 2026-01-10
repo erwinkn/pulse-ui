@@ -686,7 +686,7 @@
         "`make typecheck` passes"
       ],
       "priority": 34,
-      "passes": false,
+      "passes": true,
       "notes": "Key architectural change - one React tree at root.",
       "tests": [
         "make all"
@@ -947,7 +947,7 @@
         "`make test` passes"
       ],
       "priority": 47,
-      "passes": false,
+      "passes": true,
       "notes": "User edits to managed files get overwritten with warning.",
       "tests": [
         "make all"

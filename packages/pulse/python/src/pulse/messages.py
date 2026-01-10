@@ -110,6 +110,14 @@ class ClientUpdateMessage(TypedDict):
 	routeInfo: RouteInfo
 
 
+class ClientNavigationMessage(TypedDict):
+	type: Literal["navigation"]
+	pathname: str
+	search: str
+	hash: str
+	state: NotRequired[Any]
+
+
 class ClientDetachMessage(TypedDict):
 	type: Literal["detach"]
 	path: str
@@ -167,6 +175,7 @@ ClientPulseMessage = (
 	ClientCallbackMessage
 	| ClientAttachMessage
 	| ClientUpdateMessage
+	| ClientNavigationMessage
 	| ClientDetachMessage
 	| ClientApiResultMessage
 	| ClientJsResultMessage

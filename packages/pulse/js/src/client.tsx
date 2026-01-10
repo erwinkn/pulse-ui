@@ -44,6 +44,7 @@ export interface PulseClient {
 	// Messages
 	updateRoute(path: string, routeInfo: RouteInfo): void;
 	invokeCallback(path: string, callback: string, args: any[]): void;
+	sendNavigation(pathname: string, search: string, hash: string, state?: unknown): void;
 	// VDOM subscription
 	attach(path: string, view: MountedView): void;
 	detach(path: string): void;
@@ -400,6 +401,16 @@ export class PulseSocketIOClient {
 			path,
 			callback,
 			args: args.map(extractEvent),
+		});
+	}
+
+	public sendNavigation(pathname: string, search: string, hash: string, state?: unknown) {
+		this.sendMessage({
+			type: "navigation",
+			pathname,
+			search,
+			hash,
+			state,
 		});
 	}
 

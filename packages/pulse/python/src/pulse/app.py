@@ -923,6 +923,15 @@ class App:
 				render.update_route(msg["path"], msg["routeInfo"])
 			elif msg["type"] == "callback":
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
+			elif msg["type"] == "navigation":
+				# Client-side navigation state sync
+				# Store navigation state for access in route handlers
+				render.last_navigation = {
+					"pathname": msg.get("pathname", ""),
+					"search": msg.get("search", ""),
+					"hash": msg.get("hash", ""),
+					"state": msg.get("state"),
+				}
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
 				render.channels.remove_route(msg["path"])

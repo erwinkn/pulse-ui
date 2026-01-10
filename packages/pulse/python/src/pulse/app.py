@@ -6,6 +6,7 @@ to define routes and configure their Pulse application.
 """
 
 import asyncio
+import json
 import logging
 import os
 from collections import defaultdict
@@ -15,6 +16,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Callable, Literal, TypeVar, cast
 
+import httpx
 import socketio
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -560,6 +562,139 @@ class App:
 				raise HTTPException(status_code=410, detail="Render session expired")
 
 			return await render.forms.handle_submit(form_id, request, session)
+
+		@self.fastapi.get("/{path:path}")
+		async def ssr(path: str, request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
+			"""
+			Server-side rendering endpoint.
+			GET /{path}
+			- Matches route
+			- Prerenders VDOM
+			- POSTs to Bun render server
+			- Returns HTML response
+			"""
+			bun_render_address = envvars.bun_render_server_address
+			if not bun_render_address:
+				raise HTTPException(
+					status_code=500,
+					detail="Bun render server not configured (PULSE_BUN_RENDER_SERVER_ADDRESS)",
+				)
+
+			session = PulseContext.get().session
+			if session is None:
+				raise RuntimeError("Internal error: couldn't resolve user session")
+
+			client_addr: str | None = get_client_address(request)
+			# Create new render session for this SSR request
+			render_id = new_sid()
+			render = self.create_render(render_id, session, client_address=client_addr)
+			self._schedule_render_cleanup(render_id)
+
+			with PulseContext.update(render=render):
+				try:
+					# Normalize path with leading slash
+					normalized_path = f"/{path}" if not path.startswith("/") else path
+
+					# Prerender the route
+					prerender_result = render.prerender(normalized_path)
+
+					# Handle redirect/not-found responses
+					if prerender_result["type"] == "navigate_to":
+						nav_path = prerender_result["path"]
+						# For SSR, follow redirects internally
+						return Response(
+							content=json.dumps(
+								{
+									"error": "redirect",
+									"path": nav_path,
+								}
+							),
+							status_code=302,
+							headers={"Location": str(nav_path)},
+							media_type="application/json",
+						)
+
+					# Extract VDOM from vdom_init result
+					if prerender_result["type"] != "vdom_init":
+						raise HTTPException(
+							status_code=500, detail="Invalid prerender response"
+						)
+
+					vdom = prerender_result["vdom"]
+
+					# Build route info for SSR renderer
+					# Extract params from the path based on route segments
+					matched_route = self.routes.find(normalized_path)
+					params: dict[str, Any] = {}
+
+					# Only extract params if matched route is a Route (not Layout)
+					if isinstance(matched_route, Route):
+						# Simple param extraction from path segments
+						path_parts = (
+							normalized_path.strip("/").split("/")
+							if normalized_path != "/"
+							else []
+						)
+						for i, segment in enumerate(matched_route.segments):
+							if segment.is_dynamic and i < len(path_parts):
+								params[segment.name] = path_parts[i]
+							elif segment.is_splat:
+								params["*"] = (
+									path_parts[i:] if i < len(path_parts) else []
+								)
+
+					route_info = {
+						"location": {
+							"pathname": normalized_path,
+							"search": str(request.url.query)
+							if request.url.query
+							else "",
+							"hash": "",
+							"state": None,
+						},
+						"params": params,
+					}
+
+					# POST to Bun render server
+					async with httpx.AsyncClient() as client:
+						ssr_request = {
+							"vdom": vdom,
+							"routeInfo": route_info,
+						}
+
+						try:
+							ssr_response = await client.post(
+								f"{bun_render_address}/render",
+								json=ssr_request,
+								timeout=10.0,
+							)
+
+							if ssr_response.status_code != 200:
+								raise HTTPException(
+									status_code=ssr_response.status_code,
+									detail=f"Bun render server error: {ssr_response.text}",
+								)
+
+							# Return HTML from Bun server
+							return Response(
+								content=ssr_response.text,
+								status_code=200,
+								media_type="text/html",
+							)
+						except httpx.RequestError as e:
+							raise HTTPException(
+								status_code=503,
+								detail=f"Failed to connect to Bun render server: {str(e)}",
+							) from e
+
+				except HTTPException:
+					# Re-raise HTTP exceptions as-is
+					raise
+				except Exception as e:
+					logger.exception("SSR render error")
+					raise HTTPException(
+						status_code=500, detail=f"Render error: {str(e)}"
+					) from e
 
 		# Call on_setup hooks after FastAPI routes/middleware are in place
 		for plugin in self.plugins:

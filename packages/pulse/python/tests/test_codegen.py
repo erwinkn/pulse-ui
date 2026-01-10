@@ -276,10 +276,17 @@ class TestCodegen:
 
 		layout_content = (pulse_app_dir / "_layout.tsx").read_text()
 		assert (
-			'import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";'
+			'import { PulseRouterProvider } from "pulse-ui-client";' in layout_content
+		)
+		assert (
+			'import type { Location, NavigateFn, Params } from "pulse-ui-client";'
 			in layout_content
 		)
-		assert 'serverAddress: "http://localhost:8000"' in layout_content
+		assert "export default function PulseLayout(" in layout_content
+		assert "<PulseRouterProvider" in layout_content
+		assert "location={location}" in layout_content
+		assert "params={params}" in layout_content
+		assert "navigate={navigate}" in layout_content
 
 		routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
 		# routes.ts should be built from runtime route tree now

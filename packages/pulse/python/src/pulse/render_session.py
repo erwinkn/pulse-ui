@@ -113,6 +113,7 @@ class RenderSession:
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_global_states: dict[str, State]
+	_normalize_hook_context: Any  # Created lazily in _normalize_element
 
 	def __init__(
 		self,
@@ -142,6 +143,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
+		self._normalize_hook_context = None  # Lazy initialization
 
 	@property
 	def server_address(self) -> str:
@@ -273,6 +275,106 @@ class RenderSession:
 
 		return hierarchy
 
+	def _is_outlet(self, element: Any) -> bool:
+		"""Check if an Element is the Outlet component from react-router.
+
+		Outlet is created via @react_component(Import("Outlet", "react-router"))
+		so it has a tag that is an Import expression.
+		"""
+		from pulse.transpiler.imports import Import as ImportExpr
+		from pulse.transpiler.nodes import Element as ElementNode
+
+		if not isinstance(element, ElementNode):
+			return False
+		# Check if tag is Import("Outlet", "react-router")
+		if isinstance(element.tag, ImportExpr):
+			# Check name is "Outlet" and src is "react-router" (not module, which is an Expr)
+			result = element.tag.name == "Outlet" and element.tag.src == "react-router"
+			return result
+		return False
+
+	def _substitute_outlets(
+		self, element: Any, hierarchy: list[Route | Layout], current_index: int
+	) -> Any:
+		"""Recursively substitute Outlet components with child route content.
+
+		Works on Element nodes (PulseNodes should be normalized first via _normalize_element).
+
+		Args:
+			element: An Element node (from Route/Layout.render() after normalization)
+			hierarchy: Full route/layout hierarchy from root to matched route
+			current_index: Current position in the hierarchy (0 = root)
+
+		Returns:
+			The element with Outlets replaced by child content, or the element unchanged.
+		"""
+		from pulse.transpiler.nodes import Element as ElementNode
+
+		# If we're at the end of the hierarchy, no more children to insert
+		if current_index >= len(hierarchy) - 1:
+			return element
+
+		# Not an element, return as-is (primitives, strings, etc.)
+		if not isinstance(element, ElementNode):
+			return element
+
+		# Check if this element is an Outlet component
+		if self._is_outlet(element):
+			# Replace Outlet with the next hierarchy level's rendered content
+			next_index = current_index + 1
+			next_element = hierarchy[next_index].render()
+			# Normalize the next element in case it's a component
+			next_element = self._normalize_element(next_element)
+			# Recursively substitute outlets in the next element
+			return self._substitute_outlets(next_element, hierarchy, next_index)
+
+		# Recursively process children, replacing outlets as needed
+		if element.children:
+			new_children: list[Any] = []
+			for child in element.children:
+				if isinstance(child, ElementNode):
+					# Recursively substitute in child elements
+					new_child = self._substitute_outlets(
+						child, hierarchy, current_index
+					)
+					new_children.append(new_child)
+				else:
+					# Keep primitives (strings, numbers, etc.) as-is
+					new_children.append(child)
+			# Create new element with substituted children
+			element = ElementNode(
+				tag=element.tag,
+				props=element.props,
+				children=new_children,
+				key=element.key,
+			)
+
+		return element
+
+	def _normalize_element(self, element: Any) -> Any:
+		"""Convert any node type to Element form for substitution.
+
+		If element is a PulseNode (component), execute it to get the Element tree.
+		Uses a shared hook context for the current render session.
+		"""
+		from pulse.transpiler.nodes import PulseNode
+
+		if isinstance(element, PulseNode):
+			# Get or create hook context for this render cycle
+			if self._normalize_hook_context is None:
+				from pulse.hooks.core import HookContext
+
+				self._normalize_hook_context = HookContext()
+
+			# Execute the component with the shared hook context
+			if element.hooks is None:
+				element.hooks = self._normalize_hook_context
+			with element.hooks:
+				rendered = element.fn(*element.args, **element.kwargs)
+			# Recursively normalize in case component returns another component
+			return self._normalize_element(rendered)
+		return element
+
 	def _get_unified_tree_element(self, hierarchy: list[Route | Layout]) -> Any:
 		"""Get the root element for rendering the full hierarchy as one tree.
 
@@ -283,10 +385,14 @@ class RenderSession:
 		if not hierarchy:
 			raise ValueError("Hierarchy cannot be empty")
 
-		# Return the root element (first in hierarchy)
-		# If there are layouts, this renders the root layout with empty Outlets
-		# If there are no layouts, this renders the matched route directly
-		return hierarchy[0].render()
+		# Get the root element (first in hierarchy)
+		root_element = hierarchy[0].render()
+
+		# Normalize component to Element form
+		root_element = self._normalize_element(root_element)
+
+		# Substitute Outlet placeholders with actual child route content
+		return self._substitute_outlets(root_element, hierarchy, 0)
 
 	def prerender(
 		self, path: str, route_info: RouteInfo | None = None

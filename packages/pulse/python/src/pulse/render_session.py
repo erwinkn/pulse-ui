@@ -293,12 +293,40 @@ class RenderSession:
 			return result
 		return False
 
+	def _wrap_element_with_router_context(
+		self, element: Any, route_index: int, hierarchy: list[Route | Layout]
+	) -> Any:
+		"""Wrap an element with a router context component for scoped params.
+
+		Creates a wrapper component that will render as PulseRouterProvider
+		with the scoped params from the route at route_index.
+
+		F-0036: Each route boundary gets its own context so nested routes
+		can access scoped params via useParams.
+		"""
+		from pulse.transpiler.nodes import Element as ElementNode
+
+		if not isinstance(element, ElementNode):
+			return element
+
+		# Create wrapper component that will be recognized by renderer
+		# Mark this element as a route boundary by wrapping it with a special tag
+		# that the renderer can process
+		wrapper = ElementNode(
+			tag="$$PulseRouterProvider",
+			props={"_hierarchyIndex": route_index},  # For debugging/tracking
+			children=[element],
+			key=None,
+		)
+		return wrapper
+
 	def _substitute_outlets(
 		self, element: Any, hierarchy: list[Route | Layout], current_index: int
 	) -> Any:
 		"""Recursively substitute Outlet components with child route content.
 
 		Works on Element nodes (PulseNodes should be normalized first via _normalize_element).
+		After substitution, wraps each hierarchy level with router context wrappers (F-0036).
 
 		Args:
 			element: An Element node (from Route/Layout.render() after normalization)
@@ -325,8 +353,13 @@ class RenderSession:
 			next_element = hierarchy[next_index].render()
 			# Normalize the next element in case it's a component
 			next_element = self._normalize_element(next_element)
-			# Recursively substitute outlets in the next element
-			return self._substitute_outlets(next_element, hierarchy, next_index)
+			# Recursively substitute outlets in the next element first
+			next_element = self._substitute_outlets(next_element, hierarchy, next_index)
+			# Then wrap the substituted element with router context (F-0036)
+			next_element = self._wrap_element_with_router_context(
+				next_element, next_index, hierarchy
+			)
+			return next_element
 
 		# Recursively process children, replacing outlets as needed
 		if element.children:
@@ -381,6 +414,7 @@ class RenderSession:
 		For F-0034, this returns the root of the hierarchy (first layout or route).
 		The element will render with Outlets as placeholders.
 		For F-0035, Outlets will be replaced with child route content.
+		For F-0036, route boundaries are wrapped with PulseRouterContext wrappers.
 		"""
 		if not hierarchy:
 			raise ValueError("Hierarchy cannot be empty")
@@ -391,7 +425,13 @@ class RenderSession:
 		# Normalize component to Element form
 		root_element = self._normalize_element(root_element)
 
+		# Wrap root with router context (F-0036)
+		root_element = self._wrap_element_with_router_context(
+			root_element, 0, hierarchy
+		)
+
 		# Substitute Outlet placeholders with actual child route content
+		# Nested elements will also be wrapped as they replace outlets
 		return self._substitute_outlets(root_element, hierarchy, 0)
 
 	def prerender(

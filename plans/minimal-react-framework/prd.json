@@ -927,7 +927,7 @@
         "`make test` passes"
       ],
       "priority": 46,
-      "passes": false,
+      "passes": true,
       "notes": "Incremental updates for managed mode.",
       "tests": [
         "make all"

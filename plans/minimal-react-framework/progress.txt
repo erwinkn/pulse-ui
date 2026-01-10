@@ -614,3 +614,28 @@ Started: 2026-01-09
   - TypeScript compilation successful with no warnings
   - Acceptance criteria met: mode property, directory selection works, gitignore rules applied, make typecheck passes
   - Steel wire checkpoint: Codegen now supports two deployment modes (managed and exported)
+
+## 2026-01-10 - F-0046
+- Implemented checksum-based change detection for managed mode
+- Files: `packages/pulse/python/src/pulse/codegen/codegen.py`, `packages/pulse/python/tests/test_codegen.py`
+- **Learnings:**
+  - ChecksumsManager class manages .checksums.json file for tracking file content hashes
+  - SHA256 hashing used for content change detection (64-char hex string)
+  - ChecksumsManager.load() reads existing checksums from disk, handles corrupted files gracefully
+  - ChecksumsManager.save() writes checksums as sorted JSON for deterministic output
+  - ChecksumsManager.should_write() returns true only if content hash changed
+  - ChecksumsManager.cleanup_old_files() removes entries for deleted files
+  - write_file_if_changed() updated with optional checksums_manager parameter:
+    - With manager (managed mode): uses hash comparison
+    - Without manager (exported mode): uses direct content comparison (backward compatible)
+  - generate_all() initializes ChecksumsManager in managed mode at <base_dir>/.pulse/.checksums.json
+  - All write calls (layout, routes.ts, routes.runtime.ts, route components) pass checksums_manager
+  - File paths stored as relative paths from pulse root for deterministic keys
+  - Three new test cases verify:
+    - test_checksums_created_in_managed_mode: .checksums.json created after generation
+    - test_unchanged_files_not_rewritten: files with unchanged content keep same mtime
+    - test_checksums_format_is_valid_json: checksums are valid JSON with correct hash format
+  - All codegen tests pass (29 tests total, +6 new tests)
+  - TypeScript compilation successful with no warnings
+  - Acceptance criteria met: .checksums.json created in managed mode, SHA256 hashing, incremental updates, tests added, make test passes
+  - Steel wire checkpoint: Incremental code generation working in managed mode via checksums

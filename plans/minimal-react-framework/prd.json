@@ -1129,7 +1129,7 @@
         "No UI library included (bare bones)"
       ],
       "priority": 56,
-      "passes": false,
+      "passes": true,
       "notes": "New project scaffolding.",
       "tests": [
         "make all"

@@ -31,6 +31,7 @@ class CodegenConfig:
 	    web_dir (str): Root directory for the web output.
 	    pulse_dir (str): Name of the Pulse app directory.
 	    pulse_path (Path): Full path to the generated app directory.
+	    mode (str): Code generation mode - 'managed' or 'exported'.
 	"""
 
 	web_dir: Path | str = "web"
@@ -41,6 +42,9 @@ class CodegenConfig:
 
 	base_dir: Path | None = None
 	"""Directory containing the user's app file. If not provided, resolved from env."""
+
+	mode: str = "managed"
+	"""Code generation mode: 'managed' (.pulse/web/, gitignored) or 'exported' (web/, committed)."""
 
 	@property
 	def resolved_base_dir(self) -> Path:
@@ -64,11 +68,20 @@ class CodegenConfig:
 
 	@property
 	def web_root(self) -> Path:
-		"""Absolute path to the web root directory (e.g. `<app_dir>/pulse-web`)."""
+		"""Absolute path to the web root directory (e.g. `<app_dir>/pulse-web`).
+
+		In managed mode, returns .pulse/<web_dir>/
+		In exported mode, returns <web_dir>/
+		"""
 		wd = Path(self.web_dir)
 		if wd.is_absolute():
 			return wd
-		return self.resolved_base_dir / wd
+
+		base = self.resolved_base_dir
+		if self.mode == "managed":
+			return base / ".pulse" / wd
+		else:  # exported mode
+			return base / wd
 
 	@property
 	def pulse_path(self) -> Path:
@@ -117,8 +130,13 @@ class Codegen:
 		api_prefix: str = "",
 		connection_status: "ConnectionStatusConfig | None" = None,
 	):
-		# Ensure generated files are gitignored
-		ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
+		# Ensure generated files are gitignored based on mode
+		if self.cfg.mode == "managed":
+			# In managed mode, ignore .pulse directory at the base level
+			ensure_gitignore_has(self.cfg.resolved_base_dir, ".pulse/")
+		else:
+			# In exported mode, ignore app folder within web_root
+			ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
 
 		self._copied_files = set()
 

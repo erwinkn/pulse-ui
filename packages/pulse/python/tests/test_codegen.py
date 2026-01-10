@@ -353,6 +353,33 @@ class TestCodegen:
 		assert layout2.exists(), f"missing {layout2}"
 		assert layout1 != layout2
 
+	def test_managed_mode_outputs_to_pulse_subdirectory(self, tmp_path: Path):
+		"""Managed mode outputs to .pulse/web/ subdirectory."""
+		cfg = CodegenConfig(
+			web_dir="web", pulse_dir="pulse", base_dir=tmp_path, mode="managed"
+		)
+
+		# In managed mode, web_root should be .pulse/web/
+		assert ".pulse" in str(cfg.web_root)
+		assert "web" in str(cfg.web_root)
+		assert str(cfg.web_root).endswith("web")
+
+	def test_exported_mode_outputs_to_web_directory(self, tmp_path: Path):
+		"""Exported mode outputs to web/ directory (default behavior)."""
+		cfg = CodegenConfig(
+			web_dir="web", pulse_dir="pulse", base_dir=tmp_path, mode="exported"
+		)
+
+		# In exported mode, web_root should be web/
+		assert ".pulse" not in str(cfg.web_root)
+		assert str(cfg.web_root).endswith("web")
+
+	def test_default_mode_is_managed(self, tmp_path: Path):
+		"""Default mode should be 'managed'."""
+		cfg = CodegenConfig(web_dir="web", pulse_dir="pulse", base_dir=tmp_path)
+		assert cfg.mode == "managed"
+		assert ".pulse" in str(cfg.web_root)
+
 
 class TestGenerateRoute:
 	"""Unit tests for the new generate_route function."""

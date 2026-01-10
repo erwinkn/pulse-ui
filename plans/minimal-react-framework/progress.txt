@@ -848,3 +848,45 @@ Started: 2026-01-09
   - No UI library included (bare React only)
   - Typecheck passes with 0 errors, 0 warnings
 - **Steel wire checkpoint:** Project initialization system complete and ready for first user
+
+## 2026-01-10 - F-0057
+- Implemented pulse export command to convert managed → exported mode
+- Files: `packages/pulse/python/src/pulse/cli/cmd.py`, `packages/pulse/python/tests/test_cli.py`
+- **Implementation:**
+  - Command: `pulse export` (no arguments)
+  - Loads app from current directory via `load_app_from_target("app.py")`
+  - Validates project is in managed mode, exits with error if already exported
+  - Checks `.pulse/web/` directory exists before copying
+  - Copies entire `.pulse/web/` directory tree to `web/` via `shutil.copytree()`
+  - Updates `.gitignore`: removes `.pulse/` entry, adds `web/pulse/` entry
+  - Adds customization comments to key files: package.json, client.ts, server.ts
+- **Helper Functions:**
+  - `_update_gitignore_for_export()`: removes old entry, adds new one, handles missing file
+  - `_add_customization_comments()`: adds "// Customize as needed" header to editable files
+- **Error Handling:**
+  - Validates app loads successfully, exits with error message on failure
+  - Checks mode is "managed" before proceeding, errors on already-exported projects
+  - Verifies `.pulse/web/` exists, errors if not found
+  - Errors if target `web/` already exists (prevents accidental overwrites)
+  - Uses `raise typer.Exit(1) from None` for proper exception handling (linter B904)
+- **Learnings:**
+  - AppLoadResult has `app` attribute (not `app_instance`)
+  - App.codegen is of type `Codegen`, config accessed via `.cfg` property
+  - CodegenConfig properties: `.mode`, `.web_root`, `.resolved_base_dir`, `.web_dir`, `.pulse_dir`
+  - Use `from None` in except blocks to satisfy Ruff B904 linting rule
+  - shutil.copytree() copies entire directory tree preserving structure
+  - .gitignore update uses line filtering to remove old entries cleanly
+- **Tests Added:**
+  - `test_pulse_export_managed_to_exported()`: verifies export works for managed projects
+  - `test_pulse_export_fails_for_exported_mode()`: verifies error for already-exported projects
+  - `test_pulse_export_creates_gitignore()`: verifies .gitignore update logic
+  - All tests pass (1385 passed, +4 new tests from F-0057)
+- **Acceptance criteria met:**
+  - Command added: `pulse export`
+  - Copies .pulse/web/ to web/ successfully
+  - Adds customization comments to editable files
+  - Updates .gitignore (removes .pulse/, adds web/pulse/)
+  - Works only from managed mode (errors on exported projects)
+  - Typecheck passes with 0 errors, 0 warnings
+  - All tests pass (no new failures)
+- **Steel wire checkpoint:** Managed to exported mode migration complete

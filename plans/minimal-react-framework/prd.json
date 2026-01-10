@@ -1149,7 +1149,7 @@
         "Works only from managed mode project"
       ],
       "priority": 57,
-      "passes": false,
+      "passes": true,
       "notes": "Convert managed to exported mode.",
       "tests": [
         "make all"

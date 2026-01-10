@@ -75,7 +75,12 @@ def test_ssr_endpoint_renders_route(
 
 		# Verify response
 		assert response.status_code == 200
-		assert response.text == "<html><body>Hello</body></html>"
+		# Verify HTML is wrapped in full document shell
+		assert "<!DOCTYPE html>" in response.text
+		assert '<html lang="en">' in response.text
+		assert "__PULSE_DATA__" in response.text
+		assert "Hello" in response.text
+		assert response.headers["content-type"] == "text/html; charset=utf-8"
 
 		# Verify POST to Bun server
 		mock_client.post.assert_called_once()

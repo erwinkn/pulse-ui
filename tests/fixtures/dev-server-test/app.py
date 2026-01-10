@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pulse as ps
 
 
@@ -38,4 +40,10 @@ def CounterApp():
 	]
 
 
-app = ps.App([ps.Route("/", CounterApp)])
+app = ps.App(
+	[ps.Route("/", CounterApp)],
+	codegen=ps.CodegenConfig(
+		web_dir=Path(__file__).parent / "web",
+		mode="managed",
+	),
+)

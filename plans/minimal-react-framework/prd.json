@@ -1047,7 +1047,7 @@
         "Use web browser tools to verify Vite HMR working (edit client file, see hot reload)"
       ],
       "priority": 52,
-      "passes": false,
+      "passes": true,
       "notes": "Steel wire checkpoint - dev server working. Use browser testing.",
       "tests": [
         "make all"

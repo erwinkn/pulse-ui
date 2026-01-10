@@ -597,3 +597,20 @@ Started: 2026-01-09
   - TypeScript compilation passes - RouteNode interface properly typed
   - Acceptance criteria met: routes.ts uses new format, dynamic imports for code splitting, compatible with matchPath, make typecheck passes
   - Steel wire checkpoint: Routes.ts generation migrated to custom router with code splitting
+
+## 2026-01-10 - F-0045
+- Added managed/exported mode support to CodegenConfig
+- Files: `packages/pulse/python/src/pulse/codegen/codegen.py`, `packages/pulse/python/tests/test_codegen.py`
+- **Learnings:**
+  - CodegenConfig.mode property added with default value "managed" for better developer experience
+  - Mode affects web_root directory selection: managed → .pulse/<web_dir>/, exported → <web_dir>/
+  - web_root property updated with conditional logic based on mode (if/else on self.mode)
+  - generate_all() method updated to add correct gitignore entries per mode:
+    - Managed: adds .pulse/ to .gitignore at resolved_base_dir
+    - Exported: adds app/<pulse_dir>/ to .gitignore at web_root
+  - Absolute paths in web_dir are handled before mode check (early return)
+  - Three new test cases verify: managed mode path, exported mode path, default mode is managed
+  - All codegen tests pass (26 tests total, +3 new tests for mode functionality)
+  - TypeScript compilation successful with no warnings
+  - Acceptance criteria met: mode property, directory selection works, gitignore rules applied, make typecheck passes
+  - Steel wire checkpoint: Codegen now supports two deployment modes (managed and exported)

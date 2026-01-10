@@ -1230,7 +1230,7 @@
         "`make test` passes"
       ],
       "priority": 61,
-      "passes": false,
+      "passes": true,
       "notes": "Error UI with retry on navigation failure.",
       "tests": [
         "make all"

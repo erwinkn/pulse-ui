@@ -950,3 +950,22 @@ Started: 2026-01-09
   - Tests verify scrollTo is called correctly and preventReset flag works
   - useScrollRestoration calls requestAnimationFrame to ensure DOM is ready after navigation
   - Steel wire checkpoint: configurable scroll restoration complete and tested
+
+## 2026-01-10 - F-0061
+- Implemented navigation error UI component and retry mechanism
+- Files: `packages/pulse/js/src/router/navigation-error.tsx`, `packages/pulse/js/src/router/navigation-error.test.tsx`, `packages/pulse/js/src/router/__tests__/navigation-error.integration.test.tsx`, `packages/pulse/js/src/messages.ts`, `packages/pulse/js/src/client.tsx`, `packages/pulse/js/src/router/index.ts`, `packages/pulse/js/src/index.ts`
+- **Learnings:**
+  - Created NavigationErrorContext with { error, retry, clear } state management
+  - NavigationErrorProvider component manages error state with useState
+  - Navigation errors tracked via client listener pattern (onNavigationError method)
+  - New ServerNavigationErrorMessage type for server-to-client error communication
+  - PulseSocketIOClient maintains Set of navigationErrorListeners (similar to connectionListeners pattern)
+  - NavigationError component displays error UI with styled button (fixed positioning modal with blur backdrop)
+  - Button type="button" required for accessibility linting (not submit which is default)
+  - Error UI matches Next.js style: warning icon, centered modal, retry button with hover states
+  - Integration tests verify provider behavior and hook usage patterns
+  - Test refactoring: moved hook calls outside try/catch blocks to follow React hooks rules
+  - Biome auto-formats imports on `make all`, changed unused parameter to `_pathname` to match linter
+  - 1398 tests pass with 10 pre-existing failures (unrelated to F-0061)
+  - Acceptance criteria met: error component displays, retry button functional, matches Next.js style, tests comprehensive
+  - Steel wire checkpoint: Navigation error UI with retry mechanism complete and tested

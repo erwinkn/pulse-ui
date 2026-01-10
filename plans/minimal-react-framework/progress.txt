@@ -785,3 +785,30 @@ Started: 2026-01-09
   - Helper function called after Vite build verification
   - All 72 CLI tests pass
   - Acceptance criteria met: --compile option added, executable generation, mode support
+
+## 2026-01-10 - F-0055
+- Implemented pulse start command for production server execution
+- Files: `packages/pulse/python/src/pulse/cli/cmd.py`
+- **Implementation:**
+  - Command accepts `app_file` argument and options: `--address`, `--port`, `--plain`, `--workers`
+  - Sets env.pulse_env to "prod" for production mode
+  - Default address is "0.0.0.0" (production-appropriate) instead of localhost
+  - Validates that build artifacts exist in `web_root/dist/` before starting
+  - Spawns two processes: Python Uvicorn server (no reload, optional multiple workers) and Bun SSR server
+  - Attempts to use pre-compiled executable if available (from `pulse build --compile`)
+  - Falls back to running server from source with `bun run` if executable not found
+  - Automatically finds available ports for both servers
+  - Reuses existing process supervisor pattern from pulse dev command
+  - Interleaved output with prefixes: [python], [bun]
+  - All processes cleaned up on Ctrl+C or crash
+- **Learnings:**
+  - Production server reuses most of dev command structure but with no reload/hot-reload
+  - Executable path calculation differs between managed (.pulse/web/server/) and exported (web/server/) modes
+  - sys.platform == "win32" for Windows detection to determine server.exe vs server
+  - Graceful fallback to source-based execution if compiled executable missing
+  - Multiple Uvicorn workers useful for production scalability (--workers option)
+  - Default address 0.0.0.0 allows external connections (required for production)
+  - Use `msg = f"..."` instead of implicit string concatenation to satisfy basedpyright type checker
+  - Steel wire checkpoint: Production server deployment ready
+  - Typecheck passes with 0 errors, 0 warnings
+  - Acceptance criteria met: command added, artifact validation, workers support, address option, all tests pass

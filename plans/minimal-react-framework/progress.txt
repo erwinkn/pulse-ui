@@ -771,3 +771,17 @@ Started: 2026-01-09
   - Error handling: subprocess.CalledProcessError for failed commands, subprocess.TimeoutExpired for timeouts
   - Non-blocking warning pattern for Python check allows build to continue if basedpyright not available
   - Steel wire checkpoint: Production build system complete and ready for use
+
+## 2026-01-10 - F-0054
+- Implemented --compile option for pulse build command
+- Added _compile_bun_server helper function for Bun compilation
+- **Learnings:**
+  - --compile flag triggers bun build --compile which outputs standalone executable
+  - Handles both managed (.pulse/web/server/) and exported (web/server/) modes
+  - Cross-platform: server.exe on Windows, server elsewhere (checked via sys.platform)
+  - Output directory created with mkdir(parents=True, exist_ok=True)
+  - Graceful handling: warning if server.ts not found, continues without error
+  - 120s timeout for compilation (bun compile can be slow)
+  - Helper function called after Vite build verification
+  - All 72 CLI tests pass
+  - Acceptance criteria met: --compile option added, executable generation, mode support

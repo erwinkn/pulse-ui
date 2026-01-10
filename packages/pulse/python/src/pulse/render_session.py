@@ -72,7 +72,7 @@ MountState = Literal["pending", "active", "idle"]
 class RouteMount:
 	render: "RenderSession"
 	route: RouteContext
-	tree: RenderTree
+	tree: RenderTree | None
 	effect: Effect | None
 	_pulse_ctx: PulseContext | None
 	initialized: bool
@@ -88,7 +88,7 @@ class RouteMount:
 		self.route = RouteContext(route_info, route)
 		self.effect = None
 		self._pulse_ctx = None
-		self.tree = RenderTree(route.render())
+		self.tree = None
 		self.initialized = False
 		self.state = "pending"
 		self.queue = None
@@ -260,38 +260,86 @@ class RenderSession:
 
 	# ---- Prerendering ----
 
+	def _build_route_hierarchy(self, path: str) -> list[Route | Layout]:
+		"""Build the list of routes/layouts from root to the matched route."""
+		matched_route = self.routes.find(path)
+		hierarchy: list[Route | Layout] = []
+		current: Route | Layout | None = matched_route
+
+		# Walk up to root, collecting all ancestors
+		while current is not None:
+			hierarchy.insert(0, current)
+			current = current.parent  # type: ignore
+
+		return hierarchy
+
+	def _get_unified_tree_element(self, hierarchy: list[Route | Layout]) -> Any:
+		"""Get the root element for rendering the full hierarchy as one tree.
+
+		For F-0034, this returns the root of the hierarchy (first layout or route).
+		The element will render with Outlets as placeholders.
+		For F-0035, Outlets will be replaced with child route content.
+		"""
+		if not hierarchy:
+			raise ValueError("Hierarchy cannot be empty")
+
+		# Return the root element (first in hierarchy)
+		# If there are layouts, this renders the root layout with empty Outlets
+		# If there are no layouts, this renders the matched route directly
+		return hierarchy[0].render()
+
 	def prerender(
 		self, path: str, route_info: RouteInfo | None = None
 	) -> ServerInitMessage | ServerNavigateToMessage:
 		"""
 		Synchronous render for SSR. Returns vdom_init or navigate_to message.
-		- First call: creates RouteMount in PENDING state, starts queue
+		- First call: creates RouteMount for the matched route, starts queue
 		- Subsequent calls: re-renders and returns fresh VDOM
+		- Renders unified VDOM tree (single tree from root layouts to matched route)
 
 		Child routes inherit context from parent routes via context snapshots.
 		"""
 		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		is_new = mount is None
+		matched_route = self.routes.find(path)
+		is_new = path not in self.route_mounts
 
+		info = route_info or matched_route.default_route_info()
+
+		# Ensure all ancestors in the route hierarchy have mounts
+		hierarchy = self._build_route_hierarchy(path)
+		for ancestor in hierarchy[:-1]:  # All except the final matched route
+			ancestor_path = ancestor.unique_path()
+			if ancestor_path not in self.route_mounts:
+				ancestor_mount = RouteMount(
+					self, ancestor, ancestor.default_route_info()
+				)  # type: ignore
+				ancestor_mount.state = "pending"
+				ancestor_mount.queue = []
+				self.route_mounts[ancestor_path] = ancestor_mount
+
+		# Get or create mount for the matched route
 		if is_new:
-			route = self.routes.find(path)
-			info = route_info or route.default_route_info()
-			mount = RouteMount(self, route, info)
+			mount = RouteMount(self, matched_route, info)
 			mount.state = "pending"
 			mount.queue = []
 			self.route_mounts[path] = mount
-		elif route_info:
-			mount.route.update(route_info)
+		else:
+			mount = self.route_mounts[path]
+			mount.route.update(info)
 
 		# Get parent context snapshot for inheritance
-		parent_context = self.get_parent_context_snapshot(mount.route.pulse_route)
+		parent_context = self.get_parent_context_snapshot(matched_route)
 
 		with PulseContext.update(render=self, route=mount.route):
 			# Restore parent context so child can inherit
 			with restore_user_context(parent_context):
 				try:
-					vdom = mount.tree.render()
+					# Render unified VDOM tree starting from root of hierarchy
+					root_element = self._get_unified_tree_element(hierarchy)
+					root_tree = RenderTree(root_element)
+					vdom = root_tree.render()
+					# Store the tree on the mount for later re-renders
+					mount.tree = root_tree
 					# Capture context snapshot after render (includes any pulse_context() used)
 					mount.user_context_snapshot = get_user_context_snapshot()
 					if is_new:

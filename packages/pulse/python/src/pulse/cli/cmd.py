@@ -442,6 +442,153 @@ def dev(
 			raise typer.Exit(1) from None
 
 
+@cli.command("build")
+def build(
+	app_file: str = typer.Argument(
+		...,
+		help=("App target: 'path/to/app.py[:var]' (default :app) or 'module.path:var'"),
+	),
+	address: str = typer.Option(
+		"localhost",
+		"--address",
+		help="Address for internal server during codegen",
+	),
+	port: int = typer.Option(
+		8000, "--port", help="Port for internal server during codegen"
+	),
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
+	no_check: bool = typer.Option(False, "--no-check", help="Skip type checking"),
+):
+	"""Build Pulse app for production."""
+	env.pulse_env = "prod"
+	logger = CLILogger("prod", plain=plain)
+
+	logger.print(f"Loading app from {app_file}")
+	app_ctx = load_app_from_target(app_file, logger)
+	_apply_app_context_to_env(app_ctx)
+	app_instance = app_ctx.app
+
+	web_root = app_instance.codegen.cfg.web_root
+	if not web_root.exists():
+		logger.error(f"Directory not found: {web_root.absolute()}")
+		raise typer.Exit(1)
+
+	# Check web dependencies
+	try:
+		to_add = check_web_dependencies(
+			web_root,
+			pulse_version=PULSE_PY_VERSION,
+		)
+	except DependencyResolutionError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+	except DependencyError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+
+	if to_add:
+		try:
+			dep_plan = prepare_web_dependencies(
+				web_root,
+				pulse_version=PULSE_PY_VERSION,
+			)
+			if dep_plan:
+				_run_dependency_plan(logger, web_root, dep_plan)
+		except subprocess.CalledProcessError:
+			logger.error("Failed to install web dependencies with Bun.")
+			raise typer.Exit(1) from None
+
+	# Run codegen
+	try:
+		logger.print("Generating routes...")
+		app_instance.run_codegen(
+			f"http://{address}:{port}",
+			f"http://{address}:{port}",
+		)
+		logger.success("Routes generated")
+	except Exception as exc:
+		logger.error(f"Failed to generate routes: {exc}")
+		raise typer.Exit(1) from None
+
+	# Run type checks
+	if not no_check:
+		logger.print("Checking types...")
+		checks_passed = True
+
+		# TypeScript type check
+		try:
+			result = subprocess.run(
+				["bun", "run", "typecheck"],
+				cwd=web_root,
+				capture_output=True,
+				text=True,
+				timeout=60,
+			)
+			if result.returncode != 0:
+				logger.error("TypeScript type check failed")
+				logger.print(result.stderr or result.stdout)
+				checks_passed = False
+		except subprocess.TimeoutExpired:
+			logger.error("TypeScript type check timed out")
+			checks_passed = False
+		except subprocess.CalledProcessError as exc:
+			logger.error(f"TypeScript type check failed: {exc}")
+			checks_passed = False
+
+		# Python type check
+		try:
+			result = subprocess.run(
+				[sys.executable, "-m", "basedpyright"],
+				cwd=app_ctx.app_dir or Path.cwd(),
+				capture_output=True,
+				text=True,
+				timeout=60,
+			)
+			if result.returncode != 0:
+				logger.warning("Python type check failed (non-blocking)")
+				logger.print(result.stderr or result.stdout)
+		except subprocess.TimeoutExpired:
+			logger.warning("Python type check timed out (non-blocking)")
+		except Exception:
+			logger.warning("Python type check skipped (non-blocking)")
+
+		if not checks_passed:
+			raise typer.Exit(1)
+		logger.success("Type checks passed")
+
+	# Run Vite production build
+	try:
+		logger.print("Building frontend...")
+		result = subprocess.run(
+			["bun", "run", "build"],
+			cwd=web_root,
+			capture_output=True,
+			text=True,
+			timeout=120,
+		)
+		if result.returncode != 0:
+			logger.error("Frontend build failed")
+			logger.print(result.stderr or result.stdout)
+			raise typer.Exit(1)
+		logger.success("Frontend build complete")
+	except subprocess.TimeoutExpired:
+		logger.error("Frontend build timed out")
+		raise typer.Exit(1) from None
+	except subprocess.CalledProcessError as exc:
+		logger.error(f"Frontend build failed: {exc}")
+		raise typer.Exit(1) from None
+
+	# Verify build output exists
+	dist_dir = web_root / "dist"
+	if not dist_dir.exists():
+		logger.error(f"Build artifacts not found at {dist_dir}")
+		raise typer.Exit(1)
+
+	logger.success(f"Build complete! Output: {dist_dir}")
+
+
 @cli.command("generate")
 def generate(
 	app_file: str = typer.Argument(

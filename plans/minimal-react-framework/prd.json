@@ -1068,7 +1068,7 @@
         "`make typecheck` passes"
       ],
       "priority": 53,
-      "passes": false,
+      "passes": true,
       "notes": "Production build step.",
       "tests": [
         "make all"

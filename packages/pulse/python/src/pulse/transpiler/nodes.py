@@ -504,6 +504,117 @@ class Value(Expr):
 		)
 
 
+# HTML nesting rules - tags that have content restrictions
+# Based on HTML specification
+_NESTING_RULES: dict[str, set[str]] = {
+	# Inline elements that cannot contain block elements
+	"a": {"a", "button", "form", "select", "textarea"},
+	"button": {"a", "button", "form", "select", "textarea"},
+	"label": {"label"},
+	"small": set(),
+	"span": set(),
+	# Text-level semantic elements
+	"em": set(),
+	"strong": set(),
+	"code": set(),
+	"kbd": set(),
+	"samp": set(),
+	"var": set(),
+	# Void elements (self-closing) - cannot have children
+	"img": set(),
+	"br": set(),
+	"hr": set(),
+	"input": set(),
+	"meta": set(),
+	"link": set(),
+	# Heading elements - cannot nest headings
+	"h1": {"h1", "h2", "h3", "h4", "h5", "h6"},
+	"h2": {"h1", "h2", "h3", "h4", "h5", "h6"},
+	"h3": {"h1", "h2", "h3", "h4", "h5", "h6"},
+	"h4": {"h1", "h2", "h3", "h4", "h5", "h6"},
+	"h5": {"h1", "h2", "h3", "h4", "h5", "h6"},
+	"h6": {"h1", "h2", "h3", "h4", "h5", "h6"},
+	# Paragraph elements - cannot nest paragraphs
+	"p": {"p", "h1", "h2", "h3", "h4", "h5", "h6"},
+	# Div/section elements
+	"div": set(),
+	"section": set(),
+	"article": set(),
+	"aside": set(),
+	"header": set(),
+	"footer": set(),
+	"main": set(),
+	"nav": set(),
+	# Lists
+	"ul": {"ul", "ol"},
+	"ol": {"ul", "ol"},
+	"li": set(),
+	"dl": {"dl"},
+	"dt": set(),
+	"dd": set(),
+	# Table elements
+	"table": {"table"},
+	"thead": set(),
+	"tbody": set(),
+	"tfoot": set(),
+	"tr": set(),
+	"th": set(),
+	"td": set(),
+	# Form elements
+	"form": {"form"},
+	"select": {"select"},
+	"textarea": set(),
+}
+
+
+def _validate_html_nesting(parent_tag: str, child_tag: str) -> str | None:
+	"""Validate HTML nesting rules.
+
+	Args:
+		parent_tag: The parent element tag name
+		child_tag: The child element tag name
+
+	Returns:
+		Error message if nesting is invalid, None if valid
+	"""
+	parent_tag_lower = parent_tag.lower()
+	child_tag_lower = child_tag.lower()
+
+	# Skip validation for fragments, components, and non-string tags
+	if not parent_tag_lower or parent_tag_lower.startswith("$$"):
+		return None
+
+	if not child_tag_lower or child_tag_lower.startswith("$$"):
+		return None
+
+	# Check if parent has nesting restrictions
+	if parent_tag_lower in _NESTING_RULES:
+		forbidden_children = _NESTING_RULES[parent_tag_lower]
+		if child_tag_lower in forbidden_children:
+			return f"Invalid HTML nesting: <{child_tag_lower}> cannot be a child of <{parent_tag_lower}>"
+
+	# Void elements cannot have children
+	void_elements = {
+		"img",
+		"br",
+		"hr",
+		"input",
+		"meta",
+		"link",
+		"area",
+		"base",
+		"col",
+		"embed",
+		"source",
+		"track",
+		"wbr",
+	}
+	if parent_tag_lower in void_elements:
+		return f"Invalid HTML nesting: <{parent_tag_lower}> is a void element and cannot have children"
+
+	return None
+
+
 class Element(Expr):
 	"""A React element: built-in tag, fragment, or client component.
 
@@ -548,6 +659,34 @@ class Element(Expr):
 				parent_name=parent_name,
 				warn_stacklevel=5,
 			)
+			# Validate HTML nesting rules in dev mode only
+			if env.pulse_env == "dev" and isinstance(tag, str):
+				# Check if parent is a void element
+				void_elements = {
+					"img",
+					"br",
+					"hr",
+					"input",
+					"meta",
+					"link",
+					"area",
+					"base",
+					"col",
+					"embed",
+					"source",
+					"track",
+					"wbr",
+				}
+				if parent_name.lower() in void_elements and self.children:
+					raise ValueError(
+						f"Invalid HTML nesting: <{parent_name}> is a void element and cannot have children"
+					)
+				# Check element children
+				for child in self.children:
+					if isinstance(child, Element) and isinstance(child.tag, str):
+						error_msg = _validate_html_nesting(parent_name, child.tag)
+						if error_msg:
+							raise ValueError(error_msg)
 		self.key = key
 
 	def _emit_key(self, out: list[str]) -> None:

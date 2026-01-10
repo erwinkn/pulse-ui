@@ -539,6 +539,10 @@ class Renderer:
 				"Component tag expressions must be registry-backed Expr values "
 				+ "(Import/JsFunction/Constant/JsxFunction)."
 			)
+		# Use stable names for well-known pulse-ui-client components
+		# This allows SSR hydration without needing the codegen registry
+		if isinstance(expr, Import) and expr.src == "pulse-ui-client":
+			return expr.name  # e.g., "Link" instead of numeric ID
 		return ref["key"]
 
 	# ------------------------------------------------------------------

@@ -278,9 +278,9 @@ class RenderSession:
 		return hierarchy
 
 	def _is_outlet(self, element: Any) -> bool:
-		"""Check if an Element is the Outlet component from react-router.
+		"""Check if an Element is the Outlet component.
 
-		Outlet is created via @react_component(Import("Outlet", "react-router"))
+		Outlet is created via @react_component(Import("Outlet", "__pulse_internal__/Outlet"))
 		so it has a tag that is an Import expression.
 		"""
 		from pulse.transpiler.imports import Import as ImportExpr
@@ -288,10 +288,13 @@ class RenderSession:
 
 		if not isinstance(element, ElementNode):
 			return False
-		# Check if tag is Import("Outlet", "react-router")
+		# Check if tag is Import("Outlet", "__pulse_internal__/Outlet")
 		if isinstance(element.tag, ImportExpr):
-			# Check name is "Outlet" and src is "react-router" (not module, which is an Expr)
-			result = element.tag.name == "Outlet" and element.tag.src == "react-router"
+			# Check name is "Outlet" and src is the internal marker
+			result = (
+				element.tag.name == "Outlet"
+				and element.tag.src == "__pulse_internal__/Outlet"
+			)
 			return result
 		return False
 

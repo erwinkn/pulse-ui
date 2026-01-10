@@ -38,6 +38,7 @@ from pulse.env import (
 	ENV_PULSE_PORT,
 	ENV_PULSE_REACT_SERVER_ADDRESS,
 	ENV_PULSE_SECRET,
+	ENV_PULSE_VITE_DEV_SERVER_ADDRESS,
 	PulseEnv,
 	env,
 )
@@ -358,10 +359,14 @@ def dev(
 
 	# Bun SSR server port (allocated first, before other servers)
 	bun_port = find_available_port(3001)
+	# Vite dev server port (allocated before Python to set env var)
+	vite_port = find_available_port(5173)
 	# Set React server address for Python app to use
 	os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = f"http://{address}:{bun_port}"
 	# Set Bun render server address for Python app to POST VDOM to
 	os.environ[ENV_PULSE_BUN_RENDER_SERVER_ADDRESS] = f"http://{address}:{bun_port}"
+	# Set Vite dev server address for client script loading in dev mode
+	os.environ[ENV_PULSE_VITE_DEV_SERVER_ADDRESS] = f"http://{address}:{vite_port}"
 
 	# Python server
 	server_cmd = build_uvicorn_command(
@@ -389,8 +394,7 @@ def dev(
 	)
 	commands.append(server_cmd)
 
-	# Vite dev server
-	vite_port = find_available_port(5173)
+	# Vite dev server (vite_port allocated earlier with other ports)
 	vite_cmd = build_web_command(
 		web_root=web_root,
 		extra_args=[],

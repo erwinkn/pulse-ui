@@ -101,11 +101,13 @@ describe("renderVdom with registry", () => {
 		expect(html).toBe("<section>Content</section>");
 	});
 
-	it("throws for unknown mount point component", () => {
+	it("renders placeholder for unknown mount point component", () => {
 		const vdom = {
 			tag: "$$UnknownComponent",
 			children: [],
 		};
-		expect(() => renderVdom(vdom)).toThrow("Missing component for mount point");
+		// Unknown mount points render as placeholder divs for lazy-loaded components
+		const html = renderVdom(vdom);
+		expect(html).toBe('<div data-pulse-mount="UnknownComponent"></div>');
 	});
 });

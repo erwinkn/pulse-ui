@@ -20,6 +20,11 @@ def is_alias_source(src: str) -> bool:
 	return src.startswith("@/") or src.startswith("~/")
 
 
+def is_internal_source(src: str) -> bool:
+	"""Check if the source is a Pulse internal import that shouldn't be installed via npm."""
+	return src.startswith("__pulse_internal__")
+
+
 def is_url_or_absolute(src: str) -> bool:
 	return (
 		src.startswith("http://") or src.startswith("https://") or src.startswith("/")
@@ -76,7 +81,11 @@ def parse_install_spec(src_or_spec: str) -> str | None:
 		raise ValueError(
 			f"React component import source '{src_or_spec}' must not be relative (./ or ../). Use a package, '@/...' or '~/...' alias instead."
 		)
-	if is_alias_source(src_or_spec) or is_url_or_absolute(src_or_spec):
+	if (
+		is_alias_source(src_or_spec)
+		or is_url_or_absolute(src_or_spec)
+		or is_internal_source(src_or_spec)
+	):
 		return None
 	name, ver = parse_dependency_spec(src_or_spec)
 	return f"{name}@{ver}" if ver else name

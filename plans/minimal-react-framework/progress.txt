@@ -747,3 +747,27 @@ Started: 2026-01-09
   - Test fixtures with absolute Path() require careful handling of relative imports
   - CLI tests cover codegen integration on pulse dev startup
   - Steel wire checkpoint: pulse dev command fully functional for local development
+
+---
+
+## 2026-01-10 - F-0053
+- Implemented pulse build command for production builds
+- Files: `packages/pulse/python/src/pulse/cli/cmd.py`
+- **Implementation:**
+  - Command accepts `app_file` argument and options: `--address`, `--port`, `--plain`, `--no-check`
+  - Sets env.pulse_env to "prod" for production mode
+  - Checks web dependencies before build
+  - Runs codegen with internal server address
+  - Runs TypeScript type check via `bun run typecheck` (blocking)
+  - Runs Python type check via `basedpyright` (non-blocking warning)
+  - Runs Vite production build via `bun run build` (blocking)
+  - Verifies build artifacts exist in `web_root/dist/`
+  - Prints success message with output directory
+- **Learnings:**
+  - Build process follows dev pattern: check deps → run codegen → type check → frontend build
+  - TypeScript type check is critical (blocks build), Python check is advisory (warning only)
+  - Timeout values: 60s for type checks, 120s for Vite build
+  - Build output directory is `{web_root}/dist/` (automatically handled by Vite)
+  - Error handling: subprocess.CalledProcessError for failed commands, subprocess.TimeoutExpired for timeouts
+  - Non-blocking warning pattern for Python check allows build to continue if basedpyright not available
+  - Steel wire checkpoint: Production build system complete and ready for use

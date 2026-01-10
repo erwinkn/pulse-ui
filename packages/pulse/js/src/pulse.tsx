@@ -7,11 +7,11 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
 import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
+import { useLocation, useNavigate, useParams } from "./router";
 import type { VDOM } from "./vdom";
 
 // =================================================================
@@ -79,7 +79,7 @@ const inBrowser = typeof window !== "undefined";
 
 export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
 	const [status, setStatus] = useState<ConnectionStatus>("ok");
-	const rrNavigate = useNavigate();
+	const navigate = useNavigate();
 	const { directives } = prerender;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: another useEffect syncs the directives without recreating the client
@@ -87,10 +87,10 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 		return new PulseSocketIOClient(
 			config.serverAddress,
 			directives,
-			rrNavigate,
+			navigate,
 			config.connectionStatus,
 		);
-	}, [config.serverAddress, rrNavigate, config.connectionStatus]);
+	}, [config.serverAddress, navigate, config.connectionStatus]);
 	useEffect(() => client.setDirectives(directives), [client, directives]);
 
 	useEffect(() => {

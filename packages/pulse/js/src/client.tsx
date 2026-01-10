@@ -1,4 +1,3 @@
-import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
@@ -16,6 +15,7 @@ import type { OfflineCache } from "./offline-cache";
 import { InMemoryOfflineCache } from "./offline-cache";
 import { OfflineNavigationManager } from "./offline-navigation";
 import type { PulsePrerenderView } from "./pulse";
+import type { NavigateFn } from "./router";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
@@ -63,7 +63,7 @@ export class PulseSocketIOClient {
 		new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
 	#url: string;
-	#frameworkNavigate: NavigateFunction;
+	#frameworkNavigate: NavigateFn;
 	#directives: Directives;
 	#connectionStatusConfig: {
 		initialConnectingDelay: number;
@@ -79,7 +79,7 @@ export class PulseSocketIOClient {
 	constructor(
 		url: string,
 		directives: Directives,
-		frameworkNavigate: NavigateFunction,
+		frameworkNavigate: NavigateFn,
 		connectionStatusConfig: {
 			initialConnectingDelay: number;
 			initialErrorDelay: number;

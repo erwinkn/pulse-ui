@@ -23,6 +23,22 @@ Started: 2026-01-09
 
 ---
 
+## 2026-01-10 - F-0033
+- Created comprehensive test suite for Pulse Context system
+- Files: `packages/pulse/python/tests/test_pulse_context.py`
+- **Learnings:**
+  - Context tests verify layout > page provision/consumption patterns
+  - Nested contexts shadow parent values correctly for same keys
+  - `MappingProxyType` enforces immutability (use pyright ignore for __setitem__ test)
+  - Context snapshots isolated per session via route_mounts, no crosstalk
+  - Type preservation works for all Python types (str, int, float, bool, list, dict, None)
+  - Root routes have empty context snapshots (initial state)
+  - Test callbacks can verify context restoration via execute_callback method
+  - Render/prerender methods handle context restoration via parent snapshot lookup
+  - Steel wire checkpoint: Pulse Context system verified working
+
+---
+
 ## 2026-01-09 - F-0001
 - Created route matcher for static paths
 - Files: `packages/pulse/js/src/router/match.ts`, `packages/pulse/js/src/router/index.ts`

@@ -1003,3 +1003,19 @@ Started: 2026-01-09
   - Pending navigation and last online path tracked ✅
   - Tests comprehensive and passing ✅
   - Steel wire checkpoint: Offline navigation with caching complete and tested
+
+## 2026-01-10 - F-0063
+- Implemented dev-mode HTML nesting validator
+- Files: `packages/pulse/python/src/pulse/transpiler/nodes.py`, `packages/pulse/python/tests/test_html_nesting_validator.py`
+- **Learnings:**
+  - HTML nesting validation added at Element.__init__ time in dev mode only
+  - _NESTING_RULES dict maps parent tags to set of forbidden children
+  - Comprehensive rules for: headings (no nesting), paragraphs (no nesting), inline elements (a, button restrictions), void elements (no children)
+  - Void elements: img, br, hr, input, meta, link, area, base, col, embed, source, track, wbr
+  - _validate_html_nesting() helper checks specific tag combinations
+  - Void element check validates any children (text + elements)
+  - Dev mode only: `if env.pulse_env == "dev" and isinstance(tag, str)`
+  - Components ($$prefix) and fragments (empty tag) skip validation
+  - 27 comprehensive tests verify: valid structures, invalid nesting patterns, void elements, case-insensitive matching, mixed children
+  - All tests pass, typecheck clean (pre-existing warning in test_cli.py unrelated)
+  - Steel wire checkpoint: HTML nesting validation complete and tested

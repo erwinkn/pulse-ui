@@ -1271,7 +1271,7 @@
         "`make test` passes"
       ],
       "priority": 63,
-      "passes": false,
+      "passes": true,
       "notes": "Catch invalid HTML early with helpful errors.",
       "tests": [
         "make all"

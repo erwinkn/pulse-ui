@@ -807,7 +807,7 @@
         "`make test` passes"
       ],
       "priority": 40,
-      "passes": false,
+      "passes": true,
       "notes": "Auto-hydrate without explicit call from user code.",
       "tests": [
         "make all"

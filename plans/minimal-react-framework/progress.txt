@@ -550,3 +550,17 @@ Started: 2026-01-09
   - Bun render server (/render endpoint) successfully renders VDOM to HTML
   - Python SSR endpoint (/ssr route) wraps Bun output with full HTML shell
   - Steel wire checkpoint: Complete end-to-end SSR → hydration flow verified working
+
+## 2026-01-10 - F-0042
+- Updated codegen layout template to remove React Router dependency
+- Created new layout template using PulseRouterProvider
+- Files: `packages/pulse/python/src/pulse/codegen/templates/layout.py`, `packages/pulse/python/tests/test_codegen.py`
+- **Learnings:**
+  - Old template was tied to React Router loaders/actions (LoaderFunctionArgs, ClientLoaderFunctionArgs)
+  - New template is simpler: just wraps children with PulseRouterProvider
+  - Layout accepts location, params, navigate as props from parent
+  - PulseRouterProvider type and Location/NavigateFn/Params types exported from pulse-ui-client
+  - Template removes all react-router-dom imports, uses only React and PulseRouterProvider
+  - Test assertions updated to verify new template structure (PulseRouterProvider, prop passing)
+  - Codegen test now passes with updated layout template
+  - All acceptance criteria met: no react-router imports, uses PulseRouterProvider, make typecheck passes

@@ -847,7 +847,7 @@
         "`make typecheck` passes"
       ],
       "priority": 42,
-      "passes": false,
+      "passes": true,
       "notes": "Remove React Router dependency from generated code.",
       "tests": [
         "make all"

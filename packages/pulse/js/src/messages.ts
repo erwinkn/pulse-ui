@@ -70,6 +70,12 @@ export interface ServerNavigateToMessage {
 	hard: boolean;
 }
 
+export interface ServerNavigationErrorMessage {
+	type: "navigation_error";
+	pathname: string;
+	message: string;
+}
+
 export interface ServerJsExecMessage {
 	type: "js_exec";
 	path: string;
@@ -83,6 +89,7 @@ export type ServerMessage =
 	| ServerErrorMessage
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
+	| ServerNavigationErrorMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
 	| ServerJsExecMessage;

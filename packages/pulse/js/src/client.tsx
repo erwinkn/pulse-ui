@@ -41,6 +41,7 @@ export interface PulseClient {
 	disconnect(): void;
 	isConnected(): boolean;
 	onConnectionChange(listener: ConnectionStatusListener): () => void;
+	onNavigationError(listener: (error: { pathname: string; message: string }) => void): () => void;
 	// Messages
 	updateRoute(path: string, routeInfo: RouteInfo): void;
 	invokeCallback(path: string, callback: string, args: any[]): void;
@@ -55,6 +56,8 @@ export class PulseSocketIOClient {
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
+	#navigationErrorListeners: Set<(error: { pathname: string; message: string }) => void> =
+		new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
@@ -216,6 +219,21 @@ export class PulseSocketIOClient {
 		}
 	}
 
+	public onNavigationError(
+		listener: (error: { pathname: string; message: string }) => void,
+	): () => void {
+		this.#navigationErrorListeners.add(listener);
+		return () => {
+			this.#navigationErrorListeners.delete(listener);
+		};
+	}
+
+	#notifyNavigationError(error: { pathname: string; message: string }): void {
+		for (const listener of this.#navigationErrorListeners) {
+			listener(error);
+		}
+	}
+
 	public sendMessage(payload: ClientMessage) {
 		if (this.isConnected()) {
 			// console.log("[SocketIOTransport] Sending:", payload);
@@ -261,6 +279,7 @@ export class PulseSocketIOClient {
 		this.#socket = null;
 		this.#messageQueue = [];
 		this.#connectionListeners.clear();
+		this.#navigationErrorListeners.clear();
 		this.#activeViews.clear();
 		for (const { bridge } of this.#channels.values()) {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
@@ -328,6 +347,13 @@ export class PulseSocketIOClient {
 
 				// External URL or other scheme (mailto:, tel:, etc.)
 				hardNav();
+				break;
+			}
+			case "navigation_error": {
+				this.#notifyNavigationError({
+					pathname: message.pathname,
+					message: message.message,
+				});
 				break;
 			}
 			case "channel_message": {

@@ -26,6 +26,7 @@ export interface NavigateOptions {
 	replace?: boolean;
 	state?: unknown;
 	preventScrollReset?: boolean;
+	onError?: (error: Error) => void;
 }
 
 /**

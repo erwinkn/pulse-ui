@@ -285,7 +285,16 @@ export class VDOMRenderer {
 				const componentKey = tag.slice(MOUNT_POINT_PREFIX.length);
 				const Component = this.#registry[componentKey] as ComponentType<any>;
 				if (!Component) {
-					throw new Error(`[Pulse] Missing component for mount point: ${componentKey}`);
+					// During SSR, render a placeholder div for lazy-loaded components
+					// The component will be hydrated client-side when the registry is populated
+					return this.#rememberMeta(
+						createElement(
+							"div",
+							{ ...newProps, "data-pulse-mount": componentKey },
+							...renderedChildren,
+						),
+						{ eval: evalSet, cbKeys },
+					);
 				}
 				return this.#rememberMeta(createElement(Component, newProps, ...renderedChildren), {
 					eval: evalSet,

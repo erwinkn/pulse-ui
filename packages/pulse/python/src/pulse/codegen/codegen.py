@@ -470,7 +470,7 @@ class Codegen:
 		self, routes: list[Route | Layout], indent_level: int
 	) -> str:
 		"""
-		Render an array of RRRouteObject literals suitable for matchRoutes.
+		Render an array of PulseRouteNode literals for the custom router.
 		"""
 
 		def render_node(node: Route | Layout, indent: int) -> str:

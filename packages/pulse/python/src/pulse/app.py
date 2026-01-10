@@ -578,6 +578,16 @@ class App:
 			serialized = serialize(state)
 			state_json = json.dumps(serialized)
 
+			# In dev mode, load from Vite dev server; in prod, load from dist
+			vite_address = envvars.vite_dev_server_address
+			if vite_address:
+				# Dev mode: load from Vite with HMR support
+				client_script = f"""<script type="module" src="{vite_address}/@vite/client"></script>
+	<script type="module" src="{vite_address}/src/client.ts"></script>"""
+			else:
+				# Prod mode: load from dist
+				client_script = '<script src="/dist/client.js" type="module"></script>'
+
 			# Create HTML shell with injected state script
 			shell = f"""<!DOCTYPE html>
 <html lang="en">
@@ -589,7 +599,7 @@ class App:
 </head>
 <body>
 	<div id="root">{html_content}</div>
-	<script src="/dist/client.js" type="module"></script>
+	{client_script}
 </body>
 </html>"""
 			return shell
@@ -710,6 +720,13 @@ class App:
 							state_to_inject = {
 								"vdom": vdom,
 								"routeInfo": route_info,
+								"directives": {
+									"headers": {"X-Pulse-Render-Id": render_id},
+									"socketio": {
+										"auth": {"render_id": render_id},
+										"headers": {},
+									},
+								},
 							}
 							wrapped_html = wrap_html_with_shell(
 								ssr_response.text, state_to_inject

@@ -9,6 +9,9 @@ export type {
 	PulseClient,
 } from "./client";
 export { PulseSocketIOClient } from "./client";
+// Client initialization
+export type { InitPulseClientOptions, PulseHydrationData } from "./entry-client";
+export { getHydrationData, initPulseClient } from "./entry-client";
 // Error handling
 export type {
 	DefaultErrorFallbackProps,
@@ -105,7 +108,7 @@ export {
 export { deserialize, serialize } from "./serialize/serializer";
 // Server-side rendering
 export type { RenderConfig } from "./server/render";
-export { renderVdom } from "./server/render";
+export { defaultComponentRegistry, renderVdom } from "./server/render";
 // Transports (types only - implementation is internal)
 export type { MessageListener, Transport } from "./transport";
 // VDOM types and helpers

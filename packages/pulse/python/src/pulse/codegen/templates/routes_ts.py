@@ -17,15 +17,15 @@ ${routes_str}
 
 # Runtime route tree for matching (used by main layout loader)
 ROUTES_RUNTIME_TEMPLATE = Template(
-	"""import type { RouteObject } from "react-router";
-
-export type RRRouteObject = RouteObject & {
+	"""// Pulse route node type (custom router, no react-router dependency)
+export interface PulseRouteNode {
   id: string;
+  path?: string;
   uniquePath?: string;
-  children?: RRRouteObject[];
+  children?: PulseRouteNode[];
   file: string;
 }
 
-export const rrPulseRouteTree = ${routes_str} satisfies RRRouteObject[];
+export const pulseRouteTree = ${routes_str} satisfies PulseRouteNode[];
 """
 )

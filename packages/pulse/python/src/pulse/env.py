@@ -27,6 +27,7 @@ ENV_PULSE_HOST = "PULSE_HOST"
 ENV_PULSE_PORT = "PULSE_PORT"
 ENV_PULSE_REACT_SERVER_ADDRESS = "PULSE_REACT_SERVER_ADDRESS"
 ENV_PULSE_BUN_RENDER_SERVER_ADDRESS = "PULSE_BUN_RENDER_SERVER_ADDRESS"
+ENV_PULSE_VITE_DEV_SERVER_ADDRESS = "PULSE_VITE_DEV_SERVER_ADDRESS"
 ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
 
@@ -104,6 +105,14 @@ class EnvVars:
 	@bun_render_server_address.setter
 	def bun_render_server_address(self, value: str | None) -> None:
 		self._set(ENV_PULSE_BUN_RENDER_SERVER_ADDRESS, value)
+
+	@property
+	def vite_dev_server_address(self) -> str | None:
+		return self._get(ENV_PULSE_VITE_DEV_SERVER_ADDRESS)
+
+	@vite_dev_server_address.setter
+	def vite_dev_server_address(self, value: str | None) -> None:
+		self._set(ENV_PULSE_VITE_DEV_SERVER_ADDRESS, value)
 
 	# Secrets
 	@property

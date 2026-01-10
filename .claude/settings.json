@@ -1,8 +1,4 @@
 {
-  "enabledPlugins": {
-    "pyright-lsp@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true
-  },
   "hooks": {
     "PostToolUse": [
       {
@@ -15,5 +11,9 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": false,
+    "typescript-lsp@claude-plugins-official": false
   }
 }

@@ -466,7 +466,9 @@ def test_pulse_export_creates_gitignore(tmp_path: Path):
 	"""Test that export updates .gitignore correctly."""
 
 	# Test gitignore update logic
-	from pulse.cli.cmd import _update_gitignore_for_export
+	from pulse.cli.cmd import (
+		_update_gitignore_for_export,  # pyright: ignore[reportPrivateUsage]
+	)
 
 	gitignore_path = tmp_path / ".gitignore"
 	gitignore_path.write_text(".pulse/\n")

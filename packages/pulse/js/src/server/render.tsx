@@ -7,7 +7,16 @@ import {
 	type Params,
 	PulseRouterProvider,
 } from "../router/context";
+import { Link } from "../router/link";
 import type { ComponentRegistry, VDOM } from "../vdom";
+
+/**
+ * Wrapper for Link component that converts `to` prop to `href`.
+ * Python Link uses `to`, but JS Link expects `href`.
+ */
+function PulseLink({ to, ...props }: { to: string } & Record<string, unknown>) {
+	return <Link href={to} {...props} />;
+}
 
 /**
  * Route information for SSR rendering.
@@ -27,6 +36,39 @@ export interface RenderConfig {
 
 // No-op navigate function for SSR (navigation happens on the client)
 const ssrNavigate: NavigateFn = (() => {}) as NavigateFn;
+
+// Module-level navigate function that can be set at runtime
+let _clientNavigate: NavigateFn = ssrNavigate;
+
+/**
+ * Set the client-side navigate function.
+ * Called during client initialization to enable navigation from Links.
+ */
+export function setClientNavigate(navigate: NavigateFn): void {
+	_clientNavigate = navigate;
+}
+
+/**
+ * Wrapper for PulseRouterProvider that injects the client navigate function.
+ * During SSR, uses no-op navigate. On client, uses the set navigate function.
+ */
+function HydratablePulseRouterProvider({
+	children,
+	...props
+}: { children?: React.ReactNode } & Record<string, unknown>) {
+	const location = (props.location ?? {
+		pathname: "/",
+		search: "",
+		hash: "",
+		state: null,
+	}) as Location;
+	const params = (props.params ?? {}) as Params;
+	return (
+		<PulseRouterProvider location={location} params={params} navigate={_clientNavigate}>
+			{children}
+		</PulseRouterProvider>
+	);
+}
 
 /**
  * Default component registry for SSR.
@@ -122,7 +164,8 @@ export const defaultComponentRegistry: ComponentRegistry = {
 	datalist: "datalist",
 	// Pulse components
 	ErrorBoundary: ErrorBoundary,
-	PulseRouterProvider: PulseRouterProvider,
+	PulseRouterProvider: HydratablePulseRouterProvider,
+	Link: PulseLink,
 };
 
 /**

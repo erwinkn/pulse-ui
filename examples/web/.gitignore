@@ -5,3 +5,4 @@
 # Pulse generated files
 app/pulse/
 .pulse.lock
+.pulse/

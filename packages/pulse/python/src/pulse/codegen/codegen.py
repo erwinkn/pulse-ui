@@ -1,3 +1,5 @@
+import hashlib
+import json
 import logging
 import shutil
 from collections.abc import Sequence
@@ -20,6 +22,57 @@ if TYPE_CHECKING:
 	from pulse.app import ConnectionStatusConfig
 
 logger = logging.getLogger(__file__)
+
+
+def _compute_file_hash(content: str) -> str:
+	"""Compute SHA256 hash of file content."""
+	return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+class ChecksumsManager:
+	"""Manages checksums for detecting changed files in managed mode."""
+
+	checksums_path: Path
+	checksums: dict[str, str]
+
+	def __init__(self, checksums_path: Path):
+		self.checksums_path = checksums_path
+		self.checksums = {}
+		self.load()
+
+	def load(self) -> None:
+		"""Load checksums from .checksums.json if it exists."""
+		if self.checksums_path.exists():
+			try:
+				content = self.checksums_path.read_text()
+				self.checksums = json.loads(content)
+			except (json.JSONDecodeError, OSError):
+				# If corrupted or unreadable, start fresh
+				self.checksums = {}
+		else:
+			self.checksums = {}
+
+	def save(self) -> None:
+		"""Save checksums to .checksums.json."""
+		self.checksums_path.parent.mkdir(parents=True, exist_ok=True)
+		self.checksums_path.write_text(
+			json.dumps(self.checksums, indent=2, sort_keys=True)
+		)
+
+	def should_write(self, file_path: str, content: str) -> bool:
+		"""Check if file has changed since last generation."""
+		new_hash = _compute_file_hash(content)
+		old_hash = self.checksums.get(file_path)
+		if old_hash != new_hash:
+			self.checksums[file_path] = new_hash
+			return True
+		return False
+
+	def cleanup_old_files(self, current_files: set[str]) -> None:
+		"""Remove checksums for files that no longer exist."""
+		old_files = set(self.checksums.keys()) - current_files
+		for file_path in old_files:
+			del self.checksums[file_path]
 
 
 @dataclass
@@ -89,17 +142,32 @@ class CodegenConfig:
 		return self.web_root / "app" / self.pulse_dir
 
 
-def write_file_if_changed(path: Path, content: str) -> Path:
-	"""Write content to file only if it has changed."""
-	if path.exists():
-		try:
-			current_content = path.read_text()
-			if current_content == content:
-				return path  # Skip writing, content is the same
-		except Exception:
-			logging.warning(f"Can't read file {path.absolute()}")
-			# If we can't read the file for any reason, just write it
-			pass
+def write_file_if_changed(
+	path: Path, content: str, checksums_manager: ChecksumsManager | None = None
+) -> Path:
+	"""Write content to file only if it has changed.
+
+	If checksums_manager is provided (managed mode), uses hash comparison.
+	Otherwise uses direct content comparison (exported mode).
+	"""
+	if checksums_manager:
+		# Managed mode: use checksums for change detection
+		# Store relative path from checksums file location for deterministic keys
+		file_key = str(path.relative_to(path.parent.parent.parent))
+		if not checksums_manager.should_write(file_key, content):
+			return path  # Skip writing, content unchanged
+
+	else:
+		# Exported mode: direct content comparison
+		if path.exists():
+			try:
+				current_content = path.read_text()
+				if current_content == content:
+					return path  # Skip writing, content is the same
+			except Exception:
+				logging.warning(f"Can't read file {path.absolute()}")
+				# If we can't read the file for any reason, just write it
+				pass
 
 	path.parent.mkdir(exist_ok=True, parents=True)
 	path.write_text(content)
@@ -114,6 +182,7 @@ class Codegen:
 		self.cfg = config
 		self.routes = routes
 		self._copied_files: set[Path] = set()
+		self._checksums_manager: ChecksumsManager | None = None
 
 	@property
 	def output_folder(self):
@@ -134,11 +203,16 @@ class Codegen:
 		if self.cfg.mode == "managed":
 			# In managed mode, ignore .pulse directory at the base level
 			ensure_gitignore_has(self.cfg.resolved_base_dir, ".pulse/")
+			# Initialize checksums manager for change detection
+			checksums_path = self.cfg.resolved_base_dir / ".pulse" / ".checksums.json"
+			checksums_manager = ChecksumsManager(checksums_path)
 		else:
 			# In exported mode, ignore app folder within web_root
 			ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
+			checksums_manager = None
 
 		self._copied_files = set()
+		self._checksums_manager = checksums_manager
 
 		# Copy all registered local files to the assets directory
 		asset_import_paths = self._copy_local_files()
@@ -174,6 +248,15 @@ class Codegen:
 					logger.debug(f"Removed stale file: {path}")
 				except Exception as e:
 					logger.warning(f"Could not remove stale file {path}: {e}")
+
+		# Save checksums in managed mode
+		if checksums_manager:
+			# Clean up old checksums for deleted files
+			generated_file_keys = {
+				str(p.relative_to(p.parent.parent.parent)) for p in generated_files
+			}
+			checksums_manager.cleanup_old_files(generated_file_keys)
+			checksums_manager.save()
 
 	def _copy_local_files(self) -> dict[str, str]:
 		"""Copy all registered local files to the assets directory.
@@ -243,7 +326,11 @@ class Codegen:
 		)
 		# The underscore avoids an eventual naming conflict with a generated
 		# /layout route.
-		return write_file_if_changed(self.output_folder / "_layout.tsx", content)
+		return write_file_if_changed(
+			self.output_folder / "_layout.tsx",
+			content,
+			self._checksums_manager,
+		)
 
 	def generate_routes_ts(self):
 		"""Generate TypeScript code for the routes configuration."""
@@ -254,7 +341,11 @@ class Codegen:
 				pulse_dir=self.cfg.pulse_dir,
 			)
 		)
-		return write_file_if_changed(self.output_folder / "routes.ts", content)
+		return write_file_if_changed(
+			self.output_folder / "routes.ts",
+			content,
+			self._checksums_manager,
+		)
 
 	def generate_routes_runtime_ts(self):
 		"""Generate a runtime React Router object tree for server-side matching."""
@@ -264,7 +355,11 @@ class Codegen:
 				routes_str=routes_str,
 			)
 		)
-		return write_file_if_changed(self.output_folder / "routes.runtime.ts", content)
+		return write_file_if_changed(
+			self.output_folder / "routes.runtime.ts",
+			content,
+			self._checksums_manager,
+		)
 
 	def _render_routes_ts(
 		self, routes: Sequence[Route | Layout], indent_level: int
@@ -328,7 +423,11 @@ class Codegen:
 			asset_filenames=asset_import_paths,
 			asset_prefix=asset_prefix,
 		)
-		return write_file_if_changed(output_path, content)
+		return write_file_if_changed(
+			output_path,
+			content,
+			self._checksums_manager,
+		)
 
 	def _render_routes_runtime(
 		self, routes: list[Route | Layout], indent_level: int

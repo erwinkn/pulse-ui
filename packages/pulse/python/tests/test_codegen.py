@@ -380,6 +380,68 @@ class TestCodegen:
 		assert cfg.mode == "managed"
 		assert ".pulse" in str(cfg.web_root)
 
+	def test_checksums_created_in_managed_mode(self, tmp_path: Path):
+		"""Checksums.json is created in managed mode after generation."""
+		route = Route("/test", Component(lambda: div()))
+		cfg = CodegenConfig(
+			web_dir="web", pulse_dir="pulse", base_dir=tmp_path, mode="managed"
+		)
+		codegen = Codegen(RouteTree([route]), cfg)
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		# .checksums.json should exist in managed mode
+		checksums_path = tmp_path / ".pulse" / ".checksums.json"
+		assert checksums_path.exists()
+		checksums_data = checksums_path.read_text()
+		assert len(checksums_data) > 0
+
+	def test_unchanged_files_not_rewritten(self, tmp_path: Path):
+		"""Files with unchanged content are not rewritten."""
+		route = Route("/test", Component(lambda: div()))
+		cfg = CodegenConfig(
+			web_dir="web", pulse_dir="pulse", base_dir=tmp_path, mode="managed"
+		)
+		codegen = Codegen(RouteTree([route]), cfg)
+
+		# First generation
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+		routes_ts = cfg.pulse_path / "routes.ts"
+		first_mtime = routes_ts.stat().st_mtime
+
+		# Second generation with same content
+		import time
+
+		time.sleep(0.01)  # Ensure time difference
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+		second_mtime = routes_ts.stat().st_mtime
+
+		# File should not be rewritten (mtime unchanged)
+		assert first_mtime == second_mtime
+
+	def test_checksums_format_is_valid_json(self, tmp_path: Path):
+		"""Checksums.json contains valid JSON with path keys and hash values."""
+		route = Route("/test", Component(lambda: div()))
+		cfg = CodegenConfig(
+			web_dir="web", pulse_dir="pulse", base_dir=tmp_path, mode="managed"
+		)
+		codegen = Codegen(RouteTree([route]), cfg)
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		checksums_path = tmp_path / ".pulse" / ".checksums.json"
+		import json
+
+		checksums = json.loads(checksums_path.read_text())
+
+		# Should be a dict with file paths as keys
+		assert isinstance(checksums, dict)
+		# Should have entries for generated files
+		assert len(checksums) > 0
+		# All values should be SHA256 hashes (64-char hex strings)
+		for key, value in checksums.items():
+			assert isinstance(key, str)
+			assert isinstance(value, str)
+			assert len(value) == 64  # SHA256 hash length in hex
+
 
 class TestGenerateRoute:
 	"""Unit tests for the new generate_route function."""

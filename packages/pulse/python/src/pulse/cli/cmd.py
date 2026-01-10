@@ -243,6 +243,30 @@ def run(
 			raise typer.Exit(1) from None
 
 
+@cli.command("dev")
+def dev(
+	app_file: str = typer.Argument(
+		...,
+		help=("App target: 'path/to/app.py[:var]' (default :app) or 'module.path:var'"),
+	),
+	address: str = typer.Option(
+		"localhost",
+		"--address",
+		help="Host to bind to",
+	),
+	port: int = typer.Option(8000, "--port", help="Port to bind to"),
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
+):
+	"""Run the Pulse development server."""
+	env.pulse_env = "dev"
+	logger = CLILogger("dev", plain=plain)
+
+	logger.print(f"Starting development server for {app_file}")
+	logger.print(f"Listening on {address}:{port}")
+
+
 @cli.command("generate")
 def generate(
 	app_file: str = typer.Argument(

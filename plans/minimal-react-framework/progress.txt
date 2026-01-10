@@ -673,3 +673,19 @@ Started: 2026-01-09
   - All 33 codegen tests pass, 2 skipped (1 new test added)
   - Acceptance criteria met: codegen tested, typecheck verified, routes.ts structure validated, code splitting pattern confirmed
   - Steel wire checkpoint: Codegen system fully verified as working end-to-end
+
+## 2026-01-10 - F-0049
+- Implemented pulse dev command skeleton with startup messaging
+- Files: `packages/pulse/python/src/pulse/cli/cmd.py`
+- **Learnings:**
+  - `pulse dev` command added as new CLI entry point (after `run` command)
+  - Command accepts `app_file` argument and `--address`/`--port` options (parses both)
+  - Default values: address="localhost", port=8000 (matches acceptance criteria)
+  - Sets `env.pulse_env = "dev"` and creates CLILogger for output
+  - Prints startup message: "Starting development server..." and "Listening on..."
+  - Command exits immediately (supervisor logic added in F-0050)
+  - Typer decorator pattern: `@cli.command("dev")` for subcommand registration
+  - `pulse dev --help` shows correct options and help text
+  - `make typecheck` passes with no errors
+  - `make test` has pre-existing failures (not related to CLI changes)
+  - Acceptance criteria met: command added, options parsed, startup message printed, typecheck passes

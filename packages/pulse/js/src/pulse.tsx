@@ -176,15 +176,21 @@ export function PulseView({ path, registry }: PulseViewProps) {
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: using hacky deep equality for params
 	const routeInfo = useMemo(() => {
-		const { "*": catchall = "", ...pathParams } = params;
+		const { "*": catchallParam, ...pathParams } = params;
 		const queryParams = new URLSearchParams(location.search);
+		// catchallParam can be string[] (custom router) or string (react-router)
+		const catchall = Array.isArray(catchallParam)
+			? catchallParam
+			: typeof catchallParam === "string" && catchallParam.length > 0
+				? catchallParam.split("/")
+				: [];
 		return {
 			hash: location.hash,
 			pathname: location.pathname,
 			query: location.search,
 			queryParams: Object.fromEntries(queryParams.entries()),
 			pathParams,
-			catchall: catchall.length > 0 ? catchall.split("/") : [],
+			catchall,
 		} satisfies RouteInfo;
 	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
 

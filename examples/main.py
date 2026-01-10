@@ -3,6 +3,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any, TypedDict, override
 
 import pulse as ps
@@ -668,6 +669,10 @@ app = ps.App(
 	middleware=[ps.LatencyMiddleware()],
 	session_store=InMemorySessionStore() if ps.mode() == "prod" else None,
 	server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
+	codegen=ps.CodegenConfig(
+		web_dir=Path(__file__).parent / "web",
+		mode="exported",
+	),
 )
 
 

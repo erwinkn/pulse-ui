@@ -20,8 +20,8 @@ export { isExternalUrl, Link } from "./link";
 export type { MatchResult, RouteMatch } from "./match";
 export { compareRoutes, matchPath, selectBestMatch } from "./match";
 export type {
-	NavigationError,
 	NavigationErrorContextValue,
+	NavigationErrorData,
 	NavigationErrorProviderProps,
 } from "./navigation-error";
 export { NavigationError, NavigationErrorProvider, useNavigationError } from "./navigation-error";

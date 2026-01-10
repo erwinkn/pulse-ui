@@ -1330,7 +1330,7 @@
         "`make all` passes"
       ],
       "priority": 66,
-      "passes": false,
+      "passes": true,
       "notes": "Clean removal of dependency.",
       "tests": [
         "make all"
@@ -1349,7 +1349,7 @@
         "Example runs with pulse dev"
       ],
       "priority": 67,
-      "passes": false,
+      "passes": true,
       "notes": "Reference example for users.",
       "tests": [
         "make all"

@@ -311,7 +311,7 @@ export class PulseSocketIOClient {
 				// Ignore messages for paths that are not mounted
 				if (!route) return;
 				// Cache the VDOM for offline navigation
-				const currentLocation = route.routeInfo.location.pathname;
+				const currentLocation = route.routeInfo.pathname;
 				this.#offlineNavigation.cacheRoute(currentLocation, message.vdom, route.routeInfo);
 				route.onInit(message);
 				break;

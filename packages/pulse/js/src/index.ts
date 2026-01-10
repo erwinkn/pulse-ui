@@ -43,7 +43,7 @@ export type {
 	ServerUpdateMessage,
 } from "./messages";
 // Offline navigation
-export type { CachedRoute, OfflineCache, OfflineNavigationConfig } from "./offline-cache";
+export type { CachedRoute, OfflineCache } from "./offline-cache";
 export {
 	InMemoryOfflineCache,
 	LocalStorageOfflineCache,
@@ -63,8 +63,8 @@ export type {
 	MatchResult,
 	NavigateFn,
 	NavigateOptions,
-	NavigationError,
 	NavigationErrorContextValue,
+	NavigationErrorData,
 	NavigationErrorProviderProps,
 	NavigationProgressContextValue,
 	NavigationProgressProps,

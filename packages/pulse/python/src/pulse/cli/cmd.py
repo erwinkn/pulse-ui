@@ -900,6 +900,254 @@ def check(
 		raise typer.Exit(1) from None
 
 
+@cli.command("init")
+def init(
+	directory: str = typer.Argument(
+		".", help="Directory for the new Pulse project (default: current directory)"
+	),
+	managed: bool = typer.Option(
+		False, "--managed", help="Use managed mode (default: exported mode)"
+	),
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
+):
+	"""Create a new Pulse project with minimal scaffolding."""
+	env.pulse_env = "dev"
+	logger = CLILogger("dev", plain=plain)
+
+	# Resolve directory path
+	project_dir = Path(directory).resolve()
+	if project_dir.exists() and any(project_dir.iterdir()):
+		logger.error(f"Directory {project_dir} is not empty")
+		raise typer.Exit(1)
+
+	# Create directory if needed
+	project_dir.mkdir(parents=True, exist_ok=True)
+	logger.print(f"Creating Pulse project in {project_dir}")
+
+	# Determine mode
+	mode = "managed" if managed else "exported"
+
+	# Generate pyproject.toml
+	_generate_pyproject_toml(project_dir)
+
+	# Generate app.py
+	_generate_app_py(project_dir, mode)
+
+	# Generate web directory structure
+	_generate_web_directory(project_dir, mode)
+
+	logger.success("Pulse project created")
+	logger.print("Next steps:")
+	logger.print(f"  1. cd {project_dir}")
+	logger.print("  2. uv sync")
+	logger.print("  3. pulse dev app.py")
+
+
+def _generate_pyproject_toml(project_dir: Path) -> None:
+	"""Generate pyproject.toml for a new Pulse project."""
+	content = """{
+	"project": {
+		"name": "pulse-app",
+		"version": "0.1.0",
+		"dependencies": [
+			"pulse @ file://<local-path-to-pulse>"
+		]
+	},
+	"build-system": {
+		"requires": ["setuptools", "wheel"],
+		"build-backend": "setuptools.build_meta"
+	}
+}
+"""
+	(project_dir / "pyproject.toml").write_text(content)
+
+
+def _generate_app_py(project_dir: Path, mode: str) -> None:
+	"""Generate app.py for a new Pulse project."""
+	content = f'''from pathlib import Path
+
+import pulse as ps
+
+
+@ps.component
+def Home():
+	return ps.div(className="min-h-screen bg-white p-8 flex items-center justify-center")[
+		ps.div(className="space-y-4")[
+			ps.h1("Welcome to Pulse", className="text-3xl font-bold"),
+			ps.p("Edit app.py to get started", className="text-gray-600"),
+		],
+	]
+
+
+app = ps.App(
+	[ps.Route("/", Home)],
+	codegen=ps.CodegenConfig(
+		web_dir=Path(__file__).parent / "web",
+		mode="{mode}",
+	),
+)
+'''
+	(project_dir / "app.py").write_text(content)
+
+
+def _generate_web_directory(project_dir: Path, mode: str) -> None:
+	"""Generate web directory structure for a new Pulse project."""
+	web_dir = project_dir / "web"
+	web_dir.mkdir(exist_ok=True)
+
+	# Generate package.json
+	package_json = """{
+	"name": "pulse-app",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"pulse-ui-client": "0.1.54",
+		"react": "^19.1.0",
+		"react-dom": "^19.1.0"
+	},
+	"devDependencies": {
+		"@types/react": "^19.1.2",
+		"@types/react-dom": "^19.1.2",
+		"typescript": "^5.8.3",
+		"vite": "^6.3.3"
+	}
+}
+"""
+	(web_dir / "package.json").write_text(package_json)
+
+	# Generate tsconfig.json
+	tsconfig = """{
+	"compilerOptions": {
+		"target": "ES2020",
+		"useDefineForClassFields": true,
+		"lib": ["ES2020", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"resolveJsonModule": true,
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"strict": true,
+		"noEmit": true,
+		"jsx": "react-jsx",
+		"jsxImportSource": "react"
+	},
+	"include": ["src"],
+	"references": [{ "path": "./tsconfig.app.json" }]
+}
+"""
+	(web_dir / "tsconfig.json").write_text(tsconfig)
+
+	# Generate tsconfig.app.json
+	tsconfig_app = """{
+	"compilerOptions": {
+		"composite": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true
+	},
+	"include": ["src"],
+	"references": [{ "path": "./tsconfig.json" }]
+}
+"""
+	(web_dir / "tsconfig.app.json").write_text(tsconfig_app)
+
+	# Generate vite.config.ts
+	vite_config = """import { defineConfig } from "vite";
+
+export default defineConfig({
+	server: {
+		middlewareMode: false,
+		port: 5173,
+		hmr: {
+			port: 5173,
+		},
+	},
+});
+"""
+	(web_dir / "vite.config.ts").write_text(vite_config)
+
+	# Generate index.html
+	index_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Pulse App</title>
+</head>
+<body>
+	<div id="root"></div>
+	<script type="module" src="/src/client.ts"></script>
+</body>
+</html>
+"""
+	(web_dir / "index.html").write_text(index_html)
+
+	# Create src directory
+	src_dir = web_dir / "src"
+	src_dir.mkdir(exist_ok=True)
+
+	# Generate client.ts
+	client_ts = """import { initPulseClient } from "pulse-ui-client";
+
+initPulseClient({
+	wsUrl: `ws://${window.location.hostname}:8000/ws`,
+});
+"""
+	(src_dir / "client.ts").write_text(client_ts)
+
+	# Create server directory
+	server_dir = src_dir / "server"
+	server_dir.mkdir(exist_ok=True)
+
+	# Generate server.ts
+	server_ts = """import { Bun } from "bun";
+import { renderVdom } from "pulse-ui-client";
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+
+Bun.serve({
+	port: PORT,
+	async fetch(req: Request) {
+		if (req.method !== "POST") {
+			return new Response("Method Not Allowed", { status: 405 });
+		}
+
+		try {
+			const body = await req.json();
+			const { vdom, config } = body;
+
+			const html = await renderVdom(vdom, config);
+			return new Response(html, {
+				headers: { "Content-Type": "text/html; charset=utf-8" },
+			});
+		} catch (error) {
+			console.error("Render error:", error);
+			const message = error instanceof Error ? error.message : "Unknown error";
+			return new Response(
+				JSON.stringify({ error: message }),
+				{ status: 500, headers: { "Content-Type": "application/json" } }
+			);
+		}
+	},
+});
+
+console.log(`Bun render server listening on port ${PORT}`);
+"""
+	(server_dir / "server.ts").write_text(server_ts)
+
+	# Generate .gitignore
+	gitignore_content = ".pulse/\n"
+	(web_dir / ".gitignore").write_text(gitignore_content)
+
+
 def build_uvicorn_command(
 	*,
 	app_ctx: AppLoadResult,

@@ -19,8 +19,6 @@ export type { PulseFormProps } from "./form";
 // Form helpers
 export { PulseForm, submitForm } from "./form";
 export type { RouteInfo } from "./helpers";
-// Server helpers
-export { extractServerRouteInfo } from "./helpers";
 // Messages (types only)
 export type {
 	ClientApiResultMessage,

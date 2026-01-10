@@ -534,3 +534,19 @@ Started: 2026-01-09
   - All 14 hydration tests pass without console warnings
   - PulseSocketIOClient exported from main index for client initialization
   - Steel wire checkpoint: Complete SSR→client hydration flow verified end-to-end
+
+## 2026-01-10 - F-0041
+- Verified SSR → hydration roundtrip with browser testing
+- Used Playwriter browser automation to test end-to-end flow
+- **Learnings:**
+  - SSR HTML structure: DOCTYPE, html[lang], meta charset, meta viewport all present
+  - __PULSE_DATA__ script contains serialized VDOM and routeInfo for hydration
+  - Browser successfully parses __PULSE_DATA__ JSON and renders SSR content
+  - Root div contains fully rendered content (headings, inputs, buttons, list items)
+  - No React hydration warnings or mismatches in browser console
+  - DOM remains intact after user interactions (click events)
+  - __PULSE_DATA__ script preserved for client-side Pulse client initialization
+  - Acceptance criteria verified: SSR HTML present, no console errors, interactivity works
+  - Bun render server (/render endpoint) successfully renders VDOM to HTML
+  - Python SSR endpoint (/ssr route) wraps Bun output with full HTML shell
+  - Steel wire checkpoint: Complete end-to-end SSR → hydration flow verified working

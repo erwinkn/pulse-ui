@@ -442,40 +442,18 @@ Started: 2026-01-09
 
 ---
 
-## In Progress
-
-### F-0035 - Implement Outlet substitution
-**Status**: Incomplete - context limit reached while debugging VDOM tag structure
-
-**What was done:**
-- Implemented `_substitute_outlets()` method in `RenderSession` for recursive outlet replacement
-- Updated `_get_unified_tree_element()` to call outlet substitution
-- Created comprehensive test file: `packages/pulse/python/tests/test_outlet_substitution.py` with 8 tests
-
-**Current state:**
-- Implementation in place but tests failing (6 failed, 2 passed)
-- Root cause identified: Outlet components render as mount points (e.g., `$$3` tag) not `$$Outlet`
-- The tag value is generated based on component registry ID, not a fixed identifier
-
-**Key discovery:**
-- Outlet renders as `{ "tag": "$$<id>", ... }` where `<id>` is numeric (e.g., `$$3`)
-- Cannot check for literal `"$$Outlet"` tag name - need different approach
-- Must check if tag is a mount point (`$$` prefix) AND the component is actually an Outlet
-
-**Next steps:**
-1. Change detection logic: look for mount point tags that represent Outlet components
-2. Need to track which mount point IDs correspond to Outlet in the rendering process
-3. Alternatively: check the element object before rendering to detect Outlet components
-4. Update outlet substitution logic to work with the actual mount point structure
-
-**Files modified:**
-- `packages/pulse/python/src/pulse/render_session.py` (added `_substitute_outlets` method)
-- `packages/pulse/python/tests/test_outlet_substitution.py` (created new test file)
-
-**Key learnings:**
-- React components from imports render as mount points with numeric identifiers
-- MOUNT_PREFIX = "$$" is used for component registry references
-- ErrorBoundary uses same pattern: renders as `$$ErrorBoundary` mount point
-- Need to detect outlet substitution at Element level before rendering, not VDOM level
+## 2026-01-10 - F-0035
+- Completed Outlet substitution in unified VDOM tree rendering
+- Files: `packages/pulse/python/src/pulse/render_session.py`, `packages/pulse/python/tests/test_outlet_substitution.py`
+- **Learnings:**
+  - Outlet is created via `@react_component(Import("Outlet", "react-router"))` with tag=Import expression
+  - Cannot detect Outlet by checking VDOM tag (becomes mount point with numeric ID), must check Element level
+  - _is_outlet() checks for Import expression with name="Outlet" and src="react-router" (not module, which is an Expr)
+  - _substitute_outlets() recursively processes Element tree, replacing Outlet Elements with next hierarchy level
+  - _normalize_element() converts PulseNode components to Element form using shared HookContext
+  - Shared HookContext (initialized lazily) maintains state management during outlet substitution
+  - RenderSession._normalize_hook_context attribute required for typecheck (initialized to None, created on demand)
+  - All 8 outlet_substitution tests pass: single/nested layouts, multiple children, complex nesting, edge cases
+  - Steel wire checkpoint: Outlet substitution complete and verified
 
 ---

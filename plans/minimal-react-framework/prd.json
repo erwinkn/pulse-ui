@@ -706,7 +706,7 @@
         "`make test` passes"
       ],
       "priority": 35,
-      "passes": false,
+      "passes": true,
       "notes": "Single Outlet for now, multiple Outlets is future work.",
       "tests": [
         "make all"

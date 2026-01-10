@@ -1,28 +1,17 @@
 from mako.template import Template
 
 # Mako template for routes configuration
+# Uses Pulse router with dynamic imports for automatic code splitting
 ROUTES_CONFIG_TEMPLATE = Template(
-	"""import {
-  type RouteConfig,
-  route,
-  layout,
-  index,
-} from "@react-router/dev/routes";
-import { rrPulseRouteTree, type RRRouteObject } from "./routes.runtime";
-
-function toDevRoute(node: RRRouteObject): any {
-  const children = (node.children ?? []).map(toDevRoute);
-  if (node.index) return index(node.file!);
-  if (node.path !== undefined) {
-    return children.length ? route(node.path, node.file!, children) : route(node.path, node.file!);
-  }
-  // Layout node (pathless)
-  return layout(node.file!, children);
+	"""export interface RouteNode {
+  path: string;
+  component?: () => Promise<{ default: React.ComponentType<any> }>;
+  children?: RouteNode[];
 }
 
-export const routes = [
-  layout("${pulse_dir}/_layout.tsx", rrPulseRouteTree.map(toDevRoute)),
-] satisfies RouteConfig;
+export const routes: RouteNode[] = [
+${routes_str}
+];
 """
 )
 

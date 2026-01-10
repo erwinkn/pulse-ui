@@ -251,30 +251,43 @@ class Codegen:
 	def _render_routes_ts(
 		self, routes: Sequence[Route | Layout], indent_level: int
 	) -> str:
+		"""Generate routes with dynamic imports for code splitting."""
 		lines: list[str] = []
 		indent_str = "  " * indent_level
 		for route in routes:
 			if isinstance(route, Layout):
-				children_str = ""
-				if route.children:
-					children_str = f"\n{self._render_routes_ts(route.children, indent_level + 1)}\n{indent_str}"
+				# Layouts don't have a path in the route tree
+				lines.append(f"{indent_str}{{")
+				lines.append(f'{indent_str}  path: "",')
+				file_path = f"{self.cfg.pulse_dir}/layouts/{route.file_path()}"
 				lines.append(
-					f'{indent_str}layout("{self.cfg.pulse_dir}/layouts/{route.file_path()}", [{children_str}]),'
+					f'{indent_str}  component: () => import("{file_path}").then(m => ({{ default: m.default }})),'
 				)
-			else:
 				if route.children:
-					children_str = f"\n{self._render_routes_ts(route.children, indent_level + 1)}\n{indent_str}"
-					lines.append(
-						f'{indent_str}route("{route.path}", "{self.cfg.pulse_dir}/routes/{route.file_path()}", [{children_str}]),'
+					children_str = self._render_routes_ts(
+						route.children, indent_level + 1
 					)
-				elif route.is_index:
-					lines.append(
-						f'{indent_str}index("{self.cfg.pulse_dir}/routes/{route.file_path()}"),'
+					lines.append(f"{indent_str}  children: [")
+					lines.append(children_str)
+					lines.append(f"{indent_str}  ],")
+				lines.append(f"{indent_str}}},")
+			else:
+				# Routes have paths
+				path = route.path if not route.is_index else ""
+				lines.append(f"{indent_str}{{")
+				lines.append(f'{indent_str}  path: "{path}",')
+				file_path = f"{self.cfg.pulse_dir}/routes/{route.file_path()}"
+				lines.append(
+					f'{indent_str}  component: () => import("{file_path}").then(m => ({{ default: m.default }})),'
+				)
+				if route.children:
+					children_str = self._render_routes_ts(
+						route.children, indent_level + 1
 					)
-				else:
-					lines.append(
-						f'{indent_str}route("{route.path}", "{self.cfg.pulse_dir}/routes/{route.file_path()}"),'
-					)
+					lines.append(f"{indent_str}  children: [")
+					lines.append(children_str)
+					lines.append(f"{indent_str}  ],")
+				lines.append(f"{indent_str}}},")
 		return "\n".join(lines)
 
 	def generate_route(

@@ -192,9 +192,12 @@ class TestCodegen:
 		assert routes_ts_path.exists()
 		result = routes_ts_path.read_text()
 
-		assert "export const routes = [" in result
-		assert "] satisfies RouteConfig;" in result
-		assert 'layout("pulse/_layout.tsx"' in result
+		assert "export const routes: RouteNode[] = [" in result
+		assert "];" in result
+		assert "export interface RouteNode" in result
+		assert (
+			"component?: () => Promise<{ default: React.ComponentType<any> }>" in result
+		)
 
 	def test_generate_routes_ts_single_root_route(self, tmp_path: Path):
 		"""Test generating config with single root route."""
@@ -205,10 +208,11 @@ class TestCodegen:
 
 		routes_ts_path = Path(codegen_config.pulse_path) / "routes.ts"
 		result = routes_ts_path.read_text()
-		# New format derives dev routes from runtime route tree
-		assert "import { rrPulseRouteTree" in result
-		assert "function toDevRoute(" in result
-		assert 'layout("pulse/_layout.tsx", rrPulseRouteTree.map(toDevRoute))' in result
+		# New format uses RouteNode interface with dynamic imports
+		assert "export const routes: RouteNode[] = [" in result
+		assert "component: () => import(" in result
+		assert ".then(m => ({ default: m.default }))," in result
+		assert 'path: ""' in result
 
 	def test_generate_routes_ts_multiple_routes(self, tmp_path: Path):
 		"""Test generating config with multiple routes."""
@@ -222,10 +226,11 @@ class TestCodegen:
 
 		routes_ts_path = Path(codegen_config.pulse_path) / "routes.ts"
 		result = routes_ts_path.read_text()
-		# New format uses mapping from runtime tree, not static route literals
-		assert "import { rrPulseRouteTree" in result
-		assert "function toDevRoute(" in result
-		assert "rrPulseRouteTree.map(toDevRoute)" in result
+		# New format uses RouteNode interface with dynamic imports for code splitting
+		assert "export const routes: RouteNode[] = [" in result
+		assert 'path: ""' in result
+		assert 'path: "about"' in result
+		assert "component: () => import(" in result
 
 	def test_full_app_generation(self, tmp_path: Path):
 		"""Test generating all files for a simple app."""
@@ -293,10 +298,10 @@ class TestCodegen:
 		assert "navigate={navigate}" in layout_content
 
 		routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
-		# routes.ts should be built from runtime route tree now
-		assert "import { rrPulseRouteTree" in routes_ts_content
-		assert "function toDevRoute(" in routes_ts_content
-		assert "rrPulseRouteTree.map(toDevRoute)" in routes_ts_content
+		# routes.ts should use new RouteNode format with dynamic imports
+		assert "export const routes: RouteNode[] = [" in routes_ts_content
+		assert "component: () => import(" in routes_ts_content
+		assert ".then(m => ({ default: m.default }))" in routes_ts_content
 
 		# Validate the runtime route tree carries correct file/path data
 		runtime_content = (pulse_app_dir / "routes.runtime.ts").read_text()

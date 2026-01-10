@@ -969,3 +969,37 @@ Started: 2026-01-09
   - 1398 tests pass with 10 pre-existing failures (unrelated to F-0061)
   - Acceptance criteria met: error component displays, retry button functional, matches Next.js style, tests comprehensive
   - Steel wire checkpoint: Navigation error UI with retry mechanism complete and tested
+
+## 2026-01-10 - F-0062
+- Implemented offline navigation with cached data and reconnection support
+- Files: `packages/pulse/js/src/offline-cache.ts`, `packages/pulse/js/src/offline-navigation.ts`, `packages/pulse/js/src/client.tsx`, `packages/pulse/js/src/__tests__/offline-navigation.test.ts`, `packages/pulse/js/src/__tests__/offline-navigation.integration.test.tsx`, `packages/pulse/js/src/index.ts`
+- **Implementation:**
+  - Created OfflineCache interface with InMemoryOfflineCache and LocalStorageOfflineCache implementations
+  - InMemoryOfflineCache: in-memory LRU cache with configurable max size (default 50)
+  - LocalStorageOfflineCache: persists cache to browser localStorage for session survival
+  - OfflineNavigationManager: tracks offline state, manages cached routes, tracks pending navigation and last online path
+  - Window online/offline events tracked for connectivity state
+  - PulseSocketIOClient integrated with OfflineNavigationManager (passes optional cache in constructor)
+  - VDOM caching on vdom_init message to support offline route rendering
+  - Public getOfflineNavigation() method on client for external access
+- **Learnings:**
+  - OfflineCache is pluggable - can use in-memory, localStorage, or custom implementation
+  - navigator.onLine reflects current network status (window events fire on change)
+  - LRU eviction in InMemoryOfflineCache prevents unbounded memory growth
+  - localStorage cache survives page reloads/browser restart
+  - CachedRoute stores vdom, routeInfo, and timestamp for tracking
+  - Offline navigation requires cached route - cannot navigate to uncached paths while offline
+  - PulseSocketIOClient tracks vdom on init, enables rapid offline rehydration
+  - Reconnection detection via network events allows background sync (future work)
+- **Tests:**
+  - 14 unit tests verify cache behavior: storage, retrieval, eviction, clearing, path tracking
+  - 6 integration tests verify client integration: offline manager access, cache routing, pending navigation tracking, multi-route caching
+  - All 20 tests pass with comprehensive coverage
+- **Acceptance criteria met:**
+  - Cache systems store VDOM and route info ✅
+  - Offline navigation possible using cached data ✅
+  - Network connectivity tracked via window events ✅
+  - Multiple routes cached simultaneously ✅
+  - Pending navigation and last online path tracked ✅
+  - Tests comprehensive and passing ✅
+  - Steel wire checkpoint: Offline navigation with caching complete and tested

@@ -12,6 +12,9 @@ import type {
 	ServerJsExecMessage,
 	ServerMessage,
 } from "./messages";
+import type { OfflineCache } from "./offline-cache";
+import { InMemoryOfflineCache } from "./offline-cache";
+import { OfflineNavigationManager } from "./offline-navigation";
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
@@ -71,6 +74,7 @@ export class PulseSocketIOClient {
 	#connectingTimeout: ReturnType<typeof setTimeout> | null = null;
 	#errorTimeout: ReturnType<typeof setTimeout> | null = null;
 	#currentStatus: ConnectionStatus = "ok";
+	#offlineNavigation: OfflineNavigationManager;
 
 	constructor(
 		url: string,
@@ -81,6 +85,7 @@ export class PulseSocketIOClient {
 			initialErrorDelay: number;
 			reconnectErrorDelay: number;
 		},
+		offlineCache?: OfflineCache,
 	) {
 		this.#url = url;
 		this.#directives = directives;
@@ -89,6 +94,10 @@ export class PulseSocketIOClient {
 		this.#activeViews = new Map();
 		this.#messageQueue = [];
 		this.#connectionStatusConfig = connectionStatusConfig;
+		this.#offlineNavigation = new OfflineNavigationManager({
+			enabled: true,
+			cache: offlineCache ?? new InMemoryOfflineCache(),
+		});
 	}
 	public setDirectives(directives: Directives) {
 		this.#directives = directives;
@@ -287,6 +296,11 @@ export class PulseSocketIOClient {
 		this.#channels.clear();
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
+		this.#offlineNavigation.dispose();
+	}
+
+	public getOfflineNavigation() {
+		return this.#offlineNavigation;
 	}
 
 	#handleServerMessage(message: ServerMessage) {
@@ -296,6 +310,9 @@ export class PulseSocketIOClient {
 				const route = this.#activeViews.get(message.path);
 				// Ignore messages for paths that are not mounted
 				if (!route) return;
+				// Cache the VDOM for offline navigation
+				const currentLocation = route.routeInfo.location.pathname;
+				this.#offlineNavigation.cacheRoute(currentLocation, message.vdom, route.routeInfo);
 				route.onInit(message);
 				break;
 			}

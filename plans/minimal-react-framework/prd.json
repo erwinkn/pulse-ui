@@ -1250,7 +1250,7 @@
         "`make test` passes"
       ],
       "priority": 62,
-      "passes": false,
+      "passes": true,
       "notes": "Graceful offline handling.",
       "tests": [
         "make all"

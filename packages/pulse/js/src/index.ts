@@ -44,6 +44,14 @@ export type {
 	ServerNavigationErrorMessage,
 	ServerUpdateMessage,
 } from "./messages";
+// Offline navigation
+export type { CachedRoute, OfflineCache, OfflineNavigationConfig } from "./offline-cache";
+export {
+	InMemoryOfflineCache,
+	LocalStorageOfflineCache,
+} from "./offline-cache";
+export type { OfflineNavigationState } from "./offline-navigation";
+export { OfflineNavigationManager } from "./offline-navigation";
 export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 // Core React bindings
 export { PulseProvider, PulseView, usePulseClient } from "./pulse";

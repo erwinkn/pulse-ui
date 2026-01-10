@@ -1170,7 +1170,7 @@
         "All tests pass"
       ],
       "priority": 58,
-      "passes": false,
+      "passes": true,
       "notes": "Steel wire checkpoint - CLI working.",
       "tests": [
         "make all"

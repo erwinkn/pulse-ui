@@ -14,7 +14,7 @@ const server = Bun.serve({
 
 		if (req.method === "POST" && url.pathname === "/render") {
 			try {
-				const body = await req.json();
+				const _body = await req.json();
 				// For now, just render a simple HTML response
 				// In production, would use renderVdom from pulse-ui-client
 				const html = `<!DOCTYPE html>

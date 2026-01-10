@@ -898,6 +898,62 @@ class TestLocalFileImports:
 		# Check that the path starts with multiple ../ (at least 4 levels up for nested route)
 		assert import_match[0].count("../") >= 4
 
+	def test_codegen_produces_vite_compatible_code_splitting(self, tmp_path: Path):
+		"""Steel wire checkpoint: verify codegen produces Vite-compatible code splitting.
+
+		Tests that generated routes.ts uses dynamic imports with .then() pattern
+		that enables automatic code splitting in Vite builds.
+		"""
+		routes = [
+			Route("/", ps.component(lambda: div()["Home"])),
+			Route("/about", ps.component(lambda: div()["About"])),
+			Route("/users", ps.component(lambda: div()["Users"])),
+		]
+
+		app = App(routes=routes)
+		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="app")
+		codegen = Codegen(app.routes, codegen_config)
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		routes_ts = codegen.output_folder / "routes.ts"
+		assert routes_ts.exists(), "routes.ts not generated"
+
+		routes_content = routes_ts.read_text()
+
+		# Verify routes.ts uses RouteNode interface for type safety
+		assert "export const routes: RouteNode[]" in routes_content
+
+		# Verify dynamic imports for each route (enables code splitting)
+		assert "component: () => import(" in routes_content
+		assert ".then(m => ({ default: m.default }))" in routes_content
+
+		# Count the number of dynamic imports - should match number of routes
+		import_count = routes_content.count("component: () => import(")
+		assert import_count >= 3, (
+			f"Expected at least 3 dynamic imports, found {import_count}"
+		)
+
+		# Verify routes.ts doesn't import route components at top level (would defeat splitting)
+		import re
+
+		for route_path in ["index", "about", "users"]:
+			# Look for top-level imports (not inside component property)
+			top_level_pattern = f"import.*from.*{route_path}"
+			first_hundred = routes_content[:200]
+			assert not re.search(top_level_pattern, first_hundred), (
+				f"route component {route_path} is imported at top level, "
+				"which defeats code splitting"
+			)
+
+		# Verify runtime.ts has metadata for route files
+		runtime_ts = codegen.output_folder / "routes.runtime.ts"
+		assert runtime_ts.exists(), "routes.runtime.ts not generated"
+		runtime_content = runtime_ts.read_text()
+
+		# Runtime file should contain file paths for each route
+		assert "file:" in runtime_content, "Runtime file should contain file paths"
+		assert "path:" in runtime_content, "Runtime file should contain path metadata"
+
 
 if __name__ == "__main__":
 	pytest.main([__file__, "-v"])

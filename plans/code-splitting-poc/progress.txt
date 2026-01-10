@@ -18,6 +18,9 @@ Started: 2026-01-09
 - poc/server/ssr.ts - Bun SSR server
 - poc/test/bundle-analysis.ts - Bundle analysis test
 
+## In Progress
+<!-- Partial work from interrupted sessions. Next iteration MUST continue this. -->
+
 ---
 ## 2026-01-09 - F-0001
 - Initialized POC project with Vite + React + TypeScript

@@ -8,6 +8,7 @@ This module provides the CLI commands for running the server and generating rout
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -1146,6 +1147,130 @@ console.log(`Bun render server listening on port ${PORT}`);
 	# Generate .gitignore
 	gitignore_content = ".pulse/\n"
 	(web_dir / ".gitignore").write_text(gitignore_content)
+
+
+@cli.command("export")
+def export(
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
+):
+	"""Export managed mode project to exported mode.
+
+	Copies .pulse/web/ to web/ and updates .gitignore.
+	Only works with managed mode projects.
+	"""
+	env.pulse_env = "dev"
+	logger = CLILogger("dev", plain=plain)
+
+	# Load app from current directory to determine project structure
+	try:
+		app_ctx = load_app_from_target("app.py")
+	except Exception as exc:
+		logger.error(f"Failed to load app: {exc}")
+		raise typer.Exit(1) from None
+
+	if not app_ctx.app:
+		logger.error("Could not load Pulse app")
+		raise typer.Exit(1)
+
+	app = app_ctx.app
+
+	# Check if in managed mode
+	if app.codegen.cfg.mode != "managed":
+		logger.error("This project is already in exported mode")
+		raise typer.Exit(1)
+
+	# Check if .pulse/web/ exists
+	pulse_web = app.codegen.cfg.web_root
+	if not pulse_web.exists():
+		logger.error(f".pulse/web/ directory not found at {pulse_web}")
+		raise typer.Exit(1)
+
+	# Get target web directory (exported mode location)
+	web_dir = app.codegen.cfg.resolved_base_dir / app.codegen.cfg.web_dir
+
+	# Check if target web/ already exists
+	if web_dir.exists():
+		logger.error(f"web/ directory already exists at {web_dir}")
+		raise typer.Exit(1)
+
+	logger.print(f"Exporting from {pulse_web} to {web_dir}")
+
+	# Copy .pulse/web/ to web/
+	try:
+		shutil.copytree(str(pulse_web), str(web_dir))
+		logger.success("Copied .pulse/web/ to web/")
+	except Exception as exc:
+		logger.error(f"Failed to copy directory: {exc}")
+		raise typer.Exit(1) from None
+
+	# Update .gitignore at project root
+	gitignore_path = app.codegen.cfg.resolved_base_dir / ".gitignore"
+	_update_gitignore_for_export(gitignore_path, str(app.codegen.cfg.pulse_dir))
+
+	# Add customization comments to editable files
+	_add_customization_comments(web_dir, str(app.codegen.cfg.pulse_dir))
+
+	logger.success("Project exported to exported mode")
+	logger.print("Next steps:")
+	logger.print("  1. Remove .pulse/ directory (optional)")
+	logger.print("  2. Update app.py: mode='exported'")
+	logger.print("  3. Commit web/ directory to version control")
+
+
+def _update_gitignore_for_export(gitignore_path: Path, pulse_dir: str) -> None:
+	"""Update .gitignore to add web/pulse/ entry."""
+	new_entry = f"web/{pulse_dir}/\n"
+	existing_content = gitignore_path.read_text() if gitignore_path.exists() else ""
+
+	# Remove .pulse/ entry if present
+	lines = [
+		line
+		for line in existing_content.split("\n")
+		if line.strip() != ".pulse/" and line.strip()
+	]
+
+	# Add new entry if not already present
+	if new_entry.strip() not in [line.strip() for line in lines if line.strip()]:
+		lines.append(new_entry.strip())
+
+	updated_content = "\n".join(lines) + "\n" if lines else new_entry
+	gitignore_path.write_text(updated_content)
+
+
+def _add_customization_comments(web_dir: Path, pulse_dir: str) -> None:
+	"""Add customization comments to editable files in web/ directory."""
+	# Add comment to package.json
+	package_json_path = web_dir / "package.json"
+	if package_json_path.exists():
+		content = package_json_path.read_text()
+		# Only add comment if not already present
+		if "// Customize as needed" not in content:
+			# Insert comment at the top (after opening brace)
+			lines = content.split("\n")
+			if lines and lines[0].strip() == "{":
+				lines.insert(
+					1,
+					"	// Customize as needed - this file is now owned by you",
+				)
+				package_json_path.write_text("\n".join(lines))
+
+	# Add comment to client.ts
+	client_ts_path = web_dir / "src" / "client.ts"
+	if client_ts_path.exists():
+		content = client_ts_path.read_text()
+		if not content.startswith("//"):
+			comment = "// Customize as needed - this file is now owned by you\n"
+			client_ts_path.write_text(comment + content)
+
+	# Add comment to server.ts
+	server_ts_path = web_dir / "src" / "server" / "server.ts"
+	if server_ts_path.exists():
+		content = server_ts_path.read_text()
+		if not content.startswith("//"):
+			comment = "// Customize as needed - this file is now owned by you\n"
+			server_ts_path.write_text(comment + content)
 
 
 def build_uvicorn_command(

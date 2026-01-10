@@ -1,17 +1,17 @@
-import type { RouteObject } from "react-router";
-
-export type RRRouteObject = RouteObject & {
+export type PulseRouteNode = {
 	id: string;
 	uniquePath?: string;
-	children?: RRRouteObject[];
+	path?: string;
+	index?: boolean;
 	file: string;
+	children?: PulseRouteNode[];
 };
 
-export const rrPulseRouteTree = [
+export const pulsePulseRouteTree = [
 	{
 		id: "/",
 		uniquePath: "/",
-		index: true,
+		path: "/",
 		file: "pulse/routes/index.jsx",
 	},
-] satisfies RRRouteObject[];
+] satisfies PulseRouteNode[];

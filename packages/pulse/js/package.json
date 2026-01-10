@@ -41,8 +41,7 @@
 	},
 	"peerDependencies": {
 		"react": "^18 || ^19",
-		"react-dom": "^18 || ^19",
-		"react-router": "^7"
+		"react-dom": "^18 || ^19"
 	},
 	"publishConfig": {
 		"exports": {

@@ -9,8 +9,7 @@
  */
 
 import { hydrateRoot } from "react-dom/client";
-import type { NavigateFunction } from "react-router";
-import type { RouteInfo, VDOM } from "./index";
+import type { NavigateFn, RouteInfo, VDOM } from "./index";
 import { PulseSocketIOClient, VDOMRenderer } from "./index";
 import { defaultComponentRegistry } from "./server/render";
 
@@ -50,7 +49,7 @@ async function main() {
 	const hydrateData = getHydrationData();
 
 	// Create navigate function for client-side navigation
-	const navigate: NavigateFunction = ((to: any, options?: any) => {
+	const navigate: NavigateFn = ((to: any, options?: any) => {
 		if (typeof to === "number") {
 			window.history.go(to);
 		} else if (typeof to === "string") {
@@ -60,7 +59,7 @@ async function main() {
 				window.location.href = to;
 			}
 		}
-	}) as unknown as NavigateFunction;
+	}) as unknown as NavigateFn;
 
 	// Create Pulse client
 	const serverUrl = import.meta.env.VITE_PULSE_SERVER_URL || "/";

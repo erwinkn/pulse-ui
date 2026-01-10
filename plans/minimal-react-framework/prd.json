@@ -1027,7 +1027,7 @@
         "`make test` passes"
       ],
       "priority": 51,
-      "passes": false,
+      "passes": true,
       "notes": "",
       "tests": [
         "make all"

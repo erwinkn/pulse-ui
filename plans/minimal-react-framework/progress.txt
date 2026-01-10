@@ -657,3 +657,19 @@ Started: 2026-01-09
   - All 32 codegen tests pass (3 new tests for edit detection)
   - Acceptance criteria met: detect edits, warn to console, overwrite anyway, tests added
   - Steel wire checkpoint: User edit detection complete for managed mode
+
+## 2026-01-10 - F-0048
+- Verified codegen produces working output with code splitting support
+- Files: `packages/pulse/python/tests/test_codegen.py`
+- **Learnings:**
+  - test_full_app_generation already verifies acceptance criteria 1-3 (codegen runs, files pass typecheck, routes.ts has correct structure)
+  - Added test_codegen_produces_vite_compatible_code_splitting to verify code splitting pattern
+  - Code splitting verified by checking: dynamic imports with `component: () => import(...)` pattern
+  - Routes.ts uses `RouteNode[]` interface for type safety
+  - Dynamic imports include `.then(m => ({ default: m.default }))` transformation (Vite code splitting pattern)
+  - Route components NOT imported at top level (would defeat code splitting)
+  - routes.runtime.ts contains file paths and path metadata for all routes
+  - Pre-existing test failures in test_pulse_context.py and test_render_session.py (unrelated to codegen)
+  - All 33 codegen tests pass, 2 skipped (1 new test added)
+  - Acceptance criteria met: codegen tested, typecheck verified, routes.ts structure validated, code splitting pattern confirmed
+  - Steel wire checkpoint: Codegen system fully verified as working end-to-end

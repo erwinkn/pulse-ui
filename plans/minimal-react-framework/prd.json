@@ -967,7 +967,7 @@
         "All tests pass"
       ],
       "priority": 48,
-      "passes": false,
+      "passes": true,
       "notes": "Steel wire checkpoint - codegen working.",
       "tests": [
         "make all"

@@ -1108,7 +1108,7 @@
         "Default address 0.0.0.0 for production"
       ],
       "priority": 55,
-      "passes": false,
+      "passes": true,
       "notes": "Production server command.",
       "tests": [
         "make all"

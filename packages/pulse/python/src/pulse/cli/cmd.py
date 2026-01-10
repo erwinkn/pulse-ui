@@ -596,6 +596,172 @@ def build(
 	logger.success(f"Build complete! Output: {dist_dir}")
 
 
+@cli.command("start")
+def start(
+	app_file: str = typer.Argument(
+		...,
+		help=("App target: 'path/to/app.py[:var]' (default :app) or 'module.path:var'"),
+	),
+	address: str = typer.Option(
+		"0.0.0.0",
+		"--address",
+		help="Host to bind to (default 0.0.0.0 for production)",
+	),
+	port: int = typer.Option(8000, "--port", help="Port to bind to"),
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
+	workers: int = typer.Option(
+		1, "--workers", help="Number of Uvicorn worker processes"
+	),
+):
+	"""Run the Pulse production server."""
+	env.pulse_env = "prod"
+	logger = CLILogger("prod", plain=plain)
+
+	logger.print(f"Loading app from {app_file}")
+	app_ctx = load_app_from_target(app_file, logger)
+	_apply_app_context_to_env(app_ctx)
+	app_instance = app_ctx.app
+
+	web_root = app_instance.codegen.cfg.web_root
+	if not web_root.exists():
+		logger.error(f"Directory not found: {web_root.absolute()}")
+		raise typer.Exit(1)
+
+	# Check for build artifacts
+	dist_dir = web_root / "dist"
+	if not dist_dir.exists():
+		msg = f"Build artifacts not found at {dist_dir}. Run 'pulse build' first to create production assets."
+		logger.error(msg)
+		raise typer.Exit(1)
+
+	# Track readiness for announcement
+	server_ready = {"server": False, "bun": False}
+	announced = False
+
+	def mark_server_ready() -> None:
+		server_ready["server"] = True
+		check_and_announce()
+
+	def mark_bun_ready() -> None:
+		server_ready["bun"] = True
+		check_and_announce()
+
+	def check_and_announce() -> None:
+		"""Announce when all required servers are ready."""
+		nonlocal announced
+		if announced:
+			return
+
+		if not server_ready["server"] or not server_ready["bun"]:
+			return
+
+		# All servers are ready, show announcement
+		announced = True
+		protocol = "http" if address == "127.0.0.1" else "https"
+		server_url = f"{protocol}://{address}:{port}"
+		logger.write_ready_announcement(address, port, server_url)
+
+	# Build commands
+	commands: list[CommandSpec] = []
+
+	# Bun SSR server port (allocated first, before other servers)
+	bun_port = find_available_port(3001)
+	# Set React server address for Python app to use
+	os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = f"http://{address}:{bun_port}"
+	# Set Bun render server address for Python app to POST VDOM to
+	os.environ[ENV_PULSE_BUN_RENDER_SERVER_ADDRESS] = f"http://{address}:{bun_port}"
+
+	# Python server (no reload in production)
+	server_cmd = build_uvicorn_command(
+		app_ctx=app_ctx,
+		address=address,
+		port=port,
+		reload_enabled=False,
+		extra_args=["--workers", str(workers)] if workers > 1 else [],
+		dev_secret=None,
+		server_only=False,
+		web_root=web_root,
+		verbose=False,
+		ready_pattern=r"Application startup complete",
+		on_ready=mark_server_ready,
+	)
+	# Rename to "python" for output
+	server_cmd = CommandSpec(
+		name="python",
+		args=server_cmd.args,
+		cwd=server_cmd.cwd,
+		env=server_cmd.env,
+		ready_pattern=server_cmd.ready_pattern,
+		on_ready=server_cmd.on_ready,
+		on_spawn=server_cmd.on_spawn,
+	)
+	commands.append(server_cmd)
+
+	# Bun SSR server (use pre-built executable if available, otherwise run from source)
+	executable_path = None
+	if app_instance.codegen.cfg.mode == "managed":
+		exe_candidate = (
+			web_root.parent.parent
+			/ "server"
+			/ ("server.exe" if sys.platform == "win32" else "server")
+		)
+	else:
+		exe_candidate = (
+			web_root.parent
+			/ "server"
+			/ ("server.exe" if sys.platform == "win32" else "server")
+		)
+
+	if exe_candidate.exists():
+		executable_path = exe_candidate
+		bun_cmd = CommandSpec(
+			name="bun",
+			args=[str(executable_path)],
+			cwd=web_root,
+			env=dict(
+				os.environ,
+				PORT=str(bun_port),
+				FORCE_COLOR="1",
+				PYTHONUNBUFFERED="1",
+			),
+			ready_pattern=r"Listening on",
+			on_ready=mark_bun_ready,
+		)
+	else:
+		# Fall back to running from source with Bun
+		bun_cmd = CommandSpec(
+			name="bun",
+			args=[
+				"bun",
+				"run",
+				str(web_root / "src" / "server" / "server.ts"),
+			],
+			cwd=web_root,
+			env=dict(
+				os.environ,
+				PORT=str(bun_port),
+				FORCE_COLOR="1",
+				PYTHONUNBUFFERED="1",
+			),
+			ready_pattern=r"Listening on",
+			on_ready=mark_bun_ready,
+		)
+	commands.append(bun_cmd)
+
+	with FolderLock(web_root):
+		try:
+			exit_code = execute_commands(
+				commands,
+				tag_mode=logger.get_tag_mode(),
+			)
+			raise typer.Exit(exit_code)
+		except RuntimeError as exc:
+			logger.error(str(exc))
+			raise typer.Exit(1) from None
+
+
 @cli.command("generate")
 def generate(
 	app_file: str = typer.Argument(

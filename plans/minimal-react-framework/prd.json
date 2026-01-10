@@ -786,7 +786,7 @@
         "`make typecheck` passes"
       ],
       "priority": 39,
-      "passes": false,
+      "passes": true,
       "notes": "Complete HTML response to browser.",
       "tests": [
         "make all"

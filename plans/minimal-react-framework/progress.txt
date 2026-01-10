@@ -504,3 +504,18 @@ Started: 2026-01-09
   - Simple param extraction: iterate route.segments and match dynamic/splat segments to path_parts
   - Created comprehensive test suite with 5 tests verifying endpoint behavior
   - All acceptance criteria met: HTTP endpoint, route matching, prerender VDOM, POST to Bun, return HTML
+
+---
+
+## 2026-01-10 - F-0039
+- Implemented HTML shell injection for complete SSR response
+- Files: `packages/pulse/python/src/pulse/app.py`, `packages/pulse/python/tests/test_ssr_endpoint.py`
+- **Learnings:**
+  - wrap_html_with_shell() helper function serializes state and injects into script tag
+  - Serialization uses `serialize()` from pulse.serializer (already imported in app.py)
+  - State to inject includes VDOM and routeInfo for client-side hydration
+  - HTML shell structure: DOCTYPE, meta tags, __PULSE_DATA__ script with serialized state, root div, client.js module script
+  - Content-type header changed from "text/html" to "text/html; charset=utf-8" for proper encoding
+  - Tests updated to verify shell components: DOCTYPE, lang attribute, __PULSE_DATA__ script tag, rendered content, content-type
+  - All 5 SSR endpoint tests pass with new wrapped HTML format
+  - Steel wire checkpoint: Complete HTML response ready for client hydration

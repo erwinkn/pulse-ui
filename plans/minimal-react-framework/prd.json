@@ -1087,7 +1087,7 @@
         "--no-check option skips type checking"
       ],
       "priority": 54,
-      "passes": false,
+      "passes": true,
       "notes": "Faster cold start with compiled binary.",
       "tests": [
         "make all"

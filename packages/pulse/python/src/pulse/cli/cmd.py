@@ -31,6 +31,7 @@ from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.cli.uvicorn_log_config import get_log_config
 from pulse.env import (
+	ENV_PULSE_BUN_RENDER_SERVER_ADDRESS,
 	ENV_PULSE_DISABLE_CODEGEN,
 	ENV_PULSE_HOST,
 	ENV_PULSE_PORT,
@@ -354,6 +355,13 @@ def dev(
 	# Build commands
 	commands: list[CommandSpec] = []
 
+	# Bun SSR server port (allocated first, before other servers)
+	bun_port = find_available_port(3001)
+	# Set React server address for Python app to use
+	os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = f"http://{address}:{bun_port}"
+	# Set Bun render server address for Python app to POST VDOM to
+	os.environ[ENV_PULSE_BUN_RENDER_SERVER_ADDRESS] = f"http://{address}:{bun_port}"
+
 	# Python server
 	server_cmd = build_uvicorn_command(
 		app_ctx=app_ctx,
@@ -403,7 +411,6 @@ def dev(
 	commands.append(vite_cmd)
 
 	# Bun SSR server
-	bun_port = find_available_port(3001)
 	bun_cmd = CommandSpec(
 		name="bun",
 		args=[

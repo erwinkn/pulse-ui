@@ -90,6 +90,9 @@ export {
 //   cleanForSerialization,
 // } from "./serialize/clean";
 export { deserialize, serialize } from "./serialize/serializer";
+// Server-side rendering
+export type { RenderConfig } from "./server/render";
+export { renderVdom } from "./server/render";
 // Transports (types only - implementation is internal)
 export type { MessageListener, Transport } from "./transport";
 // VDOM types and helpers

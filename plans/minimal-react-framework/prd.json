@@ -604,7 +604,7 @@
         "`make test` passes"
       ],
       "priority": 30,
-      "passes": false,
+      "passes": true,
       "notes": "Both error types displayed with unified component.",
       "tests": [
         "make all"
@@ -625,7 +625,7 @@
         "`make typecheck` passes"
       ],
       "priority": 31,
-      "passes": false,
+      "passes": true,
       "notes": "Server-side context like React Context but Python-side.",
       "tests": [
         "make all"
@@ -645,7 +645,7 @@
         "`make test` passes"
       ],
       "priority": 32,
-      "passes": false,
+      "passes": true,
       "notes": "Context flows through layouts to pages.",
       "tests": [
         "make all"
@@ -820,14 +820,15 @@
       "id": "F-0041",
       "title": "Verify SSR \u2192 hydration roundtrip",
       "acceptanceCriteria": [
-        "Create E2E test: request page, verify SSR HTML, verify hydration",
-        "No console errors or warnings",
-        "Client navigation works after hydration",
+        "Use web browser tools to navigate to page and verify SSR HTML is present",
+        "Verify hydration completes without React console errors (check browser logs)",
+        "Use web browser tools to click navigation links and verify client-side navigation works",
+        "No console errors or warnings in browser devtools",
         "All tests pass"
       ],
       "priority": 41,
       "passes": false,
-      "notes": "Steel wire checkpoint - full SSR flow working.",
+      "notes": "Steel wire checkpoint - full SSR flow working. Use browser testing.",
       "tests": [
         "make all"
       ],
@@ -1041,13 +1042,13 @@
       "acceptanceCriteria": [
         "Create test app in tests/fixtures/",
         "`pulse dev` starts all three servers",
-        "HTTP request returns SSR HTML",
-        "WebSocket connection established",
-        "Vite HMR working (client changes hot reload)"
+        "Use web browser tools to verify SSR HTML is rendered correctly",
+        "Use web browser tools to verify WebSocket connection established",
+        "Use web browser tools to verify Vite HMR working (edit client file, see hot reload)"
       ],
       "priority": 52,
       "passes": false,
-      "notes": "Steel wire checkpoint - dev server working.",
+      "notes": "Steel wire checkpoint - dev server working. Use browser testing.",
       "tests": [
         "make all"
       ],
@@ -1362,21 +1363,21 @@
       "title": "Final verification: all goals met",
       "acceptanceCriteria": [
         "`make test` passes (all unit + integration tests)",
-        "`pulse dev` starts examples/web and app is navigable",
-        "Browser devtools: no React Router in network/bundle",
-        "React Context works across nested routes (test with Mantine theme)",
-        "Pulse Context works across nested routes",
-        "Parent route params accessible via Pulse Context",
-        "SSR produces valid HTML, hydration has no mismatch warnings",
-        "Root ErrorBoundary catches Python and React errors",
-        "Prefetch works (viewport + hover fallback)",
-        "Navigation state syncs to Python",
-        "Progress indicator shows during navigation",
-        "Dev-mode HTML validator catches nesting errors"
+        "Use web browser tools: `pulse dev` starts examples/web and app is navigable",
+        "Use web browser tools: verify no React Router in network/bundle",
+        "Use web browser tools: React Context works across nested routes (test with Mantine theme)",
+        "Use web browser tools: Pulse Context works across nested routes",
+        "Use web browser tools: parent route params accessible via Pulse Context",
+        "Use web browser tools: SSR produces valid HTML, hydration has no mismatch warnings",
+        "Use web browser tools: Root ErrorBoundary catches Python and React errors",
+        "Use web browser tools: Prefetch works (viewport + hover fallback)",
+        "Use web browser tools: Navigation state syncs to Python",
+        "Use web browser tools: Progress indicator shows during navigation",
+        "Use web browser tools: Dev-mode HTML validator catches nesting errors"
       ],
       "priority": 68,
       "passes": false,
-      "notes": "All spec goals verified.",
+      "notes": "All spec goals verified. Use browser testing for all UI verification.",
       "tests": [
         "make all"
       ],

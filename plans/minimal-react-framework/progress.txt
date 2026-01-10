@@ -18,6 +18,9 @@ Started: 2026-01-09
 - `packages/pulse/js/src/server/__tests__/render.test.tsx` - SSR integration tests (simple/nested VDOM, props)
 - `packages/pulse/python/src/pulse/error_boundary.py` - Python ErrorBoundary component for server-side error catching
 
+## In Progress
+<!-- Partial work from interrupted sessions. Next iteration MUST continue this. -->
+
 ---
 
 ## 2026-01-09 - F-0001
@@ -368,5 +371,46 @@ Started: 2026-01-09
   - Default fallback matches React ErrorBoundary visual style with red border and dev-mode stack trace
   - `env.pulse_env == "dev"` checks for development mode in Python
   - Export pattern: `from pulse.error_boundary import ErrorBoundary as ErrorBoundary` for public API
+
+---
+
+## 2026-01-10 - F-0030
+- Wired Python ErrorBoundary to React ErrorBoundary component
+- Files: `packages/pulse/python/src/pulse/renderer.py`, `packages/pulse/js/src/server/render.tsx`, `packages/pulse/python/tests/test_error_boundary.py`
+- **Learnings:**
+  - Renderer handles ErrorBoundary via `render_error_boundary` method (uses runtime isinstance check to avoid circular import)
+  - ErrorBoundary renders as `$$ErrorBoundary` mount point in VDOM (uses MOUNT_PREFIX constant)
+  - `client_fallback` prop registered as callback using standard `register_callback` function
+  - Return normalized children (not ErrorBoundary) as persistent node since boundary is a wrapper
+  - SSR uses `defaultComponentRegistry` - added `ErrorBoundary: ErrorBoundary` mapping
+  - Test files can use `Any` type with `# pyright: ignore[reportArgumentType]` for dynamic renderer behavior
+
+---
+
+## 2026-01-10 - F-0031
+- Created user-facing Pulse Context system
+- Files: `packages/pulse/python/src/pulse/context.py`, `packages/pulse/python/src/pulse/__init__.py`
+- **Learnings:**
+  - User context system is separate from internal `PulseContext` class (which manages app/session/render/route)
+  - Use `ContextVar[tuple[MappingProxyType[str, Any], ...]]` to store stack of immutable context snapshots
+  - `MappingProxyType` from `types` module creates immutable dict views
+  - Context manager pattern with `token` for push/pop semantics
+  - Search reversed stack (innermost to outermost) when looking up keys
+  - Clear error message when key not found, suggesting correct usage pattern
+
+---
+
+## 2026-01-10 - F-0032
+- Added context inheritance through route hierarchy
+- Files: `packages/pulse/python/src/pulse/context.py`, `packages/pulse/python/src/pulse/render_session.py`, `packages/pulse/python/tests/test_context_inheritance.py`
+- **Learnings:**
+  - `RouteMount` stores `user_context_snapshot` for tracking context per route path
+  - `get_user_context_snapshot()` captures current stack, `restore_user_context()` restores from snapshot
+  - `RenderSession.get_parent_context_snapshot(route)` looks up parent's mount via `route.parent.unique_path()`
+  - Snapshot capture must happen during render (inside `with pulse_context()` block), not after
+  - Context managers exit when function returns, so snapshot captured after `render()` is empty
+  - Route paths: Layout is `/<layout>`, nested layout is `/<layout>/<layout>`, route is `/routename` (not nested)
+  - Callback key format: child index + prop name, e.g., `"0.onClick"` for first child's onClick
+  - `prerender()` and `_create_render_effect()` both restore parent context before rendering child routes
 
 ---

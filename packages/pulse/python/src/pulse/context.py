@@ -136,9 +136,50 @@ def use_pulse_context(key: str) -> Any:
 	)
 
 
+# Type alias for context snapshot (tuple of immutable mappings)
+UserContextSnapshot = tuple[MappingProxyType[str, Any], ...]
+
+
+def get_user_context_snapshot() -> UserContextSnapshot:
+	"""Capture current user context stack as a snapshot.
+
+	Used by RenderSession to track context per route path.
+	"""
+	return _USER_CONTEXT_STACK.get()
+
+
+@contextmanager
+def restore_user_context(
+	snapshot: UserContextSnapshot,
+) -> Generator[None, None, None]:
+	"""Restore user context stack from a snapshot.
+
+	Used by RenderSession to restore parent route's context when
+	rendering child routes, enabling context inheritance.
+
+	Example:
+		# In parent route, context is provided
+		with pulse_context(theme="dark"):
+			parent_snapshot = get_user_context_snapshot()
+
+		# Later, when rendering child route
+		with restore_user_context(parent_snapshot):
+			# Child can access parent's context
+			theme = use_pulse_context("theme")  # Returns "dark"
+	"""
+	token = _USER_CONTEXT_STACK.set(snapshot)
+	try:
+		yield
+	finally:
+		_USER_CONTEXT_STACK.reset(token)
+
+
 __all__ = [
 	"PULSE_CONTEXT",
 	"PulseUserContextError",
+	"UserContextSnapshot",
+	"get_user_context_snapshot",
 	"pulse_context",
+	"restore_user_context",
 	"use_pulse_context",
 ]

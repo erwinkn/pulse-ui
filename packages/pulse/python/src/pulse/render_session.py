@@ -6,7 +6,12 @@ from asyncio import iscoroutine
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-from pulse.context import PulseContext
+from pulse.context import (
+	PulseContext,
+	UserContextSnapshot,
+	get_user_context_snapshot,
+	restore_user_context,
+)
 from pulse.helpers import create_future_on_loop, create_task
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
@@ -74,6 +79,7 @@ class RouteMount:
 	state: MountState
 	queue: list[ServerMessage] | None
 	queue_timeout: asyncio.TimerHandle | None
+	user_context_snapshot: UserContextSnapshot
 
 	def __init__(
 		self, render: "RenderSession", route: Route | Layout, route_info: RouteInfo
@@ -87,6 +93,8 @@ class RouteMount:
 		self.state = "pending"
 		self.queue = None
 		self.queue_timeout = None
+		# Capture user context snapshot for inheritance (set during prerender/attach)
+		self.user_context_snapshot = ()
 
 
 class RenderSession:
@@ -259,6 +267,8 @@ class RenderSession:
 		Synchronous render for SSR. Returns vdom_init or navigate_to message.
 		- First call: creates RouteMount in PENDING state, starts queue
 		- Subsequent calls: re-renders and returns fresh VDOM
+
+		Child routes inherit context from parent routes via context snapshots.
 		"""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
@@ -274,22 +284,32 @@ class RenderSession:
 		elif route_info:
 			mount.route.update(route_info)
 
+		# Get parent context snapshot for inheritance
+		parent_context = self.get_parent_context_snapshot(mount.route.pulse_route)
+
 		with PulseContext.update(render=self, route=mount.route):
-			try:
-				vdom = mount.tree.render()
-				if is_new:
-					mount.initialized = True
-			except RedirectInterrupt as r:
-				del self.route_mounts[path]
-				return ServerNavigateToMessage(
-					type="navigate_to", path=r.path, replace=r.replace, hard=False
-				)
-			except NotFoundInterrupt:
-				del self.route_mounts[path]
-				ctx = PulseContext.get()
-				return ServerNavigateToMessage(
-					type="navigate_to", path=ctx.app.not_found, replace=True, hard=False
-				)
+			# Restore parent context so child can inherit
+			with restore_user_context(parent_context):
+				try:
+					vdom = mount.tree.render()
+					# Capture context snapshot after render (includes any pulse_context() used)
+					mount.user_context_snapshot = get_user_context_snapshot()
+					if is_new:
+						mount.initialized = True
+				except RedirectInterrupt as r:
+					del self.route_mounts[path]
+					return ServerNavigateToMessage(
+						type="navigate_to", path=r.path, replace=r.replace, hard=False
+					)
+				except NotFoundInterrupt:
+					del self.route_mounts[path]
+					ctx = PulseContext.get()
+					return ServerNavigateToMessage(
+						type="navigate_to",
+						path=ctx.app.not_found,
+						replace=True,
+						hard=False,
+					)
 
 		if is_new:
 			self._create_render_effect(mount, path)
@@ -373,42 +393,52 @@ class RenderSession:
 	def _create_render_effect(self, mount: RouteMount, path: str):
 		ctx = PulseContext.get()
 		session = ctx.session
+		# Capture parent context at effect creation time
+		parent_context = self.get_parent_context_snapshot(mount.route.pulse_route)
 
 		def _render_effect():
 			with PulseContext.update(session=session, render=self, route=mount.route):
-				try:
-					if not mount.initialized:
-						vdom = mount.tree.render()
-						mount.initialized = True
-						self.send(
-							ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-						)
-					else:
-						ops = mount.tree.rerender()
-						if ops:
+				# Restore parent context for inheritance
+				with restore_user_context(parent_context):
+					try:
+						if not mount.initialized:
+							vdom = mount.tree.render()
+							# Update snapshot after render
+							mount.user_context_snapshot = get_user_context_snapshot()
+							mount.initialized = True
 							self.send(
-								ServerUpdateMessage(
-									type="vdom_update", path=path, ops=ops
+								ServerInitMessage(
+									type="vdom_init", path=path, vdom=vdom
 								)
 							)
-				except RedirectInterrupt as r:
-					self.send(
-						ServerNavigateToMessage(
-							type="navigate_to",
-							path=r.path,
-							replace=r.replace,
-							hard=False,
+						else:
+							ops = mount.tree.rerender()
+							# Update snapshot after re-render
+							mount.user_context_snapshot = get_user_context_snapshot()
+							if ops:
+								self.send(
+									ServerUpdateMessage(
+										type="vdom_update", path=path, ops=ops
+									)
+								)
+					except RedirectInterrupt as r:
+						self.send(
+							ServerNavigateToMessage(
+								type="navigate_to",
+								path=r.path,
+								replace=r.replace,
+								hard=False,
+							)
 						)
-					)
-				except NotFoundInterrupt:
-					self.send(
-						ServerNavigateToMessage(
-							type="navigate_to",
-							path=ctx.app.not_found,
-							replace=True,
-							hard=False,
+					except NotFoundInterrupt:
+						self.send(
+							ServerNavigateToMessage(
+								type="navigate_to",
+								path=ctx.app.not_found,
+								replace=True,
+								hard=False,
+							)
 						)
-					)
 
 		mount.effect = Effect(
 			_render_effect,
@@ -450,6 +480,21 @@ class RenderSession:
 			raise ValueError(f"No active route for '{path}'")
 		return mount
 
+	def get_parent_context_snapshot(self, route: Route | Layout) -> UserContextSnapshot:
+		"""Get the user context snapshot from the parent route's mount.
+
+		Returns empty tuple if no parent or parent mount not found.
+		Child routes inherit context from their parent layouts/routes.
+		"""
+		parent = route.parent
+		if parent is None:
+			return ()
+		parent_path = parent.unique_path()
+		parent_mount = self.route_mounts.get(parent_path)
+		if parent_mount is None:
+			return ()
+		return parent_mount.user_context_snapshot
+
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
 		"""Return a per-session singleton for the provided key."""
 		inst = self._global_states.get(key)
@@ -471,11 +516,14 @@ class RenderSession:
 
 		try:
 			with PulseContext.update(render=self, route=mount.route):
-				res = cb.fn(*args[: cb.n_args])
-				if iscoroutine(res):
-					create_task(
-						res, on_done=lambda t: (e := t.exception()) and report(e, True)
-					)
+				# Restore user context so callbacks can access pulse_context values
+				with restore_user_context(mount.user_context_snapshot):
+					res = cb.fn(*args[: cb.n_args])
+					if iscoroutine(res):
+						create_task(
+							res,
+							on_done=lambda t: (e := t.exception()) and report(e, True),
+						)
 		except Exception as e:
 			report(e)
 

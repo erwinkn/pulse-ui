@@ -13,7 +13,7 @@ describe("NavigationError integration", () => {
 	});
 
 	it("displays error UI when error is present", async () => {
-		let setError: ((error: any) => void) | null = null;
+		let setError: (() => void) | null = null;
 
 		const TestApp = () => {
 			const [_error, setErrorState] = React.useState<any>(null);

@@ -3,7 +3,7 @@ import { createContext, type ReactNode, useCallback, useContext, useState } from
 /**
  * Represents a navigation error that occurred during route transition.
  */
-export interface NavigationError {
+export interface NavigationErrorData {
 	pathname: string;
 	message: string;
 	timestamp: number;
@@ -13,7 +13,7 @@ export interface NavigationError {
  * Navigation error context for managing error state across the app.
  */
 export interface NavigationErrorContextValue {
-	error: NavigationError | null;
+	error: NavigationErrorData | null;
 	retry: (pathname: string) => void;
 	clear: () => void;
 }
@@ -32,7 +32,7 @@ export interface NavigationErrorProviderProps {
  * Typically wraps the entire app to catch navigation errors globally.
  */
 export function NavigationErrorProvider({ children }: NavigationErrorProviderProps) {
-	const [error, setError] = useState<NavigationError | null>(null);
+	const [error, setError] = useState<NavigationErrorData | null>(null);
 
 	const clear = useCallback(() => {
 		setError(null);

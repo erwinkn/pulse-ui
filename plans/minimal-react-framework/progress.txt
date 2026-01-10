@@ -1042,8 +1042,44 @@ Started: 2026-01-09
   - PulseSocketIOClient now fully independent of react-router
   - Steel wire checkpoint: client.tsx migrated to custom router
 
-## In Progress
-Starting F-0066: Remove React Router dependency
-- Need to: remove react-router-dom, @types/react-router-dom from package.json
-- Next: verify no react-router imports remain in codebase
-- Then: F-0067 (update examples/web) and F-0068 (final verification)
+## 2026-01-10 - F-0066
+- Removed React Router dependency from pulse-ui-client framework
+- Files: `packages/pulse/js/package.json`, `packages/pulse/js/src/entry-client.ts`, `packages/pulse/js/src/helpers.ts`, `packages/pulse/js/src/index.ts`, `tests/fixtures/dev-server-test/web/app/pulse/routes.runtime.ts`
+- **Learnings:**
+  - Removed `react-router` from peerDependencies (not react-router-dom, just react-router ^7)
+  - Replaced `NavigateFunction` from react-router with custom `NavigateFn` type in entry-client.ts
+  - Removed React Router specific functions: `extractServerRouteInfo` and its import of `LoaderFunctionArgs`
+  - Updated helpers.ts to only export `RouteInfo` interface (no server-specific functions)
+  - Removed `RRRouteObject` type from test fixtures, replaced with `PulseRouteNode` type
+  - Examples (examples/web, tutorial/examples/web, etc.) still use React Router - they are separate from framework
+  - All JS tests pass (381 passing), pre-existing Python test failures unrelated to this change
+  - Biome formats imports alphabetically - type imports reordered during pre-commit hook
+  - Steel wire checkpoint: React Router completely removed from pulse-ui-client framework
+
+## 2026-01-10 - F-0067
+- Updated examples/web to use new custom router system with exported mode
+- Files modified:
+  - `examples/main.py` - Added CodegenConfig with web_dir and mode="exported"
+  - `examples/web/package.json` - Removed react-router dependencies (@react-router/dev, @react-router/node, @react-router/serve, react-router)
+  - `examples/web/vite.config.ts` - Removed reactRouter plugin, simplified config
+  - `examples/web/tsconfig.json` - Removed React Router specific includes and rootDirs
+  - `examples/web/index.html` - New HTML entry point for Vite
+  - `examples/web/src/client.ts` - New client entry using initPulseClient
+  - `examples/web/src/server/server.ts` - New Bun SSR server using renderVdom
+  - `examples/web/.gitignore` - Updated to ignore app/pulse/ and dist/
+  - Removed: react-router.config.ts, app/routes.ts, app/root.tsx (React Router files)
+- Also fixed pre-existing TypeScript errors in framework:
+  - Renamed `NavigationError` interface to `NavigationErrorData` to avoid conflict with component
+  - Fixed `RouteInfo.pathParams` type to include `string[]` for catch-all params
+  - Fixed `client.tsx` to use `route.routeInfo.pathname` instead of `route.routeInfo.location.pathname`
+  - Removed non-existent `OfflineNavigationConfig` export
+  - Fixed test type annotation in navigation-error.integration.test.tsx
+- **Learnings:**
+  - Exported mode CodegenConfig: `ps.CodegenConfig(web_dir=Path(...), mode="exported")`
+  - Custom router web structure: index.html at root, src/client.ts entry, src/server/server.ts for SSR
+  - Client initialization: `initPulseClient({ wsUrl: ... })` from pulse-ui-client
+  - SSR server uses `renderVdom` from pulse-ui-client for VDOM to HTML rendering
+  - Keep app/components/ for custom components (date-picker.tsx, etc.)
+  - CSS imports via path alias: `import "~/app.css"` maps to `./app/app.css`
+  - All 381 JS tests pass, 10 pre-existing Python test failures unrelated to changes
+  - Steel wire checkpoint: examples/web migrated to custom router system

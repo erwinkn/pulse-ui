@@ -1,36 +1,28 @@
 {
-	"name": "pulse-web",
+	"name": "pulse-example-web",
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "react-router build",
-		"dev": "react-router dev",
-		"start": "react-router-serve ./build/server/index.js",
-		"typecheck": "react-router typegen && tsc"
+		"dev": "vite",
+		"build": "vite build",
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@react-router/node": "^7.7.1",
-		"@react-router/serve": "^7.7.1",
 		"clsx": "^2.1.1",
-		"isbot": "^5",
 		"pulse-ui-client": "workspace:*",
 		"react": "^19.1.0",
 		"react-datepicker": "^8.4.0",
-		"react-dom": "^19.1.0",
-		"react-router": "^7.7.1"
+		"react-dom": "^19.1.0"
 	},
 	"devDependencies": {
-		"@react-router/dev": "^7.7.1",
 		"@tailwindcss/vite": "^4.1.11",
 		"@types/node": "^20",
 		"@types/react": "^19.1.2",
 		"@types/react-datepicker": "^7.0.0",
 		"@types/react-dom": "^19.1.2",
-		"baseline-browser-mapping": "^2.9.7",
 		"tailwindcss": "^4.1.11",
 		"typescript": "^5.8.3",
 		"vite": "^6.3.3",
-		"vite-plugin-devtools-json": "^0.4.1",
 		"vite-tsconfig-paths": "^5.1.4"
 	}
 }

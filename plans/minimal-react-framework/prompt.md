@@ -28,35 +28,21 @@ Check `progress.txt` for an `## In Progress` section:
 
 ## Context Window Management
 
-You may receive warnings about context usage during your work:
+After each tool call, the hook reports current context usage as feedback.
 
-**⚠️ Warning (~60% context)**: Start wrapping up. If feature is nearly done, finish it. If not, prepare to save progress.
+**At ~60% context**: Start planning to stop soon.
 
-**🛑 Critical (~80% context)**: STOP IMMEDIATELY. Do not continue implementation.
+**At ~80% context**: STOP IMMEDIATELY. Make NO more tool calls. Save your work:
 
-When stopping due to context limits:
-
-1. **Do NOT mark task as passed** - it's incomplete
-2. **Write to progress.txt** under `## In Progress`:
-   ```
-   ## In Progress
-   ### [Feature ID] - [Title]
-   **Status**: Incomplete - context limit reached
-   **What was done**:
-   - List completed steps
-   - Files modified: x.py, y.ts
-   **Current state**:
-   - Describe where you stopped
-   - What's working/broken
-   **Next steps**:
-   - What to try next iteration
-   - Hypotheses about the problem
-   **Key learnings**:
-   - Patterns discovered
-   - Gotchas encountered
-   ```
-3. **Commit partial work** (if any): `wip: [ID] - partial progress`
-4. **Stop** - next iteration will continue with fresh context
+1. **Read progress.txt** to see the format
+2. **Write `## In Progress` section** with:
+   - What you completed
+   - Current working state
+   - Exact next steps to try
+   - Key learnings
+3. **Do NOT mark task as passed** in prd.json
+4. **Commit**: `wip: [ID] - partial progress`
+5. **Stop the session** - next agent will continue with fresh context
 
 ## Progress Format
 

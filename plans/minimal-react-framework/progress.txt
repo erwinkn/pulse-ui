@@ -489,3 +489,18 @@ Started: 2026-01-09
   - Test helpers: count_elements_with_tag(), extract_text_content(), find_div_with_class()
   - All 9 integration tests pass: single route, layout+page, deeply nested, outlet substitution, structure preservation, JSON serialization, content preservation
   - Steel wire checkpoint: Unified VDOM tree rendering verified and working end-to-end
+## 2026-01-10 - F-0038
+- Implemented SSR endpoint that receives HTTP requests and POSTs to Bun render server
+- Files: `packages/pulse/python/src/pulse/app.py`, `packages/pulse/python/src/pulse/env.py`, `packages/pulse/python/tests/test_ssr_endpoint.py`
+- **Learnings:**
+  - SSR endpoint is a catch-all GET route that takes pathname and prerenders VDOM
+  - Route matching done via `self.routes.find(path)` (already handles layouts/routes)
+  - VDOM prerendering via `render.prerender(path)` returns `ServerInitMessage` with vdom
+  - Param extraction from path segments: check `if isinstance(matched_route, Route)` before accessing `.segments`
+  - Layout doesn't have segments, only Route does
+  - Environment variable added: `PULSE_BUN_RENDER_SERVER_ADDRESS` for configuring Bun render server location
+  - HTTPException raised in inner except blocks caught by outer except, use `except HTTPException: raise` to re-raise
+  - Route info structure: `{"location": {...}, "params": {...}}` with location having pathname, search, hash, state
+  - Simple param extraction: iterate route.segments and match dynamic/splat segments to path_parts
+  - Created comprehensive test suite with 5 tests verifying endpoint behavior
+  - All acceptance criteria met: HTTP endpoint, route matching, prerender VDOM, POST to Bun, return HTML

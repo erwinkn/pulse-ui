@@ -766,7 +766,7 @@
         "`make typecheck` passes"
       ],
       "priority": 38,
-      "passes": false,
+      "passes": true,
       "notes": "Python drives SSR - Bun is stateless renderer.",
       "tests": [
         "make all"

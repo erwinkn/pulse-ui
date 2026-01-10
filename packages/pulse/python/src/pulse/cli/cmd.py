@@ -460,6 +460,9 @@ def build(
 		False, "--plain", help="Use plain output without colors or emojis"
 	),
 	no_check: bool = typer.Option(False, "--no-check", help="Skip type checking"),
+	compile: bool = typer.Option(
+		False, "--compile", help="Compile Bun SSR server to standalone executable"
+	),
 ):
 	"""Build Pulse app for production."""
 	env.pulse_env = "prod"
@@ -585,6 +588,10 @@ def build(
 	if not dist_dir.exists():
 		logger.error(f"Build artifacts not found at {dist_dir}")
 		raise typer.Exit(1)
+
+	# Compile Bun SSR server if requested
+	if compile:
+		_compile_bun_server(logger, web_root, app_instance.codegen.cfg.mode)
 
 	logger.success(f"Build complete! Output: {dist_dir}")
 
@@ -852,6 +859,60 @@ def build_web_command(
 		ready_pattern=ready_pattern,
 		on_ready=on_ready,
 	)
+
+
+def _compile_bun_server(logger: CLILogger, web_root: Path, mode: str) -> None:
+	"""Compile Bun SSR server to standalone executable."""
+	logger.print("Compiling Bun SSR server...")
+
+	# Determine source and output paths based on mode
+	if mode == "managed":
+		server_dir = web_root / "src" / "server"
+		output_dir = web_root / ".." / ".." / "server"  # .pulse/web/server/
+	else:
+		server_dir = web_root / "src" / "server"
+		output_dir = web_root / ".." / "server"  # web/server/
+
+	# Ensure server source exists
+	server_ts = server_dir / "server.ts"
+	if not server_ts.exists():
+		logger.warning(f"SSR server not found at {server_ts}, skipping compilation")
+		return
+
+	# Create output directory
+	output_dir.mkdir(parents=True, exist_ok=True)
+
+	# Determine executable name (platform-specific)
+	exe_name = "server.exe" if sys.platform == "win32" else "server"
+	output_path = output_dir / exe_name
+
+	# Run bun build --compile
+	try:
+		result = subprocess.run(
+			[
+				"bun",
+				"build",
+				"--compile",
+				"--outfile",
+				str(output_path),
+				str(server_ts),
+			],
+			cwd=web_root,
+			capture_output=True,
+			text=True,
+			timeout=120,
+		)
+		if result.returncode != 0:
+			logger.error("Failed to compile Bun SSR server")
+			logger.print(result.stderr or result.stdout)
+			raise typer.Exit(1)
+		logger.success(f"Bun SSR server compiled: {output_path}")
+	except subprocess.TimeoutExpired:
+		logger.error("Bun compilation timed out")
+		raise typer.Exit(1) from None
+	except subprocess.CalledProcessError as exc:
+		logger.error(f"Bun compilation failed: {exc}")
+		raise typer.Exit(1) from None
 
 
 def _apply_app_context_to_env(app_ctx: AppLoadResult) -> None:

@@ -430,7 +430,8 @@ class RenderSession:
 		try:
 			mount = self.route_mounts.pop(path)
 			self._cancel_queue_timeout(mount)
-			mount.tree.unmount()
+			if mount.tree is not None:
+				mount.tree.unmount()
 			if mount.effect:
 				mount.effect.dispose()
 		except Exception as e:
@@ -450,6 +451,11 @@ class RenderSession:
 				with restore_user_context(parent_context):
 					try:
 						if not mount.initialized:
+							# Initialize tree on first render if not already set
+							if mount.tree is None:
+								hierarchy = self._build_route_hierarchy(path)
+								root_element = self._get_unified_tree_element(hierarchy)
+								mount.tree = RenderTree(root_element)
 							vdom = mount.tree.render()
 							# Update snapshot after render
 							mount.user_context_snapshot = get_user_context_snapshot()
@@ -460,15 +466,19 @@ class RenderSession:
 								)
 							)
 						else:
-							ops = mount.tree.rerender()
-							# Update snapshot after re-render
-							mount.user_context_snapshot = get_user_context_snapshot()
-							if ops:
-								self.send(
-									ServerUpdateMessage(
-										type="vdom_update", path=path, ops=ops
-									)
+							# Tree should exist for re-renders
+							if mount.tree is not None:
+								ops = mount.tree.rerender()
+								# Update snapshot after re-render
+								mount.user_context_snapshot = (
+									get_user_context_snapshot()
 								)
+								if ops:
+									self.send(
+										ServerUpdateMessage(
+											type="vdom_update", path=path, ops=ops
+										)
+									)
 					except RedirectInterrupt as r:
 						self.send(
 							ServerNavigateToMessage(
@@ -557,6 +567,14 @@ class RenderSession:
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		mount = self.route_mounts[path]
+		if mount.tree is None:
+			self.report_error(
+				path,
+				"callback",
+				RuntimeError(f"Mount tree not initialized for callback {key}"),
+				{"callback": key},
+			)
+			return
 		cb = mount.tree.callbacks[key]
 
 		def report(e: BaseException, is_async: bool = False):

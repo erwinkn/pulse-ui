@@ -1291,7 +1291,7 @@
         "`make typecheck` passes"
       ],
       "priority": 64,
-      "passes": false,
+      "passes": true,
       "notes": "Main pulse client uses new router.",
       "tests": [
         "make all"
@@ -1310,7 +1310,7 @@
         "`make typecheck` passes"
       ],
       "priority": 65,
-      "passes": false,
+      "passes": true,
       "notes": "",
       "tests": [
         "make all"

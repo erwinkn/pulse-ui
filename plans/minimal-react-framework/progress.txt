@@ -812,3 +812,39 @@ Started: 2026-01-09
   - Steel wire checkpoint: Production server deployment ready
   - Typecheck passes with 0 errors, 0 warnings
   - Acceptance criteria met: command added, artifact validation, workers support, address option, all tests pass
+
+## 2026-01-10 - F-0056
+- Implemented pulse init command for project scaffolding
+- Files: `packages/pulse/python/src/pulse/cli/cmd.py`, `plans/minimal-react-framework/prd.json`
+- **Implementation:**
+  - Command accepts directory argument (default: current directory)
+  - --managed flag for managed mode (default: exported mode)
+  - Creates project directory structure with validation (exits if not empty)
+  - Generates pyproject.toml with basic Pulse configuration
+  - Generates app.py with Home component and CodegenConfig
+  - Generates web/ directory with complete frontend setup
+- **Files Generated:**
+  - pyproject.toml: basic project metadata with Pulse dependency placeholder
+  - app.py: minimal Pulse app with Home component and router setup
+  - web/package.json: React, Vite, TypeScript dependencies (no UI library)
+  - web/tsconfig.json and web/tsconfig.app.json: TypeScript configuration
+  - web/vite.config.ts: Vite dev server and HMR configuration
+  - web/index.html: HTML shell with root div and client.ts entry
+  - web/src/client.ts: Pulse client initialization with WebSocket URL
+  - web/src/server/server.ts: Bun SSR server skeleton with POST render endpoint
+  - web/.gitignore: Ignores .pulse/ directory for managed mode
+- **Learnings:**
+  - Mode determines CodegenConfig.mode in generated app.py
+  - Exported mode is default for better developer experience (less setup)
+  - String mode parameter passed to f-string generation in _generate_app_py
+  - Ruff linter removes unnecessary f-string prefixes (fixed automatically)
+  - Pre-existing test failures in test_context_inheritance.py and test_render_session.py (unrelated)
+  - All pre-command changes type-check without errors
+- **Acceptance criteria met:**
+  - Command added: `pulse init [directory]` with --managed flag
+  - Creates minimal project structure (bare bones, no UI library)
+  - Exported mode by default, --managed flag for managed mode
+  - Generates pyproject.toml, app.py, web/ directory
+  - No UI library included (bare React only)
+  - Typecheck passes with 0 errors, 0 warnings
+- **Steel wire checkpoint:** Project initialization system complete and ready for first user

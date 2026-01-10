@@ -915,3 +915,22 @@ Started: 2026-01-09
   - Test: pulse export converts mode ✅ (pre-existing in F-0057)
   - All tests pass ✅
 - **Steel wire checkpoint:** CLI integration testing verified working
+
+## 2026-01-10 - F-0059
+- Implemented navigation state sync from client to Python via WebSocket
+- Files: `packages/pulse/js/src/messages.ts`, `packages/pulse/python/src/pulse/messages.py`, `packages/pulse/js/src/client.tsx`, `packages/pulse/python/src/pulse/app.py`, `packages/pulse/python/src/pulse/render_session.py`
+- Tests: `packages/pulse/js/src/__tests__/navigation-sync.test.ts`, `packages/pulse/python/tests/test_navigation_sync.py`
+- **Learnings:**
+  - New ClientNavigationMessage type carries pathname, search, hash, and optional state object
+  - PulseSocketIOClient.sendNavigation() method sends navigation state to server
+  - RenderSession.last_navigation stores latest client-side navigation (pathname, search, hash, state)
+  - Message handler in app.py stores navigation state for access in route handlers
+  - ClientNavigationMessage has all required fields (type, pathname, search, hash) with state as NotRequired
+  - TypedDict fields must be defined as NotRequired, not with total=False, to maintain proper type checking
+  - Tests verify message structure, state preservation, complex state objects, and various URL patterns
+  - 10 new JS tests pass (message structure tests)
+  - 16 new Python tests pass (storage and state handling)
+  - No pre-existing test failures introduced
+  - Acceptance criteria met: client sends navigation state, Python receives and stores it
+  - Steel wire checkpoint: Client-server navigation state sync verified working
+

@@ -1190,7 +1190,7 @@
         "`make test` passes"
       ],
       "priority": 59,
-      "passes": false,
+      "passes": true,
       "notes": "Full navigation state available in Python.",
       "tests": [
         "make all"

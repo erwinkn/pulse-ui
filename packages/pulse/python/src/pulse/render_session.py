@@ -107,6 +107,7 @@ class RenderSession:
 	connected: bool
 	prerender_queue_timeout: float
 	disconnect_queue_timeout: float
+	last_navigation: dict[str, Any]  # Client-side navigation state
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
@@ -143,6 +144,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
+		self.last_navigation = {}  # Client-side navigation state
 		self._normalize_hook_context = None  # Lazy initialization
 
 	@property

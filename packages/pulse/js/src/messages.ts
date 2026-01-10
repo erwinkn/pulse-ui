@@ -104,6 +104,15 @@ export interface ClientUpdateMessage {
 	path: string;
 	routeInfo: RouteInfo;
 }
+
+export interface ClientNavigationMessage {
+	type: "navigation";
+	pathname: string;
+	search: string;
+	hash: string;
+	state?: unknown;
+}
+
 export interface ClientDetachMessage {
 	type: "detach";
 	path: string;
@@ -151,6 +160,7 @@ export type ClientMessage =
 	| ClientAttachMessage
 	| ClientCallbackMessage
 	| ClientUpdateMessage
+	| ClientNavigationMessage
 	| ClientDetachMessage
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage

@@ -639,3 +639,21 @@ Started: 2026-01-09
   - TypeScript compilation successful with no warnings
   - Acceptance criteria met: .checksums.json created in managed mode, SHA256 hashing, incremental updates, tests added, make test passes
   - Steel wire checkpoint: Incremental code generation working in managed mode via checksums
+
+## 2026-01-10 - F-0047
+- Implemented user edit detection in managed mode with warn + overwrite behavior
+- Files: `packages/pulse/python/src/pulse/codegen/codegen.py`, `packages/pulse/python/tests/test_codegen.py`
+- **Learnings:**
+  - ChecksumsManager.check_user_edits() detects when disk content differs from stored checksum
+  - write_file_if_changed() checks for edits BEFORE should_write() to force overwrite
+  - When user edits detected: warn via logger.warning(), set force_write=True, update checksum
+  - Logic prevents skipping file write when edits detected (even if content unchanged)
+  - User edits warning includes full file path for debugging
+  - Exported mode skips checksum-based detection (uses direct content comparison)
+  - Three test cases verify:
+    - test_user_edit_detection: warns and overwrites user edits
+    - test_no_warning_for_unchanged_generated_files: no warning when not edited
+    - test_user_edit_in_exported_mode_not_detected: checksum-based detection only in managed
+  - All 32 codegen tests pass (3 new tests for edit detection)
+  - Acceptance criteria met: detect edits, warn to console, overwrite anyway, tests added
+  - Steel wire checkpoint: User edit detection complete for managed mode

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pulse as ps
 import pytest
+from _pytest.logging import LogCaptureFixture
 from pulse import div
 from pulse.app import App
 from pulse.codegen.codegen import Codegen, CodegenConfig
@@ -429,11 +430,13 @@ class TestCodegen:
 
 		checksums_path = tmp_path / ".pulse" / ".checksums.json"
 		import json
+		from typing import cast
 
-		checksums = json.loads(checksums_path.read_text())
+		checksums_data = json.loads(checksums_path.read_text())
 
 		# Should be a dict with file paths as keys
-		assert isinstance(checksums, dict)
+		assert isinstance(checksums_data, dict)
+		checksums = cast(dict[str, str], checksums_data)
 		# Should have entries for generated files
 		assert len(checksums) > 0
 		# All values should be SHA256 hashes (64-char hex strings)
@@ -441,6 +444,89 @@ class TestCodegen:
 			assert isinstance(key, str)
 			assert isinstance(value, str)
 			assert len(value) == 64  # SHA256 hash length in hex
+
+	def test_user_edit_detection(self, tmp_path: Path, caplog: LogCaptureFixture):
+		"""User edits to managed files are detected and warned about."""
+		route = Route("/test", Component(lambda: div()))
+		cfg = CodegenConfig(
+			web_dir="web", pulse_dir="pulse", base_dir=tmp_path, mode="managed"
+		)
+		codegen = Codegen(RouteTree([route]), cfg)
+
+		# First generation
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		# Simulate user editing a generated file
+		routes_ts = cfg.pulse_path / "routes.ts"
+		original_content = routes_ts.read_text()
+		routes_ts.write_text(original_content + "\n// User added comment")
+
+		# Clear the log
+		caplog.clear()
+
+		# Second generation should detect the edit
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		# Check that warning was logged
+		assert any("was edited by user" in record.message for record in caplog.records)
+		assert any(
+			"Overwriting with generated content" in record.message
+			for record in caplog.records
+		)
+
+		# File should be overwritten with original content (no user comment)
+		final_content = routes_ts.read_text()
+		assert final_content == original_content
+		assert "// User added comment" not in final_content
+
+	def test_no_warning_for_unchanged_generated_files(
+		self, tmp_path: Path, caplog: LogCaptureFixture
+	):
+		"""No warning when generated files have not been edited by user."""
+		route = Route("/test", Component(lambda: div()))
+		cfg = CodegenConfig(
+			web_dir="web", pulse_dir="pulse", base_dir=tmp_path, mode="managed"
+		)
+		codegen = Codegen(RouteTree([route]), cfg)
+
+		# First generation
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		# Clear the log
+		caplog.clear()
+
+		# Second generation without user edits
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		# Should not warn about edits
+		assert not any(
+			"was edited by user" in record.message for record in caplog.records
+		)
+
+	def test_user_edit_in_exported_mode_not_detected(self, tmp_path: Path):
+		"""User edits are not detected in exported mode (direct comparison only)."""
+		route = Route("/test", Component(lambda: div()))
+		cfg = CodegenConfig(
+			web_dir="web", pulse_dir="pulse", base_dir=tmp_path, mode="exported"
+		)
+		codegen = Codegen(RouteTree([route]), cfg)
+
+		# First generation
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		# Simulate user editing a generated file
+		routes_ts = cfg.pulse_path / "routes.ts"
+		original_content = routes_ts.read_text()
+		routes_ts.write_text(original_content + "\n// User added comment")
+
+		# Second generation in exported mode
+		# File should still be overwritten (since content changed), but no checksum-based detection
+		codegen.generate_all(server_address=SERVER_ADDRESS)
+
+		# File should be overwritten with original content
+		final_content = routes_ts.read_text()
+		assert final_content == original_content
+		assert "// User added comment" not in final_content
 
 
 class TestGenerateRoute:

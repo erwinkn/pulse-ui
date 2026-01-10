@@ -68,6 +68,27 @@ class ChecksumsManager:
 			return True
 		return False
 
+	def check_user_edits(self, file_path: str, full_path: Path) -> bool:
+		"""Check if a file was edited by the user (disk content differs from stored checksum).
+
+		Returns True if user edits detected, False otherwise.
+		"""
+		if not full_path.exists():
+			return False
+
+		stored_hash = self.checksums.get(file_path)
+		if stored_hash is None:
+			# No previous hash stored, so no edits to detect
+			return False
+
+		try:
+			disk_content = full_path.read_text()
+			disk_hash = _compute_file_hash(disk_content)
+			return disk_hash != stored_hash
+		except Exception:
+			# If we can't read the file, assume no edits detected
+			return False
+
 	def cleanup_old_files(self, current_files: set[str]) -> None:
 		"""Remove checksums for files that no longer exist."""
 		old_files = set(self.checksums.keys()) - current_files
@@ -149,13 +170,29 @@ def write_file_if_changed(
 
 	If checksums_manager is provided (managed mode), uses hash comparison.
 	Otherwise uses direct content comparison (exported mode).
+	Detects and warns about user edits in managed mode.
 	"""
+	force_write = False
+
 	if checksums_manager:
 		# Managed mode: use checksums for change detection
 		# Store relative path from checksums file location for deterministic keys
 		file_key = str(path.relative_to(path.parent.parent.parent))
-		if not checksums_manager.should_write(file_key, content):
+
+		# Check for user edits before writing
+		if checksums_manager.check_user_edits(file_key, path):
+			logger.warning(
+				f"File {path.absolute()} was edited by user. Overwriting with generated content."
+			)
+			force_write = True
+
+		# Only skip writing if content is unchanged AND no user edits detected
+		if not force_write and not checksums_manager.should_write(file_key, content):
 			return path  # Skip writing, content unchanged
+		elif force_write:
+			# Update checksum after forced overwrite
+			new_hash = _compute_file_hash(content)
+			checksums_manager.checksums[file_key] = new_hash
 
 	else:
 		# Exported mode: direct content comparison

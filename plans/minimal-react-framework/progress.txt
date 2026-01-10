@@ -1019,3 +1019,31 @@ Started: 2026-01-09
   - 27 comprehensive tests verify: valid structures, invalid nesting patterns, void elements, case-insensitive matching, mixed children
   - All tests pass, typecheck clean (pre-existing warning in test_cli.py unrelated)
   - Steel wire checkpoint: HTML nesting validation complete and tested
+
+## 2026-01-10 - F-0064
+- Updated pulse.tsx to use custom Pulse router
+- Files: `packages/pulse/js/src/pulse.tsx`
+- **Learnings:**
+  - Replaced `import { useLocation, useNavigate, useParams } from "react-router"` with custom router
+  - Router exports from `./router` (index.ts)
+  - Renamed variable `rrNavigate` to `navigate` for clarity
+  - No breaking changes to PulseProvider logic - just different import source
+  - All functionality preserved - hooks work identically
+  - Steel wire checkpoint: pulse.tsx migrated to custom router
+
+## 2026-01-10 - F-0065
+- Updated client.tsx to use custom Pulse NavigateFn type
+- Files: `packages/pulse/js/src/client.tsx`
+- **Learnings:**
+  - Replaced `NavigateFunction` from react-router with `NavigateFn` from ./router
+  - Updated constructor parameter type and property type
+  - No behavioral changes - just type compatibility update
+  - Both types have same function signature: `(to: string | number, options?) => void`
+  - PulseSocketIOClient now fully independent of react-router
+  - Steel wire checkpoint: client.tsx migrated to custom router
+
+## In Progress
+Starting F-0066: Remove React Router dependency
+- Need to: remove react-router-dom, @types/react-router-dom from package.json
+- Next: verify no react-router imports remain in codebase
+- Then: F-0067 (update examples/web) and F-0068 (final verification)

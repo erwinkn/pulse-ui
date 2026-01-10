@@ -29,3 +29,4 @@ export {
 	NavigationProgressProvider,
 	useNavigationProgress,
 } from "./progress";
+export { restoreScrollPosition, saveScrollPosition, useScrollRestoration } from "./scroll";

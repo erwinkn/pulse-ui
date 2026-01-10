@@ -25,6 +25,7 @@ export type Params = Record<string, string | undefined | string[]>;
 export interface NavigateOptions {
 	replace?: boolean;
 	state?: unknown;
+	preventScrollReset?: boolean;
 }
 
 /**
@@ -150,6 +151,7 @@ function resolvePath(to: string, basePath: string): string {
  * - `navigate('/path', { state: {...} })` - with state
  * - `navigate('../sibling')` - relative path resolution
  * - `navigate(-1)` - go back in history
+ * - `navigate('/path', { preventScrollReset: true })` - skip scroll restoration
  * Throws if used outside a PulseRouterProvider.
  */
 export function useNavigate(): NavigateFn {
@@ -165,6 +167,15 @@ export function useNavigate(): NavigateFn {
 
 		// Path navigation - resolve relative paths first
 		const resolvedPath = resolvePath(toOrDelta, location.pathname);
+
+		// Handle scroll reset prevention
+		if (options?.preventScrollReset) {
+			// Import dynamically to avoid circular dependency
+			import("./scroll").then((m) => {
+				m.setScrollResetPrevention(true);
+			});
+		}
+
 		navigate(resolvedPath, options);
 	}) as NavigateFn;
 

@@ -230,14 +230,14 @@
       "title": "Verify SSR renders correct HTML",
       "acceptanceCriteria": [
         "Start SSR server: `bun poc/server/ssr.ts &`",
-        "`curl -X POST http://localhost:3001/render -d '{\"pathname\":\"/\"}' -H 'Content-Type: application/json'` returns HTML containing 'HomeWidget' content",
-        "`curl -X POST http://localhost:3001/render -d '{\"pathname\":\"/dashboard\"}' -H 'Content-Type: application/json'` returns HTML containing 'DashboardChart' content",
-        "`curl -X POST http://localhost:3001/render -d '{\"pathname\":\"/settings\"}' -H 'Content-Type: application/json'` returns HTML containing 'SettingsForm' content",
+        "Use web browser tools to navigate to / and verify HomeWidget content is rendered",
+        "Use web browser tools to navigate to /dashboard and verify DashboardChart content is rendered",
+        "Use web browser tools to navigate to /settings and verify SettingsForm content is rendered",
         "Server can be stopped cleanly"
       ],
       "priority": 14,
       "passes": true,
-      "notes": "This validates Goal 2 from spec.",
+      "notes": "This validates Goal 2 from spec. Use browser testing.",
       "tests": ["cd poc && timeout 10 bun server/ssr.ts &; sleep 2; curl -s -X POST http://localhost:3001/render -d '{\"pathname\":\"/\"}' -H 'Content-Type: application/json' | grep -q html"],
       "dependencies": ["F-0011", "F-0013"]
     },
@@ -263,15 +263,15 @@
       "title": "Final validation: all POC goals verified",
       "acceptanceCriteria": [
         "Goal 1: `bun run build && bun run analyze` shows 3+ separate chunks",
-        "Goal 2: SSR server renders all 3 routes correctly",
-        "Goal 3: Client entry loads chunk before hydration (code review)",
-        "Goal 4: Prefetch functions trigger dynamic import (code review)",
+        "Goal 2: Use web browser tools to verify SSR server renders all 3 routes correctly",
+        "Goal 3: Use web browser tools to verify client entry loads chunk before hydration (network tab)",
+        "Goal 4: Use web browser tools to verify prefetch triggers dynamic import on hover/viewport",
         "All TypeScript compiles: `bunx tsc --noEmit`",
         "README or docs explain how to test manually"
       ],
       "priority": 16,
       "passes": true,
-      "notes": "Final integration check. E2E browser test optional for POC.",
+      "notes": "Final integration check. Use browser testing for verification.",
       "tests": ["cd poc && bun run build && bun run analyze && bunx tsc --noEmit"],
       "dependencies": ["F-0014", "F-0015"]
     }

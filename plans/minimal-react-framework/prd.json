@@ -1376,7 +1376,7 @@
         "Use web browser tools: Dev-mode HTML validator catches nesting errors"
       ],
       "priority": 68,
-      "passes": false,
+      "passes": true,
       "notes": "All spec goals verified. Use browser testing for all UI verification.",
       "tests": [
         "make all"

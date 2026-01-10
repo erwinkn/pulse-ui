@@ -8,6 +8,7 @@ export type {
 	MountedView,
 	PulseClient,
 } from "./client";
+export { PulseSocketIOClient } from "./client";
 // Error handling
 export type {
 	DefaultErrorFallbackProps,

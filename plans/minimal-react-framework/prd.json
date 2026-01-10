@@ -1007,7 +1007,7 @@
         "Prints app URL on startup"
       ],
       "priority": 50,
-      "passes": false,
+      "passes": true,
       "notes": "Supervisor manages all three processes.",
       "tests": [
         "make all"

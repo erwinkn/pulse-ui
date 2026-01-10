@@ -689,3 +689,23 @@ Started: 2026-01-09
   - `make typecheck` passes with no errors
   - `make test` has pre-existing failures (not related to CLI changes)
   - Acceptance criteria met: command added, options parsed, startup message printed, typecheck passes
+
+## 2026-01-10 - F-0050
+- Implemented process supervisor for pulse dev command
+- Files: `packages/pulse/python/src/pulse/cli/cmd.py`
+- **Learnings:**
+  - `pulse dev` now spawns three processes: Python server (uvicorn), Vite dev server, Bun SSR server
+  - Reuses existing `execute_commands` utility from `processes.py` for process management
+  - Process names customized to "python", "vite", "bun" for output prefixes (replaces default "server", "web")
+  - Output interleaving via `_write_tagged_line` with tag_mode="colored" (default) or "plain"
+  - Ready callbacks trigger when each process logs specific pattern (e.g., "Application startup complete" for Python)
+  - All readiness callbacks must fire before announcing app URL via `logger.write_ready_announcement()`
+  - Process cleanup: `execute_commands` handles KeyboardInterrupt and process crashes via finally block
+  - SIGTERM sent to all processes on Ctrl+C, SIGKILL fallback in finally block ensures cleanup
+  - Port finding: Each server gets unique port via `find_available_port()` (Python 8000, Vite 5173, Bun 3001)
+  - Environment variables passed to Bun server: PORT, FORCE_COLOR, PYTHONUNBUFFERED
+  - `FolderLock` acquired during execution to prevent concurrent operations
+  - Error handling: Invalid app file or missing web_root exits with error message before starting processes
+  - `make typecheck` passes with no errors
+  - Pre-existing test failures in context/render tests unrelated to CLI changes
+  - Acceptance criteria met: three processes spawned, interleaved output with prefixes, crash/Ctrl+C handling, app URL printed

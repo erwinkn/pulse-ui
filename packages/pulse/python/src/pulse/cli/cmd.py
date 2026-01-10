@@ -263,8 +263,164 @@ def dev(
 	env.pulse_env = "dev"
 	logger = CLILogger("dev", plain=plain)
 
-	logger.print(f"Starting development server for {app_file}")
-	logger.print(f"Listening on {address}:{port}")
+	logger.print(f"Loading app from {app_file}")
+	app_ctx = load_app_from_target(app_file, logger)
+	_apply_app_context_to_env(app_ctx)
+	app_instance = app_ctx.app
+
+	web_root = app_instance.codegen.cfg.web_root
+	if not web_root.exists():
+		logger.error(f"Directory not found: {web_root.absolute()}")
+		raise typer.Exit(1)
+
+	dev_secret: str | None = None
+	if app_instance.env != "prod":
+		dev_secret = os.environ.get(ENV_PULSE_SECRET) or resolve_dev_secret(
+			web_root if web_root.exists() else app_ctx.app_file
+		)
+
+	# Check web dependencies
+	try:
+		to_add = check_web_dependencies(
+			web_root,
+			pulse_version=PULSE_PY_VERSION,
+		)
+	except DependencyResolutionError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+	except DependencyError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+
+	if to_add:
+		try:
+			dep_plan = prepare_web_dependencies(
+				web_root,
+				pulse_version=PULSE_PY_VERSION,
+			)
+			if dep_plan:
+				_run_dependency_plan(logger, web_root, dep_plan)
+		except subprocess.CalledProcessError:
+			logger.error("Failed to install web dependencies with Bun.")
+			raise typer.Exit(1) from None
+
+	# Track readiness for announcement
+	server_ready = {"server": False, "vite": False, "bun": False}
+	announced = False
+
+	def mark_server_ready() -> None:
+		server_ready["server"] = True
+		check_and_announce()
+
+	def mark_vite_ready() -> None:
+		server_ready["vite"] = True
+		check_and_announce()
+
+	def mark_bun_ready() -> None:
+		server_ready["bun"] = True
+		check_and_announce()
+
+	def check_and_announce() -> None:
+		"""Announce when all required servers are ready."""
+		nonlocal announced
+		if announced:
+			return
+
+		if (
+			not server_ready["server"]
+			or not server_ready["vite"]
+			or not server_ready["bun"]
+		):
+			return
+
+		# All servers are ready, show announcement
+		announced = True
+		protocol = "http" if address in ("127.0.0.1", "localhost") else "https"
+		server_url = f"{protocol}://{address}:{port}"
+		logger.write_ready_announcement(address, port, server_url)
+
+	# Build commands
+	commands: list[CommandSpec] = []
+
+	# Python server
+	server_cmd = build_uvicorn_command(
+		app_ctx=app_ctx,
+		address=address,
+		port=port,
+		reload_enabled=True,
+		extra_args=[],
+		dev_secret=dev_secret,
+		server_only=False,
+		web_root=web_root,
+		verbose=False,
+		ready_pattern=r"Application startup complete",
+		on_ready=mark_server_ready,
+	)
+	# Rename to "python" for output
+	server_cmd = CommandSpec(
+		name="python",
+		args=server_cmd.args,
+		cwd=server_cmd.cwd,
+		env=server_cmd.env,
+		ready_pattern=server_cmd.ready_pattern,
+		on_ready=server_cmd.on_ready,
+		on_spawn=server_cmd.on_spawn,
+	)
+	commands.append(server_cmd)
+
+	# Vite dev server
+	vite_port = find_available_port(5173)
+	vite_cmd = build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		port=vite_port,
+		mode="dev",
+		ready_pattern=r"Local:.*http",
+		on_ready=mark_vite_ready,
+	)
+	# Rename to "vite" for output
+	vite_cmd = CommandSpec(
+		name="vite",
+		args=vite_cmd.args,
+		cwd=vite_cmd.cwd,
+		env=vite_cmd.env,
+		ready_pattern=vite_cmd.ready_pattern,
+		on_ready=vite_cmd.on_ready,
+		on_spawn=vite_cmd.on_spawn,
+	)
+	commands.append(vite_cmd)
+
+	# Bun SSR server
+	bun_port = find_available_port(3001)
+	bun_cmd = CommandSpec(
+		name="bun",
+		args=[
+			"bun",
+			"run",
+			str(web_root / "src" / "server" / "server.ts"),
+		],
+		cwd=web_root,
+		env=dict(
+			os.environ,
+			PORT=str(bun_port),
+			FORCE_COLOR="1",
+			PYTHONUNBUFFERED="1",
+		),
+		ready_pattern=r"Listening on",
+		on_ready=mark_bun_ready,
+	)
+	commands.append(bun_cmd)
+
+	with FolderLock(web_root):
+		try:
+			exit_code = execute_commands(
+				commands,
+				tag_mode=logger.get_tag_mode(),
+			)
+			raise typer.Exit(exit_code)
+		except RuntimeError as exc:
+			logger.error(str(exc))
+			raise typer.Exit(1) from None
 
 
 @cli.command("generate")

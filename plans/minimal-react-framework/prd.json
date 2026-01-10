@@ -987,7 +987,7 @@
         "`make typecheck` passes"
       ],
       "priority": 49,
-      "passes": false,
+      "passes": true,
       "notes": "Replaces pulse run with dev/build/start pattern.",
       "tests": [
         "make all"

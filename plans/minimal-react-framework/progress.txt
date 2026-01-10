@@ -457,3 +457,35 @@ Started: 2026-01-09
   - Steel wire checkpoint: Outlet substitution complete and verified
 
 ---
+
+---
+
+## 2026-01-10 - F-0036
+- Wrapped route boundaries with PulseRouterContext in VDOM
+- Files: `packages/pulse/python/src/pulse/render_session.py`, `packages/pulse/python/src/pulse/renderer.py`, `packages/pulse/js/src/server/render.tsx`, `packages/pulse/python/tests/test_router_context_wrapping.py`
+- **Learnings:**
+  - Route context wrapping happens in two phases: Element tree building, then VDOM rendering
+  - _wrap_element_with_router_context() creates $$PulseRouterProvider Element wrapper nodes (string tag, not Import)
+  - Wrapping occurs AFTER outlet substitution, not before (order matters for recursion)
+  - render_router_provider() handler in Renderer recognizes string tag "$$PulseRouterProvider" and creates VDOM mount point (like ErrorBoundary pattern)
+  - Each hierarchy level gets unique $$PulseRouterProvider wrapper so nested contexts nest properly
+  - Test fixture needs event loop setup to avoid "Event loop is closed" errors in pytest-asyncio
+  - extract_router_provider_structure() test helper must search all children, not just first one (sibling finding)
+  - Mounting $$PulseRouterProvider in registry allows SSR support (defaultComponentRegistry in server/render.tsx)
+  - Steel wire checkpoint: Route boundaries now wrapped with context providers for scoped params
+
+
+## 2026-01-10 - F-0037
+- Verified unified VDOM tree rendering with integration tests
+- Files: `packages/pulse/python/tests/test_unified_vdom_tree.py`
+- **Learnings:**
+  - Unified VDOM tree renders single merged tree (not separate per-route)
+  - Layout + page + outlet substitution + router context all work together
+  - Context providers nested correctly: outer layout provider wraps inner page provider
+  - Multiple nested layouts (layout > layout > page) create 3 context providers
+  - All content (header, footer, page content) present in single tree
+  - Outlet substitution happens BEFORE context wrapping (verified by no Outlet in final VDOM)
+  - VDOM structure fully JSON-serializable for SSR transmission
+  - Test helpers: count_elements_with_tag(), extract_text_content(), find_div_with_class()
+  - All 9 integration tests pass: single route, layout+page, deeply nested, outlet substitution, structure preservation, JSON serialization, content preservation
+  - Steel wire checkpoint: Unified VDOM tree rendering verified and working end-to-end

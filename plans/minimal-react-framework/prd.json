@@ -745,7 +745,7 @@
         "All tests pass"
       ],
       "priority": 37,
-      "passes": false,
+      "passes": true,
       "notes": "Steel wire checkpoint - unified tree working.",
       "tests": [
         "make all"

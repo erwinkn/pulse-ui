@@ -88,19 +88,23 @@ class Expr(ABC):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: Transpiler,
 	) -> Expr:
 		"""Called when this expression is used as a function: expr(args).
 
 		Override to customize call behavior.
-		Default raises - most expressions are not callable.
+		Default emits a Call expression with args transpiled.
 
-		Args and kwargs are raw Python `ast.expr` nodes (not yet transpiled).
+		Args and keywords are raw Python AST nodes (not yet transpiled).
 		Use ctx.emit_expr() to convert them to Expr as needed.
+		Keywords with kw.arg=None are **spread syntax.
 		"""
-		if kwargs:
-			raise TranspileError("Keyword arguments not yet supported in v2 transpiler")
+		if keywords:
+			has_spread = any(kw.arg is None for kw in keywords)
+			if has_spread:
+				raise TranspileError("Spread (**expr) not supported in this call")
+			raise TranspileError("Keyword arguments not supported in call")
 		return Call(self, [ctx.emit_expr(a) for a in args])
 
 	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
@@ -341,10 +345,10 @@ class ExprWrapper(Expr):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: Transpiler,
 	) -> Expr:
-		return self.expr.transpile_call(args, kwargs, ctx)
+		return self.expr.transpile_call(args, keywords, ctx)
 
 	@override
 	def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
@@ -395,28 +399,33 @@ class Jsx(ExprWrapper):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: "Transpiler",
 	) -> Expr:
 		"""Transpile a call to this JSX wrapper into an Element.
 
 		Positional args become children, keyword args become props.
-		The `key` kwarg is extracted specially.
+		The `key` kwarg is extracted specially. Spread (**expr) is supported.
 		"""
 		children: list[Node] = [ctx.emit_expr(a) for a in args]
 
-		props: dict[str, Prop] = {}
+		props: list[tuple[str, Prop] | Spread] = []
 		key: str | Expr | None = None
-		for k, v in kwargs.items():
-			v = ctx.emit_expr(v)
-			if k == "key":
-				# Accept any expression as key for transpilation
-				if isinstance(v, Literal) and isinstance(v.value, str):
-					key = v.value  # Optimize string literals
-				else:
-					key = v  # Keep as expression
+		for kw in keywords:
+			if kw.arg is None:
+				# **spread syntax
+				props.append(spread_dict(ctx.emit_expr(kw.value)))
 			else:
-				props[k] = v
+				k = kw.arg
+				v = ctx.emit_expr(kw.value)
+				if k == "key":
+					# Accept any expression as key for transpilation
+					if isinstance(v, Literal) and isinstance(v.value, str):
+						key = v.value  # Optimize string literals
+					else:
+						key = v  # Keep as expression
+				else:
+					props.append((k, v))
 
 		return Element(
 			tag=self.expr,
@@ -435,7 +444,7 @@ class Jsx(ExprWrapper):
 		"""
 
 		# Normal call: build Element
-		props: dict[str, object] = {}
+		props: dict[str, Any] = {}
 		key: str | None = None
 		children: list[Node] = list(args)
 
@@ -490,7 +499,9 @@ class Value(Expr):
 
 	@override
 	def render(self) -> VDOMNode:
-		raise TypeError("Value cannot be rendered as VDOMExpr; use coerce_json instead")
+		raise TypeError(
+			"Value cannot be rendered as VDOMExpr; unwrap with .value instead"
+		)
 
 
 class Element(Expr):
@@ -501,19 +512,23 @@ class Element(Expr):
 	- "div", "span", etc.: HTML element
 	- "$$ComponentId": Client component (registered in JS registry)
 	- Expr (Import, Member, etc.): Direct component reference for transpilation
+
+	Props can be either:
+	- tuple[str, Prop]: key-value pair
+	- Spread: spread expression (...expr)
 	"""
 
 	__slots__: tuple[str, ...] = ("tag", "props", "children", "key")
 
 	tag: str | Expr
-	props: dict[str, Any] | None
+	props: Sequence[tuple[str, Prop] | Spread] | dict[str, Any] | None
 	children: Sequence[Node] | None
 	key: str | Expr | None
 
 	def __init__(
 		self,
 		tag: str | Expr,
-		props: dict[str, Any] | None = None,
+		props: Sequence[tuple[str, Prop] | Spread] | dict[str, Any] | None = None,
 		children: Sequence[Node] | None = None,
 		key: str | Expr | None = None,
 	) -> None:
@@ -534,8 +549,6 @@ class Element(Expr):
 				warn_stacklevel=5,
 			)
 		self.key = key
-		if self.key is None and self.props:
-			self.key = self.props.pop("key", None)
 
 	def _emit_key(self, out: list[str]) -> None:
 		"""Emit key prop (string or expression)."""
@@ -583,10 +596,24 @@ class Element(Expr):
 		if self.key is not None:
 			self._emit_key(props_out)
 		if self.props:
-			for name, value in self.props.items():
+			# Handle both dict (from render path) and sequence (from transpilation)
+			# Dict case: items() yields tuple[str, Any], never Spread
+			# Sequence case: already list[tuple[str, Prop] | Spread]
+			props_iter: Iterable[tuple[str, Any]] | Sequence[tuple[str, Prop] | Spread]
+			if isinstance(self.props, dict):
+				props_iter = self.props.items()
+			else:
+				props_iter = self.props
+			for prop in props_iter:
 				if props_out:
 					props_out.append(" ")
-				_emit_jsx_prop(name, value, props_out)
+				if isinstance(prop, Spread):
+					props_out.append("{...")
+					prop.expr.emit(props_out)
+					props_out.append("}")
+				else:
+					name, value = prop
+					_emit_jsx_prop(name, value, props_out)
 
 		# Build children into a separate buffer to check if empty
 		children_out: list[str] = []
@@ -681,6 +708,27 @@ class Element(Expr):
 			children=list(children),
 			key=self.key,
 		)
+
+	def props_dict(self) -> dict[str, Any]:
+		"""Convert props to dict for rendering.
+
+		Raises TypeError if props contain Spread (only valid in transpilation).
+		"""
+		if not self.props:
+			return {}
+		# Already a dict (from renderer reconciliation)
+		if isinstance(self.props, dict):
+			return self.props
+		# Sequence of (key, value) pairs or Spread
+		result: dict[str, Any] = {}
+		for prop in self.props:
+			if isinstance(prop, Spread):
+				raise TypeError(
+					"Element with spread props cannot be rendered; spread is only valid during transpilation"
+				)
+			k, v = prop
+			result[k] = v
+		return result
 
 	@override
 	def render(self) -> VDOMNode:
@@ -938,25 +986,40 @@ class Array(Expr):
 
 @dataclass(slots=True)
 class Object(Expr):
-	"""JS object: { key: value }"""
+	"""JS object: { key: value, ...spread }
 
-	props: Sequence[tuple[str, Expr]]
+	Props can be either:
+	- tuple[str, Expr]: key-value pair
+	- Spread: spread expression (...expr)
+	"""
+
+	props: Sequence[tuple[str, Expr] | Spread]
 
 	@override
 	def emit(self, out: list[str]) -> None:
 		out.append("{")
-		for i, (k, v) in enumerate(self.props):
+		for i, prop in enumerate(self.props):
 			if i > 0:
 				out.append(", ")
-			out.append('"')
-			out.append(_escape_string(k))
-			out.append('": ')
-			v.emit(out)
+			if isinstance(prop, Spread):
+				prop.emit(out)
+			else:
+				k, v = prop
+				out.append('"')
+				out.append(_escape_string(k))
+				out.append('": ')
+				v.emit(out)
 		out.append("}")
 
 	@override
 	def render(self) -> VDOMNode:
-		return {"t": "object", "props": {k: v.render() for k, v in self.props}}
+		rendered_props: dict[str, VDOMNode] = {}
+		for prop in self.props:
+			if isinstance(prop, Spread):
+				raise TypeError("Object spread cannot be rendered to VDOM")
+			k, v = prop
+			rendered_props[k] = v.render()
+		return {"t": "object", "props": rendered_props}
 
 
 @dataclass(slots=True)
@@ -1214,6 +1277,21 @@ class Spread(Expr):
 		raise TypeError("Spread cannot be rendered as VDOMExpr directly")
 
 
+def spread_dict(expr: Expr) -> Spread:
+	"""Wrap a spread expression with Map-to-object conversion.
+
+	Python dicts transpile to Map, which has no enumerable own properties.
+	This wraps the spread with an IIFE that converts Map to object:
+		(...expr) -> ...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(expr)
+
+	The IIFE ensures expr is evaluated only once.
+	"""
+	s = Identifier("$s")
+	is_map = Binary(s, "instanceof", Identifier("Map"))
+	as_obj = Call(Member(Identifier("Object"), "fromEntries"), [s])
+	return Spread(Call(Arrow(["$s"], Ternary(is_map, as_obj, s)), [expr]))
+
+
 @dataclass(slots=True)
 class New(Expr):
 	"""JS new expression: new Ctor(args)"""
@@ -1272,9 +1350,16 @@ class Transformer(Expr, Generic[_F]):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: Transpiler,
 	) -> Expr:
+		# Convert keywords to dict, reject spreads
+		kwargs: dict[str, ast.expr] = {}
+		for kw in keywords:
+			if kw.arg is None:
+				label = self.name or "Function"
+				raise TranspileError(f"{label} does not support **spread")
+			kwargs[kw.arg] = kw.value
 		if kwargs:
 			return self.fn(*args, ctx=ctx, **kwargs)
 		return self.fn(*args, ctx=ctx)

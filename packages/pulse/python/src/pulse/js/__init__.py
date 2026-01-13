@@ -30,7 +30,7 @@ import importlib as _importlib
 from typing import Any as _Any
 from typing import NoReturn as _NoReturn
 
-from pulse.transpiler.builtins import obj as obj
+from pulse.js.obj import obj as obj
 from pulse.transpiler.nodes import EXPR_REGISTRY as _EXPR_REGISTRY
 from pulse.transpiler.nodes import UNDEFINED as _UNDEFINED
 

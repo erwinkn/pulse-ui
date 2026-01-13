@@ -21,7 +21,6 @@ from pulse.transpiler.nodes import (
 	Literal,
 	Member,
 	New,
-	Object,
 	Spread,
 	Subscript,
 	Template,
@@ -171,25 +170,6 @@ def emit_dict(*args: Any, ctx: Transpiler) -> Expr:
 	if builtins.len(args) == 1:
 		return New(Identifier("Map"), [ctx.emit_expr(args[0])])
 	raise TranspileError("dict() expects at most one argument")
-
-
-@transformer("obj")
-def obj(*args: Any, ctx: Transpiler, **kwargs: Any) -> Expr:
-	"""obj(key=value, ...) -> { key: value, ... }
-
-	Creates a plain JavaScript object literal.
-	Use this instead of dict() when you need a plain object (e.g., for React props).
-
-	Example:
-		style=obj(display="block", color="red")
-		-> style={{ display: "block", color: "red" }}
-	"""
-	if args:
-		raise TranspileError("obj() only accepts keyword arguments")
-	props: list[tuple[str, Expr]] = []
-	for key, value in kwargs.items():
-		props.append((key, ctx.emit_expr(value)))
-	return Object(props)
 
 
 @transformer("filter")

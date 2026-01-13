@@ -32,6 +32,7 @@ from pulse.transpiler.nodes import (
 	If,
 	Literal,
 	Member,
+	New,
 	Return,
 	Spread,
 	Stmt,
@@ -469,7 +470,7 @@ class Transpiler:
 			return self._emit_dict(node)
 
 		if isinstance(node, ast.Set):
-			return Call(
+			return New(
 				Identifier("Set"),
 				[Array([self.emit_expr(e) for e in node.elts])],
 			)
@@ -519,14 +520,14 @@ class Transpiler:
 			arr = self._emit_comprehension_chain(
 				node.generators, lambda: self.emit_expr(node.elt)
 			)
-			return Call(Identifier("Set"), [arr])
+			return New(Identifier("Set"), [arr])
 
 		if isinstance(node, ast.DictComp):
 			pairs = self._emit_comprehension_chain(
 				node.generators,
 				lambda: Array([self.emit_expr(node.key), self.emit_expr(node.value)]),
 			)
-			return Call(Identifier("Map"), [pairs])
+			return New(Identifier("Map"), [pairs])
 
 		if isinstance(node, ast.Lambda):
 			return self._emit_lambda(node)
@@ -600,7 +601,7 @@ class Transpiler:
 			key_expr = self.emit_expr(k)
 			val_expr = self.emit_expr(v)
 			entries.append(Array([key_expr, val_expr]))
-		return Call(Identifier("Map"), [Array(entries)])
+		return New(Identifier("Map"), [Array(entries)])
 
 	def _emit_binop(self, node: ast.BinOp) -> Expr:
 		"""Emit a binary operation."""

@@ -65,47 +65,42 @@ class RenderPropTask(NamedTuple):
 
 
 class RenderTree:
-	root: Node
+	element: Node
 	callbacks: Callbacks
-	operations: list[VDOMOperation]
-	_normalized: Node | None
+	rendered: bool
 
-	def __init__(self, root: Node) -> None:
-		self.root = root
+	def __init__(self, element: Node) -> None:
+		self.element = element
 		self.callbacks = {}
-		self.operations = []
-		self._normalized = None
+		self.rendered = False
 
 	def render(self) -> VDOM:
+		"""First render. Returns VDOM."""
 		renderer = Renderer()
-		vdom, normalized = renderer.render_tree(self.root)
-		self.root = normalized
+		vdom, self.element = renderer.render_tree(self.element)
 		self.callbacks = renderer.callbacks
-		self._normalized = normalized
+		self.rendered = True
 		return vdom
 
-	def diff(self, new_tree: Node) -> list[VDOMOperation]:
-		if self._normalized is None:
-			raise RuntimeError("RenderTree.render must be called before diff")
+	def rerender(self, new_element: Node | None = None) -> list[VDOMOperation]:
+		"""Re-render and return update operations.
 
+		If new_element is provided, reconciles against it (for testing).
+		Otherwise, reconciles against the current element (production use).
+		"""
+		if not self.rendered:
+			raise RuntimeError("render() must be called before rerender()")
+		target = new_element if new_element is not None else self.element
 		renderer = Renderer()
-		normalized = renderer.reconcile_tree(self._normalized, new_tree, path="")
-
+		self.element = renderer.reconcile_tree(self.element, target, path="")
 		self.callbacks = renderer.callbacks
-		self._normalized = normalized
-		self.root = normalized
-
 		return renderer.operations
 
 	def unmount(self) -> None:
-		if self._normalized is not None:
-			unmount_element(self._normalized)
-			self._normalized = None
+		if self.rendered:
+			unmount_element(self.element)
+			self.rendered = False
 		self.callbacks.clear()
-
-	@property
-	def normalized(self) -> Node | None:
-		return self._normalized
 
 
 class Renderer:
@@ -123,13 +118,11 @@ class Renderer:
 		if isinstance(node, Element):
 			return self.render_node(node, path)
 		if isinstance(node, Value):
-			json_value = coerce_json(node.value, path)
-			return json_value, json_value
+			return node.value, node.value
 		if isinstance(node, Expr):
 			return node.render(), node
-		if is_json_primitive(node):
-			return node, node
-		raise TypeError(f"Unsupported node type: {type(node).__name__}")
+		# Pass through any other value - serializer will validate
+		return node, node
 
 	def render_component(
 		self, component: PulseNode, path: str
@@ -148,7 +141,7 @@ class Renderer:
 		if (key_val := key_value(element)) is not None:
 			vdom_node["key"] = key_val
 
-		props = element.props or {}
+		props = element.props_dict()
 		props_result = self.diff_props({}, props, path, prev_eval=set())
 		if props_result.delta_set:
 			vdom_node["props"] = props_result.delta_set
@@ -188,9 +181,9 @@ class Renderer:
 		path: str = "",
 	) -> Node:
 		if isinstance(current, Value):
-			current = coerce_json(current.value, path)
+			current = current.value
 		if isinstance(previous, Value):
-			previous = coerce_json(previous.value, path)
+			previous = previous.value
 		if not same_node(previous, current):
 			unmount_element(previous)
 			new_vdom, normalized = self.render_tree(current, path)
@@ -239,8 +232,8 @@ class Renderer:
 		current: Element,
 		path: str,
 	) -> Element:
-		prev_props = previous.props or {}
-		new_props = current.props or {}
+		prev_props = previous.props_dict()
+		new_props = current.props_dict()
 		prev_eval = eval_keys_for_props(prev_props)
 		props_result = self.diff_props(prev_props, new_props, path, prev_eval)
 
@@ -389,14 +382,14 @@ class Renderer:
 				continue
 
 			if isinstance(value, Value):
-				json_value = coerce_json(value.value, prop_path)
+				unwrapped = value.value
 				if normalized is None:
 					normalized = current.copy()
-				normalized[key] = json_value
+				normalized[key] = unwrapped
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
-				if key not in previous or not values_equal(json_value, old_value):
-					updated[key] = cast(VDOMPropValue, json_value)
+				if key not in previous or not values_equal(unwrapped, old_value):
+					updated[key] = cast(VDOMPropValue, unwrapped)
 				continue
 
 			if isinstance(value, Expr):
@@ -422,16 +415,11 @@ class Renderer:
 					updated[key] = CALLBACK_PLACEHOLDER
 				continue
 
-			json_value = coerce_json(value, prop_path)
 			if isinstance(old_value, (Element, PulseNode)):
 				unmount_element(old_value)
-			if normalized is not None:
-				normalized[key] = json_value
-			elif json_value is not value:
-				normalized = current.copy()
-				normalized[key] = json_value
-			if key not in previous or not values_equal(json_value, old_value):
-				updated[key] = cast(VDOMPropValue, json_value)
+			# No normalization needed - value passes through unchanged
+			if key not in previous or not values_equal(value, old_value):
+				updated[key] = cast(VDOMPropValue, value)
 
 		for key in removed_keys:
 			old_value = previous.get(key)
@@ -486,31 +474,6 @@ def registry_ref(expr: Expr) -> RegistryRef | None:
 	if isinstance(expr, (Import, JsFunction, Constant, JsxFunction)):
 		return {"t": "ref", "key": expr.id}
 	return None
-
-
-def is_json_primitive(value: Any) -> bool:
-	return value is None or isinstance(value, (str, int, float, bool))
-
-
-def coerce_json(value: Any, path: str) -> Any:
-	"""Convert Python value to JSON-compatible structure.
-
-	Performs runtime conversions:
-	- tuple → list
-	- validates dict keys are strings
-	"""
-	if is_json_primitive(value):
-		return value
-	if isinstance(value, (list, tuple)):
-		return [coerce_json(v, path) for v in value]
-	if isinstance(value, dict):
-		out: dict[str, Any] = {}
-		for k, v in value.items():
-			if not isinstance(k, str):
-				raise TypeError(f"Non-string prop key at {path}: {k!r}")
-			out[k] = coerce_json(v, path)
-		return out
-	raise TypeError(f"Unsupported JSON value at {path}: {type(value).__name__}")
 
 
 def prop_requires_eval(value: PropValue) -> bool:
@@ -611,7 +574,7 @@ def unmount_element(element: Node) -> None:
 		return
 
 	if isinstance(element, Element):
-		props = element.props or {}
+		props = element.props_dict()
 		for value in props.values():
 			if isinstance(value, (Element, PulseNode)):
 				unmount_element(value)

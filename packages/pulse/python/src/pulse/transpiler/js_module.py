@@ -65,10 +65,10 @@ class Class(Expr):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: Transpiler,
 	) -> Expr:
-		if kwargs:
+		if keywords:
 			raise TranspileError("Keyword arguments not supported in constructor call")
 		return New(self.ctor, [ctx.emit_expr(a) for a in args])
 
@@ -118,7 +118,7 @@ class JsModule(Expr):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: Transpiler,
 	) -> Expr:
 		label = self.py_name or self.name or "JsModule"

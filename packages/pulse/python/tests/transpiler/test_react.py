@@ -998,3 +998,145 @@ class TestPulseJsImportReact:
 		code = transpile_with_imports(use_react_namespace)
 		assert 'from "react"' in code, f"Expected react import, got:\n{code}"
 		assert "useState" in code, f"Expected useState, got:\n{code}"
+
+
+# =============================================================================
+# lazy() Function
+# =============================================================================
+
+
+class TestLazy:
+	"""Test React.lazy binding works both at definition time and in @javascript."""
+
+	def test_lazy_definition_time(self):
+		"""lazy(factory) at definition time creates a usable component."""
+		from pulse.js.react import lazy
+
+		# Create lazy component at definition time
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		LazyChart = lazy(factory)
+
+		# Should be a Jsx wrapping a Constant
+		from pulse.transpiler.nodes import Jsx
+
+		assert isinstance(LazyChart, Jsx)
+
+	def test_lazy_as_reference_in_javascript(self):
+		"""lazy used as reference in @javascript produces correct import."""
+		from pulse.js.react import lazy
+
+		@javascript
+		def pass_lazy_to_fn(some_fn):
+			return some_fn(lazy)
+
+		fn = pass_lazy_to_fn.transpile()
+		code = emit(fn)
+		# Should emit lazy as the identifier (reference to the import)
+		assert "some_fn(lazy_" in code
+
+	def test_lazy_called_in_javascript(self):
+		"""lazy(factory) called in @javascript creates Constant+Jsx."""
+		from pulse.js.react import lazy
+		from pulse.transpiler.function import CONSTANT_REGISTRY
+
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+
+		@javascript
+		def create_lazy():
+			LazyComp = lazy(factory)
+			return LazyComp
+
+		fn = create_lazy.transpile()
+		code = emit(fn)
+
+		# The function body should reference a constant (created by lazy())
+		assert "_const_" in code, f"Expected constant reference, got:\n{code}"
+
+		# Verify a constant was created with the lazy call
+		# Find constants that contain a lazy call
+		lazy_constants = [
+			c for c in CONSTANT_REGISTRY.values() if "lazy" in emit(c.expr).lower()
+		]
+		assert len(lazy_constants) > 0, "Expected constant with lazy call to be created"
+
+		# The constant's expression should contain the lazy call with Chart
+		const_expr = emit(lazy_constants[-1].expr)
+		assert "lazy_" in const_expr, (
+			f"Expected lazy_ in constant expr, got: {const_expr}"
+		)
+		assert "Chart_" in const_expr, (
+			f"Expected Chart_ in constant expr, got: {const_expr}"
+		)
+
+	def test_lazy_via_react_namespace_reference(self):
+		"""React.lazy used as reference in @javascript."""
+		from pulse.js import React
+
+		@javascript
+		def pass_react_lazy(fn):
+			return fn(React.lazy)
+
+		fn = pass_react_lazy.transpile()
+		code = emit(fn)
+		# Should emit lazy as the identifier
+		assert "fn(lazy_" in code
+
+	def test_lazy_via_react_namespace_call(self):
+		"""React.lazy(factory) called in @javascript."""
+		from pulse.js import React
+
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+
+		@javascript
+		def create_lazy_via_react():
+			LazyComp = React.lazy(factory)
+			return LazyComp
+
+		fn = create_lazy_via_react.transpile()
+		code = emit(fn)
+		# Should have a lazy call
+		assert "lazy_" in code
+		assert "Chart_" in code
+
+	def test_lazy_component_in_rendered_tree(self):
+		"""Lazy component used in a rendered JSX tree."""
+		from pulse.dom.tags import div
+		from pulse.js.react import Suspense, lazy
+
+		# Create lazy component at definition time
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		LazyChart = lazy(factory)
+
+		@javascript
+		def App():
+			return div()[Suspense(fallback=div()["Loading..."])[LazyChart()]]
+
+		fn = App.transpile()
+		code = emit(fn)
+
+		# The lazy component should be referenced via its constant ID
+		assert "_const_" in code, f"Expected constant reference, got:\n{code}"
+		# Should have JSX structure with the lazy component
+		assert "<_const_" in code, f"Expected JSX element with constant, got:\n{code}"
+		# Suspense should be present
+		assert "Suspense_" in code, f"Expected Suspense, got:\n{code}"
+
+	def test_lazy_component_with_props(self):
+		"""Lazy component with props in rendered tree."""
+		from pulse.js.react import lazy
+
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		LazyChart = lazy(factory)
+
+		@javascript
+		def render_with_props():
+			return LazyChart(data=[1, 2, 3], title="My Chart")
+
+		fn = render_with_props.transpile()
+		code = emit(fn)
+
+		# Should have the lazy component as JSX
+		assert "<_const_" in code, f"Expected JSX element, got:\n{code}"
+		# Should have props
+		assert "data=" in code, f"Expected data prop, got:\n{code}"
+		assert "title=" in code, f"Expected title prop, got:\n{code}"

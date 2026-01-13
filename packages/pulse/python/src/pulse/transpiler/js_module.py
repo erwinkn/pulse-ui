@@ -241,7 +241,12 @@ class JsModule(Expr):
 		module_name = frame.f_back.f_globals["__name__"]
 		module = sys.modules[module_name]
 
-		# Collect locally defined names and clean up module namespace
+		# Collect locally defined names and clean up module namespace.
+		# Priority order for categorization:
+		#   1. Overrides: real functions (with body), Exprs, real @components → returned directly
+		#   2. Components: stub @component functions → wrapped as Jsx(Import(...))
+		#   3. Constructors: classes → emitted with 'new' keyword
+		#   4. Regular imports: stub functions → standard named imports
 		constructors: set[str] = set()
 		components: set[str] = set()
 		local_names: set[str] = set()

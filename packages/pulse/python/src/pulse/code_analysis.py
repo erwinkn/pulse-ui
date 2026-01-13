@@ -34,5 +34,5 @@ def is_stub_function(fn: Callable[..., Any]) -> bool:
 				if stmt.value.value is ...:
 					return True
 		return False
-	except (OSError, TypeError):
+	except (OSError, TypeError, SyntaxError):
 		return False

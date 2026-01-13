@@ -12,18 +12,27 @@ Usage:
     React.useState(0)                     # -> React.useState(0)
 """
 
+import ast as _ast
 from collections.abc import Callable as _Callable
+from typing import TYPE_CHECKING as _TYPE_CHECKING
 from typing import Any as _Any
 from typing import Protocol as _Protocol
 from typing import TypeVar as _TypeVar
+from typing import override as _override
 
 from pulse.component import component as _component
 from pulse.transpiler import Import as _Import
+from pulse.transpiler.errors import TranspileError as _TranspileError
 from pulse.transpiler.function import Constant as _Constant
 from pulse.transpiler.js_module import JsModule
 from pulse.transpiler.nodes import Call as _Call
+from pulse.transpiler.nodes import Expr as _Expr
 from pulse.transpiler.nodes import Jsx as _Jsx
 from pulse.transpiler.nodes import Node as _PulseNode
+from pulse.transpiler.vdom import VDOMNode as _VDOMNode
+
+if _TYPE_CHECKING:
+	from pulse.transpiler.transpiler import Transpiler as _Transpiler
 
 # Type variables for hooks
 T = _TypeVar("T")
@@ -327,26 +336,98 @@ def forwardRef(
 	...
 
 
-def lazy(factory: _Import) -> _Jsx:
-	"""Create a lazy-loaded component from a factory import.
+class _LazyComponentFactory(_Expr):
+	"""React.lazy binding that works both at definition time and in @javascript.
+
+	This Expr represents React's lazy function. It can be:
+	- Called at Python definition time: lazy(factory) → Jsx(Constant(...))
+	- Used as a reference in @javascript: some_fn(lazy) → some_fn(lazy)
+	- Called inside @javascript: lazy(factory) → creates Constant+Jsx
 
 	Usage:
+		# At definition time (Python executes this)
 		LazyChart = lazy(Import("Chart", "./Chart", lazy=True))
-		# Generates: const LazyChart_1 = lazy(Chart_2);
 
-	Args:
-		factory: An Import with lazy=True that generates a dynamic import factory
+		# As reference in transpiled code
+		@javascript
+		def foo():
+			return higher_order_fn(lazy)  # → higher_order_fn(lazy)
 
-	Returns:
-		A Jsx-wrapped lazy component that can be used as LazyChart(props)[children]
+		# Called in transpiled code
+		@javascript
+		def bar():
+			LazyComp = lazy(factory)  # → const LazyComp_1 = lazy(factory)
+			return LazyComp()
 	"""
-	react_lazy = _Import("lazy", "react")
-	# Create: lazy(factory) call expression
-	lazy_call = _Call(react_lazy, [factory])
-	# Register as Constant so it appears in generated JS
-	const = _Constant(lazy_call, lazy_call)
-	# Wrap in Jsx so it's callable as a component
-	return _Jsx(const)
+
+	__slots__: tuple[str, ...] = ("_lazy_import",)
+	_lazy_import: _Import | None
+
+	def __init__(self) -> None:
+		# Defer Import creation to avoid polluting global import registry at module load
+		self._lazy_import = None
+
+	@property
+	def _import(self) -> _Import:
+		"""Lazily create the React.lazy import."""
+		if self._lazy_import is None:
+			self._lazy_import = _Import("lazy", "react")
+		return self._lazy_import
+
+	@_override
+	def emit(self, out: list[str]) -> None:
+		"""Emit as reference to the lazy import."""
+		self._import.emit(out)
+
+	@_override
+	def render(self) -> _VDOMNode:
+		raise TypeError("lazy cannot be rendered to VDOM")
+
+	@_override
+	def transpile_call(
+		self,
+		args: list[_ast.expr],
+		keywords: list[_ast.keyword],
+		ctx: "_Transpiler",
+	) -> _Expr:
+		"""Handle lazy(factory) calls in @javascript functions."""
+		if keywords:
+			raise _TranspileError("lazy() does not accept keyword arguments")
+		if len(args) != 1:
+			raise _TranspileError("lazy() takes exactly 1 argument")
+
+		# Transpile the factory argument
+		factory = ctx.emit_expr(args[0])
+
+		# Create: lazy(factory) call expression
+		lazy_call = _Call(self._import, [factory])
+		# Register as Constant so it appears in generated JS
+		const = _Constant(lazy_call, lazy_call)
+		# Wrap in Jsx so it's callable as a component
+		return _Jsx(const)
+
+	@_override
+	def __call__(self, factory: _Import) -> _Jsx:  # pyright: ignore[reportIncompatibleMethodOverride]
+		"""Python-time call: create a lazy-loaded component.
+
+		Args:
+			factory: An Import with lazy=True that generates a dynamic import factory
+
+		Returns:
+			A Jsx-wrapped lazy component that can be used as LazyChart(props)[children]
+		"""
+		# Create: lazy(factory) call expression
+		lazy_call = _Call(self._import, [factory])
+		# Register as Constant so it appears in generated JS
+		const = _Constant(lazy_call, lazy_call)
+		# Wrap in Jsx so it's callable as a component
+		return _Jsx(const)
+
+
+# Singleton instance - use as: lazy(Import(...))
+lazy: _LazyComponentFactory = _LazyComponentFactory()
+# Register so transpiler can resolve it from closure
+_Expr.register(lazy, lazy)
 
 
 def createContext(default_value: T) -> Context[T]:

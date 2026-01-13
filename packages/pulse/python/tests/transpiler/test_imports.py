@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from pulse.transpiler import (
+	TranspileError,
 	clear_function_cache,
 	clear_import_registry,
 	emit,
@@ -606,7 +607,7 @@ class TestLazyImports:
 
 	def setup_method(self):
 		"""Clear registries before each test."""
-		clear_import_registry()
+		clear_function_cache()
 
 	def test_import_lazy_flag_stored(self):
 		"""Import stores the lazy flag correctly."""
@@ -619,8 +620,8 @@ class TestLazyImports:
 		assert eager_imp.is_lazy is False
 
 	def test_lazy_and_type_raises(self):
-		"""Import with both lazy=True and is_type=True raises ValueError."""
-		with pytest.raises(ValueError, match="lazy and type-only"):
+		"""Import with both lazy=True and is_type=True raises TranspileError."""
+		with pytest.raises(TranspileError, match="lazy and type-only"):
 			Import("Props", "./types", is_type=True, lazy=True)
 
 	def test_lazy_import_separate_from_eager(self):

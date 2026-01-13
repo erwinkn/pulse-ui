@@ -16,6 +16,7 @@ from typing import Literal as Lit
 
 from pulse.cli.packages import pick_more_specific
 from pulse.transpiler.assets import LocalAsset, register_local_asset
+from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Call, Expr, to_js_identifier
 from pulse.transpiler.vdom import VDOMNode
@@ -204,7 +205,7 @@ class Import(Expr):
 	) -> None:
 		# Validate: lazy imports cannot be type-only
 		if lazy and is_type:
-			raise ValueError("Import cannot be both lazy and type-only")
+			raise TranspileError("Import cannot be both lazy and type-only")
 
 		# Auto-resolve local paths (relative or absolute) to actual files
 		asset: LocalAsset | None = None

@@ -50,9 +50,9 @@ class Component(Generic[P]):
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")
 
-		# Access self.fn to trigger lazy init
+		# Access self.fn to trigger lazy init (sets _takes_children)
 		_ = self.fn
-		if self._takes_children and args:
+		if self._takes_children is True and args:
 			flattened = flatten_children(
 				args,  # pyright: ignore[reportArgumentType]
 				parent_name=f"<{self.name}>",

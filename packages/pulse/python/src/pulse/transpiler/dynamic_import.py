@@ -91,11 +91,11 @@ class DynamicImportFn(Expr):
 	def transpile_call(
 		self,
 		args: list[ast.expr],
-		kwargs: dict[str, ast.expr],
+		keywords: list[ast.keyword],
 		ctx: Transpiler,
 	) -> Expr:
 		"""Handle import_("source") calls."""
-		if kwargs:
+		if keywords:
 			raise TranspileError("import_() does not accept keyword arguments")
 		if len(args) != 1:
 			raise TranspileError("import_() takes exactly 1 argument")

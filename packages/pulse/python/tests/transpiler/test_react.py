@@ -265,11 +265,10 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "return <Button_" in code
-		# Verify IIFE-wrapped spread expression (evaluates spread_expr once)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_3(props) {\n"
+			"return <Button_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)} />;\n"
+			"}"
 		)
 
 	def test_jsx_spread_with_override(self):
@@ -284,10 +283,11 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)}" in code
+		assert code == (
+			"function render_3(base) {\n"
+			"return <Button_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)} disabled={true} />;\n"
+			"}"
 		)
-		assert "disabled={true}" in code
 
 	def test_jsx_override_before_spread(self):
 		"""Test Component(size="lg", **props) includes size and Map check."""
@@ -301,10 +301,10 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert 'size="lg"' in code
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_3(props) {\n"
+			'return <Button_1 size="lg" {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)} />;\n'
+			"}"
 		)
 
 	def test_jsx_multiple_spreads(self):
@@ -319,9 +319,11 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(a)}" in code
-		assert "padding={10}" in code
-		assert "{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(b)}" in code
+		assert code == (
+			"function render_3(a, b) {\n"
+			"return <Box_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(a)} padding={10} {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(b)} />;\n"
+			"}"
+		)
 
 	def test_jsx_spread_with_children(self):
 		"""Test Component(**props)["child"] includes Map check and children."""
@@ -335,12 +337,11 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_3(props) {\n"
+			'return <Button_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}>{"Click me"}</Button_1>;\n'
+			"}"
 		)
-		assert "Click me" in code
-		assert "</Button_" in code
 
 	def test_jsx_spread_dict_literal(self):
 		"""Test Component(**{"disabled": True}) converts Map to object at runtime.
@@ -358,10 +359,10 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		# Dict literal becomes new Map, which is then converted to object for spread
-		# IIFE wraps the Map for single evaluation
-		assert (
-			"($s => $s instanceof Map ? Object.fromEntries($s) : $s)(new Map([" in code
+		assert code == (
+			"function render_3() {\n"
+			'return <Button_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(new Map([["disabled", true], ["size", "lg"]]))} />;\n'
+			"}"
 		)
 
 
@@ -378,9 +379,10 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_1(props) {\n"
+			"return <div {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)} />;\n"
+			"}"
 		)
 
 	def test_div_spread_with_children(self):
@@ -393,12 +395,11 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_1(props) {\n"
+			'return <div {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}>{"Hello"}</div>;\n'
+			"}"
 		)
-		assert "Hello" in code
-		assert "</div>" in code
 
 	def test_input_spread_with_override(self):
 		"""Test input(**base, type="text") includes Map check and override."""
@@ -410,10 +411,11 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)}" in code
+		assert code == (
+			"function render_1(base) {\n"
+			'return <input {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)} type="text" />;\n'
+			"}"
 		)
-		assert 'type="text"' in code
 
 
 # =============================================================================
@@ -996,8 +998,15 @@ class TestPulseJsImportReact:
 			return count
 
 		code = transpile_with_imports(use_react_namespace)
-		assert 'from "react"' in code, f"Expected react import, got:\n{code}"
-		assert "useState" in code, f"Expected useState, got:\n{code}"
+		assert code == (
+			'import { useState as useState_2 } from "react";\n\n'
+			"function use_react_namespace_1() {\n"
+			"const $tmp0 = useState_2(0);\n"
+			"let count = $tmp0[0];\n"
+			"let set_count = $tmp0[1];\n"
+			"return count;\n"
+			"}"
+		)
 
 
 # =============================================================================
@@ -1031,8 +1040,10 @@ class TestLazy:
 
 		fn = pass_lazy_to_fn.transpile()
 		code = emit(fn)
-		# Should emit lazy as the identifier (reference to the import)
-		assert "some_fn(lazy_" in code
+		# Note: lazy ID varies due to module-level caching across tests
+		assert code.startswith("function pass_lazy_to_fn_1(some_fn) {\n")
+		assert "return some_fn(lazy_" in code
+		assert code.endswith(");\n}")
 
 	def test_lazy_called_in_javascript(self):
 		"""lazy(factory) called in @javascript creates Constant+Jsx."""
@@ -1078,8 +1089,7 @@ class TestLazy:
 
 		fn = pass_react_lazy.transpile()
 		code = emit(fn)
-		# Should emit lazy as the identifier
-		assert "fn(lazy_" in code
+		assert code == ("function pass_react_lazy_1(fn) {\nreturn fn(lazy_2);\n}")
 
 	def test_lazy_via_react_namespace_call(self):
 		"""React.lazy(factory) called in @javascript."""
@@ -1094,9 +1104,12 @@ class TestLazy:
 
 		fn = create_lazy_via_react.transpile()
 		code = emit(fn)
-		# Should have a lazy call
-		assert "lazy_" in code
-		assert "Chart_" in code
+		assert code == (
+			"function create_lazy_via_react_3() {\n"
+			"let LazyComp = lazy_4(Chart_2);\n"
+			"return LazyComp;\n"
+			"}"
+		)
 
 	def test_lazy_component_in_rendered_tree(self):
 		"""Lazy component used in a rendered JSX tree."""

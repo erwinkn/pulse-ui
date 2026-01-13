@@ -664,7 +664,10 @@ class TestDynamicImport:
 
 		fn = load.transpile()
 		js = emit(fn)
-		assert 'import("my-module").then(m => m.default)' in js
+		assert (
+			js
+			== 'function load_1() {\nreturn import("my-module").then(m => m.default);\n}'
+		)
 
 	def test_dynamic_import_then_chain(self):
 		"""import_() supports .then() chaining."""
@@ -676,7 +679,10 @@ class TestDynamicImport:
 
 		fn = load.transpile()
 		js = emit(fn)
-		assert 'import("lodash").then(m => m.default).then(d => d.x)' in js
+		assert (
+			js
+			== 'function load_1() {\nreturn import("lodash").then(m => m.default).then(d => d.x);\n}'
+		)
 
 	def test_dynamic_import_local_with_emit_context(self, tmp_path: Path):
 		"""Local import_() uses asset path from emit context."""
@@ -693,11 +699,10 @@ class TestDynamicImport:
 
 		# Without emit context - just filename
 		js_no_ctx = emit(dynamic_import)
-		assert 'import("Chart_' in js_no_ctx
-		assert "assets" not in js_no_ctx
+		assert js_no_ctx == f'import("Chart_{asset.id}.tsx")'
 
 		# With emit context - has correct relative path
 		with EmitContext(route_file_path="routes/users/index.tsx"):
 			js_with_ctx = emit(dynamic_import)
 
-		assert 'import("../../assets/Chart_' in js_with_ctx
+		assert js_with_ctx == f'import("../../assets/Chart_{asset.id}.tsx")'

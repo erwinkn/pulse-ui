@@ -22,17 +22,15 @@ def default_signature(
 ) -> Element: ...
 
 
-def react_component(
-	expr: Expr,
-	*,
-	lazy: bool = False,
-):
+def react_component(expr: Expr):
 	"""Decorator that uses the decorated function solely as a typed signature.
 
 	Returns a Jsx(expr) that preserves the function's type signature for type
 	checkers and produces Element nodes when called in transpiled code.
 
-	Note: lazy=True is stored but not yet wired into codegen.
+	For lazy loading, use Import(lazy=True) directly:
+		LazyChart = Import("Chart", "./Chart", kind="default", lazy=True)
+		React.lazy(LazyChart)  # LazyChart is already a factory
 	"""
 
 	def decorator(fn: Callable[P, Any]) -> Callable[P, Element]:
@@ -41,11 +39,6 @@ def react_component(
 
 		# Wrap expr: Jsx provides Element generation
 		jsx_wrapper = expr if isinstance(expr, Jsx) else Jsx(expr)
-
-		# Note: lazy flag is not currently wired into codegen
-		# Could store it via a separate side-registry if needed in future
-		_ = lazy  # Suppress unused variable warning
-
 		return jsx_wrapper
 
 	return decorator

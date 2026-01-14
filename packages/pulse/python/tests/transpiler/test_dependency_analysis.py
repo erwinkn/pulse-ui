@@ -527,11 +527,7 @@ class TestMathRandomScenario:
 		fn = generate_id.transpile()
 		code = emit(fn)
 
-		# Should reference Math, not random
-		assert "Math" in code
-		assert "random" in code  # as Math.random()
-		# Should not have tried to resolve Python's random module
-		assert "Math.random()" in code
+		assert code == "function generate_id_1() {\nreturn Math.random();\n}"
 
 	def test_math_random_with_random_import_in_scope(self):
 		"""Even with random module in scope, Math.random works correctly."""
@@ -546,7 +542,8 @@ class TestMathRandomScenario:
 		# Should not raise about unregistered module
 		fn.transpile()
 		code = emit(fn.transpile())
-		assert "Math.random()" in code
+
+		assert code == "function fn_1() {\nreturn Math.random();\n}"
 
 	def test_actual_random_module_usage_raises(self):
 		"""Actually using Python's random module raises (not registered)."""
@@ -571,7 +568,8 @@ class TestMathRandomScenario:
 		# 'json' should not be detected as a global (it's an attribute)
 		fn.transpile()
 		code = emit(fn.transpile())
-		assert "obj.json" in code
+
+		assert code == "function fn_1() {\nreturn obj.json;\n}"
 
 
 # =============================================================================
@@ -857,7 +855,8 @@ class TestAnalyzeDepsWithRegisteredModules:
 		# Should not raise
 		fn.transpile()
 		code = emit(fn.transpile())
-		assert "Math.floor" in code
+
+		assert code == "function fn_1() {\nreturn Math.floor(3.7);\n}"
 
 	def test_multiple_js_builtins(self):
 		"""Multiple JS builtins work together."""
@@ -869,6 +868,8 @@ class TestAnalyzeDepsWithRegisteredModules:
 
 		fn.transpile()
 		code = emit(fn.transpile())
-		assert "console.log" in code
-		assert "JSON.stringify" in code
-		assert "Math.random" in code
+
+		assert (
+			code
+			== "function fn_1() {\nreturn console.log(JSON.stringify(Math.random()));\n}"
+		)

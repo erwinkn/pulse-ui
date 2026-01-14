@@ -30,11 +30,11 @@ class LocalAsset:
 		"""Get import path for this asset.
 
 		If EmitContext is set, returns path relative to route file.
-		Otherwise returns just the asset filename.
+		Otherwise returns the absolute source path (useful for tests/debugging).
 		"""
 		ctx = EmitContext.get()
 		if ctx is None:
-			return self.asset_filename
+			return str(self.source_path)
 		# Compute relative path from route file directory to asset
 		# route_file_path is like "routes/users/index.tsx"
 		# asset is in "assets/{asset_filename}"

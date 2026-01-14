@@ -697,9 +697,9 @@ class TestDynamicImport:
 		asset = register_local_asset(chart_file)
 		dynamic_import = DynamicImport(src=str(chart_file), asset=asset)
 
-		# Without emit context - just filename
+		# Without emit context - returns absolute source path
 		js_no_ctx = emit(dynamic_import)
-		assert js_no_ctx == f'import("Chart_{asset.id}.tsx")'
+		assert js_no_ctx == f'import("{chart_file}")'
 
 		# With emit context - has correct relative path
 		with EmitContext(route_file_path="routes/users/index.tsx"):

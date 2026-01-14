@@ -119,6 +119,10 @@ class DynamicImportFn(Expr):
 			source_path = resolve_local_path(src, ctx.source_file)
 			if source_path:
 				asset = register_local_asset(source_path)
+			else:
+				raise TranspileError(
+					f"import_({src!r}) references a local path that does not exist"
+				)
 
 		return DynamicImport(src, asset)
 

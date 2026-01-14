@@ -374,6 +374,19 @@ class _LazyComponentFactory(_Expr):
 			self._lazy_import = _Import("lazy", "react")
 		return self._lazy_import
 
+	def _create_lazy_component(self, factory: _Expr) -> _Jsx:
+		"""Create a lazy-loaded component from a factory expression.
+
+		Args:
+			factory: An Expr that evaluates to a dynamic import factory
+
+		Returns:
+			A Jsx-wrapped lazy component
+		"""
+		lazy_call = _Call(self._import, [factory])
+		const = _Constant(lazy_call, lazy_call)
+		return _Jsx(const)
+
 	@_override
 	def emit(self, out: list[str]) -> None:
 		"""Emit as reference to the lazy import."""
@@ -396,15 +409,8 @@ class _LazyComponentFactory(_Expr):
 		if len(args) != 1:
 			raise _TranspileError("lazy() takes exactly 1 argument")
 
-		# Transpile the factory argument
 		factory = ctx.emit_expr(args[0])
-
-		# Create: lazy(factory) call expression
-		lazy_call = _Call(self._import, [factory])
-		# Register as Constant so it appears in generated JS
-		const = _Constant(lazy_call, lazy_call)
-		# Wrap in Jsx so it's callable as a component
-		return _Jsx(const)
+		return self._create_lazy_component(factory)
 
 	@_override
 	def __call__(self, factory: _Import) -> _Jsx:  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -416,12 +422,7 @@ class _LazyComponentFactory(_Expr):
 		Returns:
 			A Jsx-wrapped lazy component that can be used as LazyChart(props)[children]
 		"""
-		# Create: lazy(factory) call expression
-		lazy_call = _Call(self._import, [factory])
-		# Register as Constant so it appears in generated JS
-		const = _Constant(lazy_call, lazy_call)
-		# Wrap in Jsx so it's callable as a component
-		return _Jsx(const)
+		return self._create_lazy_component(factory)
 
 
 # Singleton instance - use as: lazy(Import(...))

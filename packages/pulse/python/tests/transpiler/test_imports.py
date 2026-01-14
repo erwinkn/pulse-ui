@@ -9,9 +9,11 @@ from typing import Any
 
 import pytest
 from pulse.transpiler import (
+	TranspileError,
 	clear_function_cache,
 	clear_import_registry,
 	emit,
+	import_,
 	javascript,
 )
 from pulse.transpiler.imports import (
@@ -28,11 +30,9 @@ from pulse.transpiler.imports import (
 @pytest.fixture(autouse=True)
 def reset_caches():
 	"""Reset caches before each test."""
-	clear_function_cache()
-	clear_import_registry()
+	clear_function_cache()  # Also clears import and asset registries
 	yield
 	clear_function_cache()
-	clear_import_registry()
 
 
 # =============================================================================
@@ -88,32 +88,34 @@ class TestImportDependency:
 		"""Jsx wrapping an Import with key prop extracts key."""
 		from pulse.transpiler.nodes import Jsx
 
-		Item = Jsx(Import("Item", "./components"))  # Import ID 1, Jsx ID 2
+		# Local path creates asset (ID 1), then Import (ID 2), then Jsx (ID 3)
+		Item = Jsx(Import("Item", "./components"))
 
 		@javascript
-		def render() -> Any:  # ID 3
+		def render() -> Any:  # ID 4
 			return Item("text", key="item-1")
 
 		fn = render.transpile()
 		code = emit(fn)
 		assert (
 			code
-			== 'function render_3() {\nreturn <Item_1 key="item-1">{"text"}</Item_1>;\n}'
+			== 'function render_4() {\nreturn <Item_2 key="item-1">{"text"}</Item_2>;\n}'
 		)
 
 	def test_import_jsx_call_no_children(self):
 		"""Jsx wrapping an Import call with only props, no children."""
 		from pulse.transpiler.nodes import Jsx
 
-		Icon = Jsx(Import("Icon", "./icons"))  # Import ID 1, Jsx ID 2
+		# Local path creates asset (ID 1), then Import (ID 2), then Jsx (ID 3)
+		Icon = Jsx(Import("Icon", "./icons"))
 
 		@javascript
-		def render() -> Any:  # ID 3
+		def render() -> Any:  # ID 4
 			return Icon(name="check")
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert code == 'function render_3() {\nreturn <Icon_1 name="check" />;\n}'
+		assert code == 'function render_4() {\nreturn <Icon_2 name="check" />;\n}'
 
 	def test_import_attribute_access(self):
 		"""Import with attribute access produces Member."""
@@ -495,8 +497,8 @@ class TestImportLocalFiles:
 		"""Clear the import registry before each test."""
 		clear_import_registry()
 
-	def test_import_relative_css_sets_source_path(self, tmp_path: Path):
-		"""Import with relative CSS path sets source_path."""
+	def test_import_relative_css_sets_asset(self, tmp_path: Path):
+		"""Import with relative CSS path sets asset."""
 		css_file = tmp_path / "styles.css"
 		css_file.write_text("body { margin: 0; }")
 
@@ -514,19 +516,21 @@ class TestImportLocalFiles:
 		try:
 			imp = Import("", "./styles.css", kind="side_effect")
 			assert imp.is_local
-			assert imp.source_path == css_file
+			assert imp.asset is not None
+			assert imp.asset.source_path == css_file
 			assert str(css_file) in imp.src
 		finally:
 			imports_module.caller_file = original_caller_file
 
-	def test_import_absolute_path_sets_source_path(self, tmp_path: Path):
-		"""Import with absolute path sets source_path."""
+	def test_import_absolute_path_sets_asset(self, tmp_path: Path):
+		"""Import with absolute path sets asset."""
 		css_file = tmp_path / "absolute.css"
 		css_file.write_text("body { margin: 0; }")
 
 		imp = Import("", str(css_file), kind="side_effect")
 		assert imp.is_local
-		assert imp.source_path == css_file
+		assert imp.asset is not None
+		assert imp.asset.source_path == css_file
 
 	def test_import_absolute_js_without_extension_resolves(self, tmp_path: Path):
 		"""Import with absolute JS path without extension resolves correctly."""
@@ -536,50 +540,50 @@ class TestImportLocalFiles:
 		# Import without extension
 		imp = Import("utils", str(tmp_path / "utils"), kind="namespace")
 		assert imp.is_local
-		assert imp.source_path == ts_file
-		assert imp.source_path is not None
-		assert imp.source_path.suffix == ".ts"
+		assert imp.asset is not None
+		assert imp.asset.source_path == ts_file
+		assert imp.asset.source_path.suffix == ".ts"
 
 	def test_import_package_not_local(self):
 		"""Import from package is not local."""
 		imp = Import("useState", "react")
 		assert not imp.is_local
-		assert imp.source_path is None
+		assert imp.asset is None
 
 	def test_import_scoped_package_not_local(self):
 		"""Import from scoped package is not local."""
 		imp = Import("Button", "@mantine/core")
 		assert not imp.is_local
-		assert imp.source_path is None
+		assert imp.asset is None
 
 	def test_asset_filename_uses_id(self, tmp_path: Path):
-		"""asset_filename() uses import ID for uniqueness."""
+		"""asset.asset_filename uses asset ID for uniqueness."""
 		css_file = tmp_path / "styles.css"
 		css_file.write_text("body { margin: 0; }")
 
 		imp = Import("", str(css_file), kind="side_effect")
+		assert imp.asset is not None
 
-		filename = imp.asset_filename()
+		filename = imp.asset.asset_filename
 		assert filename.startswith("styles_")
 		assert filename.endswith(".css")
-		assert imp.id in filename
+		assert imp.asset.id in filename
 
 	def test_asset_filename_preserves_extension(self, tmp_path: Path):
-		"""asset_filename() preserves the original extension."""
+		"""asset.asset_filename preserves the original extension."""
 		ts_file = tmp_path / "Component.tsx"
 		ts_file.write_text("export const C = () => <div />;")
 
 		imp = Import("Component", str(ts_file), kind="default")
+		assert imp.asset is not None
 
-		filename = imp.asset_filename()
+		filename = imp.asset.asset_filename
 		assert filename.endswith(".tsx")
 
-	def test_asset_filename_raises_for_package_import(self):
-		"""asset_filename() raises for non-local imports."""
+	def test_no_asset_for_package_import(self):
+		"""Package imports have no asset."""
 		imp = Import("useState", "react")
-
-		with pytest.raises(ValueError, match="non-local import"):
-			imp.asset_filename()
+		assert imp.asset is None
 
 	def test_multiple_local_imports_get_unique_filenames(self, tmp_path: Path):
 		"""Multiple local imports get unique asset filenames."""
@@ -593,4 +597,112 @@ class TestImportLocalFiles:
 		imp1 = Import("utils1", str(file1), kind="namespace")
 		imp2 = Import("utils2", str(file2), kind="namespace")
 
-		assert imp1.asset_filename() != imp2.asset_filename()
+		assert imp1.asset is not None
+		assert imp2.asset is not None
+		assert imp1.asset.asset_filename != imp2.asset.asset_filename
+
+
+class TestLazyImports:
+	"""Test Import with lazy=True flag."""
+
+	def setup_method(self):
+		"""Clear registries before each test."""
+		clear_function_cache()
+
+	def test_import_lazy_flag_stored(self):
+		"""Import stores the lazy flag correctly."""
+		lazy_imp = Import("Chart", "./Chart", kind="default", lazy=True)
+		eager_imp = Import("Button", "@mantine/core")
+
+		assert lazy_imp.lazy is True
+		assert lazy_imp.is_lazy is True
+		assert eager_imp.lazy is False
+		assert eager_imp.is_lazy is False
+
+	def test_lazy_and_type_raises(self):
+		"""Import with both lazy=True and is_type=True raises TranspileError."""
+		with pytest.raises(TranspileError, match="lazy and type-only"):
+			Import("Props", "./types", is_type=True, lazy=True)
+
+	def test_lazy_import_separate_from_eager(self):
+		"""Lazy and eager imports of same symbol are tracked separately."""
+		eager = Import("Chart", "./Chart", kind="default")
+		lazy = Import("Chart", "./Chart", kind="default", lazy=True)
+
+		# They should have different IDs (separate registry entries)
+		assert eager.id != lazy.id
+
+	def test_lazy_import_dedupes_with_lazy(self):
+		"""Multiple lazy imports of same symbol dedupe."""
+		lazy1 = Import("Chart", "./Chart", kind="default", lazy=True)
+		lazy2 = Import("Chart", "./Chart", kind="default", lazy=True)
+
+		# Same ID means deduped
+		assert lazy1.id == lazy2.id
+
+	def test_lazy_import_js_name(self):
+		"""Lazy import has correct js_name."""
+		imp = Import("Chart", "./Chart", kind="default", lazy=True)
+		assert imp.js_name.startswith("Chart_")
+		assert imp.id in imp.js_name
+
+
+class TestDynamicImport:
+	"""Test dynamic import_() primitive."""
+
+	def setup_method(self):
+		"""Clear registries before each test."""
+		clear_function_cache()
+
+	def test_dynamic_import_package(self):
+		"""import_() with package path emits correct JS."""
+
+		# import_ captured via closure (package path, not local)
+		@javascript
+		def load():
+			return import_("my-module").then(lambda m: m.default)
+
+		fn = load.transpile()
+		js = emit(fn)
+		assert (
+			js
+			== 'function load_1() {\nreturn import("my-module").then(m => m.default);\n}'
+		)
+
+	def test_dynamic_import_then_chain(self):
+		"""import_() supports .then() chaining."""
+		from pulse.transpiler import import_
+
+		@javascript
+		def load():
+			return import_("lodash").then(lambda m: m.default).then(lambda d: d.x)
+
+		fn = load.transpile()
+		js = emit(fn)
+		assert (
+			js
+			== 'function load_1() {\nreturn import("lodash").then(m => m.default).then(d => d.x);\n}'
+		)
+
+	def test_dynamic_import_local_with_emit_context(self, tmp_path: Path):
+		"""Local import_() uses asset path from emit context."""
+		from pulse.transpiler import DynamicImport, EmitContext
+		from pulse.transpiler.assets import register_local_asset
+
+		# Create a temp JS file to import
+		chart_file = tmp_path / "Chart.tsx"
+		chart_file.write_text("export default function Chart() {}")
+
+		# Register asset and create DynamicImport directly (bypasses transpiler)
+		asset = register_local_asset(chart_file)
+		dynamic_import = DynamicImport(src=str(chart_file), asset=asset)
+
+		# Without emit context - returns absolute source path
+		js_no_ctx = emit(dynamic_import)
+		assert js_no_ctx == f'import("{chart_file}")'
+
+		# With emit context - has correct relative path
+		with EmitContext(route_file_path="routes/users/index.tsx"):
+			js_with_ctx = emit(dynamic_import)
+
+		assert js_with_ctx == f'import("../../assets/Chart_{asset.id}.tsx")'

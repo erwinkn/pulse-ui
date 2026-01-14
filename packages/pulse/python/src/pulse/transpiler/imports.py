@@ -15,6 +15,8 @@ from typing import (
 from typing import Literal as Lit
 
 from pulse.cli.packages import pick_more_specific
+from pulse.transpiler.assets import LocalAsset, register_local_asset
+from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Call, Expr, to_js_identifier
 from pulse.transpiler.vdom import VDOMNode
@@ -122,10 +124,10 @@ def resolve_local_path(path: str, caller: Path | None = None) -> Path | None:
 	return base_path
 
 
-# Registry key depends on kind:
-# - named: (name, src, "named")
-# - default/namespace/side_effect: ("", src, kind) - only one per src
-_ImportKey: TypeAlias = tuple[str, str, str]
+# Registry key depends on kind and lazy:
+# - named: (name, src, "named", lazy)
+# - default/namespace/side_effect: ("", src, kind, lazy) - only one per src
+_ImportKey: TypeAlias = tuple[str, str, str, bool]
 _IMPORT_REGISTRY: dict[_ImportKey, "Import"] = {}
 
 
@@ -171,17 +173,22 @@ class Import(Expr):
 		Import("", "./styles.css", kind="side_effect")  # Local CSS
 		utils = Import("utils", "./utils", kind="namespace")  # Local JS (resolves extension)
 		config = Import("config", "/absolute/path/config", kind="default")  # Absolute path
+
+		# Lazy import (generates factory for code-splitting)
+		Chart = Import("Chart", "./Chart", kind="default", lazy=True)
+		# Generates: const Chart_1 = () => import("./Chart")
 	"""
 
 	name: str
 	src: str
 	kind: ImportKind
 	is_type: bool
+	lazy: bool
 	before: tuple[str, ...]
 	id: str
 	version: str | None = None
-	source_path: Path | None = (
-		None  # Resolved local file path (for copying during codegen)
+	asset: LocalAsset | None = (
+		None  # Registered local asset (for copying during codegen)
 	)
 
 	def __init__(
@@ -191,12 +198,17 @@ class Import(Expr):
 		*,
 		kind: ImportKind | None = None,
 		is_type: bool = False,
+		lazy: bool = False,
 		version: str | None = None,
 		before: tuple[str, ...] | list[str] = (),
 		_caller_depth: int = 2,
 	) -> None:
+		# Validate: lazy imports cannot be type-only
+		if lazy and is_type:
+			raise TranspileError("Import cannot be both lazy and type-only")
+
 		# Auto-resolve local paths (relative or absolute) to actual files
-		source_path: Path | None = None
+		asset: LocalAsset | None = None
 		import_src = src
 
 		if is_local_path(src):
@@ -204,7 +216,8 @@ class Import(Expr):
 			caller = caller_file(depth=_caller_depth) if is_relative_path(src) else None
 			resolved = resolve_local_path(src, caller)
 			if resolved is not None:
-				source_path = resolved
+				# Register with unified asset registry
+				asset = register_local_asset(resolved)
 				import_src = str(resolved)
 
 		# Default kind to "named" if not specified
@@ -215,16 +228,16 @@ class Import(Expr):
 		self.src = import_src
 		self.kind = kind
 		self.version = version
-		self.source_path = source_path
+		self.lazy = lazy
+		self.asset = asset
 
 		before_tuple = tuple(before) if isinstance(before, list) else before
 
-		# Dedupe key: for named imports use (name, src, "named")
-		# For default/namespace/side_effect, only one per src: ("", src, kind)
+		# Dedupe key: includes lazy flag to keep lazy and eager imports separate
 		if kind == "named":
-			key: _ImportKey = (name, import_src, "named")
+			key: _ImportKey = (name, import_src, "named", lazy)
 		else:
-			key = ("", import_src, kind)
+			key = ("", import_src, kind, lazy)
 
 		if key in _IMPORT_REGISTRY:
 			existing = _IMPORT_REGISTRY[key]
@@ -260,8 +273,13 @@ class Import(Expr):
 
 	@property
 	def is_local(self) -> bool:
-		"""Check if this is a local file import (has resolved source_path)."""
-		return self.source_path is not None
+		"""Check if this is a local file import (has registered asset)."""
+		return self.asset is not None
+
+	@property
+	def is_lazy(self) -> bool:
+		"""Check if this is a lazy import."""
+		return self.lazy
 
 	# Convenience properties for kind checks
 	@property
@@ -275,18 +293,6 @@ class Import(Expr):
 	@property
 	def is_side_effect(self) -> bool:
 		return self.kind == "side_effect"
-
-	def asset_filename(self) -> str:
-		"""Get the filename for this import when copied to assets folder.
-
-		Uses the import ID for uniqueness and preserves the original extension.
-		For JS-like files, uses the resolved extension.
-		"""
-		if self.source_path is None:
-			raise ValueError("Cannot get asset filename for non-local import")
-		stem = self.source_path.stem
-		suffix = self.source_path.suffix
-		return f"{stem}_{self.id}{suffix}"
 
 	# -------------------------------------------------------------------------
 	# Expr.emit: outputs the unique identifier

@@ -86,9 +86,10 @@ class TestMath:
 
 		fn = get_constants.transpile()
 		code = emit(fn)
-		assert "Math.PI" in code
-		assert "Math.E" in code
-		assert "Math.SQRT2" in code
+		assert (
+			code
+			== "function get_constants_1() {\nreturn [Math.PI, Math.E, Math.SQRT2];\n}"
+		)
 
 	def test_math_methods(self):
 		# Use module-level Math import
@@ -98,10 +99,10 @@ class TestMath:
 
 		fn = calculate.transpile()
 		code = emit(fn)
-		assert "Math.sin(x)" in code
-		assert "Math.cos(x)" in code
-		assert "Math.sqrt(x)" in code
-		assert "Math.pow(x, 2)" in code
+		assert (
+			code
+			== "function calculate_1(x) {\nreturn Math.sin(x) + Math.cos(x) + Math.sqrt(x) + Math.pow(x, 2);\n}"
+		)
 
 	def test_math_from_js2_import(self):
 		# Use module-level Math import
@@ -111,7 +112,7 @@ class TestMath:
 
 		fn = use_math.transpile()
 		code = emit(fn)
-		assert "Math.floor(x)" in code
+		assert code == "function use_math_1(x) {\nreturn Math.floor(x);\n}"
 
 
 # =============================================================================
@@ -140,9 +141,10 @@ class TestConsole:
 
 		fn = log_all.transpile()
 		code = emit(fn)
-		assert "console.log(msg)" in code
-		assert "console.error(msg)" in code
-		assert "console.warn(msg)" in code
+		assert (
+			code
+			== "function log_all_1(msg) {\nconsole.log(msg);\nconsole.error(msg);\nconsole.warn(msg);\n}"
+		)
 
 
 # =============================================================================
@@ -179,8 +181,10 @@ class TestJSON:
 
 		fn = round_trip.transpile()
 		code = emit(fn)
-		assert "JSON.parse" in code
-		assert "JSON.stringify" in code
+		assert (
+			code
+			== "function round_trip_1(obj) {\nreturn JSON.parse(JSON.stringify(obj));\n}"
+		)
 
 
 # =============================================================================
@@ -197,8 +201,10 @@ class TestNumber:
 
 		fn = check_number.transpile()
 		code = emit(fn)
-		assert "Number.isFinite(x)" in code
-		assert "Number.isNaN(x)" in code
+		assert (
+			code
+			== "function check_number_1(x) {\nreturn Number.isFinite(x) && !Number.isNaN(x);\n}"
+		)
 
 	def test_number_constants(self):
 		# Use module-level Number import
@@ -208,9 +214,10 @@ class TestNumber:
 
 		fn = get_constants.transpile()
 		code = emit(fn)
-		assert "Number.MAX_SAFE_INTEGER" in code
-		assert "Number.MIN_SAFE_INTEGER" in code
-		assert "Number.EPSILON" in code
+		assert (
+			code
+			== "function get_constants_1() {\nreturn [Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, Number.EPSILON];\n}"
+		)
 
 	def test_number_namespace(self):
 		# Use module-level Number import
@@ -236,7 +243,10 @@ class TestString:
 
 		fn = make_string.transpile()
 		code = emit(fn)
-		assert "String.fromCharCode(65, 66, 67)" in code
+		assert (
+			code
+			== "function make_string_1() {\nreturn String.fromCharCode(65, 66, 67);\n}"
+		)
 
 	def test_string_constructor(self):
 		@javascript
@@ -245,7 +255,7 @@ class TestString:
 
 		fn = to_string.transpile()
 		code = emit(fn)
-		assert "new String(x)" in code
+		assert code == "function to_string_1(x) {\nreturn new String(x);\n}"
 
 
 # =============================================================================
@@ -261,7 +271,7 @@ class TestArray:
 
 		fn = make_array.transpile()
 		code = emit(fn)
-		assert "new Array(1, 2, 3)" in code
+		assert code == "function make_array_1() {\nreturn new Array(1, 2, 3);\n}"
 
 	def test_array_static_methods(self):
 		@javascript
@@ -271,8 +281,10 @@ class TestArray:
 
 		fn = check_and_create.transpile()
 		code = emit(fn)
-		assert "Array.isArray(x)" in code
-		assert "Array.from(x)" in code
+		assert (
+			code
+			== "function check_and_create_1(x) {\nif (Array.isArray(x)) {\nreturn Array.from(x);\n}\n}"
+		)
 
 	def test_array_from_js2_import(self):
 		@javascript
@@ -281,7 +293,7 @@ class TestArray:
 
 		fn = check_array.transpile()
 		code = emit(fn)
-		assert "Array.isArray(x)" in code
+		assert code == "function check_array_1(x) {\nreturn Array.isArray(x);\n}"
 
 
 # =============================================================================
@@ -318,10 +330,10 @@ class TestSet:
 
 		fn = set_ops.transpile()
 		code = emit(fn)
-		assert "new Set([1, 2, 3])" in code
-		assert ".add(4)" in code
-		assert ".delete(1)" in code
-		assert ".has(2)" in code
+		assert (
+			code
+			== "function set_ops_1() {\nlet s = new Set([1, 2, 3]);\ns.add(4);\ns.delete(1);\nreturn s.has(2);\n}"
+		)
 
 
 # =============================================================================
@@ -357,9 +369,10 @@ class TestMap:
 
 		fn = map_ops.transpile()
 		code = emit(fn)
-		assert 'new Map([["a", 1], ["b", 2]])' in code
-		assert '.set("c", 3)' in code
-		assert '.get("a")' in code
+		assert (
+			code
+			== 'function map_ops_1() {\nlet m = new Map([["a", 1], ["b", 2]]);\nm.set("c", 3);\nreturn m.get("a");\n}'
+		)
 
 
 # =============================================================================
@@ -394,9 +407,10 @@ class TestDate:
 
 		fn = date_ops.transpile()
 		code = emit(fn)
-		assert "new Date()" in code
-		assert ".getTime()" in code
-		assert ".getFullYear()" in code
+		assert (
+			code
+			== "function date_ops_1() {\nlet d = new Date();\nreturn [d.getTime(), d.getFullYear()];\n}"
+		)
 
 
 # =============================================================================
@@ -412,7 +426,10 @@ class TestPromise:
 
 		fn = make_promise.transpile()
 		code = emit(fn)
-		assert "new Promise" in code
+		assert (
+			code
+			== "function make_promise_1() {\nreturn new Promise((resolve, reject) => resolve(42));\n}"
+		)
 
 	def test_promise_static_methods(self):
 		@javascript
@@ -421,8 +438,10 @@ class TestPromise:
 
 		fn = promise_ops.transpile()
 		code = emit(fn)
-		assert "Promise.resolve(42)" in code
-		assert 'Promise.reject("error")' in code
+		assert (
+			code
+			== 'function promise_ops_1() {\nreturn [Promise.resolve(42), Promise.reject("error")];\n}'
+		)
 
 	def test_promise_methods(self):
 		@javascript
@@ -432,8 +451,10 @@ class TestPromise:
 
 		fn = promise_chain.transpile()
 		code = emit(fn)
-		assert "Promise.resolve(1)" in code
-		assert ".then" in code
+		assert (
+			code
+			== "function promise_chain_1() {\nlet p = Promise.resolve(1);\nreturn p.then(x => x + 1);\n}"
+		)
 
 
 # =============================================================================
@@ -460,9 +481,10 @@ class TestError:
 
 		fn = make_errors.transpile()
 		code = emit(fn)
-		assert 'new TypeError("type")' in code
-		assert 'new RangeError("range")' in code
-		assert 'new ReferenceError("ref")' in code
+		assert (
+			code
+			== 'function make_errors_1() {\nreturn [new TypeError("type"), new RangeError("range"), new ReferenceError("ref")];\n}'
+		)
 
 
 # =============================================================================
@@ -491,9 +513,10 @@ class TestRegExp:
 
 		fn = regexp_ops.transpile()
 		code = emit(fn)
-		assert "new RegExp(pattern)" in code
-		assert ".test(text)" in code
-		assert ".exec(text)" in code
+		assert (
+			code
+			== "function regexp_ops_1(pattern, text) {\nlet re = new RegExp(pattern);\nreturn [re.test(text), re.exec(text)];\n}"
+		)
 
 
 # =============================================================================
@@ -513,9 +536,10 @@ class TestObject:
 
 		fn = object_ops.transpile()
 		code = emit(fn)
-		assert "Object.keys(obj)" in code
-		assert "Object.values(obj)" in code
-		assert "Object.entries(obj)" in code
+		assert (
+			code
+			== "function object_ops_1(obj) {\nreturn [Object.keys(obj), Object.values(obj), Object.entries(obj)];\n}"
+		)
 
 	def test_object_assign(self):
 		@javascript
@@ -524,7 +548,10 @@ class TestObject:
 
 		fn = merge_objects.transpile()
 		code = emit(fn)
-		assert "Object.assign(target, source)" in code
+		assert (
+			code
+			== "function merge_objects_1(target, source) {\nreturn Object.assign(target, source);\n}"
+		)
 
 	def test_object_is(self):
 		@javascript
@@ -533,7 +560,7 @@ class TestObject:
 
 		fn = same_value.transpile()
 		code = emit(fn)
-		assert "Object.is(a, b)" in code
+		assert code == "function same_value_1(a, b) {\nreturn Object.is(a, b);\n}"
 
 
 # =============================================================================
@@ -560,10 +587,10 @@ class TestWeakMap:
 
 		fn = weakmap_ops.transpile()
 		code = emit(fn)
-		assert "new WeakMap()" in code
-		assert ".set(key, value)" in code
-		assert ".get(key)" in code
-		assert ".has(key)" in code
+		assert (
+			code
+			== "function weakmap_ops_1(key, value) {\nlet wm = new WeakMap();\nwm.set(key, value);\nreturn [wm.get(key), wm.has(key)];\n}"
+		)
 
 
 # =============================================================================
@@ -590,10 +617,10 @@ class TestWeakSet:
 
 		fn = weakset_ops.transpile()
 		code = emit(fn)
-		assert "new WeakSet()" in code
-		assert ".add(value)" in code
-		assert ".has(value)" in code
-		assert ".delete(value)" in code
+		assert (
+			code
+			== "function weakset_ops_1(value) {\nlet ws = new WeakSet();\nws.add(value);\nreturn [ws.has(value), ws.delete(value)];\n}"
+		)
 
 
 # =============================================================================
@@ -609,8 +636,10 @@ class TestWindow:
 
 		fn = get_dimensions.transpile()
 		code = emit(fn)
-		assert "window.innerWidth" in code
-		assert "window.innerHeight" in code
+		assert (
+			code
+			== "function get_dimensions_1() {\nreturn [window.innerWidth, window.innerHeight];\n}"
+		)
 
 	def test_window_methods(self):
 		# Use module-level window import
@@ -621,8 +650,10 @@ class TestWindow:
 
 		fn = window_ops.transpile()
 		code = emit(fn)
-		assert "window.alert(msg)" in code
-		assert "window.setTimeout" in code
+		assert (
+			code
+			== "function window_ops_1(msg) {\nwindow.alert(msg);\nwindow.setTimeout(() => null, 1000);\n}"
+		)
 
 
 # =============================================================================
@@ -639,8 +670,10 @@ class TestDocument:
 
 		fn = query_elements.transpile()
 		code = emit(fn)
-		assert "document.querySelector(selector)" in code
-		assert "document.querySelectorAll(selector)" in code
+		assert (
+			code
+			== "function query_elements_1(selector) {\nreturn [document.querySelector(selector), document.querySelectorAll(selector)];\n}"
+		)
 
 	def test_document_create_methods(self):
 		# Use module-level document import
@@ -650,8 +683,10 @@ class TestDocument:
 
 		fn = create_elements.transpile()
 		code = emit(fn)
-		assert 'document.createElement("div")' in code
-		assert 'document.createTextNode("text")' in code
+		assert (
+			code
+			== 'function create_elements_1() {\nreturn [document.createElement("div"), document.createTextNode("text")];\n}'
+		)
 
 
 # =============================================================================
@@ -667,9 +702,10 @@ class TestNavigator:
 
 		fn = get_info.transpile()
 		code = emit(fn)
-		assert "navigator.userAgent" in code
-		assert "navigator.language" in code
-		assert "navigator.onLine" in code
+		assert (
+			code
+			== "function get_info_1() {\nreturn [navigator.userAgent, navigator.language, navigator.onLine];\n}"
+		)
 
 	def test_navigator_methods(self):
 		# Use module-level navigator import
@@ -680,8 +716,10 @@ class TestNavigator:
 
 		fn = navigator_ops.transpile()
 		code = emit(fn)
-		assert "navigator.vibrate" in code
-		assert "navigator.canShare" in code
+		assert (
+			code
+			== 'function navigator_ops_1() {\nnavigator.vibrate([100, 50, 100]);\nreturn navigator.canShare(new Map([["title", "test"]]));\n}'
+		)
 
 
 # =============================================================================
@@ -706,7 +744,7 @@ class TestDirectImports:
 
 		fn = make_array.transpile()
 		code = emit(fn)
-		assert "new Array(1, 2, 3)" in code
+		assert code == "function make_array_1() {\nreturn new Array(1, 2, 3);\n}"
 
 	def test_direct_import_math(self):
 		@javascript
@@ -715,7 +753,7 @@ class TestDirectImports:
 
 		fn = use_math.transpile()
 		code = emit(fn)
-		assert "Math.floor(x)" in code
+		assert code == "function use_math_1(x) {\nreturn Math.floor(x);\n}"
 
 	def test_direct_import_console(self):
 		@javascript
@@ -724,7 +762,7 @@ class TestDirectImports:
 
 		fn = log.transpile()
 		code = emit(fn)
-		assert "console.log(msg)" in code
+		assert code == "function log_1(msg) {\nreturn console.log(msg);\n}"
 
 	def test_direct_import_promise(self):
 		@javascript
@@ -733,7 +771,7 @@ class TestDirectImports:
 
 		fn = make_promise.transpile()
 		code = emit(fn)
-		assert "Promise.resolve(42)" in code
+		assert code == "function make_promise_1() {\nreturn Promise.resolve(42);\n}"
 
 
 # =============================================================================

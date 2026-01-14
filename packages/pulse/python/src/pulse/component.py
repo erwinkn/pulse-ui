@@ -4,6 +4,7 @@ from collections.abc import Callable
 from inspect import Parameter, signature
 from typing import Any, Generic, ParamSpec, TypeVar, overload, override
 
+from pulse.code_analysis import is_stub_function
 from pulse.hooks.init import rewrite_init_blocks
 from pulse.transpiler.nodes import (
 	Children,
@@ -20,21 +21,38 @@ _T = TypeVar("_T")
 
 
 class Component(Generic[P]):
-	fn: Callable[P, Any]
+	_raw_fn: Callable[P, Any]
+	_fn: Callable[P, Any] | None
 	name: str
-	_takes_children: bool
+	_takes_children: bool | None
 
 	def __init__(self, fn: Callable[P, Any], name: str | None = None) -> None:
-		self.fn = rewrite_init_blocks(fn)
+		self._raw_fn = fn
 		self.name = name or _infer_component_name(fn)
-		self._takes_children = _takes_children(fn)
+		# Only lazy-init for stubs (avoid heavy work for JS module bindings)
+		# Real components need immediate rewrite for early error detection
+		if is_stub_function(fn):
+			self._fn = None
+			self._takes_children = None
+		else:
+			self._fn = rewrite_init_blocks(fn)
+			self._takes_children = _takes_children(fn)
+
+	@property
+	def fn(self) -> Callable[P, Any]:
+		if self._fn is None:
+			self._fn = rewrite_init_blocks(self._raw_fn)
+			self._takes_children = _takes_children(self._raw_fn)
+		return self._fn
 
 	def __call__(self, *args: P.args, **kwargs: P.kwargs) -> PulseNode:
 		key = kwargs.get("key")
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")
 
-		if self._takes_children and args:
+		# Access self.fn to trigger lazy init (sets _takes_children)
+		_ = self.fn
+		if self._takes_children is True and args:
 			flattened = flatten_children(
 				args,  # pyright: ignore[reportArgumentType]
 				parent_name=f"<{self.name}>",
@@ -46,7 +64,7 @@ class Component(Generic[P]):
 
 	@override
 	def __repr__(self) -> str:
-		return f"Component(name={self.name!r}, fn={_callable_qualname(self.fn)!r})"
+		return f"Component(name={self.name!r}, fn={_callable_qualname(self._raw_fn)!r})"
 
 	@override
 	def __str__(self) -> str:

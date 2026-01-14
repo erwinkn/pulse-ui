@@ -522,10 +522,10 @@ class TestArrowEmit:
 			],
 		)
 		result = emit(arrow)
-		assert "x => {" in result
-		assert "if (x > 0)" in result
-		assert 'return "positive";' in result
-		assert 'return "non-positive";' in result
+		assert (
+			result
+			== 'x => { if (x > 0) {\nreturn "positive";\n} else {\nreturn "non-positive";\n} }'
+		)
 
 
 # =============================================================================
@@ -665,9 +665,7 @@ class TestElementEmit:
 	def test_self_closing_with_props(self):
 		elem = Element("img", {"src": "/img.png", "alt": "Image"})
 		result = emit(elem)
-		assert 'src="/img.png"' in result
-		assert 'alt="Image"' in result
-		assert result.endswith(" />")
+		assert result == '<img src="/img.png" alt="Image" />'
 
 	def test_with_text_child(self):
 		elem = Element("p", children=["Hello world"])
@@ -687,8 +685,7 @@ class TestElementEmit:
 	def test_with_key(self):
 		elem = Element("li", key="item-1", children=["Item 1"])
 		result = emit(elem)
-		assert 'key="item-1"' in result
-		assert result.startswith("<li")
+		assert result == '<li key="item-1">Item 1</li>'
 
 	def test_props_with_primitives(self):
 		elem = Element(
@@ -696,31 +693,30 @@ class TestElementEmit:
 			{"disabled": True, "value": 42, "hidden": False, "placeholder": None},
 		)
 		result = emit(elem)
-		assert "disabled={true}" in result
-		assert "value={42}" in result
-		assert "hidden={false}" in result
-		assert "placeholder={null}" in result
+		assert (
+			result
+			== "<input disabled={true} value={42} hidden={false} placeholder={null} />"
+		)
 
 	def test_props_with_expression(self):
 		elem = Element("button", {"onClick": Identifier("handleClick")})
 		result = emit(elem)
-		assert "onClick={handleClick}" in result
+		assert result == "<button onClick={handleClick} />"
 
 	def test_props_with_value_node(self):
 		elem = Element("div", {"data": Value({"a": 1, "b": 2})})
 		result = emit(elem)
-		assert 'data={{"a": 1, "b": 2}}' in result
+		assert result == '<div data={{"a": 1, "b": 2}} />'
 
 	def test_jsx_text_escaping(self):
 		elem = Element("p", children=["<script>alert('xss')</script>"])
 		result = emit(elem)
-		assert "&lt;script&gt;" in result
-		assert "&lt;/script&gt;" in result
+		assert result == "<p>&lt;script&gt;alert('xss')&lt;/script&gt;</p>"
 
 	def test_jsx_attribute_escaping(self):
 		elem = Element("div", {"title": 'say "hello"'})
 		result = emit(elem)
-		assert 'title="say &quot;hello&quot;"' in result
+		assert result == '<div title="say &quot;hello&quot;" />'
 
 	def test_child_number(self):
 		elem = Element("span", children=[42])
@@ -780,11 +776,10 @@ class TestElementExprTag:
 			children=[Element("div", children=["Content"])],
 		)
 		result = emit(elem)
-		assert "<App.Layout" in result
-		assert "sidebar={true}" in result
-		assert 'theme="dark"' in result
-		assert "<div>Content</div>" in result
-		assert "</App.Layout>" in result
+		assert (
+			result
+			== '<App.Layout sidebar={true} theme="dark"><div>Content</div></App.Layout>'
+		)
 
 
 class TestElementWithChildren:
@@ -809,8 +804,7 @@ class TestElementWithChildren:
 		li = Element("li", key="item-1")
 		result = li.with_children(["text"])
 		output = emit(result)
-		assert 'key="item-1"' in output
-		assert "text" in output
+		assert output == '<li key="item-1">text</li>'
 
 	def test_with_children_multiple(self):
 		div = Element("div")
@@ -895,9 +889,7 @@ class TestClientComponentEmit:
 	def test_client_component_with_props(self):
 		elem = Element("$$Button", {"variant": "primary", "size": "lg"})
 		result = emit(elem)
-		assert result.startswith("<Button ")
-		assert 'variant="primary"' in result
-		assert 'size="lg"' in result
+		assert result == '<Button variant="primary" size="lg" />'
 
 	def test_client_component_with_children(self):
 		elem = Element("$$Card", children=[Element("p", children=["Card content"])])
@@ -915,13 +907,13 @@ class TestSpreadPropsEmit:
 	def test_spread_in_props(self):
 		elem = Element("div", {"spreadProps": Spread(Identifier("props"))})
 		result = emit(elem)
-		assert "{...props}" in result
+		assert result == "<div {...props} />"
 
 	def test_spread_call_in_props(self):
 		call = Call(Identifier("getProps"), [])
 		elem = Element("div", {"spreadCall": Spread(call)})
 		result = emit(elem)
-		assert "{...getProps()}" in result
+		assert result == "<div {...getProps()} />"
 
 
 # =============================================================================
@@ -956,7 +948,7 @@ class TestNestedElementPropEmit:
 		icon = Element("Icon", {"name": "check"})
 		elem = Element("Button", {"icon": icon})
 		result = emit(elem)
-		assert "icon={<Icon" in result
+		assert result == '<Button icon={<Icon name="check" />} />'
 
 
 # =============================================================================
@@ -1014,9 +1006,10 @@ class TestComplexExpressionEmit:
 		middle = Element("div", {"className": "middle"}, [inner])
 		outer = Element("section", {"className": "outer"}, [middle])
 		result = emit(outer)
-		assert '<section className="outer">' in result
-		assert '<div className="middle">' in result
-		assert '<span className="inner">Deep</span>' in result
+		assert (
+			result
+			== '<section className="outer"><div className="middle"><span className="inner">Deep</span></div></section>'
+		)
 
 
 # =============================================================================
@@ -1059,7 +1052,7 @@ class TestEdgeCasesEmit:
 		dt_value = dt.datetime(2024, 1, 15, 12, 30, 0, tzinfo=dt.timezone.utc)
 		elem = Element("span", children=[dt_value])
 		result = emit(elem)
-		assert "{new Date(" in result
+		assert result == "<span>{new Date(1705321800000)}</span>"
 
 
 # =============================================================================

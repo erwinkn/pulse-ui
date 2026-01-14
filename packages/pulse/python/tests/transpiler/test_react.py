@@ -265,11 +265,10 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "return <Button_" in code
-		# Verify IIFE-wrapped spread expression (evaluates spread_expr once)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_3(props) {\n"
+			"return <Button_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)} />;\n"
+			"}"
 		)
 
 	def test_jsx_spread_with_override(self):
@@ -284,10 +283,11 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)}" in code
+		assert code == (
+			"function render_3(base) {\n"
+			"return <Button_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)} disabled={true} />;\n"
+			"}"
 		)
-		assert "disabled={true}" in code
 
 	def test_jsx_override_before_spread(self):
 		"""Test Component(size="lg", **props) includes size and Map check."""
@@ -301,10 +301,10 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert 'size="lg"' in code
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_3(props) {\n"
+			'return <Button_1 size="lg" {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)} />;\n'
+			"}"
 		)
 
 	def test_jsx_multiple_spreads(self):
@@ -319,9 +319,11 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(a)}" in code
-		assert "padding={10}" in code
-		assert "{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(b)}" in code
+		assert code == (
+			"function render_3(a, b) {\n"
+			"return <Box_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(a)} padding={10} {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(b)} />;\n"
+			"}"
+		)
 
 	def test_jsx_spread_with_children(self):
 		"""Test Component(**props)["child"] includes Map check and children."""
@@ -335,12 +337,11 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_3(props) {\n"
+			'return <Button_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}>{"Click me"}</Button_1>;\n'
+			"}"
 		)
-		assert "Click me" in code
-		assert "</Button_" in code
 
 	def test_jsx_spread_dict_literal(self):
 		"""Test Component(**{"disabled": True}) converts Map to object at runtime.
@@ -358,10 +359,10 @@ class TestJsxSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		# Dict literal becomes new Map, which is then converted to object for spread
-		# IIFE wraps the Map for single evaluation
-		assert (
-			"($s => $s instanceof Map ? Object.fromEntries($s) : $s)(new Map([" in code
+		assert code == (
+			"function render_3() {\n"
+			'return <Button_1 {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(new Map([["disabled", true], ["size", "lg"]]))} />;\n'
+			"}"
 		)
 
 
@@ -378,9 +379,10 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_1(props) {\n"
+			"return <div {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)} />;\n"
+			"}"
 		)
 
 	def test_div_spread_with_children(self):
@@ -393,12 +395,11 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}"
-			in code
+		assert code == (
+			"function render_1(props) {\n"
+			'return <div {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(props)}>{"Hello"}</div>;\n'
+			"}"
 		)
-		assert "Hello" in code
-		assert "</div>" in code
 
 	def test_input_spread_with_override(self):
 		"""Test input(**base, type="text") includes Map check and override."""
@@ -410,10 +411,11 @@ class TestHtmlTagSpread:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert (
-			"{...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)}" in code
+		assert code == (
+			"function render_1(base) {\n"
+			'return <input {...($s => $s instanceof Map ? Object.fromEntries($s) : $s)(base)} type="text" />;\n'
+			"}"
 		)
-		assert 'type="text"' in code
 
 
 # =============================================================================
@@ -996,5 +998,158 @@ class TestPulseJsImportReact:
 			return count
 
 		code = transpile_with_imports(use_react_namespace)
-		assert 'from "react"' in code, f"Expected react import, got:\n{code}"
-		assert "useState" in code, f"Expected useState, got:\n{code}"
+		assert code == (
+			'import { useState as useState_2 } from "react";\n\n'
+			"function use_react_namespace_1() {\n"
+			"const $tmp0 = useState_2(0);\n"
+			"let count = $tmp0[0];\n"
+			"let set_count = $tmp0[1];\n"
+			"return count;\n"
+			"}"
+		)
+
+
+# =============================================================================
+# lazy() Function
+# =============================================================================
+
+
+class TestLazy:
+	"""Test React.lazy binding works both at definition time and in @javascript."""
+
+	def test_lazy_definition_time(self):
+		"""lazy(factory) at definition time creates a usable component."""
+		from pulse.js.react import lazy
+
+		# Create lazy component at definition time
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		LazyChart = lazy(factory)
+
+		# Should be a Jsx wrapping a Constant
+		from pulse.transpiler.nodes import Jsx
+
+		assert isinstance(LazyChart, Jsx)
+
+	def test_lazy_as_reference_in_javascript(self):
+		"""lazy used as reference in @javascript produces correct import."""
+		from pulse.js.react import lazy
+
+		@javascript
+		def pass_lazy_to_fn(some_fn):
+			return some_fn(lazy)
+
+		fn = pass_lazy_to_fn.transpile()
+		code = emit(fn)
+		# Note: lazy ID varies due to module-level caching across tests
+		assert code.startswith("function pass_lazy_to_fn_1(some_fn) {\n")
+		assert "return some_fn(lazy_" in code
+		assert code.endswith(");\n}")
+
+	def test_lazy_called_in_javascript(self):
+		"""lazy(factory) called in @javascript creates Constant+Jsx."""
+		from pulse.js.react import lazy
+		from pulse.transpiler.function import CONSTANT_REGISTRY
+
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+
+		@javascript
+		def create_lazy():
+			LazyComp = lazy(factory)
+			return LazyComp
+
+		fn = create_lazy.transpile()
+		code = emit(fn)
+
+		# The function body should reference a constant (created by lazy())
+		assert "_const_" in code, f"Expected constant reference, got:\n{code}"
+
+		# Verify a constant was created with the lazy call
+		# Find constants that contain a lazy call
+		lazy_constants = [
+			c for c in CONSTANT_REGISTRY.values() if "lazy" in emit(c.expr).lower()
+		]
+		assert len(lazy_constants) > 0, "Expected constant with lazy call to be created"
+
+		# The constant's expression should contain the lazy call with Chart
+		const_expr = emit(lazy_constants[-1].expr)
+		assert "lazy_" in const_expr, (
+			f"Expected lazy_ in constant expr, got: {const_expr}"
+		)
+		assert "Chart_" in const_expr, (
+			f"Expected Chart_ in constant expr, got: {const_expr}"
+		)
+
+	def test_lazy_via_react_namespace_reference(self):
+		"""React.lazy used as reference in @javascript."""
+		from pulse.js import React
+
+		@javascript
+		def pass_react_lazy(fn):
+			return fn(React.lazy)
+
+		fn = pass_react_lazy.transpile()
+		code = emit(fn)
+		assert code == ("function pass_react_lazy_1(fn) {\nreturn fn(lazy_2);\n}")
+
+	def test_lazy_via_react_namespace_call(self):
+		"""React.lazy(factory) called in @javascript."""
+		from pulse.js import React
+
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+
+		@javascript
+		def create_lazy_via_react():
+			LazyComp = React.lazy(factory)
+			return LazyComp
+
+		fn = create_lazy_via_react.transpile()
+		code = emit(fn)
+		assert code == (
+			"function create_lazy_via_react_3() {\n"
+			"let LazyComp = lazy_4(Chart_2);\n"
+			"return LazyComp;\n"
+			"}"
+		)
+
+	def test_lazy_component_in_rendered_tree(self):
+		"""Lazy component used in a rendered JSX tree."""
+		from pulse.dom.tags import div
+		from pulse.js.react import Suspense, lazy
+
+		# Create lazy component at definition time
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		LazyChart = lazy(factory)
+
+		@javascript
+		def App():
+			return div()[Suspense(fallback=div()["Loading..."])[LazyChart()]]
+
+		fn = App.transpile()
+		code = emit(fn)
+
+		# The lazy component should be referenced via its constant ID
+		assert "_const_" in code, f"Expected constant reference, got:\n{code}"
+		# Should have JSX structure with the lazy component
+		assert "<_const_" in code, f"Expected JSX element with constant, got:\n{code}"
+		# Suspense should be present
+		assert "Suspense_" in code, f"Expected Suspense, got:\n{code}"
+
+	def test_lazy_component_with_props(self):
+		"""Lazy component with props in rendered tree."""
+		from pulse.js.react import lazy
+
+		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		LazyChart = lazy(factory)
+
+		@javascript
+		def render_with_props():
+			return LazyChart(data=[1, 2, 3], title="My Chart")
+
+		fn = render_with_props.transpile()
+		code = emit(fn)
+
+		# Should have the lazy component as JSX
+		assert "<_const_" in code, f"Expected JSX element, got:\n{code}"
+		# Should have props
+		assert "data=" in code, f"Expected data prop, got:\n{code}"
+		assert "title=" in code, f"Expected title prop, got:\n{code}"

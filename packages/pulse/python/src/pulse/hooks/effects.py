@@ -20,6 +20,15 @@ class InlineEffectHookState(HookState):
 		super().on_render_start(render_cycle)
 		self._seen_this_render.clear()
 
+	@override
+	def on_render_end(self, render_cycle: int) -> None:
+		super().on_render_end(render_cycle)
+		# Dispose effects that weren't seen this render (e.g., inside conditionals that became false)
+		for key in list(self.effects.keys()):
+			if key not in self._seen_this_render:
+				self.effects[key].dispose()
+				del self.effects[key]
+
 	def get_or_create(
 		self,
 		identity: tuple[Any, int],

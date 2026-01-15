@@ -150,9 +150,13 @@ def effect(
 				interval=interval,
 			)
 
-		if len(params) > 0:
+		# Allow params with defaults (used for variable binding in loops)
+		# Reject only if there are required params (no default)
+		required_params = [p for p in params if p.default is inspect.Parameter.empty]
+		if required_params:
 			raise TypeError(
-				f"@effect: Function '{func.__name__}' must take no arguments or a single 'self' argument"
+				f"@effect: Function '{func.__name__}' must take no arguments, a single 'self' argument, "
+				+ "or only arguments with defaults (for variable binding)"
 			)
 
 		# Check if we're in a hook context (component render)

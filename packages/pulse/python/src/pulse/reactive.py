@@ -338,7 +338,7 @@ class Effect(Disposable):
 			self.cleanup_fn()
 		for dep in self.deps:
 			dep.obs.remove(self)
-		if self.parent:
+		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
 	def _schedule_interval(self):
@@ -702,7 +702,7 @@ class AsyncEffect(Effect):
 			self.cleanup_fn()
 		for dep in self.deps:
 			dep.obs.remove(self)
-		if self.parent:
+		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
 

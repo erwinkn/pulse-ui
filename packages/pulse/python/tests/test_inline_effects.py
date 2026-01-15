@@ -615,6 +615,71 @@ class TestEdgeCases:
 		assert len(effects) == 2
 		assert effects[0] is effects[1]
 
+	def test_conditional_effect_disposed_when_condition_becomes_false(self):
+		"""When a conditional becomes false, the effect inside should be disposed."""
+		cleanups: list[str] = []
+		flag = Signal(True)
+
+		@ps.component
+		def Comp():
+			if flag():
+
+				@ps.effect(immediate=True)
+				def my_effect():
+					def cleanup():
+						cleanups.append("disposed")
+
+					return cleanup
+
+			return None
+
+		ctx = HookContext()
+		with ctx:
+			Comp.fn()
+
+		assert cleanups == []  # No cleanup yet
+
+		# Change condition to false
+		flag.write(False)
+		with ctx:
+			Comp.fn()
+
+		# Effect should have been disposed and cleanup should have run
+		assert cleanups == ["disposed"]
+
+	def test_conditional_effect_not_triggered_after_disposed(self):
+		"""A disposed conditional effect should not run when its dependencies change."""
+		runs: list[int] = []
+		flag = Signal(True)
+		counter = Signal(0)
+
+		@ps.component
+		def Comp():
+			if flag():
+
+				@ps.effect(immediate=True)
+				def my_effect():
+					runs.append(counter())
+
+			return None
+
+		ctx = HookContext()
+		with ctx:
+			Comp.fn()
+
+		assert runs == [0]  # Effect ran once
+
+		# Disable the effect
+		flag.write(False)
+		with ctx:
+			Comp.fn()
+
+		# Change counter - effect should NOT run since it's disposed
+		with Batch():
+			counter.write(1)
+
+		assert runs == [0]  # Effect did NOT run again
+
 	def test_effect_with_closure_captures_current_values(self):
 		captured: list[int] = []
 

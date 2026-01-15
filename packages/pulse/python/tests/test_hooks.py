@@ -2,7 +2,6 @@ from typing import override
 
 import pytest
 from pulse.hooks.core import HookContext
-from pulse.hooks.effects import effects
 from pulse.hooks.setup import setup, setup_key
 from pulse.hooks.stable import stable
 from pulse.hooks.state import state
@@ -185,21 +184,6 @@ def test_state_disposes_all_on_unmount():
 	assert state_a.dispose_calls == 1
 	assert state_b.dispose_calls == 1
 	assert state_c.dispose_calls == 1
-
-
-def test_effects_allows_single_call_and_key_changes():
-	ctx = HookContext()
-
-	with ctx:
-		effects(lambda: None)
-		with pytest.raises(RuntimeError):
-			effects(lambda: None)
-
-	with ctx:
-		effects(lambda: None, key="alpha")
-
-	with ctx:
-		effects(lambda: None, key="beta")
 
 
 def test_stable_returns_consistent_wrappers():

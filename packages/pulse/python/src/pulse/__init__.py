@@ -1205,9 +1205,8 @@ from pulse.hooks.core import (
 	hooks as hooks,
 )
 
-# Hooks - Effects
-from pulse.hooks.effects import EffectsHookState as EffectsHookState
-from pulse.hooks.effects import effects as effects
+# Hooks - Effects (import to register inline_effect_hook before registry locks)
+from pulse.hooks.effects import InlineEffectHookState as InlineEffectHookState
 
 # Hooks - Init
 from pulse.hooks.init import (

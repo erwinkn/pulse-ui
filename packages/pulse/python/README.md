@@ -136,10 +136,10 @@ def counter():
 
 ### Hooks
 
-Server-side hooks via `ps.states`, `ps.effects`, `ps.setup`:
-- `states.use(initial)` - reactive state
-- `effects.use(fn, deps)` - side effects
-- `setup.use(fn)` - one-time initialization
+Server-side hooks via `ps.state`, `ps.effect`, `ps.setup`:
+- `ps.state(key, StateClass)` - reactive state
+- `@ps.effect` - side effects decorator
+- `ps.setup(fn)` - one-time initialization
 
 ### Queries
 

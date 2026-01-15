@@ -46,14 +46,14 @@ class JsExecError(Exception):
 
 # Module-level convenience wrapper
 @overload
-def run_js(expr: Expr, *, result: Literal[True]) -> asyncio.Future[Any]: ...
+def run_js(expr: Any, *, result: Literal[True]) -> asyncio.Future[Any]: ...
 
 
 @overload
-def run_js(expr: Expr, *, result: Literal[False] = ...) -> None: ...
+def run_js(expr: Any, *, result: Literal[False] = ...) -> None: ...
 
 
-def run_js(expr: Expr, *, result: bool = False) -> asyncio.Future[Any] | None:
+def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
 	"""Execute JavaScript on the client. Convenience wrapper for RenderSession.run_js()."""
 	ctx = PulseContext.get()
 	if ctx.render is None:
@@ -545,20 +545,20 @@ class RenderSession:
 
 	@overload
 	def run_js(
-		self, expr: Expr, *, result: Literal[True], timeout: float = ...
+		self, expr: Any, *, result: Literal[True], timeout: float = ...
 	) -> asyncio.Future[object]: ...
 
 	@overload
 	def run_js(
 		self,
-		expr: Expr,
+		expr: Any,
 		*,
 		result: Literal[False] = ...,
 		timeout: float = ...,
 	) -> None: ...
 
 	def run_js(
-		self, expr: Expr, *, result: bool = False, timeout: float = 10.0
+		self, expr: Any, *, result: bool = False, timeout: float = 10.0
 	) -> asyncio.Future[object] | None:
 		"""Execute JavaScript on the client.
 
@@ -590,6 +590,11 @@ class RenderSession:
 				pos = await run_js(get_scroll_position(), result=True)
 				print(pos["x"], pos["y"])
 		"""
+		if not isinstance(expr, Expr):
+			raise TypeError(
+				f"run_js() requires an Expr (from @javascript function or pulse.js module), got {type(expr).__name__}"
+			)
+
 		ctx = PulseContext.get()
 		exec_id = next_id()
 

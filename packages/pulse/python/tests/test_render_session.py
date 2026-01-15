@@ -703,7 +703,7 @@ async def test_run_js_timeout():
 
 	# Run JS with result=True and short timeout
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
-		future = session.run_js(get_answer(), result=True, timeout=0.05)  # pyright: ignore[reportArgumentType,reportCallIssue]
+		future = session.run_js(get_answer(), result=True, timeout=0.05)
 
 	assert future is not None
 
@@ -731,7 +731,7 @@ async def test_run_js_success_before_timeout():
 
 	# Run JS with result=True
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
-		future = session.run_js(get_answer(), result=True, timeout=1.0)  # pyright: ignore[reportArgumentType,reportCallIssue]
+		future = session.run_js(get_answer(), result=True, timeout=1.0)
 
 	assert future is not None
 

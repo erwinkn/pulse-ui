@@ -1,0 +1,17 @@
+---
+title: "Sessions"
+---
+
+Session data is per user and stored server-side.
+
+```python
+session = ps.session()
+session["visits"] = (session.get("visits") or 0) + 1
+```
+
+Use `ps.session_id()` and `ps.websocket_id()` for identifiers.
+
+## See also
+
+- [Tutorial: Sessions and Middleware](/docs/tutorial/12-sessions-middleware)
+- [Reference: Context](/docs/reference/pulse/context)

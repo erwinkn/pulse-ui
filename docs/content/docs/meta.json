@@ -1,0 +1,13 @@
+{
+  "title": "Pulse",
+  "pages": [
+    "index",
+    "getting-started",
+    "tutorial",
+    "guide",
+    "cookbook",
+    "reference",
+    "packages",
+    "ai"
+  ]
+}

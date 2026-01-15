@@ -1,0 +1,26 @@
+---
+title: "Install"
+---
+
+1) Install `uv`
+
+2) Install `bun`
+
+3) Sync deps
+
+```bash
+uv sync
+```
+
+4) Run an app
+
+```bash
+uv run pulse run path/to/app.py
+```
+
+If your app uses the generated web client, install web deps in its `web` dir:
+
+```bash
+cd web
+bun i
+```

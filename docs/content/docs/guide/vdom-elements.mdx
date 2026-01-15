@@ -1,0 +1,28 @@
+---
+title: "VDOM and Elements"
+---
+
+Pulse elements are Python functions that describe DOM.
+
+```python
+ps.div(
+    ps.h1("Title"),
+    ps.p("Body"),
+    className="p-6",
+)
+```
+
+Props follow React naming (`className`, `htmlFor`).
+Children can be positional or bracket syntax:
+
+```python
+ps.div(className="...")[
+    ps.h1("Title"),
+    ps.p("Body"),
+]
+```
+
+## See also
+
+- [Tutorial: Basics](/docs/tutorial/01-basics)
+- [Reference: DOM Elements](/docs/reference/pulse/dom)

@@ -1,0 +1,16 @@
+---
+title: "Infinite Scroll"
+---
+
+Use `@ps.infinite_query` with next/prev page params.
+
+```python
+@ps.infinite_query(initial_page_param=0)
+async def feed(self, page_param: int):
+    return PageData(...)
+```
+
+## See also
+
+- [Core Guide: Queries and Mutations](/docs/guide/queries)
+- [Reference: Queries](/docs/reference/pulse/queries)

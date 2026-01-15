@@ -1,0 +1,24 @@
+---
+title: "Routing"
+---
+
+Routes are defined on `App`.
+
+```python
+app = ps.App([
+    ps.Route("/", home),
+    ps.Layout("/app", layout, children=[
+        ps.Route("/settings", settings),
+    ]),
+])
+```
+
+Client helpers:
+- `Link`, `Outlet`
+- `ps.navigate("/path")`
+- `ps.route()` for route info
+
+## See also
+
+- [Core Guide: Routing](/docs/guide/routing)
+- [Reference: Routing](/docs/reference/pulse/routing)

@@ -1,0 +1,22 @@
+---
+title: "JS Interop"
+---
+
+Transpile Python functions to JS.
+
+```python
+@ps.javascript
+def focus(selector: str):
+    document.querySelector(selector).focus()
+
+async def on_click():
+    await ps.run_js(focus("#email"), result=True)
+```
+
+For React components, use `@ps.react_component(Import(...))`.
+
+## See also
+
+- [Core Guide: JS Interop](/docs/guide/js-interop)
+- [Reference: JS Interop](/docs/reference/pulse/js-interop)
+- [Reference: pulse.transpiler](/docs/reference/pulse-transpiler)

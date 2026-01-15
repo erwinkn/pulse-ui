@@ -1,0 +1,18 @@
+---
+title: "Mental Model"
+---
+
+Pulse is server-driven UI.
+
+Flow:
+1) Python renders VDOM
+2) Client receives diff
+3) User events call back to Python
+4) State changes trigger a new render
+
+Render happens per route. Each browser tab has a render session.
+
+## See also
+
+- [Tutorial](/docs/tutorial)
+- [Core Guide: State](/docs/guide/state)

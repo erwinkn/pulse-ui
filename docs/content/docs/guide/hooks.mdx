@@ -1,0 +1,18 @@
+---
+title: "Hooks"
+---
+
+Hooks run once per render.
+
+- `ps.init()` captures locals on first render
+- `ps.setup(fn, *args)` runs once, returns cached value
+- `ps.state(key, factory)` creates a keyed state instance
+- `ps.effects(*fns)` registers effects
+- `ps.stable(key, value)` keeps stable refs
+
+All hooks must be called at most once per render.
+
+## See also
+
+- [Tutorial: Hooks](/docs/tutorial/06-hooks)
+- [Reference: Hooks](/docs/reference/pulse/hooks)

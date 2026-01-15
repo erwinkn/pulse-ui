@@ -1,0 +1,16 @@
+---
+title: "Optimistic Mutation"
+---
+
+Update UI first, then reconcile with server.
+
+```python
+async def rename():
+    state.user.set_data({"id": state.user_id, "name": "Temp"})
+    await state.user.refetch()
+```
+
+## See also
+
+- [Core Guide: Queries and Mutations](/docs/guide/queries)
+- [Reference: Queries](/docs/reference/pulse/queries)

@@ -1,0 +1,16 @@
+---
+title: "Events and Callbacks"
+---
+
+Callbacks can be sync or async. DOM events pass a payload.
+
+```python
+ps.input(onChange=lambda e: st.set_name(e["target"]["value"]))
+```
+
+A callback may accept zero args or all args.
+
+## See also
+
+- [Tutorial: Events](/docs/tutorial/03-events)
+- [Reference: DOM Elements](/docs/reference/pulse/dom)

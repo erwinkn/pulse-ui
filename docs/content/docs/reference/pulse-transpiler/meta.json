@@ -1,0 +1,10 @@
+{
+  "title": "pulse.transpiler",
+  "pages": [
+    "index",
+    "javascript-decorator",
+    "imports-assets",
+    "nodes",
+    "emit-transpile"
+  ]
+}

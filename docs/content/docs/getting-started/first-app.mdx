@@ -1,0 +1,23 @@
+---
+title: "First App"
+---
+
+Minimal app:
+
+```python
+import pulse as ps
+
+@ps.component
+def home():
+    return ps.div("Hello Pulse")
+
+app = ps.App([
+    ps.Route("/", home),
+])
+```
+
+Run it:
+
+```bash
+uv run pulse run path/to/app.py
+```

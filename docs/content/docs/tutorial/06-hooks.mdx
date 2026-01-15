@@ -1,0 +1,27 @@
+---
+title: "Hooks"
+---
+
+Use hooks once per render.
+
+- `ps.init()` keeps locals across renders
+- `ps.setup(fn, *args)` runs once, returns cached result
+- `ps.state(key, factory)` stores a keyed state instance
+- `ps.effects(*fns)` registers effects
+- `ps.stable(key, value)` keeps stable refs
+
+Example: stable callback
+
+```python
+@ps.component
+def editor(on_save):
+    on_save = ps.stable("on_save", on_save)
+    with ps.init():
+        st = EditorState(on_save)
+    ...
+```
+
+## See also
+
+- [Core Guide: Hooks](/docs/guide/hooks)
+- [Reference: Hooks](/docs/reference/pulse/hooks)

@@ -1,0 +1,46 @@
+---
+title: "App"
+description: "Pulse application entry point"
+---
+
+
+`App` is the main server entry point.
+
+Core types:
+- `App`
+- `PulseMode` (`'single-server'` or `'subdomains'`)
+- `CodegenConfig`
+
+Env exports:
+- `PulseEnv`, `env`, `mode()`
+
+App signature (simplified):
+```python
+App(
+  routes=None,
+  codegen=None,
+  middleware=None,
+  plugins=None,
+  cookie=None,
+  session_store=None,
+  server_address=None,
+  dev_server_address='http://localhost:8000',
+  internal_server_address=None,
+  not_found='/not-found',
+  mode='single-server',
+  api_prefix='/_pulse',
+  cors=None,
+  fastapi=None,
+  session_timeout=60.0,
+  connection_status=None,
+)
+```
+
+Key methods:
+- `run(address='localhost', port=8000, find_port=True, reload=True)`
+- `run_codegen(address=None, internal_address=None)`
+- `asgi_factory()`
+- `setup(server_address)`
+
+Plugins:
+- `Plugin` (base class for extensions)

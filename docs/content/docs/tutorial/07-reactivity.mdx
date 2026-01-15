@@ -1,0 +1,27 @@
+---
+title: "Reactivity"
+---
+
+Computed values and effects live on `State`.
+
+```python
+class TodoState(ps.State):
+    text: str = ""
+
+    @ps.computed
+    def upper(self):
+        return self.text.upper()
+
+    @ps.effect
+    def log(self):
+        print(self.text)
+```
+
+Use `ps.Untrack()` to avoid dependency tracking in effects.
+Use `ps.Batch()` to group updates.
+
+## See also
+
+- [Core Guide: Reactivity](/docs/guide/reactivity)
+- [Reference: Reactive Core](/docs/reference/pulse/reactive)
+- [Reference: State](/docs/reference/pulse/state)

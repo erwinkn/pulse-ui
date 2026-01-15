@@ -1,0 +1,23 @@
+{
+  "title": "Pulse",
+  "pages": [
+    "index",
+    "app",
+    "component",
+    "dom",
+    "state",
+    "hooks",
+    "reactive",
+    "queries",
+    "forms",
+    "channels",
+    "middleware",
+    "routing",
+    "serializer",
+    "context",
+    "cookies",
+    "js-interop",
+    "codegen",
+    "cli"
+  ]
+}

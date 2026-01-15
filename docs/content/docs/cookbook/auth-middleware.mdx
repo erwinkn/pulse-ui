@@ -1,0 +1,20 @@
+---
+title: "Auth via Middleware"
+---
+
+Guard connections with middleware.
+
+```python
+class Auth(ps.PulseMiddleware):
+    async def connect(self, *, request, session, next):
+        if not session.get("user"):
+            return ps.Deny()
+        return await next()
+```
+
+Use `session` to store auth state.
+
+## See also
+
+- [Core Guide: Middleware](/docs/guide/middleware)
+- [Reference: Middleware](/docs/reference/pulse/middleware)

@@ -1,0 +1,19 @@
+---
+title: "Imperative JS"
+---
+
+Call client JS from callbacks.
+
+```python
+@ps.javascript
+def alert(msg: str):
+    window.alert(msg)
+
+async def on_click():
+    await ps.run_js(alert("hi"), result=True)
+```
+
+## See also
+
+- [Core Guide: JS Interop](/docs/guide/js-interop)
+- [Reference: JS Interop](/docs/reference/pulse/js-interop)

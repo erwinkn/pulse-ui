@@ -1,0 +1,27 @@
+---
+title: "Sessions and Middleware"
+---
+
+Session data is per user.
+
+```python
+def page():
+    session = ps.session()
+    session["visits"] = (session.get("visits") or 0) + 1
+```
+
+Middleware can short-circuit.
+
+```python
+class Auth(ps.PulseMiddleware):
+    async def connect(self, *, request, session, next):
+        if not session.get("user"):
+            return ps.Deny()
+        return await next()
+```
+
+## See also
+
+- [Core Guide: Sessions](/docs/guide/sessions)
+- [Core Guide: Middleware](/docs/guide/middleware)
+- [Reference: Middleware](/docs/reference/pulse/middleware)

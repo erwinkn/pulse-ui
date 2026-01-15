@@ -1,0 +1,17 @@
+---
+title: "File Upload Forms"
+---
+
+Use `FormData` and `UploadFile`.
+
+```python
+async def on_submit(data: ps.FormData):
+    file = data.get("file")
+    if isinstance(file, ps.UploadFile):
+        content = await file.read()
+```
+
+## See also
+
+- [Core Guide: Forms](/docs/guide/forms)
+- [Reference: Forms](/docs/reference/pulse/forms)

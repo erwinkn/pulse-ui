@@ -1,0 +1,24 @@
+---
+title: "State"
+description: "State and reactive containers"
+---
+
+
+Exports:
+- `State`
+- `computed`, `effect` decorators
+- `ReactiveList`, `ReactiveDict`, `ReactiveSet`
+- `unwrap`
+
+Rules:
+- Public fields must be declared with type annotations
+- Use `_private` for non-reactive values
+
+Example:
+```python
+class Counter(ps.State):
+    count: int = 0
+    @ps.computed
+    def doubled(self):
+        return self.count * 2
+```

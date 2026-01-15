@@ -1,0 +1,13 @@
+{
+  "title": "Packages",
+  "pages": [
+    "index",
+    "pulse-js-client",
+    "pulse-mantine",
+    "pulse-ag-grid",
+    "pulse-recharts",
+    "pulse-lucide",
+    "pulse-msal",
+    "pulse-aws"
+  ]
+}

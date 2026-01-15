@@ -1,0 +1,25 @@
+---
+title: "Pulse Mantine"
+---
+
+Mantine UI bindings for Pulse.
+
+Install:
+
+```bash
+uv add pulse-mantine
+```
+
+Quick start:
+
+```python
+from pulse_mantine import MantineProvider, Button
+
+@ps.component
+def app():
+    return MantineProvider()[Button("Hello")]
+```
+
+Forms:
+- `MantineForm` for client-side validation
+- Validators in `pulse_mantine.form.validators`

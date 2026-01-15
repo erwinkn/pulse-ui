@@ -1,0 +1,18 @@
+---
+title: "Mantine Forms"
+---
+
+Use `MantineForm` from `pulse-mantine`.
+
+```python
+form = ps.setup(lambda: MantineForm(initialValues={"email": ""}))
+return form.render(onSubmit=handle)[
+    TextInput(name="email", label="Email"),
+    Button("Submit", type="submit"),
+]
+```
+
+## See also
+
+- [Package: Pulse Mantine](/docs/packages/pulse-mantine)
+- [Core Guide: Forms](/docs/guide/forms)

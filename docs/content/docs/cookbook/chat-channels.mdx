@@ -1,0 +1,27 @@
+---
+title: "Chat with Channels"
+---
+
+Server side:
+
+```python
+chat = ps.channel("chat")
+
+@chat.on("message")
+def on_message(payload):
+    chat.broadcast("new_message", payload)
+```
+
+Client side (JS client):
+
+```ts
+const ch = usePulseChannel('chat')
+ch.on('new_message', (msg) => ...)
+ch.emit('message', { text })
+```
+
+## See also
+
+- [Core Guide: Channels](/docs/guide/channels)
+- [Reference: Channels](/docs/reference/pulse/channels)
+- [Package: Pulse JS Client](/docs/packages/pulse-js-client)

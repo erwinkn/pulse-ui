@@ -1,0 +1,20 @@
+---
+title: "Pulse"
+description: "Full-stack Python for reactive web apps"
+---
+
+Pulse is a full-stack Python framework for reactive web apps. Python renders VDOM, the React client syncs via WebSocket.
+
+Quick start:
+
+```python
+import pulse as ps
+
+@ps.component
+def home():
+    return ps.div("Hello Pulse")
+
+app = ps.App([ps.Route("/", home)])
+```
+
+Start here: /docs/getting-started/install

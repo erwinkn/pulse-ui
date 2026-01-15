@@ -1,0 +1,19 @@
+---
+title: "Lists and Keys"
+---
+
+Use `ps.For` for list rendering to avoid late-binding bugs.
+
+```python
+items = ["a", "b", "c"]
+return ps.ul()[
+    ps.For(items, lambda item: ps.li(item, key=item))
+]
+```
+
+Keys must be stable and unique for a list.
+
+## See also
+
+- [Core Guide: Lists and Keys](/docs/guide/lists-keys)
+- [Reference: Component](/docs/reference/pulse/component)

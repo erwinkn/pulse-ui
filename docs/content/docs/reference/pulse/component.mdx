@@ -1,0 +1,22 @@
+---
+title: "Component"
+description: "Component API and VDOM node types"
+---
+
+
+Exports:
+- `component` decorator
+- `Component` class
+- `Element`, `Node`, `PulseNode` (VDOM node types)
+- Built-in components: `For`, `If`
+
+Usage:
+```python
+@ps.component
+def Card(title: str, *children, key=None):
+    return ps.div(ps.h3(title), *children)
+```
+
+Notes:
+- `key` preserves component identity
+- `*children` enables `Component(...)[children]` syntax

@@ -1,0 +1,24 @@
+{
+  "title": "Core Guide",
+  "pages": [
+    "index",
+    "mental-model",
+    "vdom-elements",
+    "components",
+    "state",
+    "hooks",
+    "reactivity",
+    "events",
+    "lists-keys",
+    "async",
+    "queries",
+    "forms",
+    "routing",
+    "sessions",
+    "middleware",
+    "channels",
+    "js-interop",
+    "codegen",
+    "deployment"
+  ]
+}

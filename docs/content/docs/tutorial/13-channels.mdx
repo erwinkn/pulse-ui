@@ -1,0 +1,21 @@
+---
+title: "Channels"
+---
+
+Channels provide realtime messaging.
+
+```python
+chat = ps.channel("chat")
+
+@chat.on("message")
+def on_message(payload):
+    chat.broadcast("new_message", payload)
+```
+
+Use on the client with `usePulseChannel` (JS client or `pulse.js.pulse`).
+
+## See also
+
+- [Core Guide: Channels](/docs/guide/channels)
+- [Reference: Channels](/docs/reference/pulse/channels)
+- [Reference: Pulse Client](/docs/reference/pulse-js/pulse-client)

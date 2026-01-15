@@ -1,0 +1,20 @@
+---
+title: "Forms"
+---
+
+`ps.Form` registers server-side forms.
+
+```python
+ps.Form(key="demo", onSubmit=handle)[
+    ps.input(name="email", type="email"),
+    ps.button("Submit", type="submit"),
+]
+```
+
+`ManualForm` exposes `.props()` for custom wiring.
+`FormData` supports file uploads via `UploadFile`.
+
+## See also
+
+- [Tutorial: Forms](/docs/tutorial/10-forms)
+- [Reference: Forms](/docs/reference/pulse/forms)

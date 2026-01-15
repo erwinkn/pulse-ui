@@ -1,0 +1,33 @@
+---
+title: "Queries and Mutations"
+---
+
+Define queries on `State`.
+
+```python
+class UserState(ps.State):
+    user_id: int = 1
+
+    @ps.query
+    async def user(self):
+        return await fetch_user(self.user_id)
+
+    @user.key
+    def _key(self):
+        return ("user", self.user_id)
+
+    @ps.mutation
+    async def save(self, name: str):
+        return await save_user(self.user_id, name)
+```
+
+Query helpers:
+- `is_loading`, `is_error`, `data`, `refetch()`
+- `set_data()`, `invalidate()`
+
+Use `@ps.infinite_query` for paginated lists.
+
+## See also
+
+- [Core Guide: Queries and Mutations](/docs/guide/queries)
+- [Reference: Queries](/docs/reference/pulse/queries)

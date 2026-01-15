@@ -1,0 +1,21 @@
+{
+  "title": "Tutorial",
+  "pages": [
+    "index",
+    "01-basics",
+    "02-state",
+    "03-events",
+    "04-components",
+    "05-lists-keys",
+    "06-hooks",
+    "07-reactivity",
+    "08-async",
+    "09-queries",
+    "10-forms",
+    "11-routing",
+    "12-sessions-middleware",
+    "13-channels",
+    "14-js-interop",
+    "15-next-steps"
+  ]
+}

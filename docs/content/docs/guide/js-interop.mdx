@@ -1,0 +1,21 @@
+---
+title: "JS Interop"
+---
+
+Use `@ps.javascript` to transpile Python to JS.
+
+```python
+from pulse.js import document
+
+@ps.javascript
+def focus(sel: str):
+    document.querySelector(sel).focus()
+```
+
+Use `ps.run_js` inside callbacks to execute on the client.
+
+## See also
+
+- [Tutorial: JS Interop](/docs/tutorial/14-js-interop)
+- [Reference: JS Interop](/docs/reference/pulse/js-interop)
+- [Reference: pulse.transpiler](/docs/reference/pulse-transpiler)

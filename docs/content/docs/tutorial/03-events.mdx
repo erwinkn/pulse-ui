@@ -1,0 +1,27 @@
+---
+title: "Events"
+---
+
+Callbacks can be sync or async. For DOM events, read the event payload.
+
+```python
+@ps.component
+def input_demo():
+    with ps.init():
+        st = Counter()
+
+    def on_change(evt):
+        st.count = int(evt["target"]["value"] or 0)
+
+    return ps.div(
+        ps.input(type="number", value=st.count, onChange=on_change),
+        ps.p(f"{st.count}"),
+    )
+```
+
+Rule: a callback may take zero args or all args passed by the client.
+
+## See also
+
+- [Core Guide: Events and Callbacks](/docs/guide/events)
+- [Reference: DOM Elements](/docs/reference/pulse/dom)

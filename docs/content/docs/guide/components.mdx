@@ -1,0 +1,20 @@
+---
+title: "Components"
+---
+
+Components are functions decorated with `@ps.component`.
+
+```python
+@ps.component
+def Card(title: str, *children, key=None):
+    return ps.section(ps.h3(title), *children)
+```
+
+Notes:
+- `key` preserves identity when order changes
+- Use `*children` to enable `Component()[children]` syntax
+
+## See also
+
+- [Tutorial: Components](/docs/tutorial/04-components)
+- [Reference: Component](/docs/reference/pulse/component)

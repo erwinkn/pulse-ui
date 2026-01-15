@@ -1,0 +1,25 @@
+---
+title: "Troubleshooting"
+description: "Fix common dev issues"
+---
+
+Common issues and fixes.
+
+Server fails to start
+- Ensure `uv sync` ran
+- Ensure `uv run pulse run app.py`
+- Check port 8000 is free or pass `--port`
+
+Web client missing
+- Ensure `web/` exists
+- Run `bun i` in `web/`
+- Re-run `pulse run` to regenerate routes
+
+No UI updates
+- Check server logs for exceptions
+- Ensure state updates happen inside callbacks
+- Ensure fields are annotated on `State`
+
+CORS or cookies
+- Set `App(mode='single-server')` for local dev
+- Configure `cookie` or `cors` on `App`

@@ -1,0 +1,24 @@
+---
+title: "Hooks"
+description: "Render-time hooks and runtime helpers"
+---
+
+Primary hooks:
+- `init()`
+- `setup()` / `setup_key()`
+- `state(key, factory)`
+- `effects(*fns, key=None)`
+- `stable(key, value=None)`
+
+Runtime helpers:
+`GLOBAL_STATES`, `GlobalStateAccessor`, `NotFoundInterrupt`, `RedirectInterrupt`, `call_api`, `client_address`, `global_state`, `navigate`, `not_found`, `redirect`, `route`, `server_address`, `session`, `session_id`, `set_cookie`, `websocket_id`
+
+Hook registry types:
+`HOOK_CONTEXT`, `Hook`, `HookAlreadyRegisteredError`, `HookContext`, `HookError`, `HookInit`, `HookMetadata`, `HookNamespace`, `HookNotFoundError`, `HookRegistry`, `HookRenameCollisionError`, `HookState`, `HooksAPI`, `MISSING`, `hooks`
+
+Hook state types:
+`EffectsHookState`, `effects`, `SetupHookState`, `setup`, `setup_key`, `StateHookState`, `state`, `StableEntry`, `StableRegistry`, `stable`
+
+Notes:
+- Hooks can be called once per component render
+- `stable` keeps a stable reference to latest value

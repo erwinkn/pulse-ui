@@ -1,0 +1,11 @@
+{
+  "title": "Getting Started",
+  "pages": [
+    "index",
+    "install",
+    "first-app",
+    "dev-loop",
+    "project-layout",
+    "troubleshooting"
+  ]
+}

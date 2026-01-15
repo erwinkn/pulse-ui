@@ -1,0 +1,20 @@
+---
+title: "Async"
+---
+
+Callbacks can be async. Updates are batched between awaits.
+
+```python
+class Counter(ps.State):
+    count: int = 0
+
+    async def inc_slow(self):
+        self.count += 1
+        await asyncio.sleep(0.5)
+        self.count += 1
+```
+
+## See also
+
+- [Core Guide: Async](/docs/guide/async)
+- [Reference: Reactive Core](/docs/reference/pulse/reactive)

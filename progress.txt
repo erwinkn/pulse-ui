@@ -1,0 +1,48 @@
+Pulse docs migration progress
+
+Context
+- Replaced Mintlify docs with Fumadocs app in `docs/`
+- Old Mintlify docs moved to `.context/docs-mintlify`
+- Tutorial moved into docs and split into chapter MDX files
+- IA skeleton + nav meta created; most pages are TODO placeholders
+
+Completed
+- Scaffolded Fumadocs site with bun
+- Branding updates:
+  - `docs/lib/layout.shared.tsx` title = Pulse, githubUrl set
+  - `docs/app/(home)/page.tsx` hero copy + buttons
+  - `docs/app/docs/[[...slug]]/page.tsx` github repo link points to erwinkn/pulse-ui
+- New docs content tree under `docs/content/docs`:
+  - Root `index.mdx` updated
+  - `meta.json` with top-level sections: getting-started, tutorial, guide, cookbook, reference, packages, ai
+  - Section meta + placeholder MDX files created for each section
+- Getting started content filled (install/first-app/dev-loop/index)
+- Tutorial split from `tutorial/README.md` into `docs/content/docs/tutorial/*.mdx`
+
+Key files added/modified
+- `docs/` (new Next.js Fumadocs app)
+- `docs/content/docs/**` (new content)
+- `docs/README.md` (bun dev command)
+- `progress.txt` (this file)
+
+Pending work (high priority)
+1) Tutorial rewrite to current API:
+   - Replace `ps.states` with `ps.init`/`ps.setup`/`ps.state`
+   - Fix cross-links and headings post-split
+   - Update references to run commands (use `uv run pulse run ...`)
+2) Manual API reference:
+   - From `packages/pulse/python/src/pulse/__init__.py`
+   - Advanced modules: `pulse.js`, `pulse.transpiler`
+   - Package exports for pulse-mantine, ag-grid, recharts, lucide, msal, aws
+   - JS client exports from `packages/pulse/js/src/index.ts`
+3) Core guide pages + cookbook + packages + AI agent docs
+4) Adjust Fumadocs nav/details if needed
+
+Commands
+- Run docs dev server:
+  - `cd docs && bun run dev`
+
+Notes
+- Non-ASCII cleaned in docs root + home page; tutorial still contains ASCII only
+- `docs/` has its own `package.json` and `bun.lock`
+- `docs` currently not added to root workspace

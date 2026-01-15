@@ -1,0 +1,22 @@
+---
+title: "Components"
+---
+
+Components are reusable functions with stable state.
+
+```python
+@ps.component
+def Card(title: str, *children, key=None):
+    return ps.div(ps.h3(title), *children, className="border p-3")
+
+@ps.component
+def page():
+    return Card("Hello")[ps.p("Inside")]
+```
+
+Use `key` to preserve identity when order changes.
+
+## See also
+
+- [Core Guide: Components](/docs/guide/components)
+- [Reference: Component](/docs/reference/pulse/component)

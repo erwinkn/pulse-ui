@@ -1,0 +1,20 @@
+---
+title: "Middleware"
+---
+
+Middleware can intercept prerender, connect, message, and channel flows.
+
+```python
+class Auth(ps.PulseMiddleware):
+    async def connect(self, *, request, session, next):
+        if not session.get("user"):
+            return ps.Deny()
+        return await next()
+```
+
+Use `ps.stack(...)` to compose.
+
+## See also
+
+- [Tutorial: Sessions and Middleware](/docs/tutorial/12-sessions-middleware)
+- [Reference: Middleware](/docs/reference/pulse/middleware)

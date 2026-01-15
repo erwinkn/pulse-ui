@@ -1,0 +1,25 @@
+---
+title: "State"
+---
+
+State classes define reactive fields via type annotations.
+
+```python
+class Counter(ps.State):
+    count: int = 0
+
+    def inc(self):
+        self.count += 1
+```
+
+Rules:
+- Public fields must be annotated
+- Private data must be prefixed with `_`
+
+Use `ps.init()` to keep state instances across renders.
+
+## See also
+
+- [Tutorial: State](/docs/tutorial/02-state)
+- [Reference: State](/docs/reference/pulse/state)
+- [Core Guide: Reactivity](/docs/guide/reactivity)

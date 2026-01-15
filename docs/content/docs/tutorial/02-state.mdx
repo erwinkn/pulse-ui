@@ -1,0 +1,29 @@
+---
+title: "State"
+---
+
+State is a class with typed fields. Use `ps.init()` to keep it across renders.
+
+```python
+class Counter(ps.State):
+    count: int = 0
+
+    def inc(self):
+        self.count += 1
+
+@ps.component
+def counter():
+    with ps.init():
+        st = Counter()
+    return ps.button(f"Count: {st.count}", onClick=st.inc)
+```
+
+Rules:
+- Public fields must be annotated
+- Use `_private` for non-reactive values
+
+## See also
+
+- [Core Guide: State](/docs/guide/state)
+- [Reference: State](/docs/reference/pulse/state)
+- [Core Guide: Hooks](/docs/guide/hooks)

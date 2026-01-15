@@ -1,0 +1,29 @@
+---
+title: "Basics"
+---
+
+Create a component and render HTML tags.
+
+```python
+import pulse as ps
+
+@ps.component
+def home():
+    return ps.div(
+        ps.h1("Pulse", className="text-xl font-bold"),
+        ps.p("Hello."),
+        className="p-4",
+    )
+
+app = ps.App([ps.Route("/", home)])
+```
+
+Notes:
+- Props use React names: `className`, `htmlFor`
+- Children can be positional or `Component(...)[children]`
+
+## See also
+
+- [Core Guide: VDOM and Elements](/docs/guide/vdom-elements)
+- [Reference: DOM Elements](/docs/reference/pulse/dom)
+- [Core Guide: Components](/docs/guide/components)

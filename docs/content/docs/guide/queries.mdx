@@ -1,0 +1,31 @@
+---
+title: "Queries and Mutations"
+---
+
+Define queries on `State` methods.
+
+```python
+class UserState(ps.State):
+    user_id: int = 1
+
+    @ps.query
+    async def user(self):
+        return await fetch(self.user_id)
+
+    @user.key
+    def _key(self):
+        return ("user", self.user_id)
+```
+
+Mutations:
+
+```python
+@ps.mutation
+async def save(self, name: str):
+    return await save_user(self.user_id, name)
+```
+
+## See also
+
+- [Tutorial: Queries and Mutations](/docs/tutorial/09-queries)
+- [Reference: Queries](/docs/reference/pulse/queries)

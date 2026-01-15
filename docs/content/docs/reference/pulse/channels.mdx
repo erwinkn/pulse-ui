@@ -1,0 +1,16 @@
+---
+title: "Channels"
+description: "Realtime channels"
+---
+
+
+Exports:
+`Channel`, `ChannelClosed`, `ChannelTimeout`, `channel`
+
+Usage:
+```python
+ch = ps.channel('chat')
+@ch.on('message')
+def on_message(payload):
+    ch.broadcast('new_message', payload)
+```

@@ -1,0 +1,9 @@
+{
+  "title": "pulse.js",
+  "pages": [
+    "index",
+    "builtins",
+    "dom",
+    "pulse-client"
+  ]
+}

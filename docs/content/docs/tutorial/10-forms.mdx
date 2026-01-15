@@ -1,0 +1,29 @@
+---
+title: "Forms"
+---
+
+Use `ps.Form` for server-registered forms or `ManualForm` for manual wiring.
+
+```python
+class Log(ps.State):
+    last: dict | None = None
+    async def submit(self, data: ps.FormData):
+        self.last = data
+
+@ps.component
+def page():
+    with ps.init():
+        st = Log()
+
+    return ps.Form(key="demo", onSubmit=st.submit)[
+        ps.input(name="email", type="email"),
+        ps.button("Submit", type="submit"),
+    ]
+```
+
+`FormData` supports file uploads via `UploadFile`.
+
+## See also
+
+- [Core Guide: Forms](/docs/guide/forms)
+- [Reference: Forms](/docs/reference/pulse/forms)

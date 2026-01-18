@@ -253,52 +253,64 @@ class RenderSession:
 	# ---- Prerendering ----
 
 	def prerender(
-		self, path: str, route_info: RouteInfo | None = None
-	) -> ServerInitMessage | ServerNavigateToMessage:
+		self, paths: list[str], route_info: RouteInfo | None = None
+	) -> dict[str, ServerInitMessage | ServerNavigateToMessage]:
 		"""
-		Synchronous render for SSR. Returns vdom_init or navigate_to message.
-		- First call: creates RouteMount in PENDING state, starts queue
-		- Subsequent calls: re-renders and returns fresh VDOM
+		Synchronous render for SSR. Returns per-path init or navigate_to messages.
+		- Resets all existing mounts before rendering the new page routes
+		- Creates mounts in PENDING state and starts queue
 		"""
-		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		is_new = mount is None
+		normalized = [ensure_absolute_path(path) for path in paths]
 
-		if is_new:
+		for old_path, mount in list(self.route_mounts.items()):
+			self._cancel_queue_timeout(mount)
+			if mount.effect:
+				mount.effect.dispose()
+			mount.tree.unmount()
+			del self.route_mounts[old_path]
+
+		results: dict[str, ServerInitMessage | ServerNavigateToMessage] = {}
+
+		for path in normalized:
 			route = self.routes.find(path)
 			info = route_info or route.default_route_info()
 			mount = RouteMount(self, route, info)
 			mount.state = "pending"
 			mount.queue = []
 			self.route_mounts[path] = mount
-		elif route_info:
-			mount.route.update(route_info)
 
-		with PulseContext.update(render=self, route=mount.route):
-			try:
-				vdom = mount.tree.render()
-				if is_new:
+			with PulseContext.update(render=self, route=mount.route):
+				try:
+					vdom = mount.tree.render()
 					mount.initialized = True
-			except RedirectInterrupt as r:
-				del self.route_mounts[path]
-				return ServerNavigateToMessage(
-					type="navigate_to", path=r.path, replace=r.replace, hard=False
-				)
-			except NotFoundInterrupt:
-				del self.route_mounts[path]
-				ctx = PulseContext.get()
-				return ServerNavigateToMessage(
-					type="navigate_to", path=ctx.app.not_found, replace=True, hard=False
-				)
+				except RedirectInterrupt as r:
+					del self.route_mounts[path]
+					results[path] = ServerNavigateToMessage(
+						type="navigate_to",
+						path=r.path,
+						replace=r.replace,
+						hard=False,
+					)
+					continue
+				except NotFoundInterrupt:
+					del self.route_mounts[path]
+					ctx = PulseContext.get()
+					results[path] = ServerNavigateToMessage(
+						type="navigate_to",
+						path=ctx.app.not_found,
+						replace=True,
+						hard=False,
+					)
+					continue
 
-		if is_new:
 			self._create_render_effect(mount, path)
 			mount.queue_timeout = self._schedule_timeout(
 				self.prerender_queue_timeout,
-				lambda: self._transition_to_idle(path),
+				lambda p=path: self._transition_to_idle(p),
 			)
+			results[path] = ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 
-		return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+		return results
 
 	# ---- Client lifecycle ----
 
@@ -340,6 +352,7 @@ class RenderSession:
 			mount.route.update(route_info)
 			if mount.effect:
 				mount.effect.resume()
+				mount.effect.flush()
 
 		elif mount.state == "active":
 			# Already active, just update route
@@ -412,10 +425,11 @@ class RenderSession:
 
 		mount.effect = Effect(
 			_render_effect,
-			immediate=True,
+			immediate=False,
 			name=f"{path}:render",
 			on_error=lambda e: self.report_error(path, "render", e),
 		)
+		mount.effect.flush()
 
 	# ---- Helpers ----
 

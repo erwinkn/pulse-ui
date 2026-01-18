@@ -56,7 +56,9 @@ from pulse.messages import (
 	ClientPulseMessage,
 	Prerender,
 	PrerenderPayload,
+	ServerInitMessage,
 	ServerMessage,
+	ServerNavigateToMessage,
 )
 from pulse.middleware import (
 	ConnectResponse,
@@ -453,8 +455,9 @@ class App:
 			# Schedule cleanup timeout (will cancel/reschedule on activity)
 			self._schedule_render_cleanup(render_id)
 
-			async def _prerender_one(path: str):
-				captured = render.prerender(path, route_info)
+			def _normalize_prerender_result(
+				captured: ServerInitMessage | ServerNavigateToMessage,
+			) -> RoutePrerenderResponse:
 				if captured["type"] == "vdom_init":
 					return Ok(captured)
 				if captured["type"] == "navigate_to":
@@ -487,12 +490,13 @@ class App:
 						},
 					}
 
-					# Fan out on routes
+					captured = render.prerender(paths, route_info)
+
 					for p in paths:
 						try:
 							# Capture p in closure to avoid loop variable binding issue
 							async def _next(path: str = p) -> RoutePrerenderResponse:
-								return await _prerender_one(path)
+								return _normalize_prerender_result(captured[path])
 
 							# Call prerender_route middleware (in) -> prerender route -> (out)
 							res = await self.middleware.prerender_route(

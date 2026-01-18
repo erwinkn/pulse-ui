@@ -853,7 +853,7 @@ def test_prerender_redirect_removes_mount():
 	session = RenderSession("test-id", routes)
 
 	with ps.PulseContext.update(render=session):
-		result = session.prerender("/redirect")
+		result = session.prerender(["/redirect"], None)["/redirect"]
 
 	# Should return navigate_to message
 	assert result["type"] == "navigate_to"
@@ -872,7 +872,7 @@ def test_prerender_not_found_removes_mount():
 	session = RenderSession("test-id", routes)
 
 	with ps.PulseContext.update(render=session):
-		result = session.prerender("/missing")
+		result = session.prerender(["/missing"], None)["/missing"]
 
 	# Should return navigate_to message pointing to app.not_found
 	assert result["type"] == "navigate_to"
@@ -892,7 +892,7 @@ async def test_prerender_then_attach_works():
 
 	# Prerender first
 	with ps.PulseContext.update(render=session):
-		result = session.prerender("/a")
+		result = session.prerender(["/a"], None)["/a"]
 
 	assert result["type"] == "vdom_init"
 	assert "/a" in session.route_mounts
@@ -932,7 +932,7 @@ def test_attach_after_redirect_prerender_creates_fresh_mount():
 
 	# First prerender - redirects
 	with ps.PulseContext.update(render=session):
-		result = session.prerender("/cond")
+		result = session.prerender(["/cond"], None)["/cond"]
 
 	assert result["type"] == "navigate_to"
 	assert "/cond" not in session.route_mounts
@@ -964,8 +964,8 @@ async def test_re_prerender_returns_fresh_vdom():
 	session = RenderSession("test-id", routes)
 
 	with ps.PulseContext.update(render=session):
-		result1 = session.prerender("/a")
-		result2 = session.prerender("/a")
+		result1 = session.prerender(["/a"], None)["/a"]
+		result2 = session.prerender(["/a"], None)["/a"]
 
 	assert result1["type"] == "vdom_init"
 	assert result2["type"] == "vdom_init"
@@ -1064,7 +1064,7 @@ async def test_prerender_queue_timeout_transitions_to_idle():
 	session = RenderSession("test-id", routes, prerender_queue_timeout=0.01)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender("/a")
+		session.prerender(["/a"])
 
 	mount = session.route_mounts["/a"]
 	assert mount.state == "pending"
@@ -1088,7 +1088,7 @@ async def test_attach_from_idle_resumes_effect_and_sends_vdom():
 
 	# Prerender, then transition to idle
 	with ps.PulseContext.update(render=session):
-		session.prerender("/a")
+		session.prerender(["/a"])
 
 	mount = session.route_mounts["/a"]
 	session._transition_to_idle("/a")  # pyright: ignore[reportPrivateUsage]

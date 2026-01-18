@@ -2,8 +2,10 @@
 
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, Protocol, TypeVar, overload
+from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
 
+from pulse.hooks.core import HOOK_CONTEXT
+from pulse.hooks.effects import inline_effect_hook
 from pulse.reactive import (
 	AsyncEffect,
 	AsyncEffectFn,
@@ -160,8 +162,6 @@ def effect(
 			)
 
 		# Check if we're in a hook context (component render)
-		from pulse.hooks.core import HOOK_CONTEXT
-
 		ctx = HOOK_CONTEXT.get()
 
 		def create_effect() -> Effect | AsyncEffect:
@@ -189,7 +189,6 @@ def effect(
 			return create_effect()
 
 		# In component render - use inline caching
-		from pulse.hooks.effects import inline_effect_hook
 
 		# Get the frame where the decorator was applied.
 		# When called as `@ps.effect` (no parens), the call stack is:
@@ -208,10 +207,10 @@ def effect(
 		):
 			caller = caller.f_back
 			assert caller is not None
-		identity = (caller.f_code, caller.f_lineno)
+		identity = (func.__qualname__, func.__code__, caller.f_code)
 
 		state = inline_effect_hook()
-		return state.get_or_create(identity, key, create_effect)
+		return state.get_or_create(cast(Any, identity), key, create_effect)
 
 	if fn is not None:
 		return decorator(fn)

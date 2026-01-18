@@ -14,8 +14,12 @@ from pulse.render_session import run_js
 
 class DemoState(ps.State):
 	show_effect: bool = True
-	items: list[str] = ["apple", "banana", "cherry"]
-	item_counts: dict[str, int] = {}
+	items: list[str]
+	item_counts: dict[str, int]
+
+	def __init__(self):
+		self.items = ["apple", "banana", "cherry"]
+		self.item_counts = {k: 0 for k in self.items}
 
 	def toggle_effect(self):
 		self.show_effect = not self.show_effect
@@ -175,45 +179,62 @@ def LoopEffectDemo():
 @ps.component
 def DynamicKeyDemo():
 	with ps.init():
-		current_key = ps.Signal("v1")
-		run_count = ps.Signal(0)
+		current_key = ps.Signal("v1", "key")
+		run_count = ps.Signal(0, "count")
+		trigger_count = ps.Signal(0, "trigger")
 
 	def change_key():
 		key = current_key.read()
 		new_key = f"v{int(key[1:]) + 1}"
 		current_key.write(new_key)
 
+	def trigger_effect():
+		trigger_count.write(trigger_count.read() + 1)
+
 	# When the key changes, the old effect is disposed (cleanup runs)
 	# and a new effect is created.
-	@ps.effect(key=current_key.read(), immediate=True)
+	current = current_key.read()
+	trigger = trigger_count.read()
+
+	@ps.effect(key=current, immediate=True)
 	def key_dependent_effect():
+		trigger = trigger_count.read()
 		# Use Untrack to avoid tracking run_count as a dependency.
 		# Otherwise, writing to run_count would trigger this effect to re-run infinitely.
+		# Same for key, otherwise this effect would run instantly on key change before being disposed by the rerender.
 		with ps.Untrack():
 			count = run_count.read() + 1
+			key = current_key.read()
 		run_count.write(count)
-		key = current_key.read()
-		print(f"[Dynamic Key Effect] Created with key={key}, run #{count}")
+		print(f"[Dynamic Key Effect] Run #{count} for key={key} (trigger={trigger})")
 		run_js(
-			console.log(f"[Dynamic Key Effect] Created with key={key}, run #{count}")
+			console.log(
+				f"[Dynamic Key Effect] Run #{count} for key={key} (trigger={trigger})"
+			)
 		)
 
 		def cleanup(k=key):
-			print(f"[Dynamic Key Effect] Disposing effect with key={k}")
+			print(f"[Dynamic Key Effect] Disposing effect with key={key}")
 
 		return cleanup
 
 	return ps.div(
 		ps.h2("Dynamic Key Effects", className="text-xl font-bold mb-4"),
 		ps.p(
-			"When the key changes, the old effect is disposed and a new one is created.",
+			"Change the key to dispose/recreate the effect, or trigger it to re-run with the same key.",
 			className="text-gray-600 mb-4",
 		),
 		ps.div(
 			ps.button("Change Key", onClick=change_key, className="btn-primary mr-4"),
+			ps.button(
+				"Trigger Effect",
+				onClick=trigger_effect,
+				className="btn-secondary mr-4",
+			),
 			ps.span(f"Current key: {current_key()}", className="font-mono mr-4"),
-			ps.span(f"Effect created {run_count()} time(s)", className="text-gray-600"),
-			className="flex items-center",
+			ps.span(f"Trigger count: {trigger}", className="font-mono mr-4"),
+			ps.span(f"Effect fired {run_count()} time(s)", className="text-gray-600"),
+			className="flex flex-wrap items-center",
 		),
 		className="p-4 bg-white rounded shadow mb-6",
 	)

@@ -2,17 +2,215 @@
 title: "Channels"
 ---
 
-Channels provide realtime messaging.
+Sometimes your app needs to update in real-time. A chat application needs to show new messages instantly. A collaborative document editor needs to sync changes between users. A live dashboard needs to display fresh data as it arrives. Channels are Pulse's answer to these real-time communication needs.
+
+Channels let you send messages between the server and connected clients, and even between clients, all in real-time over WebSockets.
+
+## What Are Channels?
+
+A channel is like a chat room for your app. Clients can join a channel, send messages to it, and receive messages from it. You define what happens when messages arrive by writing handlers on the server.
+
+Think of it this way:
+- **State** is for data that belongs to one user's session
+- **Channels** are for data that needs to flow between multiple users or from server to clients in real-time
+
+## Creating a Channel
+
+Define a channel with `ps.channel()` and add handlers for different message types:
 
 ```python
-chat = ps.channel("chat")
+import pulse as ps
 
-@chat.on("message")
-def on_message(payload):
-    chat.broadcast("new_message", payload)
+# Create a channel named "notifications"
+notifications = ps.channel("notifications")
+
+
+@notifications.on("subscribe")
+def on_subscribe(payload):
+    """Called when a client joins the channel."""
+    print(f"A user subscribed to notifications")
+
+
+@notifications.on("unsubscribe")
+def on_unsubscribe(payload):
+    """Called when a client leaves the channel."""
+    print(f"A user left the notifications channel")
 ```
 
-Use on the client with `usePulseChannel` (JS client or `pulse.js.pulse`).
+The channel name ("notifications" here) is how clients will reference this channel.
+
+## Broadcasting Messages
+
+The real power of channels is broadcasting: sending a message to everyone subscribed to the channel.
+
+```python
+@notifications.on("new_alert")
+def on_new_alert(payload):
+    """When we receive an alert, broadcast it to all subscribers."""
+    # payload contains whatever the sender included
+    message = payload.get("message", "New notification!")
+
+    # Send to everyone in this channel
+    notifications.broadcast("alert", {"message": message, "time": "now"})
+```
+
+You can also broadcast from anywhere in your code, like from an event handler:
+
+```python
+class AdminState(ps.State):
+    def send_announcement(self, message: str):
+        # This reaches all users subscribed to the notifications channel
+        notifications.broadcast("announcement", {
+            "message": message,
+            "from": "Admin"
+        })
+```
+
+## Building a Simple Chat
+
+Let's put it together with a chat example. This shows how multiple users can communicate in real-time:
+
+```python
+import pulse as ps
+
+# Create the chat channel
+chat = ps.channel("chat")
+
+
+@chat.on("message")
+def on_chat_message(payload):
+    """When someone sends a message, broadcast it to everyone."""
+    username = payload.get("username", "Anonymous")
+    text = payload.get("text", "")
+
+    # Broadcast to all connected clients
+    chat.broadcast("new_message", {
+        "username": username,
+        "text": text,
+    })
+
+
+class ChatState(ps.State):
+    messages: list[dict] = []
+    username: str = ""
+    current_message: str = ""
+
+    def send_message(self):
+        if self.current_message.strip():
+            # Send to the channel (this triggers on_chat_message above)
+            chat.send("message", {
+                "username": self.username or "Anonymous",
+                "text": self.current_message,
+            })
+            self.current_message = ""
+
+
+@ps.component
+def chat_room():
+    with ps.init():
+        st = ChatState()
+
+    return ps.div(className="max-w-lg mx-auto p-4")[
+        ps.h1("Chat Room", className="text-2xl font-bold mb-4"),
+
+        # Username input
+        ps.input(
+            value=st.username,
+            onChange=lambda e: setattr(st, "username", e["target"]["value"]),
+            placeholder="Your name",
+            className="w-full border rounded px-3 py-2 mb-4",
+        ),
+
+        # Messages display
+        ps.div(className="border rounded p-4 h-64 overflow-y-auto mb-4")[
+            ps.For(
+                st.messages,
+                lambda msg: ps.div(className="mb-2")[
+                    ps.span(f"{msg['username']}: ", className="font-bold"),
+                    ps.span(msg['text']),
+                ],
+            ),
+        ],
+
+        # Message input
+        ps.div(className="flex gap-2")[
+            ps.input(
+                value=st.current_message,
+                onChange=lambda e: setattr(st, "current_message", e["target"]["value"]),
+                placeholder="Type a message...",
+                className="flex-1 border rounded px-3 py-2",
+            ),
+            ps.button(
+                "Send",
+                onClick=st.send_message,
+                className="bg-blue-500 text-white px-4 py-2 rounded",
+            ),
+        ],
+    ]
+```
+
+## Listening to Channel Messages on the Client
+
+To receive channel messages in your component, you need to subscribe to the channel from the JavaScript side. Pulse provides a `usePulseChannel` hook for this:
+
+```javascript
+// In your React/client code
+import { usePulseChannel } from "pulse-js";
+
+function ChatMessages() {
+  const [messages, setMessages] = useState([]);
+
+  usePulseChannel("chat", {
+    onMessage: (event, payload) => {
+      if (event === "new_message") {
+        setMessages(prev => [...prev, payload]);
+      }
+    }
+  });
+
+  return (
+    <div>
+      {messages.map((msg, i) => (
+        <div key={i}>{msg.username}: {msg.text}</div>
+      ))}
+    </div>
+  );
+}
+```
+
+If you're working purely in Python and want to handle incoming channel messages, you can use the `pulse.js.pulse` utilities or set up effects that respond to channel state.
+
+## Channel Use Cases
+
+Channels are perfect for:
+
+- **Chat and messaging**: Real-time conversations between users
+- **Live notifications**: Alerts that appear instantly when something happens
+- **Collaborative editing**: Syncing changes between multiple users
+- **Live dashboards**: Pushing new data to all viewers simultaneously
+- **Gaming**: Real-time game state updates
+- **Presence**: Showing who's online or viewing a page
+
+## Broadcasting vs. Sending
+
+There's an important distinction:
+
+- **`channel.broadcast(event, payload)`**: Sends to ALL subscribed clients
+- **`channel.send(event, payload)`**: Sends to a specific client (the one that triggered the handler)
+
+Use broadcast when everyone should see something (a new chat message). Use send when only one user should see it (a private notification).
+
+## Tips for Working with Channels
+
+1. **Keep payloads small**: Channels are for real-time updates, not large data transfers.
+
+2. **Use meaningful event names**: `"new_message"` is clearer than `"msg"`.
+
+3. **Handle reconnections**: Users might disconnect and reconnect. Consider what state they need to catch up on.
+
+4. **Combine with state**: Channels deliver real-time updates, but your components still need state to store and display that data.
+
+5. **Think about scale**: Broadcasting to thousands of users is different from a small chat room. Design accordingly.
 
 ## See also
 

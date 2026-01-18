@@ -2,6 +2,165 @@
 title: "Pulse AG Grid"
 ---
 
-Bindings for AG Grid.
+Python bindings for [AG Grid](https://www.ag-grid.com/), a feature-rich data grid component for displaying and editing tabular data.
 
-Status: JSON-serializable props only. Function props not yet supported.
+## Installation
+
+```bash
+uv add pulse-ag-grid
+```
+
+## Quick Start
+
+```python
+import pulse as ps
+from pulse_ag_grid import AgGridReact
+
+@ps.component
+def DataGrid():
+    row_data = [
+        {"make": "Toyota", "model": "Celica", "price": 35000},
+        {"make": "Ford", "model": "Mondeo", "price": 32000},
+        {"make": "Porsche", "model": "Boxster", "price": 72000},
+        {"make": "BMW", "model": "M50", "price": 60000},
+    ]
+
+    column_defs = [
+        {"field": "make", "headerName": "Make"},
+        {"field": "model", "headerName": "Model"},
+        {"field": "price", "headerName": "Price"},
+    ]
+
+    return ps.div(style={"height": "400px", "width": "100%"})[
+        AgGridReact(
+            rowData=row_data,
+            columnDefs=column_defs,
+        )
+    ]
+
+app = ps.App([ps.Route("/", DataGrid)])
+```
+
+## Column Definitions
+
+Configure columns with the `columnDefs` prop:
+
+```python
+column_defs = [
+    # Basic column
+    {"field": "name"},
+
+    # Custom header
+    {"field": "email", "headerName": "Email Address"},
+
+    # Fixed width
+    {"field": "age", "width": 100},
+
+    # Sortable and filterable
+    {"field": "country", "sortable": True, "filter": True},
+
+    # Right-aligned numbers
+    {"field": "salary", "type": "numericColumn"},
+
+    # Pinned to left
+    {"field": "id", "pinned": "left", "width": 80},
+]
+```
+
+## Grid Options
+
+Common configuration options:
+
+```python
+AgGridReact(
+    rowData=data,
+    columnDefs=column_defs,
+
+    # Selection
+    rowSelection="multiple",  # or "single"
+
+    # Pagination
+    pagination=True,
+    paginationPageSize=20,
+
+    # Sizing
+    domLayout="autoHeight",  # Auto-size to content
+
+    # Default column settings
+    defaultColDef={
+        "sortable": True,
+        "filter": True,
+        "resizable": True,
+    },
+)
+```
+
+## Styling
+
+AG Grid requires a container with explicit height:
+
+```python
+ps.div(style={"height": "500px"})[
+    AgGridReact(rowData=data, columnDefs=columns)
+]
+```
+
+Or use `domLayout="autoHeight"` for automatic sizing based on row count.
+
+## Example: Sortable Data Table
+
+```python
+import pulse as ps
+from pulse_ag_grid import AgGridReact
+
+@ps.component
+def EmployeeTable():
+    employees = [
+        {"id": 1, "name": "Alice Johnson", "department": "Engineering", "salary": 95000},
+        {"id": 2, "name": "Bob Smith", "department": "Marketing", "salary": 75000},
+        {"id": 3, "name": "Carol Williams", "department": "Engineering", "salary": 105000},
+        {"id": 4, "name": "David Brown", "department": "Sales", "salary": 85000},
+        {"id": 5, "name": "Eve Davis", "department": "HR", "salary": 70000},
+    ]
+
+    columns = [
+        {"field": "id", "headerName": "ID", "width": 80},
+        {"field": "name", "headerName": "Name", "flex": 1},
+        {"field": "department", "headerName": "Department"},
+        {"field": "salary", "headerName": "Salary", "type": "numericColumn"},
+    ]
+
+    return ps.div(className="p-4")[
+        ps.h1("Employee Directory", className="text-xl mb-4"),
+        ps.div(style={"height": "400px"})[
+            AgGridReact(
+                rowData=employees,
+                columnDefs=columns,
+                defaultColDef={
+                    "sortable": True,
+                    "filter": True,
+                },
+                rowSelection="single",
+            )
+        ]
+    ]
+
+app = ps.App([ps.Route("/", EmployeeTable)])
+```
+
+## Limitations
+
+The current implementation only supports JSON-serializable props:
+
+- Row data must be plain dictionaries
+- Column definitions must use JSON-compatible values
+- Function props (like `valueGetter`, `cellRenderer`) are not yet supported
+- Custom cell components are not yet supported
+
+Support for function props and custom components is planned for future releases.
+
+## Resources
+
+- [AG Grid Documentation](https://www.ag-grid.com/react-data-grid/) - Official React documentation
+- [Column Properties](https://www.ag-grid.com/react-data-grid/column-properties/) - All column options
+- [Grid Options](https://www.ag-grid.com/react-data-grid/grid-options/) - All grid configuration options

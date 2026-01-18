@@ -1,20 +1,99 @@
 ---
-title: "Builtins"
+title: "Serialization"
 ---
 
-Class-like builtins (emit `new` when called):
+# Serialization
 
-```text
-Array
-Date
-Error
-Map
-Object
-Promise
-RegExp
-Set
-String
-WeakMap
-WeakSet
-Number
+The `pulse-client` package exports serialization utilities for encoding data to and from the wire format used in Pulse WebSocket communication.
+
+## serialize
+
+Serializes JavaScript values into a wire-safe format that preserves `Date`, `Set`, `Map`, and circular references.
+
+```ts
+function serialize(data: Serializable): Serialized
+```
+
+### Parameters
+
+- `data` - Any serializable JavaScript value
+
+### Returns
+
+A `Serialized` tuple: `[[refs, dates, sets, maps], payload]`
+
+- `refs` - Indices of circular references
+- `dates` - Indices of Date objects
+- `sets` - Indices of Set objects
+- `maps` - Indices of Map objects
+- `payload` - The JSON-safe payload
+
+### Example
+
+```ts
+import { serialize } from "pulse-client";
+
+const data = {
+  date: new Date(),
+  items: new Set([1, 2, 3]),
+  lookup: new Map([["key", "value"]]),
+};
+
+const wire = serialize(data);
+// Send wire over WebSocket
+```
+
+### Limitations
+
+- `NaN` is converted to `null`
+- `Infinity` and `-Infinity` throw errors
+- Functions are not supported
+
+---
+
+## deserialize
+
+Deserializes wire data back into JavaScript values, reconstructing `Date`, `Set`, `Map`, and circular references.
+
+```ts
+function deserialize<Data = Serializable>(
+  payload: Serialized,
+  options?: DeserializationOptions
+): Data
+```
+
+### Parameters
+
+- `payload` - The serialized wire data
+- `options` - Optional configuration
+  - `coerceNullsToUndefined?: boolean` - Convert `null` values to `undefined`
+
+### Returns
+
+The reconstructed JavaScript value.
+
+### Example
+
+```ts
+import { deserialize } from "pulse-client";
+
+const data = deserialize(wireData, {
+  coerceNullsToUndefined: true
+});
+```
+
+---
+
+## Types
+
+```ts
+type Primitive = number | string | boolean | null | undefined;
+type JSON<T> = T | Array<JSON<T>> | { [K: string]: JSON<T> };
+type PlainJSON = JSON<Primitive>;
+type Serializable = any;
+type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+
+interface DeserializationOptions {
+  coerceNullsToUndefined?: boolean;
+}
 ```

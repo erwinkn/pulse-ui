@@ -3,44 +3,374 @@ title: "App"
 description: "Pulse application entry point"
 ---
 
+## App
 
-`App` is the main server entry point.
+The main application class. Creates a server that handles routing, sessions, and WebSocket connections.
 
-Core types:
-- `App`
-- `PulseMode` (`'single-server'` or `'subdomains'`)
-- `CodegenConfig`
-
-Env exports:
-- `PulseEnv`, `env`, `mode()`
-
-App signature (simplified):
 ```python
-App(
-  routes=None,
-  codegen=None,
-  middleware=None,
-  plugins=None,
-  cookie=None,
-  session_store=None,
-  server_address=None,
-  dev_server_address='http://localhost:8000',
-  internal_server_address=None,
-  not_found='/not-found',
-  mode='single-server',
-  api_prefix='/_pulse',
-  cors=None,
-  fastapi=None,
-  session_timeout=60.0,
-  connection_status=None,
+class App:
+    def __init__(
+        self,
+        routes: Sequence[Route | Layout] | None = None,
+        codegen: CodegenConfig | None = None,
+        middleware: PulseMiddleware | Sequence[PulseMiddleware] | None = None,
+        plugins: Sequence[Plugin] | None = None,
+        cookie: Cookie | None = None,
+        session_store: SessionStore | None = None,
+        server_address: str | None = None,
+        dev_server_address: str = "http://localhost:8000",
+        internal_server_address: str | None = None,
+        not_found: str = "/not-found",
+        mode: PulseMode = "single-server",
+        api_prefix: str = "/_pulse",
+        cors: CORSOptions | None = None,
+        fastapi: dict[str, Any] | None = None,
+        session_timeout: float = 60.0,
+        connection_status: ConnectionStatusConfig | None = None,
+    ): ...
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `routes` | `Sequence[Route \| Layout]` | `None` | Route definitions |
+| `codegen` | `CodegenConfig` | `None` | Code generation settings |
+| `middleware` | `PulseMiddleware \| Sequence[...]` | `None` | Request middleware |
+| `plugins` | `Sequence[Plugin]` | `None` | App plugins |
+| `cookie` | `Cookie` | `None` | Session cookie config |
+| `session_store` | `SessionStore` | `None` | Session storage backend |
+| `server_address` | `str` | `None` | Public server URL (required in prod) |
+| `dev_server_address` | `str` | `"http://localhost:8000"` | Dev server URL |
+| `internal_server_address` | `str` | `None` | Internal URL for server-side fetches |
+| `not_found` | `str` | `"/not-found"` | Path for 404 page |
+| `mode` | `PulseMode` | `"single-server"` | Deployment mode |
+| `api_prefix` | `str` | `"/_pulse"` | API route prefix |
+| `cors` | `CORSOptions` | `None` | CORS configuration |
+| `fastapi` | `dict` | `None` | Additional FastAPI options |
+| `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
+| `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `env` | `PulseEnv` | Current environment (`dev`, `ci`, `prod`) |
+| `mode` | `PulseMode` | Deployment mode |
+| `status` | `AppStatus` | Current app lifecycle status |
+| `routes` | `RouteTree` | Parsed route tree |
+| `fastapi` | `FastAPI` | Underlying FastAPI instance |
+| `asgi` | `ASGIApp` | ASGI application (includes Socket.IO) |
+
+### Methods
+
+#### run
+
+```python
+def run(
+    self,
+    address: str = "localhost",
+    port: int = 8000,
+    find_port: bool = True,
+    reload: bool = True,
+) -> None
+```
+
+Start the development server with uvicorn.
+
+#### asgi_factory
+
+```python
+def asgi_factory(self) -> ASGIApp
+```
+
+ASGI factory for production deployment. Called on each reload.
+
+#### run_codegen
+
+```python
+def run_codegen(
+    self,
+    address: str | None = None,
+    internal_address: str | None = None,
+) -> None
+```
+
+Generate React Router code for all routes.
+
+#### setup
+
+```python
+def setup(self, server_address: str) -> None
+```
+
+Initialize the app with a server address. Called automatically by `asgi_factory`.
+
+### Example
+
+```python
+import pulse as ps
+
+app = ps.App(
+    routes=[
+        ps.Route("/", render=home),
+        ps.Route("/users/:id", render=user_detail),
+    ],
+    session_timeout=120.0,
+)
+
+if __name__ == "__main__":
+    app.run(port=8000)
+```
+
+---
+
+## PulseMode
+
+```python
+PulseMode = Literal["subdomains", "single-server"]
+```
+
+Deployment mode for the application.
+
+| Value | Description |
+|-------|-------------|
+| `"single-server"` | Python and React on same origin (default) |
+| `"subdomains"` | Python API on subdomain (e.g., `api.example.com`) |
+
+---
+
+## CodegenConfig
+
+Configuration for code generation output paths.
+
+```python
+@dataclass
+class CodegenConfig:
+    web_dir: Path | str = "web"
+    pulse_dir: Path | str = "pulse"
+    base_dir: Path | None = None
+```
+
+### Attributes
+
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `web_dir` | `Path \| str` | `"web"` | Root directory for web output |
+| `pulse_dir` | `Path \| str` | `"pulse"` | Subdirectory for generated Pulse files |
+| `base_dir` | `Path` | `None` | Base directory (defaults to app file location) |
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `resolved_base_dir` | `Path` | Resolved base directory |
+| `web_root` | `Path` | Absolute path to web root |
+| `pulse_path` | `Path` | Full path to generated app directory |
+
+---
+
+## ConnectionStatusConfig
+
+Configuration for connection status message delays.
+
+```python
+@dataclass
+class ConnectionStatusConfig:
+    initial_connecting_delay: float = 2.0
+    initial_error_delay: float = 8.0
+    reconnect_error_delay: float = 8.0
+```
+
+| Attribute | Default | Description |
+|-----------|---------|-------------|
+| `initial_connecting_delay` | `2.0` | Delay before showing "Connecting..." on initial connect |
+| `initial_error_delay` | `8.0` | Additional delay before showing error on initial connect |
+| `reconnect_error_delay` | `8.0` | Delay before showing error on reconnect |
+
+---
+
+## Route
+
+Defines a route in the application.
+
+```python
+class Route:
+    def __init__(
+        self,
+        path: str,
+        render: Component[[]],
+        children: Sequence[Route | Layout] | None = None,
+        dev: bool = False,
+    ): ...
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `str` | URL path (e.g., `"/users/:id"`) |
+| `render` | `Component` | Component to render |
+| `children` | `Sequence[Route \| Layout]` | Nested routes |
+| `dev` | `bool` | Only include in dev mode |
+
+### Path Syntax
+
+| Pattern | Example | Description |
+|---------|---------|-------------|
+| Static | `/users` | Exact match |
+| Dynamic | `:id` | Named parameter |
+| Optional | `:id?` | Optional parameter |
+| Catch-all | `*` | Match remaining path (must be last) |
+
+### Example
+
+```python
+ps.Route(
+    "/users",
+    render=users_page,
+    children=[
+        ps.Route(":id", render=user_detail),
+        ps.Route(":id/edit", render=user_edit),
+    ],
 )
 ```
 
-Key methods:
-- `run(address='localhost', port=8000, find_port=True, reload=True)`
-- `run_codegen(address=None, internal_address=None)`
-- `asgi_factory()`
-- `setup(server_address)`
+---
 
-Plugins:
-- `Plugin` (base class for extensions)
+## Layout
+
+Wraps child routes with a shared layout component.
+
+```python
+class Layout:
+    def __init__(
+        self,
+        render: Component[...],
+        children: Sequence[Route | Layout] | None = None,
+        dev: bool = False,
+    ): ...
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `render` | `Component` | Layout component (must render `Outlet`) |
+| `children` | `Sequence[Route \| Layout]` | Nested routes |
+| `dev` | `bool` | Only include in dev mode |
+
+### Example
+
+```python
+@ps.component
+def AppLayout():
+    return ps.div(
+        Header(),
+        ps.main(ps.Outlet()),
+        Footer(),
+    )
+
+ps.Layout(
+    render=AppLayout,
+    children=[
+        ps.Route("/", render=home),
+        ps.Route("/about", render=about),
+    ],
+)
+```
+
+---
+
+## RouteInfo
+
+TypedDict containing current route information.
+
+```python
+class RouteInfo(TypedDict):
+    pathname: str        # Current URL path
+    hash: str            # URL hash (after #)
+    query: str           # Query string (after ?)
+    queryParams: dict[str, str]   # Parsed query parameters
+    pathParams: dict[str, str]    # Dynamic path parameters
+    catchall: list[str]  # Catch-all segments
+```
+
+---
+
+## Plugin
+
+Base class for application plugins.
+
+```python
+class Plugin:
+    priority: int = 0
+
+    def routes(self) -> list[Route | Layout]:
+        """Return routes to add to the app."""
+        return []
+
+    def middleware(self) -> list[PulseMiddleware]:
+        """Return middleware to add to the app."""
+        return []
+
+    def on_setup(self, app: App) -> None:
+        """Called after FastAPI routes are configured."""
+        ...
+
+    def on_startup(self, app: App) -> None:
+        """Called when the app starts."""
+        ...
+
+    def on_shutdown(self, app: App) -> None:
+        """Called when the app shuts down."""
+        ...
+```
+
+### Example
+
+```python
+class AuthPlugin(ps.Plugin):
+    priority = 10  # Higher priority runs first
+
+    def routes(self):
+        return [ps.Route("/login", render=login_page)]
+
+    def middleware(self):
+        return [AuthMiddleware()]
+
+    def on_startup(self, app):
+        print("Auth plugin started")
+```
+
+---
+
+## Environment
+
+### PulseEnv
+
+```python
+PulseEnv = Literal["dev", "ci", "prod"]
+```
+
+### env
+
+Singleton accessor for environment variables.
+
+```python
+from pulse.env import env
+
+env.pulse_env        # Get/set: "dev", "ci", "prod"
+env.pulse_host       # Get/set: hostname (default "localhost")
+env.pulse_port       # Get/set: port number (default 8000)
+env.pulse_secret     # Get/set: secret key for JWT sessions
+env.codegen_disabled # Get/set: disable code generation
+```
+
+### mode()
+
+```python
+def mode() -> PulseEnv
+```
+
+Returns the current `pulse_env` value. Shorthand for `env.pulse_env`.

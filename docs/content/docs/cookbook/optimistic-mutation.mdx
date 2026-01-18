@@ -2,12 +2,80 @@
 title: "Optimistic Mutation"
 ---
 
-Update UI first, then reconcile with server.
+Show instant feedback when users perform actions, then sync with the server. This avoids the "laggy" feeling of waiting for server responses before updating the UI.
+
+## Recipe
 
 ```python
-async def rename():
-    state.user.set_data({"id": state.user_id, "name": "Temp"})
-    await state.user.refetch()
+import asyncio
+from typing import TypedDict
+import pulse as ps
+
+
+class User(TypedDict):
+    id: int
+    name: str
+
+
+class UserState(ps.State):
+    user_id: int = 1
+
+    @ps.query
+    async def user(self) -> User:
+        await asyncio.sleep(0.5)  # Simulated API call
+        return {"id": self.user_id, "name": f"User {self.user_id}"}
+
+    @user.key
+    def _user_key(self):
+        return ("user", self.user_id)
+
+    async def rename(self, new_name: str):
+        # 1. Optimistically update the UI immediately
+        self.user.set_data({"id": self.user_id, "name": new_name})
+
+        # 2. Persist to server (your actual API call)
+        await asyncio.sleep(0.3)
+
+        # 3. Refetch to reconcile with server state
+        await self.user.refetch()
+
+
+@ps.component
+def UserProfile():
+    with ps.init():
+        state = UserState()
+
+    async def handle_rename():
+        await state.rename("New Name")
+
+    return ps.div(
+        ps.p(f"Name: {state.user.data['name']}" if state.user.data else "Loading..."),
+        ps.button("Rename", onClick=handle_rename),
+    )
+```
+
+## How it works
+
+1. `set_data()` immediately updates the cached query data, so the UI reflects the change
+2. Your server-side logic runs in the background
+3. `refetch()` gets the authoritative state from the server
+
+If the server returns different data (e.g., validation changed the name), the UI automatically updates to match.
+
+## Handling errors
+
+If the server call fails, refetch to restore the original state:
+
+```python
+async def rename(self, new_name: str):
+    old_data = self.user.data
+    self.user.set_data({"id": self.user_id, "name": new_name})
+    try:
+        await api_rename(self.user_id, new_name)
+        await self.user.refetch()
+    except Exception:
+        # Rollback on failure
+        self.user.set_data(old_data)
 ```
 
 ## See also

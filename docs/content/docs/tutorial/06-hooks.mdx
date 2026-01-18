@@ -2,23 +2,245 @@
 title: "Hooks"
 ---
 
-Use hooks once per render.
+Hooks are special functions that let you "hook into" Pulse's render cycle. They provide a way to preserve values across renders, run setup code once, and manage side effects. If you have used React before, you will find these concepts familiar, though Pulse hooks work a bit differently.
 
-- `ps.init()` keeps locals across renders
-- `ps.setup(fn, *args)` runs once, returns cached result
-- `ps.state(key, factory)` stores a keyed state instance
-- `ps.effects(*fns)` registers effects
-- `ps.stable(key, value)` keeps stable refs
+## The core idea
 
-Example: stable callback
+When a component renders, it runs from top to bottom like any Python function. But what happens when the component re-renders after a state change? By default, all local variables would be recreated from scratch.
+
+Hooks solve this problem. They let you say: "Remember this value between renders" or "Run this code only the first time."
+
+## The main hooks
+
+Pulse has five main hooks. Let's explore each one.
+
+### `ps.init()` - Preserve variables across renders
+
+The most common hook is `ps.init()`. It captures any variables you assign inside its block on the first render and restores them on subsequent renders.
 
 ```python
 @ps.component
-def editor(on_save):
-    on_save = ps.stable("on_save", on_save)
+def Counter():
     with ps.init():
-        st = EditorState(on_save)
-    ...
+        count_state = CounterState()
+        some_value = expensive_calculation()
+
+    # count_state and some_value are the same objects on every render
+    return ps.div(f"Count: {count_state.count}")
+```
+
+This is essential for state management. Without `ps.init()`, you would create a new `CounterState` every render, losing all your data.
+
+To see why this matters, try removing `ps.init()`:
+
+```python
+@ps.component
+def BrokenCounter():
+    # Bug: Creates a new state every render!
+    count_state = CounterState()
+    return ps.button("Click me", onClick=count_state.increment)
+```
+
+Clicking the button increments the count and triggers a re-render. But the re-render creates a fresh `CounterState` with count=0. The button appears to do nothing.
+
+### `ps.setup()` - Run a function once
+
+Sometimes you need to run initialization code that is more complex than simple variable assignment. That is where `ps.setup()` comes in:
+
+```python
+def initialize_editor():
+    print("Setting up editor...")
+    config = load_config()
+    state = EditorState(config)
+    return state
+
+@ps.component
+def Editor():
+    # initialize_editor runs only on the first render
+    state = ps.setup(initialize_editor)
+    return ps.div(...)
+```
+
+You can also pass arguments to the setup function:
+
+```python
+def create_connection(host, port):
+    return DatabaseConnection(host, port)
+
+@ps.component
+def Dashboard():
+    conn = ps.setup(create_connection, "localhost", port=5432)
+    return ps.div(...)
+```
+
+The function runs once, its return value is cached, and subsequent renders return the cached value.
+
+### `ps.state()` - Keyed state instances
+
+When you need different state instances based on a runtime key, use `ps.state()`:
+
+```python
+@ps.component
+def UserProfile(user_id: int):
+    # Different user_id = different state instance
+    state = ps.state(user_id, lambda: UserState(user_id))
+    return ps.div(f"User: {state.name}")
+```
+
+If `user_id` changes, Pulse creates a new state instance for that user. The old state is cleaned up automatically.
+
+### `ps.effects()` - Register side effects
+
+Effects let you run code in response to state changes. They are covered in detail in the [Reactivity](/docs/tutorial/reactivity) section, but here is how you register them:
+
+```python
+@ps.component
+def Logger():
+    with ps.init():
+        state = LogState()
+
+    @ps.effect
+    def log_changes():
+        print(f"Value changed to: {state.value}")
+
+    ps.effects(log_changes)
+
+    return ps.div(...)
+```
+
+### `ps.stable()` - Stable references
+
+The `ps.stable()` hook solves a common problem: keeping a stable reference to a value that might change.
+
+Consider this scenario:
+
+```python
+@ps.component
+def Editor(on_save):
+    with ps.init():
+        # Problem: on_save might change between renders,
+        # but EditorState captured the old version
+        state = EditorState(on_save)
+    return ps.div(...)
+```
+
+If the parent component passes a new `on_save` function, your `EditorState` still has the old one. Using `ps.stable()` fixes this:
+
+```python
+@ps.component
+def Editor(on_save):
+    # on_save_ref always calls the latest on_save
+    on_save_ref = ps.stable("on_save", on_save)
+
+    with ps.init():
+        state = EditorState(on_save_ref)
+    return ps.div(...)
+```
+
+The `ps.stable()` hook returns a wrapper function that always calls the latest version of `on_save`. The wrapper's identity never changes, so it is safe to pass to state constructors or use in effects.
+
+For non-function values, call the returned reference to get the value:
+
+```python
+config_ref = ps.stable("config", config)
+current_config = config_ref()  # Get the latest config
+```
+
+## The rules of hooks
+
+Hooks have one important rule: **call each hook only once per component**.
+
+This works:
+
+```python
+@ps.component
+def GoodComponent():
+    with ps.init():
+        state1 = StateA()
+        state2 = StateB()
+    return ps.div(...)
+```
+
+This breaks:
+
+```python
+@ps.component
+def BadComponent():
+    # Don't do this! Multiple ps.init() calls
+    with ps.init():
+        state1 = StateA()
+    with ps.init():  # Error!
+        state2 = StateB()
+    return ps.div(...)
+```
+
+The rule exists because hooks rely on call order to track their state internally. If you need multiple states, create them all inside a single `ps.init()` block.
+
+## Hook keys
+
+Both `ps.setup()` and `ps.effects()` accept an optional `key` argument. When the key changes, the hook re-runs:
+
+```python
+@ps.component
+def DataLoader(data_id: int):
+    # Re-runs load_data whenever data_id changes
+    data = ps.setup(load_data, data_id, key=data_id)
+    return ps.div(f"Data: {data}")
+```
+
+Keys are compared using `!=`, so use primitive values (strings, numbers, booleans) or tuples of primitives.
+
+## Complete example
+
+Here is a component that demonstrates multiple hooks working together:
+
+```python
+import pulse as ps
+
+class FormState(ps.State):
+    name: str = ""
+    email: str = ""
+
+    def __init__(self, on_submit):
+        self._on_submit = on_submit
+
+    def submit(self):
+        self._on_submit({"name": self.name, "email": self.email})
+
+@ps.component
+def ContactForm(on_submit):
+    # Keep a stable reference to on_submit
+    on_submit = ps.stable("on_submit", on_submit)
+
+    # Initialize state once
+    with ps.init():
+        state = FormState(on_submit)
+
+    return ps.form(
+        ps.input(
+            type="text",
+            placeholder="Name",
+            value=state.name,
+            onChange=lambda e: setattr(state, "name", e["target"]["value"]),
+        ),
+        ps.input(
+            type="email",
+            placeholder="Email",
+            value=state.email,
+            onChange=lambda e: setattr(state, "email", e["target"]["value"]),
+        ),
+        ps.button("Submit", type="button", onClick=state.submit),
+    )
+
+@ps.component
+def App():
+    def handle_submit(data):
+        print(f"Form submitted: {data}")
+
+    return ps.div(
+        ps.h1("Contact Us"),
+        ContactForm(on_submit=handle_submit),
+    )
 ```
 
 ## See also

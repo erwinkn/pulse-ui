@@ -2,11 +2,149 @@
 title: "MSAL Login"
 ---
 
-Use `pulse-msal` plugin.
+Add Microsoft Entra ID (Azure AD) authentication using the `pulse-msal` plugin.
+
+## Setup
+
+Register `MSALPlugin` with your app using credentials from the Azure portal.
 
 ```python
+import os
+import pulse as ps
 from pulse_msal import MSALPlugin
-app = ps.App(plugins=[MSALPlugin(...)])
+
+app = ps.App(
+    routes=[...],
+    plugins=[
+        MSALPlugin(
+            client_id=os.environ["AZURE_CLIENT_ID"],
+            client_secret=os.environ["AZURE_CLIENT_SECRET"],
+            tenant_id=os.environ["AZURE_TENANT_ID"],
+        ),
+    ],
+)
+```
+
+The plugin adds `/auth/login` and `/auth/callback` routes automatically.
+
+## Protected Pages
+
+Use `auth()` to check if a user is logged in and access their profile.
+
+```python
+import pulse as ps
+from pulse_msal import auth, logout
+
+
+@ps.component
+def ProtectedPage():
+    user = auth()
+
+    # Redirect unauthenticated users
+    if not user:
+        route = ps.route()
+        ps.redirect(f"/login?next={route.pathname}")
+        return None
+
+    return ps.div()[
+        ps.h1(f"Welcome, {user.get('name')}"),
+        ps.button("Sign out", onClick=logout),
+    ]
+```
+
+## Login Page
+
+Link to the plugin's login endpoint. Pass `next` to redirect after authentication.
+
+```python
+import pulse as ps
+
+
+@ps.component
+def LoginPage():
+    route = ps.route()
+    next_path = route.queryParams.get("next") or "/"
+
+    return ps.div()[
+        ps.h2("Sign in"),
+        ps.a(
+            "Sign in with Microsoft",
+            href=f"{ps.server_address()}/auth/login?next={next_path}",
+        ),
+    ]
+```
+
+## Complete Example
+
+```python
+import os
+import pulse as ps
+from pulse_msal import MSALPlugin, auth, logout
+
+
+@ps.component
+def Home():
+    return ps.div()[
+        ps.h1("Public Home"),
+        ps.Link("Go to Dashboard", to="/dashboard"),
+    ]
+
+
+@ps.component
+def Login():
+    route = ps.route()
+    next_path = route.queryParams.get("next") or "/"
+    return ps.a(
+        "Sign in with Microsoft",
+        href=f"{ps.server_address()}/auth/login?next={next_path}",
+    )
+
+
+@ps.component
+def Dashboard():
+    user = auth()
+    if not user:
+        ps.redirect("/login?next=/dashboard")
+        return None
+
+    return ps.div()[
+        ps.p(f"Hello, {user.get('name')}"),
+        ps.button("Sign out", onClick=logout),
+    ]
+
+
+app = ps.App(
+    routes=[
+        ps.Route("/", Home),
+        ps.Route("/login", Login),
+        ps.Route("/dashboard", Dashboard),
+    ],
+    plugins=[
+        MSALPlugin(
+            client_id=os.environ["AZURE_CLIENT_ID"],
+            client_secret=os.environ["AZURE_CLIENT_SECRET"],
+            tenant_id=os.environ["AZURE_TENANT_ID"],
+        ),
+    ],
+)
+```
+
+## Token Cache
+
+For production, use a persistent token cache like Redis.
+
+```python
+from pulse_msal import MSALPlugin, RedisTokenCacheStore
+
+MSALPlugin(
+    client_id="...",
+    client_secret="...",
+    tenant_id="...",
+    token_cache_store=RedisTokenCacheStore(
+        redis_url="redis://localhost:6379",
+        prefix="msal:",
+    ),
+)
 ```
 
 ## See also

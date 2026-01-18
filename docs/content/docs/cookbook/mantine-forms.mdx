@@ -2,14 +2,114 @@
 title: "Mantine Forms"
 ---
 
-Use `MantineForm` from `pulse-mantine`.
+Build validated forms with Mantine components. `MantineForm` provides state management, validation, and seamless integration with Mantine inputs.
+
+## Basic Form
+
+A simple form with email validation and a checkbox.
 
 ```python
-form = ps.setup(lambda: MantineForm(initialValues={"email": ""}))
-return form.render(onSubmit=handle)[
-    TextInput(name="email", label="Email"),
-    Button("Submit", type="submit"),
-]
+import pulse as ps
+from pulse_mantine import (
+    Button,
+    Checkbox,
+    Container,
+    Group,
+    IsEmail,
+    MantineForm,
+    TextInput,
+)
+
+
+@ps.component
+def SignupForm():
+    with ps.init():
+        form = MantineForm(
+            initialValues={"email": "", "subscribe": False},
+            validate={"email": IsEmail("Please enter a valid email")},
+        )
+
+    return Container(size="sm")[
+        form.render(onSubmit=lambda values: print("Submitted:", values))[
+            TextInput(
+                name="email",
+                label="Email",
+                placeholder="you@example.com",
+                withAsterisk=True,
+            ),
+            Checkbox(name="subscribe", mt="md", label="Subscribe to newsletter"),
+            Group(justify="flex-end", mt="md")[
+                Button("Submit", type="submit"),
+            ],
+        ]
+    ]
+
+
+app = ps.App([ps.Route("/", SignupForm)])
+```
+
+Set `name` on each input to register it with the form. The form handles validation, error display, and value collection automatically.
+
+## Multiple Validators
+
+Chain validators for complex rules. Each field can have a single validator or a list.
+
+```python
+from pulse_mantine import (
+    HasLength,
+    IsEmail,
+    IsNotEmpty,
+    MantineForm,
+    Matches,
+    PasswordInput,
+    TextInput,
+)
+
+form = MantineForm(
+    initialValues={"username": "", "email": "", "password": ""},
+    validate={
+        "username": [
+            IsNotEmpty("Username is required"),
+            HasLength(min=3, max=16, error="3-16 characters"),
+            Matches(r"^[a-z0-9_]+$", error="Lowercase letters, numbers, underscore only"),
+        ],
+        "email": IsEmail("Enter a valid email"),
+        "password": HasLength(min=8, error="Minimum 8 characters"),
+    },
+)
+```
+
+Built-in validators:
+- `IsNotEmpty(error)` - field must have a value
+- `IsEmail(error)` - valid email format
+- `HasLength(min, max, error)` - string length constraints
+- `Matches(regex, error)` - regex pattern match
+- `IsDate(error)` - valid date value
+- `IsAfter(field, error)` - date is after another field
+- `IsBefore(field, error)` - date is before another field
+
+## Form Methods
+
+Access form state and trigger validation programmatically.
+
+```python
+@ps.component
+def FormWithActions():
+    with ps.init():
+        form = MantineForm(initialValues={"name": ""})
+
+    async def print_values():
+        values = await form.get_form_values()
+        print("Current values:", values)
+
+    return form.render(onSubmit=lambda v: print(v))[
+        TextInput(name="name", label="Name"),
+        Group(mt="md")[
+            Button("Get Values", onClick=print_values),
+            Button("Validate", onClick=form.validate),
+            Button("Submit", type="submit"),
+        ],
+    ]
 ```
 
 ## See also

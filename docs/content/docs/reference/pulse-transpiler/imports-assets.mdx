@@ -2,9 +2,313 @@
 title: "Imports and Assets"
 ---
 
+JavaScript import declarations and local asset management for code generation.
 
-Exports:
-`Import`, `ImportKind`, `caller_file`, `clear_import_registry`, `get_registered_imports`, `is_absolute_path`, `is_local_path`, `is_relative_path`, `LocalAsset`, `clear_asset_registry`, `get_registered_assets`, `register_local_asset`, `DynamicImport`, `import_`, `JsModule`
+## `Import`
 
-Notes:
-- `Import` and `DynamicImport` register assets for codegen
+```python
+@dataclass(slots=True, init=False)
+class Import(Expr):
+    name: str
+    src: str
+    kind: ImportKind
+    is_type: bool
+    lazy: bool
+    before: tuple[str, ...]
+    id: str
+    version: str | None
+    asset: LocalAsset | None
+```
+
+JavaScript import that auto-registers and deduplicates. Emits as its unique identifier (e.g., `useState_1`).
+
+**Constructor:**
+
+```python
+def __init__(
+    self,
+    name: str,
+    src: str,
+    *,
+    kind: ImportKind | None = None,  # defaults to "named"
+    is_type: bool = False,
+    lazy: bool = False,
+    version: str | None = None,
+    before: tuple[str, ...] | list[str] = (),
+) -> None
+```
+
+**Parameters:**
+- `name`: Import name (e.g., `"useState"`, `"Button"`)
+- `src`: Module source (e.g., `"react"`, `"@mantine/core"`, `"./utils"`)
+- `kind`: Import kind - `"named"`, `"default"`, `"namespace"`, or `"side_effect"`
+- `is_type`: Type-only import (`import type { ... }`)
+- `lazy`: Generate lazy import factory for code-splitting
+- `version`: Package version hint for dependency resolution
+- `before`: Import ordering constraints
+
+**Examples:**
+
+```python
+from pulse.transpiler import Import
+
+# Named import: import { useState } from "react"
+useState = Import("useState", "react")
+
+# Default import: import React from "react"
+React = Import("React", "react", kind="default")
+
+# Namespace import: import * as utils from "./utils"
+utils = Import("utils", "./utils", kind="namespace")
+
+# Side-effect import: import "./styles.css"
+Import("", "./styles.css", kind="side_effect")
+
+# Type-only import: import type { Props } from "./types"
+Props = Import("Props", "./types", is_type=True)
+
+# Lazy import (for code-splitting)
+Chart = Import("Chart", "./Chart", kind="default", lazy=True)
+# Generates: const Chart_1 = () => import("./Chart")
+```
+
+**Properties:**
+
+```python
+@property
+def js_name(self) -> str  # Unique JS identifier
+@property
+def is_local(self) -> bool  # Has registered asset
+@property
+def is_lazy(self) -> bool
+@property
+def is_default(self) -> bool
+@property
+def is_namespace(self) -> bool
+@property
+def is_side_effect(self) -> bool
+```
+
+---
+
+## `ImportKind`
+
+```python
+ImportKind: TypeAlias = Literal["named", "default", "namespace", "side_effect"]
+```
+
+| Kind | JavaScript Output |
+|------|------------------|
+| `"named"` | `import { name } from "src"` |
+| `"default"` | `import name from "src"` |
+| `"namespace"` | `import * as name from "src"` |
+| `"side_effect"` | `import "src"` |
+
+---
+
+## `DynamicImport`
+
+```python
+@dataclass(slots=True)
+class DynamicImport(Expr):
+    src: str
+    asset: LocalAsset | None = None
+```
+
+Represents a dynamic `import()` expression. Emits as `import("src")`.
+
+Supports method chaining for `.then()`:
+
+```python
+import_("./foo").then(lambda m: m.bar)
+# -> import("./foo").then(m => m.bar)
+```
+
+---
+
+## `import_`
+
+```python
+import_: DynamicImportFn
+```
+
+Sentinel for inline dynamic imports in `@javascript` functions.
+
+```python
+from pulse.transpiler import import_
+
+@javascript
+def load_module():
+    return import_("./module").then(lambda m: m.default)
+```
+
+Transpiles to:
+```javascript
+function load_module_1() {
+  return import("./module").then(m => m.default);
+}
+```
+
+For local paths, resolves the file and registers it for asset copying.
+
+---
+
+## `JsModule`
+
+```python
+@dataclass(frozen=True)
+class JsModule(Expr):
+    name: str | None
+    py_name: str = ""
+    src: str | None = None
+    kind: Literal["default", "namespace"] = "namespace"
+    values: Literal["member", "named_import"] = "named_import"
+    constructors: frozenset[str] = frozenset()
+    components: frozenset[str] = frozenset()
+```
+
+Represents a JavaScript module binding. Used to map Python modules to JS modules.
+
+**Attributes:**
+- `name`: JS identifier for the module (e.g., `"Math"`, `"React"`), or `None` for global identifiers
+- `py_name`: Python module name for error messages
+- `src`: Import source path. `None` for builtins.
+- `kind`: Import kind - `"default"` or `"namespace"`
+- `values`: Attribute access style - `"member"` (e.g., `React.useState`) or `"named_import"`
+- `constructors`: Names that emit with `new` keyword
+- `components`: Names wrapped with `Jsx`
+
+**Methods:**
+
+```python
+def to_expr(self) -> Identifier | Import
+```
+Generate `Identifier` for builtins, `Import` for external modules.
+
+```python
+def get_value(self, name: str) -> Member | Class | Jsx | Identifier | Import
+```
+Get a member of this module as an expression.
+
+**Static Method:**
+
+```python
+@staticmethod
+def register(
+    *,
+    name: str | None,
+    src: str | None = None,
+    kind: Literal["default", "namespace"] = "namespace",
+    values: Literal["member", "named_import"] = "named_import",
+) -> None
+```
+
+Register the calling Python module as a JavaScript module binding. Must be called from within the module being registered.
+
+**Examples:**
+
+```python
+# Inside pulse/js/math.py (builtin)
+JsModule.register(name="Math")
+
+# Inside pulse/js/react.py (external module)
+JsModule.register(name="React", src="react")
+
+# Inside pulse/js/set.py (global identifier, no module binding)
+JsModule.register(name=None)
+```
+
+---
+
+## Local Assets
+
+### `LocalAsset`
+
+```python
+@dataclass(slots=True)
+class LocalAsset:
+    source_path: Path
+    id: str
+```
+
+A local file registered for copying to assets during code generation.
+
+**Properties:**
+
+```python
+@property
+def asset_filename(self) -> str  # e.g., "utils_1.ts"
+
+def import_path(self) -> str  # Relative path from route file to asset
+```
+
+### `register_local_asset`
+
+```python
+def register_local_asset(source_path: Path) -> LocalAsset
+```
+Register a local file for copying. Returns existing if already registered.
+
+### `get_registered_assets`
+
+```python
+def get_registered_assets() -> list[LocalAsset]
+```
+Get all registered local assets.
+
+### `clear_asset_registry`
+
+```python
+def clear_asset_registry() -> None
+```
+Clear asset registry (for tests).
+
+---
+
+## Import Registry Functions
+
+### `get_registered_imports`
+
+```python
+def get_registered_imports() -> list[Import]
+```
+Get all registered imports.
+
+### `clear_import_registry`
+
+```python
+def clear_import_registry() -> None
+```
+Clear the import registry.
+
+---
+
+## Path Utilities
+
+### `caller_file`
+
+```python
+def caller_file(depth: int = 2) -> Path
+```
+Get the file path of the caller at specified stack depth.
+
+### `is_relative_path`
+
+```python
+def is_relative_path(path: str) -> bool
+```
+Check if path starts with `./` or `../`.
+
+### `is_absolute_path`
+
+```python
+def is_absolute_path(path: str) -> bool
+```
+Check if path starts with `/`.
+
+### `is_local_path`
+
+```python
+def is_local_path(path: str) -> bool
+```
+Check if path is relative or absolute (i.e., a local file path).

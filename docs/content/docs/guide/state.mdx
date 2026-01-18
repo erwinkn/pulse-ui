@@ -2,21 +2,110 @@
 title: "State"
 ---
 
-State classes define reactive fields via type annotations.
+State is how you make your Pulse application interactive. When state changes, Pulse automatically re-renders your UI to reflect those changes.
+
+## Defining state
+
+Create a state class by inheriting from `ps.State` and defining fields with type annotations:
 
 ```python
 class Counter(ps.State):
     count: int = 0
 
-    def inc(self):
+    def increment(self):
         self.count += 1
+
+    def decrement(self):
+        self.count -= 1
 ```
 
-Rules:
-- Public fields must be annotated
-- Private data must be prefixed with `_`
+The type annotation (`: int`) tells Pulse this is a reactive field. When you modify `count`, Pulse knows to update the UI.
 
-Use `ps.init()` to keep state instances across renders.
+## Using state in components
+
+State needs to persist across renders. Use `ps.init()` to create state that survives re-renders:
+
+```python
+@ps.component
+def CounterDemo():
+    with ps.init():
+        state = Counter()
+
+    return ps.div()[
+        ps.p(f"Count: {state.count}"),
+        ps.button("-", onClick=state.decrement),
+        ps.button("+", onClick=state.increment),
+    ]
+```
+
+Without `ps.init()`, a new `Counter` instance would be created on every render, resetting the count to 0 each time.
+
+## Why ps.init() matters
+
+Here's what happens without it:
+
+```python
+@ps.component
+def BrokenCounter():
+    state = Counter()  # Created fresh every render!
+    # Clicking buttons changes state, triggering re-render...
+    # ...but re-render creates a NEW Counter with count=0
+    # The count never actually changes from the user's perspective
+```
+
+With `ps.init()`:
+
+```python
+@ps.component
+def WorkingCounter():
+    with ps.init():
+        state = Counter()  # Created once, reused on re-renders
+    # Now clicking buttons actually updates the displayed count
+```
+
+## Reactive vs non-reactive fields
+
+All fields with type annotations are reactive - changes trigger re-renders:
+
+```python
+class TodoState(ps.State):
+    title: str = ""        # Reactive
+    done: bool = False     # Reactive
+```
+
+To store data that shouldn't trigger re-renders, prefix the name with underscore:
+
+```python
+class TodoState(ps.State):
+    title: str = ""
+    done: bool = False
+    _internal_id: str      # Not reactive - changes won't trigger re-render
+
+    def __init__(self, internal_id: str):
+        self._internal_id = internal_id
+```
+
+This is useful for references to other states, debug info, or any data that's just for internal bookkeeping.
+
+## Event handlers
+
+State methods work as event handlers. You can also use regular functions or lambdas:
+
+```python
+@ps.component
+def EventDemo():
+    with ps.init():
+        state = Counter()
+
+    def reset():
+        state.count = 0
+
+    return ps.div()[
+        ps.button("Increment", onClick=state.increment),  # State method
+        ps.button("Reset", onClick=reset),                # Local function
+        ps.button("Set to 10", onClick=lambda: setattr(state, 'count', 10)),  # Lambda
+    ]
+```
 
 ## See also
 

@@ -3,9 +3,44 @@ title: "pulse.js"
 description: "Python bindings for JS builtins"
 ---
 
+# pulse-client
 
-Use inside `@javascript` functions.
+The `pulse-client` package provides the React client library for Pulse applications. It handles WebSocket communication, VDOM rendering, and state synchronization between the Python backend and React frontend.
 
-Exports:
-- `obj`, `throw`, `undefined`
-- Builtins and namespaces via attribute access (see pages)
+## Installation
+
+```bash
+npm install pulse-client
+# or
+bun add pulse-client
+```
+
+## Exports
+
+### React Components
+
+- [`PulseProvider`](/docs/reference/pulse-js/pulse-client#pulseprovider) - Context provider for Pulse client
+- [`PulseView`](/docs/reference/pulse-js/pulse-client#pulseview) - Renders a Pulse view
+- [`PulseForm`](/docs/reference/pulse-js/pulse-client#pulseform) - Form component for Pulse submissions
+
+### Hooks
+
+- [`usePulseClient`](/docs/reference/pulse-js/pulse-client#usepulseclient) - Access the Pulse client instance
+- [`usePulseChannel`](/docs/reference/pulse-js/pulse-client#usepulsechannel) - Subscribe to a Pulse channel
+
+### Classes
+
+- [`ChannelBridge`](/docs/reference/pulse-js/pulse-client#channelbridge) - Bidirectional channel communication
+- [`VDOMRenderer`](/docs/reference/pulse-js/pulse-client#vdomrenderer) - VDOM to React renderer
+- [`PulseChannelResetError`](/docs/reference/pulse-js/pulse-client#pulsechannelreseterror) - Channel error class
+
+### Functions
+
+- [`serialize`](/docs/reference/pulse-js/builtins#serialize) - Serialize data for wire transfer
+- [`deserialize`](/docs/reference/pulse-js/builtins#deserialize) - Deserialize wire data
+- [`submitForm`](/docs/reference/pulse-js/pulse-client#submitform) - Programmatic form submission
+- [`extractServerRouteInfo`](/docs/reference/pulse-js/dom#extractserverrouteinfo) - Extract route info from request
+
+### Types
+
+See [VDOM Types](/docs/reference/pulse-js/dom#vdom-types) and [Message Types](/docs/reference/pulse-js/dom#message-types) for TypeScript type definitions.

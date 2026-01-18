@@ -3,10 +3,281 @@ title: "Routing"
 description: "Routes, layouts, and client routing components"
 ---
 
+Route definitions and client-side navigation components.
 
-Exports:
-`Layout`, `Route`, `RouteInfo`, `Link`, `Outlet`
+## Classes
 
-Notes:
-- `Route` paths are relative
-- Use `Link` and `navigate()` for client navigation
+### Route
+
+Represents a route definition with its component and children.
+
+#### Constructor
+
+```python
+def __init__(
+    self,
+    path: str,
+    render: Component[[]],
+    children: Sequence[Route | Layout] | None = None,
+    dev: bool = False,
+)
+```
+
+**Parameters:**
+- `path` - Route path (relative, no leading slash). Use `:param` for dynamic segments, `?` suffix for optional, `*` for catch-all.
+- `render` - Component to render for this route.
+- `children` - Nested routes and layouts (optional).
+- `dev` - If `True`, route only exists in dev environment.
+
+#### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `path` | `str` | Normalized relative path |
+| `segments` | `list[PathSegment]` | Parsed path segments |
+| `render` | `Component[[]]` | Route component |
+| `children` | `Sequence[Route \| Layout]` | Child routes/layouts |
+| `is_index` | `bool` | True if path is empty (index route) |
+| `is_dynamic` | `bool` | True if path has dynamic segments |
+| `dev` | `bool` | Dev-only flag |
+| `parent` | `Route \| Layout \| None` | Parent route or layout |
+
+#### Methods
+
+##### unique_path
+
+```python
+def unique_path(self) -> str
+```
+
+Return absolute path with leading `/`.
+
+##### default_route_info
+
+```python
+def default_route_info(self) -> RouteInfo
+```
+
+Return default `RouteInfo` for static routes.
+
+**Raises:** `InvalidRouteError` if route or ancestors have dynamic segments.
+
+```python
+import pulse as ps
+
+app = ps.App(
+    routes=[
+        ps.Route("", Home),
+        ps.Route("users", Users, children=[
+            ps.Route(":id", UserDetail),
+        ]),
+        ps.Route("files/*", FileViewer),
+        ps.Route("admin", AdminPanel, dev=True),
+    ]
+)
+```
+
+### Layout
+
+Wraps child routes with a shared layout component.
+
+#### Constructor
+
+```python
+def __init__(
+    self,
+    render: Component[...],
+    children: Sequence[Route | Layout] | None = None,
+    dev: bool = False,
+)
+```
+
+**Parameters:**
+- `render` - Layout component (must render `Outlet` for children).
+- `children` - Routes and nested layouts.
+- `dev` - If `True`, layout only exists in dev environment.
+
+#### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `render` | `Component[...]` | Layout component |
+| `children` | `Sequence[Route \| Layout]` | Child routes/layouts |
+| `dev` | `bool` | Dev-only flag |
+| `parent` | `Route \| Layout \| None` | Parent route or layout |
+
+```python
+import pulse as ps
+
+@ps.component
+def DashboardLayout():
+    return ps.div(
+        Sidebar(),
+        ps.main(ps.Outlet()),
+    )
+
+app = ps.App(
+    routes=[
+        ps.Layout(DashboardLayout, children=[
+            ps.Route("dashboard", Dashboard),
+            ps.Route("settings", Settings),
+        ]),
+    ]
+)
+```
+
+### RouteInfo
+
+TypedDict containing route information from the client.
+
+```python
+class RouteInfo(TypedDict):
+    pathname: str       # Current URL path
+    hash: str           # URL hash (without #)
+    query: str          # Query string (without ?)
+    queryParams: dict[str, str]  # Parsed query parameters
+    pathParams: dict[str, str]   # Dynamic path parameters
+    catchall: list[str]          # Catch-all segments
+```
+
+### RouteContext
+
+Runtime context for the current route, accessible via `ps.route()`.
+
+#### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `info` | `RouteInfo` | Current route info (reactive) |
+| `pulse_route` | `Route \| Layout` | Route/layout definition |
+
+#### Properties
+
+```python
+@property
+def pathname(self) -> str: ...
+
+@property
+def hash(self) -> str: ...
+
+@property
+def query(self) -> str: ...
+
+@property
+def queryParams(self) -> dict[str, str]: ...
+
+@property
+def pathParams(self) -> dict[str, str]: ...
+
+@property
+def catchall(self) -> list[str]: ...
+```
+
+## Components
+
+### Link
+
+Client-side navigation link (wraps react-router `Link`).
+
+```python
+def Link(
+    *children: Node,
+    key: str | None = None,
+    to: str,
+    discover: Literal["render", "none"] | None = None,
+    prefetch: Literal["none", "intent", "render", "viewport"] = "intent",
+    preventScrollReset: bool | None = None,
+    relative: Literal["route", "path"] | None = None,
+    reloadDocument: bool | None = None,
+    replace: bool | None = None,
+    state: dict[str, object] | None = None,
+    viewTransition: bool | None = None,
+    **props: HTMLAnchorProps,
+)
+```
+
+**Parameters:**
+- `to` - Target path.
+- `prefetch` - Prefetch strategy. Default: `"intent"`.
+- `replace` - Replace history entry instead of push.
+- `state` - State to pass to the target route.
+- `**props` - Additional anchor element props.
+
+```python
+ps.Link("Go Home", to="/")
+ps.Link("User", to="/users/123", prefetch="render")
+```
+
+### Outlet
+
+Renders child routes within a layout (wraps react-router `Outlet`).
+
+```python
+def Outlet(key: str | None = None)
+```
+
+```python
+@ps.component
+def AppLayout():
+    return ps.div(
+        Header(),
+        ps.Outlet(),  # Child routes render here
+        Footer(),
+    )
+```
+
+## Functions
+
+### navigate
+
+Programmatic navigation (available via `ps.navigate()`).
+
+```python
+def navigate(path: str) -> None
+```
+
+**Parameters:**
+- `path` - Target path.
+
+```python
+def handle_submit():
+    # ... save data ...
+    ps.navigate("/success")
+```
+
+### route
+
+Get current route context (available via `ps.route()`).
+
+```python
+def route() -> RouteContext
+```
+
+**Returns:** Current `RouteContext`.
+
+```python
+@ps.component
+def UserProfile():
+    ctx = ps.route()
+    user_id = ctx.pathParams.get("id")
+    return ps.div(f"User: {user_id}")
+```
+
+## Path Syntax
+
+| Pattern | Example | Description |
+|---------|---------|-------------|
+| Static | `users` | Exact match |
+| Dynamic | `:id` | Named parameter |
+| Optional | `:id?` | Optional parameter |
+| Catch-all | `*` | Match remaining segments |
+
+## Exceptions
+
+### InvalidRouteError
+
+```python
+class InvalidRouteError(Exception)
+```
+
+Raised for invalid route configurations (empty segments, invalid characters, misplaced catch-all).

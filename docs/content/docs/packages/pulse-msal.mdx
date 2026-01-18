@@ -2,9 +2,305 @@
 title: "Pulse MSAL"
 ---
 
-Microsoft Entra ID auth plugin.
+Microsoft Entra ID (formerly Azure AD) authentication plugin for Pulse apps using [MSAL](https://github.com/AzureAD/microsoft-authentication-library-for-python).
+
+## Installation
+
+```bash
+uv add pulse-msal
+```
+
+## Prerequisites
+
+Before using this plugin, you need to register an application in Microsoft Entra ID:
+
+1. Go to the [Azure Portal](https://portal.azure.com/)
+2. Navigate to **Microsoft Entra ID** > **App registrations** > **New registration**
+3. Configure your app:
+   - Name: Your app name
+   - Supported account types: Choose based on your needs
+   - Redirect URI: `http://localhost:8000/auth/callback` (for development)
+4. Note your **Application (client) ID** and **Directory (tenant) ID**
+5. Go to **Certificates & secrets** > **New client secret** and save the secret value
+
+## Basic Usage
+
+Add the `MSALPlugin` to your Pulse app:
 
 ```python
-from pulse_msal import MSALPlugin
-app = ps.App(plugins=[MSALPlugin(...)])
+import os
+from pathlib import Path
+import pulse as ps
+from pulse_msal import MSALPlugin, auth, login, logout
+
+
+# Create the plugin with your Azure AD credentials
+msal_plugin = MSALPlugin(
+    client_id=os.environ["AZURE_CLIENT_ID"],
+    client_secret=os.environ["AZURE_CLIENT_SECRET"],
+    tenant_id=os.environ["AZURE_TENANT_ID"],
+)
+
+
+@ps.component
+def HomePage():
+    user = auth()  # Get current user info, or None if not logged in
+
+    if user:
+        return ps.div()[
+            ps.h1(f"Welcome, {user.get('name', 'User')}!"),
+            ps.p(f"Email: {user.get('preferred_username', 'N/A')}"),
+            ps.button("Sign Out", onClick=logout),
+        ]
+    else:
+        return ps.div()[
+            ps.h1("Welcome to My App"),
+            ps.button("Sign In with Microsoft", onClick=lambda: login()),
+        ]
+
+
+app = ps.App(
+    routes=[ps.Route("/", HomePage)],
+    plugins=[msal_plugin],
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "web"),
+)
 ```
+
+## Configuration Options
+
+### MSALPlugin Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `client_id` | `str` | Yes | Azure AD application client ID |
+| `client_secret` | `str` | Yes | Azure AD application client secret |
+| `tenant_id` | `str` | Yes | Azure AD tenant ID |
+| `authority` | `str` | No | Custom authority URL (defaults to `https://login.microsoftonline.com/{tenant_id}`) |
+| `scopes` | `list[str]` | No | OAuth scopes to request (defaults to `["User.Read"]`) |
+| `session_key` | `str` | No | Session storage key (defaults to `"msal"`) |
+| `claims_mapper` | `Callable` | No | Function to transform ID token claims |
+| `token_cache_store` | `TokenCacheStore` | No | Custom token cache storage |
+| `route_prefix` | `str` | No | Prefix for auth routes (e.g., `/api` for `/api/auth/login`) |
+
+### Custom Scopes
+
+Request additional Microsoft Graph permissions:
+
+```python
+msal_plugin = MSALPlugin(
+    client_id=os.environ["AZURE_CLIENT_ID"],
+    client_secret=os.environ["AZURE_CLIENT_SECRET"],
+    tenant_id=os.environ["AZURE_TENANT_ID"],
+    scopes=["User.Read", "Mail.Read", "Calendars.Read"],
+)
+```
+
+### Custom Claims Mapper
+
+Transform the user claims returned from authentication:
+
+```python
+def my_claims_mapper(claims: dict) -> dict:
+    return {
+        "id": claims.get("oid"),
+        "name": claims.get("name"),
+        "email": claims.get("preferred_username"),
+        "roles": claims.get("roles", []),
+    }
+
+
+msal_plugin = MSALPlugin(
+    client_id=os.environ["AZURE_CLIENT_ID"],
+    client_secret=os.environ["AZURE_CLIENT_SECRET"],
+    tenant_id=os.environ["AZURE_TENANT_ID"],
+    claims_mapper=my_claims_mapper,
+)
+```
+
+## Helper Functions
+
+### auth()
+
+Returns the authenticated user's claims as a dictionary, or `None` if not logged in:
+
+```python
+from pulse_msal import auth
+
+user = auth()
+if user:
+    print(user["name"])
+    print(user["preferred_username"])
+```
+
+### login()
+
+Redirects the user to the Microsoft login page:
+
+```python
+from pulse_msal import login
+
+# Basic login
+login()
+
+# Login with redirect after authentication
+login(next="/dashboard")
+
+# Login with custom route prefix
+login(next="/dashboard", route_prefix="/api")
+```
+
+### logout()
+
+Clears the user's session:
+
+```python
+from pulse_msal import logout
+
+logout()
+```
+
+## Token Cache Storage
+
+By default, in development mode with `CookieSessionStore`, the plugin uses file-based token cache storage. For production, you should use a proper cache store.
+
+### Redis Token Cache
+
+For production deployments, use Redis:
+
+```python
+from pulse_msal import MSALPlugin, RedisTokenCacheStore
+
+msal_plugin = MSALPlugin(
+    client_id=os.environ["AZURE_CLIENT_ID"],
+    client_secret=os.environ["AZURE_CLIENT_SECRET"],
+    tenant_id=os.environ["AZURE_TENANT_ID"],
+    token_cache_store=RedisTokenCacheStore(
+        url=os.environ["REDIS_URL"],
+        ttl_seconds=3600 * 24,  # 24 hours
+    ),
+)
+```
+
+### File Token Cache (Development)
+
+Explicitly use file-based storage:
+
+```python
+from pathlib import Path
+from pulse_msal import MSALPlugin, FileTokenCacheStore
+
+msal_plugin = MSALPlugin(
+    client_id=os.environ["AZURE_CLIENT_ID"],
+    client_secret=os.environ["AZURE_CLIENT_SECRET"],
+    tenant_id=os.environ["AZURE_TENANT_ID"],
+    token_cache_store=FileTokenCacheStore(
+        base_dir=Path("./cache/msal"),
+    ),
+)
+```
+
+## Protected Routes
+
+Create routes that require authentication:
+
+```python
+from pulse_msal import auth, login
+
+
+@ps.component
+def ProtectedPage():
+    user = auth()
+    if not user:
+        # Redirect to login, then back to this page
+        login(next="/protected")
+        return ps.div("Redirecting to login...")
+
+    return ps.div()[
+        ps.h1("Protected Content"),
+        ps.p(f"Hello, {user['name']}!"),
+    ]
+```
+
+## Full Example
+
+A complete app with public and protected pages:
+
+```python
+import os
+from pathlib import Path
+import pulse as ps
+from pulse_msal import MSALPlugin, auth, login, logout
+
+
+msal_plugin = MSALPlugin(
+    client_id=os.environ["AZURE_CLIENT_ID"],
+    client_secret=os.environ["AZURE_CLIENT_SECRET"],
+    tenant_id=os.environ["AZURE_TENANT_ID"],
+)
+
+
+@ps.component
+def NavBar():
+    user = auth()
+    return ps.nav(className="p-4 bg-gray-100 flex justify-between")[
+        ps.div()[
+            ps.a("Home", href="/", className="mr-4"),
+            ps.a("Dashboard", href="/dashboard", className="mr-4"),
+        ],
+        ps.div()[
+            ps.span(f"Hi, {user['name']}", className="mr-4") if user else None,
+            ps.button("Sign Out", onClick=logout) if user else
+            ps.button("Sign In", onClick=lambda: login()),
+        ],
+    ]
+
+
+@ps.component
+def HomePage():
+    return ps.div()[
+        NavBar(),
+        ps.main(className="p-4")[
+            ps.h1("Welcome to My App"),
+            ps.p("This is a public page."),
+        ],
+    ]
+
+
+@ps.component
+def Dashboard():
+    user = auth()
+    if not user:
+        login(next="/dashboard")
+        return ps.div("Redirecting...")
+
+    return ps.div()[
+        NavBar(),
+        ps.main(className="p-4")[
+            ps.h1("Dashboard"),
+            ps.p(f"Email: {user.get('preferred_username')}"),
+            ps.p(f"Object ID: {user.get('oid')}"),
+        ],
+    ]
+
+
+app = ps.App(
+    routes=[
+        ps.Route("/", HomePage),
+        ps.Route("/dashboard", Dashboard),
+    ],
+    plugins=[msal_plugin],
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "web"),
+)
+```
+
+## Environment Variables
+
+For security, store credentials in environment variables:
+
+```bash
+export AZURE_CLIENT_ID="your-client-id"
+export AZURE_CLIENT_SECRET="your-client-secret"
+export AZURE_TENANT_ID="your-tenant-id"
+```
+
+Or use a `.env` file with `python-dotenv`.

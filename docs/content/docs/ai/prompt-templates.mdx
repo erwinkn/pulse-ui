@@ -2,12 +2,212 @@
 title: "Prompt Templates"
 ---
 
-Short prompts:
+Ready-to-use prompts for working with Pulse. Copy these into any AI tool to provide context about the framework.
+
+## Quick Context Prompts
+
+### Minimal (for chat-based tools)
 
 ```text
-You are in pulse-ui. Read AGENTS.md. Be concise. Use uv + bun. Run make all before commit.
+Pulse app. Python + React via WebSockets. Use ps.State for state,
+@ps.component for components, ps.init() to preserve state.
+Commands: uv run pulse run app.py, make all.
 ```
 
+### Standard (for agentic tools)
+
 ```text
-Write docs. Use current Pulse APIs: ps.init, ps.setup, ps.state, ps.effects, ps.stable.
+I'm building a Pulse application.
+
+Pulse is a full-stack Python framework for interactive web apps.
+The Python code renders to React components via WebSocket.
+
+Key patterns:
+- State: class MyState(ps.State) with typed properties and methods
+- Components: @ps.component decorator on render functions
+- Hooks: ps.init() preserves variables, ps.setup() runs once
+- Async: @ps.query for data fetching, @ps.effect for side effects
+
+Commands:
+- uv run pulse run app.py (dev server)
+- make all (validate before commit)
+```
+
+## Task-Specific Prompts
+
+### Creating a Component
+
+```text
+Create a Pulse component for [describe UI].
+
+Requirements:
+- Use a [Name]State class for state management
+- Include event handlers as state methods
+- Style with Tailwind CSS (className prop)
+- Follow this structure:
+
+class ComponentState(ps.State):
+    # typed properties with defaults
+    # methods for state updates
+
+@ps.component
+def Component():
+    with ps.init():
+        state = ComponentState()
+    return ps.div(...)
+```
+
+### Adding a Query
+
+```text
+Add data fetching to this component using @ps.query.
+
+The query should:
+- Fetch [describe data] from [endpoint/source]
+- Show loading state while fetching
+- Handle errors gracefully
+- Re-fetch when [dependency] changes
+
+Pattern:
+class MyState(ps.State):
+    @ps.query
+    async def data(self) -> ReturnType:
+        # async fetch logic
+        return result
+```
+
+### Debugging State Issues
+
+```text
+The component state isn't persisting across renders.
+
+Check:
+1. Is the state created inside ps.init()?
+2. Are state properties properly typed?
+3. Is the component decorated with @ps.component?
+
+Correct pattern:
+@ps.component
+def MyComponent():
+    with ps.init():  # Required!
+        state = MyState()
+    return ps.div(...)
+```
+
+### Refactoring to Computed
+
+```text
+Convert this derived value to a @ps.computed property.
+
+Before: calculated inline in render
+After: cached computed that updates only when dependencies change
+
+class MyState(ps.State):
+    items: list[Item]
+    filter: str
+
+    @ps.computed
+    def filtered_items(self) -> list[Item]:
+        # filter logic here
+        return [i for i in self.items if ...]
+```
+
+## AGENTS.md Template
+
+Use this as a starting point for your project's AI configuration file:
+
+```markdown
+# [Project Name]
+
+[One-line description]
+
+## Commands
+
+```bash
+uv run pulse run app.py   # Dev server on :8000
+make all                   # Format, lint, typecheck, test
+uv sync                    # Install Python deps
+bun i                      # Install JS deps (in web/)
+```
+
+## Structure
+
+- `app.py` - Main application entry
+- `components/` - Reusable components
+- `states/` - State class definitions
+- `web/` - Generated React frontend
+
+## Pulse Patterns
+
+### State
+```python
+class ExampleState(ps.State):
+    value: str = ""
+    items: list[str] = []
+
+    def update(self, v: str):
+        self.value = v
+
+    @ps.computed
+    def count(self) -> int:
+        return len(self.items)
+
+    @ps.query
+    async def data(self) -> dict:
+        return await fetch_data()
+```
+
+### Component
+```python
+@ps.component
+def Example():
+    with ps.init():
+        state = ExampleState()
+
+    return ps.div(
+        ps.p(state.value),
+        ps.button("Update", onClick=lambda: state.update("new"))
+    )
+```
+
+## Rules
+
+- Always use ps.init() for state in components
+- Run make all before committing
+- Use Tailwind CSS for styling
+- Prefer state methods over inline lambdas for complex logic
+```
+
+## Conversation Starters
+
+### New Project
+
+```text
+Help me build a [type] app with Pulse. Features needed:
+- [Feature 1]
+- [Feature 2]
+- [Feature 3]
+
+Start with the main state class and core components.
+```
+
+### Existing Project
+
+```text
+I have a Pulse app with [describe current state].
+I want to add [feature].
+
+Current structure:
+- [List main files/components]
+
+What's the best approach?
+```
+
+### Learning
+
+```text
+Explain how [Pulse concept] works. Show me:
+1. A minimal example
+2. Common use cases
+3. Potential pitfalls
 ```

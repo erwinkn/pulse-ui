@@ -2,8 +2,249 @@
 title: "Pulse Lucide"
 ---
 
-Lucide icon bindings.
+Pulse bindings for [Lucide](https://lucide.dev/), a beautiful and consistent icon library with 1500+ icons.
+
+## Installation
+
+```bash
+uv add pulse-lucide
+```
+
+Also install the JavaScript dependency in your `web/` directory:
+
+```bash
+cd web && bun add lucide-react
+```
+
+## Basic Usage
+
+Import and use icons directly by name:
 
 ```python
-from pulse_lucide import Search, Heart
+from pathlib import Path
+import pulse as ps
+from pulse_lucide import Search, Heart, Settings, User, Mail
+
+
+@ps.component
+def IconDemo():
+    return ps.div(className="flex gap-4 items-center")[
+        Search(),
+        Heart(),
+        Settings(),
+        User(),
+        Mail(),
+    ]
+
+
+app = ps.App(
+    routes=[ps.Route("/", IconDemo)],
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "web"),
+)
 ```
+
+## Customizing Icons
+
+### Size
+
+Control icon size with the `size` prop (default is 24):
+
+```python
+from pulse_lucide import Star
+
+ps.div()[
+    Star(size=16),   # Small
+    Star(size=24),   # Default
+    Star(size=32),   # Medium
+    Star(size=48),   # Large
+]
+```
+
+### Color
+
+Icons inherit the current text color. Use CSS or `style` to change it:
+
+```python
+from pulse_lucide import Heart
+
+ps.div()[
+    Heart(style={"color": "red"}),
+    Heart(className="text-blue-500"),  # Tailwind CSS
+]
+```
+
+### Stroke Width
+
+Adjust line thickness with `strokeWidth`:
+
+```python
+from pulse_lucide import Circle
+
+ps.div()[
+    Circle(strokeWidth=1),    # Thin
+    Circle(strokeWidth=2),    # Default
+    Circle(strokeWidth=3),    # Bold
+]
+```
+
+### Absolute Stroke Width
+
+By default, stroke width scales with icon size. Set `absoluteStrokeWidth=True` to keep a fixed stroke width:
+
+```python
+from pulse_lucide import Square
+
+ps.div()[
+    Square(size=48, strokeWidth=2),                      # Stroke scales
+    Square(size=48, strokeWidth=2, absoluteStrokeWidth=True),  # Fixed stroke
+]
+```
+
+## Common Icons
+
+Here are some frequently used icons organized by category:
+
+### Navigation
+
+```python
+from pulse_lucide import (
+    Menu, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
+    ArrowLeft, ArrowRight, Home, Search,
+)
+```
+
+### Actions
+
+```python
+from pulse_lucide import (
+    Plus, Minus, Edit, Trash, Save, Download, Upload,
+    Copy, Check, X, RefreshCw,
+)
+```
+
+### Communication
+
+```python
+from pulse_lucide import (
+    Mail, MessageCircle, Phone, Send, Bell, AtSign,
+)
+```
+
+### Media
+
+```python
+from pulse_lucide import (
+    Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
+    Image, Video, Music, Camera,
+)
+```
+
+### User Interface
+
+```python
+from pulse_lucide import (
+    User, Users, Settings, LogIn, LogOut, Lock, Unlock,
+    Eye, EyeOff, Filter, SlidersHorizontal,
+)
+```
+
+### Status
+
+```python
+from pulse_lucide import (
+    Check, X, AlertCircle, AlertTriangle, Info, HelpCircle,
+    CheckCircle, XCircle, Loader,
+)
+```
+
+### Files
+
+```python
+from pulse_lucide import (
+    File, FileText, Folder, FolderOpen, Archive, Paperclip,
+)
+```
+
+## Full Example
+
+A toolbar with icon buttons:
+
+```python
+from pathlib import Path
+import pulse as ps
+from pulse_lucide import Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight
+
+
+class EditorState(ps.State):
+    is_bold: bool = False
+    is_italic: bool = False
+    alignment: str = "left"
+
+    def toggle_bold(self):
+        self.is_bold = not self.is_bold
+
+    def toggle_italic(self):
+        self.is_italic = not self.is_italic
+
+    def set_alignment(self, align: str):
+        self.alignment = align
+
+
+@ps.component
+def TextEditor():
+    with ps.init():
+        state = EditorState()
+
+    def icon_button(icon, active: bool, on_click):
+        bg = "bg-blue-100" if active else "bg-gray-100"
+        return ps.button(
+            icon,
+            onClick=on_click,
+            className=f"p-2 rounded {bg} hover:bg-blue-200",
+        )
+
+    return ps.div(className="p-4")[
+        ps.div(className="flex gap-2 mb-4")[
+            icon_button(Bold(size=18), state.is_bold, state.toggle_bold),
+            icon_button(Italic(size=18), state.is_italic, state.toggle_italic),
+            ps.div(className="w-px bg-gray-300 mx-2"),
+            icon_button(
+                AlignLeft(size=18),
+                state.alignment == "left",
+                lambda: state.set_alignment("left"),
+            ),
+            icon_button(
+                AlignCenter(size=18),
+                state.alignment == "center",
+                lambda: state.set_alignment("center"),
+            ),
+            icon_button(
+                AlignRight(size=18),
+                state.alignment == "right",
+                lambda: state.set_alignment("right"),
+            ),
+        ],
+        ps.textarea(
+            placeholder="Start typing...",
+            className=f"w-full h-40 p-2 border rounded text-{state.alignment}",
+            style={
+                "fontWeight": "bold" if state.is_bold else "normal",
+                "fontStyle": "italic" if state.is_italic else "normal",
+            },
+        ),
+    ]
+
+
+app = ps.App(
+    routes=[ps.Route("/", TextEditor)],
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "web"),
+)
+```
+
+## Finding Icons
+
+Browse all 1500+ icons at [lucide.dev/icons](https://lucide.dev/icons). Use the search to find icons by name or keywords.
+
+Icon names in `pulse-lucide` match the PascalCase names shown on the Lucide website. For example:
+- `arrow-left` on the website = `ArrowLeft` in Python
+- `chevron-down` on the website = `ChevronDown` in Python

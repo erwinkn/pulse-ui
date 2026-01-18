@@ -1,15 +1,319 @@
 ---
-title: "DOM and Browser"
+title: "Types and Helpers"
 ---
 
-Namespace modules:
+# Types and Helpers
 
-```text
-JSON
-Math
-React
-console
-window
-document
-navigator
+TypeScript type definitions and utility functions for the Pulse client.
+
+## extractServerRouteInfo
+
+Extracts route information from a React Router loader context. Used for server-side rendering.
+
+```ts
+function extractServerRouteInfo(args: LoaderFunctionArgs): RouteInfo
 ```
+
+### Parameters
+
+- `args` - React Router's `LoaderFunctionArgs` containing `params` and `request`
+
+### Returns
+
+A `RouteInfo` object with parsed route data.
+
+### Example
+
+```ts
+import { extractServerRouteInfo } from "pulse-client";
+
+export async function loader(args: LoaderFunctionArgs) {
+  const routeInfo = extractServerRouteInfo(args);
+  // Use routeInfo for server-side prerendering
+}
+```
+
+---
+
+## RouteInfo
+
+Route information extracted from the current URL and path parameters.
+
+```ts
+interface RouteInfo {
+  pathname: string;                          // Full URL path
+  hash: string;                              // URL hash (e.g., "#section")
+  query: string;                             // Query string (e.g., "?foo=bar")
+  queryParams: Record<string, string>;       // Parsed query parameters
+  pathParams: Record<string, string | undefined>; // Route path parameters
+  catchall: string[];                        // Catch-all route segments
+}
+```
+
+---
+
+## VDOM Types
+
+### VDOMNode
+
+A node in the virtual DOM tree.
+
+```ts
+type VDOMNode = JsonPrimitive | VDOMElement | VDOMExpr;
+type VDOM = VDOMNode;
+```
+
+### VDOMElement
+
+A virtual DOM element with tag, props, and children.
+
+```ts
+interface VDOMElement {
+  tag: string;                              // HTML tag or component key
+  key?: string;                             // React key for reconciliation
+  props?: Record<string, VDOMPropValue>;    // Element properties
+  children?: VDOMNode[];                    // Child nodes
+  eval?: string[];                          // Props requiring evaluation
+}
+```
+
+### VDOMPropValue
+
+Possible values for element properties.
+
+```ts
+type VDOMPropValue = JsonValue | VDOMExpr | VDOMElement | "$cb";
+```
+
+The special value `"$cb"` indicates a callback placeholder that gets bound to a server callback.
+
+### VDOMExpr
+
+Expression nodes for client-side evaluation.
+
+```ts
+type VDOMExpr =
+  | RegistryRefExpr    // { t: "ref", key: string }
+  | IdentifierExpr     // { t: "id", name: string }
+  | LiteralExpr        // { t: "lit", value: JsonPrimitive }
+  | UndefinedExpr      // { t: "undef" }
+  | ArrayExpr          // { t: "array", items: VDOMNode[] }
+  | ObjectExpr         // { t: "object", props: Record<string, VDOMNode> }
+  | MemberExpr         // { t: "member", obj: VDOMNode, prop: string }
+  | SubscriptExpr      // { t: "sub", obj: VDOMNode, key: VDOMNode }
+  | CallExpr           // { t: "call", callee: VDOMNode, args: VDOMNode[] }
+  | UnaryExpr          // { t: "unary", op: string, arg: VDOMNode }
+  | BinaryExpr         // { t: "binary", op: string, left: VDOMNode, right: VDOMNode }
+  | TernaryExpr        // { t: "ternary", cond: VDOMNode, then: VDOMNode, else_: VDOMNode }
+  | TemplateExpr       // { t: "template", parts: (string | VDOMNode)[] }
+  | ArrowExpr          // { t: "arrow", params: string[], body: VDOMNode }
+  | NewExpr;           // { t: "new", ctor: VDOMNode, args: VDOMNode[] }
+```
+
+### VDOMUpdate
+
+Update operations for incremental VDOM changes.
+
+```ts
+type VDOMUpdate = ReplaceUpdate | UpdatePropsUpdate | ReconciliationUpdate;
+
+interface ReplaceUpdate {
+  type: "replace";
+  path: string;
+  data: VDOM;
+}
+
+interface UpdatePropsUpdate {
+  type: "update_props";
+  path: string;
+  data: {
+    set?: Record<string, VDOMPropValue>;
+    remove?: string[];
+    eval?: string[];
+  };
+}
+
+interface ReconciliationUpdate {
+  type: "reconciliation";
+  path: string;
+  N: number;
+  new: [number[], VDOM[]];
+  reuse: [number[], number[]];
+}
+```
+
+### Helper Functions
+
+```ts
+function isElementNode(node: VDOMNode): node is VDOMElement;
+function isExprNode(node: unknown): node is VDOMExpr;
+function isMountPointNode(node: VDOMNode): node is VDOMElement;
+```
+
+### Constants
+
+```ts
+const FRAGMENT_TAG = "";           // Empty string represents React.Fragment
+const MOUNT_POINT_PREFIX = "$$";   // Prefix for component mount points
+```
+
+---
+
+## Message Types
+
+### Server Messages
+
+Messages sent from the Python server to the client.
+
+```ts
+type ServerMessage =
+  | ServerInitMessage
+  | ServerUpdateMessage
+  | ServerErrorMessage
+  | ServerApiCallMessage
+  | ServerNavigateToMessage
+  | ServerChannelRequestMessage
+  | ServerChannelResponseMessage
+  | ServerJsExecMessage;
+
+interface ServerInitMessage {
+  type: "vdom_init";
+  path: string;
+  vdom: VDOM;
+}
+
+interface ServerUpdateMessage {
+  type: "vdom_update";
+  path: string;
+  ops: VDOMUpdate[];
+}
+
+interface ServerErrorMessage {
+  type: "server_error";
+  path: string;
+  error: ServerError;
+}
+
+interface ServerError {
+  message: string;
+  stack?: string;
+  phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
+  details?: Record<string, any>;
+}
+
+interface ServerApiCallMessage {
+  type: "api_call";
+  id: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: any | null;
+  credentials: "include" | "omit";
+}
+
+interface ServerNavigateToMessage {
+  type: "navigate_to";
+  path: string;
+  replace: boolean;
+  hard: boolean;
+}
+```
+
+### Client Messages
+
+Messages sent from the client to the Python server.
+
+```ts
+type ClientMessage =
+  | ClientAttachMessage
+  | ClientCallbackMessage
+  | ClientUpdateMessage
+  | ClientDetachMessage
+  | ClientApiResultMessage
+  | ClientChannelRequestMessage
+  | ClientChannelResponseMessage
+  | ClientJsResultMessage;
+
+interface ClientAttachMessage {
+  type: "attach";
+  path: string;
+  routeInfo: RouteInfo;
+}
+
+interface ClientCallbackMessage {
+  type: "callback";
+  path: string;
+  callback: string;
+  args: any[];
+}
+
+interface ClientUpdateMessage {
+  type: "update";
+  path: string;
+  routeInfo: RouteInfo;
+}
+
+interface ClientDetachMessage {
+  type: "detach";
+  path: string;
+}
+
+interface ClientApiResultMessage {
+  type: "api_result";
+  id: string;
+  ok: boolean;
+  status: number;
+  headers: Record<string, string>;
+  body: any | null;
+}
+```
+
+### Channel Messages
+
+Bidirectional channel messages for custom communication.
+
+```ts
+interface ServerChannelRequestMessage {
+  type: "channel_message";
+  channel: string;
+  event: string;
+  payload?: any;
+  requestId?: string;
+}
+
+interface ServerChannelResponseMessage {
+  type: "channel_message";
+  channel: string;
+  responseTo: string;
+  payload?: any;
+  error?: any;
+}
+
+interface ClientChannelRequestMessage {
+  type: "channel_message";
+  channel: string;
+  event: string;
+  payload?: any;
+  requestId?: string;
+}
+
+interface ClientChannelResponseMessage {
+  type: "channel_message";
+  channel: string;
+  responseTo: string;
+  payload?: any;
+  error?: any;
+}
+```
+
+---
+
+## ComponentRegistry
+
+A mapping of component keys to React components for mount points.
+
+```ts
+type ComponentRegistry = Record<string, unknown>;
+```
+
+Components prefixed with `$$` in the VDOM are looked up in this registry.

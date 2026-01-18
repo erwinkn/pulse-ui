@@ -2,10 +2,237 @@
 title: "@javascript"
 ---
 
+The `@javascript` decorator marks Python functions for transpilation to JavaScript.
 
-Exports:
-`Constant`, `FUNCTION_CACHE`, `JsFunction`, `analyze_deps`, `clear_function_cache`, `collect_function_graph`, `javascript`, `registered_constants`, `registered_functions`
+## `javascript`
 
-Notes:
-- Use `@javascript` on a Python function
-- Returns a `JsFunction` callable
+```python
+@overload
+def javascript(fn: Callable[[*Args], R]) -> JsFunction[*Args, R]: ...
+
+@overload
+def javascript(*, jsx: Literal[False] = ...) -> Callable[[Callable[[*Args], R]], JsFunction[*Args, R]]: ...
+
+@overload
+def javascript(*, jsx: Literal[True]) -> Callable[[Callable[P, R]], Jsx]: ...
+```
+
+Decorator to convert a Python function into a `JsFunction` or `JsxFunction`.
+
+**Parameters:**
+- `jsx` (bool, default `False`): When `True`, creates a `JsxFunction` for React component semantics with destructured props.
+
+**Returns:**
+- `JsFunction` when `jsx=False`
+- `JsxFunction` (wrapped in `Jsx`) when `jsx=True`
+
+**Examples:**
+
+```python
+from pulse.transpiler import javascript
+
+# Basic function
+@javascript
+def add(a, b):
+    return a + b
+
+# With jsx=True for React components
+@javascript(jsx=True)
+def Button(*children, disabled=False):
+    return button(disabled=disabled)[children]
+```
+
+---
+
+## `JsFunction`
+
+```python
+@dataclass(slots=True, init=False)
+class JsFunction(Expr, Generic[*Args, R]):
+    fn: Callable[[*Args], R]
+    id: str
+    deps: dict[str, Expr]
+```
+
+A transpiled JavaScript function. Wraps a Python function with a unique identifier, resolved dependencies, and transpilation capability.
+
+**Attributes:**
+- `fn`: The original Python function
+- `id`: Unique identifier for deduplication
+- `deps`: Resolved dependencies (imports, functions, constants)
+
+**Properties:**
+
+```python
+@property
+def js_name(self) -> str
+```
+Returns the unique JS identifier (e.g., `"myFunc_1"`).
+
+**Methods:**
+
+```python
+def transpile(self) -> Function
+```
+Transpile to a `Function` node. Result is cached after first call.
+
+```python
+def imports(self) -> dict[str, Expr]
+```
+Get all `Import` dependencies.
+
+```python
+def functions(self) -> dict[str, AnyJsFunction]
+```
+Get all `JsFunction`/`JsxFunction` dependencies.
+
+---
+
+## `JsxFunction`
+
+```python
+@dataclass(slots=True, init=False)
+class JsxFunction(Expr, Generic[P, R]):
+    fn: Callable[P, R]
+    id: str
+    deps: dict[str, Expr]
+```
+
+A transpiled JSX/React component function. Like `JsFunction`, but generates a React component that receives a single props object with destructuring.
+
+For a Python function:
+```python
+def Component(*children, visible=True): ...
+```
+
+Generates:
+```javascript
+function Component_1({children, visible = true}) { ... }
+```
+
+**Methods:** Same as `JsFunction`.
+
+---
+
+## `Constant`
+
+```python
+@dataclass(slots=True, init=False)
+class Constant(Expr):
+    value: Any
+    expr: Expr
+    id: str
+    name: str
+```
+
+A hoisted constant value with a unique identifier. Used for non-primitive values (lists, dicts, sets) referenced in transpiled functions.
+
+**Example:**
+```python
+ITEMS = [1, 2, 3]
+
+@javascript
+def foo():
+    return ITEMS[0]
+
+# Emits:
+# const ITEMS_1 = [1, 2, 3];
+# function foo_2() { return ITEMS_1[0]; }
+```
+
+**Properties:**
+
+```python
+@property
+def js_name(self) -> str
+```
+Unique JS identifier for this constant.
+
+**Static Methods:**
+
+```python
+@staticmethod
+def wrap(value: Any, name: str = "") -> Constant
+```
+Get or create a `Constant` for a value (cached by identity).
+
+---
+
+## Registry Functions
+
+### `registered_functions`
+
+```python
+def registered_functions() -> list[AnyJsFunction]
+```
+Get all registered JS functions from `FUNCTION_CACHE`.
+
+### `registered_constants`
+
+```python
+def registered_constants() -> list[Constant]
+```
+Get all registered constants from `CONSTANT_REGISTRY`.
+
+### `clear_function_cache`
+
+```python
+def clear_function_cache() -> None
+```
+Clear function/constant/ref caches and reset shared ID counters. Also clears import and asset registries.
+
+---
+
+## Dependency Analysis
+
+### `analyze_deps`
+
+```python
+def analyze_deps(fn: Callable[..., Any]) -> dict[str, Expr]
+```
+
+Analyze a function and return its dependencies as `Expr` instances.
+
+Walks the function's code object to find all referenced names, then resolves them from globals/closure and converts to `Expr`.
+
+**Resolution rules:**
+1. Already an `Expr` -> returned as-is
+2. In `EXPR_REGISTRY` -> return registered expr
+3. Module -> raises `TranspileError` (must be registered)
+4. Function -> creates/returns `JsFunction`
+5. Primitives (bool, int, float, str, None) -> `Literal`
+6. Non-primitives -> wrapped in `Constant`
+
+### `collect_function_graph`
+
+```python
+def collect_function_graph(
+    functions: list[AnyJsFunction] | None = None,
+) -> tuple[list[Constant], list[AnyJsFunction]]
+```
+
+Collect all constants and functions in dependency order (depth-first).
+
+**Parameters:**
+- `functions`: Functions to walk. If `None`, uses all registered functions.
+
+**Returns:**
+Tuple of `(constants, functions)` in dependency order.
+
+---
+
+## Global Registries
+
+### `FUNCTION_CACHE`
+
+```python
+FUNCTION_CACHE: dict[Callable[..., Any], AnyJsFunction]
+```
+
+Global cache mapping Python callables to their `JsFunction`/`JsxFunction` instances. Used for deduplication.
+
+### Type Aliases
+
+```python
+AnyJsFunction: TypeAlias = "JsFunction[*tuple[Any, ...], Any] | JsxFunction[..., Any]"
+```

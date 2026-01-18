@@ -2,9 +2,141 @@
 title: "Async"
 ---
 
-Async callbacks are supported out of the box.
+Real-world apps need to fetch data, call APIs, and perform other async operations. Pulse has built-in support for async patterns that makes this straightforward.
 
-State updates are batched between awaits. Use `ps.Untrack()` when needed.
+## Async event handlers
+
+Event handlers can be `async` functions. Pulse handles this automatically:
+
+```python
+class SearchState(ps.State):
+    query: str = ""
+    results: list = []
+    loading: bool = False
+
+    async def search(self):
+        self.loading = True
+        self.results = await fetch_from_api(self.query)
+        self.loading = False
+```
+
+## Automatic batching
+
+State updates are automatically batched between `await` calls. This means your UI only rerenders when it makes sense:
+
+```python
+async def process(self):
+    # These two updates are batched - one rerender
+    self.status = "loading"
+    self.progress = 0
+
+    await asyncio.sleep(1)
+
+    # These are also batched - one rerender
+    self.status = "done"
+    self.progress = 100
+```
+
+Each group of synchronous updates triggers a single rerender, not one per update.
+
+## Queries
+
+For data fetching, Pulse provides a `@ps.query` decorator that handles loading states, caching, and dependency tracking:
+
+```python
+class UserState(ps.State):
+    user_id: int = 1
+
+    @ps.query
+    async def user(self) -> dict:
+        response = await fetch(f"/api/users/{self.user_id}")
+        return response.json()
+
+@ps.component
+def UserProfile():
+    with ps.init():
+        state = UserState()
+
+    if state.user.is_loading:
+        return ps.div("Loading...")
+
+    return ps.div(
+        ps.h1(state.user.data["name"]),
+        ps.button("Refresh", onClick=state.user.refetch),
+    )
+```
+
+Queries automatically:
+- Track dependencies and refetch when they change (like `self.user_id` above)
+- Provide `is_loading`, `is_error`, and `data` properties
+- Support manual refetching with `.refetch()`
+
+### Query properties
+
+| Property | Description |
+|----------|-------------|
+| `data` | The returned data, or `None` if not loaded |
+| `is_loading` | `True` while the query is running |
+| `is_error` | `True` if the query failed |
+| `has_loaded` | `True` after the first successful load |
+
+### Query methods
+
+| Method | Description |
+|--------|-------------|
+| `refetch()` | Manually trigger a refetch |
+| `set_data(value)` | Directly set the query data |
+| `set_initial_data(value)` | Set data to show before first load |
+
+### Keyed queries
+
+For more control over when queries rerun, use an explicit key:
+
+```python
+@ps.query(key=lambda self: self.user_id)
+async def user(self) -> dict:
+    return await fetch_user(self.user_id)
+```
+
+The query reruns whenever the key changes.
+
+## Async effects
+
+Effects can also be async, useful for background tasks or periodic updates:
+
+```python
+class PollingState(ps.State):
+    data: dict = {}
+
+    @ps.effect(lazy=True)
+    async def poll(self):
+        while True:
+            self.data = await fetch_latest()
+            await asyncio.sleep(30)
+
+    def start_polling(self):
+        self.poll.schedule()
+
+    def stop_polling(self):
+        self.poll.cancel()
+```
+
+The `lazy=True` option means the effect doesn't run automatically. Use `.schedule()` to start it and `.cancel()` to stop it.
+
+## Controlling tracking in async code
+
+Use `ps.Untrack()` when you need to read state without creating a dependency:
+
+```python
+async def save(self):
+    with ps.Untrack():
+        # Reading these won't cause the effect to rerun
+        data = {"name": self.name, "email": self.email}
+
+    await api.save(data)
+```
+
+This is particularly useful in effects where you want to read current values without triggering infinite loops.
 
 ## See also
 

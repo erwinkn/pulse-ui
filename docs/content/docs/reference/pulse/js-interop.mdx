@@ -3,10 +3,377 @@ title: "JS Interop"
 description: "Transpiled JS and client execution"
 ---
 
+## @javascript
 
-Exports:
-`javascript`, `JsFunction`, `Import`, `react_component`, `default_signature`, `run_js`, `JsExecError`, `RenderSession`, `Node`, `Element`, `PulseNode`
+Decorator that transpiles Python functions to JavaScript for client-side execution.
 
-Notes:
-- `@javascript` transpiles Python functions to JS
-- `run_js()` executes JS on the client during callbacks
+```python
+from pulse import javascript
+```
+
+### Signature
+
+```python
+@overload
+def javascript(fn: Callable[[*Args], R]) -> JsFunction[*Args, R]: ...
+
+@overload
+def javascript(*, jsx: bool = False) -> Callable[[Callable], JsFunction | Jsx]: ...
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fn` | `Callable` | - | Function to transpile (when used without arguments) |
+| `jsx` | `bool` | `False` | If `True`, transpiles as React component with props destructuring |
+
+### Usage
+
+```python
+from pulse import javascript
+from pulse.js import document, window
+
+@javascript
+def focus_element(selector: str):
+    document.querySelector(selector).focus()
+
+@javascript
+def get_scroll():
+    return {"x": window.scrollX, "y": window.scrollY}
+
+# JSX mode for React components
+@javascript(jsx=True)
+def MyComponent(*children, title: str = ""):
+    return div(h1(title), *children)
+```
+
+---
+
+## JsFunction
+
+Wrapper for transpiled JavaScript functions. Returned by `@javascript`.
+
+```python
+from pulse import JsFunction
+```
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `fn` | `Callable` | Original Python function |
+| `id` | `str` | Unique identifier for deduplication |
+| `deps` | `dict[str, Expr]` | Resolved dependencies |
+| `js_name` | `str` | Unique JS function name (e.g., `"myFunc_1"`) |
+
+### Methods
+
+#### `transpile`
+
+```python
+def transpile(self) -> Function
+```
+
+Transpile to a Function AST node. Result is cached.
+
+#### `imports`
+
+```python
+def imports(self) -> dict[str, Expr]
+```
+
+Get all Import dependencies.
+
+#### `functions`
+
+```python
+def functions(self) -> dict[str, JsFunction]
+```
+
+Get all JsFunction dependencies.
+
+---
+
+## Import
+
+JavaScript import declaration with auto-registration and deduplication.
+
+```python
+from pulse import Import
+```
+
+### Constructor
+
+```python
+Import(
+    name: str,
+    src: str,
+    *,
+    kind: Literal["named", "default", "namespace", "side_effect"] = "named",
+    is_type: bool = False,
+    lazy: bool = False,
+    version: str | None = None,
+    before: tuple[str, ...] | list[str] = (),
+)
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | required | Import name (empty for side-effect imports) |
+| `src` | `str` | required | Module path or package name |
+| `kind` | `ImportKind` | `"named"` | Import type: `"named"`, `"default"`, `"namespace"`, `"side_effect"` |
+| `is_type` | `bool` | `False` | Type-only import (TypeScript) |
+| `lazy` | `bool` | `False` | Generate lazy import factory for code-splitting |
+| `version` | `str \| None` | `None` | Package version constraint |
+| `before` | `tuple[str, ...]` | `()` | Imports that must come before this one |
+
+### Usage
+
+```python
+# Named import: import { useState } from "react"
+useState = Import("useState", "react")
+
+# Default import: import React from "react"
+React = Import("React", "react", kind="default")
+
+# Namespace import: import * as utils from "./utils"
+utils = Import("utils", "./utils", kind="namespace")
+
+# Side-effect import: import "./styles.css"
+Import("", "./styles.css", kind="side_effect")
+
+# Lazy import for code-splitting
+Chart = Import("Chart", "./Chart", kind="default", lazy=True)
+```
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `js_name` | `str` | Unique JS identifier |
+| `is_local` | `bool` | True if local file import |
+| `is_lazy` | `bool` | True if lazy import |
+| `is_default` | `bool` | True if default import |
+| `is_namespace` | `bool` | True if namespace import |
+
+---
+
+## react_component
+
+Decorator that wraps an Import as a JSX component with a typed Python signature.
+
+```python
+from pulse import react_component, Import, default_signature, Element
+```
+
+### Signature
+
+```python
+def react_component(expr: Expr) -> Callable[[Callable[P, Any]], Callable[P, Element]]
+```
+
+### Usage
+
+```python
+from pulse import react_component, Import, default_signature, Element
+
+@react_component(Import("Button", "@mantine/core"))
+def Button(
+    *children,
+    variant: str = "filled",
+    disabled: bool = False,
+) -> Element:
+    ...
+
+# Use in components
+Button("Click me", variant="outline")
+```
+
+### default_signature
+
+Default function signature for components without custom props:
+
+```python
+def default_signature(
+    *children: Node,
+    key: str | None = None,
+    **props: Any
+) -> Element: ...
+```
+
+---
+
+## run_js
+
+Execute JavaScript on the client during a callback.
+
+```python
+from pulse import run_js
+```
+
+### Signature
+
+```python
+@overload
+def run_js(expr: Expr, *, result: Literal[True]) -> asyncio.Future[Any]: ...
+
+@overload
+def run_js(expr: Expr, *, result: Literal[False] = ...) -> None: ...
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `expr` | `Expr` | required | Expression from calling a `@javascript` function |
+| `result` | `bool` | `False` | If `True`, returns Future with JS return value |
+
+### Usage
+
+```python
+from pulse import javascript, run_js
+from pulse.js import document
+
+@javascript
+def focus_input(selector: str):
+    document.querySelector(selector).focus()
+
+@javascript
+def get_value(selector: str):
+    return document.querySelector(selector).value
+
+# Fire and forget
+def on_submit():
+    run_js(focus_input("#next-field"))
+
+# Await result
+async def on_check():
+    value = await run_js(get_value("#my-input"), result=True)
+    print(value)
+```
+
+---
+
+## JsExecError
+
+Exception raised when client-side JS execution fails.
+
+```python
+from pulse import JsExecError
+```
+
+```python
+class JsExecError(Exception):
+    pass
+```
+
+---
+
+## pulse.js Module
+
+JavaScript builtin bindings for use in `@javascript` functions.
+
+```python
+from pulse.js import (
+    # Namespace objects (function-only modules)
+    Math, JSON, console, window, document, navigator,
+
+    # Classes (constructors + static methods)
+    Array, Date, Error, Map, Object, Promise, RegExp, Set, String,
+    WeakMap, WeakSet, Number,
+
+    # Statement functions
+    throw,
+
+    # Object literal helper
+    obj,
+
+    # Primitive values
+    undefined,
+)
+```
+
+### Namespace Objects
+
+Access methods directly:
+
+```python
+Math.floor(3.7)        # -> Math.floor(3.7)
+JSON.stringify(data)   # -> JSON.stringify(data)
+console.log("hi")      # -> console.log("hi")
+window.scrollTo(0, 0)  # -> window.scrollTo(0, 0)
+document.querySelector("#app")  # -> document.querySelector("#app")
+```
+
+### Classes
+
+Create instances with `new`:
+
+```python
+Date()                 # -> new Date()
+Set([1, 2, 3])         # -> new Set([1, 2, 3])
+Map()                  # -> new Map()
+Array(10)              # -> new Array(10)
+
+# Static methods
+Date.now()             # -> Date.now()
+Array.isArray(x)       # -> Array.isArray(x)
+Number.isFinite(42)    # -> Number.isFinite(42)
+```
+
+### obj()
+
+Create plain JavaScript object literals (not Maps):
+
+```python
+from pulse.js import obj
+
+obj(a=1, b=2)          # -> { a: 1, b: 2 }
+obj(**base, c=3)       # -> { ...base, c: 3 }
+obj()                  # -> {}
+```
+
+### throw()
+
+Emit a JavaScript throw statement:
+
+```python
+from pulse.js import throw, Error
+
+throw(Error("Something went wrong"))  # -> throw new Error("Something went wrong")
+```
+
+---
+
+## Node Types
+
+### Node
+
+Base type for all VDOM nodes.
+
+```python
+from pulse import Node
+
+Node = Element | Primitive | None
+```
+
+### Element
+
+JSX element node.
+
+```python
+from pulse import Element
+```
+
+### PulseNode
+
+Extended node type including components:
+
+```python
+from pulse import PulseNode
+
+PulseNode = Node | Component
+```

@@ -3,10 +3,261 @@ title: "Forms"
 description: "Form helpers and types"
 ---
 
+## Form
 
-Exports:
-`Form`, `FormData`, `FormValue`, `ManualForm`, `UploadFile`
+Server-registered HTML form component. Automatically wires up form submission to a Python handler.
 
-Notes:
-- `Form` is server-registered and requires a `key`
-- `ManualForm` exposes `props()` for manual form wiring
+```python
+def Form(
+    *children: Node,
+    key: str,
+    onSubmit: EventHandler1[FormData] | None = None,
+    **props: Unpack[PulseFormProps],
+) -> Node
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `children` | `Node` | - | Form content (inputs, buttons, etc.) |
+| `key` | `str` | required | Unique form identifier |
+| `onSubmit` | `EventHandler1[FormData] \| None` | `None` | Submit handler |
+| `**props` | `PulseFormProps` | - | Standard HTML form props (except action, method, encType, onSubmit) |
+
+### Usage
+
+```python
+async def handle_submit(data: ps.FormData):
+    name = data.get("name")  # str
+    file = data.get("avatar")  # UploadFile
+    await save_user(name, file)
+
+def my_form():
+    return ps.Form(
+        m.TextInput(name="name", label="Name"),
+        m.FileInput(name="avatar", label="Avatar"),
+        m.Button("Submit", type="submit"),
+        key="user-form",
+        onSubmit=handle_submit,
+    )
+```
+
+### Notes
+
+- `key` must be a non-empty string unique within the render
+- Cannot override `action`, `method`, `encType`, or `onSubmit` via props
+- Uses `multipart/form-data` encoding (supports file uploads)
+- Handler receives parsed form data as a `FormData` dict
+
+---
+
+## ManualForm
+
+Low-level form handler for custom form implementations.
+
+```python
+class ManualForm(Disposable):
+    def __init__(self, on_submit: EventHandler1[FormData] | None = None)
+```
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `is_submitting` | `bool` | Whether form is currently submitting |
+| `registration` | `FormRegistration` | Form registration info (raises if disposed) |
+
+### Methods
+
+#### `props() -> GeneratedFormProps`
+
+Get form props for manual binding to a form element.
+
+```python
+class GeneratedFormProps(TypedDict):
+    action: str       # Form submission URL
+    method: str       # "POST"
+    encType: str      # "multipart/form-data"
+    onSubmit: Callable[[], None]  # Submission trigger
+```
+
+#### `update(on_submit: EventHandler1[FormData] | None) -> None`
+
+Update the submit handler.
+
+#### `dispose() -> None`
+
+Unregister the form and clean up.
+
+#### `__call__(*children, key: str | None, **props) -> Node`
+
+Render as a form element with children.
+
+### Usage
+
+```python
+def custom_form():
+    manual = ManualForm(on_submit=handle_data)
+
+    # Option 1: Render directly
+    return manual(
+        m.TextInput(name="field"),
+        m.Button("Submit", type="submit"),
+        key="my-form",
+    )
+
+    # Option 2: Use props manually
+    form_props = manual.props()
+    return m.form(
+        m.TextInput(name="field"),
+        m.Button("Submit", type="submit"),
+        **form_props,
+    )
+```
+
+---
+
+## Types
+
+### FormData
+
+Parsed form submission data.
+
+```python
+FormData = dict[str, FormValue | list[FormValue]]
+```
+
+Values are either single or multiple (for repeated field names).
+
+### FormValue
+
+Individual form field value.
+
+```python
+FormValue = str | UploadFile
+```
+
+### UploadFile
+
+Re-exported from Starlette. Represents an uploaded file.
+
+```python
+from starlette.datastructures import UploadFile
+
+class UploadFile:
+    filename: str | None
+    size: int | None
+    content_type: str | None
+
+    async def read(self, size: int = -1) -> bytes: ...
+    async def write(self, data: bytes) -> int: ...
+    async def seek(self, offset: int) -> int: ...
+    async def close() -> None: ...
+```
+
+### Example with Files
+
+```python
+async def handle_upload(data: ps.FormData):
+    file = data.get("document")
+    if isinstance(file, UploadFile):
+        content = await file.read()
+        filename = file.filename or "unnamed"
+        await save_file(filename, content)
+```
+
+---
+
+## Complex Form Data
+
+Forms can include serialized complex data via a hidden `__data__` field. This is automatically deserialized and merged into the form data.
+
+```python
+def form_with_complex_data():
+    return ps.Form(
+        # Hidden field with JSON-serialized data
+        m.input(
+            type="hidden",
+            name="__data__",
+            value=json.dumps({"items": [1, 2, 3], "nested": {"key": "value"}}),
+        ),
+        m.TextInput(name="name"),
+        m.Button("Submit", type="submit"),
+        key="complex-form",
+        onSubmit=handle_submit,
+    )
+
+async def handle_submit(data: ps.FormData):
+    # data["items"] = [1, 2, 3]
+    # data["nested"] = {"key": "value"}
+    # data["name"] = "user input"
+    pass
+```
+
+---
+
+## FormRegistry
+
+Internal class managing form registrations. Not typically used directly.
+
+```python
+class FormRegistry(Disposable):
+    def register(
+        render_id: str,
+        route_id: str,
+        session_id: str,
+        on_submit: Callable[[FormData], Awaitable[None]],
+    ) -> FormRegistration
+
+    def unregister(form_id: str) -> None
+
+    async def handle_submit(
+        form_id: str,
+        request: Request,
+        session: UserSession,
+    ) -> Response
+```
+
+---
+
+## FormStorage
+
+Internal hook state for managing form lifecycle within renders. Not typically used directly.
+
+---
+
+## Complete Example
+
+```python
+import pulse as ps
+from pulse_mantine import components as m
+
+async def create_post(data: ps.FormData):
+    title = data.get("title", "")
+    body = data.get("body", "")
+    image = data.get("image")
+
+    if not isinstance(title, str) or not title:
+        raise ValueError("Title required")
+
+    image_url = None
+    if isinstance(image, ps.UploadFile) and image.filename:
+        content = await image.read()
+        image_url = await upload_to_s3(image.filename, content)
+
+    await db.posts.create(title=title, body=body, image_url=image_url)
+    ps.navigate("/posts")
+
+def create_post_form():
+    return ps.Form(
+        m.Stack([
+            m.TextInput(name="title", label="Title", required=True),
+            m.Textarea(name="body", label="Body", rows=5),
+            m.FileInput(name="image", label="Image", accept="image/*"),
+            m.Button("Create Post", type="submit"),
+        ]),
+        key="create-post",
+        onSubmit=create_post,
+    )
+```

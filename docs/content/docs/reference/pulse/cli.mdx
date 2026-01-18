@@ -3,11 +3,212 @@ title: "CLI"
 description: "pulse command line"
 ---
 
+## pulse run
 
-Commands:
-- `pulse run <app.py>`
-- `pulse generate <app.py>`
-- `pulse check <app.py>`
+Run the Pulse server and web development server together.
 
-Env vars:
-`PULSE_ENV`, `PULSE_APP_FILE`, `PULSE_APP_DIR`, `PULSE_HOST`, `PULSE_PORT`, `PULSE_REACT_SERVER_ADDRESS`, `PULSE_SECRET`, `PULSE_DISABLE_CODEGEN`
+```bash
+pulse run <app_file> [options]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `app_file` | App target: `path/to/app.py[:var]` (default `:app`) or `module.path:var` |
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--address` | `str` | `localhost` | Host uvicorn binds to |
+| `--port` | `int` | `8000` | Port uvicorn binds to |
+| `--dev` | flag | - | Run in development mode (default) |
+| `--prod` | flag | - | Run in production mode |
+| `--plain` | flag | - | Plain output without colors or emojis |
+| `--server-only` | flag | - | Run only the Python server |
+| `--web-only` | flag | - | Run only the web dev server |
+| `--react-server-address` | `str` | - | React server URL (required for single-server + server-only) |
+| `--reload/--no-reload` | flag | auto | Enable/disable hot reload (auto-enabled in dev) |
+| `--find-port/--no-find-port` | flag | `True` | Auto-find available port if specified is busy |
+| `--verbose` | flag | - | Show all logs without filtering |
+
+### Examples
+
+```bash
+# Run with defaults
+pulse run app.py
+
+# Production mode on specific port
+pulse run app.py --prod --port 3000
+
+# Development with specific address
+pulse run app.py --address 0.0.0.0 --port 8080
+
+# Run only backend (for separate frontend deployment)
+pulse run app.py --server-only --react-server-address http://localhost:5173
+```
+
+---
+
+## pulse generate
+
+Generate TypeScript routes without starting the server.
+
+```bash
+pulse generate <app_file> [options]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `app_file` | App target: `path.py[:var]` (default `:app`) or `module:var` |
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--dev` | flag | - | Generate in development mode (default) |
+| `--ci` | flag | - | Generate in CI mode |
+| `--prod` | flag | - | Generate in production mode |
+| `--plain` | flag | - | Plain output without colors or emojis |
+
+### Examples
+
+```bash
+# Generate routes for development
+pulse generate app.py
+
+# Generate for production (requires server_address)
+pulse generate app.py --prod
+```
+
+In CI or production mode, `server_address` must be configured in the App constructor or via `PULSE_SERVER_ADDRESS` environment variable.
+
+---
+
+## pulse check
+
+Check if web project dependencies are in sync with Pulse app requirements.
+
+```bash
+pulse check <app_file> [options]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `app_file` | App target: `path.py[:var]` (default `:app`) or `module:var` |
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--fix` | flag | - | Install missing or outdated dependencies |
+| `--dev` | flag | - | Run in development mode (default) |
+| `--ci` | flag | - | Run in CI mode |
+| `--prod` | flag | - | Run in production mode |
+| `--plain` | flag | - | Plain output without colors or emojis |
+
+### Examples
+
+```bash
+# Check dependencies
+pulse check app.py
+
+# Check and auto-fix
+pulse check app.py --fix
+```
+
+---
+
+## Environment Variables
+
+### PULSE_ENV
+
+```bash
+PULSE_ENV=dev|ci|prod
+```
+
+Set the Pulse environment mode. Affects logging, security defaults, and error handling.
+
+| Value | Description |
+|-------|-------------|
+| `dev` | Development mode with detailed errors and hot reload |
+| `ci` | CI/testing mode with stricter validation |
+| `prod` | Production mode with security hardening |
+
+### PULSE_APP_FILE
+
+```bash
+PULSE_APP_FILE=/path/to/app.py
+```
+
+Path to the Pulse application file. Used for resolving relative paths in `CodegenConfig`.
+
+### PULSE_APP_DIR
+
+```bash
+PULSE_APP_DIR=/path/to/app
+```
+
+Directory containing the Pulse application. Fallback for path resolution when `PULSE_APP_FILE` is not set.
+
+### PULSE_HOST
+
+```bash
+PULSE_HOST=0.0.0.0
+```
+
+Host address for the uvicorn server. Set automatically by `pulse run`.
+
+### PULSE_PORT
+
+```bash
+PULSE_PORT=8000
+```
+
+Port for the uvicorn server. Set automatically by `pulse run`.
+
+### PULSE_SERVER_ADDRESS
+
+```bash
+PULSE_SERVER_ADDRESS=https://api.example.com
+```
+
+Public server address for WebSocket connections. Required in production mode.
+
+### PULSE_REACT_SERVER_ADDRESS
+
+```bash
+PULSE_REACT_SERVER_ADDRESS=http://localhost:5173
+```
+
+React dev server address. Used in single-server mode with `--server-only`.
+
+### PULSE_SECRET
+
+```bash
+PULSE_SECRET=your-secret-key
+```
+
+Secret key for session signing. Auto-generated in development if not set.
+
+### PULSE_DISABLE_CODEGEN
+
+```bash
+PULSE_DISABLE_CODEGEN=1
+```
+
+Disable automatic code generation. Useful in production with pre-built routes.
+
+---
+
+## Exit Codes
+
+| Code | Description |
+|------|-------------|
+| `0` | Success |
+| `1` | Error (invalid arguments, missing dependencies, server failure) |

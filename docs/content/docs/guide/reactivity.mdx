@@ -2,13 +2,222 @@
 title: "Reactivity"
 ---
 
-Signals and computeds power change tracking.
+If you have ever built a UI where you forgot to update the screen after changing some data, you know how frustrating that can be. You change a variable, but the user still sees the old value. Then you add manual update calls everywhere, and suddenly your code is a tangled mess of "sync this" and "refresh that."
 
-On `State`:
-- `@ps.computed` creates cached derived values
-- `@ps.effect` runs on dependency changes
+Reactivity solves this problem. When you understand how it works, you can write UIs that stay perfectly in sync with your data without any manual bookkeeping. This guide shows you the tools Pulse gives you to make that happen.
 
-Use `ps.Batch()` to group updates and `ps.Untrack()` to avoid tracking.
+## The Big Picture
+
+Here is the core idea: Pulse watches what your code reads. When you render a component that displays `state.count`, Pulse remembers that the component depends on `count`. Later, when `count` changes, Pulse knows exactly which components need to update.
+
+This happens automatically when you use `ps.State`:
+
+```python
+class CounterState(ps.State):
+    count: int = 0
+
+@ps.component
+def Counter():
+    with ps.init():
+        state = CounterState()
+
+    # Pulse tracks that this component reads state.count
+    return ps.div(f"Count: {state.count}")
+```
+
+When `state.count` changes, Pulse rerenders the component because it knows the component depends on that value. You never have to call "refresh" or "update" manually.
+
+## Nested Data Just Works
+
+One thing that trips up beginners in other frameworks is nested data. What if your state contains a list of objects, and you modify a property deep inside one of those objects? Do you need to create a new list? Clone the object?
+
+In Pulse, you do not. The reactivity system tracks changes deep inside nested data structures like lists, dictionaries, and dataclasses.
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Todo:
+    id: int
+    text: str
+    done: bool
+
+class TodosState(ps.State):
+    todos: list[Todo]
+
+    def toggle(self, todo_id: int):
+        for todo in self.todos:
+            if todo.id == todo_id:
+                todo.done = not todo.done  # This triggers an update!
+```
+
+Notice that we just flip `todo.done` directly. We do not need to create a new list or a new Todo object. Pulse automatically wraps lists, dicts, sets, and dataclasses in reactive versions that detect mutations. You can use them like normal Python data structures.
+
+This is a big deal for productivity. You write natural, readable code, and reactivity handles the rest.
+
+## Avoiding Repeated Work with Computed Values
+
+Imagine you have a todo list with a filter. Every time you render, you need to filter the list:
+
+```python
+# This filtering runs on EVERY render
+visible = [t for t in state.todos if not t.done]
+```
+
+If `state.todos` has not changed, this is wasted work. Worse, if multiple parts of your component need `visible`, you might filter the list multiple times.
+
+Computed values solve this. A computed is a cached calculation that automatically updates only when its dependencies change. Think of it like a spreadsheet cell with a formula: it recalculates only when the cells it references change.
+
+```python
+class TodosState(ps.State):
+    todos: list[Todo]
+    filter: str = "all"
+
+    @ps.computed
+    def visible_todos(self) -> list[Todo]:
+        if self.filter == "done":
+            return [t for t in self.todos if t.done]
+        if self.filter == "open":
+            return [t for t in self.todos if not t.done]
+        return self.todos
+```
+
+Now you can call `state.visible_todos` as many times as you want. The filtering only runs when `self.todos` or `self.filter` actually changes. Otherwise, Pulse returns the cached result instantly.
+
+### Computeds That Span Multiple States
+
+Sometimes you need a computed value that depends on more than one state object. You can create these in `ps.setup`:
+
+```python
+def setup_counters():
+    counter1 = CounterState()
+    counter2 = CounterState()
+
+    @ps.computed
+    def total():
+        return counter1.count + counter2.count
+
+    return counter1, counter2, total
+
+@ps.component
+def Counters():
+    c1, c2, total = ps.setup(setup_counters)
+    return ps.div(f"Total: {total()}")  # Note: call it like a function
+```
+
+When defined outside a state class, you access the computed by calling it as a function.
+
+## Running Code When Things Change with Effects
+
+Computed values are great for deriving data, but what if you need to do something when state changes? Maybe you want to log changes, sync data to localStorage, or track analytics.
+
+Effects are functions that run in response to state changes. They are the right tool for side effects.
+
+```python
+class ToggleState(ps.State):
+    enabled: bool = False
+
+    @ps.effect
+    def log_changes(self):
+        print(f"Toggle is now: {self.enabled}")
+
+        def cleanup():
+            print("Cleaning up previous effect")
+        return cleanup
+```
+
+Like with components and computeds, Pulse tracks what the effect reads. When `self.enabled` changes, the effect runs again.
+
+### Cleaning Up After Yourself
+
+Effects can return a cleanup function. This is important when your effect sets up something that needs to be torn down, like a timer or a subscription.
+
+```python
+@ps.effect
+def start_timer(self):
+    timer_id = set_interval(lambda: self.tick(), 1000)
+
+    def cleanup():
+        clear_interval(timer_id)
+
+    return cleanup
+```
+
+The cleanup function runs in two situations:
+1. Before the effect runs again (when dependencies change)
+2. When the state is disposed (when the component is removed)
+
+This pattern prevents memory leaks and stale subscriptions.
+
+## Fine-Tuning Reactivity
+
+Most of the time, automatic tracking does exactly what you want. But occasionally you need more control.
+
+### Batching Multiple Updates
+
+When you change multiple state properties, each change normally triggers a rerender. If you are resetting a form with ten fields, that could mean ten rerenders.
+
+Use `ps.Batch()` to group updates into a single rerender:
+
+```python
+def reset_all(state):
+    with ps.Batch():
+        state.count = 0
+        state.name = ""
+        state.items.clear()
+    # Only one rerender happens here
+```
+
+Good news: Pulse automatically batches updates inside event handlers, so you usually do not need this. It is mainly useful in effects or when updating state from external code.
+
+### Reading Without Tracking
+
+Sometimes you want to read a value without creating a dependency. Maybe you want to log the current filter without re-running the effect when the filter changes.
+
+Use `ps.Untrack()`:
+
+```python
+@ps.effect
+def careful_effect(self):
+    # This read is tracked, effect reruns when count changes
+    print(f"Count: {self.count}")
+
+    with ps.Untrack():
+        # This read is NOT tracked, won't cause reruns
+        print(f"Name: {self.name}")
+```
+
+This is an advanced feature. If you find yourself using it often, step back and consider if there is a simpler approach.
+
+## Common Mistakes to Avoid
+
+Here are some patterns that trip up beginners:
+
+**Using effects for derived data.** If you need to transform state into something else, use a computed value. Effects are for side effects like logging or syncing to external systems.
+
+```python
+# Don't do this
+@ps.effect
+def update_visible(self):
+    self.visible_todos = [t for t in self.todos if not t.done]
+
+# Do this instead
+@ps.computed
+def visible_todos(self):
+    return [t for t in self.todos if not t.done]
+```
+
+**Forgetting that mutations are tracked.** You might think you need to replace a list to trigger an update. You do not. Just append, remove, or modify items directly.
+
+```python
+# You don't need this
+self.items = self.items + [new_item]
+
+# Just do this
+self.items.append(new_item)
+```
+
+**Over-using Untrack.** If you are wrapping lots of code in `ps.Untrack()`, you might be fighting the reactivity system. Consider restructuring your code instead.
 
 ## See also
 

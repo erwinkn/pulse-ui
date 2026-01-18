@@ -2,4 +2,124 @@
 title: "Open Code"
 ---
 
-Use the same repo rules as Codex/Claude.
+Open Code is an open-source terminal AI coding assistant. It works with various LLM providers and reads project context from markdown files.
+
+## Setup
+
+1. Install Open Code:
+```bash
+# Using Homebrew
+brew install opencode
+
+# Or via npm
+npm install -g opencode-ai
+```
+
+2. Configure your LLM provider in `~/.opencode/config.yaml`:
+```yaml
+provider: anthropic  # or openai, ollama, etc.
+model: claude-sonnet-4-20250514
+```
+
+3. Create an `AGENTS.md` file at your repository root (Open Code reads this automatically):
+
+```markdown
+# Pulse App
+
+Python web framework using React + WebSockets.
+
+## Commands
+
+- `uv run pulse run app.py` - Dev server
+- `make all` - Validate (format, lint, typecheck, test)
+- `uv sync` - Python deps
+- `bun i` - JS deps (in web/)
+
+## Core APIs
+
+```python
+import pulse as ps
+
+# State
+class MyState(ps.State):
+    value: int = 0
+    def increment(self): self.value += 1
+
+# Component
+@ps.component
+def Counter():
+    with ps.init():
+        state = MyState()
+    return ps.button(str(state.value), onClick=state.increment)
+
+# App
+app = ps.App(routes=[ps.Route("/", Counter)])
+```
+
+## Hooks
+
+- `ps.init()` - Preserve variables across renders
+- `ps.setup(fn)` - Run once on first render
+- `ps.stable(key, value)` - Stable reference to changing value
+
+## Async
+
+- `@ps.query` - Data fetching with loading/error states
+- `@ps.effect` - Side effects on state changes
+```
+
+## Usage
+
+Start Open Code in your project directory:
+
+```bash
+cd your-pulse-app
+opencode
+```
+
+### Basic Commands
+
+```text
+# Create a component
+> Create a user profile component with name, email, and edit functionality
+
+# Fix an issue
+> The form state resets on every render. Fix the initialization.
+
+# Understand code
+> Explain how the TodosState computed property works
+
+# Run validation
+> Run make all and show me any errors
+```
+
+## Workflows
+
+### New Feature
+
+```text
+> Add a notifications system:
+  - NotificationState with list of messages
+  - Toast component that auto-dismisses
+  - Global notification trigger function
+```
+
+### Debugging
+
+```text
+> The increment button doesn't update the count.
+  Check if CounterState is inside ps.init().
+```
+
+### Refactoring
+
+```text
+> Convert the inline event handlers to state methods for better organization.
+```
+
+## Tips
+
+- **Local models**: Open Code works with Ollama for offline development
+- **Context**: It reads `AGENTS.md`, `CLAUDE.md`, and `README.md` for context
+- **Streaming**: Responses stream in real-time for faster feedback
+- **History**: Use up arrow to recall previous prompts

@@ -11,7 +11,7 @@ export default function HomePage() {
 			</div>
 			<div className="flex flex-wrap items-center justify-center gap-3">
 				<Link
-					href="/docs/getting-started/install"
+					href="/docs/setup"
 					className="inline-flex items-center rounded-md bg-fd-primary px-4 py-2 text-sm font-medium text-fd-primary-foreground"
 				>
 					Get started

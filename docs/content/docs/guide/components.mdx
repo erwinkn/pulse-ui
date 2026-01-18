@@ -2,17 +2,124 @@
 title: "Components"
 ---
 
-Components are functions decorated with `@ps.component`.
+Components let you split your UI into reusable, self-contained pieces. A component is a function decorated with `@ps.component` that returns Pulse elements.
+
+## Why components?
+
+As your application grows, you'll find yourself repeating similar UI patterns. Components solve this by letting you:
+
+- **Reuse UI** - Define a pattern once, use it many times
+- **Encapsulate state** - Each component instance can have its own internal state
+- **Organize code** - Break complex UIs into manageable pieces
+
+## Creating a component
+
+Add the `@ps.component` decorator to any function that returns Pulse elements:
 
 ```python
 @ps.component
 def Card(title: str, *children, key=None):
-    return ps.section(ps.h3(title), *children)
+    return ps.section(className="border rounded-lg p-4 shadow")[
+        ps.h3(title, className="text-lg font-bold mb-2"),
+        *children,
+    ]
 ```
 
-Notes:
-- `key` preserves identity when order changes
-- Use `*children` to enable `Component()[children]` syntax
+Then use it like any other element:
+
+```python
+def Page():
+    return ps.div()[
+        Card(title="Welcome")[
+            ps.p("Hello, world!"),
+        ],
+        Card(title="Features")[
+            ps.ul()[
+                ps.li("Fast"),
+                ps.li("Simple"),
+                ps.li("Powerful"),
+            ],
+        ],
+    ]
+```
+
+## Component props
+
+Components accept arguments just like regular Python functions:
+
+```python
+@ps.component
+def Button(label: str, variant: str = "primary", onClick=None, key=None):
+    class_map = {
+        "primary": "bg-blue-500 text-white",
+        "secondary": "bg-gray-200 text-gray-800",
+    }
+    return ps.button(
+        label,
+        className=f"px-4 py-2 rounded {class_map.get(variant, '')}",
+        onClick=onClick,
+    )
+```
+
+## Accepting children
+
+To allow your component to wrap other elements, use `*children` as a parameter:
+
+```python
+@ps.component
+def Container(*children, key=None, className: str = ""):
+    return ps.div(className=f"max-w-4xl mx-auto p-6 {className}")[
+        *children
+    ]
+```
+
+The `*children` parameter enables the bracket syntax for passing nested content:
+
+```python
+Container(className="bg-gray-100")[
+    ps.h1("Page Title"),
+    ps.p("Page content..."),
+]
+```
+
+## Keys for list items
+
+When rendering components in a list, use the `key` prop to help Pulse track each item's identity:
+
+```python
+@ps.component
+def TodoItem(text: str, done: bool, key=None):
+    return ps.li(
+        text,
+        className="line-through" if done else "",
+    )
+
+def TodoList(todos):
+    return ps.ul()[
+        [TodoItem(key=t.id, text=t.text, done=t.done) for t in todos]
+    ]
+```
+
+Without keys, reordering items can cause unexpected behavior - the state of each component might not move with its content. Keys ensure that when items move, their associated state moves too.
+
+## Components with state
+
+Components can have their own internal state using hooks. This is covered in detail in the [State](/docs/guide/state) and [Hooks](/docs/guide/hooks) guides:
+
+```python
+@ps.component
+def Counter(key=None):
+    with ps.init():
+        state = CounterState()
+
+    return ps.div()[
+        ps.button("-", onClick=state.decrement),
+        ps.span(f"{state.count}"),
+        ps.button("+", onClick=state.increment),
+    ]
+```
+
+Each instance of `Counter` maintains its own independent count.
 
 ## See also
 

@@ -3,9 +3,23 @@ title: "Pulse"
 description: "Full-stack Python for reactive web apps"
 ---
 
-Pulse is a full-stack Python framework for reactive web apps. Python renders VDOM, the React client syncs via WebSocket.
+Welcome to Pulse! If you've ever wished you could build interactive web apps without leaving Python, you're in the right place.
 
-Quick start:
+## What is Pulse?
+
+Pulse is a full-stack Python framework for building reactive web applications. You write your entire app in Python—components, state, events, everything—and Pulse handles the frontend automatically. No JavaScript required.
+
+Under the hood, Pulse renders a virtual DOM on the server and syncs it to a React client over WebSocket. But you don't need to think about that. Just write Python.
+
+## Who is Pulse for?
+
+- **Python developers** who want to build web UIs without learning JavaScript
+- **Data scientists** who need dashboards and internal tools
+- **Backend engineers** who want full-stack capabilities in a familiar language
+
+## A taste of Pulse
+
+Here's a complete Pulse app in a few lines:
 
 ```python
 import pulse as ps
@@ -17,4 +31,8 @@ def home():
 app = ps.App([ps.Route("/", home)])
 ```
 
-Start here: /docs/getting-started/install
+That's it—a working web app with routing, ready to grow into something bigger.
+
+## Ready to get started?
+
+Head to the [Setup Guide](/docs/setup) to install Pulse and run your first app in minutes. Or dive into the [Tutorial](/docs/tutorial) for a hands-on walkthrough of all the fundamentals.

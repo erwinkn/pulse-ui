@@ -2,4 +2,46 @@
 title: "AI Agents"
 ---
 
-Guides for common AI tools. Use these to align on repo rules and commands.
+AI coding assistants accelerate Pulse development by generating components, state classes, and event handlers from natural language descriptions. These guides help you configure popular AI tools to work effectively with Pulse's conventions.
+
+## Why AI Tools Work Well with Pulse
+
+Pulse's Python-first approach makes it an excellent fit for AI assistants:
+
+- **Familiar syntax**: Components use standard Python classes and functions
+- **Clear patterns**: State management follows consistent conventions (`ps.State`, `@ps.component`, hooks)
+- **Type hints**: Comprehensive type annotations help AI understand expected inputs/outputs
+- **Self-contained files**: Most Pulse apps fit in single files, providing full context
+
+## Available Guides
+
+| Guide | Best For |
+|-------|----------|
+| [Claude Code](/docs/ai/claude-code) | Terminal-based development with agentic workflows |
+| [Cursor](/docs/ai/cursor) | IDE integration with inline completions and chat |
+| [Codex CLI](/docs/ai/codex-cli) | OpenAI's terminal agent for code generation |
+| [Open Code](/docs/ai/open-code) | Open-source AI coding assistant |
+| [Prompt Templates](/docs/ai/prompt-templates) | Ready-to-use prompts for any AI tool |
+
+## Quick Start
+
+For any AI tool, start with this context:
+
+```text
+I'm working on a Pulse app. Pulse is a full-stack Python framework for
+interactive web apps using React and WebSockets.
+
+Key APIs:
+- ps.App, ps.Route: Define app and routes
+- ps.State: Reactive state class
+- @ps.component: Decorator for components
+- ps.init(): Hook to preserve state across renders
+- ps.setup(): Run setup function once on first render
+- ps.query: Async data fetching with loading states
+
+Run commands: uv (Python), bun (JS), make all (validate)
+```
+
+## Repository Configuration
+
+Most AI tools look for instruction files in your repo. Create a `CLAUDE.md` or `AGENTS.md` at the root with project-specific rules. See [Prompt Templates](/docs/ai/prompt-templates) for examples.

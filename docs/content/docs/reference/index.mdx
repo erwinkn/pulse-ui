@@ -3,8 +3,23 @@ title: "Reference"
 description: "Manual API reference for Pulse exports"
 ---
 
-Manual API reference, grouped by module.
+API reference documentation for Pulse, organized by module.
 
-- `pulse` (Python core)
-- `pulse.js` (Python JS bindings)
-- `pulse.transpiler` (advanced transpiler API)
+## Modules
+
+### pulse (Python core)
+
+The main Python package containing the application framework, components, state management, and DOM utilities.
+
+- [Overview](/docs/reference/pulse) - All exports from `pulse`
+- [App](/docs/reference/pulse/app) - Application entry point and configuration
+- [Component](/docs/reference/pulse/component) - Component decorator and VDOM types
+- [DOM Elements](/docs/reference/pulse/dom) - HTML tags, props, and events
+
+### pulse.js (Python JS bindings)
+
+Python bindings for JavaScript interop, providing typed access to browser APIs and JS functions.
+
+### pulse.transpiler (advanced)
+
+Low-level transpiler API for Python-to-JavaScript code generation. Used internally by `@javascript` functions.

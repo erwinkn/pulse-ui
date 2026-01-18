@@ -3,9 +3,210 @@ title: "Codegen"
 description: "Client route generation"
 ---
 
+## CodegenConfig
 
-Exports:
-`CodegenConfig`
+Configuration for TypeScript/React code generation.
 
-Notes:
-- Used by `App` to generate React Router files
+```python
+from pulse import CodegenConfig
+```
+
+### Constructor
+
+```python
+@dataclass
+class CodegenConfig:
+    web_dir: Path | str = "web"
+    pulse_dir: Path | str = "pulse"
+    base_dir: Path | None = None
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `web_dir` | `Path \| str` | `"web"` | Root directory for web output (relative to base_dir or absolute) |
+| `pulse_dir` | `Path \| str` | `"pulse"` | Name of generated Pulse app directory inside `web/app/` |
+| `base_dir` | `Path \| None` | `None` | Base directory for resolving relative paths. Auto-resolved if not set |
+
+### Properties
+
+#### `resolved_base_dir`
+
+```python
+@property
+def resolved_base_dir(self) -> Path
+```
+
+Resolve the base directory where relative paths are anchored.
+
+Resolution order:
+1. Explicit `base_dir` if provided
+2. Directory of `PULSE_APP_FILE` env var
+3. `PULSE_APP_DIR` env var
+4. Current working directory
+
+#### `web_root`
+
+```python
+@property
+def web_root(self) -> Path
+```
+
+Absolute path to the web root directory (e.g., `<base_dir>/web`).
+
+#### `pulse_path`
+
+```python
+@property
+def pulse_path(self) -> Path
+```
+
+Full path to the generated Pulse app directory (e.g., `<web_root>/app/pulse`).
+
+### Usage
+
+```python
+from pulse import App, CodegenConfig
+
+# Default configuration
+app = App()
+
+# Custom web directory
+app = App(
+    codegen=CodegenConfig(web_dir="frontend")
+)
+
+# Absolute path
+app = App(
+    codegen=CodegenConfig(web_dir="/var/www/app/web")
+)
+
+# Custom pulse directory name
+app = App(
+    codegen=CodegenConfig(pulse_dir="generated")
+)
+```
+
+---
+
+## Generated Files
+
+The code generator creates the following structure inside `<web_root>/app/<pulse_dir>/`:
+
+```
+pulse/
+  _layout.tsx        # Root layout with Pulse provider
+  routes.ts          # React Router route configuration
+  routes.runtime.ts  # Server-side route matching
+  routes/
+    index.tsx        # Index route
+    users.tsx        # /users route
+    users.$id.tsx    # /users/:id route
+  layouts/
+    dashboard.tsx    # Layout components
+  assets/
+    *.css            # Copied local assets
+```
+
+### Route Files
+
+Each route file exports a React component that:
+- Connects to the Pulse WebSocket server
+- Renders the server-side VDOM
+- Handles real-time updates
+
+### Layout File
+
+The `_layout.tsx` contains:
+- Server address configuration
+- WebSocket connection setup
+- Connection status indicator (configurable)
+
+---
+
+## Codegen Class
+
+Internal class that performs code generation. Used by `App`.
+
+```python
+from pulse.codegen.codegen import Codegen
+```
+
+### Constructor
+
+```python
+Codegen(routes: RouteTree, config: CodegenConfig)
+```
+
+### Methods
+
+#### `generate_all`
+
+```python
+def generate_all(
+    self,
+    server_address: str,
+    internal_server_address: str | None = None,
+    api_prefix: str = "",
+    connection_status: ConnectionStatusConfig | None = None,
+) -> None
+```
+
+Generate all route files, layouts, and configuration.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `server_address` | `str` | Public server URL for WebSocket connection |
+| `internal_server_address` | `str \| None` | Internal server URL (for SSR) |
+| `api_prefix` | `str` | API route prefix |
+| `connection_status` | `ConnectionStatusConfig \| None` | Connection indicator config |
+
+#### `generate_route`
+
+```python
+def generate_route(self, route: Route | Layout, server_address: str) -> Path
+```
+
+Generate a single route file. Returns the output path.
+
+#### `generate_layout_tsx`
+
+```python
+def generate_layout_tsx(
+    self,
+    server_address: str,
+    internal_server_address: str | None = None,
+    api_prefix: str = "",
+    connection_status: ConnectionStatusConfig | None = None,
+) -> Path
+```
+
+Generate the root layout file with Pulse provider configuration.
+
+#### `generate_routes_ts`
+
+```python
+def generate_routes_ts(self) -> Path
+```
+
+Generate React Router route configuration file.
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `output_folder` | `Path` | Path to generated pulse directory |
+| `assets_folder` | `Path` | Path to assets directory |
+
+---
+
+## Helper Function
+
+### `write_file_if_changed`
+
+```python
+def write_file_if_changed(path: Path, content: str) -> Path
+```
+
+Write content to file only if it differs from existing content. Prevents unnecessary file changes that would trigger rebuilds.

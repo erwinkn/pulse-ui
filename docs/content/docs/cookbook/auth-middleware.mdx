@@ -2,17 +2,85 @@
 title: "Auth via Middleware"
 ---
 
-Guard connections with middleware.
+Protect routes and reject unauthenticated WebSocket connections using middleware.
+
+## The problem
+
+You want to restrict access to certain pages and ensure only authenticated users can interact with your app. Without middleware, you would need to add auth checks to every component.
+
+## Solution
+
+Create a middleware class that checks for authentication at two points: when rendering pages and when establishing WebSocket connections.
 
 ```python
-class Auth(ps.PulseMiddleware):
-    async def connect(self, *, request, session, next):
-        if not session.get("user"):
+import pulse as ps
+from typing import Any, Callable
+from collections.abc import Awaitable
+
+class AuthMiddleware(ps.PulseMiddleware):
+    # Routes that don't require authentication
+    PUBLIC_PATHS = {"/", "/login", "/signup"}
+
+    async def prerender_route(
+        self,
+        *,
+        path: str,
+        route_info: ps.RouteInfo,
+        request: ps.PulseRequest,
+        session: dict[str, Any],
+        next: Callable[[], Awaitable[ps.RoutePrerenderResponse]],
+    ) -> ps.RoutePrerenderResponse:
+        """Redirect unauthenticated users to login."""
+        if path in self.PUBLIC_PATHS:
+            return await next()
+
+        if not session.get("user_email"):
+            return ps.Redirect("/login")
+
+        return await next()
+
+    async def connect(
+        self,
+        *,
+        request: ps.PulseRequest,
+        session: dict[str, Any],
+        next: Callable[[], Awaitable[ps.ConnectResponse]],
+    ) -> ps.ConnectResponse:
+        """Reject WebSocket connections from unauthenticated users."""
+        if not session.get("user_email"):
             return ps.Deny()
         return await next()
+
+
+# Add middleware to your app
+app = ps.App(
+    routes=[
+        ps.Route("/", home),
+        ps.Route("/login", login),
+        ps.Route("/dashboard", dashboard),
+    ],
+    middleware=[AuthMiddleware()],
+)
 ```
 
-Use `session` to store auth state.
+## How it works
+
+- `prerender_route` runs before rendering each page. Return `ps.Redirect("/login")` to send unauthenticated users to the login page.
+- `connect` runs when a WebSocket connection is established. Return `ps.Deny()` to reject the connection entirely.
+- The `session` dict persists across requests for the same user. Store auth state here after login.
+
+## Setting auth state
+
+After a successful login, update the session:
+
+```python
+@app.fastapi.post("/api/login")
+async def api_login(request: Request):
+    body = await request.json()
+    # Validate credentials here...
+    ps.session().update({"user_email": body["email"]})
+    return {"ok": True}
+```
 
 ## See also
 

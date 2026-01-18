@@ -3,31 +3,229 @@ title: "Pulse (Python)"
 description: "Core Python API exports from pulse.__init__"
 ---
 
-
-Import style:
+This is the complete API reference for the main `pulse` package. Every export listed here is available directly from the top-level import:
 
 ```python
 import pulse as ps
 ```
 
-Key groups:
+<Callout type="info">
+**New to Pulse?** This reference is designed for quick lookups, not learning. If you're just getting started, head to the [Guide](/docs/guide) for explanations and examples, or the [Tutorial](/docs/tutorial) for a hands-on walkthrough.
+</Callout>
 
-- App + routing: `App`, `Route`, `Layout`, `RouteInfo`, `PulseMode`, `CodegenConfig`
-- Components: `component`, `Component`, `For`, `If`, `Link`, `Outlet`
-- State + reactivity: `State`, `computed`, `effect`, `Signal`, `Computed`, `Effect`, `AsyncEffect`, `Batch`, `Untrack`, `ReactiveList`, `ReactiveDict`, `ReactiveSet`
-- Hooks: `init`, `setup`, `setup_key`, `state`, `effects`, `stable`
-- Queries: `query`, `mutation`, `infinite_query`, `QueryClient`
-- Forms: `Form`, `ManualForm`, `FormData`, `FormValue`, `UploadFile`
-- Channels: `channel`, `Channel`, `ChannelClosed`, `ChannelTimeout`
-- Serialization: `serialize`, `deserialize`
-- JS interop: `javascript`, `JsFunction`, `Import`, `react_component`, `run_js`
+---
 
-Other exports:
-- Hooks runtime: `route`, `session`, `session_id`, `websocket_id`, `navigate`, `redirect`, `not_found`, `call_api`, `set_cookie`, `global_state`
-- Middleware: `stack`, `LatencyMiddleware`, `Redirect`, `NotFound`
-- Cookies: `Cookie`, `SetCookie`
-- Context: `PulseContext`, `PulseRequest`
-- Sessions: `SessionStore`, `CookieSessionStore`
-- Helpers: `CSSProperties`, `repeat`, `later`
-- Messages: `ClientMessage`, `Directives`, `Prerender`, `PrerenderPayload`, `SocketIODirectives`
-- Version: `__version__`
+## App and Routing
+
+These are the building blocks for creating your application and defining its URL structure. Every Pulse app starts with an `App` instance and one or more `Route` definitions.
+
+| Export | Description |
+|--------|-------------|
+| `App` | Main application class |
+| `Route` | Route definition |
+| `Layout` | Layout wrapper for nested routes |
+| `RouteInfo` | TypedDict with current route information |
+| `PulseMode` | Literal type: `'single-server'` or `'subdomains'` |
+| `CodegenConfig` | Code generation configuration |
+
+## Components
+
+Components are the core abstraction in Pulse. Use the `@component` decorator to create reusable UI pieces, and the helpers below to control rendering flow.
+
+| Export | Description |
+|--------|-------------|
+| `component` | Decorator to define a Pulse component |
+| `Component` | Component class (created by decorator) |
+| `For` | Map items to elements with automatic key handling |
+| `If` | Conditional rendering helper |
+| `Link` | Client-side navigation link |
+| `Outlet` | Renders child routes in layouts |
+
+## State and Reactivity
+
+Pulse's reactivity system automatically tracks dependencies and updates the UI when data changes. `Signal` holds values, `Computed` derives from them, and `Effect` runs side effects. For complex state, extend the `State` class.
+
+| Export | Description |
+|--------|-------------|
+| `State` | Stateful class base for component state |
+| `Signal` | Reactive value container |
+| `Computed` | Derived reactive value |
+| `Effect` | Side effect that tracks dependencies |
+| `AsyncEffect` | Async side effect |
+| `Batch` | Context manager to batch reactive updates |
+| `Untrack` | Context manager to read without tracking |
+| `computed` | Decorator to make a method computed |
+| `effect` | Decorator to make a method an effect |
+| `ReactiveList` | Reactive list container |
+| `ReactiveDict` | Reactive dict container |
+| `ReactiveSet` | Reactive set container |
+
+## Hooks
+
+Hooks let you tap into the component lifecycle. Use them inside component functions to run setup code, access state, or manage cleanup.
+
+| Export | Description |
+|--------|-------------|
+| `init` | Run code once when component mounts |
+| `setup` | Run setup code with cleanup |
+| `setup_key` | Keyed setup for dynamic dependencies |
+| `state` | Access component state instance |
+| `effects` | Register effects in component |
+| `stable` | Get stable reference across renders |
+
+## Runtime Hooks
+
+These hooks access runtime context during rendering: the current route, session data, navigation, and more. Call them inside components to interact with the request lifecycle.
+
+| Export | Description |
+|--------|-------------|
+| `route` | Get current `RouteContext` |
+| `session` | Get current session data dict |
+| `session_id` | Get current session ID |
+| `websocket_id` | Get current WebSocket connection ID |
+| `navigate` | Navigate to a URL |
+| `redirect` | Redirect and stop rendering |
+| `not_found` | Return 404 and stop rendering |
+| `call_api` | Call a server API endpoint |
+| `set_cookie` | Set a cookie on the client |
+| `global_state` | Access global state by type |
+
+## Queries
+
+Queries handle server-side data fetching with automatic caching, refetching, and loading states. Use `query` for reads, `mutation` for writes, and `infinite_query` for paginated data.
+
+| Export | Description |
+|--------|-------------|
+| `query` | Define a data query |
+| `mutation` | Define a data mutation |
+| `infinite_query` | Define an infinite/paginated query |
+| `QueryClient` | Query cache and management |
+
+## Forms
+
+Built-in form handling with typed data extraction. `Form` handles submission automatically; use `ManualForm` when you need custom submit behavior.
+
+| Export | Description |
+|--------|-------------|
+| `Form` | Form component with automatic handling |
+| `ManualForm` | Form with manual submit control |
+| `FormData` | Typed form data container |
+| `FormValue` | Single form field value |
+| `UploadFile` | Uploaded file (from starlette) |
+
+## Channels
+
+Channels enable real-time bidirectional communication between server and client. Useful for chat, live updates, and streaming data.
+
+| Export | Description |
+|--------|-------------|
+| `channel` | Create a bidirectional channel |
+| `Channel` | Channel instance type |
+| `ChannelClosed` | Exception for closed channel |
+| `ChannelTimeout` | Exception for channel timeout |
+
+## Serialization
+
+Low-level utilities for converting Python objects to JSON-compatible formats for WebSocket transport. Most apps won't need these directly.
+
+| Export | Description |
+|--------|-------------|
+| `serialize` | Serialize Python values for transport |
+| `deserialize` | Deserialize transported values |
+
+## JavaScript Interop
+
+Bridge between Python and JavaScript. Use `@javascript` to transpile Python functions to JS, `Import` to bring in npm packages, and `react_component` to wrap existing React components.
+
+| Export | Description |
+|--------|-------------|
+| `javascript` | Decorator for Python-to-JS transpilation |
+| `JsFunction` | Transpiled JS function type |
+| `Import` | Import a JS module or symbol |
+| `react_component` | Wrap a React component for use in Pulse |
+| `run_js` | Execute arbitrary JS on the client |
+
+## Middleware
+
+Middleware intercepts requests before they reach your components. Use it for authentication, logging, redirects, and other cross-cutting concerns.
+
+| Export | Description |
+|--------|-------------|
+| `stack` | Create middleware stack |
+| `PulseMiddleware` | Base middleware class |
+| `MiddlewareStack` | Middleware chain |
+| `LatencyMiddleware` | Add artificial latency (dev) |
+| `Redirect` | Middleware redirect response |
+| `NotFound` | Middleware 404 response |
+| `Ok` | Middleware success response |
+| `Deny` | Middleware deny response |
+
+## Cookies and Sessions
+
+Manage client cookies and server-side session storage. Sessions persist user data across requests.
+
+| Export | Description |
+|--------|-------------|
+| `Cookie` | Cookie configuration |
+| `SetCookie` | Cookie with value to set |
+| `SessionStore` | Abstract session storage |
+| `CookieSessionStore` | JWT-based cookie sessions |
+
+## Context
+
+Access the current request context. Useful for advanced scenarios where you need direct access to the underlying request.
+
+| Export | Description |
+|--------|-------------|
+| `PulseContext` | Current request context |
+| `PulseRequest` | Incoming request wrapper |
+
+## Plugin System
+
+Extend Pulse with custom functionality. Plugins can hook into the app lifecycle to add features like authentication providers or analytics.
+
+| Export | Description |
+|--------|-------------|
+| `Plugin` | Base class for app plugins |
+
+## Helpers
+
+Miscellaneous utilities for common tasks.
+
+| Export | Description |
+|--------|-------------|
+| `CSSProperties` | TypedDict for inline styles |
+| `repeat` | Repeat a value n times |
+| `later` | Schedule a callback after delay |
+
+## VDOM Types
+
+Type annotations for Pulse's virtual DOM. Use these for type hints in components that return or manipulate elements.
+
+| Export | Description |
+|--------|-------------|
+| `Element` | JSX/HTML element node |
+| `Node` | Any renderable node |
+| `PulseNode` | Server component instance |
+| `Primitive` | `bool`, `int`, `float`, `str`, `None` |
+
+## Event Handler Types
+
+Type annotations for event handlers with varying argument counts. Useful for strict typing of callbacks.
+
+| Export | Description |
+|--------|-------------|
+| `EventHandler0` | Handler with 0 extra args |
+| `EventHandler1` | Handler with 1 extra arg |
+| `EventHandler2` | Handler with 2 extra args |
+| ... | Up to `EventHandler10` |
+
+## Environment
+
+Access environment variables and detect the current runtime mode (development, CI, or production).
+
+| Export | Description |
+|--------|-------------|
+| `PulseEnv` | Literal type: `'dev'`, `'ci'`, `'prod'` |
+| `env` | Environment variables accessor |
+| `mode()` | Get current `PulseEnv` |

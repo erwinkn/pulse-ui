@@ -2,9 +2,297 @@
 title: "Emit and Transpile"
 ---
 
+Low-level transpilation API for converting Python AST to JavaScript.
 
-Exports:
-`EmitContext`, `Transpiler`, `transpile`, `next_id`, `reset_id_counter`, `TranspileError`
+## `transpile`
 
-Notes:
-- `transpile()` emits JS code for a Python function
+```python
+def transpile(
+    fndef: ast.FunctionDef | ast.AsyncFunctionDef,
+    deps: Mapping[str, Expr] | None = None,
+) -> Function | Arrow
+```
+
+Transpile a Python function AST node to a JavaScript `Function` or `Arrow` node.
+
+**Parameters:**
+- `fndef`: The Python function definition AST node
+- `deps`: Dictionary mapping global names to `Expr` instances
+
+**Returns:**
+- `Arrow` for single-expression functions
+- `Function` for multi-statement functions
+
+**Example:**
+
+```python
+import ast
+from pulse.transpiler import transpile, emit
+
+source = "def add(a, b): return a + b"
+module = ast.parse(source)
+fndef = module.body[0]
+
+result = transpile(fndef)
+js_code = emit(result)
+# "(a, b) => a + b"
+```
+
+---
+
+## `Transpiler`
+
+```python
+class Transpiler:
+    fndef: ast.FunctionDef | ast.AsyncFunctionDef
+    args: list[str]
+    deps: Mapping[str, Expr]
+    locals: set[str]
+    jsx: bool
+    source_file: Path | None
+```
+
+Transpile Python AST to JavaScript AST nodes.
+
+**Constructor:**
+
+```python
+def __init__(
+    self,
+    fndef: ast.FunctionDef | ast.AsyncFunctionDef,
+    deps: Mapping[str, Expr],
+    *,
+    jsx: bool = False,
+    source_file: Path | None = None,
+) -> None
+```
+
+**Parameters:**
+- `fndef`: Function definition AST node
+- `deps`: Dictionary of dependencies (substituted when names are referenced)
+- `jsx`: When `True`, generates React component with destructured props
+- `source_file`: Source file path for error messages and relative import resolution
+
+**Methods:**
+
+```python
+def transpile(self) -> Function | Arrow
+```
+Main entry point. Returns `Arrow` for single-expression functions, `Function` otherwise.
+
+```python
+def emit_stmt(self, node: ast.stmt) -> Stmt
+```
+Emit a statement node.
+
+```python
+def emit_expr(self, node: ast.expr | None) -> Expr
+```
+Emit an expression node. Returns `Literal(None)` if node is `None`.
+
+**Supported Python Constructs:**
+
+Statements:
+- `return`, `break`, `continue`, `pass`
+- `if`/`elif`/`else`
+- `for ... in ...` (for-of)
+- `while`
+- `try`/`except`/`finally`
+- `raise`
+- Variable assignment (with `let`/`const`)
+- Augmented assignment (`+=`, `-=`, etc.)
+- Nested function definitions
+
+Expressions:
+- Literals: `int`, `float`, `str`, `bool`, `None`
+- Collections: `list`, `tuple`, `dict`, `set`
+- Operators: `+`, `-`, `*`, `/`, `%`, `**`, `//`
+- Bitwise: `&`, `|`, `^`, `<<`, `>>`, `~`
+- Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=`, `is`, `is not`, `in`, `not in`
+- Boolean: `and`, `or`, `not`
+- Ternary: `x if cond else y`
+- Attribute access: `obj.attr`
+- Subscript: `obj[key]`, `obj[start:end]`
+- Function calls: `fn(args, **kwargs)`
+- Comprehensions: `[x for x in ...]`, `{k: v for ...}`, `{x for ...}`
+- Lambda: `lambda x: x + 1`
+- f-strings: `f"hello {name}"`
+- Spread: `*args`
+- Await: `await expr`
+
+---
+
+## `emit`
+
+```python
+def emit(node: Expr | Stmt) -> str
+```
+
+Emit an expression or statement as JavaScript/JSX code.
+
+**Example:**
+
+```python
+from pulse.transpiler import emit, Literal, Binary, Call, Identifier
+
+# Simple expression
+code = emit(Binary(Literal(1), "+", Literal(2)))
+# "1 + 2"
+
+# Function call
+code = emit(Call(Identifier("console.log"), [Literal("hello")]))
+# 'console.log("hello")'
+```
+
+---
+
+## `EmitContext`
+
+```python
+@dataclass
+class EmitContext:
+    route_file_path: str
+```
+
+Context for emit operations during route code generation. Stores information about the current route file being generated, allowing emit methods to compute correct relative paths.
+
+**Usage:**
+
+```python
+from pulse.transpiler import EmitContext, emit
+
+with EmitContext(route_file_path="routes/users/index.tsx"):
+    js_code = emit(fn.transpile())
+```
+
+**Attributes:**
+- `route_file_path`: Path to route file from pulse folder root (e.g., `'routes/users/index.tsx'`)
+
+**Class Methods:**
+
+```python
+@classmethod
+def get(cls) -> EmitContext | None
+```
+Get current emit context, or `None` if not set.
+
+---
+
+## `TranspileError`
+
+```python
+class TranspileError(Exception):
+    message: str
+    node: ast.expr | ast.stmt | ast.excepthandler | None
+    source: str | None
+    filename: str | None
+    func_name: str | None
+    source_start_line: int | None
+```
+
+Error during transpilation with optional source location.
+
+**Constructor:**
+
+```python
+def __init__(
+    self,
+    message: str,
+    *,
+    node: ast.expr | ast.stmt | ast.excepthandler | None = None,
+    source: str | None = None,
+    filename: str | None = None,
+    func_name: str | None = None,
+    source_start_line: int | None = None,
+) -> None
+```
+
+**Methods:**
+
+```python
+def with_context(
+    self,
+    *,
+    node: ... = None,
+    source: str | None = None,
+    filename: str | None = None,
+    func_name: str | None = None,
+    source_start_line: int | None = None,
+) -> TranspileError
+```
+Return a new `TranspileError` with additional context.
+
+**Example output:**
+
+```
+Unsupported expression: NamedExpr in my_function at /path/to/file.py:42:10
+      result := compute()
+               ^
+```
+
+---
+
+## ID Generation
+
+### `next_id`
+
+```python
+def next_id() -> str
+```
+Generate a unique ID for imports, functions, or constants. Returns incrementing string IDs: `"1"`, `"2"`, etc.
+
+### `reset_id_counter`
+
+```python
+def reset_id_counter() -> None
+```
+Reset the shared ID counter. Called by `clear_function_cache()` and related cleanup functions.
+
+---
+
+## Supported Operators
+
+### Binary Operators
+
+| Python | JavaScript |
+|--------|------------|
+| `+` | `+` |
+| `-` | `-` |
+| `*` | `*` |
+| `/` | `/` |
+| `%` | `%` |
+| `**` | `**` |
+| `//` | `Math.floor(x / y)` |
+| `&` | `&` |
+| `\|` | `\|` |
+| `^` | `^` |
+| `<<` | `<<` |
+| `>>` | `>>` |
+
+### Unary Operators
+
+| Python | JavaScript |
+|--------|------------|
+| `+x` | `+x` |
+| `-x` | `-x` |
+| `not x` | `!x` |
+| `~x` | `~x` |
+
+### Comparison Operators
+
+| Python | JavaScript |
+|--------|------------|
+| `==` | `===` |
+| `!=` | `!==` |
+| `<`, `<=`, `>`, `>=` | Same |
+| `is` | `===` |
+| `is not` | `!==` |
+| `in` | Runtime check (includes/has/in) |
+| `not in` | Negated runtime check |
+
+### Boolean Operators
+
+| Python | JavaScript |
+|--------|------------|
+| `and` | `&&` |
+| `or` | `\|\|` |

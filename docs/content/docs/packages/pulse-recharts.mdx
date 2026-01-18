@@ -2,10 +2,239 @@
 title: "Pulse Recharts"
 ---
 
-Bindings for Recharts.
+Pulse bindings for [Recharts](https://recharts.org/), a composable charting library built on React components.
 
-Example:
+## Installation
+
+```bash
+uv add pulse-recharts
+```
+
+Also install the JavaScript dependency in your `web/` directory:
+
+```bash
+cd web && bun add recharts
+```
+
+## Basic Usage
+
+Create a simple line chart with data:
 
 ```python
-from pulse_recharts import LineChart, Line, XAxis, YAxis
+from pathlib import Path
+import pulse as ps
+from pulse_recharts import (
+    LineChart,
+    Line,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    Legend,
+    ResponsiveContainer,
+)
+
+
+@ps.component
+def SalesChart():
+    data = [
+        {"month": "Jan", "sales": 4000, "returns": 400},
+        {"month": "Feb", "sales": 3000, "returns": 398},
+        {"month": "Mar", "sales": 2000, "returns": 800},
+        {"month": "Apr", "sales": 2780, "returns": 908},
+        {"month": "May", "sales": 1890, "returns": 480},
+        {"month": "Jun", "sales": 2390, "returns": 380},
+    ]
+
+    return ResponsiveContainer(width="100%", height=400)[
+        LineChart(data=data, margin={"top": 5, "right": 30, "left": 20, "bottom": 5})[
+            CartesianGrid(strokeDasharray="3 3"),
+            XAxis(dataKey="month"),
+            YAxis(),
+            Tooltip(),
+            Legend(),
+            Line(type="monotone", dataKey="sales", stroke="#8884d8"),
+            Line(type="monotone", dataKey="returns", stroke="#82ca9d"),
+        ]
+    ]
+
+
+app = ps.App(
+    routes=[ps.Route("/", SalesChart)],
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "web"),
+)
+```
+
+## Chart Types
+
+### LineChart
+
+For visualizing trends over time or continuous data.
+
+```python
+LineChart(data=data)[
+    Line(dataKey="value", stroke="#8884d8"),
+    XAxis(dataKey="name"),
+    YAxis(),
+]
+```
+
+### BarChart
+
+For comparing quantities across categories.
+
+```python
+from pulse_recharts import BarChart, Bar
+
+BarChart(data=data)[
+    Bar(dataKey="value", fill="#8884d8"),
+    XAxis(dataKey="name"),
+    YAxis(),
+]
+```
+
+### AreaChart
+
+For showing volume or cumulative data.
+
+```python
+from pulse_recharts import AreaChart, Area
+
+AreaChart(data=data)[
+    Area(type="monotone", dataKey="value", fill="#8884d8", stroke="#8884d8"),
+    XAxis(dataKey="name"),
+    YAxis(),
+]
+```
+
+### PieChart
+
+For showing proportions of a whole.
+
+```python
+from pulse_recharts import PieChart, Pie
+
+PieChart()[
+    Pie(data=data, dataKey="value", nameKey="name", fill="#8884d8"),
+]
+```
+
+### ScatterChart
+
+For showing correlations between two variables.
+
+```python
+from pulse_recharts import ScatterChart, Scatter
+
+ScatterChart()[
+    XAxis(dataKey="x", type="number"),
+    YAxis(dataKey="y", type="number"),
+    Scatter(data=data, fill="#8884d8"),
+]
+```
+
+### ComposedChart
+
+For combining multiple chart types (lines, bars, areas) in one view.
+
+```python
+from pulse_recharts import ComposedChart, Bar, Line, Area
+
+ComposedChart(data=data)[
+    XAxis(dataKey="name"),
+    YAxis(),
+    Bar(dataKey="bar_value", fill="#8884d8"),
+    Line(dataKey="line_value", stroke="#ff7300"),
+    Area(dataKey="area_value", fill="#82ca9d"),
+]
+```
+
+## Components Reference
+
+### Chart Containers
+
+| Component | Description |
+|-----------|-------------|
+| `LineChart` | Line chart container |
+| `BarChart` | Bar chart container |
+| `AreaChart` | Area chart container |
+| `PieChart` | Pie chart container |
+| `RadarChart` | Radar/spider chart container |
+| `ScatterChart` | Scatter plot container |
+| `ComposedChart` | Container for mixed chart types |
+| `ResponsiveContainer` | Makes charts responsive to parent size |
+
+### Cartesian Components
+
+| Component | Description |
+|-----------|-------------|
+| `XAxis` | Horizontal axis |
+| `YAxis` | Vertical axis |
+| `CartesianGrid` | Grid lines |
+| `Line` | Line series |
+| `Bar` | Bar series |
+| `Area` | Area series |
+
+### General Components
+
+| Component | Description |
+|-----------|-------------|
+| `Tooltip` | Hover tooltip |
+| `Legend` | Chart legend |
+| `Label` | Static labels |
+| `LabelList` | Labels for data points |
+
+## Interactive Example
+
+Charts work seamlessly with Pulse state for interactive filtering:
+
+```python
+from dataclasses import dataclass
+import pulse as ps
+from pulse_recharts import LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer
+
+
+@dataclass
+class DataPoint:
+    name: str
+    value: int
+
+
+class ChartState(ps.State):
+    show_grid: bool = True
+    data: list[DataPoint] = None
+
+    def __init__(self):
+        self.data = [
+            DataPoint("A", 100),
+            DataPoint("B", 200),
+            DataPoint("C", 150),
+            DataPoint("D", 300),
+        ]
+
+    def add_random_point(self):
+        import random
+        name = chr(ord("A") + len(self.data))
+        self.data.append(DataPoint(name, random.randint(50, 350)))
+
+
+@ps.component
+def InteractiveChart():
+    with ps.init():
+        state = ChartState()
+
+    # Convert dataclass list to dict list for Recharts
+    chart_data = [{"name": d.name, "value": d.value} for d in state.data]
+
+    return ps.div()[
+        ps.button("Add Point", onClick=state.add_random_point),
+        ResponsiveContainer(width="100%", height=300)[
+            LineChart(data=chart_data)[
+                XAxis(dataKey="name"),
+                YAxis(),
+                Tooltip(),
+                Line(dataKey="value", stroke="#8884d8"),
+            ]
+        ],
+    ]
 ```

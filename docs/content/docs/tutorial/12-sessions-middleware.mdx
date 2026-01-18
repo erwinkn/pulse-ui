@@ -2,23 +2,246 @@
 title: "Sessions and Middleware"
 ---
 
-Session data is per user.
+When building real applications, you often need to remember things about your users across page loads and requests. Did they log in? What items are in their shopping cart? What theme did they choose? This is where sessions come in.
+
+You might also need to run code before every request, like checking if a user is authenticated or logging requests. That's what middleware is for.
+
+## Sessions: Remembering Your Users
+
+A session is a way to store data for a specific user. Each user gets their own session, and the data persists across page navigations and browser refreshes.
+
+### Using Sessions
+
+Access the current user's session with `ps.session()`:
 
 ```python
-def page():
+@ps.component
+def visit_counter():
     session = ps.session()
-    session["visits"] = (session.get("visits") or 0) + 1
+
+    # Get the current visit count, defaulting to 0 if not set
+    visits = session.get("visits", 0)
+
+    # Increment and save
+    session["visits"] = visits + 1
+
+    return ps.div(
+        ps.h1("Welcome!", className="text-2xl font-bold"),
+        ps.p(f"You've visited this page {session['visits']} times."),
+    )
 ```
 
-Middleware can short-circuit.
+Sessions work like dictionaries. You can:
+- **Get values**: `session.get("key")` or `session["key"]`
+- **Set values**: `session["key"] = value`
+- **Check for keys**: `"key" in session`
+- **Delete keys**: `del session["key"]`
+
+### Common Session Use Cases
+
+**User authentication:**
 
 ```python
-class Auth(ps.PulseMiddleware):
+class AuthState(ps.State):
+    async def login(self, data: ps.FormData):
+        username = data.get("username")
+        password = data.get("password")
+
+        # Validate credentials (you'd check a database here)
+        if self.validate_credentials(username, password):
+            session = ps.session()
+            session["user"] = {"username": username}
+            ps.navigate("/dashboard")
+
+
+@ps.component
+def dashboard():
+    session = ps.session()
+    user = session.get("user")
+
+    if not user:
+        ps.navigate("/login")
+        return ps.div("Redirecting...")
+
+    return ps.div(
+        ps.h1(f"Welcome, {user['username']}!", className="text-2xl"),
+        ps.button("Logout", onClick=lambda: logout()),
+    )
+
+
+def logout():
+    session = ps.session()
+    del session["user"]
+    ps.navigate("/login")
+```
+
+**User preferences:**
+
+```python
+@ps.component
+def settings_page():
+    session = ps.session()
+
+    theme = session.get("theme", "light")
+
+    def set_theme(new_theme):
+        session["theme"] = new_theme
+
+    return ps.div(className=f"theme-{theme}")[
+        ps.h1("Settings"),
+        ps.div(
+            ps.button("Light Theme", onClick=lambda: set_theme("light")),
+            ps.button("Dark Theme", onClick=lambda: set_theme("dark")),
+        ),
+    ]
+```
+
+### What to Store in Sessions
+
+Sessions are great for:
+- User identity (who is logged in)
+- User preferences (theme, language)
+- Temporary data (items in a cart before checkout)
+- Flash messages (success/error messages shown once)
+
+Avoid storing:
+- Large amounts of data (keep sessions lightweight)
+- Sensitive data that shouldn't be in memory
+- Data that should persist long-term (use a database instead)
+
+## Middleware: Code That Runs on Every Request
+
+Middleware lets you run code before a user connects to your app. This is perfect for cross-cutting concerns like authentication, logging, or request validation.
+
+### Creating Middleware
+
+Middleware is a class that inherits from `ps.PulseMiddleware` and implements the `connect` method:
+
+```python
+class LoggingMiddleware(ps.PulseMiddleware):
     async def connect(self, *, request, session, next):
-        if not session.get("user"):
-            return ps.Deny()
+        print(f"New connection from {request.client.host}")
+        print(f"Path: {request.url.path}")
+
+        # Continue to the next middleware or the actual page
         return await next()
 ```
+
+The `connect` method receives:
+- `request`: Information about the incoming request (URL, headers, etc.)
+- `session`: The user's session (same as `ps.session()`)
+- `next`: A function to call to continue processing
+
+### Authentication Middleware
+
+A common use case is protecting routes that require login:
+
+```python
+class AuthMiddleware(ps.PulseMiddleware):
+    # Routes that don't require authentication
+    public_routes = ["/", "/login", "/signup", "/about"]
+
+    async def connect(self, *, request, session, next):
+        path = request.url.path
+
+        # Allow public routes
+        if path in self.public_routes:
+            return await next()
+
+        # Check if user is logged in
+        if not session.get("user"):
+            # Deny access - user will see an error or be redirected
+            return ps.Deny()
+
+        # User is authenticated, continue
+        return await next()
+```
+
+### Using Middleware
+
+Add middleware to your app:
+
+```python
+app = ps.App(
+    routes=[...],
+    middleware=[
+        LoggingMiddleware(),
+        AuthMiddleware(),
+    ],
+)
+```
+
+Middleware runs in order. Each middleware can:
+1. **Continue**: Call `await next()` to pass control to the next middleware
+2. **Deny**: Return `ps.Deny()` to reject the connection
+3. **Short-circuit**: Return early without calling `next()`
+
+### Multiple Middleware Example
+
+Here's how middleware chains together:
+
+```python
+class TimingMiddleware(ps.PulseMiddleware):
+    async def connect(self, *, request, session, next):
+        import time
+        start = time.time()
+        result = await next()
+        elapsed = time.time() - start
+        print(f"Request took {elapsed:.2f}s")
+        return result
+
+
+class RateLimitMiddleware(ps.PulseMiddleware):
+    async def connect(self, *, request, session, next):
+        # Simple rate limiting (you'd use a proper solution in production)
+        recent_requests = session.get("recent_requests", 0)
+
+        if recent_requests > 100:
+            return ps.Deny()
+
+        session["recent_requests"] = recent_requests + 1
+        return await next()
+
+
+app = ps.App(
+    routes=[...],
+    middleware=[
+        TimingMiddleware(),      # Runs first
+        RateLimitMiddleware(),   # Runs second
+        AuthMiddleware(),        # Runs third
+    ],
+)
+```
+
+## Combining Sessions and Middleware
+
+Sessions and middleware work together naturally. Middleware can read and modify sessions, making it easy to implement patterns like:
+
+```python
+class SessionSetupMiddleware(ps.PulseMiddleware):
+    async def connect(self, *, request, session, next):
+        # Initialize session defaults if needed
+        if "created_at" not in session:
+            from datetime import datetime
+            session["created_at"] = datetime.now().isoformat()
+            session["visits"] = 0
+
+        # Track this visit
+        session["visits"] += 1
+        session["last_visit"] = datetime.now().isoformat()
+
+        return await next()
+```
+
+## Tips
+
+1. **Keep sessions small**: Store IDs and references, not large objects.
+
+2. **Order middleware carefully**: Authentication should usually come early to protect all routes.
+
+3. **Use middleware for cross-cutting concerns**: If you find yourself checking authentication in every component, use middleware instead.
+
+4. **Handle denied connections gracefully**: Consider what users see when `ps.Deny()` is returned.
 
 ## See also
 

@@ -2,25 +2,136 @@
 title: "State"
 ---
 
-State is a class with typed fields. Use `ps.init()` to keep it across renders.
+Static pages are nice, but most applications need to be interactive. In Pulse, **state** is how you make your UI dynamic and responsive to user actions.
+
+## What is State?
+
+State is data that can change over time. When state changes, Pulse automatically updates the UI to reflect those changes. This is the core loop of any Pulse application:
+
+1. Define your state
+2. Render UI based on that state
+3. User interacts, modifying state
+4. UI automatically updates to show new state
+
+## Creating State
+
+State in Pulse is defined as a class that inherits from `ps.State`. Let's build a simple counter:
 
 ```python
+import pulse as ps
+
 class Counter(ps.State):
     count: int = 0
 
     def inc(self):
         self.count += 1
 
+    def dec(self):
+        self.count -= 1
+```
+
+A few things to note:
+
+- **Type annotations are required** for reactive properties (e.g., `count: int`)
+- **Default values** are optional but recommended
+- **Methods** can modify state freely - Pulse tracks all changes automatically
+
+## Using State in Components
+
+Here's how you use state in a component:
+
+```python
 @ps.component
 def counter():
     with ps.init():
         st = Counter()
+
+    return ps.div(
+        ps.button("-", onClick=st.dec, className="px-2 py-1 bg-red-500 text-white"),
+        ps.span(f" Count: {st.count} ", className="mx-2"),
+        ps.button("+", onClick=st.inc, className="px-2 py-1 bg-green-500 text-white"),
+    )
+
+app = ps.App([ps.Route("/", counter)])
+```
+
+The key part here is `ps.init()`. This is a **hook** that preserves state across renders.
+
+## Why `ps.init()` Matters
+
+Without `ps.init()`, a new `Counter` would be created every time the component renders. Try removing it:
+
+```python
+# This won't work as expected!
+@ps.component
+def counter():
+    st = Counter()  # New counter every render, always shows 0
     return ps.button(f"Count: {st.count}", onClick=st.inc)
 ```
 
-Rules:
-- Public fields must be annotated
-- Use `_private` for non-reactive values
+Click the button and nothing seems to happen. Here's why:
+
+1. First render: Counter is created with `count = 0`
+2. Click: `inc()` runs, setting `count = 1`
+3. Re-render: A **new** Counter is created with `count = 0` again
+
+With `ps.init()`, the same Counter instance is preserved:
+
+1. First render: Counter is created and **saved** by `ps.init()`
+2. Click: `inc()` runs, setting `count = 1`
+3. Re-render: `ps.init()` **restores** the same Counter, `count` is still 1
+
+## Private Properties
+
+Sometimes you need to store data that shouldn't trigger UI updates. Use an underscore prefix for non-reactive properties:
+
+```python
+class Counter(ps.State):
+    count: int = 0
+    _label: str  # Non-reactive, won't trigger re-renders
+
+    def __init__(self, label: str):
+        self._label = label
+```
+
+This is useful for storing references, configuration, or debug information that doesn't affect the UI.
+
+## Complete Example
+
+Here's a complete counter app you can run:
+
+```python
+import pulse as ps
+
+class Counter(ps.State):
+    count: int = 0
+
+    def inc(self):
+        self.count += 1
+
+    def dec(self):
+        self.count -= 1
+
+@ps.component
+def counter():
+    with ps.init():
+        st = Counter()
+
+    print(f"Rendering, count is {st.count}")  # See this in your terminal!
+
+    return ps.div(className="p-4")[
+        ps.h2("Counter Demo", className="text-xl font-bold mb-4"),
+        ps.div(className="flex items-center gap-2")[
+            ps.button("-", onClick=st.dec, className="px-3 py-1 bg-red-500 text-white rounded"),
+            ps.span(f"{st.count}", className="text-lg font-mono"),
+            ps.button("+", onClick=st.inc, className="px-3 py-1 bg-green-500 text-white rounded"),
+        ],
+    ]
+
+app = ps.App([ps.Route("/", counter)])
+```
+
+Run this and watch your terminal - you'll see the print statement every time the component re-renders after a click.
 
 ## See also
 

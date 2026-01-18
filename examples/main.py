@@ -17,7 +17,6 @@ from pulse.middleware import (
 )
 from pulse.render_session import run_js
 from pulse.request import PulseRequest
-from pulse.routing import RouteInfo
 from pulse.user_session import InMemorySessionStore
 
 
@@ -580,17 +579,19 @@ def app_layout():
 
 class LoggingMiddleware(ps.PulseMiddleware):
 	@override
-	async def prerender_route(
+	async def prerender(
 		self,
 		*,
-		path: str,
-		route_info: RouteInfo,
+		payload: ps.PrerenderPayload,
 		request: PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[ps.RoutePrerenderResponse]],
-	) -> ps.RoutePrerenderResponse:
+		next: Callable[[], Awaitable[ps.PrerenderResponse]],
+	) -> ps.PrerenderResponse:
 		# before
-		print(f"[MW prerender] path={path} host={request.headers.get('host')}")
+		print(
+			f"[MW prerender] paths={payload.get('paths') or []} "
+			f"host={request.headers.get('host')}"
+		)
 		# Seed same keys as connect to avoid prerender flash
 		session["user_agent"] = request.headers.get("user-agent")
 		session["ip"] = request.headers.get("x-forwarded-for") or (

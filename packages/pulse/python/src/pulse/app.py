@@ -47,7 +47,6 @@ from pulse.helpers import (
 	later,
 )
 from pulse.hooks.core import hooks
-from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
@@ -69,7 +68,6 @@ from pulse.middleware import (
 	PrerenderResponse,
 	PulseMiddleware,
 	Redirect,
-	RoutePrerenderResponse,
 )
 from pulse.plugin import Plugin
 from pulse.proxy import ReactProxy
@@ -457,7 +455,7 @@ class App:
 
 			def _normalize_prerender_result(
 				captured: ServerInitMessage | ServerNavigateToMessage,
-			) -> RoutePrerenderResponse:
+			) -> Ok[ServerInitMessage] | Redirect | NotFound:
 				if captured["type"] == "vdom_init":
 					return Ok(captured)
 				if captured["type"] == "navigate_to":
@@ -469,12 +467,6 @@ class App:
 					return Redirect(path=str(nav_path) if nav_path else "/")
 				# Fallback: shouldn't happen, return not found to be safe
 				return NotFound()
-
-			def _normalize_prerender_response(res: Any) -> RoutePrerenderResponse:
-				if isinstance(res, (Ok, Redirect, NotFound)):
-					return res
-				# Treat any other value as a VDOM payload
-				return Ok(res)
 
 			with PulseContext.update(render=render):
 				# Call top-level prerender middleware, which wraps the route processing
@@ -493,35 +485,18 @@ class App:
 					captured = render.prerender(paths, route_info)
 
 					for p in paths:
-						try:
-							# Capture p in closure to avoid loop variable binding issue
-							async def _next(path: str = p) -> RoutePrerenderResponse:
-								return _normalize_prerender_result(captured[path])
-
-							# Call prerender_route middleware (in) -> prerender route -> (out)
-							res = await self.middleware.prerender_route(
-								path=p,
-								route_info=route_info,
-								request=PulseRequest.from_fastapi(request),
-								session=session.data,
-								next=_next,
-							)
-							res = _normalize_prerender_response(res)
-							if isinstance(res, Ok):
-								# Aggregate results
-								result_data["views"][p] = res.payload
-							elif isinstance(res, Redirect):
-								# Return redirect immediately
-								return Redirect(path=res.path or "/")
-							elif isinstance(res, NotFound):
-								# Return not found immediately
-								return NotFound()
-							else:
-								raise ValueError("Unexpected prerender response:", res)
-						except RedirectInterrupt as r:
-							return Redirect(path=r.path)
-						except NotFoundInterrupt:
+						res = _normalize_prerender_result(captured[p])
+						if isinstance(res, Ok):
+							# Aggregate results
+							result_data["views"][p] = res.payload
+						elif isinstance(res, Redirect):
+							# Return redirect immediately
+							return Redirect(path=res.path or "/")
+						elif isinstance(res, NotFound):
+							# Return not found immediately
 							return NotFound()
+						else:
+							raise ValueError("Unexpected prerender response:", res)
 
 					return Ok(result_data)
 

@@ -28,19 +28,21 @@ from fastapi.responses import JSONResponse
 # Simple logging/timing middleware
 class LoggingMiddleware(ps.PulseMiddleware):
 	@override
-	async def prerender_route(
+	async def prerender(
 		self,
 		*,
-		path: str,
-		route_info: ps.RouteInfo,
+		payload: ps.PrerenderPayload,
 		request: ps.PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[ps.RoutePrerenderResponse]],
-	) -> ps.RoutePrerenderResponse:
+		next: Callable[[], Awaitable[ps.PrerenderResponse]],
+	) -> ps.PrerenderResponse:
 		start = time.perf_counter()
 		res = await next()
 		duration_ms = (time.perf_counter() - start) * 1000
-		print(f"[MW prerender] path={path} took={duration_ms:.1f}ms")
+		print(
+			f"[MW prerender] paths={payload.get('paths') or []} "
+			f"took={duration_ms:.1f}ms"
+		)
 		return res
 
 	@override

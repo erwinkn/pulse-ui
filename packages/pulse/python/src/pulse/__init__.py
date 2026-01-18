@@ -1323,9 +1323,6 @@ from pulse.middleware import (
 	Redirect as Redirect,
 )
 from pulse.middleware import (
-	RoutePrerenderResponse as RoutePrerenderResponse,
-)
-from pulse.middleware import (
 	stack as stack,
 )
 

@@ -210,6 +210,7 @@ def run(
 			mode=app_instance.env,
 			ready_pattern=r"localhost:\d+",
 			on_ready=mark_web_ready,
+			plain=plain,
 		)
 		commands.append(web_cmd)
 		# Set env var so app can read the React server address (only used in single-server mode)
@@ -228,6 +229,7 @@ def run(
 			verbose=verbose,
 			ready_pattern=r"Application startup complete",
 			on_ready=mark_server_ready,
+			plain=plain,
 		)
 		commands.append(server_cmd)
 
@@ -394,6 +396,7 @@ def build_uvicorn_command(
 	verbose: bool = False,
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
+	plain: bool = False,
 ) -> CommandSpec:
 	app_import = f"{app_ctx.module_name}:{app_ctx.app_var}.asgi_factory"
 	args: list[str] = [
@@ -421,16 +424,22 @@ def build_uvicorn_command(
 
 	if extra_args:
 		args.extend(extra_args)
+	if plain:
+		args.append("--no-use-colors")
 
 	command_env = os.environ.copy()
 	command_env.update(
 		{
-			"FORCE_COLOR": "1",
 			"PYTHONUNBUFFERED": "1",
 			ENV_PULSE_HOST: address,
 			ENV_PULSE_PORT: str(port),
 		}
 	)
+	if plain:
+		command_env["NO_COLOR"] = "1"
+		command_env["FORCE_COLOR"] = "0"
+	else:
+		command_env["FORCE_COLOR"] = "1"
 	# Pass React server address to uvicorn process if set
 	if ENV_PULSE_REACT_SERVER_ADDRESS in os.environ:
 		command_env[ENV_PULSE_REACT_SERVER_ADDRESS] = os.environ[
@@ -471,6 +480,7 @@ def build_web_command(
 	mode: PulseEnv = "dev",
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
+	plain: bool = False,
 ) -> CommandSpec:
 	command_env = os.environ.copy()
 	if mode == "prod":
@@ -493,10 +503,14 @@ def build_web_command(
 
 	command_env.update(
 		{
-			"FORCE_COLOR": "1",
 			"PYTHONUNBUFFERED": "1",
 		}
 	)
+	if plain:
+		command_env["NO_COLOR"] = "1"
+		command_env["FORCE_COLOR"] = "0"
+	else:
+		command_env["FORCE_COLOR"] = "1"
 
 	return CommandSpec(
 		name="web",

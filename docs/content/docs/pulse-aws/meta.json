@@ -1,0 +1,6 @@
+{
+  "title": "Pulse AWS",
+  "description": "AWS deployment",
+  "root": true,
+  "pages": ["index"]
+}

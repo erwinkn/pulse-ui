@@ -1,13 +1,13 @@
 {
   "title": "Pulse",
   "pages": [
-    "index",
-    "setup",
-    "tutorial",
-    "guide",
-    "cookbook",
-    "reference",
-    "packages",
-    "ai"
+    "(core)",
+    "pulse-js-client",
+    "pulse-mantine",
+    "pulse-ag-grid",
+    "pulse-recharts",
+    "pulse-lucide",
+    "pulse-msal",
+    "pulse-aws"
   ]
 }

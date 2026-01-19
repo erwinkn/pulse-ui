@@ -1,0 +1,181 @@
+---
+title: "Hooks"
+---
+
+## Why hooks exist
+
+When a Pulse component renders, it runs from top to bottom like any Python function. Every local variable is created fresh. But what happens when the component re-renders after a state change? Without some way to preserve values, all your data would be lost.
+
+Hooks solve this problem. They let you run code exactly once when a component first appears, and preserve the results across every subsequent render. This is essential for:
+
+- **State management**: Creating a state object once and keeping it alive
+- **Expensive operations**: Running a calculation or loading data only on first render
+- **Side effects**: Setting up logging, subscriptions, or external system integrations
+
+Think of hooks as a way to "escape" the normal top-to-bottom execution of your component and say: "Remember this" or "Only do this the first time."
+
+## The core hook: `ps.init()`
+
+The most common hook is `ps.init()`. Any variables you assign inside its block are captured on the first render and restored on every subsequent render.
+
+```python
+@ps.component
+def Counter():
+    with ps.init():
+        state = CounterState()  # Created once, reused on every render
+
+    return ps.div(f"Count: {state.count}")
+```
+
+**Why this matters**: Without `ps.init()`, each render would create a brand-new `CounterState` starting at zero. The button would appear to do nothing because the count resets before you can see it increment.
+
+```python
+# What happens without ps.init():
+@ps.component
+def BrokenCounter():
+    state = CounterState()  # Bug: fresh state every render!
+    return ps.button("Click me", onClick=state.increment)
+    # Click -> increment -> re-render -> new state with count=0 -> looks broken
+```
+
+**When to use it**: Any time you need objects or values to survive across renders. This includes state objects, configuration, cached calculations, or any instance you want to keep alive.
+
+## Running setup logic: `ps.setup()`
+
+Sometimes initialization is more complex than a simple assignment. You might need to call functions, load configuration, or perform setup that involves multiple steps. That's where `ps.setup()` comes in.
+
+```python
+def create_connection():
+    print("Connecting to database...")  # Only prints once!
+    config = load_config()
+    return DatabaseConnection(config.host, config.port)
+
+@ps.component
+def Dashboard():
+    conn = ps.setup(create_connection)
+    # conn is the same connection on every render
+    return ps.div(f"Connected to: {conn.host}")
+```
+
+**Why use this instead of `ps.init()`**: When your initialization involves side effects (like printing, network calls, or logging), `ps.setup()` makes it clear that the function runs exactly once. It also lets you pass arguments:
+
+```python
+config = ps.setup(load_config, "production", cache=True)
+```
+
+**When to use it**: Complex initialization logic, operations with side effects, or when you want to pass arguments to your setup function.
+
+## Dynamic state with `ps.state()`
+
+Sometimes you need different state instances based on runtime data. For example, showing a different user's profile when navigating between pages.
+
+```python
+@ps.component
+def UserProfile(user_id: int):
+    # When user_id changes, you get a fresh UserState for that user
+    user_state = ps.state(user_id, lambda: UserState(user_id))
+    return ps.div(f"User: {user_state.name}")
+```
+
+**How it works**: The first argument is a key. When the key changes, Pulse creates a new state instance using your factory function. The old state is cleaned up automatically.
+
+**When to use it**: Displaying data that depends on a dynamic identifier (user ID, document ID, tab selection). This is especially useful in routed applications where the same component displays different data based on URL parameters.
+
+## Side effects with `ps.effects()`
+
+Effects let you run code in response to state changes, like logging, analytics, or syncing with external systems.
+
+```python
+@ps.component
+def OrderTracker():
+    with ps.init():
+        state = OrderState()
+
+    @ps.effect
+    def log_status_changes():
+        # This runs whenever state.status changes
+        print(f"Order status: {state.status}")
+        analytics.track("order_status_changed", status=state.status)
+
+    ps.effects(log_status_changes)
+
+    return ps.div(f"Status: {state.status}")
+```
+
+**When to use it**: Logging, analytics, browser API interactions, or any code that should run as a reaction to state changes rather than as part of rendering.
+
+## Stable references with `ps.stable()`
+
+When a parent component passes a callback to a child, that callback might be a new function object on every render. This can cause problems if you capture the callback in state during initialization.
+
+```python
+@ps.component
+def Editor(on_save):
+    # Problem: on_save might be a different function each render
+    # but EditorState captured whatever on_save was on first render
+    with ps.init():
+        state = EditorState(on_save)  # Stuck with the old callback!
+```
+
+The `ps.stable()` hook fixes this by returning a wrapper that always calls the latest version:
+
+```python
+@ps.component
+def Editor(on_save):
+    # stable_save is always the same reference, but calls the current on_save
+    stable_save = ps.stable("on_save", on_save)
+
+    with ps.init():
+        state = EditorState(on_save=stable_save)  # Safe!
+```
+
+**When to use it**: Passing callbacks to state objects or effects, especially when those callbacks come from props that might change.
+
+## Understanding the one-hook rule
+
+**Each hook can only be called once per component.**
+
+This might seem restrictive, but it reflects how hooks work: they run once to set things up, then preserve the result. Calling a hook twice would mean trying to set up the same thing twice, which doesn't make sense.
+
+```python
+# This breaks - trying to run init twice
+@ps.component
+def BadExample():
+    with ps.init():
+        a = StateA()
+    with ps.init():  # Error! Already called ps.init()
+        b = StateB()
+```
+
+The fix is simple: put everything in one block.
+
+```python
+@ps.component
+def GoodExample():
+    with ps.init():
+        a = StateA()
+        b = StateB()  # Both states created in the same init block
+```
+
+**Why the rule exists**: Hooks track their state using call order. If you could call hooks multiple times or conditionally, Pulse couldn't reliably match each hook call to its stored data. The one-hook rule keeps things simple and predictable.
+
+## Hook keys for re-initialization
+
+Both `ps.setup()` and `ps.effects()` accept an optional `key` argument. When the key changes, the hook re-runs as if it were the first render.
+
+```python
+@ps.component
+def DataLoader(data_id: int):
+    # Re-runs load_data whenever data_id changes
+    data = ps.setup(load_data, data_id, key=data_id)
+    return ps.div(f"Data: {data.name}")
+```
+
+This is useful when you need to re-initialize based on changing props, like loading different data when navigating between items.
+
+Keys are compared using `!=`, so stick to primitive values (strings, numbers, booleans) or tuples of primitives.
+
+## See also
+
+- [Tutorial: Hooks](/docs/tutorial/06-hooks) - Step-by-step introduction with exercises
+- [Reference: Hooks](/docs/reference/pulse/hooks) - Complete API documentation

@@ -1,0 +1,6 @@
+{
+  "title": "Pulse Recharts",
+  "description": "Recharts components",
+  "root": true,
+  "pages": ["index"]
+}

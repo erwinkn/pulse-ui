@@ -1,0 +1,268 @@
+---
+title: "Queries and Mutations"
+---
+
+Most apps need to load data from somewhere—an API, a database, or another async source. You could manage this with plain `async` methods and manual loading flags, but that gets tedious fast. Pulse provides **queries** and **mutations** to handle the boilerplate for you: loading states, error handling, caching, and automatic refetching.
+
+Think of it this way:
+- **Queries** are for *reading* data (fetching a user profile, loading a list of products)
+- **Mutations** are for *writing* data (saving a form, deleting a record)
+
+## Your first query
+
+A query is an async method on a `State` class decorated with `@ps.query`. Here's a simple example that fetches user data:
+
+```python
+import pulse as ps
+
+class UserState(ps.State):
+    user_id: int = 1
+
+    @ps.query
+    async def user(self):
+        # This could be any async operation: API call, database query, etc.
+        await asyncio.sleep(0.5)  # simulate network delay
+        return {"id": self.user_id, "name": f"User {self.user_id}"}
+```
+
+In your component, access the query like a property. Pulse tracks loading and error states automatically:
+
+```python
+@ps.component
+def UserProfile():
+    with ps.init():
+        state = UserState()
+
+    if state.user.is_loading:
+        return ps.div("Loading...")
+
+    return ps.div(
+        ps.h1(f"Hello, {state.user.data['name']}!"),
+        ps.button("Refresh", onClick=state.user.refetch),
+    )
+```
+
+Notice you didn't have to:
+- Create a `loading` boolean and toggle it manually
+- Catch exceptions and store them somewhere
+- Figure out when to trigger the fetch
+
+Pulse handles all of this. The query runs when the component first renders, and you get reactive properties to check its status.
+
+## Checking query status
+
+Every query gives you these properties to work with:
+
+| Property | What it tells you |
+|----------|-------------------|
+| `data` | The fetched result, or `None` if not yet loaded |
+| `is_loading` | `True` during the *first* fetch (use for initial loading spinners) |
+| `is_fetching` | `True` during *any* fetch, including refetches (use for refresh indicators) |
+| `is_success` | `True` if the last fetch worked |
+| `is_error` | `True` if the last fetch failed |
+| `error` | The exception object if it failed, otherwise `None` |
+
+**When should you use `is_loading` vs `is_fetching`?** Use `is_loading` when you want to show a full loading state only on the first load (like a skeleton screen). Use `is_fetching` when you want to show *any* fetch activity, like a subtle spinner during background refetches.
+
+## Controlling queries manually
+
+Sometimes you need to trigger a query yourself or manipulate its data:
+
+| Method | When to use it |
+|--------|----------------|
+| `refetch()` | User clicks a "refresh" button, or you need fresh data after some action |
+| `invalidate()` | Mark data as stale so it refetches on next access (lazy refresh) |
+| `set_data(...)` | Optimistic updates—show a change immediately before the server confirms |
+| `wait()` | In an async callback when you need to await the query result |
+
+## When do queries refetch?
+
+This is where Pulse saves you the most work. By default, queries **automatically track their dependencies**. If your query reads `self.user_id`, Pulse notices that and refetches whenever `user_id` changes:
+
+```python
+@ps.query
+async def user(self):
+    # Pulse sees you're reading self.user_id
+    # When user_id changes, this query refetches automatically
+    return await fetch_user(self.user_id)
+```
+
+This "just works" for most cases. You don't need to wire up anything.
+
+### When you need more control: keyed queries
+
+Sometimes automatic tracking isn't what you want. Maybe you're reading multiple state properties but only want to refetch when one specific value changes. That's where **keyed queries** come in:
+
+```python
+@ps.query
+async def user(self):
+    return await fetch_user(self.user_id)
+
+@user.key
+def _user_key(self):
+    # Only refetch when user_id changes, ignore other state
+    return ("user", self.user_id)
+```
+
+**How do I choose?**
+
+| Situation | Use |
+|-----------|-----|
+| Simple case, refetch whenever any dependency changes | Unkeyed (default) |
+| Need explicit control over refetch triggers | Keyed query |
+| Want to share cached data across components | Keyed query (same key = shared cache) |
+
+Most of the time, start with the default. Add a key only if you notice unwanted refetches or need cache sharing.
+
+## Fine-tuning query behavior
+
+The `@ps.query` decorator accepts options for common scenarios. You don't need these for basic usage, but they're there when you do:
+
+```python
+@ps.query(
+    keep_previous_data=True,  # Show old data while refetching (avoids flicker)
+    stale_time=60.0,          # Data is "fresh" for 60 seconds (skip unnecessary refetches)
+    retries=3,                # Retry failed requests up to 3 times
+    retry_delay=1.0,          # Wait 1 second between retries
+    gc_time=300.0,            # Keep cached data around for 5 minutes
+)
+async def user(self):
+    return await fetch_user(self.user_id)
+```
+
+**Which options do you actually need?**
+
+| If you want to... | Use this option |
+|-------------------|-----------------|
+| Avoid UI flicker when switching between items | `keep_previous_data=True` |
+| Reduce API calls for data that doesn't change often | `stale_time=60.0` (or longer) |
+| Handle flaky network connections | `retries=3, retry_delay=1.0` |
+| Keep data in memory longer for fast back-navigation | `gc_time=300.0` |
+
+## Reacting to query results
+
+Need to do something when a query succeeds or fails? Use callback decorators:
+
+```python
+@ps.query
+async def user(self):
+    return await fetch_user(self.user_id)
+
+@user.on_success
+def _on_success(self):
+    print("User loaded successfully!")
+
+@user.on_error
+def _on_error(self):
+    print("Failed to load user")
+```
+
+This is useful for things like showing toast notifications, logging, or triggering side effects.
+
+## Providing initial data
+
+If you have placeholder data or cached data from elsewhere, you can show it immediately while the real fetch happens in the background:
+
+```python
+@ps.query
+async def user(self):
+    return await fetch_user(self.user_id)
+
+@user.initial_data
+def _initial_user(self):
+    # Show this until the real data arrives
+    return {"id": 0, "name": "Loading..."}
+```
+
+This creates a smoother experience than showing a loading spinner—users see *something* right away.
+
+---
+
+## Mutations: writing data
+
+While queries are for reading, **mutations** are for writing. They don't run automatically—you call them explicitly when the user takes an action:
+
+```python
+class UserState(ps.State):
+    user_id: int = 1
+
+    @ps.query
+    async def user(self):
+        return await fetch_user(self.user_id)
+
+    @ps.mutation
+    async def update_name(self, new_name: str):
+        result = await save_user_name(self.user_id, new_name)
+        # After saving, refresh the user query to show the new name
+        self.user.invalidate()
+        return result
+```
+
+Use mutations in event handlers:
+
+```python
+@ps.component
+def EditUser():
+    with ps.init():
+        state = UserState()
+
+    async def save():
+        await state.update_name("New Name")
+
+    return ps.button("Save", onClick=save)
+```
+
+### Handling mutation results
+
+Just like queries, mutations support success and error callbacks:
+
+```python
+@ps.mutation
+async def update_name(self, new_name: str):
+    return await save_user_name(self.user_id, new_name)
+
+@update_name.on_success
+def _on_save_success(self, result):
+    print(f"Saved: {result}")
+
+@update_name.on_error
+def _on_save_error(self, error):
+    print(f"Save failed: {error}")
+```
+
+## Optimistic updates
+
+For the snappiest UI, update the display immediately *before* the server responds. If the save fails, you can roll back:
+
+```python
+async def rename_user():
+    # Show the change immediately (optimistic)
+    state.user.set_data({"id": state.user_id, "name": "New Name"})
+
+    # Actually save to server
+    await state.update_name("New Name")
+
+    # Refetch to make sure we're in sync with server
+    await state.user.refetch()
+```
+
+This pattern makes your app feel instant, even with slow network connections.
+
+---
+
+## Quick reference: which tool for which job?
+
+| I want to... | Use |
+|--------------|-----|
+| Fetch data that updates automatically | `@ps.query` |
+| Send data to the server | `@ps.mutation` |
+| Show loading state on first load | `query.is_loading` |
+| Show loading state on any fetch | `query.is_fetching` |
+| Manually refresh data | `query.refetch()` |
+| Update UI immediately before server confirms | `query.set_data(...)` (optimistic update) |
+| Mark data as stale for lazy refresh | `query.invalidate()` |
+
+## See also
+
+- [Tutorial: Queries and Mutations](/docs/tutorial/09-queries)
+- [Reference: Queries](/docs/reference/pulse/queries)

@@ -1,0 +1,45 @@
+---
+title: "Mental Model"
+---
+
+To use Pulse effectively, it helps to understand what's happening behind the scenes. Pulse is a **server-driven UI** framework - your Python code runs on the server and controls what the user sees in their browser.
+
+## The render cycle
+
+Here's how Pulse works:
+
+1. **Python renders a virtual DOM (VDOM)** - Your component functions return Pulse elements that describe what the UI should look like
+2. **The client receives a diff** - Pulse compares the new VDOM to what's currently displayed and sends only the changes to the browser
+3. **User events call back to Python** - When someone clicks a button or types in an input, that event is sent to your Python code
+4. **State changes trigger a new render** - Your event handler updates the state, which causes Pulse to re-render and repeat the cycle
+
+This cycle is the core loop of every Pulse application:
+
+```
+State -> Render -> User interaction -> State update -> Re-render -> ...
+```
+
+## Sessions and isolation
+
+Each browser tab gets its own **render session**. This means:
+
+- State is isolated per tab - opening your app in two tabs creates two independent sessions
+- Users don't share state with each other (unless you explicitly set up shared state via a database or similar)
+- Refreshing the page starts a fresh session
+
+A render session is tied to a specific route. When users navigate between routes, Pulse manages the session lifecycle automatically.
+
+## Why server-driven?
+
+With Pulse, your business logic stays on the server. This means:
+
+- **Security** - Sensitive logic never reaches the client
+- **Simplicity** - No need to build and maintain a separate API layer
+- **Python everywhere** - Use your favorite Python libraries directly in your UI code
+
+The tradeoff is that every user interaction requires a round-trip to the server. Pulse minimizes the impact through efficient diffing and batched updates, but it's good to keep this in mind for latency-sensitive applications.
+
+## See also
+
+- [Tutorial](/docs/tutorial)
+- [Core Concepts: State](/docs/concepts/state)

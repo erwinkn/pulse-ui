@@ -1,0 +1,111 @@
+---
+title: "Codegen"
+---
+
+Pulse generates React Router files that connect your Python routes to the React frontend. This code generation happens automatically during development and can be triggered manually for production builds.
+
+## How it works
+
+When you run `pulse run app.py`, Pulse:
+
+1. Reads your route definitions from the `App` object
+2. Generates React Router configuration files in your web directory
+3. Creates route components that connect to the Pulse server
+4. Copies any local assets referenced by `Import` or `DynamicImport`
+
+The generated files are placed in a `pulse/` directory inside your web app folder (by default `web/app/pulse/`).
+
+## Configuration
+
+Configure code generation with `CodegenConfig` when creating your app.
+
+```python
+from pathlib import Path
+import pulse as ps
+
+app = ps.App(
+    routes=[...],
+    codegen=ps.CodegenConfig(
+        web_dir=Path(__file__).parent / "web",  # Where your React app lives
+        pulse_dir="pulse",                       # Subdirectory for generated files
+    ),
+)
+```
+
+### `web_dir`
+
+The root directory of your React application. This is where Pulse looks for `app/` to place generated route files.
+
+If you provide a relative path, it is resolved relative to your app file's directory.
+
+### `pulse_dir`
+
+The name of the subdirectory where generated files are placed (default: `"pulse"`). The full path will be `{web_dir}/app/{pulse_dir}/`.
+
+## Generated files
+
+Pulse generates several types of files:
+
+- **`routes.ts`** - React Router route configuration
+- **`_layout.tsx`** - Root layout with Pulse client setup
+- **`routes/*.tsx`** - Individual route components
+- **`layouts/*.tsx`** - Layout components (if you use `ps.Layout`)
+- **`assets/`** - Copied local files from imports
+
+## Running code generation
+
+### During development
+
+Code generation runs automatically when you start your app with `pulse run`.
+
+```bash
+pulse run app.py
+```
+
+The files are regenerated whenever the server restarts, ensuring your routes stay in sync.
+
+### Manual generation
+
+For production builds or CI, call `run_codegen()` directly.
+
+```python
+app = ps.App(routes=[...], codegen=ps.CodegenConfig(...))
+
+# Generate files for a specific server address
+app.run_codegen(address="https://api.example.com")
+```
+
+Or use the factory pattern for ASGI servers.
+
+```python
+# In your app.py
+def create_app():
+    app = ps.App(routes=[...])
+    app.run_codegen(address="https://api.example.com")
+    return app.asgi
+
+# Run with: uvicorn app:create_app --factory
+```
+
+## Gitignore
+
+Pulse automatically adds the generated directory to `.gitignore` in your web folder. This prevents generated files from being committed to version control.
+
+## Troubleshooting
+
+### Files not updating
+
+If your routes are not updating, check that:
+- The `web_dir` path is correct
+- Your app file is being reloaded (check for syntax errors)
+- The Pulse dev server is running
+
+### Missing assets
+
+If imported assets are not being copied:
+- Ensure the source file exists at the path specified in `Import`
+- Check that the path is relative to your app file or absolute
+
+## See also
+
+- [Reference: Codegen](/docs/reference/pulse/codegen)

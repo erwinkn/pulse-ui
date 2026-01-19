@@ -1,0 +1,16 @@
+{
+  "title": "Pulse",
+  "description": "Core docs",
+  "root": true,
+  "pages": [
+    "index",
+    "setup",
+    "tutorial",
+    "concepts",
+    "advanced",
+    "cookbook",
+    "reference",
+    "packages",
+    "ai"
+  ]
+}

@@ -83,6 +83,7 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	update_deps: bool | None = None,
 	interval: float | None = None,
 	key: str | None = None,
 ) -> Effect: ...
@@ -97,6 +98,7 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	update_deps: bool | None = None,
 	interval: float | None = None,
 	key: str | None = None,
 ) -> AsyncEffect: ...
@@ -115,6 +117,7 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	update_deps: bool | None = None,
 	interval: float | None = None,
 	key: str | None = None,
 ) -> EffectBuilder: ...
@@ -128,6 +131,7 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	update_deps: bool | None = None,
 	interval: float | None = None,
 	key: str | None = None,
 ):
@@ -149,6 +153,7 @@ def effect(
 				lazy=lazy,
 				on_error=on_error,
 				deps=deps,
+				update_deps=update_deps,
 				interval=interval,
 			)
 
@@ -172,6 +177,7 @@ def effect(
 					lazy=lazy,
 					on_error=on_error,
 					deps=deps,
+					update_deps=update_deps,
 					interval=interval,
 				)
 			return Effect(
@@ -181,6 +187,7 @@ def effect(
 				lazy=lazy,
 				on_error=on_error,
 				deps=deps,
+				update_deps=update_deps,
 				interval=interval,
 			)
 

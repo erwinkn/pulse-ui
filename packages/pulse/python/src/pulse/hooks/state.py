@@ -104,7 +104,9 @@ def _frame_offset(frame: FrameType) -> int:
 	return offset
 
 
-def _collect_component_identity(frame: FrameType) -> tuple[tuple[CodeType, int], ...]:
+def collect_component_identity(
+	frame: FrameType,
+) -> tuple[tuple[CodeType, int], ...]:
 	identity: list[tuple[CodeType, int]] = []
 	cursor: FrameType | None = frame
 	while cursor is not None:
@@ -159,7 +161,7 @@ def state(
 		assert frame is not None
 		caller = frame.f_back
 		assert caller is not None
-		identity = _collect_component_identity(caller)
+		identity = collect_component_identity(caller)
 	else:
 		identity = resolved_key
 

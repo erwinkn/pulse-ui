@@ -6,6 +6,7 @@ from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
 
 from pulse.hooks.core import HOOK_CONTEXT
 from pulse.hooks.effects import inline_effect_hook
+from pulse.hooks.state import collect_component_identity
 from pulse.reactive import (
 	AsyncEffect,
 	AsyncEffectFn,
@@ -214,7 +215,10 @@ def effect(
 		):
 			caller = caller.f_back
 			assert caller is not None
-		identity = (func.__qualname__, func.__code__, caller.f_code)
+		if key is None:
+			identity = collect_component_identity(caller)
+		else:
+			identity = key
 
 		state = inline_effect_hook()
 		return state.get_or_create(cast(Any, identity), key, create_effect)

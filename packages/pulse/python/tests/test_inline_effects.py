@@ -157,6 +157,33 @@ class TestIdentityAndKeying:
 		assert len(effects) == 3
 		assert len(set(id(e) for e in effects)) == 3
 
+	def test_helper_callsites_are_distinct(self):
+		effects: list[Effect] = []
+
+		def helper():
+			@ps.effect
+			def my_effect():
+				pass
+
+			effects.append(my_effect)
+
+		@ps.component
+		def Comp():
+			helper()
+			helper()
+			return None
+
+		ctx = HookContext()
+		with ctx:
+			Comp.fn()
+		with ctx:
+			Comp.fn()
+
+		assert len(effects) == 4
+		assert effects[0] is effects[2]
+		assert effects[1] is effects[3]
+		assert effects[0] is not effects[1]
+
 	def test_key_change_disposes_old_effect(self):
 		disposed = {"count": 0}
 		effects: list[Effect] = []

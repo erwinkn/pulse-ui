@@ -252,7 +252,13 @@ def later(
 
 	from pulse.reactive import Untrack
 
-	loop = asyncio.get_running_loop()
+	try:
+		loop = asyncio.get_running_loop()
+	except RuntimeError:
+		try:
+			loop = asyncio.get_event_loop()
+		except RuntimeError as exc:
+			raise RuntimeError("later() requires an event loop") from exc
 
 	def _run():
 		try:

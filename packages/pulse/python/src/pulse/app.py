@@ -73,7 +73,7 @@ from pulse.plugin import Plugin
 from pulse.proxy import ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
-from pulse.routing import Layout, Route, RouteTree
+from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -439,6 +439,8 @@ class App:
 				raise HTTPException(
 					status_code=400, detail="'paths' must be a non-empty list"
 				)
+			paths = [ensure_absolute_path(path) for path in paths]
+			payload["paths"] = paths
 			route_info = payload.get("routeInfo")
 
 			client_addr: str | None = get_client_address(request)

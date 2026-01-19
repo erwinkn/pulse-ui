@@ -69,6 +69,11 @@ def make_route_info(pathname: str) -> RouteInfo:
 	}
 
 
+def transition_mount_to_idle(session: RenderSession, path: str) -> None:
+	mount = session.route_mounts[path]
+	mount.to_idle()
+
+
 # TODO: clean this up - this was refactored using GPT-5 and is thus quite hacky
 def mount_with_listener(session: RenderSession, path: str):
 	# Maintain a session-level set of listened paths and a shared message log
@@ -131,7 +136,8 @@ def extract_count_from_ctx(session: RenderSession, path: str) -> int:
 	return int(text)  # type: ignore[arg-type]
 
 
-def test_two_sessions_two_routes_are_isolated():
+@pytest.mark.asyncio
+async def test_two_sessions_two_routes_are_isolated():
 	routes = make_routes()
 	s1 = RenderSession("s1", routes)
 	s2 = RenderSession("s2", routes)
@@ -229,7 +235,8 @@ def extract_global_count(session: RenderSession, path: str) -> int:
 	return int(text)  # type: ignore[arg-type]
 
 
-def test_global_state_shared_within_session_and_isolated_across_sessions():
+@pytest.mark.asyncio
+async def test_global_state_shared_within_session_and_isolated_across_sessions():
 	routes = make_global_routes()
 	s1 = RenderSession("s1", routes)
 	s2 = RenderSession("s2", routes)
@@ -285,7 +292,8 @@ def test_global_state_shared_within_session_and_isolated_across_sessions():
 	s2.close()
 
 
-def test_global_state_disposed_on_session_close():
+@pytest.mark.asyncio
+async def test_global_state_disposed_on_session_close():
 	disposed: list[str] = []
 
 	class Disposable(ps.State):
@@ -581,7 +589,7 @@ async def test_effect_paused_in_idle_state():
 	assert mount.effect.paused is False  # Still running in PENDING
 
 	# Manually trigger transition to IDLE (simulating timeout)
-	session._transition_to_idle("/a")  # pyright: ignore[reportPrivateUsage]
+	transition_mount_to_idle(session, "/a")
 
 	# Now the effect should be paused
 	assert mount.state == "idle"
@@ -616,8 +624,8 @@ async def test_multiple_routes_idle_attach_requests_reload():
 	assert mount_b.state == "pending"
 
 	# Manually transition to IDLE (simulating timeout)
-	session._transition_to_idle("/a")  # pyright: ignore[reportPrivateUsage]
-	session._transition_to_idle("/b")  # pyright: ignore[reportPrivateUsage]
+	transition_mount_to_idle(session, "/a")
+	transition_mount_to_idle(session, "/b")
 
 	# Both effects should now be paused
 	effect_a = mount_a.effect
@@ -1160,7 +1168,8 @@ def test_detach_nonexistent_path_is_noop():
 	session.close()
 
 
-def test_update_route_updates_route_context():
+@pytest.mark.asyncio
+async def test_update_route_updates_route_context():
 	"""Test that update_route updates the route context for an attached path."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
@@ -1216,7 +1225,7 @@ async def test_prerender_queue_timeout_transitions_to_idle():
 	assert mount.effect.paused is False
 
 	# Manually trigger the timeout (simulating time passing)
-	session._transition_to_idle("/a")  # pyright: ignore[reportPrivateUsage]
+	transition_mount_to_idle(session, "/a")
 
 	assert mount.state == "idle"
 	assert mount.effect.paused is True
@@ -1235,7 +1244,7 @@ async def test_attach_from_idle_requests_reload():
 		session.prerender(["/a"])
 
 	mount = session.route_mounts["/a"]
-	session._transition_to_idle("/a")  # pyright: ignore[reportPrivateUsage]
+	transition_mount_to_idle(session, "/a")
 	assert mount.state == "idle"
 	assert mount.effect is not None
 	assert mount.effect.paused is True

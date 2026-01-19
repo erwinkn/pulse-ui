@@ -18,9 +18,8 @@ class DummyState(State):
 		super().__init__()
 
 	@override
-	def dispose(self):
+	def on_dispose(self) -> None:
 		self._dispose_calls += 1
-		super().dispose()
 
 	@property
 	def dispose_calls(self) -> int:
@@ -181,6 +180,40 @@ def test_state_disposes_direct_instances():
 		assert result is direct  # Should return the existing state
 		# transient should be disposed since it's not being used
 		assert transient.dispose_calls == 1
+
+
+def test_state_rejects_disposed_instance_arg():
+	ctx = HookContext()
+	arg = DummyState()
+	arg.__disposed__ = True
+
+	with ctx:
+		with pytest.raises(
+			RuntimeError,
+			match="received a disposed State instance",
+		):
+			state(arg, key="test")
+
+	assert arg.dispose_calls == 0
+
+
+def test_state_rejects_disposed_cached_state():
+	ctx = HookContext()
+
+	with ctx:
+		cached = state(DummyState, key="test")
+
+	cached.__disposed__ = True
+
+	with ctx:
+		arg = DummyState()
+		with pytest.raises(
+			RuntimeError,
+			match="disposed cached State for key='test'",
+		):
+			state(arg, key="test")
+
+	assert arg.dispose_calls == 1
 
 
 def test_state_allows_multiple_calls_with_different_keys():

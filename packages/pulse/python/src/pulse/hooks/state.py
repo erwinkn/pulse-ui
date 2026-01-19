@@ -52,17 +52,23 @@ class StateHookState(HookState):
 		if existing is not None:
 			# Dispose any State instances passed directly as args that aren't being used
 			if isinstance(arg, State) and arg is not existing:
-				try:
-					if not arg.__disposed__:
-						arg.dispose()
-				except RuntimeError:
-					# Already disposed, ignore
-					pass
-
+				arg.dispose()
+			if existing.__disposed__:
+				key_label = f"key='{key}'" if key is not None else "callsite"
+				raise RuntimeError(
+					"`pulse.state` found a disposed cached State for "
+					+ key_label
+					+ ". Do not dispose states returned by `pulse.state`."
+				)
 			return existing
 
 		# Create new state
 		instance = _instantiate_state(arg)
+		if instance.__disposed__:
+			raise RuntimeError(
+				"`pulse.state` received a disposed State instance. "
+				+ "Do not dispose states passed to `pulse.state`."
+			)
 		self.instances[full_identity] = instance
 		return instance
 

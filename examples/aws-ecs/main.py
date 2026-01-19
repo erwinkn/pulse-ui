@@ -232,7 +232,6 @@ def Leaf(label: str, key: str | None = None):
 
 	meta = ps.setup(_init, label)
 
-	# states: called once per component instance
 	with ps.init():
 		state = LeafState(meta["label"])
 

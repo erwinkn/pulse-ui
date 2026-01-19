@@ -1,5 +1,6 @@
+import inspect
 from collections.abc import Callable
-from typing import TypeVar, override
+from typing import Any, TypeVar, override
 
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.state import State
@@ -9,41 +10,53 @@ S = TypeVar("S", bound=State)
 
 class StateHookState(HookState):
 	__slots__ = ("instances", "called_keys")  # pyright: ignore[reportUnannotatedClassAttribute]
-	instances: dict[str, State]
-	called_keys: set[str]
+	instances: dict[tuple[str, Any], State]
+	called_keys: set[tuple[str, Any]]
 
 	def __init__(self) -> None:
 		super().__init__()
 		self.instances = {}
 		self.called_keys = set()
 
+	def _make_key(self, identity: Any, key: str | None) -> tuple[str, Any]:
+		if key is None:
+			return ("code", identity)
+		return ("key", key)
+
 	@override
 	def on_render_start(self, render_cycle: int) -> None:
 		super().on_render_start(render_cycle)
 		self.called_keys.clear()
 
-	def get_or_create_state(self, key: str, arg: State | Callable[[], State]) -> State:
-		if key in self.called_keys:
+	def get_or_create_state(
+		self,
+		identity: Any,
+		key: str | None,
+		arg: State | Callable[[], State],
+	) -> State:
+		full_identity = self._make_key(identity, key)
+		if full_identity in self.called_keys:
+			if key is None:
+				raise RuntimeError(
+					"`pulse.state` can only be called once per component render at the same location. "
+					+ "Use the `key` parameter to disambiguate: ps.state(..., key=unique_value)"
+				)
 			raise RuntimeError(
 				f"`pulse.state` can only be called once per component render with key='{key}'"
 			)
-		self.called_keys.add(key)
+		self.called_keys.add(full_identity)
 
-		existing = self.instances.get(key)
+		existing = self.instances.get(full_identity)
 		if existing is not None:
 			# Dispose any State instances passed directly as args that aren't being used
 			if isinstance(arg, State) and arg is not existing:
-				try:
-					if not arg.__disposed__:
-						arg.dispose()
-				except RuntimeError:
-					# Already disposed, ignore
-					pass
+				if not arg.__disposed__:
+					arg.dispose()
 			return existing
 
 		# Create new state
 		instance = _instantiate_state(arg)
-		self.instances[key] = instance
+		self.instances[full_identity] = instance
 		return instance
 
 	@override
@@ -81,12 +94,16 @@ _state_hook = hooks.create(
 )
 
 
-def state(key: str, arg: S | Callable[[], S]) -> S:
-	"""Get or create a state instance associated with the given key.
+def state(
+	arg: S | Callable[[], S],
+	*,
+	key: str | None = None,
+) -> S:
+	"""Get or create a state instance associated with a key or callsite.
 
 	Args:
-		key: A unique string key identifying this state within the component.
 		arg: A State instance or a callable that returns a State instance.
+		key: Optional key to disambiguate multiple calls from the same location.
 
 	Returns:
 		The state instance (same instance on subsequent renders with the same key).
@@ -96,10 +113,30 @@ def state(key: str, arg: S | Callable[[], S]) -> S:
 		RuntimeError: If called more than once per render with the same key.
 		TypeError: If arg is not a State or callable returning a State.
 	"""
-	if not key:
+	if key is not None and not isinstance(key, str):
+		raise TypeError("state() key must be a string")
+
+	if key == "":
 		raise ValueError("state() requires a non-empty string key")
+
+	resolved_key = key
+	resolved_arg = arg
+
+	identity: Any
+	if resolved_key is None:
+		frame = inspect.currentframe()
+		assert frame is not None
+		caller = frame.f_back
+		assert caller is not None
+		offset = caller.f_lasti
+		if offset < 0:
+			offset = caller.f_lineno
+		identity = (caller.f_code, offset)
+	else:
+		identity = resolved_key
+
 	hook_state = _state_hook()
-	return hook_state.get_or_create_state(key, arg)  # pyright: ignore[reportReturnType]
+	return hook_state.get_or_create_state(identity, resolved_key, resolved_arg)  # pyright: ignore[reportReturnType]
 
 
 __all__ = ["state", "StateHookState"]

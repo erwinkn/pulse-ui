@@ -45,11 +45,15 @@ class JsExecError(Exception):
 
 
 class RenderLoopError(RuntimeError):
+	path: str
+	renders: int
+	batch_id: int
+
 	def __init__(self, path: str, renders: int, batch_id: int) -> None:
 		super().__init__(
 			"Detected an infinite render loop in Pulse. "
-			f"Render path '{path}' exceeded {renders} renders in reactive batch {batch_id}. "
-			"This usually happens when a render or effect mutates state without a guard."
+			+ f"Render path '{path}' exceeded {renders} renders in reactive batch {batch_id}. "
+			+ "This usually happens when a render or effect mutates state without a guard."
 		)
 		self.path = path
 		self.renders = renders
@@ -620,9 +624,9 @@ class RenderSession:
 		Args:
 			expr: An Expr from calling a @javascript function.
 			result: If True, returns a Future that resolves with the JS return value.
-			        If False (default), returns None (fire-and-forget).
+							If False (default), returns None (fire-and-forget).
 			timeout: Maximum seconds to wait for result (default 10s, only applies when
-			         result=True). Future raises asyncio.TimeoutError if exceeded.
+							 result=True). Future raises asyncio.TimeoutError if exceeded.
 
 		Returns:
 			None if result=False, otherwise a Future resolving to the JS result.

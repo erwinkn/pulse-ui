@@ -915,6 +915,55 @@ async def test_prerender_then_attach_works():
 	session.close()
 
 
+def test_prerender_keeps_active_mounts_and_drops_inactive():
+	"""Test that prerender preserves active mounts and removes inactive ones."""
+	routes = make_routes()
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.attach("/a", make_route_info("/a"))
+		session.attach("/b", make_route_info("/b"))
+
+	mount_a = session.route_mounts["/a"]
+	mount_b = session.route_mounts["/b"]
+	effect_a = mount_a.effect
+	effect_b = mount_b.effect
+	assert effect_a is not None
+	assert effect_b is not None
+	assert mount_a.state == "active"
+	assert mount_b.state == "active"
+
+	nav_info = make_route_info("/a")
+	nav_info["query"] = "?page=2"
+	nav_info["queryParams"] = {"page": "2"}
+
+	with ps.PulseContext.update(render=session):
+		result = session.prerender(["/a"], nav_info)["/a"]
+
+	assert result["type"] == "vdom_init"
+	assert session.route_mounts["/a"] is mount_a
+	assert mount_a.effect is effect_a
+	assert mount_a.state == "active"
+	assert mount_a.route.query == "?page=2"
+	assert "/b" not in session.route_mounts
+	assert effect_b.parent is None
+	assert mount_b.tree.rendered is False
+	for dep in effect_b.deps:
+		assert effect_b not in dep.obs
+
+	messages.clear()
+	session.update_route("/a", nav_info)
+	session.execute_callback("/a", "1.onClick", [])
+	session.flush()
+
+	assert len([m for m in messages if m["type"] == "vdom_update"]) == 1
+
+	session.close()
+
+
 def test_attach_after_redirect_prerender_creates_fresh_mount():
 	"""Test that attaching after a redirecting prerender creates a fresh working mount."""
 	# Route that redirects on first render but not subsequent ones

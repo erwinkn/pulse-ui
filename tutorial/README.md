@@ -338,7 +338,7 @@ If the key changes, the setup function reruns. States and effects created in the
 
 Keys are compared using the `!=` operator and thus have to support it. It is recommended to only use primitive values (strings, numbers, booleans) or tuples of primitive values as keys.
 
-For keyed state management, use `ps.state(key, StateClass)` when you need different state instances based on runtime keys.
+For keyed state management, use `ps.state(StateClass, key=...)` when you need different state instances based on runtime keys.
 
 ### 4.5 `stable` hook
 

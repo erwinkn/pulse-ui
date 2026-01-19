@@ -137,7 +137,7 @@ def counter():
 ### Hooks
 
 Server-side hooks via `ps.state`, `ps.effect`, `ps.setup`:
-- `ps.state(key, StateClass)` - reactive state
+- `ps.state(StateClass)` - reactive state (auto-keyed by callsite; use `key=` for manual control)
 - `@ps.effect` - side effects decorator
 - `ps.setup(fn)` - one-time initialization
 

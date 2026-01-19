@@ -284,8 +284,11 @@ class RenderSession:
 		- Creates mounts in PENDING state and starts queue
 		"""
 		normalized = [ensure_absolute_path(path) for path in paths]
+		active_paths = set(normalized)
 
 		for old_path, mount in list(self.route_mounts.items()):
+			if old_path in active_paths:
+				continue
 			self._cancel_queue_timeout(mount)
 			if mount.effect:
 				mount.effect.dispose()
@@ -297,41 +300,45 @@ class RenderSession:
 		for path in normalized:
 			route = self.routes.find(path)
 			info = route_info or route.default_route_info()
-			mount = RouteMount(self, route, info)
-			mount.state = "pending"
-			mount.queue = []
-			self.route_mounts[path] = mount
+			mount = self.route_mounts.get(path)
 
-			with PulseContext.update(render=self, route=mount.route):
-				try:
-					vdom = mount.tree.render()
-					mount.initialized = True
-				except RedirectInterrupt as r:
-					del self.route_mounts[path]
-					results[path] = ServerNavigateToMessage(
-						type="navigate_to",
-						path=r.path,
-						replace=r.replace,
-						hard=False,
-					)
-					continue
-				except NotFoundInterrupt:
-					del self.route_mounts[path]
-					ctx = PulseContext.get()
-					results[path] = ServerNavigateToMessage(
-						type="navigate_to",
-						path=ctx.app.not_found,
-						replace=True,
-						hard=False,
-					)
-					continue
+			if mount is None:
+				mount = RouteMount(self, route, info)
+				mount.state = "pending"
+				mount.queue = []
+				self.route_mounts[path] = mount
+				self._create_render_effect(mount, path, lazy=True, flush=False)
+			else:
+				mount.route.update(info)
+				if mount.state == "idle":
+					mount.state = "pending"
+					mount.queue = []
+					if mount.effect:
+						mount.effect.resume()
+				elif mount.state == "pending":
+					mount.queue = []
+				if mount.effect is None:
+					self._create_render_effect(mount, path, lazy=True, flush=False)
 
-			self._create_render_effect(mount, path)
-			mount.queue_timeout = self._schedule_timeout(
-				self.prerender_queue_timeout,
-				lambda p=path: self._transition_to_idle(p),
-			)
-			results[path] = ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+			assert mount.effect is not None
+			with mount.effect.capture_deps(update_deps=True):
+				message = self.render(mount, path)
+
+			results[path] = message
+			if message["type"] == "navigate_to":
+				self._cancel_queue_timeout(mount)
+				if mount.effect:
+					mount.effect.dispose()
+				mount.tree.unmount()
+				del self.route_mounts[path]
+				continue
+
+			if mount.state == "pending":
+				self._cancel_queue_timeout(mount)
+				mount.queue_timeout = self._schedule_timeout(
+					self.prerender_queue_timeout,
+					lambda p=path: self._transition_to_idle(p),
+				)
 
 		return results
 
@@ -341,22 +348,20 @@ class RenderSession:
 		"""
 		Client ready to receive updates for path.
 		- PENDING: flush queue, transition to ACTIVE
-		- IDLE: fresh render, transition to ACTIVE
+		- IDLE: request reload
 		- ACTIVE: update route_info
-		- No mount: create fresh
+		- No mount: request reload
 		"""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
 
-		if mount is None:
-			# No prerender, create fresh
-			route = self.routes.find(path)
-			mount = RouteMount(self, route, route_info)
-			mount.state = "active"
-			self.route_mounts[path] = mount
-			self._create_render_effect(mount, path)
+		if mount is None or mount.state == "idle":
+			# Initial render must come from prerender
+			self.send({"type": "reload"})
 			return
 
+		# Update route info for active and pending mounts
+		mount.route.update(route_info)
 		if mount.state == "pending":
 			# Flush queue, go active
 			self._cancel_queue_timeout(mount)
@@ -366,19 +371,6 @@ class RenderSession:
 						self._send_message(msg)
 			mount.queue = None
 			mount.state = "active"
-			mount.route.update(route_info)
-
-		elif mount.state == "idle":
-			# Need fresh render
-			mount.initialized = False
-			mount.state = "active"
-			mount.route.update(route_info)
-			if mount.effect:
-				mount.effect.resume()
-				mount.effect.flush()
-
-		elif mount.state == "active":
-			# Already active, just update route
 			mount.route.update(route_info)
 
 	def update_route(self, path: str, route_info: RouteInfo):
@@ -406,58 +398,99 @@ class RenderSession:
 
 	# ---- Effect creation ----
 
-	def _create_render_effect(self, mount: RouteMount, path: str):
+	def _check_render_loop(self, mount: RouteMount, path: str) -> None:
+		batch_id = REACTIVE_CONTEXT.get().batch.flush_id
+		if mount.render_batch_id == batch_id:
+			mount.render_batch_renders += 1
+		else:
+			mount.render_batch_id = batch_id
+			mount.render_batch_renders = 1
+		if mount.render_batch_renders > self.render_loop_limit:
+			if mount.effect:
+				mount.effect.pause()
+			raise RenderLoopError(path, mount.render_batch_renders, batch_id)
+
+	def _render_with_interrupts(
+		self,
+		mount: RouteMount,
+		path: str,
+		*,
+		session: Any | None = None,
+		render_fn: Callable[[], ServerInitMessage | ServerUpdateMessage | None],
+	) -> ServerInitMessage | ServerUpdateMessage | ServerNavigateToMessage | None:
+		ctx = PulseContext.get()
+		render_session = ctx.session if session is None else session
+		with PulseContext.update(
+			session=render_session, render=self, route=mount.route
+		):
+			try:
+				self._check_render_loop(mount, path)
+				return render_fn()
+			except RedirectInterrupt as r:
+				return ServerNavigateToMessage(
+					type="navigate_to",
+					path=r.path,
+					replace=r.replace,
+					hard=False,
+				)
+			except NotFoundInterrupt:
+				ctx = PulseContext.get()
+				return ServerNavigateToMessage(
+					type="navigate_to",
+					path=ctx.app.not_found,
+					replace=True,
+					hard=False,
+				)
+
+	def render(
+		self, mount: RouteMount, path: str, *, session: Any | None = None
+	) -> ServerInitMessage | ServerNavigateToMessage:
+		def _render() -> ServerInitMessage:
+			vdom = mount.tree.render()
+			mount.initialized = True
+			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+
+		message = self._render_with_interrupts(
+			mount, path, session=session, render_fn=_render
+		)
+		if message is None:
+			raise RuntimeError("Render produced no message")
+		if message["type"] == "vdom_update":
+			raise RuntimeError("Render produced update message")
+		return message
+
+	def rerender(
+		self, mount: RouteMount, path: str, *, session: Any | None = None
+	) -> ServerInitMessage | ServerUpdateMessage | ServerNavigateToMessage | None:
+		def _rerender() -> ServerInitMessage | ServerUpdateMessage | None:
+			if not mount.initialized:
+				vdom = mount.tree.render()
+				mount.initialized = True
+				return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+			ops = mount.tree.rerender()
+			if ops:
+				return ServerUpdateMessage(type="vdom_update", path=path, ops=ops)
+			return None
+
+		return self._render_with_interrupts(
+			mount, path, session=session, render_fn=_rerender
+		)
+
+	def _create_render_effect(
+		self,
+		mount: RouteMount,
+		path: str,
+		*,
+		lazy: bool = False,
+		flush: bool = True,
+	):
 		ctx = PulseContext.get()
 		session = ctx.session
 
 		def _render_effect():
-			with PulseContext.update(session=session, render=self, route=mount.route):
-				try:
-					batch_id = REACTIVE_CONTEXT.get().batch.flush_id
-					if mount.render_batch_id == batch_id:
-						mount.render_batch_renders += 1
-					else:
-						mount.render_batch_id = batch_id
-						mount.render_batch_renders = 1
-					if mount.render_batch_renders > self.render_loop_limit:
-						if mount.effect:
-							mount.effect.pause()
-						raise RenderLoopError(
-							path, mount.render_batch_renders, batch_id
-						)
-
-					if not mount.initialized:
-						vdom = mount.tree.render()
-						mount.initialized = True
-						self.send(
-							ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-						)
-					else:
-						ops = mount.tree.rerender()
-						if ops:
-							self.send(
-								ServerUpdateMessage(
-									type="vdom_update", path=path, ops=ops
-								)
-							)
-				except RedirectInterrupt as r:
-					self.send(
-						ServerNavigateToMessage(
-							type="navigate_to",
-							path=r.path,
-							replace=r.replace,
-							hard=False,
-						)
-					)
-				except NotFoundInterrupt:
-					self.send(
-						ServerNavigateToMessage(
-							type="navigate_to",
-							path=ctx.app.not_found,
-							replace=True,
-							hard=False,
-						)
-					)
+			message = self.rerender(mount, path, session=session)
+			if message is not None:
+				self.send(message)
 
 		def _report_render_error(exc: Exception) -> None:
 			details: dict[str, Any] | None = None
@@ -473,8 +506,10 @@ class RenderSession:
 			immediate=False,
 			name=f"{path}:render",
 			on_error=_report_render_error,
+			lazy=lazy,
 		)
-		mount.effect.flush()
+		if flush:
+			mount.effect.flush()
 
 	# ---- Helpers ----
 

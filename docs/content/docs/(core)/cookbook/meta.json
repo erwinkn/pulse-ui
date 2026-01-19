@@ -1,17 +1,12 @@
 {
   "title": "Cookbook",
+  "icon": "ChefHat",
   "pages": [
-    "index",
-    "auth-middleware",
-    "chat-channels",
-    "forms-upload",
-    "optimistic-mutation",
-    "query-invalidation",
-    "infinite-scroll",
-    "run-js-imperative",
-    "mantine-forms",
-    "charts-recharts",
-    "icons-lucide",
-    "msal-login"
+    "auth",
+    "data-queries",
+    "forms",
+    "ui-components",
+    "js-from-python",
+    "advanced-patterns"
   ]
 }

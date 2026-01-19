@@ -1,0 +1,6 @@
+{
+  "title": "JS Client",
+  "description": "JavaScript client SDK",
+  "icon": "Globe",
+  "pages": ["index"]
+}

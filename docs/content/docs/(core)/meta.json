@@ -1,16 +1,21 @@
 {
-  "title": "Pulse",
-  "description": "Core docs",
+  "title": "Core",
+  "description": "Core documentation",
+  "icon": "BookOpen",
   "root": true,
   "pages": [
+    "---Introduction---",
     "index",
     "setup",
     "tutorial",
-    "concepts",
+    "mental-model",
+    "glossary",
+    "---Guide---",
+    "...concepts",
     "advanced",
-    "cookbook",
-    "reference",
-    "packages",
-    "ai"
+    "---Cookbook---",
+    "...cookbook",
+    "---Resources---",
+    "skills"
   ]
 }

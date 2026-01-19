@@ -1,0 +1,5 @@
+{
+  "title": "UI Components",
+  "icon": "LayoutGrid",
+  "pages": ["charts-recharts", "icons-lucide"]
+}

@@ -1,0 +1,269 @@
+---
+title: "Charts"
+description: "Data visualization with Mantine Charts"
+---
+
+[Mantine Charts](https://mantine.dev/charts/getting-started/) provides a simplified API for common chart types, built on top of [Recharts](https://recharts.org/). Use Mantine Charts for quick, consistent visualizations that match your Mantine theme.
+
+## Available Charts
+
+| Chart | Description |
+|-------|-------------|
+| `LineChart` | Trends over time |
+| `AreaChart` | Volume/cumulative data |
+| `BarChart` | Category comparisons |
+| `CompositeChart` | Mixed chart types |
+| `PieChart` | Proportions of a whole |
+| `DonutChart` | Pie chart with center cutout |
+| `RadarChart` | Multivariate comparisons |
+| `RadialBarChart` | Circular bar chart |
+| `ScatterChart` | Correlations between variables |
+| `BubbleChart` | Scatter with size dimension |
+| `FunnelChart` | Conversion/process stages |
+| `Sparkline` | Inline mini charts |
+| `Heatmap` | Matrix data visualization |
+
+## Basic Usage
+
+All Mantine charts share a common API pattern:
+
+- **`data`**: List of dicts with your data points
+- **`dataKey`**: Key for x-axis values
+- **`series`**: List of series configurations
+- **`h`**: Chart height (required)
+
+```python
+from pulse_mantine import MantineProvider, LineChart
+
+@ps.component
+def SalesChart():
+    data = [
+        {"month": "Jan", "sales": 4000, "expenses": 2400},
+        {"month": "Feb", "sales": 3000, "expenses": 1398},
+        {"month": "Mar", "sales": 2000, "expenses": 9800},
+        {"month": "Apr", "sales": 2780, "expenses": 3908},
+        {"month": "May", "sales": 1890, "expenses": 4800},
+        {"month": "Jun", "sales": 2390, "expenses": 3800},
+    ]
+
+    return MantineProvider()[
+        LineChart(
+            h=300,
+            data=data,
+            dataKey="month",
+            series=[
+                {"name": "sales", "color": "blue"},
+                {"name": "expenses", "color": "red"},
+            ],
+            withLegend=True,
+            withTooltip=True,
+        )
+    ]
+```
+
+## Examples
+
+### LineChart
+
+Multi-series line chart with curve smoothing:
+
+```python
+from pulse_mantine import LineChart
+
+LineChart(
+    h=300,
+    data=[
+        {"date": "Mon", "views": 2400, "clicks": 400},
+        {"date": "Tue", "views": 1398, "clicks": 300},
+        {"date": "Wed", "views": 9800, "clicks": 800},
+        {"date": "Thu", "views": 3908, "clicks": 500},
+        {"date": "Fri", "views": 4800, "clicks": 600},
+    ],
+    dataKey="date",
+    series=[
+        {"name": "views", "color": "indigo.6"},
+        {"name": "clicks", "color": "cyan.6"},
+    ],
+    curveType="natural",
+    withLegend=True,
+)
+```
+
+### BarChart
+
+Grouped bar chart:
+
+```python
+from pulse_mantine import BarChart
+
+BarChart(
+    h=300,
+    data=[
+        {"quarter": "Q1", "revenue": 12000, "profit": 3000},
+        {"quarter": "Q2", "revenue": 15000, "profit": 4500},
+        {"quarter": "Q3", "revenue": 18000, "profit": 5200},
+        {"quarter": "Q4", "revenue": 22000, "profit": 7000},
+    ],
+    dataKey="quarter",
+    series=[
+        {"name": "revenue", "color": "violet.6"},
+        {"name": "profit", "color": "teal.6"},
+    ],
+    withLegend=True,
+)
+```
+
+### AreaChart
+
+Stacked area chart:
+
+```python
+from pulse_mantine import AreaChart
+
+AreaChart(
+    h=300,
+    data=[
+        {"month": "Jan", "mobile": 1200, "desktop": 2400},
+        {"month": "Feb", "mobile": 1800, "desktop": 2100},
+        {"month": "Mar", "mobile": 2200, "desktop": 1900},
+        {"month": "Apr", "mobile": 2800, "desktop": 2300},
+    ],
+    dataKey="month",
+    series=[
+        {"name": "desktop", "color": "blue.6"},
+        {"name": "mobile", "color": "cyan.6"},
+    ],
+    type="stacked",
+    withLegend=True,
+)
+```
+
+### PieChart and DonutChart
+
+```python
+from pulse_mantine import PieChart, DonutChart
+
+data = [
+    {"name": "USA", "value": 400, "color": "indigo.6"},
+    {"name": "India", "value": 300, "color": "yellow.6"},
+    {"name": "Japan", "value": 200, "color": "teal.6"},
+    {"name": "Other", "value": 100, "color": "gray.6"},
+]
+
+# Pie chart
+PieChart(h=250, data=data, withLabels=True)
+
+# Donut chart (pie with center cutout)
+DonutChart(h=250, data=data, withLabels=True)
+```
+
+### CompositeChart
+
+Combine bars and lines in one chart:
+
+```python
+from pulse_mantine import CompositeChart
+
+CompositeChart(
+    h=300,
+    data=[
+        {"month": "Jan", "orders": 120, "revenue": 4200},
+        {"month": "Feb", "orders": 150, "revenue": 5100},
+        {"month": "Mar", "orders": 180, "revenue": 6300},
+        {"month": "Apr", "orders": 140, "revenue": 4800},
+    ],
+    dataKey="month",
+    series=[
+        {"name": "orders", "color": "blue.6", "type": "bar"},
+        {"name": "revenue", "color": "red.6", "type": "line"},
+    ],
+    withLegend=True,
+)
+```
+
+### Sparkline
+
+Inline mini chart for dashboards:
+
+```python
+from pulse_mantine import Sparkline
+
+Sparkline(
+    w=200,
+    h=60,
+    data=[10, 20, 40, 20, 40, 10, 50],
+    color="blue.6",
+    curveType="natural",
+)
+```
+
+## Chart Customization
+
+### Colors
+
+Use Mantine color names with optional shade (0-9):
+
+```python
+series=[
+    {"name": "sales", "color": "blue"},      # Default shade
+    {"name": "profit", "color": "green.7"},  # Specific shade
+    {"name": "costs", "color": "red.4"},     # Lighter shade
+]
+```
+
+Available colors: `blue`, `cyan`, `grape`, `green`, `indigo`, `lime`, `orange`, `pink`, `red`, `teal`, `violet`, `yellow`, `gray`.
+
+### Grid and Axes
+
+```python
+LineChart(
+    h=300,
+    data=data,
+    dataKey="month",
+    series=[{"name": "value", "color": "blue"}],
+    gridProps={"strokeDasharray": "3 3"},
+    xAxisProps={"tickMargin": 10},
+    yAxisProps={"domain": [0, 100]},
+    withXAxis=True,
+    withYAxis=True,
+)
+```
+
+### Legend and Tooltip
+
+```python
+LineChart(
+    h=300,
+    data=data,
+    dataKey="month",
+    series=[{"name": "value", "color": "blue"}],
+    withLegend=True,
+    legendProps={"verticalAlign": "bottom"},
+    withTooltip=True,
+    tooltipAnimationDuration=200,
+)
+```
+
+### Common Props
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `h` | `int` | Chart height (required) |
+| `data` | `list[dict]` | Data points |
+| `dataKey` | `str` | Key for x-axis values |
+| `series` | `list[dict]` | Series configurations |
+| `withLegend` | `bool` | Show legend |
+| `withTooltip` | `bool` | Show tooltip on hover |
+| `withXAxis` | `bool` | Show x-axis |
+| `withYAxis` | `bool` | Show y-axis |
+| `curveType` | `str` | Line curve type: `"linear"`, `"natural"`, `"monotone"`, `"step"` |
+| `type` | `str` | For AreaChart: `"default"`, `"stacked"`, `"percent"` |
+
+## Recharts Fallback
+
+For advanced use cases not covered by Mantine Charts (custom shapes, reference lines, complex animations), use [pulse-recharts](/packages/pulse-recharts) for direct Recharts access. Recharts provides lower-level control at the cost of more verbose configuration.
+
+## Reference
+
+- [Mantine Charts Documentation](https://mantine.dev/charts/getting-started/)
+- [Mantine Colors](https://mantine.dev/theming/colors/)

@@ -1,6 +1,0 @@
-{
-  "title": "Pulse JS Client",
-  "description": "JavaScript client SDK",
-  "root": true,
-  "pages": ["index"]
-}

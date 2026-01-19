@@ -1,7 +1,6 @@
 {
   "title": "Advanced",
   "pages": [
-    "index",
     "channels",
     "js-interop",
     "custom-hooks",

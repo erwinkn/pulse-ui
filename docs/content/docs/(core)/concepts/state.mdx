@@ -1,8 +1,8 @@
 ---
-title: "State"
+title: "State and Reactivity"
 ---
 
-State is how you make your Pulse application interactive. When state changes, Pulse automatically re-renders your UI to reflect those changes.
+State is how you make your Pulse application interactive. When state changes, Pulse automatically re-renders your UI to reflect those changes. Reactivity is the system that makes this possible—Pulse watches what your code reads, and when that data changes, it knows exactly what needs to update.
 
 ## Defining state
 
@@ -40,32 +40,52 @@ def CounterDemo():
 
 Without `ps.init()`, a new `Counter` instance would be created on every render, resetting the count to 0 each time.
 
-## Why ps.init() matters
+## How tracking works
 
-Here's what happens without it:
-
-```python
-@ps.component
-def BrokenCounter():
-    state = Counter()  # Created fresh every render!
-    # Clicking buttons changes state, triggering re-render...
-    # ...but re-render creates a NEW Counter with count=0
-    # The count never actually changes from the user's perspective
-```
-
-With `ps.init()`:
+When you render a component that displays `state.count`, Pulse remembers that the component depends on `count`. Later, when `count` changes, Pulse rerenders only the components that need it.
 
 ```python
+class CounterState(ps.State):
+    count: int = 0
+
 @ps.component
-def WorkingCounter():
+def Counter():
     with ps.init():
-        state = Counter()  # Created once, reused on re-renders
-    # Now clicking buttons actually updates the displayed count
+        state = CounterState()
+
+    # Pulse tracks that this component reads state.count
+    return ps.div(f"Count: {state.count}")
 ```
+
+When `state.count` changes, Pulse rerenders the component. You never call "refresh" manually.
+
+### Nested data just works
+
+What if your state contains a list of objects, and you modify a property deep inside? In Pulse, the reactivity system tracks changes through nested structures automatically:
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Todo:
+    id: int
+    text: str
+    done: bool
+
+class TodosState(ps.State):
+    todos: list[Todo]
+
+    def toggle(self, todo_id: int):
+        for todo in self.todos:
+            if todo.id == todo_id:
+                todo.done = not todo.done  # This triggers an update!
+```
+
+We just flip `todo.done` directly. No need to create a new list or clone objects. Pulse wraps lists, dicts, sets, and dataclasses in reactive versions that detect mutations.
 
 ## Reactive vs non-reactive fields
 
-All fields with type annotations are reactive - changes trigger re-renders:
+All fields with type annotations are reactive—changes trigger re-renders:
 
 ```python
 class TodoState(ps.State):
@@ -87,6 +107,189 @@ class TodoState(ps.State):
 
 This is useful for references to other states, debug info, or any data that's just for internal bookkeeping.
 
+---
+
+## Preserving state across renders
+
+When a component renders, it runs top to bottom like any Python function. Every local variable is created fresh. Without some way to preserve values, all your data would be lost on re-render.
+
+### `ps.init()` - the core hook
+
+Any variables assigned inside `ps.init()` are captured on first render and restored on every subsequent render:
+
+```python
+@ps.component
+def Counter():
+    with ps.init():
+        state = CounterState()  # Created once, reused on every render
+
+    return ps.div(f"Count: {state.count}")
+```
+
+Without `ps.init()`, each render would create a brand-new `CounterState` starting at zero:
+
+```python
+# What happens without ps.init():
+@ps.component
+def BrokenCounter():
+    state = CounterState()  # Bug: fresh state every render!
+    return ps.button("Click me", onClick=state.increment)
+    # Click -> increment -> re-render -> new state with count=0 -> looks broken
+```
+
+**How it works:** `ps.init()` uses AST rewriting—when you apply `@ps.component`, Pulse parses your function's source and transforms `with ps.init():` blocks. Because of this:
+- It **only works at the top level** of the component (not inside `if`, `for`, or nested functions)
+- No control flow inside the block (`if`, `for`, `while`, `try`, `with`, `match`)
+
+**Equivalent to `ps.setup()`:** The code above is equivalent to:
+
+```python
+@ps.component
+def Counter():
+    state = ps.setup(lambda: CounterState())
+    return ps.div(f"Count: {state.count}")
+```
+
+If you encounter issues with `ps.init()` (e.g., source not available), use `ps.setup()` instead.
+
+### `ps.setup()` - complex initialization
+
+When initialization involves side effects or multiple steps:
+
+```python
+def create_connection():
+    print("Connecting to database...")  # Only prints once!
+    config = load_config()
+    return DatabaseConnection(config.host, config.port)
+
+@ps.component
+def Dashboard():
+    conn = ps.setup(create_connection)
+    return ps.div(f"Connected to: {conn.host}")
+```
+
+You can also pass arguments: `config = ps.setup(load_config, "production", cache=True)`
+
+### `ps.state()` - dynamic state by key
+
+When you need different state instances based on runtime data:
+
+```python
+@ps.component
+def UserProfile(user_id: int):
+    # When user_id changes, you get a fresh UserState for that user
+    user_state = ps.state(user_id, lambda: UserState(user_id))
+    return ps.div(f"User: {user_state.name}")
+```
+
+The first argument is a key. When it changes, Pulse creates a new state instance and cleans up the old one.
+
+### `ps.stable()` - stable callback references
+
+When a parent passes a callback that might be a new function object each render:
+
+```python
+@ps.component
+def Editor(on_save):
+    # stable_save is always the same reference, but calls the current on_save
+    stable_save = ps.stable("on_save", on_save)
+
+    with ps.init():
+        state = EditorState(on_save=stable_save)  # Safe!
+```
+
+### The one-hook rule
+
+**Each hook can only be called once per component.** Put everything in one block:
+
+```python
+@ps.component
+def GoodExample():
+    with ps.init():
+        a = StateA()
+        b = StateB()  # Both states in the same init block
+```
+
+---
+
+## Computed values
+
+A computed is a cached calculation that updates only when its dependencies change. Like a spreadsheet formula:
+
+```python
+class TodosState(ps.State):
+    todos: list[Todo]
+    filter: str = "all"
+
+    @ps.computed
+    def visible_todos(self) -> list[Todo]:
+        if self.filter == "done":
+            return [t for t in self.todos if t.done]
+        if self.filter == "open":
+            return [t for t in self.todos if not t.done]
+        return self.todos
+```
+
+Call `state.visible_todos` as many times as you want. Filtering only runs when `todos` or `filter` changes.
+
+### Computeds across multiple states
+
+Create these in `ps.setup`:
+
+```python
+def setup_counters():
+    counter1 = CounterState()
+    counter2 = CounterState()
+
+    @ps.computed
+    def total():
+        return counter1.count + counter2.count
+
+    return counter1, counter2, total
+
+@ps.component
+def Counters():
+    c1, c2, total = ps.setup(setup_counters)
+    return ps.div(f"Total: {total()}")  # Call it like a function
+```
+
+---
+
+## Batching updates
+
+Multiple state changes within async code would normally trigger multiple rerenders. Use `ps.Batch()` to group them:
+
+```python
+async def complex_update(state):
+    with ps.Batch():
+        state.loading = True
+        data = await fetch_data()
+        state.data = data
+        state.loading = False
+    # Single rerender after all updates
+```
+
+**Good news:** Pulse automatically batches updates inside event handlers. Manual batching is mainly useful for async boundaries—when you make multiple state changes across `await` points.
+
+---
+
+## Reading without tracking
+
+Use `ps.Untrack()` when you need to read state without creating a dependency:
+
+```python
+@ps.effect
+def careful_effect(self):
+    print(f"Count: {self.count}")  # Tracked
+
+    with ps.Untrack():
+        print(f"Name: {self.name}")  # NOT tracked
+```
+
+This is advanced. If you use it often, consider restructuring your code.
+
+---
+
 ## Event handlers
 
 State methods work as event handlers. You can also use regular functions or lambdas:
@@ -107,8 +310,23 @@ def EventDemo():
     ]
 ```
 
+---
+
+## Common mistakes
+
+**Creating new collections to trigger updates.** Just mutate directly:
+
+```python
+# You don't need this
+self.items = self.items + [new_item]
+
+# Just do this
+self.items.append(new_item)
+```
+
 ## See also
 
 - [Tutorial: State](/docs/tutorial/02-state)
-- [Reference: State](/docs/reference/pulse/state)
-- [Core Concepts: Reactivity](/docs/concepts/reactivity)
+- [Tutorial: Hooks](/docs/tutorial/06-hooks)
+- [Tutorial: Reactivity](/docs/tutorial/07-reactivity)
+- [Effects](/docs/concepts/effects) - running side effects in response to state changes

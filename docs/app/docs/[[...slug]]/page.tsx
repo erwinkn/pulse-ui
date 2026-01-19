@@ -1,8 +1,9 @@
-import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/layouts/docs/page";
 import { createRelativeLink } from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LLMCopyButton, ViewOptions } from "@/components/ai/page-actions";
+import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/layout/docs/page";
+import { RelatedPages } from "@/components/related-pages";
 import { getPageImage, source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 
@@ -19,7 +20,12 @@ export default async function Page(props: PageProps<"/docs/[[...slug]]">) {
 	};
 
 	return (
-		<DocsPage toc={page.data.toc} full={page.data.full}>
+		<DocsPage
+			toc={page.data.toc}
+			full={page.data.full}
+			tableOfContent={{ style: "clerk" }}
+			footer={{ children: <RelatedPages /> }}
+		>
 			<DocsTitle>{page.data.title}</DocsTitle>
 			<DocsDescription className="mb-0">{page.data.description}</DocsDescription>
 			<div className="flex flex-row gap-2 items-center border-b pb-6">

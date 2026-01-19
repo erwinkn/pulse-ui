@@ -1,0 +1,6 @@
+{
+  "title": "AWS",
+  "description": "AWS deployment",
+  "icon": "Cloud",
+  "pages": ["index"]
+}

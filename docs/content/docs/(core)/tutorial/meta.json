@@ -1,7 +1,6 @@
 {
   "title": "Tutorial",
   "pages": [
-    "index",
     "01-basics",
     "02-state",
     "03-events",

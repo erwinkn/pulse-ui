@@ -1,3 +1,7 @@
+# AI stuff
+.context/
+notes/
+
 node_modules/
 
 # Byte-compiled / optimized / DLL files

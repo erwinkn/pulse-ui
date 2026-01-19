@@ -50,3 +50,4 @@ examples/                     # Example apps
 - Run `make all` before committing
 - Check `examples/` for patterns
 - Use `make bump` for changing package versions
+- When editing docs, update `docs/content/docs/(core)/glossary.mdx` if introducing new technical terms

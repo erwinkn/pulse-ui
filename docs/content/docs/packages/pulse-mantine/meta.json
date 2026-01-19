@@ -1,0 +1,6 @@
+{
+  "title": "Mantine",
+  "description": "Mantine UI components",
+  "icon": "Palette",
+  "pages": ["index", "core", "forms", "charts", "dates"]
+}

@@ -22,6 +22,12 @@
 		"indentStyle": "tab"
 	},
 	"files": {
-		"includes": ["**/*.{ts,tsx,js,jsx,cjs,mjs}", "**/*.{ts,tsx,js,jsx,cjs,mjs}"]
+		"includes": [
+			"docs/**/*.{ts,tsx,js,jsx,cjs,mjs}",
+			"examples/**/*.{ts,tsx,js,jsx,cjs,mjs}",
+			"packages/**/*.{ts,tsx,js,jsx,cjs,mjs}",
+			"scripts/**/*.{ts,tsx,js,jsx,cjs,mjs}",
+			"tutorial/**/*.{ts,tsx,js,jsx,cjs,mjs}"
+		]
 	}
 }

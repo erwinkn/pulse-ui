@@ -1,0 +1,24 @@
+{
+  "title": "Pulse",
+  "icon": "Zap",
+  "defaultOpen": true,
+  "pages": [
+    "app",
+    "component",
+    "dom",
+    "state",
+    "hooks",
+    "reactive",
+    "queries",
+    "forms",
+    "channels",
+    "middleware",
+    "routing",
+    "serializer",
+    "context",
+    "cookies",
+    "js-interop",
+    "codegen",
+    "cli"
+  ]
+}

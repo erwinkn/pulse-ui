@@ -1,6 +1,0 @@
-{
-  "title": "Pulse Mantine",
-  "description": "Mantine UI components",
-  "root": true,
-  "pages": ["index"]
-}

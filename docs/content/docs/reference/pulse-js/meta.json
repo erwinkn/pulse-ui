@@ -1,0 +1,10 @@
+{
+  "title": "pulse.js",
+  "icon": "Braces",
+  "defaultOpen": true,
+  "pages": [
+    "builtins",
+    "dom",
+    "pulse-client"
+  ]
+}

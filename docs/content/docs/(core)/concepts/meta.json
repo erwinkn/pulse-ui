@@ -1,21 +1,17 @@
 {
   "title": "Core Concepts",
+  "icon": "Lightbulb",
   "pages": [
-    "index",
-    "mental-model",
-    "vdom-elements",
+    "html",
     "components",
     "state",
-    "hooks",
-    "reactivity",
+    "effects",
     "events",
     "lists-keys",
-    "async",
-    "queries",
+    "data-fetching",
     "forms",
     "routing",
     "sessions",
-    "codegen",
     "deployment"
   ]
 }

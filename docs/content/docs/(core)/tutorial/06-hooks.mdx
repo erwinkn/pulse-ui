@@ -43,6 +43,40 @@ def BrokenCounter():
 
 Clicking the button increments the count and triggers a re-render. But the re-render creates a fresh `CounterState` with count=0. The button appears to do nothing.
 
+#### How `ps.init()` works (a bit of magic)
+
+`ps.init()` uses **AST rewriting** to transform your code. When you apply the `@ps.component` decorator, Pulse parses your function's source code and rewrites `with ps.init():` blocks.
+
+Because of this:
+- `ps.init()` **only works at the top level** of the component function (not inside `if`, `for`, loops, or nested functions)
+- You cannot have control flow inside the block (no `if`, `for`, `while`, `try`, `with`, `match`)
+
+#### Equivalent to `ps.setup()`
+
+Under the hood, `ps.init()` is syntactic sugar for `ps.setup()`. This:
+
+```python
+@ps.component
+def Counter():
+    with ps.init():
+        state = CounterState()
+        value = expensive_calculation()
+    return ps.div(f"Count: {state.count}")
+```
+
+Is equivalent to:
+
+```python
+@ps.component
+def Counter():
+    def init():
+        return CounterState(), expensive_calculation()
+    state, value = ps.setup(init)
+    return ps.div(f"Count: {state.count}")
+```
+
+If you encounter issues with `ps.init()` (e.g., source not available in some deployment environments), use `ps.setup()` instead.
+
 ### `ps.setup()` - Run a function once
 
 Sometimes you need to run initialization code that is more complex than simple variable assignment. That is where `ps.setup()` comes in:
@@ -91,7 +125,7 @@ If `user_id` changes, Pulse creates a new state instance for that user. The old 
 
 ### `ps.effects()` - Register side effects
 
-Effects let you run code in response to state changes. They are covered in detail in the [Reactivity](/docs/tutorial/reactivity) section, but here is how you register them:
+Effects let you run code in response to state changes. They are covered in detail in the [Reactivity](/docs/tutorial/07-reactivity) section, but here is how you register them:
 
 ```python
 @ps.component
@@ -245,5 +279,4 @@ def App():
 
 ## See also
 
-- [Core Concepts: Hooks](/docs/concepts/hooks)
 - [Reference: Hooks](/docs/reference/pulse/hooks)

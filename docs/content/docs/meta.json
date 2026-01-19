@@ -2,12 +2,7 @@
   "title": "Pulse",
   "pages": [
     "(core)",
-    "pulse-js-client",
-    "pulse-mantine",
-    "pulse-ag-grid",
-    "pulse-recharts",
-    "pulse-lucide",
-    "pulse-msal",
-    "pulse-aws"
+    "reference",
+    "packages"
   ]
 }

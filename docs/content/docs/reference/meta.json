@@ -1,0 +1,13 @@
+{
+  "title": "Reference",
+  "description": "API reference",
+  "icon": "FileCode",
+  "root": true,
+  "pages": [
+    "index",
+    "architecture",
+    "pulse",
+    "pulse-js",
+    "pulse-transpiler"
+  ]
+}

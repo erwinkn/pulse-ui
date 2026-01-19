@@ -1,6 +1,0 @@
-{
-  "title": "Pulse MSAL",
-  "description": "Microsoft auth",
-  "root": true,
-  "pages": ["index"]
-}

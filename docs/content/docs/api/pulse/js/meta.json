@@ -1,0 +1,29 @@
+{
+  "title": "js",
+  "pages": [
+    "index",
+    "_ThrowExpr",
+    "obj",
+    "pulse",
+    "console",
+    "document",
+    "navigator",
+    "window",
+    "promise",
+    "weakmap",
+    "react",
+    "_types",
+    "error",
+    "object",
+    "weakset",
+    "number",
+    "map",
+    "regexp",
+    "math",
+    "string",
+    "array",
+    "set",
+    "date",
+    "json"
+  ]
+}

@@ -1,0 +1,149 @@
+---
+title: "for_"
+---
+
+For loop component for mapping items to elements.
+
+Provides a declarative way to render lists, similar to JavaScript's Array.map().
+
+<PyAttribute name={"T"} type={null} value={"TypeVar('T')"} />
+
+<Tabs items={["Functions"]}>
+
+<Tab value={"Functions"}>
+
+<PyFunction name={"emit_for"} type={"(items, fn, *, ctx) -> Expr"}>
+
+For(items, fn) -> items.map(fn)
+
+<PySourceCode >
+
+```python
+@transformer("For")
+def emit_for(items: Any, fn: Any, *, ctx: "Transpiler") -> Expr:
+	"""For(items, fn) -> items.map(fn)"""
+	items_expr = ctx.emit_expr(items)
+	fn_expr = ctx.emit_expr(fn)
+	return Call(Member(items_expr, "map"), [fn_expr])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"items"} type={"Any"} value={null} />
+<PyParameter name={"fn"} type={"Any"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+<PyFunction name={"For"} type={"(items, fn) -> list[Element]"}>
+
+Map items to elements, like JavaScript's Array.map().
+
+Iterates over `items` and calls `fn` for each one, returning a list of
+elements. The mapper function can accept either one argument (item) or
+two arguments (item, index).
+
+<Callout title={"Example"} type={"example"}>
+
+Single argument (item only)::
+
+        ps.For(users, lambda user: UserCard(user=user, key=user.id))
+
+With index::
+
+        ps.For(items, lambda item, i: ps.li(f"\{i\}: \{item\}", key=str(i)))
+
+</Callout>
+
+<Callout title={"Note"} type={"note"}>
+
+In transpiled `@javascript` code, `For` compiles to `.map()`.
+
+</Callout>
+
+<PySourceCode >
+
+```python
+def For(items: Iterable[T], fn: Callable[..., Element]) -> list[Element]:
+	"""Map items to elements, like JavaScript's Array.map().
+
+	Iterates over `items` and calls `fn` for each one, returning a list of
+	elements. The mapper function can accept either one argument (item) or
+	two arguments (item, index).
+
+	Args:
+		items: Iterable of items to map over.
+		fn: Mapper function that receives `(item)` or `(item, index)` and
+			returns an Element. If `fn` has a `*args` parameter, it receives
+			both item and index.
+
+	Returns:
+		A list of Elements, one for each item.
+
+	Example:
+		Single argument (item only)::
+
+			ps.For(users, lambda user: UserCard(user=user, key=user.id))
+
+		With index::
+
+			ps.For(items, lambda item, i: ps.li(f"{i}: {item}", key=str(i)))
+
+	Note:
+		In transpiled `@javascript` code, `For` compiles to `.map()`.
+	"""
+	try:
+		sig = signature(fn)
+		has_varargs = any(
+			p.kind == Parameter.VAR_POSITIONAL for p in sig.parameters.values()
+		)
+		num_positional = sum(
+			1
+			for p in sig.parameters.values()
+			if p.kind in (Parameter.POSITIONAL_ONLY, Parameter.POSITIONAL_OR_KEYWORD)
+		)
+		accepts_two = has_varargs or num_positional >= 2
+	except (ValueError, TypeError):
+		# Builtins or callables without inspectable signature: default to single-arg
+		accepts_two = False
+
+	if accepts_two:
+		return [fn(item, idx) for idx, item in enumerate(items)]
+	return [fn(item) for item in items]
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"items"} type={"Iterable[T]"} value={undefined}>
+
+Iterable of items to map over.
+
+</PyParameter>
+<PyParameter name={"fn"} type={"Callable[..., Element]"} value={undefined}>
+
+Mapper function that receives `(item)` or `(item, index)` and
+returns an Element. If `fn` has a `*args` parameter, it receives
+both item and index.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"list"}>
+
+A list of Elements, one for each item.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

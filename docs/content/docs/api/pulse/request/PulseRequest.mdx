@@ -1,0 +1,300 @@
+---
+title: "PulseRequest"
+---
+
+Normalized request object for both HTTP prerender and WebSocket connect.
+
+Provides a consistent interface for accessing request data regardless of
+the underlying transport (FastAPI/Starlette HTTP or Socket.IO WebSocket).
+
+## Attributes
+
+<PyAttribute name={"headers"} type={"dict[str, str]"} value={"{(k.lower()): v for k, v in ((headers or {}).items())}"}>
+
+Request headers with lowercased keys.
+
+</PyAttribute>
+
+<PyAttribute name={"cookies"} type={"dict[str, str]"} value={"dict(cookies or {})"}>
+
+Request cookies as name-value pairs.
+
+</PyAttribute>
+
+<PyAttribute name={"scheme"} type={"str"} value={"scheme or ''"}>
+
+URL scheme (http/https).
+
+</PyAttribute>
+
+<PyAttribute name={"method"} type={"str"} value={"method or ''"}>
+
+HTTP method (GET, POST, etc.).
+
+</PyAttribute>
+
+<PyAttribute name={"path"} type={"str"} value={"path or ''"}>
+
+URL path.
+
+</PyAttribute>
+
+<PyAttribute name={"query_string"} type={"str"} value={"query_string or ''"}>
+
+Query string (without leading ?).
+
+</PyAttribute>
+
+<PyAttribute name={"client"} type={"tuple[str, int] | None"} value={"client"}>
+
+Client address as (host, port) tuple, or None.
+
+</PyAttribute>
+
+<PyAttribute name={"auth"} type={"Any | None"} value={"auth"}>
+
+Auth data (Socket.IO only).
+
+</PyAttribute>
+
+<PyAttribute name={"raw"} type={"Any | None"} value={"raw"}>
+
+Underlying request object for advanced use.
+
+</PyAttribute>
+
+<PyAttribute name={"url"} type={"str"} value={null}>
+
+Full URL including scheme, host, path, and query string.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, *, headers=None, cookies=None, scheme=None, method=None, path=None, query_string=None, client=None, auth=None, raw=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	*,
+	headers: Mapping[str, str] | None = None,
+	cookies: Mapping[str, str] | None = None,
+	scheme: str | None = None,
+	method: str | None = None,
+	path: str | None = None,
+	query_string: str | None = None,
+	client: tuple[str, int] | None = None,
+	auth: Any | None = None,
+	raw: Any | None = None,
+) -> None:
+	self.headers = {k.lower(): v for k, v in (headers or {}).items()}
+	self.cookies = dict(cookies or {})
+	self.scheme = scheme or ""
+	self.method = method or ""
+	self.path = path or ""
+	self.query_string = query_string or ""
+	self.client = client
+	self.auth = auth
+	self.raw = raw
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"headers"} type={"Mapping[str, str] | None"} value={"None"} />
+<PyParameter name={"cookies"} type={"Mapping[str, str] | None"} value={"None"} />
+<PyParameter name={"scheme"} type={"str | None"} value={"None"} />
+<PyParameter name={"method"} type={"str | None"} value={"None"} />
+<PyParameter name={"path"} type={"str | None"} value={"None"} />
+<PyParameter name={"query_string"} type={"str | None"} value={"None"} />
+<PyParameter name={"client"} type={"tuple[str, int] | None"} value={"None"} />
+<PyParameter name={"auth"} type={"Any | None"} value={"None"} />
+<PyParameter name={"raw"} type={"Any | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"from_fastapi"} type={"(request) -> 'PulseRequest'"}>
+
+Create from a FastAPI/Starlette request.
+
+<PySourceCode >
+
+```python
+@staticmethod
+def from_fastapi(request: Any) -> "PulseRequest":
+	"""Create from a FastAPI/Starlette request.
+
+	Args:
+		request: FastAPI/Starlette Request object.
+
+	Returns:
+		PulseRequest instance with normalized request data.
+	"""
+	# FastAPI/Starlette Request
+	headers = {k.lower(): v for k, v in request.headers.items()}
+	cookies = dict(request.cookies or {})
+	scheme = request.url.scheme
+	method = request.method
+	path = request.url.path
+	query_string = request.url.query or ""
+	client = (request.client.host, request.client.port) if request.client else None
+	return PulseRequest(
+		headers=headers,
+		cookies=cookies,
+		scheme=scheme,
+		method=method,
+		path=path,
+		query_string=query_string,
+		client=client,
+		raw=request,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"request"} type={"Any"} value={undefined}>
+
+FastAPI/Starlette Request object.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"'PulseRequest'"}>
+
+PulseRequest instance with normalized request data.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"from_socketio_environ"} type={"(environ, auth) -> 'PulseRequest'"}>
+
+Create from a Socket.IO environ dictionary.
+
+<PySourceCode >
+
+```python
+@staticmethod
+def from_socketio_environ(
+	environ: MutableMapping[str, Any], auth: Any | None
+) -> "PulseRequest":
+	"""Create from a Socket.IO environ dictionary.
+
+	Args:
+		environ: Socket.IO environ dictionary (WSGI or ASGI-like).
+		auth: Auth data passed during Socket.IO connect.
+
+	Returns:
+		PulseRequest instance with normalized request data.
+	"""
+	# python-socketio passes a WSGI/ASGI-like environ. Try to detect ASGI scope first.
+	scope: MutableMapping[str, Any] = environ.get("asgi.scope") or environ
+
+	headers: dict[str, str] = {}
+	cookies: dict[str, str] = {}
+	scheme = ""
+	method = ""
+	path = ""
+	query_string = ""
+	client: tuple[str, int] | None = None
+
+	if isinstance(scope, Mapping) and "type" in scope:  # ASGI scope
+		scheme = scope.get("scheme", "")
+		method = scope.get("method", "") or "GET"
+		path = scope.get("path", "")
+		raw_qs = scope.get("query_string", b"") or b""
+		try:
+			query_string = raw_qs.decode("latin1")
+		except Exception:
+			query_string = ""
+		asgi_headers = cast(
+			list[tuple[bytes, bytes]], scope.get("headers", []) or []
+		)
+		headers = _bytes_kv_to_str(asgi_headers)
+		# Cookies from header if present
+		cookie_header = headers.get("cookie")
+		if cookie_header:
+			sc = SimpleCookie()
+			sc.load(cookie_header)
+			cookies = {k: v.value for k, v in sc.items()}
+		scope_client = scope.get("client")
+		if scope_client:
+			client = tuple(scope_client)
+	else:
+		# WSGI-like environ
+		scheme = scope.get("wsgi.url_scheme", "") or scope.get("scheme", "")
+		method = scope.get("REQUEST_METHOD", "GET")
+		path = scope.get("PATH_INFO", "")
+		query_string = scope.get("QUERY_STRING", "")
+		# headers from HTTP_* keys
+		for k, v in scope.items():
+			if isinstance(k, str) and k.startswith("HTTP_"):
+				name = k[5:].replace("_", "-").lower()
+				headers[name] = str(v)
+		if "CONTENT_TYPE" in scope:
+			headers["content-type"] = str(scope["CONTENT_TYPE"])  # type: ignore
+		if "CONTENT_LENGTH" in scope:
+			headers["content-length"] = str(scope["CONTENT_LENGTH"])  # type: ignore
+		# Cookies
+		cookie_header = headers.get("cookie") or scope.get("HTTP_COOKIE")
+		if cookie_header:
+			sc = SimpleCookie()
+			sc.load(cookie_header)  # type: ignore[arg-type]
+			cookies = {k: v.value for k, v in sc.items()}
+		# client is not standard in WSGI; try remote addr
+		remote = scope.get("REMOTE_ADDR")
+		port = scope.get("REMOTE_PORT")
+		if remote is not None and port is not None:
+			try:
+				client = (str(remote), int(port))
+			except Exception:
+				client = None
+
+	return PulseRequest(
+		headers=headers,
+		cookies=cookies,
+		scheme=scheme,
+		method=method,
+		path=path,
+		query_string=query_string,
+		client=client,
+		auth=auth,
+		raw=environ,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"environ"} type={"MutableMapping[str, Any]"} value={undefined}>
+
+Socket.IO environ dictionary (WSGI or ASGI-like).
+
+</PyParameter>
+<PyParameter name={"auth"} type={"Any | None"} value={undefined}>
+
+Auth data passed during Socket.IO connect.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"'PulseRequest'"}>
+
+PulseRequest instance with normalized request data.
+
+</PyFunctionReturn>
+
+</PyFunction>

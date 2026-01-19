@@ -1,0 +1,134 @@
+---
+title: "Class"
+---
+
+Expr wrapper that emits calls as `new ...(...)`.
+
+Must also behave like the wrapped expression for attribute access,
+so patterns like `Promise.resolve(...)` work even if `Promise(...)` emits
+as `new Promise(...)`.
+
+## Attributes
+
+<PyAttribute name={"ctor"} type={"Expr"} value={null} />
+
+<PyAttribute name={"name"} type={"str"} value={"''"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	self.ctor.emit(out)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	return self.ctor.render()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_call"} type={"(self, args, keywords, ctx) -> Expr"}>
+
+<PySourceCode >
+
+```python
+@override
+def transpile_call(
+	self,
+	args: list[ast.expr],
+	keywords: list[ast.keyword],
+	ctx: Transpiler,
+) -> Expr:
+	if keywords:
+		raise TranspileError("Keyword arguments not supported in constructor call")
+	return New(self.ctor, [ctx.emit_expr(a) for a in args])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"list[ast.expr]"} value={null} />
+<PyParameter name={"keywords"} type={"list[ast.keyword]"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_getattr"} type={"(self, attr, ctx) -> Expr"}>
+
+<PySourceCode >
+
+```python
+@override
+def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+	# Convention: trailing underscore escapes Python keywords (e.g. from_ -> from, is_ -> is)
+	js_attr = attr[:-1] if attr.endswith("_") else attr
+	return Member(self.ctor, js_attr)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"attr"} type={"str"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, ctor, name='') -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"ctor"} type={"Expr"} value={null} />
+<PyParameter name={"name"} type={"str"} value={"''"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

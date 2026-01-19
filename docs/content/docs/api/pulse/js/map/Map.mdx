@@ -1,0 +1,339 @@
+---
+title: "Map"
+---
+
+JavaScript Map - a collection of keyed data items.
+
+Map[K, V] preserves insertion order and allows keys of any type.
+
+## Attributes
+
+<PyAttribute name={"size"} type={"int"} value={null}>
+
+The number of key/value pairs in the Map.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, iterable=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, iterable: _Iterable[tuple[K, V]] | None = None, /) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"iterable"} type={"_Iterable[tuple[K, V]] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"clear"} type={"(self) -> None"}>
+
+Remove all key/value pairs.
+
+<PySourceCode >
+
+```python
+def clear(self) -> None:
+	"""Remove all key/value pairs."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"delete"} type={"(self, key) -> bool"}>
+
+Remove a key and its value. Returns True if the key existed.
+
+<PySourceCode >
+
+```python
+def delete(self, key: K) -> bool:
+	"""Remove a key and its value. Returns True if the key existed."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"K"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"get"} type={"(self, key) -> V | None"}>
+
+Return the value for a key, or None if not present.
+
+<PySourceCode >
+
+```python
+def get(self, key: K) -> V | None:
+	"""Return the value for a key, or None if not present."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"K"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.map.V | None"} />
+
+</PyFunction>
+
+<PyFunction name={"has"} type={"(self, key) -> bool"}>
+
+Return True if the key exists in the Map.
+
+<PySourceCode >
+
+```python
+def has(self, key: K) -> bool:
+	"""Return True if the key exists in the Map."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"K"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"set"} type={"(self, key, value) -> Map[K, V]"}>
+
+Set a key/value pair. Returns the Map for chaining.
+
+<PySourceCode >
+
+```python
+def set(self, key: K, value: V) -> "Map[K, V]":
+	"""Set a key/value pair. Returns the Map for chaining."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"K"} value={null} />
+<PyParameter name={"value"} type={"V"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.map.Map[pulse.js.map.K, pulse.js.map.V]"} />
+
+</PyFunction>
+
+<PyFunction name={"forEach"} type={"(self, callback, thisArg=None) -> None"}>
+
+Execute a function for each key/value pair.
+
+<PySourceCode >
+
+```python
+def forEach(
+	self,
+	callback: _Callable[[V, K, "Map[K, V]"], None],
+	thisArg: _Any | None = None,
+	/,
+) -> None:
+	"""Execute a function for each key/value pair."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"callback"} type={"_Callable[[V, K, Map[K, V]], None]"} value={null} />
+<PyParameter name={"thisArg"} type={"_Any | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"keys"} type={"(self) -> _Iterable[K]"}>
+
+Return an iterator of keys.
+
+<PySourceCode >
+
+```python
+def keys(self) -> _Iterable[K]:
+	"""Return an iterator of keys."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterable[pulse.js.map.K]"} />
+
+</PyFunction>
+
+<PyFunction name={"values"} type={"(self) -> _Iterable[V]"}>
+
+Return an iterator of values.
+
+<PySourceCode >
+
+```python
+def values(self) -> _Iterable[V]:
+	"""Return an iterator of values."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterable[pulse.js.map.V]"} />
+
+</PyFunction>
+
+<PyFunction name={"entries"} type={"(self) -> _Iterable[tuple[K, V]]"}>
+
+Return an iterator of [key, value] pairs.
+
+<PySourceCode >
+
+```python
+def entries(self) -> _Iterable[tuple[K, V]]:
+	"""Return an iterator of [key, value] pairs."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterable[tuple[pulse.js.map.K, pulse.js.map.V]]"} />
+
+</PyFunction>
+
+<PyFunction name={"__iter__"} type={"(self) -> _Iterator[tuple[K, V]]"}>
+
+Iterate over [key, value] pairs.
+
+<PySourceCode >
+
+```python
+def __iter__(self) -> _Iterator[tuple[K, V]]:
+	"""Iterate over [key, value] pairs."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterator[tuple[pulse.js.map.K, pulse.js.map.V]]"} />
+
+</PyFunction>
+
+<PyFunction name={"__len__"} type={"(self) -> int"}>
+
+Return the number of key/value pairs (same as size).
+
+<PySourceCode >
+
+```python
+def __len__(self) -> int:
+	"""Return the number of key/value pairs (same as size)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"int"} />
+
+</PyFunction>
+
+<PyFunction name={"__contains__"} type={"(self, key) -> bool"}>
+
+Check if key exists in the Map (same as has).
+
+<PySourceCode >
+
+```python
+def __contains__(self, key: K) -> bool:
+	"""Check if key exists in the Map (same as has)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"K"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>

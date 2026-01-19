@@ -24,14 +24,34 @@ logger = logging.getLogger(__name__)
 
 
 ChannelHandler = Callable[[Any], Any | Awaitable[Any]]
+"""Handler function for channel events. Can be sync or async.
+
+Type alias for ``Callable[[Any], Any | Awaitable[Any]]``.
+"""
 
 
 class ChannelClosed(RuntimeError):
-	"""Raised when interacting with a channel that has been closed."""
+	"""Raised when interacting with a channel that has been closed.
+
+	This exception is raised when attempting to call ``on()``, ``emit()``,
+	or ``request()`` on a channel that has already been closed.
+
+	Example:
+		>>> ch = ps.channel("my-channel")
+		>>> ch.close()
+		>>> ch.emit("event")  # Raises ChannelClosed
+	"""
 
 
 class ChannelTimeout(asyncio.TimeoutError):
-	"""Raised when a channel request times out waiting for a response."""
+	"""Raised when a channel request times out waiting for a response.
+
+	This exception is raised by ``Channel.request()`` when the specified
+	timeout elapses before receiving a response from the client.
+
+	Example:
+		>>> result = await ch.request("get_value", timeout=5.0)  # Raises if no response in 5s
+	"""
 
 
 @dataclass(slots=True)
@@ -311,7 +331,29 @@ class ChannelsManager:
 
 
 class Channel:
-	"""Bidirectional communication channel bound to a render session."""
+	"""Bidirectional communication channel bound to a render session.
+
+	Channels enable real-time messaging between server and client. Use
+	``ps.channel()`` to create a channel within a component.
+
+	Attributes:
+		id: Channel identifier (auto-generated UUID or user-provided).
+		render_id: Associated render session ID.
+		session_id: Associated user session ID.
+		route_path: Route path this channel is bound to, or None.
+		closed: Whether the channel has been closed.
+
+	Example:
+		>>> @ps.component
+		... def ChatRoom():
+		...     ch = ps.channel("chat")
+		...
+		...     @ch.on("message")
+		...     def handle_message(payload):
+		...         ch.emit("broadcast", payload)
+		...
+		...     return ps.div("Chat room")
+	"""
 
 	_manager: ChannelsManager
 	id: str
@@ -344,7 +386,21 @@ class Channel:
 	def on(self, event: str, handler: ChannelHandler) -> Callable[[], None]:
 		"""Register a handler for an incoming event.
 
-		Returns a callable that removes the handler when invoked.
+		Args:
+			event: Event name to listen for.
+			handler: Callback function ``(payload: Any) -> Any | Awaitable[Any]``.
+
+		Returns:
+			Callable that removes the handler when invoked.
+
+		Raises:
+			ChannelClosed: If the channel is closed.
+
+		Example:
+			>>> ch = ps.channel()
+			>>> remove_handler = ch.on("data", lambda payload: print(payload))
+			>>> # Later, to unregister:
+			>>> remove_handler()
 		"""
 
 		self._ensure_open()
@@ -368,7 +424,18 @@ class Channel:
 	# Outgoing messages
 	# ---------------------------------------------------------------------
 	def emit(self, event: str, payload: Any = None) -> None:
-		"""Send a fire-and-forget event to the client."""
+		"""Send a fire-and-forget event to the client.
+
+		Args:
+			event: Event name.
+			payload: Data to send (optional).
+
+		Raises:
+			ChannelClosed: If the channel is closed.
+
+		Example:
+			>>> ch.emit("notification", {"message": "Hello"})
+		"""
 
 		self._ensure_open()
 		msg = ServerChannelRequestMessage(
@@ -389,7 +456,23 @@ class Channel:
 		*,
 		timeout: float | None = None,
 	) -> Any:
-		"""Send a request to the client and await the response."""
+		"""Send a request to the client and await the response.
+
+		Args:
+			event: Event name.
+			payload: Data to send (optional).
+			timeout: Timeout in seconds (optional).
+
+		Returns:
+			Response payload from client.
+
+		Raises:
+			ChannelClosed: If the channel is closed.
+			ChannelTimeout: If the request times out.
+
+		Example:
+			>>> result = await ch.request("get_value", timeout=5.0)
+		"""
 
 		self._ensure_open()
 		request_id = uuid.uuid4().hex
@@ -421,6 +504,11 @@ class Channel:
 
 	# ---------------------------------------------------------------------
 	def close(self) -> None:
+		"""Close the channel and clean up resources.
+
+		After closing, any further operations on the channel will raise
+		``ChannelClosed``. Pending requests will be cancelled.
+		"""
 		if self.closed:
 			return
 		self.closed = True
@@ -458,7 +546,30 @@ class Channel:
 
 
 def channel(identifier: str | None = None) -> Channel:
-	"""Convenience helper to create a channel using the active PulseContext."""
+	"""Create a channel bound to the current render session.
+
+	Args:
+		identifier: Optional channel ID. Auto-generated UUID if not provided.
+
+	Returns:
+		Channel instance.
+
+	Raises:
+		RuntimeError: If called outside an active render session.
+
+	Example:
+		>>> import pulse as ps
+		>>>
+		>>> @ps.component
+		... def ChatRoom():
+		...     ch = ps.channel("chat")
+		...
+		...     @ch.on("message")
+		...     def handle_message(payload):
+		...         ch.emit("broadcast", payload)
+		...
+		...     return ps.div("Chat room")
+	"""
 
 	ctx = PulseContext.get()
 	if ctx.render is None:

@@ -66,8 +66,12 @@ export function LargeSearchToggle({
 			<Search className="size-4" />
 			{text.search}
 			<div className="ms-auto inline-flex gap-0.5">
-				{hotKey.map((k) => (
-					<kbd key={k.display} className="rounded-md border bg-fd-background px-1.5">
+				{hotKey.map((k, i) => (
+					<kbd
+						// biome-ignore lint/suspicious/noArrayIndexKey: hotKey order is static
+						key={i}
+						className="rounded-md border bg-fd-background px-1.5"
+					>
 						{k.display}
 					</kbd>
 				))}

@@ -1,0 +1,263 @@
+---
+title: "QueryStore"
+---
+
+Store for query entries. Manages creation, retrieval, and disposal of queries.
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self):
+	self._entries: dict[QueryKey, KeyedQuery[Any] | InfiniteQuery[Any, Any]] = {}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"items"} type={"(self)"}>
+
+Iterate over all (key, query) pairs in the store.
+
+<PySourceCode >
+
+```python
+def items(self):
+	"""Iterate over all (key, query) pairs in the store."""
+	return self._entries.items()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"get_any"} type={"(self, key)"}>
+
+Get any query (regular or infinite) by key, or None if not found.
+
+<PySourceCode >
+
+```python
+def get_any(self, key: QueryKey):
+	"""Get any query (regular or infinite) by key, or None if not found."""
+	return self._entries.get(key)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"ensure"} type={"(self, key, initial_data=MISSING, initial_data_updated_at=None, gc_time=300.0, retries=3, retry_delay=RETRY_DELAY_DEFAULT) -> KeyedQuery[T]"}>
+
+<PySourceCode >
+
+```python
+def ensure(
+	self,
+	key: QueryKey,
+	initial_data: T | None = MISSING,
+	initial_data_updated_at: float | dt.datetime | None = None,
+	gc_time: float = 300.0,
+	retries: int = 3,
+	retry_delay: float = RETRY_DELAY_DEFAULT,
+) -> KeyedQuery[T]:
+	# Return existing entry if present
+	existing = self._entries.get(key)
+	if existing:
+		if isinstance(existing, InfiniteQuery):
+			raise TypeError(
+				"Query key is already used for an infinite query; cannot reuse for regular query"
+			)
+		return cast(KeyedQuery[T], existing)
+
+	def _on_dispose(e: KeyedQuery[Any]) -> None:
+		if e.key in self._entries and self._entries[e.key] is e:
+			del self._entries[e.key]
+
+	entry = KeyedQuery(
+		key,
+		initial_data=initial_data,
+		initial_data_updated_at=initial_data_updated_at,
+		gc_time=gc_time,
+		retries=retries,
+		retry_delay=retry_delay,
+		on_dispose=_on_dispose,
+	)
+	self._entries[key] = entry
+	return entry
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={null} />
+<PyParameter name={"initial_data"} type={"T | None"} value={"MISSING"} />
+<PyParameter name={"initial_data_updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+<PyParameter name={"gc_time"} type={"float"} value={"300.0"} />
+<PyParameter name={"retries"} type={"int"} value={"3"} />
+<PyParameter name={"retry_delay"} type={"float"} value={"RETRY_DELAY_DEFAULT"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.query.KeyedQuery[pulse.queries.store.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"get"} type={"(self, key) -> KeyedQuery[Any] | None"}>
+
+Get an existing regular query by key, or None if not found.
+
+<PySourceCode >
+
+```python
+def get(self, key: QueryKey) -> KeyedQuery[Any] | None:
+	"""
+	Get an existing regular query by key, or None if not found.
+	"""
+	existing = self._entries.get(key)
+	if existing and isinstance(existing, InfiniteQuery):
+		return None
+	return existing
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.query.KeyedQuery[typing.Any] | None"} />
+
+</PyFunction>
+
+<PyFunction name={"get_infinite"} type={"(self, key) -> InfiniteQuery[Any, Any] | None"}>
+
+Get an existing infinite query by key, or None if not found.
+
+<PySourceCode >
+
+```python
+def get_infinite(self, key: QueryKey) -> InfiniteQuery[Any, Any] | None:
+	"""
+	Get an existing infinite query by key, or None if not found.
+	"""
+	existing = self._entries.get(key)
+	if existing and isinstance(existing, InfiniteQuery):
+		return existing
+	return None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.infinite_query.InfiniteQuery[typing.Any, typing.Any] | None"} />
+
+</PyFunction>
+
+<PyFunction name={"ensure_infinite"} type={"(self, key, *, initial_page_param, get_next_page_param, get_previous_page_param=None, max_pages=0, initial_data_updated_at=None, gc_time=300.0, retries=3, retry_delay=RETRY_DELAY_DEFAULT) -> InfiniteQuery[Any, Any]"}>
+
+<PySourceCode >
+
+```python
+def ensure_infinite(
+	self,
+	key: QueryKey,
+	*,
+	initial_page_param: Any,
+	get_next_page_param: Callable[[list[Page[Any, Any]]], Any | None],
+	get_previous_page_param: Callable[[list[Page[Any, Any]]], Any | None]
+	| None = None,
+	max_pages: int = 0,
+	initial_data_updated_at: float | dt.datetime | None = None,
+	gc_time: float = 300.0,
+	retries: int = 3,
+	retry_delay: float = RETRY_DELAY_DEFAULT,
+) -> InfiniteQuery[Any, Any]:
+	existing = self._entries.get(key)
+	if existing:
+		if not isinstance(existing, InfiniteQuery):
+			raise TypeError(
+				"Query key is already used for a regular query; cannot reuse for infinite query"
+			)
+		return existing
+
+	def _on_dispose(e: InfiniteQuery[Any, Any]) -> None:
+		if e.key in self._entries and self._entries[e.key] is e:
+			del self._entries[e.key]
+
+	entry = InfiniteQuery(
+		key,
+		initial_page_param=initial_page_param,
+		get_next_page_param=get_next_page_param,
+		get_previous_page_param=get_previous_page_param,
+		max_pages=max_pages,
+		initial_data_updated_at=initial_data_updated_at,
+		gc_time=gc_time,
+		retries=retries,
+		retry_delay=retry_delay,
+		on_dispose=_on_dispose,
+	)
+	self._entries[key] = entry
+	return entry
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={null} />
+<PyParameter name={"initial_page_param"} type={"Any"} value={null} />
+<PyParameter name={"get_next_page_param"} type={"Callable[[list[Page[Any, Any]]], Any | None]"} value={null} />
+<PyParameter name={"get_previous_page_param"} type={"Callable[[list[Page[Any, Any]]], Any | None] | None"} value={"None"} />
+<PyParameter name={"max_pages"} type={"int"} value={"0"} />
+<PyParameter name={"initial_data_updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+<PyParameter name={"gc_time"} type={"float"} value={"300.0"} />
+<PyParameter name={"retries"} type={"int"} value={"3"} />
+<PyParameter name={"retry_delay"} type={"float"} value={"RETRY_DELAY_DEFAULT"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.infinite_query.InfiniteQuery[typing.Any, typing.Any]"} />
+
+</PyFunction>

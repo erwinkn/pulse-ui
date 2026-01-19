@@ -46,6 +46,48 @@ __all__ = [
 
 
 def serialize(data: Any) -> Serialized:
+	"""Serialize a Python value to wire format.
+
+	Converts Python values to a JSON-compatible format with metadata for
+	preserving types like datetime, set, and shared references.
+
+	Args:
+		data: Value to serialize.
+
+	Returns:
+		Serialized tuple containing metadata and JSON payload.
+
+	Raises:
+		TypeError: For unsupported types (functions, modules, classes).
+		ValueError: For Infinity float values.
+
+	Supported types:
+		- Primitives: None, bool, int, float, str
+		- Collections: list, tuple, dict, set
+		- datetime.datetime (converted to milliseconds since Unix epoch)
+		- Dataclasses (serialized as dict of fields)
+		- Objects with __dict__ (public attributes only)
+
+	Notes:
+		- NaN floats serialize as None
+		- Infinity raises ValueError
+		- Dict keys must be strings
+		- Private attributes (starting with _) are excluded
+		- Shared references and cycles are preserved
+
+	Example:
+		```python
+		from datetime import datetime
+		import pulse as ps
+
+		data = {
+			"name": "Alice",
+			"created": datetime.now(),
+			"tags": {"admin", "user"},
+		}
+		serialized = ps.serialize(data)
+		```
+	"""
 	# Map object id -> assigned global index
 	seen: dict[int, int] = {}
 	refs: list[int] = []
@@ -133,6 +175,35 @@ def serialize(data: Any) -> Serialized:
 def deserialize(
 	payload: Serialized,
 ) -> Any:
+	"""Deserialize wire format back to Python values.
+
+	Reconstructs Python values from the serialized format, restoring
+	datetime objects, sets, and shared references.
+
+	Args:
+		payload: Serialized tuple from serialize().
+
+	Returns:
+		Reconstructed Python value.
+
+	Raises:
+		TypeError: For malformed payloads.
+
+	Notes:
+		- datetime values are reconstructed as UTC-aware
+		- set values are reconstructed as Python sets
+		- Shared references and cycles are restored
+
+	Example:
+		```python
+		from datetime import datetime
+		import pulse as ps
+
+		original = {"items": [1, 2, 3], "timestamp": datetime.now()}
+		serialized = ps.serialize(original)
+		restored = ps.deserialize(serialized)
+		```
+	"""
 	(refs, dates, sets, _maps), data = payload
 	refs = set(refs)
 	dates = set(dates)

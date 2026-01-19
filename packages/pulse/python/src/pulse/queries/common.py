@@ -19,13 +19,40 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 QueryKey: TypeAlias = tuple[Hashable, ...]
+"""Tuple of hashable values identifying a query in the store.
+
+Used to uniquely identify queries for caching, deduplication, and invalidation.
+Keys are hierarchical tuples like ``("user", user_id)`` or ``("posts", "feed")``.
+"""
+
 QueryStatus: TypeAlias = Literal["loading", "success", "error"]
+"""Current status of a query.
+
+Values:
+    - ``"loading"``: Query is fetching data (initial load or refetch).
+    - ``"success"``: Query has successfully fetched data.
+    - ``"error"``: Query encountered an error during fetch.
+"""
 
 
-# Discriminated union result types for query actions
 @dataclass(slots=True, frozen=True)
 class ActionSuccess(Generic[T]):
-	"""Successful query action result."""
+	"""Successful query action result.
+
+	Returned by query operations like ``refetch()`` and ``wait()`` when the
+	operation completes successfully.
+
+	Attributes:
+		data: The fetched data of type T.
+		status: Always ``"success"`` for discriminated union matching.
+
+	Example:
+		::
+
+			result = await state.user.refetch()
+			if result.status == "success":
+			    print(result.data)
+	"""
 
 	data: T
 	status: Literal["success"] = "success"
@@ -33,13 +60,33 @@ class ActionSuccess(Generic[T]):
 
 @dataclass(slots=True, frozen=True)
 class ActionError:
-	"""Failed query action result."""
+	"""Failed query action result.
+
+	Returned by query operations like ``refetch()`` and ``wait()`` when the
+	operation fails after exhausting retries.
+
+	Attributes:
+		error: The exception that caused the failure.
+		status: Always ``"error"`` for discriminated union matching.
+
+	Example:
+		::
+
+			result = await state.user.refetch()
+			if result.status == "error":
+			    print(f"Failed: {result.error}")
+	"""
 
 	error: Exception
 	status: Literal["error"] = "error"
 
 
 ActionResult: TypeAlias = ActionSuccess[T] | ActionError
+"""Union type for query action results.
+
+Either ``ActionSuccess[T]`` with data or ``ActionError`` with an exception.
+Use the ``status`` field to discriminate between success and error cases.
+"""
 
 OnSuccessFn = Callable[[TState], Any] | Callable[[TState, T], Any]
 OnErrorFn = Callable[[TState], Any] | Callable[[TState, Exception], Any]

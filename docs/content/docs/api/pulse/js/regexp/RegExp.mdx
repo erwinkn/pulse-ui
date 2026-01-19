@@ -1,0 +1,111 @@
+---
+title: "RegExp"
+---
+
+Class for JavaScript RegExp instances.
+
+## Attributes
+
+<PyAttribute name={"source"} type={"str"} value={null} />
+
+<PyAttribute name={"flags"} type={"str"} value={null} />
+
+<PyAttribute name={"glob"} type={"bool"} value={null} />
+
+<PyAttribute name={"ignoreCase"} type={"bool"} value={null} />
+
+<PyAttribute name={"multiline"} type={"bool"} value={null} />
+
+<PyAttribute name={"dotAll"} type={"bool"} value={null} />
+
+<PyAttribute name={"unicode"} type={"bool"} value={null} />
+
+<PyAttribute name={"sticky"} type={"bool"} value={null} />
+
+<PyAttribute name={"lastIndex"} type={"int"} value={null} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, pattern, flags=None)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, pattern: str, flags: str | None = None, /): ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"pattern"} type={"str"} value={null} />
+<PyParameter name={"flags"} type={"str | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"exec"} type={"(self, string) -> list[str] | None"}>
+
+<PySourceCode >
+
+```python
+def exec(self, string: str) -> list[str] | None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"string"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"list[str] | None"} />
+
+</PyFunction>
+
+<PyFunction name={"test"} type={"(self, string) -> bool"}>
+
+<PySourceCode >
+
+```python
+def test(self, string: str) -> bool: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"string"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"toString"} type={"(self) -> str"}>
+
+<PySourceCode >
+
+```python
+def toString(self) -> str: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>

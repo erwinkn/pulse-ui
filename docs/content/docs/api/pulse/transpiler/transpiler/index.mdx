@@ -1,0 +1,79 @@
+---
+title: "transpiler"
+---
+
+Python -> JavaScript transpiler using v2 nodes.
+
+Transpiles a restricted subset of Python into v2 Expr/Stmt AST nodes.
+Dependencies are resolved through a dict[str, Expr] mapping.
+
+<PyAttribute name={"ALLOWED_BINOPS"} type={"dict[type[ast.operator], str]"} value={"{ast.Add: '+', ast.Sub: '-', ast.Mult: '*', ast.Div: '/', ast.Mod: '%', ast.Pow: '**', ast.BitAnd: '&', ast.BitOr: '|', ast.BitXor: '^', ast.LShift: '<<', ast.RShift: '>>'}"} />
+
+<PyAttribute name={"ALLOWED_UNOPS"} type={"dict[type[ast.unaryop], str]"} value={"{ast.UAdd: '+', ast.USub: '-', ast.Not: '!', ast.Invert: '~'}"} />
+
+<PyAttribute name={"ALLOWED_CMPOPS"} type={"dict[type[ast.cmpop], str]"} value={"{ast.Eq: '===', ast.NotEq: '!==', ast.Lt: '<', ast.LtE: '<=', ast.Gt: '>', ast.GtE: '>='}"} />
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"Transpiler"} href={"/docs/api/pulse/transpiler/transpiler/Transpiler"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"transpile"} type={"(fndef, deps=None) -> Function | Arrow"}>
+
+Transpile a Python function to a v2 Function or Arrow node.
+
+<PySourceCode >
+
+```python
+def transpile(
+	fndef: ast.FunctionDef | ast.AsyncFunctionDef,
+	deps: Mapping[str, Expr] | None = None,
+) -> Function | Arrow:
+	"""Transpile a Python function to a v2 Function or Arrow node.
+
+	Args:
+		fndef: The function definition AST node
+		deps: Dictionary mapping global names to Expr instances
+
+	Returns:
+		Arrow for single-expression functions, Function for multi-statement
+	"""
+	return Transpiler(fndef, deps or {}).transpile()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"fndef"} type={"ast.FunctionDef | ast.AsyncFunctionDef"} value={undefined}>
+
+The function definition AST node
+
+</PyParameter>
+<PyParameter name={"deps"} type={"Mapping[str, Expr] | None"} value={"None"}>
+
+Dictionary mapping global names to Expr instances
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"Function | Arrow"}>
+
+Arrow for single-expression functions, Function for multi-statement
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

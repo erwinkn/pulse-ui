@@ -1,0 +1,27 @@
+{
+  "title": "messages",
+  "pages": [
+    "index",
+    "ServerInitMessage",
+    "ServerUpdateMessage",
+    "ServerErrorInfo",
+    "ServerErrorMessage",
+    "ServerNavigateToMessage",
+    "ServerApiCallMessage",
+    "ServerChannelRequestMessage",
+    "ServerChannelResponseMessage",
+    "ServerJsExecMessage",
+    "ClientCallbackMessage",
+    "ClientAttachMessage",
+    "ClientUpdateMessage",
+    "ClientDetachMessage",
+    "ClientApiResultMessage",
+    "ClientChannelRequestMessage",
+    "ClientChannelResponseMessage",
+    "ClientJsResultMessage",
+    "PrerenderPayload",
+    "SocketIODirectives",
+    "Directives",
+    "Prerender"
+  ]
+}

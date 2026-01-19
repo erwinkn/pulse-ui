@@ -104,7 +104,7 @@ export function DocsLayout({
 						const key =
 							"url" in item && item.url
 								? item.url
-								: typeof item.text === "string"
+								: "text" in item && typeof item.text === "string"
 									? item.text
 									: item.type;
 

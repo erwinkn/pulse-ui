@@ -1,0 +1,765 @@
+---
+title: "ReactiveDict"
+---
+
+A dict-like container with per-key reactivity.
+
+Reading a key registers a dependency on that key's Signal. Writing a key
+updates only that key's Signal. Iteration, membership checks, and len are
+reactive to structural changes.
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={null} value={"('_signals', '_structure')"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, initial=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, initial: Mapping[T1, T2] | None = None) -> None:
+	super().__init__()
+	self._signals: dict[T1, Signal[_Any]] = {}
+	self._structure: Signal[int] = Signal(0)
+	if initial:
+		for k, v in initial.items():
+			v = reactive(v)
+			super().__setitem__(k, v)
+			self._signals[k] = Signal(v)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"initial"} type={"Mapping[T1, T2] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_bump_structure"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def _bump_structure(self) -> None:
+	self._structure.write(self._structure.read() + 1)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__getitem__"} type={"(self, key) -> T2"}>
+
+<PySourceCode >
+
+```python
+@override
+def __getitem__(self, key: T1) -> T2:
+	if key not in self._signals:
+		# Lazily create missing key with sentinel so it can be reactive
+		self._signals[key] = Signal(_MISSING)
+	val = self._signals[key].read()
+	# Preserve dict.__getitem__ typing by casting. Semantics: return None
+	# only if the stored value is explicitly None; otherwise unwrap sentinel.
+	return cast(T2, None) if val is _MISSING else cast(T2, val)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive_extensions.T2"} />
+
+</PyFunction>
+
+<PyFunction name={"__setitem__"} type={"(self, key, value) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def __setitem__(self, key: T1, value: T2) -> None:
+	self.set(key, value)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+<PyParameter name={"value"} type={"T2"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__delitem__"} type={"(self, key) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def __delitem__(self, key: T1) -> None:
+	# Remove from mapping but preserve signal object for subscribers
+	if key not in self._signals:
+		self._signals[key] = Signal(_MISSING)
+	else:
+		self._signals[key].write(_MISSING)
+	if super().__contains__(key):
+		super().__delitem__(key)
+		self._bump_structure()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"get"} type={"(self, key, default=None) -> T2 | T3 | None"}>
+
+<PySourceCode >
+
+```python
+@override
+def get(self, key: T1, default: T3 | None = None) -> T2 | T3 | None:
+	# Ensure a per-key signal exists so get() can subscribe even when absent
+	sig = self._signals.get(key)
+	if sig is None:
+		sig = cast(Signal[T2], Signal(_MISSING))
+		self._signals[key] = sig
+	val = sig.read()
+	return default if val is _MISSING else val
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+<PyParameter name={"default"} type={"T3 | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive_extensions.T2 | pulse.reactive_extensions.T3 | None"} />
+
+</PyFunction>
+
+<PyFunction name={"__iter__"} type={"(self) -> Iterator[T1]"}>
+
+<PySourceCode >
+
+```python
+@override
+def __iter__(self) -> Iterator[T1]:
+	# Reactive to structural changes
+	self._structure.read()
+	return super().__iter__()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterator[pulse.reactive_extensions.T1]"} />
+
+</PyFunction>
+
+<PyFunction name={"__len__"} type={"(self) -> int"}>
+
+<PySourceCode >
+
+```python
+@override
+def __len__(self) -> int:
+	self._structure.read()
+	return super().__len__()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"int"} />
+
+</PyFunction>
+
+<PyFunction name={"__contains__"} type={"(self, key) -> bool"}>
+
+<PySourceCode >
+
+```python
+@override
+def __contains__(self, key: T1) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
+	# Subscribe to the per-key value signal so presence checks are reactive
+	sig = self._signals.get(key)
+	if sig is None:
+		sig = Signal(_MISSING)
+		self._signals[key] = sig
+	sig.read()
+	return dict.__contains__(self, key)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"set"} type={"(self, key, value) -> None"}>
+
+<PySourceCode >
+
+```python
+def set(self, key: T1, value: T2) -> None:
+	value = reactive(value)
+	was_present = super().__contains__(key)
+	sig = self._signals.get(key)
+	if sig is None:
+		self._signals[key] = Signal(value)
+	else:
+		sig.write(value)
+	super().__setitem__(key, value)
+	if not was_present:
+		self._bump_structure()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+<PyParameter name={"value"} type={"T2"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"update"} type={"(self, other=None, **kwargs) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+# Pyright also doesn't want to accept this overloaded override, but it's
+# exactly correct.
+def update(  # pyright: ignore[reportIncompatibleMethodOverride]
+	self,
+	other: _Any = None,
+	**kwargs: T2,
+) -> None:
+	# Match dict.update semantics
+	if other is not None:
+		if isinstance(other, Mapping) or hasattr(other, "keys"):
+			# Mapping-like: iterate keys and fetch via __getitem__
+			keys_iter = other.keys()
+			for k in keys_iter:
+				self.set(cast(T1, k), cast(T2, other[k]))
+		else:
+			# Iterable of key/value pairs
+			for k, v in other:
+				self.set(k, v)
+	if kwargs:
+		for k, v in kwargs.items():
+			self.set(cast(T1, k), v)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"_Any"} value={"None"} />
+<PyParameter name={"kwargs"} type={"T2"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"delete"} type={"(self, key) -> None"}>
+
+<PySourceCode >
+
+```python
+def delete(self, key: T1) -> None:
+	if key in self._signals:
+		# Preserve signal and mark as not present; do not raise
+		self._signals[key].write(_MISSING)
+		if super().__contains__(key):
+			super().__delitem__(key)
+			self._bump_structure()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"keys"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+def keys(self):
+	self._structure.read()
+	return super().keys()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"items"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+def items(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+	return ReactiveDictItems(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"values"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+def values(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+	return ReactiveDictValues(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"pop"} type={"(self, key, default=_MISSING) -> T2 | T3"}>
+
+<PySourceCode >
+
+```python
+@override
+def pop(self, key: T1, default: T3 = _MISSING) -> T2 | T3:
+	if super().__contains__(key):
+		val = cast(T2, dict.__getitem__(self, key))
+		self.__delitem__(key)
+		return val
+	if default is _MISSING:
+		raise KeyError(key)
+	return default
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+<PyParameter name={"default"} type={"T3"} value={"_MISSING"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive_extensions.T2 | pulse.reactive_extensions.T3"} />
+
+</PyFunction>
+
+<PyFunction name={"popitem"} type={"(self) -> tuple[T1, T2]"}>
+
+<PySourceCode >
+
+```python
+@override
+def popitem(self) -> tuple[T1, T2]:
+	if not super().__len__():
+		raise KeyError("popitem(): dictionary is empty")
+	k, v = super().popitem()
+	# Preserve and update reactive metadata
+	sig = self._signals.get(k)
+	if sig is None:
+		self._signals[k] = Signal(_MISSING)
+	else:
+		sig.write(_MISSING)
+	self._bump_structure()
+	return k, v
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"tuple[pulse.reactive_extensions.T1, pulse.reactive_extensions.T2]"} />
+
+</PyFunction>
+
+<PyFunction name={"setdefault"} type={"(self, key, default=None) -> T2 | None"}>
+
+<PySourceCode >
+
+```python
+@override
+def setdefault(self, key: T1, default: T2 | None = None) -> T2 | None:
+	if super().__contains__(key):
+		# Return current value without structural change
+		if key not in self._signals:
+			self._signals[key] = Signal(_MISSING)
+		return self._signals[key].read()
+	# Insert default
+	self.set(key, default)  # pyright: ignore[reportArgumentType]
+	# Read structure after write to suppress immediate rerun of the current
+	# effect (if this is used in an effect) caused by the structural bump
+	# performed in set().
+	self._structure.read()
+	sig = self._signals.get(key)
+	if sig is None:
+		sig = cast(Signal[T2], Signal(_MISSING))
+		self._signals[key] = sig
+	return sig.read()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"T1"} value={null} />
+<PyParameter name={"default"} type={"T2 | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive_extensions.T2 | None"} />
+
+</PyFunction>
+
+<PyFunction name={"clear"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def clear(self) -> None:
+	if not super().__len__():
+		return
+	for k in list(super().keys()):
+		# Use our deletion to keep signals/presence updated
+		self.__delitem__(k)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"copy"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+def copy(self):
+	# Shallow copy preserving current values
+	return ReactiveDict(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__copy__"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def __copy__(self):
+	return self.copy()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__deepcopy__"} type={"(self, memo)"}>
+
+<PySourceCode >
+
+```python
+def __deepcopy__(self, memo: dict[int, _Any]):
+	if id(self) in memo:
+		return memo[id(self)]
+	result = type(self)()
+	memo[id(self)] = result
+	for key in dict.__iter__(self):
+		key = cast(T1, key)
+		key_copy = copy.deepcopy(key, memo)
+		value_copy = copy.deepcopy(cast(T2, dict.__getitem__(self, key)), memo)
+		result.set(key_copy, value_copy)
+	return result
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"memo"} type={"dict[int, _Any]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"fromkeys"} type={"(cls, iterable, value=None) -> ReactiveDict[S, _Any | None] | ReactiveDict[S, T]"}>
+
+<PySourceCode >
+
+```python
+@override
+@classmethod
+def fromkeys(
+	cls, iterable: Iterable[S], value: T | None = None, /
+) -> ReactiveDict[S, _Any | None] | ReactiveDict[S, T]:
+	rd: ReactiveDict[S, T | None] = cls()  # pyright: ignore[reportAssignmentType]
+	for k in iterable:
+		rd.set(k, value)
+	return rd
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+<PyParameter name={"iterable"} type={"Iterable[S]"} value={null} />
+<PyParameter name={"value"} type={"T | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive_extensions.ReactiveDict[pulse.reactive_extensions.S, typing.Any | None] | pulse.reactive_extensions.ReactiveDict[pulse.reactive_extensions.S, pulse.reactive_extensions.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"__ior__"} type={"(self, other) -> ReactiveDict[T1, T2]"}>
+
+<PySourceCode >
+
+```python
+@override
+def __ior__(self, other: Mapping[T1, T2]) -> ReactiveDict[T1, T2]:  # pyright: ignore[reportIncompatibleMethodOverride]
+	self.update(other)
+	return self
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Mapping[T1, T2]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive_extensions.ReactiveDict[pulse.reactive_extensions.T1, pulse.reactive_extensions.T2]"} />
+
+</PyFunction>
+
+<PyFunction name={"__or__"} type={"(self, other) -> ReactiveDict[T1, T2]"}>
+
+<PySourceCode >
+
+```python
+@override
+def __or__(self, other: Mapping[T1, T2]) -> ReactiveDict[T1, T2]:  # pyright: ignore[reportIncompatibleMethodOverride]
+	result = ReactiveDict(self)
+	result.update(other)
+	return result
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Mapping[T1, T2]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive_extensions.ReactiveDict[pulse.reactive_extensions.T1, pulse.reactive_extensions.T2]"} />
+
+</PyFunction>
+
+<PyFunction name={"__ror__"} type={"(self, other) -> ReactiveDict[T1, T2]"}>
+
+<PySourceCode >
+
+```python
+@override
+def __ror__(self, other: Mapping[T1, T2]) -> ReactiveDict[T1, T2]:  # pyright: ignore[reportIncompatibleMethodOverride]
+	result = ReactiveDict(other)
+	result.update(self)
+	return result
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Mapping[T1, T2]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive_extensions.ReactiveDict[pulse.reactive_extensions.T1, pulse.reactive_extensions.T2]"} />
+
+</PyFunction>
+
+<PyFunction name={"unwrap"} type={"(self) -> dict[T1, _Any]"}>
+
+Return a plain dict while subscribing to contained signals.
+
+<PySourceCode >
+
+```python
+def unwrap(self) -> dict[T1, _Any]:
+	"""Return a plain dict while subscribing to contained signals.
+
+	Returns:
+		A plain dict with all reactive containers recursively unwrapped.
+	"""
+	self._structure.read()
+	result: dict[T1, _Any] = {}
+	for key in dict.__iter__(self):
+		result[key] = unwrap(self[key])
+	return result
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"dict"}>
+
+A plain dict with all reactive containers recursively unwrapped.
+
+</PyFunctionReturn>
+
+</PyFunction>

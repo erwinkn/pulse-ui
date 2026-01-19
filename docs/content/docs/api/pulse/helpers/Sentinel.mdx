@@ -1,0 +1,82 @@
+---
+title: "Sentinel"
+---
+
+## Attributes
+
+<PyAttribute name={"name"} type={"str"} value={"name"} />
+
+<PyAttribute name={"value"} type={"Any"} value={"value"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, name, value=MISSING) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, name: str, value: Any = MISSING) -> None:
+	self.name = name
+	self.value = value
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"value"} type={"Any"} value={"MISSING"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__call__"} type={"(self, value)"}>
+
+<PySourceCode >
+
+```python
+def __call__(self, value: Any):
+	return Sentinel(self.name, value)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__repr__"} type={"(self) -> str"}>
+
+<PySourceCode >
+
+```python
+@override
+def __repr__(self) -> str:
+	if self.value is not MISSING:
+		return f"{self.name}({self.value})"
+	else:
+		return self.name
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>

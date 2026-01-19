@@ -1,0 +1,72 @@
+---
+title: "CSSStyleDeclaration"
+---
+
+Protocol for CSSStyleDeclaration.
+
+## Functions
+
+<PyFunction name={"getPropertyValue"} type={"(self, property) -> str"}>
+
+<PySourceCode >
+
+```python
+def getPropertyValue(self, property: str) -> str: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"property"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+
+<PyFunction name={"setProperty"} type={"(self, property, value, priority='') -> None"}>
+
+<PySourceCode >
+
+```python
+def setProperty(self, property: str, value: str, priority: str = "", /) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"property"} type={"str"} value={null} />
+<PyParameter name={"value"} type={"str"} value={null} />
+<PyParameter name={"priority"} type={"str"} value={"''"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"removeProperty"} type={"(self, property) -> str"}>
+
+<PySourceCode >
+
+```python
+def removeProperty(self, property: str) -> str: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"property"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>

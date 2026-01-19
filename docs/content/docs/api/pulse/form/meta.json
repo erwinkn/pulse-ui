@@ -1,0 +1,12 @@
+{
+  "title": "form",
+  "pages": [
+    "index",
+    "FormRegistration",
+    "FormRegistry",
+    "PulseFormProps",
+    "GeneratedFormProps",
+    "ManualForm",
+    "FormStorage"
+  ]
+}

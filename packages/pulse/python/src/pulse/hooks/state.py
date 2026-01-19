@@ -8,6 +8,12 @@ S = TypeVar("S", bound=State)
 
 
 class StateHookState(HookState):
+	"""Internal hook state for managing State instances across renders.
+
+	Stores State instances keyed by string identifier and tracks which keys
+	have been accessed during the current render cycle.
+	"""
+
 	__slots__ = ("instances", "called_keys")  # pyright: ignore[reportUnannotatedClassAttribute]
 	instances: dict[str, State]
 	called_keys: set[str]
@@ -82,19 +88,32 @@ _state_hook = hooks.create(
 
 
 def state(key: str, arg: S | Callable[[], S]) -> S:
-	"""Get or create a state instance associated with the given key.
+	"""Get or create a State instance persisted across renders.
 
 	Args:
-		key: A unique string key identifying this state within the component.
-		arg: A State instance or a callable that returns a State instance.
+		key: Unique identifier within the component. Must be a non-empty string.
+		arg: State instance or factory function that returns a State instance.
+			The factory is only called on first render; subsequent renders
+			return the cached instance.
 
 	Returns:
-		The state instance (same instance on subsequent renders with the same key).
+		The same State instance on subsequent renders with the same key.
 
 	Raises:
 		ValueError: If key is empty.
 		RuntimeError: If called more than once per render with the same key.
 		TypeError: If arg is not a State or callable returning a State.
+
+	Example:
+		>>> def counter():
+		...     s = ps.state("counter", lambda: CounterState())
+		...     return m.Button(f"Count: {s.count}", on_click=lambda: s.increment())
+
+	Notes:
+		- Key must be non-empty string
+		- Can only be called once per render with the same key
+		- Factory is only called on first render; subsequent renders return cached instance
+		- State is disposed when component unmounts
 	"""
 	if not key:
 		raise ValueError("state() requires a non-empty string key")

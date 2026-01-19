@@ -1,0 +1,49 @@
+---
+title: "CORSOptions"
+---
+
+TypedDict for CORS middleware configuration.
+
+## Attributes
+
+<PyAttribute name={"allow_origins"} type={"Sequence[str]"} value={null}>
+
+List of allowed origins. Use ['*'] for all. Default: ().
+
+</PyAttribute>
+
+<PyAttribute name={"allow_methods"} type={"Sequence[str]"} value={null}>
+
+List of allowed HTTP methods. Default: ('GET',).
+
+</PyAttribute>
+
+<PyAttribute name={"allow_headers"} type={"Sequence[str]"} value={null}>
+
+List of allowed HTTP headers. Default: ().
+
+</PyAttribute>
+
+<PyAttribute name={"allow_credentials"} type={"bool"} value={null}>
+
+Whether to allow credentials. Default: False.
+
+</PyAttribute>
+
+<PyAttribute name={"allow_origin_regex"} type={"str | None"} value={null}>
+
+Regex pattern for allowed origins. Default: None.
+
+</PyAttribute>
+
+<PyAttribute name={"expose_headers"} type={"Sequence[str]"} value={null}>
+
+List of headers to expose to browser. Default: ().
+
+</PyAttribute>
+
+<PyAttribute name={"max_age"} type={"int"} value={null}>
+
+Browser CORS cache duration in seconds. Default: 600.
+
+</PyAttribute>

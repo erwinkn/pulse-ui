@@ -1,0 +1,48 @@
+---
+title: "request"
+---
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"PulseRequest"} href={"/docs/api/pulse/request/PulseRequest"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"_bytes_kv_to_str"} type={"(headers) -> dict[str, str]"}>
+
+<PySourceCode >
+
+```python
+def _bytes_kv_to_str(headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
+	out: dict[str, str] = {}
+	for k, v in headers:
+		try:
+			out[k.decode("latin1").lower()] = v.decode("latin1")
+		except Exception:
+			# Best effort
+			out[str(k).lower()] = str(v)
+	return out
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"headers"} type={"list[tuple[bytes, bytes]]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"dict[str, str]"} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

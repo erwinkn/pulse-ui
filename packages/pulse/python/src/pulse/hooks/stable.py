@@ -8,6 +8,17 @@ TCallable = TypeVar("TCallable", bound=Callable[..., Any])
 
 
 class StableEntry:
+	"""Container for a stable value and its wrapper function.
+
+	Holds a value and a wrapper function that always delegates to the
+	current value, allowing the wrapper reference to remain stable while
+	the underlying value can change.
+
+	Attributes:
+		value: The current wrapped value.
+		wrapper: Stable function that delegates to the current value.
+	"""
+
 	__slots__ = ("value", "wrapper")  # pyright: ignore[reportUnannotatedClassAttribute]
 	value: Any
 	wrapper: Callable[..., Any]
@@ -25,6 +36,13 @@ class StableEntry:
 
 
 class StableRegistry(HookState):
+	"""Internal hook state that stores stable entries by key.
+
+	Maintains a dictionary of StableEntry objects, allowing stable
+	wrappers to persist across renders while their underlying values
+	can be updated.
+	"""
+
 	__slots__ = ("entries",)  # pyright: ignore[reportUnannotatedClassAttribute]
 
 	def __init__(self) -> None:
@@ -59,6 +77,41 @@ def stable(key: str, value: T) -> Callable[[], T]: ...
 
 
 def stable(key: str, value: Any = MISSING):
+	"""Return a stable wrapper that always calls the latest value.
+
+	Creates a wrapper function that maintains a stable reference across renders
+	while delegating to the current value. Useful for event handlers and callbacks
+	that need to stay referentially stable.
+
+	Args:
+		key: Unique identifier for this stable value within the component.
+		value: Optional value or callable to wrap. If provided, updates the
+			stored value and returns the wrapper. If omitted, returns the
+			existing wrapper for the key.
+
+	Returns:
+		A stable wrapper function that delegates to the current value. If the
+		value is callable, the wrapper calls it with any provided arguments.
+		If not callable, the wrapper returns the value directly.
+
+	Raises:
+		ValueError: If key is empty.
+		KeyError: If value is not provided and no entry exists for the key.
+
+	Example:
+		>>> def my_component():
+		...     s = ps.state("data", lambda: DataState())
+		...
+		...     # Without stable, this would create a new function each render
+		...     handle_click = ps.stable("click", lambda: s.increment())
+		...
+		...     return m.Button("Click", on_click=handle_click)
+
+	Use Cases:
+		- Event handlers passed to child components to prevent unnecessary re-renders
+		- Callbacks registered with external systems
+		- Any function reference that needs to stay stable across renders
+	"""
 	if not key:
 		raise ValueError("stable() requires a non-empty string key")
 

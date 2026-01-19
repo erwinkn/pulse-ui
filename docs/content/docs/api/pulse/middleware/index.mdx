@@ -1,0 +1,104 @@
+---
+title: "middleware"
+---
+
+<PyAttribute name={"T"} type={null} value={"TypeVar('T')"} />
+
+<PyAttribute name={"RoutePrerenderResponse"} type={null} value={"Ok[ServerInitMessage] | Redirect | NotFound"}>
+
+Response type for individual route prerender: ``Ok[ServerInitMessage] | Redirect | NotFound``.
+
+</PyAttribute>
+
+<PyAttribute name={"PrerenderResponse"} type={null} value={"Ok[Prerender] | Redirect | NotFound"}>
+
+Response type for batch prerender: ``Ok[Prerender] | Redirect | NotFound``.
+
+</PyAttribute>
+
+<PyAttribute name={"ConnectResponse"} type={null} value={"Ok[None] | Deny"}>
+
+Response type for WebSocket connection: ``Ok[None] | Deny``.
+
+</PyAttribute>
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"Redirect"} href={"/docs/api/pulse/middleware/Redirect"} />
+<Card title={"NotFound"} href={"/docs/api/pulse/middleware/NotFound"} />
+<Card title={"Ok"} href={"/docs/api/pulse/middleware/Ok"} />
+<Card title={"Deny"} href={"/docs/api/pulse/middleware/Deny"} />
+<Card title={"PulseMiddleware"} href={"/docs/api/pulse/middleware/PulseMiddleware"} />
+<Card title={"MiddlewareStack"} href={"/docs/api/pulse/middleware/MiddlewareStack"} />
+<Card title={"LatencyMiddleware"} href={"/docs/api/pulse/middleware/LatencyMiddleware"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"stack"} type={"(*middlewares) -> PulseMiddleware"}>
+
+Compose multiple middlewares into a single middleware stack.
+
+<Callout title={"Example"} type={"example"}>
+
+>>> import pulse as ps
+>>>
+>>> app = ps.App(
+...     middleware=ps.stack(
+...         AuthMiddleware(),
+...         LoggingMiddleware(),
+...     )
+... )
+
+</Callout>
+
+<PySourceCode >
+
+```python
+def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
+	"""Compose multiple middlewares into a single middleware stack.
+
+	Args:
+		*middlewares: Middleware instances to compose.
+
+	Returns:
+		``MiddlewareStack`` instance.
+
+	Example:
+		>>> import pulse as ps
+		>>>
+		>>> app = ps.App(
+		...     middleware=ps.stack(
+		...         AuthMiddleware(),
+		...         LoggingMiddleware(),
+		...     )
+		... )
+	"""
+	return MiddlewareStack(list(middlewares))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"middlewares"} type={"PulseMiddleware"} value={"()"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.PulseMiddleware"}>
+
+``MiddlewareStack`` instance.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

@@ -1,0 +1,175 @@
+---
+title: "TagExpr"
+---
+
+Expr that creates JSX elements when called.
+
+Represents a tag function like `div`, `span`, etc.
+When called, produces an Element with props from kwargs and children from args.
+
+## Attributes
+
+<PyAttribute name={"tag"} type={"str"} value={null} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append(f'"{self.tag}"')
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	return self.tag
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_call"} type={"(self, args, keywords, ctx) -> Expr"}>
+
+Handle tag calls: positional args are children, kwargs are props.
+
+Spread (**expr) is supported for prop spreading.
+
+<PySourceCode >
+
+```python
+@override
+def transpile_call(
+	self,
+	args: list[ast.expr],
+	keywords: list[ast.keyword],
+	ctx: Transpiler,
+) -> Expr:
+	"""Handle tag calls: positional args are children, kwargs are props.
+
+	Spread (**expr) is supported for prop spreading.
+	"""
+	# Build children from positional args
+	children: list[Node] = []
+	for a in args:
+		children.append(ctx.emit_expr(a))
+
+	# Build props from kwargs
+	props: list[tuple[str, Prop] | Spread] = []
+	key: str | Expr | None = None
+	for kw in keywords:
+		if kw.arg is None:
+			# **spread syntax
+			props.append(spread_dict(ctx.emit_expr(kw.value)))
+		else:
+			k = kw.arg
+			prop_value = ctx.emit_expr(kw.value)
+			if k == "key":
+				# Accept any expression as key for transpilation
+				if isinstance(prop_value, Literal) and isinstance(
+					prop_value.value, str
+				):
+					key = prop_value.value  # Optimize string literals
+				else:
+					key = prop_value  # Keep as expression
+			else:
+				props.append((k, prop_value))
+
+	return Element(
+		tag=self.tag,
+		props=props if props else None,
+		children=children if children else None,
+		key=key,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"list[ast.expr]"} value={null} />
+<PyParameter name={"keywords"} type={"list[ast.keyword]"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"__call__"} type={"(self, *args, **kwargs)"}>
+
+Allow calling TagExpr objects in Python code.
+
+Returns a placeholder Element for type checking. The actual transpilation
+happens via transpile_call when the transpiler processes the AST.
+
+<PySourceCode >
+
+```python
+@override
+def __call__(self, *args: Any, **kwargs: Any):  # pyright: ignore[reportIncompatibleMethodOverride]
+	"""Allow calling TagExpr objects in Python code.
+
+	Returns a placeholder Element for type checking. The actual transpilation
+	happens via transpile_call when the transpiler processes the AST.
+	"""
+	return Element(tag=self.tag, props=None, children=None, key=None)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"Any"} value={"()"} />
+<PyParameter name={"kwargs"} type={"Any"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, tag) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"tag"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

@@ -1,0 +1,361 @@
+---
+title: "SetupHookState"
+---
+
+Internal hook state for the setup hook.
+
+Manages the initialization, argument tracking, and lifecycle of
+setup-created values.
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={null} value={"('value', 'initialized', 'args', 'kwargs', 'effects', 'key', '_called', '_pending_key')"} />
+
+<PyAttribute name={"initialized"} type={"bool"} value={"False"}>
+
+Whether setup has been called at least once.
+
+</PyAttribute>
+
+<PyAttribute name={"_called"} type={"bool"} value={"False"} />
+
+<PyAttribute name={"value"} type={"Any"} value={"None"}>
+
+The value returned by the setup function.
+
+</PyAttribute>
+
+<PyAttribute name={"args"} type={"list[Signal[Any]]"} value={"[]"}>
+
+List of signals tracking positional argument values.
+
+</PyAttribute>
+
+<PyAttribute name={"kwargs"} type={"dict[str, Signal[Any]]"} value={"{}"}>
+
+Dict of signals tracking keyword argument values.
+
+</PyAttribute>
+
+<PyAttribute name={"effects"} type={"list[Effect]"} value={"[]"}>
+
+List of effects created during setup execution.
+
+</PyAttribute>
+
+<PyAttribute name={"key"} type={"str | None"} value={"None"}>
+
+Optional key for re-initialization control.
+
+</PyAttribute>
+
+<PyAttribute name={"_pending_key"} type={"str | None"} value={"None"} />
+
+<PyAttribute name={"called_this_render"} type={"bool"} value={null} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self) -> None:
+	super().__init__()
+	self.value: Any = None
+	self.initialized = False
+	self.args: list[Signal[Any]] = []
+	self.kwargs: dict[str, Signal[Any]] = {}
+	self.effects: list[Effect] = []
+	self.key: str | None = None
+	self._called = False
+	self._pending_key: str | None = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"on_render_start"} type={"(self, render_cycle) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def on_render_start(self, render_cycle: int) -> None:
+	super().on_render_start(render_cycle)
+	self._called = False
+	self._pending_key = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render_cycle"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"initialize"} type={"(self, init_func, args, kwargs, key) -> Any"}>
+
+<PySourceCode >
+
+```python
+def initialize(
+	self,
+	init_func: Callable[..., Any],
+	args: tuple[Any, ...],
+	kwargs: dict[str, Any],
+	key: str | None,
+) -> Any:
+	self.dispose_effects()
+	with Scope() as scope:
+		self.value = init_func(*args, **kwargs)
+		self.effects = list(scope.effects)
+	self.args = [Signal(arg) for arg in args]
+	self.kwargs = {name: Signal(value) for name, value in kwargs.items()}
+	self.initialized = True
+	self.key = key
+	return self.value
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"init_func"} type={"Callable[..., Any]"} value={null} />
+<PyParameter name={"args"} type={"tuple[Any, ...]"} value={null} />
+<PyParameter name={"kwargs"} type={"dict[str, Any]"} value={null} />
+<PyParameter name={"key"} type={"str | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"typing.Any"} />
+
+</PyFunction>
+
+<PyFunction name={"ensure_signature"} type={"(self, args, kwargs) -> None"}>
+
+<PySourceCode >
+
+```python
+def ensure_signature(
+	self,
+	args: tuple[Any, ...],
+	kwargs: dict[str, Any],
+) -> None:
+	if len(args) != len(self.args):
+		raise RuntimeError(
+			"Number of positional arguments passed to `pulse.setup` changed. "
+			+ "Make sure you always call `pulse.setup` with the same number of positional "
+			+ "arguments and the same keyword arguments."
+		)
+	if kwargs.keys() != self.kwargs.keys():
+		new_keys = kwargs.keys() - self.kwargs.keys()
+		missing_keys = self.kwargs.keys() - kwargs.keys()
+		raise RuntimeError(
+			"Keyword arguments passed to `pulse.setup` changed. "
+			+ f"New arguments: {list(new_keys)}. Missing arguments: {list(missing_keys)}. "
+			+ "Make sure you always call `pulse.setup` with the same number of positional "
+			+ "arguments and the same keyword arguments."
+		)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"tuple[Any, ...]"} value={null} />
+<PyParameter name={"kwargs"} type={"dict[str, Any]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"update_args"} type={"(self, args, kwargs) -> None"}>
+
+<PySourceCode >
+
+```python
+def update_args(
+	self,
+	args: tuple[Any, ...],
+	kwargs: dict[str, Any],
+) -> None:
+	for idx, value in enumerate(args):
+		self.args[idx].write(value)
+	for name, value in kwargs.items():
+		self.kwargs[name].write(value)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"tuple[Any, ...]"} value={null} />
+<PyParameter name={"kwargs"} type={"dict[str, Any]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose_effects"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def dispose_effects(self) -> None:
+	for effect in self.effects:
+		effect.dispose()
+	self.effects = []
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self) -> None:
+	self.dispose_effects()
+	self.args = []
+	self.kwargs = {}
+	self.value = None
+	self.initialized = False
+	self.key = None
+	self._pending_key = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"ensure_not_called"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def ensure_not_called(self) -> None:
+	if self._called:
+		raise RuntimeError(
+			"`pulse.setup` can only be called once per component render"
+		)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"mark_called"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def mark_called(self) -> None:
+	self._called = True
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"set_pending_key"} type={"(self, key) -> None"}>
+
+<PySourceCode >
+
+```python
+def set_pending_key(self, key: str) -> None:
+	self._pending_key = key
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"consume_pending_key"} type={"(self) -> str | None"}>
+
+<PySourceCode >
+
+```python
+def consume_pending_key(self) -> str | None:
+	key = self._pending_key
+	self._pending_key = None
+	return key
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str | None"} />
+
+</PyFunction>

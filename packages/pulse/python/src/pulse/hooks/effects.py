@@ -6,6 +6,16 @@ from pulse.reactive import Effect, EffectFn, Untrack
 
 
 class EffectsHookState(HookState):
+	"""Internal hook state for managing reactive effects across renders.
+
+	Tracks effect initialization and handles recreation when keys change.
+
+	Attributes:
+		initialized: Whether effects have been initialized.
+		effects: Tuple of active Effect instances.
+		key: Optional key for identifying when effects should be recreated.
+	"""
+
 	__slots__ = ("initialized", "effects", "key", "_called")  # pyright: ignore[reportUnannotatedClassAttribute]
 	initialized: bool
 	_called: bool
@@ -85,6 +95,40 @@ def effects(
 	on_error: Callable[[Exception], None] | None = None,
 	key: str | None = None,
 ) -> None:
+	"""Register effects that persist across renders.
+
+	Effects are reactive functions that automatically re-run when their
+	dependencies change. They are disposed when the component unmounts
+	or when the key changes.
+
+	Args:
+		*fns: Effect functions to register. Each function will be wrapped
+			in a reactive Effect that tracks its dependencies.
+		on_error: Optional error handler called if an effect throws an exception.
+		key: Optional key; if changed between renders, existing effects are
+			disposed and new ones are created.
+
+	Raises:
+		RuntimeError: If called more than once per component render.
+		ValueError: If any of the provided functions is not callable.
+
+	Example:
+		>>> def user_profile(user_id: str):
+		...     s = ps.state("user", lambda: UserState(user_id))
+		...
+		...     ps.effects(
+		...         lambda: print(f"User changed: {s.name}"),
+		...         lambda: subscribe_to_updates(s.user_id),
+		...         key=user_id,  # Recreate effects when user_id changes
+		...     )
+		...
+		...     return m.Text(s.name)
+
+	Notes:
+		- Can only be called once per component render
+		- Effects are disposed when component unmounts
+		- Changing ``key`` disposes old effects and creates new ones
+	"""
 	state = cast(EffectsHookState, _effects_hook())
 	state.ensure_not_called()
 

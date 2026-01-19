@@ -1,0 +1,453 @@
+---
+title: "Computed"
+---
+
+A derived value that auto-updates when dependencies change.
+
+Lazy evaluation: only recomputes when read and dirty. Throws if a signal
+is written inside the computed function.
+
+## Attributes
+
+<PyAttribute name={"fn"} type={"Callable[..., T_co]"} value={"fn"} />
+
+<PyAttribute name={"name"} type={"str | None"} value={"name"}>
+
+Debug name.
+
+</PyAttribute>
+
+<PyAttribute name={"dirty"} type={"bool"} value={"False"}>
+
+Whether recompute is needed.
+
+</PyAttribute>
+
+<PyAttribute name={"on_stack"} type={"bool"} value={"False"} />
+
+<PyAttribute name={"accepts_prev_value"} type={"bool"} value={"any((p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)) for p in params)"} />
+
+<PyAttribute name={"value"} type={"T_co"} value={"None"}>
+
+Cached computed value.
+
+</PyAttribute>
+
+<PyAttribute name={"last_change"} type={"int"} value={"-1"}>
+
+Epoch when value last changed.
+
+</PyAttribute>
+
+<PyAttribute name={"deps"} type={"dict[Signal[Any] | Computed[Any], int]"} value={"{}"} />
+
+<PyAttribute name={"obs"} type={"list[Computed[Any] | Effect]"} value={"[]"} />
+
+<PyAttribute name={"_obs_change_listeners"} type={"list[Callable[[int], None]]"} value={"[]"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, fn, name=None)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, fn: Callable[..., T_co], name: str | None = None):
+	self.fn = fn
+	self.value: T_co = None  # pyright: ignore[reportAttributeAccessIssue]
+	self.name = name
+	self.dirty = False
+	self.on_stack = False
+	self.last_change: int = -1
+	# Dep -> last_change
+	self.deps: dict[Signal[Any] | Computed[Any], int] = {}
+	self.obs: list[Computed[Any] | Effect] = []
+	self._obs_change_listeners: list[Callable[[int], None]] = []
+	sig = inspect.signature(self.fn)
+	params = list(sig.parameters.values())
+	# Check if function has at least one positional parameter
+	# (excluding *args and **kwargs, and keyword-only params)
+	self.accepts_prev_value = any(
+		p.kind
+		in (
+			inspect.Parameter.POSITIONAL_ONLY,
+			inspect.Parameter.POSITIONAL_OR_KEYWORD,
+		)
+		for p in params
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"Callable[..., T_co]"} value={null} />
+<PyParameter name={"name"} type={"str | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"read"} type={"(self) -> T_co"}>
+
+Get the computed value, recomputing if dirty, and register a dependency.
+
+<PySourceCode >
+
+```python
+def read(self) -> T_co:
+	"""Get the computed value, recomputing if dirty, and register a dependency.
+
+	Returns:
+		The computed value.
+
+	Raises:
+		RuntimeError: If circular dependency detected.
+	"""
+	if self.on_stack:
+		raise RuntimeError("Circular dependency detected")
+
+	rc = REACTIVE_CONTEXT.get()
+	# Ensure this computed is up-to-date before registering as a dep
+	self.recompute_if_necessary()
+	if rc.scope is not None:
+		# Register after potential recompute so the scope records the
+		# latest observed version for this computed
+		rc.scope.register_dep(self)
+	return self.value
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive.T_co"}>
+
+The computed value.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"__call__"} type={"(self) -> T_co"}>
+
+Alias for read().
+
+<PySourceCode >
+
+```python
+def __call__(self) -> T_co:
+	"""Alias for read().
+
+	Returns:
+		The computed value.
+	"""
+	return self.read()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive.T_co"}>
+
+The computed value.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"unwrap"} type={"(self) -> T_co"}>
+
+Alias for read().
+
+<PySourceCode >
+
+```python
+def unwrap(self) -> T_co:
+	"""Alias for read().
+
+	Returns:
+		The computed value while registering subscriptions.
+	"""
+	return self.read()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive.T_co"}>
+
+The computed value while registering subscriptions.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"__copy__"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def __copy__(self):
+	return self.__class__(self.fn, name=self.name)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__deepcopy__"} type={"(self, memo)"}>
+
+<PySourceCode >
+
+```python
+def __deepcopy__(self, memo: dict[int, Any]):
+	if id(self) in memo:
+		return memo[id(self)]
+	fn_copy = copy.deepcopy(self.fn, memo)
+	name_copy = copy.deepcopy(self.name, memo)
+	new_computed = self.__class__(fn_copy, name=name_copy)
+	memo[id(self)] = new_computed
+	return new_computed
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"memo"} type={"dict[int, Any]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"push_change"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def push_change(self):
+	if self.dirty:
+		return
+
+	self.dirty = True
+	for obs in self.obs:
+		obs.push_change()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_recompute"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def _recompute(self):
+	prev_value = self.value
+	prev_deps = set(self.deps)
+	with Scope() as scope:
+		if self.on_stack:
+			raise RuntimeError("Circular dependency detected")
+		self.on_stack = True
+		try:
+			execution_epoch = epoch()
+			if self.accepts_prev_value:
+				self.value = self.fn(prev_value)
+			else:
+				self.value = self.fn()
+			if epoch() != execution_epoch:
+				raise RuntimeError(
+					f"Detected write to a signal in computed {self.name}. Computeds should be read-only."
+				)
+			self.dirty = False
+			if not values_equal(prev_value, self.value):
+				self.last_change = execution_epoch
+
+			if len(scope.effects) > 0:
+				raise RuntimeError(
+					"An effect was created within a computed variable's function. "
+					+ "This is most likely unintended. If you need to create an effect here, "
+					+ "wrap the effect creation with Untrack()."
+				)
+		finally:
+			self.on_stack = False
+
+	# Update deps and their observed versions to the values seen during this recompute
+	self.deps = scope.deps
+	new_deps = set(self.deps)
+	add_deps = new_deps - prev_deps
+	remove_deps = prev_deps - new_deps
+	for dep in add_deps:
+		dep.add_obs(self)
+	for dep in remove_deps:
+		dep.remove_obs(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"recompute_if_necessary"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def recompute_if_necessary(self):
+	if self.last_change < 0:
+		self._recompute()
+		return
+	if not self.dirty:
+		return
+
+	for dep in self.deps:
+		if isinstance(dep, Computed):
+			dep.recompute_if_necessary()
+		# Only recompute if a dependency has changed beyond the version
+		# we last observed during our previous recompute
+		last_seen = self.deps.get(dep, -1)
+		if dep.last_change > last_seen:
+			self._recompute()
+			return
+
+	self.dirty = False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"add_obs"} type={"(self, obs)"}>
+
+<PySourceCode >
+
+```python
+def add_obs(self, obs: "Computed[Any] | Effect"):
+	prev = len(self.obs)
+	self.obs.append(obs)
+	if prev == 0 and len(self.obs) == 1:
+		for cb in list(self._obs_change_listeners):
+			cb(len(self.obs))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"obs"} type={"Computed[Any] | Effect"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"remove_obs"} type={"(self, obs)"}>
+
+<PySourceCode >
+
+```python
+def remove_obs(self, obs: "Computed[Any] | Effect"):
+	if obs in self.obs:
+		self.obs.remove(obs)
+		if len(self.obs) == 0:
+			for cb in list(self._obs_change_listeners):
+				cb(0)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"obs"} type={"Computed[Any] | Effect"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"on_observer_change"} type={"(self, cb) -> Callable[[], None]"}>
+
+<PySourceCode >
+
+```python
+def on_observer_change(self, cb: Callable[[int], None]) -> Callable[[], None]:
+	self._obs_change_listeners.append(cb)
+
+	def off():
+		try:
+			self._obs_change_listeners.remove(cb)
+		except ValueError:
+			pass
+
+	return off
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cb"} type={"Callable[[int], None]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Callable[[], None]"} />
+
+</PyFunction>

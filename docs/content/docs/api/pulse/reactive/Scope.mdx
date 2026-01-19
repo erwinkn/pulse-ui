@@ -1,0 +1,153 @@
+---
+title: "Scope"
+---
+
+Tracks dependencies and effects created within a context.
+
+Use as a context manager to capture which signals/computeds are read
+and which effects are created.
+
+## Attributes
+
+<PyAttribute name={"deps"} type={"dict[Signal[Any] | Computed[Any], int]"} value={"{}"}>
+
+Tracked dependencies mapping Signal/Computed to last_change epoch.
+
+</PyAttribute>
+
+<PyAttribute name={"effects"} type={"list[Effect]"} value={"[]"}>
+
+Effects created in this scope.
+
+</PyAttribute>
+
+<PyAttribute name={"_token"} type={"Token[ReactiveContext] | None"} value={"None"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self):
+	# Dict preserves insertion order. Maps dependency -> last_change
+	self.deps: dict[Signal[Any] | Computed[Any], int] = {}
+	self.effects: list[Effect] = []
+	self._token: "Token[ReactiveContext] | None" = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"register_effect"} type={"(self, effect)"}>
+
+<PySourceCode >
+
+```python
+def register_effect(self, effect: "Effect"):
+	if effect not in self.effects:
+		self.effects.append(effect)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"effect"} type={"Effect"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"register_dep"} type={"(self, value)"}>
+
+<PySourceCode >
+
+```python
+def register_dep(self, value: "Signal[Any] | Computed[Any]"):
+	self.deps[value] = value.last_change
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"Signal[Any] | Computed[Any]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__enter__"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def __enter__(self):
+	rc = REACTIVE_CONTEXT.get()
+	# Create a new immutable reactive context with updated scope
+	self._token = REACTIVE_CONTEXT.set(
+		ReactiveContext(rc.epoch, rc.batch, self, rc.on_effect_error)
+	)
+	return self
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__exit__"} type={"(self, exc_type, exc_value, exc_traceback) -> Literal[False]"}>
+
+<PySourceCode >
+
+```python
+def __exit__(
+	self,
+	exc_type: type[BaseException] | None,
+	exc_value: BaseException | None,
+	exc_traceback: Any,
+) -> Literal[False]:
+	# Restore previous reactive context
+	if self._token:
+		REACTIVE_CONTEXT.reset(self._token)
+	return False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"exc_type"} type={"type[BaseException] | None"} value={null} />
+<PyParameter name={"exc_value"} type={"BaseException | None"} value={null} />
+<PyParameter name={"exc_traceback"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"typing.Literal[False]"} />
+
+</PyFunction>

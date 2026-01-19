@@ -18,16 +18,43 @@ T = TypeVar("T")
 
 
 class Redirect:
+	"""Redirect response. Causes navigation to the specified path.
+
+	Attributes:
+		path: The path to redirect to.
+
+	Example:
+		>>> return ps.Redirect("/login")
+	"""
+
 	path: str
 
 	def __init__(self, path: str) -> None:
+		"""Initialize a redirect response.
+
+		Args:
+			path: The path to redirect to.
+		"""
 		self.path = path
 
 
-class NotFound: ...
+class NotFound:
+	"""Not found response. Returns 404."""
 
 
 class Ok(Generic[T]):
+	"""Success response wrapper.
+
+	Use ``Ok(None)`` for void success, or ``Ok(payload)`` to wrap a value.
+
+	Attributes:
+		payload: The wrapped success value.
+
+	Example:
+		>>> return ps.Ok(None)  # Allow request
+		>>> return ps.Ok(prerender_result)  # Return with payload
+	"""
+
 	payload: T
 
 	@overload
@@ -35,22 +62,56 @@ class Ok(Generic[T]):
 	@overload
 	def __init__(self, payload: None = None) -> None: ...
 	def __init__(self, payload: T | None = None) -> None:
+		"""Initialize a success response.
+
+		Args:
+			payload: The success value (optional, defaults to None).
+		"""
 		self.payload = payload  # pyright: ignore[reportAttributeAccessIssue]
 
 
-class Deny: ...
+class Deny:
+	"""Denial response. Blocks the request."""
 
 
 RoutePrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
+"""Response type for individual route prerender: ``Ok[ServerInitMessage] | Redirect | NotFound``."""
+
 PrerenderResponse = Ok[Prerender] | Redirect | NotFound
+"""Response type for batch prerender: ``Ok[Prerender] | Redirect | NotFound``."""
+
 ConnectResponse = Ok[None] | Deny
+"""Response type for WebSocket connection: ``Ok[None] | Deny``."""
 
 
 class PulseMiddleware:
-	"""Base middleware with pass-through defaults and short-circuiting.
+	"""Base middleware class with pass-through defaults.
 
-	Subclass and override any of the hooks. Mutate `context` to attach values
-	for later use. Return a decision to allow or short-circuit the flow.
+	Subclass and override hooks to implement custom behavior. Each hook receives
+	a ``next`` callable to continue the middleware chain.
+
+	Attributes:
+		dev: If True, middleware is only active in dev environments.
+
+	Example:
+		>>> class AuthMiddleware(ps.PulseMiddleware):
+		...     async def prerender_route(
+		...         self,
+		...         *,
+		...         path: str,
+		...         request: ps.PulseRequest,
+		...         route_info: ps.RouteInfo,
+		...         session: dict[str, Any],
+		...         next,
+		...     ):
+		...         if path.startswith("/admin") and not session.get("is_admin"):
+		...             return ps.Redirect("/login")
+		...         return await next()
+		...
+		...     async def connect(self, *, request, session, next):
+		...         if not session.get("user_id"):
+		...             return ps.Deny()
+		...         return await next()
 	"""
 
 	dev: bool
@@ -71,10 +132,16 @@ class PulseMiddleware:
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[PrerenderResponse]],
 	) -> PrerenderResponse:
-		"""Handle batch prerender at the top level.
+		"""Handle batch prerender at the top level (HTTP request).
 
-		Receives the full PrerenderPayload. Call next() to get the PrerenderResult
-		and can modify it (views and directives) before returning to the client.
+		Args:
+			payload: Full prerender payload.
+			request: Normalized request object.
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain.
+
+		Returns:
+			``Ok[Prerender]``, ``Redirect``, or ``NotFound``.
 		"""
 		return await next()
 
@@ -87,6 +154,18 @@ class PulseMiddleware:
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[RoutePrerenderResponse]],
 	) -> RoutePrerenderResponse:
+		"""Handle individual route prerender.
+
+		Args:
+			path: Route path being prerendered.
+			request: Normalized request object.
+			route_info: Route information.
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain.
+
+		Returns:
+			``Ok[ServerInitMessage]``, ``Redirect``, or ``NotFound``.
+		"""
 		return await next()
 
 	async def connect(
@@ -96,6 +175,16 @@ class PulseMiddleware:
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[ConnectResponse]],
 	) -> ConnectResponse:
+		"""Handle WebSocket connection establishment.
+
+		Args:
+			request: Normalized request object.
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain.
+
+		Returns:
+			``Ok[None]`` to allow, ``Deny`` to reject.
+		"""
 		return await next()
 
 	async def message(
@@ -107,7 +196,13 @@ class PulseMiddleware:
 	) -> Ok[None] | Deny:
 		"""Handle per-message authorization.
 
-		Return Deny() to block, Ok(None) to allow.
+		Args:
+			data: Client message data.
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain.
+
+		Returns:
+			``Ok[None]`` to allow, ``Deny`` to block.
 		"""
 		return await next()
 
@@ -121,17 +216,46 @@ class PulseMiddleware:
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[Ok[None]]],
 	) -> Ok[None] | Deny:
+		"""Handle channel message authorization.
+
+		Args:
+			channel_id: Channel identifier.
+			event: Event name.
+			payload: Event payload.
+			request_id: Request ID if awaiting response.
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain.
+
+		Returns:
+			``Ok[None]`` to allow, ``Deny`` to block.
+		"""
 		return await next()
 
 
 class MiddlewareStack(PulseMiddleware):
-	"""Composable stack of `PulseMiddleware` executed in order.
+	"""Composable stack of ``PulseMiddleware`` executed in order.
 
-	Each middleware receives a `next` callable that advances the chain. If a
-	middleware returns without calling `next`, the chain short-circuits.
+	Each middleware receives a ``next`` callable that advances the chain. If a
+	middleware returns without calling ``next``, the chain short-circuits.
+
+	Args:
+		middlewares: Sequence of middleware instances.
+
+	Example:
+		>>> app = ps.App(
+		...     middleware=ps.stack(
+		...         AuthMiddleware(),
+		...         LoggingMiddleware(),
+		...     )
+		... )
 	"""
 
 	def __init__(self, middlewares: Sequence[PulseMiddleware]) -> None:
+		"""Initialize middleware stack.
+
+		Args:
+			middlewares: Sequence of middleware instances.
+		"""
 		super().__init__(dev=False)
 		# Filter out dev middlewares when not in dev environment
 		if env.pulse_env != "dev":
@@ -276,10 +400,23 @@ class MiddlewareStack(PulseMiddleware):
 
 
 def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
-	"""Helper to build a middleware stack in code.
+	"""Compose multiple middlewares into a single middleware stack.
 
-	Example: `app = App(..., middleware=stack(Auth(), Logging()))`
-	Prefer passing a `list`/`tuple` to `App` directly.
+	Args:
+		*middlewares: Middleware instances to compose.
+
+	Returns:
+		``MiddlewareStack`` instance.
+
+	Example:
+		>>> import pulse as ps
+		>>>
+		>>> app = ps.App(
+		...     middleware=ps.stack(
+		...         AuthMiddleware(),
+		...         LoggingMiddleware(),
+		...     )
+		... )
 	"""
 	return MiddlewareStack(list(middlewares))
 

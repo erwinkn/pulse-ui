@@ -1,0 +1,147 @@
+---
+title: "Constant"
+---
+
+A hoisted constant value with a unique identifier.
+
+Used for non-primitive values (lists, dicts, sets) referenced in transpiled
+functions. The value is emitted once at module scope, and the function
+references it by name.
+
+Example:
+        ITEMS = [1, 2, 3]
+
+        @javascript
+        def foo():
+                return ITEMS[0]
+
+        # Emits:
+        # const ITEMS_1 = [1, 2, 3];
+        # function foo_2() \{ return ITEMS_1[0]; \}
+
+## Attributes
+
+<PyAttribute name={"value"} type={"Any"} value={"value"} />
+
+<PyAttribute name={"expr"} type={"Expr"} value={"expr"} />
+
+<PyAttribute name={"id"} type={"str"} value={"next_id()"} />
+
+<PyAttribute name={"name"} type={"str"} value={"name"} />
+
+<PyAttribute name={"js_name"} type={"str"} value={null}>
+
+Unique JS identifier for this constant.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, value, expr, name='') -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, value: Any, expr: Expr, name: str = "") -> None:
+	self.value = value
+	self.expr = expr
+	self.id = next_id()
+	self.name = name
+	# Register in global cache
+	CONSTANT_REGISTRY[id(value)] = self
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"Any"} value={null} />
+<PyParameter name={"expr"} type={"Expr"} value={null} />
+<PyParameter name={"name"} type={"str"} value={"''"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+Emit the unique JS identifier.
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	"""Emit the unique JS identifier."""
+	out.append(self.js_name)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+Render as a registry reference.
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	"""Render as a registry reference."""
+	return {"t": "ref", "key": self.id}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"wrap"} type={"(value, name='') -> 'Constant'"}>
+
+Get or create a Constant for a value (cached by identity).
+
+<PySourceCode >
+
+```python
+@staticmethod
+def wrap(value: Any, name: str = "") -> "Constant":
+	"""Get or create a Constant for a value (cached by identity)."""
+	if (existing := CONSTANT_REGISTRY.get(id(value))) is not None:
+		return existing
+	expr = Expr.of(value)
+	return Constant(value, expr, name)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"Any"} value={null} />
+<PyParameter name={"name"} type={"str"} value={"''"} />
+
+</div>
+
+<PyFunctionReturn type={"'Constant'"} />
+
+</PyFunction>

@@ -1,0 +1,38 @@
+---
+title: "obj"
+---
+
+JavaScript object literal creation.
+
+Usage:
+    from pulse.js import obj
+
+    # Create plain JS objects (not Maps):
+    obj(a=1, b=2)          # -> \{ a: 1, b: 2 \}
+
+    # With spread syntax:
+    obj(**base, c=3)       # -> \{ ...base, c: 3 \}
+    obj(a=1, **base)       # -> \{ a: 1, ...base \}
+
+    # Empty object:
+    obj()                  # -> \{\}
+
+Unlike dict() which transpiles to new Map(), obj() creates plain JavaScript
+object literals. Use this for React props, style objects, and anywhere you
+need a plain JS object.
+
+<PyAttribute name={"obj"} type={null} value={"ObjTransformer()"} />
+
+<Tabs items={["Class"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"ObjTransformer"} href={"/docs/api/pulse/js/obj/ObjTransformer"} />
+
+</Cards>
+
+</Tab>
+
+</Tabs>

@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fumapy",
+]
 
 
 [dependency-groups]
@@ -35,6 +37,7 @@ pulse-mantine = { workspace = true }
 pulse-msal = { workspace = true }
 pulse-recharts = { workspace = true }
 pulse-aws = { workspace = true }
+fumapy = { git = "https://github.com/fuma-nama/fumadocs", subdirectory = "packages/python" }
 
 
 [tool.uv.workspace]

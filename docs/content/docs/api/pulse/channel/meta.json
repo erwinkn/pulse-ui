@@ -1,0 +1,11 @@
+{
+  "title": "channel",
+  "pages": [
+    "index",
+    "ChannelClosed",
+    "ChannelTimeout",
+    "PendingRequest",
+    "ChannelsManager",
+    "Channel"
+  ]
+}

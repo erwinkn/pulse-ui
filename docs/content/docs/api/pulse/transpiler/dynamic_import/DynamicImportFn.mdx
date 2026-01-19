@@ -1,0 +1,124 @@
+---
+title: "DynamicImportFn"
+---
+
+Sentinel expr that intercepts import_() calls.
+
+When used in a @javascript function:
+    import_("./module")
+
+Transpiles to:
+    import("./module")
+
+For local paths, resolves the file and registers it for asset copying.
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	raise TypeError(
+		"import_ cannot be emitted directly - call it with a source path"
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	raise TypeError("import_ cannot be rendered to VDOM")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_call"} type={"(self, args, keywords, ctx) -> Expr"}>
+
+Handle import_("source") calls.
+
+<PySourceCode >
+
+```python
+@override
+def transpile_call(
+	self,
+	args: list[ast.expr],
+	keywords: list[ast.keyword],
+	ctx: Transpiler,
+) -> Expr:
+	"""Handle import_("source") calls."""
+	if keywords:
+		raise TranspileError("import_() does not accept keyword arguments")
+	if len(args) != 1:
+		raise TranspileError("import_() takes exactly 1 argument")
+
+	# Extract string literal from AST
+	src_node = args[0]
+	if not isinstance(src_node, ast.Constant) or not isinstance(
+		src_node.value, str
+	):
+		raise TranspileError("import_() argument must be a string literal")
+
+	src = src_node.value
+	asset: LocalAsset | None = None
+
+	# Resolve local paths and register asset
+	if is_local_path(src):
+		if ctx.source_file is None:
+			raise TranspileError(
+				"Cannot resolve relative import_() path: source file unknown"
+			)
+		source_path = resolve_local_path(src, ctx.source_file)
+		if source_path:
+			asset = register_local_asset(source_path)
+		else:
+			raise TranspileError(
+				f"import_({src!r}) references a local path that does not exist"
+			)
+
+	return DynamicImport(src, asset)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"list[ast.expr]"} value={null} />
+<PyParameter name={"keywords"} type={"list[ast.keyword]"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>

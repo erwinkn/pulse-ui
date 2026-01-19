@@ -1,0 +1,252 @@
+---
+title: "CLILogger"
+---
+
+Mode-aware CLI logger that adapts output based on pulse environment.
+
+## Attributes
+
+<PyAttribute name={"mode"} type={"PulseEnv"} value={"mode"} />
+
+<PyAttribute name={"plain"} type={"bool"} value={"plain"} />
+
+<PyAttribute name={"is_plain"} type={"bool"} value={null}>
+
+Return True if using plain output (ci/prod mode or --plain flag).
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, mode='dev', *, plain=False)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, mode: PulseEnv = "dev", *, plain: bool = False):
+	self.mode = mode
+	self.plain = plain
+	self._console = None
+	if mode == "dev" and not plain:
+		from rich.console import Console
+
+		self._console = Console()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"mode"} type={"PulseEnv"} value={"'dev'"} />
+<PyParameter name={"plain"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"print"} type={"(self, message) -> None"}>
+
+Print a message.
+
+<PySourceCode >
+
+```python
+def print(self, message: str) -> None:
+	"""Print a message."""
+	if self._console:
+		self._console.print(message)
+	else:
+		print(message)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"message"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"error"} type={"(self, message) -> None"}>
+
+Print an error message.
+
+<PySourceCode >
+
+```python
+def error(self, message: str) -> None:
+	"""Print an error message."""
+	if self._console:
+		self._console.print(f"[red]Error:[/red] {message}")
+	else:
+		print(f"Error: {message}")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"message"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"success"} type={"(self, message) -> None"}>
+
+Print a success message.
+
+<PySourceCode >
+
+```python
+def success(self, message: str) -> None:
+	"""Print a success message."""
+	if self._console:
+		self._console.print(f"[green]✓[/green] {message}")
+	else:
+		print(f"Done: {message}")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"message"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"warning"} type={"(self, message) -> None"}>
+
+Print a warning message.
+
+<PySourceCode >
+
+```python
+def warning(self, message: str) -> None:
+	"""Print a warning message."""
+	if self._console:
+		self._console.print(f"[yellow]Warning:[/yellow] {message}")
+	else:
+		print(f"Warning: {message}")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"message"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"print_exception"} type={"(self) -> None"}>
+
+Print the current exception.
+
+<PySourceCode >
+
+```python
+def print_exception(self) -> None:
+	"""Print the current exception."""
+	if self._console:
+		self._console.print_exception()
+	else:
+		import traceback
+
+		traceback.print_exc()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"get_tag_mode"} type={"(self) -> TagMode"}>
+
+Return tag mode for process output: colored in dev, plain in ci/prod.
+
+<PySourceCode >
+
+```python
+def get_tag_mode(self) -> TagMode:
+	"""Return tag mode for process output: colored in dev, plain in ci/prod."""
+	return "plain" if self.is_plain else "colored"
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.cli.logging.TagMode"} />
+
+</PyFunction>
+
+<PyFunction name={"write_ready_announcement"} type={"(self, address, port, server_url) -> None"}>
+
+Write the 'Pulse is ready' announcement.
+
+<PySourceCode >
+
+```python
+def write_ready_announcement(
+	self, address: str, port: int, server_url: str
+) -> None:
+	"""Write the 'Pulse is ready' announcement."""
+	if self._console:
+		self._console.print("")
+		self._console.print(
+			f"[bold green]Ready:[/bold green] [bold cyan][link={server_url}]{server_url}[/link][/bold cyan]"
+		)
+		self._console.print("")
+	else:
+		print("")
+		print(f"Ready: {server_url}")
+		print("")
+	sys.stdout.flush()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"address"} type={"str"} value={null} />
+<PyParameter name={"port"} type={"int"} value={null} />
+<PyParameter name={"server_url"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

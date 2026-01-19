@@ -48,7 +48,7 @@ export function createLinkItemRenderer({
 							const key =
 								"url" in child && child.url
 									? child.url
-									: typeof child.text === "string"
+									: "text" in child && typeof child.text === "string"
 										? child.text
 										: child.type;
 

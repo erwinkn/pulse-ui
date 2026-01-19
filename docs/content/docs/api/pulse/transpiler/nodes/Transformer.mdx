@@ -1,0 +1,170 @@
+---
+title: "Transformer"
+---
+
+Expr that wraps a function transforming args to Expr output.
+
+Used for Python->JS transpilation of functions, builtins, and module attrs.
+The wrapped function receives args/kwargs and ctx, and returns an Expr.
+
+Example:
+        emit_len = Transformer(lambda x, ctx: Member(ctx.emit_expr(x), "length"), name="len")
+        # When called: emit_len.transpile_call([some_ast], \{\}, ctx) -> Member(some_expr, "length")
+
+## Attributes
+
+<PyAttribute name={"fn"} type={"_F"} value={null} />
+
+<PyAttribute name={"name"} type={"str"} value={"''"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	label = self.name or "Transformer"
+	raise TypeError(f"{label} cannot be emitted directly - must be called")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_call"} type={"(self, args, keywords, ctx) -> Expr"}>
+
+<PySourceCode >
+
+```python
+@override
+def transpile_call(
+	self,
+	args: list[ast.expr],
+	keywords: list[ast.keyword],
+	ctx: Transpiler,
+) -> Expr:
+	# Convert keywords to dict, reject spreads
+	kwargs: dict[str, ast.expr] = {}
+	for kw in keywords:
+		if kw.arg is None:
+			label = self.name or "Function"
+			raise TranspileError(f"{label} does not support **spread")
+		kwargs[kw.arg] = kw.value
+	if kwargs:
+		return self.fn(*args, ctx=ctx, **kwargs)
+	return self.fn(*args, ctx=ctx)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"list[ast.expr]"} value={null} />
+<PyParameter name={"keywords"} type={"list[ast.keyword]"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_getattr"} type={"(self, attr, ctx) -> Expr"}>
+
+<PySourceCode >
+
+```python
+@override
+def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+	label = self.name or "Transformer"
+	raise TypeError(f"{label} cannot have attributes")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"attr"} type={"str"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_subscript"} type={"(self, key, ctx) -> Expr"}>
+
+<PySourceCode >
+
+```python
+@override
+def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+	label = self.name or "Transformer"
+	raise TypeError(f"{label} cannot be subscripted")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"ast.expr"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	label = self.name or "Transformer"
+	raise TypeError(f"{label} cannot be rendered - must be called")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, fn, name='') -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"_F"} value={null} />
+<PyParameter name={"name"} type={"str"} value={"''"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

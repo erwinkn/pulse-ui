@@ -1,0 +1,97 @@
+---
+title: "pulse"
+---
+
+Pulse UI client bindings for channel communication.
+
+Usage:
+    from pulse.js.pulse import usePulseChannel, ChannelBridge, PulseChannelResetError
+
+    @ps.javascript(jsx=True)
+    def MyChannelComponent(*, channel_id: str):
+        bridge = usePulseChannel(channel_id)
+
+        # Subscribe to events
+        useEffect(
+            lambda: bridge.on("server:notify", lambda payload: console.log(payload)),
+            [bridge],
+        )
+
+        # Emit events to server
+        def send_ping():
+            bridge.emit("client:ping", \{"message": "hello"\})
+
+        # Make requests to server
+        async def send_request():
+            response = await bridge.request("client:request", \{"data": 123\})
+            console.log(response)
+
+        return ps.div()[
+            ps.button(onClick=send_ping)["Send Ping"],
+            ps.button(onClick=send_request)["Send Request"],
+        ]
+
+<PyAttribute name={"T"} type={null} value={"_TypeVar('T')"} />
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"PulseChannelResetError"} href={"/docs/api/pulse/js/pulse/PulseChannelResetError"} />
+<Card title={"ChannelBridge"} href={"/docs/api/pulse/js/pulse/ChannelBridge"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"usePulseChannel"} type={"(channel_id) -> ChannelBridge"}>
+
+React hook to connect to a Pulse channel.
+
+Must be called from within a React component. The channel connection
+is automatically managed based on component lifecycle.
+
+<PySourceCode >
+
+```python
+def usePulseChannel(channel_id: str) -> ChannelBridge:
+	"""React hook to connect to a Pulse channel.
+
+	Must be called from within a React component. The channel connection
+	is automatically managed based on component lifecycle.
+
+	Args:
+	    channel_id: The unique identifier for the channel to connect to.
+
+	Returns:
+	    A ChannelBridge instance for interacting with the channel.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"channel_id"} type={"str"} value={undefined}>
+
+The unique identifier for the channel to connect to.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.pulse.ChannelBridge"}>
+
+A ChannelBridge instance for interacting with the channel.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

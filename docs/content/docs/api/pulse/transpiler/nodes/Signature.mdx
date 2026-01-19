@@ -1,0 +1,35 @@
+---
+title: "Signature"
+---
+
+Wraps an Expr with signature information for type checking.
+
+When you call expr.as_(callable_type), this creates a Signature wrapper
+that stores the callable's signature for introspection, while delegating
+all other behavior to the wrapped expression.
+
+Example:
+        button = Import("Button", "@mantine/core")
+        typed_button = Signature(button, signature_of_callable)
+
+## Attributes
+
+<PyAttribute name={"expr"} type={"Expr"} value={null} />
+
+<PyAttribute name={"sig"} type={"Any"} value={null} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, expr, sig) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"expr"} type={"Expr"} value={null} />
+<PyParameter name={"sig"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

@@ -1,0 +1,51 @@
+---
+title: "Return"
+---
+
+JS return statement: return expr;
+
+## Attributes
+
+<PyAttribute name={"value"} type={"Expr | None"} value={"None"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append("return")
+	if self.value is not None:
+		out.append(" ")
+		self.value.emit(out)
+	out.append(";")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, value=None) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"Expr | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

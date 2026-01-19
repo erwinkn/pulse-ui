@@ -1,0 +1,14 @@
+{
+  "title": "queries",
+  "pages": [
+    "index",
+    "store",
+    "query",
+    "mutation",
+    "protocol",
+    "client",
+    "common",
+    "infinite_query",
+    "effect"
+  ]
+}

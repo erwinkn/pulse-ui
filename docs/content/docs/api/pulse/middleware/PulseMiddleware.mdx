@@ -1,0 +1,383 @@
+---
+title: "PulseMiddleware"
+---
+
+Base middleware class with pass-through defaults.
+
+Subclass and override hooks to implement custom behavior. Each hook receives
+a ``next`` callable to continue the middleware chain.
+
+## Attributes
+
+<PyAttribute name={"dev"} type={"bool"} value={"dev"}>
+
+If True, middleware is only active in dev environments.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, dev=False) -> None"}>
+
+Initialize middleware.
+
+<PySourceCode >
+
+```python
+def __init__(self, dev: bool = False) -> None:
+	"""Initialize middleware.
+
+	Args:
+		dev: If True, this middleware is only active in dev environments.
+	"""
+	self.dev = dev
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"dev"} type={"bool"} value={"False"}>
+
+If True, this middleware is only active in dev environments.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"prerender"} type={"(self, *, payload, request, session, next) -> PrerenderResponse"}>
+
+Handle batch prerender at the top level (HTTP request).
+
+<PySourceCode >
+
+```python
+async def prerender(
+	self,
+	*,
+	payload: "PrerenderPayload",
+	request: PulseRequest,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[PrerenderResponse]],
+) -> PrerenderResponse:
+	"""Handle batch prerender at the top level (HTTP request).
+
+	Args:
+		payload: Full prerender payload.
+		request: Normalized request object.
+		session: Session data dictionary.
+		next: Callable to continue the middleware chain.
+
+	Returns:
+		``Ok[Prerender]``, ``Redirect``, or ``NotFound``.
+	"""
+	return await next()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"payload"} type={"'PrerenderPayload'"} value={undefined}>
+
+Full prerender payload.
+
+</PyParameter>
+<PyParameter name={"request"} type={"PulseRequest"} value={undefined}>
+
+Normalized request object.
+
+</PyParameter>
+<PyParameter name={"session"} type={"dict[str, Any]"} value={undefined}>
+
+Session data dictionary.
+
+</PyParameter>
+<PyParameter name={"next"} type={"Callable[[], Awaitable[PrerenderResponse]]"} value={undefined}>
+
+Callable to continue the middleware chain.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.PrerenderResponse"}>
+
+``Ok[Prerender]``, ``Redirect``, or ``NotFound``.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"prerender_route"} type={"(self, *, path, request, route_info, session, next) -> RoutePrerenderResponse"}>
+
+Handle individual route prerender.
+
+<PySourceCode >
+
+```python
+async def prerender_route(
+	self,
+	*,
+	path: str,
+	request: PulseRequest,
+	route_info: RouteInfo,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[RoutePrerenderResponse]],
+) -> RoutePrerenderResponse:
+	"""Handle individual route prerender.
+
+	Args:
+		path: Route path being prerendered.
+		request: Normalized request object.
+		route_info: Route information.
+		session: Session data dictionary.
+		next: Callable to continue the middleware chain.
+
+	Returns:
+		``Ok[ServerInitMessage]``, ``Redirect``, or ``NotFound``.
+	"""
+	return await next()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"path"} type={"str"} value={undefined}>
+
+Route path being prerendered.
+
+</PyParameter>
+<PyParameter name={"request"} type={"PulseRequest"} value={undefined}>
+
+Normalized request object.
+
+</PyParameter>
+<PyParameter name={"route_info"} type={"RouteInfo"} value={undefined}>
+
+Route information.
+
+</PyParameter>
+<PyParameter name={"session"} type={"dict[str, Any]"} value={undefined}>
+
+Session data dictionary.
+
+</PyParameter>
+<PyParameter name={"next"} type={"Callable[[], Awaitable[RoutePrerenderResponse]]"} value={undefined}>
+
+Callable to continue the middleware chain.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.RoutePrerenderResponse"}>
+
+``Ok[ServerInitMessage]``, ``Redirect``, or ``NotFound``.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"connect"} type={"(self, *, request, session, next) -> ConnectResponse"}>
+
+Handle WebSocket connection establishment.
+
+<PySourceCode >
+
+```python
+async def connect(
+	self,
+	*,
+	request: PulseRequest,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[ConnectResponse]],
+) -> ConnectResponse:
+	"""Handle WebSocket connection establishment.
+
+	Args:
+		request: Normalized request object.
+		session: Session data dictionary.
+		next: Callable to continue the middleware chain.
+
+	Returns:
+		``Ok[None]`` to allow, ``Deny`` to reject.
+	"""
+	return await next()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"request"} type={"PulseRequest"} value={undefined}>
+
+Normalized request object.
+
+</PyParameter>
+<PyParameter name={"session"} type={"dict[str, Any]"} value={undefined}>
+
+Session data dictionary.
+
+</PyParameter>
+<PyParameter name={"next"} type={"Callable[[], Awaitable[ConnectResponse]]"} value={undefined}>
+
+Callable to continue the middleware chain.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.ConnectResponse"}>
+
+``Ok[None]`` to allow, ``Deny`` to reject.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"message"} type={"(self, *, data, session, next) -> Ok[None] | Deny"}>
+
+Handle per-message authorization.
+
+<PySourceCode >
+
+```python
+async def message(
+	self,
+	*,
+	data: ClientMessage,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[Ok[None]]],
+) -> Ok[None] | Deny:
+	"""Handle per-message authorization.
+
+	Args:
+		data: Client message data.
+		session: Session data dictionary.
+		next: Callable to continue the middleware chain.
+
+	Returns:
+		``Ok[None]`` to allow, ``Deny`` to block.
+	"""
+	return await next()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"ClientMessage"} value={undefined}>
+
+Client message data.
+
+</PyParameter>
+<PyParameter name={"session"} type={"dict[str, Any]"} value={undefined}>
+
+Session data dictionary.
+
+</PyParameter>
+<PyParameter name={"next"} type={"Callable[[], Awaitable[Ok[None]]]"} value={undefined}>
+
+Callable to continue the middleware chain.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"Ok[None] | Deny"}>
+
+``Ok[None]`` to allow, ``Deny`` to block.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"channel"} type={"(self, *, channel_id, event, payload, request_id, session, next) -> Ok[None] | Deny"}>
+
+Handle channel message authorization.
+
+<PySourceCode >
+
+```python
+async def channel(
+	self,
+	*,
+	channel_id: str,
+	event: str,
+	payload: Any,
+	request_id: str | None,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[Ok[None]]],
+) -> Ok[None] | Deny:
+	"""Handle channel message authorization.
+
+	Args:
+		channel_id: Channel identifier.
+		event: Event name.
+		payload: Event payload.
+		request_id: Request ID if awaiting response.
+		session: Session data dictionary.
+		next: Callable to continue the middleware chain.
+
+	Returns:
+		``Ok[None]`` to allow, ``Deny`` to block.
+	"""
+	return await next()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel_id"} type={"str"} value={undefined}>
+
+Channel identifier.
+
+</PyParameter>
+<PyParameter name={"event"} type={"str"} value={undefined}>
+
+Event name.
+
+</PyParameter>
+<PyParameter name={"payload"} type={"Any"} value={undefined}>
+
+Event payload.
+
+</PyParameter>
+<PyParameter name={"request_id"} type={"str | None"} value={undefined}>
+
+Request ID if awaiting response.
+
+</PyParameter>
+<PyParameter name={"session"} type={"dict[str, Any]"} value={undefined}>
+
+Session data dictionary.
+
+</PyParameter>
+<PyParameter name={"next"} type={"Callable[[], Awaitable[Ok[None]]]"} value={undefined}>
+
+Callable to continue the middleware chain.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"Ok[None] | Deny"}>
+
+``Ok[None]`` to allow, ``Deny`` to block.
+
+</PyFunctionReturn>
+
+</PyFunction>

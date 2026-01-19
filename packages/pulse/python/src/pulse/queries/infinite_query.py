@@ -44,6 +44,25 @@ TState = TypeVar("TState", bound=State)
 
 
 class Page(NamedTuple, Generic[T, TParam]):
+	"""Named tuple representing a page in an infinite query.
+
+	Each page contains the fetched data and the parameter used to fetch it,
+	enabling cursor-based or offset-based pagination.
+
+	Attributes:
+		data: The fetched page data of type T.
+		param: The page parameter (cursor, offset, etc.) used to fetch this page.
+
+	Example:
+		::
+
+			# Access pages from infinite query result
+			for page in state.posts.data:
+			    print(f"Page param: {page.param}")
+			    for post in page.data:
+			        print(post.title)
+	"""
+
 	data: T
 	param: TParam
 
@@ -714,8 +733,38 @@ def none_if_missing(value: Any):
 
 
 class InfiniteQueryResult(Generic[T, TParam], Disposable):
-	"""
-	Observer wrapper for InfiniteQuery with lifecycle and stale tracking.
+	"""Observer wrapper for InfiniteQuery with lifecycle and stale tracking.
+
+	InfiniteQueryResult provides the interface for interacting with paginated
+	queries. It manages observation lifecycle, staleness tracking, and exposes
+	reactive properties and methods for pagination.
+
+	Attributes:
+		data: List of Page objects or None if not loaded.
+		pages: List of page data only (without params) or None.
+		page_params: List of page parameters only or None.
+		error: The last error encountered, or None.
+		status: Current QueryStatus ("loading", "success", "error").
+		is_loading: Whether status is "loading".
+		is_success: Whether status is "success".
+		is_error: Whether status is "error".
+		is_fetching: Whether any fetch is in progress.
+		has_next_page: Whether more pages are available forward.
+		has_previous_page: Whether previous pages are available.
+		is_fetching_next_page: Whether fetching the next page.
+		is_fetching_previous_page: Whether fetching the previous page.
+
+	Example:
+		::
+
+			# Access infinite query result
+			if state.posts.is_loading:
+			    show_skeleton()
+			elif state.posts.data:
+			    for page in state.posts.data:
+			        render_posts(page.data)
+			    if state.posts.has_next_page:
+			        Button("Load More", on_click=state.posts.fetch_next_page)
 	"""
 
 	_query: Computed[InfiniteQuery[T, TParam]]
@@ -957,6 +1006,46 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 
 
 class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
+	"""Descriptor for state-bound infinite queries created by the @infinite_query decorator.
+
+	InfiniteQueryProperty is the return type of the ``@infinite_query`` decorator.
+	It acts as a descriptor that creates and manages InfiniteQueryResult instances
+	for each State object.
+
+	When accessed on a State instance, returns an InfiniteQueryResult with reactive
+	properties for pagination state and methods for fetching pages.
+
+	Required decorators:
+		- ``@infinite_query_prop.key``: Define the query key (required).
+		- ``@infinite_query_prop.get_next_page_param``: Define how to get next page param.
+
+	Optional decorators:
+		- ``@infinite_query_prop.get_previous_page_param``: For bi-directional pagination.
+		- ``@infinite_query_prop.on_success``: Handle successful fetch.
+		- ``@infinite_query_prop.on_error``: Handle fetch errors.
+
+	Example:
+		::
+
+			class FeedState(ps.State):
+			    feed_type: str = "home"
+
+			    @ps.infinite_query(initial_page_param=None)
+			    async def posts(self, cursor: str | None) -> list[Post]:
+			        return await api.get_posts(cursor=cursor)
+
+			    @posts.key
+			    def _posts_key(self):
+			        return ("feed", self.feed_type)
+
+			    @posts.get_next_page_param
+			    def _next_cursor(self, pages: list[Page]) -> str | None:
+			        if not pages:
+			            return None
+			        last = pages[-1]
+			        return last.data[-1].id if last.data else None
+	"""
+
 	name: str
 	_fetch_fn: "Callable[[TState, TParam], Awaitable[T]]"
 	_keep_alive: bool
@@ -1234,6 +1323,59 @@ def infinite_query(
 	fetch_on_mount: bool = True,
 	key: QueryKey | None = None,
 ):
+	"""Decorator for paginated queries on State methods.
+
+	Creates a reactive infinite query that supports cursor-based or offset-based
+	pagination. Data is stored as a list of pages, each with its data and the
+	parameter used to fetch it.
+
+	Requires ``@query_prop.key`` and ``@query_prop.get_next_page_param`` decorators.
+
+	Args:
+		fn: The async method to decorate (when used without parentheses).
+		initial_page_param: The parameter for fetching the first page (required).
+		max_pages: Maximum pages to keep in memory (0 = unlimited).
+		stale_time: Seconds before data is considered stale (default 0.0).
+		gc_time: Seconds to keep unused query in cache (default 300.0).
+		refetch_interval: Auto-refetch interval in seconds (default None).
+		keep_previous_data: Keep previous data while refetching (default False).
+		retries: Number of retry attempts on failure (default 3).
+		retry_delay: Delay between retries in seconds (default 2.0).
+		initial_data_updated_at: Timestamp for initial data staleness.
+		enabled: Whether query is enabled (default True).
+		fetch_on_mount: Fetch when component mounts (default True).
+		key: Static query key for sharing across instances.
+
+	Returns:
+		InfiniteQueryProperty that creates InfiniteQueryResult instances when accessed.
+
+	Example:
+		::
+
+			class FeedState(ps.State):
+			    @ps.infinite_query(initial_page_param=None, key=("feed",))
+			    async def posts(self, cursor: str | None) -> list[Post]:
+			        return await api.get_posts(cursor=cursor)
+
+			    @posts.key
+			    def _posts_key(self):
+			        return ("feed", self.feed_type)
+
+			    @posts.get_next_page_param
+			    def _next_cursor(self, pages: list[Page]) -> str | None:
+			        if not pages:
+			            return None
+			        last = pages[-1]
+			        return last.data[-1].id if last.data else None
+
+			    @posts.get_previous_page_param
+			    def _prev_cursor(self, pages: list[Page]) -> str | None:
+			        if not pages:
+			            return None
+			        first = pages[0]
+			        return first.data[0].id if first.data else None
+	"""
+
 	def decorator(
 		func: Callable[[TState, TParam], Awaitable[T]], /
 	) -> InfiniteQueryProperty[T, TParam, TState]:

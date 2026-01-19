@@ -1,0 +1,229 @@
+---
+title: "Layout"
+---
+
+Wraps child routes with a shared layout component.
+
+Layouts provide persistent UI elements (headers, sidebars, etc.) that
+wrap child routes. The layout component must render an `Outlet` to
+display the matched child route.
+
+## Attributes
+
+<PyAttribute name={"render"} type={"Component[...]"} value={"render"}>
+
+Layout component to render.
+
+</PyAttribute>
+
+<PyAttribute name={"children"} type={"Sequence[Route | Layout]"} value={"children or []"}>
+
+Nested routes.
+
+</PyAttribute>
+
+<PyAttribute name={"dev"} type={"bool"} value={"dev"}>
+
+Whether layout is dev-only.
+
+</PyAttribute>
+
+<PyAttribute name={"parent"} type={"Route | Layout | None"} value={"None"} />
+
+<PyAttribute name={"idx"} type={"int"} value={"1"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, render, children=None, dev=False)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	render: "Component[...]",
+	children: "Sequence[Route | Layout] | None" = None,
+	dev: bool = False,
+):
+	self.render = render
+	self.children = children or []
+	self.dev = dev
+	self.parent: Route | Layout | None = None
+	# 1-based sibling index assigned by RouteTree at each level
+	self.idx: int = 1
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render"} type={"Component[...]"} value={null} />
+<PyParameter name={"children"} type={"Sequence[Route | Layout] | None"} value={"None"} />
+<PyParameter name={"dev"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_path_list"} type={"(self, include_layouts=False) -> list[str]"}>
+
+<PySourceCode >
+
+```python
+def _path_list(self, include_layouts: bool = False) -> list[str]:
+	path_list = (
+		self.parent._path_list(include_layouts=include_layouts)
+		if self.parent
+		else []
+	)
+	if include_layouts:
+		nb = "" if self.idx == 1 else str(self.idx)
+		path_list.append(LAYOUT_INDICATOR + nb)
+	return path_list
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"include_layouts"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={"list[str]"} />
+
+</PyFunction>
+
+<PyFunction name={"unique_path"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def unique_path(self):
+	# Return absolute path with leading '/'
+	path = "/".join(self._path_list(include_layouts=True))
+	return f"/{path}"
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"file_path"} type={"(self) -> str"}>
+
+<PySourceCode >
+
+```python
+def file_path(self) -> str:
+	path_list = self._path_list(include_layouts=True)
+	# Map layout indicators (with optional numeric suffix) to directory names
+	# e.g., "<layout>" -> "layout" and "<layout>2" -> "layout2"
+	converted: list[str] = []
+	for seg in path_list:
+		if seg.startswith(LAYOUT_INDICATOR):
+			suffix = seg[len(LAYOUT_INDICATOR) :]
+			converted.append("layout" + suffix)
+		else:
+			converted.append(seg)
+	# Place file within the current layout's directory
+	path = "/".join([*converted, "_layout.tsx"])
+	# Replace Windows-invalid characters in filenames
+	return _sanitize_filename(path)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+
+<PyFunction name={"__repr__"} type={"(self) -> str"}>
+
+<PySourceCode >
+
+```python
+@override
+def __repr__(self) -> str:
+	return f"Layout(children={len(self.children)})"
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+
+<PyFunction name={"default_route_info"} type={"(self) -> RouteInfo"}>
+
+Return a default RouteInfo corresponding to this layout's URL path.
+
+The layout itself does not contribute a path segment. The resulting
+pathname is the URL path formed by its ancestor routes. This method
+raises InvalidRouteError if any ancestor route includes dynamic,
+optional, or catch-all segments because defaults cannot be derived.
+
+<PySourceCode >
+
+```python
+def default_route_info(self) -> "RouteInfo":
+	"""Return a default RouteInfo corresponding to this layout's URL path.
+
+	The layout itself does not contribute a path segment. The resulting
+	pathname is the URL path formed by its ancestor routes. This method
+	raises InvalidRouteError if any ancestor route includes dynamic,
+	optional, or catch-all segments because defaults cannot be derived.
+	"""
+	# Walk up the tree to ensure there are no dynamic segments in ancestor routes
+	if route_or_ancestors_have_dynamic(self):
+		raise InvalidRouteError(
+			"Cannot build default RouteInfo for layout under a dynamic route."
+		)
+
+	# Build pathname from ancestor route path segments (exclude layout indicators)
+	path_list = self._path_list(include_layouts=False)
+	pathname = ensure_absolute_path("/".join(path_list))
+	return {
+		"pathname": pathname,
+		"hash": "",
+		"query": "",
+		"queryParams": {},
+		"pathParams": {},
+		"catchall": [],
+	}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.routing.RouteInfo"} />
+
+</PyFunction>

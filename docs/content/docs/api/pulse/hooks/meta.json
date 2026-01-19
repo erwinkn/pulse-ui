@@ -1,0 +1,13 @@
+{
+  "title": "hooks",
+  "pages": [
+    "index",
+    "effects",
+    "core",
+    "runtime",
+    "setup",
+    "stable",
+    "init",
+    "state"
+  ]
+}

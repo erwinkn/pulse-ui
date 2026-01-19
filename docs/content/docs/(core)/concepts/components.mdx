@@ -82,26 +82,6 @@ Container(className="bg-gray-100")[
 ]
 ```
 
-## Keys for list items
-
-When rendering components in a list, use the `key` prop to help Pulse track each item's identity:
-
-```python
-@ps.component
-def TodoItem(text: str, done: bool, key=None):
-    return ps.li(
-        text,
-        className="line-through" if done else "",
-    )
-
-def TodoList(todos):
-    return ps.ul()[
-        [TodoItem(key=t.id, text=t.text, done=t.done) for t in todos]
-    ]
-```
-
-Without keys, reordering items can cause unexpected behavior - the state of each component might not move with its content. Keys ensure that when items move, their associated state moves too.
-
 ## Components with state
 
 Components can have their own internal state using hooks. This is covered in detail in the [State](/docs/concepts/state) and [Hooks](/docs/concepts/hooks) guides:
@@ -121,7 +101,119 @@ def Counter(key=None):
 
 Each instance of `Counter` maintains its own independent count.
 
+## Rendering lists with `ps.For`
+
+Use `ps.For` to render a list of items:
+
+```python
+@ps.component
+def TodoList():
+    with ps.init():
+        state = TodosState()
+
+    return ps.div(
+        ps.For(state.todos, lambda todo: TodoItem(todo, key=todo.id))
+    )
+```
+
+`ps.For` takes an iterable and a function that returns a Pulse element for each item.
+
+### Why use `ps.For`?
+
+Python's late binding semantics can cause subtle bugs with list comprehensions:
+
+```python
+# Problematic - all callbacks reference the last item!
+[ps.button(f"Delete {item.name}", onClick=lambda: delete(item))
+ for item in items]
+
+# Safe - ps.For handles binding correctly
+ps.For(items, lambda item: ps.button(
+    f"Delete {item.name}",
+    onClick=lambda: delete(item)
+))
+```
+
+In the first example, all `onClick` handlers end up deleting the same item (the last one) because `item` is captured by reference, not by value.
+
+## Keys preserve component identity
+
+Keys tell Pulse which component is which when items move, get added, or get removed. Without keys, Pulse identifies components by their position in the list.
+
+```python
+@ps.component
+def ListItem(text: str, key=None):
+    with ps.init():
+        state = ItemState()  # Each item has its own state
+
+    return ps.div(
+        ps.input(value=state.value, onChange=...),
+        ps.span(text),
+    )
+
+@ps.component
+def ItemList():
+    items = ["Apple", "Banana", "Cherry"]
+
+    return ps.div(
+        # With keys - state follows the item
+        ps.For(items, lambda item: ListItem(item, key=item)),
+    )
+```
+
+When you add a new item at the beginning of the list:
+- **With keys**: Existing items keep their state (input values, checkbox states, etc.)
+- **Without keys**: State stays in position, so items appear to lose their state
+
+### Key requirements
+
+Keys must be:
+- **Stable**: The same item should always have the same key
+- **Unique**: No two items in the same list should share a key
+
+Good keys:
+```python
+key=item.id        # Database IDs
+key=item.uuid      # UUIDs
+key=f"{item.type}:{item.id}"  # Composite keys
+```
+
+Avoid using array indices as keys unless the list never reorders:
+```python
+# Only OK if items never move or get inserted
+ps.For(enumerate(items), lambda i, item: Component(item, key=i))
+```
+
+### Component keys
+
+Keys are specified as a keyword argument on components. By convention, components that might be used in lists should accept an optional `key` parameter:
+
+```python
+@ps.component
+def Card(title: str, key=None):
+    # key=None makes it optional
+    return ps.div(ps.h3(title))
+```
+
+Keys only work within a single level of the tree. They help Pulse track items within a list, but cannot be used to move a component to a completely different part of the UI.
+
+## Iterables as children
+
+You can also pass iterables directly as children to any element:
+
+```python
+def Navigation():
+    links = [("Home", "/"), ("About", "/about"), ("Contact", "/contact")]
+
+    return ps.nav()[
+        [ps.a(text, href=url) for text, url in links]
+    ]
+```
+
+Pulse automatically flattens nested iterables. If the iterable contains components, Pulse will warn you if they don't have keys.
+
 ## See also
 
 - [Tutorial: Components](/docs/tutorial/04-components)
+- [Tutorial: Lists and Keys](/docs/tutorial/05-lists-keys)
 - [Reference: Component](/docs/reference/pulse/component)

@@ -1,0 +1,763 @@
+---
+title: "Expr"
+---
+
+Base class for expression nodes.
+
+Provides hooks for custom transpilation behavior:
+- transpile_call: customize behavior when called as a function
+- transpile_getattr: customize attribute access
+- transpile_subscript: customize subscript access
+
+And serialization for client-side rendering:
+- render: serialize to dict for client renderer (stub for now)
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={"tuple[str, ...]"} value={"()"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+Emit this expression as JavaScript/JSX code into the output buffer.
+
+<PySourceCode >
+
+```python
+@abstractmethod
+def emit(self, out: list[str]) -> None:
+	"""Emit this expression as JavaScript/JSX code into the output buffer."""
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"precedence"} type={"(self) -> int"}>
+
+Operator precedence (higher = binds tighter). Default: primary (20).
+
+<PySourceCode >
+
+```python
+def precedence(self) -> int:
+	"""Operator precedence (higher = binds tighter). Default: primary (20)."""
+	return 20
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"int"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_call"} type={"(self, args, keywords, ctx) -> Expr"}>
+
+Called when this expression is used as a function: expr(args).
+
+Override to customize call behavior.
+Default emits a Call expression with args transpiled.
+
+Args and keywords are raw Python AST nodes (not yet transpiled).
+Use ctx.emit_expr() to convert them to Expr as needed.
+Keywords with kw.arg=None are **spread syntax.
+
+<PySourceCode >
+
+```python
+def transpile_call(
+	self,
+	args: list[ast.expr],
+	keywords: list[ast.keyword],
+	ctx: Transpiler,
+) -> Expr:
+	"""Called when this expression is used as a function: expr(args).
+
+	Override to customize call behavior.
+	Default emits a Call expression with args transpiled.
+
+	Args and keywords are raw Python AST nodes (not yet transpiled).
+	Use ctx.emit_expr() to convert them to Expr as needed.
+	Keywords with kw.arg=None are **spread syntax.
+	"""
+	if keywords:
+		has_spread = any(kw.arg is None for kw in keywords)
+		if has_spread:
+			raise TranspileError("Spread (**expr) not supported in this call")
+		raise TranspileError("Keyword arguments not supported in call")
+	return Call(self, [ctx.emit_expr(a) for a in args])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"list[ast.expr]"} value={null} />
+<PyParameter name={"keywords"} type={"list[ast.keyword]"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_getattr"} type={"(self, attr, ctx) -> Expr"}>
+
+Called when an attribute is accessed: expr.attr.
+
+Override to customize attribute access.
+Default returns Member(self, attr).
+
+<PySourceCode >
+
+```python
+def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+	"""Called when an attribute is accessed: expr.attr.
+
+	Override to customize attribute access.
+	Default returns Member(self, attr).
+	"""
+	return Member(self, attr)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"attr"} type={"str"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_subscript"} type={"(self, key, ctx) -> Expr"}>
+
+Called when subscripted: expr[key].
+
+Override to customize subscript behavior.
+Default returns Subscript(self, emitted_key).
+
+<PySourceCode >
+
+```python
+def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr:
+	"""Called when subscripted: expr[key].
+
+	Override to customize subscript behavior.
+	Default returns Subscript(self, emitted_key).
+	"""
+	if isinstance(key, ast.Tuple):
+		raise TranspileError(
+			"Multiple indices not supported in subscript", node=key
+		)
+	return Subscript(self, ctx.emit_expr(key))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"ast.expr"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+Serialize this expression node for client-side rendering.
+
+Returns a VDOMNode (primitive or dict) that can be JSON-serialized and
+evaluated on the client. Override in each concrete Expr subclass.
+
+Raises TypeError for nodes that cannot be serialized (e.g., Transformer).
+
+<PySourceCode >
+
+```python
+@abstractmethod
+def render(self) -> VDOMNode:
+	"""Serialize this expression node for client-side rendering.
+
+	Returns a VDOMNode (primitive or dict) that can be JSON-serialized and
+	evaluated on the client. Override in each concrete Expr subclass.
+
+	Raises TypeError for nodes that cannot be serialized (e.g., Transformer).
+	"""
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"__call__"} type={"(self, *args, **kwargs) -> 'Call'"}>
+
+Allow calling Expr objects in Python code.
+
+Returns a Call expression. Subclasses may override to return more
+specific types (e.g., Element for JSX components).
+
+<PySourceCode >
+
+```python
+def __call__(self, *args: object, **kwargs: object) -> "Call":
+	"""Allow calling Expr objects in Python code.
+
+	Returns a Call expression. Subclasses may override to return more
+	specific types (e.g., Element for JSX components).
+	"""
+	return Call(self, [Expr.of(a) for a in args])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"object"} value={"()"} />
+<PyParameter name={"kwargs"} type={"object"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={"'Call'"} />
+
+</PyFunction>
+
+<PyFunction name={"__getitem__"} type={"(self, key) -> 'Subscript'"}>
+
+Allow subscript access on Expr objects in Python code.
+
+Returns a Subscript expression for type checking.
+
+<PySourceCode >
+
+```python
+def __getitem__(self, key: object) -> "Subscript":
+	"""Allow subscript access on Expr objects in Python code.
+
+	Returns a Subscript expression for type checking.
+	"""
+	return Subscript(self, Expr.of(key))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"object"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Subscript'"} />
+
+</PyFunction>
+
+<PyFunction name={"__getattr__"} type={"(self, attr) -> 'Member'"}>
+
+Allow attribute access on Expr objects in Python code.
+
+Returns a Member expression for type checking.
+
+<PySourceCode >
+
+```python
+def __getattr__(self, attr: str) -> "Member":
+	"""Allow attribute access on Expr objects in Python code.
+
+	Returns a Member expression for type checking.
+	"""
+	return Member(self, attr)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"attr"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Member'"} />
+
+</PyFunction>
+
+<PyFunction name={"__add__"} type={"(self, other) -> 'Binary'"}>
+
+Allow + operator on Expr objects.
+
+<PySourceCode >
+
+```python
+def __add__(self, other: object) -> "Binary":
+	"""Allow + operator on Expr objects."""
+	return Binary(self, "+", Expr.of(other))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"object"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Binary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__sub__"} type={"(self, other) -> 'Binary'"}>
+
+Allow - operator on Expr objects.
+
+<PySourceCode >
+
+```python
+def __sub__(self, other: object) -> "Binary":
+	"""Allow - operator on Expr objects."""
+	return Binary(self, "-", Expr.of(other))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"object"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Binary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__mul__"} type={"(self, other) -> 'Binary'"}>
+
+Allow * operator on Expr objects.
+
+<PySourceCode >
+
+```python
+def __mul__(self, other: object) -> "Binary":
+	"""Allow * operator on Expr objects."""
+	return Binary(self, "*", Expr.of(other))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"object"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Binary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__truediv__"} type={"(self, other) -> 'Binary'"}>
+
+Allow / operator on Expr objects.
+
+<PySourceCode >
+
+```python
+def __truediv__(self, other: object) -> "Binary":
+	"""Allow / operator on Expr objects."""
+	return Binary(self, "/", Expr.of(other))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"object"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Binary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__mod__"} type={"(self, other) -> 'Binary'"}>
+
+Allow % operator on Expr objects.
+
+<PySourceCode >
+
+```python
+def __mod__(self, other: object) -> "Binary":
+	"""Allow % operator on Expr objects."""
+	return Binary(self, "%", Expr.of(other))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"object"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Binary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__and__"} type={"(self, other) -> 'Binary'"}>
+
+Allow & operator on Expr objects (maps to &&).
+
+<PySourceCode >
+
+```python
+def __and__(self, other: object) -> "Binary":
+	"""Allow & operator on Expr objects (maps to &&)."""
+	return Binary(self, "&&", Expr.of(other))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"object"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Binary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__or__"} type={"(self, other) -> 'Binary'"}>
+
+Allow | operator on Expr objects (maps to ||).
+
+<PySourceCode >
+
+```python
+def __or__(self, other: object) -> "Binary":
+	"""Allow | operator on Expr objects (maps to ||)."""
+	return Binary(self, "||", Expr.of(other))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"object"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Binary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__neg__"} type={"(self) -> 'Unary'"}>
+
+Allow unary - operator on Expr objects.
+
+<PySourceCode >
+
+```python
+def __neg__(self) -> "Unary":
+	"""Allow unary - operator on Expr objects."""
+	return Unary("-", self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Unary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__pos__"} type={"(self) -> 'Unary'"}>
+
+Allow unary + operator on Expr objects.
+
+<PySourceCode >
+
+```python
+def __pos__(self) -> "Unary":
+	"""Allow unary + operator on Expr objects."""
+	return Unary("+", self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Unary'"} />
+
+</PyFunction>
+
+<PyFunction name={"__invert__"} type={"(self) -> 'Unary'"}>
+
+Allow ~ operator on Expr objects (maps to !).
+
+<PySourceCode >
+
+```python
+def __invert__(self) -> "Unary":
+	"""Allow ~ operator on Expr objects (maps to !)."""
+	return Unary("!", self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Unary'"} />
+
+</PyFunction>
+
+<PyFunction name={"as_"} type={"(self, typ_) -> '_T'"}>
+
+Cast this expression to a type or use as a decorator.
+
+Usage as decorator:
+        @Import(...).as_
+        def fn(): ...
+
+Usage for type casting:
+        clsx = Import(...).as_(Callable[[str, ...], str])
+
+If typ_ is a user-defined callable (function or lambda),
+wraps the expression in a Signature node that stores the callable's
+signature for type introspection.
+
+<PySourceCode >
+
+```python
+def as_(self, typ_: "_T | type[_T]") -> "_T":
+	"""Cast this expression to a type or use as a decorator.
+
+	Usage as decorator:
+		@Import(...).as_
+		def fn(): ...
+
+	Usage for type casting:
+		clsx = Import(...).as_(Callable[[str, ...], str])
+
+	If typ_ is a user-defined callable (function or lambda),
+	wraps the expression in a Signature node that stores the callable's
+	signature for type introspection.
+	"""
+	# Only wrap for user-defined functions (lambdas, def functions)
+	# Skip for types (str, int, etc.) used as type annotations
+	if isfunction(typ_):
+		try:
+			sig = signature(typ_)
+			return cast("_T", Signature(self, sig))
+		except (ValueError, TypeError):
+			# Signature not available (e.g., for built-ins), return self
+			pass
+
+	return cast("_T", self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"typ_"} type={"'_T | type[_T]'"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'_T'"} />
+
+</PyFunction>
+
+<PyFunction name={"jsx"} type={"(self) -> 'Jsx'"}>
+
+Wrap this expression as a JSX component.
+
+When called in transpiled code, produces Element(tag=self, ...).
+
+<PySourceCode >
+
+```python
+def jsx(self) -> "Jsx":
+	"""Wrap this expression as a JSX component.
+
+	When called in transpiled code, produces Element(tag=self, ...).
+	"""
+	return Jsx(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"'Jsx'"} />
+
+</PyFunction>
+
+<PyFunction name={"of"} type={"(value) -> Expr"}>
+
+Convert a Python value to an Expr.
+
+Resolution order:
+1. Already an Expr: returned as-is
+2. Registered in EXPR_REGISTRY: return the registered expr
+3. Primitives: str/int/float -> Literal, bool -> Literal, None -> Literal(None)
+4. Collections: list/tuple -> Array, dict -> Object (recursively converted)
+5. set -> Call(Identifier("Set"), [Array(...)])
+
+Raises TypeError for unconvertible values.
+
+<PySourceCode >
+
+```python
+@staticmethod
+def of(value: Any) -> Expr:
+	"""Convert a Python value to an Expr.
+
+	Resolution order:
+	1. Already an Expr: returned as-is
+	2. Registered in EXPR_REGISTRY: return the registered expr
+	3. Primitives: str/int/float -> Literal, bool -> Literal, None -> Literal(None)
+	4. Collections: list/tuple -> Array, dict -> Object (recursively converted)
+	5. set -> Call(Identifier("Set"), [Array(...)])
+
+	Raises TypeError for unconvertible values.
+	"""
+	# Already an Expr
+	if isinstance(value, Expr):
+		return value
+
+	# Check registry (for modules, functions, etc.)
+	if (expr := EXPR_REGISTRY.get(id(value))) is not None:
+		return expr
+
+	# Primitives - must check bool before int since bool is subclass of int
+	if isinstance(value, bool):
+		return Literal(value)
+	if isinstance(value, (int, float, str)):
+		return Literal(value)
+	if value is None:
+		return Literal(None)
+
+	# Collections
+	if isinstance(value, (list, tuple)):
+		return Array([Expr.of(v) for v in value])
+	if isinstance(value, dict):
+		props = [(str(k), Expr.of(v)) for k, v in value.items()]  # pyright: ignore[reportUnknownArgumentType]
+		return Object(props)
+	if isinstance(value, set):
+		# new Set([...])
+		return New(Identifier("Set"), [Array([Expr.of(v) for v in value])])
+
+	raise TypeError(f"Cannot convert {type(value).__name__} to Expr")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"register"} type={"(value, expr) -> None"}>
+
+Register a Python value for conversion via Expr.of().
+
+<PySourceCode >
+
+```python
+@staticmethod
+def register(value: Any, expr: Expr | Callable[..., Expr]) -> None:
+	"""Register a Python value for conversion via Expr.of().
+
+	Args:
+		value: The Python object to register (function, constant, etc.)
+		expr: Either an Expr or a Callable[..., Expr] (will be wrapped in Transformer)
+	"""
+	if callable(expr) and not isinstance(expr, Expr):
+		expr = Transformer(expr)
+	EXPR_REGISTRY[id(value)] = expr
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"Any"} value={undefined}>
+
+The Python object to register (function, constant, etc.)
+
+</PyParameter>
+<PyParameter name={"expr"} type={"Expr | Callable[..., Expr]"} value={undefined}>
+
+Either an Expr or a Callable[..., Expr] (will be wrapped in Transformer)
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

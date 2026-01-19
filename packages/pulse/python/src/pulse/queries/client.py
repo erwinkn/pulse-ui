@@ -42,17 +42,40 @@ def _prefix_filter(prefix: tuple[Any, ...]) -> Callable[[QueryKey], bool]:
 
 
 class QueryClient:
-	"""
-	Client for managing queries and infinite queries in a session.
+	"""Client for managing queries and infinite queries in a session.
 
 	Provides methods to get, set, invalidate, and refetch queries by key
-	or using filter predicates.
+	or using filter predicates. Automatically resolves to the current
+	RenderSession's query store.
 
-	Automatically resolves to the current RenderSession's query store.
+	Access via ``ps.queries`` singleton:
+
+	Example:
+		::
+
+			# Get query data
+			user = ps.queries.get_data(("user", user_id))
+
+			# Invalidate queries by prefix
+			ps.queries.invalidate_prefix(("users",))
+
+			# Set data optimistically
+			ps.queries.set_data(("user", user_id), updated_user)
+
+			# Check if any query is fetching
+			if ps.queries.is_fetching(("user", user_id)):
+			    show_loading()
 	"""
 
 	def _get_store(self):
-		"""Get the query store from the current PulseContext."""
+		"""Get the query store from the current PulseContext.
+
+		Returns:
+			The QueryStore from the active render session.
+
+		Raises:
+			RuntimeError: If no render session is available.
+		"""
 		render = PulseContext.get().render
 		if render is None:
 			raise RuntimeError("No render session available")
@@ -62,12 +85,26 @@ class QueryClient:
 	# Query accessors
 	# ─────────────────────────────────────────────────────────────────────────
 
-	def get(self, key: QueryKey):
-		"""Get an existing regular query by key, or None if not found."""
+	def get(self, key: QueryKey) -> KeyedQuery[Any] | None:
+		"""Get an existing regular query by key.
+
+		Args:
+			key: The query key tuple to look up.
+
+		Returns:
+			The KeyedQuery instance, or None if not found.
+		"""
 		return self._get_store().get(key)
 
-	def get_infinite(self, key: QueryKey):
-		"""Get an existing infinite query by key, or None if not found."""
+	def get_infinite(self, key: QueryKey) -> InfiniteQuery[Any, Any] | None:
+		"""Get an existing infinite query by key.
+
+		Args:
+			key: The query key tuple to look up.
+
+		Returns:
+			The InfiniteQuery instance, or None if not found.
+		"""
 		return self._get_store().get_infinite(key)
 
 	def get_all(
@@ -101,7 +138,15 @@ class QueryClient:
 		return results
 
 	def get_queries(self, filter: QueryFilter | None = None) -> list[KeyedQuery[Any]]:
-		"""Get all regular queries matching the filter."""
+		"""Get all regular queries matching the filter.
+
+		Args:
+			filter: Optional filter - exact key, list of keys, or predicate.
+				If None, returns all regular queries.
+
+		Returns:
+			List of matching KeyedQuery instances (excludes infinite queries).
+		"""
 		store = self._get_store()
 		predicate = _normalize_filter(filter)
 		results: list[KeyedQuery[Any]] = []
@@ -118,7 +163,15 @@ class QueryClient:
 	def get_infinite_queries(
 		self, filter: QueryFilter | None = None
 	) -> list[InfiniteQuery[Any, Any]]:
-		"""Get all infinite queries matching the filter."""
+		"""Get all infinite queries matching the filter.
+
+		Args:
+			filter: Optional filter - exact key, list of keys, or predicate.
+				If None, returns all infinite queries.
+
+		Returns:
+			List of matching InfiniteQuery instances.
+		"""
 		store = self._get_store()
 		predicate = _normalize_filter(filter)
 		results: list[InfiniteQuery[Any, Any]] = []
@@ -137,14 +190,28 @@ class QueryClient:
 	# ─────────────────────────────────────────────────────────────────────────
 
 	def get_data(self, key: QueryKey) -> Any | None:
-		"""Get the data for a query by key. Returns None if not found or no data."""
+		"""Get the data for a query by key.
+
+		Args:
+			key: The query key tuple to look up.
+
+		Returns:
+			The query data, or None if query not found or has no data.
+		"""
 		query = self.get(key)
 		if query is None:
 			return None
 		return query.data.read()
 
 	def get_infinite_data(self, key: QueryKey) -> list[Page[Any, Any]] | None:
-		"""Get the pages for an infinite query by key."""
+		"""Get the pages for an infinite query by key.
+
+		Args:
+			key: The query key tuple to look up.
+
+		Returns:
+			List of Page objects, or None if query not found.
+		"""
 		query = self.get_infinite(key)
 		if query is None:
 			return None
@@ -215,7 +282,16 @@ class QueryClient:
 		*,
 		updated_at: float | dt.datetime | None = None,
 	) -> bool:
-		"""Set pages for an infinite query by key."""
+		"""Set pages for an infinite query by key.
+
+		Args:
+			key: The query key tuple.
+			pages: New pages list or updater function.
+			updated_at: Optional timestamp to set.
+
+		Returns:
+			True if query was found and updated, False otherwise.
+		"""
 		query = self.get_infinite(key)
 		if query is None:
 			return False
@@ -291,11 +367,20 @@ class QueryClient:
 		*,
 		cancel_refetch: bool = False,
 	) -> int:
-		"""
-		Invalidate all queries whose keys start with the given prefix.
+		"""Invalidate all queries whose keys start with the given prefix.
+
+		Args:
+			prefix: Tuple prefix to match against query keys.
+			cancel_refetch: Cancel in-flight requests before refetch.
+
+		Returns:
+			Count of invalidated queries.
 
 		Example:
-			ps.queries.invalidate_prefix(("users",))  # invalidates ("users",), ("users", 1), etc.
+			::
+
+				# Invalidates ("users",), ("users", 1), ("users", 2, "posts"), etc.
+				ps.queries.invalidate_prefix(("users",))
 		"""
 		return self.invalidate(_prefix_filter(prefix), cancel_refetch=cancel_refetch)
 
@@ -309,10 +394,14 @@ class QueryClient:
 		*,
 		cancel_refetch: bool = True,
 	) -> ActionResult[Any] | None:
-		"""
-		Refetch a query by key and return the result.
+		"""Refetch a query by key and return the result.
 
-		Returns None if the query doesn't exist.
+		Args:
+			key: The query key tuple to refetch.
+			cancel_refetch: Cancel in-flight request before refetching (default True).
+
+		Returns:
+			ActionResult with data or error, or None if query doesn't exist.
 		"""
 		query = self.get(key)
 		if query is not None:
@@ -330,10 +419,15 @@ class QueryClient:
 		*,
 		cancel_refetch: bool = True,
 	) -> list[ActionResult[Any]]:
-		"""
-		Refetch all queries matching the filter.
+		"""Refetch all queries matching the filter.
 
-		Returns list of ActionResult for each refetched query.
+		Args:
+			filter: Optional filter - exact key, list of keys, or predicate.
+				If None, refetches all queries.
+			cancel_refetch: Cancel in-flight requests before refetching.
+
+		Returns:
+			List of ActionResult for each refetched query.
 		"""
 		queries = self.get_all(filter)
 		results: list[ActionResult[Any]] = []
@@ -353,7 +447,15 @@ class QueryClient:
 		*,
 		cancel_refetch: bool = True,
 	) -> list[ActionResult[Any]]:
-		"""Refetch all queries whose keys start with the given prefix."""
+		"""Refetch all queries whose keys start with the given prefix.
+
+		Args:
+			prefix: Tuple prefix to match against query keys.
+			cancel_refetch: Cancel in-flight requests before refetching.
+
+		Returns:
+			List of ActionResult for each refetched query.
+		"""
 		return await self.refetch_all(
 			_prefix_filter(prefix), cancel_refetch=cancel_refetch
 		)
@@ -369,7 +471,16 @@ class QueryClient:
 		*,
 		updated_at: float | dt.datetime | None = None,
 	) -> bool:
-		"""Set error state on a query by key."""
+		"""Set error state on a query by key.
+
+		Args:
+			key: The query key tuple.
+			error: The exception to set.
+			updated_at: Optional timestamp to set.
+
+		Returns:
+			True if query was found and error was set, False otherwise.
+		"""
 		query = self.get(key)
 		if query is not None:
 			query.set_error(error, updated_at=updated_at)
@@ -387,10 +498,13 @@ class QueryClient:
 	# ─────────────────────────────────────────────────────────────────────────
 
 	def remove(self, key: QueryKey) -> bool:
-		"""
-		Remove a query from the store, disposing it.
+		"""Remove a query from the store, disposing it.
 
-		Returns True if query existed and was removed.
+		Args:
+			key: The query key tuple to remove.
+
+		Returns:
+			True if query existed and was removed, False otherwise.
 		"""
 		store = self._get_store()
 		entry = store.get_any(key)
@@ -400,10 +514,14 @@ class QueryClient:
 		return True
 
 	def remove_all(self, filter: QueryFilter | None = None) -> int:
-		"""
-		Remove all queries matching the filter.
+		"""Remove all queries matching the filter.
 
-		Returns count of removed queries.
+		Args:
+			filter: Optional filter - exact key, list of keys, or predicate.
+				If None, removes all queries.
+
+		Returns:
+			Count of removed queries.
 		"""
 		queries = self.get_all(filter)
 		for q in queries:
@@ -411,7 +529,14 @@ class QueryClient:
 		return len(queries)
 
 	def remove_prefix(self, prefix: tuple[Any, ...]) -> int:
-		"""Remove all queries whose keys start with the given prefix."""
+		"""Remove all queries whose keys start with the given prefix.
+
+		Args:
+			prefix: Tuple prefix to match against query keys.
+
+		Returns:
+			Count of removed queries.
+		"""
 		return self.remove_all(_prefix_filter(prefix))
 
 	# ─────────────────────────────────────────────────────────────────────────
@@ -419,7 +544,15 @@ class QueryClient:
 	# ─────────────────────────────────────────────────────────────────────────
 
 	def is_fetching(self, filter: QueryFilter | None = None) -> bool:
-		"""Check if any query matching the filter is currently fetching."""
+		"""Check if any query matching the filter is currently fetching.
+
+		Args:
+			filter: Optional filter - exact key, list of keys, or predicate.
+				If None, checks all queries.
+
+		Returns:
+			True if any matching query is fetching.
+		"""
 		queries = self.get_all(filter)
 		for q in queries:
 			if q.is_fetching():
@@ -427,7 +560,15 @@ class QueryClient:
 		return False
 
 	def is_loading(self, filter: QueryFilter | None = None) -> bool:
-		"""Check if any query matching the filter is in loading state."""
+		"""Check if any query matching the filter is in loading state.
+
+		Args:
+			filter: Optional filter - exact key, list of keys, or predicate.
+				If None, checks all queries.
+
+		Returns:
+			True if any matching query has status "loading".
+		"""
 		queries = self.get_all(filter)
 		for q in queries:
 			if isinstance(q, InfiniteQuery):
@@ -442,10 +583,13 @@ class QueryClient:
 	# ─────────────────────────────────────────────────────────────────────────
 
 	async def wait(self, key: QueryKey) -> ActionResult[Any] | None:
-		"""
-		Wait for a query to complete and return the result.
+		"""Wait for a query to complete and return the result.
 
-		Returns None if the query doesn't exist.
+		Args:
+			key: The query key tuple to wait for.
+
+		Returns:
+			ActionResult with data or error, or None if query doesn't exist.
 		"""
 		query = self.get(key)
 		if query is not None:
@@ -458,5 +602,5 @@ class QueryClient:
 		return None
 
 
-# Singleton instance
+# Singleton instance accessible via ps.queries
 queries = QueryClient()

@@ -1,0 +1,115 @@
+---
+title: "EmitContext"
+---
+
+Context for emit operations during route code generation.
+
+Stores information about the current route file being generated,
+allowing emit methods to compute correct relative paths.
+
+Usage:
+        with EmitContext(route_file_path="routes/users/index.tsx"):
+                js_code = emit(fn.transpile())
+
+## Attributes
+
+<PyAttribute name={"route_file_path"} type={"str"} value={null}>
+
+Path to route file from pulse folder root, e.g. 'routes/users/index.tsx'
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"get"} type={"(cls) -> EmitContext | None"}>
+
+Get current emit context, or None if not set.
+
+<PySourceCode >
+
+```python
+@classmethod
+def get(cls) -> EmitContext | None:
+	"""Get current emit context, or None if not set."""
+	return _EMIT_CONTEXT.get()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.emit_context.EmitContext | None"} />
+
+</PyFunction>
+
+<PyFunction name={"__enter__"} type={"(self) -> EmitContext"}>
+
+<PySourceCode >
+
+```python
+def __enter__(self) -> EmitContext:
+	self._token = _EMIT_CONTEXT.set(self)
+	return self
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.emit_context.EmitContext"} />
+
+</PyFunction>
+
+<PyFunction name={"__exit__"} type={"(self, exc_type=None, exc_val=None, exc_tb=None) -> Literal[False]"}>
+
+<PySourceCode >
+
+```python
+def __exit__(
+	self,
+	exc_type: type[BaseException] | None = None,
+	exc_val: BaseException | None = None,
+	exc_tb: TracebackType | None = None,
+) -> Literal[False]:
+	if self._token is not None:
+		_EMIT_CONTEXT.reset(self._token)
+		self._token = None
+	return False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"exc_type"} type={"type[BaseException] | None"} value={"None"} />
+<PyParameter name={"exc_val"} type={"BaseException | None"} value={"None"} />
+<PyParameter name={"exc_tb"} type={"TracebackType | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"typing.Literal[False]"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, route_file_path, _token=None) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"route_file_path"} type={"str"} value={null} />
+<PyParameter name={"_token"} type={"Token[EmitContext | None] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

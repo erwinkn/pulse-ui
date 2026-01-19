@@ -1,0 +1,92 @@
+---
+title: "Function"
+---
+
+JS function: function name(params) \{ ... \} or async function ...
+
+For statement-bodied functions. Use Arrow for expression-bodied.
+
+## Attributes
+
+<PyAttribute name={"params"} type={"Sequence[str]"} value={null} />
+
+<PyAttribute name={"body"} type={"Sequence[Stmt]"} value={null} />
+
+<PyAttribute name={"name"} type={"str | None"} value={"None"} />
+
+<PyAttribute name={"is_async"} type={"bool"} value={"False"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	if self.is_async:
+		out.append("async ")
+	out.append("function")
+	if self.name:
+		out.append(" ")
+		out.append(self.name)
+	out.append("(")
+	out.append(", ".join(self.params))
+	out.append(") {\n")
+	for stmt in self.body:
+		stmt.emit(out)
+		out.append("\n")
+	out.append("}")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	raise TypeError("Function cannot be rendered as VDOMExpr")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, params, body, name=None, is_async=False) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"params"} type={"Sequence[str]"} value={null} />
+<PyParameter name={"body"} type={"Sequence[Stmt]"} value={null} />
+<PyParameter name={"name"} type={"str | None"} value={"None"} />
+<PyParameter name={"is_async"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

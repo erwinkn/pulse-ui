@@ -1,0 +1,536 @@
+---
+title: "StringMethods"
+---
+
+String method transpilation.
+
+## Functions
+
+<PyFunction name={"__runtime_check__"} type={"(cls, expr) -> Expr"}>
+
+<PySourceCode >
+
+```python
+@classmethod
+@override
+def __runtime_check__(cls, expr: Expr) -> Expr:
+	return Binary(Unary("typeof", expr), "===", Literal("string"))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+<PyParameter name={"expr"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"__methods__"} type={"(cls) -> set[str]"}>
+
+<PySourceCode >
+
+```python
+@classmethod
+@override
+def __methods__(cls) -> set[str]:
+	return STR_METHODS
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"set[str]"} />
+
+</PyFunction>
+
+<PyFunction name={"lower"} type={"(self) -> Expr"}>
+
+str.lower() -> str.toLowerCase()
+
+<PySourceCode >
+
+```python
+def lower(self) -> Expr:
+	"""str.lower() -> str.toLowerCase()"""
+	return Call(Member(self.this, "toLowerCase"), [])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"upper"} type={"(self) -> Expr"}>
+
+str.upper() -> str.toUpperCase()
+
+<PySourceCode >
+
+```python
+def upper(self) -> Expr:
+	"""str.upper() -> str.toUpperCase()"""
+	return Call(Member(self.this, "toUpperCase"), [])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"strip"} type={"(self) -> Expr"}>
+
+str.strip() -> str.trim()
+
+<PySourceCode >
+
+```python
+def strip(self) -> Expr:
+	"""str.strip() -> str.trim()"""
+	return Call(Member(self.this, "trim"), [])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"lstrip"} type={"(self) -> Expr"}>
+
+str.lstrip() -> str.trimStart()
+
+<PySourceCode >
+
+```python
+def lstrip(self) -> Expr:
+	"""str.lstrip() -> str.trimStart()"""
+	return Call(Member(self.this, "trimStart"), [])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"rstrip"} type={"(self) -> Expr"}>
+
+str.rstrip() -> str.trimEnd()
+
+<PySourceCode >
+
+```python
+def rstrip(self) -> Expr:
+	"""str.rstrip() -> str.trimEnd()"""
+	return Call(Member(self.this, "trimEnd"), [])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"zfill"} type={"(self, width) -> Expr"}>
+
+str.zfill(width) -> str.padStart(width, '0')
+
+<PySourceCode >
+
+```python
+def zfill(self, width: Expr) -> Expr:
+	"""str.zfill(width) -> str.padStart(width, '0')"""
+	return Call(Member(self.this, "padStart"), [width, Literal("0")])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"width"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"startswith"} type={"(self, prefix) -> Expr"}>
+
+str.startswith(prefix) -> str.startsWith(prefix)
+
+<PySourceCode >
+
+```python
+def startswith(self, prefix: Expr) -> Expr:
+	"""str.startswith(prefix) -> str.startsWith(prefix)"""
+	return Call(Member(self.this, "startsWith"), [prefix])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"prefix"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"endswith"} type={"(self, suffix) -> Expr"}>
+
+str.endswith(suffix) -> str.endsWith(suffix)
+
+<PySourceCode >
+
+```python
+def endswith(self, suffix: Expr) -> Expr:
+	"""str.endswith(suffix) -> str.endsWith(suffix)"""
+	return Call(Member(self.this, "endsWith"), [suffix])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"suffix"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"replace"} type={"(self, old, new) -> Expr"}>
+
+str.replace(old, new) -> str.replaceAll(old, new)
+
+<PySourceCode >
+
+```python
+def replace(self, old: Expr, new: Expr) -> Expr:
+	"""str.replace(old, new) -> str.replaceAll(old, new)"""
+	return Call(Member(self.this, "replaceAll"), [old, new])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"old"} type={"Expr"} value={null} />
+<PyParameter name={"new"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"capitalize"} type={"(self) -> Expr"}>
+
+str.capitalize() -> str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
+
+<PySourceCode >
+
+```python
+def capitalize(self) -> Expr:
+	"""str.capitalize() -> str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()"""
+	left = Call(
+		Member(Call(Member(self.this, "charAt"), [Literal(0)]), "toUpperCase"), []
+	)
+	right = Call(
+		Member(Call(Member(self.this, "slice"), [Literal(1)]), "toLowerCase"), []
+	)
+	return Binary(left, "+", right)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"split"} type={"(self, sep=None) -> Expr | None"}>
+
+str.split(sep) -> str.split(sep) or special whitespace handling.
+
+Python's split() without args splits on whitespace and removes empties:
+"a  b".split() -> ["a", "b"]
+
+JavaScript's split() without args returns the whole string:
+"a  b".split() -> ["a  b"]
+
+Fix: str.trim().split(/\s+/)
+
+<PySourceCode >
+
+```python
+def split(self, sep: Expr | None = None) -> Expr | None:
+	"""str.split(sep) -> str.split(sep) or special whitespace handling.
+
+	Python's split() without args splits on whitespace and removes empties:
+	"a  b".split() -> ["a", "b"]
+
+	JavaScript's split() without args returns the whole string:
+	"a  b".split() -> ["a  b"]
+
+	Fix: str.trim().split(/\\s+/)
+	"""
+	if sep is None:
+		# Python's default: split on whitespace and filter empties
+		trimmed = Call(Member(self.this, "trim"), [])
+		return Call(Member(trimmed, "split"), [Identifier(r"/\s+/")])
+	return None  # Fall through for explicit separator
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"sep"} type={"Expr | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr | None"} />
+
+</PyFunction>
+
+<PyFunction name={"join"} type={"(self, iterable) -> Expr"}>
+
+str.join(iterable) -> iterable.join(str)
+
+<PySourceCode >
+
+```python
+def join(self, iterable: Expr) -> Expr:
+	"""str.join(iterable) -> iterable.join(str)"""
+	return Call(Member(iterable, "join"), [self.this])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"iterable"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"find"} type={"(self, sub) -> Expr"}>
+
+str.find(sub) -> str.indexOf(sub)
+
+<PySourceCode >
+
+```python
+def find(self, sub: Expr) -> Expr:
+	"""str.find(sub) -> str.indexOf(sub)"""
+	return Call(Member(self.this, "indexOf"), [sub])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"sub"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"rfind"} type={"(self, sub) -> Expr"}>
+
+str.rfind(sub) -> str.lastIndexOf(sub)
+
+<PySourceCode >
+
+```python
+def rfind(self, sub: Expr) -> Expr:
+	"""str.rfind(sub) -> str.lastIndexOf(sub)"""
+	return Call(Member(self.this, "lastIndexOf"), [sub])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"sub"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"count"} type={"(self, sub) -> Expr"}>
+
+str.count(sub) -> (str.split(sub).length - 1)
+
+<PySourceCode >
+
+```python
+def count(self, sub: Expr) -> Expr:
+	"""str.count(sub) -> (str.split(sub).length - 1)"""
+	return Binary(
+		Member(Call(Member(self.this, "split"), [sub]), "length"),
+		"-",
+		Literal(1),
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"sub"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"isdigit"} type={"(self) -> Expr"}>
+
+str.isdigit() -> /^\d+$/.test(str)
+
+<PySourceCode >
+
+```python
+def isdigit(self) -> Expr:
+	r"""str.isdigit() -> /^\d+$/.test(str)"""
+	return Call(
+		Member(Identifier("/^\\d+$/"), "test"),
+		[self.this],
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"isalpha"} type={"(self) -> Expr"}>
+
+str.isalpha() -> /^[a-zA-Z]+$/.test(str)
+
+<PySourceCode >
+
+```python
+def isalpha(self) -> Expr:
+	r"""str.isalpha() -> /^[a-zA-Z]+$/.test(str)"""
+	return Call(
+		Member(Identifier("/^[a-zA-Z]+$/"), "test"),
+		[self.this],
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"isalnum"} type={"(self) -> Expr"}>
+
+str.isalnum() -> /^[a-zA-Z0-9]+$/.test(str)
+
+<PySourceCode >
+
+```python
+def isalnum(self) -> Expr:
+	r"""str.isalnum() -> /^[a-zA-Z0-9]+$/.test(str)"""
+	return Call(
+		Member(Identifier("/^[a-zA-Z0-9]+$/"), "test"),
+		[self.this],
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>

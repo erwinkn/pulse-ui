@@ -1,0 +1,118 @@
+---
+title: "StateMeta"
+---
+
+Metaclass that automatically converts annotated attributes into reactive properties.
+
+When a class uses StateMeta (via inheriting from State), the metaclass:
+
+1. Converts all public type-annotated attributes into StateProperty descriptors
+2. Converts all public non-callable values into StateProperty descriptors
+3. Skips private attributes (starting with '_')
+4. Preserves existing descriptors (StateProperty, ComputedProperty, StateEffect)
+
+This enables the declarative state definition pattern:
+
+Example:
+        class MyState(ps.State):
+            count: int = 0        # Becomes StateProperty
+            name: str = "test"    # Becomes StateProperty
+            _private: int = 0     # Stays as regular attribute (not reactive)
+
+            @ps.computed
+            def doubled(self):    # Becomes ComputedProperty
+                return self.count * 2
+
+## Functions
+
+<PyFunction name={"__new__"} type={"(mcs, name, bases, namespace, **kwargs)"}>
+
+<PySourceCode >
+
+```python
+def __new__(
+	mcs,
+	name: str,
+	bases: tuple[type, ...],
+	namespace: dict[str, Any],
+	**kwargs: Any,
+):
+	annotations = namespace.get("__annotations__", {})
+
+	# 1) Turn annotated fields into StateProperty descriptors
+	for attr_name in annotations:
+		# Do not wrap private/dunder attributes as reactive
+		if attr_name.startswith("_"):
+			continue
+		default_value = namespace.get(attr_name)
+		namespace[attr_name] = StateProperty(attr_name, default_value)
+
+	# 2) Turn non-annotated plain values into StateProperty descriptors
+	for attr_name, value in list(namespace.items()):
+		# Do not wrap private/dunder attributes as reactive
+		if attr_name.startswith("_"):
+			continue
+		# Skip if already set as a descriptor we care about
+		if isinstance(
+			value,
+			(StateProperty, ComputedProperty, StateEffect, InitializableProperty),
+		):
+			continue
+		# Skip common callables and descriptors
+		if callable(value) or isinstance(
+			value, (staticmethod, classmethod, property)
+		):
+			continue
+		# Convert plain class var into a StateProperty
+		namespace[attr_name] = StateProperty(attr_name, value)
+
+	return super().__new__(mcs, name, bases, namespace)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"mcs"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"bases"} type={"tuple[type, ...]"} value={null} />
+<PyParameter name={"namespace"} type={"dict[str, Any]"} value={null} />
+<PyParameter name={"kwargs"} type={"Any"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__call__"} type={"(cls, *args, **kwargs)"}>
+
+<PySourceCode >
+
+```python
+@override
+def __call__(cls, *args: Any, **kwargs: Any):
+	# Create the instance (runs __new__ and the class' __init__)
+	instance = super().__call__(*args, **kwargs)
+	# Ensure state effects are initialized even if user __init__ skipped super().__init__
+	try:
+		initializer = instance._initialize
+	except AttributeError:
+		return instance
+	initializer()
+	return instance
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+<PyParameter name={"args"} type={"Any"} value={"()"} />
+<PyParameter name={"kwargs"} type={"Any"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

@@ -1,0 +1,264 @@
+---
+title: "CookieSessionStore"
+---
+
+Store sessions in signed cookies. Default session store.
+
+The cookie stores a compact JSON of the session signed with HMAC-SHA256
+to prevent tampering. Keep session data small (\<4KB).
+
+## Attributes
+
+<PyAttribute name={"digestmod"} type={"str"} value={"digestmod"} />
+
+<PyAttribute name={"secret"} type={"bytes"} value={"secret.encode('utf-8')"} />
+
+<PyAttribute name={"salt"} type={"bytes"} value={"salt.encode('utf-8')"} />
+
+<PyAttribute name={"max_cookie_bytes"} type={"int"} value={"max_cookie_bytes"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, secret=None, *, salt='pulse.session', digestmod='sha256', max_cookie_bytes=3800) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	secret: str | None = None,
+	*,
+	salt: str = "pulse.session",
+	digestmod: str = "sha256",
+	max_cookie_bytes: int = 3800,
+) -> None:
+	if not secret:
+		secret = env.pulse_secret or ""
+		if not secret:
+			pulse_env = env.pulse_env
+			if pulse_env == "prod":
+				# In CI/production, require an explicit secret
+				raise RuntimeError(
+					"PULSE_SECRET must be set when using CookieSessionStore in production.\nCookieSessionStore is the default way of storing sessions in Pulse. Providing a secret is necessary to not invalidate all sessions on reload."
+				)
+			# In dev, use an ephemeral secret silently
+			secret = secrets.token_urlsafe(32)
+	self.secret = secret.encode("utf-8")
+	self.salt = salt.encode("utf-8")
+	self.digestmod = digestmod
+	self.max_cookie_bytes = max_cookie_bytes
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"secret"} type={"str | None"} value={"None"} />
+<PyParameter name={"salt"} type={"str"} value={"'pulse.session'"} />
+<PyParameter name={"digestmod"} type={"str"} value={"'sha256'"} />
+<PyParameter name={"max_cookie_bytes"} type={"int"} value={"3800"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"encode"} type={"(self, sid, session) -> str"}>
+
+Encode session to signed cookie value.
+
+<PySourceCode >
+
+```python
+def encode(self, sid: str, session: dict[str, Any]) -> str:
+	"""Encode session to signed cookie value.
+
+	Args:
+		sid: Session identifier.
+		session: Session data to encode.
+
+	Returns:
+		Signed cookie value string.
+	"""
+	# Encode the entire session into the cookie (compressed v1)
+	try:
+		data = SessionCookiePayload(sid=sid, data=dict(session))
+		payload_json = json.dumps(data, separators=(",", ":")).encode("utf-8")
+		compressed = zlib.compress(payload_json, level=6)
+		signed = self._sign(compressed)
+		if len(signed) > self.max_cookie_bytes:
+			logging.warning("Session cookie too large, truncating")
+			session.clear()
+			return self.encode(sid, session)
+		return signed
+	except Exception:
+		logging.warning("Error encoding session cookie, truncating")
+		session.clear()
+		return self.encode(sid, session)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"sid"} type={"str"} value={undefined}>
+
+Session identifier.
+
+</PyParameter>
+<PyParameter name={"session"} type={"dict[str, Any]"} value={undefined}>
+
+Session data to encode.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"str"}>
+
+Signed cookie value string.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"decode"} type={"(self, cookie) -> tuple[str, Session] | None"}>
+
+Decode and verify signed cookie.
+
+<PySourceCode >
+
+```python
+def decode(self, cookie: str) -> tuple[str, Session] | None:
+	"""Decode and verify signed cookie.
+
+	Args:
+		cookie: Signed cookie value string.
+
+	Returns:
+		Tuple of (sid, session) if valid, None if invalid or tampered.
+	"""
+	if not cookie:
+		return None
+
+	raw = self._unsign(cookie)
+	if raw is None:
+		return None
+
+	try:
+		payload_json = zlib.decompress(raw).decode("utf-8")
+		data = cast(SessionCookiePayload, json.loads(payload_json))
+		return data["sid"], ReactiveDict(data["data"])
+	except Exception:
+		return None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cookie"} type={"str"} value={undefined}>
+
+Signed cookie value string.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"tuple[str, Session] | None"}>
+
+Tuple of (sid, session) if valid, None if invalid or tampered.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"_mac"} type={"(self, payload) -> bytes"}>
+
+<PySourceCode >
+
+```python
+def _mac(self, payload: bytes) -> bytes:
+	return hmac.new(
+		self.secret + b"|" + self.salt, payload, self.digestmod
+	).digest()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"payload"} type={"bytes"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bytes"} />
+
+</PyFunction>
+
+<PyFunction name={"_sign"} type={"(self, payload) -> str"}>
+
+<PySourceCode >
+
+```python
+def _sign(self, payload: bytes) -> str:
+	mac = self._mac(payload)
+	b64 = base64.urlsafe_b64encode(payload).rstrip(b"=")
+	sig = base64.urlsafe_b64encode(mac).rstrip(b"=")
+	return f"v1.{b64.decode('ascii')}.{sig.decode('ascii')}"
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"payload"} type={"bytes"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+
+<PyFunction name={"_unsign"} type={"(self, token) -> bytes | None"}>
+
+<PySourceCode >
+
+```python
+def _unsign(self, token: str) -> bytes | None:
+	try:
+		if not token.startswith("v1."):
+			return None
+		_, b64, sig = token.split(".", 2)
+
+		def _pad(s: str) -> bytes:
+			return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+		raw = _pad(b64)
+		mac = _pad(sig)
+		expected = self._mac(raw)
+		if not hmac.compare_digest(mac, expected):
+			return None
+		return raw
+	except Exception:
+		return None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"token"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bytes | None"} />
+
+</PyFunction>

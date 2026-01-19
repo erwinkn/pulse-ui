@@ -1,0 +1,463 @@
+---
+title: "State"
+---
+
+Base class for reactive state objects.
+
+Define state properties using type annotations:
+
+```python
+class CounterState(ps.State):
+    count: int = 0
+    name: str = "Counter"
+
+    @ps.computed
+    def double_count(self):
+        return self.count * 2
+
+    @ps.effect
+    def print_count(self):
+        print(f"Count is now: \{self.count\}")
+```
+
+Properties will automatically trigger re-renders when changed.
+
+Override `on_dispose()` to run cleanup code when the state is disposed:
+```python
+class MyState(ps.State):
+    def on_dispose(self):
+        # Clean up timers, connections, etc.
+        self.timer.cancel()
+        self.connection.close()
+```
+
+## Functions
+
+<PyFunction name={"__setattr__"} type={"(self, name, value) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def __setattr__(self, name: str, value: Any) -> None:
+	if (
+		# Allow writing private/internal attributes
+		name.startswith("_")
+		# Allow writing during initialization
+		or getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
+		== StateStatus.INITIALIZING
+	):
+		super().__setattr__(name, value)
+		return
+
+	# Route reactive properties through their descriptor
+	cls_attr = getattr(self.__class__, name, None)
+	if isinstance(cls_attr, ReactiveProperty):
+		cls_attr.__set__(self, value)
+		return
+
+	if isinstance(cls_attr, ComputedProperty):
+		raise AttributeError(f"Cannot set computed property '{name}'")
+
+	# Reject all other public writes
+	raise AttributeError(
+		"Cannot set non-reactive property '"
+		+ name
+		+ "' on "
+		+ self.__class__.__name__
+		+ ". "
+		+ "To make '"
+		+ name
+		+ "' reactive, declare it with a type annotation at the class level: "
+		+ "'"
+		+ name
+		+ ": <type> = <default_value>'"
+		+ "Otherwise, make it private with an underscore: 'self._"
+		+ name
+		+ " = <value>'"
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"value"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_initialize"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def _initialize(self):
+	# Idempotent: avoid double-initialization when subclass calls super().__init__
+	status = getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
+	if status == StateStatus.INITIALIZED:
+		return
+	if status == StateStatus.INITIALIZING:
+		raise RuntimeError(
+			"Circular state initialization, this is a Pulse internal error"
+		)
+	setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZING)
+
+	self._scope = Scope()
+	with self._scope:
+		# Traverse MRO so effects declared on base classes are also initialized
+		for cls in self.__class__.__mro__:
+			if cls is State or cls is ABC:
+				continue
+			for name, attr in cls.__dict__.items():
+				# If the attribute is shadowed in a subclass with a non-StateEffect, skip
+				if getattr(self.__class__, name, attr) is not attr:
+					continue
+				if isinstance(attr, InitializableProperty):
+					# Initialize properties like state effects or queries
+					attr.initialize(self, name)
+
+	setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"properties"} type={"(self) -> Iterator[Signal[Any]]"}>
+
+Iterate over the state's reactive Signal instances.
+
+Traverses the class hierarchy (MRO) to include properties from base classes.
+Each Signal is yielded only once, even if shadowed in subclasses.
+
+<Callout title={"Example"} type={"example"}>
+
+for signal in state.properties():
+    print(signal.name, signal.value)
+
+</Callout>
+
+<PySourceCode >
+
+```python
+def properties(self) -> Iterator[Signal[Any]]:
+	"""
+	Iterate over the state's reactive Signal instances.
+
+	Traverses the class hierarchy (MRO) to include properties from base classes.
+	Each Signal is yielded only once, even if shadowed in subclasses.
+
+	Yields:
+		Signal[Any]: Each reactive property's underlying Signal instance.
+
+	Example:
+		for signal in state.properties():
+		    print(signal.name, signal.value)
+	"""
+	seen: set[str] = set()
+	for cls in self.__class__.__mro__:
+		if cls in (State, ABC):
+			continue
+		for name, prop in cls.__dict__.items():
+			if name in seen:
+				continue
+			if isinstance(prop, ReactiveProperty):
+				seen.add(name)
+				yield prop.get_signal(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterator[pulse.reactive.Signal[typing.Any]]"} />
+
+</PyFunction>
+
+<PyFunction name={"computeds"} type={"(self) -> Iterator[Computed[Any]]"}>
+
+Iterate over the state's Computed instances.
+
+Traverses the class hierarchy (MRO) to include computed properties from
+base classes. Each Computed is yielded only once.
+
+<Callout title={"Example"} type={"example"}>
+
+for computed in state.computeds():
+    print(computed.name, computed.read())
+
+</Callout>
+
+<PySourceCode >
+
+```python
+def computeds(self) -> Iterator[Computed[Any]]:
+	"""
+	Iterate over the state's Computed instances.
+
+	Traverses the class hierarchy (MRO) to include computed properties from
+	base classes. Each Computed is yielded only once.
+
+	Yields:
+		Computed[Any]: Each computed property's underlying Computed instance.
+
+	Example:
+		for computed in state.computeds():
+		    print(computed.name, computed.read())
+	"""
+	seen: set[str] = set()
+	for cls in self.__class__.__mro__:
+		if cls in (State, ABC):
+			continue
+		for name, comp_prop in cls.__dict__.items():
+			if name in seen:
+				continue
+			if isinstance(comp_prop, ComputedProperty):
+				seen.add(name)
+				yield comp_prop.get_computed(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterator[pulse.reactive.Computed[typing.Any]]"} />
+
+</PyFunction>
+
+<PyFunction name={"effects"} type={"(self) -> Iterator[Effect]"}>
+
+Iterate over the state's Effect instances.
+
+Returns effects that have been initialized on this state instance.
+Effects are created from @ps.effect decorated methods when the
+state is instantiated.
+
+<Callout title={"Example"} type={"example"}>
+
+for effect in state.effects():
+    print(effect.name)
+
+</Callout>
+
+<PySourceCode >
+
+```python
+def effects(self) -> Iterator[Effect]:
+	"""
+	Iterate over the state's Effect instances.
+
+	Returns effects that have been initialized on this state instance.
+	Effects are created from @ps.effect decorated methods when the
+	state is instantiated.
+
+	Yields:
+		Effect: Each effect instance attached to this state.
+
+	Example:
+		for effect in state.effects():
+		    print(effect.name)
+	"""
+	for value in self.__dict__.values():
+		if isinstance(value, Effect):
+			yield value
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterator[pulse.reactive.Effect]"} />
+
+</PyFunction>
+
+<PyFunction name={"on_dispose"} type={"(self) -> None"}>
+
+Override this method to run cleanup code when the state is disposed.
+
+This is called automatically when `dispose()` is called, before effects are disposed.
+Use this to clean up timers, connections, or other resources.
+
+<PySourceCode >
+
+```python
+def on_dispose(self) -> None:
+	"""
+	Override this method to run cleanup code when the state is disposed.
+
+	This is called automatically when `dispose()` is called, before effects are disposed.
+	Use this to clean up timers, connections, or other resources.
+	"""
+	pass
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self) -> None"}>
+
+Clean up the state, disposing all effects and resources.
+
+Calls on_dispose() first for user-defined cleanup, then disposes all
+Disposable instances attached to this state (including effects).
+
+This method is called automatically when the state goes out of scope
+or when explicitly cleaning up. After disposal, the state should not
+be used.
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self) -> None:
+	"""
+	Clean up the state, disposing all effects and resources.
+
+	Calls on_dispose() first for user-defined cleanup, then disposes all
+	Disposable instances attached to this state (including effects).
+
+	This method is called automatically when the state goes out of scope
+	or when explicitly cleaning up. After disposal, the state should not
+	be used.
+
+	Raises:
+		RuntimeError: If any effects defined on the state's scope were not
+		    properly disposed.
+	"""
+	# Call user-defined cleanup hook first
+	self.on_dispose()
+	for value in self.__dict__.values():
+		if isinstance(value, Disposable):
+			value.dispose()
+
+	undisposed_effects = [e for e in self._scope.effects if not e.__disposed__]
+	if len(undisposed_effects) > 0:
+		raise RuntimeError(
+			f"State.dispose() missed effects defined on its Scope: {[e.name for e in undisposed_effects]}"
+		)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__repr__"} type={"(self) -> str"}>
+
+Return a developer-friendly representation of the state.
+
+<PySourceCode >
+
+```python
+@override
+def __repr__(self) -> str:
+	"""Return a developer-friendly representation of the state."""
+	props: list[str] = []
+
+	# Include StateProperty values from MRO
+	seen: set[str] = set()
+	for cls in self.__class__.__mro__:
+		if cls in (State, ABC):
+			continue
+		for name, value in cls.__dict__.items():
+			if name in seen:
+				continue
+			if isinstance(value, ReactiveProperty):
+				seen.add(name)
+				prop_value = getattr(self, name)
+				props.append(f"{name}={prop_value!r}")
+
+	# Include ComputedProperty values from MRO
+	seen.clear()
+	for cls in self.__class__.__mro__:
+		if cls in (State, ABC):
+			continue
+		for name, value in cls.__dict__.items():
+			if name in seen:
+				continue
+			if isinstance(value, ComputedProperty):
+				seen.add(name)
+				prop_value = getattr(self, name)
+				props.append(f"{name}={prop_value!r} (computed)")
+
+	return f"<{self.__class__.__name__} {' '.join(props)}>"
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+
+<PyFunction name={"__str__"} type={"(self) -> str"}>
+
+Return a user-friendly representation of the state.
+
+<PySourceCode >
+
+```python
+@override
+def __str__(self) -> str:
+	"""Return a user-friendly representation of the state."""
+	return self.__repr__()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>

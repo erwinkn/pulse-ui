@@ -1,0 +1,176 @@
+---
+title: "HookNamespace"
+---
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={null} value={"('hook', 'states')"} />
+
+<PyAttribute name={"hook"} type={"Hook[T]"} value={"hook"} />
+
+<PyAttribute name={"states"} type={"dict[object, T]"} value={"{}"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, hook) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, hook: Hook[T]) -> None:
+	self.hook = hook
+	self.states: dict[object, T] = {}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"hook"} type={"Hook[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_normalize_key"} type={"(key) -> object"}>
+
+<PySourceCode >
+
+```python
+@staticmethod
+def _normalize_key(key: str | None) -> object:
+	return key if key is not None else DEFAULT_HOOK_KEY
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"key"} type={"str | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"object"} />
+
+</PyFunction>
+
+<PyFunction name={"on_render_start"} type={"(self, render_cycle)"}>
+
+<PySourceCode >
+
+```python
+def on_render_start(self, render_cycle: int):
+	for state in self.states.values():
+		state.on_render_start(render_cycle)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render_cycle"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"on_render_end"} type={"(self, render_cycle)"}>
+
+<PySourceCode >
+
+```python
+def on_render_end(self, render_cycle: int):
+	for state in self.states.values():
+		state.on_render_end(render_cycle)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render_cycle"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"ensure"} type={"(self, ctx, key) -> T"}>
+
+<PySourceCode >
+
+```python
+def ensure(self, ctx: "HookContext", key: str | None) -> T:
+	normalized = self._normalize_key(key)
+	state = self.states.get(normalized)
+	if state is None:
+		created = call_flexible(
+			self.hook.factory,
+			HookInit(definition=self.hook, render_cycle=ctx.render_cycle, key=key),
+		)
+		if inspect.isawaitable(created):
+			raise HookError(
+				f"Hook factory '{self.hook.name}' returned an awaitable; "
+				+ "async factories are not supported"
+			)
+		if not isinstance(created, HookState):
+			raise HookError(
+				f"Hook factory '{self.hook.name}' must return a HookState instance"
+			)
+		state = created
+		self.states[normalized] = state
+		state.on_render_start(ctx.render_cycle)
+	return state
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"ctx"} type={"HookContext"} value={null} />
+<PyParameter name={"key"} type={"str | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.hooks.core.T"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def dispose(self) -> None:
+	for key, state in self.states.items():
+		try:
+			state.dispose()
+		except Exception:
+			logger.exception(
+				"Error disposing hook '%s' (key=%r)",
+				self.hook.name,
+				key,
+			)
+	self.states.clear()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

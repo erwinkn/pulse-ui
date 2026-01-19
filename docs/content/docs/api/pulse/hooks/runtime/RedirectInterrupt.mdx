@@ -1,0 +1,49 @@
+---
+title: "RedirectInterrupt"
+---
+
+Exception raised to interrupt render and trigger a redirect.
+
+This exception is thrown by ``ps.redirect()`` to interrupt the current
+render cycle and navigate to a different path.
+
+## Attributes
+
+<PyAttribute name={"path"} type={"str"} value={"path"}>
+
+The destination URL to redirect to.
+
+</PyAttribute>
+
+<PyAttribute name={"replace"} type={"bool"} value={"replace"}>
+
+If True, replaces the current history entry instead of pushing.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, path, *, replace=False)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, path: str, *, replace: bool = False):
+	super().__init__(path)
+	self.path = path
+	self.replace = replace
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+<PyParameter name={"replace"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

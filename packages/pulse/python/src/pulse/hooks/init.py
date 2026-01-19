@@ -41,7 +41,30 @@ def previous_frame() -> types.FrameType:
 
 
 class InitContext:
-	"""Context that captures locals on first render and restores thereafter."""
+	"""Context manager for one-time initialization in components.
+
+	Variables assigned inside the block persist across re-renders. On first render,
+	the code inside runs normally and variables are captured. On subsequent renders,
+	the block is skipped and variables are restored from storage.
+
+	This class is returned by ``ps.init()`` and should be used as a context manager.
+
+	Attributes:
+		callsite: Tuple of (code object, line number) identifying the call site.
+		frame: The stack frame where init was called.
+		first_render: True if this is the first render cycle.
+		pre_keys: Set of variable names that existed before entering the block.
+		saved: Dictionary of captured variable values.
+
+	Example:
+		>>> def my_component():
+		...     with ps.init():
+		...         counter = 0
+		...         api = ApiClient()
+		...         data = fetch_initial_data()
+		...     # counter, api, data retain their values across renders
+		...     return m.Text(f"Counter: {counter}")
+	"""
 
 	callsite: tuple[Any, int] | None
 	frame: types.FrameType | None
@@ -113,6 +136,36 @@ class InitContext:
 
 
 def init() -> InitContext:
+	"""Context manager for one-time initialization in components.
+
+	Variables assigned inside the block persist across re-renders. Uses AST
+	rewriting to transform the code at decoration time.
+
+	Returns:
+		InitContext: Context manager that captures and restores variables.
+
+	Example:
+		>>> def my_component():
+		...     with ps.init():
+		...         counter = 0
+		...         api = ApiClient()
+		...         data = fetch_initial_data()
+		...     # counter, api, data retain their values across renders
+		...     return m.Text(f"Counter: {counter}")
+
+	Rules:
+		- Can only be used once per component
+		- Must be at the top level of the component function (not inside
+		  conditionals, loops, or nested functions)
+		- Cannot contain control flow (if, for, while, try, with, match)
+		- Cannot use ``as`` binding (``with ps.init() as ctx:`` not allowed)
+		- Variables are restored from first render on subsequent renders
+
+	Notes:
+		If you encounter issues with ``ps.init()`` (e.g., source code not
+		available in some deployment environments), use ``ps.setup()`` instead.
+		It provides the same functionality without AST rewriting.
+	"""
 	return InitContext()
 
 

@@ -1,0 +1,368 @@
+---
+title: "AsyncEffect"
+---
+
+Async version of Effect for coroutine functions.
+
+Does not use batching; cancels and restarts on each dependency change.
+The `immediate` parameter is not supported (raises if passed).
+
+## Attributes
+
+<PyAttribute name={"fn"} type={"AsyncEffectFn"} value={null} />
+
+<PyAttribute name={"batch"} type={"None"} value={null} />
+
+<PyAttribute name={"is_scheduled"} type={"bool"} value={null} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, fn, name=None, lazy=False, on_error=None, deps=None, interval=None)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	fn: AsyncEffectFn,
+	name: str | None = None,
+	lazy: bool = False,
+	on_error: Callable[[Exception], None] | None = None,
+	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	interval: float | None = None,
+):
+	# Track an async task when running async effects
+	self._task = None
+	self._task_started = False
+	super().__init__(
+		fn=fn,  # pyright: ignore[reportArgumentType]
+		name=name,
+		immediate=False,
+		lazy=lazy,
+		on_error=on_error,
+		deps=deps,
+		interval=interval,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"AsyncEffectFn"} value={null} />
+<PyParameter name={"name"} type={"str | None"} value={"None"} />
+<PyParameter name={"lazy"} type={"bool"} value={"False"} />
+<PyParameter name={"on_error"} type={"Callable[[Exception], None] | None"} value={"None"} />
+<PyParameter name={"deps"} type={"list[Signal[Any] | Computed[Any]] | None"} value={"None"} />
+<PyParameter name={"interval"} type={"float | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"push_change"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+def push_change(self):
+	# Short-circuit if task exists but hasn't started executing yet.
+	# This avoids cancelling and recreating tasks multiple times when reached
+	# through multiple dependency paths before the event loop runs.
+	# Once the task starts running, new push_change calls will cancel and restart.
+	if self._task is not None and not self._task.done() and not self._task_started:
+		return
+	self.schedule()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"schedule"} type={"(self)"}>
+
+Schedule the async effect. Unlike synchronous effects, async effects do not
+go through batches, they cancel the previous run and create a new task
+immediately..
+
+<PySourceCode >
+
+```python
+@override
+def schedule(self):
+	"""
+	Schedule the async effect. Unlike synchronous effects, async effects do not
+	go through batches, they cancel the previous run and create a new task
+	immediately..
+	"""
+	self.run()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_copy_kwargs"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+def _copy_kwargs(self):
+	kwargs = super()._copy_kwargs()
+	kwargs.pop("immediate", None)
+	return kwargs
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"run"} type={"(self) -> asyncio.Task[Any]"}>
+
+Start the async effect, cancelling any previous run.
+
+<PySourceCode >
+
+```python
+@override
+def run(self) -> asyncio.Task[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+	"""Start the async effect, cancelling any previous run.
+
+	Returns:
+		The asyncio.Task running the effect.
+	"""
+	execution_epoch = epoch()
+
+	# Cancel any previous run still in flight, but preserve the interval
+	self.cancel(cancel_interval=False)
+	this_task: asyncio.Task[None] | None = None
+
+	async def _runner():
+		nonlocal execution_epoch, this_task
+		try:
+			self._task_started = True
+			# Perform cleanups in the new task
+			with Untrack():
+				try:
+					self._cleanup_before_run()
+				except Exception as e:
+					self.handle_error(e)
+
+			# Capture last_change for explicit deps before running
+			captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = (
+				None
+			)
+			if self.explicit_deps:
+				captured_last_changes = {dep: dep.last_change for dep in self.deps}
+
+			with Scope() as scope:
+				try:
+					result = self.fn()
+					self.cleanup_fn = await maybe_await(result)
+				except asyncio.CancelledError:
+					# Re-raise so finally block executes to clear task reference
+					raise
+				except Exception as e:
+					self.handle_error(e)
+				self.runs += 1
+				self.last_run = execution_epoch
+			self._apply_scope_results(scope, captured_last_changes)
+			# Start/restart interval if set and not currently scheduled
+			if self._interval is not None and self._interval_handle is None:
+				self._schedule_interval()
+		finally:
+			# Clear the task reference when it finishes
+			if self._task is this_task:
+				self._task = None
+				self._task_started = False
+
+	this_task = create_task(_runner(), name=f"effect:{self.name or 'unnamed'}")
+	self._task = this_task
+	return this_task
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"asyncio.Task"}>
+
+The asyncio.Task running the effect.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"__call__"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+async def __call__(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+	await self.run()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"cancel"} type={"(self, cancel_interval=True) -> None"}>
+
+Cancel the async effect. Cancels the running task and optionally the interval.
+
+<PySourceCode >
+
+```python
+@override
+def cancel(self, cancel_interval: bool = True) -> None:
+	"""
+	Cancel the async effect. Cancels the running task and optionally the interval.
+
+	Args:
+		cancel_interval: If True (default), also cancels the interval timer.
+	"""
+	if self._task:
+		t = self._task
+		self._task = None
+		if not t.cancelled():
+			t.cancel()
+	if cancel_interval:
+		self._cancel_interval()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_interval"} type={"bool"} value={"True"}>
+
+If True (default), also cancels the interval timer.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"wait"} type={"(self) -> None"}>
+
+Wait for the current task to complete.
+
+Does not start a new task if none is running. If the task is cancelled
+while waiting, waits for a new task if one is started.
+
+<PySourceCode >
+
+```python
+async def wait(self) -> None:
+	"""Wait for the current task to complete.
+
+	Does not start a new task if none is running. If the task is cancelled
+	while waiting, waits for a new task if one is started.
+	"""
+	while True:
+		if self._task is None or self._task.done():
+			# No task running, return immediately
+			return
+		try:
+			await self._task
+			return
+		except asyncio.CancelledError:
+			# If wait() itself is cancelled, propagate it
+			current_task = asyncio.current_task()
+			if current_task is not None and (
+				current_task.cancelling() > 0 or current_task.cancelled()
+			):
+				raise
+			# Effect task was cancelled, check if a new task was started
+			# and continue waiting if so
+			continue
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self):
+	# Run children cleanups first, then cancel in-flight task and interval
+	self.cancel(cancel_interval=True)
+	for child in self.children.copy():
+		child.dispose()
+	if self.cleanup_fn:
+		self.cleanup_fn()
+	for dep in self.deps:
+		dep.obs.remove(self)
+	if self.parent:
+		self.parent.children.remove(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

@@ -1,3 +1,9 @@
+"""Component definition and VDOM node types for Pulse.
+
+This module provides the core component abstraction for building Pulse UIs,
+including the `@component` decorator and the `Component` class.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -21,12 +27,36 @@ _T = TypeVar("_T")
 
 
 class Component(Generic[P]):
+	"""A callable wrapper that turns a function into a Pulse component.
+
+	Component instances are created by the `@component` decorator. When called,
+	they return a `PulseNode` that represents the component in the virtual DOM.
+
+	Attributes:
+		name: Display name of the component (defaults to function name).
+		fn: The underlying render function (lazily initialized for stubs).
+
+	Example:
+		>>> @ps.component
+		... def Card(title: str):
+		...     return ps.div(ps.h3(title))
+		...
+		>>> Card(title="Hello")  # Returns a PulseNode
+		>>> Card(title="Hello", key="card-1")  # With reconciliation key
+	"""
+
 	_raw_fn: Callable[P, Any]
 	_fn: Callable[P, Any] | None
 	name: str
 	_takes_children: bool | None
 
 	def __init__(self, fn: Callable[P, Any], name: str | None = None) -> None:
+		"""Initialize a Component.
+
+		Args:
+			fn: The function to wrap as a component.
+			name: Custom display name. Defaults to the function's `__name__`.
+		"""
 		self._raw_fn = fn
 		self.name = name or _infer_component_name(fn)
 		# Only lazy-init for stubs (avoid heavy work for JS module bindings)
@@ -40,12 +70,26 @@ class Component(Generic[P]):
 
 	@property
 	def fn(self) -> Callable[P, Any]:
+		"""The render function (lazily initialized for stub functions)."""
 		if self._fn is None:
 			self._fn = rewrite_init_blocks(self._raw_fn)
 			self._takes_children = _takes_children(self._raw_fn)
 		return self._fn
 
 	def __call__(self, *args: P.args, **kwargs: P.kwargs) -> PulseNode:
+		"""Invoke the component to create a PulseNode.
+
+		Args:
+			*args: Positional arguments passed to the component function.
+			**kwargs: Keyword arguments passed to the component function.
+				The special `key` kwarg is used for reconciliation.
+
+		Returns:
+			A PulseNode representing this component invocation in the VDOM.
+
+		Raises:
+			ValueError: If `key` is provided but is not a string.
+		"""
 		key = kwargs.get("key")
 		if key is not None and not isinstance(key, str):
 			raise ValueError("key must be a string or None")
@@ -85,6 +129,46 @@ def component(
 def component(
 	fn: Callable[P, Any] | None = None, *, name: str | None = None
 ) -> Component[P] | Callable[[Callable[P, Any]], Component[P]]:
+	"""Decorator that creates a Pulse component from a function.
+
+	Can be used with or without parentheses. The decorated function becomes
+	callable and returns a `PulseNode` when invoked.
+
+	Args:
+		fn: Function to wrap as a component. When used as `@component` without
+			parentheses, this is the decorated function.
+		name: Custom component name for debugging/dev tools. Defaults to the
+			function's `__name__`.
+
+	Returns:
+		A `Component` instance if `fn` is provided, otherwise a decorator.
+
+	Example:
+		Basic usage::
+
+			@ps.component
+			def Card(title: str):
+				return ps.div(ps.h3(title))
+
+		With custom name::
+
+			@ps.component(name="MyCard")
+			def card_impl(title: str):
+				return ps.div(ps.h3(title))
+
+		With children (use `*children` parameter)::
+
+			@ps.component
+			def Container(*children):
+				return ps.div(*children, className="container")
+
+			# Children can be passed via subscript syntax:
+			Container()[
+				Card(title="First"),
+				Card(title="Second"),
+			]
+	"""
+
 	def decorator(fn: Callable[P, Any]) -> Component[P]:
 		return Component(fn, name)
 

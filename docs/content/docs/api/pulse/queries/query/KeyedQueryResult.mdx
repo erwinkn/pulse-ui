@@ -1,0 +1,447 @@
+---
+title: "KeyedQueryResult"
+---
+
+Observer wrapper for keyed queries.
+Handles observation lifecycle, staleness tracking, and provides query operations.
+
+## Attributes
+
+<PyAttribute name={"status"} type={"QueryStatus"} value={null} />
+
+<PyAttribute name={"is_loading"} type={"bool"} value={null} />
+
+<PyAttribute name={"is_success"} type={"bool"} value={null} />
+
+<PyAttribute name={"is_error"} type={"bool"} value={null} />
+
+<PyAttribute name={"is_fetching"} type={"bool"} value={null} />
+
+<PyAttribute name={"is_scheduled"} type={"bool"} value={null} />
+
+<PyAttribute name={"error"} type={"Exception | None"} value={null} />
+
+<PyAttribute name={"data"} type={"T | None"} value={null} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, query, fetch_fn, stale_time=0.0, gc_time=300.0, refetch_interval=None, keep_previous_data=False, on_success=None, on_error=None, enabled=True, fetch_on_mount=True)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	query: Computed[KeyedQuery[T]],
+	fetch_fn: Callable[[], Awaitable[T]],
+	stale_time: float = 0.0,
+	gc_time: float = 300.0,
+	refetch_interval: float | None = None,
+	keep_previous_data: bool = False,
+	on_success: Callable[[T], Awaitable[None] | None] | None = None,
+	on_error: Callable[[Exception], Awaitable[None] | None] | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
+):
+	self._query = query
+	self._fetch_fn = fetch_fn
+	self._stale_time = stale_time
+	self._gc_time = gc_time
+	self._refetch_interval = refetch_interval
+	self._keep_previous_data = keep_previous_data
+	self._on_success = on_success
+	self._on_error = on_error
+	self._enabled = Signal(enabled, name=f"query.enabled({query().key})")
+	self._interval_effect = None
+
+	def observe_effect():
+		q = self._query()
+		enabled = self._enabled()
+
+		with Untrack():
+			q.observe(self)
+
+			# If stale or loading, schedule refetch (only when enabled)
+			if enabled and fetch_on_mount and self.is_stale():
+				self.invalidate()
+
+		# Return cleanup function that captures the query (old query on key change)
+		def cleanup():
+			q.unobserve(self)
+
+		return cleanup
+
+	self._observe_effect = Effect(
+		observe_effect,
+		name=f"query_observe({self._query().key})",
+		immediate=True,
+	)
+	self._data_computed = Computed(
+		self._data_computed_fn, name=f"query_data({self._query().key})"
+	)
+
+	# Set up interval effect if interval is specified
+	if refetch_interval is not None and refetch_interval > 0:
+		self._setup_interval_effect(refetch_interval)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"query"} type={"Computed[KeyedQuery[T]]"} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[], Awaitable[T]]"} value={null} />
+<PyParameter name={"stale_time"} type={"float"} value={"0.0"} />
+<PyParameter name={"gc_time"} type={"float"} value={"300.0"} />
+<PyParameter name={"refetch_interval"} type={"float | None"} value={"None"} />
+<PyParameter name={"keep_previous_data"} type={"bool"} value={"False"} />
+<PyParameter name={"on_success"} type={"Callable[[T], Awaitable[None] | None] | None"} value={"None"} />
+<PyParameter name={"on_error"} type={"Callable[[Exception], Awaitable[None] | None] | None"} value={"None"} />
+<PyParameter name={"enabled"} type={"bool"} value={"True"} />
+<PyParameter name={"fetch_on_mount"} type={"bool"} value={"True"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_setup_interval_effect"} type={"(self, interval)"}>
+
+Create an effect that invalidates the query at the specified interval.
+
+<PySourceCode >
+
+```python
+def _setup_interval_effect(self, interval: float):
+	"""Create an effect that invalidates the query at the specified interval."""
+
+	def interval_fn():
+		# Read enabled to make this effect reactive to enabled changes
+		if self._enabled():
+			self.invalidate()
+
+	self._interval_effect = Effect(
+		interval_fn,
+		name=f"query_interval({self._query().key})",
+		interval=interval,
+		immediate=True,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"interval"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_data_computed_fn"} type={"(self, prev) -> T | None"}>
+
+<PySourceCode >
+
+```python
+def _data_computed_fn(self, prev: T | None) -> T | None:
+	query = self._query()
+	if self._keep_previous_data and query.status() != "success":
+		return prev
+	raw = query.data()
+	if raw is None:
+		return None
+	return raw
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"prev"} type={"T | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.query.T | None"} />
+
+</PyFunction>
+
+<PyFunction name={"is_stale"} type={"(self) -> bool"}>
+
+Check if the query data is stale based on stale_time.
+
+<PySourceCode >
+
+```python
+def is_stale(self) -> bool:
+	"""Check if the query data is stale based on stale_time."""
+	query = self._query()
+	return (time.time() - query.last_updated.read()) > self._stale_time
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"refetch"} type={"(self, cancel_refetch=True) -> ActionResult[T]"}>
+
+Refetch the query data using this observer's fetch function.
+If cancel_refetch is True (default), cancels any in-flight request and starts a new one.
+If cancel_refetch is False, deduplicates requests if one is already in flight.
+
+<PySourceCode >
+
+```python
+async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
+	"""
+	Refetch the query data using this observer's fetch function.
+	If cancel_refetch is True (default), cancels any in-flight request and starts a new one.
+	If cancel_refetch is False, deduplicates requests if one is already in flight.
+	"""
+	query = self._query()
+	if cancel_refetch or not query.is_fetching():
+		query.run_fetch(
+			self._fetch_fn, cancel_previous=cancel_refetch, initiator=self
+		)
+	return await self.wait()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"True"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[pulse.queries.query.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"wait"} type={"(self) -> ActionResult[T]"}>
+
+Wait for the current query to complete.
+
+<PySourceCode >
+
+```python
+async def wait(self) -> ActionResult[T]:
+	"""Wait for the current query to complete."""
+	query = self._query()
+	# If loading and no task, start a fetch with this observer's fetch function
+	if query.status() == "loading" and not query.is_fetching():
+		query.run_fetch(self._fetch_fn, initiator=self)
+	return await query.wait()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[pulse.queries.query.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"invalidate"} type={"(self)"}>
+
+Mark the query as stale and refetch using this observer's fetch function.
+
+<PySourceCode >
+
+```python
+def invalidate(self):
+	"""Mark the query as stale and refetch using this observer's fetch function."""
+	query = self._query()
+	if not query.is_scheduled and len(query.observers) > 0:
+		query.run_fetch(self._fetch_fn, cancel_previous=False, initiator=self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_data"} type={"(self, data)"}>
+
+Optimistically set data without changing loading/error state.
+
+<PySourceCode >
+
+```python
+def set_data(self, data: T | Callable[[T | None], T]):
+	"""Optimistically set data without changing loading/error state."""
+	query = self._query()
+	query.set_data(data)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T | Callable[[T | None], T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_initial_data"} type={"(self, data, *, updated_at=None)"}>
+
+Seed initial data and optional freshness timestamp.
+
+<PySourceCode >
+
+```python
+def set_initial_data(
+	self,
+	data: T | Callable[[], T],
+	*,
+	updated_at: float | dt.datetime | None = None,
+):
+	"""Seed initial data and optional freshness timestamp."""
+	query = self._query()
+	query.set_initial_data(data, updated_at=updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T | Callable[[], T]"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_error"} type={"(self, error)"}>
+
+Set error state on the query.
+
+<PySourceCode >
+
+```python
+def set_error(self, error: Exception):
+	"""Set error state on the query."""
+	query = self._query()
+	query.set_error(error)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"error"} type={"Exception"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"enable"} type={"(self)"}>
+
+Enable the query.
+
+<PySourceCode >
+
+```python
+def enable(self):
+	"""Enable the query."""
+	self._enabled.write(True)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"disable"} type={"(self)"}>
+
+Disable the query, preventing it from fetching.
+
+<PySourceCode >
+
+```python
+def disable(self):
+	"""Disable the query, preventing it from fetching."""
+	self._enabled.write(False)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self)"}>
+
+Clean up the result and its observe effect.
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self):
+	"""Clean up the result and its observe effect."""
+	if self._interval_effect is not None and not self._interval_effect.__disposed__:
+		self._interval_effect.dispose()
+	if not self._observe_effect.__disposed__:
+		self._observe_effect.dispose()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

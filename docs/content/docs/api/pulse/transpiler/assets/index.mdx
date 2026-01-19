@@ -1,0 +1,87 @@
+---
+title: "assets"
+---
+
+Unified asset registry for local files that need copying.
+
+Used by both Import (static imports) and DynamicImport (inline dynamic imports)
+to track local files that should be copied to the assets folder during codegen.
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"LocalAsset"} href={"/docs/api/pulse/transpiler/assets/LocalAsset"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"register_local_asset"} type={"(source_path) -> LocalAsset"}>
+
+Register a local file for copying. Returns existing if already registered.
+
+<PySourceCode >
+
+```python
+def register_local_asset(source_path: Path) -> LocalAsset:
+	"""Register a local file for copying. Returns existing if already registered."""
+	if source_path in _ASSET_REGISTRY:
+		return _ASSET_REGISTRY[source_path]
+	asset = LocalAsset(source_path, next_id())
+	_ASSET_REGISTRY[source_path] = asset
+	return asset
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"source_path"} type={"Path"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.assets.LocalAsset"} />
+
+</PyFunction>
+<PyFunction name={"get_registered_assets"} type={"() -> list[LocalAsset]"}>
+
+Get all registered local assets.
+
+<PySourceCode >
+
+```python
+def get_registered_assets() -> list[LocalAsset]:
+	"""Get all registered local assets."""
+	return list(_ASSET_REGISTRY.values())
+```
+
+</PySourceCode>
+
+<PyFunctionReturn type={"list[pulse.transpiler.assets.LocalAsset]"} />
+
+</PyFunction>
+<PyFunction name={"clear_asset_registry"} type={"() -> None"}>
+
+Clear asset registry (for tests).
+
+<PySourceCode >
+
+```python
+def clear_asset_registry() -> None:
+	"""Clear asset registry (for tests)."""
+	_ASSET_REGISTRY.clear()
+```
+
+</PySourceCode>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

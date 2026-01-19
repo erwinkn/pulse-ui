@@ -1,0 +1,42 @@
+---
+title: "CommandSpec"
+---
+
+Instructions for launching a subprocess associated with the CLI.
+
+## Attributes
+
+<PyAttribute name={"name"} type={"str"} value={null} />
+
+<PyAttribute name={"args"} type={"list[str]"} value={null} />
+
+<PyAttribute name={"cwd"} type={"Path"} value={null} />
+
+<PyAttribute name={"env"} type={"dict[str, str]"} value={null} />
+
+<PyAttribute name={"on_spawn"} type={"Callable[[], None] | None"} value={"None"} />
+
+<PyAttribute name={"ready_pattern"} type={"str | None"} value={"None"} />
+
+<PyAttribute name={"on_ready"} type={"Callable[[], None] | None"} value={"None"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, name, args, cwd, env, on_spawn=None, ready_pattern=None, on_ready=None) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"args"} type={"list[str]"} value={null} />
+<PyParameter name={"cwd"} type={"Path"} value={null} />
+<PyParameter name={"env"} type={"dict[str, str]"} value={null} />
+<PyParameter name={"on_spawn"} type={"Callable[[], None] | None"} value={"None"} />
+<PyParameter name={"ready_pattern"} type={"str | None"} value={"None"} />
+<PyParameter name={"on_ready"} type={"Callable[[], None] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

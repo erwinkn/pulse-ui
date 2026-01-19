@@ -1,0 +1,200 @@
+---
+title: "EffectsHookState"
+---
+
+Internal hook state for managing reactive effects across renders.
+
+Tracks effect initialization and handles recreation when keys change.
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={null} value={"('initialized', 'effects', 'key', '_called')"} />
+
+<PyAttribute name={"initialized"} type={"bool"} value={"False"}>
+
+Whether effects have been initialized.
+
+</PyAttribute>
+
+<PyAttribute name={"_called"} type={"bool"} value={"False"} />
+
+<PyAttribute name={"effects"} type={"tuple[Effect, ...]"} value={"()"}>
+
+Tuple of active Effect instances.
+
+</PyAttribute>
+
+<PyAttribute name={"key"} type={"str | None"} value={"None"}>
+
+Optional key for identifying when effects should be recreated.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self) -> None:
+	super().__init__()
+	self.initialized = False
+	self.effects: tuple[Effect, ...] = ()
+	self.key: str | None = None
+	self._called = False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"on_render_start"} type={"(self, render_cycle) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def on_render_start(self, render_cycle: int) -> None:
+	super().on_render_start(render_cycle)
+	self._called = False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render_cycle"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"replace"} type={"(self, effects, key) -> None"}>
+
+<PySourceCode >
+
+```python
+def replace(self, effects: list[Effect], key: str | None) -> None:
+	self.dispose_effects()
+	self.effects = tuple(effects)
+	self.key = key
+	self.initialized = True
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"effects"} type={"list[Effect]"} value={null} />
+<PyParameter name={"key"} type={"str | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose_effects"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def dispose_effects(self) -> None:
+	for effect in self.effects:
+		effect.dispose()
+	self.effects = ()
+	self.initialized = False
+	self.key = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self) -> None:
+	self.dispose_effects()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"ensure_not_called"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def ensure_not_called(self) -> None:
+	if self._called:
+		raise RuntimeError(
+			"`pulse.effects` can only be called once per component render"
+		)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"mark_called"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def mark_called(self) -> None:
+	self._called = True
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

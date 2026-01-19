@@ -1,0 +1,11 @@
+{
+  "title": "dom",
+  "pages": [
+    "index",
+    "tags",
+    "events",
+    "elements",
+    "svg",
+    "props"
+  ]
+}

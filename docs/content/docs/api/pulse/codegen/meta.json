@@ -1,0 +1,10 @@
+{
+  "title": "codegen",
+  "pages": [
+    "index",
+    "js",
+    "utils",
+    "codegen",
+    "templates"
+  ]
+}

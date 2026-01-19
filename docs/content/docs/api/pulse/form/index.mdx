@@ -1,0 +1,274 @@
+---
+title: "form"
+---
+
+<PyAttribute name={"__all__"} type={null} value={"['Form', 'ManualForm', 'FormData', 'FormValue', 'UploadFile', 'FormRegistry', 'FormStorage', 'internal_forms_hook']"} />
+
+<PyAttribute name={"FormValue"} type={null} value={"str | UploadFile"}>
+
+Individual form field value: ``str | UploadFile``.
+
+</PyAttribute>
+
+<PyAttribute name={"FormData"} type={null} value={"dict[str, FormValue | list[FormValue]]"}>
+
+Parsed form submission data.
+
+Values are either single or multiple (for repeated field names).
+Type alias for ``dict[str, FormValue | list[FormValue]]``.
+
+</PyAttribute>
+
+<PyAttribute name={"internal_forms_hook"} type={null} value={"hooks.create('pulse:core.forms', _forms_factory, metadata=(HookMetadata(owner='pulse.core', description='Internal storage for ps.Form manual forms')))"} />
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"FormRegistration"} href={"/docs/api/pulse/form/FormRegistration"} />
+<Card title={"FormRegistry"} href={"/docs/api/pulse/form/FormRegistry"} />
+<Card title={"PulseFormProps"} href={"/docs/api/pulse/form/PulseFormProps"} />
+<Card title={"GeneratedFormProps"} href={"/docs/api/pulse/form/GeneratedFormProps"} />
+<Card title={"ManualForm"} href={"/docs/api/pulse/form/ManualForm"} />
+<Card title={"FormStorage"} href={"/docs/api/pulse/form/FormStorage"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"client_form_component"} type={"(*children, /, *, key=None, **props)"}>
+
+<PySourceCode >
+
+```python
+@react_component(Import("PulseForm", "pulse-ui-client"))
+def client_form_component(
+	*children: Node,
+	key: str | None = None,
+	**props: Unpack[HTMLFormProps],
+): ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"children"} type={"Node"} value={"()"} />
+<PyParameter name={"key"} type={"str | None"} value={"None"} />
+<PyParameter name={"props"} type={"Unpack[HTMLFormProps]"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+<PyFunction name={"normalize_form_data"} type={"(raw) -> FormData"}>
+
+Convert Starlette FormData to normalized FormData dict.
+
+Handles multiple values for the same key and filters out empty file uploads.
+
+<PySourceCode >
+
+```python
+def normalize_form_data(raw: StarletteFormData) -> FormData:
+	"""Convert Starlette FormData to normalized FormData dict.
+
+	Handles multiple values for the same key and filters out empty file uploads.
+
+	Args:
+		raw: Starlette FormData from request.form().
+
+	Returns:
+		Normalized FormData dictionary.
+	"""
+	normalized: FormData = {}
+	for key, value in raw.multi_items():
+		item: FormValue
+		if isinstance(value, UploadFile):
+			# Form submission tends to produce empty UploadFile objects for
+			# empty file inputs
+			if not value.filename and not value.size:
+				continue
+			item = value
+		else:
+			item = str(value)
+
+		existing = normalized.get(key)
+		if existing is None:
+			normalized[key] = item
+		elif isinstance(existing, list):
+			existing.append(item)
+		else:
+			normalized[key] = [existing, item]
+
+	return normalized
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"raw"} type={"StarletteFormData"} value={undefined}>
+
+Starlette FormData from request.form().
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"pulse.form.FormData"}>
+
+Normalized FormData dictionary.
+
+</PyFunctionReturn>
+
+</PyFunction>
+<PyFunction name={"Form"} type={"(*children, /, *, key, onSubmit=None, **props)"}>
+
+Server-registered HTML form component.
+
+Automatically wires up form submission to a Python handler. Uses
+``multipart/form-data`` encoding to support file uploads.
+
+<Callout title={"Example"} type={"example"}>
+
+>>> async def handle_submit(data: ps.FormData):
+...     name = data.get("name")  # str
+...     file = data.get("avatar")  # UploadFile
+...     await save_user(name, file)
+...
+>>> def my_form():
+...     return ps.Form(
+...         m.TextInput(name="name", label="Name"),
+...         m.FileInput(name="avatar", label="Avatar"),
+...         m.Button("Submit", type="submit"),
+...         key="user-form",
+...         onSubmit=handle_submit,
+...     )
+
+</Callout>
+
+<Callout title={"Note"} type={"note"}>
+
+- ``key`` must be unique within the render.
+- Cannot override ``action``, ``method``, ``encType``, or ``onSubmit`` via props.
+- Handler receives parsed form data as a ``FormData`` dict.
+
+</Callout>
+
+<PySourceCode >
+
+```python
+def Form(
+	*children: Node,
+	key: str,
+	onSubmit: EventHandler1[FormData] | None = None,
+	**props: Unpack[PulseFormProps],  # pyright: ignore[reportGeneralTypeIssues]
+):
+	"""Server-registered HTML form component.
+
+	Automatically wires up form submission to a Python handler. Uses
+	``multipart/form-data`` encoding to support file uploads.
+
+	Args:
+		*children: Form content (inputs, buttons, etc.).
+		key: Unique form identifier (required, non-empty string).
+		onSubmit: Submit handler receiving parsed FormData.
+		**props: Standard HTML form props (except action, method, encType, onSubmit).
+
+	Returns:
+		Form node.
+
+	Raises:
+		ValueError: If key is empty or onSubmit is not callable.
+		RuntimeError: If called outside a component render.
+
+	Example:
+		>>> async def handle_submit(data: ps.FormData):
+		...     name = data.get("name")  # str
+		...     file = data.get("avatar")  # UploadFile
+		...     await save_user(name, file)
+		...
+		>>> def my_form():
+		...     return ps.Form(
+		...         m.TextInput(name="name", label="Name"),
+		...         m.FileInput(name="avatar", label="Avatar"),
+		...         m.Button("Submit", type="submit"),
+		...         key="user-form",
+		...         onSubmit=handle_submit,
+		...     )
+
+	Note:
+		- ``key`` must be unique within the render.
+		- Cannot override ``action``, ``method``, ``encType``, or ``onSubmit`` via props.
+		- Handler receives parsed form data as a ``FormData`` dict.
+	"""
+	if not isinstance(key, str) or not key:
+		raise ValueError("ps.Form requires a non-empty string key")
+	if not callable(onSubmit):
+		raise ValueError("ps.Form requires an onSubmit callable")
+	if "action" in props:
+		raise ValueError("ps.Form does not allow overriding the form action")
+
+	hook_state = HOOK_CONTEXT.get()
+	if hook_state is None:
+		raise RuntimeError("ps.Form can only be used within a component render")
+
+	handler = stable(f"form:{key}", onSubmit)
+	storage = internal_forms_hook()
+	manual = storage.register(
+		key,
+		lambda: ManualForm(handler),
+	)
+
+	return manual(*children, key=key, **props)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"children"} type={"Node"} value={"()"} />
+<PyParameter name={"key"} type={"str"} value={undefined}>
+
+Unique form identifier (required, non-empty string).
+
+</PyParameter>
+<PyParameter name={"onSubmit"} type={"EventHandler1[FormData] | None"} value={"None"}>
+
+Submit handler receiving parsed FormData.
+
+</PyParameter>
+<PyParameter name={"props"} type={"Unpack[PulseFormProps]"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={null}>
+
+Form node.
+
+</PyFunctionReturn>
+
+</PyFunction>
+<PyFunction name={"_forms_factory"} type={"()"}>
+
+<PySourceCode >
+
+```python
+def _forms_factory():
+	return FormStorage()
+```
+
+</PySourceCode>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

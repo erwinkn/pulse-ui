@@ -1,5 +1,5 @@
 {
-  "title": "Core Concepts",
+  "title": "Concepts",
   "icon": "Lightbulb",
   "pages": [
     "html",
@@ -7,7 +7,6 @@
     "state",
     "effects",
     "events",
-    "lists-keys",
     "data-fetching",
     "forms",
     "routing",

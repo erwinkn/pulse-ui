@@ -1,0 +1,21 @@
+---
+title: "VDOMElement"
+---
+
+A React element in wire format.
+
+Special tags:
+- "": React Fragment
+- "$$\<ComponentKey>": mount point for client component registry
+
+## Attributes
+
+<PyAttribute name={"tag"} type={"str"} value={null} />
+
+<PyAttribute name={"key"} type={"NotRequired[str]"} value={null} />
+
+<PyAttribute name={"props"} type={"NotRequired[dict[str, VDOMPropValue]]"} value={null} />
+
+<PyAttribute name={"children"} type={"NotRequired[list['VDOMNode']]"} value={null} />
+
+<PyAttribute name={"eval"} type={"NotRequired[list[str]]"} value={null} />

@@ -22,9 +22,27 @@ P = ParamSpec("P")
 
 
 class MutationResult(Generic[T, P]):
-	"""
-	Result object for mutations that provides reactive access to mutation state
-	and is callable to execute the mutation.
+	"""Result object for mutations providing reactive state and execution.
+
+	MutationResult wraps an async mutation function and provides reactive
+	access to its execution state. It is callable to execute the mutation.
+
+	Attributes:
+		data: The last successful mutation result, or None.
+		is_running: Whether the mutation is currently executing.
+		error: The last error encountered, or None.
+
+	Example:
+		::
+
+			# Access mutation state
+			if state.update_name.is_running:
+			    show_loading()
+			if state.update_name.error:
+			    show_error(state.update_name.error)
+
+			# Execute mutation
+			result = await state.update_name("New Name")
 	"""
 
 	_data: Signal[T | None]
@@ -40,6 +58,13 @@ class MutationResult(Generic[T, P]):
 		on_success: Callable[[T], Any] | None = None,
 		on_error: Callable[[Exception], Any] | None = None,
 	):
+		"""Initialize the mutation result.
+
+		Args:
+			fn: The bound async function to execute.
+			on_success: Optional callback invoked on successful completion.
+			on_error: Optional callback invoked on error.
+		"""
 		self._data = Signal(None, name="mutation.data")
 		self._is_running = Signal(False, name="mutation.is_running")
 		self._error = Signal(None, name="mutation.error")
@@ -49,14 +74,17 @@ class MutationResult(Generic[T, P]):
 
 	@property
 	def data(self) -> T | None:
+		"""The last successful mutation result, or None if never completed."""
 		return self._data()
 
 	@property
 	def is_running(self) -> bool:
+		"""Whether the mutation is currently executing."""
 		return self._is_running()
 
 	@property
 	def error(self) -> Exception | None:
+		"""The last error encountered, or None if no error."""
 		return self._error()
 
 	async def __call__(self, *args: P.args, **kwargs: P.kwargs) -> T:
@@ -78,6 +106,36 @@ class MutationResult(Generic[T, P]):
 
 
 class MutationProperty(Generic[T, TState, P], InitializableProperty):
+	"""Descriptor for state-bound mutations created by the @mutation decorator.
+
+	MutationProperty is the return type of the ``@mutation`` decorator. It acts
+	as a descriptor that creates and manages MutationResult instances for each
+	State object.
+
+	When accessed on a State instance, returns a MutationResult that can be
+	called to execute the mutation and provides reactive state properties.
+
+	Supports additional decorators for customization:
+		- ``@mutation_prop.on_success``: Handle successful mutation.
+		- ``@mutation_prop.on_error``: Handle mutation errors.
+
+	Example:
+		::
+
+			class UserState(ps.State):
+			    @ps.mutation
+			    async def update_name(self, name: str) -> User:
+			        return await api.update_user(name=name)
+
+			    @update_name.on_success
+			    def _on_success(self, data: User):
+			        self.user.invalidate()  # Refresh user query
+
+			    @update_name.on_error
+			    def _on_error(self, error: Exception):
+			        logger.error(f"Update failed: {error}")
+	"""
+
 	_on_success_fn: Callable[[TState, T], Any] | None
 	_on_error_fn: Callable[[TState, Exception], Any] | None
 	name: str
@@ -90,13 +148,28 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 		on_success: OnSuccessFn[TState, T] | None = None,
 		on_error: OnErrorFn[TState] | None = None,
 	):
+		"""Initialize the mutation property.
+
+		Args:
+			name: The method name.
+			fn: The async method to wrap.
+			on_success: Optional success callback.
+			on_error: Optional error callback.
+		"""
 		self.name = name
 		self.fn = fn
 		self._on_success_fn = on_success  # pyright: ignore[reportAttributeAccessIssue]
 		self._on_error_fn = on_error  # pyright: ignore[reportAttributeAccessIssue]
 
-	# Decorator to attach an on-success handler (sync or async)
 	def on_success(self, fn: OnSuccessFn[TState, T]):
+		"""Decorator to attach an on-success handler (sync or async).
+
+		Args:
+			fn: Callback receiving (self, data) on successful mutation.
+
+		Returns:
+			The callback function unchanged.
+		"""
 		if self._on_success_fn is not None:
 			raise RuntimeError(
 				f"Duplicate on_success() decorator for mutation '{self.name}'. Only one is allowed."
@@ -104,8 +177,15 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 		self._on_success_fn = fn  # pyright: ignore[reportAttributeAccessIssue]
 		return fn
 
-	# Decorator to attach an on-error handler (sync or async)
 	def on_error(self, fn: OnErrorFn[TState]):
+		"""Decorator to attach an on-error handler (sync or async).
+
+		Args:
+			fn: Callback receiving (self, error) on mutation failure.
+
+		Returns:
+			The callback function unchanged.
+		"""
 		if self._on_error_fn is not None:
 			raise RuntimeError(
 				f"Duplicate on_error() decorator for mutation '{self.name}'. Only one is allowed."
@@ -161,6 +241,35 @@ def mutation(
 def mutation(
 	fn: Callable[Concatenate[TState, P], Awaitable[T]] | None = None,
 ):
+	"""Decorator for async mutations (write operations) on State methods.
+
+	Creates a mutation wrapper that tracks execution state and provides
+	callbacks for success/error handling. Unlike queries, mutations are
+	not cached and must be explicitly called.
+
+	Args:
+		fn: The async method to decorate (when used without parentheses).
+
+	Returns:
+		MutationProperty that creates MutationResult instances when accessed.
+
+	Example:
+		::
+
+			class UserState(ps.State):
+			    @ps.mutation
+			    async def update_name(self, name: str) -> User:
+			        return await api.update_user(name=name)
+
+			    @update_name.on_success
+			    def _on_success(self, data: User):
+			        self.user.invalidate()
+
+		Calling the mutation::
+
+			result = await state.update_name("New Name")
+	"""
+
 	def decorator(func: Callable[Concatenate[TState, P], Awaitable[T]], /):
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())

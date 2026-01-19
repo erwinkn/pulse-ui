@@ -1,0 +1,280 @@
+---
+title: "ManualForm"
+---
+
+Low-level form handler for custom form implementations.
+
+Use when you need more control over form rendering than ``ps.Form`` provides.
+
+## Attributes
+
+<PyAttribute name={"_submit_signal"} type={"Signal[bool]"} value={"Signal(False)"} />
+
+<PyAttribute name={"_render"} type={"RenderSession"} value={"render"} />
+
+<PyAttribute name={"_registration"} type={"FormRegistration | None"} value={"render.forms.register(session_id=(session.sid), render_id=(render.id), route_id=(route.pulse_route.unique_path()), on_submit=(self.wrap_on_submit(on_submit)))"} />
+
+<PyAttribute name={"is_submitting"} type={"bool"} value={null}>
+
+Whether the form is currently submitting.
+
+</PyAttribute>
+
+<PyAttribute name={"registration"} type={"FormRegistration"} value={null}>
+
+Form registration info (raises if disposed).
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, on_submit=None) -> None"}>
+
+Initialize a manual form handler.
+
+<PySourceCode >
+
+```python
+def __init__(self, on_submit: EventHandler1[FormData] | None = None) -> None:
+	"""Initialize a manual form handler.
+
+	Args:
+		on_submit: Optional submit handler receiving parsed FormData.
+
+	Raises:
+		RuntimeError: If called outside a render pass, route context,
+			or user session.
+	"""
+	ctx = PulseContext.get()
+	render = ctx.render
+	route = ctx.route
+	session = ctx.session
+	if render is None:
+		raise RuntimeError("ManualForm must be created during a render pass")
+	if route is None:
+		raise RuntimeError("ManualForm requires an active route context")
+	if session is None:
+		raise RuntimeError("ManualForm requires an active user session")
+
+	self._submit_signal = Signal(False)
+	self._render = render
+	self._registration = render.forms.register(
+		session_id=session.sid,
+		render_id=render.id,
+		route_id=route.pulse_route.unique_path(),
+		on_submit=self.wrap_on_submit(on_submit),
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"on_submit"} type={"EventHandler1[FormData] | None"} value={"None"}>
+
+Optional submit handler receiving parsed FormData.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"wrap_on_submit"} type={"(self, on_submit)"}>
+
+<PySourceCode >
+
+```python
+def wrap_on_submit(self, on_submit: EventHandler1[FormData] | None):
+	async def on_submit_handler(data: FormData):
+		if on_submit:
+			await maybe_await(call_flexible(on_submit, data))
+		self._submit_signal.write(False)
+
+	return on_submit_handler
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"on_submit"} type={"EventHandler1[FormData] | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_start_submit"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def _start_submit(self) -> None:
+	self._submit_signal.write(True)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"props"} type={"(self) -> GeneratedFormProps"}>
+
+Get form props for manual binding to a form element.
+
+<PySourceCode >
+
+```python
+def props(self) -> GeneratedFormProps:
+	"""Get form props for manual binding to a form element.
+
+	Returns:
+		Dict with action, method, encType, and onSubmit props.
+	"""
+	return {
+		"action": f"{server_address()}/pulse/forms/{self._render.id}/{self.registration.id}",
+		"method": "POST",
+		"encType": "multipart/form-data",
+		"onSubmit": self._start_submit,
+	}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.form.GeneratedFormProps"}>
+
+Dict with action, method, encType, and onSubmit props.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"__call__"} type={"(self, *children, *, key=None, **props)"}>
+
+Render as a form element with children.
+
+<PySourceCode >
+
+```python
+def __call__(
+	self,
+	*children: Node,
+	key: str | None = None,
+	**props: Unpack[PulseFormProps],
+):
+	"""Render as a form element with children.
+
+	Args:
+		*children: Form content.
+		key: Optional element key.
+		**props: Additional form props.
+
+	Returns:
+		Form node with auto-generated submission props.
+	"""
+	props.update(self.props())  # pyright: ignore[reportCallIssue, reportArgumentType]
+	return client_form_component(*children, key=key, **props)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"children"} type={"Node"} value={"()"} />
+<PyParameter name={"key"} type={"str | None"} value={"None"}>
+
+Optional element key.
+
+</PyParameter>
+<PyParameter name={"props"} type={"Unpack[PulseFormProps]"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={null}>
+
+Form node with auto-generated submission props.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self) -> None"}>
+
+Unregister the form and clean up.
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self) -> None:
+	"""Unregister the form and clean up."""
+	if self._registration is None:
+		return
+	self._render.forms.unregister(self._registration.id)
+	self._registration = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"update"} type={"(self, on_submit) -> None"}>
+
+Update the submit handler.
+
+<PySourceCode >
+
+```python
+def update(self, on_submit: EventHandler1[FormData] | None) -> None:
+	"""Update the submit handler.
+
+	Args:
+		on_submit: New submit handler.
+	"""
+	self.registration.on_submit = self.wrap_on_submit(on_submit)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"on_submit"} type={"EventHandler1[FormData] | None"} value={undefined}>
+
+New submit handler.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

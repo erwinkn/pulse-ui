@@ -1,0 +1,9 @@
+{
+  "title": "components",
+  "pages": [
+    "index",
+    "react_router",
+    "if_",
+    "for_"
+  ]
+}

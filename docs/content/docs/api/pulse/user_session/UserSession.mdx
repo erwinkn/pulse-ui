@@ -1,0 +1,237 @@
+---
+title: "UserSession"
+---
+
+## Attributes
+
+<PyAttribute name={"sid"} type={"str"} value={"sid"} />
+
+<PyAttribute name={"data"} type={"Session"} value={"reactive(data)"} />
+
+<PyAttribute name={"app"} type={"App"} value={"app"} />
+
+<PyAttribute name={"is_cookie_session"} type={"bool"} value={"isinstance(app.session_store, CookieSessionStore)"} />
+
+<PyAttribute name={"scheduled_cookie_refresh"} type={"bool"} value={"False"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, sid, data, app) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, sid: str, data: dict[str, Any], app: "App") -> None:
+	self.sid = sid
+	self.data = reactive(data)
+	self.scheduled_cookie_refresh = False
+	self._queued_cookies = {}
+	self.app = app
+	self.is_cookie_session = isinstance(app.session_store, CookieSessionStore)
+	if isinstance(app.session_store, CookieSessionStore):
+		self._effect = Effect(
+			lambda: self.refresh_session_cookie(app),
+			name=f"save_cookie_session:{self.sid}",
+		)
+	else:
+		self._effect = AsyncEffect(
+			self._save_server_session, name=f"save_server_session:{self.sid}"
+		)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"sid"} type={"str"} value={null} />
+<PyParameter name={"data"} type={"dict[str, Any]"} value={null} />
+<PyParameter name={"app"} type={"App"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_save_server_session"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+async def _save_server_session(self):
+	assert isinstance(self.app.session_store, SessionStore)
+	# unwrap subscribes the effect to all signals in the session ReactiveDict
+	data = unwrap(self.data)
+	await self.app.session_store.save(self.sid, data)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"refresh_session_cookie"} type={"(self, app)"}>
+
+<PySourceCode >
+
+```python
+def refresh_session_cookie(self, app: "App"):
+	assert isinstance(app.session_store, CookieSessionStore)
+	# unwrap subscribes the effect to all signals in the session ReactiveDict
+	data = unwrap(self.data)
+	signed_cookie = app.session_store.encode(self.sid, data)
+	if app.cookie.secure is None:
+		raise RuntimeError(
+			"Cookie.secure is not resolved. This is likely an internal error. Ensure App.setup() ran before sessions."
+		)
+	self.set_cookie(
+		name=app.cookie.name,
+		value=signed_cookie,
+		domain=app.cookie.domain,
+		secure=app.cookie.secure,
+		samesite=app.cookie.samesite,
+		max_age_seconds=app.cookie.max_age_seconds,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"app"} type={"App"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self):
+	self._effect.dispose()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"handle_response"} type={"(self, res)"}>
+
+<PySourceCode >
+
+```python
+def handle_response(self, res: Response):
+	# For cookie sessions, run the effect now if it's scheduled, in order to set the updated cookie
+	if self.is_cookie_session:
+		self._effect.flush()
+	for cookie in self._queued_cookies.values():
+		cookie.set_on_fastapi(res, cookie.value)
+	self._queued_cookies.clear()
+	self.scheduled_cookie_refresh = False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"res"} type={"Response"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"get_cookie_value"} type={"(self, name) -> str | None"}>
+
+<PySourceCode >
+
+```python
+def get_cookie_value(self, name: str) -> str | None:
+	cookie = self._queued_cookies.get(name)
+	if cookie is None:
+		return None
+	return cookie.value
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str | None"} />
+
+</PyFunction>
+
+<PyFunction name={"set_cookie"} type={"(self, name, value, domain=None, secure=True, samesite='lax', max_age_seconds=7 * 24 * 3600)"}>
+
+<PySourceCode >
+
+```python
+def set_cookie(
+	self,
+	name: str,
+	value: str,
+	domain: str | None = None,
+	secure: bool = True,
+	samesite: Literal["lax", "strict", "none"] = "lax",
+	max_age_seconds: int = 7 * 24 * 3600,
+):
+	cookie = SetCookie(
+		name=name,
+		value=value,
+		domain=domain,
+		secure=secure,
+		samesite=samesite,
+		max_age_seconds=max_age_seconds,
+	)
+	self._queued_cookies[name] = cookie
+	if not self.scheduled_cookie_refresh:
+		self.app.refresh_cookies(self.sid)
+		self.scheduled_cookie_refresh = True
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"value"} type={"str"} value={null} />
+<PyParameter name={"domain"} type={"str | None"} value={"None"} />
+<PyParameter name={"secure"} type={"bool"} value={"True"} />
+<PyParameter name={"samesite"} type={"Literal['lax', 'strict', 'none']"} value={"'lax'"} />
+<PyParameter name={"max_age_seconds"} type={"int"} value={"7 * 24 * 3600"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

@@ -1,0 +1,11 @@
+{
+  "title": "renderer",
+  "pages": [
+    "index",
+    "Callback",
+    "DiffPropsResult",
+    "RenderPropTask",
+    "RenderTree",
+    "Renderer"
+  ]
+}

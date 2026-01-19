@@ -1,0 +1,161 @@
+---
+title: "FormStorage"
+---
+
+Internal hook state for managing form lifecycle within renders.
+
+Not typically used directly. Manages form persistence and cleanup across
+render cycles.
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={null} value={"('forms', 'prev_forms', 'render_mark')"} />
+
+<PyAttribute name={"render_mark"} type={"int"} value={"0"} />
+
+<PyAttribute name={"forms"} type={"dict[str, ManualForm]"} value={"{}"} />
+
+<PyAttribute name={"prev_forms"} type={"dict[str, ManualForm]"} value={"{}"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self) -> None:
+	super().__init__()
+	self.forms: dict[str, ManualForm] = {}
+	self.prev_forms: dict[str, ManualForm] = {}
+	self.render_mark = 0
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"on_render_start"} type={"(self, render_cycle) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def on_render_start(self, render_cycle: int) -> None:
+	super().on_render_start(render_cycle)
+	if self.render_mark == render_cycle:
+		return
+	self.prev_forms = self.forms
+	self.forms = {}
+	self.render_mark = render_cycle
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render_cycle"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"on_render_end"} type={"(self, render_cycle) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def on_render_end(self, render_cycle: int) -> None:
+	if not self.prev_forms:
+		return
+	for form in self.prev_forms.values():
+		form.dispose()
+	self.prev_forms.clear()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render_cycle"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"register"} type={"(self, key, factory) -> ManualForm"}>
+
+<PySourceCode >
+
+```python
+def register(
+	self,
+	key: str,
+	factory: Callable[[], ManualForm],
+) -> ManualForm:
+	if key in self.forms:
+		raise RuntimeError(
+			f"Duplicate ps.Form id '{key}' detected within the same render"
+		)
+	form = self.prev_forms.pop(key, None)
+	if form is None:
+		form = factory()
+	self.forms[key] = form
+	return form
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"str"} value={null} />
+<PyParameter name={"factory"} type={"Callable[[], ManualForm]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.form.ManualForm"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self) -> None:
+	for form in self.forms.values():
+		form.dispose()
+	for form in self.prev_forms.values():
+		form.dispose()
+	self.forms.clear()
+	self.prev_forms.clear()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

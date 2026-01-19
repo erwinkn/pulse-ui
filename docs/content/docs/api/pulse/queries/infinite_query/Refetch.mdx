@@ -1,0 +1,33 @@
+---
+title: "Refetch"
+---
+
+Refetch all pages.
+
+## Attributes
+
+<PyAttribute name={"fetch_fn"} type={"Callable[[TParam], Awaitable[T]]"} value={null} />
+
+<PyAttribute name={"observer"} type={"InfiniteQueryResult[T, TParam] | None"} value={"None"} />
+
+<PyAttribute name={"refetch_page"} type={"Callable[[T, int, list[T]], bool] | None"} value={"None"} />
+
+<PyAttribute name={"future"} type={"asyncio.Future[ActionResult[list[Page[T, TParam]]]]"} value={"field(default_factory=(asyncio.Future))"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, fetch_fn, observer=None, refetch_page=None, future=asyncio.Future()) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[TParam], Awaitable[T]]"} value={null} />
+<PyParameter name={"observer"} type={"InfiniteQueryResult[T, TParam] | None"} value={"None"} />
+<PyParameter name={"refetch_page"} type={"Callable[[T, int, list[T]], bool] | None"} value={"None"} />
+<PyParameter name={"future"} type={"asyncio.Future[ActionResult[list[Page[T, TParam]]]]"} value={"asyncio.Future()"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

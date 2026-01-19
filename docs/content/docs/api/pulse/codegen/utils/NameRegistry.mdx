@@ -1,0 +1,66 @@
+---
+title: "NameRegistry"
+---
+
+## Attributes
+
+<PyAttribute name={"names"} type={"set[str]"} value={"set(names or [])"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, names=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, names: Iterable[str] | None = None) -> None:
+	self.names: set[str] = set(names or [])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"names"} type={"Iterable[str] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"register"} type={"(self, name, suffix=None, allow_rename=True)"}>
+
+<PySourceCode >
+
+```python
+def register(self, name: str, suffix: str | None = None, allow_rename: bool = True):
+	if name not in self.names:
+		self.names.add(name)
+		return name
+	if not allow_rename:
+		raise ValueError(f"Duplicate identifier {name}")
+	i = 2
+	aliased = f"{name}{i}"
+	while aliased in self.names:
+		i += 1
+		aliased = f"{name}{i}"
+	self.names.add(aliased)
+	return aliased
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"suffix"} type={"str | None"} value={"None"} />
+<PyParameter name={"allow_rename"} type={"bool"} value={"True"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

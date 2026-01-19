@@ -1,0 +1,51 @@
+---
+title: "id"
+---
+
+Shared ID generator for unique identifiers across imports, functions, constants.
+
+<Tabs items={["Functions"]}>
+
+<Tab value={"Functions"}>
+
+<PyFunction name={"next_id"} type={"() -> str"}>
+
+Generate a unique ID for imports, functions, or constants.
+
+<PySourceCode >
+
+```python
+def next_id() -> str:
+	"""Generate a unique ID for imports, functions, or constants."""
+	global _id_counter
+	_id_counter += 1
+	return str(_id_counter)
+```
+
+</PySourceCode>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+<PyFunction name={"reset_id_counter"} type={"() -> None"}>
+
+Reset the shared ID counter. Called by clear_* functions.
+
+<PySourceCode >
+
+```python
+def reset_id_counter() -> None:
+	"""Reset the shared ID counter. Called by clear_* functions."""
+	global _id_counter
+	_id_counter = 0
+```
+
+</PySourceCode>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

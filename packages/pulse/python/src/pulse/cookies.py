@@ -14,6 +14,26 @@ if TYPE_CHECKING:
 
 @dataclass
 class Cookie:
+	"""Configuration for HTTP cookies used in session management.
+
+	Attributes:
+		name: Cookie name.
+		domain: Cookie domain. Set automatically in subdomain mode.
+		secure: HTTPS-only flag. Auto-resolved from server address if None.
+		samesite: SameSite attribute ("lax", "strict", or "none").
+		max_age_seconds: Cookie lifetime in seconds (default 7 days).
+
+	Example:
+		```python
+		cookie = Cookie(
+			name="session",
+			secure=True,
+			samesite="strict",
+			max_age_seconds=3600,
+		)
+		```
+	"""
+
 	name: str
 	_: KW_ONLY
 	domain: str | None = None
@@ -22,18 +42,45 @@ class Cookie:
 	max_age_seconds: int = 7 * 24 * 3600
 
 	def get_from_fastapi(self, request: Request) -> str | None:
-		"""Extract sid from a FastAPI Request (by reading Cookie header)."""
+		"""Extract cookie value from a FastAPI Request.
+
+		Reads the Cookie header and parses it to find this cookie's value.
+
+		Args:
+			request: FastAPI/Starlette Request object.
+
+		Returns:
+			Cookie value if found, None otherwise.
+		"""
 		header = request.headers.get("cookie")
 		cookies = parse_cookie_header(header)
 		return cookies.get(self.name)
 
 	def get_from_socketio(self, environ: dict[str, Any]) -> str | None:
-		"""Extract sid from a socket.io environ mapping."""
+		"""Extract cookie value from a Socket.IO environ mapping.
+
+		Args:
+			environ: Socket.IO environ dictionary.
+
+		Returns:
+			Cookie value if found, None otherwise.
+		"""
 		raw = environ.get("HTTP_COOKIE") or environ.get("COOKIE")
 		cookies = parse_cookie_header(raw)
 		return cookies.get(self.name)
 
-	async def set_through_api(self, value: str):
+	async def set_through_api(self, value: str) -> None:
+		"""Set the cookie on the client via WebSocket.
+
+		Must be called during a callback context.
+
+		Args:
+			value: Cookie value to set.
+
+		Raises:
+			RuntimeError: If Cookie.secure is not resolved (ensure App.setup()
+				ran first).
+		"""
 		if self.secure is None:
 			raise RuntimeError(
 				"Cookie.secure is not resolved. Ensure App.setup() ran or set Cookie(secure=True/False)."
@@ -48,7 +95,17 @@ class Cookie:
 		)
 
 	def set_on_fastapi(self, response: Response, value: str) -> None:
-		"""Set the session cookie on a FastAPI Response-like object."""
+		"""Set the cookie on a FastAPI Response object.
+
+		Configured with httponly=True and path="/".
+
+		Args:
+			response: FastAPI Response object.
+			value: Cookie value to set.
+
+		Raises:
+			RuntimeError: If Cookie.secure is not resolved.
+		"""
 		if self.secure is None:
 			raise RuntimeError(
 				"Cookie.secure is not resolved. Ensure App.setup() ran or set Cookie(secure=True/False)."
@@ -67,10 +124,31 @@ class Cookie:
 
 @dataclass
 class SetCookie(Cookie):
+	"""Extended Cookie dataclass that includes the cookie value.
+
+	Used for setting cookies with a specific value. Inherits all configuration
+	from Cookie.
+
+	Attributes:
+		value: The cookie value to set.
+	"""
+
 	value: str
 
 	@classmethod
 	def from_cookie(cls, cookie: Cookie, value: str) -> "SetCookie":
+		"""Create a SetCookie from an existing Cookie configuration.
+
+		Args:
+			cookie: Cookie configuration to copy settings from.
+			value: Cookie value to set.
+
+		Returns:
+			SetCookie instance with the same configuration and specified value.
+
+		Raises:
+			RuntimeError: If cookie.secure is not resolved.
+		"""
 		if cookie.secure is None:
 			raise RuntimeError(
 				"Cookie.secure is not resolved. Ensure App.setup() ran or set Cookie(secure=True/False)."
@@ -111,6 +189,18 @@ def session_cookie(
 
 
 class CORSOptions(TypedDict, total=False):
+	"""TypedDict for CORS middleware configuration.
+
+	Attributes:
+		allow_origins: List of allowed origins. Use ['*'] for all. Default: ().
+		allow_methods: List of allowed HTTP methods. Default: ('GET',).
+		allow_headers: List of allowed HTTP headers. Default: ().
+		allow_credentials: Whether to allow credentials. Default: False.
+		allow_origin_regex: Regex pattern for allowed origins. Default: None.
+		expose_headers: List of headers to expose to browser. Default: ().
+		max_age: Browser CORS cache duration in seconds. Default: 600.
+	"""
+
 	allow_origins: Sequence[str]
 	"List of allowed origins. Use ['*'] to allow all origins. Default: ()"
 
@@ -207,6 +297,20 @@ def cors_options(mode: "PulseMode", server_address: str) -> CORSOptions:
 
 
 def parse_cookie_header(header: str | None) -> dict[str, str]:
+	"""Parse a raw Cookie header string into a dictionary.
+
+	Args:
+		header: Raw Cookie header string (e.g., "session=abc123; theme=dark").
+
+	Returns:
+		Dictionary of cookie name-value pairs.
+
+	Example:
+		```python
+		cookies = parse_cookie_header("session=abc123; theme=dark")
+		# {"session": "abc123", "theme": "dark"}
+		```
+	"""
 	cookies: dict[str, str] = {}
 	if not header:
 		return cookies

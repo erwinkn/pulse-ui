@@ -1,0 +1,11 @@
+---
+title: "ChannelTimeout"
+---
+
+Raised when a channel request times out waiting for a response.
+
+This exception is raised by ``Channel.request()`` when the specified
+timeout elapses before receiving a response from the client.
+
+Example:
+        >>> result = await ch.request("get_value", timeout=5.0)  # Raises if no response in 5s

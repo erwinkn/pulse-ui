@@ -1,0 +1,257 @@
+---
+title: "Cookie"
+---
+
+Configuration for HTTP cookies used in session management.
+
+## Attributes
+
+<PyAttribute name={"name"} type={"str"} value={null}>
+
+Cookie name.
+
+</PyAttribute>
+
+<PyAttribute name={"_"} type={"KW_ONLY"} value={null} />
+
+<PyAttribute name={"domain"} type={"str | None"} value={"None"}>
+
+Cookie domain. Set automatically in subdomain mode.
+
+</PyAttribute>
+
+<PyAttribute name={"secure"} type={"bool | None"} value={"None"}>
+
+HTTPS-only flag. Auto-resolved from server address if None.
+
+</PyAttribute>
+
+<PyAttribute name={"samesite"} type={"Literal['lax', 'strict', 'none']"} value={"'lax'"}>
+
+SameSite attribute ("lax", "strict", or "none").
+
+</PyAttribute>
+
+<PyAttribute name={"max_age_seconds"} type={"int"} value={"7 * 24 * 3600"}>
+
+Cookie lifetime in seconds (default 7 days).
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"get_from_fastapi"} type={"(self, request) -> str | None"}>
+
+Extract cookie value from a FastAPI Request.
+
+Reads the Cookie header and parses it to find this cookie's value.
+
+<PySourceCode >
+
+```python
+def get_from_fastapi(self, request: Request) -> str | None:
+	"""Extract cookie value from a FastAPI Request.
+
+	Reads the Cookie header and parses it to find this cookie's value.
+
+	Args:
+		request: FastAPI/Starlette Request object.
+
+	Returns:
+		Cookie value if found, None otherwise.
+	"""
+	header = request.headers.get("cookie")
+	cookies = parse_cookie_header(header)
+	return cookies.get(self.name)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"request"} type={"Request"} value={undefined}>
+
+FastAPI/Starlette Request object.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"str | None"}>
+
+Cookie value if found, None otherwise.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"get_from_socketio"} type={"(self, environ) -> str | None"}>
+
+Extract cookie value from a Socket.IO environ mapping.
+
+<PySourceCode >
+
+```python
+def get_from_socketio(self, environ: dict[str, Any]) -> str | None:
+	"""Extract cookie value from a Socket.IO environ mapping.
+
+	Args:
+		environ: Socket.IO environ dictionary.
+
+	Returns:
+		Cookie value if found, None otherwise.
+	"""
+	raw = environ.get("HTTP_COOKIE") or environ.get("COOKIE")
+	cookies = parse_cookie_header(raw)
+	return cookies.get(self.name)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"environ"} type={"dict[str, Any]"} value={undefined}>
+
+Socket.IO environ dictionary.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"str | None"}>
+
+Cookie value if found, None otherwise.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"set_through_api"} type={"(self, value) -> None"}>
+
+Set the cookie on the client via WebSocket.
+
+Must be called during a callback context.
+
+<PySourceCode >
+
+```python
+async def set_through_api(self, value: str) -> None:
+	"""Set the cookie on the client via WebSocket.
+
+	Must be called during a callback context.
+
+	Args:
+		value: Cookie value to set.
+
+	Raises:
+		RuntimeError: If Cookie.secure is not resolved (ensure App.setup()
+			ran first).
+	"""
+	if self.secure is None:
+		raise RuntimeError(
+			"Cookie.secure is not resolved. Ensure App.setup() ran or set Cookie(secure=True/False)."
+		)
+	await set_cookie(
+		name=self.name,
+		value=value,
+		domain=self.domain,
+		secure=self.secure,
+		samesite=self.samesite,
+		max_age_seconds=self.max_age_seconds,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"str"} value={undefined}>
+
+Cookie value to set.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"set_on_fastapi"} type={"(self, response, value) -> None"}>
+
+Set the cookie on a FastAPI Response object.
+
+Configured with httponly=True and path="/".
+
+<PySourceCode >
+
+```python
+def set_on_fastapi(self, response: Response, value: str) -> None:
+	"""Set the cookie on a FastAPI Response object.
+
+	Configured with httponly=True and path="/".
+
+	Args:
+		response: FastAPI Response object.
+		value: Cookie value to set.
+
+	Raises:
+		RuntimeError: If Cookie.secure is not resolved.
+	"""
+	if self.secure is None:
+		raise RuntimeError(
+			"Cookie.secure is not resolved. Ensure App.setup() ran or set Cookie(secure=True/False)."
+		)
+	response.set_cookie(
+		key=self.name,
+		value=value,
+		httponly=True,
+		samesite=self.samesite,
+		secure=self.secure,
+		max_age=self.max_age_seconds,
+		domain=self.domain,
+		path="/",
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"response"} type={"Response"} value={undefined}>
+
+FastAPI Response object.
+
+</PyParameter>
+<PyParameter name={"value"} type={"str"} value={undefined}>
+
+Cookie value to set.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, name, *, domain=None, secure=None, samesite='lax', max_age_seconds=7 * 24 * 3600) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"domain"} type={"str | None"} value={"None"} />
+<PyParameter name={"secure"} type={"bool | None"} value={"None"} />
+<PyParameter name={"samesite"} type={"Literal['lax', 'strict', 'none']"} value={"'lax'"} />
+<PyParameter name={"max_age_seconds"} type={"int"} value={"7 * 24 * 3600"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

@@ -1,0 +1,135 @@
+---
+title: "_examples"
+---
+
+<Tabs items={["Functions"]}>
+
+<Tab value={"Functions"}>
+
+<PyFunction name={"square"} type={"(x) -> float"}>
+
+Return the square of x.
+
+<PySourceCode >
+
+```python
+def square(x: float) -> float:
+	"""Return the square of x."""
+	return x * x
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"x"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"float"} />
+
+</PyFunction>
+<PyFunction name={"cube"} type={"(x) -> float"}>
+
+Return the cube of x.
+
+<PySourceCode >
+
+```python
+def cube(x: float) -> float:
+	"""Return the cube of x."""
+	return x * x * x
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"x"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"float"} />
+
+</PyFunction>
+<PyFunction name={"factorial"} type={"(n) -> int"}>
+
+Calculate factorial recursively.
+
+<PySourceCode >
+
+```python
+def factorial(n: int) -> int:
+	"""Calculate factorial recursively."""
+	if n <= 1:
+		return 1
+	return n * factorial(n - 1)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"n"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"int"} />
+
+</PyFunction>
+<PyFunction name={"is_even"} type={"(n) -> bool"}>
+
+Check if n is even.
+
+<PySourceCode >
+
+```python
+def is_even(n: int) -> bool:
+	"""Check if n is even."""
+	return n % 2 == 0
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"n"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+<PyFunction name={"clamp"} type={"(value, min_val, max_val) -> float"}>
+
+Clamp value between min_val and max_val.
+
+<PySourceCode >
+
+```python
+def clamp(value: float, min_val: float, max_val: float) -> float:
+	"""Clamp value between min_val and max_val."""
+	if value < min_val:
+		return min_val
+	if value > max_val:
+		return max_val
+	return value
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"float"} value={null} />
+<PyParameter name={"min_val"} type={"float"} value={null} />
+<PyParameter name={"max_val"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"float"} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

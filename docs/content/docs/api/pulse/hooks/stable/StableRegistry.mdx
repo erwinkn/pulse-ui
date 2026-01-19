@@ -1,0 +1,39 @@
+---
+title: "StableRegistry"
+---
+
+Internal hook state that stores stable entries by key.
+
+Maintains a dictionary of StableEntry objects, allowing stable
+wrappers to persist across renders while their underlying values
+can be updated.
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={null} value={"('entries',)"} />
+
+<PyAttribute name={"entries"} type={"dict[str, StableEntry]"} value={"{}"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self) -> None:
+	super().__init__()
+	self.entries: dict[str, StableEntry] = {}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

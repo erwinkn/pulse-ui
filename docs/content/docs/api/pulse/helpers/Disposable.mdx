@@ -1,0 +1,69 @@
+---
+title: "Disposable"
+---
+
+## Attributes
+
+<PyAttribute name={"__disposed__"} type={"bool"} value={"False"} />
+
+## Functions
+
+<PyFunction name={"dispose"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+@abstractmethod
+def dispose(self) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__init_subclass__"} type={"(cls, **kwargs)"}>
+
+<PySourceCode >
+
+```python
+def __init_subclass__(cls, **kwargs: Any):
+	super().__init_subclass__(**kwargs)
+
+	if "dispose" in cls.__dict__:
+		original_dispose = cls.dispose
+
+		@wraps(original_dispose)
+		def wrapped_dispose(self: Self, *args: Any, **kwargs: Any):
+			if self.__disposed__:
+				if env.pulse_env == "dev":
+					cls_name = type(self).__name__
+					raise RuntimeError(
+						f"{self} (type={cls_name}) was disposed twice. This is likely a bug."
+					)
+				return
+			self.__disposed__ = True
+			return original_dispose(self, *args, **kwargs)
+
+		cls.dispose = wrapped_dispose
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+<PyParameter name={"kwargs"} type={"Any"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

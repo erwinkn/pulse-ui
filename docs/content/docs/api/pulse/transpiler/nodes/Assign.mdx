@@ -1,0 +1,70 @@
+---
+title: "Assign"
+---
+
+JS assignment: let x = expr; or x = expr; or x += expr;
+
+declare: "let", "const", or None (reassignment)
+op: None for =, or "+", "-", etc. for augmented assignment
+
+## Attributes
+
+<PyAttribute name={"target"} type={"str"} value={null} />
+
+<PyAttribute name={"value"} type={"Expr"} value={null} />
+
+<PyAttribute name={"declare"} type={"Lit['let', 'const'] | None"} value={"None"} />
+
+<PyAttribute name={"op"} type={"str | None"} value={"None"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	if self.declare:
+		out.append(self.declare)
+		out.append(" ")
+	out.append(self.target)
+	if self.op:
+		out.append(" ")
+		out.append(self.op)
+		out.append("= ")
+	else:
+		out.append(" = ")
+	self.value.emit(out)
+	out.append(";")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, target, value, declare=None, op=None) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"target"} type={"str"} value={null} />
+<PyParameter name={"value"} type={"Expr"} value={null} />
+<PyParameter name={"declare"} type={"Lit['let', 'const'] | None"} value={"None"} />
+<PyParameter name={"op"} type={"str | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

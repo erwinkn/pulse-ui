@@ -1,0 +1,108 @@
+---
+title: "DynamicImport"
+---
+
+Represents a dynamic import() expression.
+
+Emits as: import("src")
+
+Supports method chaining for .then():
+    import_("./foo").then(lambda m: m.bar)
+    -> import("./foo").then(m => m.bar)
+
+## Attributes
+
+<PyAttribute name={"src"} type={"str"} value={null} />
+
+<PyAttribute name={"asset"} type={"LocalAsset | None"} value={"None"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	if self.asset:
+		out.append(f'import("{self.asset.import_path()}")')
+	else:
+		out.append(f'import("{self.src}")')
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	raise TypeError("DynamicImport cannot be rendered to VDOM")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_getattr"} type={"(self, attr, ctx) -> Expr"}>
+
+Allow .then() and other method chaining.
+
+<PySourceCode >
+
+```python
+@override
+def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr:
+	"""Allow .then() and other method chaining."""
+	return Member(self, attr)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"attr"} type={"str"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, src, asset=None) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"src"} type={"str"} value={null} />
+<PyParameter name={"asset"} type={"LocalAsset | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

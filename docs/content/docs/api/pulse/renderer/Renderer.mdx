@@ -1,0 +1,592 @@
+---
+title: "Renderer"
+---
+
+## Attributes
+
+<PyAttribute name={"callbacks"} type={"Callbacks"} value={"{}"} />
+
+<PyAttribute name={"operations"} type={"list[VDOMOperation]"} value={"[]"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self) -> None:
+	self.callbacks: Callbacks = {}
+	self.operations: list[VDOMOperation] = []
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render_tree"} type={"(self, node, path='') -> tuple[Any, Node]"}>
+
+<PySourceCode >
+
+```python
+def render_tree(self, node: Node, path: str = "") -> tuple[Any, Node]:
+	if isinstance(node, PulseNode):
+		return self.render_component(node, path)
+	if isinstance(node, Element):
+		return self.render_node(node, path)
+	if isinstance(node, Value):
+		return node.value, node.value
+	if isinstance(node, Expr):
+		return node.render(), node
+	# Pass through any other value - serializer will validate
+	return node, node
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"Node"} value={null} />
+<PyParameter name={"path"} type={"str"} value={"''"} />
+
+</div>
+
+<PyFunctionReturn type={"tuple[typing.Any, pulse.transpiler.nodes.Node]"} />
+
+</PyFunction>
+
+<PyFunction name={"render_component"} type={"(self, component, path) -> tuple[VDOM, PulseNode]"}>
+
+<PySourceCode >
+
+```python
+def render_component(
+	self, component: PulseNode, path: str
+) -> tuple[VDOM, PulseNode]:
+	if component.hooks is None:
+		component.hooks = HookContext()
+	with component.hooks:
+		rendered = component.fn(*component.args, **component.kwargs)
+	vdom, normalized_child = self.render_tree(rendered, path)
+	component.contents = normalized_child
+	return vdom, component
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"component"} type={"PulseNode"} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"tuple[pulse.transpiler.vdom.VDOM, pulse.transpiler.nodes.PulseNode]"} />
+
+</PyFunction>
+
+<PyFunction name={"render_node"} type={"(self, element, path) -> tuple[VDOMNode, Element]"}>
+
+<PySourceCode >
+
+```python
+def render_node(self, element: Element, path: str) -> tuple[VDOMNode, Element]:
+	tag = self.render_tag(element.tag)
+	vdom_node: VDOMElement = {"tag": tag}
+	if (key_val := key_value(element)) is not None:
+		vdom_node["key"] = key_val
+
+	props = element.props_dict()
+	props_result = self.diff_props({}, props, path, prev_eval=set())
+	if props_result.delta_set:
+		vdom_node["props"] = props_result.delta_set
+	if props_result.eval_keys:
+		vdom_node["eval"] = sorted(props_result.eval_keys)
+
+	for task in props_result.render_prop_reconciles:
+		normalized_value = self.reconcile_tree(
+			task.previous, task.current, task.path
+		)
+		props_result.normalized[task.key] = normalized_value
+
+	element.props = props_result.normalized or None
+
+	children_vdom: list[VDOM] = []
+	normalized_children: list[Node] = []
+	for idx, child in enumerate(normalize_children(element.children)):
+		child_path = join_path(path, idx)
+		child_vdom, normalized_child = self.render_tree(child, child_path)
+		children_vdom.append(child_vdom)
+		normalized_children.append(normalized_child)
+
+	if children_vdom:
+		vdom_node["children"] = children_vdom
+	element.children = normalized_children
+
+	return vdom_node, element
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"element"} type={"Element"} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"tuple[pulse.transpiler.vdom.VDOMNode, pulse.transpiler.nodes.Element]"} />
+
+</PyFunction>
+
+<PyFunction name={"reconcile_tree"} type={"(self, previous, current, path='') -> Node"}>
+
+<PySourceCode >
+
+```python
+def reconcile_tree(
+	self,
+	previous: Node,
+	current: Node,
+	path: str = "",
+) -> Node:
+	if isinstance(current, Value):
+		current = current.value
+	if isinstance(previous, Value):
+		previous = previous.value
+	if not same_node(previous, current):
+		unmount_element(previous)
+		new_vdom, normalized = self.render_tree(current, path)
+		self.operations.append(
+			ReplaceOperation(type="replace", path=path, data=new_vdom)
+		)
+		return normalized
+
+	if isinstance(previous, PulseNode) and isinstance(current, PulseNode):
+		return self.reconcile_component(previous, current, path)
+
+	if isinstance(previous, Element) and isinstance(current, Element):
+		return self.reconcile_element(previous, current, path)
+
+	return current
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"previous"} type={"Node"} value={null} />
+<PyParameter name={"current"} type={"Node"} value={null} />
+<PyParameter name={"path"} type={"str"} value={"''"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Node"} />
+
+</PyFunction>
+
+<PyFunction name={"reconcile_component"} type={"(self, previous, current, path) -> PulseNode"}>
+
+<PySourceCode >
+
+```python
+def reconcile_component(
+	self,
+	previous: PulseNode,
+	current: PulseNode,
+	path: str,
+) -> PulseNode:
+	current.hooks = previous.hooks
+	current.contents = previous.contents
+
+	if current.hooks is None:
+		current.hooks = HookContext()
+
+	with current.hooks:
+		rendered = current.fn(*current.args, **current.kwargs)
+
+	if current.contents is None:
+		new_vdom, normalized = self.render_tree(rendered, path)
+		current.contents = normalized
+		self.operations.append(
+			ReplaceOperation(type="replace", path=path, data=new_vdom)
+		)
+	else:
+		current.contents = self.reconcile_tree(current.contents, rendered, path)
+
+	return current
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"previous"} type={"PulseNode"} value={null} />
+<PyParameter name={"current"} type={"PulseNode"} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.PulseNode"} />
+
+</PyFunction>
+
+<PyFunction name={"reconcile_element"} type={"(self, previous, current, path) -> Element"}>
+
+<PySourceCode >
+
+```python
+def reconcile_element(
+	self,
+	previous: Element,
+	current: Element,
+	path: str,
+) -> Element:
+	prev_props = previous.props_dict()
+	new_props = current.props_dict()
+	prev_eval = eval_keys_for_props(prev_props)
+	props_result = self.diff_props(prev_props, new_props, path, prev_eval)
+
+	if (
+		props_result.delta_set
+		or props_result.delta_remove
+		or props_result.eval_changed
+	):
+		delta: UpdatePropsDelta = {}
+		if props_result.delta_set:
+			delta["set"] = props_result.delta_set
+		if props_result.delta_remove:
+			delta["remove"] = sorted(props_result.delta_remove)
+		if props_result.eval_changed:
+			delta["eval"] = sorted(props_result.eval_keys)
+		self.operations.append(
+			UpdatePropsOperation(type="update_props", path=path, data=delta)
+		)
+
+	for task in props_result.render_prop_reconciles:
+		normalized_value = self.reconcile_tree(
+			task.previous, task.current, task.path
+		)
+		props_result.normalized[task.key] = normalized_value
+
+	prev_children = normalize_children(previous.children)
+	next_children = normalize_children(current.children)
+	normalized_children = self.reconcile_children(
+		prev_children, next_children, path
+	)
+
+	current.props = props_result.normalized or None
+	current.children = normalized_children
+	return current
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"previous"} type={"Element"} value={null} />
+<PyParameter name={"current"} type={"Element"} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Element"} />
+
+</PyFunction>
+
+<PyFunction name={"reconcile_children"} type={"(self, c1, c2, path) -> list[Node]"}>
+
+<PySourceCode >
+
+```python
+def reconcile_children(
+	self,
+	c1: list[Node],
+	c2: list[Node],
+	path: str,
+) -> list[Node]:
+	if not c1 and not c2:
+		return []
+
+	N1 = len(c1)
+	N2 = len(c2)
+	norm: list[Node | None] = [None] * N2
+	N = min(N1, N2)
+	i = 0
+	while i < N:
+		x1 = c1[i]
+		x2 = c2[i]
+		if not same_node(x1, x2):
+			break
+		norm[i] = self.reconcile_tree(x1, x2, join_path(path, i))
+		i += 1
+
+	if i == N1 == N2:
+		return norm
+
+	op = ReconciliationOperation(
+		type="reconciliation", path=path, N=len(c2), new=([], []), reuse=([], [])
+	)
+	self.operations.append(op)
+
+	keys_to_old_idx: dict[str, int] = {}
+	for j1 in range(i, N1):
+		key = key_value(c1[j1])
+		if key is not None:
+			keys_to_old_idx[key] = j1
+
+	reused = [False] * (N1 - i)
+	for j2 in range(i, N2):
+		x2 = c2[j2]
+		k = key_value(x2)
+		if k is not None:
+			j1 = keys_to_old_idx.get(k)
+			if j1 is not None:
+				x1 = c1[j1]
+				if same_node(x1, x2):
+					norm[j2] = self.reconcile_tree(x1, x2, join_path(path, j2))
+					reused[j1 - i] = True
+					if j1 != j2:
+						op["reuse"][0].append(j2)
+						op["reuse"][1].append(j1)
+					continue
+		if k is None and j2 < N1:
+			x1 = c1[j2]
+			if same_node(x1, x2):
+				reused[j2 - i] = True
+				norm[j2] = self.reconcile_tree(x1, x2, join_path(path, j2))
+				continue
+
+		vdom, el = self.render_tree(x2, join_path(path, j2))
+		op["new"][0].append(j2)
+		op["new"][1].append(vdom)
+		norm[j2] = el
+
+	for j1 in range(i, N1):
+		if not reused[j1 - i]:
+			self.unmount_subtree(c1[j1])
+
+	return norm
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"c1"} type={"list[Node]"} value={null} />
+<PyParameter name={"c2"} type={"list[Node]"} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"list[pulse.transpiler.nodes.Node]"} />
+
+</PyFunction>
+
+<PyFunction name={"diff_props"} type={"(self, previous, current, path, prev_eval) -> DiffPropsResult"}>
+
+<PySourceCode >
+
+```python
+def diff_props(
+	self,
+	previous: dict[str, PropValue],
+	current: dict[str, PropValue],
+	path: str,
+	prev_eval: set[str],
+) -> DiffPropsResult:
+	updated: dict[str, VDOMPropValue] = {}
+	normalized: dict[str, PropValue] | None = None
+	render_prop_tasks: list[RenderPropTask] = []
+	eval_keys: set[str] = set()
+	removed_keys = set(previous.keys()) - set(current.keys())
+
+	for key, value in current.items():
+		old_value = previous.get(key)
+		prop_path = join_path(path, key)
+
+		if isinstance(value, (Element, PulseNode)):
+			eval_keys.add(key)
+			if isinstance(old_value, (Element, PulseNode)):
+				if normalized is None:
+					normalized = current.copy()
+				normalized[key] = old_value
+				render_prop_tasks.append(
+					RenderPropTask(
+						key=key,
+						previous=old_value,
+						current=value,
+						path=prop_path,
+					)
+				)
+			else:
+				vdom_value, normalized_value = self.render_tree(value, prop_path)
+				if normalized is None:
+					normalized = current.copy()
+				normalized[key] = normalized_value
+				updated[key] = cast(VDOMPropValue, vdom_value)
+			continue
+
+		if isinstance(value, Value):
+			unwrapped = value.value
+			if normalized is None:
+				normalized = current.copy()
+			normalized[key] = unwrapped
+			if isinstance(old_value, (Element, PulseNode)):
+				unmount_element(old_value)
+			if key not in previous or not values_equal(unwrapped, old_value):
+				updated[key] = cast(VDOMPropValue, unwrapped)
+			continue
+
+		if isinstance(value, Expr):
+			eval_keys.add(key)
+			if isinstance(old_value, (Element, PulseNode)):
+				unmount_element(old_value)
+			if normalized is None:
+				normalized = current.copy()
+			normalized[key] = value
+			if not (isinstance(old_value, Expr) and values_equal(old_value, value)):
+				updated[key] = value.render()
+			continue
+
+		if callable(value):
+			eval_keys.add(key)
+			if isinstance(old_value, (Element, PulseNode)):
+				unmount_element(old_value)
+			if normalized is None:
+				normalized = current.copy()
+			normalized[key] = value
+			register_callback(self.callbacks, prop_path, value)
+			if not callable(old_value):
+				updated[key] = CALLBACK_PLACEHOLDER
+			continue
+
+		if isinstance(old_value, (Element, PulseNode)):
+			unmount_element(old_value)
+		# No normalization needed - value passes through unchanged
+		if key not in previous or not values_equal(value, old_value):
+			updated[key] = cast(VDOMPropValue, value)
+
+	for key in removed_keys:
+		old_value = previous.get(key)
+		if isinstance(old_value, (Element, PulseNode)):
+			unmount_element(old_value)
+
+	normalized_props = normalized if normalized is not None else current.copy()
+	eval_changed = eval_keys != prev_eval
+	return DiffPropsResult(
+		normalized=normalized_props,
+		delta_set=updated,
+		delta_remove=removed_keys,
+		render_prop_reconciles=render_prop_tasks,
+		eval_keys=eval_keys,
+		eval_changed=eval_changed,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"previous"} type={"dict[str, PropValue]"} value={null} />
+<PyParameter name={"current"} type={"dict[str, PropValue]"} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+<PyParameter name={"prev_eval"} type={"set[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.renderer.DiffPropsResult"} />
+
+</PyFunction>
+
+<PyFunction name={"render_tag"} type={"(self, tag) -> str"}>
+
+<PySourceCode >
+
+```python
+def render_tag(self, tag: str | Expr) -> str:
+	if isinstance(tag, str):
+		return tag
+
+	key = self.register_component_expr(tag)
+	return f"{MOUNT_PREFIX}{key}"
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"tag"} type={"str | Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+
+<PyFunction name={"register_component_expr"} type={"(self, expr) -> str"}>
+
+<PySourceCode >
+
+```python
+def register_component_expr(self, expr: Expr) -> str:
+	ref = registry_ref(expr)
+	if ref is None:
+		raise TypeError(
+			"Component tag expressions must be registry-backed Expr values "
+			+ "(Import/JsFunction/Constant/JsxFunction)."
+		)
+	return ref["key"]
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"expr"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+
+<PyFunction name={"unmount_subtree"} type={"(self, node) -> None"}>
+
+<PySourceCode >
+
+```python
+def unmount_subtree(self, node: Node) -> None:
+	unmount_element(node)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"Node"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

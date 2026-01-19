@@ -19,7 +19,7 @@ from pulse.messages import (
 	ServerUpdateMessage,
 )
 from pulse.queries.store import QueryStore
-from pulse.reactive import Effect, flush_effects
+from pulse.reactive import REACTIVE_CONTEXT, Effect, flush_effects
 from pulse.renderer import RenderTree
 from pulse.routing import (
 	Layout,
@@ -42,6 +42,18 @@ logger = logging.getLogger(__file__)
 
 class JsExecError(Exception):
 	"""Raised when client-side JS execution fails."""
+
+
+class RenderLoopError(RuntimeError):
+	def __init__(self, path: str, renders: int, batch_id: int) -> None:
+		super().__init__(
+			"Detected an infinite render loop in Pulse. "
+			f"Render path '{path}' exceeded {renders} renders in reactive batch {batch_id}. "
+			"This usually happens when a render or effect mutates state without a guard."
+		)
+		self.path = path
+		self.renders = renders
+		self.batch_id = batch_id
 
 
 # Module-level convenience wrapper
@@ -74,6 +86,8 @@ class RouteMount:
 	state: MountState
 	queue: list[ServerMessage] | None
 	queue_timeout: asyncio.TimerHandle | None
+	render_batch_id: int
+	render_batch_renders: int
 
 	def __init__(
 		self, render: "RenderSession", route: Route | Layout, route_info: RouteInfo
@@ -87,6 +101,8 @@ class RouteMount:
 		self.state = "pending"
 		self.queue = None
 		self.queue_timeout = None
+		self.render_batch_id = -1
+		self.render_batch_renders = 0
 
 
 class RenderSession:
@@ -99,6 +115,7 @@ class RenderSession:
 	connected: bool
 	prerender_queue_timeout: float
 	disconnect_queue_timeout: float
+	render_loop_limit: int
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
@@ -115,6 +132,7 @@ class RenderSession:
 		client_address: str | None = None,
 		prerender_queue_timeout: float = 5.0,
 		disconnect_queue_timeout: float = 2.0,
+		render_loop_limit: int = 50,
 	) -> None:
 		from pulse.channel import ChannelsManager
 		from pulse.form import FormRegistry
@@ -134,6 +152,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
+		self.render_loop_limit = render_loop_limit
 
 	@property
 	def server_address(self) -> str:
@@ -390,6 +409,19 @@ class RenderSession:
 		def _render_effect():
 			with PulseContext.update(session=session, render=self, route=mount.route):
 				try:
+					batch_id = REACTIVE_CONTEXT.get().batch.flush_id
+					if mount.render_batch_id == batch_id:
+						mount.render_batch_renders += 1
+					else:
+						mount.render_batch_id = batch_id
+						mount.render_batch_renders = 1
+					if mount.render_batch_renders > self.render_loop_limit:
+						if mount.effect:
+							mount.effect.pause()
+						raise RenderLoopError(
+							path, mount.render_batch_renders, batch_id
+						)
+
 					if not mount.initialized:
 						vdom = mount.tree.render()
 						mount.initialized = True
@@ -423,11 +455,20 @@ class RenderSession:
 						)
 					)
 
+		def _report_render_error(exc: Exception) -> None:
+			details: dict[str, Any] | None = None
+			if isinstance(exc, RenderLoopError):
+				details = {
+					"renders": exc.renders,
+					"batch_id": exc.batch_id,
+				}
+			self.report_error(path, "render", exc, details)
+
 		mount.effect = Effect(
 			_render_effect,
 			immediate=False,
 			name=f"{path}:render",
-			on_error=lambda e: self.report_error(path, "render", e),
+			on_error=_report_render_error,
 		)
 		mount.effect.flush()
 

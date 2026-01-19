@@ -708,12 +708,14 @@ class AsyncEffect(Effect):
 
 class Batch:
 	name: str | None
+	flush_id: int
 
 	def __init__(
 		self, effects: list[Effect] | None = None, name: str | None = None
 	) -> None:
 		self.effects: list[Effect] = effects or []
 		self.name = name
+		self.flush_id = 0
 		self._token: "Token[ReactiveContext] | None" = None
 
 	def register_effect(self, effect: Effect):
@@ -726,6 +728,7 @@ class Batch:
 		if rc.batch is not self:
 			token = REACTIVE_CONTEXT.set(ReactiveContext(rc.epoch, self, rc.scope))
 
+		self.flush_id += 1
 		MAX_ITERS = 10000
 		iters = 0
 

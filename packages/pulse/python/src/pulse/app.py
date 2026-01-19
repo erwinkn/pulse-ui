@@ -162,6 +162,7 @@ class App:
 	_render_cleanups: dict[str, asyncio.TimerHandle]
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
+	render_loop_limit: int
 
 	def __init__(
 		self,
@@ -182,6 +183,7 @@ class App:
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
 		connection_status: ConnectionStatusConfig | None = None,
+		render_loop_limit: int = 50,
 	):
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
@@ -229,6 +231,7 @@ class App:
 		self._render_cleanups = {}
 		self.session_timeout = session_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
+		self.render_loop_limit = render_loop_limit
 
 		self.codegen = Codegen(
 			self.routes,
@@ -898,6 +901,7 @@ class App:
 			self.routes,
 			server_address=self.server_address,
 			client_address=client_address,
+			render_loop_limit=self.render_loop_limit,
 		)
 		self.render_sessions[rid] = render
 		self._render_to_user[rid] = session.sid

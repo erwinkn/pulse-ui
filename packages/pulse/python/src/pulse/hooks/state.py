@@ -1,7 +1,9 @@
 import inspect
 from collections.abc import Callable
+from types import CodeType, FrameType
 from typing import Any, TypeVar, override
 
+from pulse.component import is_component_code
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.state import State
 
@@ -50,8 +52,13 @@ class StateHookState(HookState):
 		if existing is not None:
 			# Dispose any State instances passed directly as args that aren't being used
 			if isinstance(arg, State) and arg is not existing:
-				if not arg.__disposed__:
-					arg.dispose()
+				try:
+					if not arg.__disposed__:
+						arg.dispose()
+				except RuntimeError:
+					# Already disposed, ignore
+					pass
+
 			return existing
 
 		# Create new state
@@ -82,6 +89,24 @@ def _instantiate_state(arg: State | Callable[[], State]) -> State:
 
 def _state_factory():
 	return StateHookState()
+
+
+def _frame_offset(frame: FrameType) -> int:
+	offset = frame.f_lasti
+	if offset < 0:
+		offset = frame.f_lineno
+	return offset
+
+
+def _collect_component_identity(frame: FrameType) -> tuple[tuple[CodeType, int], ...]:
+	identity: list[tuple[CodeType, int]] = []
+	cursor: FrameType | None = frame
+	while cursor is not None:
+		identity.append((cursor.f_code, _frame_offset(cursor)))
+		if is_component_code(cursor.f_code):
+			return tuple(identity)
+		cursor = cursor.f_back
+	return tuple(identity[:1])
 
 
 _state_hook = hooks.create(
@@ -128,10 +153,7 @@ def state(
 		assert frame is not None
 		caller = frame.f_back
 		assert caller is not None
-		offset = caller.f_lasti
-		if offset < 0:
-			offset = caller.f_lineno
-		identity = (caller.f_code, offset)
+		identity = _collect_component_identity(caller)
 	else:
 		identity = resolved_key
 

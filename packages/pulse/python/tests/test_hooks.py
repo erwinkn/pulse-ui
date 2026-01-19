@@ -130,6 +130,29 @@ def test_state_auto_key_requires_unique_callsite():
 			BadComp.fn()
 
 
+def test_state_auto_key_disambiguates_helper_callsites():
+	ctx = HookContext()
+
+	def make_state():
+		return state(DummyState)
+
+	@ps.component
+	def Comp():
+		first = make_state()
+		second = make_state()
+		return first, second
+
+	with ctx:
+		first_a, second_a = Comp.fn()
+
+	with ctx:
+		first_b, second_b = Comp.fn()
+
+	assert first_a is first_b
+	assert second_a is second_b
+	assert first_a is not second_a
+
+
 def test_state_creates_different_instances_for_different_keys():
 	ctx = HookContext()
 

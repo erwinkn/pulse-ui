@@ -1,6 +1,0 @@
-{
-  "title": "MSAL",
-  "description": "Microsoft auth",
-  "icon": "Shield",
-  "pages": ["index"]
-}

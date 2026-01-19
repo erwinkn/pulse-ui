@@ -50,4 +50,11 @@ examples/                     # Example apps
 - Run `make all` before committing
 - Check `examples/` for patterns
 - Use `make bump` for changing package versions
-- When editing docs, update `docs/content/docs/(core)/glossary.mdx` if introducing new technical terms
+
+## Documentation
+
+Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, and Pulse conventions. Key points:
+- One page, one job (tutorial / how-to / reference / explanation)
+- Code first, explain after
+- Be conversational—write like you're explaining to a friend
+- Update `docs/content/docs/(core)/glossary.mdx` if introducing new terms

@@ -261,7 +261,6 @@ class HookContext:
 		if self._token is not None:
 			HOOK_CONTEXT.reset(self._token)
 			self._token = None
-
 			for namespace in self.namespaces.values():
 				namespace.on_render_end(self.render_cycle)
 		return False

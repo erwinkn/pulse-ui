@@ -2,8 +2,11 @@
 
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, Protocol, TypeVar, overload
+from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
 
+from pulse.hooks.core import HOOK_CONTEXT
+from pulse.hooks.effects import inline_effect_hook
+from pulse.hooks.state import collect_component_identity
 from pulse.reactive import (
 	AsyncEffect,
 	AsyncEffectFn,
@@ -131,7 +134,9 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	update_deps: bool | None = None,
 	interval: float | None = None,
+	key: str | None = None,
 ) -> Effect: ...
 
 
@@ -144,7 +149,9 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	update_deps: bool | None = None,
 	interval: float | None = None,
+	key: str | None = None,
 ) -> AsyncEffect: ...
 # In practice this overload returns a StateEffect, but it gets converted into an
 # Effect at state instantiation.
@@ -161,7 +168,9 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	update_deps: bool | None = None,
 	interval: float | None = None,
+	key: str | None = None,
 ) -> EffectBuilder: ...
 
 
@@ -173,12 +182,9 @@ def effect(
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	update_deps: bool | None = None,
 	interval: float | None = None,
-) -> (
-	Effect
-	| AsyncEffect
-	| StateEffect
-	| Callable[[Callable[..., Any]], Effect | AsyncEffect | StateEffect]
+	key: str | None = None,
 ):
 	"""
 	Decorator for side effects that run when dependencies change.
@@ -251,10 +257,11 @@ def effect(
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())
 
-		# Disallow intermediate + async
+		# Disallow immediate + async
 		if immediate and inspect.iscoroutinefunction(func):
 			raise ValueError("Async effects cannot have immediate=True")
 
+		# State method - unchanged behavior
 		if len(params) == 1 and params[0].name == "self":
 			return StateEffect(
 				func,
@@ -263,34 +270,75 @@ def effect(
 				lazy=lazy,
 				on_error=on_error,
 				deps=deps,
+				update_deps=update_deps,
 				interval=interval,
 			)
 
-		if len(params) > 0:
+		# Allow params with defaults (used for variable binding in loops)
+		# Reject only if there are required params (no default)
+		required_params = [p for p in params if p.default is inspect.Parameter.empty]
+		if required_params:
 			raise TypeError(
-				f"@effect: Function '{func.__name__}' must take no arguments or a single 'self' argument"
+				f"@effect: Function '{func.__name__}' must take no arguments, a single 'self' argument, "
+				+ "or only arguments with defaults (for variable binding)"
 			)
 
-		# This is a standalone effect function. Choose subclass based on async-ness
-		if inspect.iscoroutinefunction(func):
-			return AsyncEffect(
+		# Check if we're in a hook context (component render)
+		ctx = HOOK_CONTEXT.get()
+
+		def create_effect() -> Effect | AsyncEffect:
+			if inspect.iscoroutinefunction(func):
+				return AsyncEffect(
+					func,  # type: ignore[arg-type]
+					name=name or func.__name__,
+					lazy=lazy,
+					on_error=on_error,
+					deps=deps,
+					update_deps=update_deps,
+					interval=interval,
+				)
+			return Effect(
 				func,  # type: ignore[arg-type]
 				name=name or func.__name__,
+				immediate=immediate,
 				lazy=lazy,
 				on_error=on_error,
 				deps=deps,
+				update_deps=update_deps,
 				interval=interval,
 			)
-		return Effect(
-			func,  # type: ignore[arg-type]
-			name=name or func.__name__,
-			immediate=immediate,
-			lazy=lazy,
-			on_error=on_error,
-			deps=deps,
-			interval=interval,
-		)
 
-	if fn:
+		if ctx is None:
+			# Not in component - create standalone effect (current behavior)
+			return create_effect()
+
+		# In component render - use inline caching
+
+		# Get the frame where the decorator was applied.
+		# When called as `@ps.effect` (no parens), the call stack is:
+		#   decorator -> effect -> component
+		# When called as `@ps.effect(...)` (with parens), the stack is:
+		#   decorator -> component
+		# We detect which case by checking if the immediate caller is effect().
+		frame = inspect.currentframe()
+		assert frame is not None
+		caller = frame.f_back
+		assert caller is not None
+		# If the immediate caller is the effect function itself, go back one more
+		if (
+			caller.f_code.co_name == "effect"
+			and "decorators" in caller.f_code.co_filename
+		):
+			caller = caller.f_back
+			assert caller is not None
+		if key is None:
+			identity = collect_component_identity(caller)
+		else:
+			identity = key
+
+		state = inline_effect_hook()
+		return state.get_or_create(cast(Any, identity), key, create_effect)
+
+	if fn is not None:
 		return decorator(fn)
 	return decorator

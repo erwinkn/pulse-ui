@@ -4,10 +4,10 @@ import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 from pulse.context import PulseContext
-from pulse.helpers import create_future_on_loop, create_task
+from pulse.helpers import create_future_on_loop, create_task, later
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
 	ServerApiCallMessage,
@@ -19,7 +19,7 @@ from pulse.messages import (
 	ServerUpdateMessage,
 )
 from pulse.queries.store import QueryStore
-from pulse.reactive import Effect, flush_effects
+from pulse.reactive import REACTIVE_CONTEXT, Effect, flush_effects
 from pulse.renderer import RenderTree
 from pulse.routing import (
 	Layout,
@@ -44,16 +44,32 @@ class JsExecError(Exception):
 	"""Raised when client-side JS execution fails."""
 
 
+class RenderLoopError(RuntimeError):
+	path: str
+	renders: int
+	batch_id: int
+
+	def __init__(self, path: str, renders: int, batch_id: int) -> None:
+		super().__init__(
+			"Detected an infinite render loop in Pulse. "
+			+ f"Render path '{path}' exceeded {renders} renders in reactive batch {batch_id}. "
+			+ "This usually happens when a render or effect mutates state without a guard."
+		)
+		self.path = path
+		self.renders = renders
+		self.batch_id = batch_id
+
+
 # Module-level convenience wrapper
 @overload
-def run_js(expr: Expr, *, result: Literal[True]) -> asyncio.Future[Any]: ...
+def run_js(expr: Any, *, result: Literal[True]) -> asyncio.Future[Any]: ...
 
 
 @overload
-def run_js(expr: Expr, *, result: Literal[False] = ...) -> None: ...
+def run_js(expr: Any, *, result: Literal[False] = ...) -> None: ...
 
 
-def run_js(expr: Expr, *, result: bool = False) -> asyncio.Future[Any] | None:
+def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
 	"""Execute JavaScript on the client. Convenience wrapper for RenderSession.run_js()."""
 	ctx = PulseContext.get()
 	if ctx.render is None:
@@ -61,11 +77,13 @@ def run_js(expr: Expr, *, result: bool = False) -> asyncio.Future[Any] | None:
 	return ctx.render.run_js(expr, result=result)
 
 
-MountState = Literal["pending", "active", "idle"]
+MountState = Literal["pending", "active", "idle", "closed"]
+T_Render = TypeVar("T_Render")
 
 
 class RouteMount:
 	render: "RenderSession"
+	path: str
 	route: RouteContext
 	tree: RenderTree
 	effect: Effect | None
@@ -74,19 +92,118 @@ class RouteMount:
 	state: MountState
 	queue: list[ServerMessage] | None
 	queue_timeout: asyncio.TimerHandle | None
+	render_batch_id: int
+	render_batch_renders: int
 
 	def __init__(
-		self, render: "RenderSession", route: Route | Layout, route_info: RouteInfo
+		self,
+		render: "RenderSession",
+		path: str,
+		route: Route | Layout,
+		route_info: RouteInfo,
 	) -> None:
 		self.render = render
+		self.path = ensure_absolute_path(path)
 		self.route = RouteContext(route_info, route)
 		self.effect = None
 		self._pulse_ctx = None
 		self.tree = RenderTree(route.render())
 		self.initialized = False
 		self.state = "pending"
-		self.queue = None
+		self.queue = []
 		self.queue_timeout = None
+		self.render_batch_id = -1
+		self.render_batch_renders = 0
+
+	def update_route(self, route_info: RouteInfo) -> None:
+		self.route.update(route_info)
+
+	def _cancel_queue_timeout(self) -> None:
+		if self.queue_timeout is not None:
+			self.queue_timeout.cancel()
+			self.queue_timeout = None
+
+	def start_pending(self, timeout: float) -> None:
+		self._cancel_queue_timeout()
+		if self.state == "idle" and self.effect:
+			self.effect.resume()
+		self.state = "pending"
+		self.queue = []
+		self.queue_timeout = later(timeout, self.to_idle)
+
+	def activate(self, send_message: Callable[[ServerMessage], Any]) -> None:
+		if self.state != "pending":
+			return
+		self._cancel_queue_timeout()
+		if self.queue:
+			for msg in self.queue:
+				send_message(msg)
+		self.queue = None
+		self.state = "active"
+
+	def deliver(
+		self, message: ServerMessage, send_message: Callable[[ServerMessage], Any]
+	):
+		if self.state == "pending":
+			if self.queue is None:
+				raise RuntimeError(f"Pending mount missing queue for {self.path!r}")
+			self.queue.append(message)
+			return
+		if self.state == "active":
+			send_message(message)
+			return
+		if self.state == "closed":
+			raise RuntimeError(f"Message sent to closed mount {self.path!r}")
+
+	def to_idle(self) -> None:
+		if self.state != "pending":
+			return
+		self.state = "idle"
+		self.queue = None
+		self._cancel_queue_timeout()
+		if self.effect:
+			self.effect.pause()
+
+	def ensure_effect(self, *, lazy: bool = False, flush: bool = True) -> None:
+		if self.effect is not None:
+			if flush:
+				self.effect.flush()
+			return
+
+		ctx = PulseContext.get()
+		session = ctx.session
+
+		def _render_effect():
+			message = self.render.rerender(self, self.path, session=session)
+			if message is not None:
+				self.render.send(message)
+
+		def _report_render_error(exc: Exception) -> None:
+			details: dict[str, Any] | None = None
+			if isinstance(exc, RenderLoopError):
+				details = {
+					"renders": exc.renders,
+					"batch_id": exc.batch_id,
+				}
+			self.render.report_error(self.path, "render", exc, details)
+
+		self.effect = Effect(
+			_render_effect,
+			immediate=False,
+			name=f"{self.path}:render",
+			on_error=_report_render_error,
+			lazy=lazy,
+		)
+		if flush:
+			self.effect.flush()
+
+	def dispose(self) -> None:
+		self._cancel_queue_timeout()
+		self.state = "closed"
+		self.queue = None
+		self.tree.unmount()
+		if self.effect:
+			self.effect.dispose()
 
 
 class RenderSession:
@@ -99,6 +216,7 @@ class RenderSession:
 	connected: bool
 	prerender_queue_timeout: float
 	disconnect_queue_timeout: float
+	render_loop_limit: int
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
@@ -115,6 +233,7 @@ class RenderSession:
 		client_address: str | None = None,
 		prerender_queue_timeout: float = 5.0,
 		disconnect_queue_timeout: float = 2.0,
+		render_loop_limit: int = 50,
 	) -> None:
 		from pulse.channel import ChannelsManager
 		from pulse.form import FormRegistry
@@ -134,6 +253,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
+		self.render_loop_limit = render_loop_limit
 
 	@property
 	def server_address(self) -> str:
@@ -147,8 +267,8 @@ class RenderSession:
 			raise RuntimeError("Client address not set")
 		return self._client_address
 
-	def _on_effect_error(self, effect: Any, exc: Exception):
-		details = {"effect": getattr(effect, "name", "<unnamed>")}
+	def _on_effect_error(self, effect: Effect, exc: Exception):
+		details = {"effect": effect.name or "<unnamed>"}
 		for path in list(self.route_mounts.keys()):
 			self.report_error(path, "effect", exc, details)
 
@@ -164,14 +284,9 @@ class RenderSession:
 		self._send_message = None
 		self.connected = False
 
-		for path, mount in self.route_mounts.items():
+		for mount in self.route_mounts.values():
 			if mount.state == "active":
-				mount.state = "pending"
-				mount.queue = []
-				mount.queue_timeout = self._schedule_timeout(
-					self.disconnect_queue_timeout,
-					lambda p=path: self._transition_to_idle(p),
-				)
+				mount.start_pending(self.disconnect_queue_timeout)
 
 	# ---- Message routing ----
 
@@ -193,10 +308,11 @@ class RenderSession:
 				self._send_message(message)
 			return
 
-		if mount.state == "pending" and mount.queue is not None:
-			mount.queue.append(message)
-		elif mount.state == "active" and self._send_message:
-			self._send_message(message)
+		if self._send_message:
+			mount.deliver(message, self._send_message)
+			return
+		if mount.state == "pending":
+			mount.deliver(message, lambda _: None)
 		# idle: drop (effect should be paused anyway)
 
 	def report_error(
@@ -228,77 +344,54 @@ class RenderSession:
 
 	# ---- State transitions ----
 
-	def _schedule_timeout(
-		self, delay: float, callback: Callable[[], None]
-	) -> asyncio.TimerHandle:
-		loop = asyncio.get_event_loop()
-		return loop.call_later(delay, callback)
-
-	def _cancel_queue_timeout(self, mount: RouteMount):
-		if mount.queue_timeout is not None:
-			mount.queue_timeout.cancel()
-			mount.queue_timeout = None
-
-	def _transition_to_idle(self, path: str):
-		mount = self.route_mounts.get(path)
-		if mount is None or mount.state != "pending":
-			return
-
-		mount.state = "idle"
-		mount.queue = None
-		mount.queue_timeout = None
-		if mount.effect:
-			mount.effect.pause()
-
 	# ---- Prerendering ----
 
 	def prerender(
-		self, path: str, route_info: RouteInfo | None = None
-	) -> ServerInitMessage | ServerNavigateToMessage:
+		self, paths: list[str], route_info: RouteInfo | None = None
+	) -> dict[str, ServerInitMessage | ServerNavigateToMessage]:
 		"""
-		Synchronous render for SSR. Returns vdom_init or navigate_to message.
-		- First call: creates RouteMount in PENDING state, starts queue
-		- Subsequent calls: re-renders and returns fresh VDOM
+		Synchronous render for SSR. Returns per-path init or navigate_to messages.
+		- Resets all existing mounts before rendering the new page routes
+		- Creates mounts in PENDING state and starts queue
 		"""
-		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		is_new = mount is None
+		normalized = [ensure_absolute_path(path) for path in paths]
+		active_paths = set(normalized)
 
-		if is_new:
+		for old_path, mount in list(self.route_mounts.items()):
+			if old_path in active_paths:
+				continue
+			mount.dispose()
+			del self.route_mounts[old_path]
+
+		results: dict[str, ServerInitMessage | ServerNavigateToMessage] = {}
+
+		for path in normalized:
 			route = self.routes.find(path)
 			info = route_info or route.default_route_info()
-			mount = RouteMount(self, route, info)
-			mount.state = "pending"
-			mount.queue = []
-			self.route_mounts[path] = mount
-		elif route_info:
-			mount.route.update(route_info)
+			mount = self.route_mounts.get(path)
 
-		with PulseContext.update(render=self, route=mount.route):
-			try:
-				vdom = mount.tree.render()
-				if is_new:
-					mount.initialized = True
-			except RedirectInterrupt as r:
+			if mount is None:
+				mount = RouteMount(self, path, route, info)
+				self.route_mounts[path] = mount
+				mount.ensure_effect(lazy=True, flush=False)
+			else:
+				mount.update_route(info)
+				if mount.effect is None:
+					mount.ensure_effect(lazy=True, flush=False)
+
+			if mount.state != "active":
+				mount.start_pending(self.prerender_queue_timeout)
+			assert mount.effect is not None
+			with mount.effect.capture_deps(update_deps=True):
+				message = self.render(mount, path)
+
+			results[path] = message
+			if message["type"] == "navigate_to":
+				mount.dispose()
 				del self.route_mounts[path]
-				return ServerNavigateToMessage(
-					type="navigate_to", path=r.path, replace=r.replace, hard=False
-				)
-			except NotFoundInterrupt:
-				del self.route_mounts[path]
-				ctx = PulseContext.get()
-				return ServerNavigateToMessage(
-					type="navigate_to", path=ctx.app.not_found, replace=True, hard=False
-				)
+				continue
 
-		if is_new:
-			self._create_render_effect(mount, path)
-			mount.queue_timeout = self._schedule_timeout(
-				self.prerender_queue_timeout,
-				lambda: self._transition_to_idle(path),
-			)
-
-		return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+		return results
 
 	# ---- Client lifecycle ----
 
@@ -306,51 +399,29 @@ class RenderSession:
 		"""
 		Client ready to receive updates for path.
 		- PENDING: flush queue, transition to ACTIVE
-		- IDLE: fresh render, transition to ACTIVE
+		- IDLE: request reload
 		- ACTIVE: update route_info
-		- No mount: create fresh
+		- No mount: request reload
 		"""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
 
-		if mount is None:
-			# No prerender, create fresh
-			route = self.routes.find(path)
-			mount = RouteMount(self, route, route_info)
-			mount.state = "active"
-			self.route_mounts[path] = mount
-			self._create_render_effect(mount, path)
+		if mount is None or mount.state == "idle":
+			# Initial render must come from prerender
+			self.send({"type": "reload"})
 			return
 
-		if mount.state == "pending":
-			# Flush queue, go active
-			self._cancel_queue_timeout(mount)
-			if mount.queue:
-				for msg in mount.queue:
-					if self._send_message:
-						self._send_message(msg)
-			mount.queue = None
-			mount.state = "active"
-			mount.route.update(route_info)
-
-		elif mount.state == "idle":
-			# Need fresh render
-			mount.initialized = False
-			mount.state = "active"
-			mount.route.update(route_info)
-			if mount.effect:
-				mount.effect.resume()
-
-		elif mount.state == "active":
-			# Already active, just update route
-			mount.route.update(route_info)
+		# Update route info for active and pending mounts
+		mount.update_route(route_info)
+		if mount.state == "pending" and self._send_message:
+			mount.activate(self._send_message)
 
 	def update_route(self, path: str, route_info: RouteInfo):
 		"""Update routing state (query params, etc.) for attached path."""
 		path = ensure_absolute_path(path)
 		try:
 			mount = self.get_route_mount(path)
-			mount.route.update(route_info)
+			mount.update_route(route_info)
 		except Exception as e:
 			self.report_error(path, "navigate", e)
 
@@ -361,60 +432,82 @@ class RenderSession:
 			return
 		try:
 			mount = self.route_mounts.pop(path)
-			self._cancel_queue_timeout(mount)
-			mount.tree.unmount()
-			if mount.effect:
-				mount.effect.dispose()
+			mount.dispose()
 		except Exception as e:
 			self.report_error(path, "unmount", e)
 
 	# ---- Effect creation ----
 
-	def _create_render_effect(self, mount: RouteMount, path: str):
+	def _check_render_loop(self, mount: RouteMount, path: str) -> None:
+		batch_id = REACTIVE_CONTEXT.get().batch.flush_id
+		if mount.render_batch_id == batch_id:
+			mount.render_batch_renders += 1
+		else:
+			mount.render_batch_id = batch_id
+			mount.render_batch_renders = 1
+		if mount.render_batch_renders > self.render_loop_limit:
+			if mount.effect:
+				mount.effect.pause()
+			raise RenderLoopError(path, mount.render_batch_renders, batch_id)
+
+	def _render_with_interrupts(
+		self,
+		mount: RouteMount,
+		path: str,
+		*,
+		session: Any | None = None,
+		render_fn: Callable[[], T_Render],
+	) -> T_Render | ServerNavigateToMessage:
 		ctx = PulseContext.get()
-		session = ctx.session
+		render_session = ctx.session if session is None else session
+		with PulseContext.update(
+			session=render_session, render=self, route=mount.route
+		):
+			try:
+				self._check_render_loop(mount, path)
+				return render_fn()
+			except RedirectInterrupt as r:
+				return ServerNavigateToMessage(
+					type="navigate_to",
+					path=r.path,
+					replace=r.replace,
+					hard=False,
+				)
+			except NotFoundInterrupt:
+				ctx = PulseContext.get()
+				return ServerNavigateToMessage(
+					type="navigate_to",
+					path=ctx.app.not_found,
+					replace=True,
+					hard=False,
+				)
 
-		def _render_effect():
-			with PulseContext.update(session=session, render=self, route=mount.route):
-				try:
-					if not mount.initialized:
-						vdom = mount.tree.render()
-						mount.initialized = True
-						self.send(
-							ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
-						)
-					else:
-						ops = mount.tree.rerender()
-						if ops:
-							self.send(
-								ServerUpdateMessage(
-									type="vdom_update", path=path, ops=ops
-								)
-							)
-				except RedirectInterrupt as r:
-					self.send(
-						ServerNavigateToMessage(
-							type="navigate_to",
-							path=r.path,
-							replace=r.replace,
-							hard=False,
-						)
-					)
-				except NotFoundInterrupt:
-					self.send(
-						ServerNavigateToMessage(
-							type="navigate_to",
-							path=ctx.app.not_found,
-							replace=True,
-							hard=False,
-						)
-					)
+	def render(
+		self, mount: RouteMount, path: str, *, session: Any | None = None
+	) -> ServerInitMessage | ServerNavigateToMessage:
+		def _render() -> ServerInitMessage:
+			vdom = mount.tree.render()
+			mount.initialized = True
+			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 
-		mount.effect = Effect(
-			_render_effect,
-			immediate=True,
-			name=f"{path}:render",
-			on_error=lambda e: self.report_error(path, "render", e),
+		message = self._render_with_interrupts(
+			mount, path, session=session, render_fn=_render
+		)
+		return message
+
+	def rerender(
+		self, mount: RouteMount, path: str, *, session: Any | None = None
+	) -> ServerUpdateMessage | ServerNavigateToMessage | None:
+		def _rerender() -> ServerUpdateMessage | None:
+			if not mount.initialized:
+				raise RuntimeError(f"rerender called before init for {path!r}")
+			ops = mount.tree.rerender()
+			if ops:
+				return ServerUpdateMessage(type="vdom_update", path=path, ops=ops)
+			return None
+
+		return self._render_with_interrupts(
+			mount, path, session=session, render_fn=_rerender
 		)
 
 	# ---- Helpers ----
@@ -545,29 +638,29 @@ class RenderSession:
 
 	@overload
 	def run_js(
-		self, expr: Expr, *, result: Literal[True], timeout: float = ...
+		self, expr: Any, *, result: Literal[True], timeout: float = ...
 	) -> asyncio.Future[object]: ...
 
 	@overload
 	def run_js(
 		self,
-		expr: Expr,
+		expr: Any,
 		*,
 		result: Literal[False] = ...,
 		timeout: float = ...,
 	) -> None: ...
 
 	def run_js(
-		self, expr: Expr, *, result: bool = False, timeout: float = 10.0
+		self, expr: Any, *, result: bool = False, timeout: float = 10.0
 	) -> asyncio.Future[object] | None:
 		"""Execute JavaScript on the client.
 
 		Args:
 			expr: An Expr from calling a @javascript function.
 			result: If True, returns a Future that resolves with the JS return value.
-			        If False (default), returns None (fire-and-forget).
+							If False (default), returns None (fire-and-forget).
 			timeout: Maximum seconds to wait for result (default 10s, only applies when
-			         result=True). Future raises asyncio.TimeoutError if exceeded.
+							 result=True). Future raises asyncio.TimeoutError if exceeded.
 
 		Returns:
 			None if result=False, otherwise a Future resolving to the JS result.
@@ -590,6 +683,11 @@ class RenderSession:
 				pos = await run_js(get_scroll_position(), result=True)
 				print(pos["x"], pos["y"])
 		"""
+		if not isinstance(expr, Expr):
+			raise TypeError(
+				f"run_js() requires an Expr (from @javascript function or pulse.js module), got {type(expr).__name__}"
+			)
+
 		ctx = PulseContext.get()
 		exec_id = next_id()
 

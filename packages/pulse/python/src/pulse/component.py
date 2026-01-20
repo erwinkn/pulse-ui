@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from inspect import Parameter, signature
+from types import CodeType
 from typing import Any, Generic, ParamSpec, TypeVar, overload, override
 
 from pulse.code_analysis import is_stub_function
@@ -24,6 +25,12 @@ from pulse.transpiler.vdom import VDOMNode
 
 P = ParamSpec("P")
 _T = TypeVar("_T")
+
+_COMPONENT_CODES: set[CodeType] = set()
+
+
+def is_component_code(code: CodeType) -> bool:
+	return code in _COMPONENT_CODES
 
 
 class Component(Generic[P]):
@@ -70,6 +77,7 @@ class Component(Generic[P]):
 		else:
 			self._fn = rewrite_init_blocks(fn)
 			self._takes_children = _takes_children(fn)
+			_COMPONENT_CODES.add(self._fn.__code__)
 
 	@property
 	def fn(self) -> Callable[P, Any]:
@@ -77,6 +85,7 @@ class Component(Generic[P]):
 		if self._fn is None:
 			self._fn = rewrite_init_blocks(self._raw_fn)
 			self._takes_children = _takes_children(self._raw_fn)
+			_COMPONENT_CODES.add(self._fn.__code__)
 		return self._fn
 
 	def __call__(self, *args: P.args, **kwargs: P.kwargs) -> PulseNode:
@@ -224,4 +233,5 @@ __all__ = [
 	"Primitive",
 	"VDOMNode",
 	"component",
+	"is_component_code",
 ]

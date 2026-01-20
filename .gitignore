@@ -4,6 +4,7 @@ notes/
 generated/
 
 node_modules/
+plans/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

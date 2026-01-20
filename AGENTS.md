@@ -2,6 +2,16 @@
 
 Full-stack Python framework for interactive web apps. Runs on React with WebSocket-driven UI updates.
 
+## Guidelines
+
+- Be extremely concise. Sacrifice grammar for the sake of concision.
+- Read the README.md in the relevant package before starting work
+- Always add tests when implementing a new feature
+- Run `make test` after implementing
+- Run `make all` before committing
+- Check `examples/` for usage patterns
+- Use `make bump` for changing package versions
+
 ## Code Style
 
 - No `getattr`/`setattr` unless necessary
@@ -42,14 +52,6 @@ packages/
 └── pulse-aws/                # AWS deploy
 examples/                     # Example apps
 ```
-
-## Guidelines
-
-- Be extremely concise. Sacrifice grammar for the sake of concision.
-- Read the README.md in the relevant package before starting work
-- Run `make all` before committing
-- Check `examples/` for patterns
-- Use `make bump` for changing package versions
 
 ## Documentation
 

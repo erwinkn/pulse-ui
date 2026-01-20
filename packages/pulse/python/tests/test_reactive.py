@@ -892,7 +892,7 @@ def test_effect_immediate_false_explicit_deps_registers_on_init():
 	assert a.obs == [e]
 	assert b.obs == [e]
 	# Explicit deps should be stored in regular deps attribute (not _explicit_deps)
-	assert e.explicit_deps is True
+	assert e.update_deps is False
 	assert e.deps == {a: a.last_change, b: b.last_change}
 
 	# After first run, deps should still be registered
@@ -948,6 +948,93 @@ def test_effect_explicit_deps_doesnt_track_dynamic_deps():
 	flush_effects()
 	assert runs == 4
 	assert values == [(0, 0, 0), (1, 0, 10), (1, 2, 10), (3, 4, 10)]
+
+
+def test_effect_seeded_deps_update_after_first_run():
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+	runs = 0
+
+	@effect(deps=[a], update_deps=True, lazy=True)
+	def e():
+		nonlocal runs
+		runs += 1
+		_ = b()
+
+	# Before first run, seeded dep should schedule
+	a.write(1)
+	flush_effects()
+	assert runs == 1
+	assert e in b.obs
+	assert e not in a.obs
+
+	# After first run, only tracked deps should schedule
+	a.write(2)
+	flush_effects()
+	assert runs == 1
+
+	b.write(3)
+	flush_effects()
+	assert runs == 2
+
+
+def test_effect_update_deps_false_keeps_explicit_deps():
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+
+	@effect(deps=[a], update_deps=False)
+	def e():
+		_ = b()
+
+	flush_effects()
+	assert e.deps == {a: a.last_change}
+	assert e in a.obs
+	assert e not in b.obs
+
+	b.write(1)
+	flush_effects()
+	assert e.runs == 1
+
+	a.write(1)
+	flush_effects()
+	assert e.runs == 2
+
+
+def test_effect_set_deps_dict_respects_last_change():
+	s = Signal(0, name="s")
+
+	@effect(lazy=True)
+	def e():
+		_ = s()
+
+	e.set_deps({s: s.last_change})
+	assert e.runs == 0
+	flush_effects()
+	assert e.runs == 0
+	assert e in s.obs
+
+	s.write(1)
+	flush_effects()
+	assert e.runs == 1
+
+
+def test_effect_capture_deps_updates_observers():
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+
+	@effect(deps=[a], update_deps=False, lazy=True)
+	def e(): ...
+
+	assert e in a.obs
+	assert e not in b.obs
+
+	with e.capture_deps():
+		_ = b()
+
+	assert e.update_deps is False
+	assert e not in a.obs
+	assert e in b.obs
+	assert e.deps == {b: b.last_change}
 
 
 @pytest.mark.asyncio
@@ -1017,6 +1104,37 @@ async def test_async_effect_cleanup_on_rerun():
 	await asyncio.sleep(0)
 	assert e.runs == 2
 	assert cleanup_runs == 1
+
+
+@pytest.mark.asyncio
+async def test_async_effect_seeded_deps_update_after_first_run():
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+	runs = 0
+
+	@effect(deps=[a], update_deps=True, lazy=True)
+	async def e():
+		nonlocal runs
+		runs += 1
+		_ = b()
+		await asyncio.sleep(0)
+
+	a.write(1)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert runs == 1
+	assert e in b.obs
+	assert e not in a.obs
+
+	a.write(2)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert runs == 1
+
+	b.write(3)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert runs == 2
 
 
 # TODO: find a way to make this pass. Effect cancellation works in practice.

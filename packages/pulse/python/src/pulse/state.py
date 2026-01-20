@@ -173,6 +173,7 @@ class StateEffect(Generic[T], InitializableProperty):
 	on_error: "Callable[[Exception], None] | None"
 	lazy: bool
 	deps: "list[Signal[Any] | Computed[Any]] | None"
+	update_deps: bool | None
 	interval: float | None
 
 	def __init__(
@@ -183,6 +184,7 @@ class StateEffect(Generic[T], InitializableProperty):
 		lazy: bool = False,
 		on_error: "Callable[[Exception], None] | None" = None,
 		deps: "list[Signal[Any] | Computed[Any]] | None" = None,
+		update_deps: bool | None = None,
 		interval: float | None = None,
 	):
 		self.fn = fn
@@ -191,6 +193,7 @@ class StateEffect(Generic[T], InitializableProperty):
 		self.on_error = on_error
 		self.lazy = lazy
 		self.deps = deps
+		self.update_deps = update_deps
 		self.interval = interval
 
 	@override
@@ -204,6 +207,7 @@ class StateEffect(Generic[T], InitializableProperty):
 				lazy=self.lazy,
 				on_error=self.on_error,
 				deps=self.deps,
+				update_deps=self.update_deps,
 				interval=self.interval,
 			)
 		else:
@@ -214,6 +218,7 @@ class StateEffect(Generic[T], InitializableProperty):
 				lazy=self.lazy,
 				on_error=self.on_error,
 				deps=self.deps,
+				update_deps=self.update_deps,
 				interval=self.interval,
 			)
 		setattr(state, name, effect)

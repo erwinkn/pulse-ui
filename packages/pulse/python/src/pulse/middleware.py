@@ -9,10 +9,8 @@ from pulse.messages import (
 	ClientMessage,
 	Prerender,
 	PrerenderPayload,
-	ServerInitMessage,
 )
 from pulse.request import PulseRequest
-from pulse.routing import RouteInfo
 
 T = TypeVar("T")
 
@@ -80,9 +78,6 @@ class Deny:
 	"""Denial response. Blocks the request."""
 
 
-RoutePrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
-"""Response type for individual route prerender: ``Ok[ServerInitMessage] | Redirect | NotFound``."""
-
 PrerenderResponse = Ok[Prerender] | Redirect | NotFound
 """Response type for batch prerender: ``Ok[Prerender] | Redirect | NotFound``."""
 
@@ -141,39 +136,10 @@ class PulseMiddleware:
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[PrerenderResponse]],
 	) -> PrerenderResponse:
-		"""Handle batch prerender at the top level (HTTP request).
+		"""Handle batch prerender for the full request.
 
-		Args:
-			payload: Full prerender payload.
-			request: Normalized request object.
-			session: Session data dictionary.
-			next: Callable to continue the middleware chain.
-
-		Returns:
-			``Ok[Prerender]``, ``Redirect``, or ``NotFound``.
-		"""
-		return await next()
-
-	async def prerender_route(
-		self,
-		*,
-		path: str,
-		request: PulseRequest,
-		route_info: RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], Awaitable[RoutePrerenderResponse]],
-	) -> RoutePrerenderResponse:
-		"""Handle individual route prerender.
-
-		Args:
-			path: Route path being prerendered.
-			request: Normalized request object.
-			route_info: Route information.
-			session: Session data dictionary.
-			next: Callable to continue the middleware chain.
-
-		Returns:
-			``Ok[ServerInitMessage]``, ``Redirect``, or ``NotFound``.
+		Receives the full PrerenderPayload (all paths). Call next() to get the
+		Prerender result and can modify it (views and directives) before returning.
 		"""
 		return await next()
 
@@ -293,34 +259,6 @@ class MiddlewareStack(PulseMiddleware):
 
 			return await mw.prerender(
 				payload=payload,
-				request=request,
-				session=session,
-				next=_next,
-			)
-
-		return await dispatch(0)
-
-	@override
-	async def prerender_route(
-		self,
-		*,
-		path: str,
-		request: PulseRequest,
-		route_info: RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], Awaitable[RoutePrerenderResponse]],
-	) -> RoutePrerenderResponse:
-		async def dispatch(index: int) -> RoutePrerenderResponse:
-			if index >= len(self._middlewares):
-				return await next()
-			mw = self._middlewares[index]
-
-			async def _next() -> RoutePrerenderResponse:
-				return await dispatch(index + 1)
-
-			return await mw.prerender_route(
-				path=path,
-				route_info=route_info,
 				request=request,
 				session=session,
 				next=_next,
@@ -454,7 +392,6 @@ class LatencyMiddleware(PulseMiddleware):
 	"""
 
 	prerender_ms: float
-	prerender_route_ms: float
 	connect_ms: float
 	message_ms: float
 	channel_ms: float
@@ -463,7 +400,6 @@ class LatencyMiddleware(PulseMiddleware):
 		self,
 		*,
 		prerender_ms: float = 80.0,
-		prerender_route_ms: float = 60.0,
 		connect_ms: float = 40.0,
 		message_ms: float = 25.0,
 		channel_ms: float = 20.0,
@@ -472,14 +408,12 @@ class LatencyMiddleware(PulseMiddleware):
 
 		Args:
 			prerender_ms: Latency for batch prerender requests (HTTP). Default: 80ms
-			prerender_route_ms: Latency for individual route prerenders. Default: 60ms
 			connect_ms: Latency for WebSocket connections. Default: 40ms
 			message_ms: Latency for WebSocket messages (including API calls). Default: 25ms
 			channel_ms: Latency for channel messages. Default: 20ms
 		"""
 		super().__init__(dev=True)
 		self.prerender_ms = prerender_ms
-		self.prerender_route_ms = prerender_route_ms
 		self.connect_ms = connect_ms
 		self.message_ms = message_ms
 		self.channel_ms = channel_ms
@@ -495,20 +429,6 @@ class LatencyMiddleware(PulseMiddleware):
 	) -> PrerenderResponse:
 		if self.prerender_ms > 0:
 			await asyncio.sleep(self.prerender_ms / 1000.0)
-		return await next()
-
-	@override
-	async def prerender_route(
-		self,
-		*,
-		path: str,
-		request: PulseRequest,
-		route_info: RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], Awaitable[RoutePrerenderResponse]],
-	) -> RoutePrerenderResponse:
-		if self.prerender_route_ms > 0:
-			await asyncio.sleep(self.prerender_route_ms / 1000.0)
 		return await next()
 
 	@override

@@ -60,7 +60,7 @@ Cleanup runs:
 
 ## Effects in components
 
-Use `ps.effects()` to register effects that depend on component state:
+Use `@ps.effect` to define effects inside components. Pulse automatically registers them:
 
 ```python
 @ps.component
@@ -73,34 +73,67 @@ def OrderTracker():
         print(f"Order status: {state.status}")
         analytics.track("order_status_changed", status=state.status)
 
-    ps.effects(log_status_changes)
-
     return ps.div(f"Status: {state.status}")
 ```
 
-The effect definition (`@ps.effect`) and registration (`ps.effects()`) are separate steps. Define effects inline or in the state class, then register them with `ps.effects()`.
+Effects defined with `@ps.effect` inside a component are automatically cached by their code location. You don't need to register them separately.
 
-### Multiple effects
+### Conditional effects
 
-You can register multiple effects at once:
+Effects inside conditionals work as expected. They're created when the condition is true and disposed when it becomes false:
 
 ```python
 @ps.component
-def Dashboard():
+def ConditionalLogger():
     with ps.init():
-        state = DashboardState()
+        state = LoggerState()
 
-    @ps.effect
-    def sync_title():
-        document.title = f"Dashboard - {state.page_name}"
+    if state.logging_enabled:
+        @ps.effect
+        def log_changes():
+            print(f"Value: {state.value}")
 
-    @ps.effect
-    def log_page_views():
-        analytics.page_view(state.page_name)
+    return ps.div(f"Value: {state.value}")
+```
 
-    ps.effects(sync_title, log_page_views)
+### Loop effects with keys
 
-    return ps.div(f"Page: {state.page_name}")
+When using `@ps.effect` inside a loop, provide a unique `key` to disambiguate each effect:
+
+```python
+@ps.component
+def ItemTracker():
+    with ps.init():
+        state = ItemState()
+
+    for item in state.items:
+        @ps.effect(key=item.id)  # Key makes each effect unique
+        def track_item(item=item):  # Capture via default arg
+            print(f"Item {item.name}: count={item.count}")
+
+    return ps.ul(*[ps.li(item.name) for item in state.items])
+```
+
+Without a key, Pulse raises an error because all effects would share the same code location.
+
+### Dynamic key effects
+
+When the key changes, the old effect is disposed and a new one is created:
+
+```python
+@ps.component
+def UserTracker():
+    with ps.init():
+        user_id = ps.Signal("user-1")
+
+    @ps.effect(key=user_id())  # Effect recreated when user_id changes
+    def track_user():
+        print(f"Tracking user: {user_id()}")
+        def cleanup():
+            print(f"Stopped tracking: {user_id()}")
+        return cleanup
+
+    return ps.div(f"User: {user_id()}")
 ```
 
 ---

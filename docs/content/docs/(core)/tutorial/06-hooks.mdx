@@ -109,23 +109,62 @@ def Dashboard():
 
 The function runs once, its return value is cached, and subsequent renders return the cached value.
 
-### `ps.state()` - Keyed state instances
+### `ps.state()` - Inline state instances
 
-When you need different state instances based on a runtime key, use `ps.state()`:
+Use `ps.state()` to create state instances inline that persist across renders:
+
+```python
+@ps.component
+def Counter():
+    counter = ps.state(lambda: CounterState())  # Factory function
+    # Or pass a State instance directly:
+    # counter = ps.state(CounterState())
+    return ps.button(f"Count: {counter.count}", onClick=counter.increment)
+```
+
+Pulse identifies each `ps.state()` call by its code location, so you can have multiple inline states without explicit keys:
+
+```python
+@ps.component
+def Dashboard():
+    stats = ps.state(StatsState())       # Location 1
+    settings = ps.state(SettingsState()) # Location 2 - different state
+    return ps.div(...)
+```
+
+#### Loop states with keys
+
+When using `ps.state()` inside a loop, provide a unique `key` to disambiguate each instance:
+
+```python
+@ps.component
+def UserList():
+    with ps.init():
+        user_ids = ["alice", "bob", "charlie"]
+
+    items = []
+    for user_id in user_ids:
+        user_state = ps.state(lambda uid=user_id: UserState(uid), key=user_id)
+        items.append(ps.li(user_state.name, key=user_id))
+
+    return ps.ul(*items)
+```
+
+#### Dynamic keys for re-initialization
+
+When the key changes, the old state is disposed and a new one is created:
 
 ```python
 @ps.component
 def UserProfile(user_id: int):
-    # Different user_id = different state instance
-    state = ps.state(user_id, lambda: UserState(user_id))
+    # State is recreated when user_id changes
+    state = ps.state(lambda: UserState(user_id), key=f"user-{user_id}")
     return ps.div(f"User: {state.name}")
 ```
 
-If `user_id` changes, Pulse creates a new state instance for that user. The old state is cleaned up automatically.
+### `@ps.effect` - Inline side effects
 
-### `ps.effects()` - Register side effects
-
-Effects let you run code in response to state changes. They are covered in detail in the [Reactivity](/docs/tutorial/07-reactivity) section, but here is how you register them:
+Effects let you run code in response to state changes. When used inside a component, `@ps.effect` automatically registers the effect:
 
 ```python
 @ps.component
@@ -137,10 +176,26 @@ def Logger():
     def log_changes():
         print(f"Value changed to: {state.value}")
 
-    ps.effects(log_changes)
+    return ps.div(...)
+```
+
+For effects in loops, use the `key` parameter:
+
+```python
+@ps.component
+def ItemLogger():
+    with ps.init():
+        items = ["a", "b", "c"]
+
+    for item in items:
+        @ps.effect(key=item)
+        def log_item(item=item):  # Capture via default arg
+            print(f"Item: {item}")
 
     return ps.div(...)
 ```
+
+Effects are covered in detail in the [Reactivity](/docs/tutorial/07-reactivity) section.
 
 ### `ps.stable()` - Stable references
 
@@ -212,7 +267,7 @@ The rule exists because hooks rely on call order to track their state internally
 
 ## Hook keys
 
-Both `ps.setup()` and `ps.effects()` accept an optional `key` argument. When the key changes, the hook re-runs:
+Both `ps.setup()` and `ps.state()` accept an optional `key` argument. When the key changes, the hook re-initializes:
 
 ```python
 @ps.component
@@ -222,7 +277,30 @@ def DataLoader(data_id: int):
     return ps.div(f"Data: {data}")
 ```
 
+```python
+@ps.component
+def UserProfile(user_id: int):
+    # State is recreated whenever user_id changes
+    state = ps.state(lambda: UserState(user_id), key=f"user-{user_id}")
+    return ps.div(f"User: {state.name}")
+```
+
 Keys are compared using `!=`, so use primitive values (strings, numbers, booleans) or tuples of primitives.
+
+Similarly, `@ps.effect` accepts a `key` parameter for use in loops or to force effect recreation:
+
+```python
+@ps.component
+def DynamicEffect():
+    with ps.init():
+        version = ps.Signal("v1")
+
+    @ps.effect(key=version())  # Effect recreated when version changes
+    def versioned_effect():
+        print(f"Running with version: {version()}")
+
+    return ps.div(...)
+```
 
 ## Complete example
 

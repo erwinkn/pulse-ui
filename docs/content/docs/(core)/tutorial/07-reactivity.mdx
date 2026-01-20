@@ -147,21 +147,36 @@ The cleanup sequence is:
 5. Component is removed from UI
 6. Cleanup function runs one final time
 
-### Effects outside state
+### Effects in components
 
-You can define effects in `ps.setup()` for effects that need multiple states:
+You can define effects directly inside components using `@ps.effect`. Pulse automatically registers them:
 
 ```python
-def setup_with_logging(state):
+@ps.component
+def TrackedComponent():
+    with ps.init():
+        state = MyState()
+
     @ps.effect
     def log_all_changes():
         print(f"Name: {state.name}, Count: {state.count}")
 
-    return state, log_all_changes
+    return ps.div(...)
+```
 
+For effects in loops, use the `key` parameter:
+
+```python
 @ps.component
-def TrackedComponent():
-    state, _ = ps.setup(setup_with_logging, MyState())
+def MultiLogger():
+    with ps.init():
+        items = ["a", "b", "c"]
+
+    for item in items:
+        @ps.effect(key=item)
+        def log_item(item=item):  # Capture via default arg
+            print(f"Item changed: {item}")
+
     return ps.div(...)
 ```
 

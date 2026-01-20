@@ -135,9 +135,6 @@ def MyComponent():
 
 ```python
 def create_api(user_id: int):
-    @ps.effect
-    def log():
-        print(f"User {user_id} mounted")
     return {"user_id": user_id}
 
 @ps.component
@@ -146,7 +143,26 @@ def UserView(user_id: int):
     return ps.div(f"User: {meta['user_id']}")
 ```
 
-#### `ps.effects(*fns)` — Register effects
+#### `ps.state(arg, *, key=None)` — Inline state instances
+
+```python
+@ps.component
+def Counter():
+    # Simple usage - identified by code location
+    counter = ps.state(CounterState())
+    return ps.button(f"Count: {counter.count}", onClick=counter.increment)
+
+# In loops - use key parameter
+@ps.component
+def UserList(user_ids: list[str]):
+    items = []
+    for uid in user_ids:
+        user = ps.state(lambda uid=uid: UserState(uid), key=uid)
+        items.append(ps.li(user.name, key=uid))
+    return ps.ul(*items)
+```
+
+#### `@ps.effect` — Inline effects (auto-registered in components)
 
 ```python
 @ps.component
@@ -154,11 +170,20 @@ def Timer():
     with ps.init():
         state = TimerState()
 
-    ps.effects(
-        lambda: print("mounted"),
-        lambda: state.start_timer(),  # Can return cleanup fn
-    )
+    @ps.effect  # Auto-registered, no ps.effects() needed
+    def log_elapsed():
+        print(f"Elapsed: {state.elapsed}")
+
     return ps.div(str(state.elapsed))
+
+# In loops - use key parameter
+@ps.component
+def ItemTracker(items: list[str]):
+    for item in items:
+        @ps.effect(key=item)
+        def track(item=item):  # Capture via default arg
+            print(f"Tracking: {item}")
+    return ps.div(...)
 ```
 
 #### Runtime hooks

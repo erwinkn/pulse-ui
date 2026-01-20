@@ -8,34 +8,55 @@ description: "Render-time hooks and runtime helpers"
 Get or create a State instance persisted across renders.
 
 ```python
-def state(key: str, arg: S | Callable[[], S]) -> S
+def state(arg: S | Callable[[], S], *, key: str | None = None) -> S
 ```
 
 ### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `key` | `str` | required | Unique identifier within the component |
 | `arg` | `S \| Callable[[], S]` | required | State instance or factory function |
+| `key` | `str \| None` | `None` | Optional key for loops or manual invalidation |
 
 ### Returns
 
-The same State instance on subsequent renders with the same key.
+The same State instance on subsequent renders at the same location (or with the same key).
 
 ### Example
 
 ```python
+# Simple usage - Pulse identifies by code location
 def counter():
-    s = ps.state("counter", lambda: CounterState())
+    s = ps.state(CounterState())
     return m.Button(f"Count: {s.count}", on_click=lambda: s.increment())
+
+# With factory function
+def counter():
+    s = ps.state(lambda: CounterState())
+    return m.Button(f"Count: {s.count}", on_click=lambda: s.increment())
+
+# In a loop - use key to disambiguate
+def user_list(user_ids):
+    items = []
+    for uid in user_ids:
+        user = ps.state(lambda uid=uid: UserState(uid), key=uid)
+        items.append(m.Text(user.name, key=uid))
+    return m.Stack(items)
+
+# Dynamic key - state recreated when key changes
+def user_profile(user_id):
+    user = ps.state(lambda: UserState(user_id), key=f"user-{user_id}")
+    return m.Text(user.name)
 ```
 
 ### Notes
 
-- Key must be non-empty string
-- Can only be called once per render with the same key
+- Without a key, each call is identified by its code location (file + line number)
+- With a key, the key is used for identification instead
+- Key must be non-empty string if provided
+- Can only be called once per render at the same location or with the same key
 - Factory is only called on first render; subsequent renders return cached instance
-- State is disposed when component unmounts
+- State is disposed when component unmounts or when key changes
 
 ---
 
@@ -112,46 +133,80 @@ state = ps.setup(lambda: CounterState())
 
 ---
 
-## effects
+## effect (inline)
 
-Register effects that persist across renders.
+When `@ps.effect` is used inside a component, effects are automatically registered and cached by code location.
 
 ```python
-def effects(
-    *fns: EffectFn,
-    on_error: Callable[[Exception], None] | None = None,
-    key: str | None = None,
-) -> None
+@ps.effect
+def my_effect():
+    print("Effect runs when dependencies change")
+
+@ps.effect(key="unique-key", immediate=True)
+def keyed_effect():
+    print("Effect with explicit key")
 ```
 
-### Parameters
+### Parameters (decorator)
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `*fns` | `EffectFn` | required | Effect functions to register |
+| `key` | `str \| None` | `None` | Optional key for loops or manual invalidation |
+| `immediate` | `bool` | `False` | Run synchronously instead of batched |
+| `lazy` | `bool` | `False` | Don't run on creation |
 | `on_error` | `Callable[[Exception], None] \| None` | `None` | Error handler |
-| `key` | `str \| None` | `None` | Optional key; if changed, effects are recreated |
+| `interval` | `float \| None` | `None` | Polling interval in seconds |
 
 ### Example
 
 ```python
-def user_profile(user_id: str):
-    s = ps.state("user", lambda: UserState(user_id))
+@ps.component
+def UserProfile():
+    with ps.init():
+        state = UserState()
 
-    ps.effects(
-        lambda: print(f"User changed: {s.name}"),
-        lambda: subscribe_to_updates(s.user_id),
-        key=user_id,  # Recreate effects when user_id changes
-    )
+    # Simple inline effect - auto-registered
+    @ps.effect
+    def log_changes():
+        print(f"User changed: {state.name}")
 
-    return m.Text(s.name)
+    return ps.div(state.name)
+
+# In a loop - use key parameter
+@ps.component
+def ItemList():
+    with ps.init():
+        items = ["a", "b", "c"]
+
+    for item in items:
+        @ps.effect(key=item)
+        def track_item(item=item):  # Capture via default arg
+            print(f"Tracking: {item}")
+
+    return ps.ul(...)
+
+# Dynamic key - effect recreated when key changes
+@ps.component
+def DynamicEffect():
+    with ps.init():
+        version = ps.Signal("v1")
+
+    @ps.effect(key=version())
+    def versioned_effect():
+        print(f"Version: {version()}")
+        def cleanup():
+            print("Cleaning up old version")
+        return cleanup
+
+    return ps.div(...)
 ```
 
 ### Notes
 
-- Can only be called once per component render
-- Effects are disposed when component unmounts
-- Changing `key` disposes old effects and creates new ones
+- Effects are cached by code location when no key is provided
+- In loops, the `key` parameter is required to disambiguate each effect
+- When key changes, old effect is disposed and new one is created
+- Effects with cleanup functions have their cleanup called on key change or unmount
 
 ---
 

@@ -1,6 +1,5 @@
 import { IBM_Plex_Mono, Oxanium } from "next/font/google";
 import Link from "next/link";
-import { PulseField } from "./pulse-field.client";
 
 const display = Oxanium({
 	subsets: ["latin"],
@@ -22,10 +21,11 @@ export default function HomePage() {
 		>
 			<div className="pointer-events-none absolute inset-0">
 				<div className="absolute inset-0 opacity-70 forge-scan-lines" />
-				<div className="absolute -top-32 left-1/2 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,_rgba(70,210,255,0.25),_transparent_65%)] blur-2xl" />
-				<div className="absolute -bottom-40 -left-10 h-[360px] w-[360px] rounded-full bg-[radial-gradient(circle,_rgba(255,155,65,0.18),_transparent_70%)] blur-2xl forge-orb" />
-				<div className="absolute right-[-10%] top-[30%] h-[280px] w-[280px] rounded-full bg-[radial-gradient(circle,_rgba(70,255,194,0.18),_transparent_70%)] blur-2xl forge-orb-alt" />
-				<PulseField />
+				<div className="forge-light forge-light-a" />
+				<div className="forge-light forge-light-b" />
+				<div className="forge-light forge-light-c" />
+				<div className="forge-light forge-light-d" />
+				<div className="forge-light forge-light-e" />
 			</div>
 			<div className="relative mx-auto w-full max-w-6xl px-6 pb-20 pt-12">
 				<header className="flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
@@ -167,32 +167,145 @@ def App():
 					background-size: 120px 120px;
 					mask-image: radial-gradient(circle at 50% 20%, black, transparent 70%);
 				}
-				.forge-orb {
-					animation: forge-drift 14s ease-in-out infinite;
+				.forge-light {
+					position: absolute;
+					border-radius: 999px;
+					pointer-events: none;
+					will-change: transform;
+					background: radial-gradient(circle, var(--light-color), transparent 65%);
+					opacity: 0.38;
+					mask-image: radial-gradient(circle, black 45%, transparent 75%);
+					mix-blend-mode: screen;
 				}
-				.forge-orb-alt {
-					animation: forge-drift-alt 18s ease-in-out infinite;
+				.forge-light-a {
+					left: 18%;
+					top: 20%;
+					width: 720px;
+					height: 720px;
+					--light-color: rgba(70, 210, 255, 0.26);
+					animation: forge-light-a 22s ease-in-out infinite;
 				}
-				@keyframes forge-drift {
+				.forge-light-b {
+					left: 74%;
+					top: 26%;
+					width: 840px;
+					height: 840px;
+					--light-color: rgba(120, 255, 210, 0.3);
+					animation: forge-light-b 26s ease-in-out infinite;
+				}
+				.forge-light-c {
+					left: 24%;
+					top: 76%;
+					width: 640px;
+					height: 640px;
+					--light-color: rgba(255, 168, 88, 0.32);
+					animation: forge-light-c 24s ease-in-out infinite;
+				}
+				.forge-light-d {
+					left: 50%;
+					top: -8%;
+					width: 520px;
+					height: 520px;
+					--light-color: rgba(170, 230, 255, 0.22);
+					animation: forge-light-d 20s ease-in-out infinite;
+				}
+				.forge-light-e {
+					left: 92%;
+					top: 70%;
+					width: 520px;
+					height: 520px;
+					--light-color: rgba(130, 255, 190, 0.28);
+					animation: forge-light-e 28s ease-in-out infinite;
+				}
+				@keyframes forge-light-a {
 					0% {
-						transform: translateY(0px);
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
 					}
-					50% {
-						transform: translateY(-18px);
+					25% {
+						transform: translate3d(-50%, -50%, 0) translate(90px, -120px) scale(1.04);
+					}
+					55% {
+						transform: translate3d(-50%, -50%, 0) translate(160px, 40px) scale(0.98);
+					}
+					80% {
+						transform: translate3d(-50%, -50%, 0) translate(40px, 120px) scale(1.03);
 					}
 					100% {
-						transform: translateY(0px);
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
 					}
 				}
-				@keyframes forge-drift-alt {
+				@keyframes forge-light-b {
 					0% {
-						transform: translateY(0px) scale(1);
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
 					}
-					50% {
-						transform: translateY(14px) scale(1.05);
+					30% {
+						transform: translate3d(-50%, -50%, 0) translate(-140px, 70px)
+							scale(1.05);
+					}
+					60% {
+						transform: translate3d(-50%, -50%, 0) translate(-60px, -120px)
+							scale(0.97);
+					}
+					85% {
+						transform: translate3d(-50%, -50%, 0) translate(80px, -40px) scale(1.02);
 					}
 					100% {
-						transform: translateY(0px) scale(1);
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
+					}
+				}
+				@keyframes forge-light-c {
+					0% {
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
+					}
+					35% {
+						transform: translate3d(-50%, -50%, 0) translate(120px, 90px) scale(1.04);
+					}
+					65% {
+						transform: translate3d(-50%, -50%, 0) translate(-40px, 150px)
+							scale(0.98);
+					}
+					90% {
+						transform: translate3d(-50%, -50%, 0) translate(-110px, 10px)
+							scale(1.02);
+					}
+					100% {
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
+					}
+				}
+				@keyframes forge-light-d {
+					0% {
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
+					}
+					40% {
+						transform: translate3d(-50%, -50%, 0) translate(110px, 110px)
+							scale(1.05);
+					}
+					70% {
+						transform: translate3d(-50%, -50%, 0) translate(-60px, 180px)
+							scale(0.97);
+					}
+					100% {
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
+					}
+				}
+				@keyframes forge-light-e {
+					0% {
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
+					}
+					25% {
+						transform: translate3d(-50%, -50%, 0) translate(-120px, -90px)
+							scale(1.04);
+					}
+					55% {
+						transform: translate3d(-50%, -50%, 0) translate(-180px, 40px)
+							scale(0.98);
+					}
+					80% {
+						transform: translate3d(-50%, -50%, 0) translate(-70px, 160px)
+							scale(1.02);
+					}
+					100% {
+						transform: translate3d(-50%, -50%, 0) translate(0px, 0px) scale(1);
 					}
 				}
 			`}</style>

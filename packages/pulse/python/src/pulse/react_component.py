@@ -6,10 +6,14 @@ from collections.abc import Callable
 from typing import Any, ParamSpec, overload
 
 from pulse.transpiler.imports import Import
-from pulse.transpiler.nodes import Element, Expr, Jsx
-from pulse.transpiler.react_component import default_signature
+from pulse.transpiler.nodes import Element, Expr, Jsx, Node
 
 P = ParamSpec("P")
+
+
+def default_signature(
+	*children: Node, key: str | None = None, **props: Any
+) -> Element: ...
 
 
 class ReactComponent(Jsx):

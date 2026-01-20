@@ -592,14 +592,15 @@ class TestReactComponent:
 		)
 
 	def test_react_component_decorator(self):
-		"""The @react_component decorator returns a Jsx(expr)."""
-		from pulse.transpiler.react_component import react_component
+		"""The @react_component decorator returns a typed Expr wrapper."""
+		from pulse.react_component import react_component
+		from pulse.transpiler.nodes import Signature
 
 		@react_component(Import("Button", "@mantine/core"))
 		def Button(children: str, variant: str = "default") -> Element: ...
 
-		# Should be a Jsx
-		assert isinstance(Button, Jsx)
+		assert isinstance(Button, Signature)
+		assert isinstance(Button.expr, Jsx)
 
 
 # =============================================================================

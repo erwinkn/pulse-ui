@@ -1,5 +1,6 @@
 import { IBM_Plex_Mono, Oxanium } from "next/font/google";
 import Link from "next/link";
+import { codeToHtml } from "shiki";
 import { ForgeLights } from "./forge-lights.client";
 
 const display = Oxanium({
@@ -14,7 +15,34 @@ const mono = IBM_Plex_Mono({
 	variable: "--font-body",
 });
 
-export default function HomePage() {
+const CODE = `import pulse as ps
+
+# Wrap any React component
+Button = ps.react_component(
+    ps.Import("Button", "@mantine/core")
+)
+
+class Counter(ps.State):
+    count: int = 0
+    def inc(self):
+        self.count += 1
+
+@ps.component
+def App():
+    with ps.init():
+        state = Counter()
+    return ps.div(
+        ps.h1(f"Count: {state.count}"),
+        Button("+1", onClick=state.inc),
+    )`;
+
+const LINE_NUMBERS = Array.from({ length: 20 }, (_, i) => i + 1);
+
+export default async function HomePage() {
+	const highlighted = await codeToHtml(CODE, {
+		lang: "python",
+		themes: { light: "github-light", dark: "github-dark" },
+	});
 	return (
 		<div
 			className={`${display.variable} ${mono.variable} home-shell relative overflow-hidden`}
@@ -28,17 +56,17 @@ export default function HomePage() {
 				<header className="flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
 					<div className="max-w-xl">
 						<p className="home-pill inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em]">
-							Pulse Forge
+							Full-stack Python
 						</p>
 						<h1
 							className="mt-6 text-4xl font-semibold leading-tight md:text-6xl"
 							style={{ fontFamily: "var(--font-display)" }}
 						>
-							Reactive web apps, forged in Python.
+							Reactive web apps. Pure Python.
 						</h1>
 						<p className="home-muted mt-5 text-base md:text-lg">
-							Pulse runs a React UI with WebSocket-driven updates, while you stay in Python for
-							state, events, and composition.
+							Build interactive web apps entirely in Python. Pulse renders your code to a React
+							frontend and keeps it in sync over WebSocket. No JavaScript required.
 						</p>
 						<div className="mt-8 flex flex-wrap gap-3">
 							<Link
@@ -54,102 +82,84 @@ export default function HomePage() {
 								Docs
 							</Link>
 						</div>
-						<div className="home-muted-strong mt-10 flex flex-wrap gap-4 text-xs uppercase tracking-[0.2em]">
-							<span>Server state</span>
-							<span>Typed updates</span>
-							<span>React renderer</span>
-						</div>
+						<p className="home-muted mt-10 text-sm">
+							State lives on the server. UI updates flow over WebSocket.
+						</p>
 					</div>
-					<div className="w-full max-w-lg space-y-4">
-						<div className="home-card rounded-2xl border p-5">
-							<div className="home-muted-strong flex items-center justify-between text-xs uppercase tracking-[0.2em]">
-								<span>Pulse state</span>
-								<span>live</span>
+					<div className="w-full max-w-lg">
+						<div className="home-editor rounded-xl border overflow-hidden">
+							<div className="home-editor-titlebar flex items-center gap-3 px-4 py-3">
+								<div className="flex gap-[7px]">
+									<span className="home-dot home-dot-red" />
+									<span className="home-dot home-dot-yellow" />
+									<span className="home-dot home-dot-green" />
+								</div>
+								<div className="home-editor-tab rounded-md px-3 py-1 text-xs">app.py</div>
 							</div>
-							<pre className="home-code mt-4 whitespace-pre-wrap text-sm leading-relaxed">
-								<code>{`import pulse as ps
-
-class Counter(ps.State):
-    count: int = 0
-
-    def inc(self):
-        self.count += 1
-
-@ps.component
-def App():
-    with ps.init():
-        state = Counter()
-    return ps.div(
-        ps.h1(f"Count: {state.count}"),
-        ps.button("Increment", onClick=state.inc),
-    )`}</code>
-							</pre>
-						</div>
-						<div className="grid gap-3 sm:grid-cols-3">
-							<div className="home-card rounded-xl border p-3">
-								<p className="home-muted-strong text-xs uppercase tracking-[0.2em]">Transport</p>
-								<p className="mt-2 text-sm">WebSocket diff sync</p>
-							</div>
-							<div className="home-card rounded-xl border p-3">
-								<p className="home-muted-strong text-xs uppercase tracking-[0.2em]">UI</p>
-								<p className="mt-2 text-sm">React-driven render</p>
-							</div>
-							<div className="home-card rounded-xl border p-3">
-								<p className="home-muted-strong text-xs uppercase tracking-[0.2em]">State</p>
-								<p className="mt-2 text-sm">Python classes</p>
+							<div className="home-code flex overflow-x-auto text-[13px] leading-[1.7]">
+								<div className="home-line-numbers select-none text-right pr-4 pl-4 py-4">
+									{LINE_NUMBERS.map((n) => (
+										<div key={n}>{n}</div>
+									))}
+								</div>
+								<div
+									className="flex-1 py-4 pr-4 [&_pre]:!bg-transparent [&_code]:!bg-transparent"
+									// biome-ignore lint/security/noDangerouslySetInnerHtml: shiki output
+									dangerouslySetInnerHTML={{ __html: highlighted }}
+								/>
 							</div>
 						</div>
 					</div>
 				</header>
 
-				<section className="mt-16 grid gap-6 md:grid-cols-3">
-					<div className="home-card rounded-2xl border p-6">
-						<h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-display)" }}>
-							Build in Python
-						</h2>
-						<p className="home-muted mt-3 text-sm">
-							Keep server logic, state, and UI composition in one place. No glue code between
-							stacks.
-						</p>
-					</div>
-					<div className="home-card rounded-2xl border p-6">
-						<h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-display)" }}>
-							React front-end
-						</h2>
-						<p className="home-muted mt-3 text-sm">
-							Pulse renders to React and streams updates. Your UI feels instant without extra client
-							state.
-						</p>
-					</div>
-					<div className="home-card rounded-2xl border p-6">
-						<h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-display)" }}>
-							Always in sync
-						</h2>
-						<p className="home-muted mt-3 text-sm">
-							UI updates flow over WebSocket. The server is the source of truth.
-						</p>
+				<section className="mt-16">
+					<div className="grid gap-6 md:grid-cols-3">
+						<div className="home-feature">
+							<p className="home-feature-title">Pure Python</p>
+							<p className="home-muted mt-2 text-sm">
+								Components, state, events—all Python. Use pandas, SQLAlchemy, or any library
+								directly in your UI code.
+							</p>
+						</div>
+						<div className="home-feature">
+							<p className="home-feature-title">React-powered</p>
+							<p className="home-muted mt-2 text-sm">
+								Renders to a real React frontend. Access the full ecosystem of component libraries
+								when you need them.
+							</p>
+						</div>
+						<div className="home-feature">
+							<p className="home-feature-title">Server-driven</p>
+							<p className="home-muted mt-2 text-sm">
+								State lives on the server. Changes sync instantly over WebSocket. No API layer to
+								build.
+							</p>
+						</div>
 					</div>
 				</section>
 
 				<section className="home-panel mt-16 rounded-3xl border p-8">
 					<div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
 						<div>
-							<p className="home-muted-strong text-xs uppercase tracking-[0.2em]">Flow</p>
+							<p className="home-muted-strong text-xs uppercase tracking-[0.2em]">
+								Built for Python developers
+							</p>
 							<h2
 								className="mt-3 text-2xl font-semibold"
 								style={{ fontFamily: "var(--font-display)" }}
 							>
-								{"State -> Render -> Event -> Update"}
+								Dashboards, internal tools, data apps
 							</h2>
 							<p className="home-muted mt-3 text-sm">
-								Keep loops tight. Ship complex flows without juggling multiple runtimes.
+								Ship production web apps without learning a frontend framework. One codebase, one
+								language.
 							</p>
 						</div>
 						<Link
-							href="/docs"
+							href="/docs/tutorial"
 							className="home-cta-outline rounded-full border px-5 py-2 text-sm font-semibold transition hover:translate-y-[-2px]"
 						>
-							Explore docs
+							Start the tutorial
 						</Link>
 					</div>
 				</section>
@@ -166,11 +176,14 @@ def App():
 					--home-border-strong: rgba(15, 23, 42, 0.2);
 					--home-surface: rgba(255, 255, 255, 0.7);
 					--home-surface-strong: rgba(255, 255, 255, 0.85);
-					--home-panel-bg: linear-gradient(
-						135deg,
-						rgba(255, 255, 255, 0.9),
-						rgba(255, 255, 255, 0.6)
-					);
+					--home-editor-bg: rgba(255, 255, 255, 0.92);
+					--home-editor-titlebar: rgba(245, 247, 250, 0.95);
+					--home-editor-tab: rgba(255, 255, 255, 0.8);
+					--home-line-number: rgba(15, 23, 42, 0.35);
+					--home-panel-bg: rgba(255, 255, 255, 0.25);
+					--home-panel-border-outer: rgba(15, 23, 42, 0.08);
+					--home-panel-border-inner: rgba(255, 255, 255, 0.7);
+					--home-panel-shadow: 0 8px 32px rgba(15, 23, 42, 0.08);
 					--home-pill: rgba(255, 255, 255, 0.85);
 					--home-cta-bg: #0b0f14;
 					--home-cta-fg: #ffffff;
@@ -195,11 +208,14 @@ def App():
 					--home-border-strong: rgba(255, 255, 255, 0.3);
 					--home-surface: rgba(255, 255, 255, 0.06);
 					--home-surface-strong: rgba(255, 255, 255, 0.09);
-					--home-panel-bg: linear-gradient(
-						135deg,
-						rgba(255, 255, 255, 0.06),
-						rgba(255, 255, 255, 0.02)
-					);
+					--home-editor-bg: rgba(15, 20, 28, 0.92);
+					--home-editor-titlebar: rgba(20, 26, 36, 0.95);
+					--home-editor-tab: rgba(255, 255, 255, 0.08);
+					--home-line-number: rgba(255, 255, 255, 0.25);
+					--home-panel-bg: rgba(255, 255, 255, 0.04);
+					--home-panel-border-outer: rgba(255, 255, 255, 0.1);
+					--home-panel-border-inner: rgba(255, 255, 255, 0.15);
+					--home-panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 					--home-pill: rgba(255, 255, 255, 0.06);
 					--home-cta-bg: #ffffff;
 					--home-cta-fg: #0b0f14;
@@ -221,25 +237,82 @@ def App():
 				.home-muted-strong {
 					color: var(--home-muted-strong);
 				}
-				.home-code {
-					color: rgba(15, 23, 42, 0.78);
-				}
-				.dark .home-code {
-					color: rgba(255, 255, 255, 0.78);
+				html.dark .home-code span,
+				.dark .home-code span {
+					color: var(--shiki-dark) !important;
 				}
 				.home-pill {
 					border-color: var(--home-border);
 					background: var(--home-pill);
 					color: var(--home-muted);
 				}
-				.home-card {
+				.home-editor {
 					border-color: var(--home-border);
-					background: var(--home-surface);
+					background: var(--home-editor-bg);
 					box-shadow: var(--home-shadow);
 				}
+				.home-editor-titlebar {
+					background: var(--home-editor-titlebar);
+					border-bottom: 1px solid var(--home-border);
+				}
+				.home-editor-tab {
+					background: var(--home-editor-tab);
+					color: var(--home-muted);
+				}
+				.home-dot {
+					width: 12px;
+					height: 12px;
+					border-radius: 50%;
+				}
+				.home-dot-red {
+					background: #ff5f57;
+				}
+				.home-dot-yellow {
+					background: #febc2e;
+				}
+				.home-dot-green {
+					background: #28c840;
+				}
+				.home-line-numbers {
+					color: var(--home-line-number);
+					border-right: 1px solid var(--home-border);
+				}
 				.home-panel {
-					border-color: var(--home-border);
+					border-color: var(--home-panel-border-outer);
 					background: var(--home-panel-bg);
+					backdrop-filter: blur(24px);
+					-webkit-backdrop-filter: blur(24px);
+					box-shadow:
+						var(--home-panel-shadow),
+						inset 0 1px 0 0 var(--home-panel-border-inner),
+						inset 1px 0 0 0 var(--home-panel-border-inner);
+				}
+				.home-feature {
+					padding-top: 1.5rem;
+					border-top: 1px solid var(--home-border);
+				}
+				.home-feature-title {
+					font-family: var(--font-display);
+					font-size: 1.05rem;
+					font-weight: 600;
+				}
+				@media (min-width: 768px) {
+					.home-feature {
+						padding-top: 0;
+						padding-left: 1.5rem;
+						border-top: 0;
+						border-left: 1px solid var(--home-border);
+					}
+					.home-feature:first-child {
+						padding-left: 0;
+						border-left-color: transparent;
+					}
+				}
+				@media (max-width: 767px) {
+					.home-feature:first-child {
+						padding-top: 0;
+						border-top: 0;
+					}
 				}
 				.home-cta {
 					background: var(--home-cta-bg);

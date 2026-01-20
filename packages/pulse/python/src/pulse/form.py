@@ -244,7 +244,7 @@ def Form(
 	key: str,
 	onSubmit: EventHandler1[FormData] | None = None,
 	**props: Unpack[PulseFormProps],  # pyright: ignore[reportGeneralTypeIssues]
-):
+) -> Node:
 	"""Server-registered HTML form component.
 
 	Automatically wires up form submission to a Python handler. Uses
@@ -434,7 +434,7 @@ class ManualForm(Disposable):
 		*children: Node,
 		key: str | None = None,
 		**props: Unpack[PulseFormProps],
-	):
+	) -> Node:
 		"""Render as a form element with children.
 
 		Args:

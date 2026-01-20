@@ -9,8 +9,7 @@
     "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
     "lint": "biome check",
-    "format": "biome format --write",
-    "generate:api": "cd .. && uv run python docs/scripts/generate-python-docs.py && cd docs && bun scripts/generate-docs.mjs"
+    "format": "biome format --write"
   },
   "dependencies": {
     "@radix-ui/react-collapsible": "^1.1.12",
@@ -20,7 +19,6 @@
     "class-variance-authority": "^0.7.1",
     "fumadocs-core": "16.4.7",
     "fumadocs-mdx": "14.2.5",
-    "fumadocs-python": "^0.0.7",
     "fumadocs-ui": "16.4.7",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",

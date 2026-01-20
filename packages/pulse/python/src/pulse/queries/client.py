@@ -6,6 +6,7 @@ from pulse.context import PulseContext
 from pulse.queries.common import ActionResult, QueryKey
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import KeyedQuery
+from pulse.queries.store import QueryStore
 
 T = TypeVar("T")
 
@@ -68,7 +69,7 @@ class QueryClient:
 	```
 	"""
 
-	def _get_store(self):
+	def _get_store(self) -> QueryStore:
 		"""Get the query store from the current PulseContext.
 
 		Returns:

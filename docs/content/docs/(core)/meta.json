@@ -1,6 +1,6 @@
 {
   "title": "Core",
-  "description": "Core documentation",
+  "description": "State, components, routing, and hooks",
   "icon": "BookOpen",
   "root": true,
   "pages": [

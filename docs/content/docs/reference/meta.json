@@ -1,6 +1,6 @@
 {
   "title": "Reference",
-  "description": "API reference",
+  "description": "Architecture and Python/JS APIs",
   "icon": "FileCode",
   "root": true,
   "pages": [

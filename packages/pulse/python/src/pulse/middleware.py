@@ -476,7 +476,6 @@ class LatencyMiddleware(PulseMiddleware):
 			connect_ms: Latency for WebSocket connections. Default: 40ms
 			message_ms: Latency for WebSocket messages (including API calls). Default: 25ms
 			channel_ms: Latency for channel messages. Default: 20ms
-			dev: If True, only active in dev environments. Default: True
 		"""
 		super().__init__(dev=True)
 		self.prerender_ms = prerender_ms

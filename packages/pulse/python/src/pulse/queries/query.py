@@ -1229,6 +1229,9 @@ def query(
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
 	key: QueryKey | None = None,
+) -> (
+	QueryProperty[T, TState]
+	| Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]
 ):
 	"""Decorator for async data fetching on State methods.
 

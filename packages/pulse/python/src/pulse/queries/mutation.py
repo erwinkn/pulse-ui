@@ -163,7 +163,7 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 		self._on_success_fn = on_success  # pyright: ignore[reportAttributeAccessIssue]
 		self._on_error_fn = on_error  # pyright: ignore[reportAttributeAccessIssue]
 
-	def on_success(self, fn: OnSuccessFn[TState, T]):
+	def on_success(self, fn: OnSuccessFn[TState, T]) -> OnSuccessFn[TState, T]:
 		"""Decorator to attach an on-success handler (sync or async).
 
 		Args:
@@ -179,7 +179,7 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 		self._on_success_fn = fn  # pyright: ignore[reportAttributeAccessIssue]
 		return fn
 
-	def on_error(self, fn: OnErrorFn[TState]):
+	def on_error(self, fn: OnErrorFn[TState]) -> OnErrorFn[TState]:
 		"""Decorator to attach an on-error handler (sync or async).
 
 		Args:
@@ -242,6 +242,12 @@ def mutation(
 
 def mutation(
 	fn: Callable[Concatenate[TState, P], Awaitable[T]] | None = None,
+) -> (
+	MutationProperty[T, TState, P]
+	| Callable[
+		[Callable[Concatenate[TState, P], Awaitable[T]]],
+		MutationProperty[T, TState, P],
+	]
 ):
 	"""Decorator for async mutations (write operations) on State methods.
 

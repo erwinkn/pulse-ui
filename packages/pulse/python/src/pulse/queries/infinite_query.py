@@ -1325,6 +1325,12 @@ def infinite_query(
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
 	key: QueryKey | None = None,
+) -> (
+	InfiniteQueryProperty[T, TParam, TState]
+	| Callable[
+		[Callable[[TState, Any], Awaitable[T]]],
+		InfiniteQueryProperty[T, TParam, TState],
+	]
 ):
 	"""Decorator for paginated queries on State methods.
 

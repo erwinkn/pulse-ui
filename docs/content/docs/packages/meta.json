@@ -1,6 +1,6 @@
 {
   "title": "Packages",
-  "description": "Integration packages for Pulse",
+  "description": "UI libraries, auth, and deploy",
   "icon": "Package",
   "root": true,
   "pages": [

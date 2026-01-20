@@ -377,7 +377,7 @@ class HooksAPI:
 		factory: HookFactory[T] = _default_factory,
 		*,
 		metadata: HookMetadata | None = None,
-	):
+	) -> "Hook[T]":
 		"""Register a new hook.
 
 		Args:

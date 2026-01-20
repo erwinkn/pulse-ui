@@ -32,7 +32,15 @@ def computed(
 ) -> Callable[[Callable[[], T]], Computed[T]]: ...
 
 
-def computed(fn: Callable[..., Any] | None = None, *, name: str | None = None):
+def computed(
+	fn: Callable[..., Any] | None = None,
+	*,
+	name: str | None = None,
+) -> (
+	Computed[T]
+	| ComputedProperty[T]
+	| Callable[[Callable[..., Any]], Computed[T] | ComputedProperty[T]]
+):
 	"""
 	Decorator for computed (derived) properties.
 
@@ -49,8 +57,7 @@ def computed(fn: Callable[..., Any] | None = None, *, name: str | None = None):
 		name: Optional debug name for the computed. Defaults to the function name.
 
 	Returns:
-		ComputedProperty[T]: When decorating a State method.
-		Computed[T]: When decorating a standalone function.
+		Computed wrapper or decorator depending on usage.
 
 	Raises:
 		TypeError: If the function takes arguments other than `self`.
@@ -167,6 +174,11 @@ def effect(
 	on_error: Callable[[Exception], None] | None = None,
 	deps: list[Signal[Any] | Computed[Any]] | None = None,
 	interval: float | None = None,
+) -> (
+	Effect
+	| AsyncEffect
+	| StateEffect
+	| Callable[[Callable[..., Any]], Effect | AsyncEffect | StateEffect]
 ):
 	"""
 	Decorator for side effects that run when dependencies change.
@@ -183,21 +195,19 @@ def effect(
 
 	Args:
 		fn: The effect function. Must take no arguments (standalone) or only
-		    `self` (State method). Can return a cleanup function.
+		        `self` (State method). Can return a cleanup function.
 		name: Optional debug name. Defaults to "ClassName.method_name" or function name.
 		immediate: If True, run synchronously when scheduled instead of batching.
-		    Only valid for sync effects.
+		        Only valid for sync effects.
 		lazy: If True, don't run on creation; wait for first dependency change.
 		on_error: Callback invoked if the effect throws an exception.
 		deps: Explicit list of dependencies. If provided, auto-tracking is disabled
-		    and the effect only re-runs when these specific dependencies change.
+		        and the effect only re-runs when these specific dependencies change.
 		interval: Re-run interval in seconds. Creates a polling effect that runs
-		    periodically regardless of dependency changes.
+		        periodically regardless of dependency changes.
 
 	Returns:
-		Effect: For sync standalone functions.
-		AsyncEffect: For async standalone functions.
-		StateEffect: For State methods (converted to Effect at instantiation).
+		Effect, AsyncEffect, or StateEffect depending on usage.
 
 	Raises:
 		TypeError: If the function takes arguments other than `self`.

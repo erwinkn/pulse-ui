@@ -1,7 +1,7 @@
 {
-  "title": "Pulse",
+  "title": "pulse",
   "icon": "Zap",
-  "defaultOpen": true,
+  "defaultOpen": false,
   "pages": [
     "app",
     "component",

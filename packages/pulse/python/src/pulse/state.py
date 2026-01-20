@@ -134,10 +134,10 @@ class StateEffect(Generic[T], InitializableProperty):
 	Created automatically when using the @ps.effect decorator on a State method.
 	Supports both sync and async methods.
 
-	Args:
-		fn: The effect function. Must take only `self` as argument.
-		    Can return a cleanup function that runs before the next execution
-		    or when the effect is disposed.
+		Args:
+			fn: The effect function. Must take only `self` as argument.
+			        Can return a cleanup function that runs before the next execution
+			        or when the effect is disposed.
 		name: Debug name for the effect. Defaults to "ClassName.method_name".
 		immediate: If True, run synchronously when scheduled (sync effects only).
 		lazy: If True, don't run on creation; wait for first dependency change.
@@ -498,7 +498,7 @@ class State(Disposable, metaclass=StateMeta):
 
 		Raises:
 			RuntimeError: If any effects defined on the state's scope were not
-			    properly disposed.
+			        properly disposed.
 		"""
 		# Call user-defined cleanup hook first
 		self.on_dispose()

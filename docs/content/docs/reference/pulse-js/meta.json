@@ -3,8 +3,9 @@
   "icon": "Braces",
   "defaultOpen": false,
   "pages": [
+    "index",
     "builtins",
-    "dom",
-    "pulse-client"
+    "namespaces",
+    "react"
   ]
 }

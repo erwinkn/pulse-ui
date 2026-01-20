@@ -1,0 +1,501 @@
+---
+title: "React"
+description: "React hooks and components for transpiled Python code"
+---
+
+# React
+
+React hooks and components for use in `@ps.javascript` decorated functions.
+
+```python
+from pulse.js.react import useState, useEffect, useRef, useMemo, useCallback
+```
+
+---
+
+## State hooks
+
+### useState
+
+Returns a stateful value and a function to update it.
+
+```python
+from pulse.js.react import useState
+
+@ps.javascript(jsx=True)
+def Counter():
+    count, set_count = useState(0)
+
+    return ps.div()[
+        ps.span()[f"Count: {count}"],
+        ps.button(onClick=lambda e: set_count(count + 1))["Increment"],
+        ps.button(onClick=lambda e: set_count(lambda prev: prev - 1))["Decrement"],
+    ]
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `initial_state` | Initial value or function returning initial value |
+
+Returns `(state, setState)` tuple where `setState` accepts a new value or updater function.
+
+### useReducer
+
+An alternative to `useState` for complex state logic.
+
+```python
+from pulse.js.react import useReducer
+
+@ps.javascript(jsx=True)
+def TodoList():
+    def reducer(state, action):
+        if action["type"] == "add":
+            return [*state, action["item"]]
+        if action["type"] == "remove":
+            return [item for item in state if item["id"] != action["id"]]
+        return state
+
+    todos, dispatch = useReducer(reducer, [])
+
+    def add_todo(text):
+        dispatch({"type": "add", "item": {"id": Date.now(), "text": text}})
+
+    return ps.div()[
+        # ... render todos
+    ]
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `reducer` | `(state, action) -> newState` function |
+| `initial_arg` | Initial state value |
+| `init` | Optional lazy initializer `(initial_arg) -> state` |
+
+Returns `(state, dispatch)` tuple.
+
+---
+
+## Effect hooks
+
+### useEffect
+
+Runs side effects after render. Use for subscriptions, timers, and DOM mutations.
+
+```python
+from pulse.js.react import useState, useEffect
+
+@ps.javascript(jsx=True)
+def Timer():
+    seconds, set_seconds = useState(0)
+
+    def effect():
+        interval_id = window.setInterval(lambda: set_seconds(lambda s: s + 1), 1000)
+        # Return cleanup function
+        return lambda: window.clearInterval(interval_id)
+
+    useEffect(effect, [])  # Empty deps = run once on mount
+
+    return ps.div()[f"Elapsed: {seconds}s"]
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `effect` | Function to run; may return cleanup function |
+| `deps` | Dependency array (optional, None = run every render) |
+
+### useLayoutEffect
+
+Like `useEffect`, but fires synchronously after all DOM mutations. Use for measuring DOM elements.
+
+```python
+from pulse.js.react import useRef, useLayoutEffect
+
+@ps.javascript(jsx=True)
+def MeasuredBox():
+    ref = useRef(None)
+    height, set_height = useState(0)
+
+    def measure():
+        if ref.current:
+            set_height(ref.current.offsetHeight)
+
+    useLayoutEffect(measure, [])
+
+    return ps.div(ref=ref)[f"Height: {height}px"]
+```
+
+### useInsertionEffect
+
+Like `useLayoutEffect`, but fires before any DOM mutations. Use for CSS-in-JS libraries.
+
+---
+
+## Ref hooks
+
+### useRef
+
+Returns a mutable ref object that persists across renders.
+
+```python
+from pulse.js.react import useRef
+
+@ps.javascript(jsx=True)
+def FocusInput():
+    input_ref = useRef(None)
+
+    def focus():
+        input_ref.current.focus()
+
+    return ps.div()[
+        ps.input(ref=input_ref, type="text"),
+        ps.button(onClick=lambda e: focus())["Focus Input"],
+    ]
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `initial_value` | Initial `.current` value |
+
+Returns `MutableRefObject` with `.current` property.
+
+### useImperativeHandle
+
+Customizes the instance value exposed to parent components via ref.
+
+```python
+from pulse.js.react import forwardRef, useImperativeHandle, useRef
+
+@ps.javascript(jsx=True)
+def FancyInput(props, ref):
+    input_ref = useRef(None)
+
+    useImperativeHandle(ref, lambda: {
+        "focus": lambda: input_ref.current.focus(),
+        "scrollToTop": lambda: input_ref.current.scrollTop = 0,
+    }, [])
+
+    return ps.input(ref=input_ref)
+```
+
+---
+
+## Performance hooks
+
+### useMemo
+
+Memoizes an expensive computation.
+
+```python
+from pulse.js.react import useMemo
+
+@ps.javascript(jsx=True)
+def FilteredList(*, items, filter_text):
+    filtered = useMemo(
+        lambda: items.filter(lambda item: filter_text in item.name),
+        [items, filter_text]
+    )
+
+    return ps.ul()[
+        [ps.li(key=item.id)[item.name] for item in filtered]
+    ]
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `factory` | Function that computes the value |
+| `deps` | Dependency array |
+
+Returns the memoized value.
+
+### useCallback
+
+Memoizes a callback function.
+
+```python
+from pulse.js.react import useCallback
+
+@ps.javascript(jsx=True)
+def Parent():
+    count, set_count = useState(0)
+
+    # Memoized - won't cause child re-renders
+    increment = useCallback(
+        lambda: set_count(lambda c: c + 1),
+        []
+    )
+
+    return ps.div()[
+        ps.span()[count],
+        ChildButton(onClick=increment),
+    ]
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `callback` | The callback function |
+| `deps` | Dependency array |
+
+Returns the memoized callback.
+
+### useDeferredValue
+
+Defers updating a part of the UI.
+
+```python
+from pulse.js.react import useDeferredValue
+
+@ps.javascript(jsx=True)
+def SearchResults(*, query):
+    deferred_query = useDeferredValue(query)
+
+    # Expensive render uses deferred value
+    return ExpensiveList(query=deferred_query)
+```
+
+### useTransition
+
+Returns pending state and a function to start low-priority transitions.
+
+```python
+from pulse.js.react import useTransition
+
+@ps.javascript(jsx=True)
+def TabContainer():
+    tab, set_tab = useState("home")
+    is_pending, start_transition = useTransition()
+
+    def select_tab(next_tab):
+        start_transition(lambda: set_tab(next_tab))
+
+    return ps.div()[
+        ps.div(className="pending" if is_pending else "")[
+            TabPanel(tab=tab)
+        ]
+    ]
+```
+
+Returns `(isPending, startTransition)` tuple.
+
+---
+
+## Context hooks
+
+### useContext
+
+Returns the current context value.
+
+```python
+from pulse.js.react import useContext, createContext
+
+ThemeContext = createContext("light")
+
+@ps.javascript(jsx=True)
+def ThemedButton():
+    theme = useContext(ThemeContext)
+    return ps.button(className=f"btn-{theme}")["Click me"]
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `context` | Context object from `createContext` |
+
+Returns the current context value.
+
+---
+
+## Other hooks
+
+### useId
+
+Generates a unique ID stable across server and client.
+
+```python
+from pulse.js.react import useId
+
+@ps.javascript(jsx=True)
+def FormField(*, label):
+    id = useId()
+    return ps.div()[
+        ps.label(htmlFor=id)[label],
+        ps.input(id=id, type="text"),
+    ]
+```
+
+### useDebugValue
+
+Displays a label in React DevTools for custom hooks.
+
+```python
+from pulse.js.react import useDebugValue
+
+@ps.javascript
+def useOnlineStatus():
+    is_online = useSyncExternalStore(subscribe, get_snapshot)
+    useDebugValue("Online" if is_online else "Offline")
+    return is_online
+```
+
+### useSyncExternalStore
+
+Subscribe to an external store.
+
+```python
+from pulse.js.react import useSyncExternalStore
+
+@ps.javascript
+def useWindowWidth():
+    def subscribe(callback):
+        window.addEventListener("resize", callback)
+        return lambda: window.removeEventListener("resize", callback)
+
+    def get_snapshot():
+        return window.innerWidth
+
+    return useSyncExternalStore(subscribe, get_snapshot)
+```
+
+---
+
+## Components
+
+### Suspense
+
+Displays a fallback while children are loading.
+
+```python
+from pulse.js.react import Suspense
+
+@ps.javascript(jsx=True)
+def App():
+    return Suspense(fallback=ps.div()["Loading..."])[
+        LazyComponent(),
+    ]
+```
+
+| Prop | Description |
+|------|-------------|
+| `fallback` | Content to show while loading |
+| `name` | Optional name for debugging |
+
+### lazy
+
+Lazy-load a component.
+
+```python
+from pulse.js.react import lazy, Suspense
+from pulse.transpiler import Import
+
+# Define lazy component at module level
+LazyChart = lazy(Import("Chart", "./components/Chart", lazy=True))
+
+@ps.javascript(jsx=True)
+def Dashboard():
+    return Suspense(fallback=ps.div()["Loading chart..."])[
+        LazyChart(data=chart_data),
+    ]
+```
+
+---
+
+## Element creation
+
+### createElement
+
+Creates a React element (low-level API).
+
+```python
+from pulse.js.react import createElement
+
+@ps.javascript
+def example():
+    element = createElement("div", {"className": "box"}, "Hello")
+```
+
+### cloneElement
+
+Clones a React element with new props.
+
+```python
+from pulse.js.react import cloneElement
+
+@ps.javascript
+def example(element):
+    return cloneElement(element, {"className": "modified"})
+```
+
+### isValidElement
+
+Checks if an object is a React element.
+
+```python
+from pulse.js.react import isValidElement
+
+@ps.javascript
+def example(obj):
+    if isValidElement(obj):
+        console.log("It's a React element")
+```
+
+### createContext
+
+Creates a context object.
+
+```python
+from pulse.js.react import createContext
+
+ThemeContext = createContext("light")  # Default value
+```
+
+### memo
+
+Memoizes a component to skip re-renders when props are unchanged.
+
+```python
+from pulse.js.react import memo
+
+@ps.javascript(jsx=True)
+def ExpensiveComponent(*, data):
+    # ... expensive render
+    pass
+
+MemoizedComponent = memo(ExpensiveComponent)
+```
+
+### forwardRef
+
+Allows a component to expose a DOM node to its parent via ref.
+
+```python
+from pulse.js.react import forwardRef
+
+@ps.javascript(jsx=True)
+def FancyButton(props, ref):
+    return ps.button(ref=ref, className="fancy")[props.children]
+
+FancyButton = forwardRef(FancyButton)
+```
+
+---
+
+## Types
+
+The module also exports type definitions for use in type hints:
+
+| Type | Description |
+|------|-------------|
+| `RefObject[T]` | Read-only ref with `.current: T` |
+| `MutableRefObject[T]` | Mutable ref with `.current: T` |
+| `Dispatch[T]` | setState/dispatch function type |
+| `Context[T]` | Context object type |
+| `ReactNode` | Any renderable React content |
+| `ReactElement` | A React element |
+| `TransitionStartFunction` | Type for startTransition callback |
+
+---
+
+## See also
+
+- [Builtins reference](/docs/reference/pulse-js/builtins) - Array, Map, Set, Promise, etc.
+- [Namespaces reference](/docs/reference/pulse-js/namespaces) - Math, JSON, console, window, document
+- [pulse.js overview](/docs/reference/pulse-js/) - Module overview
+- [@ps.javascript decorator](/docs/reference/pulse/decorators#javascript) - Transpilation decorator

@@ -8,6 +8,7 @@
     "architecture",
     "pulse",
     "pulse-js",
-    "pulse-transpiler"
+    "pulse-transpiler",
+    "pulse-client"
   ]
 }

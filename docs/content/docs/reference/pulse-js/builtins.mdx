@@ -1,99 +1,638 @@
 ---
-title: "Serialization"
+title: "Builtins"
+description: "JavaScript built-in classes for transpiled Python code"
 ---
 
-# Serialization
+# Builtins
 
-The `pulse-client` package exports serialization utilities for encoding data to and from the wire format used in Pulse WebSocket communication.
+JavaScript built-in classes wrapped for use in `@ps.javascript` decorated functions. These classes transpile to their JavaScript equivalents with `new` constructors and static methods.
 
-## serialize
-
-Serializes JavaScript values into a wire-safe format that preserves `Date`, `Set`, `Map`, and circular references.
-
-```ts
-function serialize(data: Serializable): Serialized
+```python
+from pulse.js import Array, Set, Map, Date, Promise, Error, Number, Object, RegExp, String, WeakMap, WeakSet
 ```
 
-### Parameters
+---
 
-- `data` - Any serializable JavaScript value
+## Array
 
-### Returns
+JavaScript Array - a generic indexed collection.
 
-A `Serialized` tuple: `[[refs, dates, sets, maps], payload]`
+```python
+from pulse.js import Array
 
-- `refs` - Indices of circular references
-- `dates` - Indices of Date objects
-- `sets` - Indices of Set objects
-- `maps` - Indices of Map objects
-- `payload` - The JSON-safe payload
+@ps.javascript
+def example():
+    arr = Array(10)              # -> new Array(10)
+    arr = Array(1, 2, 3)         # -> new Array(1, 2, 3)
+```
+
+### Static methods
+
+| Method | Description |
+|--------|-------------|
+| `Array.isArray(value)` | Check if value is an array |
+| `Array.from_(iterable)` | Create array from iterable (note the underscore) |
+| `Array.from_(iterable, mapFn)` | Create array with mapping function |
+| `Array.of(*elements)` | Create array from arguments |
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `length` | Number of elements |
+
+### Mutator methods
+
+These modify the array in place:
+
+| Method | Description |
+|--------|-------------|
+| `push(*items)` | Add items to end, return new length |
+| `pop()` | Remove and return last item |
+| `shift()` | Remove and return first item |
+| `unshift(*items)` | Add items to start, return new length |
+| `splice(start, deleteCount, *items)` | Remove/replace elements |
+| `reverse()` | Reverse in place |
+| `sort(compareFn=None)` | Sort in place |
+| `fill(value, start=0, end=None)` | Fill with value |
+| `copyWithin(target, start=0, end=None)` | Copy within array |
+
+### Accessor methods
+
+These return new arrays or values:
+
+| Method | Description |
+|--------|-------------|
+| `concat(*items)` | Merge arrays/values |
+| `slice(start=0, end=None)` | Return portion |
+| `join(separator=",")` | Join to string |
+| `indexOf(element, fromIndex=0)` | First index of element |
+| `lastIndexOf(element, fromIndex=None)` | Last index of element |
+| `includes(element, fromIndex=0)` | Check if contains |
+| `at(index)` | Get at index (supports negative) |
+| `flat(depth=1)` | Flatten nested arrays |
+| `flatMap(callback)` | Map then flatten by one level |
+| `toReversed()` | Return new reversed array (ES2023) |
+| `toSorted(compareFn=None)` | Return new sorted array (ES2023) |
+| `toSpliced(start, deleteCount, *items)` | Return new spliced array (ES2023) |
+| `with_(index, value)` | Return new array with element replaced (ES2023) |
+
+### Iteration methods
+
+| Method | Description |
+|--------|-------------|
+| `forEach(callback)` | Execute for each element |
+| `map(callback)` | Create array with mapped values |
+| `filter(callback)` | Create array with passing elements |
+| `reduce(callback, initialValue=None)` | Reduce to single value (left to right) |
+| `reduceRight(callback, initialValue=None)` | Reduce right to left |
+| `find(callback)` | First element passing test |
+| `findIndex(callback)` | Index of first passing element |
+| `findLast(callback)` | Last element passing test (ES2023) |
+| `findLastIndex(callback)` | Index of last passing element (ES2023) |
+| `every(callback)` | Test if all pass |
+| `some(callback)` | Test if any pass |
+| `keys()` | Iterator of indices |
+| `values()` | Iterator of values |
+| `entries()` | Iterator of [index, value] pairs |
 
 ### Example
 
-```ts
-import { serialize } from "pulse-client";
+```python
+from pulse.js import Array
 
-const data = {
-  date: new Date(),
-  items: new Set([1, 2, 3]),
-  lookup: new Map([["key", "value"]]),
-};
+@ps.javascript
+def process_items(items):
+    # Filter and map
+    result = Array.from_(items).filter(
+        lambda x, i, arr: x > 0
+    ).map(
+        lambda x, i, arr: x * 2
+    )
 
-const wire = serialize(data);
-// Send wire over WebSocket
+    # Reduce
+    total = result.reduce(lambda acc, x, i, arr: acc + x, 0)
+
+    return total
 ```
-
-### Limitations
-
-- `NaN` is converted to `null`
-- `Infinity` and `-Infinity` throw errors
-- Functions are not supported
 
 ---
 
-## deserialize
+## Date
 
-Deserializes wire data back into JavaScript values, reconstructing `Date`, `Set`, `Map`, and circular references.
+JavaScript Date - date and time handling.
 
-```ts
-function deserialize<Data = Serializable>(
-  payload: Serialized,
-  options?: DeserializationOptions
-): Data
+```python
+from pulse.js import Date
+
+@ps.javascript
+def example():
+    now = Date()                      # -> new Date()
+    specific = Date("2024-01-15")     # -> new Date("2024-01-15")
+    timestamp = Date.now()            # -> Date.now()
 ```
 
-### Parameters
+### Static methods
 
-- `payload` - The serialized wire data
-- `options` - Optional configuration
-  - `coerceNullsToUndefined?: boolean` - Convert `null` values to `undefined`
+| Method | Description |
+|--------|-------------|
+| `Date.now()` | Current timestamp in milliseconds |
+| `Date.parse(dateString)` | Parse date string to timestamp |
+| `Date.UTC(year, month, ...)` | Create UTC timestamp |
 
-### Returns
+### Instance methods (getters)
 
-The reconstructed JavaScript value.
+| Method | Description |
+|--------|-------------|
+| `getDate()` | Day of month (1-31) |
+| `getDay()` | Day of week (0-6) |
+| `getFullYear()` | Four-digit year |
+| `getHours()` | Hours (0-23) |
+| `getMilliseconds()` | Milliseconds (0-999) |
+| `getMinutes()` | Minutes (0-59) |
+| `getMonth()` | Month (0-11) |
+| `getSeconds()` | Seconds (0-59) |
+| `getTime()` | Timestamp in milliseconds |
+| `getTimezoneOffset()` | UTC offset in minutes |
+
+UTC variants: `getUTCDate()`, `getUTCDay()`, `getUTCFullYear()`, etc.
+
+### Instance methods (setters)
+
+| Method | Description |
+|--------|-------------|
+| `setDate(date)` | Set day of month |
+| `setFullYear(year, month?, date?)` | Set year |
+| `setHours(hours, min?, sec?, ms?)` | Set hours |
+| `setMilliseconds(ms)` | Set milliseconds |
+| `setMinutes(min, sec?, ms?)` | Set minutes |
+| `setMonth(month, date?)` | Set month |
+| `setSeconds(sec, ms?)` | Set seconds |
+| `setTime(time)` | Set timestamp |
+
+UTC variants: `setUTCDate()`, `setUTCFullYear()`, etc.
+
+### String methods
+
+| Method | Description |
+|--------|-------------|
+| `toDateString()` | Date portion as string |
+| `toISOString()` | ISO 8601 format |
+| `toJSON()` | JSON representation |
+| `toLocaleDateString(locales?, options?)` | Locale date string |
+| `toLocaleString(locales?, options?)` | Locale date/time string |
+| `toLocaleTimeString(locales?, options?)` | Locale time string |
+| `toString()` | Full string representation |
+| `toTimeString()` | Time portion as string |
+| `toUTCString()` | UTC string |
+| `valueOf()` | Primitive value (timestamp) |
+
+---
+
+## Error
+
+JavaScript Error types for error handling.
+
+```python
+from pulse.js import Error, throw
+from pulse.js.error import TypeError, RangeError, ReferenceError
+
+@ps.javascript
+def example():
+    throw(Error("Something went wrong"))
+    throw(TypeError("Expected a string"))
+```
+
+### Error class
+
+| Property/Method | Description |
+|-----------------|-------------|
+| `message` | Error message |
+| `name` | Error type name |
+| `stack` | Stack trace (if available) |
+| `toString()` | String representation |
+
+### Error types
+
+All error types have the same interface as `Error`:
+
+- `Error` - Base error
+- `TypeError` - Type mismatch
+- `RangeError` - Value out of range
+- `ReferenceError` - Invalid reference
+- `SyntaxError` - Syntax error
+- `EvalError` - Eval error
+- `URIError` - URI handling error
+
+### Using throw
+
+The `throw` function converts to a JavaScript throw statement:
+
+```python
+from pulse.js import Error, throw
+
+@ps.javascript
+def validate(value):
+    if value < 0:
+        throw(RangeError("Value must be non-negative"))
+    return value
+```
+
+---
+
+## Map
+
+JavaScript Map - a key-value collection that preserves insertion order.
+
+```python
+from pulse.js import Map
+
+@ps.javascript
+def example():
+    m = Map()                         # -> new Map()
+    m = Map([["a", 1], ["b", 2]])     # -> new Map([["a", 1], ["b", 2]])
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `size` | Number of entries |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `clear()` | Remove all entries |
+| `delete(key)` | Remove entry, return True if existed |
+| `get(key)` | Get value for key |
+| `has(key)` | Check if key exists |
+| `set(key, value)` | Set entry, return Map for chaining |
+| `forEach(callback)` | Execute for each entry |
+| `keys()` | Iterator of keys |
+| `values()` | Iterator of values |
+| `entries()` | Iterator of [key, value] pairs |
 
 ### Example
 
-```ts
-import { deserialize } from "pulse-client";
+```python
+from pulse.js import Map
 
-const data = deserialize(wireData, {
-  coerceNullsToUndefined: true
-});
+@ps.javascript
+def build_lookup(items):
+    lookup = Map()
+    for item in items:
+        lookup.set(item.id, item)
+
+    if lookup.has("abc"):
+        return lookup.get("abc")
+    return None
 ```
 
 ---
 
-## Types
+## Number
 
-```ts
-type Primitive = number | string | boolean | null | undefined;
-type JSON<T> = T | Array<JSON<T>> | { [K: string]: JSON<T> };
-type PlainJSON = JSON<Primitive>;
-type Serializable = any;
-type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+JavaScript Number - numeric utilities.
 
-interface DeserializationOptions {
-  coerceNullsToUndefined?: boolean;
-}
+```python
+from pulse.js import Number
+
+@ps.javascript
+def example():
+    Number.isFinite(42)           # -> Number.isFinite(42)
+    Number.MAX_SAFE_INTEGER       # -> Number.MAX_SAFE_INTEGER
 ```
+
+### Constants
+
+| Constant | Description |
+|----------|-------------|
+| `EPSILON` | Smallest difference between numbers |
+| `MAX_SAFE_INTEGER` | Maximum safe integer (2^53 - 1) |
+| `MIN_SAFE_INTEGER` | Minimum safe integer |
+| `MAX_VALUE` | Maximum representable number |
+| `MIN_VALUE` | Minimum positive number |
+| `NaN` | Not-a-Number |
+| `NEGATIVE_INFINITY` | Negative infinity |
+| `POSITIVE_INFINITY` | Positive infinity |
+
+### Static methods
+
+| Method | Description |
+|--------|-------------|
+| `isFinite(value)` | Check if finite number |
+| `isInteger(value)` | Check if integer |
+| `isNaN(value)` | Check if NaN |
+| `isSafeInteger(value)` | Check if safe integer |
+| `parseFloat(string)` | Parse float from string |
+| `parseInt(string, radix=10)` | Parse integer from string |
+
+---
+
+## Object
+
+JavaScript Object utilities - static methods for object manipulation.
+
+```python
+from pulse.js import Object
+
+@ps.javascript
+def example():
+    keys = Object.keys(data)          # -> Object.keys(data)
+    merged = Object.assign({}, a, b)  # -> Object.assign({}, a, b)
+```
+
+### Static methods
+
+| Method | Description |
+|--------|-------------|
+| `assign(target, *sources)` | Copy properties to target |
+| `create(proto, properties?)` | Create with prototype |
+| `defineProperty(obj, prop, descriptor)` | Define property |
+| `defineProperties(obj, props)` | Define multiple properties |
+| `entries(obj)` | Array of [key, value] pairs |
+| `freeze(obj)` | Prevent modifications |
+| `fromEntries(entries)` | Create from [key, value] pairs |
+| `getOwnPropertyDescriptor(obj, prop)` | Get property descriptor |
+| `getOwnPropertyDescriptors(obj)` | Get all descriptors |
+| `getOwnPropertyNames(obj)` | All own property names |
+| `getOwnPropertySymbols(obj)` | All own Symbol properties |
+| `getPrototypeOf(obj)` | Get prototype |
+| `hasOwn(obj, prop)` | Check own property |
+| `is_(value1, value2)` | SameValue comparison (note underscore) |
+| `isExtensible(obj)` | Check if extensible |
+| `isFrozen(obj)` | Check if frozen |
+| `isSealed(obj)` | Check if sealed |
+| `keys(obj)` | Array of enumerable keys |
+| `preventExtensions(obj)` | Prevent adding properties |
+| `seal(obj)` | Prevent adding/removing properties |
+| `setPrototypeOf(obj, prototype)` | Set prototype |
+| `values(obj)` | Array of enumerable values |
+| `groupBy(items, keyFn)` | Group items by key (ES2024) |
+
+---
+
+## Promise
+
+JavaScript Promise - async operation handling.
+
+```python
+from pulse.js import Promise
+
+@ps.javascript
+async def example():
+    result = await Promise.resolve(42)
+    data = await fetch("/api/data")
+```
+
+### Constructor
+
+```python
+Promise(lambda resolve, reject: ...)
+```
+
+### Static methods
+
+| Method | Description |
+|--------|-------------|
+| `resolve(value?)` | Create resolved promise |
+| `reject(reason)` | Create rejected promise |
+| `all(iterable)` | Wait for all to resolve |
+| `allSettled(iterable)` | Wait for all to settle |
+| `any(iterable)` | First to fulfill |
+| `race(iterable)` | First to settle |
+| `withResolvers()` | Create with exposed resolve/reject (ES2024) |
+
+### Instance methods
+
+| Method | Description |
+|--------|-------------|
+| `then(onFulfilled?, onRejected?)` | Attach handlers |
+| `catch(onRejected)` | Attach rejection handler |
+| `finally_(onFinally)` | Attach settlement handler (note underscore) |
+
+### Async/await
+
+Promise supports Python's `await` syntax:
+
+```python
+@ps.javascript
+async def fetch_data():
+    response = await fetch("/api/data")
+    data = await response.json()
+    return data
+```
+
+---
+
+## RegExp
+
+JavaScript RegExp - regular expressions.
+
+```python
+from pulse.js import RegExp
+
+@ps.javascript
+def example():
+    pattern = RegExp(r"\d+", "g")     # -> new RegExp("\\d+", "g")
+    if pattern.test("abc123"):
+        matches = pattern.exec("abc123")
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `exec(string)` | Execute search, return matches or None |
+| `test(string)` | Test if pattern matches |
+| `toString()` | String representation |
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `source` | Pattern string |
+| `flags` | Flag string |
+| `glob` | Global flag (g) |
+| `ignoreCase` | Case-insensitive flag (i) |
+| `multiline` | Multiline flag (m) |
+| `dotAll` | Dot-all flag (s) |
+| `unicode` | Unicode flag (u) |
+| `sticky` | Sticky flag (y) |
+| `lastIndex` | Next search start index |
+
+---
+
+## Set
+
+JavaScript Set - a collection of unique values.
+
+```python
+from pulse.js import Set
+
+@ps.javascript
+def example():
+    s = Set()                         # -> new Set()
+    s = Set([1, 2, 3])                # -> new Set([1, 2, 3])
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `size` | Number of values |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `add(value)` | Add value, return Set for chaining |
+| `clear()` | Remove all values |
+| `delete(value)` | Remove value, return True if existed |
+| `has(value)` | Check if value exists |
+| `forEach(callback)` | Execute for each value |
+| `keys()` | Iterator of values (same as values) |
+| `values()` | Iterator of values |
+| `entries()` | Iterator of [value, value] pairs |
+
+### ES2024 Set methods
+
+| Method | Description |
+|--------|-------------|
+| `union(other)` | Values in either set |
+| `intersection(other)` | Values in both sets |
+| `difference(other)` | Values in this but not other |
+| `symmetricDifference(other)` | Values in either but not both |
+| `isSubsetOf(other)` | Check if subset |
+| `isSupersetOf(other)` | Check if superset |
+| `isDisjointFrom(other)` | Check if no overlap |
+
+---
+
+## String
+
+JavaScript String constructor and static methods.
+
+```python
+from pulse.js import String
+
+@ps.javascript
+def example():
+    String.fromCharCode(65)           # -> String.fromCharCode(65) -> "A"
+    String.fromCodePoint(0x1F600)     # -> String.fromCodePoint(0x1F600) -> emoji
+```
+
+### Static methods
+
+| Method | Description |
+|--------|-------------|
+| `fromCharCode(*codes)` | Create from char codes |
+| `fromCodePoint(*codePoints)` | Create from code points |
+| `raw(template, *substitutions)` | Raw template literal |
+
+---
+
+## WeakMap
+
+JavaScript WeakMap - key-value collection with weak key references.
+
+```python
+from pulse.js import WeakMap
+
+@ps.javascript
+def example():
+    cache = WeakMap()
+    cache.set(obj, "value")
+```
+
+Keys must be objects. Entries are garbage collected when keys are no longer referenced.
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `delete(key)` | Remove entry, return True if existed |
+| `get(key)` | Get value for key |
+| `has(key)` | Check if key exists |
+| `set(key, value)` | Set entry, return WeakMap for chaining |
+
+---
+
+## WeakSet
+
+JavaScript WeakSet - collection with weak value references.
+
+```python
+from pulse.js import WeakSet
+
+@ps.javascript
+def example():
+    seen = WeakSet()
+    seen.add(obj)
+```
+
+Values must be objects. Entries are garbage collected when values are no longer referenced.
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `add(value)` | Add value, return WeakSet for chaining |
+| `delete(value)` | Remove value, return True if existed |
+| `has(value)` | Check if value exists |
+
+---
+
+## Special exports
+
+### obj
+
+Create plain JavaScript object literals (not Maps):
+
+```python
+from pulse.js import obj
+
+@ps.javascript
+def example():
+    style = obj(color="red", fontSize="14px")  # -> { color: "red", fontSize: "14px" }
+
+    # With spread
+    merged = obj(**base, newKey="value")       # -> { ...base, newKey: "value" }
+```
+
+Use `obj()` when you need a plain JS object, like for React props or style objects. Python `dict()` transpiles to `new Map()`.
+
+### undefined
+
+The JavaScript `undefined` value:
+
+```python
+from pulse.js import undefined
+
+@ps.javascript
+def example():
+    if value is undefined:
+        return "missing"
+```
+
+### throw
+
+Throw JavaScript errors:
+
+```python
+from pulse.js import throw, Error
+
+@ps.javascript
+def validate(x):
+    if x < 0:
+        throw(Error("Must be positive"))
+```
+
+---
+
+## See also
+
+- [Namespaces reference](/docs/reference/pulse-js/namespaces) - Math, JSON, console, window, document
+- [React reference](/docs/reference/pulse-js/react) - Hooks and components
+- [pulse.js overview](/docs/reference/pulse-js/) - Module overview

@@ -6,8 +6,24 @@ AI coding assistant skills for Pulse development. These files help AI tools unde
 
 | Skill | Description |
 |-------|-------------|
-| [pulse-framework](./pulse-framework/SKILL.md) | Core Pulse framework patterns and APIs |
+| [pulse](./pulse/SKILL.md) | Complete Pulse framework reference with reactive state, components, routing, queries, channels, and JS interop |
 | [pulse-mantine](./pulse-mantine/SKILL.md) | Mantine UI components for Pulse |
+
+### Pulse Skill Structure
+
+The main `pulse` skill includes detailed reference documentation:
+
+```
+pulse/
+├── SKILL.md                    # Core framework reference (~4k words)
+└── references/
+    ├── reactive.md             # Signal, Computed, Effect, containers
+    ├── queries.md              # Query, mutation, infinite queries
+    ├── channels.md             # Real-time bidirectional communication
+    ├── middleware.md           # Request middleware, auth patterns
+    ├── js-interop.md           # React components, JS execution
+    └── dom.md                  # HTML elements and events
+```
 
 ## Installation
 
@@ -19,11 +35,18 @@ Add skills to your `CLAUDE.md`:
 # Skills
 
 Include these skills for Pulse development:
-- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-framework/SKILL.md
+- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse/SKILL.md
 - https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-mantine/SKILL.md
 ```
 
 Or copy the SKILL.md contents directly into your `CLAUDE.md`.
+
+For advanced topics, also include reference files:
+```markdown
+- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse/references/reactive.md
+- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse/references/queries.md
+- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse/references/channels.md
+```
 
 ### Codex CLI
 
@@ -33,7 +56,7 @@ Add to your `AGENTS.md` or `codex.md`:
 # Skills
 
 Include these skills:
-@import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-framework/SKILL.md
+@import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse/SKILL.md
 @import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-mantine/SKILL.md
 ```
 
@@ -44,7 +67,7 @@ Add to `.cursorrules`:
 ```text
 # Pulse Framework Skills
 
-[Paste contents of pulse-framework/SKILL.md here]
+[Paste contents of pulse/SKILL.md here]
 
 # Pulse Mantine Skills
 
@@ -59,7 +82,7 @@ Add to `~/.opencode/agents.md` or project-level `AGENTS.md`:
 # Skills
 
 Include these skills for Pulse development:
-@import skills/pulse-framework/SKILL.md
+@import skills/pulse/SKILL.md
 @import skills/pulse-mantine/SKILL.md
 ```
 
@@ -85,7 +108,9 @@ your-project/
 ├── skills/
 │   ├── README.md
 │   └── my-domain/
-│       └── SKILL.md
+│       ├── SKILL.md
+│       └── references/
+│           └── api.md
 ├── CLAUDE.md (or AGENTS.md)
 └── ...
 ```

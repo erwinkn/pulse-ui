@@ -1,0 +1,346 @@
+---
+title: "Classes"
+description: "Core classes for Pulse client functionality"
+---
+
+# Classes
+
+Core classes for Pulse client functionality.
+
+---
+
+## ChannelBridge
+
+Manages bidirectional communication over a Pulse channel. You get a ChannelBridge instance from the `usePulseChannel` hook.
+
+```ts
+class ChannelBridge {
+  readonly id: string;
+
+  emit(event: string, payload?: any): void;
+  request(event: string, payload?: any): Promise<any>;
+  on(event: string, handler: ChannelEventHandler): () => void;
+}
+
+type ChannelEventHandler = (payload: any) => any | Promise<any>;
+```
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `string` | The channel identifier |
+
+### Methods
+
+#### emit
+
+Sends a fire-and-forget event to the server. The server receives the event but does not send a response.
+
+```ts
+emit(event: string, payload?: any): void
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event` | `string` | Event name |
+| `payload` | `any` | Optional event data |
+
+**Example:**
+
+```ts
+const channel = usePulseChannel("notifications");
+
+// Notify server of user activity (no response expected)
+channel.emit("user_active", { page: "/dashboard" });
+
+// Send typing indicator
+channel.emit("typing", { conversationId: "123" });
+```
+
+#### request
+
+Sends a request and waits for the server's response. This is like a remote procedure call.
+
+```ts
+request(event: string, payload?: any): Promise<any>
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event` | `string` | Event name |
+| `payload` | `any` | Optional request data |
+
+**Returns:** Promise resolving to the server's response.
+
+**Throws:** `PulseChannelResetError` if the channel closes before the response arrives.
+
+**Example:**
+
+```ts
+const channel = usePulseChannel("api");
+
+// Fetch data from server
+const users = await channel.request("get_users", { limit: 10 });
+
+// Perform action and get result
+const result = await channel.request("process_order", {
+  items: ["item-1", "item-2"],
+  shipping: "express",
+});
+```
+
+#### on
+
+Registers an event handler. Returns a function to unsubscribe.
+
+```ts
+on(event: string, handler: ChannelEventHandler): () => void
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event` | `string` | Event name to listen for |
+| `handler` | `ChannelEventHandler` | Callback function |
+
+**Returns:** Unsubscribe function.
+
+The handler can be sync or async. If multiple handlers are registered for the same event, all are called. For request-response patterns, the first handler that returns a non-undefined value provides the response.
+
+**Example:**
+
+```ts
+const channel = usePulseChannel("notifications");
+
+// Subscribe to events
+useEffect(() => {
+  const unsubscribe = channel.on("notification", (data) => {
+    showToast(data.message);
+  });
+
+  return unsubscribe;
+}, [channel]);
+
+// Handle server requests
+useEffect(() => {
+  return channel.on("confirm_action", async (data) => {
+    const confirmed = await showConfirmDialog(data.message);
+    return { confirmed };
+  });
+}, [channel]);
+```
+
+### Event Backlog
+
+If an event arrives before any handler is registered, it's queued in a backlog. Once a handler is registered for that event, backlogged events are delivered immediately. This prevents race conditions during component mounting.
+
+### Complete Example
+
+```tsx
+import { usePulseChannel, PulseChannelResetError } from "pulse-ui-client";
+import { useState, useEffect } from "react";
+
+function LiveAuction({ auctionId }: { auctionId: string }) {
+  const channel = usePulseChannel(`auction-${auctionId}`);
+  const [currentBid, setCurrentBid] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  // Listen for bid updates
+  useEffect(() => {
+    return channel.on("bid_update", (data) => {
+      setCurrentBid(data.amount);
+    });
+  }, [channel]);
+
+  // Place a bid
+  const placeBid = async (amount: number) => {
+    try {
+      const result = await channel.request("place_bid", { amount });
+      if (!result.success) {
+        setError(result.error);
+      }
+    } catch (e) {
+      if (e instanceof PulseChannelResetError) {
+        setError("Connection lost. Please refresh.");
+      }
+    }
+  };
+
+  return (
+    <div>
+      <div>Current bid: ${currentBid}</div>
+      {error && <div className="error">{error}</div>}
+      <button onClick={() => placeBid(currentBid + 10)}>
+        Bid ${currentBid + 10}
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## PulseChannelResetError
+
+Error thrown when a channel operation fails due to channel closure or disconnection.
+
+```ts
+class PulseChannelResetError extends Error {
+  name: "PulseChannelResetError";
+}
+```
+
+### When It's Thrown
+
+- Channel is closed by the server
+- WebSocket connection is lost
+- `request()` is pending when the channel closes
+- Attempting to use a closed channel
+
+### Example
+
+```ts
+import { PulseChannelResetError } from "pulse-ui-client";
+
+async function fetchData(channel: ChannelBridge) {
+  try {
+    return await channel.request("get_data");
+  } catch (error) {
+    if (error instanceof PulseChannelResetError) {
+      // Handle channel closure gracefully
+      console.log("Channel closed:", error.message);
+      return null;
+    }
+    throw error;
+  }
+}
+```
+
+---
+
+## VDOMRenderer
+
+Converts VDOM trees to React elements and applies incremental updates. This is used internally by `PulseView`, but you can use it directly for custom rendering scenarios.
+
+```ts
+class VDOMRenderer {
+  constructor(
+    client: PulseSocketIOClient,
+    path: string,
+    registry?: ComponentRegistry
+  );
+
+  init(view: PulsePrerenderView): ReactNode;
+  applyUpdates(tree: ReactNode, updates: VDOMUpdate[]): ReactNode;
+  renderNode(node: VDOMNode, currentPath?: string): ReactNode;
+  evaluateExpr(expr: VDOMNode): unknown;
+}
+```
+
+### Constructor
+
+```ts
+constructor(
+  client: PulseSocketIOClient,
+  path: string,
+  registry?: ComponentRegistry
+)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `client` | `PulseSocketIOClient` | The Pulse client for callbacks |
+| `path` | `string` | View path for callback routing |
+| `registry` | `ComponentRegistry` | Optional component registry |
+
+### Methods
+
+#### init
+
+Initializes rendering from a prerendered view.
+
+```ts
+init(view: PulsePrerenderView): ReactNode
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `view` | `PulsePrerenderView` | View with VDOM data |
+
+**Returns:** React node tree.
+
+#### applyUpdates
+
+Applies incremental VDOM updates to an existing React tree. This is the core of Pulse's efficient updates.
+
+```ts
+applyUpdates(tree: ReactNode, updates: VDOMUpdate[]): ReactNode
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tree` | `ReactNode` | Current React tree |
+| `updates` | `VDOMUpdate[]` | Updates from server |
+
+**Returns:** New React tree with updates applied.
+
+#### renderNode
+
+Renders a single VDOM node to a React node.
+
+```ts
+renderNode(node: VDOMNode, currentPath?: string): ReactNode
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `node` | `VDOMNode` | VDOM node to render |
+| `currentPath` | `string` | Optional path for callbacks |
+
+**Returns:** React node.
+
+#### evaluateExpr
+
+Evaluates a VDOM expression node. Used for `run_js` support and computed props.
+
+```ts
+evaluateExpr(expr: VDOMNode): unknown
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `expr` | `VDOMNode` | Expression node to evaluate |
+
+**Returns:** Evaluated result.
+
+### Example: Custom Renderer
+
+```tsx
+import { VDOMRenderer, usePulseClient, usePulsePrerender } from "pulse-ui-client";
+import { useMemo, useState, useEffect } from "react";
+
+function CustomView({ path }: { path: string }) {
+  const client = usePulseClient();
+  const prerender = usePulsePrerender(path);
+
+  const renderer = useMemo(
+    () => new VDOMRenderer(client, path, {}),
+    [client, path]
+  );
+
+  const [tree, setTree] = useState(() => renderer.init(prerender));
+
+  // Apply updates when they arrive (simplified)
+  // In practice, you'd subscribe via client.attach()
+
+  return <div className="custom-wrapper">{tree}</div>;
+}
+```
+
+---
+
+## See Also
+
+- [Hooks](/docs/reference/pulse-client/hooks) - usePulseChannel hook
+- [Types](/docs/reference/pulse-client/types) - VDOM and update types
+- [Serialization](/docs/reference/pulse-client/serialization) - Wire format

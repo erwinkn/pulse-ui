@@ -1,0 +1,273 @@
+---
+title: "Hooks"
+description: "React hooks for Pulse applications"
+---
+
+# Hooks
+
+React hooks for accessing Pulse functionality.
+
+---
+
+## usePulseClient
+
+Hook to access the Pulse client instance. Use this when you need direct access to connection status or low-level client operations.
+
+```ts
+import { usePulseClient } from "pulse-ui-client";
+
+function usePulseClient(): PulseSocketIOClient
+```
+
+### Returns
+
+Returns the `PulseSocketIOClient` instance managing the WebSocket connection.
+
+### Throws
+
+Throws an error if used outside of a `PulseProvider`.
+
+### Example: Connection Status
+
+```tsx
+import { usePulseClient } from "pulse-ui-client";
+import { useState, useEffect } from "react";
+
+function ConnectionIndicator() {
+  const client = usePulseClient();
+  const [status, setStatus] = useState<"ok" | "connecting" | "reconnecting" | "error">("ok");
+
+  useEffect(() => {
+    return client.onConnectionChange(setStatus);
+  }, [client]);
+
+  return (
+    <div className={`status-${status}`}>
+      {status === "ok" && "Connected"}
+      {status === "connecting" && "Connecting..."}
+      {status === "reconnecting" && "Reconnecting..."}
+      {status === "error" && "Connection failed"}
+    </div>
+  );
+}
+```
+
+### Example: Check Connection Before Action
+
+```tsx
+import { usePulseClient } from "pulse-ui-client";
+
+function SaveButton({ onSave }: { onSave: () => void }) {
+  const client = usePulseClient();
+
+  const handleClick = () => {
+    if (!client.isConnected()) {
+      alert("Cannot save while offline");
+      return;
+    }
+    onSave();
+  };
+
+  return <button onClick={handleClick}>Save</button>;
+}
+```
+
+### Client Methods
+
+The returned client has these methods:
+
+```ts
+interface PulseClient {
+  // Connection
+  connect(): Promise<void>;
+  disconnect(): void;
+  isConnected(): boolean;
+  onConnectionChange(listener: ConnectionStatusListener): () => void;
+
+  // Route management
+  updateRoute(path: string, routeInfo: RouteInfo): void;
+  attach(path: string, view: MountedView): void;
+  detach(path: string): void;
+
+  // Callbacks
+  invokeCallback(path: string, callback: string, args: any[]): void;
+}
+```
+
+Most of these are used internally by `PulseView`. The most useful for app code are `isConnected()` and `onConnectionChange()`.
+
+---
+
+## usePulseChannel
+
+Hook to subscribe to a Pulse channel for bidirectional communication. Channels enable real-time messaging patterns like chat, notifications, or streaming data.
+
+```ts
+import { usePulseChannel } from "pulse-ui-client";
+
+function usePulseChannel(channelId: string): ChannelBridge
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `channelId` | `string` | Non-empty string identifying the channel |
+
+### Returns
+
+Returns a `ChannelBridge` instance for sending and receiving messages.
+
+### Throws
+
+- Throws if `channelId` is empty
+- Throws if used outside of a `PulseProvider`
+
+### Lifecycle
+
+The hook manages channel subscription automatically:
+
+1. On mount: acquires a reference to the channel
+2. On unmount: releases the reference
+3. When all references are released: channel closes
+
+Multiple components can subscribe to the same channel. The channel stays open as long as at least one component is subscribed.
+
+### Example: Chat Room
+
+```tsx
+import { usePulseChannel } from "pulse-ui-client";
+import { useState, useEffect } from "react";
+
+interface Message {
+  id: string;
+  user: string;
+  text: string;
+}
+
+function ChatRoom({ roomId }: { roomId: string }) {
+  const channel = usePulseChannel(`chat-${roomId}`);
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  useEffect(() => {
+    // Listen for new messages
+    const unsubscribe = channel.on("message", (msg: Message) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+
+    return unsubscribe;
+  }, [channel]);
+
+  const sendMessage = (text: string) => {
+    channel.emit("message", { text });
+  };
+
+  return (
+    <div>
+      {messages.map((m) => (
+        <div key={m.id}>{m.user}: {m.text}</div>
+      ))}
+      <input
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            sendMessage(e.currentTarget.value);
+            e.currentTarget.value = "";
+          }
+        }}
+      />
+    </div>
+  );
+}
+```
+
+### Example: Request-Response
+
+```tsx
+import { usePulseChannel } from "pulse-ui-client";
+import { useState } from "react";
+
+function UserSearch() {
+  const channel = usePulseChannel("user-search");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const search = async (query: string) => {
+    setLoading(true);
+    try {
+      const users = await channel.request("search", { query });
+      setResults(users);
+    } catch (error) {
+      console.error("Search failed:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <input onChange={(e) => search(e.target.value)} />
+      {loading && <div>Searching...</div>}
+      {results.map((user) => (
+        <div key={user.id}>{user.name}</div>
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+## usePulsePrerender
+
+Hook to access prerendered view data. Useful for custom rendering scenarios or accessing the raw VDOM.
+
+```ts
+import { usePulsePrerender } from "pulse-ui-client";
+
+function usePulsePrerender(path: string): PulsePrerenderView
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `string` | View path to get prerender data for |
+
+### Returns
+
+```ts
+interface PulsePrerenderView {
+  vdom: VDOM;
+}
+```
+
+### Throws
+
+- Throws if used outside of a `PulseProvider`
+- Throws if no prerender data exists for the given path
+
+### Example
+
+```tsx
+import { usePulsePrerender } from "pulse-ui-client";
+
+function DebugView({ path }: { path: string }) {
+  const prerender = usePulsePrerender(path);
+
+  return (
+    <pre>
+      {JSON.stringify(prerender.vdom, null, 2)}
+    </pre>
+  );
+}
+```
+
+This hook is primarily used internally by `PulseView`. Most applications won't need it directly.
+
+---
+
+## See Also
+
+- [Components](/docs/reference/pulse-client/components) - PulseProvider, PulseView, PulseForm
+- [Classes](/docs/reference/pulse-client/classes) - ChannelBridge, VDOMRenderer
+- [Channels guide](/docs/guide/channels) - How to use channels

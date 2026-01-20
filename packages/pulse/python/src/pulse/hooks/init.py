@@ -57,13 +57,16 @@ class InitContext:
 		saved: Dictionary of captured variable values.
 
 	Example:
-		>>> def my_component():
-		...     with ps.init():
-		...         counter = 0
-		...         api = ApiClient()
-		...         data = fetch_initial_data()
-		...     # counter, api, data retain their values across renders
-		...     return m.Text(f"Counter: {counter}")
+
+	```python
+	def my_component():
+	    with ps.init():
+	        counter = 0
+	        api = ApiClient()
+	        data = fetch_initial_data()
+	    # counter, api, data retain their values across renders
+	    return m.Text(f"Counter: {counter}")
+	```
 	"""
 
 	callsite: tuple[Any, int] | None
@@ -145,13 +148,16 @@ def init() -> InitContext:
 		InitContext: Context manager that captures and restores variables.
 
 	Example:
-		>>> def my_component():
-		...     with ps.init():
-		...         counter = 0
-		...         api = ApiClient()
-		...         data = fetch_initial_data()
-		...     # counter, api, data retain their values across renders
-		...     return m.Text(f"Counter: {counter}")
+
+	```python
+	def my_component():
+	    with ps.init():
+	        counter = 0
+	        api = ApiClient()
+	        data = fetch_initial_data()
+	    # counter, api, data retain their values across renders
+	    return m.Text(f"Counter: {counter}")
+	```
 
 	Rules:
 		- Can only be used once per component

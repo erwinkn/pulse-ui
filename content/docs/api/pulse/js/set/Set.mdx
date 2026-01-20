@@ -1,0 +1,493 @@
+---
+title: Set
+---
+
+JavaScript Set - a collection of unique values.
+
+Set[T] stores unique values of type T in insertion order.
+
+## Attributes
+
+<PyAttribute name={"size"} type={"int"} value={null}>
+
+The number of values in the Set.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, iterable=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, iterable: _Iterable[T] | None = None, /) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"iterable"} type={"_Iterable[T] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"add"} type={"(self, value) -> Set[T]"}>
+
+Add a value to the Set. Returns the Set for chaining.
+
+<PySourceCode >
+
+```python
+def add(self, value: T) -> "Set[T]":
+	"""Add a value to the Set. Returns the Set for chaining."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"T"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.set.Set[pulse.js.set.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"clear"} type={"(self) -> None"}>
+
+Remove all values from the Set.
+
+<PySourceCode >
+
+```python
+def clear(self) -> None:
+	"""Remove all values from the Set."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"delete"} type={"(self, value) -> bool"}>
+
+Remove a value. Returns True if the value existed.
+
+<PySourceCode >
+
+```python
+def delete(self, value: T) -> bool:
+	"""Remove a value. Returns True if the value existed."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"T"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"has"} type={"(self, value) -> bool"}>
+
+Return True if the value exists in the Set.
+
+<PySourceCode >
+
+```python
+def has(self, value: T) -> bool:
+	"""Return True if the value exists in the Set."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"T"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"forEach"} type={"(self, callback, thisArg=None) -> None"}>
+
+Execute a function for each value.
+
+Note: callback receives (value, value, set) for compatibility with Map.
+
+<PySourceCode >
+
+```python
+def forEach(
+	self,
+	callback: _Callable[[T, T, "Set[T]"], None],
+	thisArg: _Any | None = None,
+	/,
+) -> None:
+	"""Execute a function for each value.
+
+	Note: callback receives (value, value, set) for compatibility with Map.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"callback"} type={"_Callable[[T, T, Set[T]], None]"} value={null} />
+<PyParameter name={"thisArg"} type={"_Any | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"keys"} type={"(self) -> _Iterable[T]"}>
+
+Return an iterator of values (same as values()).
+
+<PySourceCode >
+
+```python
+def keys(self) -> _Iterable[T]:
+	"""Return an iterator of values (same as values())."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterable[pulse.js.set.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"values"} type={"(self) -> _Iterable[T]"}>
+
+Return an iterator of values.
+
+<PySourceCode >
+
+```python
+def values(self) -> _Iterable[T]:
+	"""Return an iterator of values."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterable[pulse.js.set.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"entries"} type={"(self) -> _Iterable[tuple[T, T]]"}>
+
+Return an iterator of [value, value] pairs.
+
+<PySourceCode >
+
+```python
+def entries(self) -> _Iterable[tuple[T, T]]:
+	"""Return an iterator of [value, value] pairs."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterable[tuple[pulse.js.set.T, pulse.js.set.T]]"} />
+
+</PyFunction>
+
+<PyFunction name={"__iter__"} type={"(self) -> _Iterator[T]"}>
+
+Iterate over values.
+
+<PySourceCode >
+
+```python
+def __iter__(self) -> _Iterator[T]:
+	"""Iterate over values."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterator[pulse.js.set.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"__len__"} type={"(self) -> int"}>
+
+Return the number of values (same as size).
+
+<PySourceCode >
+
+```python
+def __len__(self) -> int:
+	"""Return the number of values (same as size)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"int"} />
+
+</PyFunction>
+
+<PyFunction name={"__contains__"} type={"(self, value) -> bool"}>
+
+Check if value exists in the Set (same as has).
+
+<PySourceCode >
+
+```python
+def __contains__(self, value: T) -> bool:
+	"""Check if value exists in the Set (same as has)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"T"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"union"} type={"(self, other) -> Set[T]"}>
+
+Return a new Set with values from both sets (ES2024).
+
+<PySourceCode >
+
+```python
+def union(self, other: "Set[T]") -> "Set[T]":
+	"""Return a new Set with values from both sets (ES2024)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Set[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.set.Set[pulse.js.set.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"intersection"} type={"(self, other) -> Set[T]"}>
+
+Return a new Set with values in both sets (ES2024).
+
+<PySourceCode >
+
+```python
+def intersection(self, other: "Set[T]") -> "Set[T]":
+	"""Return a new Set with values in both sets (ES2024)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Set[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.set.Set[pulse.js.set.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"difference"} type={"(self, other) -> Set[T]"}>
+
+Return a new Set with values in this but not other (ES2024).
+
+<PySourceCode >
+
+```python
+def difference(self, other: "Set[T]") -> "Set[T]":
+	"""Return a new Set with values in this but not other (ES2024)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Set[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.set.Set[pulse.js.set.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"symmetricDifference"} type={"(self, other) -> Set[T]"}>
+
+Return a new Set with values in either but not both (ES2024).
+
+<PySourceCode >
+
+```python
+def symmetricDifference(self, other: "Set[T]") -> "Set[T]":
+	"""Return a new Set with values in either but not both (ES2024)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Set[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.set.Set[pulse.js.set.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"isSubsetOf"} type={"(self, other) -> bool"}>
+
+Return True if all values are in other (ES2024).
+
+<PySourceCode >
+
+```python
+def isSubsetOf(self, other: "Set[T]") -> bool:
+	"""Return True if all values are in other (ES2024)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Set[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"isSupersetOf"} type={"(self, other) -> bool"}>
+
+Return True if all values of other are in this (ES2024).
+
+<PySourceCode >
+
+```python
+def isSupersetOf(self, other: "Set[T]") -> bool:
+	"""Return True if all values of other are in this (ES2024)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Set[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"isDisjointFrom"} type={"(self, other) -> bool"}>
+
+Return True if no values are in common (ES2024).
+
+<PySourceCode >
+
+```python
+def isDisjointFrom(self, other: "Set[T]") -> bool:
+	"""Return True if no values are in common (ES2024)."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Set[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>

@@ -1,0 +1,173 @@
+---
+title: Number
+---
+
+JavaScript Number constructor and namespace.
+
+## Attributes
+
+<PyAttribute name={"EPSILON"} type={"float"} value={null} />
+
+<PyAttribute name={"MAX_SAFE_INTEGER"} type={"int"} value={null} />
+
+<PyAttribute name={"MAX_VALUE"} type={"float"} value={null} />
+
+<PyAttribute name={"MIN_SAFE_INTEGER"} type={"int"} value={null} />
+
+<PyAttribute name={"MIN_VALUE"} type={"float"} value={null} />
+
+<PyAttribute name={"NaN"} type={"float"} value={null} />
+
+<PyAttribute name={"NEGATIVE_INFINITY"} type={"float"} value={null} />
+
+<PyAttribute name={"POSITIVE_INFINITY"} type={"float"} value={null} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, value) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, value: _Any) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"_Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"isFinite"} type={"(value) -> bool"}>
+
+<PySourceCode >
+
+```python
+@staticmethod
+def isFinite(value: float) -> bool: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"isInteger"} type={"(value) -> bool"}>
+
+<PySourceCode >
+
+```python
+@staticmethod
+def isInteger(value: float) -> bool: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"isNaN"} type={"(value) -> bool"}>
+
+<PySourceCode >
+
+```python
+@staticmethod
+def isNaN(value: float) -> bool: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"isSafeInteger"} type={"(value) -> bool"}>
+
+<PySourceCode >
+
+```python
+@staticmethod
+def isSafeInteger(value: float) -> bool: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"parseFloat"} type={"(string) -> float"}>
+
+<PySourceCode >
+
+```python
+@staticmethod
+def parseFloat(string: str) -> float: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"string"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"float"} />
+
+</PyFunction>
+
+<PyFunction name={"parseInt"} type={"(string, radix=10) -> int"}>
+
+<PySourceCode >
+
+```python
+@staticmethod
+def parseInt(string: str, radix: int = 10, /) -> int: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"string"} type={"str"} value={null} />
+<PyParameter name={"radix"} type={"int"} value={"10"} />
+
+</div>
+
+<PyFunctionReturn type={"int"} />
+
+</PyFunction>

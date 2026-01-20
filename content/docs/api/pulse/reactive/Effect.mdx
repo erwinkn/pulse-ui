@@ -1,0 +1,734 @@
+---
+title: Effect
+---
+
+Runs a function when dependencies change.
+
+Synchronous effect and base class. Use AsyncEffect for async effects.
+Both are isinstance(Effect).
+
+## Attributes
+
+<PyAttribute name={"fn"} type={"EffectFn"} value={"fn"} />
+
+<PyAttribute name={"name"} type={"str | None"} value={"name"} />
+
+<PyAttribute name={"on_error"} type={"Callable[[Exception], None] | None"} value={"on_error"} />
+
+<PyAttribute name={"runs"} type={"int"} value={"0"} />
+
+<PyAttribute name={"last_run"} type={"int"} value={"-1"} />
+
+<PyAttribute name={"immediate"} type={"bool"} value={"immediate"} />
+
+<PyAttribute name={"explicit_deps"} type={"bool"} value={"deps is not None"} />
+
+<PyAttribute name={"batch"} type={"Batch | None"} value={"None"} />
+
+<PyAttribute name={"paused"} type={"bool"} value={"False"} />
+
+<PyAttribute name={"cleanup_fn"} type={"EffectCleanup | None"} value={"None"} />
+
+<PyAttribute name={"deps"} type={"dict[Signal[Any] | Computed[Any], int]"} value={"{}"} />
+
+<PyAttribute name={"children"} type={"list[Effect]"} value={"[]"} />
+
+<PyAttribute name={"parent"} type={"Effect | None"} value={"None"} />
+
+<PyAttribute name={"scope"} type={"Scope | None"} value={"None"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, fn, name=None, immediate=False, lazy=False, on_error=None, deps=None, interval=None)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	fn: EffectFn,
+	name: str | None = None,
+	immediate: bool = False,
+	lazy: bool = False,
+	on_error: Callable[[Exception], None] | None = None,
+	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	interval: float | None = None,
+):
+	self.fn = fn  # type: ignore[assignment]
+	self.name = name
+	self.on_error = on_error
+	self.cleanup_fn: EffectCleanup | None = None
+	self.deps: dict[Signal[Any] | Computed[Any], int] = {}
+	self.children: list[Effect] = []
+	self.parent: Effect | None = None
+	self.runs = 0
+	self.last_run = -1
+	self.scope: Scope | None = None
+	self.batch = None
+	self.explicit_deps = deps is not None
+	self.immediate = immediate
+	self._lazy = lazy
+	self._interval = interval
+	self._interval_handle = None
+	self.paused = False
+
+	if immediate and lazy:
+		raise ValueError("An effect cannot be boht immediate and lazy")
+
+	# Register explicit dependencies immediately upon initialization
+	if deps is not None:
+		self.deps = {dep: dep.last_change for dep in deps}
+		for dep in deps:
+			dep.add_obs(self)
+
+	rc = REACTIVE_CONTEXT.get()
+	if rc.scope is not None:
+		rc.scope.register_effect(self)
+
+	if immediate:
+		self.run()
+	elif not lazy:
+		self.schedule()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"EffectFn"} value={null} />
+<PyParameter name={"name"} type={"str | None"} value={"None"} />
+<PyParameter name={"immediate"} type={"bool"} value={"False"} />
+<PyParameter name={"lazy"} type={"bool"} value={"False"} />
+<PyParameter name={"on_error"} type={"Callable[[Exception], None] | None"} value={"None"} />
+<PyParameter name={"deps"} type={"list[Signal[Any] | Computed[Any]] | None"} value={"None"} />
+<PyParameter name={"interval"} type={"float | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_cleanup_before_run"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def _cleanup_before_run(self):
+	for child in self.children:
+		child._cleanup_before_run()
+	if self.cleanup_fn:
+		self.cleanup_fn()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self)"}>
+
+Clean up the effect, run cleanup function, remove from dependencies.
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self):
+	"""Clean up the effect, run cleanup function, remove from dependencies."""
+	self.cancel(cancel_interval=True)
+	for child in self.children.copy():
+		child.dispose()
+	if self.cleanup_fn:
+		self.cleanup_fn()
+	for dep in self.deps:
+		dep.obs.remove(self)
+	if self.parent:
+		self.parent.children.remove(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_schedule_interval"} type={"(self)"}>
+
+Schedule the next interval run if interval is set.
+
+<PySourceCode >
+
+```python
+def _schedule_interval(self):
+	"""Schedule the next interval run if interval is set."""
+	if self._interval is not None and self._interval > 0:
+		from pulse.helpers import later
+
+		self._interval_handle = later(self._interval, self._on_interval)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_on_interval"} type={"(self)"}>
+
+Called when the interval timer fires.
+
+<PySourceCode >
+
+```python
+def _on_interval(self):
+	"""Called when the interval timer fires."""
+	if self._interval is not None:
+		# Run directly instead of scheduling - interval runs are unconditional
+		self.run()
+		self._schedule_interval()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_cancel_interval"} type={"(self)"}>
+
+Cancel the interval timer.
+
+<PySourceCode >
+
+```python
+def _cancel_interval(self):
+	"""Cancel the interval timer."""
+	if self._interval_handle is not None:
+		self._interval_handle.cancel()
+		self._interval_handle = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"pause"} type={"(self)"}>
+
+Pause the effect; it won't run when dependencies change.
+
+<PySourceCode >
+
+```python
+def pause(self):
+	"""Pause the effect; it won't run when dependencies change."""
+	self.paused = True
+	self.cancel(cancel_interval=True)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"resume"} type={"(self)"}>
+
+Resume a paused effect and schedule it to run.
+
+<PySourceCode >
+
+```python
+def resume(self):
+	"""Resume a paused effect and schedule it to run."""
+	if self.paused:
+		self.paused = False
+		self.schedule()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"schedule"} type={"(self)"}>
+
+Schedule the effect to run in the current batch.
+
+<PySourceCode >
+
+```python
+def schedule(self):
+	"""Schedule the effect to run in the current batch."""
+	if self.paused:
+		return
+	# Immediate effects run right away when scheduled and do not enter a batch
+	if self.immediate:
+		self.run()
+		return
+	rc = REACTIVE_CONTEXT.get()
+	batch = rc.batch
+	batch.register_effect(self)
+	self.batch = batch
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"cancel"} type={"(self, cancel_interval=True)"}>
+
+Cancel the effect. For sync effects, removes from batch.
+For async effects (override), also cancels the running task.
+
+<PySourceCode >
+
+```python
+def cancel(self, cancel_interval: bool = True):
+	"""
+	Cancel the effect. For sync effects, removes from batch.
+	For async effects (override), also cancels the running task.
+
+	Args:
+		cancel_interval: If True (default), also cancels the interval timer.
+	"""
+	if self.batch is not None:
+		self.batch.effects.remove(self)
+		self.batch = None
+	if cancel_interval:
+		self._cancel_interval()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_interval"} type={"bool"} value={"True"}>
+
+If True (default), also cancels the interval timer.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"push_change"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def push_change(self):
+	if self.paused:
+		return
+	# Short-circuit if already scheduled in a batch.
+	# This avoids redundant schedule() calls and O(n) list checks
+	# when the same effect is reached through multiple dependency paths.
+	if self.batch is not None:
+		return
+	self.schedule()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"should_run"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def should_run(self):
+	return self.runs == 0 or self._deps_changed_since_last_run()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_deps_changed_since_last_run"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def _deps_changed_since_last_run(self):
+	for dep in self.deps:
+		if isinstance(dep, Computed):
+			dep.recompute_if_necessary()
+		last_seen = self.deps.get(dep, -1)
+		if dep.last_change > last_seen:
+			return True
+	return False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__call__"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def __call__(self):
+	self.run()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"flush"} type={"(self)"}>
+
+If scheduled in a batch, remove and run immediately.
+
+<PySourceCode >
+
+```python
+def flush(self):
+	"""If scheduled in a batch, remove and run immediately."""
+	if self.batch is not None:
+		self.batch.effects.remove(self)
+		self.batch = None
+		# Run now (respects IS_PRERENDERING and error handling)
+		self.run()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"handle_error"} type={"(self, exc) -> None"}>
+
+<PySourceCode >
+
+```python
+def handle_error(self, exc: Exception) -> None:
+	if callable(self.on_error):
+		self.on_error(exc)
+		return
+	handler = getattr(REACTIVE_CONTEXT.get(), "on_effect_error", None)
+	if callable(handler):
+		handler(self, exc)
+		return
+	raise exc
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"exc"} type={"Exception"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_apply_scope_results"} type={"(self, scope, captured_last_changes=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def _apply_scope_results(
+	self,
+	scope: "Scope",
+	captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None,
+) -> None:
+	# Apply captured last_change values at the end for explicit deps
+	if self.explicit_deps:
+		assert captured_last_changes is not None
+		for dep, last_change in captured_last_changes.items():
+			self.deps[dep] = last_change
+		return
+
+	self.children = scope.effects
+	for child in self.children:
+		child.parent = self
+
+	prev_deps = set(self.deps)
+	if not self.explicit_deps:
+		self.deps = scope.deps
+	new_deps = set(self.deps)
+	add_deps = new_deps - prev_deps
+	remove_deps = prev_deps - new_deps
+	for dep in add_deps:
+		dep.add_obs(self)
+		is_dirty = isinstance(dep, Computed) and dep.dirty
+		has_changed = isinstance(dep, Signal) and dep.last_change > self.deps.get(
+			dep, -1
+		)
+		if is_dirty or has_changed:
+			self.schedule()
+	for dep in remove_deps:
+		dep.remove_obs(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"scope"} type={"Scope"} value={null} />
+<PyParameter name={"captured_last_changes"} type={"dict[Signal[Any] | Computed[Any], int] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_copy_kwargs"} type={"(self) -> dict[str, Any]"}>
+
+<PySourceCode >
+
+```python
+def _copy_kwargs(self) -> dict[str, Any]:
+	deps = None
+	if self.explicit_deps:
+		deps = list(self.deps.keys())
+	return {
+		"fn": self.fn,
+		"name": self.name,
+		"immediate": self.immediate,
+		"lazy": self._lazy,
+		"on_error": self.on_error,
+		"deps": deps,
+		"interval": self._interval,
+	}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"dict[str, typing.Any]"} />
+
+</PyFunction>
+
+<PyFunction name={"__copy__"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def __copy__(self):
+	kwargs = self._copy_kwargs()
+	return type(self)(**kwargs)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__deepcopy__"} type={"(self, memo)"}>
+
+<PySourceCode >
+
+```python
+def __deepcopy__(self, memo: dict[int, Any]):
+	if id(self) in memo:
+		return memo[id(self)]
+	kwargs = self._copy_kwargs()
+	kwargs["fn"] = copy.deepcopy(self.fn, memo)
+	kwargs["name"] = copy.deepcopy(self.name, memo)
+	kwargs["on_error"] = copy.deepcopy(self.on_error, memo)
+	deps = kwargs.get("deps")
+	if deps is not None:
+		kwargs["deps"] = list(deps)
+	new_effect = type(self)(**kwargs)
+	memo[id(self)] = new_effect
+	return new_effect
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"memo"} type={"dict[int, Any]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"run"} type={"(self)"}>
+
+Execute the effect immediately.
+
+<PySourceCode >
+
+```python
+def run(self):
+	"""Execute the effect immediately."""
+	with Untrack():
+		try:
+			self._cleanup_before_run()
+		except Exception as e:
+			self.handle_error(e)
+	self._execute()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_execute"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def _execute(self) -> None:
+	execution_epoch = epoch()
+	# Capture last_change for explicit deps before running
+	captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None
+	if self.explicit_deps:
+		captured_last_changes = {dep: dep.last_change for dep in self.deps}
+	with Scope() as scope:
+		# Clear batch *before* running as we may update a signal that causes
+		# this effect to be rescheduled.
+		self.batch = None
+		try:
+			self.cleanup_fn = self.fn()
+		except Exception as e:
+			self.handle_error(e)
+		self.runs += 1
+		self.last_run = execution_epoch
+	self._apply_scope_results(scope, captured_last_changes)
+	# Start/restart interval if set and not currently scheduled
+	if self._interval is not None and self._interval_handle is None:
+		self._schedule_interval()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

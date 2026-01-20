@@ -57,11 +57,14 @@ def route() -> RouteContext:
 		RuntimeError: If called outside of a component render context.
 
 	Example:
-		>>> def user_page():
-		...     r = ps.route()
-		...     user_id = r.params.get("user_id")  # From /users/:user_id
-		...     page = r.query.get("page", "1")    # From ?page=2
-		...     return m.Text(f"User {user_id}, Page {page}")
+
+	```python
+	def user_page():
+	    r = ps.route()
+	    user_id = r.params.get("user_id")  # From /users/:user_id
+	    page = r.query.get("page", "1")    # From ?page=2
+	    return m.Text(f"User {user_id}, Page {page}")
+	```
 	"""
 	ctx = PulseContext.get()
 	if not ctx or not ctx.route:
@@ -82,10 +85,13 @@ def session() -> ReactiveDict[str, Any]:
 		RuntimeError: If called outside of a session context.
 
 	Example:
-		>>> def my_component():
-		...     sess = ps.session()
-		...     sess["last_visited"] = datetime.now()
-		...     return m.Text(f"Visits: {sess.get('visit_count', 0)}")
+
+	```python
+	def my_component():
+	    sess = ps.session()
+	    sess["last_visited"] = datetime.now()
+	    return m.Text(f"Visits: {sess.get('visit_count', 0)}")
+	```
 	"""
 	ctx = PulseContext.get()
 	if not ctx.session:
@@ -214,9 +220,12 @@ def navigate(path: str, *, replace: bool = False, hard: bool = False) -> None:
 		RuntimeError: If called outside of a Pulse callback context.
 
 	Example:
-		>>> async def handle_login():
-		...     await api.login(username, password)
-		...     ps.navigate("/dashboard")
+
+	```python
+	async def handle_login():
+	    await api.login(username, password)
+	    ps.navigate("/dashboard")
+	```
 	"""
 	ctx = PulseContext.get()
 	if ctx.render is None:
@@ -243,12 +252,15 @@ def redirect(path: str, *, replace: bool = False) -> NoReturn:
 		RedirectInterrupt: Always raised to interrupt the render.
 
 	Example:
-		>>> def protected_page():
-		...     user = get_current_user()
-		...     if not user:
-		...         ps.redirect("/login")  # Interrupts render
-		...
-		...     return m.Text(f"Welcome, {user.name}")
+
+	```python
+	def protected_page():
+	    user = get_current_user()
+	    if not user:
+	        ps.redirect("/login")  # Interrupts render
+
+	    return m.Text(f"Welcome, {user.name}")
+	```
 	"""
 	ctx = HOOK_CONTEXT.get()
 	if not ctx:
@@ -267,13 +279,16 @@ def not_found() -> NoReturn:
 		NotFoundInterrupt: Always raised to trigger 404 page.
 
 	Example:
-		>>> def user_page():
-		...     r = ps.route()
-		...     user = get_user(r.params["id"])
-		...     if not user:
-		...         ps.not_found()  # Shows 404 page
-		...
-		...     return m.Text(user.name)
+
+	```python
+	def user_page():
+	    r = ps.route()
+	    user = get_user(r.params["id"])
+	    if not user:
+	        ps.not_found()  # Shows 404 page
+
+	    return m.Text(user.name)
+	```
 	"""
 	ctx = HOOK_CONTEXT.get()
 	if not ctx:
@@ -366,28 +381,33 @@ def global_state(
 			Call with ``id=`` parameter for per-entity global state.
 
 	Example:
-		>>> @ps.global_state
-		... class AppSettings(ps.State):
-		...     theme: str = "light"
-		...     language: str = "en"
-		...
-		>>> def settings_panel():
-		...     settings = AppSettings()  # Same instance across all components
-		...     return m.Select(
-		...         value=settings.theme,
-		...         data=["light", "dark"],
-		...         on_change=lambda v: setattr(settings, "theme", v),
-		...     )
 
-		With instance ID for per-entity global state:
+	```python
+	@ps.global_state
+	class AppSettings(ps.State):
+	    theme: str = "light"
+	    language: str = "en"
 
-		>>> @ps.global_state
-		... class UserCache(ps.State):
-		...     data: dict = {}
-		...
-		>>> def user_profile(user_id: str):
-		...     cache = UserCache(id=user_id)  # Shared per user_id
-		...     return m.Text(cache.data.get("name", "Loading..."))
+	def settings_panel():
+	    settings = AppSettings()  # Same instance across all components
+	    return m.Select(
+	        value=settings.theme,
+	        data=["light", "dark"],
+	        on_change=lambda v: setattr(settings, "theme", v),
+	    )
+	```
+
+	With instance ID for per-entity global state:
+
+	```python
+	@ps.global_state
+	class UserCache(ps.State):
+	    data: dict = {}
+
+	def user_profile(user_id: str):
+	    cache = UserCache(id=user_id)  # Shared per user_id
+	    return m.Text(cache.data.get("name", "Loading..."))
+	```
 	"""
 	if isinstance(factory, type):
 		cls = factory

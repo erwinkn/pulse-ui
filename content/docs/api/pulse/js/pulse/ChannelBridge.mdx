@@ -1,0 +1,153 @@
+---
+title: ChannelBridge
+---
+
+A bridge for bidirectional communication between client and server.
+
+Provides methods for emitting events, making requests, and subscribing
+to server events on a specific channel.
+
+## Attributes
+
+<PyAttribute name={"id"} type={"str"} value={null}>
+
+The unique channel identifier.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, event, payload=None) -> None"}>
+
+Emit an event to the server.
+
+<PySourceCode >
+
+```python
+def emit(self, event: str, payload: _Any = None) -> None:
+	"""Emit an event to the server.
+
+	Args:
+	    event: The event name to emit.
+	    payload: Optional data to send with the event.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"event"} type={"str"} value={undefined}>
+
+The event name to emit.
+
+</PyParameter>
+<PyParameter name={"payload"} type={"_Any"} value={"None"}>
+
+Optional data to send with the event.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"request"} type={"(self, event, payload=None) -> _Awaitable[_Any]"}>
+
+Make a request to the server and await a response.
+
+<PySourceCode >
+
+```python
+def request(self, event: str, payload: _Any = None) -> _Awaitable[_Any]:
+	"""Make a request to the server and await a response.
+
+	Args:
+	    event: The event name to send.
+	    payload: Optional data to send with the request.
+
+	Returns:
+	    A Promise that resolves with the server's response.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"event"} type={"str"} value={undefined}>
+
+The event name to send.
+
+</PyParameter>
+<PyParameter name={"payload"} type={"_Any"} value={"None"}>
+
+Optional data to send with the request.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Awaitable"}>
+
+A Promise that resolves with the server's response.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"on"} type={"(self, event, handler) -> _Callable[[], None]"}>
+
+Subscribe to events from the server.
+
+<PySourceCode >
+
+```python
+def on(self, event: str, handler: _Callable[[_Any], _Any]) -> _Callable[[], None]:
+	"""Subscribe to events from the server.
+
+	Args:
+	    event: The event name to listen for.
+	    handler: A callback function that receives the event payload.
+	        May be sync or async. For request events, the return value
+	        is sent back to the server.
+
+	Returns:
+	    A cleanup function that unsubscribes the handler.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"event"} type={"str"} value={undefined}>
+
+The event name to listen for.
+
+</PyParameter>
+<PyParameter name={"handler"} type={"_Callable[[_Any], _Any]"} value={undefined}>
+
+A callback function that receives the event payload.
+May be sync or async. For request events, the return value
+is sent back to the server.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Callable"}>
+
+A cleanup function that unsubscribes the handler.
+
+</PyFunctionReturn>
+
+</PyFunction>

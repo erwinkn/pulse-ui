@@ -105,9 +105,12 @@ def state(key: str, arg: S | Callable[[], S]) -> S:
 		TypeError: If arg is not a State or callable returning a State.
 
 	Example:
-		>>> def counter():
-		...     s = ps.state("counter", lambda: CounterState())
-		...     return m.Button(f"Count: {s.count}", on_click=lambda: s.increment())
+
+	```python
+	def counter():
+	    s = ps.state("counter", lambda: CounterState())
+	    return m.Button(f"Count: {s.count}", on_click=lambda: s.increment())
+	```
 
 	Notes:
 		- Key must be non-empty string

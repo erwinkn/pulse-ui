@@ -24,7 +24,10 @@ class Redirect:
 		path: The path to redirect to.
 
 	Example:
-		>>> return ps.Redirect("/login")
+
+	```python
+	return ps.Redirect("/login")
+	```
 	"""
 
 	path: str
@@ -51,8 +54,11 @@ class Ok(Generic[T]):
 		payload: The wrapped success value.
 
 	Example:
-		>>> return ps.Ok(None)  # Allow request
-		>>> return ps.Ok(prerender_result)  # Return with payload
+
+	```python
+	return ps.Ok(None)  # Allow request
+	return ps.Ok(prerender_result)  # Return with payload
+	```
 	"""
 
 	payload: T
@@ -94,24 +100,27 @@ class PulseMiddleware:
 		dev: If True, middleware is only active in dev environments.
 
 	Example:
-		>>> class AuthMiddleware(ps.PulseMiddleware):
-		...     async def prerender_route(
-		...         self,
-		...         *,
-		...         path: str,
-		...         request: ps.PulseRequest,
-		...         route_info: ps.RouteInfo,
-		...         session: dict[str, Any],
-		...         next,
-		...     ):
-		...         if path.startswith("/admin") and not session.get("is_admin"):
-		...             return ps.Redirect("/login")
-		...         return await next()
-		...
-		...     async def connect(self, *, request, session, next):
-		...         if not session.get("user_id"):
-		...             return ps.Deny()
-		...         return await next()
+
+	```python
+	class AuthMiddleware(ps.PulseMiddleware):
+	    async def prerender_route(
+	        self,
+	        *,
+	        path: str,
+	        request: ps.PulseRequest,
+	        route_info: ps.RouteInfo,
+	        session: dict[str, Any],
+	        next,
+	    ):
+	        if path.startswith("/admin") and not session.get("is_admin"):
+	            return ps.Redirect("/login")
+	        return await next()
+
+	    async def connect(self, *, request, session, next):
+	        if not session.get("user_id"):
+	            return ps.Deny()
+	        return await next()
+	```
 	"""
 
 	dev: bool
@@ -242,12 +251,15 @@ class MiddlewareStack(PulseMiddleware):
 		middlewares: Sequence of middleware instances.
 
 	Example:
-		>>> app = ps.App(
-		...     middleware=ps.stack(
-		...         AuthMiddleware(),
-		...         LoggingMiddleware(),
-		...     )
-		... )
+
+	```python
+	app = ps.App(
+	    middleware=ps.stack(
+	        AuthMiddleware(),
+	        LoggingMiddleware(),
+	    )
+	)
+	```
 	"""
 
 	def __init__(self, middlewares: Sequence[PulseMiddleware]) -> None:
@@ -409,14 +421,17 @@ def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
 		``MiddlewareStack`` instance.
 
 	Example:
-		>>> import pulse as ps
-		>>>
-		>>> app = ps.App(
-		...     middleware=ps.stack(
-		...         AuthMiddleware(),
-		...         LoggingMiddleware(),
-		...     )
-		... )
+
+	```python
+	import pulse as ps
+
+	app = ps.App(
+	    middleware=ps.stack(
+	        AuthMiddleware(),
+	        LoggingMiddleware(),
+	    )
+	)
+	```
 	"""
 	return MiddlewareStack(list(middlewares))
 

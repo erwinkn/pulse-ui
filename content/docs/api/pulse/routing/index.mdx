@@ -1,0 +1,320 @@
+---
+title: routing
+---
+
+<PyAttribute name={"LAYOUT_INDICATOR"} type={null} value={"'<layout>'"} />
+
+<PyAttribute name={"PATH_SEGMENT_REGEX"} type={null} value={"re.compile(\"^([a-zA-Z0-9\\\\-._~!$&'()*+,;=:@]|%[0-9a-fA-F]{2})*$\")"} />
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"PathParameters"} href={"/docs/api/pulse/routing/PathParameters"} />
+<Card title={"PathSegment"} href={"/docs/api/pulse/routing/PathSegment"} />
+<Card title={"Route"} href={"/docs/api/pulse/routing/Route"} />
+<Card title={"Layout"} href={"/docs/api/pulse/routing/Layout"} />
+<Card title={"InvalidRouteError"} href={"/docs/api/pulse/routing/InvalidRouteError"} />
+<Card title={"RouteTree"} href={"/docs/api/pulse/routing/RouteTree"} />
+<Card title={"RouteInfo"} href={"/docs/api/pulse/routing/RouteInfo"} />
+<Card title={"RouteContext"} href={"/docs/api/pulse/routing/RouteContext"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"parse_route_path"} type={"(path) -> list[PathSegment]"}>
+
+<PySourceCode >
+
+```python
+def parse_route_path(path: str) -> list[PathSegment]:
+	if path.startswith("/"):
+		path = path[1:]
+	if path.endswith("/"):
+		path = path[:-1]
+
+	if not path:
+		return []
+
+	parts = path.split("/")
+	segments: list[PathSegment] = []
+	for i, part in enumerate(parts):
+		segment = PathSegment(part)
+		if segment.is_splat and i != len(parts) - 1:
+			raise InvalidRouteError(
+				f"Splat segment '*' can only be at the end of path '{path}'."
+			)
+		segments.append(segment)
+	return segments
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"list[pulse.routing.PathSegment]"} />
+
+</PyFunction>
+<PyFunction name={"ensure_relative_path"} type={"(path)"}>
+
+<PySourceCode >
+
+```python
+def ensure_relative_path(path: str):
+	if path.startswith("/"):
+		path = path[1:]
+	if path.endswith("/"):
+		path = path[:-1]
+	return path
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+<PyFunction name={"ensure_absolute_path"} type={"(path)"}>
+
+<PySourceCode >
+
+```python
+def ensure_absolute_path(path: str):
+	if not path.startswith("/"):
+		path = "/" + path
+	return path
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+<PyFunction name={"segments_are_dynamic"} type={"(segments) -> bool"}>
+
+Return True if any segment is dynamic, optional, or a catch-all.
+
+<PySourceCode >
+
+```python
+def segments_are_dynamic(segments: list[PathSegment]) -> bool:
+	"""Return True if any segment is dynamic, optional, or a catch-all."""
+	return any(s.is_dynamic or s.is_optional or s.is_splat for s in segments)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"segments"} type={"list[PathSegment]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+<PyFunction name={"_sanitize_filename"} type={"(path) -> str"}>
+
+Replace Windows-invalid characters in filenames with safe alternatives.
+
+<PySourceCode >
+
+```python
+def _sanitize_filename(path: str) -> str:
+	"""Replace Windows-invalid characters in filenames with safe alternatives."""
+	import hashlib
+
+	# Split path into segments to handle each part individually
+	segments = path.split("/")
+	sanitized_segments: list[str] = []
+
+	for segment in segments:
+		if not segment:
+			continue
+
+		# Check if segment contains Windows-invalid characters
+		invalid_chars = '<>:"|?*'
+		has_invalid = any(char in segment for char in invalid_chars)
+
+		if has_invalid:
+			# Create a collision-safe filename by replacing invalid chars and adding hash
+			# Remove extension temporarily for hashing
+			name, ext = segment.rsplit(".", 1) if "." in segment else (segment, "")
+
+			# Replace invalid characters with underscores
+			sanitized_name = name
+			for char in invalid_chars:
+				sanitized_name = sanitized_name.replace(char, "_")
+
+			# Add hash of original segment to prevent collisions
+			original_hash = hashlib.md5(segment.encode()).hexdigest()[:8]
+			sanitized_name = f"{sanitized_name}_{original_hash}"
+
+			# Reattach extension
+			segment = f"{sanitized_name}.{ext}" if ext else sanitized_name
+
+		sanitized_segments.append(segment)
+
+	return "/".join(sanitized_segments)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>
+<PyFunction name={"route_or_ancestors_have_dynamic"} type={"(node) -> bool"}>
+
+Check whether this node or any ancestor Route contains dynamic segments.
+
+<PySourceCode >
+
+```python
+def route_or_ancestors_have_dynamic(node: "Route | Layout") -> bool:
+	"""Check whether this node or any ancestor Route contains dynamic segments."""
+	current = node
+	while current is not None:
+		if isinstance(current, Route) and segments_are_dynamic(current.segments):
+			return True
+		current = current.parent
+	return False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"node"} type={"Route | Layout"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+<PyFunction name={"filter_layouts"} type={"(path_list)"}>
+
+<PySourceCode >
+
+```python
+def filter_layouts(path_list: list[str]):
+	return [p for p in path_list if p != LAYOUT_INDICATOR]
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"path_list"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+<PyFunction name={"replace_layout_indicator"} type={"(path_list, value)"}>
+
+<PySourceCode >
+
+```python
+def replace_layout_indicator(path_list: list[str], value: str):
+	return [value if p == LAYOUT_INDICATOR else p for p in path_list]
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"path_list"} type={"list[str]"} value={null} />
+<PyParameter name={"value"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+<PyFunction name={"filter_dev_routes"} type={"(routes) -> list[Route | Layout]"}>
+
+Filter out routes with dev=True.
+
+This function removes all routes marked with dev=True from the route tree.
+Should only be called when env != "dev".
+
+<PySourceCode >
+
+```python
+def filter_dev_routes(routes: Sequence[Route | Layout]) -> list[Route | Layout]:
+	"""
+	Filter out routes with dev=True.
+
+	This function removes all routes marked with dev=True from the route tree.
+	Should only be called when env != "dev".
+	"""
+	filtered: list[Route | Layout] = []
+	for route in routes:
+		# Skip dev-only routes
+		if route.dev:
+			continue
+
+		# Recursively filter children
+		if route.children:
+			filtered_children = filter_dev_routes(route.children)
+			# Create a copy of the route with filtered children
+			if isinstance(route, Route):
+				filtered_route = Route(
+					path=route.path,
+					render=route.render,
+					children=filtered_children,
+					dev=route.dev,
+				)
+			else:  # Layout
+				filtered_route = Layout(
+					render=route.render,
+					children=filtered_children,
+					dev=route.dev,
+				)
+			filtered.append(filtered_route)
+		else:
+			filtered.append(route)
+	return filtered
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"routes"} type={"Sequence[Route | Layout]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"list[pulse.routing.Route | pulse.routing.Layout]"} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

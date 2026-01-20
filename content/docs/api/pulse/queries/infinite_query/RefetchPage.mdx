@@ -1,0 +1,33 @@
+---
+title: RefetchPage
+---
+
+Refetch a single page by param.
+
+## Attributes
+
+<PyAttribute name={"fetch_fn"} type={"Callable[[TParam], Awaitable[T]]"} value={null} />
+
+<PyAttribute name={"param"} type={"TParam"} value={null} />
+
+<PyAttribute name={"observer"} type={"InfiniteQueryResult[T, TParam] | None"} value={"None"} />
+
+<PyAttribute name={"future"} type={"asyncio.Future[ActionResult[T | None]]"} value={"field(default_factory=(asyncio.Future))"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, fetch_fn, param, observer=None, future=asyncio.Future()) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[TParam], Awaitable[T]]"} value={null} />
+<PyParameter name={"param"} type={"TParam"} value={null} />
+<PyParameter name={"observer"} type={"InfiniteQueryResult[T, TParam] | None"} value={"None"} />
+<PyParameter name={"future"} type={"asyncio.Future[ActionResult[T | None]]"} value={"asyncio.Future()"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

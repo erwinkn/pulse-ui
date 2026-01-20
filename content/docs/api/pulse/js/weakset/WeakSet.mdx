@@ -1,0 +1,106 @@
+---
+title: WeakSet
+---
+
+JavaScript WeakSet - a collection of objects with weak references.
+
+WeakSet[T] holds weak references to values, allowing garbage collection.
+Values must be objects (not primitives).
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, iterable=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, iterable: _Iterable[T] | None = None, /) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"iterable"} type={"_Iterable[T] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"add"} type={"(self, value) -> WeakSet[T]"}>
+
+Add a value to the WeakSet. Returns the WeakSet for chaining.
+
+<PySourceCode >
+
+```python
+def add(self, value: T) -> "WeakSet[T]":
+	"""Add a value to the WeakSet. Returns the WeakSet for chaining."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"T"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.weakset.WeakSet[pulse.js.weakset.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"delete"} type={"(self, value) -> bool"}>
+
+Remove a value. Returns True if the value existed.
+
+<PySourceCode >
+
+```python
+def delete(self, value: T) -> bool:
+	"""Remove a value. Returns True if the value existed."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"T"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"has"} type={"(self, value) -> bool"}>
+
+Return True if the value exists in the WeakSet.
+
+<PySourceCode >
+
+```python
+def has(self, value: T) -> bool:
+	"""Return True if the value exists in the WeakSet."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"T"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>

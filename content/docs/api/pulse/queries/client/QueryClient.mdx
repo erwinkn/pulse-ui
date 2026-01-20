@@ -1,0 +1,1208 @@
+---
+title: QueryClient
+---
+
+Client for managing queries and infinite queries in a session.
+
+Provides methods to get, set, invalidate, and refetch queries by key
+or using filter predicates. Automatically resolves to the current
+RenderSession's query store.
+
+Access via ``ps.queries`` singleton:
+
+Example:
+
+```python
+# Get query data
+user = ps.queries.get_data(("user", user_id))
+
+# Invalidate queries by prefix
+ps.queries.invalidate_prefix(("users",))
+
+# Set data optimistically
+ps.queries.set_data(("user", user_id), updated_user)
+
+# Check if any query is fetching
+if ps.queries.is_fetching(("user", user_id)):
+    show_loading()
+```
+
+## Functions
+
+<PyFunction name={"_get_store"} type={"(self)"}>
+
+Get the query store from the current PulseContext.
+
+<PySourceCode >
+
+```python
+def _get_store(self):
+	"""Get the query store from the current PulseContext.
+
+	Returns:
+		The QueryStore from the active render session.
+
+	Raises:
+		RuntimeError: If no render session is available.
+	"""
+	render = PulseContext.get().render
+	if render is None:
+		raise RuntimeError("No render session available")
+	return render.query_store
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null}>
+
+The QueryStore from the active render session.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"get"} type={"(self, key) -> KeyedQuery[Any] | None"}>
+
+Get an existing regular query by key.
+
+<PySourceCode >
+
+```python
+def get(self, key: QueryKey) -> KeyedQuery[Any] | None:
+	"""Get an existing regular query by key.
+
+	Args:
+		key: The query key tuple to look up.
+
+	Returns:
+		The KeyedQuery instance, or None if not found.
+	"""
+	return self._get_store().get(key)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple to look up.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"KeyedQuery[Any] | None"}>
+
+The KeyedQuery instance, or None if not found.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"get_infinite"} type={"(self, key) -> InfiniteQuery[Any, Any] | None"}>
+
+Get an existing infinite query by key.
+
+<PySourceCode >
+
+```python
+def get_infinite(self, key: QueryKey) -> InfiniteQuery[Any, Any] | None:
+	"""Get an existing infinite query by key.
+
+	Args:
+		key: The query key tuple to look up.
+
+	Returns:
+		The InfiniteQuery instance, or None if not found.
+	"""
+	return self._get_store().get_infinite(key)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple to look up.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"InfiniteQuery[Any, Any] | None"}>
+
+The InfiniteQuery instance, or None if not found.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"get_all"} type={"(self, filter=None, *, include_infinite=True) -> list[KeyedQuery[Any] | InfiniteQuery[Any, Any]]"}>
+
+Get all queries matching the filter.
+
+<PySourceCode >
+
+```python
+def get_all(
+	self,
+	filter: QueryFilter | None = None,
+	*,
+	include_infinite: bool = True,
+) -> list[KeyedQuery[Any] | InfiniteQuery[Any, Any]]:
+	"""
+	Get all queries matching the filter.
+
+	Args:
+		filter: Optional filter - can be an exact key, list of keys, or predicate.
+			If None, returns all queries.
+		include_infinite: Whether to include infinite queries (default True).
+
+	Returns:
+		List of matching Query or InfiniteQuery instances.
+	"""
+	store = self._get_store()
+	predicate = _normalize_filter(filter)
+	results: list[KeyedQuery[Any] | InfiniteQuery[Any, Any]] = []
+
+	for key, entry in store.items():
+		if predicate is not None and not predicate(key):
+			continue
+		if not include_infinite and isinstance(entry, InfiniteQuery):
+			continue
+		results.append(entry)
+
+	return results
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"filter"} type={"QueryFilter | None"} value={"None"}>
+
+Optional filter - can be an exact key, list of keys, or predicate.
+If None, returns all queries.
+
+</PyParameter>
+<PyParameter name={"include_infinite"} type={"bool"} value={"True"}>
+
+Whether to include infinite queries (default True).
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"list"}>
+
+List of matching Query or InfiniteQuery instances.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"get_queries"} type={"(self, filter=None) -> list[KeyedQuery[Any]]"}>
+
+Get all regular queries matching the filter.
+
+<PySourceCode >
+
+```python
+def get_queries(self, filter: QueryFilter | None = None) -> list[KeyedQuery[Any]]:
+	"""Get all regular queries matching the filter.
+
+	Args:
+		filter: Optional filter - exact key, list of keys, or predicate.
+			If None, returns all regular queries.
+
+	Returns:
+		List of matching KeyedQuery instances (excludes infinite queries).
+	"""
+	store = self._get_store()
+	predicate = _normalize_filter(filter)
+	results: list[KeyedQuery[Any]] = []
+
+	for key, entry in store.items():
+		if isinstance(entry, InfiniteQuery):
+			continue
+		if predicate is not None and not predicate(key):
+			continue
+		results.append(entry)
+
+	return results
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"filter"} type={"QueryFilter | None"} value={"None"}>
+
+Optional filter - exact key, list of keys, or predicate.
+If None, returns all regular queries.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"list"}>
+
+List of matching KeyedQuery instances (excludes infinite queries).
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"get_infinite_queries"} type={"(self, filter=None) -> list[InfiniteQuery[Any, Any]]"}>
+
+Get all infinite queries matching the filter.
+
+<PySourceCode >
+
+```python
+def get_infinite_queries(
+	self, filter: QueryFilter | None = None
+) -> list[InfiniteQuery[Any, Any]]:
+	"""Get all infinite queries matching the filter.
+
+	Args:
+		filter: Optional filter - exact key, list of keys, or predicate.
+			If None, returns all infinite queries.
+
+	Returns:
+		List of matching InfiniteQuery instances.
+	"""
+	store = self._get_store()
+	predicate = _normalize_filter(filter)
+	results: list[InfiniteQuery[Any, Any]] = []
+
+	for key, entry in store.items():
+		if not isinstance(entry, InfiniteQuery):
+			continue
+		if predicate is not None and not predicate(key):
+			continue
+		results.append(entry)
+
+	return results
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"filter"} type={"QueryFilter | None"} value={"None"}>
+
+Optional filter - exact key, list of keys, or predicate.
+If None, returns all infinite queries.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"list"}>
+
+List of matching InfiniteQuery instances.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"get_data"} type={"(self, key) -> Any | None"}>
+
+Get the data for a query by key.
+
+<PySourceCode >
+
+```python
+def get_data(self, key: QueryKey) -> Any | None:
+	"""Get the data for a query by key.
+
+	Args:
+		key: The query key tuple to look up.
+
+	Returns:
+		The query data, or None if query not found or has no data.
+	"""
+	query = self.get(key)
+	if query is None:
+		return None
+	return query.data.read()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple to look up.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"Any | None"}>
+
+The query data, or None if query not found or has no data.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"get_infinite_data"} type={"(self, key) -> list[Page[Any, Any]] | None"}>
+
+Get the pages for an infinite query by key.
+
+<PySourceCode >
+
+```python
+def get_infinite_data(self, key: QueryKey) -> list[Page[Any, Any]] | None:
+	"""Get the pages for an infinite query by key.
+
+	Args:
+		key: The query key tuple to look up.
+
+	Returns:
+		List of Page objects, or None if query not found.
+	"""
+	query = self.get_infinite(key)
+	if query is None:
+		return None
+	return list(query.pages)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple to look up.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"list[Page[Any, Any]] | None"}>
+
+List of Page objects, or None if query not found.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"set_data"} type={"(self, key_or_filter, data, *, updated_at=None) -> bool | int"}>
+
+Set data for queries matching the key or filter.
+
+When using a single key, returns True if query exists and was updated.
+When using a filter, returns count of updated queries.
+
+<PySourceCode >
+
+```python
+def set_data(
+	self,
+	key_or_filter: QueryKey | list[QueryKey] | Callable[[QueryKey], bool],
+	data: Any | Callable[[Any], Any],
+	*,
+	updated_at: float | dt.datetime | None = None,
+) -> bool | int:
+	"""
+	Set data for queries matching the key or filter.
+
+	When using a single key, returns True if query exists and was updated.
+	When using a filter, returns count of updated queries.
+
+	Args:
+		key_or_filter: Exact key or filter predicate.
+		data: New data value or updater function.
+		updated_at: Optional timestamp to set.
+
+	Returns:
+		bool if exact key, int count if filter.
+	"""
+	# Single key case
+	if isinstance(key_or_filter, tuple):
+		query = self.get(key_or_filter)
+		if query is None:
+			return False
+		query.set_data(data, updated_at=updated_at)
+		return True
+
+	# Filter case
+	queries = self.get_queries(key_or_filter)
+	for q in queries:
+		q.set_data(data, updated_at=updated_at)
+	return len(queries)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key_or_filter"} type={"QueryKey | list[QueryKey] | Callable[[QueryKey], bool]"} value={undefined}>
+
+Exact key or filter predicate.
+
+</PyParameter>
+<PyParameter name={"data"} type={"Any | Callable[[Any], Any]"} value={undefined}>
+
+New data value or updater function.
+
+</PyParameter>
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"}>
+
+Optional timestamp to set.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"bool | int"}>
+
+bool if exact key, int count if filter.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"set_infinite_data"} type={"(self, key, pages, *, updated_at=None) -> bool"}>
+
+Set pages for an infinite query by key.
+
+<PySourceCode >
+
+```python
+def set_infinite_data(
+	self,
+	key: QueryKey,
+	pages: list[Page[Any, Any]]
+	| Callable[[list[Page[Any, Any]]], list[Page[Any, Any]]],
+	*,
+	updated_at: float | dt.datetime | None = None,
+) -> bool:
+	"""Set pages for an infinite query by key.
+
+	Args:
+		key: The query key tuple.
+		pages: New pages list or updater function.
+		updated_at: Optional timestamp to set.
+
+	Returns:
+		True if query was found and updated, False otherwise.
+	"""
+	query = self.get_infinite(key)
+	if query is None:
+		return False
+	query.set_data(pages, updated_at=updated_at)
+	return True
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple.
+
+</PyParameter>
+<PyParameter name={"pages"} type={"list[Page[Any, Any]] | Callable[[list[Page[Any, Any]]], list[Page[Any, Any]]]"} value={undefined}>
+
+New pages list or updater function.
+
+</PyParameter>
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"}>
+
+Optional timestamp to set.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"bool"}>
+
+True if query was found and updated, False otherwise.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"invalidate"} type={"(self, key_or_filter=None, *, cancel_refetch=False) -> bool | int"}>
+
+Invalidate queries matching the key or filter.
+
+For regular queries: marks as stale and refetches if observed.
+For infinite queries: triggers refetch of all pages if observed.
+
+<PySourceCode >
+
+```python
+def invalidate(
+	self,
+	key_or_filter: QueryKey
+	| list[QueryKey]
+	| Callable[[QueryKey], bool]
+	| None = None,
+	*,
+	cancel_refetch: bool = False,
+) -> bool | int:
+	"""
+	Invalidate queries matching the key or filter.
+
+	For regular queries: marks as stale and refetches if observed.
+	For infinite queries: triggers refetch of all pages if observed.
+
+	Args:
+		key_or_filter: Exact key, filter predicate, or None for all.
+		cancel_refetch: Cancel in-flight requests before refetch.
+
+	Returns:
+		bool if exact key, int count if filter/None.
+	"""
+	# Single key case
+	if isinstance(key_or_filter, tuple):
+		query = self.get(key_or_filter)
+		if query is not None:
+			query.invalidate(cancel_refetch=cancel_refetch)
+			return True
+		inf_query = self.get_infinite(key_or_filter)
+		if inf_query is not None:
+			inf_query.invalidate(cancel_fetch=cancel_refetch)
+			return True
+		return False
+
+	# Filter case
+	queries = self.get_all(key_or_filter)
+	for q in queries:
+		if isinstance(q, InfiniteQuery):
+			q.invalidate(cancel_fetch=cancel_refetch)
+		else:
+			q.invalidate(cancel_refetch=cancel_refetch)
+	return len(queries)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key_or_filter"} type={"QueryKey | list[QueryKey] | Callable[[QueryKey], bool] | None"} value={"None"}>
+
+Exact key, filter predicate, or None for all.
+
+</PyParameter>
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"False"}>
+
+Cancel in-flight requests before refetch.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"bool | int"}>
+
+bool if exact key, int count if filter/None.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"invalidate_prefix"} type={"(self, prefix, *, cancel_refetch=False) -> int"}>
+
+Invalidate all queries whose keys start with the given prefix.
+
+Example:
+
+```python
+# Invalidates ("users",), ("users", 1), ("users", 2, "posts"), etc.
+ps.queries.invalidate_prefix(("users",))
+```
+
+<PySourceCode >
+
+```python
+def invalidate_prefix(
+	self,
+	prefix: tuple[Any, ...],
+	*,
+	cancel_refetch: bool = False,
+) -> int:
+	"""Invalidate all queries whose keys start with the given prefix.
+
+	Args:
+		prefix: Tuple prefix to match against query keys.
+		cancel_refetch: Cancel in-flight requests before refetch.
+
+	Returns:
+		Count of invalidated queries.
+
+	Example:
+
+	\```python
+	# Invalidates ("users",), ("users", 1), ("users", 2, "posts"), etc.
+	ps.queries.invalidate_prefix(("users",))
+	\```
+	"""
+	return self.invalidate(_prefix_filter(prefix), cancel_refetch=cancel_refetch)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"prefix"} type={"tuple[Any, ...]"} value={undefined}>
+
+Tuple prefix to match against query keys.
+
+</PyParameter>
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"False"}>
+
+Cancel in-flight requests before refetch.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"int"}>
+
+Count of invalidated queries.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"refetch"} type={"(self, key, *, cancel_refetch=True) -> ActionResult[Any] | None"}>
+
+Refetch a query by key and return the result.
+
+<PySourceCode >
+
+```python
+async def refetch(
+	self,
+	key: QueryKey,
+	*,
+	cancel_refetch: bool = True,
+) -> ActionResult[Any] | None:
+	"""Refetch a query by key and return the result.
+
+	Args:
+		key: The query key tuple to refetch.
+		cancel_refetch: Cancel in-flight request before refetching (default True).
+
+	Returns:
+		ActionResult with data or error, or None if query doesn't exist.
+	"""
+	query = self.get(key)
+	if query is not None:
+		return await query.refetch(cancel_refetch=cancel_refetch)
+
+	inf_query = self.get_infinite(key)
+	if inf_query is not None:
+		return await inf_query.refetch(cancel_fetch=cancel_refetch)
+
+	return None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple to refetch.
+
+</PyParameter>
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"True"}>
+
+Cancel in-flight request before refetching (default True).
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"ActionResult[Any] | None"}>
+
+ActionResult with data or error, or None if query doesn't exist.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"refetch_all"} type={"(self, filter=None, *, cancel_refetch=True) -> list[ActionResult[Any]]"}>
+
+Refetch all queries matching the filter.
+
+<PySourceCode >
+
+```python
+async def refetch_all(
+	self,
+	filter: QueryFilter | None = None,
+	*,
+	cancel_refetch: bool = True,
+) -> list[ActionResult[Any]]:
+	"""Refetch all queries matching the filter.
+
+	Args:
+		filter: Optional filter - exact key, list of keys, or predicate.
+			If None, refetches all queries.
+		cancel_refetch: Cancel in-flight requests before refetching.
+
+	Returns:
+		List of ActionResult for each refetched query.
+	"""
+	queries = self.get_all(filter)
+	results: list[ActionResult[Any]] = []
+
+	for q in queries:
+		if isinstance(q, InfiniteQuery):
+			result = await q.refetch(cancel_fetch=cancel_refetch)
+		else:
+			result = await q.refetch(cancel_refetch=cancel_refetch)
+		results.append(result)
+
+	return results
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"filter"} type={"QueryFilter | None"} value={"None"}>
+
+Optional filter - exact key, list of keys, or predicate.
+If None, refetches all queries.
+
+</PyParameter>
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"True"}>
+
+Cancel in-flight requests before refetching.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"list"}>
+
+List of ActionResult for each refetched query.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"refetch_prefix"} type={"(self, prefix, *, cancel_refetch=True) -> list[ActionResult[Any]]"}>
+
+Refetch all queries whose keys start with the given prefix.
+
+<PySourceCode >
+
+```python
+async def refetch_prefix(
+	self,
+	prefix: tuple[Any, ...],
+	*,
+	cancel_refetch: bool = True,
+) -> list[ActionResult[Any]]:
+	"""Refetch all queries whose keys start with the given prefix.
+
+	Args:
+		prefix: Tuple prefix to match against query keys.
+		cancel_refetch: Cancel in-flight requests before refetching.
+
+	Returns:
+		List of ActionResult for each refetched query.
+	"""
+	return await self.refetch_all(
+		_prefix_filter(prefix), cancel_refetch=cancel_refetch
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"prefix"} type={"tuple[Any, ...]"} value={undefined}>
+
+Tuple prefix to match against query keys.
+
+</PyParameter>
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"True"}>
+
+Cancel in-flight requests before refetching.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"list"}>
+
+List of ActionResult for each refetched query.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"set_error"} type={"(self, key, error, *, updated_at=None) -> bool"}>
+
+Set error state on a query by key.
+
+<PySourceCode >
+
+```python
+def set_error(
+	self,
+	key: QueryKey,
+	error: Exception,
+	*,
+	updated_at: float | dt.datetime | None = None,
+) -> bool:
+	"""Set error state on a query by key.
+
+	Args:
+		key: The query key tuple.
+		error: The exception to set.
+		updated_at: Optional timestamp to set.
+
+	Returns:
+		True if query was found and error was set, False otherwise.
+	"""
+	query = self.get(key)
+	if query is not None:
+		query.set_error(error, updated_at=updated_at)
+		return True
+
+	inf_query = self.get_infinite(key)
+	if inf_query is not None:
+		inf_query.set_error(error, updated_at=updated_at)
+		return True
+
+	return False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple.
+
+</PyParameter>
+<PyParameter name={"error"} type={"Exception"} value={undefined}>
+
+The exception to set.
+
+</PyParameter>
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"}>
+
+Optional timestamp to set.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"bool"}>
+
+True if query was found and error was set, False otherwise.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"remove"} type={"(self, key) -> bool"}>
+
+Remove a query from the store, disposing it.
+
+<PySourceCode >
+
+```python
+def remove(self, key: QueryKey) -> bool:
+	"""Remove a query from the store, disposing it.
+
+	Args:
+		key: The query key tuple to remove.
+
+	Returns:
+		True if query existed and was removed, False otherwise.
+	"""
+	store = self._get_store()
+	entry = store.get_any(key)
+	if entry is None:
+		return False
+	entry.dispose()
+	return True
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple to remove.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"bool"}>
+
+True if query existed and was removed, False otherwise.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"remove_all"} type={"(self, filter=None) -> int"}>
+
+Remove all queries matching the filter.
+
+<PySourceCode >
+
+```python
+def remove_all(self, filter: QueryFilter | None = None) -> int:
+	"""Remove all queries matching the filter.
+
+	Args:
+		filter: Optional filter - exact key, list of keys, or predicate.
+			If None, removes all queries.
+
+	Returns:
+		Count of removed queries.
+	"""
+	queries = self.get_all(filter)
+	for q in queries:
+		q.dispose()
+	return len(queries)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"filter"} type={"QueryFilter | None"} value={"None"}>
+
+Optional filter - exact key, list of keys, or predicate.
+If None, removes all queries.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"int"}>
+
+Count of removed queries.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"remove_prefix"} type={"(self, prefix) -> int"}>
+
+Remove all queries whose keys start with the given prefix.
+
+<PySourceCode >
+
+```python
+def remove_prefix(self, prefix: tuple[Any, ...]) -> int:
+	"""Remove all queries whose keys start with the given prefix.
+
+	Args:
+		prefix: Tuple prefix to match against query keys.
+
+	Returns:
+		Count of removed queries.
+	"""
+	return self.remove_all(_prefix_filter(prefix))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"prefix"} type={"tuple[Any, ...]"} value={undefined}>
+
+Tuple prefix to match against query keys.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"int"}>
+
+Count of removed queries.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"is_fetching"} type={"(self, filter=None) -> bool"}>
+
+Check if any query matching the filter is currently fetching.
+
+<PySourceCode >
+
+```python
+def is_fetching(self, filter: QueryFilter | None = None) -> bool:
+	"""Check if any query matching the filter is currently fetching.
+
+	Args:
+		filter: Optional filter - exact key, list of keys, or predicate.
+			If None, checks all queries.
+
+	Returns:
+		True if any matching query is fetching.
+	"""
+	queries = self.get_all(filter)
+	for q in queries:
+		if q.is_fetching():
+			return True
+	return False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"filter"} type={"QueryFilter | None"} value={"None"}>
+
+Optional filter - exact key, list of keys, or predicate.
+If None, checks all queries.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"bool"}>
+
+True if any matching query is fetching.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"is_loading"} type={"(self, filter=None) -> bool"}>
+
+Check if any query matching the filter is in loading state.
+
+<PySourceCode >
+
+```python
+def is_loading(self, filter: QueryFilter | None = None) -> bool:
+	"""Check if any query matching the filter is in loading state.
+
+	Args:
+		filter: Optional filter - exact key, list of keys, or predicate.
+			If None, checks all queries.
+
+	Returns:
+		True if any matching query has status "loading".
+	"""
+	queries = self.get_all(filter)
+	for q in queries:
+		if isinstance(q, InfiniteQuery):
+			if q.status() == "loading":
+				return True
+		elif q.status() == "loading":
+			return True
+	return False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"filter"} type={"QueryFilter | None"} value={"None"}>
+
+Optional filter - exact key, list of keys, or predicate.
+If None, checks all queries.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"bool"}>
+
+True if any matching query has status "loading".
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"wait"} type={"(self, key) -> ActionResult[Any] | None"}>
+
+Wait for a query to complete and return the result.
+
+<PySourceCode >
+
+```python
+async def wait(self, key: QueryKey) -> ActionResult[Any] | None:
+	"""Wait for a query to complete and return the result.
+
+	Args:
+		key: The query key tuple to wait for.
+
+	Returns:
+		ActionResult with data or error, or None if query doesn't exist.
+	"""
+	query = self.get(key)
+	if query is not None:
+		return await query.wait()
+
+	inf_query = self.get_infinite(key)
+	if inf_query is not None:
+		return await inf_query.wait()
+
+	return None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={undefined}>
+
+The query key tuple to wait for.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"ActionResult[Any] | None"}>
+
+ActionResult with data or error, or None if query doesn't exist.
+
+</PyFunctionReturn>
+
+</PyFunction>

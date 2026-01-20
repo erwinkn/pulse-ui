@@ -1,0 +1,152 @@
+---
+title: navigator
+---
+
+Browser navigator global object.
+
+Usage:
+
+```python
+from pulse.js import navigator, console
+console.log(navigator.userAgent)
+```
+
+<PyAttribute name={"userAgent"} type={"str"} value={null} />
+
+<PyAttribute name={"language"} type={"str"} value={null} />
+
+<PyAttribute name={"languages"} type={"list[str]"} value={null} />
+
+<PyAttribute name={"platform"} type={"str"} value={null} />
+
+<PyAttribute name={"vendor"} type={"str"} value={null} />
+
+<PyAttribute name={"appName"} type={"str"} value={null} />
+
+<PyAttribute name={"appVersion"} type={"str"} value={null} />
+
+<PyAttribute name={"onLine"} type={"bool"} value={null} />
+
+<PyAttribute name={"hardwareConcurrency"} type={"int"} value={null} />
+
+<PyAttribute name={"maxTouchPoints"} type={"int"} value={null} />
+
+<PyAttribute name={"deviceMemory"} type={"float | None"} value={null} />
+
+<PyAttribute name={"cookieEnabled"} type={"bool"} value={null} />
+
+<PyAttribute name={"pdfViewerEnabled"} type={"bool"} value={null} />
+
+<PyAttribute name={"clipboard"} type={"_Clipboard"} value={null} />
+
+<PyAttribute name={"mediaDevices"} type={"_Any"} value={null} />
+
+<PyAttribute name={"permissions"} type={"_Any"} value={null} />
+
+<PyAttribute name={"serviceWorker"} type={"_Any"} value={null} />
+
+<PyAttribute name={"geolocation"} type={"_Any"} value={null} />
+
+<PyAttribute name={"storage"} type={"_Any"} value={null} />
+
+<Tabs items={["Functions"]}>
+
+<Tab value={"Functions"}>
+
+<PyFunction name={"vibrate"} type={"(pattern) -> bool"}>
+
+Vibrate the device. Returns True if vibration is supported.
+
+<PySourceCode >
+
+```python
+def vibrate(pattern: int | list[int]) -> bool:
+	"""Vibrate the device. Returns True if vibration is supported."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"pattern"} type={"int | list[int]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+<PyFunction name={"share"} type={"(data) -> _Any"}>
+
+Share data via the Web Share API. Returns a Promise.
+
+<PySourceCode >
+
+```python
+def share(data: dict[str, str]) -> _Any:
+	"""Share data via the Web Share API. Returns a Promise."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"data"} type={"dict[str, str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"typing.Any"} />
+
+</PyFunction>
+<PyFunction name={"sendBeacon"} type={"(url, data=None) -> bool"}>
+
+Send data to a URL asynchronously. Returns True if successful.
+
+<PySourceCode >
+
+```python
+def sendBeacon(url: str, data: str | bytes | _Any | None = None, /) -> bool:
+	"""Send data to a URL asynchronously. Returns True if successful."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"url"} type={"str"} value={null} />
+<PyParameter name={"data"} type={"str | bytes | _Any | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+<PyFunction name={"canShare"} type={"(data=None) -> bool"}>
+
+Check if data can be shared via the Web Share API.
+
+<PySourceCode >
+
+```python
+def canShare(data: dict[str, str] | None = None, /) -> bool:
+	"""Check if data can be shared via the Web Share API."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"data"} type={"dict[str, str] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

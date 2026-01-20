@@ -1,0 +1,38 @@
+---
+title: ActionSuccess
+---
+
+Successful query action result.
+
+Returned by query operations like ``refetch()`` and ``wait()`` when the
+operation completes successfully.
+
+## Attributes
+
+<PyAttribute name={"data"} type={"T"} value={null}>
+
+The fetched data of type T.
+
+</PyAttribute>
+
+<PyAttribute name={"status"} type={"Literal['success']"} value={"'success'"}>
+
+Always ``"success"`` for discriminated union matching.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, data, status='success') -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T"} value={null} />
+<PyParameter name={"status"} type={"Literal['success']"} value={"'success'"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

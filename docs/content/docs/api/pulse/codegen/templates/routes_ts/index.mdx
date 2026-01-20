@@ -1,7 +1,0 @@
----
-title: "routes_ts"
----
-
-<PyAttribute name={"ROUTES_CONFIG_TEMPLATE"} type={null} value={"Template('import {\\n  type RouteConfig,\\n  route,\\n  layout,\\n  index,\\n} from \"@react-router/dev/routes\";\\nimport { rrPulseRouteTree, type RRRouteObject } from \"./routes.runtime\";\\n\\nfunction toDevRoute(node: RRRouteObject): any {\\n  const children = (node.children ?? []).map(toDevRoute);\\n  if (node.index) return index(node.file!);\\n  if (node.path !== undefined) {\\n    return children.length ? route(node.path, node.file!, children) : route(node.path, node.file!);\\n  }\\n  // Layout node (pathless)\\n  return layout(node.file!, children);\\n}\\n\\nexport const routes = [\\n  layout(\"${pulse_dir}/_layout.tsx\", rrPulseRouteTree.map(toDevRoute)),\\n] satisfies RouteConfig;\\n')"} />
-
-<PyAttribute name={"ROUTES_RUNTIME_TEMPLATE"} type={null} value={"Template('import type { RouteObject } from \"react-router\";\\n\\nexport type RRRouteObject = RouteObject & {\\n  id: string;\\n  uniquePath?: string;\\n  children?: RRRouteObject[];\\n  file: string;\\n}\\n\\nexport const rrPulseRouteTree = ${routes_str} satisfies RRRouteObject[];\\n')"} />

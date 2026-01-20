@@ -40,10 +40,13 @@ class Signal(Generic[T]):
 		last_change: Epoch when last changed.
 
 	Example:
-		>>> count = Signal(0, name="count")
-		>>> print(count())     # 0 (registers dependency)
-		>>> count.write(1)     # Updates and notifies observers
-		>>> print(count.value) # 1 (no dependency tracking)
+
+	```python
+	count = Signal(0, name="count")
+	print(count())     # 0 (registers dependency)
+	count.write(1)     # Updates and notifies observers
+	print(count.value) # 1 (no dependency tracking)
+	```
 	"""
 
 	value: T
@@ -155,11 +158,14 @@ class Computed(Generic[T_co]):
 		last_change: Epoch when value last changed.
 
 	Example:
-		>>> count = Signal(5)
-		>>> doubled = Computed(lambda: count() * 2)
-		>>> print(doubled())  # 10
-		>>> count.write(10)
-		>>> print(doubled())  # 20
+
+	```python
+	count = Signal(5)
+	doubled = Computed(lambda: count() * 2)
+	print(doubled())  # 10
+	count.write(10)
+	print(doubled())  # 20
+	```
 	"""
 
 	fn: Callable[..., T_co]
@@ -357,13 +363,16 @@ class Effect(Disposable):
 		interval: Re-run interval in seconds.
 
 	Example:
-		>>> count = Signal(0)
-		>>> def log_count():
-		...     print(f"Count: {count()}")
-		...     return lambda: print("Cleanup")
-		>>> effect = Effect(log_count)
-		>>> count.write(1)  # Effect runs after batch flush
-		>>> effect.dispose()
+
+	```python
+	count = Signal(0)
+	def log_count():
+	    print(f"Count: {count()}")
+	    return lambda: print("Cleanup")
+	effect = Effect(log_count)
+	count.write(1)  # Effect runs after batch flush
+	effect.dispose()
+	```
 	"""
 
 	fn: EffectFn
@@ -838,12 +847,15 @@ class Batch:
 		name: Debug name for the batch.
 
 	Example:
-		>>> count = Signal(0)
-		>>> with Batch() as batch:
-		...     count.write(1)
-		...     count.write(2)
-		...     count.write(3)
-		... # Effects run once here with final value 3
+
+	```python
+	count = Signal(0)
+	with Batch() as batch:
+	    count.write(1)
+	    count.write(2)
+	    count.write(3)
+	# Effects run once here with final value 3
+	```
 	"""
 
 	name: str | None
@@ -977,11 +989,14 @@ class Scope:
 		effects: Effects created in this scope.
 
 	Example:
-		>>> with Scope() as scope:
-		...     value = signal()  # Dependency tracked
-		...     effect = Effect(fn)  # Effect registered
-		>>> print(scope.deps)    # {signal: last_change}
-		>>> print(scope.effects) # [effect]
+
+	```python
+	with Scope() as scope:
+	    value = signal()  # Dependency tracked
+	    effect = Effect(fn)  # Effect registered
+	print(scope.deps)    # {signal: last_change}
+	print(scope.effects) # [effect]
+	```
 	"""
 
 	def __init__(self):
@@ -1023,8 +1038,11 @@ class Untrack(Scope):
 	Use as a context manager to read signals without registering dependencies.
 
 	Example:
-		>>> with Untrack():
-		...     value = signal()  # No dependency registered
+
+	```python
+	with Untrack():
+	    value = signal()  # No dependency registered
+	```
 	"""
 
 	...
@@ -1048,10 +1066,13 @@ class ReactiveContext:
 		on_effect_error: Global effect error handler.
 
 	Example:
-		>>> ctx = ReactiveContext()
-		>>> with ctx:
-		...     # All reactive operations use this context
-		...     pass
+
+	```python
+	ctx = ReactiveContext()
+	with ctx:
+	    # All reactive operations use this context
+	    pass
+	```
 	"""
 
 	epoch: Epoch
@@ -1122,10 +1143,13 @@ def flush_effects() -> None:
 	"""Flush the current batch, running all scheduled effects.
 
 	Example:
-		>>> count = Signal(0)
-		>>> Effect(lambda: print(count()))
-		>>> count.write(1)
-		>>> flush_effects()  # Prints: 1
+
+	```python
+	count = Signal(0)
+	Effect(lambda: print(count()))
+	count.write(1)
+	flush_effects()  # Prints: 1
+	```
 	"""
 	REACTIVE_CONTEXT.get().batch.flush()
 

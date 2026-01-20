@@ -1,0 +1,69 @@
+---
+title: Identifier
+---
+
+JS identifier: x, foo, myFunc
+
+## Attributes
+
+<PyAttribute name={"name"} type={"str"} value={null} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append(self.name)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	return {"t": "id", "name": self.name}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, name) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

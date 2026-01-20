@@ -113,16 +113,19 @@ def effects(
 		ValueError: If any of the provided functions is not callable.
 
 	Example:
-		>>> def user_profile(user_id: str):
-		...     s = ps.state("user", lambda: UserState(user_id))
-		...
-		...     ps.effects(
-		...         lambda: print(f"User changed: {s.name}"),
-		...         lambda: subscribe_to_updates(s.user_id),
-		...         key=user_id,  # Recreate effects when user_id changes
-		...     )
-		...
-		...     return m.Text(s.name)
+
+	```python
+	def user_profile(user_id: str):
+	    s = ps.state("user", lambda: UserState(user_id))
+
+	    ps.effects(
+	        lambda: print(f"User changed: {s.name}"),
+	        lambda: subscribe_to_updates(s.user_id),
+	        key=user_id,  # Recreate effects when user_id changes
+	    )
+
+	    return m.Text(s.name)
+	```
 
 	Notes:
 		- Can only be called once per component render

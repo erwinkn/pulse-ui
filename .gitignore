@@ -1,6 +1,7 @@
 # AI stuff
 .context/
 notes/
+generated/
 
 node_modules/
 

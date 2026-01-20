@@ -1,0 +1,137 @@
+---
+title: json
+---
+
+JavaScript JSON builtin module.
+
+Usage:
+
+```python
+import pulse.js.json as JSON
+JSON.stringify(\{"a": 1\})      # -> JSON.stringify(\{"a": 1\})
+JSON.parse('\{"a": 1\}')        # -> JSON.parse('\{"a": 1\}')
+
+from pulse.js.json import stringify, parse
+stringify(\{"a": 1\})           # -> JSON.stringify(\{"a": 1\})
+parse('\{"a": 1\}')             # -> JSON.parse('\{"a": 1\}')
+```
+
+<PyAttribute name={"JSONValue"} type={null} value={"None | bool | int | float | str | list['JSONValue'] | dict[str, 'JSONValue']"} />
+
+<PyAttribute name={"JSONReplacer"} type={null} value={"_Sequence[str | int] | _Callable[[str, JSONValue], JSONValue]"} />
+
+<PyAttribute name={"JSONReviver"} type={null} value={"_Callable[[str, JSONValue], JSONValue]"} />
+
+<PyAttribute name={"T"} type={null} value={"_TypeVar('T')"} />
+
+<Tabs items={["Functions"]}>
+
+<Tab value={"Functions"}>
+
+<PyFunction name={"parse"} type={"(text, reviver=None) -> JSONValue"}>
+
+Parse a JSON string into a JavaScript value.
+
+<PySourceCode >
+
+```python
+def parse(text: str, reviver: JSONReviver | None = None, /) -> JSONValue:
+	"""Parse a JSON string into a JavaScript value.
+
+	Args:
+	    text: The JSON string to parse.
+	    reviver: Optional function (key: str, value: Any) -> Any that transforms the parsed value.
+	        Called for each key-value pair. Return the value to use, or undefined to omit.
+
+	Returns:
+	    The parsed JavaScript value (null, bool, number, string, array, or object).
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"text"} type={"str"} value={undefined}>
+
+The JSON string to parse.
+
+</PyParameter>
+<PyParameter name={"reviver"} type={"JSONReviver | None"} value={"None"}>
+
+Optional function (key: str, value: Any) -> Any that transforms the parsed value.
+Called for each key-value pair. Return the value to use, or undefined to omit.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"pulse.js.json.JSONValue"}>
+
+The parsed JavaScript value (null, bool, number, string, array, or object).
+
+</PyFunctionReturn>
+
+</PyFunction>
+<PyFunction name={"stringify"} type={"(value, replacer=None, space=None) -> str"}>
+
+Convert a JavaScript value to a JSON string.
+
+<PySourceCode >
+
+```python
+def stringify(
+	value: JSONValue,
+	replacer: JSONReplacer | None = None,
+	space: int | str | None = None,
+	/,
+) -> str:
+	"""Convert a JavaScript value to a JSON string.
+
+	Args:
+	    value: The value to convert to JSON.
+	    replacer: Optional array of property names/indices, or function (key: str, value: Any) -> Any
+	        that controls which properties are included. Return undefined to omit.
+	    space: Optional indentation. Number for spaces per level, or string (up to 10 chars).
+
+	Returns:
+	    The JSON string representation of the value.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"JSONValue"} value={undefined}>
+
+The value to convert to JSON.
+
+</PyParameter>
+<PyParameter name={"replacer"} type={"JSONReplacer | None"} value={"None"}>
+
+Optional array of property names/indices, or function (key: str, value: Any) -> Any
+that controls which properties are included. Return undefined to omit.
+
+</PyParameter>
+<PyParameter name={"space"} type={"int | str | None"} value={"None"}>
+
+Optional indentation. Number for spaces per level, or string (up to 10 chars).
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"str"}>
+
+The JSON string representation of the value.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

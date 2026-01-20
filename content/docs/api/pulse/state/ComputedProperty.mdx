@@ -1,0 +1,130 @@
+---
+title: ComputedProperty
+---
+
+Descriptor for computed (derived) properties on State classes.
+
+ComputedProperty wraps a method that derives its value from other reactive
+properties. The computed value is cached and only recalculated when its
+dependencies change. Reading a computed property subscribes to it.
+
+Created automatically when using the @ps.computed decorator on a State method.
+
+## Attributes
+
+<PyAttribute name={"name"} type={"str"} value={"name"} />
+
+<PyAttribute name={"private_name"} type={"str"} value={"f'__computed_{name}'"} />
+
+<PyAttribute name={"fn"} type={"Callable[[State], T]"} value={"fn"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, name, fn)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, name: str, fn: "Callable[[State], T]"):
+	self.name = name
+	self.private_name = f"__computed_{name}"
+	# The computed_template holds the original method
+	self.fn = fn
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"fn"} type={"Callable[[State], T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"get_computed"} type={"(self, obj) -> Computed[T]"}>
+
+<PySourceCode >
+
+```python
+def get_computed(self, obj: Any) -> Computed[T]:
+	if not isinstance(obj, State):
+		raise ValueError(
+			f"Computed property {self.name} defined on a non-State class"
+		)
+	if not hasattr(obj, self.private_name):
+		# Create the computed on first access for this instance
+		bound_method = self.fn.__get__(obj, obj.__class__)
+		new_computed = Computed(
+			bound_method,
+			name=f"{obj.__class__.__name__}.{self.name}",
+		)
+		setattr(obj, self.private_name, new_computed)
+	return getattr(obj, self.private_name)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"obj"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.reactive.Computed[pulse.state.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"__get__"} type={"(self, obj, objtype=None) -> T"}>
+
+<PySourceCode >
+
+```python
+def __get__(self, obj: Any, objtype: Any = None) -> T:
+	if obj is None:
+		return self  # pyright: ignore[reportReturnType]
+
+	return self.get_computed(obj).read()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"obj"} type={"Any"} value={null} />
+<PyParameter name={"objtype"} type={"Any"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.state.T"} />
+
+</PyFunction>
+
+<PyFunction name={"__set__"} type={"(self, obj, value) -> Never"}>
+
+<PySourceCode >
+
+```python
+def __set__(self, obj: Any, value: Any) -> Never:
+	raise AttributeError(f"Cannot set computed property '{self.name}'")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"obj"} type={"Any"} value={null} />
+<PyParameter name={"value"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"typing.Never"} />
+
+</PyFunction>

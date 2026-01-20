@@ -1,0 +1,91 @@
+---
+title: Object
+---
+
+JS object: \{ key: value, ...spread \}
+
+Props can be either:
+- tuple[str, Expr]: key-value pair
+- Spread: spread expression (...expr)
+
+## Attributes
+
+<PyAttribute name={"props"} type={"Sequence[tuple[str, Expr] | Spread]"} value={null} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append("{")
+	for i, prop in enumerate(self.props):
+		if i > 0:
+			out.append(", ")
+		if isinstance(prop, Spread):
+			prop.emit(out)
+		else:
+			k, v = prop
+			out.append('"')
+			out.append(_escape_string(k))
+			out.append('": ')
+			v.emit(out)
+	out.append("}")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	rendered_props: dict[str, VDOMNode] = {}
+	for prop in self.props:
+		if isinstance(prop, Spread):
+			raise TypeError("Object spread cannot be rendered to VDOM")
+		k, v = prop
+		rendered_props[k] = v.render()
+	return {"t": "object", "props": rendered_props}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, props) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"props"} type={"Sequence[tuple[str, Expr] | Spread]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

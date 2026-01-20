@@ -1,0 +1,399 @@
+---
+title: decorators
+---
+
+<PyAttribute name={"T"} type={null} value={"TypeVar('T')"} />
+
+<PyAttribute name={"TState"} type={null} value={"TypeVar('TState', bound=State)"} />
+
+<PyAttribute name={"P"} type={null} value={"ParamSpec('P')"} />
+
+<PyAttribute name={"StateEffectFn"} type={null} value={"Callable[[TState], EffectCleanup | None]"} />
+
+<PyAttribute name={"AsyncStateEffectFn"} type={null} value={"Callable[[TState], Awaitable[EffectCleanup | None]]"} />
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"EffectBuilder"} href={"/docs/api/pulse/decorators/EffectBuilder"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"computed"} type={"(fn=None, *, name=None)"}>
+
+Decorator for computed (derived) properties.
+
+Creates a cached, reactive value that automatically recalculates when its
+dependencies change. The computed tracks which Signals/Computeds are read
+during execution and subscribes to them.
+
+Can be used in two ways:
+1. On a State method (with single `self` argument) - creates a ComputedProperty
+2. As a standalone function (with no arguments) - creates a Computed
+
+<Callout title={"Example"} type={"example"}>
+
+On a State method:
+
+    class MyState(ps.State):
+        count: int = 0
+
+        @ps.computed
+        def doubled(self):
+            return self.count * 2
+
+As a standalone computed:
+
+    signal = Signal(5)
+
+    @ps.computed
+    def doubled():
+        return signal() * 2
+
+With explicit name:
+
+    @ps.computed(name="my_computed")
+    def doubled(self):
+        return self.count * 2
+
+</Callout>
+
+<PySourceCode >
+
+```python
+def computed(fn: Callable[..., Any] | None = None, *, name: str | None = None):
+	"""
+	Decorator for computed (derived) properties.
+
+	Creates a cached, reactive value that automatically recalculates when its
+	dependencies change. The computed tracks which Signals/Computeds are read
+	during execution and subscribes to them.
+
+	Can be used in two ways:
+	1. On a State method (with single `self` argument) - creates a ComputedProperty
+	2. As a standalone function (with no arguments) - creates a Computed
+
+	Args:
+		fn: The function to compute the value. Must take no arguments (standalone) or only `self` (State method).
+		name: Optional debug name for the computed. Defaults to the function name.
+
+	Returns:
+		ComputedProperty[T]: When decorating a State method.
+		Computed[T]: When decorating a standalone function.
+
+	Raises:
+		TypeError: If the function takes arguments other than `self`.
+
+	Example:
+		On a State method:
+
+		    class MyState(ps.State):
+		        count: int = 0
+
+		        @ps.computed
+		        def doubled(self):
+		            return self.count * 2
+
+		As a standalone computed:
+
+		    signal = Signal(5)
+
+		    @ps.computed
+		    def doubled():
+		        return signal() * 2
+
+		With explicit name:
+
+		    @ps.computed(name="my_computed")
+		    def doubled(self):
+		        return self.count * 2
+	"""
+
+	# The type checker is not happy if I don't specify the `/` here.
+	def decorator(fn: Callable[..., Any], /):
+		sig = inspect.signature(fn)
+		params = list(sig.parameters.values())
+		# Check if it's a method with exactly one argument called 'self'
+		if len(params) == 1 and params[0].name == "self":
+			return ComputedProperty(fn.__name__, fn)
+		# If it has any arguments at all, it's not allowed (except for 'self')
+		if len(params) > 0:
+			raise TypeError(
+				f"@computed: Function '{fn.__name__}' must take no arguments or a single 'self' argument"
+			)
+		return Computed(fn, name=name or fn.__name__)
+
+	if fn is not None:
+		return decorator(fn)
+	else:
+		return decorator
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"fn"} type={"Callable[..., Any] | None"} value={"None"}>
+
+The function to compute the value. Must take no arguments (standalone) or only `self` (State method).
+
+</PyParameter>
+<PyParameter name={"name"} type={"str | None"} value={"None"}>
+
+Optional debug name for the computed. Defaults to the function name.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={null}>
+
+ComputedProperty[T]: When decorating a State method.
+
+</PyFunctionReturn>
+
+</PyFunction>
+<PyFunction name={"effect"} type={"(fn=None, *, name=None, immediate=False, lazy=False, on_error=None, deps=None, interval=None)"}>
+
+Decorator for side effects that run when dependencies change.
+
+Creates an effect that automatically re-runs when any of its tracked
+dependencies change. Dependencies are automatically tracked by observing
+which Signals/Computeds are read during execution.
+
+Can be used in two ways:
+1. On a State method (with single `self` argument) - creates a StateEffect
+2. As a standalone function (with no arguments) - creates an Effect
+
+Supports both sync and async functions. Async effects cannot use `immediate=True`.
+
+<Callout title={"Example"} type={"example"}>
+
+State method effect:
+
+    class MyState(ps.State):
+        count: int = 0
+
+        @ps.effect
+        def log_changes(self):
+            print(f"Count is \{self.count\}")
+
+Async effect:
+
+    class MyState(ps.State):
+        query: str = ""
+
+        @ps.effect
+        async def fetch_data(self):
+            data = await api.fetch(self.query)
+            self.data = data
+
+Effect with cleanup:
+
+    @ps.effect
+    def subscribe(self):
+        unsub = event_bus.subscribe(self.handle)
+        return unsub  # Called before next run or on dispose
+
+Polling effect:
+
+    @ps.effect(interval=5.0)
+    async def poll_status(self):
+        self.status = await api.get_status()
+
+</Callout>
+
+<PySourceCode >
+
+```python
+def effect(
+	fn: Callable[..., Any] | None = None,
+	*,
+	name: str | None = None,
+	immediate: bool = False,
+	lazy: bool = False,
+	on_error: Callable[[Exception], None] | None = None,
+	deps: list[Signal[Any] | Computed[Any]] | None = None,
+	interval: float | None = None,
+):
+	"""
+	Decorator for side effects that run when dependencies change.
+
+	Creates an effect that automatically re-runs when any of its tracked
+	dependencies change. Dependencies are automatically tracked by observing
+	which Signals/Computeds are read during execution.
+
+	Can be used in two ways:
+	1. On a State method (with single `self` argument) - creates a StateEffect
+	2. As a standalone function (with no arguments) - creates an Effect
+
+	Supports both sync and async functions. Async effects cannot use `immediate=True`.
+
+	Args:
+		fn: The effect function. Must take no arguments (standalone) or only
+		    `self` (State method). Can return a cleanup function.
+		name: Optional debug name. Defaults to "ClassName.method_name" or function name.
+		immediate: If True, run synchronously when scheduled instead of batching.
+		    Only valid for sync effects.
+		lazy: If True, don't run on creation; wait for first dependency change.
+		on_error: Callback invoked if the effect throws an exception.
+		deps: Explicit list of dependencies. If provided, auto-tracking is disabled
+		    and the effect only re-runs when these specific dependencies change.
+		interval: Re-run interval in seconds. Creates a polling effect that runs
+		    periodically regardless of dependency changes.
+
+	Returns:
+		Effect: For sync standalone functions.
+		AsyncEffect: For async standalone functions.
+		StateEffect: For State methods (converted to Effect at instantiation).
+
+	Raises:
+		TypeError: If the function takes arguments other than `self`.
+		ValueError: If `immediate=True` is used with an async function.
+
+	Example:
+		State method effect:
+
+		    class MyState(ps.State):
+		        count: int = 0
+
+		        @ps.effect
+		        def log_changes(self):
+		            print(f"Count is {self.count}")
+
+		Async effect:
+
+		    class MyState(ps.State):
+		        query: str = ""
+
+		        @ps.effect
+		        async def fetch_data(self):
+		            data = await api.fetch(self.query)
+		            self.data = data
+
+		Effect with cleanup:
+
+		    @ps.effect
+		    def subscribe(self):
+		        unsub = event_bus.subscribe(self.handle)
+		        return unsub  # Called before next run or on dispose
+
+		Polling effect:
+
+		    @ps.effect(interval=5.0)
+		    async def poll_status(self):
+		        self.status = await api.get_status()
+	"""
+
+	def decorator(func: Callable[..., Any], /):
+		sig = inspect.signature(func)
+		params = list(sig.parameters.values())
+
+		# Disallow intermediate + async
+		if immediate and inspect.iscoroutinefunction(func):
+			raise ValueError("Async effects cannot have immediate=True")
+
+		if len(params) == 1 and params[0].name == "self":
+			return StateEffect(
+				func,
+				name=name,
+				immediate=immediate,
+				lazy=lazy,
+				on_error=on_error,
+				deps=deps,
+				interval=interval,
+			)
+
+		if len(params) > 0:
+			raise TypeError(
+				f"@effect: Function '{func.__name__}' must take no arguments or a single 'self' argument"
+			)
+
+		# This is a standalone effect function. Choose subclass based on async-ness
+		if inspect.iscoroutinefunction(func):
+			return AsyncEffect(
+				func,  # type: ignore[arg-type]
+				name=name or func.__name__,
+				lazy=lazy,
+				on_error=on_error,
+				deps=deps,
+				interval=interval,
+			)
+		return Effect(
+			func,  # type: ignore[arg-type]
+			name=name or func.__name__,
+			immediate=immediate,
+			lazy=lazy,
+			on_error=on_error,
+			deps=deps,
+			interval=interval,
+		)
+
+	if fn:
+		return decorator(fn)
+	return decorator
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"fn"} type={"Callable[..., Any] | None"} value={"None"}>
+
+The effect function. Must take no arguments (standalone) or only
+`self` (State method). Can return a cleanup function.
+
+</PyParameter>
+<PyParameter name={"name"} type={"str | None"} value={"None"}>
+
+Optional debug name. Defaults to "ClassName.method_name" or function name.
+
+</PyParameter>
+<PyParameter name={"immediate"} type={"bool"} value={"False"}>
+
+If True, run synchronously when scheduled instead of batching.
+Only valid for sync effects.
+
+</PyParameter>
+<PyParameter name={"lazy"} type={"bool"} value={"False"}>
+
+If True, don't run on creation; wait for first dependency change.
+
+</PyParameter>
+<PyParameter name={"on_error"} type={"Callable[[Exception], None] | None"} value={"None"}>
+
+Callback invoked if the effect throws an exception.
+
+</PyParameter>
+<PyParameter name={"deps"} type={"list[Signal[Any] | Computed[Any]] | None"} value={"None"}>
+
+Explicit list of dependencies. If provided, auto-tracking is disabled
+and the effect only re-runs when these specific dependencies change.
+
+</PyParameter>
+<PyParameter name={"interval"} type={"float | None"} value={"None"}>
+
+Re-run interval in seconds. Creates a polling effect that runs
+periodically regardless of dependency changes.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={null}>
+
+For sync standalone functions.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

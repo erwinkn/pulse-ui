@@ -1,0 +1,45 @@
+---
+title: HookInit
+---
+
+Initialization context passed to hook factories.
+
+When a hook factory accepts a single argument, it receives this object
+containing context about the initialization.
+
+## Attributes
+
+<PyAttribute name={"key"} type={"str | None"} value={null}>
+
+Optional key if the hook was called with a specific key.
+
+</PyAttribute>
+
+<PyAttribute name={"render_cycle"} type={"int"} value={null}>
+
+The current render cycle number.
+
+</PyAttribute>
+
+<PyAttribute name={"definition"} type={"Hook[T]"} value={null}>
+
+Reference to the Hook definition being initialized.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, key, render_cycle, definition) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"str | None"} value={null} />
+<PyParameter name={"render_cycle"} type={"int"} value={null} />
+<PyParameter name={"definition"} type={"Hook[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

@@ -1,0 +1,16 @@
+---
+title: ChannelClosed
+---
+
+Raised when interacting with a channel that has been closed.
+
+This exception is raised when attempting to call ``on()``, ``emit()``,
+or ``request()`` on a channel that has already been closed.
+
+Example:
+
+```python
+ch = ps.channel("my-channel")
+ch.close()
+ch.emit("event")  # Raises ChannelClosed
+```

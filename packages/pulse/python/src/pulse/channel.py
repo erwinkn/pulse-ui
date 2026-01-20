@@ -37,9 +37,12 @@ class ChannelClosed(RuntimeError):
 	or ``request()`` on a channel that has already been closed.
 
 	Example:
-		>>> ch = ps.channel("my-channel")
-		>>> ch.close()
-		>>> ch.emit("event")  # Raises ChannelClosed
+
+	```python
+	ch = ps.channel("my-channel")
+	ch.close()
+	ch.emit("event")  # Raises ChannelClosed
+	```
 	"""
 
 
@@ -50,7 +53,10 @@ class ChannelTimeout(asyncio.TimeoutError):
 	timeout elapses before receiving a response from the client.
 
 	Example:
-		>>> result = await ch.request("get_value", timeout=5.0)  # Raises if no response in 5s
+
+	```python
+	result = await ch.request("get_value", timeout=5.0)  # Raises if no response in 5s
+	```
 	"""
 
 
@@ -344,15 +350,18 @@ class Channel:
 		closed: Whether the channel has been closed.
 
 	Example:
-		>>> @ps.component
-		... def ChatRoom():
-		...     ch = ps.channel("chat")
-		...
-		...     @ch.on("message")
-		...     def handle_message(payload):
-		...         ch.emit("broadcast", payload)
-		...
-		...     return ps.div("Chat room")
+
+	```python
+	@ps.component
+	def ChatRoom():
+	    ch = ps.channel("chat")
+
+	    @ch.on("message")
+	    def handle_message(payload):
+	        ch.emit("broadcast", payload)
+
+	    return ps.div("Chat room")
+	```
 	"""
 
 	_manager: ChannelsManager
@@ -397,10 +406,13 @@ class Channel:
 			ChannelClosed: If the channel is closed.
 
 		Example:
-			>>> ch = ps.channel()
-			>>> remove_handler = ch.on("data", lambda payload: print(payload))
-			>>> # Later, to unregister:
-			>>> remove_handler()
+
+		```python
+		ch = ps.channel()
+		remove_handler = ch.on("data", lambda payload: print(payload))
+		# Later, to unregister:
+		remove_handler()
+		```
 		"""
 
 		self._ensure_open()
@@ -434,7 +446,10 @@ class Channel:
 			ChannelClosed: If the channel is closed.
 
 		Example:
-			>>> ch.emit("notification", {"message": "Hello"})
+
+		```python
+		ch.emit("notification", {"message": "Hello"})
+		```
 		"""
 
 		self._ensure_open()
@@ -471,7 +486,10 @@ class Channel:
 			ChannelTimeout: If the request times out.
 
 		Example:
-			>>> result = await ch.request("get_value", timeout=5.0)
+
+		```python
+		result = await ch.request("get_value", timeout=5.0)
+		```
 		"""
 
 		self._ensure_open()
@@ -558,17 +576,20 @@ def channel(identifier: str | None = None) -> Channel:
 		RuntimeError: If called outside an active render session.
 
 	Example:
-		>>> import pulse as ps
-		>>>
-		>>> @ps.component
-		... def ChatRoom():
-		...     ch = ps.channel("chat")
-		...
-		...     @ch.on("message")
-		...     def handle_message(payload):
-		...         ch.emit("broadcast", payload)
-		...
-		...     return ps.div("Chat room")
+
+	```python
+	import pulse as ps
+
+	@ps.component
+	def ChatRoom():
+	    ch = ps.channel("chat")
+
+	    @ch.on("message")
+	    def handle_message(payload):
+	        ch.emit("broadcast", payload)
+
+	    return ps.div("Chat room")
+	```
 	"""
 
 	ctx = PulseContext.get()

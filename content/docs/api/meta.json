@@ -1,0 +1,8 @@
+{
+  "title": "API Reference",
+  "icon": "Code",
+  "root": true,
+  "pages": [
+    "pulse"
+  ]
+}

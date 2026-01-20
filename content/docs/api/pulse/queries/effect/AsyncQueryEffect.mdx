@@ -1,0 +1,82 @@
+---
+title: AsyncQueryEffect
+---
+
+Specialized AsyncEffect for queries that synchronously sets loading state
+when rescheduled/run.
+
+For unkeyed queries (deps=None), also resets data/status when re-running
+due to dependency changes, to behave like keyed queries on key change.
+
+## Attributes
+
+<PyAttribute name={"fetcher"} type={"Fetcher"} value={"fetcher"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, fn, fetcher, name=None, lazy=False, deps=None)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	fn: Callable[[], Awaitable[None]],
+	fetcher: Fetcher,
+	name: str | None = None,
+	lazy: bool = False,
+	deps: list[Signal[Any] | Computed[Any]] | None = None,
+):
+	self.fetcher = fetcher
+	# Unkeyed queries have deps=None (auto-track), keyed have deps=[] (no auto-track)
+	self._is_unkeyed = deps is None
+	super().__init__(fn, name=name, lazy=lazy, deps=deps)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"Callable[[], Awaitable[None]]"} value={null} />
+<PyParameter name={"fetcher"} type={"Fetcher"} value={null} />
+<PyParameter name={"name"} type={"str | None"} value={"None"} />
+<PyParameter name={"lazy"} type={"bool"} value={"False"} />
+<PyParameter name={"deps"} type={"list[Signal[Any] | Computed[Any]] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"run"} type={"(self) -> asyncio.Task[Any]"}>
+
+<PySourceCode >
+
+```python
+@override
+def run(self) -> asyncio.Task[Any]:
+	# Immediately set loading state before running the effect
+	self.fetcher.is_fetching.write(True)
+
+	# For unkeyed queries on re-run (dependency changed), reset data/status
+	# to behave like keyed queries when key changes (new Query with data=None)
+	if self._is_unkeyed and self.runs > 0:
+		self.fetcher.data.write(None)
+		self.fetcher.status.write("loading")
+
+	return super().run()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"asyncio.asyncio.Task[typing.Any]"} />
+
+</PyFunction>

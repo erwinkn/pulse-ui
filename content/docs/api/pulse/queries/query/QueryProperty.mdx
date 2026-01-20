@@ -1,0 +1,433 @@
+---
+title: QueryProperty
+---
+
+Descriptor for state-bound queries created by the @query decorator.
+
+QueryProperty is the return type of the ``@query`` decorator. It acts as a
+descriptor that creates and manages query instances for each State object.
+
+When accessed on a State instance, returns a QueryResult with reactive
+properties (data, status, error) and methods (refetch, invalidate, etc.).
+
+Supports additional decorators for customization:
+        - ``@query_prop.key``: Define dynamic query key for sharing.
+        - ``@query_prop.initial_data``: Provide initial/placeholder data.
+        - ``@query_prop.on_success``: Handle successful fetch.
+        - ``@query_prop.on_error``: Handle fetch errors.
+
+Example:
+
+```python
+class UserState(ps.State):
+    user_id: str = ""
+
+    @ps.query
+    async def user(self) -> User:
+        return await api.get_user(self.user_id)
+
+    @user.key
+    def _user_key(self):
+        return ("user", self.user_id)
+
+    @user.on_success
+    def _on_user_loaded(self, data: User):
+        print(f"Loaded user: \{data.name\}")
+```
+
+## Attributes
+
+<PyAttribute name={"name"} type={"str"} value={"name"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, name, fetch_fn, keep_previous_data=False, stale_time=0.0, gc_time=300.0, refetch_interval=None, retries=3, retry_delay=RETRY_DELAY_DEFAULT, initial_data_updated_at=None, enabled=True, fetch_on_mount=True, key=None)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	name: str,
+	fetch_fn: "Callable[[TState], Awaitable[T]]",
+	keep_previous_data: bool = False,
+	stale_time: float = 0.0,
+	gc_time: float = 300.0,
+	refetch_interval: float | None = None,
+	retries: int = 3,
+	retry_delay: float = RETRY_DELAY_DEFAULT,
+	initial_data_updated_at: float | dt.datetime | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
+):
+	self.name = name
+	self._fetch_fn = fetch_fn
+	self._key = key
+	self._on_success_fn = None
+	self._on_error_fn = None
+	self._keep_previous_data = keep_previous_data
+	self._stale_time = stale_time
+	self._gc_time = gc_time
+	self._refetch_interval = refetch_interval
+	self._retries = retries
+	self._retry_delay = retry_delay
+	self._initial_data_updated_at = initial_data_updated_at
+	self._initial_data = MISSING  # pyright: ignore[reportAttributeAccessIssue]
+	self._enabled = enabled
+	self._fetch_on_mount = fetch_on_mount
+	self._priv_result = f"__query_{name}"
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[TState], Awaitable[T]]"} value={null} />
+<PyParameter name={"keep_previous_data"} type={"bool"} value={"False"} />
+<PyParameter name={"stale_time"} type={"float"} value={"0.0"} />
+<PyParameter name={"gc_time"} type={"float"} value={"300.0"} />
+<PyParameter name={"refetch_interval"} type={"float | None"} value={"None"} />
+<PyParameter name={"retries"} type={"int"} value={"3"} />
+<PyParameter name={"retry_delay"} type={"float"} value={"RETRY_DELAY_DEFAULT"} />
+<PyParameter name={"initial_data_updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+<PyParameter name={"enabled"} type={"bool"} value={"True"} />
+<PyParameter name={"fetch_on_mount"} type={"bool"} value={"True"} />
+<PyParameter name={"key"} type={"QueryKey | Callable[[TState], QueryKey] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"key"} type={"(self, fn)"}>
+
+<PySourceCode >
+
+```python
+def key(self, fn: Callable[[TState], QueryKey]):
+	if self._key is not None:
+		raise RuntimeError(
+			f"Cannot use @{self.name}.key decorator when a key is already provided to @query(key=...)."
+		)
+	self._key = fn
+	return fn
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"Callable[[TState], QueryKey]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"initial_data"} type={"(self, fn)"}>
+
+<PySourceCode >
+
+```python
+def initial_data(self, fn: Callable[[TState], T]):
+	if self._initial_data is not MISSING:
+		raise RuntimeError(
+			f"Duplicate initial_data() decorator for query '{self.name}'. Only one is allowed."
+		)
+	self._initial_data = fn
+	return fn
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"Callable[[TState], T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"on_success"} type={"(self, fn)"}>
+
+<PySourceCode >
+
+```python
+def on_success(self, fn: OnSuccessFn[TState, T]):
+	if self._on_success_fn is not None:
+		raise RuntimeError(
+			f"Duplicate on_success() decorator for query '{self.name}'. Only one is allowed."
+		)
+	self._on_success_fn = fn  # pyright: ignore[reportAttributeAccessIssue]
+	return fn
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"OnSuccessFn[TState, T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"on_error"} type={"(self, fn)"}>
+
+<PySourceCode >
+
+```python
+def on_error(self, fn: OnErrorFn[TState]):
+	if self._on_error_fn is not None:
+		raise RuntimeError(
+			f"Duplicate on_error() decorator for query '{self.name}'. Only one is allowed."
+		)
+	self._on_error_fn = fn  # pyright: ignore[reportAttributeAccessIssue]
+	return fn
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fn"} type={"OnErrorFn[TState]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"initialize"} type={"(self, state, name) -> KeyedQueryResult[T] | UnkeyedQueryResult[T]"}>
+
+<PySourceCode >
+
+```python
+@override
+def initialize(
+	self, state: Any, name: str
+) -> KeyedQueryResult[T] | UnkeyedQueryResult[T]:
+	# Return cached query instance if present
+	result: KeyedQueryResult[T] | UnkeyedQueryResult[T] | None = getattr(
+		state, self._priv_result, None
+	)
+	if result:
+		# Don't re-initialize, just return the cached instance
+		return result
+
+	# Bind methods to this instance
+	fetch_fn = bind_state(state, self._fetch_fn)
+	initial_data = cast(
+		T | None,
+		(
+			call_flexible(self._initial_data, state)
+			if callable(self._initial_data)
+			else self._initial_data
+		),
+	)
+
+	if self._key is None:
+		# Unkeyed query: create UnkeyedQuery with single observer
+		result = self._create_unkeyed(
+			fetch_fn,
+			initial_data,
+			self._initial_data_updated_at,
+			state,
+		)
+	else:
+		# Keyed query: use session-wide QueryStore
+		result = self._create_keyed(
+			state,
+			fetch_fn,
+			initial_data,
+			self._initial_data_updated_at,
+		)
+
+	# Store result on the instance
+	setattr(state, self._priv_result, result)
+	return result
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"state"} type={"Any"} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.query.KeyedQueryResult[pulse.queries.query.T] | pulse.queries.query.UnkeyedQueryResult[pulse.queries.query.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"_create_keyed"} type={"(self, state, fetch_fn, initial_data, initial_data_updated_at) -> KeyedQueryResult[T]"}>
+
+Create or get a keyed query from the session store.
+
+<PySourceCode >
+
+```python
+def _create_keyed(
+	self,
+	state: TState,
+	fetch_fn: Callable[[], Awaitable[T]],
+	initial_data: T | None,
+	initial_data_updated_at: float | dt.datetime | None,
+) -> KeyedQueryResult[T]:
+	"""Create or get a keyed query from the session store."""
+	assert self._key is not None
+
+	# Create a Computed for the key - passthrough for constant keys, reactive for function keys
+	if callable(self._key):
+		key_computed = Computed(
+			bind_state(state, self._key), name=f"query.key.{self.name}"
+		)
+	else:
+		const_key = self._key  # ensure a constant reference
+		key_computed = Computed(lambda: const_key, name=f"query.key.{self.name}")
+
+	render = PulseContext.get().render
+	if render is None:
+		raise RuntimeError("No render session available")
+	store = render.query_store
+
+	def query() -> KeyedQuery[T]:
+		key = key_computed()
+		# Use Untrack to avoid an error due to creating an Effect within a computed
+		with Untrack():
+			return store.ensure(
+				key,
+				initial_data,
+				initial_data_updated_at=initial_data_updated_at,
+				gc_time=self._gc_time,
+				retries=self._retries,
+				retry_delay=self._retry_delay,
+			)
+
+	query_computed = Computed(query, name=f"query.{self.name}")
+
+	return KeyedQueryResult[T](
+		query=query_computed,
+		fetch_fn=fetch_fn,
+		stale_time=self._stale_time,
+		keep_previous_data=self._keep_previous_data,
+		gc_time=self._gc_time,
+		refetch_interval=self._refetch_interval,
+		on_success=bind_state(state, self._on_success_fn)
+		if self._on_success_fn
+		else None,
+		on_error=bind_state(state, self._on_error_fn)
+		if self._on_error_fn
+		else None,
+		enabled=self._enabled,
+		fetch_on_mount=self._fetch_on_mount,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"state"} type={"TState"} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[], Awaitable[T]]"} value={null} />
+<PyParameter name={"initial_data"} type={"T | None"} value={null} />
+<PyParameter name={"initial_data_updated_at"} type={"float | dt.datetime | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.query.KeyedQueryResult[pulse.queries.query.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"_create_unkeyed"} type={"(self, fetch_fn, initial_data, initial_data_updated_at, state) -> UnkeyedQueryResult[T]"}>
+
+Create a private unkeyed query.
+
+<PySourceCode >
+
+```python
+def _create_unkeyed(
+	self,
+	fetch_fn: Callable[[], Awaitable[T]],
+	initial_data: T | None,
+	initial_data_updated_at: float | dt.datetime | None,
+	state: TState,
+) -> UnkeyedQueryResult[T]:
+	"""Create a private unkeyed query."""
+	return UnkeyedQueryResult[T](
+		fetch_fn=fetch_fn,
+		on_success=bind_state(state, self._on_success_fn)
+		if self._on_success_fn
+		else None,
+		on_error=bind_state(state, self._on_error_fn)
+		if self._on_error_fn
+		else None,
+		retries=self._retries,
+		retry_delay=self._retry_delay,
+		initial_data=initial_data,
+		initial_data_updated_at=initial_data_updated_at,
+		gc_time=self._gc_time,
+		stale_time=self._stale_time,
+		keep_previous_data=self._keep_previous_data,
+		refetch_interval=self._refetch_interval,
+		enabled=self._enabled,
+		fetch_on_mount=self._fetch_on_mount,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[], Awaitable[T]]"} value={null} />
+<PyParameter name={"initial_data"} type={"T | None"} value={null} />
+<PyParameter name={"initial_data_updated_at"} type={"float | dt.datetime | None"} value={null} />
+<PyParameter name={"state"} type={"TState"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.query.UnkeyedQueryResult[pulse.queries.query.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"__get__"} type={"(self, obj, objtype=None) -> QueryResult[T]"}>
+
+<PySourceCode >
+
+```python
+def __get__(self, obj: Any, objtype: Any = None) -> "QueryResult[T]":
+	if obj is None:
+		return self  # pyright: ignore[reportReturnType]
+	return self.initialize(obj, self.name)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"obj"} type={"Any"} value={null} />
+<PyParameter name={"objtype"} type={"Any"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.protocol.QueryResult[pulse.queries.query.T]"} />
+
+</PyFunction>

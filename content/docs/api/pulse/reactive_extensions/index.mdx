@@ -1,0 +1,447 @@
+---
+title: reactive_extensions
+---
+
+<PyAttribute name={"T1"} type={null} value={"TypeVar('T1')"} />
+
+<PyAttribute name={"T1_co"} type={null} value={"TypeVar('T1_co', covariant=True)"} />
+
+<PyAttribute name={"T2"} type={null} value={"TypeVar('T2')"} />
+
+<PyAttribute name={"T2_co"} type={null} value={"TypeVar('T2_co', covariant=True)"} />
+
+<PyAttribute name={"T3"} type={null} value={"TypeVar('T3')"} />
+
+<PyAttribute name={"T"} type={null} value={"TypeVar('T')"} />
+
+<PyAttribute name={"S"} type={null} value={"TypeVar('S')"} />
+
+<PyAttribute name={"KT"} type={null} value={"TypeVar"} />
+
+<PyAttribute name={"SupportsRichComparison"} type={"TypeAlias"} value={"SupportsDunderLT[_Any] | SupportsDunderGT[_Any]"} />
+
+<PyAttribute name={"SupportsRichComparisonT"} type={null} value={"TypeVar('SupportsRichComparisonT', bound=SupportsRichComparison)"} />
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"SupportsKeysAndGetItem"} href={"/docs/api/pulse/reactive_extensions/SupportsKeysAndGetItem"} />
+<Card title={"ReactiveDictItems"} href={"/docs/api/pulse/reactive_extensions/ReactiveDictItems"} />
+<Card title={"ReactiveDictValues"} href={"/docs/api/pulse/reactive_extensions/ReactiveDictValues"} />
+<Card title={"ReactiveDict"} href={"/docs/api/pulse/reactive_extensions/ReactiveDict"} />
+<Card title={"SupportsBool"} href={"/docs/api/pulse/reactive_extensions/SupportsBool"} />
+<Card title={"SupportsDunderLT"} href={"/docs/api/pulse/reactive_extensions/SupportsDunderLT"} />
+<Card title={"SupportsDunderGT"} href={"/docs/api/pulse/reactive_extensions/SupportsDunderGT"} />
+<Card title={"ReactiveList"} href={"/docs/api/pulse/reactive_extensions/ReactiveList"} />
+<Card title={"ReactiveSet"} href={"/docs/api/pulse/reactive_extensions/ReactiveSet"} />
+<Card title={"ReactiveProperty"} href={"/docs/api/pulse/reactive_extensions/ReactiveProperty"} />
+<Card title={"DataclassReactiveProperty"} href={"/docs/api/pulse/reactive_extensions/DataclassReactiveProperty"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"_copy_dataclass_params"} type={"(parent) -> dict[str, _Any]"}>
+
+<PySourceCode >
+
+```python
+def _copy_dataclass_params(parent: type) -> dict[str, _Any]:
+	params = getattr(parent, "__dataclass_params__", None)
+	if params is None:
+		return {}
+	copied: dict[str, _Any] = {}
+	for key in (
+		"init",
+		"repr",
+		"eq",
+		"order",
+		"unsafe_hash",
+		"frozen",
+		"match_args",
+		"kw_only",
+		"slots",
+		"weakref_slot",
+	):
+		if hasattr(params, key):
+			copied[key] = getattr(params, key)
+	return copied
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"parent"} type={"type"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"dict[str, typing.Any]"} />
+
+</PyFunction>
+<PyFunction name={"_get_reactive_dataclass_class"} type={"(parent) -> type"}>
+
+<PySourceCode >
+
+```python
+def _get_reactive_dataclass_class(parent: type) -> type:
+	# Already reactive?
+	if getattr(parent, "__is_reactive_dataclass__", False):
+		return parent
+	cached = _REACTIVE_DATACLASS_CACHE.get(parent)
+	if cached is not None:
+		return cached
+	if not is_dataclass(parent):
+		raise TypeError("_get_reactive_dataclass_class expects a dataclass type")
+
+	subclass_name = f"Reactive{parent.__name__}"
+	subclass = type(
+		subclass_name,
+		(parent,),
+		{
+			"__module__": parent.__module__,
+			"__doc__": getattr(parent, "__doc__", None),
+		},
+	)
+
+	# Mirror parent dataclass parameters when generating dataclass on subclass
+	dc_kwargs = _copy_dataclass_params(parent)
+	reactive_subclass = reactive_dataclass(subclass, **dc_kwargs)  # type: ignore[arg-type]
+	reactive_subclass.__is_reactive_dataclass__ = True
+	reactive_subclass.__reactive_base__ = parent
+
+	# Hide InitVar attributes on instances by shadowing with a descriptor that raises
+	class _HiddenInitVar:
+		def __get__(self, obj: _Any, objtype: type[_Any] | None = None):
+			raise AttributeError
+
+	parent_annotations = getattr(parent, "__annotations__", {}) or {}
+	for _name, _anno in parent_annotations.items():
+		# Detect dataclasses.InitVar annotations (e.g., InitVar[int])
+		try:
+			if isinstance(_anno, _DC_InitVar):
+				setattr(reactive_subclass, _name, _HiddenInitVar())
+		except Exception:
+			pass
+
+	# Wrap __init__ to allow field assignment during construction even if frozen
+	original_init = getattr(reactive_subclass, "__init__", None)
+	if callable(original_init):
+
+		def _wrapped_init(self: _Any, *args: _Any, **kwargs: _Any):
+			_INITIALIZING_OBJECT_IDS.add(id(self))
+			try:
+				return original_init(self, *args, **kwargs)
+			finally:
+				_INITIALIZING_OBJECT_IDS.discard(id(self))
+
+		reactive_subclass.__init__ = _wrapped_init  # pyright: ignore[reportAttributeAccessIssue]
+
+	_REACTIVE_DATACLASS_CACHE[parent] = reactive_subclass
+	return reactive_subclass
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"parent"} type={"type"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"type"} />
+
+</PyFunction>
+<PyFunction name={"reactive_dataclass"} type={"(cls=None, **dataclass_kwargs) -> Callable[[type], type] | type"}>
+
+Decorator to make a dataclass' fields reactive.
+
+Usage:
+    @reactive_dataclass
+    @dataclass
+    class Model: ...
+
+Or simply:
+    @reactive_dataclass
+    class Model: ...   # will be dataclass()-ed with defaults
+
+<PySourceCode >
+
+```python
+def reactive_dataclass(
+	cls: type | None = None, /, **dataclass_kwargs: _Any
+) -> Callable[[type], type] | type:
+	"""Decorator to make a dataclass' fields reactive.
+
+	Usage:
+	    @reactive_dataclass
+	    @dataclass
+	    class Model: ...
+
+	Or simply:
+	    @reactive_dataclass
+	    class Model: ...   # will be dataclass()-ed with defaults
+	"""
+
+	def _wrap(
+		cls_param: type,
+	) -> type:
+		# ensure it's a dataclass
+		klass: type = cls_param
+		if not is_dataclass(klass):
+			klass = cast(type, _dc_dataclass(klass, **dataclass_kwargs))  # pyright: ignore[reportUnknownArgumentType]
+
+		# Replace fields with DataclassReactiveProperty descriptors
+		for f in _dc_fields(klass):
+			# Skip ClassVars or InitVars implicitly as dataclasses excludes them from fields()
+			default_val = f.default if f.default is not _DC_MISSING else _MISSING
+			rp = DataclassReactiveProperty(f.name, default_val)
+			setattr(klass, f.name, rp)
+			# When assigning descriptors post-class-creation, __set_name__ is not called automatically
+			rp.__set_name__(klass, f.name)
+
+		return klass
+
+	if cls is None:
+		return _wrap
+	return _wrap(cls)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={"type | None"} value={"None"} />
+<PyParameter name={"dataclass_kwargs"} type={"_Any"} value={"{}"} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Callable[[type], type] | type"} />
+
+</PyFunction>
+<PyFunction name={"reactive"} type={"(value) -> _Any"}>
+
+Wrap built-in collections in their reactive counterparts if not already reactive.
+
+<Callout title={"Converts"} type={"converts"}>
+
+- dict -> ReactiveDict
+- list -> ReactiveList
+- set -> ReactiveSet
+- dataclass instance -> reactive dataclass with Signal-backed fields
+
+</Callout>
+
+Leaves other values (primitives, already-reactive containers) untouched.
+
+Example:
+
+```python
+data = reactive(\{"key": "value"\})  # ReactiveDict
+items = reactive([1, 2, 3])        # ReactiveList
+tags = reactive(\{"a", "b"\})        # ReactiveSet
+```
+
+<PySourceCode >
+
+```python
+def reactive(value: _Any) -> _Any:
+	"""Wrap built-in collections in their reactive counterparts if not already reactive.
+
+	Converts:
+		- dict -> ReactiveDict
+		- list -> ReactiveList
+		- set -> ReactiveSet
+		- dataclass instance -> reactive dataclass with Signal-backed fields
+
+	Leaves other values (primitives, already-reactive containers) untouched.
+
+	Args:
+		value: The value to make reactive.
+
+	Returns:
+		The reactive version of the value, or the original if already reactive
+		or not a supported collection type.
+
+	Example:
+
+	\```python
+	data = reactive({"key": "value"})  # ReactiveDict
+	items = reactive([1, 2, 3])        # ReactiveList
+	tags = reactive({"a", "b"})        # ReactiveSet
+	\```
+	"""
+	if isinstance(value, ReactiveDict | ReactiveList | ReactiveSet):
+		return value
+	# Dataclass instance: upgrade to reactive subclass in-place
+	if not isinstance(value, type) and is_dataclass(value):
+		# Already reactive instance?
+		if getattr(type(value), "__is_reactive_dataclass__", False):
+			return value
+		base_cls = cast(type, type(value))
+		reactive_cls = _get_reactive_dataclass_class(base_cls)
+		# Capture current field values
+		field_values: dict[str, _Any] = {}
+		for f in _dc_fields(base_cls):  # type: ignore[arg-type]
+			try:
+				field_values[f.name] = getattr(value, f.name)
+			except Exception:
+				field_values[f.name] = None
+		# For dict-backed instances, drop raw attrs to avoid stale shadowing
+		if hasattr(value, "__dict__") and isinstance(value.__dict__, dict):
+			for name in field_values.keys():
+				value.__dict__.pop(name, None)
+		# Swap class
+		value.__class__ = reactive_cls  # pyright: ignore[reportAttributeAccessIssue]
+		# Write back via descriptors (handles frozen via object.__setattr__)
+		_INITIALIZING_OBJECT_IDS.add(id(value))
+		try:
+			for name, v in field_values.items():
+				object.__setattr__(value, name, reactive(v))
+		finally:
+			_INITIALIZING_OBJECT_IDS.discard(id(value))
+		return value
+	if isinstance(value, dict):
+		return ReactiveDict(value)  # pyright: ignore[reportUnknownArgumentType]
+	if isinstance(value, list):
+		return ReactiveList(value)  # pyright: ignore[reportUnknownArgumentType]
+	if isinstance(value, set):
+		return ReactiveSet(value)  # pyright: ignore[reportUnknownArgumentType]
+	if isinstance(value, type) and is_dataclass(value):
+		return _get_reactive_dataclass_class(value)
+	return value
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"_Any"} value={undefined}>
+
+The value to make reactive.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"typing.Any"}>
+
+The reactive version of the value, or the original if already reactive
+
+</PyFunctionReturn>
+
+</PyFunction>
+<PyFunction name={"unwrap"} type={"(value, untrack=False) -> _Any"}>
+
+Recursively unwrap reactive containers into plain Python values.
+
+<Callout title={"Converts"} type={"converts"}>
+
+- Signal/Computed -> their read() value
+- ReactiveDict -> dict
+- ReactiveList -> list
+- ReactiveSet -> set
+- Other Mapping/Sequence types are recursively unwrapped
+
+</Callout>
+
+Example:
+
+```python
+count = Signal(5)
+data = ReactiveDict(\{"count": count\})
+unwrap(data)  # \{"count": 5\}
+```
+
+<PySourceCode >
+
+```python
+def unwrap(value: _Any, untrack: bool = False) -> _Any:
+	"""Recursively unwrap reactive containers into plain Python values.
+
+	Converts:
+		- Signal/Computed -> their read() value
+		- ReactiveDict -> dict
+		- ReactiveList -> list
+		- ReactiveSet -> set
+		- Other Mapping/Sequence types are recursively unwrapped
+
+	Args:
+		value: The value to unwrap.
+		untrack: If True, don't track dependencies during unwrapping.
+			Defaults to False.
+
+	Returns:
+		A plain Python value with all reactive containers unwrapped.
+
+	Example:
+
+	\```python
+	count = Signal(5)
+	data = ReactiveDict({"count": count})
+	unwrap(data)  # {"count": 5}
+	\```
+	"""
+
+	def _unwrap(v: _Any) -> _Any:
+		if isinstance(v, (Signal, Computed)):
+			return _unwrap(v.unwrap())
+		if isinstance(v, ReactiveDict):
+			return v.unwrap()
+		if isinstance(v, ReactiveList):
+			return v.unwrap()
+		if isinstance(v, ReactiveSet):
+			return v.unwrap()
+		if isinstance(v, Mapping):
+			return {k: _unwrap(val) for k, val in v.items()}
+		if isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)):
+			if isinstance(v, tuple):
+				# Preserve namedtuple types
+				if hasattr(v, "_fields"):
+					return type(v)(*(_unwrap(val) for val in v))
+				else:
+					return tuple(_unwrap(val) for val in v)
+			return [_unwrap(val) for val in v]
+		if isinstance(v, set):
+			return {_unwrap(val) for val in v}
+		return v
+
+	if untrack:
+		with Untrack():
+			return _unwrap(value)
+	return _unwrap(value)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"value"} type={"_Any"} value={undefined}>
+
+The value to unwrap.
+
+</PyParameter>
+<PyParameter name={"untrack"} type={"bool"} value={"False"}>
+
+If True, don't track dependencies during unwrapping.
+Defaults to False.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"typing.Any"}>
+
+A plain Python value with all reactive containers unwrapped.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

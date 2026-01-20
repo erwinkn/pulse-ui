@@ -2,11 +2,14 @@
 JavaScript Error builtin module.
 
 Usage:
-    from pulse.js import Error
-    Error("message")              # -> new Error("message")
 
-    from pulse.js.error import TypeError, RangeError, ReferenceError
-    TypeError("message")         # -> new TypeError("message")
+```python
+from pulse.js import Error
+Error("message")              # -> new Error("message")
+
+from pulse.js.error import TypeError, RangeError, ReferenceError
+TypeError("message")         # -> new TypeError("message")
+```
 """
 
 from pulse.transpiler.js_module import JsModule

@@ -1,0 +1,112 @@
+---
+title: ObjTransformer
+---
+
+Transformer for `obj()` with `**spread` support.
+
+- `obj(key=value, ...)` -> `\{ key: value, ... \}`
+- `obj(**base, key=value)` -> `\{ ...base, key: value \}`
+
+Creates a plain JavaScript object literal.
+Use this instead of `dict()` when you need a plain object (e.g., for React props).
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	raise TypeError("obj cannot be emitted directly - must be called")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	raise TypeError("obj cannot be rendered - must be called")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"transpile_call"} type={"(self, args, keywords, ctx) -> Expr"}>
+
+<PySourceCode >
+
+```python
+@override
+def transpile_call(
+	self,
+	args: list[ast.expr],
+	keywords: list[ast.keyword],
+	ctx: Transpiler,
+) -> Expr:
+	if args:
+		raise TranspileError("obj() only accepts keyword arguments")
+
+	props: list[tuple[str, Expr] | Spread] = []
+	for kw in keywords:
+		if kw.arg is None:
+			# **spread syntax
+			props.append(spread_dict(ctx.emit_expr(kw.value)))
+		else:
+			# key=value
+			props.append((kw.arg, ctx.emit_expr(kw.value)))
+
+	return Object(props)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"args"} type={"list[ast.expr]"} value={null} />
+<PyParameter name={"keywords"} type={"list[ast.keyword]"} value={null} />
+<PyParameter name={"ctx"} type={"Transpiler"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

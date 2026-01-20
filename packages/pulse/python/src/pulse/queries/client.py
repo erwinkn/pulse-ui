@@ -51,20 +51,21 @@ class QueryClient:
 	Access via ``ps.queries`` singleton:
 
 	Example:
-		::
 
-			# Get query data
-			user = ps.queries.get_data(("user", user_id))
+	```python
+	# Get query data
+	user = ps.queries.get_data(("user", user_id))
 
-			# Invalidate queries by prefix
-			ps.queries.invalidate_prefix(("users",))
+	# Invalidate queries by prefix
+	ps.queries.invalidate_prefix(("users",))
 
-			# Set data optimistically
-			ps.queries.set_data(("user", user_id), updated_user)
+	# Set data optimistically
+	ps.queries.set_data(("user", user_id), updated_user)
 
-			# Check if any query is fetching
-			if ps.queries.is_fetching(("user", user_id)):
-			    show_loading()
+	# Check if any query is fetching
+	if ps.queries.is_fetching(("user", user_id)):
+	    show_loading()
+	```
 	"""
 
 	def _get_store(self):
@@ -377,10 +378,11 @@ class QueryClient:
 			Count of invalidated queries.
 
 		Example:
-			::
 
-				# Invalidates ("users",), ("users", 1), ("users", 2, "posts"), etc.
-				ps.queries.invalidate_prefix(("users",))
+		```python
+		# Invalidates ("users",), ("users", 1), ("users", 2, "posts"), etc.
+		ps.queries.invalidate_prefix(("users",))
+		```
 		"""
 		return self.invalidate(_prefix_filter(prefix), cancel_refetch=cancel_refetch)
 

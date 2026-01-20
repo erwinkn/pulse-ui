@@ -85,10 +85,13 @@ class ReactiveDict(dict[T1, T2]):
 		initial: Initial key-value pairs to populate the dict.
 
 	Example:
-		>>> data = ReactiveDict({"name": "Alice", "age": 30})
-		>>> print(data["name"])  # "Alice" (registers dependency)
-		>>> data["age"] = 31     # Updates age signal only
-		>>> data.unwrap()        # {"name": "Alice", "age": 31}
+
+	```python
+	data = ReactiveDict({"name": "Alice", "age": 30})
+	print(data["name"])  # "Alice" (registers dependency)
+	data["age"] = 31     # Updates age signal only
+	data.unwrap()        # {"name": "Alice", "age": 31}
+	```
 	"""
 
 	__slots__ = ("_signals", "_structure")  # pyright: ignore[reportUnannotatedClassAttribute]
@@ -420,10 +423,13 @@ class ReactiveList(list[T1]):
 		initial: Initial items to populate the list.
 
 	Example:
-		>>> items = ReactiveList([1, 2, 3])
-		>>> print(items[0])   # 1 (registers dependency on index 0)
-		>>> items.append(4)   # Triggers structural change
-		>>> items.unwrap()    # [1, 2, 3, 4]
+
+	```python
+	items = ReactiveList([1, 2, 3])
+	print(items[0])   # 1 (registers dependency on index 0)
+	items.append(4)   # Triggers structural change
+	items.unwrap()    # [1, 2, 3, 4]
+	```
 	"""
 
 	__slots__ = ("_signals", "_structure")  # pyright: ignore[reportUnannotatedClassAttribute]
@@ -669,10 +675,13 @@ class ReactiveSet(set[T1]):
 		initial: Initial elements to populate the set.
 
 	Example:
-		>>> tags = ReactiveSet({"python", "react"})
-		>>> print("python" in tags)  # True (registers dependency)
-		>>> tags.add("typescript")   # Updates membership signal
-		>>> tags.unwrap()            # {"python", "react", "typescript"}
+
+	```python
+	tags = ReactiveSet({"python", "react"})
+	print("python" in tags)  # True (registers dependency)
+	tags.add("typescript")   # Updates membership signal
+	tags.unwrap()            # {"python", "react", "typescript"}
+	```
 	"""
 
 	__slots__ = ("_signals",)  # pyright: ignore[reportUnannotatedClassAttribute]
@@ -1059,9 +1068,12 @@ def reactive(value: _Any) -> _Any:
 		or not a supported collection type.
 
 	Example:
-		>>> data = reactive({"key": "value"})  # ReactiveDict
-		>>> items = reactive([1, 2, 3])        # ReactiveList
-		>>> tags = reactive({"a", "b"})        # ReactiveSet
+
+	```python
+	data = reactive({"key": "value"})  # ReactiveDict
+	items = reactive([1, 2, 3])        # ReactiveList
+	tags = reactive({"a", "b"})        # ReactiveSet
+	```
 	"""
 	if isinstance(value, ReactiveDict | ReactiveList | ReactiveSet):
 		return value
@@ -1123,9 +1135,12 @@ def unwrap(value: _Any, untrack: bool = False) -> _Any:
 		A plain Python value with all reactive containers unwrapped.
 
 	Example:
-		>>> count = Signal(5)
-		>>> data = ReactiveDict({"count": count})
-		>>> unwrap(data)  # {"count": 5}
+
+	```python
+	count = Signal(5)
+	data = ReactiveDict({"count": count})
+	unwrap(data)  # {"count": 5}
+	```
 	"""
 
 	def _unwrap(v: _Any) -> _Any:

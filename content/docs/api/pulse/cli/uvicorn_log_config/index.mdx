@@ -1,0 +1,87 @@
+---
+title: uvicorn_log_config
+---
+
+Custom logging configuration for uvicorn to filter noisy requests.
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"FilterNoisyRequests"} href={"/docs/api/pulse/cli/uvicorn_log_config/FilterNoisyRequests"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"get_log_config"} type={"(default_level='info') -> dict[str, Any]"}>
+
+Get uvicorn logging config with noise filter.
+
+<PySourceCode >
+
+```python
+def get_log_config(default_level: str = "info") -> dict[str, Any]:
+	"""Get uvicorn logging config with noise filter."""
+	return {
+		"version": 1,
+		"disable_existing_loggers": False,
+		"filters": {
+			"filter_noisy_requests": {
+				"()": "pulse.cli.uvicorn_log_config.FilterNoisyRequests",
+			},
+		},
+		"formatters": {
+			"default": {
+				"()": "uvicorn.logging.DefaultFormatter",
+				"fmt": "%(message)s",
+				"use_colors": None,
+			},
+			"access": {
+				"()": "uvicorn.logging.AccessFormatter",
+				"fmt": '%(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+			},
+		},
+		"handlers": {
+			"default": {
+				"formatter": "default",
+				"class": "logging.StreamHandler",
+				"stream": "ext://sys.stderr",
+			},
+			"access": {
+				"formatter": "access",
+				"class": "logging.StreamHandler",
+				"stream": "ext://sys.stdout",
+				"filters": ["filter_noisy_requests"],
+			},
+		},
+		"loggers": {
+			"uvicorn": {"handlers": ["default"], "level": default_level.upper()},
+			"uvicorn.error": {"level": "INFO"},
+			"uvicorn.access": {
+				"handlers": ["access"],
+				"level": "INFO",
+				"propagate": False,
+			},
+		},
+	}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"default_level"} type={"str"} value={"'info'"} />
+
+</div>
+
+<PyFunctionReturn type={"dict[str, typing.Any]"} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

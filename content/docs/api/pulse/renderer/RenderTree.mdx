@@ -1,0 +1,127 @@
+---
+title: RenderTree
+---
+
+## Attributes
+
+<PyAttribute name={"element"} type={"Node"} value={"element"} />
+
+<PyAttribute name={"callbacks"} type={"Callbacks"} value={"{}"} />
+
+<PyAttribute name={"rendered"} type={"bool"} value={"False"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, element) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, element: Node) -> None:
+	self.element = element
+	self.callbacks = {}
+	self.rendered = False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"element"} type={"Node"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOM"}>
+
+First render. Returns VDOM.
+
+<PySourceCode >
+
+```python
+def render(self) -> VDOM:
+	"""First render. Returns VDOM."""
+	renderer = Renderer()
+	vdom, self.element = renderer.render_tree(self.element)
+	self.callbacks = renderer.callbacks
+	self.rendered = True
+	return vdom
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOM"} />
+
+</PyFunction>
+
+<PyFunction name={"rerender"} type={"(self, new_element=None) -> list[VDOMOperation]"}>
+
+Re-render and return update operations.
+
+If new_element is provided, reconciles against it (for testing).
+Otherwise, reconciles against the current element (production use).
+
+<PySourceCode >
+
+```python
+def rerender(self, new_element: Node | None = None) -> list[VDOMOperation]:
+	"""Re-render and return update operations.
+
+	If new_element is provided, reconciles against it (for testing).
+	Otherwise, reconciles against the current element (production use).
+	"""
+	if not self.rendered:
+		raise RuntimeError("render() must be called before rerender()")
+	target = new_element if new_element is not None else self.element
+	renderer = Renderer()
+	self.element = renderer.reconcile_tree(self.element, target, path="")
+	self.callbacks = renderer.callbacks
+	return renderer.operations
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"new_element"} type={"Node | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"list[pulse.transpiler.vdom.VDOMOperation]"} />
+
+</PyFunction>
+
+<PyFunction name={"unmount"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def unmount(self) -> None:
+	if self.rendered:
+		unmount_element(self.element)
+		self.rendered = False
+	self.callbacks.clear()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

@@ -47,11 +47,12 @@ class ActionSuccess(Generic[T]):
 		status: Always ``"success"`` for discriminated union matching.
 
 	Example:
-		::
 
-			result = await state.user.refetch()
-			if result.status == "success":
-			    print(result.data)
+	```python
+	result = await state.user.refetch()
+	if result.status == "success":
+	    print(result.data)
+	```
 	"""
 
 	data: T
@@ -70,11 +71,12 @@ class ActionError:
 		status: Always ``"error"`` for discriminated union matching.
 
 	Example:
-		::
 
-			result = await state.user.refetch()
-			if result.status == "error":
-			    print(f"Failed: {result.error}")
+	```python
+	result = await state.user.refetch()
+	if result.status == "error":
+	    print(f"Failed: {result.error}")
+	```
 	"""
 
 	error: Exception

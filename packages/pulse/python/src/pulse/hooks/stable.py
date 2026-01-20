@@ -99,13 +99,16 @@ def stable(key: str, value: Any = MISSING):
 		KeyError: If value is not provided and no entry exists for the key.
 
 	Example:
-		>>> def my_component():
-		...     s = ps.state("data", lambda: DataState())
-		...
-		...     # Without stable, this would create a new function each render
-		...     handle_click = ps.stable("click", lambda: s.increment())
-		...
-		...     return m.Button("Click", on_click=handle_click)
+
+	```python
+	def my_component():
+	    s = ps.state("data", lambda: DataState())
+
+	    # Without stable, this would create a new function each render
+	    handle_click = ps.stable("click", lambda: s.increment())
+
+	    return m.Button("Click", on_click=handle_click)
+	```
 
 	Use Cases:
 		- Event handlers passed to child components to prevent unnecessary re-renders

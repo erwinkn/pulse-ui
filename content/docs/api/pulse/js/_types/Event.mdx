@@ -1,0 +1,81 @@
+---
+title: Event
+---
+
+Protocol for Event objects.
+
+## Attributes
+
+<PyAttribute name={"type"} type={"str"} value={null} />
+
+<PyAttribute name={"target"} type={"Element | None"} value={null} />
+
+<PyAttribute name={"currentTarget"} type={"Element | None"} value={null} />
+
+<PyAttribute name={"bubbles"} type={"bool"} value={null} />
+
+<PyAttribute name={"cancelable"} type={"bool"} value={null} />
+
+<PyAttribute name={"defaultPrevented"} type={"bool"} value={null} />
+
+## Functions
+
+<PyFunction name={"preventDefault"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def preventDefault(self) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"stopPropagation"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def stopPropagation(self) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"stopImmediatePropagation"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def stopImmediatePropagation(self) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

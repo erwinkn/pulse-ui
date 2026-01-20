@@ -1,0 +1,46 @@
+---
+title: RouteInfo
+---
+
+TypedDict containing current route information.
+
+Provides access to URL components and parsed parameters for the
+current route. Available via `use_route()` hook in components.
+
+## Attributes
+
+<PyAttribute name={"pathname"} type={"str"} value={null}>
+
+Current URL path (e.g., "/users/123").
+
+</PyAttribute>
+
+<PyAttribute name={"hash"} type={"str"} value={null}>
+
+URL hash fragment after # (e.g., "section1").
+
+</PyAttribute>
+
+<PyAttribute name={"query"} type={"str"} value={null}>
+
+Raw query string after ? (e.g., "page=2&sort=name").
+
+</PyAttribute>
+
+<PyAttribute name={"queryParams"} type={"dict[str, str]"} value={null}>
+
+Parsed query parameters as dict (e.g., \{"page": "2"\}).
+
+</PyAttribute>
+
+<PyAttribute name={"pathParams"} type={"dict[str, str]"} value={null}>
+
+Dynamic path parameters (e.g., \{"id": "123"\} for ":id").
+
+</PyAttribute>
+
+<PyAttribute name={"catchall"} type={"list[str]"} value={null}>
+
+Catch-all segments as list (e.g., ["a", "b"] for "a/b").
+
+</PyAttribute>

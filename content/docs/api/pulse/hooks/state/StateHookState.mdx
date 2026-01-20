@@ -1,0 +1,138 @@
+---
+title: StateHookState
+---
+
+Internal hook state for managing State instances across renders.
+
+Stores State instances keyed by string identifier and tracks which keys
+have been accessed during the current render cycle.
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={null} value={"('instances', 'called_keys')"} />
+
+<PyAttribute name={"instances"} type={"dict[str, State]"} value={"{}"} />
+
+<PyAttribute name={"called_keys"} type={"set[str]"} value={"set()"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self) -> None:
+	super().__init__()
+	self.instances = {}
+	self.called_keys = set()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"on_render_start"} type={"(self, render_cycle) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def on_render_start(self, render_cycle: int) -> None:
+	super().on_render_start(render_cycle)
+	self.called_keys.clear()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render_cycle"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"get_or_create_state"} type={"(self, key, arg) -> State"}>
+
+<PySourceCode >
+
+```python
+def get_or_create_state(self, key: str, arg: State | Callable[[], State]) -> State:
+	if key in self.called_keys:
+		raise RuntimeError(
+			f"`pulse.state` can only be called once per component render with key='{key}'"
+		)
+	self.called_keys.add(key)
+
+	existing = self.instances.get(key)
+	if existing is not None:
+		# Dispose any State instances passed directly as args that aren't being used
+		if isinstance(arg, State) and arg is not existing:
+			try:
+				if not arg.__disposed__:
+					arg.dispose()
+			except RuntimeError:
+				# Already disposed, ignore
+				pass
+		return existing
+
+	# Create new state
+	instance = _instantiate_state(arg)
+	self.instances[key] = instance
+	return instance
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"str"} value={null} />
+<PyParameter name={"arg"} type={"State | Callable[[], State]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.state.State"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self) -> None:
+	for instance in self.instances.values():
+		try:
+			if not instance.__disposed__:
+				instance.dispose()
+		except RuntimeError:
+			# Already disposed, ignore
+			pass
+	self.instances.clear()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

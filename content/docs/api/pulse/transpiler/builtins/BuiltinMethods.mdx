@@ -1,0 +1,86 @@
+---
+title: BuiltinMethods
+---
+
+Abstract base class for type-specific method transpilation.
+
+## Attributes
+
+<PyAttribute name={"this"} type={"Expr"} value={"obj"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, obj) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, obj: Expr) -> None:
+	self.this: Expr = obj
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"obj"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__runtime_check__"} type={"(cls, expr) -> Expr"}>
+
+Return a JS expression that checks if expr is this type at runtime.
+
+<PySourceCode >
+
+```python
+@classmethod
+@abstractmethod
+def __runtime_check__(cls, expr: Expr) -> Expr:
+	"""Return a JS expression that checks if expr is this type at runtime."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+<PyParameter name={"expr"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"__methods__"} type={"(cls) -> builtins.set[str]"}>
+
+Return the set of method names this class handles.
+
+<PySourceCode >
+
+```python
+@classmethod
+@abstractmethod
+def __methods__(cls) -> builtins.set[str]:
+	"""Return the set of method names this class handles."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"builtins.builtins.set[str]"} />
+
+</PyFunction>

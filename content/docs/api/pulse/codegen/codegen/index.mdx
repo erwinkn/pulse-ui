@@ -1,0 +1,60 @@
+---
+title: codegen
+---
+
+<PyAttribute name={"logger"} type={null} value={"logging.getLogger(__file__)"} />
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"CodegenConfig"} href={"/docs/api/pulse/codegen/codegen/CodegenConfig"} />
+<Card title={"Codegen"} href={"/docs/api/pulse/codegen/codegen/Codegen"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"write_file_if_changed"} type={"(path, content) -> Path"}>
+
+Write content to file only if it has changed.
+
+<PySourceCode >
+
+```python
+def write_file_if_changed(path: Path, content: str) -> Path:
+	"""Write content to file only if it has changed."""
+	if path.exists():
+		try:
+			current_content = path.read_text()
+			if current_content == content:
+				return path  # Skip writing, content is the same
+		except Exception:
+			logging.warning(f"Can't read file {path.absolute()}")
+			# If we can't read the file for any reason, just write it
+			pass
+
+	path.parent.mkdir(exist_ok=True, parents=True)
+	path.write_text(content)
+	return path
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"path"} type={"Path"} value={null} />
+<PyParameter name={"content"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pathlib.Path"} />
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

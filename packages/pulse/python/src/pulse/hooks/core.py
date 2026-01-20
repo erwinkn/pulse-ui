@@ -59,20 +59,23 @@ class HookState(Disposable):
 		render_cycle: The current render cycle number.
 
 	Example:
-		>>> class TimerHookState(ps.hooks.State):
-		...     def __init__(self):
-		...         self.start_time = time.time()
-		...
-		...     def elapsed(self) -> float:
-		...         return time.time() - self.start_time
-		...
-		...     def dispose(self) -> None:
-		...         pass
-		...
-		>>> _timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())
-		...
-		>>> def use_timer() -> TimerHookState:
-		...     return _timer_hook()
+
+	```python
+	class TimerHookState(ps.hooks.State):
+	    def __init__(self):
+	        self.start_time = time.time()
+
+	    def elapsed(self) -> float:
+	        return time.time() - self.start_time
+
+	    def dispose(self) -> None:
+	        pass
+
+	_timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())
+
+	def use_timer() -> TimerHookState:
+	    return _timer_hook()
+	```
 	"""
 
 	render_cycle: int = 0
@@ -392,20 +395,23 @@ class HooksAPI:
 			HookError: If the registry is locked.
 
 		Example:
-			>>> class TimerHookState(ps.hooks.State):
-			...     def __init__(self):
-			...         self.start_time = time.time()
-			...
-			...     def elapsed(self) -> float:
-			...         return time.time() - self.start_time
-			...
-			...     def dispose(self) -> None:
-			...         pass
-			...
-			>>> _timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())
-			...
-			>>> def use_timer() -> TimerHookState:
-			...     return _timer_hook()
+
+		```python
+		class TimerHookState(ps.hooks.State):
+		    def __init__(self):
+		        self.start_time = time.time()
+
+		    def elapsed(self) -> float:
+		        return time.time() - self.start_time
+
+		    def dispose(self) -> None:
+		        pass
+
+		_timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())
+
+		def use_timer() -> TimerHookState:
+		    return _timer_hook()
+		```
 		"""
 		return HOOK_REGISTRY.create(name, factory, metadata)
 

@@ -33,16 +33,17 @@ class MutationResult(Generic[T, P]):
 		error: The last error encountered, or None.
 
 	Example:
-		::
 
-			# Access mutation state
-			if state.update_name.is_running:
-			    show_loading()
-			if state.update_name.error:
-			    show_error(state.update_name.error)
+	```python
+	# Access mutation state
+	if state.update_name.is_running:
+	    show_loading()
+	if state.update_name.error:
+	    show_error(state.update_name.error)
 
-			# Execute mutation
-			result = await state.update_name("New Name")
+	# Execute mutation
+	result = await state.update_name("New Name")
+	```
 	"""
 
 	_data: Signal[T | None]
@@ -120,20 +121,21 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 		- ``@mutation_prop.on_error``: Handle mutation errors.
 
 	Example:
-		::
 
-			class UserState(ps.State):
-			    @ps.mutation
-			    async def update_name(self, name: str) -> User:
-			        return await api.update_user(name=name)
+	```python
+	class UserState(ps.State):
+	    @ps.mutation
+	    async def update_name(self, name: str) -> User:
+	        return await api.update_user(name=name)
 
-			    @update_name.on_success
-			    def _on_success(self, data: User):
-			        self.user.invalidate()  # Refresh user query
+	    @update_name.on_success
+	    def _on_success(self, data: User):
+	        self.user.invalidate()  # Refresh user query
 
-			    @update_name.on_error
-			    def _on_error(self, error: Exception):
-			        logger.error(f"Update failed: {error}")
+	    @update_name.on_error
+	    def _on_error(self, error: Exception):
+	        logger.error(f"Update failed: {error}")
+	```
 	"""
 
 	_on_success_fn: Callable[[TState, T], Any] | None
@@ -254,20 +256,23 @@ def mutation(
 		MutationProperty that creates MutationResult instances when accessed.
 
 	Example:
-		::
 
-			class UserState(ps.State):
-			    @ps.mutation
-			    async def update_name(self, name: str) -> User:
-			        return await api.update_user(name=name)
+	```python
+	class UserState(ps.State):
+	    @ps.mutation
+	    async def update_name(self, name: str) -> User:
+	        return await api.update_user(name=name)
 
-			    @update_name.on_success
-			    def _on_success(self, data: User):
-			        self.user.invalidate()
+	    @update_name.on_success
+	    def _on_success(self, data: User):
+	        self.user.invalidate()
+	```
 
-		Calling the mutation::
+	Calling the mutation:
 
-			result = await state.update_name("New Name")
+	```python
+	result = await state.update_name("New Name")
+	```
 	"""
 
 	def decorator(func: Callable[Concatenate[TState, P], Awaitable[T]], /):

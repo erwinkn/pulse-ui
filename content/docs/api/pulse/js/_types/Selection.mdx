@@ -1,0 +1,121 @@
+---
+title: Selection
+---
+
+Protocol for window.getSelection() result.
+
+## Attributes
+
+<PyAttribute name={"anchorNode"} type={"Element | None"} value={null} />
+
+<PyAttribute name={"focusNode"} type={"Element | None"} value={null} />
+
+<PyAttribute name={"isCollapsed"} type={"bool"} value={null} />
+
+<PyAttribute name={"rangeCount"} type={"int"} value={null} />
+
+## Functions
+
+<PyFunction name={"getRangeAt"} type={"(self, index) -> Range"}>
+
+<PySourceCode >
+
+```python
+def getRangeAt(self, index: int) -> "Range": ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"index"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js._types.Range"} />
+
+</PyFunction>
+
+<PyFunction name={"collapse"} type={"(self, node, offset=0) -> None"}>
+
+<PySourceCode >
+
+```python
+def collapse(self, node: Element | None, offset: int = 0, /) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"Element | None"} value={null} />
+<PyParameter name={"offset"} type={"int"} value={"0"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"selectAllChildren"} type={"(self, node) -> None"}>
+
+<PySourceCode >
+
+```python
+def selectAllChildren(self, node: Element) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"Element"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"removeAllRanges"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def removeAllRanges(self) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"toString"} type={"(self) -> str"}>
+
+<PySourceCode >
+
+```python
+def toString(self) -> str: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>

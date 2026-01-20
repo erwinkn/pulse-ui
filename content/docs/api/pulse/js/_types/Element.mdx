@@ -1,0 +1,291 @@
+---
+title: Element
+---
+
+Protocol for DOM Element objects.
+
+## Attributes
+
+<PyAttribute name={"tagName"} type={"str"} value={null} />
+
+<PyAttribute name={"id"} type={"str"} value={null} />
+
+<PyAttribute name={"className"} type={"str"} value={null} />
+
+<PyAttribute name={"innerHTML"} type={"str"} value={null} />
+
+<PyAttribute name={"textContent"} type={"str | None"} value={null} />
+
+<PyAttribute name={"parentElement"} type={"Element | None"} value={null} />
+
+<PyAttribute name={"children"} type={"NodeList[Element]"} value={null} />
+
+## Functions
+
+<PyFunction name={"querySelector"} type={"(self, selectors) -> Element | None"}>
+
+<PySourceCode >
+
+```python
+def querySelector(self, selectors: str) -> "Element | None": ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"selectors"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js._types.Element | None"} />
+
+</PyFunction>
+
+<PyFunction name={"querySelectorAll"} type={"(self, selectors) -> NodeList[Element]"}>
+
+<PySourceCode >
+
+```python
+def querySelectorAll(self, selectors: str) -> "NodeList[Element]": ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"selectors"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js._types.NodeList[pulse.js._types.Element]"} />
+
+</PyFunction>
+
+<PyFunction name={"getAttribute"} type={"(self, name) -> str | None"}>
+
+<PySourceCode >
+
+```python
+def getAttribute(self, name: str) -> str | None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str | None"} />
+
+</PyFunction>
+
+<PyFunction name={"setAttribute"} type={"(self, name, value) -> None"}>
+
+<PySourceCode >
+
+```python
+def setAttribute(self, name: str, value: str) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"value"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"removeAttribute"} type={"(self, name) -> None"}>
+
+<PySourceCode >
+
+```python
+def removeAttribute(self, name: str) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"hasAttribute"} type={"(self, name) -> bool"}>
+
+<PySourceCode >
+
+```python
+def hasAttribute(self, name: str) -> bool: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"addEventListener"} type={"(self, type, listener, options=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def addEventListener(
+	self,
+	type: str,
+	listener: _Callable[..., None],
+	options: bool | dict[str, bool] | None = None,
+	/,
+) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"type"} type={"str"} value={null} />
+<PyParameter name={"listener"} type={"_Callable[..., None]"} value={null} />
+<PyParameter name={"options"} type={"bool | dict[str, bool] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"removeEventListener"} type={"(self, type, listener, options=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def removeEventListener(
+	self,
+	type: str,
+	listener: _Callable[..., None],
+	options: bool | dict[str, bool] | None = None,
+	/,
+) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"type"} type={"str"} value={null} />
+<PyParameter name={"listener"} type={"_Callable[..., None]"} value={null} />
+<PyParameter name={"options"} type={"bool | dict[str, bool] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"remove"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def remove(self) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"append"} type={"(self, *nodes) -> None"}>
+
+<PySourceCode >
+
+```python
+def append(self, *nodes: "Element | str") -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"nodes"} type={"Element | str"} value={"()"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"prepend"} type={"(self, *nodes) -> None"}>
+
+<PySourceCode >
+
+```python
+def prepend(self, *nodes: "Element | str") -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"nodes"} type={"Element | str"} value={"()"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"replaceWith"} type={"(self, *nodes) -> None"}>
+
+<PySourceCode >
+
+```python
+def replaceWith(self, *nodes: "Element | str") -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"nodes"} type={"Element | str"} value={"()"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

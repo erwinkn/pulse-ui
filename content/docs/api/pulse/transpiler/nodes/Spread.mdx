@@ -1,0 +1,70 @@
+---
+title: Spread
+---
+
+JS spread: ...expr
+
+## Attributes
+
+<PyAttribute name={"expr"} type={"Expr"} value={null} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append("...")
+	self.expr.emit(out)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	raise TypeError("Spread cannot be rendered as VDOMExpr directly")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, expr) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"expr"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

@@ -1,0 +1,30 @@
+---
+title: FetchPrevious
+---
+
+Fetch the previous page.
+
+## Attributes
+
+<PyAttribute name={"fetch_fn"} type={"Callable[[TParam], Awaitable[T]]"} value={null} />
+
+<PyAttribute name={"observer"} type={"InfiniteQueryResult[T, TParam] | None"} value={"None"} />
+
+<PyAttribute name={"future"} type={"asyncio.Future[ActionResult[Page[T, TParam] | None]]"} value={"field(default_factory=(asyncio.Future))"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, fetch_fn, observer=None, future=asyncio.Future()) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[TParam], Awaitable[T]]"} value={null} />
+<PyParameter name={"observer"} type={"InfiniteQueryResult[T, TParam] | None"} value={"None"} />
+<PyParameter name={"future"} type={"asyncio.Future[ActionResult[Page[T, TParam] | None]]"} value={"asyncio.Future()"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

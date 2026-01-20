@@ -37,12 +37,15 @@ class Component(Generic[P]):
 		fn: The underlying render function (lazily initialized for stubs).
 
 	Example:
-		>>> @ps.component
-		... def Card(title: str):
-		...     return ps.div(ps.h3(title))
-		...
-		>>> Card(title="Hello")  # Returns a PulseNode
-		>>> Card(title="Hello", key="card-1")  # With reconciliation key
+
+	```python
+	@ps.component
+	def Card(title: str):
+	    return ps.div(ps.h3(title))
+
+	Card(title="Hello")  # Returns a PulseNode
+	Card(title="Hello", key="card-1")  # With reconciliation key
+	```
 	"""
 
 	_raw_fn: Callable[P, Any]
@@ -144,29 +147,36 @@ def component(
 		A `Component` instance if `fn` is provided, otherwise a decorator.
 
 	Example:
-		Basic usage::
 
-			@ps.component
-			def Card(title: str):
-				return ps.div(ps.h3(title))
+	Basic usage:
 
-		With custom name::
+	```python
+	@ps.component
+	def Card(title: str):
+	    return ps.div(ps.h3(title))
+	```
 
-			@ps.component(name="MyCard")
-			def card_impl(title: str):
-				return ps.div(ps.h3(title))
+	With custom name:
 
-		With children (use `*children` parameter)::
+	```python
+	@ps.component(name="MyCard")
+	def card_impl(title: str):
+	    return ps.div(ps.h3(title))
+	```
 
-			@ps.component
-			def Container(*children):
-				return ps.div(*children, className="container")
+	With children (use `*children` parameter):
 
-			# Children can be passed via subscript syntax:
-			Container()[
-				Card(title="First"),
-				Card(title="Second"),
-			]
+	```python
+	@ps.component
+	def Container(*children):
+	    return ps.div(*children, className="container")
+
+	# Children can be passed via subscript syntax:
+	Container()[
+	    Card(title="First"),
+	    Card(title="Second"),
+	]
+	```
 	"""
 
 	def decorator(fn: Callable[P, Any]) -> Component[P]:

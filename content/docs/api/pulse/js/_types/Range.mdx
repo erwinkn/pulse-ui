@@ -1,0 +1,166 @@
+---
+title: Range
+---
+
+Protocol for Range objects.
+
+## Attributes
+
+<PyAttribute name={"startContainer"} type={"Element"} value={null} />
+
+<PyAttribute name={"endContainer"} type={"Element"} value={null} />
+
+<PyAttribute name={"startOffset"} type={"int"} value={null} />
+
+<PyAttribute name={"endOffset"} type={"int"} value={null} />
+
+<PyAttribute name={"collapsed"} type={"bool"} value={null} />
+
+## Functions
+
+<PyFunction name={"setStart"} type={"(self, node, offset) -> None"}>
+
+<PySourceCode >
+
+```python
+def setStart(self, node: Element, offset: int) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"Element"} value={null} />
+<PyParameter name={"offset"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"setEnd"} type={"(self, node, offset) -> None"}>
+
+<PySourceCode >
+
+```python
+def setEnd(self, node: Element, offset: int) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"Element"} value={null} />
+<PyParameter name={"offset"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"selectNode"} type={"(self, node) -> None"}>
+
+<PySourceCode >
+
+```python
+def selectNode(self, node: Element) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"Element"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"selectNodeContents"} type={"(self, node) -> None"}>
+
+<PySourceCode >
+
+```python
+def selectNodeContents(self, node: Element) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"Element"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"collapse"} type={"(self, toStart=False) -> None"}>
+
+<PySourceCode >
+
+```python
+def collapse(self, toStart: bool = False, /) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"toStart"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"cloneContents"} type={"(self) -> Element"}>
+
+<PySourceCode >
+
+```python
+def cloneContents(self) -> Element: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js._types.Element"} />
+
+</PyFunction>
+
+<PyFunction name={"deleteContents"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def deleteContents(self) -> None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

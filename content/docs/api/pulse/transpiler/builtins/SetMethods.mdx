@@ -1,0 +1,385 @@
+---
+title: SetMethods
+---
+
+Set method transpilation.
+
+## Functions
+
+<PyFunction name={"__runtime_check__"} type={"(cls, expr) -> Expr"}>
+
+<PySourceCode >
+
+```python
+@classmethod
+@override
+def __runtime_check__(cls, expr: Expr) -> Expr:
+	return Binary(expr, "instanceof", Identifier("Set"))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+<PyParameter name={"expr"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"__methods__"} type={"(cls) -> set[str]"}>
+
+<PySourceCode >
+
+```python
+@classmethod
+@override
+def __methods__(cls) -> set[str]:
+	return SET_METHODS
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"cls"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"set[str]"} />
+
+</PyFunction>
+
+<PyFunction name={"add"} type={"(self, value) -> Expr | None"}>
+
+set.add() doesn't need transformation.
+
+<PySourceCode >
+
+```python
+def add(self, value: Expr) -> Expr | None:
+	"""set.add() doesn't need transformation."""
+	return None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr | None"} />
+
+</PyFunction>
+
+<PyFunction name={"remove"} type={"(self, value) -> Expr"}>
+
+set.remove(value) -> set.delete(value)
+
+<PySourceCode >
+
+```python
+def remove(self, value: Expr) -> Expr:
+	"""set.remove(value) -> set.delete(value)"""
+	return Call(Member(self.this, "delete"), [value])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"discard"} type={"(self, value) -> Expr"}>
+
+set.discard(value) -> set.delete(value)
+
+<PySourceCode >
+
+```python
+def discard(self, value: Expr) -> Expr:
+	"""set.discard(value) -> set.delete(value)"""
+	return Call(Member(self.this, "delete"), [value])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"clear"} type={"(self) -> Expr | None"}>
+
+set.clear() doesn't need transformation.
+
+<PySourceCode >
+
+```python
+def clear(self) -> Expr | None:
+	"""set.clear() doesn't need transformation."""
+	return None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr | None"} />
+
+</PyFunction>
+
+<PyFunction name={"copy"} type={"(self) -> Expr"}>
+
+set.copy() -> new Set(set)
+
+<PySourceCode >
+
+```python
+def copy(self) -> Expr:
+	"""set.copy() -> new Set(set)"""
+	return New(Identifier("Set"), [self.this])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"pop"} type={"(self) -> Expr"}>
+
+set.pop() -> (v => (set.delete(v), v))(set.values().next().value)
+
+<PySourceCode >
+
+```python
+def pop(self) -> Expr:
+	"""set.pop() -> (v => (set.delete(v), v))(set.values().next().value)"""
+	get_first = Member(
+		Call(Member(Call(Member(self.this, "values"), []), "next"), []), "value"
+	)
+	delete_call = Call(Member(self.this, "delete"), [Identifier("$v")])
+	return Call(
+		Arrow(
+			["$v"], Subscript(Array([delete_call, Identifier("$v")]), Literal(1))
+		),
+		[get_first],
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"update"} type={"(self, other) -> Expr"}>
+
+set.update(other) -> other.forEach(v => set.add(v))
+
+<PySourceCode >
+
+```python
+def update(self, other: Expr) -> Expr:
+	"""set.update(other) -> other.forEach(v => set.add(v))"""
+	return Call(
+		Member(other, "forEach"),
+		[Arrow(["$v"], Call(Member(self.this, "add"), [Identifier("$v")]))],
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"intersection"} type={"(self, other) -> Expr"}>
+
+set.intersection(other) -> new Set([...set].filter(x => other.has(x)))
+
+<PySourceCode >
+
+```python
+def intersection(self, other: Expr) -> Expr:
+	"""set.intersection(other) -> new Set([...set].filter(x => other.has(x)))"""
+	filtered = Call(
+		Member(Array([Spread(self.this)]), "filter"),
+		[Arrow(["$x"], Call(Member(other, "has"), [Identifier("$x")]))],
+	)
+	return New(Identifier("Set"), [filtered])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"union"} type={"(self, other) -> Expr"}>
+
+set.union(other) -> new Set([...set, ...other])
+
+<PySourceCode >
+
+```python
+def union(self, other: Expr) -> Expr:
+	"""set.union(other) -> new Set([...set, ...other])"""
+	return New(
+		Identifier("Set"),
+		[Array([Spread(self.this), Spread(other)])],
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"difference"} type={"(self, other) -> Expr"}>
+
+set.difference(other) -> new Set([...set].filter(x => !other.has(x)))
+
+<PySourceCode >
+
+```python
+def difference(self, other: Expr) -> Expr:
+	"""set.difference(other) -> new Set([...set].filter(x => !other.has(x)))"""
+	filtered = Call(
+		Member(Array([Spread(self.this)]), "filter"),
+		[
+			Arrow(
+				["$x"],
+				Unary("!", Call(Member(other, "has"), [Identifier("$x")])),
+			)
+		],
+	)
+	return New(Identifier("Set"), [filtered])
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"issubset"} type={"(self, other) -> Expr"}>
+
+set.issubset(other) -> [...set].every(x => other.has(x))
+
+<PySourceCode >
+
+```python
+def issubset(self, other: Expr) -> Expr:
+	"""set.issubset(other) -> [...set].every(x => other.has(x))"""
+	return Call(
+		Member(Array([Spread(self.this)]), "every"),
+		[Arrow(["$x"], Call(Member(other, "has"), [Identifier("$x")]))],
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>
+
+<PyFunction name={"issuperset"} type={"(self, other) -> Expr"}>
+
+set.issuperset(other) -> [...other].every(x => set.has(x))
+
+<PySourceCode >
+
+```python
+def issuperset(self, other: Expr) -> Expr:
+	"""set.issuperset(other) -> [...other].every(x => set.has(x))"""
+	return Call(
+		Member(Array([Spread(other)]), "every"),
+		[Arrow(["$x"], Call(Member(self.this, "has"), [Identifier("$x")]))],
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"other"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.nodes.Expr"} />
+
+</PyFunction>

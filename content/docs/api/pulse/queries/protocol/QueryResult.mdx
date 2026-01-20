@@ -1,0 +1,347 @@
+---
+title: QueryResult
+---
+
+Unified query result interface for both keyed and unkeyed queries.
+
+This protocol defines the public API that all query results expose,
+regardless of whether they use keyed (cached/shared) or unkeyed
+(dependency-tracked) execution strategies.
+
+Keyed queries use a session-wide cache and explicit key functions to
+determine when to refetch. Unkeyed queries automatically track reactive
+dependencies and refetch when those dependencies change.
+
+## Attributes
+
+<PyAttribute name={"status"} type={"QueryStatus"} value={null}>
+
+Current query status: 'loading', 'success', or 'error'.
+
+</PyAttribute>
+
+<PyAttribute name={"is_loading"} type={"bool"} value={null}>
+
+True if the query has not yet completed its initial fetch.
+
+</PyAttribute>
+
+<PyAttribute name={"is_success"} type={"bool"} value={null}>
+
+True if the query completed successfully.
+
+</PyAttribute>
+
+<PyAttribute name={"is_error"} type={"bool"} value={null}>
+
+True if the query completed with an error.
+
+</PyAttribute>
+
+<PyAttribute name={"is_fetching"} type={"bool"} value={null}>
+
+True if a fetch is currently in progress (including refetches).
+
+</PyAttribute>
+
+<PyAttribute name={"is_scheduled"} type={"bool"} value={null}>
+
+True if a fetch is scheduled or currently running.
+
+</PyAttribute>
+
+<PyAttribute name={"data"} type={"T | None"} value={null}>
+
+The query result data, or None if not yet available.
+
+</PyAttribute>
+
+<PyAttribute name={"error"} type={"Exception | None"} value={null}>
+
+The error from the last fetch, or None if no error.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"is_stale"} type={"(self) -> bool"}>
+
+Check if the query data is stale based on stale_time.
+
+<PySourceCode >
+
+```python
+def is_stale(self) -> bool:
+	"""Check if the query data is stale based on stale_time."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"refetch"} type={"(self, cancel_refetch=True) -> ActionResult[T]"}>
+
+Refetch the query data.
+
+<PySourceCode >
+
+```python
+async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
+	"""
+	Refetch the query data.
+
+	Args:
+	    cancel_refetch: If True (default), cancels any in-flight request
+	        before starting a new one. If False, deduplicates requests.
+
+	Returns:
+	    ActionResult containing either the data or an error.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"True"}>
+
+If True (default), cancels any in-flight request
+before starting a new one. If False, deduplicates requests.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult"}>
+
+ActionResult containing either the data or an error.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"wait"} type={"(self) -> ActionResult[T]"}>
+
+Wait for the current fetch to complete.
+
+<PySourceCode >
+
+```python
+async def wait(self) -> ActionResult[T]:
+	"""
+	Wait for the current fetch to complete.
+
+	Returns:
+	    ActionResult containing either the data or an error.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult"}>
+
+ActionResult containing either the data or an error.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"invalidate"} type={"(self) -> None"}>
+
+Mark the query as stale and trigger a refetch if observed.
+
+<PySourceCode >
+
+```python
+def invalidate(self) -> None:
+	"""Mark the query as stale and trigger a refetch if observed."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"set_data"} type={"(self, data) -> None"}>
+
+Optimistically set data without changing loading/error state.
+
+<PySourceCode >
+
+```python
+def set_data(self, data: T | Callable[[T | None], T]) -> None:
+	"""
+	Optimistically set data without changing loading/error state.
+
+	Args:
+	    data: The new data value, or a function that receives the current
+	        data and returns the new data.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T | Callable[[T | None], T]"} value={undefined}>
+
+The new data value, or a function that receives the current
+data and returns the new data.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"set_initial_data"} type={"(self, data, *, updated_at=None) -> None"}>
+
+Set data as if it were provided as initial_data.
+
+Only takes effect if the query is still in 'loading' state.
+
+<PySourceCode >
+
+```python
+def set_initial_data(
+	self,
+	data: T | Callable[[], T],
+	*,
+	updated_at: float | dt.datetime | None = None,
+) -> None:
+	"""
+	Set data as if it were provided as initial_data.
+
+	Only takes effect if the query is still in 'loading' state.
+
+	Args:
+	    data: The initial data value, or a function that returns it.
+	    updated_at: Optional timestamp to seed staleness calculations.
+	"""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T | Callable[[], T]"} value={undefined}>
+
+The initial data value, or a function that returns it.
+
+</PyParameter>
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"}>
+
+Optional timestamp to seed staleness calculations.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"set_error"} type={"(self, error) -> None"}>
+
+Set error state on the query.
+
+<PySourceCode >
+
+```python
+def set_error(self, error: Exception) -> None:
+	"""Set error state on the query."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"error"} type={"Exception"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"enable"} type={"(self) -> None"}>
+
+Enable the query, allowing it to fetch.
+
+<PySourceCode >
+
+```python
+def enable(self) -> None:
+	"""Enable the query, allowing it to fetch."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"disable"} type={"(self) -> None"}>
+
+Disable the query, preventing it from fetching.
+
+<PySourceCode >
+
+```python
+def disable(self) -> None:
+	"""Disable the query, preventing it from fetching."""
+	...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

@@ -940,22 +940,23 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		- ``@query_prop.on_error``: Handle fetch errors.
 
 	Example:
-		::
 
-			class UserState(ps.State):
-			    user_id: str = ""
+	```python
+	class UserState(ps.State):
+	    user_id: str = ""
 
-			    @ps.query
-			    async def user(self) -> User:
-			        return await api.get_user(self.user_id)
+	    @ps.query
+	    async def user(self) -> User:
+	        return await api.get_user(self.user_id)
 
-			    @user.key
-			    def _user_key(self):
-			        return ("user", self.user_id)
+	    @user.key
+	    def _user_key(self):
+	        return ("user", self.user_id)
 
-			    @user.on_success
-			    def _on_user_loaded(self, data: User):
-			        print(f"Loaded user: {data.name}")
+	    @user.on_success
+	    def _on_user_loaded(self, data: User):
+	        print(f"Loaded user: {data.name}")
+	```
 	"""
 
 	name: str
@@ -1252,26 +1253,33 @@ def query(
 		QueryProperty that creates QueryResult instances when accessed.
 
 	Example:
-		Basic usage::
 
-			class UserState(ps.State):
-			    user_id: str = ""
+	Basic usage:
 
-			    @ps.query
-			    async def user(self) -> User:
-			        return await api.get_user(self.user_id)
+	```python
+	class UserState(ps.State):
+	    user_id: str = ""
 
-		With options::
+	    @ps.query
+	    async def user(self) -> User:
+	        return await api.get_user(self.user_id)
+	```
 
-			@ps.query(stale_time=60, refetch_interval=300)
-			async def user(self) -> User:
-			    return await api.get_user(self.user_id)
+	With options:
 
-		Keyed query (shared across instances)::
+	```python
+	@ps.query(stale_time=60, refetch_interval=300)
+	async def user(self) -> User:
+	    return await api.get_user(self.user_id)
+	```
 
-			@ps.query(key=("users", "current"))
-			async def current_user(self) -> User:
-			    return await api.get_current_user()
+	Keyed query (shared across instances):
+
+	```python
+	@ps.query(key=("users", "current"))
+	async def current_user(self) -> User:
+	    return await api.get_current_user()
+	```
 	"""
 
 	def decorator(

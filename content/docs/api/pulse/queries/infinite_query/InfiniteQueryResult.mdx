@@ -1,0 +1,601 @@
+---
+title: InfiniteQueryResult
+---
+
+Observer wrapper for InfiniteQuery with lifecycle and stale tracking.
+
+InfiniteQueryResult provides the interface for interacting with paginated
+queries. It manages observation lifecycle, staleness tracking, and exposes
+reactive properties and methods for pagination.
+
+## Attributes
+
+<PyAttribute name={"_query"} type={"Computed[InfiniteQuery[T, TParam]]"} value={"query"} />
+
+<PyAttribute name={"_fetch_fn"} type={"Callable[[TParam], Awaitable[T]]"} value={"fetch_fn"} />
+
+<PyAttribute name={"_stale_time"} type={"float"} value={"stale_time"} />
+
+<PyAttribute name={"_gc_time"} type={"float"} value={"gc_time"} />
+
+<PyAttribute name={"_refetch_interval"} type={"float | None"} value={"refetch_interval"} />
+
+<PyAttribute name={"_keep_previous_data"} type={"bool"} value={"keep_previous_data"} />
+
+<PyAttribute name={"_on_success"} type={"Callable[[list[Page[T, TParam]]], Awaitable[None] | None] | None"} value={"on_success"} />
+
+<PyAttribute name={"_on_error"} type={"Callable[[Exception], Awaitable[None] | None] | None"} value={"on_error"} />
+
+<PyAttribute name={"_observe_effect"} type={"Effect"} value={"Effect(observe_effect, name=f'inf_query_observe({self._query().key})', immediate=True)"} />
+
+<PyAttribute name={"_interval_effect"} type={"Effect | None"} value={"None"} />
+
+<PyAttribute name={"_data_computed"} type={"Computed[list[Page[T, TParam]] | None]"} value={"Computed(self._data_computed_fn, name=f'inf_query_data({self._query().key})')"} />
+
+<PyAttribute name={"_enabled"} type={"Signal[bool]"} value={"Signal(enabled, name=f'inf_query.enabled({query().key})')"} />
+
+<PyAttribute name={"_fetch_on_mount"} type={"bool"} value={"fetch_on_mount"} />
+
+<PyAttribute name={"status"} type={"QueryStatus"} value={null}>
+
+Current QueryStatus ("loading", "success", "error").
+
+</PyAttribute>
+
+<PyAttribute name={"is_loading"} type={"bool"} value={null}>
+
+Whether status is "loading".
+
+</PyAttribute>
+
+<PyAttribute name={"is_success"} type={"bool"} value={null}>
+
+Whether status is "success".
+
+</PyAttribute>
+
+<PyAttribute name={"is_error"} type={"bool"} value={null}>
+
+Whether status is "error".
+
+</PyAttribute>
+
+<PyAttribute name={"is_fetching"} type={"bool"} value={null}>
+
+Whether any fetch is in progress.
+
+</PyAttribute>
+
+<PyAttribute name={"error"} type={"Exception | None"} value={null}>
+
+The last error encountered, or None.
+
+</PyAttribute>
+
+<PyAttribute name={"data"} type={"list[Page[T, TParam]] | None"} value={null}>
+
+List of Page objects or None if not loaded.
+
+</PyAttribute>
+
+<PyAttribute name={"pages"} type={"list[T] | None"} value={null}>
+
+List of page data only (without params) or None.
+
+</PyAttribute>
+
+<PyAttribute name={"page_params"} type={"list[TParam] | None"} value={null}>
+
+List of page parameters only or None.
+
+</PyAttribute>
+
+<PyAttribute name={"has_next_page"} type={"bool"} value={null}>
+
+Whether more pages are available forward.
+
+</PyAttribute>
+
+<PyAttribute name={"has_previous_page"} type={"bool"} value={null}>
+
+Whether previous pages are available.
+
+</PyAttribute>
+
+<PyAttribute name={"is_fetching_next_page"} type={"bool"} value={null}>
+
+Whether fetching the next page.
+
+</PyAttribute>
+
+<PyAttribute name={"is_fetching_previous_page"} type={"bool"} value={null}>
+
+Whether fetching the previous page.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, query, fetch_fn, stale_time=0.0, gc_time=300.0, refetch_interval=None, keep_previous_data=False, on_success=None, on_error=None, enabled=True, fetch_on_mount=True)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	query: Computed[InfiniteQuery[T, TParam]],
+	fetch_fn: Callable[[TParam], Awaitable[T]],
+	stale_time: float = 0.0,
+	gc_time: float = 300.0,
+	refetch_interval: float | None = None,
+	keep_previous_data: bool = False,
+	on_success: Callable[[list[Page[T, TParam]]], Awaitable[None] | None]
+	| None = None,
+	on_error: Callable[[Exception], Awaitable[None] | None] | None = None,
+	enabled: bool = True,
+	fetch_on_mount: bool = True,
+):
+	self._query = query
+	self._fetch_fn = fetch_fn
+	self._stale_time = stale_time
+	self._gc_time = gc_time
+	self._refetch_interval = refetch_interval
+	self._keep_previous_data = keep_previous_data
+	self._on_success = on_success
+	self._on_error = on_error
+	self._enabled = Signal(enabled, name=f"inf_query.enabled({query().key})")
+	self._fetch_on_mount = fetch_on_mount
+	self._interval_effect = None
+
+	def observe_effect():
+		q = self._query()
+		enabled = self._enabled()
+
+		with Untrack():
+			q.observe(self)
+
+			if enabled and fetch_on_mount and self.is_stale():
+				q.invalidate()
+
+		# Return cleanup function that captures the query (old query on key change)
+		def cleanup():
+			q.unobserve(self)
+
+		return cleanup
+
+	self._observe_effect = Effect(
+		observe_effect,
+		name=f"inf_query_observe({self._query().key})",
+		immediate=True,
+	)
+	self._data_computed = Computed(
+		self._data_computed_fn, name=f"inf_query_data({self._query().key})"
+	)
+
+	# Set up interval effect if interval is specified
+	if refetch_interval is not None and refetch_interval > 0:
+		self._setup_interval_effect(refetch_interval)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"query"} type={"Computed[InfiniteQuery[T, TParam]]"} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[TParam], Awaitable[T]]"} value={null} />
+<PyParameter name={"stale_time"} type={"float"} value={"0.0"} />
+<PyParameter name={"gc_time"} type={"float"} value={"300.0"} />
+<PyParameter name={"refetch_interval"} type={"float | None"} value={"None"} />
+<PyParameter name={"keep_previous_data"} type={"bool"} value={"False"} />
+<PyParameter name={"on_success"} type={"Callable[[list[Page[T, TParam]]], Awaitable[None] | None] | None"} value={"None"} />
+<PyParameter name={"on_error"} type={"Callable[[Exception], Awaitable[None] | None] | None"} value={"None"} />
+<PyParameter name={"enabled"} type={"bool"} value={"True"} />
+<PyParameter name={"fetch_on_mount"} type={"bool"} value={"True"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_setup_interval_effect"} type={"(self, interval)"}>
+
+Create an effect that invalidates the query at the specified interval.
+
+<PySourceCode >
+
+```python
+def _setup_interval_effect(self, interval: float):
+	"""Create an effect that invalidates the query at the specified interval."""
+
+	def interval_fn():
+		# Read enabled to make this effect reactive to enabled changes
+		if self._enabled():
+			self._query().invalidate()
+
+	self._interval_effect = Effect(
+		interval_fn,
+		name=f"inf_query_interval({self._query().key})",
+		interval=interval,
+		immediate=True,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"interval"} type={"float"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_data_computed_fn"} type={"(self, prev) -> list[Page[T, TParam]] | None"}>
+
+<PySourceCode >
+
+```python
+def _data_computed_fn(
+	self, prev: list[Page[T, TParam]] | None
+) -> list[Page[T, TParam]] | None:
+	query = self._query()
+	if self._keep_previous_data and query.status() != "success":
+		return prev
+	# Access pages.version to subscribe to structural changes
+	result = unwrap(query.pages) if len(query.pages) > 0 else None
+	return result
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"prev"} type={"list[Page[T, TParam]] | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"list[pulse.queries.infinite_query.Page[pulse.queries.infinite_query.T, pulse.queries.infinite_query.TParam]] | None"} />
+
+</PyFunction>
+
+<PyFunction name={"is_stale"} type={"(self) -> bool"}>
+
+<PySourceCode >
+
+```python
+def is_stale(self) -> bool:
+	if self._stale_time <= 0:
+		return False
+	query = self._query()
+	return (time.time() - query.last_updated.read()) > self._stale_time
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"fetch_next_page"} type={"(self, *, cancel_fetch=False) -> ActionResult[Page[T, TParam] | None]"}>
+
+<PySourceCode >
+
+```python
+async def fetch_next_page(
+	self,
+	*,
+	cancel_fetch: bool = False,
+) -> ActionResult[Page[T, TParam] | None]:
+	return await self._query().fetch_next_page(
+		self._fetch_fn, observer=self, cancel_fetch=cancel_fetch
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_fetch"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[pulse.queries.infinite_query.Page[pulse.queries.infinite_query.T, pulse.queries.infinite_query.TParam] | None]"} />
+
+</PyFunction>
+
+<PyFunction name={"fetch_previous_page"} type={"(self, *, cancel_fetch=False) -> ActionResult[Page[T, TParam] | None]"}>
+
+<PySourceCode >
+
+```python
+async def fetch_previous_page(
+	self,
+	*,
+	cancel_fetch: bool = False,
+) -> ActionResult[Page[T, TParam] | None]:
+	return await self._query().fetch_previous_page(
+		self._fetch_fn, observer=self, cancel_fetch=cancel_fetch
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_fetch"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[pulse.queries.infinite_query.Page[pulse.queries.infinite_query.T, pulse.queries.infinite_query.TParam] | None]"} />
+
+</PyFunction>
+
+<PyFunction name={"fetch_page"} type={"(self, page_param, *, cancel_fetch=False) -> ActionResult[T | None]"}>
+
+<PySourceCode >
+
+```python
+async def fetch_page(
+	self,
+	page_param: TParam,
+	*,
+	cancel_fetch: bool = False,
+) -> ActionResult[T | None]:
+	return await self._query().refetch_page(
+		page_param,
+		fetch_fn=self._fetch_fn,
+		observer=self,
+		cancel_fetch=cancel_fetch,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"page_param"} type={"TParam"} value={null} />
+<PyParameter name={"cancel_fetch"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[pulse.queries.infinite_query.T | None]"} />
+
+</PyFunction>
+
+<PyFunction name={"set_initial_data"} type={"(self, pages, updated_at=None)"}>
+
+<PySourceCode >
+
+```python
+def set_initial_data(
+	self,
+	pages: list[Page[T, TParam]] | Callable[[], list[Page[T, TParam]]],
+	updated_at: float | dt.datetime | None = None,
+):
+	return self._query().set_initial_data(pages, updated_at=updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"pages"} type={"list[Page[T, TParam]] | Callable[[], list[Page[T, TParam]]]"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_data"} type={"(self, pages, updated_at=None)"}>
+
+<PySourceCode >
+
+```python
+def set_data(
+	self,
+	pages: list[Page[T, TParam]]
+	| Callable[[list[Page[T, TParam]] | None], list[Page[T, TParam]]],
+	updated_at: float | dt.datetime | None = None,
+):
+	return self._query().set_data(pages, updated_at=updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"pages"} type={"list[Page[T, TParam]] | Callable[[list[Page[T, TParam]] | None], list[Page[T, TParam]]]"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"refetch"} type={"(self, *, cancel_fetch=False, refetch_page=None) -> ActionResult[list[Page[T, TParam]]]"}>
+
+<PySourceCode >
+
+```python
+async def refetch(
+	self,
+	*,
+	cancel_fetch: bool = False,
+	refetch_page: Callable[[T, int, list[T]], bool] | None = None,
+) -> ActionResult[list[Page[T, TParam]]]:
+	return await self._query().refetch(
+		self._fetch_fn,
+		observer=self,
+		cancel_fetch=cancel_fetch,
+		refetch_page=refetch_page,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_fetch"} type={"bool"} value={"False"} />
+<PyParameter name={"refetch_page"} type={"Callable[[T, int, list[T]], bool] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[list[pulse.queries.infinite_query.Page[pulse.queries.infinite_query.T, pulse.queries.infinite_query.TParam]]]"} />
+
+</PyFunction>
+
+<PyFunction name={"wait"} type={"(self) -> ActionResult[list[Page[T, TParam]]]"}>
+
+<PySourceCode >
+
+```python
+async def wait(self) -> ActionResult[list[Page[T, TParam]]]:
+	return await self._query().wait(fetch_fn=self._fetch_fn, observer=self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[list[pulse.queries.infinite_query.Page[pulse.queries.infinite_query.T, pulse.queries.infinite_query.TParam]]]"} />
+
+</PyFunction>
+
+<PyFunction name={"invalidate"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def invalidate(self):
+	query = self._query()
+	query.invalidate(fetch_fn=self._fetch_fn, observer=self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"enable"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def enable(self):
+	self._enabled.write(True)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"disable"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def disable(self):
+	self._enabled.write(False)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_error"} type={"(self, error)"}>
+
+<PySourceCode >
+
+```python
+def set_error(self, error: Exception):
+	query = self._query()
+	query.set_error(error)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"error"} type={"Exception"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self)"}>
+
+Clean up the result and its observe effect.
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self):
+	"""Clean up the result and its observe effect."""
+	if self._interval_effect is not None:
+		self._interval_effect.dispose()
+	self._observe_effect.dispose()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

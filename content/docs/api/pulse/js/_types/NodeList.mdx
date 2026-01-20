@@ -1,0 +1,72 @@
+---
+title: NodeList
+---
+
+Protocol for NodeList objects.
+
+## Attributes
+
+<PyAttribute name={"length"} type={"int"} value={null} />
+
+## Functions
+
+<PyFunction name={"item"} type={"(self, index) -> T | None"}>
+
+<PySourceCode >
+
+```python
+def item(self, index: int) -> T | None: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"index"} type={"int"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.js._types.T | None"} />
+
+</PyFunction>
+
+<PyFunction name={"__iter__"} type={"(self) -> _Iterator[T]"}>
+
+<PySourceCode >
+
+```python
+def __iter__(self) -> _Iterator[T]: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Iterator[pulse.js._types.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"__len__"} type={"(self) -> int"}>
+
+<PySourceCode >
+
+```python
+def __len__(self) -> int: ...
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"int"} />
+
+</PyFunction>

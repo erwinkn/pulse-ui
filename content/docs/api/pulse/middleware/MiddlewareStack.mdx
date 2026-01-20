@@ -1,0 +1,294 @@
+---
+title: MiddlewareStack
+---
+
+Composable stack of ``PulseMiddleware`` executed in order.
+
+Each middleware receives a ``next`` callable that advances the chain. If a
+middleware returns without calling ``next``, the chain short-circuits.
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, middlewares) -> None"}>
+
+Initialize middleware stack.
+
+<PySourceCode >
+
+```python
+def __init__(self, middlewares: Sequence[PulseMiddleware]) -> None:
+	"""Initialize middleware stack.
+
+	Args:
+		middlewares: Sequence of middleware instances.
+	"""
+	super().__init__(dev=False)
+	# Filter out dev middlewares when not in dev environment
+	if env.pulse_env != "dev":
+		middlewares = [mw for mw in middlewares if not mw.dev]
+	self._middlewares: list[PulseMiddleware] = list(middlewares)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"middlewares"} type={"Sequence[PulseMiddleware]"} value={undefined}>
+
+Sequence of middleware instances.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"prerender"} type={"(self, *, payload, request, session, next) -> PrerenderResponse"}>
+
+<PySourceCode >
+
+```python
+@override
+async def prerender(
+	self,
+	*,
+	payload: "PrerenderPayload",
+	request: PulseRequest,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[PrerenderResponse]],
+) -> PrerenderResponse:
+	async def dispatch(index: int) -> PrerenderResponse:
+		if index >= len(self._middlewares):
+			return await next()
+		mw = self._middlewares[index]
+
+		async def _next() -> PrerenderResponse:
+			return await dispatch(index + 1)
+
+		return await mw.prerender(
+			payload=payload,
+			request=request,
+			session=session,
+			next=_next,
+		)
+
+	return await dispatch(0)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"payload"} type={"'PrerenderPayload'"} value={null} />
+<PyParameter name={"request"} type={"PulseRequest"} value={null} />
+<PyParameter name={"session"} type={"dict[str, Any]"} value={null} />
+<PyParameter name={"next"} type={"Callable[[], Awaitable[PrerenderResponse]]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.PrerenderResponse"} />
+
+</PyFunction>
+
+<PyFunction name={"prerender_route"} type={"(self, *, path, request, route_info, session, next) -> RoutePrerenderResponse"}>
+
+<PySourceCode >
+
+```python
+@override
+async def prerender_route(
+	self,
+	*,
+	path: str,
+	request: PulseRequest,
+	route_info: RouteInfo,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[RoutePrerenderResponse]],
+) -> RoutePrerenderResponse:
+	async def dispatch(index: int) -> RoutePrerenderResponse:
+		if index >= len(self._middlewares):
+			return await next()
+		mw = self._middlewares[index]
+
+		async def _next() -> RoutePrerenderResponse:
+			return await dispatch(index + 1)
+
+		return await mw.prerender_route(
+			path=path,
+			route_info=route_info,
+			request=request,
+			session=session,
+			next=_next,
+		)
+
+	return await dispatch(0)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+<PyParameter name={"request"} type={"PulseRequest"} value={null} />
+<PyParameter name={"route_info"} type={"RouteInfo"} value={null} />
+<PyParameter name={"session"} type={"dict[str, Any]"} value={null} />
+<PyParameter name={"next"} type={"Callable[[], Awaitable[RoutePrerenderResponse]]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.RoutePrerenderResponse"} />
+
+</PyFunction>
+
+<PyFunction name={"connect"} type={"(self, *, request, session, next) -> ConnectResponse"}>
+
+<PySourceCode >
+
+```python
+@override
+async def connect(
+	self,
+	*,
+	request: PulseRequest,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[ConnectResponse]],
+) -> ConnectResponse:
+	async def dispatch(index: int) -> ConnectResponse:
+		if index >= len(self._middlewares):
+			return await next()
+		mw = self._middlewares[index]
+
+		async def _next() -> ConnectResponse:
+			return await dispatch(index + 1)
+
+		return await mw.connect(request=request, session=session, next=_next)
+
+	return await dispatch(0)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"request"} type={"PulseRequest"} value={null} />
+<PyParameter name={"session"} type={"dict[str, Any]"} value={null} />
+<PyParameter name={"next"} type={"Callable[[], Awaitable[ConnectResponse]]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.ConnectResponse"} />
+
+</PyFunction>
+
+<PyFunction name={"message"} type={"(self, *, data, session, next) -> Ok[None] | Deny"}>
+
+<PySourceCode >
+
+```python
+@override
+async def message(
+	self,
+	*,
+	data: ClientMessage,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[Ok[None]]],
+) -> Ok[None] | Deny:
+	async def dispatch(index: int) -> Ok[None] | Deny:
+		if index >= len(self._middlewares):
+			return await next()
+		mw = self._middlewares[index]
+
+		async def _next() -> Ok[None]:
+			result = await dispatch(index + 1)
+			# If dispatch returns Deny, the middleware should have short-circuited
+			# This should only be called when continuing the chain
+			if isinstance(result, Deny):
+				# This shouldn't happen, but handle it gracefully
+				return Ok(None)
+			return result
+
+		return await mw.message(session=session, data=data, next=_next)
+
+	return await dispatch(0)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"ClientMessage"} value={null} />
+<PyParameter name={"session"} type={"dict[str, Any]"} value={null} />
+<PyParameter name={"next"} type={"Callable[[], Awaitable[Ok[None]]]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.Ok[None] | pulse.middleware.Deny"} />
+
+</PyFunction>
+
+<PyFunction name={"channel"} type={"(self, *, channel_id, event, payload, request_id, session, next) -> Ok[None] | Deny"}>
+
+<PySourceCode >
+
+```python
+@override
+async def channel(
+	self,
+	*,
+	channel_id: str,
+	event: str,
+	payload: Any,
+	request_id: str | None,
+	session: dict[str, Any],
+	next: Callable[[], Awaitable[Ok[None]]],
+) -> Ok[None] | Deny:
+	async def dispatch(index: int) -> Ok[None] | Deny:
+		if index >= len(self._middlewares):
+			return await next()
+		mw = self._middlewares[index]
+
+		async def _next() -> Ok[None]:
+			result = await dispatch(index + 1)
+			# If dispatch returns Deny, the middleware should have short-circuited
+			# This should only be called when continuing the chain
+			if isinstance(result, Deny):
+				# This shouldn't happen, but handle it gracefully
+				return Ok(None)
+			return result
+
+		return await mw.channel(
+			channel_id=channel_id,
+			event=event,
+			payload=payload,
+			request_id=request_id,
+			session=session,
+			next=_next,
+		)
+
+	return await dispatch(0)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel_id"} type={"str"} value={null} />
+<PyParameter name={"event"} type={"str"} value={null} />
+<PyParameter name={"payload"} type={"Any"} value={null} />
+<PyParameter name={"request_id"} type={"str | None"} value={null} />
+<PyParameter name={"session"} type={"dict[str, Any]"} value={null} />
+<PyParameter name={"next"} type={"Callable[[], Awaitable[Ok[None]]]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.middleware.Ok[None] | pulse.middleware.Deny"} />
+
+</PyFunction>

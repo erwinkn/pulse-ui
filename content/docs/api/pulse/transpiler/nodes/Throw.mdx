@@ -1,0 +1,49 @@
+---
+title: Throw
+---
+
+JS throw statement: throw expr;
+
+## Attributes
+
+<PyAttribute name={"value"} type={"Expr"} value={null} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append("throw ")
+	self.value.emit(out)
+	out.append(";")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, value) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"value"} type={"Expr"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

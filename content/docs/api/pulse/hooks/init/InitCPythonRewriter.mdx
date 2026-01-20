@@ -1,0 +1,133 @@
+---
+title: InitCPythonRewriter
+---
+
+## Attributes
+
+<PyAttribute name={"counter"} type={"int"} value={"0"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, init_names, init_modules)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, init_names: set[str], init_modules: set[str]):
+	super().__init__()
+	self.counter = 0
+	self._init_names = init_names
+	self._init_modules = init_modules
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"init_names"} type={"set[str]"} value={null} />
+<PyParameter name={"init_modules"} type={"set[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"visit_With"} type={"(self, node)"}>
+
+<PySourceCode >
+
+```python
+@override
+def visit_With(self, node: ast.With):
+	node = cast(ast.With, self.generic_visit(node))
+	if not node.items:
+		return node
+
+	item = node.items[0]
+	if self.is_init_call(item.context_expr):
+		ctx_name = f"_init_ctx_{self.counter}"
+		self.counter += 1
+		new_item = ast.withitem(
+			context_expr=item.context_expr,
+			optional_vars=ast.Name(id=ctx_name, ctx=ast.Store()),
+		)
+
+		restore_call = ast.Expr(
+			value=ast.Call(
+				func=ast.Attribute(
+					value=ast.Name(id=ctx_name, ctx=ast.Load()),
+					attr="restore_variables",
+					ctx=ast.Load(),
+				),
+				args=[],
+				keywords=[],
+			)
+		)
+
+		new_if = ast.If(
+			test=ast.Attribute(
+				value=ast.Name(id=ctx_name, ctx=ast.Load()),
+				attr="first_render",
+				ctx=ast.Load(),
+			),
+			body=node.body,
+			orelse=[restore_call],
+		)
+
+		return ast.With(
+			items=[new_item],
+			body=[new_if],
+			type_comment=getattr(node, "type_comment", None),
+		)
+
+	return node
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"node"} type={"ast.With"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"is_init_call"} type={"(self, expr) -> bool"}>
+
+<PySourceCode >
+
+```python
+def is_init_call(self, expr: ast.AST) -> bool:
+	if not isinstance(expr, ast.Call):
+		return False
+	func = expr.func
+	if isinstance(func, ast.Name) and func.id in self._init_names:
+		return True
+	if (
+		isinstance(func, ast.Attribute)
+		and isinstance(func.value, ast.Name)
+		and func.value.id in self._init_modules
+		and func.attr == "init"
+	):
+		return True
+	return False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"expr"} type={"ast.AST"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>

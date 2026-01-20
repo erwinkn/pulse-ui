@@ -37,13 +37,16 @@ class StateProperty(ReactiveProperty[Any]):
 	them into StateProperty instances.
 
 	Example:
-		class MyState(ps.State):
-		    count: int = 0  # Automatically becomes a StateProperty
-		    name: str = "default"
 
-		state = MyState()
-		state.count = 5  # Updates the underlying Signal
-		print(state.count)  # Reads from the Signal, subscribes to changes
+	```python
+	class MyState(ps.State):
+	    count: int = 0  # Automatically becomes a StateProperty
+	    name: str = "default"
+
+	state = MyState()
+	state.count = 5  # Updates the underlying Signal
+	print(state.count)  # Reads from the Signal, subscribes to changes
+	```
 	"""
 
 	pass
@@ -69,17 +72,20 @@ class ComputedProperty(Generic[T]):
 		fn: The method that computes the value. Must take only `self` as argument.
 
 	Example:
-		class MyState(ps.State):
-		    count: int = 0
 
-		    @ps.computed
-		    def doubled(self):
-		        return self.count * 2
+	```python
+	class MyState(ps.State):
+	    count: int = 0
 
-		state = MyState()
-		print(state.doubled)  # 0
-		state.count = 5
-		print(state.doubled)  # 10 (automatically recomputed)
+	    @ps.computed
+	    def doubled(self):
+	        return self.count * 2
+
+	state = MyState()
+	print(state.doubled)  # 0
+	state.count = 5
+	print(state.doubled)  # 10 (automatically recomputed)
+	```
 	"""
 
 	name: str
@@ -140,22 +146,25 @@ class StateEffect(Generic[T], InitializableProperty):
 		interval: Re-run interval in seconds for polling effects.
 
 	Example:
-		class MyState(ps.State):
-		    count: int = 0
 
-		    @ps.effect
-		    def log_count(self):
-		        print(f"Count changed to: {self.count}")
+	```python
+	class MyState(ps.State):
+	    count: int = 0
 
-		    @ps.effect
-		    async def fetch_data(self):
-		        data = await api.fetch(self.query)
-		        self.data = data
+	    @ps.effect
+	    def log_count(self):
+	        print(f"Count changed to: {self.count}")
 
-		    @ps.effect
-		    def subscribe(self):
-		        unsub = event_bus.subscribe(self.handle_event)
-		        return unsub  # Cleanup function
+	    @ps.effect
+	    async def fetch_data(self):
+	        data = await api.fetch(self.query)
+	        self.data = data
+
+	    @ps.effect
+	    def subscribe(self):
+	        unsub = event_bus.subscribe(self.handle_event)
+	        return unsub  # Cleanup function
+	```
 	"""
 
 	fn: "Callable[[State], T]"
@@ -224,14 +233,17 @@ class StateMeta(ABCMeta):
 	This enables the declarative state definition pattern:
 
 	Example:
-		class MyState(ps.State):
-		    count: int = 0        # Becomes StateProperty
-		    name: str = "test"    # Becomes StateProperty
-		    _private: int = 0     # Stays as regular attribute (not reactive)
 
-		    @ps.computed
-		    def doubled(self):    # Becomes ComputedProperty
-		        return self.count * 2
+	```python
+	class MyState(ps.State):
+	    count: int = 0        # Becomes StateProperty
+	    name: str = "test"    # Becomes StateProperty
+	    _private: int = 0     # Stays as regular attribute (not reactive)
+
+	    @ps.computed
+	    def doubled(self):    # Becomes ComputedProperty
+	        return self.count * 2
+	```
 	"""
 
 	def __new__(

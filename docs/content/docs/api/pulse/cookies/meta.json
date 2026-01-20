@@ -1,9 +1,0 @@
-{
-  "title": "cookies",
-  "pages": [
-    "index",
-    "Cookie",
-    "SetCookie",
-    "CORSOptions"
-  ]
-}

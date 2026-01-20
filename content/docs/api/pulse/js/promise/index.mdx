@@ -1,0 +1,46 @@
+---
+title: promise
+---
+
+JavaScript Promise builtin module.
+
+Usage:
+
+```python
+from pulse.js import Promise
+Promise(executor)             # -> new Promise(executor)
+Promise.resolve(value)        # -> Promise.resolve(value)
+Promise.reject(reason)        # -> Promise.reject(reason)
+
+# Or import from module directly:
+from pulse.js.promise import Promise
+```
+
+The `Promise` class is generic and supports async/await via the Awaitable protocol.
+
+<PyAttribute name={"T"} type={null} value={"_TypeVar('T')"} />
+
+<PyAttribute name={"T_co"} type={null} value={"_TypeVar('T_co', covariant=True)"} />
+
+<PyAttribute name={"U"} type={null} value={"_TypeVar('U')"} />
+
+<PyAttribute name={"PromiseFulfilledResult"} type={null} value={"dict[str, T | str]"} />
+
+<PyAttribute name={"PromiseRejectedResult"} type={null} value={"dict[str, str]"} />
+
+<PyAttribute name={"PromiseSettledResult"} type={null} value={"PromiseFulfilledResult[T] | PromiseRejectedResult"} />
+
+<Tabs items={["Class"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"Promise"} href={"/docs/api/pulse/js/promise/Promise"} />
+<Card title={"PromiseWithResolvers"} href={"/docs/api/pulse/js/promise/PromiseWithResolvers"} />
+
+</Cards>
+
+</Tab>
+
+</Tabs>

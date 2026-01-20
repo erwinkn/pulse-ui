@@ -4,6 +4,7 @@ requires-python = ">=3.12"
 
 [manifest]
 members = [
+    "fumapy",
     "pulse-ag-grid",
     "pulse-aws",
     "pulse-framework",
@@ -425,10 +426,16 @@ wheels = [
 [[package]]
 name = "fumapy"
 version = "0.1.0"
-source = { git = "https://github.com/fuma-nama/fumadocs?subdirectory=packages%2Fpython#0167b8a4d7c41328a7aade5a7860c9b7eef18a8e" }
+source = { editable = "packages/fumapy" }
 dependencies = [
     { name = "griffe" },
     { name = "griffe-typingdoc" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
+    { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
 ]
 
 [[package]]
@@ -1096,7 +1103,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "fumapy", git = "https://github.com/fuma-nama/fumadocs?subdirectory=packages%2Fpython" }]
+requires-dist = [{ name = "fumapy", editable = "packages/fumapy" }]
 
 [package.metadata.requires-dev]
 dev = [

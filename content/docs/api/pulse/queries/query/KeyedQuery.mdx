@@ -1,0 +1,587 @@
+---
+title: KeyedQuery
+---
+
+Query for keyed queries (shared across observers).
+Uses direct task management without dependency tracking.
+Multiple observers can share the same query.
+
+## Attributes
+
+<PyAttribute name={"key"} type={"QueryKey"} value={"key"} />
+
+<PyAttribute name={"state"} type={"QueryState[T]"} value={"QueryState(name=(str(key)), retries=retries, retry_delay=retry_delay, initial_data=initial_data, initial_data_updated_at=initial_data_updated_at, gc_time=gc_time, on_dispose=on_dispose)"} />
+
+<PyAttribute name={"observers"} type={"list[KeyedQueryResult[T]]"} value={"[]"} />
+
+<PyAttribute name={"data"} type={"Signal[T | None]"} value={null} />
+
+<PyAttribute name={"error"} type={"Signal[Exception | None]"} value={null} />
+
+<PyAttribute name={"last_updated"} type={"Signal[float]"} value={null} />
+
+<PyAttribute name={"status"} type={"Signal[QueryStatus]"} value={null} />
+
+<PyAttribute name={"is_fetching"} type={"Signal[bool]"} value={null} />
+
+<PyAttribute name={"retries"} type={"Signal[int]"} value={null} />
+
+<PyAttribute name={"retry_reason"} type={"Signal[Exception | None]"} value={null} />
+
+<PyAttribute name={"cfg"} type={"QueryConfig[T]"} value={null} />
+
+<PyAttribute name={"is_scheduled"} type={"bool"} value={null}>
+
+Check if a fetch is currently scheduled/running.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, key, retries=3, retry_delay=RETRY_DELAY_DEFAULT, initial_data=MISSING, initial_data_updated_at=None, gc_time=300.0, on_dispose=None)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	key: QueryKey,
+	retries: int = 3,
+	retry_delay: float = RETRY_DELAY_DEFAULT,
+	initial_data: T | None = MISSING,
+	initial_data_updated_at: float | dt.datetime | None = None,
+	gc_time: float = 300.0,
+	on_dispose: Callable[[Any], None] | None = None,
+):
+	self.key = key
+	self.state = QueryState(
+		name=str(key),
+		retries=retries,
+		retry_delay=retry_delay,
+		initial_data=initial_data,
+		initial_data_updated_at=initial_data_updated_at,
+		gc_time=gc_time,
+		on_dispose=on_dispose,
+	)
+	self.observers = []
+	self._task = None
+	self._task_initiator = None
+	self._gc_handle = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"key"} type={"QueryKey"} value={null} />
+<PyParameter name={"retries"} type={"int"} value={"3"} />
+<PyParameter name={"retry_delay"} type={"float"} value={"RETRY_DELAY_DEFAULT"} />
+<PyParameter name={"initial_data"} type={"T | None"} value={"MISSING"} />
+<PyParameter name={"initial_data_updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+<PyParameter name={"gc_time"} type={"float"} value={"300.0"} />
+<PyParameter name={"on_dispose"} type={"Callable[[Any], None] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_data"} type={"(self, data, *, updated_at=None)"}>
+
+<PySourceCode >
+
+```python
+def set_data(
+	self,
+	data: T | Callable[[T | None], T],
+	*,
+	updated_at: float | dt.datetime | None = None,
+):
+	self.state.set_data(data, updated_at=updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T | Callable[[T | None], T]"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_initial_data"} type={"(self, data, *, updated_at=None)"}>
+
+<PySourceCode >
+
+```python
+def set_initial_data(
+	self,
+	data: T | Callable[[], T],
+	*,
+	updated_at: float | dt.datetime | None = None,
+):
+	self.state.set_initial_data(data, updated_at=updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T | Callable[[], T]"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_error"} type={"(self, error, *, updated_at=None)"}>
+
+<PySourceCode >
+
+```python
+def set_error(
+	self, error: Exception, *, updated_at: float | dt.datetime | None = None
+):
+	self.state.set_error(error, updated_at=updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"error"} type={"Exception"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"_run_fetch"} type={"(self, fetch_fn, observers) -> None"}>
+
+Execute the fetch with retry logic.
+
+<PySourceCode >
+
+```python
+async def _run_fetch(
+	self,
+	fetch_fn: Callable[[], Awaitable[T]],
+	observers: "list[KeyedQueryResult[T]]",
+) -> None:
+	"""Execute the fetch with retry logic."""
+
+	async def on_success(result: T):
+		for obs in observers:
+			if obs._on_success:  # pyright: ignore[reportPrivateUsage]
+				await maybe_await(call_flexible(obs._on_success, result))  # pyright: ignore[reportPrivateUsage]
+
+	async def on_error(e: Exception):
+		for obs in observers:
+			if obs._on_error:  # pyright: ignore[reportPrivateUsage]
+				await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
+
+	await run_fetch_with_retries(
+		self.state,
+		fetch_fn,
+		on_success=on_success,
+		on_error=on_error,
+		untrack=True,  # Keyed queries use asyncio.create_task, need to untrack
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[], Awaitable[T]]"} value={null} />
+<PyParameter name={"observers"} type={"list[KeyedQueryResult[T]]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"run_fetch"} type={"(self, fetch_fn, cancel_previous=True, initiator=None) -> asyncio.Task[None]"}>
+
+Start a fetch with the given fetch function.
+Cancels any in-flight fetch if cancel_previous is True.
+
+<PySourceCode >
+
+```python
+def run_fetch(
+	self,
+	fetch_fn: Callable[[], Awaitable[T]],
+	cancel_previous: bool = True,
+	initiator: "KeyedQueryResult[T] | None" = None,
+) -> asyncio.Task[None]:
+	"""
+	Start a fetch with the given fetch function.
+	Cancels any in-flight fetch if cancel_previous is True.
+
+	Args:
+		fetch_fn: The async function to fetch data.
+		cancel_previous: If True, cancels any in-flight fetch before starting.
+		initiator: The KeyedQueryResult observer that initiated this fetch (for cancellation tracking).
+	"""
+	if cancel_previous and self._task and not self._task.done():
+		self._task.cancel()
+
+	self.state.is_fetching.write(True)
+	# Capture current observers at fetch start
+	observers = list(self.observers)
+	self._task = asyncio.create_task(self._run_fetch(fetch_fn, observers))
+	self._task_initiator = initiator
+	return self._task
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"fetch_fn"} type={"Callable[[], Awaitable[T]]"} value={undefined}>
+
+The async function to fetch data.
+
+</PyParameter>
+<PyParameter name={"cancel_previous"} type={"bool"} value={"True"}>
+
+If True, cancels any in-flight fetch before starting.
+
+</PyParameter>
+<PyParameter name={"initiator"} type={"KeyedQueryResult[T] | None"} value={"None"}>
+
+The KeyedQueryResult observer that initiated this fetch (for cancellation tracking).
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"asyncio.asyncio.Task[None]"} />
+
+</PyFunction>
+
+<PyFunction name={"wait"} type={"(self) -> ActionResult[T]"}>
+
+Wait for the current fetch to complete.
+
+<PySourceCode >
+
+```python
+async def wait(self) -> ActionResult[T]:
+	"""Wait for the current fetch to complete."""
+	while self._task and not self._task.done():
+		try:
+			await self._task
+		except asyncio.CancelledError:
+			# Task was cancelled (probably by a new refetch).
+			# If there's a new task, wait for that one instead.
+			# If no new task, re-raise the cancellation.
+			# Note: self._task may have been reassigned by run_fetch() after await
+			if self._task is None or self._task.done():  # pyright: ignore[reportUnnecessaryComparison]
+				raise
+			# Otherwise, loop and wait for the new task
+	# Return result based on current state
+	if self.state.status() == "error":
+		return ActionError(cast(Exception, self.state.error.read()))
+	return ActionSuccess(cast(T, self.state.data.read()))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[pulse.queries.query.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"cancel"} type={"(self) -> None"}>
+
+Cancel the current fetch if running.
+
+<PySourceCode >
+
+```python
+def cancel(self) -> None:
+	"""Cancel the current fetch if running."""
+	if self._task and not self._task.done():
+		self._task.cancel()
+		self._task = None
+		self._task_initiator = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_get_first_observer_fetch_fn"} type={"(self) -> Callable[[], Awaitable[T]]"}>
+
+Get the fetch function from the first observer.
+
+<PySourceCode >
+
+```python
+def _get_first_observer_fetch_fn(self) -> Callable[[], Awaitable[T]]:
+	"""Get the fetch function from the first observer."""
+	if len(self.observers) == 0:
+		raise RuntimeError(
+			f"Query '{self.key}' has no observers. Cannot access fetch function."
+		)
+	return self.observers[0]._fetch_fn  # pyright: ignore[reportPrivateUsage]
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Callable[[], collections.abc.Awaitable[pulse.queries.query.T]]"} />
+
+</PyFunction>
+
+<PyFunction name={"refetch"} type={"(self, cancel_refetch=True) -> ActionResult[T]"}>
+
+Reruns the query and returns the result.
+Uses the first observer's fetch function.
+
+Note: Prefer calling refetch() on KeyedQueryResult to ensure the correct fetch function is used.
+
+<PySourceCode >
+
+```python
+async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
+	"""
+	Reruns the query and returns the result.
+	Uses the first observer's fetch function.
+
+	Note: Prefer calling refetch() on KeyedQueryResult to ensure the correct fetch function is used.
+	"""
+	fetch_fn = self._get_first_observer_fetch_fn()
+	if cancel_refetch or not self.is_fetching():
+		self.run_fetch(fetch_fn, cancel_previous=cancel_refetch)
+	return await self.wait()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"True"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.queries.common.ActionResult[pulse.queries.query.T]"} />
+
+</PyFunction>
+
+<PyFunction name={"invalidate"} type={"(self, cancel_refetch=False)"}>
+
+Marks query as stale. If there are active observers, triggers a refetch.
+Uses the first observer's fetch function.
+
+Note: Prefer calling invalidate() on KeyedQueryResult to ensure the correct fetch function is used.
+
+<PySourceCode >
+
+```python
+def invalidate(self, cancel_refetch: bool = False):
+	"""
+	Marks query as stale. If there are active observers, triggers a refetch.
+	Uses the first observer's fetch function.
+
+	Note: Prefer calling invalidate() on KeyedQueryResult to ensure the correct fetch function is used.
+	"""
+	if len(self.observers) > 0:
+		fetch_fn = self._get_first_observer_fetch_fn()
+		if not self.is_scheduled or cancel_refetch:
+			self.run_fetch(fetch_fn, cancel_previous=cancel_refetch)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"cancel_refetch"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"observe"} type={"(self, observer)"}>
+
+Register an observer.
+
+<PySourceCode >
+
+```python
+def observe(self, observer: "KeyedQueryResult[T]"):
+	"""Register an observer."""
+	self.observers.append(observer)
+	self.cancel_gc()
+	if observer._gc_time > 0:  # pyright: ignore[reportPrivateUsage]
+		self.cfg.gc_time = max(self.cfg.gc_time, observer._gc_time)  # pyright: ignore[reportPrivateUsage]
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"observer"} type={"KeyedQueryResult[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"unobserve"} type={"(self, observer)"}>
+
+Unregister an observer. Schedules GC if no observers remain.
+
+<PySourceCode >
+
+```python
+def unobserve(self, observer: "KeyedQueryResult[T]"):
+	"""Unregister an observer. Schedules GC if no observers remain."""
+	if observer in self.observers:
+		self.observers.remove(observer)
+
+	# If the departing observer initiated the ongoing fetch, cancel it
+	if self._task_initiator is observer and self._task and not self._task.done():
+		self._task.cancel()
+		self._task = None
+		self._task_initiator = None
+		# Reschedule from another observer if any remain
+		if len(self.observers) > 0:
+			fetch_fn = self._get_first_observer_fetch_fn()
+			self.run_fetch(
+				fetch_fn, cancel_previous=False, initiator=self.observers[0]
+			)
+
+	if len(self.observers) == 0:
+		self.schedule_gc()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"observer"} type={"KeyedQueryResult[T]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"schedule_gc"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def schedule_gc(self):
+	self.cancel_gc()
+	if self.cfg.gc_time > 0:
+		self._gc_handle = later(self.cfg.gc_time, self.dispose)
+	else:
+		self.dispose()
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"cancel_gc"} type={"(self)"}>
+
+<PySourceCode >
+
+```python
+def cancel_gc(self):
+	if self._gc_handle:
+		self._gc_handle.cancel()
+		self._gc_handle = None
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"dispose"} type={"(self)"}>
+
+Clean up the query, cancelling any in-flight fetch.
+
+<PySourceCode >
+
+```python
+@override
+def dispose(self):
+	"""Clean up the query, cancelling any in-flight fetch."""
+	self.cancel()
+	if self.cfg.on_dispose:
+		self.cfg.on_dispose(self)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

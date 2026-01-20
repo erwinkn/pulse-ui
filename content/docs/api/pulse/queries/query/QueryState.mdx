@@ -1,0 +1,363 @@
+---
+title: QueryState
+---
+
+Container for query state signals and manipulation methods.
+
+Manages reactive signals for query data, status, errors, and retry state.
+Used by both KeyedQuery and UnkeyedQuery via composition.
+
+## Attributes
+
+<PyAttribute name={"cfg"} type={"QueryConfig[T]"} value={"QueryConfig(retries=retries, retry_delay=retry_delay, initial_data=initial_data, initial_data_updated_at=initial_data_updated_at, gc_time=gc_time, on_dispose=on_dispose)"}>
+
+Query configuration options.
+
+</PyAttribute>
+
+<PyAttribute name={"data"} type={"Signal[T | None]"} value={"Signal(None if initial_data is MISSING else initial_data, name=f'query.data({name})')"}>
+
+Signal containing the fetched data or None.
+
+</PyAttribute>
+
+<PyAttribute name={"error"} type={"Signal[Exception | None]"} value={"Signal(None, name=f'query.error({name})')"}>
+
+Signal containing the last error or None.
+
+</PyAttribute>
+
+<PyAttribute name={"last_updated"} type={"Signal[float]"} value={"Signal(0.0, name=f'query.last_updated({name})')"}>
+
+Signal with timestamp of last successful update.
+
+</PyAttribute>
+
+<PyAttribute name={"status"} type={"Signal[QueryStatus]"} value={"Signal('loading' if initial_data is MISSING else 'success', name=f'query.status({name})')"}>
+
+Signal with current QueryStatus ("loading", "success", "error").
+
+</PyAttribute>
+
+<PyAttribute name={"is_fetching"} type={"Signal[bool]"} value={"Signal(False, name=f'query.is_fetching({name})')"}>
+
+Signal indicating if a fetch is in progress.
+
+</PyAttribute>
+
+<PyAttribute name={"retries"} type={"Signal[int]"} value={"Signal(0, name=f'query.retries({name})')"}>
+
+Signal with current retry attempt count.
+
+</PyAttribute>
+
+<PyAttribute name={"retry_reason"} type={"Signal[Exception | None]"} value={"Signal(None, name=f'query.retry_reason({name})')"}>
+
+Signal with exception from last failed retry.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, name, retries=3, retry_delay=RETRY_DELAY_DEFAULT, initial_data=MISSING, initial_data_updated_at=None, gc_time=300.0, on_dispose=None)"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	name: str,
+	retries: int = 3,
+	retry_delay: float = RETRY_DELAY_DEFAULT,
+	initial_data: T | None = MISSING,
+	initial_data_updated_at: float | dt.datetime | None = None,
+	gc_time: float = 300.0,
+	on_dispose: Callable[[Any], None] | None = None,
+):
+	self.cfg = QueryConfig(
+		retries=retries,
+		retry_delay=retry_delay,
+		initial_data=initial_data,
+		initial_data_updated_at=initial_data_updated_at,
+		gc_time=gc_time,
+		on_dispose=on_dispose,
+	)
+
+	# Initialize reactive signals
+	self.data = Signal(
+		None if initial_data is MISSING else initial_data,
+		name=f"query.data({name})",
+	)
+	self.error = Signal(None, name=f"query.error({name})")
+
+	self.last_updated = Signal(
+		0.0,
+		name=f"query.last_updated({name})",
+	)
+	if initial_data_updated_at:
+		self.set_updated_at(initial_data_updated_at)
+
+	self.status = Signal(
+		"loading" if initial_data is MISSING else "success",
+		name=f"query.status({name})",
+	)
+	self.is_fetching = Signal(False, name=f"query.is_fetching({name})")
+	self.retries = Signal(0, name=f"query.retries({name})")
+	self.retry_reason = Signal(None, name=f"query.retry_reason({name})")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"name"} type={"str"} value={null} />
+<PyParameter name={"retries"} type={"int"} value={"3"} />
+<PyParameter name={"retry_delay"} type={"float"} value={"RETRY_DELAY_DEFAULT"} />
+<PyParameter name={"initial_data"} type={"T | None"} value={"MISSING"} />
+<PyParameter name={"initial_data_updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+<PyParameter name={"gc_time"} type={"float"} value={"300.0"} />
+<PyParameter name={"on_dispose"} type={"Callable[[Any], None] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_data"} type={"(self, data, *, updated_at=None)"}>
+
+Set data manually, accepting a value or updater function.
+
+<PySourceCode >
+
+```python
+def set_data(
+	self,
+	data: T | Callable[[T | None], T],
+	*,
+	updated_at: float | dt.datetime | None = None,
+):
+	"""Set data manually, accepting a value or updater function."""
+	current = self.data.read()
+	new_value = cast(T, data(current) if callable(data) else data)
+	self.set_success(new_value, manual=True)
+	if updated_at is not None:
+		self.set_updated_at(updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T | Callable[[T | None], T]"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_updated_at"} type={"(self, updated_at)"}>
+
+<PySourceCode >
+
+```python
+def set_updated_at(self, updated_at: float | dt.datetime):
+	if isinstance(updated_at, dt.datetime):
+		updated_at = updated_at.timestamp()
+	self.last_updated.write(updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_initial_data"} type={"(self, data, *, updated_at=None)"}>
+
+Set data as if it were provided as initial_data.
+Optionally supply an updated_at timestamp to seed staleness calculations.
+
+<PySourceCode >
+
+```python
+def set_initial_data(
+	self,
+	data: T | Callable[[], T],
+	*,
+	updated_at: float | dt.datetime | None = None,
+):
+	"""
+	Set data as if it were provided as initial_data.
+	Optionally supply an updated_at timestamp to seed staleness calculations.
+	"""
+	if self.status() == "loading":
+		value = cast(T, data() if callable(data) else data)
+		self.set_data(value, updated_at=updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T | Callable[[], T]"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_error"} type={"(self, error, *, updated_at=None)"}>
+
+<PySourceCode >
+
+```python
+def set_error(
+	self, error: Exception, *, updated_at: float | dt.datetime | None = None
+):
+	self.apply_error(error, manual=True)
+	if updated_at is not None:
+		self.set_updated_at(updated_at)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"error"} type={"Exception"} value={null} />
+<PyParameter name={"updated_at"} type={"float | dt.datetime | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"set_success"} type={"(self, data, manual=False)"}>
+
+Set success state with data.
+
+<PySourceCode >
+
+```python
+def set_success(self, data: T, manual: bool = False):
+	"""Set success state with data."""
+	self.data.write(data)
+	self.last_updated.write(time.time())
+	self.error.write(None)
+	self.status.write("success")
+	if not manual:
+		self.is_fetching.write(False)
+		self.retries.write(0)
+		self.retry_reason.write(None)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"data"} type={"T"} value={null} />
+<PyParameter name={"manual"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"apply_error"} type={"(self, error, manual=False)"}>
+
+Apply error state to the query.
+
+<PySourceCode >
+
+```python
+def apply_error(self, error: Exception, manual: bool = False):
+	"""Apply error state to the query."""
+	self.error.write(error)
+	self.last_updated.write(time.time())
+	self.status.write("error")
+	if not manual:
+		self.is_fetching.write(False)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"error"} type={"Exception"} value={null} />
+<PyParameter name={"manual"} type={"bool"} value={"False"} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"failed_retry"} type={"(self, reason)"}>
+
+Record a failed retry attempt.
+
+<PySourceCode >
+
+```python
+def failed_retry(self, reason: Exception):
+	"""Record a failed retry attempt."""
+	self.retries.write(self.retries.read() + 1)
+	self.retry_reason.write(reason)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"reason"} type={"Exception"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"reset_retries"} type={"(self)"}>
+
+Reset retry state at start of fetch.
+
+<PySourceCode >
+
+```python
+def reset_retries(self):
+	"""Reset retry state at start of fetch."""
+	self.retries.write(0)
+	self.retry_reason.write(None)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

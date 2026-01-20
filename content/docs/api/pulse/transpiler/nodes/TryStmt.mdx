@@ -1,0 +1,79 @@
+---
+title: TryStmt
+---
+
+JS try/catch/finally statement.
+
+try \{ body \} catch (param) \{ handler \} finally \{ finalizer \}
+
+## Attributes
+
+<PyAttribute name={"body"} type={"Sequence[Stmt]"} value={null} />
+
+<PyAttribute name={"catch_param"} type={"str | None"} value={"None"} />
+
+<PyAttribute name={"catch_body"} type={"Sequence[Stmt] | None"} value={"None"} />
+
+<PyAttribute name={"finally_body"} type={"Sequence[Stmt] | None"} value={"None"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append("try {\n")
+	for stmt in self.body:
+		stmt.emit(out)
+		out.append("\n")
+	out.append("}")
+
+	if self.catch_body is not None:
+		if self.catch_param:
+			out.append(f" catch ({self.catch_param}) {{\n")
+		else:
+			out.append(" catch {\n")
+		for stmt in self.catch_body:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
+
+	if self.finally_body is not None:
+		out.append(" finally {\n")
+		for stmt in self.finally_body:
+			stmt.emit(out)
+			out.append("\n")
+		out.append("}")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, body, catch_param=None, catch_body=None, finally_body=None) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"body"} type={"Sequence[Stmt]"} value={null} />
+<PyParameter name={"catch_param"} type={"str | None"} value={"None"} />
+<PyParameter name={"catch_body"} type={"Sequence[Stmt] | None"} value={"None"} />
+<PyParameter name={"finally_body"} type={"Sequence[Stmt] | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

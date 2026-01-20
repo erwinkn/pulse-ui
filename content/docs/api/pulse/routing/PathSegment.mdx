@@ -1,0 +1,73 @@
+---
+title: PathSegment
+---
+
+## Attributes
+
+<PyAttribute name={"is_splat"} type={"bool"} value={"part == '*'"} />
+
+<PyAttribute name={"is_optional"} type={"bool"} value={"part.endswith('?')"} />
+
+<PyAttribute name={"is_dynamic"} type={"bool"} value={"value.startswith(':')"} />
+
+<PyAttribute name={"name"} type={"str"} value={"value[1:] if self.is_dynamic else value"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, part)"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, part: str):
+	if not part:
+		raise InvalidRouteError("Route path segment cannot be empty.")
+
+	self.is_splat = part == "*"
+	self.is_optional = part.endswith("?")
+	value = part[:-1] if self.is_optional else part
+	self.is_dynamic = value.startswith(":")
+	self.name = value[1:] if self.is_dynamic else value
+
+	# Validate characters
+	# The value to validate is the part without ':', '?', or being a splat
+	if not self.is_splat and not PATH_SEGMENT_REGEX.match(self.name):
+		raise InvalidRouteError(
+			f"Path segment '{part}' contains invalid characters."
+		)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"part"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>
+
+<PyFunction name={"__repr__"} type={"(self) -> str"}>
+
+<PySourceCode >
+
+```python
+@override
+def __repr__(self) -> str:
+	return f"PathSegment('{self.name}', dynamic={self.is_dynamic}, optional={self.is_optional}, splat={self.is_splat})"
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"str"} />
+
+</PyFunction>

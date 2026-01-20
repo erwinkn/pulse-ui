@@ -1,0 +1,73 @@
+---
+title: _types
+---
+
+Common type definitions for JavaScript builtin bindings.
+
+This module provides type aliases and protocols for proper typing of JS APIs.
+These are purely for static type checking - they have no runtime effect.
+
+<PyAttribute name={"T"} type={null} value={"_TypeVar('T')"} />
+
+<PyAttribute name={"T_co"} type={null} value={"_TypeVar('T_co', covariant=True)"} />
+
+<PyAttribute name={"T_contra"} type={null} value={"_TypeVar('T_contra', contravariant=True)"} />
+
+<PyAttribute name={"K"} type={null} value={"_TypeVar('K')"} />
+
+<PyAttribute name={"V"} type={null} value={"_TypeVar('V')"} />
+
+<PyAttribute name={"R"} type={null} value={"_TypeVar('R')"} />
+
+<PyAttribute name={"PromiseSettledResult"} type={null} value={"dict[str, T | str]"} />
+
+<PyAttribute name={"ArrayCallback"} type={null} value={"_Callable[[T, int, 'JSArray[T]'], R]"} />
+
+<PyAttribute name={"ArrayCallbackNoIndex"} type={null} value={"_Callable[[T], R]"} />
+
+<PyAttribute name={"ArrayPredicate"} type={null} value={"_Callable[[T, int, 'JSArray[T]'], bool]"} />
+
+<PyAttribute name={"ArrayReducer"} type={null} value={"_Callable[[R, T, int, 'JSArray[T]'], R]"} />
+
+<PyAttribute name={"ArrayComparator"} type={null} value={"_Callable[[T, T], int]"} />
+
+<PyAttribute name={"MapForEachCallback"} type={null} value={"_Callable[[V, K, 'JSMap[K, V]'], None]"} />
+
+<PyAttribute name={"SetForEachCallback"} type={null} value={"_Callable[[T, T, 'JSSet[T]'], None]"} />
+
+<PyAttribute name={"V_co"} type={null} value={"_TypeVar('V_co', covariant=True)"} />
+
+<PyAttribute name={"JSONValue"} type={null} value={"None | bool | int | float | str | list['JSONValue'] | dict[str, 'JSONValue']"} />
+
+<PyAttribute name={"JSONReplacer"} type={null} value={"list[str | int] | _Callable[[str, JSONValue], JSONValue]"} />
+
+<PyAttribute name={"JSONReviver"} type={null} value={"_Callable[[str, JSONValue], JSONValue]"} />
+
+<Tabs items={["Class"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"JSIterator"} href={"/docs/api/pulse/js/_types/JSIterator"} />
+<Card title={"JSIteratorResult"} href={"/docs/api/pulse/js/_types/JSIteratorResult"} />
+<Card title={"JSIterable"} href={"/docs/api/pulse/js/_types/JSIterable"} />
+<Card title={"JSArray"} href={"/docs/api/pulse/js/_types/JSArray"} />
+<Card title={"JSMap"} href={"/docs/api/pulse/js/_types/JSMap"} />
+<Card title={"JSSet"} href={"/docs/api/pulse/js/_types/JSSet"} />
+<Card title={"Element"} href={"/docs/api/pulse/js/_types/Element"} />
+<Card title={"HTMLElement"} href={"/docs/api/pulse/js/_types/HTMLElement"} />
+<Card title={"CSSStyleDeclaration"} href={"/docs/api/pulse/js/_types/CSSStyleDeclaration"} />
+<Card title={"NodeList"} href={"/docs/api/pulse/js/_types/NodeList"} />
+<Card title={"HTMLCollection"} href={"/docs/api/pulse/js/_types/HTMLCollection"} />
+<Card title={"Selection"} href={"/docs/api/pulse/js/_types/Selection"} />
+<Card title={"Range"} href={"/docs/api/pulse/js/_types/Range"} />
+<Card title={"Clipboard"} href={"/docs/api/pulse/js/_types/Clipboard"} />
+<Card title={"ClipboardItem"} href={"/docs/api/pulse/js/_types/ClipboardItem"} />
+<Card title={"Event"} href={"/docs/api/pulse/js/_types/Event"} />
+
+</Cards>
+
+</Tab>
+
+</Tabs>

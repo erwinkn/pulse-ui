@@ -1,0 +1,114 @@
+---
+title: channel
+---
+
+<PyAttribute name={"logger"} type={null} value={"logging.getLogger(__name__)"} />
+
+<PyAttribute name={"ChannelHandler"} type={null} value={"Callable[[Any], Any | Awaitable[Any]]"}>
+
+Handler function for channel events. Can be sync or async.
+
+Type alias for ``Callable[[Any], Any | Awaitable[Any]]``.
+
+</PyAttribute>
+
+<PyAttribute name={"__all__"} type={null} value={"['ChannelsManager', 'Channel', 'ChannelClosed', 'ChannelTimeout', 'channel']"} />
+
+<Tabs items={["Class","Functions"]}>
+
+<Tab value={"Class"}>
+
+<Cards >
+
+<Card title={"ChannelClosed"} href={"/docs/api/pulse/channel/ChannelClosed"} />
+<Card title={"ChannelTimeout"} href={"/docs/api/pulse/channel/ChannelTimeout"} />
+<Card title={"PendingRequest"} href={"/docs/api/pulse/channel/PendingRequest"} />
+<Card title={"ChannelsManager"} href={"/docs/api/pulse/channel/ChannelsManager"} />
+<Card title={"Channel"} href={"/docs/api/pulse/channel/Channel"} />
+
+</Cards>
+
+</Tab>
+<Tab value={"Functions"}>
+
+<PyFunction name={"channel"} type={"(identifier=None) -> Channel"}>
+
+Create a channel bound to the current render session.
+
+Example:
+
+```python
+import pulse as ps
+
+@ps.component
+def ChatRoom():
+    ch = ps.channel("chat")
+
+    @ch.on("message")
+    def handle_message(payload):
+        ch.emit("broadcast", payload)
+
+    return ps.div("Chat room")
+```
+
+<PySourceCode >
+
+```python
+def channel(identifier: str | None = None) -> Channel:
+	"""Create a channel bound to the current render session.
+
+	Args:
+		identifier: Optional channel ID. Auto-generated UUID if not provided.
+
+	Returns:
+		Channel instance.
+
+	Raises:
+		RuntimeError: If called outside an active render session.
+
+	Example:
+
+	\```python
+	import pulse as ps
+
+	@ps.component
+	def ChatRoom():
+	    ch = ps.channel("chat")
+
+	    @ch.on("message")
+	    def handle_message(payload):
+	        ch.emit("broadcast", payload)
+
+	    return ps.div("Chat room")
+	\```
+	"""
+
+	ctx = PulseContext.get()
+	if ctx.render is None:
+		raise RuntimeError("Channels require an active render session")
+	return ctx.render.channels.create(identifier)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"identifier"} type={"str | None"} value={"None"}>
+
+Optional channel ID. Auto-generated UUID if not provided.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"pulse.channel.Channel"}>
+
+Channel instance.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+</Tab>
+
+</Tabs>

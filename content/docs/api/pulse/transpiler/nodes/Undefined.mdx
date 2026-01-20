@@ -1,0 +1,59 @@
+---
+title: Undefined
+---
+
+JS undefined literal.
+
+Use Undefined() for JS `undefined`. Literal(None) emits `null`.
+This is a singleton-like class with no fields.
+
+## Attributes
+
+<PyAttribute name={"__slots__"} type={"tuple[str, ...]"} value={"()"} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append("undefined")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	return {"t": "undef"}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>

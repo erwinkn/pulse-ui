@@ -178,14 +178,17 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 		RuntimeError: If the number or names of arguments change between renders.
 
 	Example:
-		>>> @ps.component
-		... def Counter():
-		...     def init():
-		...         return CounterState(), expensive_calculation()
-		...
-		...     state, value = ps.setup(init)
-		...
-		...     return ps.div(f"Count: {state.count}")
+
+	```python
+	@ps.component
+	def Counter():
+	    def init():
+	        return CounterState(), expensive_calculation()
+
+	    state, value = ps.setup(init)
+
+	    return ps.div(f"Count: {state.count}")
+	```
 
 	Notes:
 		- ``ps.init()`` is syntactic sugar that transforms into ``ps.setup()`` calls
@@ -232,10 +235,13 @@ def setup_key(key: str) -> None:
 		RuntimeError: If called after setup() in the same render.
 
 	Example:
-		>>> def user_profile(user_id: str):
-		...     ps.setup_key(user_id)  # Re-run setup when user_id changes
-		...     data = ps.setup(lambda: fetch_user_data(user_id))
-		...     return m.Text(data.name)
+
+	```python
+	def user_profile(user_id: str):
+	    ps.setup_key(user_id)  # Re-run setup when user_id changes
+	    data = ps.setup(lambda: fetch_user_data(user_id))
+	    return m.Text(data.name)
+	```
 	"""
 	if not isinstance(key, str):
 		raise TypeError("setup_key() requires a string key")

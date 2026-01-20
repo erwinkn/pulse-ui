@@ -37,17 +37,18 @@ pulse-mantine = { workspace = true }
 pulse-msal = { workspace = true }
 pulse-recharts = { workspace = true }
 pulse-aws = { workspace = true }
-fumapy = { git = "https://github.com/fuma-nama/fumadocs", subdirectory = "packages/python" }
+fumapy = { workspace = true }
 
 
 [tool.uv.workspace]
 members = [
-    "packages/pulse/python",
-    "packages/pulse-ag-grid",
-    "packages/pulse-lucide",
-    "packages/pulse-mantine/python",
-    "packages/pulse-msal",
-    "packages/pulse-recharts",
+	"packages/pulse/python",
+	"packages/fumapy",
+	"packages/pulse-ag-grid",
+	"packages/pulse-lucide",
+	"packages/pulse-mantine/python",
+	"packages/pulse-msal",
+	"packages/pulse-recharts",
     "packages/pulse-aws",
 ]
 

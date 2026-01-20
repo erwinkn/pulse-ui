@@ -1,0 +1,38 @@
+---
+title: ActionError
+---
+
+Failed query action result.
+
+Returned by query operations like ``refetch()`` and ``wait()`` when the
+operation fails after exhausting retries.
+
+## Attributes
+
+<PyAttribute name={"error"} type={"Exception"} value={null}>
+
+The exception that caused the failure.
+
+</PyAttribute>
+
+<PyAttribute name={"status"} type={"Literal['error']"} value={"'error'"}>
+
+Always ``"error"`` for discriminated union matching.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, error, status='error') -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"error"} type={"Exception"} value={null} />
+<PyParameter name={"status"} type={"Literal['error']"} value={"'error'"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

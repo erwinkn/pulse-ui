@@ -1,0 +1,437 @@
+---
+title: Channel
+---
+
+Bidirectional communication channel bound to a render session.
+
+Channels enable real-time messaging between server and client. Use
+``ps.channel()`` to create a channel within a component.
+
+## Attributes
+
+<PyAttribute name={"_manager"} type={"ChannelsManager"} value={"manager"} />
+
+<PyAttribute name={"id"} type={"str"} value={"identifier"}>
+
+Channel identifier (auto-generated UUID or user-provided).
+
+</PyAttribute>
+
+<PyAttribute name={"render_id"} type={"str"} value={"render_id"}>
+
+Associated render session ID.
+
+</PyAttribute>
+
+<PyAttribute name={"session_id"} type={"str"} value={"session_id"}>
+
+Associated user session ID.
+
+</PyAttribute>
+
+<PyAttribute name={"route_path"} type={"str | None"} value={"route_path"}>
+
+Route path this channel is bound to, or None.
+
+</PyAttribute>
+
+<PyAttribute name={"_handlers"} type={"dict[str, list[ChannelHandler]]"} value={"defaultdict(list)"} />
+
+<PyAttribute name={"closed"} type={"bool"} value={"False"}>
+
+Whether the channel has been closed.
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, manager, identifier, *, render_id, session_id, route_path) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(
+	self,
+	manager: ChannelsManager,
+	identifier: str,
+	*,
+	render_id: str,
+	session_id: str,
+	route_path: str | None,
+) -> None:
+	self._manager = manager
+	self.id = identifier
+	self.render_id = render_id
+	self.session_id = session_id
+	self.route_path = route_path
+	self._handlers = defaultdict(list)
+	self.closed = False
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"manager"} type={"ChannelsManager"} value={null} />
+<PyParameter name={"identifier"} type={"str"} value={null} />
+<PyParameter name={"render_id"} type={"str"} value={null} />
+<PyParameter name={"session_id"} type={"str"} value={null} />
+<PyParameter name={"route_path"} type={"str | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"on"} type={"(self, event, handler) -> Callable[[], None]"}>
+
+Register a handler for an incoming event.
+
+Example:
+
+```python
+ch = ps.channel()
+remove_handler = ch.on("data", lambda payload: print(payload))
+# Later, to unregister:
+remove_handler()
+```
+
+<PySourceCode >
+
+```python
+def on(self, event: str, handler: ChannelHandler) -> Callable[[], None]:
+	"""Register a handler for an incoming event.
+
+	Args:
+		event: Event name to listen for.
+		handler: Callback function ``(payload: Any) -> Any | Awaitable[Any]``.
+
+	Returns:
+		Callable that removes the handler when invoked.
+
+	Raises:
+		ChannelClosed: If the channel is closed.
+
+	Example:
+
+	\```python
+	ch = ps.channel()
+	remove_handler = ch.on("data", lambda payload: print(payload))
+	# Later, to unregister:
+	remove_handler()
+	\```
+	"""
+
+	self._ensure_open()
+	bucket = self._handlers[event]
+	bucket.append(handler)
+
+	def _remove() -> None:
+		handlers = self._handlers.get(event)
+		if not handlers:
+			return
+		try:
+			handlers.remove(handler)
+		except ValueError:
+			return
+		if not handlers:
+			self._handlers.pop(event, None)
+
+	return _remove
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"event"} type={"str"} value={undefined}>
+
+Event name to listen for.
+
+</PyParameter>
+<PyParameter name={"handler"} type={"ChannelHandler"} value={undefined}>
+
+Callback function ``(payload: Any) -> Any | Awaitable[Any]``.
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"collections.abc.Callable"}>
+
+Callable that removes the handler when invoked.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"emit"} type={"(self, event, payload=None) -> None"}>
+
+Send a fire-and-forget event to the client.
+
+Example:
+
+```python
+ch.emit("notification", \{"message": "Hello"\})
+```
+
+<PySourceCode >
+
+```python
+def emit(self, event: str, payload: Any = None) -> None:
+	"""Send a fire-and-forget event to the client.
+
+	Args:
+		event: Event name.
+		payload: Data to send (optional).
+
+	Raises:
+		ChannelClosed: If the channel is closed.
+
+	Example:
+
+	\```python
+	ch.emit("notification", {"message": "Hello"})
+	\```
+	"""
+
+	self._ensure_open()
+	msg = ServerChannelRequestMessage(
+		type="channel_message",
+		channel=self.id,
+		event=event,
+		payload=payload,
+	)
+	self._manager.send_to_client(
+		channel=self,
+		msg=msg,
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"event"} type={"str"} value={undefined}>
+
+Event name.
+
+</PyParameter>
+<PyParameter name={"payload"} type={"Any"} value={"None"}>
+
+Data to send (optional).
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"request"} type={"(self, event, payload=None, *, timeout=None) -> Any"}>
+
+Send a request to the client and await the response.
+
+Example:
+
+```python
+result = await ch.request("get_value", timeout=5.0)
+```
+
+<PySourceCode >
+
+```python
+async def request(
+	self,
+	event: str,
+	payload: Any = None,
+	*,
+	timeout: float | None = None,
+) -> Any:
+	"""Send a request to the client and await the response.
+
+	Args:
+		event: Event name.
+		payload: Data to send (optional).
+		timeout: Timeout in seconds (optional).
+
+	Returns:
+		Response payload from client.
+
+	Raises:
+		ChannelClosed: If the channel is closed.
+		ChannelTimeout: If the request times out.
+
+	Example:
+
+	\```python
+	result = await ch.request("get_value", timeout=5.0)
+	\```
+	"""
+
+	self._ensure_open()
+	request_id = uuid.uuid4().hex
+	fut = create_future_on_loop()
+	self._manager.register_pending(request_id, fut, self.id)
+	msg = ServerChannelRequestMessage(
+		type="channel_message",
+		channel=self.id,
+		event=event,
+		payload=payload,
+		requestId=request_id,
+	)
+	self._manager.send_to_client(
+		channel=self,
+		msg=msg,
+	)
+	try:
+		if timeout is None:
+			return await fut
+		return await asyncio.wait_for(fut, timeout=timeout)
+	except TimeoutError as exc:
+		self._manager.resolve_pending_error(
+			request_id,
+			ChannelTimeout("Channel request timed out"),
+		)
+		raise ChannelTimeout("Channel request timed out") from exc
+	finally:
+		self._manager.pending_requests.pop(request_id, None)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"event"} type={"str"} value={undefined}>
+
+Event name.
+
+</PyParameter>
+<PyParameter name={"payload"} type={"Any"} value={"None"}>
+
+Data to send (optional).
+
+</PyParameter>
+<PyParameter name={"timeout"} type={"float | None"} value={"None"}>
+
+Timeout in seconds (optional).
+
+</PyParameter>
+
+</div>
+
+<PyFunctionReturn type={"typing.Any"}>
+
+Response payload from client.
+
+</PyFunctionReturn>
+
+</PyFunction>
+
+<PyFunction name={"close"} type={"(self) -> None"}>
+
+Close the channel and clean up resources.
+
+After closing, any further operations on the channel will raise
+``ChannelClosed``. Pending requests will be cancelled.
+
+<PySourceCode >
+
+```python
+def close(self) -> None:
+	"""Close the channel and clean up resources.
+
+	After closing, any further operations on the channel will raise
+	``ChannelClosed``. Pending requests will be cancelled.
+	"""
+	if self.closed:
+		return
+	self.closed = True
+	self._handlers.clear()
+	self._manager.dispose_channel(self, reason="channel.close")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_ensure_open"} type={"(self) -> None"}>
+
+<PySourceCode >
+
+```python
+def _ensure_open(self) -> None:
+	if self.closed:
+		raise ChannelClosed(f"Channel '{self.id}' is closed")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"dispatch"} type={"(self, event, payload, request_id) -> Any | None"}>
+
+<PySourceCode >
+
+```python
+async def dispatch(
+	self, event: str, payload: Any, request_id: str | None
+) -> Any | None:
+	handlers = list(self._handlers.get(event, ()))
+	if not handlers:
+		return None
+
+	last_result: Any | None = None
+	for handler in handlers:
+		try:
+			result = handler(payload)
+			if asyncio.iscoroutine(result):
+				result = await result
+		except Exception as exc:
+			logger.exception(
+				"Error in channel handler '%s' for event '%s'", self.id, event
+			)
+			raise exc
+		if request_id is not None and result is not None:
+			return result
+		if result is not None:
+			last_result = result
+	return last_result
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"event"} type={"str"} value={null} />
+<PyParameter name={"payload"} type={"Any"} value={null} />
+<PyParameter name={"request_id"} type={"str | None"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"typing.Any | None"} />
+
+</PyFunction>

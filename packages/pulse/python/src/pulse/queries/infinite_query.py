@@ -54,13 +54,14 @@ class Page(NamedTuple, Generic[T, TParam]):
 		param: The page parameter (cursor, offset, etc.) used to fetch this page.
 
 	Example:
-		::
 
-			# Access pages from infinite query result
-			for page in state.posts.data:
-			    print(f"Page param: {page.param}")
-			    for post in page.data:
-			        print(post.title)
+	```python
+	# Access pages from infinite query result
+	for page in state.posts.data:
+	    print(f"Page param: {page.param}")
+	    for post in page.data:
+	        print(post.title)
+	```
 	"""
 
 	data: T
@@ -755,16 +756,17 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		is_fetching_previous_page: Whether fetching the previous page.
 
 	Example:
-		::
 
-			# Access infinite query result
-			if state.posts.is_loading:
-			    show_skeleton()
-			elif state.posts.data:
-			    for page in state.posts.data:
-			        render_posts(page.data)
-			    if state.posts.has_next_page:
-			        Button("Load More", on_click=state.posts.fetch_next_page)
+	```python
+	# Access infinite query result
+	if state.posts.is_loading:
+	    show_skeleton()
+	elif state.posts.data:
+	    for page in state.posts.data:
+	        render_posts(page.data)
+	    if state.posts.has_next_page:
+	        Button("Load More", on_click=state.posts.fetch_next_page)
+	```
 	"""
 
 	_query: Computed[InfiniteQuery[T, TParam]]
@@ -1025,25 +1027,26 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		- ``@infinite_query_prop.on_error``: Handle fetch errors.
 
 	Example:
-		::
 
-			class FeedState(ps.State):
-			    feed_type: str = "home"
+	```python
+	class FeedState(ps.State):
+	    feed_type: str = "home"
 
-			    @ps.infinite_query(initial_page_param=None)
-			    async def posts(self, cursor: str | None) -> list[Post]:
-			        return await api.get_posts(cursor=cursor)
+	    @ps.infinite_query(initial_page_param=None)
+	    async def posts(self, cursor: str | None) -> list[Post]:
+	        return await api.get_posts(cursor=cursor)
 
-			    @posts.key
-			    def _posts_key(self):
-			        return ("feed", self.feed_type)
+	    @posts.key
+	    def _posts_key(self):
+	        return ("feed", self.feed_type)
 
-			    @posts.get_next_page_param
-			    def _next_cursor(self, pages: list[Page]) -> str | None:
-			        if not pages:
-			            return None
-			        last = pages[-1]
-			        return last.data[-1].id if last.data else None
+	    @posts.get_next_page_param
+	    def _next_cursor(self, pages: list[Page]) -> str | None:
+	        if not pages:
+	            return None
+	        last = pages[-1]
+	        return last.data[-1].id if last.data else None
+	```
 	"""
 
 	name: str
@@ -1350,30 +1353,31 @@ def infinite_query(
 		InfiniteQueryProperty that creates InfiniteQueryResult instances when accessed.
 
 	Example:
-		::
 
-			class FeedState(ps.State):
-			    @ps.infinite_query(initial_page_param=None, key=("feed",))
-			    async def posts(self, cursor: str | None) -> list[Post]:
-			        return await api.get_posts(cursor=cursor)
+	```python
+	class FeedState(ps.State):
+	    @ps.infinite_query(initial_page_param=None, key=("feed",))
+	    async def posts(self, cursor: str | None) -> list[Post]:
+	        return await api.get_posts(cursor=cursor)
 
-			    @posts.key
-			    def _posts_key(self):
-			        return ("feed", self.feed_type)
+	    @posts.key
+	    def _posts_key(self):
+	        return ("feed", self.feed_type)
 
-			    @posts.get_next_page_param
-			    def _next_cursor(self, pages: list[Page]) -> str | None:
-			        if not pages:
-			            return None
-			        last = pages[-1]
-			        return last.data[-1].id if last.data else None
+	    @posts.get_next_page_param
+	    def _next_cursor(self, pages: list[Page]) -> str | None:
+	        if not pages:
+	            return None
+	        last = pages[-1]
+	        return last.data[-1].id if last.data else None
 
-			    @posts.get_previous_page_param
-			    def _prev_cursor(self, pages: list[Page]) -> str | None:
-			        if not pages:
-			            return None
-			        first = pages[0]
-			        return first.data[0].id if first.data else None
+	    @posts.get_previous_page_param
+	    def _prev_cursor(self, pages: list[Page]) -> str | None:
+	        if not pages:
+	            return None
+	        first = pages[0]
+	        return first.data[0].id if first.data else None
+	```
 	"""
 
 	def decorator(

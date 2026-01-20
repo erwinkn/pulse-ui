@@ -1,0 +1,86 @@
+---
+title: Template
+---
+
+JS template literal: `hello $\{name\}`
+
+Parts alternate: [str, Expr, str, Expr, str, ...]
+Always starts and ends with a string (may be empty).
+
+## Attributes
+
+<PyAttribute name={"parts"} type={"Sequence[str | Expr]"} value={null} />
+
+## Functions
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	out.append("`")
+	for p in self.parts:
+		if isinstance(p, str):
+			out.append(_escape_template(p))
+		else:
+			out.append("${")
+			p.emit(out)
+			out.append("}")
+	out.append("`")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	rendered_parts: list[str | VDOMNode] = []
+	for p in self.parts:
+		if isinstance(p, str):
+			rendered_parts.append(p)
+		else:
+			rendered_parts.append(p.render())
+	return {"t": "template", "parts": rendered_parts}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, parts) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"parts"} type={"Sequence[str | Expr]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

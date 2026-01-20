@@ -1,9 +1,0 @@
-{
-  "title": "app",
-  "pages": [
-    "index",
-    "AppStatus",
-    "ConnectionStatusConfig",
-    "App"
-  ]
-}

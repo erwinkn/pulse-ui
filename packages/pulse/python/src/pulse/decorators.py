@@ -45,8 +45,7 @@ def computed(fn: Callable[..., Any] | None = None, *, name: str | None = None):
 	2. As a standalone function (with no arguments) - creates a Computed
 
 	Args:
-		fn: The function to compute the value. Must take no arguments (standalone)
-		    or only `self` (State method).
+		fn: The function to compute the value. Must take no arguments (standalone) or only `self` (State method).
 		name: Optional debug name for the computed. Defaults to the function name.
 
 	Returns:

@@ -1,0 +1,116 @@
+---
+title: Arrow
+---
+
+JS arrow function: (x) => expr or (x) => \{ ... \}
+
+body can be:
+- Expr: expression body, emits as `() => expr`
+- Sequence[Stmt]: statement body, emits as `() => \{ stmt1; stmt2; \}`
+
+## Attributes
+
+<PyAttribute name={"params"} type={"Sequence[str]"} value={null} />
+
+<PyAttribute name={"body"} type={"Expr | Sequence[Stmt]"} value={null} />
+
+## Functions
+
+<PyFunction name={"precedence"} type={"(self) -> int"}>
+
+<PySourceCode >
+
+```python
+@override
+def precedence(self) -> int:
+	# Arrow functions have very low precedence (assignment level)
+	# This ensures they get wrapped in parens when used as callee in Call
+	return 3
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"int"} />
+
+</PyFunction>
+
+<PyFunction name={"emit"} type={"(self, out) -> None"}>
+
+<PySourceCode >
+
+```python
+@override
+def emit(self, out: list[str]) -> None:
+	if len(self.params) == 1:
+		out.append(self.params[0])
+	else:
+		out.append("(")
+		out.append(", ".join(self.params))
+		out.append(")")
+	out.append(" => ")
+	if isinstance(self.body, Expr):
+		self.body.emit(out)
+	else:
+		out.append("{ ")
+		for stmt in self.body:
+			stmt.emit(out)
+			out.append(" ")
+		out.append("}")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"out"} type={"list[str]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"render"} type={"(self) -> VDOMNode"}>
+
+<PySourceCode >
+
+```python
+@override
+def render(self) -> VDOMNode:
+	if not isinstance(self.body, Expr):
+		raise TypeError("Arrow with statement body cannot be rendered as VDOMExpr")
+	return {"t": "arrow", "params": list(self.params), "body": self.body.render()}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.transpiler.vdom.VDOMNode"} />
+
+</PyFunction>
+
+<PyFunction name={"__init__"} type={"(self, params, body) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"params"} type={"Sequence[str]"} value={null} />
+<PyParameter name={"body"} type={"Expr | Sequence[Stmt]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

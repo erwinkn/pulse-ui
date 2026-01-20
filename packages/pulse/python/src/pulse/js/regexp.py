@@ -2,11 +2,14 @@
 JavaScript RegExp builtin module.
 
 Usage:
-    from pulse.js import RegExp
-    RegExp(pattern, flags)        # -> new RegExp(pattern, flags)
 
-    # Or import from module directly:
-    from pulse.js.regexp import RegExp
+```python
+from pulse.js import RegExp
+RegExp(pattern, flags)        # -> new RegExp(pattern, flags)
+
+# Or import from module directly:
+from pulse.js.regexp import RegExp
+```
 """
 
 from pulse.transpiler.js_module import JsModule

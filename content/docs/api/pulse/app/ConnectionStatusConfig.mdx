@@ -1,0 +1,45 @@
+---
+title: ConnectionStatusConfig
+---
+
+Configuration for connection status message delays.
+
+## Attributes
+
+<PyAttribute name={"initial_connecting_delay"} type={"float"} value={"2.0"}>
+
+Delay in seconds before showing "Connecting..." message
+on initial connection attempt. Default: 2.0
+
+</PyAttribute>
+
+<PyAttribute name={"initial_error_delay"} type={"float"} value={"8.0"}>
+
+Additional delay in seconds before showing error message
+on initial connection attempt (after connecting message). Default: 8.0
+
+</PyAttribute>
+
+<PyAttribute name={"reconnect_error_delay"} type={"float"} value={"8.0"}>
+
+Delay in seconds before showing error message when
+reconnecting after losing connection. Default: 8.0
+
+</PyAttribute>
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, initial_connecting_delay=2.0, initial_error_delay=8.0, reconnect_error_delay=8.0) -> None"}>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"initial_connecting_delay"} type={"float"} value={"2.0"} />
+<PyParameter name={"initial_error_delay"} type={"float"} value={"8.0"} />
+<PyParameter name={"reconnect_error_delay"} type={"float"} value={"8.0"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

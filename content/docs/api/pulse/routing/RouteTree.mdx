@@ -1,0 +1,87 @@
+---
+title: RouteTree
+---
+
+## Attributes
+
+<PyAttribute name={"tree"} type={"list[Route | Layout]"} value={"list(routes)"} />
+
+<PyAttribute name={"flat_tree"} type={"dict[str, Route | Layout]"} value={"{}"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, routes) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, routes: Sequence[Route | Layout]) -> None:
+	# Filter out dev routes when not in dev environment
+	if env.pulse_env != "dev":
+		routes = filter_dev_routes(routes)
+	self.tree = list(routes)
+	self.flat_tree = {}
+
+	def _flatten_route_tree(route: Route | Layout):
+		key = route.unique_path()
+		if key in self.flat_tree:
+			if isinstance(route, Layout):
+				raise RuntimeError(f"Multiple layouts have the same path '{key}'")
+			else:
+				raise RuntimeError(f"Multiple routes have the same path '{key}'")
+
+		self.flat_tree[key] = route
+		layout_count = 0
+		for child in route.children:
+			if isinstance(child, Layout):
+				layout_count += 1
+				child.idx = layout_count
+			child.parent = route
+			_flatten_route_tree(child)
+
+	layout_count = 0
+	for route in routes:
+		if isinstance(route, Layout):
+			layout_count += 1
+			route.idx = layout_count
+		_flatten_route_tree(route)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"routes"} type={"Sequence[Route | Layout]"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"find"} type={"(self, path)"}>
+
+<PySourceCode >
+
+```python
+def find(self, path: str):
+	path = ensure_absolute_path(path)
+	route = self.flat_tree.get(path)
+	if not route:
+		raise ValueError(f"No route found for path '{path}'")
+	return route
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={null} />
+
+</PyFunction>

@@ -1,0 +1,564 @@
+---
+title: ChannelsManager
+---
+
+Coordinates creation, routing, and cleanup of Pulse channels.
+
+## Attributes
+
+<PyAttribute name={"pending_requests"} type={"dict[str, PendingRequest]"} value={"{}"} />
+
+## Functions
+
+<PyFunction name={"__init__"} type={"(self, render_session) -> None"}>
+
+<PySourceCode >
+
+```python
+def __init__(self, render_session: "RenderSession") -> None:
+	self._render_session = render_session
+	self._channels = {}
+	self._channels_by_route = defaultdict(set)
+	self.pending_requests = {}
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render_session"} type={"RenderSession"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"create"} type={"(self, identifier=None) -> Channel"}>
+
+<PySourceCode >
+
+```python
+def create(self, identifier: str | None = None) -> "Channel":
+	ctx = PulseContext.get()
+	render = ctx.render
+	session = ctx.session
+	if render is None or session is None:
+		raise RuntimeError("Channels require an active render and session")
+
+	channel_id = identifier or uuid.uuid4().hex
+	if channel_id in self._channels:
+		raise ValueError(f"Channel id '{channel_id}' is already in use")
+
+	route_path: str | None = None
+	if ctx.route is not None:
+		# unique_path() returns absolute path, use as-is for keys
+		route_path = ctx.route.pulse_route.unique_path()
+
+	channel = Channel(
+		self,
+		channel_id,
+		render_id=render.id,
+		session_id=session.sid,
+		route_path=route_path,
+	)
+	self._channels[channel_id] = channel
+	if route_path is not None:
+		self._channels_by_route[route_path].add(channel_id)
+	return channel
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"identifier"} type={"str | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"pulse.channel.Channel"} />
+
+</PyFunction>
+
+<PyFunction name={"remove_route"} type={"(self, path) -> None"}>
+
+<PySourceCode >
+
+```python
+def remove_route(self, path: str) -> None:
+	# route_path is already an absolute path
+	route_channels = list(self._channels_by_route.get(path, set()))
+	# if route_channels:
+	# 	print(f"Disposing {len(route_channels)} channel(s) for route {route_path}")
+	for channel_id in route_channels:
+		channel = self._channels.get(channel_id)
+		if channel is None:
+			continue
+		channel.closed = True
+		self.dispose_channel(channel, reason="route.unmount")
+	self._channels_by_route.pop(path, None)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"path"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"handle_client_response"} type={"(self, message) -> None"}>
+
+<PySourceCode >
+
+```python
+def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
+	response_to = message.get("responseTo")
+	if not response_to:
+		return
+
+	if error := message.get("error") is not None:
+		self.resolve_pending_error(response_to, error)
+	else:
+		self._resolve_pending_success(response_to, message.get("payload"))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"message"} type={"ClientChannelResponseMessage"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"handle_client_event"} type={"(self, *, render, session, message) -> None"}>
+
+<PySourceCode >
+
+```python
+def handle_client_event(
+	self,
+	*,
+	render: "RenderSession",
+	session: "UserSession",
+	message: ClientChannelRequestMessage,
+) -> None:
+	channel_id = str(message.get("channel"))
+	channel = self._channels.get(channel_id)
+	if channel is None:
+		if request_id := message.get("requestId"):
+			self._send_error_response(channel_id, request_id, "Channel closed")
+		return
+
+	if channel.render_id != render.id or channel.session_id != session.sid:
+		logger.warning(
+			"Ignoring channel message for mismatched context: %s", channel_id
+		)
+		return
+
+	event = message["event"]
+	payload = message.get("payload")
+	request_id = message.get("requestId")
+
+	if event == "__close__":
+		reason: str | None = None
+		if isinstance(payload, str):
+			reason = payload
+		elif isinstance(payload, dict):
+			raw_reason = cast(Any, payload.get("reason"))
+			if raw_reason is not None:
+				reason = str(raw_reason)
+		self.release_channel(channel.id, reason=reason)
+		return
+
+	route_ctx = None
+	if channel.route_path is not None:
+		try:
+			mount = render.get_route_mount(channel.route_path)
+			route_ctx = mount.route
+		except Exception:
+			route_ctx = None
+
+	async def _invoke() -> None:
+		try:
+			with PulseContext.update(
+				session=session, render=render, route=route_ctx
+			):
+				result = await channel.dispatch(event, payload, request_id)
+		except Exception as exc:
+			if request_id:
+				self._send_error_response(channel.id, request_id, str(exc))
+			else:
+				logger.exception("Unhandled error in channel handler")
+			return
+
+		if request_id:
+			msg = ServerChannelResponseMessage(
+				type="channel_message",
+				channel=channel.id,
+				event=None,
+				responseTo=request_id,
+				payload=result,
+			)
+			self.send_to_client(
+				channel=channel,
+				msg=msg,
+			)
+
+	asyncio.create_task(_invoke())
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"render"} type={"RenderSession"} value={null} />
+<PyParameter name={"session"} type={"UserSession"} value={null} />
+<PyParameter name={"message"} type={"ClientChannelRequestMessage"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"register_pending"} type={"(self, request_id, future, channel_id) -> None"}>
+
+<PySourceCode >
+
+```python
+def register_pending(
+	self,
+	request_id: str,
+	future: asyncio.Future[Any],
+	channel_id: str,
+) -> None:
+	self.pending_requests[request_id] = PendingRequest(
+		future=future, channel_id=channel_id
+	)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"request_id"} type={"str"} value={null} />
+<PyParameter name={"future"} type={"asyncio.Future[Any]"} value={null} />
+<PyParameter name={"channel_id"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_resolve_pending_success"} type={"(self, request_id, payload) -> None"}>
+
+<PySourceCode >
+
+```python
+def _resolve_pending_success(self, request_id: str, payload: Any) -> None:
+	pending = self.pending_requests.pop(request_id, None)
+	if not pending:
+		return
+	if pending.future.done():
+		return
+	pending.future.set_result(payload)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"request_id"} type={"str"} value={null} />
+<PyParameter name={"payload"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"resolve_pending_error"} type={"(self, request_id, error) -> None"}>
+
+<PySourceCode >
+
+```python
+def resolve_pending_error(self, request_id: str, error: Any) -> None:
+	pending = self.pending_requests.pop(request_id, None)
+	if not pending:
+		return
+	if pending.future.done():
+		return
+	if isinstance(error, Exception):
+		pending.future.set_exception(error)
+	else:
+		pending.future.set_exception(RuntimeError(str(error)))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"request_id"} type={"str"} value={null} />
+<PyParameter name={"error"} type={"Any"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_send_error_response"} type={"(self, channel_id, request_id, message) -> None"}>
+
+<PySourceCode >
+
+```python
+def _send_error_response(
+	self, channel_id: str, request_id: str, message: str
+) -> None:
+	channel = self._channels.get(channel_id)
+	if channel is None:
+		self.resolve_pending_error(request_id, ChannelClosed(message))
+		return
+	try:
+		msg = ServerChannelResponseMessage(
+			type="channel_message",
+			channel=channel.id,
+			event=None,
+			responseTo=request_id,
+			payload=None,
+			error=message,
+		)
+		self.send_to_client(
+			channel=channel,
+			msg=msg,
+		)
+	except ChannelClosed:
+		self.resolve_pending_error(request_id, ChannelClosed(message))
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel_id"} type={"str"} value={null} />
+<PyParameter name={"request_id"} type={"str"} value={null} />
+<PyParameter name={"message"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"send_error"} type={"(self, channel_id, request_id, message) -> None"}>
+
+<PySourceCode >
+
+```python
+def send_error(self, channel_id: str, request_id: str, message: str) -> None:
+	self._send_error_response(channel_id, request_id, message)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel_id"} type={"str"} value={null} />
+<PyParameter name={"request_id"} type={"str"} value={null} />
+<PyParameter name={"message"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"_cancel_pending_for_channel"} type={"(self, channel_id) -> None"}>
+
+<PySourceCode >
+
+```python
+def _cancel_pending_for_channel(self, channel_id: str) -> None:
+	for key, pending in list(self.pending_requests.items()):
+		if pending.channel_id != channel_id:
+			continue
+		if not pending.future.done():
+			pending.future.set_exception(ChannelClosed("Channel closed"))
+		self.pending_requests.pop(key, None)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel_id"} type={"str"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"release_channel"} type={"(self, channel_id, *, reason=None) -> bool"}>
+
+<PySourceCode >
+
+```python
+def release_channel(
+	self,
+	channel_id: str,
+	*,
+	reason: str | None = None,
+) -> bool:
+	channel = self._channels.get(channel_id)
+	if channel is None:
+		return False
+	if channel.closed:
+		# Already closed but still tracked; ensure cleanup completes.
+		self.dispose_channel(channel, reason=reason or "client.close")
+		return True
+
+	channel.closed = True
+	self.dispose_channel(channel, reason=reason or "client.close")
+	return True
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel_id"} type={"str"} value={null} />
+<PyParameter name={"reason"} type={"str | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"bool"} />
+
+</PyFunction>
+
+<PyFunction name={"_cleanup_channel_refs"} type={"(self, channel) -> None"}>
+
+<PySourceCode >
+
+```python
+def _cleanup_channel_refs(self, channel: "Channel") -> None:
+	if channel.route_path is not None:
+		route_bucket = self._channels_by_route.get(channel.route_path)
+		if route_bucket is not None:
+			route_bucket.discard(channel.id)
+			if not route_bucket:
+				self._channels_by_route.pop(channel.route_path, None)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel"} type={"Channel"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"dispose_channel"} type={"(self, channel, *, reason=None) -> None"}>
+
+<PySourceCode >
+
+```python
+def dispose_channel(
+	self,
+	channel: "Channel",
+	*,
+	reason: str | None = None,
+) -> None:
+	# pending = sum(
+	# 	1
+	# 	for pending in self.pending_requests.values()
+	# 	if pending.channel_id == channel.id
+	# )
+	# print(f"Disposing channel id={channel.id} render={channel.render_id} session={channel.session_id} route={channel.route_path} reason={reason or 'unspecified'} pending={pending}")
+	self._cleanup_channel_refs(channel)
+	self._cancel_pending_for_channel(channel.id)
+	self._channels.pop(channel.id, None)
+	# Notify client that the channel has been closed
+	try:
+		msg = ServerChannelRequestMessage(
+			type="channel_message",
+			channel=channel.id,
+			event="__close__",
+			payload=None,
+		)
+		self.send_to_client(
+			channel=channel,
+			msg=msg,
+		)
+	except Exception:
+		print(f"Failed to send close notification for channel {channel.id}")
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel"} type={"Channel"} value={null} />
+<PyParameter name={"reason"} type={"str | None"} value={"None"} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>
+
+<PyFunction name={"send_to_client"} type={"(self, *, channel, msg) -> None"}>
+
+<PySourceCode >
+
+```python
+def send_to_client(
+	self,
+	*,
+	channel: "Channel",
+	msg: ServerChannelMessage,
+) -> None:
+	self._render_session.send(msg)
+```
+
+</PySourceCode>
+
+<div >
+
+<PyParameter name={"self"} type={null} value={null} />
+<PyParameter name={"channel"} type={"Channel"} value={null} />
+<PyParameter name={"msg"} type={"ServerChannelMessage"} value={null} />
+
+</div>
+
+<PyFunctionReturn type={"None"} />
+
+</PyFunction>

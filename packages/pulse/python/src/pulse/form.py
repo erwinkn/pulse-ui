@@ -264,19 +264,22 @@ def Form(
 		RuntimeError: If called outside a component render.
 
 	Example:
-		>>> async def handle_submit(data: ps.FormData):
-		...     name = data.get("name")  # str
-		...     file = data.get("avatar")  # UploadFile
-		...     await save_user(name, file)
-		...
-		>>> def my_form():
-		...     return ps.Form(
-		...         m.TextInput(name="name", label="Name"),
-		...         m.FileInput(name="avatar", label="Avatar"),
-		...         m.Button("Submit", type="submit"),
-		...         key="user-form",
-		...         onSubmit=handle_submit,
-		...     )
+
+	```python
+	async def handle_submit(data: ps.FormData):
+	    name = data.get("name")  # str
+	    file = data.get("avatar")  # UploadFile
+	    await save_user(name, file)
+
+	def my_form():
+	    return ps.Form(
+	        m.TextInput(name="name", label="Name"),
+	        m.FileInput(name="avatar", label="Avatar"),
+	        m.Button("Submit", type="submit"),
+	        key="user-form",
+	        onSubmit=handle_submit,
+	    )
+	```
 
 	Note:
 		- ``key`` must be unique within the render.
@@ -330,23 +333,26 @@ class ManualForm(Disposable):
 		registration: Form registration info (raises if disposed).
 
 	Example:
-		>>> def custom_form():
-		...     manual = ManualForm(on_submit=handle_data)
-		...
-		...     # Option 1: Render directly
-		...     return manual(
-		...         m.TextInput(name="field"),
-		...         m.Button("Submit", type="submit"),
-		...         key="my-form",
-		...     )
-		...
-		...     # Option 2: Use props manually
-		...     form_props = manual.props()
-		...     return m.form(
-		...         m.TextInput(name="field"),
-		...         m.Button("Submit", type="submit"),
-		...         **form_props,
-		...     )
+
+	```python
+	def custom_form():
+	    manual = ManualForm(on_submit=handle_data)
+
+	    # Option 1: Render directly
+	    return manual(
+	        m.TextInput(name="field"),
+	        m.Button("Submit", type="submit"),
+	        key="my-form",
+	    )
+
+	    # Option 2: Use props manually
+	    form_props = manual.props()
+	    return m.form(
+	        m.TextInput(name="field"),
+	        m.Button("Submit", type="submit"),
+	        **form_props,
+	    )
+	```
 	"""
 
 	_submit_signal: Signal[bool]

@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, TypedDict, override
 
 import pulse as ps
+from pulse.js import console
 from pulse.messages import ClientMessage
 from pulse.middleware import (
 	ConnectResponse,
@@ -14,8 +15,8 @@ from pulse.middleware import (
 	Ok,
 	Redirect,
 )
+from pulse.render_session import run_js
 from pulse.request import PulseRequest
-from pulse.routing import RouteInfo
 from pulse.user_session import InMemorySessionStore
 
 
@@ -234,7 +235,10 @@ def Leaf(label: str, key: str | None = None):
 		state = LeafState(meta["label"])
 
 	# effects: register a mount-only effect for the component instance
-	ps.effects(lambda: print(f"[Leaf effects] ready: {meta['label']}"))
+	@ps.effect
+	def on_effects_ready():  # pyright: ignore[reportUnusedFunction]
+		print(f"[Leaf effects] ready: {meta['label']}")
+		run_js(console.log(f"[Leaf effects] ready: {meta['label']}"))
 
 	return ps.div(
 		ps.div(
@@ -299,6 +303,16 @@ def counter():
 		state1 = CounterState("Counter 1")
 		state2 = CounterState("Counter2")
 	route_info = ps.route()
+
+	@ps.effect
+	def log_count_1():  # pyright: ignore[reportUnusedFunction]
+		print(f"Counter 1 count: {state1.count}")
+		run_js(console.log(f"Counter 1 count: {state1.count}"))
+
+	@ps.effect
+	def log_count_2():  # pyright: ignore[reportUnusedFunction]
+		print(f"Counter 2 count: {state2.count}")
+		run_js(console.log(f"Counter 2 count: {state2.count}"))
 
 	return ps.div(
 		ps.h1("Interactive Counter", className="text-3xl font-bold mb-4"),
@@ -478,8 +492,9 @@ def dynamic_route():
 
 
 @ps.react_component(
-	ps.Import("CustomDatePicker", "~/components/date-picker", kind="default"),
-	lazy=True,
+	ps.Import(
+		"CustomDatePicker", "~/components/date-picker", kind="default", lazy=True
+	),
 )
 def DatePicker(
 	*children: ps.Node,
@@ -564,17 +579,19 @@ def app_layout():
 
 class LoggingMiddleware(ps.PulseMiddleware):
 	@override
-	async def prerender_route(
+	async def prerender(
 		self,
 		*,
-		path: str,
-		route_info: RouteInfo,
+		payload: ps.PrerenderPayload,
 		request: PulseRequest,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[ps.RoutePrerenderResponse]],
-	) -> ps.RoutePrerenderResponse:
+		next: Callable[[], Awaitable[ps.PrerenderResponse]],
+	) -> ps.PrerenderResponse:
 		# before
-		print(f"[MW prerender] path={path} host={request.headers.get('host')}")
+		print(
+			f"[MW prerender] paths={payload.get('paths') or []} "
+			f"host={request.headers.get('host')}"
+		)
 		# Seed same keys as connect to avoid prerender flash
 		session["user_agent"] = request.headers.get("user-agent")
 		session["ip"] = request.headers.get("x-forwarded-for") or (

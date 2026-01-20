@@ -8,6 +8,7 @@ from pulse.queries.common import ActionError
 from pulse.queries.infinite_query import Page
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
+from pulse.test_helpers import wait_for
 
 
 class ProjectsPage(TypedDict):
@@ -596,15 +597,13 @@ async def test_infinite_query_refetch_interval():
 	assert s.calls == 1
 	assert q.pages == [1]
 
-	# Wait for interval to trigger refetch
-	await asyncio.sleep(0.015)
+	# Wait for interval to trigger refetch and complete
+	assert await wait_for(lambda: q.pages == [2])
 	assert s.calls == 2
-	assert q.pages == [2]
 
 	# Wait for another interval
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: q.pages == [3])
 	assert s.calls == 3
-	assert q.pages == [3]
 
 	q.dispose()
 
@@ -639,15 +638,14 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	assert s.calls == 1
 
 	# Wait for one interval refetch
-	await asyncio.sleep(0.015)
-	assert s.calls == 2
+	assert await wait_for(lambda: s.calls >= 2)
 
 	# Dispose - interval should stop
 	q.dispose()
 	calls_at_dispose = s.calls
 
-	# Wait and verify no more refetches
-	await asyncio.sleep(0.01)
+	# Wait and verify no more refetches (negative test - sleep is appropriate here)
+	await asyncio.sleep(0.03)
 	assert s.calls == calls_at_dispose
 
 

@@ -2,10 +2,8 @@
 Example: Testing Redirect and NotFound responses from middleware.
 
 This example demonstrates:
-- Middleware returning Redirect from prerender()
-- Middleware returning NotFound from prerender()
-- Middleware returning Redirect from prerender_route()
-- Middleware returning NotFound from prerender_route()
+- Middleware returning Redirect from prerender() based on payload paths
+- Middleware returning NotFound from prerender() based on payload paths
 """
 
 from __future__ import annotations
@@ -18,49 +16,7 @@ from pulse.middleware import (
 	NotFound,
 	PrerenderResponse,
 	Redirect,
-	RoutePrerenderResponse,
 )
-
-
-# Middleware that tests prerender_route redirects
-class RouteRedirectMiddleware(ps.PulseMiddleware):
-	"""Redirects /old-path to /new-path at prerender_route level."""
-
-	@override
-	async def prerender_route(
-		self,
-		*,
-		path: str,
-		request: ps.PulseRequest,
-		route_info: ps.RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], Awaitable[RoutePrerenderResponse]],
-	) -> RoutePrerenderResponse:
-		print(f"[RouteRedirectMiddleware] prerender_route path={path}")
-		if path == "/old-path":
-			print(f"[RouteRedirectMiddleware] Redirecting {path} -> /new-path")
-			return Redirect("/new-path")
-		return await next()
-
-
-# Middleware that tests prerender_route not found
-class RouteNotFoundMiddleware(ps.PulseMiddleware):
-	"""Returns NotFound for /blocked-path at prerender_route level."""
-
-	@override
-	async def prerender_route(
-		self,
-		*,
-		path: str,
-		request: ps.PulseRequest,
-		route_info: ps.RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], Awaitable[RoutePrerenderResponse]],
-	) -> RoutePrerenderResponse:
-		if path == "/blocked-path":
-			print(f"[RouteNotFoundMiddleware] Blocking {path} with NotFound")
-			return NotFound()
-		return await next()
 
 
 # Middleware that tests prerender redirects
@@ -77,7 +33,11 @@ class PrerenderRedirectMiddleware(ps.PulseMiddleware):
 		next: Callable[[], Awaitable[PrerenderResponse]],
 	) -> PrerenderResponse:
 		# Check if any path in the batch should be redirected
-		if "/old-batch" in payload["paths"]:
+		paths = payload["paths"]
+		if "/old-path" in paths:
+			print("[PrerenderRedirectMiddleware] Redirecting /old-path -> /new-path")
+			return Redirect("/new-path")
+		if "/old-batch" in paths:
 			print("[PrerenderRedirectMiddleware] Redirecting /old-batch -> /new-batch")
 			return Redirect("/new-batch")
 
@@ -98,7 +58,11 @@ class PrerenderNotFoundMiddleware(ps.PulseMiddleware):
 		next: Callable[[], Awaitable[PrerenderResponse]],
 	) -> PrerenderResponse:
 		# Check if any path in the batch should be blocked
-		if "/blocked-batch" in payload["paths"]:
+		paths = payload["paths"]
+		if "/blocked-path" in paths:
+			print("[PrerenderNotFoundMiddleware] Blocking /blocked-path with NotFound")
+			return NotFound()
+		if "/blocked-batch" in paths:
 			print("[PrerenderNotFoundMiddleware] Blocking /blocked-batch with NotFound")
 			return NotFound()
 
@@ -267,8 +231,6 @@ app = ps.App(
 		ps.Route("/blocked-batch", placeholder_blocked_batch),
 	],
 	middleware=[
-		RouteRedirectMiddleware(),
-		RouteNotFoundMiddleware(),
 		PrerenderRedirectMiddleware(),
 		PrerenderNotFoundMiddleware(),
 	],

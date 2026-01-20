@@ -47,7 +47,6 @@ from pulse.helpers import (
 	later,
 )
 from pulse.hooks.core import hooks
-from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
@@ -56,7 +55,9 @@ from pulse.messages import (
 	ClientPulseMessage,
 	Prerender,
 	PrerenderPayload,
+	ServerInitMessage,
 	ServerMessage,
+	ServerNavigateToMessage,
 )
 from pulse.middleware import (
 	ConnectResponse,
@@ -67,13 +68,12 @@ from pulse.middleware import (
 	PrerenderResponse,
 	PulseMiddleware,
 	Redirect,
-	RoutePrerenderResponse,
 )
 from pulse.plugin import Plugin
 from pulse.proxy import ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
-from pulse.routing import Layout, Route, RouteTree
+from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -162,6 +162,7 @@ class App:
 	_render_cleanups: dict[str, asyncio.TimerHandle]
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
+	render_loop_limit: int
 
 	def __init__(
 		self,
@@ -182,6 +183,7 @@ class App:
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
 		connection_status: ConnectionStatusConfig | None = None,
+		render_loop_limit: int = 50,
 	):
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
@@ -229,6 +231,7 @@ class App:
 		self._render_cleanups = {}
 		self.session_timeout = session_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
+		self.render_loop_limit = render_loop_limit
 
 		self.codegen = Codegen(
 			self.routes,
@@ -436,6 +439,8 @@ class App:
 				raise HTTPException(
 					status_code=400, detail="'paths' must be a non-empty list"
 				)
+			paths = [ensure_absolute_path(path) for path in paths]
+			payload["paths"] = paths
 			route_info = payload.get("routeInfo")
 
 			client_addr: str | None = get_client_address(request)
@@ -453,8 +458,9 @@ class App:
 			# Schedule cleanup timeout (will cancel/reschedule on activity)
 			self._schedule_render_cleanup(render_id)
 
-			async def _prerender_one(path: str):
-				captured = render.prerender(path, route_info)
+			def _normalize_prerender_result(
+				captured: ServerInitMessage | ServerNavigateToMessage,
+			) -> Ok[ServerInitMessage] | Redirect | NotFound:
 				if captured["type"] == "vdom_init":
 					return Ok(captured)
 				if captured["type"] == "navigate_to":
@@ -466,12 +472,6 @@ class App:
 					return Redirect(path=str(nav_path) if nav_path else "/")
 				# Fallback: shouldn't happen, return not found to be safe
 				return NotFound()
-
-			def _normalize_prerender_response(res: Any) -> RoutePrerenderResponse:
-				if isinstance(res, (Ok, Redirect, NotFound)):
-					return res
-				# Treat any other value as a VDOM payload
-				return Ok(res)
 
 			with PulseContext.update(render=render):
 				# Call top-level prerender middleware, which wraps the route processing
@@ -487,37 +487,21 @@ class App:
 						},
 					}
 
-					# Fan out on routes
-					for p in paths:
-						try:
-							# Capture p in closure to avoid loop variable binding issue
-							async def _next(path: str = p) -> RoutePrerenderResponse:
-								return await _prerender_one(path)
+					captured = render.prerender(paths, route_info)
 
-							# Call prerender_route middleware (in) -> prerender route -> (out)
-							res = await self.middleware.prerender_route(
-								path=p,
-								route_info=route_info,
-								request=PulseRequest.from_fastapi(request),
-								session=session.data,
-								next=_next,
-							)
-							res = _normalize_prerender_response(res)
-							if isinstance(res, Ok):
-								# Aggregate results
-								result_data["views"][p] = res.payload
-							elif isinstance(res, Redirect):
-								# Return redirect immediately
-								return Redirect(path=res.path or "/")
-							elif isinstance(res, NotFound):
-								# Return not found immediately
-								return NotFound()
-							else:
-								raise ValueError("Unexpected prerender response:", res)
-						except RedirectInterrupt as r:
-							return Redirect(path=r.path)
-						except NotFoundInterrupt:
+					for p in paths:
+						res = _normalize_prerender_result(captured[p])
+						if isinstance(res, Ok):
+							# Aggregate results
+							result_data["views"][p] = res.payload
+						elif isinstance(res, Redirect):
+							# Return redirect immediately
+							return Redirect(path=res.path or "/")
+						elif isinstance(res, NotFound):
+							# Return not found immediately
 							return NotFound()
+						else:
+							raise ValueError("Unexpected prerender response:", res)
 
 					return Ok(result_data)
 
@@ -919,6 +903,7 @@ class App:
 			self.routes,
 			server_address=self.server_address,
 			client_address=client_address,
+			render_loop_limit=self.render_loop_limit,
 		)
 		self.render_sessions[rid] = render
 		self._render_to_user[rid] = session.sid

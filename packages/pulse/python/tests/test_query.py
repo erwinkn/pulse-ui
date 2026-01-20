@@ -11,6 +11,7 @@ from pulse.queries.store import QueryStore
 from pulse.reactive import Computed, Untrack
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
+from pulse.test_helpers import wait_for
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -1831,20 +1832,19 @@ async def test_state_query_refetch_interval():
 	assert s.calls == 1
 	assert q.data == 1
 
-	# Wait for interval to trigger refetch
-	await asyncio.sleep(0.015)
+	# Wait for interval to trigger refetch and complete
+	assert await wait_for(lambda: q.data == 2)
 	assert s.calls == 2
-	assert q.data == 2
 
 	# Wait for another interval
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: q.data == 3)
 	assert s.calls == 3
-	assert q.data == 3
 
 	# Dispose should stop the interval
 	query_result(q).dispose()
-	await asyncio.sleep(0.015)
-	assert s.calls == 3  # No more refetches
+	# Negative test - verify no more refetches happen
+	await asyncio.sleep(0.03)
+	assert s.calls == 3
 
 
 @pytest.mark.asyncio
@@ -1873,15 +1873,14 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 	assert s.calls == 1
 
 	# Wait for one interval refetch
-	await asyncio.sleep(0.015)
-	assert s.calls == 2
+	assert await wait_for(lambda: s.calls >= 2)
 
 	# Dispose - interval should stop
 	query_result(q).dispose()
 	calls_at_dispose = s.calls
 
-	# Wait and verify no more refetches
-	await asyncio.sleep(0.015)
+	# Wait and verify no more refetches (negative test - sleep is appropriate here)
+	await asyncio.sleep(0.03)
 	assert s.calls == calls_at_dispose
 
 

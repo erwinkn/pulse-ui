@@ -7,6 +7,10 @@ description: Full-stack Python framework for interactive web apps. Server-driven
 
 Full-stack Python web framework. Server renders React components over WebSocket. All logic runs in Python—no JavaScript required.
 
+## Import Convention
+
+Canonical Pulse style: `import pulse as ps`, then access everything from `ps`. The only modules with exports not available through `pulse` are `pulse.js` (React/JS placeholders for transpilation) and `pulse.transpiler`.
+
 ## Quick Start
 
 ```python
@@ -28,7 +32,7 @@ def App():
 app = ps.App([ps.Route("/", App)])
 ```
 
-Run: `uv run pulse run app.py` → dev server on `:8000`
+`pulse run app.py` → dev server on `:8000`
 
 ## Core Concepts
 

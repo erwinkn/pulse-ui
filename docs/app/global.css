@@ -4,6 +4,7 @@
 @import 'fumadocs-python/preset.css';
 
 @theme {
+  /* Keep OG image colors in sync with docs/lib/og.ts */
   --color-pulse-marine: hsl(208, 85%, 55%);
 
   --color-fd-background: hsl(0, 0%, 99%);
@@ -27,7 +28,7 @@
 .dark {
   --color-pulse-marine: hsl(208, 90%, 62%);
 
-  --color-fd-background: hsl(0, 0%, 6%);
+  --color-fd-background: hsl(213, 29%, 6%);
   --color-fd-foreground: hsl(0, 0%, 92%);
   --color-fd-muted: hsl(0, 0%, 11%);
   --color-fd-muted-foreground: hsl(0, 0%, 65%);

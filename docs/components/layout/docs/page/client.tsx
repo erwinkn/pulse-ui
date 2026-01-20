@@ -21,6 +21,7 @@ import {
 	useState,
 } from "react";
 import { cn } from "../../../../lib/cn";
+import { clamp } from "../../../../lib/math";
 import { isActive } from "../../../../lib/urls";
 import { useTOCItems } from "../../../toc";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../../ui/collapsible";
@@ -141,12 +142,6 @@ interface ProgressCircleProps extends Omit<React.ComponentProps<"svg">, "strokeW
 	size?: number;
 	min?: number;
 	max?: number;
-}
-
-function clamp(input: number, min: number, max: number): number {
-	if (input < min) return min;
-	if (input > max) return max;
-	return input;
 }
 
 function ProgressCircle({

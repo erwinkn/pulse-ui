@@ -1,7 +1,8 @@
+import type { Metadata } from "next";
 import { IBM_Plex_Mono, Oxanium } from "next/font/google";
 import Link from "next/link";
 import { codeToHtml } from "shiki";
-import { ForgeLights } from "./forge-lights.client";
+import { HeroLights } from "./hero-lights.client";
 
 const display = Oxanium({
 	subsets: ["latin"],
@@ -38,6 +39,15 @@ def App():
 
 const LINE_NUMBERS = Array.from({ length: 20 }, (_, i) => i + 1);
 
+export const metadata: Metadata = {
+	title: "Pulse",
+	description:
+		"Build interactive web apps entirely in Python. Pulse renders your code to a React frontend and keeps it in sync over WebSocket.",
+	openGraph: {
+		images: "/og/home",
+	},
+};
+
 export default async function HomePage() {
 	const highlighted = await codeToHtml(CODE, {
 		lang: "python",
@@ -49,17 +59,14 @@ export default async function HomePage() {
 			style={{ fontFamily: "var(--font-body)" }}
 		>
 			<div className="pointer-events-none absolute inset-0">
-				<div className="absolute inset-0 opacity-70 forge-scan-lines" />
-				<ForgeLights />
+				<div className="absolute inset-0 opacity-70 hero-scan-lines" />
+				<HeroLights />
 			</div>
 			<div className="relative mx-auto w-full max-w-6xl px-6 pb-20 pt-12">
 				<header className="flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
 					<div className="max-w-xl">
-						<p className="home-pill inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em]">
-							Full-stack Python
-						</p>
 						<h1
-							className="mt-6 text-4xl font-semibold leading-tight md:text-6xl"
+							className=" text-4xl font-semibold leading-tight md:text-6xl"
 							style={{ fontFamily: "var(--font-display)" }}
 						>
 							Reactive web apps. Pure Python.
@@ -82,9 +89,6 @@ export default async function HomePage() {
 								Docs
 							</Link>
 						</div>
-						<p className="home-muted mt-10 text-sm">
-							State lives on the server. UI updates flow over WebSocket.
-						</p>
 					</div>
 					<div className="w-full max-w-lg">
 						<div className="home-editor rounded-xl border overflow-hidden">
@@ -155,12 +159,12 @@ export default async function HomePage() {
 								language.
 							</p>
 						</div>
-						<Link
+						{/*<Link
 							href="/docs/tutorial"
 							className="home-cta-outline rounded-full border px-5 py-2 text-sm font-semibold transition hover:translate-y-[-2px]"
 						>
 							Start the tutorial
-						</Link>
+						</Link>*/}
 					</div>
 				</section>
 			</div>
@@ -322,34 +326,34 @@ export default async function HomePage() {
 					border-color: var(--home-border-strong);
 					color: var(--home-muted);
 				}
-				.home-cta-outline:hover {
-					color: var(--home-fg);
-					border-color: var(--home-fg);
-				}
-				.forge-scan-lines {
-					background-image: linear-gradient(
-						90deg,
-						var(--scan-line-strong) 1px,
+					.home-cta-outline:hover {
+						color: var(--home-fg);
+						border-color: var(--home-fg);
+					}
+					.hero-scan-lines {
+						background-image: linear-gradient(
+							90deg,
+							var(--scan-line-strong) 1px,
 						transparent 1px
 					), linear-gradient(var(--scan-line-soft) 1px, transparent 1px);
 					background-size: 120px 120px;
 					mask-image: var(--scan-mask);
 				}
-				.forge-field {
+				.hero-field {
 					pointer-events: none;
 				}
-				.forge-pulse-layer {
+				.hero-pulse-layer {
 					position: absolute;
 					inset: 0;
 					pointer-events: none;
 				}
-				.forge-light {
+				.hero-light {
 					position: absolute;
 					border-radius: 999px;
 					pointer-events: none;
 					transform: translate(-50%, -50%);
 				}
-				.forge-light-core {
+				.hero-light-core {
 					position: absolute;
 					inset: 0;
 					border-radius: inherit;
@@ -358,10 +362,10 @@ export default async function HomePage() {
 					opacity: var(--light-opacity);
 					mix-blend-mode: var(--light-blend);
 				}
-				.forge-field[data-js="true"] .forge-light-core {
+				.hero-field[data-js="true"] .hero-light-core {
 					animation: none;
 				}
-				.forge-pulse {
+				.hero-pulse {
 					position: absolute;
 					border-radius: 999px;
 					pointer-events: none;
@@ -374,91 +378,91 @@ export default async function HomePage() {
 					opacity: 0;
 					transform: translate(-50%, -50%) scale(0.18);
 					transform-origin: center;
-					animation: forge-pulse 24s linear infinite;
+					animation: hero-pulse 24s linear infinite;
 					box-shadow: var(--pulse-shadow)
 						color-mix(in srgb, var(--pulse-color, var(--light-color)), transparent 55%);
 				}
-				.forge-pulse-a {
+				.hero-pulse-a {
 					--pulse-x: 18%;
 					--pulse-y: 20%;
 					--pulse-size: 720px;
 					--pulse-color: rgba(60, 140, 210, 0.48);
 					animation-delay: 0s;
 				}
-				.forge-pulse-b {
+				.hero-pulse-b {
 					--pulse-x: 74%;
 					--pulse-y: 26%;
 					--pulse-size: 840px;
 					--pulse-color: rgba(60, 180, 150, 0.48);
 					animation-delay: -8s;
 				}
-				.forge-pulse-c {
+				.hero-pulse-c {
 					--pulse-x: 24%;
 					--pulse-y: 76%;
 					--pulse-size: 640px;
 					--pulse-color: rgba(210, 125, 65, 0.54);
 					animation-delay: -16s;
 				}
-				.forge-light-a {
+				.hero-light-a {
 					left: 18%;
 					top: 20%;
 					width: 720px;
 					height: 720px;
 					--light-color: rgba(50, 135, 220, 0.52);
 				}
-				.forge-light-b {
+				.hero-light-b {
 					left: 74%;
 					top: 26%;
 					width: 840px;
 					height: 840px;
 					--light-color: rgba(55, 185, 155, 0.5);
 				}
-				.forge-light-c {
+				.hero-light-c {
 					left: 24%;
 					top: 76%;
 					width: 640px;
 					height: 640px;
 					--light-color: rgba(230, 130, 70, 0.58);
 				}
-				.forge-light-d {
+				.hero-light-d {
 					left: 50%;
 					top: -8%;
 					width: 520px;
 					height: 520px;
 					--light-color: rgba(100, 165, 230, 0.48);
 				}
-				.forge-light-e {
+				.hero-light-e {
 					left: 92%;
 					top: 70%;
 					width: 520px;
 					height: 520px;
 					--light-color: rgba(70, 185, 135, 0.48);
 				}
-				.dark .forge-light-a {
+				.dark .hero-light-a {
 					--light-color: rgba(70, 210, 255, 0.26);
 				}
-				.dark .forge-light-b {
+				.dark .hero-light-b {
 					--light-color: rgba(120, 255, 210, 0.3);
 				}
-				.dark .forge-light-c {
+				.dark .hero-light-c {
 					--light-color: rgba(255, 168, 88, 0.32);
 				}
-				.dark .forge-light-d {
+				.dark .hero-light-d {
 					--light-color: rgba(170, 230, 255, 0.22);
 				}
-				.dark .forge-light-e {
+				.dark .hero-light-e {
 					--light-color: rgba(130, 255, 190, 0.28);
 				}
-				.dark .forge-pulse-a {
+				.dark .hero-pulse-a {
 					--pulse-color: rgba(70, 210, 255, 0.26);
 				}
-				.dark .forge-pulse-b {
+				.dark .hero-pulse-b {
 					--pulse-color: rgba(120, 255, 210, 0.3);
 				}
-				.dark .forge-pulse-c {
+				.dark .hero-pulse-c {
 					--pulse-color: rgba(255, 168, 88, 0.32);
 				}
-				@keyframes forge-pulse {
+				@keyframes hero-pulse {
 					0% {
 						opacity: 0;
 						transform: translate(-50%, -50%) scale(0.18);

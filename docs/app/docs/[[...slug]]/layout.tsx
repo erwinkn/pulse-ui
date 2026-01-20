@@ -17,7 +17,7 @@ export default function Layout({ children }: LayoutProps<"/docs/[[...slug]]">) {
 							...option,
 							icon: (
 								<div
-									className="[&_svg]:size-full rounded-lg size-full text-(--tab-color) max-md:bg-(--tab-color)/10 max-md:border max-md:p-1.5"
+									className="flex items-center justify-center rounded-lg size-full text-(--tab-color) [&_svg]:size-4.5 max-md:bg-(--tab-color)/10 max-md:border max-md:p-1.5"
 									style={
 										{
 											"--tab-color": color,

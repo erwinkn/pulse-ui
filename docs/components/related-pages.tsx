@@ -1,5 +1,6 @@
 "use client";
 
+import type { Node } from "fumadocs-core/page-tree";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -11,61 +12,51 @@ interface RelatedPagesProps {
 	max?: number;
 }
 
+// Get parent section from a docs URL (e.g., "/docs/guides/intro" -> "guides")
+function getSection(url: string) {
+	const parts = url
+		.replace(/^\/docs/, "")
+		.split("/")
+		.filter(Boolean);
+	return parts.slice(0, -1).join("/");
+}
+
 export function RelatedPages({ max = 3 }: RelatedPagesProps) {
 	const pathname = usePathname();
 
 	const relatedPages = useMemo(() => {
 		const tree = source.getPageTree();
-		const currentPath = pathname.replace(/^\/docs/, "");
+		const currentSection = getSection(pathname);
 
-		// Find the current section (parent folder)
-		const pathParts = currentPath.split("/").filter(Boolean);
-		if (pathParts.length === 0) return [];
+		// Collect all internal pages except current
+		const pages: { url: string; name: ReactNode; description?: ReactNode }[] = [];
 
-		// Get all pages from the tree, using Map to deduplicate by URL
-		const pageMap = new Map<string, { url: string; name: ReactNode; description?: ReactNode }>();
-
-		function collectPages(node: typeof tree | (typeof tree.children)[number], depth = 0) {
-			if ("children" in node) {
-				for (const child of node.children) {
-					collectPages(child, depth + 1);
+		function collectPages(node: Node) {
+			if (node.type === "page") {
+				if (!node.external && node.url !== pathname) {
+					pages.push({ url: node.url, name: node.name, description: node.description });
 				}
-			}
-			if ("url" in node && node.type === "page" && !node.external && !pageMap.has(node.url)) {
-				pageMap.set(node.url, {
-					url: node.url,
-					name: node.name,
-					description: node.description,
-				});
+			} else if (node.type === "folder") {
+				for (const child of node.children) {
+					collectPages(child);
+				}
 			}
 		}
 
-		collectPages(tree);
-		const allPages = Array.from(pageMap.values());
+		for (const child of tree.children) {
+			collectPages(child);
+		}
 
-		// Find pages in the same section (share the same parent path)
-		const currentSection = pathParts.slice(0, -1).join("/");
-		const sameSection = allPages.filter((page) => {
-			const pagePathParts = page.url
-				.replace(/^\/docs/, "")
-				.split("/")
-				.filter(Boolean);
-			const pageSection = pagePathParts.slice(0, -1).join("/");
-			return pageSection === currentSection && page.url !== pathname;
-		});
+		// Sort alphabetically by URL
+		pages.sort((a, b) => a.url.localeCompare(b.url));
 
-		// If we have pages in the same section, prioritize those
+		// Prefer pages in the same section
+		const sameSection = pages.filter((p) => getSection(p.url) === currentSection);
 		if (sameSection.length > 0) {
 			return sameSection.slice(0, max);
 		}
 
-		// Otherwise, find pages in sibling or parent sections
-		const siblingPages = allPages.filter((page) => {
-			return page.url !== pathname && page.url.startsWith("/docs");
-		});
-
-		// Shuffle and return a subset
-		return siblingPages.sort(() => Math.random() - 0.5).slice(0, max);
+		return pages.slice(0, max);
 	}, [pathname, max]);
 
 	if (relatedPages.length === 0) return null;

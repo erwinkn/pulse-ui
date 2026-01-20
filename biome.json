@@ -7,6 +7,7 @@
 	},
 	"linter": {
 		"enabled": true,
+		"includes": ["**", "!docs/app/playground/**"],
 		"rules": {
 			"recommended": true,
 			"suspicious": {

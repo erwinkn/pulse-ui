@@ -11,6 +11,7 @@ import {
 	useRef,
 } from "react";
 import { cn } from "../../lib/cn";
+import { getElementBounds } from "../../lib/dom";
 import { mergeRefs } from "../../lib/merge-refs";
 
 const TOCContext = createContext<Primitive.TOCItemType[]>([]);
@@ -105,12 +106,9 @@ function calc(container: HTMLElement, active: string[]): TocThumbType {
 		const element = container.querySelector<HTMLElement>(`a[href="#${item}"]`);
 		if (!element) continue;
 
-		const styles = getComputedStyle(element);
-		upper = Math.min(upper, element.offsetTop + parseFloat(styles.paddingTop));
-		lower = Math.max(
-			lower,
-			element.offsetTop + element.clientHeight - parseFloat(styles.paddingBottom),
-		);
+		const bounds = getElementBounds(element);
+		upper = Math.min(upper, bounds.top);
+		lower = Math.max(lower, bounds.bottom);
 	}
 
 	return [upper, lower - upper];

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { clamp } from "../../lib/math";
 
 type LightState = {
 	el: HTMLDivElement;
@@ -17,10 +18,6 @@ const bounds = {
 	y: [8, 92],
 };
 
-function clamp(value: number, min: number, max: number) {
-	return Math.min(max, Math.max(min, value));
-}
-
 function randomRange(min: number, max: number) {
 	return Math.random() * (max - min) + min;
 }
@@ -30,7 +27,7 @@ function randomSigned(min: number, max: number) {
 	return randomRange(min, max) * sign;
 }
 
-export function ForgeLights() {
+export function HeroLights() {
 	const rootRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
@@ -43,9 +40,9 @@ export function ForgeLights() {
 			return;
 		}
 
-		const pulseLayer = root.querySelector<HTMLDivElement>(".forge-pulse-layer");
-		const lightEls = Array.from(root.querySelectorAll<HTMLDivElement>(".forge-light"));
-		const pulseEls = Array.from(root.querySelectorAll<HTMLDivElement>(".forge-pulse"));
+		const pulseLayer = root.querySelector<HTMLDivElement>(".hero-pulse-layer");
+		const lightEls = Array.from(root.querySelectorAll<HTMLDivElement>(".hero-light"));
+		const pulseEls = Array.from(root.querySelectorAll<HTMLDivElement>(".hero-pulse"));
 		if (!pulseLayer || lightEls.length === 0) {
 			return;
 		}
@@ -139,26 +136,26 @@ export function ForgeLights() {
 	}, []);
 
 	return (
-		<div ref={rootRef} className="forge-field absolute inset-0">
-			<div className="forge-pulse-layer">
-				<div className="forge-pulse forge-pulse-a" />
-				<div className="forge-pulse forge-pulse-b" />
-				<div className="forge-pulse forge-pulse-c" />
+		<div ref={rootRef} className="hero-field absolute inset-0">
+			<div className="hero-pulse-layer">
+				<div className="hero-pulse hero-pulse-a" />
+				<div className="hero-pulse hero-pulse-b" />
+				<div className="hero-pulse hero-pulse-c" />
 			</div>
-			<div className="forge-light forge-light-a">
-				<div className="forge-light-core" />
+			<div className="hero-light hero-light-a">
+				<div className="hero-light-core" />
 			</div>
-			<div className="forge-light forge-light-b">
-				<div className="forge-light-core" />
+			<div className="hero-light hero-light-b">
+				<div className="hero-light-core" />
 			</div>
-			<div className="forge-light forge-light-c">
-				<div className="forge-light-core" />
+			<div className="hero-light hero-light-c">
+				<div className="hero-light-core" />
 			</div>
-			<div className="forge-light forge-light-d">
-				<div className="forge-light-core" />
+			<div className="hero-light hero-light-d">
+				<div className="hero-light-core" />
 			</div>
-			<div className="forge-light forge-light-e">
-				<div className="forge-light-core" />
+			<div className="hero-light hero-light-e">
+				<div className="hero-light-core" />
 			</div>
 		</div>
 	);

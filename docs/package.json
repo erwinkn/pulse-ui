@@ -6,7 +6,7 @@
     "build": "next build",
     "dev": "next dev",
     "start": "next start",
-    "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
+    "types:check": "next typegen && fumadocs-mdx && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
     "lint": "biome check",
     "format": "biome format --write"
@@ -16,6 +16,7 @@
     "@radix-ui/react-popover": "^1.1.15",
     "@radix-ui/react-presence": "^1.1.5",
     "@radix-ui/react-scroll-area": "^1.2.10",
+    "@takumi-rs/image-response": "^0.62.8",
     "class-variance-authority": "^0.7.1",
     "fumadocs-core": "16.4.7",
     "fumadocs-mdx": "14.2.5",

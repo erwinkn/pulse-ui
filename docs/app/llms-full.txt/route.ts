@@ -2,6 +2,10 @@ import { getLLMText, source } from "@/lib/source";
 
 export const revalidate = false;
 
+/**
+ * Full docs dump - returns all documentation pages concatenated into a single response.
+ * Useful for LLMs that want to ingest the entire documentation at once.
+ */
 export async function GET() {
 	const scan = source.getPages().map(getLLMText);
 	const scanned = await Promise.all(scan);

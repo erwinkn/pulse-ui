@@ -1,6 +1,14 @@
 import { RootProvider } from "fumadocs-ui/provider/next";
+import type { Metadata } from "next";
 import "./global.css";
 import { Inter } from "next/font/google";
+
+export const metadata: Metadata = {
+	metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://pulse.sc"),
+	icons: {
+		icon: "/favicon.svg",
+	},
+};
 
 const inter = Inter({
 	subsets: ["latin"],

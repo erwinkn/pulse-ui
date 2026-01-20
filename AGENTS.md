@@ -11,6 +11,8 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Run `make all` before committing
 - Check `examples/` for usage patterns
 - Use `make bump` for changing package versions
+- When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)
+- Do not add tests without being asked for it.
 
 ## Code Style
 

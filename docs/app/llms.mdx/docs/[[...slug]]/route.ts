@@ -3,6 +3,10 @@ import { getLLMText, source } from "@/lib/source";
 
 export const revalidate = false;
 
+/**
+ * Individual page MDX endpoint - returns the markdown content for a single doc page.
+ * Accessed by appending .mdx to any doc URL (e.g., /docs/getting-started.mdx).
+ */
 export async function GET(_req: Request, { params }: RouteContext<"/llms.mdx/docs/[[...slug]]">) {
 	const { slug } = await params;
 	const page = source.getPage(slug);

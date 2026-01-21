@@ -5,6 +5,7 @@ import pulse as ps
 import pytest
 from pulse import HookContext, Signal
 from pulse.reactive import AsyncEffect, Batch, Effect
+from pulse.test_helpers import wait_for
 
 
 class TestBasicCaching:
@@ -476,15 +477,12 @@ class TestAsyncEffects:
 			Comp.fn()
 
 		# Wait for the async effect to complete
-		import asyncio
-
-		await asyncio.sleep(0.01)
-
-		assert runs["count"] == 1
+		assert await wait_for(lambda: runs["count"] == 1, timeout=0.2)
 
 	@pytest.mark.asyncio
 	async def test_async_cleanup_runs(self):
 		cleanups = {"count": 0}
+		runs = {"count": 0}
 		counter = Signal(0)
 
 		@ps.component
@@ -492,6 +490,7 @@ class TestAsyncEffects:
 			@ps.effect
 			async def my_effect():
 				counter()
+				runs["count"] += 1
 
 				def cleanup():
 					cleanups["count"] += 1
@@ -504,13 +503,11 @@ class TestAsyncEffects:
 		with ctx:
 			Comp.fn()
 
-		import asyncio
-
-		await asyncio.sleep(0.01)
+		assert await wait_for(lambda: runs["count"] == 1, timeout=0.2)
 		assert cleanups["count"] == 0
 
 		counter.write(1)
-		await asyncio.sleep(0.01)
+		assert await wait_for(lambda: cleanups["count"] == 1, timeout=0.2)
 
 		assert cleanups["count"] == 1
 

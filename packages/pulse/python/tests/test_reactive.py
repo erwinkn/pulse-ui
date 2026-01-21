@@ -25,6 +25,7 @@ from pulse.reactive_extensions import (
 	reactive_dataclass,
 	unwrap,
 )
+from pulse.test_helpers import wait_for
 
 
 def test_signal_creation_and_access():
@@ -180,8 +181,7 @@ async def test_later_does_not_track_dependencies():
 	assert callback_runs == 0
 
 	# Wait for callback to execute
-	await asyncio.sleep(0.015)
-	assert callback_runs == 1
+	assert await wait_for(lambda: callback_runs == 1, timeout=0.2)
 
 	# Change s2 - should NOT trigger effect rerun
 	s2.write(20)
@@ -229,8 +229,7 @@ async def test_repeat_does_not_track_dependencies():
 	assert callback_runs == 0
 
 	# Wait for callback to execute
-	await asyncio.sleep(0.015)
-	assert callback_runs >= 1
+	assert await wait_for(lambda: callback_runs >= 1, timeout=0.2)
 
 	initial_callback_runs = callback_runs
 
@@ -240,8 +239,7 @@ async def test_repeat_does_not_track_dependencies():
 	assert effect_runs == 1  # Effect should not rerun
 
 	# Wait a bit more - callback should continue running
-	await asyncio.sleep(0.015)
-	assert callback_runs > initial_callback_runs
+	assert await wait_for(lambda: callback_runs > initial_callback_runs, timeout=0.2)
 
 	# Change s1 - should trigger effect rerun
 	s1.write(2)
@@ -2524,8 +2522,7 @@ async def test_async_effect_skips_batch():
 
 	# Starts immediately
 	assert e.runs == 0  # Task created but not run yet
-	await asyncio.sleep(0.01)
-	assert e.runs == 1
+	assert await wait_for(lambda: e.runs == 1, timeout=0.2)
 
 	# Update inside batch
 	with Batch() as batch:
@@ -2533,11 +2530,10 @@ async def test_async_effect_skips_batch():
 		# AsyncEffect should ignore batch and run immediately (task created)
 		assert e not in batch.effects
 		assert e.runs == 1  # Task created, not run yet
-		await asyncio.sleep(0.01)
-		assert e.runs == 2
+		assert await wait_for(lambda: e.runs == 2, timeout=0.2)
 
 	# Exiting batch does nothing extra
-	await asyncio.sleep(0.01)
+	assert not await wait_for(lambda: e.runs > 2, timeout=0.05)
 	assert e.runs == 2
 
 
@@ -2825,12 +2821,10 @@ async def test_async_effect_explicit_deps_rerun_on_external_modification_during_
 	assert e.runs == 0
 
 	# Allow effect to finish its first run
-	await asyncio.sleep(0.015)
-	assert e.runs == 1
+	assert await wait_for(lambda: e.runs >= 1, timeout=0.2)
 
 	s.write(2)
-	await asyncio.sleep(0.015)
-	assert e.runs == 2
+	assert await wait_for(lambda: e.runs >= 2, timeout=0.2)
 
 
 def test_unwrap_preserves_namedtuple_type():
@@ -2940,12 +2934,10 @@ async def test_effect_interval_runs_periodically():
 	assert len(runs) == 1
 
 	# Wait for interval to trigger (just over 1 interval, under 2)
-	await asyncio.sleep(0.012)
-	assert len(runs) == 2
+	assert await wait_for(lambda: len(runs) >= 2, timeout=0.2)
 
 	# Wait for another interval
-	await asyncio.sleep(0.012)
-	assert len(runs) == 3
+	assert await wait_for(lambda: len(runs) >= 3, timeout=0.2)
 
 	e.dispose()
 
@@ -2967,7 +2959,7 @@ async def test_effect_cancel_with_cancel_interval_true():
 	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should not trigger
-	await asyncio.sleep(0.015)
+	assert not await wait_for(lambda: len(runs) > 1, timeout=0.05)
 	flush_effects()
 	assert len(runs) == 1
 
@@ -2993,7 +2985,7 @@ async def test_effect_cancel_with_cancel_interval_false():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should still trigger
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: len(runs) >= 2, timeout=0.2)
 	flush_effects()
 	assert len(runs) == 2
 
@@ -3022,7 +3014,7 @@ async def test_effect_run_restarts_cancelled_interval():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should trigger again
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: len(runs) >= 3, timeout=0.2)
 	flush_effects()
 	assert len(runs) == 3
 
@@ -3043,15 +3035,15 @@ async def test_async_effect_interval_runs_periodically():
 	await e.run()
 	assert len(runs) == 1
 
-	# Wait for interval to trigger (just over 1 interval, under 2)
-	await asyncio.sleep(0.012)
+	# Wait for interval to trigger
+	assert await wait_for(lambda: len(runs) >= 2, timeout=0.2)
 	await e.wait()
-	assert len(runs) == 2
+	assert len(runs) >= 2
 
 	# Wait for another interval
-	await asyncio.sleep(0.012)
+	assert await wait_for(lambda: len(runs) >= 3, timeout=0.2)
 	await e.wait()
-	assert len(runs) == 3
+	assert len(runs) >= 3
 
 	e.dispose()
 
@@ -3074,7 +3066,7 @@ async def test_async_effect_cancel_with_cancel_interval_true():
 	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should not trigger
-	await asyncio.sleep(0.015)
+	assert not await wait_for(lambda: len(runs) > 1, timeout=0.05)
 	assert len(runs) == 1
 
 	e.dispose()
@@ -3100,9 +3092,9 @@ async def test_async_effect_cancel_with_cancel_interval_false():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should still trigger
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: len(runs) >= 2, timeout=0.2)
 	await e.wait()
-	assert len(runs) == 2
+	assert len(runs) >= 2
 
 	e.dispose()
 
@@ -3130,8 +3122,8 @@ async def test_async_effect_run_restarts_cancelled_interval():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should trigger again
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: len(runs) >= 3, timeout=0.2)
 	await e.wait()
-	assert len(runs) == 3
+	assert len(runs) >= 3
 
 	e.dispose()

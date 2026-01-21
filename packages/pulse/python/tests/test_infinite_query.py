@@ -645,7 +645,7 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	calls_at_dispose = s.calls
 
 	# Wait and verify no more refetches (negative test - sleep is appropriate here)
-	await asyncio.sleep(0.03)
+	assert not await wait_for(lambda: s.calls > calls_at_dispose, timeout=0.05)
 	assert s.calls == calls_at_dispose
 
 
@@ -680,7 +680,7 @@ async def test_infinite_query_cancel_fetch_cancels_inflight_request():
 	# Start initial fetch (but don't await it fully)
 	wait_task = asyncio.create_task(q.wait())
 	# Give it time to start the fetch
-	await asyncio.sleep(0.01)
+	assert await wait_for(lambda: 0 in s.fetch_started, timeout=0.2)
 
 	# Verify fetch started
 	assert 0 in s.fetch_started
@@ -739,7 +739,7 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 
 	# Start fetching next page (don't await - we'll cancel it)
 	_fetch_task = asyncio.create_task(q.fetch_next_page())
-	await asyncio.sleep(0.01)
+	assert await wait_for(lambda: 1 in s.fetch_started, timeout=0.2)
 
 	assert 1 in s.fetch_started
 	assert 1 not in s.fetch_completed
@@ -845,7 +845,7 @@ async def test_infinite_query_multiple_observers_use_own_fetch_fn():
 	# Note: invalidate refetches all pages, so the last fetch will be for the last page
 	fetch_log_before = len(fetch_log)
 	q2.invalidate()
-	await asyncio.sleep(0.01)  # Let invalidate trigger refetch
+	assert await wait_for(lambda: len(fetch_log) > fetch_log_before, timeout=0.2)
 	# Check that all new fetches used q2's fetch function
 	new_fetches = fetch_log[fetch_log_before:]
 	for name, suffix, _page in new_fetches:
@@ -1054,7 +1054,7 @@ async def test_infinite_query_refetch_with_cancel_uses_correct_fetch_fn():
 
 	# Start q1's wait (which triggers initial fetch)
 	task1 = asyncio.create_task(q1.wait())
-	await asyncio.sleep(0.01)  # Let it start
+	assert await wait_for(lambda: ("A", 0) in fetch_started, timeout=0.2)
 
 	assert ("A", 0) in fetch_started
 
@@ -1117,7 +1117,7 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 	q.dispose()
 
 	# Give time for cancellation to propagate
-	await asyncio.sleep(0.01)
+	assert not await wait_for(lambda: "completed" in fetch_log, timeout=0.015)
 
 	# Fetch should have been cancelled, not completed
 	assert "started" in fetch_log
@@ -1180,7 +1180,7 @@ async def test_infinite_query_result_dispose_cancels_pending_actions():
 
 	# s1 enqueues an action - this will be pending in the queue
 	task_s1 = asyncio.create_task(q1.fetch_next_page())
-	await asyncio.sleep(0.01)  # Let it get enqueued
+	assert await wait_for(lambda: len(q1._query()._queue) > 0, timeout=0.2)  # pyright: ignore[reportPrivateUsage]
 
 	# Now dispose s1 - s1's pending action should be cancelled
 	q1.dispose()
@@ -1299,7 +1299,7 @@ async def test_infinite_query_key_change_cancels_pending_actions():
 	# Change key before fetch completes
 	s.user_id = 2
 	# Allow the reactive system to process the key change
-	await asyncio.sleep(0.01)
+	assert await wait_for(lambda: q._query().key == ("projects", 2), timeout=0.2)  # pyright: ignore[reportPrivateUsage]
 
 	# The old fetch (for user_id=1) may have been cancelled or continued
 	# depending on whether it was the currently executing action
@@ -1423,7 +1423,7 @@ async def test_infinite_query_key_change_does_not_affect_other_observer():
 
 	# s2 changes its key - but s1 started the fetch, so it should continue
 	s2.user_id = 2
-	await asyncio.sleep(0.01)  # Let reactive system process
+	assert await wait_for(lambda: q2._query().key == ("projects", 2), timeout=0.2)  # pyright: ignore[reportPrivateUsage]
 
 	# Wait for s1's fetch to complete
 	await wait_task

@@ -1,4 +1,4 @@
-.PHONY: help init lint lint-fix format format-check typecheck test all bump
+.PHONY: help init lint lint-fix format format-check typecheck typecheck-py typecheck-ts test all bump
 
 help:
 	@echo "Available commands:"
@@ -51,15 +51,19 @@ format-check:
 	@bunx biome format
 
 # Type checking
-typecheck:
+typecheck: typecheck-py typecheck-ts
+
+typecheck-py:
 	@echo "Running basedpyright..."
 	@uv run basedpyright
+
+typecheck-ts:
 	@echo "Running TypeScript for pulse-ui-client..."
 	@bunx tsc --noEmit -p packages/pulse/js/tsconfig.json
 	@echo "Running TypeScript for pulse-mantine..."
 	@bunx tsc --noEmit -p packages/pulse-mantine/js/tsconfig.json
 	@echo "Running TypeScript for docs..."
-	@bunx tsc --noEmit -p docs/tsconfig.json
+	@cd docs && bun run types:check
 
 # Testing
 test:

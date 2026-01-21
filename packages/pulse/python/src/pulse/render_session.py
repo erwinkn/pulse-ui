@@ -133,7 +133,7 @@ class RouteMount:
 		action = self.pending_action
 		self.pending_action = None
 		if action == "dispose":
-			self.render._dispose_mount(self.path, self)
+			self.render.dispose_mount(self.path, self)
 			return
 		self.to_idle()
 
@@ -444,7 +444,7 @@ class RenderSession:
 		except Exception as e:
 			self.report_error(path, "navigate", e)
 
-	def _dispose_mount(self, path: str, mount: RouteMount) -> None:
+	def dispose_mount(self, path: str, mount: RouteMount) -> None:
 		current = self.route_mounts.get(path)
 		if current is not mount:
 			return
@@ -465,7 +465,7 @@ class RenderSession:
 		if timeout is None:
 			timeout = self.detach_queue_timeout
 		if timeout <= 0:
-			self._dispose_mount(path, mount)
+			self.dispose_mount(path, mount)
 			return
 		mount.start_pending(timeout, action="dispose")
 

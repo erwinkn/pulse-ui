@@ -9,7 +9,6 @@ from typing import final, override
 from pulse.transpiler.nodes import Expr
 from pulse.transpiler.py_module import PyModule
 from pulse.transpiler.transpiler import Transpiler
-from pulse.transpiler.vdom import VDOMNode
 
 
 @dataclass(slots=True)
@@ -30,7 +29,7 @@ class TypeHint(Expr):
 		)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		raise TypeError(
 			f"Type hint '{self.name}' cannot be rendered. "
 			+ "It should only be used with typing.cast() or similar."

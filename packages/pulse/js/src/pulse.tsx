@@ -27,6 +27,7 @@ export interface ConnectionStatusConfig {
 export interface PulseConfig {
 	serverAddress: string;
 	connectionStatus: ConnectionStatusConfig;
+	apiPrefix: string;
 }
 
 export type PulsePrerenderView = {
@@ -34,6 +35,7 @@ export type PulsePrerenderView = {
 };
 
 export type PulsePrerender = {
+	renderId: string;
 	views: Record<string, PulsePrerenderView>;
 	directives: Directives;
 };

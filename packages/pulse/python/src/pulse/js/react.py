@@ -32,7 +32,6 @@ from pulse.transpiler.nodes import Call as _Call
 from pulse.transpiler.nodes import Expr as _Expr
 from pulse.transpiler.nodes import Jsx as _Jsx
 from pulse.transpiler.nodes import Node as _PulseNode
-from pulse.transpiler.vdom import VDOMNode as _VDOMNode
 
 if _TYPE_CHECKING:
 	from pulse.transpiler.transpiler import Transpiler as _Transpiler
@@ -432,7 +431,7 @@ class _LazyComponentFactory(_Expr):
 		self._import.emit(out)
 
 	@_override
-	def render(self) -> _VDOMNode:
+	def render(self):
 		raise TypeError("lazy cannot be rendered to VDOM")
 
 	@_override

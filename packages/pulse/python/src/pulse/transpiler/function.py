@@ -39,7 +39,7 @@ from pulse.transpiler.nodes import (
 	to_js_identifier,
 )
 from pulse.transpiler.transpiler import Transpiler
-from pulse.transpiler.vdom import VDOMNode
+from pulse.transpiler.vdom import VDOMExpr
 
 Args = TypeVarTuple("Args")
 P = ParamSpec("P")
@@ -114,7 +114,7 @@ class Constant(Expr):
 		out.append(self.js_name)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		"""Render as a registry reference."""
 		return {"t": "ref", "key": self.id}
 
@@ -226,7 +226,7 @@ class JsFunction(Expr, Generic[*Args, R]):
 		out.append(self.js_name)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		"""Render as a registry reference."""
 		return {"t": "ref", "key": self.id}
 
@@ -314,7 +314,7 @@ class JsxFunction(Expr, Generic[P, R]):
 		out.append(self.js_name)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		"""Render as a registry reference."""
 		return {"t": "ref", "key": self.id}
 

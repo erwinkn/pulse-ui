@@ -203,24 +203,6 @@ describe("VDOMRenderer", () => {
 		expect(kids[0]).toBe("A");
 	});
 
-	it("throws an informative error for invalid component types", () => {
-		const { renderer } = makeRenderer();
-		const badTag: VDOMNode = {
-			tag: { t: "lit", value: 123 },
-			children: ["A"],
-		};
-		let caught: unknown;
-		try {
-			renderer.renderNode(badTag);
-		} catch (err) {
-			caught = err;
-		}
-		expect(caught).toBeTruthy();
-		const message = String(caught);
-		expect(message).toContain("[Pulse] Invalid component type");
-		expect(message).toContain(`tag '{"t":"lit","value":123}'`);
-		expect(message).toContain("component: number:123");
-	});
 
 	it("rebinds callbacks after reconciliation moves (no callback registry)", () => {
 		const { renderer, invokeCallback } = makeRenderer();

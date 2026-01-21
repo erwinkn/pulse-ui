@@ -9,7 +9,7 @@ from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
 from pulse.renderer import RenderTree
 from pulse.transpiler.nodes import Element, PulseNode
-from pulse.transpiler.vdom import VDOMElement
+from pulse.transpiler.vdom import VDOMElement, VDOMExpr
 
 
 # Helpers for reconciliation-based updates
@@ -875,10 +875,10 @@ def test_expr_tag_renders_as_expr():
 	tree = RenderTree(Element(tag=header))
 	vdom = cast(VDOMElement, tree.render())
 
-	tag = cast(dict[str, Any], vdom.get("tag"))
+	tag = cast(VDOMExpr, vdom.get("tag"))
 	assert tag["t"] == "member"
 	assert tag["prop"] == "Header"
-	obj = cast(dict[str, Any], tag["obj"])
+	obj = cast(VDOMExpr, tag["obj"])
 	assert obj["t"] == "ref"
 	clear_import_registry()
 

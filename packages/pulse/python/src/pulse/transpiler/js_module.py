@@ -23,7 +23,6 @@ from pulse.transpiler.nodes import (
 	New,
 )
 from pulse.transpiler.transpiler import Transpiler
-from pulse.transpiler.vdom import VDOMNode
 
 _MODULE_DUNDERS = frozenset(
 	{
@@ -58,7 +57,7 @@ class Class(Expr):
 		self.ctor.emit(out)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		return self.ctor.render()
 
 	@override
@@ -110,7 +109,7 @@ class JsModule(Expr):
 		raise TypeError(f"{label} cannot be emitted directly - access an attribute")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		label = self.py_name or self.name or "JsModule"
 		raise TypeError(f"{label} cannot be rendered directly - access an attribute")
 

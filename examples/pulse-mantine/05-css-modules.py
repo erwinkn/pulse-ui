@@ -1,8 +1,8 @@
 import pulse as ps
 from pulse_mantine import Button, Group, MantineProvider, Stack, Text, Title
 
-ps.CssImport("@mantine/core/styles.css")
-styles = ps.CssImport("./mantine-demo.module.css", module=True, relative=True)
+ps.Import("@mantine/core/styles.css", side_effect=True)
+styles = ps.Import("./mantine-demo.module.css")
 
 
 @ps.component
@@ -12,8 +12,8 @@ def CssModulesShowcase():
 			Title(order=3, className=styles.title)["Pulse + Mantine"],
 			Text(className=styles.description)[
 				"This card combines Mantine components with a CSS module "
-				"loaded via ps.css_module(). The classes resolve on the client "
-				"side, so you can ship scoped styles alongside your views."
+				+ "loaded via ps.css_module(). The classes resolve on the client "
+				+ "side, so you can ship scoped styles alongside your views."
 			],
 			Group(className=styles.actions)[
 				Button("Primary action", className=styles.primaryButton),

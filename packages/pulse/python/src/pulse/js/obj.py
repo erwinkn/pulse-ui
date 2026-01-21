@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING, override
 
 from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.nodes import Expr, Object, Spread, spread_dict
-from pulse.transpiler.vdom import VDOMNode
 
 # TYPE_CHECKING avoids import cycle: Transpiler -> nodes -> Expr -> obj -> Transpiler
 if TYPE_CHECKING:
@@ -53,7 +52,7 @@ class ObjTransformer(Expr):
 		raise TypeError("obj cannot be emitted directly - must be called")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		raise TypeError("obj cannot be rendered - must be called")
 
 	@override

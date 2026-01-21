@@ -646,6 +646,28 @@ class TestImportLocalFiles:
 		filename = imp.asset.asset_filename
 		assert filename.endswith(".tsx")
 
+	@pytest.mark.parametrize(
+		"ext",
+		[
+			".css",
+			".scss",
+			".sass",
+			".less",
+			".styl",
+			".stylus",
+		],
+	)
+	def test_asset_filename_preserves_css_module_suffix(self, tmp_path: Path, ext: str):
+		"""CSS module assets keep .module.<ext> suffix intact."""
+		css_file = tmp_path / f"foo.bar.module{ext}"
+		css_file.write_text(".x { color: red; }")
+
+		imp = Import(str(css_file))
+		assert imp.asset is not None
+
+		filename = imp.asset.asset_filename
+		assert filename == f"foo.bar_{imp.asset.id}.module{ext}"
+
 	def test_no_asset_for_package_import(self):
 		"""Package imports have no asset."""
 		imp = Import("useState", "react")

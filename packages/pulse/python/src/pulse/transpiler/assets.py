@@ -13,6 +13,15 @@ from pathlib import Path
 from pulse.transpiler.emit_context import EmitContext
 from pulse.transpiler.id import next_id
 
+_CSS_MODULE_EXTS = (
+	".css",
+	".scss",
+	".sass",
+	".less",
+	".styl",
+	".stylus",
+)
+
 
 @dataclass(slots=True)
 class LocalAsset:
@@ -23,7 +32,13 @@ class LocalAsset:
 
 	@property
 	def asset_filename(self) -> str:
-		"""Filename in assets folder: stem_id.ext"""
+		"""Filename in assets folder: stem_id.ext (preserve .module.*)."""
+		name = self.source_path.name
+		for ext in _CSS_MODULE_EXTS:
+			module_suffix = f".module{ext}"
+			if name.endswith(module_suffix):
+				base = name[: -len(module_suffix)]
+				return f"{base}_{self.id}{module_suffix}"
 		return f"{self.source_path.stem}_{self.id}{self.source_path.suffix}"
 
 	def import_path(self) -> str:

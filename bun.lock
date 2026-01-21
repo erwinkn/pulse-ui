@@ -104,7 +104,7 @@
     },
     "packages/pulse/js": {
       "name": "pulse-ui-client",
-      "version": "0.1.55",
+      "version": "0.1.56",
       "dependencies": {
         "socket.io-client": "^4.8.1",
       },

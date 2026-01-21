@@ -2,13 +2,16 @@
 JavaScript Number builtin module.
 
 Usage:
-    from pulse.js import Number
-    Number.isFinite(42)       # -> Number.isFinite(42)
-    Number.MAX_SAFE_INTEGER   # -> Number.MAX_SAFE_INTEGER
-    Number(x)                 # -> new Number(x)
 
-    # Or import from module directly:
-    from pulse.js.number import Number
+```python
+from pulse.js import Number
+Number.isFinite(42)       # -> Number.isFinite(42)
+Number.MAX_SAFE_INTEGER   # -> Number.MAX_SAFE_INTEGER
+Number(x)                 # -> new Number(x)
+
+# Or import from module directly:
+from pulse.js.number import Number
+```
 """
 
 from typing import Any as _Any

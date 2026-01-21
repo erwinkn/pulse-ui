@@ -2,31 +2,34 @@
 Pulse UI client bindings for channel communication.
 
 Usage:
-    from pulse.js.pulse import usePulseChannel, ChannelBridge, PulseChannelResetError
 
-    @ps.javascript(jsx=True)
-    def MyChannelComponent(*, channel_id: str):
-        bridge = usePulseChannel(channel_id)
+```python
+from pulse.js.pulse import usePulseChannel, ChannelBridge, PulseChannelResetError
 
-        # Subscribe to events
-        useEffect(
-            lambda: bridge.on("server:notify", lambda payload: console.log(payload)),
-            [bridge],
-        )
+@ps.javascript(jsx=True)
+def MyChannelComponent(*, channel_id: str):
+    bridge = usePulseChannel(channel_id)
 
-        # Emit events to server
-        def send_ping():
-            bridge.emit("client:ping", {"message": "hello"})
+    # Subscribe to events
+    useEffect(
+        lambda: bridge.on("server:notify", lambda payload: console.log(payload)),
+        [bridge],
+    )
 
-        # Make requests to server
-        async def send_request():
-            response = await bridge.request("client:request", {"data": 123})
-            console.log(response)
+    # Emit events to server
+    def send_ping():
+        bridge.emit("client:ping", {"message": "hello"})
 
-        return ps.div()[
-            ps.button(onClick=send_ping)["Send Ping"],
-            ps.button(onClick=send_request)["Send Request"],
-        ]
+    # Make requests to server
+    async def send_request():
+        response = await bridge.request("client:request", {"data": 123})
+        console.log(response)
+
+    return ps.div()[
+        ps.button(onClick=send_ping)["Send Ping"],
+        ps.button(onClick=send_request)["Send Request"],
+    ]
+```
 """
 
 from collections.abc import Awaitable as _Awaitable

@@ -31,6 +31,18 @@ MISSING: Any = object()
 
 @dataclass(slots=True)
 class HookMetadata:
+	"""Metadata for a registered hook.
+
+	Contains optional descriptive information about a hook, useful for
+	debugging and documentation.
+
+	Attributes:
+		description: Human-readable description of the hook's purpose.
+		owner: Module or package that owns this hook (e.g., "pulse.core").
+		version: Version string for the hook implementation.
+		extra: Additional metadata as a mapping.
+	"""
+
 	description: str | None = None
 	owner: str | None = None
 	version: str | None = None
@@ -38,20 +50,58 @@ class HookMetadata:
 
 
 class HookState(Disposable):
-	"""Base class returned by hook factories."""
+	"""Base class for hook state returned by hook factories.
+
+	Subclass this to create custom hook state that persists across renders.
+	Override lifecycle methods to respond to render events.
+
+	Attributes:
+		render_cycle: The current render cycle number.
+
+	Example:
+
+	```python
+	class TimerHookState(ps.hooks.State):
+	    def __init__(self):
+	        self.start_time = time.time()
+
+	    def elapsed(self) -> float:
+	        return time.time() - self.start_time
+
+	    def dispose(self) -> None:
+	        pass
+
+	_timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())
+
+	def use_timer() -> TimerHookState:
+	    return _timer_hook()
+	```
+	"""
 
 	render_cycle: int = 0
 
 	def on_render_start(self, render_cycle: int) -> None:
+		"""Called before each component render.
+
+		Args:
+			render_cycle: The current render cycle number.
+		"""
 		self.render_cycle = render_cycle
 
 	def on_render_end(self, render_cycle: int) -> None:
-		"""Called after the component render has completed."""
+		"""Called after the component render has completed.
+
+		Args:
+			render_cycle: The current render cycle number.
+		"""
 		...
 
 	@override
 	def dispose(self) -> None:
-		"""Called when the hook instance is discarded."""
+		"""Called when the hook instance is discarded.
+
+		Override to clean up resources (close connections, cancel tasks, etc.).
+		"""
 		...
 
 
@@ -66,11 +116,33 @@ def _default_factory() -> HookState:
 
 @dataclass(slots=True)
 class Hook(Generic[T]):
+	"""A registered hook definition.
+
+	Hooks are created via ``ps.hooks.create()`` and can be called during
+	component render to access their associated state.
+
+	Attributes:
+		name: Unique name identifying this hook.
+		factory: Function that creates new HookState instances.
+		metadata: Optional metadata about the hook.
+	"""
+
 	name: str
 	factory: HookFactory[T]
 	metadata: HookMetadata
 
 	def __call__(self, key: str | None = None) -> T:
+		"""Get or create hook state for the current component.
+
+		Args:
+			key: Optional key for multiple instances of the same hook.
+
+		Returns:
+			The hook state instance.
+
+		Raises:
+			HookError: If called outside of a render context.
+		"""
 		ctx = HookContext.require(self.name)
 		namespace = ctx.namespace_for(self)
 		state = namespace.ensure(ctx, key)
@@ -79,6 +151,17 @@ class Hook(Generic[T]):
 
 @dataclass(slots=True)
 class HookInit(Generic[T]):
+	"""Initialization context passed to hook factories.
+
+	When a hook factory accepts a single argument, it receives this object
+	containing context about the initialization.
+
+	Attributes:
+		key: Optional key if the hook was called with a specific key.
+		render_cycle: The current render cycle number.
+		definition: Reference to the Hook definition being initialized.
+	"""
+
 	key: str | None
 	render_cycle: int
 	definition: Hook[T]
@@ -264,6 +347,19 @@ HOOK_REGISTRY: HookRegistry = HookRegistry()
 
 
 class HooksAPI:
+	"""Low-level API for creating custom hooks.
+
+	Access via ``ps.hooks``. Provides methods for registering, listing,
+	and managing hooks.
+
+	Attributes:
+		State: Alias for HookState base class.
+		Metadata: Alias for HookMetadata dataclass.
+		AlreadyRegisteredError: Exception for duplicate hook registration.
+		NotFoundError: Exception for missing hook lookup.
+		RenameCollisionError: Exception for hook rename conflicts.
+	"""
+
 	__slots__ = ()  # pyright: ignore[reportUnannotatedClassAttribute]
 
 	State: type[HookState] = HookState
@@ -280,7 +376,42 @@ class HooksAPI:
 		factory: HookFactory[T] = _default_factory,
 		*,
 		metadata: HookMetadata | None = None,
-	):
+	) -> "Hook[T]":
+		"""Register a new hook.
+
+		Args:
+			name: Unique name for the hook (e.g., "my_app:timer").
+			factory: Function that creates HookState instances. Can be a
+				zero-argument callable or accept a HookInit object.
+			metadata: Optional metadata describing the hook.
+
+		Returns:
+			Hook[T]: The registered hook, callable during component render.
+
+		Raises:
+			ValueError: If name is empty.
+			HookAlreadyRegisteredError: If a hook with this name already exists.
+			HookError: If the registry is locked.
+
+		Example:
+
+		```python
+		class TimerHookState(ps.hooks.State):
+		    def __init__(self):
+		        self.start_time = time.time()
+
+		    def elapsed(self) -> float:
+		        return time.time() - self.start_time
+
+		    def dispose(self) -> None:
+		        pass
+
+		_timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())
+
+		def use_timer() -> TimerHookState:
+		    return _timer_hook()
+		```
+		"""
 		return HOOK_REGISTRY.create(name, factory, metadata)
 
 	def rename(self, current: str, new: str) -> None:

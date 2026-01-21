@@ -1,3 +1,8 @@
+"""Conditional rendering component.
+
+Provides a declarative way to conditionally render elements based on a condition.
+"""
+
 from collections.abc import Iterable
 from typing import Any, TypeVar
 
@@ -37,15 +42,33 @@ def If(
 	then: T1,
 	else_: T2 = None,
 ) -> T1 | T2:
-	"""Conditional rendering helper that returns either then or else_ based on condition.
+	"""Conditional rendering helper.
+
+	Returns `then` if the condition is truthy, otherwise returns `else_`.
+	Automatically unwraps reactive values (Signal, Computed) before evaluation.
 
 	Args:
-	    condition: Value to test truthiness
-	    then: Element to render if condition is truthy
-	    else_: Optional element to render if condition is falsy
+		condition: A boolean or reactive value to evaluate. Supports `Signal[bool]`
+			and `Computed[bool]` which are automatically unwrapped.
+		then: Element to render when condition is truthy.
+		else_: Element to render when condition is falsy. Defaults to None.
 
 	Returns:
-	    The then value if condition is truthy, else_ if provided and condition is falsy, None otherwise
+		The `then` value if condition is truthy, otherwise `else_`.
+
+	Example:
+		Basic conditional::
+
+			ps.If(
+				user.is_admin,
+				then=AdminPanel(),
+				else_=ps.p("Access denied"),
+			)
+
+		With reactive condition::
+
+			is_visible = ps.Signal(True)
+			ps.If(is_visible, then=ps.div("Content"))
 	"""
 	# Unwrap reactive condition if needed and coerce to bool explicitly with guards
 	if isinstance(condition, (Signal, Computed)):

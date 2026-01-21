@@ -1,0 +1,134 @@
+---
+title: "Infinite Scroll"
+---
+
+Load paginated data incrementally as users scroll or click "load more". This is ideal for feeds, search results, or any list that can grow large.
+
+## Recipe
+
+```python
+import asyncio
+from typing import TypedDict
+import pulse as ps
+from pulse.queries.infinite_query import Page
+
+
+class Item(TypedDict):
+    id: str
+    title: str
+
+
+class FeedPage(TypedDict):
+    items: list[Item]
+    next_cursor: int | None
+    prev_cursor: int | None
+
+
+class FeedState(ps.State):
+    @ps.infinite_query(initial_page_param=0, max_pages=10)
+    async def feed(self, page_param: int) -> FeedPage:
+        # Simulated API - replace with your actual data fetching
+        await asyncio.sleep(0.3)
+        items = [
+            {"id": f"item-{page_param}-{i}", "title": f"Post {page_param * 10 + i}"}
+            for i in range(10)
+        ]
+        return {
+            "items": items,
+            "next_cursor": page_param + 1 if page_param < 5 else None,
+            "prev_cursor": page_param - 1 if page_param > 0 else None,
+        }
+
+    @feed.get_next_page_param
+    def _next_page(self, pages: list[Page[FeedPage, int]]) -> int | None:
+        return pages[-1].data["next_cursor"] if pages else None
+
+    @feed.get_previous_page_param
+    def _prev_page(self, pages: list[Page[FeedPage, int]]) -> int | None:
+        return pages[0].data["prev_cursor"] if pages else None
+
+
+@ps.component
+def InfiniteFeed():
+    with ps.init():
+        state = FeedState()
+
+    query = state.feed
+
+    async def load_more():
+        await query.fetch_next_page()
+
+    # Flatten all pages into a single list
+    all_items = [
+        item
+        for page in (query.pages or [])
+        for item in page["items"]
+    ]
+
+    return ps.div(
+        ps.h2("Feed"),
+        ps.ul(
+            *[ps.li(item["title"], key=item["id"]) for item in all_items]
+        ),
+        ps.button(
+            "Load More",
+            onClick=load_more,
+            disabled=not query.has_next_page or query.is_fetching_next_page,
+        ),
+        ps.p("Loading..." if query.is_fetching_next_page else ""),
+    )
+```
+
+## Key concepts
+
+### Page parameters
+
+The `page_param` tells your API which page to fetch. It can be:
+- An offset number (0, 1, 2...)
+- A cursor string from the previous response
+- Any value your API uses for pagination
+
+### Defining page navigation
+
+Use decorators to tell Pulse how to get the next/previous page parameters:
+
+```python
+@feed.get_next_page_param
+def _next_page(self, pages: list[Page[FeedPage, int]]) -> int | None:
+    # Return None when there are no more pages
+    return pages[-1].data["next_cursor"] if pages else None
+```
+
+### Query properties
+
+| Property | Description |
+|----------|-------------|
+| `pages` | List of all loaded page data |
+| `has_next_page` | True if more pages can be loaded |
+| `has_previous_page` | True if earlier pages can be loaded |
+| `is_fetching_next_page` | True while loading the next page |
+| `is_fetching_previous_page` | True while loading the previous page |
+
+### Query methods
+
+| Method | Description |
+|--------|-------------|
+| `fetch_next_page()` | Load the next page |
+| `fetch_previous_page()` | Load the previous page |
+| `fetch_page(param)` | Jump to a specific page |
+| `refetch()` | Reload all currently loaded pages |
+
+## Limiting memory usage
+
+Use `max_pages` to limit how many pages are kept in memory. When exceeded, old pages are dropped:
+
+```python
+@ps.infinite_query(initial_page_param=0, max_pages=5)
+async def feed(self, page_param: int) -> FeedPage:
+    ...
+```
+
+## See also
+
+- [Core Concepts: Queries and Mutations](/docs/concepts/queries)
+- [Reference: Queries](/docs/reference/pulse/queries)

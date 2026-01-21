@@ -1,0 +1,217 @@
+---
+title: "JS Interop"
+---
+
+Pulse runs on React, so you can integrate any React component or JavaScript library. This guide covers wrapping React components, executing client-side code, and the transpiler that lets you write JavaScript in Python.
+
+## Wrapping React Components
+
+Use `react_component` to wrap any React component from npm. This is the most common form of JS interop—bringing in UI libraries that don't have Pulse wrappers.
+
+```python
+from pulse import react_component, Import
+
+# Wrap a named export
+DatePicker = react_component(
+    Import("DatePicker", "react-datepicker")
+)
+
+# Wrap a default export
+Calendar = react_component(
+    Import("Calendar", "react-calendar", kind="default")
+)
+```
+
+Use wrapped components like any Pulse element:
+
+```python
+@ps.component
+def BookingForm():
+    with ps.init():
+        state = BookingState()
+
+    return ps.div()[
+        ps.label()["Select a date:"],
+        DatePicker(
+            selected=state.date,
+            onChange=state.set_date,
+        ),
+    ]
+```
+
+For typed props, add a signature function:
+
+```python
+@react_component(Import("Button", "@chakra-ui/react"))
+def Button(
+    *children,
+    colorScheme: str = "blue",
+    size: str = "md",
+    isDisabled: bool = False,
+) -> ps.Element:
+    ...
+```
+
+## Executing JavaScript
+
+Use `ps.run_js()` to execute JavaScript in the browser during a callback. It takes a JavaScript expression—either from calling a `@ps.javascript` function or from `pulse.js` exports.
+
+```python
+from pulse.js import window
+
+@ps.component
+def ScrollButton():
+    def scroll_top():
+        ps.run_js(window.scrollTo(0, 0))
+
+    return ps.button(onClick=scroll_top)["Scroll to top"]
+```
+
+`run_js` does **not** accept strings. You must pass an expression object:
+
+```python
+# Correct - using pulse.js exports
+ps.run_js(window.scrollTo(0, 0))
+ps.run_js(document.querySelector("#input").focus())
+
+# Correct - using a @ps.javascript function (see below)
+ps.run_js(my_js_function(arg1, arg2))
+
+# Wrong - strings don't work
+ps.run_js("window.scrollTo(0, 0)")  # TypeError
+```
+
+To get a return value, use `result=True` and await:
+
+```python
+async def check_scroll():
+    pos = await ps.run_js(window.scrollY, result=True)
+    print(f"Scroll position: {pos}")
+```
+
+## The `@ps.javascript` Decorator
+
+For logic beyond simple expressions, define functions that get transpiled to JavaScript:
+
+```python
+from pulse.js import document, window
+
+@ps.javascript
+def focus_input(selector: str):
+    el = document.querySelector(selector)
+    if el:
+        el.focus()
+
+@ps.javascript
+def scroll_to_element(element_id: str):
+    el = document.getElementById(element_id)
+    if el:
+        el.scrollIntoView({"behavior": "smooth"})
+```
+
+Call these functions inside `run_js`:
+
+```python
+class FormState(ps.State):
+    def on_error(self):
+        ps.run_js(focus_input("#email"))
+
+    def go_to_section(self, section_id: str):
+        ps.run_js(scroll_to_element(section_id))
+```
+
+The transpiler supports variables, conditionals, loops, function calls, and object/array operations. Browser globals like `document`, `window`, `console`, and `localStorage` are available.
+
+```python
+@ps.javascript
+def save_preference(key: str, value: str):
+    localStorage.setItem(key, value)
+
+@ps.javascript
+def get_selection():
+    selection = window.getSelection()
+    if selection:
+        return selection.toString()
+    return ""
+```
+
+### Getting Results
+
+When you need data back from the browser:
+
+```python
+@ps.javascript
+def get_scroll_position():
+    return {"x": window.scrollX, "y": window.scrollY}
+
+async def on_check():
+    pos = await ps.run_js(get_scroll_position(), result=True)
+    print(f"Position: {pos['x']}, {pos['y']}")
+```
+
+### JSX Components
+
+Use `@ps.javascript(jsx=True)` to create React components that run entirely in the browser—useful for high-frequency interactions or client-only state:
+
+```python
+useState = ps.Import("useState", "react")
+
+@ps.javascript(jsx=True)
+def ClientCounter(*, initialValue: int = 0):
+    count, setCount = useState(initialValue)
+
+    def increment():
+        setCount(lambda c: c + 1)
+
+    return ps.div()[
+        ps.span()[f"Count: {count}"],
+        ps.button(onClick=increment)["Increment"],
+    ]
+```
+
+## Complex Interop
+
+### External Libraries
+
+Reference JavaScript modules with `ps.Import`:
+
+```python
+lodash = ps.Import("default", "lodash")
+motion = ps.Import("motion", "framer-motion")
+
+@ps.javascript
+def debounced_log(message: str):
+    lodash.debounce(lambda: console.log(message), 300)()
+```
+
+### Error Handling
+
+JavaScript errors propagate to Python when awaiting results:
+
+```python
+from pulse.render_session import JsExecError
+
+async def on_click():
+    try:
+        result = await ps.run_js(might_fail(), result=True)
+    except JsExecError as e:
+        print(f"JS error: {e}")
+```
+
+### Browser APIs
+
+```python
+@ps.javascript
+def copy_to_clipboard(text: str):
+    navigator.clipboard.writeText(text)
+
+@ps.javascript
+def request_notification():
+    if "Notification" in window:
+        Notification.requestPermission()
+```
+
+## See also
+
+- [Reference: JS Interop](/docs/reference/pulse/js-interop) — Full API for `run_js`, `@javascript`, `Import`, `react_component`, and `pulse.js` exports
+- [Reference: pulse.transpiler](/docs/reference/pulse-transpiler)

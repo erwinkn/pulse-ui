@@ -1,0 +1,334 @@
+---
+title: "Serialization"
+description: "Wire format for Pulse client-server communication"
+---
+
+# Serialization
+
+Pulse uses a custom serialization format for WebSocket messages. This format handles JavaScript types that JSON doesn't support natively, like `Date`, `Set`, `Map`, and object references.
+
+---
+
+## serialize
+
+Converts a JavaScript value to the Pulse wire format.
+
+```ts
+import { serialize } from "pulse-ui-client";
+
+function serialize(data: Serializable): Serialized
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `data` | `Serializable` | Any serializable value |
+
+### Returns
+
+```ts
+type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+//                  ^refs     ^dates    ^sets     ^maps     ^payload
+```
+
+A tuple containing:
+1. Metadata arrays tracking special types by index
+2. The JSON payload
+
+### Supported Types
+
+| Type | Handling |
+|------|----------|
+| `null`, `undefined` | Passed through |
+| `boolean`, `string` | Passed through |
+| `number` | Passed through (NaN becomes null, Infinity throws) |
+| `Date` | Converted to timestamp |
+| `Array` | Recursively processed |
+| `Set` | Converted to array |
+| `Map` | Converted to object (string keys only) |
+| `Object` | Recursively processed |
+| Circular refs | Tracked and restored |
+
+### Example
+
+```ts
+import { serialize } from "pulse-ui-client";
+
+const data = {
+  name: "Alice",
+  createdAt: new Date("2024-01-15"),
+  tags: new Set(["admin", "active"]),
+  metadata: new Map([["version", 1]]),
+};
+
+const serialized = serialize(data);
+// [[[], [0], [1], [2]], { name: "Alice", createdAt: 1705276800000, tags: ["admin", "active"], metadata: { version: 1 } }]
+```
+
+### Circular References
+
+The serializer handles circular references by tracking object indices:
+
+```ts
+const obj = { name: "root" };
+obj.self = obj;  // circular reference
+
+const serialized = serialize(obj);
+// The reference is preserved and restored on deserialize
+```
+
+### Error Cases
+
+```ts
+// Infinity throws an error
+serialize({ value: Infinity });
+// Error: Cannot serialize Infinity in 'value'
+
+// NaN is converted to null (with no error)
+serialize({ value: NaN });
+// [[[], [], [], []], { value: null }]
+```
+
+---
+
+## deserialize
+
+Converts the Pulse wire format back to JavaScript values.
+
+```ts
+import { deserialize } from "pulse-ui-client";
+
+function deserialize<T>(payload: Serialized, options?: DeserializationOptions): T
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `payload` | `Serialized` | Wire format data |
+| `options` | `DeserializationOptions` | Optional settings |
+
+### Options
+
+```ts
+interface DeserializationOptions {
+  coerceNullsToUndefined?: boolean;
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `coerceNullsToUndefined` | `false` | Convert `null` values to `undefined` |
+
+### Returns
+
+The reconstructed JavaScript value with proper types restored.
+
+### Example
+
+```ts
+import { deserialize } from "pulse-ui-client";
+
+const serialized: Serialized = [
+  [[], [0], [1], [2]],
+  {
+    name: "Alice",
+    createdAt: 1705276800000,
+    tags: ["admin", "active"],
+    metadata: { version: 1 },
+  },
+];
+
+const data = deserialize(serialized);
+// {
+//   name: "Alice",
+//   createdAt: Date("2024-01-15"),  // Date object restored
+//   tags: Set(["admin", "active"]), // Set restored
+//   metadata: Map([["version", 1]]) // Map restored
+// }
+```
+
+### Null Coercion
+
+When working with APIs that use `undefined` for missing values:
+
+```ts
+const data = deserialize(payload, { coerceNullsToUndefined: true });
+// All null values become undefined
+```
+
+---
+
+## Wire Format Details
+
+The serialized format is designed to be compact and handle edge cases that plain JSON cannot.
+
+### Format Structure
+
+```ts
+type Serialized = [
+  [
+    number[],  // refs: indices of circular references
+    number[],  // dates: indices of Date objects
+    number[],  // sets: indices of Set objects
+    number[],  // maps: indices of Map objects
+  ],
+  PlainJSON    // The actual data as JSON
+];
+```
+
+### Index Tracking
+
+During serialization, a global counter increments for each visited node. The metadata arrays record which indices are special types:
+
+```ts
+// Example: { date: new Date(), items: new Set([1, 2]) }
+// Index 0: root object
+// Index 1: Date at "date" key
+// Index 2: Set at "items" key
+
+// Serialized:
+[
+  [[], [1], [2], []],  // dates=[1], sets=[2]
+  { date: 1705276800000, items: [1, 2] }
+]
+```
+
+### Circular Reference Resolution
+
+```ts
+const a = { name: "a" };
+const b = { name: "b", ref: a };
+a.ref = b;  // circular
+
+// Serialized:
+[
+  [[3], [], [], []],  // refs=[3] (index 3 is a back-reference)
+  { name: "a", ref: { name: "b", ref: 0 } }
+  //                              ^ references index 0
+]
+```
+
+---
+
+## extractServerRouteInfo
+
+Extracts route information from a React Router loader function. Use this in SSR loaders to pass route context to the Pulse server.
+
+```ts
+import { extractServerRouteInfo } from "pulse-ui-client";
+
+function extractServerRouteInfo(args: LoaderFunctionArgs): RouteInfo
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `args` | `LoaderFunctionArgs` | React Router loader arguments |
+
+### Returns
+
+```ts
+interface RouteInfo {
+  pathname: string;
+  hash: string;
+  query: string;
+  queryParams: Record<string, string>;
+  pathParams: Record<string, string | undefined>;
+  catchall: string[];
+}
+```
+
+### Example
+
+```ts
+import { extractServerRouteInfo } from "pulse-ui-client";
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(args: LoaderFunctionArgs) {
+  const routeInfo = extractServerRouteInfo(args);
+
+  // routeInfo.pathname = "/users/123"
+  // routeInfo.pathParams = { id: "123" }
+  // routeInfo.queryParams = { tab: "settings" }
+
+  // Pass to Pulse server for SSR
+  const prerender = await fetchPulsePrerender(routeInfo);
+  return { prerender };
+}
+```
+
+---
+
+## submitForm
+
+Programmatically submits a form via fetch. This is what `PulseForm` uses internally.
+
+```ts
+import { submitForm } from "pulse-ui-client";
+
+async function submitForm(options: SubmitFormOptions): Promise<void>
+```
+
+### Parameters
+
+```ts
+interface SubmitFormOptions {
+  event: FormEvent<HTMLFormElement>;
+  action: string;
+  onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  formData?: FormData;
+  force?: boolean;
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `event` | `FormEvent<HTMLFormElement>` | The form submit event |
+| `action` | `string` | Form action URL |
+| `onSubmit` | `function` | Optional submit handler |
+| `formData` | `FormData` | Optional pre-built form data |
+| `force` | `boolean` | Submit even if `defaultPrevented` |
+
+### Example
+
+```tsx
+import { submitForm } from "pulse-ui-client";
+
+function CustomForm() {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    // Custom validation
+    const form = e.currentTarget;
+    if (!form.checkValidity()) {
+      e.preventDefault();
+      return;
+    }
+
+    // Custom form data
+    const formData = new FormData(form);
+    formData.append("timestamp", Date.now().toString());
+
+    await submitForm({
+      event: e,
+      action: "/api/submit",
+      formData,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="data" required />
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+---
+
+## See Also
+
+- [Types](/docs/reference/pulse-client/types) - Type definitions
+- [Components](/docs/reference/pulse-client/components) - PulseForm component

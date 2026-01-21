@@ -1,0 +1,151 @@
+---
+title: "File Upload Forms"
+---
+
+Handle form submissions with file uploads using `ps.Form` and `ps.FormData`.
+
+## The problem
+
+You need to accept file uploads from users, validate them, and process the contents server-side.
+
+## Solution
+
+Use `ps.Form` with file inputs. Your handler receives `UploadFile` objects for any file fields.
+
+```python
+import pulse as ps
+from fastapi import UploadFile
+
+class UploadState(ps.State):
+    filename: str | None = None
+    file_size: int | None = None
+    error: str | None = None
+
+    async def handle_upload(self, data: ps.FormData):
+        """Process the uploaded file."""
+        file = data.get("document")
+
+        if not isinstance(file, UploadFile):
+            self.error = "No file uploaded"
+            return
+
+        # Read file content
+        content = await file.read()
+
+        # Access file metadata
+        self.filename = file.filename
+        self.file_size = len(content)
+        self.error = None
+
+        # Save to disk or process as needed
+        # await save_to_storage(file.filename, content)
+
+
+@ps.component
+def FileUploadForm():
+    with ps.init():
+        state = UploadState()
+
+    return ps.div(
+        ps.h2("Upload a Document"),
+
+        ps.Form(key="upload", onSubmit=state.handle_upload)[
+            ps.label("Select file", htmlFor="doc"),
+            ps.input(
+                id="doc",
+                name="document",
+                type="file",
+                accept=".pdf,.doc,.docx",
+                required=True,
+            ),
+            ps.button("Upload", type="submit"),
+        ],
+
+        # Show result
+        ps.div(
+            ps.p(f"Uploaded: {state.filename} ({state.file_size} bytes)")
+            if state.filename else None,
+            ps.p(state.error, style={"color": "red"})
+            if state.error else None,
+        ),
+    )
+```
+
+## Multiple file uploads
+
+For multiple files, add `multiple=True` to the input. The handler receives a list:
+
+```python
+class MultiUploadState(ps.State):
+    files: list[dict] = []
+
+    async def handle_upload(self, data: ps.FormData):
+        attachments = data.get("files")
+
+        # Handle both single and multiple files
+        if isinstance(attachments, list):
+            file_list = attachments
+        elif isinstance(attachments, UploadFile):
+            file_list = [attachments]
+        else:
+            file_list = []
+
+        self.files = []
+        for file in file_list:
+            content = await file.read()
+            self.files.append({
+                "name": file.filename,
+                "size": len(content),
+                "type": file.content_type,
+            })
+
+
+@ps.component
+def MultiFileForm():
+    with ps.init():
+        state = MultiUploadState()
+
+    return ps.Form(key="multi-upload", onSubmit=state.handle_upload)[
+        ps.input(name="files", type="file", multiple=True),
+        ps.button("Upload All", type="submit"),
+    ]
+```
+
+## Tracking submission state
+
+Use `ps.ManualForm` for more control, including access to `is_submitting`:
+
+```python
+@ps.component
+def FormWithProgress():
+    with ps.init():
+        state = UploadState()
+
+    manual_form = ps.setup(lambda: ps.ManualForm(state.handle_upload))
+
+    return ps.div(
+        ps.p("Uploading...") if manual_form.is_submitting else None,
+
+        ps.form(**manual_form.props())[
+            ps.input(name="document", type="file", required=True),
+            ps.button(
+                "Upload",
+                type="submit",
+                disabled=manual_form.is_submitting,
+            ),
+        ],
+    )
+```
+
+## How it works
+
+- `ps.Form` requires a unique `key` to identify the form
+- The `onSubmit` handler receives `ps.FormData`, a dict of field names to values
+- Text fields are strings; file inputs are `UploadFile` objects
+- `UploadFile` provides `filename`, `content_type`, `size`, and `read()` method
+- Forms are automatically bound to the user session for security
+
+## See also
+
+- [Core Concepts: Forms](/docs/concepts/forms)
+- [Reference: Forms](/docs/reference/pulse/forms)

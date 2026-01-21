@@ -23,10 +23,6 @@ TState = TypeVar("TState", bound=State)
 P = ParamSpec("P")
 
 
-# -> @ps.computed The chalenge is:
-# - We want to turn regular functions with no arguments into a Computed object
-# - We want to turn state methods into a ComputedProperty (which wraps a
-#   Computed, but gives it access to the State object).
 @overload
 def computed(fn: Callable[[], T], *, name: str | None = None) -> Computed[T]: ...
 @overload
@@ -39,7 +35,61 @@ def computed(
 ) -> Callable[[Callable[[], T]], Computed[T]]: ...
 
 
-def computed(fn: Callable[..., Any] | None = None, *, name: str | None = None):
+def computed(
+	fn: Callable[..., Any] | None = None,
+	*,
+	name: str | None = None,
+) -> (
+	Computed[T]
+	| ComputedProperty[T]
+	| Callable[[Callable[..., Any]], Computed[T] | ComputedProperty[T]]
+):
+	"""
+	Decorator for computed (derived) properties.
+
+	Creates a cached, reactive value that automatically recalculates when its
+	dependencies change. The computed tracks which Signals/Computeds are read
+	during execution and subscribes to them.
+
+	Can be used in two ways:
+	1. On a State method (with single `self` argument) - creates a ComputedProperty
+	2. As a standalone function (with no arguments) - creates a Computed
+
+	Args:
+		fn: The function to compute the value. Must take no arguments (standalone) or only `self` (State method).
+		name: Optional debug name for the computed. Defaults to the function name.
+
+	Returns:
+		Computed wrapper or decorator depending on usage.
+
+	Raises:
+		TypeError: If the function takes arguments other than `self`.
+
+	Example:
+		On a State method:
+
+		    class MyState(ps.State):
+		        count: int = 0
+
+		        @ps.computed
+		        def doubled(self):
+		            return self.count * 2
+
+		As a standalone computed:
+
+		    signal = Signal(5)
+
+		    @ps.computed
+		    def doubled():
+		        return signal() * 2
+
+		With explicit name:
+
+		    @ps.computed(name="my_computed")
+		    def doubled(self):
+		        return self.count * 2
+	"""
+
 	# The type checker is not happy if I don't specify the `/` here.
 	def decorator(fn: Callable[..., Any], /):
 		sig = inspect.signature(fn)
@@ -136,7 +186,73 @@ def effect(
 	interval: float | None = None,
 	key: str | None = None,
 ):
-	# The type checker is not happy if I don't specify the `/` here.
+	"""
+	Decorator for side effects that run when dependencies change.
+
+	Creates an effect that automatically re-runs when any of its tracked
+	dependencies change. Dependencies are automatically tracked by observing
+	which Signals/Computeds are read during execution.
+
+	Can be used in two ways:
+	1. On a State method (with single `self` argument) - creates a StateEffect
+	2. As a standalone function (with no arguments) - creates an Effect
+
+	Supports both sync and async functions. Async effects cannot use `immediate=True`.
+
+	Args:
+		fn: The effect function. Must take no arguments (standalone) or only
+		        `self` (State method). Can return a cleanup function.
+		name: Optional debug name. Defaults to "ClassName.method_name" or function name.
+		immediate: If True, run synchronously when scheduled instead of batching.
+		        Only valid for sync effects.
+		lazy: If True, don't run on creation; wait for first dependency change.
+		on_error: Callback invoked if the effect throws an exception.
+		deps: Explicit list of dependencies. If provided, auto-tracking is disabled
+		        and the effect only re-runs when these specific dependencies change.
+		interval: Re-run interval in seconds. Creates a polling effect that runs
+		        periodically regardless of dependency changes.
+
+	Returns:
+		Effect, AsyncEffect, or StateEffect depending on usage.
+
+	Raises:
+		TypeError: If the function takes arguments other than `self`.
+		ValueError: If `immediate=True` is used with an async function.
+
+	Example:
+		State method effect:
+
+		    class MyState(ps.State):
+		        count: int = 0
+
+		        @ps.effect
+		        def log_changes(self):
+		            print(f"Count is {self.count}")
+
+		Async effect:
+
+		    class MyState(ps.State):
+		        query: str = ""
+
+		        @ps.effect
+		        async def fetch_data(self):
+		            data = await api.fetch(self.query)
+		            self.data = data
+
+		Effect with cleanup:
+
+		    @ps.effect
+		    def subscribe(self):
+		        unsub = event_bus.subscribe(self.handle)
+		        return unsub  # Called before next run or on dispose
+
+		Polling effect:
+
+		    @ps.effect(interval=5.0)
+		    async def poll_status(self):
+		        self.status = await api.get_status()
+	"""
+
 	def decorator(func: Callable[..., Any], /):
 		sig = inspect.signature(func)
 		params = list(sig.parameters.values())

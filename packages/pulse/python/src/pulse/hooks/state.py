@@ -11,6 +11,12 @@ S = TypeVar("S", bound=State)
 
 
 class StateHookState(HookState):
+	"""Internal hook state for managing State instances across renders.
+
+	Stores State instances keyed by string identifier and tracks which keys
+	have been accessed during the current render cycle.
+	"""
+
 	__slots__ = ("instances", "called_keys")  # pyright: ignore[reportUnannotatedClassAttribute]
 	instances: dict[tuple[str, Any], State]
 	called_keys: set[tuple[str, Any]]
@@ -139,12 +145,26 @@ def state(
 		key: Optional key to disambiguate multiple calls from the same location.
 
 	Returns:
-		The state instance (same instance on subsequent renders with the same key).
+		The same State instance on subsequent renders with the same key.
 
 	Raises:
 		ValueError: If key is empty.
 		RuntimeError: If called more than once per render with the same key.
 		TypeError: If arg is not a State or callable returning a State.
+
+	Example:
+
+	```python
+	def counter():
+	    s = ps.state("counter", lambda: CounterState())
+	    return m.Button(f"Count: {s.count}", on_click=lambda: s.increment())
+	```
+
+	Notes:
+		- Key must be non-empty string
+		- Can only be called once per render with the same key
+		- Factory is only called on first render; subsequent renders return cached instance
+		- State is disposed when component unmounts
 	"""
 	if key is not None and not isinstance(key, str):
 		raise TypeError("state() key must be a string")

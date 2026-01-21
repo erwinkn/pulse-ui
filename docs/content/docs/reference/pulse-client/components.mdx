@@ -1,0 +1,273 @@
+---
+title: "Components"
+description: "React components for Pulse applications"
+---
+
+# Components
+
+React components for building Pulse applications.
+
+---
+
+## PulseProvider
+
+Root context provider that establishes the WebSocket connection and provides the Pulse client to descendant components. Wrap your entire app (or the portion using Pulse) with this component.
+
+```tsx
+import { PulseProvider } from "pulse-ui-client";
+
+function PulseProvider(props: PulseProviderProps): ReactNode
+```
+
+### Props
+
+```ts
+interface PulseProviderProps {
+  children: ReactNode;
+  config: PulseConfig;
+  prerender: PulsePrerender;
+}
+```
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `children` | `ReactNode` | Child components to render |
+| `config` | `PulseConfig` | Connection and status configuration |
+| `prerender` | `PulsePrerender` | Prerendered views and directives from SSR |
+
+### PulseConfig
+
+```ts
+interface PulseConfig {
+  serverAddress: string;
+  connectionStatus: ConnectionStatusConfig;
+}
+
+interface ConnectionStatusConfig {
+  initialConnectingDelay: number;  // ms before showing "Connecting..."
+  initialErrorDelay: number;       // ms before showing error on initial connect
+  reconnectErrorDelay: number;     // ms before showing error on reconnect
+}
+```
+
+The connection status configuration controls when status messages appear:
+
+- **initialConnectingDelay** - How long to wait before showing "Connecting..." on first load. A small delay (e.g., 500ms) prevents flash on fast connections.
+- **initialErrorDelay** - How long to wait before showing an error if initial connection fails.
+- **reconnectErrorDelay** - How long to wait before showing an error when reconnecting after disconnect.
+
+### PulsePrerender
+
+```ts
+interface PulsePrerender {
+  views: Record<string, PulsePrerenderView>;
+  directives: Directives;
+}
+
+interface PulsePrerenderView {
+  vdom: VDOM;
+}
+
+interface Directives {
+  headers?: Record<string, string>;
+  socketio?: SocketIODirectives;
+}
+
+interface SocketIODirectives {
+  headers?: Record<string, string>;
+  auth?: Record<string, string>;
+}
+```
+
+The `prerender` prop contains server-side rendered content and connection directives. In a typical setup, this comes from your SSR loader.
+
+### Example
+
+```tsx
+import { PulseProvider } from "pulse-ui-client";
+import { BrowserRouter } from "react-router";
+
+function App() {
+  return (
+    <BrowserRouter>
+      <PulseProvider
+        config={{
+          serverAddress: "http://localhost:8000",
+          connectionStatus: {
+            initialConnectingDelay: 500,
+            initialErrorDelay: 5000,
+            reconnectErrorDelay: 3000,
+          },
+        }}
+        prerender={{ views: {}, directives: {} }}
+      >
+        <Routes />
+      </PulseProvider>
+    </BrowserRouter>
+  );
+}
+```
+
+### Connection Status UI
+
+PulseProvider automatically shows connection status in a fixed toast at the bottom-right corner:
+
+- **"Connecting..."** - Shown after `initialConnectingDelay` during initial connection
+- **"Reconnecting..."** - Shown immediately when connection is lost
+- **"Failed to connect to the server."** - Shown after timeout if connection fails
+
+---
+
+## PulseView
+
+Renders a Pulse view at a specific path. This component subscribes to server updates and handles VDOM reconciliation automatically.
+
+```tsx
+import { PulseView } from "pulse-ui-client";
+
+function PulseView(props: PulseViewProps): ReactNode
+```
+
+### Props
+
+```ts
+interface PulseViewProps {
+  path: string;
+  registry: Record<string, unknown>;
+}
+```
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `path` | `string` | View mount path (must match server route) |
+| `registry` | `Record<string, unknown>` | Component registry for mount points |
+
+### Component Registry
+
+The `registry` maps component names to React components. When the server sends a VDOM element with a tag like `$$MyButton`, PulseView looks up `MyButton` in the registry and renders that component.
+
+```tsx
+import { PulseView } from "pulse-ui-client";
+import { Button, Card, Modal } from "./components";
+
+const registry = {
+  Button,
+  Card,
+  Modal,
+};
+
+function MyPage() {
+  return <PulseView path="/dashboard" registry={registry} />;
+}
+```
+
+### Route Integration
+
+PulseView automatically syncs with React Router. It extracts path parameters, query parameters, and hash from the current location and sends them to the server.
+
+```tsx
+import { Routes, Route } from "react-router";
+import { PulseView } from "pulse-ui-client";
+
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/users/:id" element={<PulseView path="/users" registry={registry} />} />
+      <Route path="/*" element={<PulseView path="/" registry={registry} />} />
+    </Routes>
+  );
+}
+```
+
+### Server Error Handling
+
+When the server throws an error during rendering or callback execution, PulseView displays an error panel with the stack trace (in development). This helps debug issues without checking server logs.
+
+---
+
+## PulseForm
+
+A form component that submits via `fetch` instead of native form submission. This keeps the Pulse view mounted during submission, allowing reactive updates to continue.
+
+```tsx
+import { PulseForm } from "pulse-ui-client";
+
+const PulseForm = forwardRef<HTMLFormElement, PulseFormProps>(...)
+```
+
+### Props
+
+```ts
+interface PulseFormProps extends ComponentPropsWithoutRef<"form"> {
+  action: string;
+}
+```
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `action` | `string` | Form action URL (required) |
+| `...rest` | `ComponentPropsWithoutRef<"form">` | All standard form props |
+
+PulseForm accepts all standard `<form>` props like `onSubmit`, `className`, etc.
+
+### Example
+
+```tsx
+import { PulseForm } from "pulse-ui-client";
+
+function LoginForm() {
+  return (
+    <PulseForm action="/api/login" className="login-form">
+      <label>
+        Username
+        <input name="username" required />
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" required />
+      </label>
+      <button type="submit">Login</button>
+    </PulseForm>
+  );
+}
+```
+
+### How It Works
+
+1. User submits the form
+2. PulseForm intercepts the submit event
+3. Calls your `onSubmit` handler if provided
+4. If not `event.defaultPrevented`, sends form data via `fetch` with `credentials: "include"`
+5. Server processes the form and updates state
+6. Reactive updates flow back through the WebSocket
+
+### Custom Submit Handler
+
+You can add validation or preprocessing with `onSubmit`:
+
+```tsx
+function ContactForm() {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    const formData = new FormData(e.currentTarget);
+    if (!formData.get("email")?.toString().includes("@")) {
+      e.preventDefault();
+      alert("Please enter a valid email");
+    }
+  };
+
+  return (
+    <PulseForm action="/api/contact" onSubmit={handleSubmit}>
+      <input name="email" type="email" />
+      <button type="submit">Send</button>
+    </PulseForm>
+  );
+}
+```
+
+---
+
+## See Also
+
+- [Hooks](/docs/reference/pulse-client/hooks) - usePulseClient, usePulseChannel, usePulsePrerender
+- [Classes](/docs/reference/pulse-client/classes) - ChannelBridge, VDOMRenderer
+- [Types](/docs/reference/pulse-client/types) - TypeScript type definitions

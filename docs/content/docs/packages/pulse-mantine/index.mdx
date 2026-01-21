@@ -1,0 +1,169 @@
+---
+title: "Pulse Mantine"
+description: "Python bindings for the Mantine React component library"
+---
+
+Python bindings for [Mantine](https://mantine.dev/), a modern React component library with 100+ components, a form system, date pickers, and charts.
+
+## Installation
+
+```bash
+uv add pulse-mantine
+```
+
+## Quick Start
+
+Wrap your app with `MantineProvider` to enable Mantine styling:
+
+```python
+import pulse as ps
+from pulse_mantine import MantineProvider, Button, TextInput, Stack
+
+@ps.component
+def App():
+    return MantineProvider()[
+        Stack(gap="md")[
+            TextInput(label="Name", placeholder="Enter your name"),
+            Button("Submit"),
+        ]
+    ]
+
+app = ps.App([ps.Route("/", App)])
+```
+
+## What's Included
+
+Pulse Mantine implements four Mantine packages:
+
+| Package | Description | Docs |
+|---------|-------------|------|
+| `@mantine/core` | 100+ UI components (buttons, inputs, modals, etc.) | [Core Components](./core) |
+| `@mantine/form` | Form state management with validation | [Forms](./forms) |
+| `@mantine/dates` | Date and time pickers | [Date Pickers](./dates) |
+| `@mantine/charts` | Charts built on Recharts | [Charts](./charts) |
+
+## Component Types
+
+Most Mantine components work with `**props: Any`, meaning you can pass any prop from the official Mantine docs. A subset of high-value components have full Python type definitions:
+
+**Fully typed (with TypedDict):**
+- `Stack`, `Grid`, `GridCol` — layout components
+- `AppShell` and subcomponents — application layout
+- `Box` — base component
+
+**Generic props (`**props: Any`):**
+- All other components (Button, TextInput, Modal, etc.)
+
+Even without explicit types, all components work identically to their Mantine counterparts. The official Mantine documentation serves as the primary API reference.
+
+## Translating Mantine Examples
+
+The [official Mantine docs](https://mantine.dev/) use React/JSX. Here's how to convert examples to Pulse:
+
+### JSX to Python
+
+```tsx
+// Mantine (React)
+<Button variant="outline" color="blue" onClick={() => console.log("clicked")}>
+  Click me
+</Button>
+```
+
+```python
+# Pulse Mantine (Python)
+Button("Click me", variant="outline", color="blue", onClick=lambda: print("clicked"))
+```
+
+**Key differences:**
+1. **Children as arguments** — pass children before props: `Button("Click me", variant="...")`
+2. **Callbacks are Python functions** — use `lambda` or define functions
+3. **camelCase preserved** — props like `onClick`, `withAsterisk` stay the same
+
+### Nested Components
+
+```tsx
+// Mantine (React)
+<Stack gap="md">
+  <TextInput label="Name" />
+  <Button>Submit</Button>
+</Stack>
+```
+
+```python
+# Pulse Mantine (Python)
+Stack(gap="md")[
+    TextInput(label="Name"),
+    Button("Submit"),
+]
+```
+
+**Key point:** Use `[...]` bracket syntax for children, not `(...)`.
+
+### Compound Components
+
+Mantine uses dot notation for compound components (e.g., `Tabs.Tab`). In Pulse:
+
+```python
+from pulse_mantine import Tabs, TabsList, TabsTab, TabsPanel
+
+Tabs(defaultValue="first")[
+    TabsList()[
+        TabsTab("First", value="first"),
+        TabsTab("Second", value="second"),
+    ],
+    TabsPanel(value="first")["First panel content"],
+    TabsPanel(value="second")["Second panel content"],
+]
+```
+
+## JS Interop with Mantine
+
+For advanced use cases requiring client-side JavaScript, see the [JS Interop reference](/reference/pulse/js-interop).
+
+### Example: Focus Management
+
+```python
+import pulse as ps
+from pulse import javascript, run_js
+from pulse.js import document
+from pulse_mantine import MantineProvider, TextInput, Button, Stack
+
+@javascript
+def focus_element(selector: str):
+    el = document.querySelector(selector)
+    if el:
+        el.focus()
+
+@ps.component
+def FocusDemo():
+    def focus_email():
+        run_js(focus_element("#email-input"))
+
+    return MantineProvider()[
+        Stack(gap="md")[
+            TextInput(id="email-input", label="Email"),
+            Button("Focus Email Field", onClick=focus_email),
+        ]
+    ]
+```
+
+### Example: Scroll to Section
+
+```python
+@javascript
+def scroll_to(element_id: str):
+    el = document.getElementById(element_id)
+    if el:
+        el.scrollIntoView({"behavior": "smooth"})
+
+# In a callback:
+def go_to_section():
+    run_js(scroll_to("section-2"))
+```
+
+## Resources
+
+- [Mantine Documentation](https://mantine.dev/) — official component reference
+- [Mantine Core](https://mantine.dev/core/getting-started/) — UI components
+- [Mantine Charts](https://mantine.dev/charts/getting-started/) — chart components
+- [Mantine Dates](https://mantine.dev/dates/getting-started/) — date picker components

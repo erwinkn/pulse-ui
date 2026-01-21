@@ -1,0 +1,138 @@
+---
+title: "Events and Callbacks"
+---
+
+Events connect user interactions to your Python code. When a user clicks a button, types in an input, or performs any action, your event handlers run on the server.
+
+## Basic event handling
+
+Pass a function to an event prop like `onClick` or `onChange`:
+
+```python
+class CounterState(ps.State):
+    count: int = 0
+
+    def increment(self):
+        self.count += 1
+
+@ps.component
+def Counter():
+    with ps.init():
+        state = CounterState()
+
+    return ps.div(
+        ps.p(f"Count: {state.count}"),
+        ps.button("Increment", onClick=state.increment),
+    )
+```
+
+Event handlers can be state methods, regular functions, or lambdas:
+
+```python
+@ps.component
+def Counter():
+    with ps.init():
+        state = CounterState()
+
+    def decrement():
+        state.count -= 1
+
+    return ps.div(
+        ps.button("Decrement", onClick=decrement),
+        ps.button("Increment", onClick=state.increment),
+        ps.button("Reset", onClick=lambda: setattr(state, 'count', 0)),
+    )
+```
+
+## Event payloads
+
+Most DOM events pass a payload with details about the event. For inputs, you typically want the current value:
+
+```python
+class FormState(ps.State):
+    name: str = ""
+
+    def set_name(self, value: str):
+        self.name = value
+
+@ps.component
+def NameForm():
+    with ps.init():
+        state = FormState()
+
+    return ps.input(
+        type="text",
+        value=state.name,
+        onChange=lambda e: state.set_name(e["target"]["value"]),
+    )
+```
+
+The event object mirrors the JavaScript event structure. Common patterns:
+
+```python
+# Text input value
+onChange=lambda e: handle(e["target"]["value"])
+
+# Checkbox checked state
+onChange=lambda e: handle(e["target"]["checked"])
+
+# Form submission (prevent default happens automatically)
+onSubmit=lambda e: handle_submit()
+
+# Mouse position
+onMouseMove=lambda e: handle(e["clientX"], e["clientY"])
+```
+
+## Argument flexibility
+
+A Pulse callback can accept zero arguments or all arguments. This means you can ignore the event payload if you don't need it:
+
+```python
+# Both of these work
+ps.button("Click", onClick=state.increment)          # No args
+ps.button("Click", onClick=lambda e: state.increment())  # Ignoring e
+```
+
+## Async event handlers
+
+Event handlers can be async. Pulse handles this automatically:
+
+```python
+class SearchState(ps.State):
+    query: str = ""
+    results: list = []
+
+    async def search(self):
+        self.results = await fetch_results(self.query)
+
+@ps.component
+def Search():
+    with ps.init():
+        state = SearchState()
+
+    return ps.div(
+        ps.input(
+            value=state.query,
+            onChange=lambda e: setattr(state, 'query', e["target"]["value"]),
+        ),
+        ps.button("Search", onClick=state.search),
+    )
+```
+
+State updates between `await` calls are automatically batched, so the UI only rerenders when necessary.
+
+## Common event types
+
+| Event | When it fires | Common use |
+|-------|---------------|------------|
+| `onClick` | Element is clicked | Buttons, links, any clickable element |
+| `onChange` | Input value changes | Text inputs, checkboxes, selects |
+| `onSubmit` | Form is submitted | Form handling |
+| `onKeyDown` | Key is pressed | Keyboard shortcuts |
+| `onFocus` / `onBlur` | Element gains/loses focus | Form validation |
+| `onMouseEnter` / `onMouseLeave` | Mouse enters/leaves | Hover effects |
+
+## See also
+
+- [Tutorial: Events](/docs/tutorial/03-events)
+- [Reference: DOM Elements](/docs/reference/pulse/dom)

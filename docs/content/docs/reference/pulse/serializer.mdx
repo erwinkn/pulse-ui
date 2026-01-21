@@ -1,0 +1,113 @@
+---
+title: "Serializer"
+description: "Wire serialization helpers"
+---
+
+Serialization utilities for converting Python objects to/from wire format. Handles shared references, cycles, dates, sets, and maps.
+
+## Functions
+
+### serialize
+
+```python
+def serialize(data: Any) -> Serialized
+```
+
+Serialize a Python value to wire format.
+
+**Parameters:**
+- `data` - Value to serialize.
+
+**Returns:** `Serialized` tuple containing metadata and payload.
+
+**Raises:** `TypeError` for unsupported types (functions, modules, classes).
+
+**Supported types:**
+- Primitives: `None`, `bool`, `int`, `float`, `str`
+- Collections: `list`, `tuple`, `dict`, `set`
+- `datetime.datetime` (converted to milliseconds since Unix epoch)
+- Dataclasses (serialized as dict of fields)
+- Objects with `__dict__` (public attributes only)
+
+**Notes:**
+- `NaN` floats serialize as `None`
+- `Infinity` raises `ValueError`
+- Dict keys must be strings
+- Private attributes (starting with `_`) are excluded from object serialization
+- Shared references and cycles are preserved
+
+```python
+import pulse as ps
+from datetime import datetime
+
+data = {
+    "name": "Alice",
+    "created": datetime.now(),
+    "tags": {"admin", "user"},
+}
+serialized = ps.serialize(data)
+```
+
+### deserialize
+
+```python
+def deserialize(payload: Serialized) -> Any
+```
+
+Deserialize wire format back to Python values.
+
+**Parameters:**
+- `payload` - Serialized tuple from `serialize()`.
+
+**Returns:** Reconstructed Python value.
+
+**Raises:** `TypeError` for malformed payloads.
+
+**Notes:**
+- `datetime` values are reconstructed as UTC-aware
+- `set` values are reconstructed as Python sets
+- Shared references and cycles are restored
+
+```python
+original = {"items": [1, 2, 3], "timestamp": datetime.now()}
+serialized = ps.serialize(original)
+restored = ps.deserialize(serialized)
+```
+
+## Types
+
+### Serialized
+
+```python
+Serialized = tuple[tuple[list[int], list[int], list[int], list[int]], PlainJSON]
+```
+
+Serialized payload structure:
+- First element: metadata tuple of `(refs, dates, sets, maps)` - lists of indices
+- Second element: JSON-compatible payload
+
+### PlainJSON
+
+```python
+PlainJSON = int | float | str | bool | None | list["PlainJSON"] | dict[str, "PlainJSON"]
+```
+
+JSON-compatible type alias.
+
+## Wire Format
+
+The serialized format is a tuple:
+
+```
+((refs, dates, sets, maps), payload)
+```
+
+- `refs` - Indices where the value is a reference to a previously visited node
+- `dates` - Indices that are `datetime` objects (stored as millisecond timestamps)
+- `sets` - Indices that are `set` objects (stored as arrays)
+- `maps` - Indices that are `Map` objects (for JS interop)
+
+This format preserves:
+- Shared references (same object referenced multiple times)
+- Circular references
+- Type information for dates and sets

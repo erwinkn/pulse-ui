@@ -1,0 +1,217 @@
+---
+title: "Sessions"
+---
+
+Imagine a user logs into your app, browses around, then refreshes the page. Without sessions, they'd be logged out instantly because component state resets on each page load. Sessions solve this by giving each user a persistent storage space that survives navigation and refreshes.
+
+## Sessions vs component state
+
+Before diving in, it helps to understand when to use each:
+
+| Use **sessions** for... | Use **component state** for... |
+|------------------------|------------------------------|
+| Login info and user identity | Form inputs the user is typing |
+| User preferences (theme, language) | UI state like "is dropdown open?" |
+| Shopping cart contents | Which tab is selected |
+| Data that should survive page refreshes | Temporary data for the current view |
+
+**Rule of thumb**: If the data should "travel with the user" across pages, use sessions. If it's just for the current component, use state.
+
+## Your first session
+
+Access the session with `ps.session()`. It works like a Python dictionary:
+
+```python
+import pulse as ps
+
+@ps.component
+def visit_counter():
+    session = ps.session()
+
+    # Read the current count (default to 0 if not set)
+    visits = session.get("visits", 0)
+
+    # Update the session
+    session["visits"] = visits + 1
+
+    return ps.p(f"You've visited this page {visits + 1} times")
+```
+
+Pulse handles all the behind-the-scenes work. It automatically:
+- Creates a unique session for each user
+- Saves session data between requests
+- Restores session data when the user returns
+
+No cookies or local storage code required.
+
+## Common patterns
+
+### Remembering user preferences
+
+Users hate re-configuring their preferences every time they visit. Sessions make it easy to remember their choices:
+
+```python
+@ps.component
+def theme_toggle():
+    session = ps.session()
+    dark_mode = session.get("dark_mode", False)
+
+    def toggle():
+        session["dark_mode"] = not dark_mode
+
+    return ps.button(
+        f"Switch to {'light' if dark_mode else 'dark'} mode",
+        onClick=toggle,
+    )
+```
+
+Now when users toggle dark mode, it stays that way as they navigate around your app.
+
+### Protecting pages with login
+
+Most apps need some pages that only logged-in users can see. Sessions make this straightforward:
+
+```python
+@ps.component
+def protected_page():
+    session = ps.session()
+
+    # If no user is logged in, redirect to login
+    if not session.get("user_email"):
+        ps.redirect("/login")
+        return None
+
+    return ps.div(
+        ps.p(f"Welcome, {session['user_email']}!"),
+        ps.button("Sign out", onClick=sign_out),
+    )
+
+async def sign_out():
+    session = ps.session()
+    del session["user_email"]
+    ps.navigate("/")
+```
+
+When users log in (via your login form or OAuth), you store their email in the session. Every page can then check if they're authenticated.
+
+**Important**: When logging users out, use `session.clear()` to remove all sensitive data, not just the email:
+
+```python
+def logout():
+    session = ps.session()
+    session.clear()  # Remove ALL session data
+    ps.navigate("/")
+```
+
+### Sharing data across pages
+
+Sometimes you need data from one page on another. For example, showing what the user recently searched:
+
+```python
+# On the search page
+@ps.component
+def search_page():
+    session = ps.session()
+    session["last_search"] = "pulse framework"
+    # ... rest of search UI
+
+# On another page entirely
+@ps.component
+def recent_activity():
+    session = ps.session()
+    last_search = session.get("last_search")
+
+    if last_search:
+        return ps.p(f"Your last search: {last_search}")
+    return None
+```
+
+This works because both components access the same session storage.
+
+## Keeping session data manageable
+
+Sessions are sent over the network with each request, so it's best to keep them lean. Store IDs and references rather than large objects:
+
+```python
+# Good: Store a user ID, fetch details when needed
+session["user_id"] = 12345
+
+# Avoid: Storing large objects directly
+session["user"] = {"id": 12345, "name": "...", "permissions": [...], ...}
+```
+
+For important session values that you access frequently, consider helper functions to keep your code clean and type-safe:
+
+```python
+def get_current_user(session) -> dict | None:
+    return session.get("user")
+
+def set_current_user(session, user: dict):
+    session["user"] = user
+```
+
+## Session identifiers
+
+Pulse provides two identifier functions for more advanced use cases.
+
+### `ps.session_id()`
+
+Returns a unique identifier for the user's session. This ID persists across WebSocket reconnections and page reloads, making it useful for logging, associating database records with users, or rate limiting:
+
+```python
+@ps.component
+def debug_info():
+    sid = ps.session_id()
+    return ps.p(f"Session ID: {sid}")
+```
+
+### `ps.websocket_id()`
+
+Returns the identifier for the current WebSocket connection. Unlike session IDs, this changes each time the user's browser reconnects. It's helpful for tracking active connections, debugging connection issues, or building real-time presence features:
+
+```python
+@ps.component
+def connection_info():
+    ws_id = ps.websocket_id()
+    return ps.p(f"Connection ID: {ws_id}")
+```
+
+## Session storage in production
+
+By default, Pulse stores sessions in memory. This works well for development, but sessions are lost when the server restarts.
+
+For production, configure a persistent session store when creating your app:
+
+```python
+from pulse.user_session import InMemorySessionStore
+
+app = ps.App(
+    routes=[...],
+    session_store=InMemorySessionStore(),  # Or your custom store
+)
+```
+
+## Using sessions in middleware
+
+If you need to check sessions before rendering any page (like for app-wide authentication), middleware is the right tool. Sessions are available directly in middleware hooks:
+
+```python
+class AuthMiddleware(ps.PulseMiddleware):
+    async def prerender_route(self, *, session, path, **kwargs):
+        # Block unauthenticated users from admin pages
+        if path.startswith("/admin") and not session.get("is_admin"):
+            return ps.Redirect("/login")
+        return await kwargs["next"]()
+
+    async def connect(self, *, session, request, next):
+        # Record when each user connected
+        session["connected_at"] = time.time()
+        return await next()
+```
+
+This is more maintainable than adding auth checks to every protected component. See the [Middleware guide](/docs/advanced/middleware) for more details.
+
+## See also
+
+- [Tutorial: Sessions and Middleware](/docs/tutorial/12-sessions-middleware)
+- [Reference: Context](/docs/reference/pulse/context)

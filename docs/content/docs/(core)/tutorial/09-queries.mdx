@@ -1,0 +1,322 @@
+---
+title: "Queries and Mutations"
+---
+
+While you can use async callbacks for data fetching, Pulse provides a more powerful abstraction: queries and mutations. They handle common patterns like loading states, error handling, caching, and refetching automatically.
+
+## Understanding queries
+
+A query is a declarative way to fetch data. You define what data you need and how to get it. Pulse handles the rest: tracking loading state, storing the result, and re-fetching when dependencies change.
+
+### Basic query
+
+Here is a simple query that fetches user data:
+
+```python
+import asyncio
+import pulse as ps
+
+class UserState(ps.State):
+    user_id: int = 1
+
+    @ps.query
+    async def user(self) -> dict:
+        # Simulate API call
+        await asyncio.sleep(1)
+        return {"id": self.user_id, "name": f"User {self.user_id}"}
+```
+
+The query automatically tracks `user_id` as a dependency. When `user_id` changes, the query re-fetches automatically.
+
+### Using query results
+
+Query results have several useful properties:
+
+```python
+@ps.component
+def UserProfile():
+    with ps.init():
+        state = UserState()
+
+    # Check if loading
+    if state.user.is_loading:
+        return ps.div("Loading...")
+
+    # Check for errors
+    if state.user.is_error:
+        return ps.div(f"Error: {state.user.error}")
+
+    # Access the data
+    user = state.user.data
+    if user:
+        return ps.div()[
+            ps.h2(user["name"]),
+            ps.button("Next User", onClick=lambda: setattr(state, "user_id", state.user_id + 1)),
+            ps.button("Refresh", onClick=state.user.refetch),
+        ]
+
+    return ps.div("No user loaded")
+```
+
+### Query properties and methods
+
+Every query provides these properties:
+
+- `data` - The fetched data, or `None` if not loaded yet
+- `is_loading` - `True` while the query is running
+- `is_error` - `True` if the query failed
+- `error` - The error message if the query failed
+- `has_loaded` - `True` after the query completes at least once
+
+And these methods:
+
+- `refetch()` - Manually trigger the query to run again
+- `set_data(value)` - Directly set the query data
+- `set_initial_data(value)` - Set initial data to show before the first load
+- `invalidate()` - Mark the query as stale, triggering a refetch
+
+## Query keys
+
+By default, queries automatically track their dependencies. But sometimes you want explicit control over when a query re-runs. Use `@query.key` for this:
+
+```python
+class SearchState(ps.State):
+    query: str = ""
+    page: int = 1
+
+    @ps.query
+    async def results(self) -> list[dict]:
+        await asyncio.sleep(1)
+        return await search_api(self.query, self.page)
+
+    @results.key
+    def _results_key(self):
+        # Query re-runs only when this tuple changes
+        return (self.query, self.page)
+```
+
+The key function returns a value that determines the query's identity. When the key changes, the query re-runs. This is useful when:
+
+- You want to prevent unnecessary re-fetches
+- The query reads state that should not trigger a refetch
+- You need a stable cache key for the data
+
+## Mutations
+
+While queries are for reading data, mutations are for writing data. They represent actions like saving, updating, or deleting:
+
+```python
+class UserState(ps.State):
+    user_id: int = 1
+
+    @ps.query
+    async def user(self) -> dict:
+        return await fetch_user(self.user_id)
+
+    @ps.mutation
+    async def save_user(self, name: str, email: str):
+        result = await update_user_api(self.user_id, name, email)
+        # Invalidate the user query to refetch fresh data
+        self.user.invalidate()
+        return result
+```
+
+Mutations have similar properties to queries:
+
+- `is_loading` - `True` while the mutation is running
+- `is_error` - `True` if the mutation failed
+- `error` - The error message if failed
+- `data` - The result returned by the mutation
+
+### Using mutations
+
+```python
+@ps.component
+def UserEditor():
+    with ps.init():
+        state = UserState()
+        name = ""
+        email = ""
+
+    def handle_save():
+        state.save_user(name, email)
+
+    return ps.div()[
+        ps.input(
+            value=name,
+            onChange=lambda e: setattr(state, "name", e["target"]["value"]),
+            placeholder="Name",
+        ),
+        ps.input(
+            value=email,
+            onChange=lambda e: setattr(state, "email", e["target"]["value"]),
+            placeholder="Email",
+        ),
+        ps.button(
+            "Saving..." if state.save_user.is_loading else "Save",
+            onClick=handle_save,
+            disabled=state.save_user.is_loading,
+        ),
+        ps.p(f"Error: {state.save_user.error}") if state.save_user.is_error else None,
+    ]
+```
+
+## Infinite queries for pagination
+
+For paginated data like infinite scroll lists, use `@ps.infinite_query`:
+
+```python
+class FeedState(ps.State):
+    @ps.infinite_query
+    async def posts(self, page_param: int = 0) -> dict:
+        response = await fetch_posts(page=page_param, limit=20)
+        return {
+            "items": response["posts"],
+            "next_page": page_param + 1 if response["has_more"] else None,
+        }
+```
+
+Infinite queries:
+
+- Automatically track pages of data
+- Provide a `fetch_next_page()` method to load more
+- Have a `has_next_page` property to know if more data is available
+- Combine all pages into a single `data` list
+
+```python
+@ps.component
+def InfiniteFeed():
+    with ps.init():
+        state = FeedState()
+
+    return ps.div()[
+        ps.For(state.posts.data or [], lambda post: ps.div(post["title"], key=post["id"])),
+        ps.button(
+            "Load More",
+            onClick=state.posts.fetch_next_page,
+            disabled=not state.posts.has_next_page or state.posts.is_loading,
+        ) if state.posts.has_next_page else None,
+        ps.p("Loading...") if state.posts.is_loading else None,
+    ]
+```
+
+## Complete example
+
+Here is a complete example showing queries and mutations working together:
+
+```python
+import asyncio
+import pulse as ps
+from dataclasses import dataclass
+
+@dataclass
+class Todo:
+    id: int
+    text: str
+    done: bool
+
+class TodoState(ps.State):
+    @ps.query
+    async def todos(self) -> list[Todo]:
+        await asyncio.sleep(0.5)
+        # In a real app, this would fetch from an API
+        return [
+            Todo(1, "Learn Pulse", False),
+            Todo(2, "Build an app", False),
+            Todo(3, "Ship it", False),
+        ]
+
+    @ps.mutation
+    async def add_todo(self, text: str):
+        await asyncio.sleep(0.3)
+        # In a real app, this would POST to an API
+        # After adding, invalidate the list to refetch
+        self.todos.invalidate()
+
+    @ps.mutation
+    async def toggle_todo(self, todo_id: int):
+        await asyncio.sleep(0.2)
+        # In a real app, this would PATCH the API
+        self.todos.invalidate()
+
+    @ps.mutation
+    async def delete_todo(self, todo_id: int):
+        await asyncio.sleep(0.2)
+        # In a real app, this would DELETE via API
+        self.todos.invalidate()
+
+@ps.component
+def TodoApp():
+    with ps.init():
+        state = TodoState()
+        new_text = ""
+
+    def handle_add():
+        nonlocal new_text
+        if new_text.strip():
+            state.add_todo(new_text)
+            new_text = ""
+
+    return ps.div()[
+        ps.h1("Todo List"),
+
+        # Add new todo
+        ps.div()[
+            ps.input(
+                value=new_text,
+                onChange=lambda e: setattr(state, "new_text", e["target"]["value"]),
+                placeholder="What needs to be done?",
+                disabled=state.add_todo.is_loading,
+            ),
+            ps.button(
+                "Adding..." if state.add_todo.is_loading else "Add",
+                onClick=handle_add,
+                disabled=state.add_todo.is_loading,
+            ),
+        ],
+
+        # Todo list
+        ps.div()[
+            ps.p("Loading...") if state.todos.is_loading else None,
+            ps.ul()[
+                ps.For(
+                    state.todos.data or [],
+                    lambda todo: ps.li(
+                        ps.input(
+                            type="checkbox",
+                            checked=todo.done,
+                            onChange=lambda: state.toggle_todo(todo.id),
+                        ),
+                        ps.span(
+                            todo.text,
+                            style={"textDecoration": "line-through" if todo.done else "none"},
+                        ),
+                        ps.button("Delete", onClick=lambda: state.delete_todo(todo.id)),
+                        key=todo.id,
+                    )
+                )
+            ] if state.todos.data else None,
+        ],
+
+        # Refresh button
+        ps.button("Refresh", onClick=state.todos.refetch),
+    ]
+```
+
+## When to use queries vs async callbacks
+
+Use **queries** when:
+- Fetching data to display in your UI
+- You want automatic loading/error states
+- You need caching or automatic refetching
+- Data depends on state that might change
+
+Use **async callbacks** when:
+- Performing one-off actions (form submission, file upload)
+- You need fine-grained control over the async flow
+- The operation does not fit the query/mutation pattern
+
+## See also
+
+- [Core Concepts: Queries and Mutations](/docs/concepts/queries)
+- [Reference: Queries](/docs/reference/pulse/queries)

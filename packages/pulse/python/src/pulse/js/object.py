@@ -2,13 +2,16 @@
 JavaScript Object builtin module.
 
 Usage:
-    from pulse.js import Object
-    Object.keys({"a": 1})         # -> Object.keys({"a": 1})
-    Object.assign({}, {"a": 1})   # -> Object.assign({}, {"a": 1})
-    Object.is_(x, y)              # -> Object.is(x, y)
 
-    # Or import from module directly:
-    from pulse.js.object import Object
+```python
+from pulse.js import Object
+Object.keys({"a": 1})         # -> Object.keys({"a": 1})
+Object.assign({}, {"a": 1})   # -> Object.assign({}, {"a": 1})
+Object.is_(x, y)              # -> Object.is(x, y)
+
+# Or import from module directly:
+from pulse.js.object import Object
+```
 """
 
 from collections.abc import Iterable as _Iterable

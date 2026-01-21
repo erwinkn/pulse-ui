@@ -2,12 +2,15 @@
 JavaScript WeakSet builtin module.
 
 Usage:
-    from pulse.js import WeakSet
-    WeakSet()                     # -> new WeakSet()
-    WeakSet([obj1, obj2])        # -> new WeakSet([obj1, obj2])
 
-    # Or import from module directly:
-    from pulse.js.weakset import WeakSet
+```python
+from pulse.js import WeakSet
+WeakSet()                     # -> new WeakSet()
+WeakSet([obj1, obj2])        # -> new WeakSet([obj1, obj2])
+
+# Or import from module directly:
+from pulse.js.weakset import WeakSet
+```
 """
 
 from collections.abc import Iterable as _Iterable

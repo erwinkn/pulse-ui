@@ -2,19 +2,22 @@
 JavaScript object literal creation.
 
 Usage:
-    from pulse.js import obj
 
-    # Create plain JS objects (not Maps):
-    obj(a=1, b=2)          # -> { a: 1, b: 2 }
+```python
+from pulse.js import obj
 
-    # With spread syntax:
-    obj(**base, c=3)       # -> { ...base, c: 3 }
-    obj(a=1, **base)       # -> { a: 1, ...base }
+# Create plain JS objects (not Maps):
+obj(a=1, b=2)          # -> { a: 1, b: 2 }
 
-    # Empty object:
-    obj()                  # -> {}
+# With spread syntax:
+obj(**base, c=3)       # -> { ...base, c: 3 }
+obj(a=1, **base)       # -> { a: 1, ...base }
 
-Unlike dict() which transpiles to new Map(), obj() creates plain JavaScript
+# Empty object:
+obj()                  # -> {}
+```
+
+Unlike `dict()` which transpiles to `new Map()`, `obj()` creates plain JavaScript
 object literals. Use this for React props, style objects, and anywhere you
 need a plain JS object.
 """
@@ -36,13 +39,13 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class ObjTransformer(Expr):
-	"""Transformer for obj() with **spread support.
+	"""Transformer for `obj()` with `**spread` support.
 
-	obj(key=value, ...) -> { key: value, ... }
-	obj(**base, key=value) -> { ...base, key: value }
+	- `obj(key=value, ...)` -> `{ key: value, ... }`
+	- `obj(**base, key=value)` -> `{ ...base, key: value }`
 
 	Creates a plain JavaScript object literal.
-	Use this instead of dict() when you need a plain object (e.g., for React props).
+	Use this instead of `dict()` when you need a plain object (e.g., for React props).
 	"""
 
 	@override

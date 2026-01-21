@@ -11,6 +11,8 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Run `make all` before committing
 - Check `examples/` for usage patterns
 - Use `make bump` for changing package versions
+- When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)
+- Do not add tests without being asked for it.
 
 ## Code Style
 
@@ -53,3 +55,10 @@ packages/
 examples/                     # Example apps
 ```
 
+## Documentation
+
+Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, and Pulse conventions. Key points:
+- One page, one job (tutorial / how-to / reference / explanation)
+- Code first, explain after
+- Be conversational—write like you're explaining to a friend
+- Update `docs/content/docs/(core)/glossary.mdx` if introducing new terms

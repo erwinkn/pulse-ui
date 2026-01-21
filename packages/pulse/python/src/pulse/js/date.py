@@ -2,13 +2,16 @@
 JavaScript Date builtin module.
 
 Usage:
-    from pulse.js import Date
-    Date()                        # -> new Date()
-    Date.now()                    # -> Date.now()
-    Date.parse("2023-01-01")      # -> Date.parse("2023-01-01")
 
-    # Or import from module directly:
-    from pulse.js.date import Date
+```python
+from pulse.js import Date
+Date()                        # -> new Date()
+Date.now()                    # -> Date.now()
+Date.parse("2023-01-01")      # -> Date.parse("2023-01-01")
+
+# Or import from module directly:
+from pulse.js.date import Date
+```
 """
 
 from typing import Any as _Any

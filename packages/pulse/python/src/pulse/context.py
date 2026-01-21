@@ -16,9 +16,23 @@ if TYPE_CHECKING:
 class PulseContext:
 	"""Composite context accessible to hooks and internals.
 
-	- session: per-user session ReactiveDict
-	- render: per-connection RenderSession
-	- route: active RouteContext for this render/effect scope
+	Manages per-request state via context variables. Provides access to the
+	application instance, user session, render session, and route context.
+
+	Attributes:
+		app: Application instance.
+		session: Per-user session (UserSession or None).
+		render: Per-connection render session (RenderSession or None).
+		route: Active route context (RouteContext or None).
+
+	Example:
+		```python
+		ctx = PulseContext(app=app, session=session)
+		with ctx:
+			# Context is active here
+			current = PulseContext.get()
+		# Previous context restored
+		```
 	"""
 
 	app: "App"
@@ -28,7 +42,15 @@ class PulseContext:
 	_token: "Token[PulseContext | None] | None" = None
 
 	@classmethod
-	def get(cls):
+	def get(cls) -> "PulseContext":
+		"""Get the current context.
+
+		Returns:
+			Current PulseContext instance.
+
+		Raises:
+			RuntimeError: If no context is active.
+		"""
 		ctx = PULSE_CONTEXT.get()
 		if ctx is None:
 			raise RuntimeError("Internal error: PULSE_CONTEXT is not set")
@@ -40,7 +62,19 @@ class PulseContext:
 		session: "UserSession | None" = None,
 		render: "RenderSession | None" = None,
 		route: "RouteContext | None" = None,
-	):
+	) -> "PulseContext":
+		"""Create a new context with updated values.
+
+		Inherits unspecified values from the current context.
+
+		Args:
+			session: New session (optional, inherits if not provided).
+			render: New render session (optional, inherits if not provided).
+			route: New route context (optional, inherits if not provided).
+
+		Returns:
+			New PulseContext instance with updated values.
+		"""
 		ctx = cls.get()
 		return PulseContext(
 			app=ctx.app,

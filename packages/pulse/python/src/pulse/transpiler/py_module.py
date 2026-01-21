@@ -124,13 +124,7 @@ class PyModule(Expr):
 		elif hasattr(transpilation, "_transpiler"):
 			transpiler_dict = transpilation._transpiler
 		else:
-			# Legacy: class namespace without PyModule inheritance
-			items = (
-				(name, getattr(transpilation, name))
-				for name in dir(transpilation)
-				if not name.startswith("_")
-			)
-			transpiler_dict = PyModule._build_transpiler(items)
+			raise TypeError("PyModule.register expects a PyModule subclass or dict")
 
 		# Register individual values for lookup by id
 		for attr_name, expr in transpiler_dict.items():

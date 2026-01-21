@@ -11,6 +11,20 @@ T = TypeVar("T")
 
 
 class SetupHookState(HookState):
+	"""Internal hook state for the setup hook.
+
+	Manages the initialization, argument tracking, and lifecycle of
+	setup-created values.
+
+	Attributes:
+		value: The value returned by the setup function.
+		initialized: Whether setup has been called at least once.
+		args: List of signals tracking positional argument values.
+		kwargs: Dict of signals tracking keyword argument values.
+		effects: List of effects created during setup execution.
+		key: Optional key for re-initialization control.
+	"""
+
 	__slots__ = (  # pyright: ignore[reportUnannotatedClassAttribute]
 		"value",
 		"initialized",
@@ -141,6 +155,46 @@ _setup_hook = hooks.create(
 
 
 def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+	"""One-time initialization that persists across renders.
+
+	Calls the init function on first render and caches the result. On subsequent
+	renders, returns the cached value without re-running the function.
+
+	This is the lower-level alternative to ``ps.init()`` that doesn't require
+	AST rewriting and works in all environments.
+
+	Args:
+		init_func: Function to call on first render. Its return value is cached.
+		*args: Positional arguments passed to init_func. Changes to these are
+			tracked via reactive signals.
+		**kwargs: Keyword arguments passed to init_func. Changes to these are
+			tracked via reactive signals.
+
+	Returns:
+		The value returned by init_func (cached on first render).
+
+	Raises:
+		RuntimeError: If called more than once per component render.
+		RuntimeError: If the number or names of arguments change between renders.
+
+	Example:
+
+	```python
+	@ps.component
+	def Counter():
+	    def init():
+	        return CounterState(), expensive_calculation()
+
+	    state, value = ps.setup(init)
+
+	    return ps.div(f"Count: {state.count}")
+	```
+
+	Notes:
+		- ``ps.init()`` is syntactic sugar that transforms into ``ps.setup()`` calls
+		- Use ``ps.setup()`` directly when AST rewriting is problematic
+		- Arguments must be consistent across renders (same count and names)
+	"""
 	state = _setup_hook()
 	state.ensure_not_called()
 
@@ -166,6 +220,29 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 
 
 def setup_key(key: str) -> None:
+	"""Set a key for the next setup call to control re-initialization.
+
+	When the key changes between renders, the setup function is re-run
+	and a new value is created. This is useful for resetting state when
+	a prop changes.
+
+	Args:
+		key: String key that, when changed, triggers re-initialization
+			of the subsequent setup call.
+
+	Raises:
+		TypeError: If key is not a string.
+		RuntimeError: If called after setup() in the same render.
+
+	Example:
+
+	```python
+	def user_profile(user_id: str):
+	    ps.setup_key(user_id)  # Re-run setup when user_id changes
+	    data = ps.setup(lambda: fetch_user_data(user_id))
+	    return m.Text(data.name)
+	```
+	"""
 	if not isinstance(key, str):
 		raise TypeError("setup_key() requires a string key")
 	state = _setup_hook()

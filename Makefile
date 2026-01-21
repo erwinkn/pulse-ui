@@ -58,6 +58,8 @@ typecheck:
 	@bunx tsc --noEmit -p packages/pulse/js/tsconfig.json
 	@echo "Running TypeScript for pulse-mantine..."
 	@bunx tsc --noEmit -p packages/pulse-mantine/js/tsconfig.json
+	@echo "Running TypeScript for docs..."
+	@bunx tsc --noEmit -p docs/tsconfig.json
 
 # Testing
 test:

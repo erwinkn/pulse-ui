@@ -1,0 +1,171 @@
+---
+title: "Custom Hooks"
+---
+
+## When to create a custom hook
+
+Built-in hooks like `ps.init()`, `ps.setup()`, and `ps.state()` cover most use cases. Create a custom hook when you need:
+
+- **Lifecycle control**: Code that runs at specific points in the render cycle
+- **Reusable initialization logic**: Complex setup shared across many components
+- **Resource management**: Automatic cleanup when components unmount
+
+## Creating a custom hook
+
+Custom hooks have two parts: a state class and a hook registration.
+
+### Step 1: Subclass `ps.hooks.State`
+
+The state class holds data and defines lifecycle methods:
+
+```python
+class TimerHookState(ps.hooks.State):
+    def __init__(self):
+        self.start_time = time.time()
+
+    def elapsed(self) -> float:
+        return time.time() - self.start_time
+
+    def dispose(self) -> None:
+        # Called when the component unmounts
+        print(f"Timer ran for {self.elapsed():.2f}s")
+```
+
+### Step 2: Register with `ps.hooks.create`
+
+Register your hook with a unique name and factory function:
+
+```python
+_timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())
+
+def use_timer() -> TimerHookState:
+    """Get the timer for the current component."""
+    return _timer_hook()
+```
+
+### Step 3: Use in components
+
+```python
+@ps.component
+def MyComponent():
+    timer = use_timer()
+    return ps.div(f"Component has been alive for {timer.elapsed():.1f}s")
+```
+
+## Lifecycle methods
+
+The `HookState` base class provides three lifecycle methods you can override:
+
+| Method | When it runs | Use case |
+|--------|--------------|----------|
+| `on_render_start(render_cycle)` | Before each render | Reset per-render state, start measurements |
+| `on_render_end(render_cycle)` | After each render | Finalize calculations, trigger side effects |
+| `dispose()` | When component unmounts | Clean up resources, cancel subscriptions |
+
+```python
+class RenderCounterState(ps.hooks.State):
+    def __init__(self):
+        self.total_renders = 0
+        self.last_render_duration = 0.0
+        self._render_start: float = 0.0
+
+    def on_render_start(self, render_cycle: int) -> None:
+        self._render_start = time.time()
+        self.total_renders = render_cycle
+
+    def on_render_end(self, render_cycle: int) -> None:
+        self.last_render_duration = time.time() - self._render_start
+
+    def dispose(self) -> None:
+        print(f"Component rendered {self.total_renders} times")
+```
+
+## Hook keys
+
+Hooks can be called with an optional key to maintain separate instances:
+
+```python
+_cache_hook = ps.hooks.create("my_app:cache", lambda: CacheState())
+
+def use_cache(key: str | None = None) -> CacheState:
+    return _cache_hook(key)
+
+@ps.component
+def Dashboard():
+    users_cache = use_cache("users")    # Separate cache instance
+    orders_cache = use_cache("orders")  # Separate cache instance
+    # ...
+```
+
+## Adding metadata
+
+Provide metadata for documentation and debugging:
+
+```python
+_my_hook = ps.hooks.create(
+    "my_app:feature",
+    lambda: FeatureState(),
+    metadata=ps.hooks.Metadata(
+        description="Tracks feature usage analytics",
+        owner="analytics-team",
+        version="1.0.0",
+    )
+)
+
+# Inspect registered hooks
+ps.hooks.list()  # Returns all hook names
+ps.hooks.describe("my_app:feature")  # Returns metadata
+```
+
+## Naming conventions
+
+Use namespaced names to avoid collisions:
+
+- `"my_app:timer"` - App-specific hooks
+- `"pulse:init"` - Framework hooks (reserved)
+- `"pulse_mantine:form"` - Package hooks
+
+## Example: Connection pool hook
+
+A practical example managing a database connection pool:
+
+```python
+class ConnectionPoolState(ps.hooks.State):
+    def __init__(self):
+        self.pool = create_pool(min_size=2, max_size=10)
+
+    async def query(self, sql: str, *args):
+        async with self.pool.acquire() as conn:
+            return await conn.fetch(sql, *args)
+
+    def dispose(self) -> None:
+        # Clean up when component tree unmounts
+        self.pool.close()
+
+_pool_hook = ps.hooks.create(
+    "my_app:db_pool",
+    lambda: ConnectionPoolState(),
+    metadata=ps.hooks.Metadata(description="Database connection pool"),
+)
+
+def use_db() -> ConnectionPoolState:
+    return _pool_hook()
+
+@ps.component
+def UserList():
+    db = use_db()
+
+    with ps.init():
+        users = []
+
+    async def load_users():
+        nonlocal users
+        users = await db.query("SELECT * FROM users")
+
+    # ...
+```
+
+## See also
+
+- [Hooks](/docs/concepts/hooks) - Built-in hooks for common use cases
+- [Reference: Hooks API](/docs/reference/pulse/hooks) - Complete API documentation

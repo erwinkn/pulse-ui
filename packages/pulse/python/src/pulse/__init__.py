@@ -1340,6 +1340,9 @@ from pulse.queries.infinite_query import infinite_query as infinite_query
 from pulse.queries.mutation import mutation as mutation
 from pulse.queries.protocol import QueryResult as QueryResult
 from pulse.queries.query import query as query
+from pulse.react_component import (
+	ReactComponent as ReactComponent,
+)
 
 # React components (v2)
 from pulse.react_component import (

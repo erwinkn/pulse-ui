@@ -1,0 +1,11 @@
+{
+  "title": "pulse.js",
+  "icon": "Braces",
+  "defaultOpen": false,
+  "pages": [
+    "index",
+    "builtins",
+    "namespaces",
+    "react"
+  ]
+}

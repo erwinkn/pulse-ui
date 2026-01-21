@@ -2,12 +2,15 @@
 JavaScript WeakMap builtin module.
 
 Usage:
-    from pulse.js import WeakMap
-    WeakMap()                     # -> new WeakMap()
-    WeakMap([[obj, "value"]])    # -> new WeakMap([[obj, "value"]])
 
-    # Or import from module directly:
-    from pulse.js.weakmap import WeakMap
+```python
+from pulse.js import WeakMap
+WeakMap()                     # -> new WeakMap()
+WeakMap([[obj, "value"]])    # -> new WeakMap([[obj, "value"]])
+
+# Or import from module directly:
+from pulse.js.weakmap import WeakMap
+```
 """
 
 from collections.abc import Iterable as _Iterable

@@ -88,6 +88,16 @@ T = TypeVar("T")
 
 
 class AppStatus(IntEnum):
+	"""Application lifecycle status.
+
+	Attributes:
+		created: App instance created but not yet initialized.
+		initialized: App.setup() has been called, routes configured.
+		running: App is actively serving requests.
+		draining: App is shutting down, draining connections.
+		stopped: App has been fully stopped.
+	"""
+
 	created = 0
 	initialized = 1
 	running = 2
@@ -96,6 +106,12 @@ class AppStatus(IntEnum):
 
 
 PulseMode = Literal["subdomains", "single-server"]
+"""Deployment mode for the application.
+
+Values:
+    "single-server": Python and React served from the same origin (default).
+    "subdomains": Python API on a subdomain (e.g., api.example.com).
+"""
 
 
 @dataclass
@@ -118,21 +134,55 @@ class ConnectionStatusConfig:
 
 
 class App:
-	"""
-	Pulse UI Application - the main entry point for defining your app.
+	"""Main Pulse application class.
 
+	Creates a server that handles routing, sessions, and WebSocket connections.
 	Similar to FastAPI, users create an App instance and define their routes.
 
+	Args:
+		routes: Route definitions for the application.
+		codegen: Code generation settings for React Router output.
+		middleware: Request middleware, either a single middleware or sequence.
+		plugins: Application plugins that can contribute routes, middleware,
+			and lifecycle hooks.
+		cookie: Session cookie configuration.
+		session_store: Session storage backend. Defaults to CookieSessionStore.
+		server_address: Public server URL. Required in production.
+		dev_server_address: Development server URL. Defaults to
+			"http://localhost:8000".
+		internal_server_address: Internal URL for server-side loader fetches.
+			Falls back to server_address if not provided.
+		not_found: Path for 404 page. Defaults to "/not-found".
+		mode: Deployment mode - "single-server" (default) or "subdomains".
+		api_prefix: API route prefix. Defaults to "/_pulse".
+		cors: CORS configuration. Auto-configured based on mode if not provided.
+		fastapi: Additional FastAPI constructor options.
+		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
+		connection_status: Connection status UI timing configuration.
+
+	Attributes:
+		env: Current environment ("dev", "ci", or "prod").
+		mode: Deployment mode ("single-server" or "subdomains").
+		status: Current application lifecycle status.
+		routes: Parsed route tree containing all registered routes.
+		fastapi: Underlying FastAPI instance.
+		asgi: ASGI application (includes Socket.IO).
+
 	Example:
-	    ```python
-	    import pulse as ps
+		```python
+		import pulse as ps
 
-	    app = ps.App()
+		app = ps.App(
+		    routes=[
+		        ps.Route("/", render=home),
+		        ps.Route("/users/:id", render=user_detail),
+		    ],
+		    session_timeout=120.0,
+		)
 
-	    @app.route("/")
-	    def home():
-	        return ps.div("Hello World!")
-	    ```
+		if __name__ == "__main__":
+		    app.run(port=8000)
+		```
 	"""
 
 	env: PulseEnv
@@ -293,7 +343,21 @@ class App:
 
 	def run_codegen(
 		self, address: str | None = None, internal_address: str | None = None
-	):
+	) -> None:
+		"""Generate React Router code for all routes.
+
+		Generates TypeScript/JSX files for React Router integration based on
+		the application's route definitions.
+
+		Args:
+			address: Public server address. Updates server_address if provided.
+			internal_address: Internal server address for SSR fetches. Updates
+				internal_server_address if provided.
+
+		Raises:
+			RuntimeError: If no server address is available (neither passed
+				as argument nor set on the App instance).
+		"""
 		# Allow the CLI to disable codegen in specific scenarios (e.g., prod server-only)
 		if envvars.codegen_disabled:
 			return
@@ -312,11 +376,18 @@ class App:
 			connection_status=self.connection_status,
 		)
 
-	def asgi_factory(self):
-		"""
-		ASGI factory for uvicorn. This is called on every reload.
-		"""
+	def asgi_factory(self) -> ASGIApp:
+		"""ASGI factory for production deployment.
 
+		Called on each uvicorn reload. Initializes code generation and sets up
+		the application with the appropriate server address.
+
+		Returns:
+			The ASGI application instance (includes Socket.IO).
+
+		Raises:
+			RuntimeError: If in prod/ci mode without an explicit server_address.
+		"""
 		# In prod/ci, use the server_address provided to App(...).
 		if self.env in ("prod", "ci"):
 			if not self.server_address:
@@ -350,13 +421,34 @@ class App:
 		port: int = 8000,
 		find_port: bool = True,
 		reload: bool = True,
-	):
+	) -> None:
+		"""Start the development server with uvicorn.
+
+		Args:
+			address: Host address to bind to. Defaults to "localhost".
+			port: Port number to listen on. Defaults to 8000.
+			find_port: If True, automatically find an available port if the
+				specified port is in use. Defaults to True.
+			reload: If True, enable auto-reload on file changes. Defaults to True.
+		"""
 		if find_port:
 			port = find_available_port(port)
 
 		uvicorn.run(self.asgi_factory, reload=reload)
 
-	def setup(self, server_address: str):
+	def setup(self, server_address: str) -> None:
+		"""Initialize the app with a server address.
+
+		Configures FastAPI routes, middleware, CORS, and Socket.IO handlers.
+		Called automatically by asgi_factory().
+
+		Args:
+			server_address: The public URL where the server is accessible.
+
+		Note:
+			This method is idempotent - calling it multiple times on an already
+			initialized app will log a warning and return early.
+		"""
 		if self.status >= AppStatus.initialized:
 			logger.warning("Called App.setup() on an already initialized application")
 			return

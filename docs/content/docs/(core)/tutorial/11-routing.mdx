@@ -1,0 +1,237 @@
+---
+title: "Routing"
+---
+
+Most web applications have multiple pages. A blog has a home page, individual post pages, and maybe an about page. A dashboard might have separate sections for analytics, settings, and user management. Routing is how you define these different pages and let users navigate between them.
+
+In Pulse, you define your routes when creating the `App`, and Pulse handles all the navigation for you.
+
+## Defining Routes
+
+Routes are defined as a list when you create your Pulse app. Each route maps a URL path to a component.
+
+```python
+import pulse as ps
+from pathlib import Path
+
+
+@ps.component
+def home():
+    return ps.div(
+        ps.h1("Welcome Home", className="text-3xl font-bold"),
+        ps.p("This is the home page."),
+    )
+
+
+@ps.component
+def about():
+    return ps.div(
+        ps.h1("About Us", className="text-3xl font-bold"),
+        ps.p("Learn more about our company."),
+    )
+
+
+@ps.component
+def contact():
+    return ps.div(
+        ps.h1("Contact", className="text-3xl font-bold"),
+        ps.p("Get in touch with us."),
+    )
+
+
+app = ps.App(
+    routes=[
+        ps.Route("/", home),
+        ps.Route("/about", about),
+        ps.Route("/contact", contact),
+    ],
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "web"),
+)
+```
+
+Now users can visit `/`, `/about`, or `/contact` to see the corresponding pages.
+
+## Navigation: Links and Programmatic Navigation
+
+There are two ways to navigate between pages in Pulse: using `Link` components (for clickable navigation) and `ps.navigate()` (for programmatic navigation).
+
+### Using Link
+
+`Link` creates a clickable element that navigates to another page. It's like an `<a>` tag but works with Pulse's client-side routing.
+
+```python
+@ps.component
+def navbar():
+    return ps.nav(className="flex gap-4 p-4 bg-gray-100")[
+        ps.Link("/", className="text-blue-600 hover:underline")["Home"],
+        ps.Link("/about", className="text-blue-600 hover:underline")["About"],
+        ps.Link("/contact", className="text-blue-600 hover:underline")["Contact"],
+    ]
+```
+
+### Using ps.navigate()
+
+Sometimes you need to navigate programmatically, like after a form submission or when a user completes an action.
+
+```python
+class LoginState(ps.State):
+    async def login(self, data: ps.FormData):
+        # Validate credentials...
+        if valid:
+            # Redirect to the dashboard after successful login
+            ps.navigate("/dashboard")
+```
+
+You can also pass query parameters:
+
+```python
+# Navigate to /search?q=pulse
+ps.navigate("/search", query={"q": "pulse"})
+```
+
+## Layouts: Shared UI Across Pages
+
+Most apps have elements that appear on every page: a navigation bar, a sidebar, a footer. Instead of repeating these in every page component, you can use layouts.
+
+A layout wraps a group of routes and provides shared UI. The `Outlet` component marks where the child route's content should appear.
+
+```python
+@ps.component
+def app_layout():
+    return ps.div(className="min-h-screen")[
+        # Navigation appears on all pages in this layout
+        ps.nav(className="bg-gray-800 text-white p-4")[
+            ps.Link("/app", className="mr-4")["Dashboard"],
+            ps.Link("/app/settings", className="mr-4")["Settings"],
+            ps.Link("/app/profile")["Profile"],
+        ],
+        # Child route content appears here
+        ps.div(className="p-6")[
+            ps.Outlet(),
+        ],
+    ]
+
+
+@ps.component
+def dashboard():
+    return ps.h1("Dashboard", className="text-2xl")
+
+
+@ps.component
+def settings():
+    return ps.h1("Settings", className="text-2xl")
+
+
+@ps.component
+def profile():
+    return ps.h1("Profile", className="text-2xl")
+
+
+app = ps.App(
+    routes=[
+        ps.Route("/", home),  # No layout
+        ps.Layout("/app", app_layout, children=[
+            ps.Route("/", dashboard),        # /app
+            ps.Route("/settings", settings), # /app/settings
+            ps.Route("/profile", profile),   # /app/profile
+        ]),
+    ],
+)
+```
+
+The layout component renders the navigation, and `ps.Outlet()` is replaced with the content of whichever child route matches the current URL.
+
+## Dynamic Routes and Route Parameters
+
+Often you need routes that include variable parts, like `/users/123` or `/posts/my-first-post`. Pulse supports dynamic route segments using colon syntax.
+
+```python
+@ps.component
+def user_profile():
+    # Get route information including parameters
+    route = ps.route()
+    user_id = route.params.get("id")
+
+    return ps.div(
+        ps.h1(f"User Profile: {user_id}", className="text-2xl"),
+        ps.p(f"Showing details for user {user_id}"),
+    )
+
+
+app = ps.App(
+    routes=[
+        ps.Route("/users/:id", user_profile),
+    ],
+)
+```
+
+When a user visits `/users/42`, the `user_profile` component renders with `user_id` set to `"42"`.
+
+## Getting Route Information
+
+The `ps.route()` function gives you information about the current route:
+
+```python
+@ps.component
+def current_page():
+    route = ps.route()
+
+    return ps.div(
+        ps.p(f"Current path: {route.path}"),
+        ps.p(f"Query params: {route.query}"),
+        ps.p(f"Route params: {route.params}"),
+    )
+```
+
+This is useful for:
+- Reading query parameters (like `?search=pulse`)
+- Getting dynamic route parameters
+- Highlighting the current page in navigation
+
+## Nested Layouts
+
+You can nest layouts for complex applications. For example, you might have a main app layout and then a settings-specific layout with a sidebar.
+
+```python
+@ps.component
+def settings_layout():
+    return ps.div(className="flex")[
+        ps.aside(className="w-48 bg-gray-100 p-4")[
+            ps.Link("/app/settings/account")["Account"],
+            ps.Link("/app/settings/security")["Security"],
+            ps.Link("/app/settings/notifications")["Notifications"],
+        ],
+        ps.div(className="flex-1 p-4")[
+            ps.Outlet(),
+        ],
+    ]
+
+
+app = ps.App(
+    routes=[
+        ps.Layout("/app", app_layout, children=[
+            ps.Route("/", dashboard),
+            ps.Layout("/settings", settings_layout, children=[
+                ps.Route("/account", account_settings),
+                ps.Route("/security", security_settings),
+                ps.Route("/notifications", notification_settings),
+            ]),
+        ]),
+    ],
+)
+```
+
+## Tips for Routing
+
+1. **Keep routes organized**: For larger apps, consider defining routes in a separate file or grouping related routes together.
+
+2. **Use layouts for shared UI**: Don't repeat navigation or other common elements in every page component.
+
+3. **Prefer `Link` over `ps.navigate()`**: Links are more accessible and let users open links in new tabs.
+
+4. **Handle 404s**: Consider adding a catch-all route for unmatched URLs.
+
+## See also
+
+- [Core Concepts: Routing](/docs/concepts/routing)
+- [Reference: Routing](/docs/reference/pulse/routing)

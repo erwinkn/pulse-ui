@@ -1,0 +1,112 @@
+---
+title: "pulse.transpiler"
+description: "Advanced transpiler API"
+---
+
+Python-to-JavaScript transpiler for Pulse. Converts decorated Python functions to JavaScript code for client-side execution.
+
+## Overview
+
+The transpiler converts Python functions decorated with `@javascript` into JavaScript. It handles:
+
+- Function bodies (statements, expressions, control flow)
+- Dependencies (imports, other functions, constants)
+- JSX generation for React components
+- Code-splitting via dynamic imports
+
+## Primary API
+
+### `@javascript` Decorator
+
+```python
+from pulse.transpiler import javascript
+
+@javascript
+def add(a, b):
+    return a + b
+
+@javascript(jsx=True)
+def Button(*children, disabled=False):
+    return button(disabled=disabled)[children]
+```
+
+See [javascript-decorator](./javascript-decorator) for full API.
+
+### `Import`
+
+Declare JavaScript imports that register for code generation:
+
+```python
+from pulse.transpiler import Import
+
+useState = Import("useState", "react")
+Button = Import("Button", "@mantine/core")
+```
+
+See [imports-assets](./imports-assets) for full API.
+
+### `DynamicImport` / `import_`
+
+Code-splitting via dynamic imports:
+
+```python
+from pulse.transpiler import import_
+
+@javascript
+def load_chart():
+    return import_("./Chart").then(lambda m: m.default)
+```
+
+See [imports-assets](./imports-assets) for full API.
+
+### `transpile`
+
+Low-level function to transpile an AST function definition:
+
+```python
+from pulse.transpiler import transpile, emit
+
+result = transpile(fndef, deps={})
+js_code = emit(result)
+```
+
+See [emit-transpile](./emit-transpile) for full API.
+
+## Module Exports
+
+```python
+# Core decorator and function types
+javascript, JsFunction, JsxFunction, Jsx
+
+# Import system
+Import, ImportKind, DynamicImport, import_
+
+# Code emission
+transpile, Transpiler, emit, EmitContext
+
+# AST nodes
+Expr, Stmt, Node, Element, PulseNode
+Identifier, Literal, Array, Object, Call, Member, Subscript
+Binary, Unary, Ternary, Arrow, Function, Template, Spread, New
+Assign, Return, If, ForOf, While, Break, Continue, Block, Throw
+
+# Registries and utilities
+EXPR_REGISTRY, FUNCTION_CACHE
+registered_functions, registered_constants
+clear_function_cache, analyze_deps, collect_function_graph
+
+# Local assets
+LocalAsset, register_local_asset, get_registered_assets, clear_asset_registry
+
+# ID generation
+next_id, reset_id_counter
+
+# Errors
+TranspileError
+
+# JS module system
+JsModule
+
+# Constants
+Constant, UNDEFINED
+```

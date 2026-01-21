@@ -176,8 +176,6 @@ jobs:
       - name: Publish JavaScript package
         if: github.event_name == 'push'
         working-directory: ${{ matrix.package }}
-        env:
-          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun publish --access public
 
   publish_python:

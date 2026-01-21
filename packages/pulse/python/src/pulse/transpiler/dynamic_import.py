@@ -28,7 +28,6 @@ from pulse.transpiler.assets import LocalAsset, register_local_asset
 from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.imports import is_local_path, resolve_local_path
 from pulse.transpiler.nodes import Expr, Member
-from pulse.transpiler.vdom import VDOMNode
 
 if TYPE_CHECKING:
 	from pulse.transpiler.transpiler import Transpiler
@@ -56,7 +55,7 @@ class DynamicImport(Expr):
 			out.append(f'import("{self.src}")')
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		raise TypeError("DynamicImport cannot be rendered to VDOM")
 
 	@override
@@ -84,7 +83,7 @@ class DynamicImportFn(Expr):
 		)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		raise TypeError("import_ cannot be rendered to VDOM")
 
 	@override

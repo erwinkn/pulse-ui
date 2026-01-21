@@ -7,7 +7,7 @@ import pulse as ps
 
 
 class MantineComponentProps(TypedDict, total=False):
-	component: str | ps.Element
+	component: str | ps.Node
 	"Changes the default element used by the component"
-	renderRoot: Callable[[dict[str, Any]], ps.Element]
+	renderRoot: Callable[[dict[str, Any]], ps.Node]
 	"""Changes the default element used by the component, depending on props."""

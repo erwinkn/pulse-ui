@@ -19,7 +19,7 @@ from pulse.transpiler.assets import LocalAsset, register_local_asset
 from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Call, Expr, to_js_identifier
-from pulse.transpiler.vdom import VDOMNode
+from pulse.transpiler.vdom import VDOMExpr
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -320,7 +320,7 @@ class Import(Expr):
 		out.append(self.js_name)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		"""Render as a registry reference."""
 		return {"t": "ref", "key": self.id}
 

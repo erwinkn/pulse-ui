@@ -899,7 +899,7 @@ wheels = [
 
 [[package]]
 name = "pulse-ag-grid"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/pulse-ag-grid" }
 dependencies = [
     { name = "pulse-framework" },
@@ -910,7 +910,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-aws"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "packages/pulse-aws" }
 dependencies = [
     { name = "aws-cdk-lib" },
@@ -980,7 +980,7 @@ dev = [
 
 [[package]]
 name = "pulse-lucide"
-version = "0.546.0a0"
+version = "0.546.1"
 source = { editable = "packages/pulse-lucide" }
 dependencies = [
     { name = "pulse-framework" },
@@ -991,7 +991,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-mantine"
-version = "0.1.22"
+version = "0.1.23"
 source = { editable = "packages/pulse-mantine/python" }
 dependencies = [
     { name = "pulse-framework" },
@@ -1002,7 +1002,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-msal"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/pulse-msal" }
 
 [package.optional-dependencies]
@@ -1024,7 +1024,7 @@ dev = [{ name = "redis", specifier = ">=6.4.0" }]
 
 [[package]]
 name = "pulse-recharts"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "packages/pulse-recharts" }
 dependencies = [
     { name = "pulse-framework" },

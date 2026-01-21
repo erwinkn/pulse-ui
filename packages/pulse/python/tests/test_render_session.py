@@ -1019,8 +1019,8 @@ async def test_prerender_seeds_effect_deps_for_updates():
 
 
 @pytest.mark.asyncio
-async def test_prerender_keeps_active_mounts_and_drops_inactive():
-	"""Test that prerender preserves active mounts and removes inactive ones."""
+async def test_prerender_keeps_mounts_for_unrendered_paths():
+	"""Test that prerender preserves mounts that are not part of the new paths."""
 	routes = make_routes()
 	session = RenderSession("test-id", routes)
 
@@ -1053,11 +1053,8 @@ async def test_prerender_keeps_active_mounts_and_drops_inactive():
 	assert mount_a.effect is effect_a
 	assert mount_a.state == "active"
 	assert mount_a.route.query == "?page=2"
-	assert "/b" not in session.route_mounts
-	assert effect_b.parent is None
-	assert mount_b.tree.rendered is False
-	for dep in effect_b.deps:
-		assert effect_b not in dep.obs
+	assert session.route_mounts["/b"] is mount_b
+	assert mount_b.effect is effect_b
 
 	messages.clear()
 	session.update_route("/a", nav_info)
@@ -1127,8 +1124,8 @@ async def test_re_prerender_returns_fresh_vdom():
 
 
 @pytest.mark.asyncio
-async def test_detach_removes_mount_and_disposes_effect():
-	"""Test that detach removes mount and disposes the render effect."""
+async def test_detach_soft_keeps_mount_until_timeout_dispose():
+	"""Test that detach keeps the mount pending; timeout disposal removes it."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -1145,8 +1142,15 @@ async def test_detach_removes_mount_and_disposes_effect():
 	# Effect has deps before dispose
 	assert len(effect.deps) >= 0  # Just verify effect exists and is valid
 
-	# Detach
+	# Soft detach
 	session.detach("/a")
+
+	# Mount should remain pending
+	assert "/a" in session.route_mounts
+	assert mount.state == "pending"
+
+	# Immediate timeout to dispose
+	session.detach("/a", timeout=0)
 
 	# Mount should be removed
 	assert "/a" not in session.route_mounts

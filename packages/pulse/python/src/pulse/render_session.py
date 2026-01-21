@@ -78,6 +78,7 @@ def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
 
 
 MountState = Literal["pending", "active", "idle", "closed"]
+PendingAction = Literal["idle", "dispose"]
 T_Render = TypeVar("T_Render")
 
 
@@ -90,6 +91,7 @@ class RouteMount:
 	_pulse_ctx: PulseContext | None
 	initialized: bool
 	state: MountState
+	pending_action: PendingAction | None
 	queue: list[ServerMessage] | None
 	queue_timeout: asyncio.TimerHandle | None
 	render_batch_id: int
@@ -110,6 +112,7 @@ class RouteMount:
 		self.tree = RenderTree(route.render())
 		self.initialized = False
 		self.state = "pending"
+		self.pending_action = None
 		self.queue = []
 		self.queue_timeout = None
 		self.render_batch_id = -1
@@ -118,23 +121,44 @@ class RouteMount:
 	def update_route(self, route_info: RouteInfo) -> None:
 		self.route.update(route_info)
 
-	def _cancel_queue_timeout(self) -> None:
+	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
 			self.queue_timeout.cancel()
 			self.queue_timeout = None
+		self.pending_action = None
 
-	def start_pending(self, timeout: float) -> None:
-		self._cancel_queue_timeout()
+	def _on_pending_timeout(self) -> None:
+		if self.state != "pending":
+			return
+		action = self.pending_action
+		self.pending_action = None
+		if action == "dispose":
+			self.render._dispose_mount(self.path, self)
+			return
+		self.to_idle()
+
+	def start_pending(self, timeout: float, *, action: PendingAction = "idle") -> None:
+		if self.state == "pending":
+			prev_action = self.pending_action
+			next_action: PendingAction = (
+				"dispose" if prev_action == "dispose" or action == "dispose" else "idle"
+			)
+			self._cancel_pending_timeout()
+			self.pending_action = next_action
+			self.queue_timeout = later(timeout, self._on_pending_timeout)
+			return
+		self._cancel_pending_timeout()
 		if self.state == "idle" and self.effect:
 			self.effect.resume()
 		self.state = "pending"
 		self.queue = []
-		self.queue_timeout = later(timeout, self.to_idle)
+		self.pending_action = action
+		self.queue_timeout = later(timeout, self._on_pending_timeout)
 
 	def activate(self, send_message: Callable[[ServerMessage], Any]) -> None:
 		if self.state != "pending":
 			return
-		self._cancel_queue_timeout()
+		self._cancel_pending_timeout()
 		if self.queue:
 			for msg in self.queue:
 				send_message(msg)
@@ -160,7 +184,7 @@ class RouteMount:
 			return
 		self.state = "idle"
 		self.queue = None
-		self._cancel_queue_timeout()
+		self._cancel_pending_timeout()
 		if self.effect:
 			self.effect.pause()
 
@@ -198,7 +222,7 @@ class RouteMount:
 			self.effect.flush()
 
 	def dispose(self) -> None:
-		self._cancel_queue_timeout()
+		self._cancel_pending_timeout()
 		self.state = "closed"
 		self.queue = None
 		self.tree.unmount()
@@ -215,6 +239,7 @@ class RenderSession:
 	route_mounts: dict[str, RouteMount]
 	connected: bool
 	prerender_queue_timeout: float
+	detach_queue_timeout: float
 	disconnect_queue_timeout: float
 	render_loop_limit: int
 	_server_address: str | None
@@ -232,7 +257,8 @@ class RenderSession:
 		server_address: str | None = None,
 		client_address: str | None = None,
 		prerender_queue_timeout: float = 5.0,
-		disconnect_queue_timeout: float = 2.0,
+		detach_queue_timeout: float = 15.0,
+		disconnect_queue_timeout: float = 300.0,
 		render_loop_limit: int = 50,
 	) -> None:
 		from pulse.channel import ChannelsManager
@@ -252,6 +278,7 @@ class RenderSession:
 		self._pending_api = {}
 		self._pending_js_results = {}
 		self.prerender_queue_timeout = prerender_queue_timeout
+		self.detach_queue_timeout = detach_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.render_loop_limit = render_loop_limit
 
@@ -351,17 +378,9 @@ class RenderSession:
 	) -> dict[str, ServerInitMessage | ServerNavigateToMessage]:
 		"""
 		Synchronous render for SSR. Returns per-path init or navigate_to messages.
-		- Resets all existing mounts before rendering the new page routes
 		- Creates mounts in PENDING state and starts queue
 		"""
 		normalized = [ensure_absolute_path(path) for path in paths]
-		active_paths = set(normalized)
-
-		for old_path, mount in list(self.route_mounts.items()):
-			if old_path in active_paths:
-				continue
-			mount.dispose()
-			del self.route_mounts[old_path]
 
 		results: dict[str, ServerInitMessage | ServerNavigateToMessage] = {}
 
@@ -379,7 +398,7 @@ class RenderSession:
 				if mount.effect is None:
 					mount.ensure_effect(lazy=True, flush=False)
 
-			if mount.state != "active":
+			if mount.state != "active" and mount.queue_timeout is None:
 				mount.start_pending(self.prerender_queue_timeout)
 			assert mount.effect is not None
 			with mount.effect.capture_deps(update_deps=True):
@@ -425,16 +444,30 @@ class RenderSession:
 		except Exception as e:
 			self.report_error(path, "navigate", e)
 
-	def detach(self, path: str):
-		"""Client no longer wants updates. Dispose Effect, remove mount."""
-		path = ensure_absolute_path(path)
-		if path not in self.route_mounts:
+	def _dispose_mount(self, path: str, mount: RouteMount) -> None:
+		current = self.route_mounts.get(path)
+		if current is not mount:
 			return
 		try:
-			mount = self.route_mounts.pop(path)
+			self.route_mounts.pop(path, None)
 			mount.dispose()
 		except Exception as e:
 			self.report_error(path, "unmount", e)
+
+	def detach(self, path: str, *, timeout: float | None = None):
+		"""Client no longer wants updates. Queue briefly, then dispose."""
+		path = ensure_absolute_path(path)
+		print(f"Detaching '{path}'")
+		mount = self.route_mounts.get(path)
+		if not mount:
+			return
+
+		if timeout is None:
+			timeout = self.detach_queue_timeout
+		if timeout <= 0:
+			self._dispose_mount(path, mount)
+			return
+		mount.start_pending(timeout, action="dispose")
 
 	# ---- Effect creation ----
 
@@ -515,7 +548,7 @@ class RenderSession:
 	def close(self):
 		self.forms.dispose()
 		for path in list(self.route_mounts.keys()):
-			self.detach(path)
+			self.detach(path, timeout=0)
 		self.route_mounts.clear()
 		for value in self._global_states.values():
 			value.dispose()

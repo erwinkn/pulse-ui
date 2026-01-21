@@ -213,6 +213,8 @@ class App:
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
+	detach_queue_timeout: float
+	disconnect_queue_timeout: float
 
 	def __init__(
 		self,
@@ -232,6 +234,8 @@ class App:
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
+		detach_queue_timeout: float = 15.0,
+		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
 		render_loop_limit: int = 50,
 	):
@@ -280,6 +284,8 @@ class App:
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self.session_timeout = session_timeout
+		self.detach_queue_timeout = detach_queue_timeout
+		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
 		self.render_loop_limit = render_loop_limit
 
@@ -817,6 +823,8 @@ class App:
 	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
+		print(f"[MSG] {msg}")
+
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
 				render.attach(msg["path"], msg["routeInfo"])
@@ -995,6 +1003,8 @@ class App:
 			self.routes,
 			server_address=self.server_address,
 			client_address=client_address,
+			detach_queue_timeout=self.detach_queue_timeout,
+			disconnect_queue_timeout=self.disconnect_queue_timeout,
 			render_loop_limit=self.render_loop_limit,
 		)
 		self.render_sessions[rid] = render

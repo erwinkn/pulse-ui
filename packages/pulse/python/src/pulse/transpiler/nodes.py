@@ -450,6 +450,8 @@ class Jsx(ExprWrapper):
 
 		for k, v in kwargs.items():
 			if k == "key":
+				if v is None:
+					continue
 				if not isinstance(v, str):
 					raise ValueError("key must be a string")
 				key = v

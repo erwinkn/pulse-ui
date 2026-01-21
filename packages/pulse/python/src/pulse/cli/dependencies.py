@@ -11,11 +11,10 @@ from pulse.cli.packages import (
 	is_workspace_spec,
 	load_package_json,
 	parse_dependency_spec,
-	parse_install_spec,
 	resolve_versions,
 	spec_satisfies,
 )
-from pulse.transpiler.imports import get_registered_imports
+from pulse.requirements import get_requirements
 
 
 def convert_pep440_to_semver(python_version: str) -> str:
@@ -98,20 +97,12 @@ def get_required_dependencies(
 		"pulse-ui-client": [pulse_version],
 	}
 
-	# New transpiler v2 imports
-	for imp in get_registered_imports():
-		if imp.src:
-			try:
-				spec = parse_install_spec(imp.src)
-			except ValueError as exc:
-				# We might want to be more lenient here or at least log it,
-				# but following existing pattern of raising DependencyError
-				raise DependencyError(str(exc)) from None
-			if spec:
-				name_only, ver = parse_dependency_spec(spec)
-				constraints.setdefault(name_only, []).append(ver)
-				if imp.version:
-					constraints.setdefault(name_only, []).append(imp.version)
+	for src, version in get_requirements():
+		name_only, ver_in_src = parse_dependency_spec(src)
+		if ver_in_src:
+			constraints.setdefault(name_only, []).append(ver_in_src)
+		if version:
+			constraints.setdefault(name_only, []).append(version)
 
 	try:
 		resolved = resolve_versions(constraints)

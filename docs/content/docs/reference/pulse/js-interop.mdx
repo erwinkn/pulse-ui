@@ -127,7 +127,7 @@ Import(
 | `kind` | `ImportKind` | `"named"` | Import type: `"named"`, `"default"`, `"namespace"`, `"side_effect"` |
 | `is_type` | `bool` | `False` | Type-only import (TypeScript) |
 | `lazy` | `bool` | `False` | Generate lazy import factory for code-splitting |
-| `version` | `str \| None` | `None` | Package version constraint |
+| `version` | `str \| None` | `None` | Package version constraint. Adds a dependency requirement used by the CLI |
 | `before` | `tuple[str, ...]` | `()` | Imports that must come before this one |
 
 ### Usage
@@ -161,6 +161,44 @@ Chart = Import("Chart", "./Chart", kind="default", lazy=True)
 | `is_lazy` | `bool` | True if lazy import |
 | `is_default` | `bool` | True if default import |
 | `is_namespace` | `bool` | True if namespace import |
+
+---
+
+## require
+
+Register default npm package version constraints used by dependency resolution.
+
+```python
+from pulse import require
+```
+
+### Signature
+
+```python
+def require(packages: Mapping[str, str]) -> None
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `packages` | `Mapping[str, str]` | required | Package name to version constraint |
+
+### Usage
+
+```python
+import pulse as ps
+
+ps.require(
+    {
+        "@mantine/core": ">=8.0.0",
+        "@mantine/dates": ">=8.0.0",
+        "dayjs": "^1",
+    }
+)
+```
+
+Call this at module import time to register requirements once. `Import(..., version=...)` also registers a requirement automatically.
 
 ---
 

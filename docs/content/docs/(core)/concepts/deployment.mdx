@@ -200,12 +200,22 @@ Setting `PULSE_ENV=prod` enables production optimizations and disables hot reloa
 
 ## AWS deployment
 
-The `pulse-aws` package makes it easy to run Pulse on Lambda, ECS, and other AWS services:
+`pulse-aws` is the current official example, not the only way to deploy Pulse. You can run Pulse anywhere you can host a long-lived Python server + WebSocket connections.
 
-```python
-from pulse_aws import create_lambda_handler
+Why people use it:
+- Keeps old servers alive while users are connected, so deploys don't drop sessions.
+- Runs multiple versions at once with affinity routing, so you can balance users across them.
 
-handler = create_lambda_handler(app)
+<Callout type="warn">
+Unverified example. Not run in this update.
+</Callout>
+
+```bash
+uv run pulse-aws deploy \
+  --deployment-name prod \
+  --domain app.example.com \
+  --app-file src/app/main.py \
+  --web-root web
 ```
 
 See the [Pulse AWS package documentation](/docs/packages/pulse-aws) for detailed guides.

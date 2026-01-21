@@ -2,7 +2,7 @@
 # pyright: reportUnsupportedDunderAll=false
 import pulse as ps
 
-from .props import lucide_signature
+from pulse_lucide.props import lucide_signature
 
 __all__ = [
 	"AArrowDown",
@@ -750,6 +750,7 @@ __all__ = [
 	"Glasses",
 	"Globe",
 	"GlobeLock",
+	"GlobeX",
 	"Goal",
 	"Gpu",
 	"GraduationCap",

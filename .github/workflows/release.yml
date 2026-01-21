@@ -162,21 +162,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: npm install --workspaces --include-workspace-root --no-package-lock
+
+      - name: Build JavaScript package
+        working-directory: ${{ matrix.package }}
+        run: npm run build
 
       - name: Publish JavaScript package (dry run)
         if: github.event_name != 'push'
         working-directory: ${{ matrix.package }}
-        run: bun pm pack --dry-run --quiet
+        run: npm publish --dry-run --access public --ignore-scripts
 
       - name: Publish JavaScript package
         if: github.event_name == 'push'
         working-directory: ${{ matrix.package }}
-        run: bun publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --ignore-scripts
 
   publish_python:
     needs: detect

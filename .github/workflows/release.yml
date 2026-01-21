@@ -1,7 +1,6 @@
 name: Release
 
-permissions:
-  id-token: write  # Required for OIDC
+
 
 on:
   push:
@@ -122,6 +121,9 @@ jobs:
     if: needs.detect.outputs.js_matrix != '[]'
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'push' && 'release' || 'release-dry-run' }}
+    permissions:
+      id-token: write  
+      contents: read
     strategy:
       matrix:
         package: ${{ fromJson(needs.detect.outputs.js_matrix) }}
@@ -137,7 +139,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
@@ -150,14 +152,12 @@ jobs:
       - name: Publish JavaScript package (dry run)
         if: github.event_name != 'push'
         working-directory: ${{ matrix.package }}
-        run: npm publish --dry-run --access public --ignore-scripts
+        run: npm publish --dry-run --access public 
 
       - name: Publish JavaScript package
         if: github.event_name == 'push'
         working-directory: ${{ matrix.package }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --ignore-scripts
+        run: npm publish --access public
 
   publish_python:
     needs: detect

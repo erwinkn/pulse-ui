@@ -3,7 +3,7 @@ Minimal FastAPI server for proving ECS deployment workflow.
 
 This server reads DEPLOYMENT_ID from environment and exposes:
 - GET / → returns deployment info with affinity header
-- GET /_health → health check for ECS/ALB
+- GET /_pulse/health → health check for ECS/ALB
 
 For the reaper-based deployment workflow, this server:
 - Discovers its ECS task ID from the metadata endpoint
@@ -185,7 +185,7 @@ async def root(response: Response) -> dict[str, str | bool]:
 	return {"deployment_id": DEPLOYMENT_ID, "ok": True}
 
 
-@app.get("/_health")
+@app.get("/_pulse/health")
 async def health() -> JSONResponse:
 	"""
 	Health check endpoint for ECS/ALB target health.

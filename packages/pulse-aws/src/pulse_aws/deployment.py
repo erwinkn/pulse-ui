@@ -738,7 +738,7 @@ async def create_service_and_target_group(
 	baseline: BaselineStackOutputs,
 	*,
 	desired_count: int = 2,
-	health_check_path: str = "/_health",
+	health_check_path: str = "/_pulse/health",
 	health_check_interval: int = 30,
 	health_check_timeout: int = 5,
 	healthy_threshold: int = 2,

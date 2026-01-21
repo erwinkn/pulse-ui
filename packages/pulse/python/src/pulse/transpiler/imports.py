@@ -14,7 +14,8 @@ from typing import (
 )
 from typing import Literal as Lit
 
-from pulse.cli.packages import pick_more_specific
+from pulse.cli.packages import parse_dependency_spec, pick_more_specific
+from pulse.requirements import add_requirement, clear_requirements
 from pulse.transpiler.assets import LocalAsset, register_local_asset
 from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.id import next_id
@@ -131,6 +132,14 @@ _ImportKey: TypeAlias = tuple[str, str, str, bool]
 _IMPORT_REGISTRY: dict[_ImportKey, "Import"] = {}
 
 
+def _is_alias_path(path: str) -> bool:
+	return path.startswith("@/") or path.startswith("~/")
+
+
+def _is_url(path: str) -> bool:
+	return path.startswith("http://") or path.startswith("https://")
+
+
 def get_registered_imports() -> list["Import"]:
 	"""Get all registered imports."""
 	return list(_IMPORT_REGISTRY.values())
@@ -139,6 +148,7 @@ def get_registered_imports() -> list["Import"]:
 def clear_import_registry() -> None:
 	"""Clear the import registry."""
 	_IMPORT_REGISTRY.clear()
+	clear_requirements()
 
 
 @dataclass(slots=True, init=False)
@@ -239,6 +249,17 @@ class Import(Expr):
 				# Register with unified asset registry
 				asset = register_local_asset(resolved)
 				import_src = str(resolved)
+
+		if (
+			not is_local_path(import_src)
+			and not _is_alias_path(import_src)
+			and not _is_url(import_src)
+		):
+			name_only, ver_in_src = parse_dependency_spec(import_src)
+			if ver_in_src:
+				add_requirement(name_only, ver_in_src)
+			if version:
+				add_requirement(name_only, version)
 
 		self.name = name
 		self.src = import_src

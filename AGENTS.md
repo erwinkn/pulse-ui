@@ -6,13 +6,12 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 
 - Be extremely concise. Sacrifice grammar for the sake of concision.
 - Read the README.md in the relevant package before starting work
-- Always add tests when implementing a new feature
+- Always add tests when implementing a new feature. 
 - Run `make test` after implementing
 - Run `make all` before committing
 - Check `examples/` for usage patterns
 - Use `make bump` for changing package versions
 - When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)
-- Do not add tests without being asked for it.
 - Use `bun info ...` to get information about a JS package
 
 ## Code Style

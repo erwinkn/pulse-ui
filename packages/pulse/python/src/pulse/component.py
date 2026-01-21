@@ -112,7 +112,7 @@ class Component(Generic[P]):
 			flattened = flatten_children(
 				args,  # pyright: ignore[reportArgumentType]
 				parent_name=f"<{self.name}>",
-				warn_stacklevel=4,
+				warn_stacklevel=None,
 			)
 			args = tuple(flattened)  # pyright: ignore[reportAssignmentType]
 

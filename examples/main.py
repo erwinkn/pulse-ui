@@ -7,6 +7,7 @@ from typing import Any, TypedDict, override
 
 import pulse as ps
 from pulse.js import console
+from pulse.js.react import lazy
 from pulse.messages import ClientMessage
 from pulse.middleware import (
 	ConnectResponse,
@@ -492,9 +493,7 @@ def dynamic_route():
 
 
 @ps.react_component(
-	ps.Import(
-		"CustomDatePicker", "~/components/date-picker", kind="default", lazy=True
-	),
+	lazy(ps.Import("~/components/date-picker", lazy=True)),
 )
 def DatePicker(
 	*children: ps.Node,
@@ -504,7 +503,7 @@ def DatePicker(
 	placeholder: str = "Select a date",
 	className: str = "",
 	showTimeSelect: bool = False,
-) -> ps.Element: ...
+): ...
 
 
 class DatePickerState(ps.State):

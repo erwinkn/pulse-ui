@@ -277,7 +277,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_jsexpr(tmp_path: Pat
 	test_css_file = tmp_path / "test.module.css"
 	test_css_file.write_text(".foo { color: red; }")
 
-	css_module = Import("styles", str(test_css_file), kind="default")
+	css_module = Import(str(test_css_file))
 	css_ref = Member(css_module, "foo")
 
 	tree.rerender(div(render=css_ref))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
@@ -849,7 +849,7 @@ def test_css_module_with_jsexpr(tmp_path: Path):
 	test_css_file = tmp_path / "test.module.css"
 	test_css_file.write_text(".test { color: red; }")
 
-	css_module = Import("styles", str(test_css_file), kind="default")
+	css_module = Import(str(test_css_file))
 	css_ref = Member(css_module, "test")
 
 	tree = RenderTree(div(className=css_ref))

@@ -154,14 +154,13 @@ class Import(Expr):
 		useState = Import("useState", "react")
 
 		# Default import: import React from "react"
-		React = Import("React", "react", kind="default")
+		React = Import("react")
 
-		# Namespace import: import * as utils from "./utils"
-		utils = Import("utils", "./utils", kind="namespace")
+		# Namespace import: import * as React from "react"
+		React = Import("*", "react")
 
 		# Side-effect import: import "./styles.css"
-		Import("", "./styles.css", kind="side_effect")
-		Import("./styles.css")
+		Import("./styles.css", side_effect=True)
 
 		# Type-only import: import type { Props } from "./types"
 		Props = Import("Props", "./types", is_type=True)
@@ -171,12 +170,12 @@ class Import(Expr):
 		# Button("Click me", disabled=True) -> <Button_1 disabled={true}>Click me</Button_1>
 
 		# Local file imports (relative or absolute paths)
-		Import("", "./styles.css", kind="side_effect")  # Local CSS
-		utils = Import("utils", "./utils", kind="namespace")  # Local JS (resolves extension)
-		config = Import("config", "/absolute/path/config", kind="default")  # Absolute path
+		Import("./styles.css", side_effect=True)  # Local CSS
+		utils = Import("*", "./utils")  # Local JS namespace (resolves extension)
+		config = Import("/absolute/path/config")  # Absolute path default import
 
 		# Lazy import (generates factory for code-splitting)
-		Chart = Import("Chart", "./Chart", kind="default", lazy=True)
+		Chart = Import("./Chart", lazy=True)
 		# Generates: const Chart_1 = () => import("./Chart")
 	"""
 
@@ -197,7 +196,7 @@ class Import(Expr):
 		name: str,
 		src: str | None = None,
 		*,
-		kind: ImportKind | None = None,
+		side_effect: bool = False,
 		is_type: bool = False,
 		lazy: bool = False,
 		version: str | None = None,
@@ -205,13 +204,25 @@ class Import(Expr):
 		_caller_depth: int = 2,
 	) -> None:
 		if src is None:
-			if kind not in (None, "side_effect"):
-				raise TypeError(
-					"Import single-argument form is reserved for side effect imports"
-				)
+			if name == "*":
+				raise TypeError("Import('*') requires a source")
 			src = name
-			name = ""
-			kind = "side_effect"
+			if side_effect:
+				name = ""
+				kind: ImportKind = "side_effect"
+			else:
+				kind = "default"
+		else:
+			if side_effect:
+				raise TypeError("side_effect imports cannot specify a name")
+			if name == "*":
+				name = src
+				kind = "namespace"
+			else:
+				if not name:
+					raise TypeError("Import(name, src) requires a non-empty name")
+				kind = "named"
+
 		# Validate: lazy imports cannot be type-only
 		if lazy and is_type:
 			raise TranspileError("Import cannot be both lazy and type-only")
@@ -228,10 +239,6 @@ class Import(Expr):
 				# Register with unified asset registry
 				asset = register_local_asset(resolved)
 				import_src = str(resolved)
-
-		# Default kind to "named" if not specified
-		if kind is None:
-			kind = "named"
 
 		self.name = name
 		self.src = import_src

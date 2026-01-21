@@ -119,7 +119,7 @@ class TestImportDependency:
 
 	def test_import_attribute_access(self):
 		"""Import with attribute access produces Member."""
-		React = Import("React", "react", kind="default")  # ID 1
+		React = Import("react")  # ID 1
 
 		@javascript
 		def get_version() -> Any:  # ID 2
@@ -127,11 +127,11 @@ class TestImportDependency:
 
 		fn = get_version.transpile()
 		code = emit(fn)
-		assert code == "function get_version_2() {\nreturn React_1.version;\n}"
+		assert code == "function get_version_2() {\nreturn react_1.version;\n}"
 
 	def test_import_method_call(self):
 		"""Import method call chains correctly."""
-		router = Import("router", "next/router", kind="default")  # ID 1
+		router = Import("next/router")  # ID 1
 
 		@javascript
 		def navigate() -> Any:  # ID 2
@@ -139,7 +139,7 @@ class TestImportDependency:
 
 		fn = navigate.transpile()
 		code = emit(fn)
-		assert code == 'function navigate_2() {\nreturn router_1.push("/home");\n}'
+		assert code == 'function navigate_2() {\nreturn next_router_1.push("/home");\n}'
 
 	def test_import_deduplication(self):
 		"""Same import used twice gets same ID."""
@@ -224,7 +224,7 @@ class TestImportAsDecorator:
 		from pulse.transpiler.imports import Import
 		from pulse.transpiler.nodes import Signature
 
-		clsx_import = Import("clsx", "clsx", kind="default")
+		clsx_import = Import("clsx")
 
 		@clsx_import.as_
 		def clsx(*args: str) -> str: ...
@@ -238,7 +238,7 @@ class TestImportAsDecorator:
 		from pulse.transpiler.imports import Import
 		from pulse.transpiler.nodes import Call
 
-		clsx_import = Import("clsx", "clsx", kind="default")
+		clsx_import = Import("clsx")
 
 		@clsx_import.as_
 		def clsx(*args: str) -> str: ...
@@ -267,19 +267,20 @@ class TestImportAsDecorator:
 
 
 class TestImportSingleArg:
-	"""Test Import single-argument side-effect form."""
+	"""Test Import single-argument default form."""
 
-	def test_import_single_arg_side_effect_package(self):
-		"""Import("react") creates a side-effect import."""
+	def test_import_single_arg_default_package(self):
+		"""Import("react") creates a default import."""
 		imp = Import("react")
-		assert imp.kind == "side_effect"
-		assert imp.name == ""
+		assert imp.kind == "default"
+		assert imp.name == "react"
 		assert imp.src == "react"
-		assert imp.is_side_effect is True
+		assert imp.is_default is True
+		assert imp.is_side_effect is False
 		assert imp.asset is None
 
-	def test_import_single_arg_side_effect_local(self, tmp_path: Path):
-		"""Import("./styles.css") resolves local assets."""
+	def test_import_single_arg_default_local(self, tmp_path: Path):
+		"""Import("./styles.css") resolves local assets and defaults."""
 		css_file = tmp_path / "styles.css"
 		css_file.write_text("body { margin: 0; }")
 
@@ -293,8 +294,8 @@ class TestImportSingleArg:
 
 		try:
 			imp = Import("./styles.css")
-			assert imp.kind == "side_effect"
-			assert imp.name == ""
+			assert imp.kind == "default"
+			assert imp.name == "./styles.css"
 			assert imp.is_local
 			assert imp.asset is not None
 			assert imp.asset.source_path == css_file
@@ -302,10 +303,33 @@ class TestImportSingleArg:
 		finally:
 			imports_module.caller_file = original_caller_file
 
-	def test_import_single_arg_rejects_non_side_effect_kind(self):
-		"""Single-argument form only supports side-effect imports."""
-		with pytest.raises(TypeError, match="single-argument form"):
-			Import("./styles.css", kind="default")
+	def test_import_namespace_star(self):
+		"""Import("*", "react") creates a namespace import."""
+		imp = Import("*", "react")
+		assert imp.kind == "namespace"
+		assert imp.name == "react"
+		assert imp.src == "react"
+		assert imp.is_namespace is True
+
+	def test_import_side_effect_flag(self):
+		"""side_effect=True creates a side-effect import."""
+		imp = Import("react", side_effect=True)
+		assert imp.kind == "side_effect"
+		assert imp.name == ""
+		assert imp.src == "react"
+		assert imp.is_side_effect is True
+
+	def test_import_star_requires_source(self):
+		"""Import("*") requires a source path."""
+		with pytest.raises(TypeError, match="requires a source"):
+			Import("*")
+
+	def test_import_side_effect_rejects_name(self):
+		"""side_effect cannot be combined with an explicit name."""
+		with pytest.raises(
+			TypeError, match="side_effect imports cannot specify a name"
+		):
+			Import("Foo", "pkg", side_effect=True)
 
 
 class TestPathHelpers:
@@ -556,7 +580,7 @@ class TestImportLocalFiles:
 		imports_module.caller_file = lambda depth: caller
 
 		try:
-			imp = Import("", "./styles.css", kind="side_effect")
+			imp = Import("./styles.css", side_effect=True)
 			assert imp.is_local
 			assert imp.asset is not None
 			assert imp.asset.source_path == css_file
@@ -569,7 +593,7 @@ class TestImportLocalFiles:
 		css_file = tmp_path / "absolute.css"
 		css_file.write_text("body { margin: 0; }")
 
-		imp = Import("", str(css_file), kind="side_effect")
+		imp = Import(str(css_file), side_effect=True)
 		assert imp.is_local
 		assert imp.asset is not None
 		assert imp.asset.source_path == css_file
@@ -580,7 +604,7 @@ class TestImportLocalFiles:
 		ts_file.write_text("export const x = 1;")
 
 		# Import without extension
-		imp = Import("utils", str(tmp_path / "utils"), kind="namespace")
+		imp = Import("*", str(tmp_path / "utils"))
 		assert imp.is_local
 		assert imp.asset is not None
 		assert imp.asset.source_path == ts_file
@@ -603,7 +627,7 @@ class TestImportLocalFiles:
 		css_file = tmp_path / "styles.css"
 		css_file.write_text("body { margin: 0; }")
 
-		imp = Import("", str(css_file), kind="side_effect")
+		imp = Import(str(css_file), side_effect=True)
 		assert imp.asset is not None
 
 		filename = imp.asset.asset_filename
@@ -616,7 +640,7 @@ class TestImportLocalFiles:
 		ts_file = tmp_path / "Component.tsx"
 		ts_file.write_text("export const C = () => <div />;")
 
-		imp = Import("Component", str(ts_file), kind="default")
+		imp = Import(str(ts_file))
 		assert imp.asset is not None
 
 		filename = imp.asset.asset_filename
@@ -636,8 +660,8 @@ class TestImportLocalFiles:
 		file1.write_text("export const x = 1;")
 		file2.write_text("export const y = 2;")
 
-		imp1 = Import("utils1", str(file1), kind="namespace")
-		imp2 = Import("utils2", str(file2), kind="namespace")
+		imp1 = Import("*", str(file1))
+		imp2 = Import("*", str(file2))
 
 		assert imp1.asset is not None
 		assert imp2.asset is not None
@@ -653,7 +677,7 @@ class TestLazyImports:
 
 	def test_import_lazy_flag_stored(self):
 		"""Import stores the lazy flag correctly."""
-		lazy_imp = Import("Chart", "./Chart", kind="default", lazy=True)
+		lazy_imp = Import("./Chart", lazy=True)
 		eager_imp = Import("Button", "@mantine/core")
 
 		assert lazy_imp.lazy is True
@@ -668,24 +692,24 @@ class TestLazyImports:
 
 	def test_lazy_import_separate_from_eager(self):
 		"""Lazy and eager imports of same symbol are tracked separately."""
-		eager = Import("Chart", "./Chart", kind="default")
-		lazy = Import("Chart", "./Chart", kind="default", lazy=True)
+		eager = Import("./Chart")
+		lazy = Import("./Chart", lazy=True)
 
 		# They should have different IDs (separate registry entries)
 		assert eager.id != lazy.id
 
 	def test_lazy_import_dedupes_with_lazy(self):
 		"""Multiple lazy imports of same symbol dedupe."""
-		lazy1 = Import("Chart", "./Chart", kind="default", lazy=True)
-		lazy2 = Import("Chart", "./Chart", kind="default", lazy=True)
+		lazy1 = Import("./Chart", lazy=True)
+		lazy2 = Import("./Chart", lazy=True)
 
 		# Same ID means deduped
 		assert lazy1.id == lazy2.id
 
 	def test_lazy_import_js_name(self):
 		"""Lazy import has correct js_name."""
-		imp = Import("Chart", "./Chart", kind="default", lazy=True)
-		assert imp.js_name.startswith("Chart_")
+		imp = Import("./Chart", lazy=True)
+		assert imp.js_name.endswith(f"_{imp.id}")
 		assert imp.id in imp.js_name
 
 

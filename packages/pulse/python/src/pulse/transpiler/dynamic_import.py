@@ -11,7 +11,7 @@ For lazy-loaded React components, use Import(lazy=True) with React.lazy:
     from pulse.js.react import React, lazy
 
     # Low-level: Import(lazy=True) creates a factory, wrap with React.lazy
-    factory = Import("Chart", "./Chart", kind="default", lazy=True)
+    factory = Import("./Chart", lazy=True)
     LazyChart = Jsx(React.lazy(factory))
 
     # High-level: lazy() helper combines both

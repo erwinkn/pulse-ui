@@ -1022,7 +1022,7 @@ class TestLazy:
 		from pulse.js.react import lazy
 
 		# Create lazy component at definition time
-		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		factory = Import("./Chart", lazy=True)
 		LazyChart = lazy(factory)
 
 		# Should be a Jsx wrapping a Constant
@@ -1050,7 +1050,7 @@ class TestLazy:
 		from pulse.js.react import lazy
 		from pulse.transpiler.function import CONSTANT_REGISTRY
 
-		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		factory = Import("./Chart", lazy=True)
 
 		@javascript
 		def create_lazy():
@@ -1095,7 +1095,7 @@ class TestLazy:
 		"""React.lazy(factory) called in @javascript."""
 		from pulse.js import React
 
-		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		factory = Import("./Chart", lazy=True)
 
 		@javascript
 		def create_lazy_via_react():
@@ -1106,7 +1106,7 @@ class TestLazy:
 		code = emit(fn)
 		assert code == (
 			"function create_lazy_via_react_3() {\n"
-			"let LazyComp = lazy_4(Chart_2);\n"
+			"let LazyComp = lazy_4(__Chart_2);\n"
 			"return LazyComp;\n"
 			"}"
 		)
@@ -1117,7 +1117,7 @@ class TestLazy:
 		from pulse.js.react import Suspense, lazy
 
 		# Create lazy component at definition time
-		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		factory = Import("./Chart", lazy=True)
 		LazyChart = lazy(factory)
 
 		@javascript
@@ -1138,7 +1138,7 @@ class TestLazy:
 		"""Lazy component with props in rendered tree."""
 		from pulse.js.react import lazy
 
-		factory = Import("Chart", "./Chart", kind="default", lazy=True)
+		factory = Import("./Chart", lazy=True)
 		LazyChart = lazy(factory)
 
 		@javascript

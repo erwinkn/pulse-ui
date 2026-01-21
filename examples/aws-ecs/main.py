@@ -493,9 +493,7 @@ def dynamic_route():
 
 
 @ps.react_component(
-	ps.Import(
-		"CustomDatePicker", "~/components/date-picker", kind="default", lazy=True
-	),
+	ps.Import("~/components/date-picker", lazy=True),
 )
 def DatePicker(
 	*children: ps.Node,

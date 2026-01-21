@@ -36,8 +36,8 @@ from pulse.js.react import useEffect, useState
 
 
 # Import a JS function with proper typing using Import as a decorator
-@ps.Import("clsx", "clsx", kind="default").as_
-def clsx(*classes: str) -> str:
+@ps.Import("clsx").as_
+def clsx(*classes: str):
 	"""Typed import for the clsx library."""
 	...
 
@@ -50,7 +50,7 @@ def clsx(*classes: str) -> str:
 @ps.react_component(ps.Import("FunctionTester", "~/components/function-tester"))
 def FunctionTester(
 	fn: Any, label: str, initialValue: Any = None, showCode: bool = False
-) -> ps.Element: ...
+): ...
 
 
 @ps.react_component(ps.Import("MultiArgFunctionTester", "~/components/function-tester"))
@@ -60,19 +60,19 @@ def MultiArgFunctionTester(
 	argLabels: list[str] | None = None,
 	initialValues: list[Any] | None = None,
 	showCode: bool = False,
-) -> ps.Element: ...
+): ...
 
 
 @ps.react_component(ps.Import("StringFunctionTester", "~/components/function-tester"))
 def StringFunctionTester(
 	fn: Any, label: str, initialValue: str = "", showCode: bool = False
-) -> ps.Element: ...
+): ...
 
 
 @ps.react_component(ps.Import("ArrayFunctionTester", "~/components/function-tester"))
 def ArrayFunctionTester(
 	fn: Any, label: str, initialValue: str = "", showCode: bool = False
-) -> ps.Element: ...
+): ...
 
 
 # =============================================================================

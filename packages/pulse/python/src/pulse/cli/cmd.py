@@ -398,6 +398,7 @@ def build_uvicorn_command(
 	on_ready: Callable[[], None] | None = None,
 	plain: bool = False,
 ) -> CommandSpec:
+	cwd = app_ctx.server_cwd or app_ctx.app_dir or Path.cwd()
 	app_import = f"{app_ctx.module_name}:{app_ctx.app_var}.asgi_factory"
 	args: list[str] = [
 		sys.executable,
@@ -418,6 +419,12 @@ def build_uvicorn_command(
 		args.extend(["--reload-dir", str(app_dir)])
 		if web_root.exists():
 			args.extend(["--reload-dir", str(web_root)])
+			pulse_dir = str(app_ctx.app.codegen.cfg.pulse_dir)
+			pulse_app_dir = web_root / "app" / pulse_dir
+			rel_path = Path(os.path.relpath(pulse_app_dir, cwd))
+			if not rel_path.is_absolute():
+				args.extend(["--reload-exclude", str(rel_path)])
+				args.extend(["--reload-exclude", str(rel_path / "**")])
 
 	if app_ctx.app.env == "prod":
 		args.extend(production_flags())
@@ -449,8 +456,6 @@ def build_uvicorn_command(
 		command_env[ENV_PULSE_DISABLE_CODEGEN] = "1"
 	if dev_secret:
 		command_env[ENV_PULSE_SECRET] = dev_secret
-
-	cwd = app_ctx.server_cwd or app_ctx.app_dir or Path.cwd()
 
 	# Apply custom log config to filter noisy requests (dev/ci only)
 	if app_ctx.app.env != "prod" and not verbose:

@@ -1,6 +1,11 @@
 {
 	"name": "pulse-ui-client",
 	"version": "0.1.57",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/erwinkn/pulse-ui",
+		"directory": "packages/pulse/js"
+	},
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,

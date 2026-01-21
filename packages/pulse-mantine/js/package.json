@@ -1,6 +1,11 @@
 {
 	"name": "pulse-mantine",
 	"version": "0.1.23",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/erwinkn/pulse-ui",
+		"directory": "packages/pulse-mantine/js"
+	},
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,

@@ -19,9 +19,9 @@ const mono = IBM_Plex_Mono({
 const CODE = `import pulse as ps
 
 # Wrap any React component
-Button = ps.react_component(
-    ps.Import("Button", "@mantine/core")
-)
+@ps.react_component("Button", "@mantine/core")
+def Button(*children, **props):
+  ...
 
 class Counter(ps.State):
     count: int = 0
@@ -37,7 +37,7 @@ def App():
         Button("+1", onClick=state.inc),
     )`;
 
-const LINE_NUMBERS = Array.from({ length: 20 }, (_, i) => i + 1);
+const LINE_NUMBERS = Array.from({ length: 21 }, (_, i) => i + 1);
 
 export const metadata: Metadata = {
 	title: "Pulse",
@@ -98,7 +98,7 @@ export default async function HomePage() {
 									<span className="home-dot home-dot-yellow" />
 									<span className="home-dot home-dot-green" />
 								</div>
-								<div className="home-editor-tab rounded-md px-3 py-1 text-xs">app.py</div>
+								<div className="home-editor-tab rounded-md px-3 py-1 text-xs">example.py</div>
 							</div>
 							<div className="home-code flex overflow-x-auto text-[13px] leading-[1.7]">
 								<div className="home-line-numbers select-none text-right pr-4 pl-4 py-4">

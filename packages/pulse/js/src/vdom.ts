@@ -6,7 +6,7 @@ export const FRAGMENT_TAG = "";
 export const MOUNT_POINT_PREFIX = "$$";
 
 // Unified registry: mount-point key -> React component (or any registry object).
-export type ComponentRegistry = Record<string, unknown>;
+export type ComponentRegistry = Record<string, any>;
 
 // -----------------------------------------------------------------------------
 // JSON types
@@ -129,7 +129,7 @@ export type CallbackPlaceholder = "$cb";
 export type VDOMPropValue = JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder;
 
 export interface VDOMElement {
-	tag: string;
+	tag: string | VDOMExpr;
 	key?: string;
 	props?: Record<string, VDOMPropValue>;
 	children?: VDOMNode[];
@@ -151,7 +151,10 @@ export function isExprNode(node: unknown): node is VDOMExpr {
 
 export function isMountPointNode(node: VDOMNode): node is VDOMElement {
 	return (
-		isElementNode(node) && node.tag.startsWith(MOUNT_POINT_PREFIX) && node.tag !== FRAGMENT_TAG
+		isElementNode(node) &&
+		typeof node.tag === "string" &&
+		node.tag.startsWith(MOUNT_POINT_PREFIX) &&
+		node.tag !== FRAGMENT_TAG
 	);
 }
 

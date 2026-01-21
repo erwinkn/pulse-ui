@@ -863,6 +863,26 @@ def test_css_module_with_jsexpr(tmp_path: Path):
 	clear_import_registry()
 
 
+def test_expr_tag_renders_as_expr():
+	"""Tag expressions should be serialized as VDOMExpr for client evaluation."""
+	from pulse.transpiler.imports import Import, clear_import_registry
+	from pulse.transpiler.nodes import Member
+
+	clear_import_registry()
+	app_shell = Import("AppShell", "@mantine/core")
+	header = Member(app_shell, "Header")
+
+	tree = RenderTree(Element(tag=header))
+	vdom = cast(VDOMElement, tree.render())
+
+	tag = cast(dict[str, Any], vdom.get("tag"))
+	assert tag["t"] == "member"
+	assert tag["prop"] == "Header"
+	obj = cast(dict[str, Any], tag["obj"])
+	assert obj["t"] == "ref"
+	clear_import_registry()
+
+
 # -----------------------------------------------------------------------------
 # Additional keyed reconciliation scenarios to exhaust code paths
 # -----------------------------------------------------------------------------

@@ -27,6 +27,7 @@ from pulse.transpiler.vdom import (
 	UpdatePropsDelta,
 	UpdatePropsOperation,
 	VDOMElement,
+	VDOMExpr,
 	VDOMNode,
 	VDOMOperation,
 	VDOMPropValue,
@@ -441,26 +442,17 @@ class Renderer:
 	# Expression + tag rendering
 	# ------------------------------------------------------------------
 
-	def render_tag(self, tag: str | Expr) -> str:
+	def render_tag(self, tag: str | Expr) -> str | VDOMExpr:
 		if isinstance(tag, str):
 			return tag
 
-		key = self.register_component_expr(tag)
-		return f"{MOUNT_PREFIX}{key}"
+		return self.register_component_expr(tag)
 
-	def register_component_expr(self, expr: Expr) -> str:
+	def register_component_expr(self, expr: Expr) -> str | VDOMExpr:
 		ref = registry_ref(expr)
-		if ref is None:
-			expr_type = type(expr).__name__
-			expr_repr = repr(expr)
-			if len(expr_repr) > 200:
-				expr_repr = f"{expr_repr[:197]}..."
-			raise TypeError(
-				"Component tag expressions must be registry-backed Expr values "
-				+ "(Import/JsFunction/Constant/JsxFunction). "
-				+ f"Got {expr_type}: {expr_repr}"
-			)
-		return ref["key"]
+		if ref is not None:
+			return f"{MOUNT_PREFIX}{ref['key']}"
+		return expr.render()
 
 	# ------------------------------------------------------------------
 	# Unmount helper

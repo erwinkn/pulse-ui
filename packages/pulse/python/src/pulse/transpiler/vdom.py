@@ -177,9 +177,10 @@ class VDOMElement(TypedDict):
 	Special tags:
 	- "": React Fragment
 	- "$$<ComponentKey>": mount point for client component registry
+	- Expr object (VDOMExpr): evaluated on the client for dynamic component tags
 	"""
 
-	tag: str
+	tag: str | VDOMExpr
 	key: NotRequired[str]
 	# Default: plain JSON props (no interpretation).
 	# When `eval` is present, listed keys may contain VDOMExpr / VDOMElement / "$cb:...".

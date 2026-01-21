@@ -123,6 +123,7 @@ from pulse_mantine.core.feedback.notifications import (
 from pulse_mantine.core.feedback.notifications import (
 	NotificationRootCSSVariables as NotificationRootCSSVariables,
 )
+from pulse_mantine.core.feedback.notifications import Notifications as Notifications
 from pulse_mantine.core.feedback.notifications import (
 	NotificationsApi as NotificationsApi,
 )

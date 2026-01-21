@@ -183,6 +183,45 @@ describe("VDOMRenderer", () => {
 		expect((el.props as any).items).toEqual([1, 2, 3]);
 	});
 
+	it("evaluates expression tags", () => {
+		const Header = (_props: { children?: React.ReactNode }) => null;
+		const { renderer } = makeRenderer({
+			AppShell: { Header },
+		});
+		const tree = renderer.renderNode({
+			tag: {
+				t: "member",
+				obj: { t: "ref", key: "AppShell" },
+				prop: "Header",
+			},
+			children: ["A"],
+		});
+		const el = tree as React.ReactElement;
+		expect(el.type).toBe(Header);
+		const kids = childrenArray(el);
+		expect(kids).toHaveLength(1);
+		expect(kids[0]).toBe("A");
+	});
+
+	it("throws an informative error for invalid component types", () => {
+		const { renderer } = makeRenderer();
+		const badTag: VDOMNode = {
+			tag: { t: "lit", value: 123 },
+			children: ["A"],
+		};
+		let caught: unknown;
+		try {
+			renderer.renderNode(badTag);
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).toBeTruthy();
+		const message = String(caught);
+		expect(message).toContain("[Pulse] Invalid component type");
+		expect(message).toContain(`tag '{"t":"lit","value":123}'`);
+		expect(message).toContain("component: number:123");
+	});
+
 	it("rebinds callbacks after reconciliation moves (no callback registry)", () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		const initialVDOM: VDOMNode = {

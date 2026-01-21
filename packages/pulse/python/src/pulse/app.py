@@ -823,8 +823,6 @@ class App:
 	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
-		print(f"[MSG] {msg}")
-
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
 				render.attach(msg["path"], msg["routeInfo"])

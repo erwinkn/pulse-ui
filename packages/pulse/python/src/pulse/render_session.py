@@ -457,7 +457,6 @@ class RenderSession:
 	def detach(self, path: str, *, timeout: float | None = None):
 		"""Client no longer wants updates. Queue briefly, then dispose."""
 		path = ensure_absolute_path(path)
-		print(f"Detaching '{path}'")
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return

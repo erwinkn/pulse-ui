@@ -1,0 +1,205 @@
+---
+title: "Pulse AWS"
+description: "Beginner tutorial for deploying Pulse on ECS"
+---
+
+Deploy a Pulse app to AWS ECS with a guided, beginner-friendly workflow.
+
+## Prerequisites
+
+- AWS credentials available to boto3 (AWS CLI profile or env vars)
+- Docker (can build Linux images)
+- `uv` (to install/run `pulse-aws`)
+- A domain you control (for HTTPS)
+
+## What you are deploying
+
+Pulse deploys as a Python server plus an optional React Router server. They can be bundled into one container (this tutorial) or split later.
+
+```text
+Browser
+  |
+  v
+Route 53 / Cloudflare
+  |
+  v
+ALB (HTTPS)
+  |
+  v
+Target Group -> ECS Service -> Fargate Tasks
+  |
+  v
+Pulse app (Python server + React Router server)
+
+ECR -> container images
+SSM -> deployment state + drain signals
+CloudWatch -> logs
+```
+
+## Step 1: install pulse-aws
+
+```bash
+uv add pulse-aws
+```
+
+You should now see `pulse-aws` in `pyproject.toml`.
+
+## Step 2: add a Dockerfile
+
+Create `Dockerfile` in your project root.
+
+<Callout type="warn">
+Unverified example. Not run in this update.
+</Callout>
+
+```dockerfile
+ARG APP_FILE=src/app/main.py
+ARG WEB_ROOT=web
+
+# Stage 1: Python deps (uv)
+FROM python:3.12-slim AS python-deps
+ARG APP_FILE
+ARG WEB_ROOT
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv venv && uv sync --frozen
+
+# Stage 2: Dependency check (pulse check)
+FROM python:3.12-slim AS check
+ARG APP_FILE
+ARG WEB_ROOT
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+COPY src ./src
+COPY --from=python-deps /app/.venv /app/.venv
+COPY ${WEB_ROOT}/package.json ${WEB_ROOT}/
+ENV PATH="/app/.venv/bin:$PATH"
+RUN pulse check ${APP_FILE}
+
+# Stage 3: Codegen (pulse generate)
+FROM python:3.12-slim AS codegen
+ARG APP_FILE
+ARG WEB_ROOT
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+COPY src ./src
+COPY --from=python-deps /app/.venv /app/.venv
+COPY ${WEB_ROOT} ./${WEB_ROOT}
+ENV PATH="/app/.venv/bin:$PATH"
+ARG PULSE_SERVER_ADDRESS
+ENV PULSE_SERVER_ADDRESS=${PULSE_SERVER_ADDRESS}
+RUN pulse generate ${APP_FILE} --ci
+
+# Stage 4: JS dev deps
+FROM oven/bun:latest AS js-dev-deps
+ARG WEB_ROOT
+WORKDIR /app/${WEB_ROOT}
+COPY ${WEB_ROOT}/package.json ${WEB_ROOT}/bun.lock ./
+RUN bun install --frozen-lockfile
+
+# Stage 5: JS prod deps
+FROM oven/bun:latest AS js-prod-deps
+ARG WEB_ROOT
+WORKDIR /app/${WEB_ROOT}
+COPY ${WEB_ROOT}/package.json ${WEB_ROOT}/bun.lock ./
+RUN bun install --frozen-lockfile --production
+
+# Stage 6: JS build
+FROM oven/bun:latest AS js-build
+ARG APP_FILE
+ARG WEB_ROOT
+WORKDIR /app/${WEB_ROOT}
+COPY --from=js-dev-deps /app/${WEB_ROOT}/node_modules ./node_modules
+COPY --from=codegen /app/${WEB_ROOT}/app ./app
+COPY --from=codegen /app/${WEB_ROOT}/public ./public
+COPY --from=codegen /app/${WEB_ROOT}/react-router.config.ts ./
+COPY --from=codegen /app/${WEB_ROOT}/tsconfig.json ./
+COPY --from=codegen /app/${WEB_ROOT}/vite.config.ts ./
+COPY --from=codegen /app/${WEB_ROOT}/package.json ./
+COPY --from=codegen /app/src ../src
+ENV NODE_ENV=production
+RUN bun run build
+
+# Stage 7: Runtime image
+FROM python:3.12-slim AS final
+ARG APP_FILE
+ARG WEB_ROOT
+COPY --from=oven/bun:latest /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=python-deps /app/.venv /app/.venv
+COPY --from=js-prod-deps /app/${WEB_ROOT}/node_modules /app/${WEB_ROOT}/node_modules
+COPY --from=js-build /app/${WEB_ROOT}/build /app/${WEB_ROOT}/build
+COPY --from=js-build /app/${WEB_ROOT}/package.json /app/${WEB_ROOT}/package.json
+COPY src ./src
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PULSE_APP_FILE=${APP_FILE}
+EXPOSE 8000
+WORKDIR /app
+CMD ["sh", "-c", "pulse run \"$PULSE_APP_FILE\" --prod --address 0.0.0.0"]
+```
+
+Key options:
+- `APP_FILE`: relative path to your Pulse entry file.
+- `WEB_ROOT`: relative path to your React Router app.
+- `PULSE_SERVER_ADDRESS`: build arg used during `pulse generate`.
+
+At runtime, `PULSE_SERVER_ADDRESS` must be set. `pulse-aws deploy` sets it on the ECS task.
+
+## Step 3: deploy
+
+```bash
+uv run pulse-aws deploy \
+  --deployment-name prod \
+  --domain app.example.com \
+  --app-file src/app/main.py \
+  --web-root web \
+  --dockerfile Dockerfile \
+  --context .
+```
+
+You should now see a step-by-step deploy log ending with:
+- `Deployment Complete!`
+- `Deployment is live and healthy!`
+
+## Step 4: respond to prompts
+
+During deploy, you may be asked for input.
+
+### Certificate DNS validation
+
+You will see DNS records to add for ACM. The CLI asks you to press Enter once records exist. Type `cancel` to abort.
+
+### Domain routing to the ALB
+
+If your domain does not resolve to the ALB, the CLI prints the CNAME/ALIAS to add. You can press Enter to re-check, type `skip` to continue without waiting, or `cancel` to abort.
+
+If you run in CI, the CLI will not wait. It will tell you to update DNS and rerun.
+
+## Step 5: verify
+
+```bash
+uv run pulse-aws verify \
+  --deployment-name prod \
+  --domain app.example.com
+```
+
+You should now see checks for the base URL, health endpoint, and (if multiple versions exist) affinity routing.
+
+## What deploy does under the hood
+
+1. Ensures an ACM certificate for your domain.
+2. Creates/updates baseline infra (VPC, ALB, ECS cluster, ECR, CloudWatch).
+3. Builds and pushes your Docker image to ECR.
+4. Registers an ECS task definition with drain settings.
+5. Creates a new service + target group.
+6. Waits for health checks, then switches traffic.
+7. Marks older deployments as draining and lets the reaper clean them up.
+8. Verifies that your domain resolves to the ALB (or Cloudflare proxy path).
+
+## See also
+
+- [Pulse AWS reference](/docs/packages/pulse-aws/reference) — CLI flags + Python API exports
+- [Deployment concepts](/docs/concepts/deployment) — how deployments work
+- [Packages index](/docs/packages) — all add-ons

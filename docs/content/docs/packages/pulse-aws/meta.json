@@ -1,0 +1,6 @@
+{
+  "title": "Pulse AWS",
+  "description": "Deploy Pulse apps to AWS ECS",
+  "icon": "Cloud",
+  "pages": ["index", "reference"]
+}

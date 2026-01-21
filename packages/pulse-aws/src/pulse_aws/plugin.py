@@ -32,8 +32,8 @@ class AWSECSPlugin(ps.Plugin):
 	- PULSE_AWS_DRAIN_POLL_SECONDS: Seconds between SSM state polls - Required
 	- PULSE_AWS_DRAIN_GRACE_SECONDS: Grace period after draining before shutdown ready - Required
 
-	The plugin can be instantiated without environment variables present (e.g., during local development).
-	Environment variables are validated when the app starts up.
+	In dev mode, missing env vars disable the plugin (no-op).
+	In prod/ci, missing env vars raise on startup.
 	"""
 
 	priority: int = 100  # High priority to run before other plugins
@@ -48,6 +48,8 @@ class AWSECSPlugin(ps.Plugin):
 	_task_id: str
 	_app: ps.App | None
 	_poll_thread: threading.Thread | None
+	enabled: bool
+	_config_error: str | None
 
 	def __init__(self) -> None:
 		"""Initialize the AWS ECS plugin.
@@ -62,6 +64,8 @@ class AWSECSPlugin(ps.Plugin):
 		self._task_id = "unknown"
 		self._app = None
 		self._poll_thread = None
+		self.enabled = False
+		self._config_error = None
 
 		# Will be set from environment variables in on_startup
 		self.deployment_name = ""
@@ -84,25 +88,34 @@ class AWSECSPlugin(ps.Plugin):
 		drain_poll_seconds = os.environ.get("PULSE_AWS_DRAIN_POLL_SECONDS")
 		drain_grace_seconds = os.environ.get("PULSE_AWS_DRAIN_GRACE_SECONDS")
 
-		if not deployment_name:
-			raise ValueError(
-				"PULSE_AWS_DEPLOYMENT_NAME environment variable is required"
+		missing = [
+			name
+			for name, value in (
+				("PULSE_AWS_DEPLOYMENT_NAME", deployment_name),
+				("PULSE_AWS_DEPLOYMENT_ID", deployment_id),
+				("PULSE_AWS_DRAIN_POLL_SECONDS", drain_poll_seconds),
+				("PULSE_AWS_DRAIN_GRACE_SECONDS", drain_grace_seconds),
 			)
-		if not deployment_id:
-			raise ValueError("PULSE_AWS_DEPLOYMENT_ID environment variable is required")
-		if not drain_poll_seconds:
-			raise ValueError(
-				"PULSE_AWS_DRAIN_POLL_SECONDS environment variable is required"
-			)
-		if not drain_grace_seconds:
-			raise ValueError(
-				"PULSE_AWS_DRAIN_GRACE_SECONDS environment variable is required"
-			)
+			if not value
+		]
+		if missing:
+			msg = f"Missing required env vars: {', '.join(missing)}"
+			self._config_error = msg
+			if app.env == "dev":
+				logger.info("AWSECSPlugin disabled: %s", msg)
+				return
+			raise ValueError(msg)
 
-		self.deployment_name = deployment_name
-		self.deployment_id = deployment_id
-		self.drain_poll_seconds = int(drain_poll_seconds)
-		self.drain_grace_seconds = int(drain_grace_seconds)
+		self.deployment_name = str(deployment_name)
+		self.deployment_id = str(deployment_id)
+		try:
+			self.drain_poll_seconds = int(str(drain_poll_seconds))
+			self.drain_grace_seconds = int(str(drain_grace_seconds))
+		except ValueError as exc:
+			raise ValueError(
+				"PULSE_AWS_DRAIN_POLL_SECONDS and PULSE_AWS_DRAIN_GRACE_SECONDS must be integers"
+			) from exc
+		self.enabled = True
 
 		self._app = app
 
@@ -174,6 +187,8 @@ class AWSECSPlugin(ps.Plugin):
 
 		Only writes when state changes to avoid unnecessary SSM calls.
 		"""
+		if not self.enabled:
+			return
 		if draining == self._last_written_state:
 			# State hasn't changed, skip write
 			return
@@ -297,6 +312,8 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 		next: Callable[[], Awaitable[ps.PrerenderResponse]],
 	) -> ps.PrerenderResponse:
 		"""Add AWS ECS deployment affinity header to prerender directives."""
+		if not self.plugin.enabled:
+			return await next()
 		res = await next()
 
 		# Only modify directives if we have an Ok result

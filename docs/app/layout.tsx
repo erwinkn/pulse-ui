@@ -1,12 +1,20 @@
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata } from "next";
-import "./global.css";
 import { Inter } from "next/font/google";
+import "./global.css";
+
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.pulse.sc";
 
 export const metadata: Metadata = {
-	metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://pulse.sc"),
+	metadataBase: new URL(siteUrl),
 	icons: {
 		icon: "/favicon.svg",
+	},
+	openGraph: {
+		siteName: "Pulse",
+	},
+	twitter: {
+		card: "summary_large_image",
 	},
 };
 

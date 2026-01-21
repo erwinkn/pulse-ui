@@ -217,7 +217,7 @@ export async function GET() {
 		{
 			width: 1200,
 			height: 630,
-			format: "webp",
+			format: "png",
 		},
 	);
 }

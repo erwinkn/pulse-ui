@@ -147,7 +147,7 @@ class App:
 			and lifecycle hooks.
 		cookie: Session cookie configuration.
 		session_store: Session storage backend. Defaults to CookieSessionStore.
-		server_address: Public server URL. Required in production.
+		server_address: Public server URL. Used only in ci/prod.
 		dev_server_address: Development server URL. Defaults to
 			"http://localhost:8000".
 		internal_server_address: Internal URL for server-side loader fetches.
@@ -243,8 +243,8 @@ class App:
 		self.env = envvars.pulse_env
 		self.mode = mode
 		self.status = AppStatus.created
-		# Persist the server address for use by sessions (API calls, etc.)
-		self.server_address = server_address
+		# Persist the server address for use by sessions (API calls, etc.) in ci/prod.
+		self.server_address = server_address if self.env in ("ci", "prod") else None
 		# Development server address (used in dev mode)
 		self.dev_server_address = dev_server_address
 		# Optional internal address used by server-side loader fetches

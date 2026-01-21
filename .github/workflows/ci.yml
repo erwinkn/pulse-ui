@@ -33,7 +33,7 @@ jobs:
         run: uv sync --dev --all-packages
 
       - name: Install JavaScript dependencies
-        run: bun install
+        run: bun install && cd docs && bun install
 
       - name: Check formatting
         run: make format-check

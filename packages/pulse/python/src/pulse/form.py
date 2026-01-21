@@ -422,8 +422,9 @@ class ManualForm(Disposable):
 		Returns:
 			Dict with action, method, encType, and onSubmit props.
 		"""
+		prefix = PulseContext.get().app.api_prefix
 		return {
-			"action": f"{server_address()}/pulse/forms/{self._render.id}/{self.registration.id}",
+			"action": f"{server_address()}{prefix}/forms/{self._render.id}/{self.registration.id}",
 			"method": "POST",
 			"encType": "multipart/form-data",
 			"onSubmit": self._start_submit,

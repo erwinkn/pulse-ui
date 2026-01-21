@@ -44,7 +44,27 @@ export const metadata: Metadata = {
 	description:
 		"Build interactive web apps entirely in Python. Pulse renders your code to a React frontend and keeps it in sync over WebSocket.",
 	openGraph: {
-		images: "/og/home",
+		title: "Pulse",
+		description:
+			"Build interactive web apps entirely in Python. Pulse renders your code to a React frontend and keeps it in sync over WebSocket.",
+		siteName: "Pulse",
+		type: "website",
+		url: "/",
+		images: [
+			{
+				url: "/og/home",
+				width: 1200,
+				height: 630,
+				alt: "Pulse — Reactive web apps. Pure Python.",
+				type: "image/png",
+			},
+		],
+	},
+	twitter: {
+		title: "Pulse",
+		description:
+			"Build interactive web apps entirely in Python. Pulse renders your code to a React frontend and keeps it in sync over WebSocket.",
+		images: ["/og/home"],
 	},
 };
 

@@ -162,7 +162,7 @@ async def test_query_entry_cancel_refetch():
 
 	# Start first fetch
 	t1 = asyncio.create_task(entry.refetch(cancel_refetch=True))
-	await asyncio.sleep(0.01)  # Ensure it starts
+	assert await wait_for(lambda: entry.is_fetching.read() is True, timeout=0.2)
 
 	# Start second fetch, should cancel first
 	t2 = asyncio.create_task(entry.refetch(cancel_refetch=True))
@@ -207,7 +207,7 @@ async def test_query_store_garbage_collection():
 	assert store.get(key) is entry
 
 	# Wait for GC
-	await asyncio.sleep(0.02)
+	assert await wait_for(lambda: store.get(key) is None, timeout=0.2)
 
 	# Should be gone
 	assert store.get(key) is None
@@ -445,7 +445,9 @@ async def test_query_retry_cancellation():
 
 	# Wait for first attempt to complete and enter retry delay
 	# The fetcher runs synchronously (no await before the raise), so just give it time to start
-	await asyncio.sleep(0.01)
+	assert await wait_for(
+		lambda: attempts == 1 and query.retries.read() == 1, timeout=0.2
+	)
 
 	# Now cancel during retry delay
 	task.cancel()
@@ -1255,8 +1257,7 @@ async def test_state_query_gc_time_0_disposes_immediately():
 	assert query_result(s.user).__disposed__ is True
 
 	# Allow any scheduled tasks to attempt to finish; they should be canceled
-	await asyncio.sleep(0.01)
-	assert not s.finished
+	assert not await wait_for(lambda: s.finished, timeout=0.05)
 
 
 @pytest.mark.asyncio
@@ -1289,7 +1290,7 @@ async def test_state_query_gc_time_0_no_refetch_after_state_dispose():
 
 	# Changing key after dispose must not schedule a new run
 	s.uid = 2
-	await asyncio.sleep(0.01)
+	assert not await wait_for(lambda: s.calls > 1, timeout=0.05)
 	assert s.calls == 1
 
 
@@ -1558,7 +1559,7 @@ async def test_state_query_invalidate_without_observers_does_not_refetch():
 
 	# Invalidate without observers should not trigger refetch
 	q.invalidate()
-	await asyncio.sleep(0.01)  # Wait to ensure no refetch happens
+	assert not await wait_for(lambda: s.calls > 1, timeout=0.05)
 	assert s.calls == 1  # Should still be 1
 
 
@@ -1698,7 +1699,7 @@ async def test_state_query_refetch_with_cancel_refetch_true():
 
 	# Start first refetch
 	t1 = asyncio.create_task(q.refetch(cancel_refetch=True))
-	await asyncio.sleep(0.01)  # Let it start but not complete
+	assert await wait_for(lambda: q.is_fetching is True, timeout=0.2)
 
 	# Start second refetch with cancel_refetch=True (should cancel first)
 	t2 = asyncio.create_task(q.refetch(cancel_refetch=True))
@@ -1797,7 +1798,11 @@ async def test_state_query_multiple_observers_lifecycle():
 
 	# Dispose second observer - query should be GC'd
 	query_result(q2).dispose()
-	await asyncio.sleep(0.015)  # Wait for GC
+	key = ("user", 1)
+	render = ps.PulseContext.get().render
+	assert render is not None
+	store = render.query_store
+	assert await wait_for(lambda: store.get(key) is None, timeout=0.2)
 
 	# New query should be created (old one was GC'd)
 	s3 = S()
@@ -1843,7 +1848,7 @@ async def test_state_query_refetch_interval():
 	# Dispose should stop the interval
 	query_result(q).dispose()
 	# Negative test - verify no more refetches happen
-	await asyncio.sleep(0.03)
+	assert not await wait_for(lambda: s.calls > 3, timeout=0.05)
 	assert s.calls == 3
 
 
@@ -1880,7 +1885,7 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 	calls_at_dispose = s.calls
 
 	# Wait and verify no more refetches (negative test - sleep is appropriate here)
-	await asyncio.sleep(0.03)
+	assert not await wait_for(lambda: s.calls > calls_at_dispose, timeout=0.05)
 	assert s.calls == calls_at_dispose
 
 
@@ -2374,7 +2379,7 @@ async def test_keyed_query_concurrent_refetch_with_cancel_false_deduplicates():
 	refetch2_task = asyncio.create_task(q2.refetch(cancel_refetch=False))
 
 	# Give it a moment to potentially start (it shouldn't)
-	await asyncio.sleep(0.01)
+	assert not await wait_for(lambda: len(fetch_log) > 1, timeout=0.05)
 
 	# Only one fetch should have happened
 	assert len(fetch_log) == 1
@@ -2503,7 +2508,9 @@ async def test_query_result_dispose_cancels_in_flight_fetch():
 	query_result(q).dispose()
 
 	# Give time for cancellation to propagate
-	await asyncio.sleep(0.01)
+	assert await wait_for(
+		lambda: wait_task.done() or wait_task.cancelled(), timeout=0.2
+	)
 
 	# Fetch should have been cancelled, not completed
 	assert "started" in fetch_log
@@ -2734,7 +2741,7 @@ async def test_key_change_cancels_in_flight_fetch():
 	# Change key before fetch completes
 	s.user_id = 2
 	# Allow the reactive system to process the key change
-	await asyncio.sleep(0.01)
+	assert await wait_for(fetch_started.is_set, timeout=0.2)
 
 	# The old fetch (for user_id=1) should be cancelled
 	assert (1, "started") in fetch_log
@@ -2846,7 +2853,7 @@ async def test_key_change_does_not_affect_other_observer():
 
 	# s2 changes its key - but s1 started the fetch, so it should continue
 	s2.user_id = 2
-	await asyncio.sleep(0.01)  # Let reactive system process
+	assert await wait_for(fetch_started.is_set, timeout=0.2)
 
 	# Wait for s1's fetch to complete
 	await wait_task

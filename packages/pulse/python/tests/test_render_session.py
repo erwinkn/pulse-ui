@@ -16,6 +16,7 @@ from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
+from pulse.test_helpers import wait_for
 
 
 @javascript
@@ -703,7 +704,9 @@ async def test_call_api_success_before_timeout():
 	api_task = asyncio.create_task(session.call_api("/test", timeout=1.0))
 
 	# Give it a moment to send the message
-	await asyncio.sleep(0.01)
+	assert await wait_for(
+		lambda: any(m.get("type") == "api_call" for m in messages), timeout=0.2
+	)
 
 	# Find the api_call message and get its ID
 	api_msgs = [m for m in messages if m.get("type") == "api_call"]

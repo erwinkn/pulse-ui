@@ -19,8 +19,7 @@ class LinkPath(TypedDict):
 	hash: str
 
 
-# @react_component(Import("Link", "react-router", version="^7"))
-@react_component(Import("Link", "react-router"))
+@react_component(Import("Link", "react-router", version="^7"))
 def Link(
 	*children: Node,
 	key: str | None = None,
@@ -69,8 +68,7 @@ def Link(
 	...
 
 
-# @react_component(Import("Outlet", "react-router", version="^7"))
-@react_component(Import("Outlet", "react-router"))
+@react_component(Import("Outlet", "react-router", version="^7"))
 def Outlet(key: str | None = None) -> None:
 	"""Renders the matched child route's element.
 

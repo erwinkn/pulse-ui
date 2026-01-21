@@ -920,7 +920,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-aws"
-version = "0.1.8"
+version = "0.1.9"
 source = { editable = "packages/pulse-aws" }
 dependencies = [
     { name = "aws-cdk-lib" },
@@ -943,7 +943,7 @@ requires-dist = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.61"
+version = "0.1.62"
 source = { editable = "packages/pulse/python" }
 dependencies = [
     { name = "fastapi" },
@@ -1005,7 +1005,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-mantine"
-version = "0.1.26"
+version = "0.1.27"
 source = { editable = "packages/pulse-mantine/python" }
 dependencies = [
     { name = "pulse-framework" },

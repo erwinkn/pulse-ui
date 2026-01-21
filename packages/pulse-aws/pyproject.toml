@@ -1,6 +1,6 @@
 [project]
 name = "pulse-aws"
-version = "0.1.8"
+version = "0.1.9"
 description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]

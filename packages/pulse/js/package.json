@@ -1,6 +1,6 @@
 {
 	"name": "pulse-ui-client",
-	"version": "0.1.55",
+	"version": "0.1.56",
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,

@@ -107,7 +107,8 @@ jobs:
           print(f"JavaScript packages to publish (unpublished): {js_list}")
           print(f"Python packages to publish (unpublished): {python_list}")
 
-          output_path = Path("${GITHUB_OUTPUT}")
+          import os
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
           with output_path.open("a") as fh:
               fh.write(f"js_matrix={json.dumps(js_list)}\n")
               fh.write(f"python_matrix={json.dumps(python_list)}\n")

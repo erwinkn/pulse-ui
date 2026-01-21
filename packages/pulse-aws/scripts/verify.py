@@ -197,7 +197,7 @@ async def main() -> None:
 		# Test 2: Health endpoint
 		print("2️⃣  Testing health endpoint...")
 		try:
-			response = await client.get(f"{base_url}/_health")
+			response = await client.get(f"{base_url}/_pulse/health")
 			if response.status_code == 200:
 				data = response.json()
 				print(f"   ✓ Status: {response.status_code}")
@@ -251,7 +251,7 @@ async def main() -> None:
 	if running_deployment_ids:
 		print("To test with domain:")
 		print(f"  curl https://{domain}/")
-		print(f"  curl https://{domain}/_health")
+		print(f"  curl https://{domain}/_pulse/health")
 		print()
 		if len(running_deployment_ids) > 1:
 			print("To test affinity:")

@@ -77,11 +77,21 @@ class ReactiveDictValues(Generic[T1, T2]):
 class ReactiveDict(dict[T1, T2]):
 	"""A dict-like container with per-key reactivity.
 
-	- Reading a key registers a dependency on that key's Signal
-	- Writing a key updates only that key's Signal
-	- Deleting a key removes the key from the mapping but preserves the Signal object
-	  (writes `None` to it) for existing subscribers
-	- Iteration, membership checks, and len are reactive to structural changes
+	Reading a key registers a dependency on that key's Signal. Writing a key
+	updates only that key's Signal. Iteration, membership checks, and len are
+	reactive to structural changes.
+
+	Args:
+		initial: Initial key-value pairs to populate the dict.
+
+	Example:
+
+	```python
+	data = ReactiveDict({"name": "Alice", "age": 30})
+	print(data["name"])  # "Alice" (registers dependency)
+	data["age"] = 31     # Updates age signal only
+	data.unwrap()        # {"name": "Alice", "age": 31}
+	```
 	"""
 
 	__slots__ = ("_signals", "_structure")  # pyright: ignore[reportUnannotatedClassAttribute]
@@ -365,7 +375,11 @@ class ReactiveDict(dict[T1, T2]):
 		return result
 
 	def unwrap(self) -> dict[T1, _Any]:
-		"""Return a plain dict while subscribing to contained signals."""
+		"""Return a plain dict while subscribing to contained signals.
+
+		Returns:
+			A plain dict with all reactive containers recursively unwrapped.
+		"""
 		self._structure.read()
 		result: dict[T1, _Any] = {}
 		for key in dict.__iter__(self):
@@ -398,15 +412,24 @@ SupportsRichComparisonT = TypeVar(
 
 
 class ReactiveList(list[T1]):
-	"""A list with item-level reactivity where possible and structural change signaling.
+	"""A list with item-level reactivity and structural change signaling.
 
-	Semantics:
-	- Index reads depend on that index's Signal
-	- Setting an index writes to that index's Signal
-	- Structural operations (append/insert/pop/remove/clear/extend/sort/reverse/slice assigns)
-	  trigger a structural version Signal so consumers can listen for changes that affect layout
-	- Iteration subscribes to all item signals and structural changes
-	- len() subscribes to structural changes
+	Index reads depend on that index's Signal. Setting an index writes to that
+	index's Signal. Structural operations (append/insert/pop/etc.) trigger a
+	structural version Signal. Iteration subscribes to all item signals and
+	structural changes. len() subscribes to structural changes.
+
+	Args:
+		initial: Initial items to populate the list.
+
+	Example:
+
+	```python
+	items = ReactiveList([1, 2, 3])
+	print(items[0])   # 1 (registers dependency on index 0)
+	items.append(4)   # Triggers structural change
+	items.unwrap()    # [1, 2, 3, 4]
+	```
 	"""
 
 	__slots__ = ("_signals", "_structure")  # pyright: ignore[reportUnannotatedClassAttribute]
@@ -528,7 +551,11 @@ class ReactiveList(list[T1]):
 		return val
 
 	def unwrap(self) -> list[_Any]:
-		"""Return a plain list while subscribing to element signals."""
+		"""Return a plain list while subscribing to element signals.
+
+		Returns:
+			A plain list with all reactive containers recursively unwrapped.
+		"""
 		self._structure()
 		return [unwrap(self[i]) for i in range(len(self._signals))]
 
@@ -640,9 +667,21 @@ class ReactiveList(list[T1]):
 class ReactiveSet(set[T1]):
 	"""A set with per-element membership reactivity.
 
-	- `x in s` reads a membership Signal for element `x`
-	- Mutations update membership Signals for affected elements
-	- Iteration subscribes to membership signals for all elements
+	`x in s` reads a membership Signal for element `x`. Mutations update
+	membership Signals for affected elements. Iteration subscribes to
+	membership signals for all elements.
+
+	Args:
+		initial: Initial elements to populate the set.
+
+	Example:
+
+	```python
+	tags = ReactiveSet({"python", "react"})
+	print("python" in tags)  # True (registers dependency)
+	tags.add("typescript")   # Updates membership signal
+	tags.unwrap()            # {"python", "react", "typescript"}
+	```
 	"""
 
 	__slots__ = ("_signals",)  # pyright: ignore[reportUnannotatedClassAttribute]
@@ -721,7 +760,11 @@ class ReactiveSet(set[T1]):
 			self.discard(v)
 
 	def unwrap(self) -> set[_Any]:
-		"""Return a plain set while subscribing to membership signals."""
+		"""Return a plain set while subscribing to membership signals.
+
+		Returns:
+			A plain set with all reactive containers recursively unwrapped.
+		"""
 		result: set[_Any] = set()
 		for value in set.__iter__(self):
 			_ = value in self
@@ -1009,10 +1052,28 @@ def reactive(value: T1) -> T1: ...
 def reactive(value: _Any) -> _Any:
 	"""Wrap built-in collections in their reactive counterparts if not already reactive.
 
-	- dict -> ReactiveDict
-	- list -> ReactiveList
-	- set -> ReactiveSet
-	Leaves other values untouched.
+	Converts:
+		- dict -> ReactiveDict
+		- list -> ReactiveList
+		- set -> ReactiveSet
+		- dataclass instance -> reactive dataclass with Signal-backed fields
+
+	Leaves other values (primitives, already-reactive containers) untouched.
+
+	Args:
+		value: The value to make reactive.
+
+	Returns:
+		The reactive version of the value, or the original if already reactive
+		or not a supported collection type.
+
+	Example:
+
+	```python
+	data = reactive({"key": "value"})  # ReactiveDict
+	items = reactive([1, 2, 3])        # ReactiveList
+	tags = reactive({"a", "b"})        # ReactiveSet
+	```
 	"""
 	if isinstance(value, ReactiveDict | ReactiveList | ReactiveSet):
 		return value
@@ -1058,9 +1119,28 @@ def reactive(value: _Any) -> _Any:
 def unwrap(value: _Any, untrack: bool = False) -> _Any:
 	"""Recursively unwrap reactive containers into plain Python values.
 
+	Converts:
+		- Signal/Computed -> their read() value
+		- ReactiveDict -> dict
+		- ReactiveList -> list
+		- ReactiveSet -> set
+		- Other Mapping/Sequence types are recursively unwrapped
+
 	Args:
-	    value: The value to unwrap
-	    untrack: Whether to not track dependencies during unwrapping. Defaults to False.
+		value: The value to unwrap.
+		untrack: If True, don't track dependencies during unwrapping.
+			Defaults to False.
+
+	Returns:
+		A plain Python value with all reactive containers unwrapped.
+
+	Example:
+
+	```python
+	count = Signal(5)
+	data = ReactiveDict({"count": count})
+	unwrap(data)  # {"count": 5}
+	```
 	"""
 
 	def _unwrap(v: _Any) -> _Any:

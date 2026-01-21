@@ -1,0 +1,398 @@
+---
+title: "DOM Elements"
+description: "HTML tags, props, events"
+---
+
+Pulse exports typed HTML/SVG tag functions, prop types, element types, and event types.
+
+## Tag Functions
+
+Tag functions create `Element` nodes. They accept children as positional arguments and props as keyword arguments.
+
+```python
+def tag(*children: Node, **props: Any) -> Element
+```
+
+### Usage
+
+```python
+import pulse as ps
+
+# Basic element
+ps.div("Hello, World!")
+
+# With props
+ps.button("Click me", onClick=handle_click, disabled=False)
+
+# Nested elements
+ps.div(
+    ps.h1("Title"),
+    ps.p("Paragraph text"),
+    className="container",
+)
+
+# With key for reconciliation
+ps.div("Content", key="unique-id")
+```
+
+### Self-Closing Tags
+
+Self-closing tags do not accept children.
+
+```python
+def self_closing_tag(**props: Any) -> Element
+```
+
+```python
+ps.img(src="/logo.png", alt="Logo")
+ps.input(type="text", value=name, onChange=handle_change)
+ps.br()
+```
+
+---
+
+## HTML Tags
+
+### Container Tags
+
+```python
+div, span, section, article, aside, header, footer, main, nav
+```
+
+### Text Tags
+
+```python
+p, h1, h2, h3, h4, h5, h6, strong, em, b, i, u, s, small, mark, code, pre, blockquote, q, cite, abbr, kbd, samp, var, sub, sup
+```
+
+### List Tags
+
+```python
+ul, ol, li, dl, dt, dd, menu
+```
+
+### Table Tags
+
+```python
+table, thead, tbody, tfoot, tr, th, td, caption, colgroup, col
+```
+
+### Form Tags
+
+```python
+form, input, button, select, option, optgroup, textarea, label, fieldset, legend, datalist, output, meter, progress
+```
+
+`form` has default prop: `method="POST"`
+
+### Media Tags
+
+```python
+img, audio, video, source, track, picture, canvas, iframe, embed, object_
+```
+
+Note: `object` is exported as `object_` to avoid conflict with Python builtin.
+
+### Interactive Tags
+
+```python
+a, button, details, summary, dialog
+```
+
+### Other Tags
+
+```python
+html, head, body, title, meta, link, script, style, noscript, template, base, time, data, wbr, ins, del_, ruby, rt, rp, bdi, bdo, figure, figcaption, hgroup, address
+```
+
+Note: `del` is exported as `del_` and `map` as `map_` to avoid Python keyword/builtin conflicts.
+
+### Self-Closing Tags
+
+```python
+area, base, br, col, embed, hr, img, input, link, meta, param, source, track, wbr
+```
+
+### Fragment
+
+```python
+fragment  # React fragment (<>...</>)
+```
+
+```python
+ps.fragment(
+    ps.p("First paragraph"),
+    ps.p("Second paragraph"),
+)
+```
+
+---
+
+## SVG Tags
+
+```python
+svg, circle, ellipse, g, line, path, polygon, polyline, rect, text, tspan, defs, clipPath, mask, pattern, use
+```
+
+### Example
+
+```python
+ps.svg(
+    ps.circle(cx=50, cy=50, r=40, fill="blue"),
+    width=100,
+    height=100,
+)
+```
+
+---
+
+## Prop Types
+
+Each tag has a corresponding props TypedDict for type checking.
+
+| Tag | Props Type |
+|-----|------------|
+| `div` | `HTMLDivProps` |
+| `button` | `HTMLButtonProps` |
+| `input` | `HTMLInputProps` |
+| `a` | `HTMLAnchorProps` |
+| `img` | `HTMLImgProps` |
+| `form` | `HTMLFormProps` |
+| ... | ... |
+
+### Base Props
+
+All HTML elements inherit from `BaseHTMLProps`:
+
+```python
+class BaseHTMLProps(TypedDict, total=False):
+    id: str
+    className: ClassName
+    style: CSSProperties
+    title: str
+    hidden: bool
+    tabIndex: int
+    accessKey: str
+    contentEditable: bool | Literal["true", "false", "inherit"]
+    dir: Literal["ltr", "rtl", "auto"]
+    draggable: bool
+    lang: str
+    spellCheck: bool
+    # ... data-* and aria-* attributes
+    # ... event handlers
+```
+
+### ClassName
+
+```python
+ClassName = str | list[str] | dict[str, bool] | None
+```
+
+```python
+# String
+ps.div(className="card active")
+
+# List (joined with spaces)
+ps.div(className=["card", "active"])
+
+# Dict (keys with truthy values)
+ps.div(className={"card": True, "active": is_active})
+```
+
+### CSSProperties
+
+TypedDict for inline styles with camelCase property names.
+
+```python
+ps.div(style={"backgroundColor": "red", "padding": "10px"})
+```
+
+---
+
+## Element Types
+
+DOM element types for event handler typing.
+
+| Type | Description |
+|------|-------------|
+| `HTMLElement` | Generic HTML element |
+| `HTMLDivElement` | `<div>` element |
+| `HTMLButtonElement` | `<button>` element |
+| `HTMLInputElement` | `<input>` element |
+| `HTMLFormElement` | `<form>` element |
+| `HTMLAnchorElement` | `<a>` element |
+| `HTMLImageElement` | `<img>` element |
+| `HTMLSelectElement` | `<select>` element |
+| `HTMLTextAreaElement` | `<textarea>` element |
+| ... | ... |
+
+---
+
+## Event Types
+
+### SyntheticEvent
+
+Base event type with common properties.
+
+```python
+class SyntheticEvent(TypedDict):
+    type: str
+    target: HTMLElement
+    currentTarget: HTMLElement
+    bubbles: bool
+    cancelable: bool
+    defaultPrevented: bool
+    eventPhase: int
+    isTrusted: bool
+    timeStamp: float
+```
+
+### Specific Event Types
+
+| Type | Trigger |
+|------|---------|
+| `MouseEvent` | Click, mouse move, etc. |
+| `KeyboardEvent` | Key press, key up, etc. |
+| `FocusEvent` | Focus, blur |
+| `FormEvent` | Form submission |
+| `ChangeEvent` | Input value change |
+| `InputEvent` | Text input |
+| `ClipboardEvent` | Copy, paste, cut |
+| `DragEvent` | Drag and drop |
+| `TouchEvent` | Touch interactions |
+| `WheelEvent` | Mouse wheel scroll |
+| `AnimationEvent` | CSS animations |
+| `TransitionEvent` | CSS transitions |
+| `PointerEvent` | Pointer (mouse/touch/pen) |
+| `ToggleEvent` | Details/dialog toggle |
+
+### MouseEvent
+
+```python
+class MouseEvent(SyntheticEvent):
+    altKey: bool
+    button: int
+    buttons: int
+    clientX: float
+    clientY: float
+    ctrlKey: bool
+    metaKey: bool
+    movementX: float
+    movementY: float
+    pageX: float
+    pageY: float
+    screenX: float
+    screenY: float
+    shiftKey: bool
+```
+
+### KeyboardEvent
+
+```python
+class KeyboardEvent(SyntheticEvent):
+    altKey: bool
+    charCode: int
+    code: str
+    ctrlKey: bool
+    key: str
+    keyCode: int
+    locale: str
+    location: int
+    metaKey: bool
+    repeat: bool
+    shiftKey: bool
+```
+
+### ChangeEvent
+
+```python
+class ChangeEvent(SyntheticEvent):
+    target: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+```
+
+---
+
+## Event Handler Types
+
+```python
+EventHandler0 = Callable[[], None]
+EventHandler1 = Callable[[T1], None]
+EventHandler2 = Callable[[T1, T2], None]
+# ... up to EventHandler10
+```
+
+### Usage
+
+```python
+def handle_click(event: ps.MouseEvent) -> None:
+    print(f"Clicked at ({event['clientX']}, {event['clientY']})")
+
+ps.button("Click", onClick=handle_click)
+```
+
+---
+
+## Event Handler Props
+
+### Mouse Events
+
+```python
+onClick, onDoubleClick, onMouseDown, onMouseUp, onMouseMove,
+onMouseEnter, onMouseLeave, onMouseOver, onMouseOut, onContextMenu
+```
+
+### Keyboard Events
+
+```python
+onKeyDown, onKeyUp, onKeyPress
+```
+
+### Focus Events
+
+```python
+onFocus, onBlur
+```
+
+### Form Events
+
+```python
+onChange, onInput, onSubmit, onReset, onInvalid
+```
+
+### Clipboard Events
+
+```python
+onCopy, onCut, onPaste
+```
+
+### Drag Events
+
+```python
+onDrag, onDragStart, onDragEnd, onDragEnter, onDragLeave, onDragOver, onDrop
+```
+
+### Touch Events
+
+```python
+onTouchStart, onTouchMove, onTouchEnd, onTouchCancel
+```
+
+### Pointer Events
+
+```python
+onPointerDown, onPointerUp, onPointerMove, onPointerEnter, onPointerLeave,
+onPointerOver, onPointerOut, onPointerCancel, onGotPointerCapture, onLostPointerCapture
+```
+
+### Animation/Transition Events
+
+```python
+onAnimationStart, onAnimationEnd, onAnimationIteration,
+onTransitionEnd
+```
+
+### Other Events
+
+```python
+onScroll, onWheel, onLoad, onError, onToggle
+```

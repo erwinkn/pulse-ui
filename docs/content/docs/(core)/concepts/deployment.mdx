@@ -1,0 +1,211 @@
+---
+title: "Deployment"
+---
+
+Ready to share your Pulse app with the world? This guide walks you through building and deploying your application to production.
+
+Pulse apps are Python backends that communicate with React frontends over WebSockets. When deploying, you need to generate the frontend code and decide how to host these two pieces.
+
+## Code generation
+
+Pulse generates React Router files that connect your Python routes to the React frontend. This happens automatically during development and can be triggered manually for production builds.
+
+### How it works
+
+When you run `pulse run app.py`, Pulse:
+
+1. Reads your route definitions from the `App` object
+2. Generates React Router configuration files in your web directory
+3. Creates route components that connect to the Pulse server
+4. Copies any local assets referenced by `Import` or `DynamicImport`
+
+The generated files are placed in a `pulse/` directory inside your web app folder (by default `web/app/pulse/`).
+
+### Configuration
+
+Configure code generation with `CodegenConfig`:
+
+```python
+from pathlib import Path
+import pulse as ps
+
+app = ps.App(
+    routes=[...],
+    codegen=ps.CodegenConfig(
+        web_dir=Path(__file__).parent / "web",  # Where your React app lives
+        pulse_dir="pulse",                       # Subdirectory for generated files
+    ),
+)
+```
+
+### Manual generation for production
+
+For production builds or CI, call `run_codegen()` directly:
+
+```python
+app = ps.App(routes=[...], codegen=ps.CodegenConfig(...))
+
+# Generate files for a specific server address
+app.run_codegen(address="https://api.example.com")
+```
+
+Pulse automatically adds the generated directory to `.gitignore`.
+
+---
+
+## Deployment modes
+
+You need to decide how to host the API and frontend—together on one server, or separately.
+
+**If you're just getting started, use single-server mode.** It's simpler to set up and works great for most applications.
+
+| | Single-server | Subdomains |
+|---|---|---|
+| **Setup complexity** | Simple | More involved |
+| **Best for** | Most apps, getting started | Large-scale apps, separate teams |
+| **Scaling** | Scale everything together | Scale API and frontend independently |
+| **Infrastructure** | One server/container | Separate API server + CDN |
+
+### Single-server mode (recommended)
+
+Your Pulse server handles everything: the API, WebSocket connections, and serving the React frontend.
+
+```python
+import pulse as ps
+
+app = ps.App(
+    routes=[...],
+    mode="single-server",  # This is the default
+    server_address="https://myapp.example.com",
+)
+```
+
+Why this mode is simpler:
+- **One thing to deploy** - Your Pulse server handles both the API and frontend
+- **No CORS headaches** - Everything runs on the same origin
+- **Cookies just work** - Session cookies are automatically configured
+
+### Subdomains mode
+
+Host the API and frontend separately (e.g., `api.example.com` and `app.example.com`):
+
+```python
+app = ps.App(
+    routes=[...],
+    mode="subdomains",
+    server_address="https://api.example.com",
+)
+```
+
+This mode requires more configuration:
+- **CORS must be configured** - The browser needs permission to make cross-origin requests
+- **Cookies need domain settings** - Session cookies must work across subdomains
+- **Separate deployments** - Deploy frontend (often to a CDN) and API server separately
+
+---
+
+## Server address configuration
+
+The `server_address` tells Pulse where your API will be accessible. Pulse uses this to:
+- Generate the correct WebSocket URL for the React client
+- Set up CORS policies
+- Configure cookie domains
+
+```python
+# Development
+app = ps.App(
+    routes=[...],
+    dev_server_address="http://localhost:8000",
+)
+
+# Production
+app = ps.App(
+    routes=[...],
+    server_address="https://api.myapp.com",
+)
+```
+
+---
+
+## Cookie configuration
+
+Pulse uses cookies to manage user sessions. The defaults work well for most apps. For subdomains mode or specific security requirements:
+
+```python
+from pulse import Cookie
+
+app = ps.App(
+    routes=[...],
+    cookie=Cookie(
+        name="pulse_session",
+        domain=".example.com",       # Leading dot for subdomain sharing
+        secure=True,                 # Only send over HTTPS
+        samesite="lax",              # CSRF protection
+        max_age_seconds=86400 * 30,  # 30 days
+    ),
+)
+```
+
+## CORS configuration
+
+Pulse configures CORS automatically based on your deployment mode. For custom settings:
+
+```python
+app = ps.App(
+    routes=[...],
+    cors={
+        "allow_origins": ["https://app.example.com"],
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    },
+)
+```
+
+---
+
+## Running in production
+
+Run your app with a production-grade ASGI server like Uvicorn:
+
+```bash
+uvicorn app:app.asgi --host 0.0.0.0 --port 8000
+```
+
+For more control over initialization, use the factory pattern:
+
+```python
+# app.py
+def create_app():
+    app = ps.App(routes=[...], server_address="https://api.example.com")
+    app.run_codegen(address="https://api.example.com")
+    return app.asgi
+```
+
+```bash
+uvicorn app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+### Environment variables
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `PULSE_ENV` | Set to `prod` for production mode | `prod` |
+| `PULSE_HOST` | Server host to bind to | `0.0.0.0` |
+| `PULSE_PORT` | Server port | `8000` |
+
+Setting `PULSE_ENV=prod` enables production optimizations and disables hot reloading.
+
+---
+
+## AWS deployment
+
+The `pulse-aws` package makes it easy to run Pulse on Lambda, ECS, and other AWS services:
+
+```python
+from pulse_aws import create_lambda_handler
+
+handler = create_lambda_handler(app)
+```
+
+See the [Pulse AWS package documentation](/docs/packages/pulse-aws) for detailed guides.

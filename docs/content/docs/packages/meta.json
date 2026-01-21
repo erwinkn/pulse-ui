@@ -1,0 +1,19 @@
+{
+  "title": "Packages",
+  "description": "UI libraries, auth, and deploy",
+  "icon": "Package",
+  "root": true,
+  "pages": [
+    "index",
+    "---UI Components---",
+    "pulse-mantine",
+    "pulse-ag-grid",
+    "pulse-recharts",
+    "pulse-lucide",
+    "---Core---",
+    "pulse-js-client",
+    "---Auth & Deploy---",
+    "pulse-msal",
+    "pulse-aws"
+  ]
+}

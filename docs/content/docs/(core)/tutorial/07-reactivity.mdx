@@ -1,0 +1,344 @@
+---
+title: "Reactivity"
+---
+
+Pulse has a powerful reactivity system that automatically tracks dependencies and updates your UI when data changes. This section covers computed values and effects, two key features that make working with state intuitive and efficient.
+
+## Computed values
+
+A computed value is a cached calculation that automatically updates when its dependencies change. Think of it like a spreadsheet cell that contains a formula: it recalculates only when the cells it references change.
+
+### Defining computed values
+
+Use the `@ps.computed` decorator on a method in your state class:
+
+```python
+class TodoState(ps.State):
+    todos: list[Todo] = []
+    filter: str = "all"  # "all", "active", or "completed"
+
+    @ps.computed
+    def filtered_todos(self) -> list[Todo]:
+        if self.filter == "active":
+            return [t for t in self.todos if not t.done]
+        if self.filter == "completed":
+            return [t for t in self.todos if t.done]
+        return self.todos
+
+    @ps.computed
+    def remaining_count(self) -> int:
+        return len([t for t in self.todos if not t.done])
+```
+
+Now you can use these computed values just like regular properties:
+
+```python
+@ps.component
+def TodoApp():
+    with ps.init():
+        state = TodoState()
+
+    return ps.div()[
+        ps.p(f"{state.remaining_count} items left"),
+        ps.ul()[
+            ps.For(state.filtered_todos, lambda t: ps.li(t.text, key=t.id))
+        ],
+    ]
+```
+
+### How computed values work
+
+When you first access a computed value, Pulse:
+
+1. Runs the function
+2. Tracks which state properties were accessed during execution
+3. Caches the result
+
+On subsequent accesses:
+- If no dependencies changed, Pulse returns the cached value instantly
+- If any dependency changed, Pulse re-runs the function and updates the cache
+
+This means you can call `state.filtered_todos` multiple times in your render without worrying about performance. The filtering logic only runs when `todos` or `filter` actually change.
+
+### Computed values outside state
+
+You can also create computed values that depend on multiple states using `ps.Computed`:
+
+```python
+def setup_counters():
+    counter1 = CounterState()
+    counter2 = CounterState()
+
+    @ps.Computed
+    def total():
+        return counter1.count + counter2.count
+
+    return counter1, counter2, total
+
+@ps.component
+def CounterPair():
+    counter1, counter2, total = ps.setup(setup_counters)
+
+    return ps.div()[
+        ps.p(f"Counter 1: {counter1.count}"),
+        ps.p(f"Counter 2: {counter2.count}"),
+        ps.p(f"Total: {total()}"),  # Note: call it like a function
+    ]
+```
+
+When defined outside a state class, you access the computed value by calling it as a function.
+
+## Effects
+
+Effects are functions that run in response to state changes. They are useful for side effects like logging, analytics, or synchronizing with external systems.
+
+### Defining effects
+
+Use the `@ps.effect` decorator on a method in your state class:
+
+```python
+class SettingsState(ps.State):
+    theme: str = "light"
+    font_size: int = 14
+
+    @ps.effect
+    def save_to_storage(self):
+        # This runs whenever theme or font_size changes
+        storage.save({
+            "theme": self.theme,
+            "font_size": self.font_size,
+        })
+        print(f"Settings saved: {self.theme}, {self.font_size}px")
+```
+
+When the effect runs, Pulse tracks which state properties it reads. Those become the effect's dependencies. The effect re-runs automatically whenever any dependency changes.
+
+### Effect cleanup
+
+Effects can return a cleanup function that runs before the next execution and when the effect is disposed:
+
+```python
+class TimerState(ps.State):
+    interval_ms: int = 1000
+    count: int = 0
+
+    @ps.effect
+    def start_timer(self):
+        # Set up the timer
+        timer_id = set_interval(lambda: self.tick(), self.interval_ms)
+
+        # Cleanup function: cancel the timer
+        def cleanup():
+            clear_interval(timer_id)
+            print("Timer stopped")
+
+        return cleanup
+
+    def tick(self):
+        self.count += 1
+```
+
+The cleanup sequence is:
+
+1. Effect runs for the first time, returns cleanup function
+2. A dependency changes
+3. Cleanup function runs (cleans up the old timer)
+4. Effect runs again with new values (creates new timer)
+5. Component is removed from UI
+6. Cleanup function runs one final time
+
+### Effects in components
+
+You can define effects directly inside components using `@ps.effect`. Pulse automatically registers them:
+
+```python
+@ps.component
+def TrackedComponent():
+    with ps.init():
+        state = MyState()
+
+    @ps.effect
+    def log_all_changes():
+        print(f"Name: {state.name}, Count: {state.count}")
+
+    return ps.div(...)
+```
+
+For effects in loops, use the `key` parameter:
+
+```python
+@ps.component
+def MultiLogger():
+    with ps.init():
+        items = ["a", "b", "c"]
+
+    for item in items:
+        @ps.effect(key=item)
+        def log_item(item=item):  # Capture via default arg
+            print(f"Item changed: {item}")
+
+    return ps.div(...)
+```
+
+## Controlling reactivity
+
+Sometimes you need fine-grained control over the reactivity system. Pulse provides two utilities for this.
+
+### `ps.Untrack()` - Ignore dependencies
+
+Use `ps.Untrack()` to read state without creating a dependency:
+
+```python
+class AnalyticsState(ps.State):
+    page_views: int = 0
+    debug_mode: bool = False
+
+    @ps.effect
+    def track_page_view(self):
+        self.page_views += 1
+
+        # Read debug_mode without making it a dependency
+        with ps.Untrack():
+            if self.debug_mode:
+                print(f"Page view: {self.page_views}")
+
+        # The effect only re-runs when page_views changes,
+        # NOT when debug_mode changes
+```
+
+This is useful when you want to read a value for logging or conditional logic without triggering re-runs when that value changes.
+
+### `ps.Batch()` - Group updates
+
+Use `ps.Batch()` to group multiple state updates into a single re-render:
+
+```python
+class FormState(ps.State):
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+
+    def reset(self):
+        # Without batching: 3 separate re-renders
+        # With batching: 1 re-render
+        with ps.Batch():
+            self.name = ""
+            self.email = ""
+            self.phone = ""
+```
+
+Pulse automatically batches synchronous updates in event handlers, so you usually do not need this. It is mainly useful in effects or when updating state from external code.
+
+## Complete example
+
+Here is a component that demonstrates computed values and effects together:
+
+```python
+from dataclasses import dataclass
+import pulse as ps
+
+@dataclass
+class Todo:
+    id: int
+    text: str
+    done: bool = False
+
+class TodoState(ps.State):
+    todos: list[Todo] = []
+    filter: str = "all"
+    _next_id: int = 1
+
+    @ps.computed
+    def filtered_todos(self) -> list[Todo]:
+        if self.filter == "active":
+            return [t for t in self.todos if not t.done]
+        if self.filter == "completed":
+            return [t for t in self.todos if t.done]
+        return self.todos
+
+    @ps.computed
+    def stats(self) -> dict:
+        total = len(self.todos)
+        done = len([t for t in self.todos if t.done])
+        return {"total": total, "done": done, "remaining": total - done}
+
+    @ps.effect
+    def log_changes(self):
+        stats = self.stats
+        print(f"Todos: {stats['total']} total, {stats['remaining']} remaining")
+
+    def add(self, text: str):
+        self.todos.append(Todo(self._next_id, text))
+        self._next_id += 1
+
+    def toggle(self, todo_id: int):
+        for todo in self.todos:
+            if todo.id == todo_id:
+                todo.done = not todo.done
+                break
+
+@ps.component
+def TodoApp():
+    with ps.init():
+        state = TodoState()
+        new_text = ""
+
+    def handle_add():
+        nonlocal new_text
+        if new_text.strip():
+            state.add(new_text)
+            new_text = ""
+
+    stats = state.stats
+
+    return ps.div()[
+        ps.h1("Todo List"),
+
+        # Add new todo
+        ps.div()[
+            ps.input(
+                type="text",
+                value=new_text,
+                onChange=lambda e: setattr(state, "new_text", e["target"]["value"]),
+                placeholder="What needs to be done?",
+            ),
+            ps.button("Add", onClick=handle_add),
+        ],
+
+        # Filter buttons
+        ps.div()[
+            ps.button("All", onClick=lambda: setattr(state, "filter", "all")),
+            ps.button("Active", onClick=lambda: setattr(state, "filter", "active")),
+            ps.button("Completed", onClick=lambda: setattr(state, "filter", "completed")),
+        ],
+
+        # Todo list
+        ps.ul()[
+            ps.For(
+                state.filtered_todos,
+                lambda t: ps.li(
+                    ps.input(type="checkbox", checked=t.done, onChange=lambda: state.toggle(t.id)),
+                    ps.span(t.text),
+                    key=t.id,
+                )
+            )
+        ],
+
+        # Stats
+        ps.p(f"{stats['remaining']} of {stats['total']} remaining"),
+    ]
+```
+
+## When to use what
+
+- **Computed values**: Use for derived data that can be calculated from state. They are efficient because they cache results.
+
+- **Effects**: Use for side effects that should happen in response to state changes: logging, analytics, syncing to storage, etc.
+
+- **Avoid effects for derived data**: If you need to transform state into something else, use a computed value instead of an effect that updates another state property.
+
+## See also
+
+- [Core Concepts: State and Reactivity](/docs/concepts/state)
+- [Reference: Reactive Core](/docs/reference/pulse/reactive)
+- [Reference: State](/docs/reference/pulse/state)

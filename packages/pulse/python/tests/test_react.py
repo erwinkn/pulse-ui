@@ -9,9 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from pulse.react_component import react_component
+from pulse.react_component import ReactComponent, react_component
 from pulse.transpiler.imports import Import
-from pulse.transpiler.nodes import Element, Jsx, Member, Node
+from pulse.transpiler.nodes import Element, Jsx, Member, Node, Signature
 
 
 def test_react_component_import_expr():
@@ -21,6 +21,7 @@ def test_react_component_import_expr():
 	@react_component(button_import)
 	def Button(*children: Node, key: str | None = None, **props: Any) -> Element: ...
 
+	assert isinstance(Button, Signature)
 	node = Button("Click", disabled=True)
 	assert isinstance(node, Element)
 	assert node.tag is button_import
@@ -36,6 +37,7 @@ def test_react_component_member_expr():
 	@react_component(header_expr)
 	def Header(*children: Node, key: str | None = None, **props: Any) -> Element: ...
 
+	assert isinstance(Header, Signature)
 	node = Header("Title")
 	assert isinstance(node, Element)
 	assert node.tag is header_expr
@@ -50,15 +52,16 @@ def test_react_component_jsx_expr_passthrough():
 	@react_component(jsx)
 	def Card(*children: Node, key: str | None = None, **props: Any) -> Element: ...
 
+	assert isinstance(Card, Signature)
 	node = Card("Body")
 	assert isinstance(node, Element)
 	assert node.tag is card_import
 	assert node.children == ["Body"]
 
 
-def test_react_component_rejects_non_expr():
-	"""@react_component enforces Expr-only inputs."""
-	with pytest.raises(TypeError, match="expects an Expr"):
+def test_react_component_rejects_missing_src():
+	"""@react_component enforces (name, src) for string inputs."""
+	with pytest.raises(TypeError, match="expects \\(name, src\\)"):
 
 		@react_component("Button")  # pyright: ignore[reportArgumentType]
 		def Button(  # pyright: ignore[reportUnusedFunction]
@@ -78,3 +81,43 @@ def test_react_component_key_validation():
 
 	node = Box(key="k1")
 	assert node.key == "k1"
+
+
+def test_react_component_string_import():
+	"""@react_component(name, src) creates Import-backed components."""
+
+	@react_component("Button", "@mantine/core")
+	def Button(*children: Node, key: str | None = None, **props: Any) -> Element: ...
+
+	node = Button("Click", variant="filled")
+	assert isinstance(node.tag, Import)
+	assert node.tag.name == "Button"
+	assert node.tag.src == "@mantine/core"
+
+
+def test_react_component_string_lazy():
+	"""@react_component(name, src, lazy=True) sets Import.lazy."""
+
+	@react_component("Chart", "@mantine/charts", lazy=True)
+	def Chart(*children: Node, key: str | None = None, **props: Any) -> Element: ...
+
+	node = Chart()
+	assert isinstance(node.tag, Import)
+	assert node.tag.lazy is True
+
+
+def test_react_component_class_wraps_expr():
+	"""ReactComponent(expr) behaves like Jsx(expr)."""
+	button_import = Import("Button", "@ui/button")
+	component = ReactComponent(button_import)
+	node = component("Click")
+	assert isinstance(component, Jsx)
+	assert node.tag is button_import
+
+
+def test_react_component_class_unwraps_jsx():
+	"""ReactComponent unwraps Jsx(expr) to avoid double-wrapping."""
+	card_import = Import("Card", "@ui/card")
+	component = ReactComponent(Jsx(card_import))
+	node = component("Body")
+	assert node.tag is card_import

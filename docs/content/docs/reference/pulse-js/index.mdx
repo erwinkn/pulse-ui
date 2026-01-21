@@ -1,0 +1,99 @@
+---
+title: "pulse.js"
+description: "Python bindings for JavaScript builtins in transpiled code"
+---
+
+# pulse.js
+
+The `pulse.js` module provides typed Python wrappers for JavaScript objects, functions, and built-ins. Use these when writing `@ps.javascript` decorated functions that get transpiled to JavaScript.
+
+## Why pulse.js?
+
+When you write a `@ps.javascript` function, your Python code gets transpiled to JavaScript. But Python and JavaScript have different built-ins: Python has `dict` and `set`, JavaScript has `Map` and `Set`. The `pulse.js` module bridges this gap by providing Python classes that transpile to their JavaScript equivalents.
+
+```python
+from pulse.js import Set, Array, Math, console
+
+@ps.javascript
+def example():
+    items = Set([1, 2, 3])          # -> new Set([1, 2, 3])
+    arr = Array.from_(items)        # -> Array.from(items)
+    rounded = Math.floor(3.7)       # -> Math.floor(3.7)
+    console.log(rounded)            # -> console.log(rounded)
+```
+
+## Module organization
+
+The module provides three categories of exports:
+
+### Classes (constructors + static methods)
+
+Use `new` when called, provide static methods:
+
+- [Array](/docs/reference/pulse-js/builtins#array) - Indexed collection
+- [Date](/docs/reference/pulse-js/builtins#date) - Date and time
+- [Error](/docs/reference/pulse-js/builtins#error) - Error types
+- [Map](/docs/reference/pulse-js/builtins#map) - Key-value collection
+- [Number](/docs/reference/pulse-js/builtins#number) - Number utilities
+- [Object](/docs/reference/pulse-js/builtins#object) - Object utilities
+- [Promise](/docs/reference/pulse-js/builtins#promise) - Async operations
+- [RegExp](/docs/reference/pulse-js/builtins#regexp) - Regular expressions
+- [Set](/docs/reference/pulse-js/builtins#set) - Unique value collection
+- [String](/docs/reference/pulse-js/builtins#string) - String utilities
+- [WeakMap](/docs/reference/pulse-js/builtins#weakmap) - Weak key-value collection
+- [WeakSet](/docs/reference/pulse-js/builtins#weakset) - Weak value collection
+
+### Namespaces (static functions only)
+
+Access methods via the namespace:
+
+- [Math](/docs/reference/pulse-js/namespaces#math) - Mathematical functions
+- [JSON](/docs/reference/pulse-js/namespaces#json) - JSON parsing/stringifying
+- [console](/docs/reference/pulse-js/namespaces#console) - Logging
+- [window](/docs/reference/pulse-js/namespaces#window) - Browser window
+- [document](/docs/reference/pulse-js/namespaces#document) - DOM document
+- [navigator](/docs/reference/pulse-js/namespaces#navigator) - Browser info
+
+### React bindings
+
+Hooks and components for React:
+
+- [useState, useEffect, useRef, ...](/docs/reference/pulse-js/react) - React hooks
+- [Suspense, lazy](/docs/reference/pulse-js/react#components) - React components
+
+### Special functions
+
+- `throw(error)` - Throw an error (statement, not expression)
+- `obj(key=value)` - Create plain JS object literal
+- `undefined` - JavaScript undefined value
+
+## Import patterns
+
+Import classes and namespaces from `pulse.js`:
+
+```python
+from pulse.js import Set, Map, Array, Math, console, window
+```
+
+Or import namespace modules for aliased access:
+
+```python
+import pulse.js.math as Math
+import pulse.js.json as JSON
+
+Math.floor(3.7)        # -> Math.floor(3.7)
+JSON.stringify(data)   # -> JSON.stringify(data)
+```
+
+Import React hooks from `pulse.js.react`:
+
+```python
+from pulse.js.react import useState, useEffect, useRef
+```
+
+## See also
+
+- [Builtins reference](/docs/reference/pulse-js/builtins) - Array, Map, Set, Promise, etc.
+- [Namespaces reference](/docs/reference/pulse-js/namespaces) - Math, JSON, console, window, document
+- [React reference](/docs/reference/pulse-js/react) - Hooks and components
+- [@ps.javascript decorator](/docs/reference/pulse/decorators#javascript) - Transpilation decorator

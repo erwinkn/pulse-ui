@@ -1,0 +1,512 @@
+---
+title: "Forms"
+description: "Form state management with client-side validation for Pulse Mantine"
+---
+
+Mantine's form system relies heavily on the `useForm` hook and imperative JavaScript calls. Since forms also benefit from fast client-side validation, Pulse Mantine provides a custom `MantineForm` wrapper that handles both challenges—giving you the same ergonomics in Python while running validation directly in the browser.
+
+## Basic Form Setup
+
+Building a form requires three things:
+
+1. A `MantineForm` instance (created inside `ps.init()`)
+2. Calling `form.render()` to set up the form element
+3. Giving a `name` prop to all inputs inside the form
+
+The `name` defines the field's path in the form data structure. Inputs automatically detect they're inside a form and register themselves.
+
+```python
+import pulse as ps
+from pulse_mantine import Button, Checkbox, Group, IsEmail, MantineForm, TextInput
+
+@ps.component
+def SignupForm():
+    with ps.init():
+        form = MantineForm(
+            initialValues={"email": "", "termsOfService": False},
+            validate={
+                "email": IsEmail("Invalid email")
+            },
+        )
+
+    return form.render(onSubmit=lambda values: print(values))[
+        TextInput(
+            name="email",
+            withAsterisk=True,
+            label="Email",
+            placeholder="your@email.com",
+        ),
+        Checkbox(
+            name="termsOfService",
+            mt="md",
+            label="I agree to the terms of service",
+        ),
+        Group(justify="flex-end", mt="md")[
+            Button("Submit", type="submit"),
+        ],
+    ]
+```
+
+### Side-by-Side: Mantine (React) vs Pulse (Python)
+
+```tsx
+// Mantine (React)
+import { useForm } from "@mantine/form";
+
+function Demo() {
+  const form = useForm({
+    mode: "uncontrolled",
+    initialValues: { email: "", termsOfService: false },
+    validate: {
+      email: (value) => (/^\S+@\S+$/.test(value) ? null : "Invalid email"),
+    },
+  });
+
+  return (
+    <form onSubmit={form.onSubmit((values) => console.log(values))}>
+      <TextInput
+        label="Email"
+        key={form.key("email")}
+        {...form.getInputProps("email")}
+      />
+      <Checkbox
+        label="I agree"
+        key={form.key("termsOfService")}
+        {...form.getInputProps("termsOfService", { type: "checkbox" })}
+      />
+      <Button type="submit">Submit</Button>
+    </form>
+  );
+}
+```
+
+```python
+# Pulse Mantine (Python)
+from pulse_mantine import MantineForm, IsEmail, TextInput, Checkbox, Button
+
+@ps.component
+def Demo():
+    with ps.init():
+        form = MantineForm(
+            initialValues={"email": "", "termsOfService": False},
+            validate={"email": IsEmail("Invalid email")},
+        )
+
+    return form.render(onSubmit=lambda values: print(values))[
+        TextInput(name="email", label="Email"),
+        Checkbox(name="termsOfService", label="I agree"),
+        Button("Submit", type="submit"),
+    ]
+```
+
+Key differences:
+- No `useForm` hook—use a `MantineForm` state class instead
+- No `{...form.getInputProps("email")}`—just add `name="email"` to the input
+- Built-in validators replace inline validation functions
+
+---
+
+## Validation
+
+Pulse Mantine ships with built-in validators that run both client-side (for instant feedback) and server-side (on submit, for security).
+
+### Available Validators
+
+**String validators:**
+- `IsNotEmpty(error)` — field must not be empty
+- `IsEmail(error)` — valid email format
+- `Matches(regex, error, client_regex=None)` — matches a regex pattern
+- `HasLength(min=None, max=None, error)` — string length constraints
+- `StartsWith(prefix, error)` — must start with prefix
+- `EndsWith(suffix, error)` — must end with suffix
+- `IsUrl(error)` — valid URL format
+- `IsJSONString(error)` — valid JSON string
+
+**Number validators:**
+- `IsNumber(error)` — must be a number
+- `IsInteger(error)` — must be an integer
+- `IsInRange(min=None, max=None, error)` — number within range
+
+**Date validators:**
+- `IsDate(error)` — must be a valid date
+- `IsBefore(field, error, inclusive=False)` — date before another field's value
+- `IsAfter(field, error, inclusive=False)` — date after another field's value
+- `IsISODate(error)` — valid ISO date string
+
+**ID validators:**
+- `IsUUID(error)` — valid UUID format
+- `IsULID(error)` — valid ULID format
+
+**Array validators:**
+- `IsArrayNotEmpty(error)` — array must have items
+- `MinItems(count, error)` — minimum number of items
+- `MaxItems(count, error)` — maximum number of items
+
+**File validators:**
+- `AllowedFileTypes(types, error)` — allowed MIME types
+- `MaxFileSize(bytes, error)` — maximum file size
+
+**Conditional validators:**
+- `RequiredWhen(field, equals=None, not_equals=None, in_values=None, not_in_values=None, error)` — conditionally required based on another field
+- `RequiredUnless(field, equals=None, not_equals=None, in_values=None, not_in_values=None, error)` — required unless condition met
+- `MatchesField(field, error)` — must match another field's value
+
+### Multiple Validators per Field
+
+Pass a list of validators to run them in sequence:
+
+```python
+validate = {
+    "username": [
+        IsNotEmpty("Username is required"),
+        HasLength(min=3, max=16, error="Must be 3-16 characters"),
+        Matches(r"^[a-z0-9_]+$", error="Lowercase letters, numbers, underscore only"),
+    ],
+    "email": IsEmail("Enter a valid email"),
+    "password": HasLength(min=8, error="Minimum 8 characters"),
+}
+```
+
+### When Validation Runs
+
+Control validation timing with these options:
+
+```python
+form = MantineForm(
+    initialValues={...},
+    validate={...},
+    validateInputOnChange=True,   # Validate on every keystroke
+    validateInputOnBlur=True,     # Validate when field loses focus
+)
+```
+
+You can also specify which fields to validate on change/blur:
+
+```python
+validateInputOnChange=["email", "username"],  # Only these fields
+validateInputOnBlur=["password"],             # Only password on blur
+```
+
+### Cross-Field Validation
+
+Use `IsBefore`, `IsAfter`, and `MatchesField` to validate fields against each other:
+
+```python
+validate = {
+    "start": IsDate("Pick a start date"),
+    "end": [
+        IsDate("Pick an end date"),
+        IsAfter("start", inclusive=True, error="End date must be on or after start"),
+    ],
+    "deadline": [
+        IsDate("Set a deadline"),
+        IsBefore("end", error="Deadline must be before end date"),
+        IsAfter("start", error="Deadline must be after start date"),
+    ],
+    "confirmPassword": MatchesField("password", error="Passwords must match"),
+}
+```
+
+---
+
+## Server Validation
+
+For validation that requires database lookups or complex server-side logic, use `ServerValidation`:
+
+```python
+from pulse_mantine import ServerValidation
+
+class SignupForm(MantineForm):
+    def __init__(self):
+        validate = {
+            "username": [
+                IsNotEmpty("Username is required"),
+                HasLength(min=3, max=16, error="3-16 characters"),
+                ServerValidation(self.check_username_available, debounce_ms=300, run_on="blur"),
+            ],
+        }
+        super().__init__(
+            initialValues={"username": ""},
+            validate=validate,
+        )
+
+    async def check_username_available(self, value, values, path):
+        # Simulate database lookup
+        taken_usernames = {"admin", "root", "system"}
+        if value.lower() in taken_usernames:
+            return "This username is already taken"
+        return None  # No error
+```
+
+### ServerValidation Options
+
+- `debounce_ms` — delay before calling the server (default: 300ms). Prevents firing on every keystroke.
+- `run_on` — when to run: `"change"`, `"blur"`, or `"submit"` (default: follows form settings)
+
+**Combining client and server validation:**
+
+```python
+validate = {
+    "username": [
+        # Client-side validators run instantly
+        IsNotEmpty("Username is required"),
+        HasLength(min=3, max=16, error="3-16 characters"),
+        Matches(r"^[a-z0-9_]+$", error="Lowercase only"),
+
+        # Server validator runs on blur (not every keystroke)
+        ServerValidation(self.check_username, debounce_ms=150, run_on="blur"),
+    ],
+}
+```
+
+---
+
+## Form Actions
+
+`MantineForm` provides methods to manipulate form state programmatically:
+
+### Getting Values
+
+```python
+async def handle_click():
+    values = await form.get_form_values()
+    print(values)
+```
+
+### Setting Values
+
+```python
+form.set_values({"email": "new@example.com", "name": "John"})
+form.set_field_value("email", "another@example.com")
+```
+
+### List Operations
+
+For dynamic forms with arrays:
+
+```python
+form.insert_list_item("items", {"name": ""})           # Add to end
+form.insert_list_item("items", {"name": ""}, index=0)  # Add at index
+form.remove_list_item("items", index=2)                # Remove at index
+form.reorder_list_item("items", from_index=0, to_index=2)  # Move item
+```
+
+### Error Handling
+
+```python
+form.set_errors({"email": "Email already exists", "username": "Username taken"})
+form.set_field_error("email", "Invalid format")
+form.clear_errors()                    # Clear all errors
+form.clear_errors("email", "username") # Clear specific fields
+```
+
+### Validation and Reset
+
+```python
+form.validate()                        # Trigger validation manually
+form.reset()                           # Reset to initial values
+form.reset(initial_values={"email": ""})  # Reset with new initial values
+```
+
+---
+
+## Dynamic Forms
+
+For forms where fields can be added, removed, or reordered, enable value synchronization:
+
+```python
+form = MantineForm(
+    initialValues={"members": [{"name": "", "email": ""}]},
+    syncMode="change",  # Sync values to server on every change
+    debounceMs=300,     # Debounce text input updates
+)
+```
+
+With `syncMode="change"`, form values are available on the server via `form.values`:
+
+```python
+@ps.component
+def DynamicForm():
+    with ps.init():
+        form = MantineForm(
+            initialValues={"members": [{"name": ""}]},
+            syncMode="change",
+        )
+
+    members = form.values.get("members") or []
+
+    def add_member():
+        form.insert_list_item("members", {"name": ""})
+
+    def remove_member(index):
+        form.remove_list_item("members", index)
+
+    return form.render(onSubmit=lambda v: print(v))[
+        ps.For(
+            list(range(len(members))),
+            lambda i: ps.div(key=f"member-{i}")[
+                TextInput(name=f"members.{i}.name", label=f"Member {i + 1}"),
+                Button("Remove", onClick=lambda: remove_member(i)),
+            ],
+        ),
+        Button("Add Member", onClick=add_member),
+        Button("Submit", type="submit"),
+    ]
+```
+
+### syncMode Options
+
+- `"change"` — sync on every input change (with debounce for text inputs)
+- `"blur"` — sync when fields lose focus
+- `"none"` — no automatic sync (default)
+
+The `form.values` property is reactive—your UI updates automatically when values change.
+
+---
+
+## Controlled vs Uncontrolled
+
+Mantine forms support two modes:
+
+**Controlled (default):** Form values live in React state. Every keystroke triggers a re-render.
+
+**Uncontrolled:** Form values stay in the DOM. No re-renders on input, better performance for large forms.
+
+```python
+form = MantineForm(
+    mode="uncontrolled",  # Better performance for large forms
+    initialValues={...},
+)
+```
+
+### When to Use Each
+
+- **Controlled:** When you need real-time access to form values, conditional rendering based on input, or complex field interactions.
+- **Uncontrolled:** For large forms, performance-critical applications, or when you only need values on submit.
+
+Both modes work with all Pulse Mantine features including validation and dynamic forms.
+
+---
+
+## Full Example: Signup Form
+
+```python
+import pulse as ps
+from pulse_mantine import (
+    Button,
+    Card,
+    Group,
+    HasLength,
+    IsEmail,
+    IsNotEmpty,
+    MantineForm,
+    Matches,
+    MatchesField,
+    PasswordInput,
+    Stack,
+    TextInput,
+    Title,
+    ServerValidation,
+)
+
+
+class SignupFormState(MantineForm):
+    def __init__(self):
+        validate = {
+            "username": [
+                IsNotEmpty("Username is required"),
+                HasLength(min=3, max=20, error="Must be 3-20 characters"),
+                Matches(r"^[a-z0-9_]+$", error="Lowercase letters, numbers, underscore only"),
+                ServerValidation(self.check_username, run_on="blur"),
+            ],
+            "email": [
+                IsNotEmpty("Email is required"),
+                IsEmail("Enter a valid email"),
+            ],
+            "password": [
+                IsNotEmpty("Password is required"),
+                HasLength(min=8, error="Minimum 8 characters"),
+            ],
+            "confirmPassword": [
+                IsNotEmpty("Please confirm your password"),
+                MatchesField("password", error="Passwords must match"),
+            ],
+        }
+
+        super().__init__(
+            mode="uncontrolled",
+            initialValues={
+                "username": "",
+                "email": "",
+                "password": "",
+                "confirmPassword": "",
+            },
+            validate=validate,
+            validateInputOnBlur=True,
+        )
+
+    async def check_username(self, value, values, path):
+        # In a real app, check database
+        taken = {"admin", "root", "system", "test"}
+        if value and value.lower() in taken:
+            return "Username is already taken"
+        return None
+
+
+@ps.component
+def SignupPage():
+    with ps.init():
+        form = SignupFormState()
+
+    async def handle_submit(values):
+        print("Creating account:", values)
+        # Handle signup logic here
+
+    return Card(withBorder=True, shadow="sm", p="xl", maw=400, mx="auto", mt="xl")[
+        Stack(gap="lg")[
+            Title(order=2)["Create Account"],
+            form.render(onSubmit=handle_submit)[
+                Stack(gap="md")[
+                    TextInput(
+                        name="username",
+                        label="Username",
+                        placeholder="johndoe",
+                        withAsterisk=True,
+                    ),
+                    TextInput(
+                        name="email",
+                        label="Email",
+                        placeholder="you@example.com",
+                        withAsterisk=True,
+                    ),
+                    PasswordInput(
+                        name="password",
+                        label="Password",
+                        placeholder="At least 8 characters",
+                        withAsterisk=True,
+                    ),
+                    PasswordInput(
+                        name="confirmPassword",
+                        label="Confirm Password",
+                        placeholder="Repeat your password",
+                        withAsterisk=True,
+                    ),
+                    Group(justify="flex-end", mt="md")[
+                        Button("Create Account", type="submit"),
+                    ],
+                ]
+            ],
+        ]
+    ]
+
+
+app = ps.App([ps.Route("/", SignupPage)])
+```
+
+---
+
+## Resources
+
+- [Mantine useForm](https://mantine.dev/form/use-form/) — official Mantine form documentation
+- [Mantine Validation](https://mantine.dev/form/validation/) — validation patterns and options
+- [Mantine Form Actions](https://mantine.dev/form/actions/) — manipulating form state

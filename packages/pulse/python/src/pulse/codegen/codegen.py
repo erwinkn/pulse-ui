@@ -24,13 +24,32 @@ logger = logging.getLogger(__file__)
 
 @dataclass
 class CodegenConfig:
-	"""
-	Configuration for code generation.
+	"""Configuration for code generation output paths.
+
+	Controls where generated React Router files are written. All paths
+	can be relative (resolved against base_dir) or absolute.
+
+	Args:
+		web_dir: Root directory for web output. Defaults to "web".
+		pulse_dir: Subdirectory for generated Pulse files. Defaults to "pulse".
+		base_dir: Base directory for resolving relative paths. If not provided,
+			resolved from PULSE_APP_FILE, PULSE_APP_DIR, or cwd.
 
 	Attributes:
-	    web_dir (str): Root directory for the web output.
-	    pulse_dir (str): Name of the Pulse app directory.
-	    pulse_path (Path): Full path to the generated app directory.
+		web_dir: Root directory for web output.
+		pulse_dir: Subdirectory name for generated files.
+		base_dir: Explicit base directory, if provided.
+
+	Example:
+		```python
+		app = ps.App(
+		    codegen=ps.CodegenConfig(
+		        web_dir="frontend",
+		        pulse_dir="generated",
+		    ),
+		)
+		# Generated files will be at: frontend/app/generated/
+		```
 	"""
 
 	web_dir: Path | str = "web"
@@ -46,11 +65,14 @@ class CodegenConfig:
 	def resolved_base_dir(self) -> Path:
 		"""Resolve the base directory where relative paths should be anchored.
 
-		Precedence:
-		  1) Explicit `base_dir` if provided
-		  2) Env var `PULSE_APP_FILE` (directory of the file)
-		  3) Env var `PULSE_APP_DIR`
-		  4) Current working directory
+		Returns:
+			Resolved base directory path.
+
+		Resolution precedence:
+			1. Explicit `base_dir` if provided
+			2. Directory of PULSE_APP_FILE env var
+			3. PULSE_APP_DIR env var
+			4. Current working directory
 		"""
 		if isinstance(self.base_dir, Path):
 			return self.base_dir
@@ -64,7 +86,11 @@ class CodegenConfig:
 
 	@property
 	def web_root(self) -> Path:
-		"""Absolute path to the web root directory (e.g. `<app_dir>/pulse-web`)."""
+		"""Absolute path to the web root directory.
+
+		Returns:
+			Absolute path to web_dir (e.g., `<base_dir>/web`).
+		"""
 		wd = Path(self.web_dir)
 		if wd.is_absolute():
 			return wd
@@ -72,7 +98,12 @@ class CodegenConfig:
 
 	@property
 	def pulse_path(self) -> Path:
-		"""Full path to the generated app directory."""
+		"""Full path to the generated Pulse app directory.
+
+		Returns:
+			Absolute path where generated files are written
+			(e.g., `<web_root>/app/<pulse_dir>`).
+		"""
 		return self.web_root / "app" / self.pulse_dir
 
 

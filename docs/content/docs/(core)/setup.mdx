@@ -1,0 +1,96 @@
+---
+title: "Getting Started"
+description: "Set up your first Pulse app"
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Welcome to Pulse! This guide will walk you through creating your first Pulse application from scratch.
+
+<Callout type="warn" title="Early access">
+Pulse is under active development and this setup process will be simplified in the future. For now, you'll need to set up two parts: a Python project (where your app logic lives) and a React Router app (which handles the frontend).
+</Callout>
+
+## What you'll need
+
+Before getting started, make sure you have these tools installed:
+
+- **[uv](https://docs.astral.sh/uv/)** — A fast Python package manager
+- **[Bun](https://bun.sh/)** — A JavaScript runtime and package manager
+
+## Step 1: Create your Python project
+
+First, let's set up a new directory for your Pulse app and initialize it as a Python project:
+
+```bash
+mkdir my-pulse-app
+cd my-pulse-app
+uv init
+uv add pulse-framework
+uv sync
+```
+
+This creates a new Python project managed by uv and installs the Pulse framework.
+
+Now create a file called `app.py` with your first Pulse component:
+
+```python
+from pathlib import Path
+import pulse as ps
+
+@ps.component
+def home():
+    return ps.div("Hello Pulse")
+
+app = ps.App(
+    routes=[ps.Route("/", home)],
+    codegen=ps.CodegenConfig(web_dir=Path(__file__).parent / "web"),
+)
+```
+
+Let's break down what's happening here:
+
+- **`@ps.component`** — This decorator turns a Python function into a Pulse component. Components are the building blocks of your UI.
+- **`ps.div("Hello Pulse")`** — This creates a `<div>` element with the text "Hello Pulse" inside it. Pulse provides functions like `div`, `span`, `button`, etc. that map to HTML elements.
+- **`ps.App`** — This is your application object. It holds your routes and configuration.
+- **`ps.Route("/", home)`** — This tells Pulse to render the `home` component when someone visits the root URL (`/`).
+- **`CodegenConfig(web_dir=...)`** — This tells Pulse where your React frontend lives (we'll create that next).
+
+## Step 2: Create the React Router frontend
+
+Pulse uses React Router for the frontend. Run these commands to create a new React Router app in a `web/` folder:
+
+```bash
+bunx create-react-router@latest web --template react-router-serve
+cd web
+bun install
+cd ..
+```
+
+This scaffolds a server-side rendered React app that Pulse will use to display your components. You can take a look at how `examples/main.py` and `examples/web/` are set up for a working reference.
+
+## Step 3: Run your app
+
+Now you're ready to start your Pulse app:
+
+```bash
+uv run pulse run app.py
+```
+
+The `pulse run` command does two things:
+1. **Generates React routes** — It reads your Python components and creates corresponding files in `web/app/pulse/`
+2. **Starts the dev server** — It launches the React Router development server
+
+Open the URL shown in your terminal (usually `http://localhost:5173`) and you should see "Hello Pulse" displayed in your browser!
+
+## Customizing the frontend location
+
+By default, Pulse expects your React app to be in a `web/` folder next to your Python file. If your frontend lives somewhere else, just update the `web_dir` setting:
+
+```python
+codegen=ps.CodegenConfig(web_dir=Path("/path/to/your/react-app"))
+```
+
+## Next steps
+
+Now that you have a working Pulse app, head over to the [Tutorial](/docs/tutorial) to learn how to build interactive UIs with state, events, and more.

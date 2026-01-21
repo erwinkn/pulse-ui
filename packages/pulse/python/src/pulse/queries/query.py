@@ -48,6 +48,20 @@ RETRY_DELAY_DEFAULT = 2.0 if not is_pytest() else 0.01
 
 @dataclass(slots=True)
 class QueryConfig(Generic[T]):
+	"""Configuration options for a query.
+
+	Stores immutable configuration that controls query behavior including
+	retry logic, caching, and lifecycle callbacks.
+
+	Attributes:
+		retries: Number of retry attempts on failure (default 3).
+		retry_delay: Delay in seconds between retry attempts (default 2.0).
+		initial_data: Initial data value or factory function.
+		initial_data_updated_at: Timestamp for initial data staleness calculation.
+		gc_time: Seconds to keep unused query in cache before garbage collection.
+		on_dispose: Callback invoked when query is disposed.
+	"""
+
 	retries: int
 	retry_delay: float
 	initial_data: T | Callable[[], T] | None
@@ -57,9 +71,20 @@ class QueryConfig(Generic[T]):
 
 
 class QueryState(Generic[T]):
-	"""
-	Container for query state signals and manipulation methods.
+	"""Container for query state signals and manipulation methods.
+
+	Manages reactive signals for query data, status, errors, and retry state.
 	Used by both KeyedQuery and UnkeyedQuery via composition.
+
+	Attributes:
+		cfg: Query configuration options.
+		data: Signal containing the fetched data or None.
+		error: Signal containing the last error or None.
+		last_updated: Signal with timestamp of last successful update.
+		status: Signal with current QueryStatus ("loading", "success", "error").
+		is_fetching: Signal indicating if a fetch is in progress.
+		retries: Signal with current retry attempt count.
+		retry_reason: Signal with exception from last failed retry.
 	"""
 
 	cfg: QueryConfig[T]
@@ -900,17 +925,38 @@ class KeyedQueryResult(Generic[T], Disposable):
 
 
 class QueryProperty(Generic[T, TState], InitializableProperty):
-	"""
-	Descriptor for state-bound queries.
+	"""Descriptor for state-bound queries created by the @query decorator.
 
-	Usage:
-	    class S(ps.State):
-	        @ps.query()
-	        async def user(self) -> User: ...
+	QueryProperty is the return type of the ``@query`` decorator. It acts as a
+	descriptor that creates and manages query instances for each State object.
 
-	        @user.key
-	        def _user_key(self):
-	            return ("user", self.user_id)
+	When accessed on a State instance, returns a QueryResult with reactive
+	properties (data, status, error) and methods (refetch, invalidate, etc.).
+
+	Supports additional decorators for customization:
+		- ``@query_prop.key``: Define dynamic query key for sharing.
+		- ``@query_prop.initial_data``: Provide initial/placeholder data.
+		- ``@query_prop.on_success``: Handle successful fetch.
+		- ``@query_prop.on_error``: Handle fetch errors.
+
+	Example:
+
+	```python
+	class UserState(ps.State):
+	    user_id: str = ""
+
+	    @ps.query
+	    async def user(self) -> User:
+	        return await api.get_user(self.user_id)
+
+	    @user.key
+	    def _user_key(self):
+	        return ("user", self.user_id)
+
+	    @user.on_success
+	    def _on_user_loaded(self, data: User):
+	        print(f"Loaded user: {data.name}")
+	```
 	"""
 
 	name: str
@@ -1183,7 +1229,62 @@ def query(
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
 	key: QueryKey | None = None,
+) -> (
+	QueryProperty[T, TState]
+	| Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]
 ):
+	"""Decorator for async data fetching on State methods.
+
+	Creates a reactive query that automatically fetches data, handles loading
+	states, retries on failure, and caches results. Queries can be shared
+	across components using keys.
+
+	Args:
+		fn: The async method to decorate (when used without parentheses).
+		stale_time: Seconds before data is considered stale (default 0.0).
+		gc_time: Seconds to keep unused query in cache (default 300.0, None to disable).
+		refetch_interval: Auto-refetch interval in seconds (default None, disabled).
+		keep_previous_data: Keep previous data while refetching (default False).
+		retries: Number of retry attempts on failure (default 3).
+		retry_delay: Delay between retries in seconds (default 2.0).
+		initial_data_updated_at: Timestamp for initial data staleness calculation.
+		enabled: Whether query is enabled (default True).
+		fetch_on_mount: Fetch when component mounts (default True).
+		key: Static query key for sharing across instances.
+
+	Returns:
+		QueryProperty that creates QueryResult instances when accessed.
+
+	Example:
+
+	Basic usage:
+
+	```python
+	class UserState(ps.State):
+	    user_id: str = ""
+
+	    @ps.query
+	    async def user(self) -> User:
+	        return await api.get_user(self.user_id)
+	```
+
+	With options:
+
+	```python
+	@ps.query(stale_time=60, refetch_interval=300)
+	async def user(self) -> User:
+	    return await api.get_user(self.user_id)
+	```
+
+	Keyed query (shared across instances):
+
+	```python
+	@ps.query(key=("users", "current"))
+	async def current_user(self) -> User:
+	    return await api.get_current_user()
+	```
+	"""
+
 	def decorator(
 		func: Callable[[TState], Awaitable[T]], /
 	) -> QueryProperty[T, TState]:

@@ -2,12 +2,15 @@
 JavaScript Map builtin module.
 
 Usage:
-    from pulse.js import Map
-    Map()                         # -> new Map()
-    Map([["a", 1]])              # -> new Map([["a", 1]])
 
-    # Or import from module directly:
-    from pulse.js.map import Map
+```python
+from pulse.js import Map
+Map()                         # -> new Map()
+Map([["a", 1]])              # -> new Map([["a", 1]])
+
+# Or import from module directly:
+from pulse.js.map import Map
+```
 """
 
 from collections.abc import Callable as _Callable

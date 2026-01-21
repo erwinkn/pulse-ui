@@ -16,7 +16,7 @@ Thank you for your interest in contributing to Pulse! This guide will help you s
 
 ```bash
 # Install Python dependencies
-uv sync --dev
+uv sync --dev --all-packages
 
 # Install JavaScript dependencies
 bun install

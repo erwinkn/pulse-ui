@@ -1,0 +1,93 @@
+---
+title: "HTML"
+---
+
+Pulse elements are Python functions that describe what should appear on the page. They're the building blocks of your UI - every button, heading, and container is a Pulse element.
+
+## HTML elements
+
+All standard HTML elements are available as functions on the `ps` module:
+
+```python
+ps.div(
+    ps.h1("Welcome!"),
+    ps.p("This is a paragraph."),
+    ps.button("Click me"),
+)
+```
+
+This produces the HTML you'd expect:
+
+```html
+<div>
+  <h1>Welcome!</h1>
+  <p>This is a paragraph.</p>
+  <button>Click me</button>
+</div>
+```
+
+## Props and children
+
+Elements accept two kinds of arguments:
+
+- **Props** (keyword arguments) - attributes like `className`, `id`, or event handlers
+- **Children** (positional arguments) - content nested inside the element
+
+```python
+ps.button(
+    "Click me",              # child (the button text)
+    className="btn-primary", # prop
+    onClick=handle_click,    # prop (event handler)
+)
+```
+
+### React naming conventions
+
+Pulse uses React's naming conventions for props:
+
+- `className` instead of `class` (since `class` is a Python keyword)
+- `htmlFor` instead of `for` (on label elements)
+- `onClick`, `onChange`, etc. for event handlers (camelCase)
+
+### Two ways to pass children
+
+You can pass children as positional arguments:
+
+```python
+ps.div(ps.h1("Title"), ps.p("Body"))
+```
+
+Or use bracket syntax, which is often cleaner for elements with many children or lots of props:
+
+```python
+ps.div(className="container mx-auto p-6")[
+    ps.h1("Title", className="text-2xl font-bold"),
+    ps.p("Body", className="text-gray-600"),
+    ps.button("Action", onClick=do_something),
+]
+```
+
+The bracket syntax keeps the props visually close to the element name, making the code easier to scan. Use whichever style feels more readable for your situation.
+
+## Nesting elements
+
+Elements can be nested as deeply as you need:
+
+```python
+ps.main(className="min-h-screen")[
+    ps.header(className="bg-blue-600 text-white p-4")[
+        ps.h1("My App"),
+    ],
+    ps.div(className="container mx-auto p-6")[
+        ps.section()[
+            ps.h2("Section 1"),
+            ps.p("Content goes here..."),
+        ],
+    ],
+]
+```
+
+## See also
+
+- [Tutorial: Basics](/docs/tutorial/01-basics)
+- [Reference: DOM Elements](/docs/reference/pulse/dom)

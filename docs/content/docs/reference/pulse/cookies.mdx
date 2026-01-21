@@ -1,0 +1,147 @@
+---
+title: "Cookies"
+description: "Cookie types"
+---
+
+## Cookie
+
+Dataclass for configuring HTTP cookies used in session management.
+
+```python
+from pulse import Cookie
+```
+
+### Constructor
+
+```python
+@dataclass
+class Cookie:
+    name: str
+    domain: str | None = None
+    secure: bool | None = None
+    samesite: Literal["lax", "strict", "none"] = "lax"
+    max_age_seconds: int = 7 * 24 * 3600  # 7 days
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | required | Cookie name |
+| `domain` | `str \| None` | `None` | Cookie domain. Set automatically in subdomain mode |
+| `secure` | `bool \| None` | `None` | HTTPS-only flag. Auto-resolved from server address |
+| `samesite` | `Literal["lax", "strict", "none"]` | `"lax"` | SameSite attribute |
+| `max_age_seconds` | `int` | `604800` | Cookie lifetime in seconds (default 7 days) |
+
+### Methods
+
+#### `get_from_fastapi`
+
+```python
+def get_from_fastapi(self, request: Request) -> str | None
+```
+
+Extract cookie value from a FastAPI Request by reading the Cookie header.
+
+#### `get_from_socketio`
+
+```python
+def get_from_socketio(self, environ: dict[str, Any]) -> str | None
+```
+
+Extract cookie value from a socket.io environ mapping.
+
+#### `set_through_api`
+
+```python
+async def set_through_api(self, value: str) -> None
+```
+
+Set the cookie on the client via WebSocket. Must be called during a callback context.
+
+Raises `RuntimeError` if `Cookie.secure` is not resolved (ensure `App.setup()` ran first).
+
+#### `set_on_fastapi`
+
+```python
+def set_on_fastapi(self, response: Response, value: str) -> None
+```
+
+Set the cookie on a FastAPI Response object. Configured with `httponly=True` and `path="/"`.
+
+---
+
+## SetCookie
+
+Extended Cookie dataclass that includes the cookie value. Used for setting cookies.
+
+```python
+from pulse import SetCookie
+```
+
+### Constructor
+
+```python
+@dataclass
+class SetCookie(Cookie):
+    value: str
+```
+
+Inherits all parameters from `Cookie`, plus:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `value` | `str` | The cookie value to set |
+
+### Class Methods
+
+#### `from_cookie`
+
+```python
+@classmethod
+def from_cookie(cls, cookie: Cookie, value: str) -> SetCookie
+```
+
+Create a `SetCookie` from an existing `Cookie` configuration with a specific value.
+
+Raises `RuntimeError` if `cookie.secure` is not resolved.
+
+---
+
+## CORSOptions
+
+TypedDict for CORS middleware configuration.
+
+```python
+from pulse.cookies import CORSOptions
+```
+
+```python
+class CORSOptions(TypedDict, total=False):
+    allow_origins: Sequence[str]       # Default: ()
+    allow_methods: Sequence[str]       # Default: ("GET",)
+    allow_headers: Sequence[str]       # Default: ()
+    allow_credentials: bool            # Default: False
+    allow_origin_regex: str | None     # Default: None
+    expose_headers: Sequence[str]      # Default: ()
+    max_age: int                       # Default: 600
+```
+
+---
+
+## Helper Functions
+
+### `parse_cookie_header`
+
+```python
+def parse_cookie_header(header: str | None) -> dict[str, str]
+```
+
+Parse a raw Cookie header string into a dictionary of cookie name-value pairs.
+
+```python
+from pulse.cookies import parse_cookie_header
+
+cookies = parse_cookie_header("session=abc123; theme=dark")
+# {"session": "abc123", "theme": "dark"}
+```

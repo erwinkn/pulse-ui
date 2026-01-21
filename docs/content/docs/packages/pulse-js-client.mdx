@@ -1,0 +1,157 @@
+---
+title: "Pulse JS Client"
+icon: Globe
+---
+
+The JavaScript client library that renders server-driven VDOM in the browser and handles WebSocket communication with the Pulse Python server.
+
+## Overview
+
+When you build a Pulse application, the Python server generates a virtual DOM (VDOM) that describes your UI. The JS client receives this VDOM over WebSocket, renders it as React components, and sends user interactions back to the server.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser                                                        │
+│  ┌──────────────┐  ┌────────────┐  ┌─────────────────────────┐  │
+│  │ PulseProvider│──│ PulseClient│──│ Transport (Socket.IO)   │  │
+│  └──────────────┘  └────────────┘  └─────────────────────────┘  │
+│         │                │                                      │
+│         ▼                ▼                                      │
+│  ┌──────────────┐  ┌────────────┐                               │
+│  │  PulseView   │  │  Renderer  │                               │
+│  │  (per route) │  │  (VDOM→DOM)│                               │
+│  └──────────────┘  └────────────┘                               │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                                        │
+         │ VDOM updates                           │ Events/callbacks
+         │                                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Python Server                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Installation
+
+The client is automatically included when you create a Pulse app. You don't need to install it manually unless you're building custom integrations.
+
+```bash
+bun add pulse-client
+```
+
+## Key Components
+
+### PulseProvider
+
+The root provider that establishes the WebSocket connection to your server.
+
+```tsx
+import { PulseProvider } from "pulse-client";
+
+function App() {
+  return (
+    <PulseProvider config={{ serverUrl: "http://localhost:8000" }}>
+      <Routes />
+    </PulseProvider>
+  );
+}
+```
+
+### PulseView
+
+Renders a server-driven view for a specific route.
+
+```tsx
+import { PulseView } from "pulse-client";
+
+function Dashboard() {
+  return <PulseView path="/dashboard" registry={registry} />;
+}
+```
+
+### usePulseClient
+
+Hook to access the client instance for advanced use cases.
+
+```tsx
+import { usePulseClient } from "pulse-client";
+
+function MyComponent() {
+  const client = usePulseClient();
+  // Access client methods
+}
+```
+
+### usePulseChannel
+
+Hook for real-time bidirectional messaging between client and server.
+
+```tsx
+import { usePulseChannel } from "pulse-client";
+
+function Chat() {
+  const channel = usePulseChannel("chat");
+
+  channel.on("new_message", (msg) => {
+    // Handle incoming message
+  });
+
+  const sendMessage = () => {
+    channel.emit("message", { text: "Hello" });
+  };
+}
+```
+
+## Forms
+
+### PulseForm
+
+A form component that handles submission and serialization.
+
+```tsx
+import { PulseForm, submitForm } from "pulse-client";
+
+function MyForm() {
+  return (
+    <PulseForm onSubmit={(data) => console.log(data)}>
+      <input name="email" />
+      <button type="submit">Submit</button>
+    </PulseForm>
+  );
+}
+```
+
+## Serialization
+
+The client provides utilities for serializing and deserializing data between Python and JavaScript.
+
+```tsx
+import { serialize, deserialize } from "pulse-client";
+
+// Serialize data for sending to server
+const wire = serialize({ date: new Date() });
+
+// Deserialize data received from server
+const data = deserialize(wire);
+```
+
+## Exports
+
+**Components:**
+- `PulseProvider` - Root provider for connection management
+- `PulseView` - Renders server-driven views
+- `PulseForm` - Form handling component
+
+**Hooks:**
+- `usePulseClient()` - Access the client instance
+- `usePulseChannel(name)` - Real-time messaging
+
+**Functions:**
+- `serialize` - Convert data for wire transfer
+- `deserialize` - Parse data from wire format
+- `submitForm` - Programmatic form submission
+- `extractServerRouteInfo` - Extract route information
+
+**Types:**
+- `VDOM`, `VDOMNode`, `VDOMElement` - Virtual DOM types
+- `PulseClient` - Client interface
+- `ComponentRegistry` - Component registration

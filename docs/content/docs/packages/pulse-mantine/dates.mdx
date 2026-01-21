@@ -1,0 +1,295 @@
+---
+title: "Date Pickers"
+description: "Date and time input components from @mantine/dates"
+---
+
+Date and time components from `@mantine/dates`. These components provide calendar-based date selection, time pickers, and datetime inputs with full form integration.
+
+## Available Components
+
+### Input Components
+
+For use in forms with `name` prop support:
+
+| Component | Description |
+|-----------|-------------|
+| `DateInput` | Text input that parses typed date strings |
+| `DatePickerInput` | Date picker with dropdown calendar |
+| `DateTimePicker` | Combined date and time picker |
+| `TimeInput` | Simple time input field |
+| `TimePicker` | Time picker with dropdown |
+| `MonthPickerInput` | Month/year selection input |
+| `YearPickerInput` | Year selection input |
+
+### Picker Components
+
+Inline picker components (no input wrapper):
+
+| Component | Description |
+|-----------|-------------|
+| `DatePicker` | Calendar for selecting dates |
+| `MonthPicker` | Month/year selector |
+| `YearPicker` | Year selector |
+
+### Calendar Components
+
+| Component | Description |
+|-----------|-------------|
+| `Calendar` | Full calendar display |
+| `MiniCalendar` | Compact calendar view |
+
+## Basic Usage
+
+### DatePickerInput
+
+The most common date input component:
+
+```python
+from pulse_mantine import MantineProvider, DatePickerInput, Stack
+
+@ps.component
+def DateForm():
+    return MantineProvider()[
+        Stack(gap="md")[
+            DatePickerInput(
+                label="Select date",
+                placeholder="Pick a date",
+                name="date",
+            ),
+        ]
+    ]
+```
+
+### DateTimePicker
+
+For selecting both date and time:
+
+```python
+from pulse_mantine import DateTimePicker
+
+DateTimePicker(
+    label="Meeting time",
+    placeholder="Select date and time",
+    name="meeting_time",
+)
+```
+
+### TimeInput
+
+For time-only input:
+
+```python
+from pulse_mantine import TimeInput
+
+TimeInput(
+    label="Start time",
+    placeholder="HH:MM",
+    name="start_time",
+)
+```
+
+## Form Integration
+
+Date pickers integrate with `MantineForm` using the `name` prop for automatic form registration.
+
+### Basic Form Example
+
+```python
+import pulse as ps
+from pulse_mantine import (
+    MantineProvider, MantineForm, DatePickerInput,
+    TextInput, Button, Stack,
+)
+
+@ps.component
+def EventForm():
+    form = MantineForm(
+        initialValues={"title": "", "date": None},
+        validateInputOnBlur=True,
+    )
+
+    def handle_submit(data):
+        print(f"Event: {data['title']} on {data['date']}")
+
+    return MantineProvider()[
+        form.render(onSubmit=handle_submit)[
+            Stack(gap="md")[
+                TextInput(label="Event title", name="title"),
+                DatePickerInput(
+                    label="Event date",
+                    placeholder="Select date",
+                    name="date",
+                ),
+                Button("Create Event", type="submit"),
+            ]
+        ]
+    ]
+```
+
+### Date Validators
+
+Pulse Mantine provides validators for date fields:
+
+| Validator | Description |
+|-----------|-------------|
+| `IsDate()` | Validates that value is a parseable date |
+| `IsBefore(field=..., value=...)` | Date must be before another field or fixed value |
+| `IsAfter(field=..., value=...)` | Date must be after another field or fixed value |
+
+### Date Range with Validation
+
+```python
+from pulse_mantine import (
+    MantineProvider, MantineForm, DatePickerInput,
+    Button, Stack, IsNotEmpty, IsDate, IsBefore, IsAfter,
+)
+
+@ps.component
+def DateRangeForm():
+    form = MantineForm(
+        initialValues={"start_date": None, "end_date": None},
+        validate={
+            "start_date": [IsNotEmpty("Start date is required"), IsDate()],
+            "end_date": [
+                IsNotEmpty("End date is required"),
+                IsDate(),
+                IsAfter("start_date", error="End date must be after start date"),
+            ],
+        },
+        validateInputOnBlur=True,
+    )
+
+    def handle_submit(data):
+        print(f"Range: {data['start_date']} to {data['end_date']}")
+
+    return MantineProvider()[
+        form.render(onSubmit=handle_submit)[
+            Stack(gap="md")[
+                DatePickerInput(
+                    label="Start date",
+                    placeholder="Select start",
+                    name="start_date",
+                ),
+                DatePickerInput(
+                    label="End date",
+                    placeholder="Select end",
+                    name="end_date",
+                ),
+                Button("Submit", type="submit"),
+            ]
+        ]
+    ]
+```
+
+## Examples
+
+### Simple Date Picker
+
+```python
+from pulse_mantine import MantineProvider, DatePickerInput
+
+@ps.component
+def SimpleDatePicker():
+    return MantineProvider()[
+        DatePickerInput(
+            label="Birth date",
+            placeholder="Select your birth date",
+            valueFormat="MMMM D, YYYY",
+            clearable=True,
+        )
+    ]
+```
+
+### DateTime Picker with Constraints
+
+```python
+from datetime import datetime
+from pulse_mantine import MantineProvider, DateTimePicker
+
+@ps.component
+def AppointmentPicker():
+    return MantineProvider()[
+        DateTimePicker(
+            label="Appointment",
+            placeholder="Pick date and time",
+            minDate=datetime.now(),  # No past dates
+            valueFormat="DD MMM YYYY hh:mm A",
+        )
+    ]
+```
+
+### Inline Calendar
+
+For displaying a calendar without an input wrapper:
+
+```python
+from pulse_mantine import MantineProvider, DatePicker
+
+@ps.component
+def InlineCalendar():
+    return MantineProvider()[
+        DatePicker(
+            type="range",  # Allow range selection
+            numberOfColumns=2,  # Show two months
+        )
+    ]
+```
+
+## Configuration
+
+### Common Props
+
+All date picker components support these props:
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `label` | `str` | Input label |
+| `placeholder` | `str` | Placeholder text |
+| `valueFormat` | `str` | Date format string (dayjs format) |
+| `minDate` | `datetime` | Minimum selectable date |
+| `maxDate` | `datetime` | Maximum selectable date |
+| `clearable` | `bool` | Show clear button |
+| `disabled` | `bool` | Disable the input |
+| `required` | `bool` | Mark as required |
+| `error` | `str` | Error message to display |
+
+### Value Format
+
+The `valueFormat` prop uses [dayjs format tokens](https://day.js.org/docs/en/display/format):
+
+```python
+# Examples
+DatePickerInput(valueFormat="YYYY-MM-DD")      # 2024-01-15
+DatePickerInput(valueFormat="MMMM D, YYYY")    # January 15, 2024
+DatePickerInput(valueFormat="DD/MM/YYYY")      # 15/01/2024
+DateTimePicker(valueFormat="DD MMM YYYY HH:mm") # 15 Jan 2024 14:30
+```
+
+### Locale Support
+
+Wrap your app with `DatesProvider` to configure locale settings:
+
+```python
+from pulse_mantine import MantineProvider, DatesProvider, DatePickerInput
+
+@ps.component
+def LocalizedApp():
+    return MantineProvider()[
+        DatesProvider(settings={"locale": "de", "firstDayOfWeek": 1})[
+            DatePickerInput(label="Datum", placeholder="Datum auswahlen"),
+        ]
+    ]
+```
+
+Available settings:
+
+| Setting | Description |
+|---------|-------------|
+| `locale` | Locale string (e.g., "en", "de", "fr") |
+| `firstDayOfWeek` | First day of week (0=Sunday, 1=Monday) |
+| `weekendDays` | Array of weekend day indices |
+| `timezone` | Timezone for date calculations |
+
+## Reference
+
+For complete prop documentation and examples, see the [Mantine Dates documentation](https://mantine.dev/dates/getting-started/).

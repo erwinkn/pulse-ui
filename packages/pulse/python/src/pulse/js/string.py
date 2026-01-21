@@ -2,13 +2,16 @@
 JavaScript String builtin module.
 
 Usage:
-    from pulse.js import String
-    String(x)                      # -> new String(x)
-    String.fromCharCode(65)        # -> String.fromCharCode(65)
-    String.fromCodePoint(0x1F600)  # -> String.fromCodePoint(0x1F600)
 
-    # Or import from module directly:
-    from pulse.js.string import String
+```python
+from pulse.js import String
+String(x)                      # -> new String(x)
+String.fromCharCode(65)        # -> String.fromCharCode(65)
+String.fromCodePoint(0x1F600)  # -> String.fromCodePoint(0x1F600)
+
+# Or import from module directly:
+from pulse.js.string import String
+```
 """
 
 from typing import Any as _Any

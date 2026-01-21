@@ -2,15 +2,18 @@
 JavaScript Promise builtin module.
 
 Usage:
-    from pulse.js import Promise
-    Promise(executor)             # -> new Promise(executor)
-    Promise.resolve(value)        # -> Promise.resolve(value)
-    Promise.reject(reason)        # -> Promise.reject(reason)
 
-    # Or import from module directly:
-    from pulse.js.promise import Promise
+```python
+from pulse.js import Promise
+Promise(executor)             # -> new Promise(executor)
+Promise.resolve(value)        # -> Promise.resolve(value)
+Promise.reject(reason)        # -> Promise.reject(reason)
 
-The Promise class is generic and supports async/await via the Awaitable protocol.
+# Or import from module directly:
+from pulse.js.promise import Promise
+```
+
+The `Promise` class is generic and supports async/await via the Awaitable protocol.
 """
 
 from collections.abc import Callable as _Callable
@@ -36,16 +39,19 @@ PromiseSettledResult = PromiseFulfilledResult[T] | PromiseRejectedResult
 class Promise(_Generic[T_co]):
 	"""JavaScript Promise - a thenable that represents an async operation.
 
-	Promise is both generic over its resolved type and implements Awaitable,
+	`Promise` is both generic over its resolved type and implements `Awaitable`,
 	allowing it to be used with Python's async/await syntax which transpiles
 	to JavaScript async/await.
 
 	Example:
-	    @javascript
-	    async def fetch_data() -> str:
-	        response: Promise[Response] = fetch("/api/data")
-	        data = await response  # Awaits the promise
-	        return data.text()
+
+	```python
+	@javascript
+	async def fetch_data() -> str:
+	    response: Promise[Response] = fetch("/api/data")
+	    data = await response  # Awaits the promise
+	    return data.text()
+	```
 	"""
 
 	def __init__(

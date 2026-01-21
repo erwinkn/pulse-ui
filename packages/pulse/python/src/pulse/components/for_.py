@@ -1,3 +1,8 @@
+"""For loop component for mapping items to elements.
+
+Provides a declarative way to render lists, similar to JavaScript's Array.map().
+"""
+
 from collections.abc import Callable, Iterable
 from inspect import Parameter, signature
 from typing import TYPE_CHECKING, Any, TypeVar, overload
@@ -27,11 +32,32 @@ def For(items: Iterable[T], fn: Callable[[T, int], Element]) -> list[Element]: .
 
 
 def For(items: Iterable[T], fn: Callable[..., Element]) -> list[Element]:
-	"""Map items to elements, passing `(item)` or `(item, index)`.
+	"""Map items to elements, like JavaScript's Array.map().
 
-	The callable `fn` may accept either a single positional argument (the item)
-	or two positional arguments (the item and its index), similar to JavaScript's
-	Array.map. If `fn` declares `*args`, it will receive `(item, index)`.
+	Iterates over `items` and calls `fn` for each one, returning a list of
+	elements. The mapper function can accept either one argument (item) or
+	two arguments (item, index).
+
+	Args:
+		items: Iterable of items to map over.
+		fn: Mapper function that receives `(item)` or `(item, index)` and
+			returns an Element. If `fn` has a `*args` parameter, it receives
+			both item and index.
+
+	Returns:
+		A list of Elements, one for each item.
+
+	Example:
+		Single argument (item only)::
+
+			ps.For(users, lambda user: UserCard(user=user, key=user.id))
+
+		With index::
+
+			ps.For(items, lambda item, i: ps.li(f"{i}: {item}", key=str(i)))
+
+	Note:
+		In transpiled `@javascript` code, `For` compiles to `.map()`.
 	"""
 	try:
 		sig = signature(fn)

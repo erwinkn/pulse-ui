@@ -10,7 +10,8 @@
     "packages/pulse-mantine/js",
     "examples/web/",
     "examples/pulse-mantine/web",
-    "tutorial/examples/web"
+    "tutorial/examples/web",
+    "docs/"
   ],
   "devDependencies": {
     "@biomejs/biome": "2.2.5"

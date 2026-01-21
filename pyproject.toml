@@ -4,9 +4,6 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "fumapy",
-]
 
 
 [dependency-groups]
@@ -37,13 +34,11 @@ pulse-mantine = { workspace = true }
 pulse-msal = { workspace = true }
 pulse-recharts = { workspace = true }
 pulse-aws = { workspace = true }
-fumapy = { workspace = true }
 
 
 [tool.uv.workspace]
 members = [
 	"packages/pulse/python",
-	"packages/fumapy",
 	"packages/pulse-ag-grid",
 	"packages/pulse-lucide",
 	"packages/pulse-mantine/python",

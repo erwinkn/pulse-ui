@@ -6,7 +6,7 @@ Focuses on the @react_component decorator behavior with Expr-backed components.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pulse.react_component import ReactComponent, react_component
@@ -95,6 +95,17 @@ def test_react_component_string_import():
 	assert node.tag.src == "@mantine/core"
 
 
+def test_react_component_string_default_import():
+	"""@react_component(name, src, is_default=True) sets default import kind."""
+
+	@react_component("Calendar", "react-calendar", is_default=True)
+	def Calendar(*children: Node, key: str | None = None, **props: Any) -> Element: ...
+
+	node = Calendar()
+	assert isinstance(node.tag, Import)
+	assert node.tag.kind == "default"
+
+
 def test_react_component_string_lazy():
 	"""@react_component(name, src, lazy=True) sets Import.lazy."""
 
@@ -104,6 +115,19 @@ def test_react_component_string_lazy():
 	node = Chart()
 	assert isinstance(node.tag, Import)
 	assert node.tag.lazy is True
+
+
+def test_react_component_rejects_is_default_for_expr():
+	"""@react_component(expr, is_default=True) raises TypeError."""
+	button_import = Import("Button", "@ui/button")
+	decorator = cast(Any, react_component)
+
+	with pytest.raises(TypeError, match="is_default only supported"):
+
+		@decorator(button_import, is_default=True)
+		def Button(  # pyright: ignore[reportUnusedFunction]
+			*children: Node, key: str | None = None, **props: Any
+		) -> Element: ...
 
 
 def test_react_component_class_wraps_expr():

@@ -108,7 +108,7 @@ from pulse import Import
 ```python
 Import(
     name: str,
-    src: str,
+    src: str | None = None,
     *,
     kind: Literal["named", "default", "namespace", "side_effect"] = "named",
     is_type: bool = False,
@@ -123,7 +123,7 @@ Import(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | required | Import name (empty for side-effect imports) |
-| `src` | `str` | required | Module path or package name |
+| `src` | `str \| None` | `None` | Module path or package name. If omitted, `name` is treated as the source and `kind` becomes `"side_effect"`. |
 | `kind` | `ImportKind` | `"named"` | Import type: `"named"`, `"default"`, `"namespace"`, `"side_effect"` |
 | `is_type` | `bool` | `False` | Type-only import (TypeScript) |
 | `lazy` | `bool` | `False` | Generate lazy import factory for code-splitting |
@@ -144,6 +144,9 @@ utils = Import("utils", "./utils", kind="namespace")
 
 # Side-effect import: import "./styles.css"
 Import("", "./styles.css", kind="side_effect")
+
+# Side-effect import (single-argument form)
+Import("./styles.css")
 
 # Lazy import for code-splitting
 Chart = Import("Chart", "./Chart", kind="default", lazy=True)
@@ -172,7 +175,17 @@ from pulse import react_component, Import, default_signature, Element
 ### Signature
 
 ```python
+@overload
 def react_component(expr: Expr) -> Callable[[Callable[P, Any]], Callable[P, Element]]
+
+@overload
+def react_component(
+    name: str,
+    src: str,
+    *,
+    lazy: bool = False,
+    is_default: bool = False,
+) -> Callable[[Callable[P, Any]], Callable[P, Element]]
 ```
 
 ### Usage
@@ -186,6 +199,10 @@ def Button(
     variant: str = "filled",
     disabled: bool = False,
 ) -> Element:
+    ...
+
+@react_component("Calendar", "react-calendar", is_default=True)
+def Calendar(*children, **props) -> Element:
     ...
 
 # Use in components

@@ -161,6 +161,7 @@ class Import(Expr):
 
 		# Side-effect import: import "./styles.css"
 		Import("", "./styles.css", kind="side_effect")
+		Import("./styles.css")
 
 		# Type-only import: import type { Props } from "./types"
 		Props = Import("Props", "./types", is_type=True)
@@ -194,7 +195,7 @@ class Import(Expr):
 	def __init__(
 		self,
 		name: str,
-		src: str,
+		src: str | None = None,
 		*,
 		kind: ImportKind | None = None,
 		is_type: bool = False,
@@ -203,6 +204,14 @@ class Import(Expr):
 		before: tuple[str, ...] | list[str] = (),
 		_caller_depth: int = 2,
 	) -> None:
+		if src is None:
+			if kind not in (None, "side_effect"):
+				raise TypeError(
+					"Import single-argument form is reserved for side effect imports"
+				)
+			src = name
+			name = ""
+			kind = "side_effect"
 		# Validate: lazy imports cannot be type-only
 		if lazy and is_type:
 			raise TranspileError("Import cannot be both lazy and type-only")

@@ -28,7 +28,7 @@ JavaScript import that auto-registers and deduplicates. Emits as its unique iden
 def __init__(
     self,
     name: str,
-    src: str,
+    src: str | None = None,
     *,
     kind: ImportKind | None = None,  # defaults to "named"
     is_type: bool = False,
@@ -40,7 +40,7 @@ def __init__(
 
 **Parameters:**
 - `name`: Import name (e.g., `"useState"`, `"Button"`)
-- `src`: Module source (e.g., `"react"`, `"@mantine/core"`, `"./utils"`)
+- `src`: Module source (e.g., `"react"`, `"@mantine/core"`, `"./utils"`). If omitted, `name` is treated as the source and `kind` becomes `"side_effect"`.
 - `kind`: Import kind - `"named"`, `"default"`, `"namespace"`, or `"side_effect"`
 - `is_type`: Type-only import (`import type { ... }`)
 - `lazy`: Generate lazy import factory for code-splitting
@@ -63,6 +63,9 @@ utils = Import("utils", "./utils", kind="namespace")
 
 # Side-effect import: import "./styles.css"
 Import("", "./styles.css", kind="side_effect")
+
+# Side-effect import (single-argument form)
+Import("./styles.css")
 
 # Type-only import: import type { Props } from "./types"
 Props = Import("Props", "./types", is_type=True)

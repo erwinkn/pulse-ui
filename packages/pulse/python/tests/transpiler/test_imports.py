@@ -266,6 +266,48 @@ class TestImportAsDecorator:
 		assert result.children == ["Click"]
 
 
+class TestImportSingleArg:
+	"""Test Import single-argument side-effect form."""
+
+	def test_import_single_arg_side_effect_package(self):
+		"""Import("react") creates a side-effect import."""
+		imp = Import("react")
+		assert imp.kind == "side_effect"
+		assert imp.name == ""
+		assert imp.src == "react"
+		assert imp.is_side_effect is True
+		assert imp.asset is None
+
+	def test_import_single_arg_side_effect_local(self, tmp_path: Path):
+		"""Import("./styles.css") resolves local assets."""
+		css_file = tmp_path / "styles.css"
+		css_file.write_text("body { margin: 0; }")
+
+		caller = tmp_path / "test_caller.py"
+		caller.write_text("")
+
+		import pulse.transpiler.imports as imports_module
+
+		original_caller_file = imports_module.caller_file
+		imports_module.caller_file = lambda depth: caller
+
+		try:
+			imp = Import("./styles.css")
+			assert imp.kind == "side_effect"
+			assert imp.name == ""
+			assert imp.is_local
+			assert imp.asset is not None
+			assert imp.asset.source_path == css_file
+			assert str(css_file) in imp.src
+		finally:
+			imports_module.caller_file = original_caller_file
+
+	def test_import_single_arg_rejects_non_side_effect_kind(self):
+		"""Single-argument form only supports side-effect imports."""
+		with pytest.raises(TypeError, match="single-argument form"):
+			Import("./styles.css", kind="default")
+
+
 class TestPathHelpers:
 	"""Test the path classification helper functions."""
 

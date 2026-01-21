@@ -1,5 +1,4 @@
 import logging
-import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,20 +106,26 @@ class CodegenConfig:
 		return self.web_root / "app" / self.pulse_dir
 
 
-def write_file_if_changed(path: Path, content: str) -> Path:
+def write_file_if_changed(path: Path, content: str | bytes) -> Path:
 	"""Write content to file only if it has changed."""
 	if path.exists():
 		try:
-			current_content = path.read_text()
+			if isinstance(content, bytes):
+				current_content = path.read_bytes()
+			else:
+				current_content = path.read_text()
 			if current_content == content:
 				return path  # Skip writing, content is the same
-		except Exception:
-			logging.warning(f"Can't read file {path.absolute()}")
+		except Exception as exc:
+			logging.warning("Can't read file %s: %s", path.absolute(), exc)
 			# If we can't read the file for any reason, just write it
 			pass
 
 	path.parent.mkdir(exist_ok=True, parents=True)
-	path.write_text(content)
+	if isinstance(content, bytes):
+		path.write_bytes(content)
+	else:
+		path.write_text(content)
 	return path
 
 
@@ -202,9 +207,17 @@ class Codegen:
 
 			# Copy file if source exists
 			if asset.source_path.exists():
-				shutil.copy2(asset.source_path, dest_path)
 				self._copied_files.add(dest_path)
-				logger.debug(f"Copied {asset.source_path} -> {dest_path}")
+				try:
+					content = asset.source_path.read_bytes()
+				except OSError as exc:
+					logger.warning(
+						"Can't read asset %s: %s",
+						asset.source_path,
+						exc,
+					)
+					continue
+				write_file_if_changed(dest_path, content)
 
 	def generate_layout_tsx(
 		self,

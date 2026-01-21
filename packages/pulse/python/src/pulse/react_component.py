@@ -35,7 +35,11 @@ def react_component(
 
 @overload
 def react_component(
-	expr_or_name: str, src: str, *, lazy: bool = False
+	expr_or_name: str,
+	src: str,
+	*,
+	lazy: bool = False,
+	is_default: bool = False,
 ) -> Callable[[Callable[P, Any]], Callable[P, Element]]: ...
 
 
@@ -44,6 +48,7 @@ def react_component(
 	src: str | None = None,
 	*,
 	lazy: bool = False,
+	is_default: bool = False,
 ) -> Callable[[Callable[P, Any]], Callable[P, Element]]:
 	"""Decorator for typed React component bindings."""
 	if isinstance(expr_or_name, Expr):
@@ -51,11 +56,16 @@ def react_component(
 			raise TypeError("react_component expects (expr) or (name, src)")
 		if lazy:
 			raise TypeError("react_component lazy only supported with (name, src)")
+		if is_default:
+			raise TypeError(
+				"react_component is_default only supported with (name, src)"
+			)
 		component = ReactComponent(expr_or_name)
 	elif isinstance(expr_or_name, str):
 		if src is None:
 			raise TypeError("react_component expects (name, src)")
-		component = ReactComponent(Import(expr_or_name, src, lazy=lazy))
+		kind = "default" if is_default else None
+		component = ReactComponent(Import(expr_or_name, src, kind=kind, lazy=lazy))
 	else:
 		raise TypeError("react_component expects an Expr or (name, src)")
 

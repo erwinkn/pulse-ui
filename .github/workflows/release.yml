@@ -25,124 +25,89 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Determine base revision
-        id: base
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
-            first_commit="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
-            echo "sha=${first_commit}" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Detect version changes
+      - name: Detect unpublished versions
         id: detect
-        env:
-          BASE_SHA: ${{ steps.base.outputs.sha }}
-          GITHUB_SHA: ${{ github.sha }}
         run: |
           python <<'PY'
           import json
-          import os
-          import subprocess
           from pathlib import Path
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import quote
+          from urllib.request import urlopen
           try:
               import tomllib  # type: ignore[attr-defined]
           except ModuleNotFoundError:
               import tomli as tomllib  # type: ignore[assignment]
 
-          base = os.environ.get("BASE_SHA")
-          head = os.environ.get("GITHUB_SHA")
+          repo_root = Path(".")
 
-          def git_output(*args: str) -> list[str]:
+          def fetch_json(url: str) -> dict | None:
               try:
-                  result = subprocess.check_output(["git", *args], text=True)
-              except subprocess.CalledProcessError:
-                  return []
-              return [line for line in result.splitlines() if line.strip()]
-
-          if not base or set(base) == {"0"}:
-              first_commits = git_output("rev-list", "--max-parents=0", head or "HEAD")
-              base = first_commits[-1] if first_commits else ""
-
-          def read_file_at(commit: str | None, path: str) -> str | None:
-              if not commit:
+                  with urlopen(url) as response:
+                      return json.loads(response.read().decode("utf-8"))
+              except HTTPError as exc:
+                  if exc.code == 404:
+                      return None
+                  raise
+              except URLError:
                   return None
-              try:
-                  return subprocess.check_output(
-                      ["git", "show", f"{commit}:{path}"], text=True
-                  )
-              except subprocess.CalledProcessError:
-                  return None
-
-          js_candidates = git_output(
-              "diff",
-              "--name-only",
-              base,
-              head,
-              "--",
-              ":(glob)packages/**/package.json",
-          )
-
-          python_candidates = git_output(
-              "diff",
-              "--name-only",
-              base,
-              head,
-              "--",
-              ":(glob)packages/**/pyproject.toml",
-          )
 
           js_dirs: set[str] = set()
           python_dirs: set[str] = set()
 
-          for path in js_candidates:
-              file_path = Path(path)
+          js_candidates = [
+              path
+              for path in repo_root.joinpath("packages").rglob("package.json")
+              if "node_modules" not in path.parts
+          ]
+          python_candidates = [
+              path
+              for path in repo_root.joinpath("packages").rglob("pyproject.toml")
+              if "node_modules" not in path.parts
+          ]
+
+          for file_path in js_candidates:
               if not file_path.is_file():
                   continue
-
-              new_data = json.loads(file_path.read_text())
-              if new_data.get("private"):
+              data = json.loads(file_path.read_text())
+              if data.get("private"):
                   continue
-              new_version = new_data.get("version")
-
-              old_raw = read_file_at(base, path)
-              old_version = None
-              if old_raw:
-                  try:
-                      old_version = json.loads(old_raw).get("version")
-                  except json.JSONDecodeError:
-                      old_version = None
-
-              if new_version and new_version != old_version:
+              name = data.get("name")
+              version = data.get("version")
+              if not name or not version:
+                  continue
+              encoded = quote(name, safe="@")
+              registry = fetch_json(f"https://registry.npmjs.org/{encoded}")
+              if registry is None:
+                  js_dirs.add(str(file_path.parent))
+                  continue
+              if version not in registry.get("versions", {}):
                   js_dirs.add(str(file_path.parent))
 
-          for path in python_candidates:
-              file_path = Path(path)
+          for file_path in python_candidates:
               if not file_path.is_file():
                   continue
-
               with file_path.open("rb") as fh:
                   data = tomllib.load(fh)
-              new_version = data.get("project", {}).get("version")
-
-              old_raw = read_file_at(base, path)
-              old_version = None
-              if old_raw:
-                  old_version = tomllib.loads(old_raw).get("project", {}).get("version")
-
-              if new_version and new_version != old_version:
+              project = data.get("project", {})
+              name = project.get("name")
+              version = project.get("version")
+              if not name or not version:
+                  continue
+              registry = fetch_json(f"https://pypi.org/pypi/{name}/json")
+              if registry is None:
+                  python_dirs.add(str(file_path.parent))
+                  continue
+              if version not in registry.get("releases", {}):
                   python_dirs.add(str(file_path.parent))
 
           js_list = sorted(js_dirs)
           python_list = sorted(python_dirs)
 
-          print(f"JavaScript packages to publish: {js_list}")
-          print(f"Python packages to publish: {python_list}")
+          print(f"JavaScript packages to publish (unpublished): {js_list}")
+          print(f"Python packages to publish (unpublished): {python_list}")
 
-          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          output_path = Path("${GITHUB_OUTPUT}")
           with output_path.open("a") as fh:
               fh.write(f"js_matrix={json.dumps(js_list)}\n")
               fh.write(f"python_matrix={json.dumps(python_list)}\n")
@@ -162,6 +127,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -169,11 +137,11 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: npm install --workspaces --include-workspace-root --no-package-lock
+        run: bun install --frozen-lockfile
 
       - name: Build JavaScript package
         working-directory: ${{ matrix.package }}
-        run: npm run build
+        run: bun run build
 
       - name: Publish JavaScript package (dry run)
         if: github.event_name != 'push'

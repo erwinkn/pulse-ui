@@ -451,9 +451,14 @@ class Renderer:
 	def register_component_expr(self, expr: Expr) -> str:
 		ref = registry_ref(expr)
 		if ref is None:
+			expr_type = type(expr).__name__
+			expr_repr = repr(expr)
+			if len(expr_repr) > 200:
+				expr_repr = f"{expr_repr[:197]}..."
 			raise TypeError(
 				"Component tag expressions must be registry-backed Expr values "
-				+ "(Import/JsFunction/Constant/JsxFunction)."
+				+ "(Import/JsFunction/Constant/JsxFunction). "
+				+ f"Got {expr_type}: {expr_repr}"
 			)
 		return ref["key"]
 

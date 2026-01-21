@@ -6,12 +6,13 @@ Focuses on the @react_component decorator behavior with Expr-backed components.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from pulse.react_component import ReactComponent, react_component
+from pulse.transpiler.function import Constant
 from pulse.transpiler.imports import Import
-from pulse.transpiler.nodes import Element, Jsx, Member, Node, Signature
+from pulse.transpiler.nodes import Call, Element, Jsx, Member, Node, Signature
 
 
 def test_react_component_import_expr():
@@ -59,14 +60,16 @@ def test_react_component_jsx_expr_passthrough():
 	assert node.children == ["Body"]
 
 
-def test_react_component_rejects_missing_src():
-	"""@react_component enforces (name, src) for string inputs."""
-	with pytest.raises(TypeError, match="expects \\(name, src\\)"):
+def test_react_component_source_only():
+	"""@react_component(src) creates a default import-backed component."""
 
-		@react_component("Button")  # pyright: ignore[reportArgumentType]
-		def Button(  # pyright: ignore[reportUnusedFunction]
-			*children: Node, key: str | None = None, **props: Any
-		) -> Element: ...
+	@react_component("react-calendar")
+	def Calendar(*children: Node, key: str | None = None, **props: Any) -> Element: ...
+
+	node = Calendar()
+	assert isinstance(node.tag, Import)
+	assert node.tag.src == "react-calendar"
+	assert node.tag.kind == "default"
 
 
 def test_react_component_key_validation():
@@ -95,39 +98,34 @@ def test_react_component_string_import():
 	assert node.tag.src == "@mantine/core"
 
 
-def test_react_component_string_default_import():
-	"""@react_component(name, src, is_default=True) sets default import kind."""
-
-	@react_component("Calendar", "react-calendar", is_default=True)
-	def Calendar(*children: Node, key: str | None = None, **props: Any) -> Element: ...
-
-	node = Calendar()
-	assert isinstance(node.tag, Import)
-	assert node.tag.kind == "default"
-
-
 def test_react_component_string_lazy():
-	"""@react_component(name, src, lazy=True) sets Import.lazy."""
+	"""@react_component(name, src, lazy=True) wraps with React.lazy."""
 
 	@react_component("Chart", "@mantine/charts", lazy=True)
 	def Chart(*children: Node, key: str | None = None, **props: Any) -> Element: ...
 
 	node = Chart()
-	assert isinstance(node.tag, Import)
-	assert node.tag.lazy is True
+	assert isinstance(node.tag, Constant)
+	assert isinstance(node.tag.expr, Call)
+	assert isinstance(node.tag.expr.callee, Import)
+	assert node.tag.expr.callee.name == "lazy"
+	assert isinstance(node.tag.expr.args[0], Import)
+	assert node.tag.expr.args[0].lazy is True
 
 
-def test_react_component_rejects_is_default_for_expr():
-	"""@react_component(expr, is_default=True) raises TypeError."""
-	button_import = Import("Button", "@ui/button")
-	decorator = cast(Any, react_component)
+def test_react_component_source_only_lazy():
+	"""@react_component(src, lazy=True) wraps with React.lazy."""
 
-	with pytest.raises(TypeError, match="is_default only supported"):
+	@react_component("~/components/widget", lazy=True)
+	def Widget(*children: Node, key: str | None = None, **props: Any) -> Element: ...
 
-		@decorator(button_import, is_default=True)
-		def Button(  # pyright: ignore[reportUnusedFunction]
-			*children: Node, key: str | None = None, **props: Any
-		) -> Element: ...
+	node = Widget()
+	assert isinstance(node.tag, Constant)
+	assert isinstance(node.tag.expr, Call)
+	assert isinstance(node.tag.expr.callee, Import)
+	assert node.tag.expr.callee.name == "lazy"
+	assert isinstance(node.tag.expr.args[0], Import)
+	assert node.tag.expr.args[0].lazy is True
 
 
 def test_react_component_class_wraps_expr():
@@ -145,3 +143,23 @@ def test_react_component_class_unwraps_jsx():
 	component = ReactComponent(Jsx(card_import))
 	node = component("Body")
 	assert node.tag is card_import
+
+
+def test_react_component_class_source_only():
+	"""ReactComponent(src) uses a default import."""
+	component = ReactComponent("react-calendar")
+	node = component("Body")
+	assert isinstance(node.tag, Import)
+	assert node.tag.kind == "default"
+
+
+def test_react_component_class_source_only_lazy():
+	"""ReactComponent(src, lazy=True) wraps with React.lazy."""
+	component = ReactComponent("~/components/widget", lazy=True)
+	node = component("Body")
+	assert isinstance(node.tag, Constant)
+	assert isinstance(node.tag.expr, Call)
+	assert isinstance(node.tag.expr.callee, Import)
+	assert node.tag.expr.callee.name == "lazy"
+	assert isinstance(node.tag.expr.args[0], Import)
+	assert node.tag.expr.args[0].lazy is True

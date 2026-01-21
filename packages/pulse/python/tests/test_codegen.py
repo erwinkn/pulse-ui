@@ -78,7 +78,7 @@ class TestCodegen:
 
 	def test_generate_route_page_with_default_export_components(self, tmp_path: Path):
 		"""Test generating route with default export components."""
-		default_import = Import("DefaultComp", "@ui/default-comp", kind="default")
+		default_import = Import("@ui/default-comp")
 		_default_comp = Jsx(default_import)
 		route = Route(
 			"/default-export",
@@ -92,8 +92,8 @@ class TestCodegen:
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		# Default imports use the name directly with unique ID
-		assert "import DefaultComp_" in result
+		# Default imports use a generated binding
+		assert f'import {default_import.js_name} from "@ui/default-comp";' in result
 		assert '"@ui/default-comp"' in result
 
 	def test_generate_route_page_with_property_components(self, tmp_path: Path):
@@ -342,7 +342,7 @@ class TestGenerateRoute:
 	def test_generate_route_with_css_import(self):
 		"""Test route generation with CSS side-effect import."""
 		# Create a side-effect import for CSS
-		Import("", "@mantine/core/styles.css", kind="side_effect")
+		Import("@mantine/core/styles.css", side_effect=True)
 
 		button_import = Import("Button", "@mantine/core")
 		Jsx(button_import)
@@ -366,12 +366,12 @@ class TestGenerateRoute:
 	def test_generate_route_with_namespace_import(self):
 		"""Test route generation with namespace import."""
 		# Creating the import auto-registers it (for import generation)
-		Import("Icons", "lucide-react", kind="namespace")
+		icons_import = Import("*", "lucide-react")
 
 		result = generate_route(path="/icons", route_file_path="routes/icons.tsx")
 
-		# Should generate: import * as Icons_X from "lucide-react";
-		assert "import * as Icons_" in result
+		# Should generate: import * as <binding> from "lucide-react";
+		assert f'import * as {icons_import.js_name} from "lucide-react";' in result
 		assert 'from "lucide-react"' in result
 		# Note: Imports are no longer auto-added to __registry
 		# Only Refs are in the registry now
@@ -396,7 +396,7 @@ class TestLocalFileImports:
 		css_file.write_text("body { margin: 0; }")
 
 		# Create import using absolute path
-		Import("", str(css_file), kind="side_effect")
+		Import(str(css_file), side_effect=True)
 
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
@@ -424,7 +424,7 @@ class TestLocalFileImports:
 		ts_file.write_text("export const helper = () => {};")
 
 		# Create import using absolute path (without extension)
-		Import("helper", str(tmp_path / "src" / "utils"), kind="named")
+		Import("helper", str(tmp_path / "src" / "utils"))
 
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
@@ -449,7 +449,7 @@ class TestLocalFileImports:
 		css_file.write_text("body { margin: 0; }")
 
 		# Create import (auto-registered, so we just need to create it)
-		_css_import = Import("", str(css_file), kind="side_effect")
+		_css_import = Import(str(css_file), side_effect=True)
 		del _css_import  # Suppress unused variable warning
 
 		route = Route("/test", Component(lambda: div()))
@@ -520,9 +520,9 @@ class TestLocalFileImports:
 			f.write_text(f"content of {f.name}")
 
 		# Create imports
-		Import("", str(file1), kind="side_effect")
+		Import(str(file1), side_effect=True)
 		Import("utils", str(tmp_path / "src" / "utils"))
-		Import("config", str(file3), kind="default")
+		Import(str(file3))
 
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
@@ -574,7 +574,7 @@ class TestLocalFileImports:
 		css_file.write_text(".layout { display: flex; }")
 
 		# Create import
-		Import("", str(css_file), kind="side_effect")
+		Import(str(css_file), side_effect=True)
 
 		# Create layout route
 		from pulse.routing import Layout

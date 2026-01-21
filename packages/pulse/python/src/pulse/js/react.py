@@ -384,7 +384,7 @@ class _LazyComponentFactory(_Expr):
 
 	```python
 	# At definition time (Python executes this)
-	LazyChart = lazy(Import("Chart", "./Chart", lazy=True))
+	LazyChart = lazy(Import("./Chart", lazy=True))
 
 	# As reference in transpiled code
 	@javascript

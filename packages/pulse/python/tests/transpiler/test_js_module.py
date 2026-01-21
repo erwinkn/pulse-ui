@@ -51,9 +51,9 @@ class TestJsModule:
 		module = JsModule(name="React", src="react")
 		expr = module.to_expr()
 		assert isinstance(expr, Import)
-		assert expr.name == "React"
+		assert expr.name == "react"
 		assert expr.src == "react"
-		assert not expr.is_default
+		assert expr.is_namespace
 
 	def test_external_module_to_expr_default(self) -> None:
 		"""External default imports return Import with is_default."""

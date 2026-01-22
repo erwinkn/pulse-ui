@@ -1038,7 +1038,7 @@ dev = [{ name = "redis", specifier = ">=6.4.0" }]
 
 [[package]]
 name = "pulse-recharts"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "packages/pulse-recharts" }
 dependencies = [
     { name = "pulse-framework" },

@@ -847,6 +847,48 @@ async def test_session_close_cancels_pending_js():
 	assert len(session._pending_js_results) == 0  # pyright: ignore[reportPrivateUsage]
 
 
+@pytest.mark.asyncio
+async def test_session_close_cancels_tracked_tasks():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	started = asyncio.Event()
+	cancelled = asyncio.Event()
+
+	async def work():
+		started.set()
+		try:
+			await asyncio.sleep(10)
+		except asyncio.CancelledError:
+			cancelled.set()
+			raise
+
+	session.spawn_task(work(), name="test.task")
+	assert await wait_for(lambda: started.is_set(), timeout=0.2)
+
+	session.close()
+
+	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_session_close_cancels_tracked_timers():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	fired = False
+
+	def on_fire():
+		nonlocal fired
+		fired = True
+
+	session.schedule_later(0.05, on_fire)
+	session.close()
+
+	await asyncio.sleep(0.1)
+	assert fired is False
+
+
 def test_handle_api_result_ignores_unknown_id():
 	"""Test that handle_api_result silently ignores unknown correlation IDs."""
 	routes = RouteTree([Route("a", simple_component)])

@@ -19,8 +19,6 @@ from pulse.helpers import (
 	MISSING,
 	Disposable,
 	call_flexible,
-	is_pytest,
-	later,
 	maybe_await,
 )
 from pulse.queries.common import (
@@ -35,6 +33,7 @@ from pulse.queries.common import (
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
+from pulse.scheduling import is_pytest, later
 from pulse.state import InitializableProperty, State
 
 if TYPE_CHECKING:

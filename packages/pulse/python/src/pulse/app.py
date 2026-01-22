@@ -40,11 +40,9 @@ from pulse.env import (
 )
 from pulse.env import env as envvars
 from pulse.helpers import (
-	create_task,
 	find_available_port,
 	get_client_address,
 	get_client_address_socketio,
-	later,
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
@@ -74,6 +72,7 @@ from pulse.proxy import ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
+from pulse.scheduling import TaskRegistry, TimerRegistry
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -210,6 +209,8 @@ class App:
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
 	_render_cleanups: dict[str, asyncio.TimerHandle]
+	_tasks: TaskRegistry
+	_timers: TimerRegistry
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
@@ -283,6 +284,8 @@ class App:
 		self._socket_to_render = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
+		self._tasks = TaskRegistry(name="app")
+		self._timers = TimerRegistry(name="app")
 		self.session_timeout = session_timeout
 		self.detach_queue_timeout = detach_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
@@ -718,7 +721,7 @@ class App:
 				payload = serialize(message)
 				# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
 				payload = list(payload)
-				create_task(self.sio.emit("message", list(payload), to=sid))
+				self._tasks.create(self.sio.emit("message", list(payload), to=sid))
 
 			render.connect(on_message)
 			# Map socket sid to renderId for message routing
@@ -790,8 +793,10 @@ class App:
 	def _cancel_render_cleanup(self, rid: str):
 		"""Cancel any pending cleanup task for a render session."""
 		cleanup_handle = self._render_cleanups.pop(rid, None)
-		if cleanup_handle and not cleanup_handle.cancelled():
-			cleanup_handle.cancel()
+		if cleanup_handle:
+			if not cleanup_handle.cancelled():
+				cleanup_handle.cancel()
+			self._timers.discard(cleanup_handle)
 
 	def _schedule_render_cleanup(self, rid: str):
 		"""Schedule cleanup of a RenderSession after the configured timeout."""
@@ -817,7 +822,7 @@ class App:
 				)
 				self.close_render(rid)
 
-		handle = later(self.session_timeout, _cleanup)
+		handle = self._timers.later(self.session_timeout, _cleanup)
 		self._render_cleanups[rid] = handle
 
 	async def _handle_pulse_message(
@@ -1023,7 +1028,7 @@ class App:
 		self._user_to_render[session.sid].remove(rid)
 
 		if len(self._user_to_render[session.sid]) == 0:
-			later(60, self.close_session_if_inactive, sid)
+			self._timers.later(60, self.close_session_if_inactive, sid)
 
 	def close_session(self, sid: str):
 		session = self.user_sessions.pop(sid, None)
@@ -1052,6 +1057,10 @@ class App:
 		# Close all user sessions
 		for sid in list(self.user_sessions.keys()):
 			self.close_session(sid)
+
+		# Cancel any remaining app-level tasks/timers
+		self._tasks.cancel_all()
+		self._timers.cancel_all()
 
 		# Update status
 		self.status = AppStatus.stopped
@@ -1082,5 +1091,8 @@ class App:
 			return  # no active render for this user session
 
 		# We don't want to wait for this to resolve
-		create_task(render.call_api(f"{self.api_prefix}/set-cookies", method="GET"))
+		render.spawn_task(
+			render.call_api(f"{self.api_prefix}/set-cookies", method="GET"),
+			name="cookies.refresh",
+		)
 		sess.scheduled_cookie_refresh = True

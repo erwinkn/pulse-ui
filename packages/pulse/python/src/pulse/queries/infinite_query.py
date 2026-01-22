@@ -20,7 +20,6 @@ from pulse.helpers import (
 	MISSING,
 	Disposable,
 	call_flexible,
-	later,
 	maybe_await,
 )
 from pulse.queries.common import (
@@ -36,6 +35,7 @@ from pulse.queries.common import (
 from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryConfig
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
+from pulse.scheduling import later
 from pulse.state import InitializableProperty, State
 
 T = TypeVar("T")

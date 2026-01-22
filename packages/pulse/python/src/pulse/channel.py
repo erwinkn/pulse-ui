@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from pulse.context import PulseContext
-from pulse.helpers import create_future_on_loop
 from pulse.messages import (
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
@@ -15,6 +14,7 @@ from pulse.messages import (
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
 )
+from pulse.scheduling import create_future_on_loop
 
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
@@ -203,7 +203,7 @@ class ChannelsManager:
 					msg=msg,
 				)
 
-		asyncio.create_task(_invoke())
+		render.spawn_task(_invoke(), name=f"channel:{channel_id}:{event}")
 
 	# ------------------------------------------------------------------
 	def register_pending(

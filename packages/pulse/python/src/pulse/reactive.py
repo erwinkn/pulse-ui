@@ -15,10 +15,12 @@ from typing import (
 
 from pulse.helpers import (
 	Disposable,
-	create_task,
 	maybe_await,
-	schedule_on_loop,
 	values_equal,
+)
+from pulse.scheduling import (
+	create_task,
+	schedule_on_loop,
 )
 
 T = TypeVar("T")
@@ -461,7 +463,7 @@ class Effect(Disposable):
 	def _schedule_interval(self):
 		"""Schedule the next interval run if interval is set."""
 		if self._interval is not None and self._interval > 0:
-			from pulse.helpers import later
+			from pulse.scheduling import later
 
 			self._interval_handle = later(self._interval, self._on_interval)
 

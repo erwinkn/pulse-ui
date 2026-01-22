@@ -67,12 +67,10 @@ def create_task(
 				task.add_done_callback(on_done)
 			return task
 
-		try:
-			return from_thread.run(_runner)
-		except RuntimeError:
-			if is_pytest():
-				return None  # pyright: ignore[reportReturnType]
-			raise
+	try:
+		return from_thread.run(_runner)
+	except RuntimeError:
+		raise
 
 
 def create_future_on_loop() -> asyncio.Future[Any]:
@@ -235,10 +233,8 @@ class TaskRegistry:
 		*,
 		name: str | None = None,
 		on_done: Callable[[asyncio.Task[T]], None] | None = None,
-	) -> asyncio.Task[T] | None:
+	) -> asyncio.Task[T]:
 		task = create_task(coroutine, name=name, on_done=on_done)
-		if task is None:
-			return None
 		return self.track(task)
 
 	def cancel_all(self) -> None:

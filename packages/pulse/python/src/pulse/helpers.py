@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
+from pulse import scheduling as _scheduling
 from pulse.env import env
 
 
@@ -126,6 +127,15 @@ def data(**attrs: Any):
 	    data(foo="bar") -> {"data-foo": "bar"}
 	"""
 	return {f"data-{k}": v for k, v in attrs.items()}
+
+
+# Re-export scheduling helpers for backward compatibility
+create_task = _scheduling.create_task
+create_future_on_loop = _scheduling.create_future_on_loop
+later = _scheduling.later
+repeat = _scheduling.repeat
+schedule_on_loop = _scheduling.schedule_on_loop
+is_pytest = _scheduling.is_pytest
 
 
 # --- Async scheduling helpers (work from loop or sync threads) ---

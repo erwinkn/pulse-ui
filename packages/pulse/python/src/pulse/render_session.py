@@ -609,7 +609,7 @@ class RenderSession:
 		*,
 		name: str | None = None,
 		on_done: Callable[[asyncio.Task[Any]], None] | None = None,
-	) -> asyncio.Task[Any] | None:
+	) -> asyncio.Task[Any]:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
 			return self._tasks.create(coroutine(), name=name, on_done=on_done)

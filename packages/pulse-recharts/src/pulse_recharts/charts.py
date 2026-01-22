@@ -1,4 +1,4 @@
-from typing import Any, Generic, TypedDict, TypeVar, Unpack
+from typing import Any, Generic, Literal, TypedDict, TypeVar, Unpack
 
 import pulse as ps
 from pulse.dom.elements import GenericHTMLElement
@@ -11,6 +11,7 @@ from .common import (
 	StackOffsetType,
 	SyncMethod,
 )
+from .general import TextProps
 
 T = TypeVar("T")
 
@@ -166,6 +167,74 @@ def FunnelChart(
 ): ...
 
 
-# TODO:
-# - Treemap
-# - Sankey
+class TreemapProps(TypedDict, total=False):
+	width: float | str
+	height: float | str
+	data: list[Any]
+	dataKey: DataKey[Any]
+	nameKey: DataKey[Any]
+	type: Literal["flat", "nest"]
+	aspectRatio: float
+	content: ps.Element | ps.JsFunction[Any, ps.Element]
+	fill: str
+	stroke: str
+	className: str
+	isAnimationActive: bool | Literal["auto"]
+	animationBegin: int
+	animationDuration: int
+	animationEasing: str
+
+
+@ps.react_component(ps.Import("Treemap", "recharts"))
+def Treemap(
+	*children: ps.Node, key: str | None = None, **props: Unpack[TreemapProps]
+): ...
+
+
+class SankeyProps(TypedDict, total=False):
+	width: float | str
+	height: float | str
+	data: dict[str, Any]
+	nameKey: DataKey[Any]
+	dataKey: DataKey[Any]
+	nodePadding: float
+	nodeWidth: float
+	linkCurvature: float
+	iterations: int
+	node: ps.Element | ps.JsFunction[Any, ps.Element] | dict[str, Any]
+	link: ps.Element | ps.JsFunction[Any, ps.Element] | dict[str, Any]
+	margin: Margin
+	className: str
+
+
+@ps.react_component(ps.Import("Sankey", "recharts"))
+def Sankey(
+	*children: ps.Node, key: str | None = None, **props: Unpack[SankeyProps]
+): ...
+
+
+class SunburstChartProps(TypedDict, total=False):
+	className: str
+	data: dict[str, Any]
+	dataKey: DataKey[Any]
+	nameKey: DataKey[Any]
+	width: float | str
+	height: float | str
+	responsive: bool
+	padding: float
+	ringPadding: float
+	innerRadius: float
+	outerRadius: float
+	cx: float
+	cy: float
+	startAngle: float
+	endAngle: float
+	fill: str
+	stroke: str
+	textOptions: TextProps
+
+
+@ps.react_component(ps.Import("SunburstChart", "recharts"))
+def SunburstChart(
+	*children: ps.Node, key: str | None = None, **props: Unpack[SunburstChartProps]
+): ...

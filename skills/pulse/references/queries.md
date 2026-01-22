@@ -19,11 +19,14 @@ class UserState(ps.State):
 
 ```python
 @ps.query(
-    stale_time=0,           # Seconds before data considered stale (default 0)
-    gc_time=300.0,          # Seconds before unused cache is garbage collected
-    retries=3,              # Retry attempts on failure
-    retry_delay=1.0,        # Delay between retries in seconds
+    stale_time=0,            # Seconds before data considered stale (default 0)
+    gc_time=300.0,           # Seconds before unused cache is garbage collected
+    retries=3,               # Retry attempts on failure
+    retry_delay=2.0,         # Delay between retries in seconds
     keep_previous_data=True, # Keep old data while refetching
+    enabled=True,            # Whether query runs automatically (default True)
+    fetch_on_mount=True,     # Fetch when component mounts (default True)
+    refetch_interval=None,   # Auto-refetch interval in seconds (None = disabled)
 )
 async def data(self) -> T: ...
 ```
@@ -73,6 +76,28 @@ def _error(self):
     print("Fetch failed")
 ```
 
+### Enabled & Fetch Control
+
+Control when queries run:
+
+```python
+@ps.query(enabled=False)  # Query won't run automatically
+async def data(self) -> T: ...
+
+@ps.query(fetch_on_mount=False)  # Don't fetch when component mounts
+async def lazy_data(self) -> T: ...
+
+@ps.query(refetch_interval=5.0)  # Refetch every 5 seconds
+async def live_data(self) -> T: ...
+```
+
+Enable/disable programmatically:
+
+```python
+state.data.enable()   # Enable the query
+state.data.disable()  # Disable the query
+```
+
 ### Query Properties
 
 Access in components:
@@ -85,15 +110,18 @@ state.user.is_loading   # True if loading (no data yet)
 state.user.is_fetching  # True if fetch in progress (including refetch)
 state.user.is_success   # True if last fetch succeeded
 state.user.is_error     # True if last fetch failed
+state.user.is_scheduled # True if a refetch is scheduled/running
 ```
 
 ### Query Methods
 
 ```python
-state.user.refetch()    # Force refetch
-state.user.invalidate() # Mark stale, refetch if observed
+state.user.refetch()     # Force refetch
+state.user.invalidate()  # Mark stale, refetch if observed
 state.user.set_data(val) # Manually set data (optimistic update)
-await state.user.wait() # Wait for current fetch to complete
+await state.user.wait()  # Wait for current fetch to complete
+state.user.enable()      # Enable the query
+state.user.disable()     # Disable the query
 ```
 
 ### Usage Pattern
@@ -180,7 +208,7 @@ Pagination with automatic page merging.
 class FeedState(ps.State):
     cursor: str | None = None
 
-    @ps.infinite_query
+    @ps.infinite_query(initial_page_param=None)
     async def posts(self, page_param: str | None) -> dict:
         return await api.get_posts(cursor=page_param, limit=20)
 
@@ -189,29 +217,89 @@ class FeedState(ps.State):
         return ("posts",)
 
     @posts.get_next_page_param
-    def _next(self, last_page: dict) -> str | None:
-        return last_page.get("next_cursor")  # None = no more pages
+    def _next(self, pages: list) -> str | None:
+        if not pages:
+            return None
+        return pages[-1].data.get("next_cursor")  # None = no more pages
+```
 
-    @posts.initial_page_param
-    def _initial(self) -> str | None:
-        return None  # First page param
+### Infinite Query Options
+
+```python
+@ps.infinite_query(
+    initial_page_param=None,  # Parameter for first page (required)
+    max_pages=0,              # Max pages to keep in memory (0 = unlimited)
+    stale_time=0,             # Seconds before data considered stale
+    gc_time=300.0,            # Seconds before unused cache is garbage collected
+    refetch_interval=None,    # Auto-refetch interval in seconds
+    keep_previous_data=False, # Keep old data while refetching
+    retries=3,                # Retry attempts on failure
+    retry_delay=2.0,          # Delay between retries in seconds
+    enabled=True,             # Whether query runs automatically
+    fetch_on_mount=True,      # Fetch when component mounts
+)
+async def feed(self, page_param: int) -> list: ...
+```
+
+### Bidirectional Pagination
+
+```python
+@ps.infinite_query(initial_page_param=None, key=("posts",))
+async def posts(self, cursor: str | None) -> dict:
+    return await api.get_posts(cursor=cursor)
+
+@posts.get_next_page_param
+def _next(self, pages: list) -> str | None:
+    if not pages:
+        return None
+    return pages[-1].data.get("next_cursor")
+
+@posts.get_previous_page_param
+def _prev(self, pages: list) -> str | None:
+    if not pages:
+        return None
+    return pages[0].data.get("prev_cursor")
 ```
 
 ### Infinite Query Properties
 
 ```python
-state.posts.data        # list[T] — all pages merged
-state.posts.pages       # list[T] — individual page results
-state.posts.has_next_page  # True if more pages available
-state.posts.is_fetching_next_page  # True if loading next page
+state.posts.data                    # list[Page] — all pages with data and params
+state.posts.pages                   # list[T] — individual page results (data only)
+state.posts.page_params             # list[TParam] — page parameters only
+state.posts.has_next_page           # True if more pages available forward
+state.posts.has_previous_page       # True if previous pages available
+state.posts.is_fetching_next_page   # True if loading next page
+state.posts.is_fetching_previous_page  # True if loading previous page
+state.posts.is_fetching             # True if any fetch in progress
+state.posts.is_loading              # True if loading (no data yet)
+state.posts.is_success              # True if last fetch succeeded
+state.posts.is_error                # True if last fetch failed
 ```
 
 ### Infinite Query Methods
 
 ```python
-state.posts.fetch_next_page()  # Load next page
-state.posts.refetch()          # Refetch all pages
-state.posts.invalidate()       # Mark stale
+await state.posts.fetch_next_page()      # Load next page
+await state.posts.fetch_previous_page()  # Load previous page (bidirectional)
+await state.posts.fetch_page(param)      # Refetch specific page by param
+await state.posts.refetch()              # Refetch all pages
+await state.posts.wait()                 # Wait for current fetch to complete
+state.posts.invalidate()                 # Mark stale, trigger refetch
+state.posts.set_data(pages)              # Manually set pages
+state.posts.enable()                     # Enable the query
+state.posts.disable()                    # Disable the query
+```
+
+### Selective Page Refetch
+
+Refetch only specific pages using a filter function:
+
+```python
+# Only refetch first page
+await state.posts.refetch(
+    refetch_page=lambda data, index, all_pages: index == 0
+)
 ```
 
 ### Usage Pattern
@@ -228,8 +316,11 @@ def InfiniteFeed():
     return ps.div(
         ps.ul(
             ps.For(
-                state.posts.data or [],
-                lambda post, _: ps.li(post["title"], key=str(post["id"])),
+                state.posts.pages or [],  # Use .pages for data only
+                lambda posts, _: ps.For(
+                    posts,
+                    lambda post, _: ps.li(post["title"], key=str(post["id"])),
+                ),
             )
         ),
         state.posts.has_next_page and ps.button(
@@ -238,6 +329,25 @@ def InfiniteFeed():
             disabled=state.posts.is_fetching_next_page,
         ),
     )
+```
+
+### Infinite Query Callbacks
+
+```python
+@ps.infinite_query(initial_page_param=0, key=("feed",))
+async def feed(self, page: int) -> list: ...
+
+@feed.get_next_page_param
+def _next(self, pages: list) -> int | None:
+    return len(pages) if pages else None
+
+@feed.on_success
+def _success(self, pages: list):
+    print(f"Loaded {len(pages)} pages")
+
+@feed.on_error
+def _error(self, error: Exception):
+    print(f"Failed: {error}")
 ```
 
 ## QueryClient
@@ -329,3 +439,9 @@ class ChainedState(ps.State):
         user = self.user.data
         return ("posts", user["id"] if user else None)
 ```
+
+## See Also
+
+- `reactive.md` - Effect for polling patterns
+- `middleware.md` - Session management and QueryClient scope
+- `state.md` - State class with @ps.query

@@ -4,378 +4,209 @@ HTML/SVG elements and event handling.
 
 ## HTML Elements
 
-All standard tags available as `ps.<tag>(*children, **props)`:
+All standard tags available as `ps.<tag>(*children, **props)`.
 
 ### Layout
 
-```python
-ps.div(*children, className="", id="", style=...)
-ps.span(*children, ...)
-ps.section(*children, ...)
-ps.article(*children, ...)
-ps.aside(*children, ...)
-ps.header(*children, ...)
-ps.footer(*children, ...)
-ps.main(*children, ...)
-ps.nav(*children, ...)
-```
+| Element | Notes |
+|---------|-------|
+| div, span | Generic containers |
+| section, article, aside | Semantic sections |
+| header, footer, main, nav | Page structure |
 
 ### Text
 
-```python
-ps.h1(*children, ...)  # h1-h6
-ps.p(*children, ...)
-ps.strong(*children, ...)
-ps.em(*children, ...)
-ps.code(*children, ...)
-ps.pre(*children, ...)
-ps.blockquote(*children, ...)
-ps.small(*children, ...)
-ps.mark(*children, ...)
-```
+| Element | Notes |
+|---------|-------|
+| h1–h6 | Headings |
+| p, blockquote | Paragraphs |
+| strong, em, small, mark | Inline formatting |
+| code, pre | Code blocks |
 
 ### Lists
 
-```python
-ps.ul(*children, ...)
-ps.ol(*children, start=1, type="1", ...)
-ps.li(*children, value=1, ...)
-ps.dl(*children, ...)
-ps.dt(*children, ...)
-ps.dd(*children, ...)
-```
+| Element | Key Props | Notes |
+|---------|-----------|-------|
+| ul, ol | start, type | Unordered/ordered lists |
+| li | value | List item |
+| dl, dt, dd | — | Definition list |
 
 ### Forms
 
-```python
-ps.form(*children, onSubmit=handler, action="", method="", ...)
-ps.input(value="", onChange=handler, type="text", placeholder="", disabled=False, ...)
-ps.textarea(value="", onChange=handler, rows=3, cols=40, ...)
-ps.select(*children, value="", onChange=handler, multiple=False, ...)
-ps.option(*children, value="", selected=False, disabled=False, ...)
-ps.button(*children, onClick=handler, type="button", disabled=False, ...)
-ps.label(*children, htmlFor="", ...)
-ps.fieldset(*children, disabled=False, ...)
-ps.legend(*children, ...)
-```
+| Element | Key Props | Notes |
+|---------|-----------|-------|
+| form | onSubmit, action, method | Container for inputs |
+| input | value, onChange, type, placeholder, disabled | See Input Types |
+| textarea | value, onChange, rows, cols | Multi-line text |
+| select | value, onChange, multiple | Dropdown |
+| option | value, selected, disabled | Select option |
+| button | onClick, type, disabled | type: "button" / "submit" |
+| label | htmlFor | Associate with input |
+| fieldset | disabled | Group inputs |
+| legend | — | Fieldset caption |
 
 ### Input Types
 
-```python
-ps.input(type="text", ...)
-ps.input(type="password", ...)
-ps.input(type="email", ...)
-ps.input(type="number", min=0, max=100, step=1, ...)
-ps.input(type="checkbox", checked=False, onChange=handler, ...)
-ps.input(type="radio", name="group", checked=False, ...)
-ps.input(type="file", accept=".pdf,.doc", multiple=False, ...)
-ps.input(type="date", ...)
-ps.input(type="time", ...)
-ps.input(type="datetime-local", ...)
-ps.input(type="range", min=0, max=100, ...)
-ps.input(type="color", ...)
-ps.input(type="search", ...)
-ps.input(type="tel", ...)
-ps.input(type="url", ...)
-ps.input(type="hidden", value="...", ...)
-```
+| Type | Extra Props | Notes |
+|------|-------------|-------|
+| text, password, email, search, tel, url | — | Text variants |
+| number | min, max, step | Numeric input |
+| checkbox | checked, onChange | Boolean toggle |
+| radio | name, checked | Group by name |
+| file | accept, multiple | accept=".pdf,.doc" |
+| date, time, datetime-local | — | Date/time pickers |
+| range | min, max | Slider |
+| color | — | Color picker |
+| hidden | value | Not displayed |
 
 ### Media
 
-```python
-ps.img(src="", alt="", width=100, height=100, loading="lazy", ...)
-ps.video(*children, src="", controls=True, autoplay=False, muted=False, ...)
-ps.audio(*children, src="", controls=True, ...)
-ps.source(src="", type="video/mp4", ...)
-ps.picture(*children, ...)
-ps.iframe(src="", width=600, height=400, ...)
-ps.canvas(width=300, height=150, ...)
-```
+| Element | Key Props | Notes |
+|---------|-----------|-------|
+| img | src, alt, width, height, loading | loading="lazy" |
+| video | src, controls, autoplay, muted | Container for source |
+| audio | src, controls | Audio player |
+| source | src, type | type="video/mp4" |
+| picture | — | Responsive images |
+| iframe | src, width, height | Embedded content |
+| canvas | width, height | Drawing surface |
 
 ### Tables
 
-```python
-ps.table(*children, ...)
-ps.thead(*children, ...)
-ps.tbody(*children, ...)
-ps.tfoot(*children, ...)
-ps.tr(*children, ...)
-ps.th(*children, colSpan=1, rowSpan=1, scope="col", ...)
-ps.td(*children, colSpan=1, rowSpan=1, ...)
-ps.caption(*children, ...)
-```
+| Element | Key Props | Notes |
+|---------|-----------|-------|
+| table | — | Container |
+| thead, tbody, tfoot | — | Row groups |
+| tr | — | Row |
+| th | colSpan, rowSpan, scope | Header cell |
+| td | colSpan, rowSpan | Data cell |
+| caption | — | Table caption |
 
 ### Links
 
-```python
-ps.a(*children, href="", target="_blank", rel="noopener", ...)
-ps.Link(*children, to="/path", ...)  # Client-side nav
-```
+| Element | Key Props | Notes |
+|---------|-----------|-------|
+| a | href, target, rel | target="_blank", rel="noopener" |
+| Link | to | Client-side nav: `ps.Link("Home", to="/")` |
 
 ### Interactive
 
-```python
-ps.details(*children, open=False, ...)
-ps.summary(*children, ...)
-ps.dialog(*children, open=False, ...)
-ps.menu(*children, ...)
-```
+| Element | Key Props | Notes |
+|---------|-----------|-------|
+| details | open | Expandable section |
+| summary | — | Details header |
+| dialog | open | Modal dialog |
+| menu | — | Menu container |
 
 ### SVG
 
-```python
-ps.svg(*children, width=100, height=100, viewBox="0 0 100 100", ...)
-ps.circle(cx=50, cy=50, r=40, fill="red", ...)
-ps.rect(x=10, y=10, width=80, height=80, fill="blue", ...)
-ps.path(d="M10 10 L90 90", stroke="black", ...)
-ps.line(x1=0, y1=0, x2=100, y2=100, stroke="black", ...)
-ps.polygon(points="50,15 100,100 0,100", fill="green", ...)
-ps.polyline(points="0,0 50,50 100,0", fill="none", stroke="black", ...)
-ps.ellipse(cx=50, cy=50, rx=40, ry=20, ...)
-ps.text(*children, x=10, y=50, ...)
-ps.g(*children, transform="translate(10,10)", ...)  # Group
-ps.defs(*children, ...)
-ps.use(href="#id", ...)
-ps.clipPath(*children, id="clip", ...)
-ps.mask(*children, id="mask", ...)
-ps.pattern(*children, id="pattern", ...)
-```
+| Element | Key Props | Notes |
+|---------|-----------|-------|
+| svg | width, height, viewBox | Container |
+| circle | cx, cy, r, fill | Circle shape |
+| rect | x, y, width, height, fill | Rectangle |
+| path | d, stroke, fill | Arbitrary path |
+| line | x1, y1, x2, y2, stroke | Line segment |
+| polygon | points, fill | Closed shape |
+| polyline | points, stroke, fill | Open shape |
+| ellipse | cx, cy, rx, ry | Ellipse |
+| text | x, y | SVG text |
+| g | transform | Group: `transform="translate(10,10)"` |
+| defs, use, clipPath, mask, pattern | id, href | Reusable definitions |
 
 ### Other
 
-```python
-ps.br()
-ps.hr()
-ps.fragment(*children)  # React fragment <>...</>
-ps.slot(*children, name="", ...)
-ps.template(*children, ...)
-```
+| Element | Notes |
+|---------|-------|
+| br, hr | Line break, horizontal rule |
+| fragment | React fragment `<>...</>` |
+| slot | Web component slot |
+| template | Template element |
 
 ## Syntax Variants
 
 ```python
-# Positional children
-ps.div(ps.h1("Title"), ps.p("Body"))
-
-# Bracket syntax
-ps.div(className="container")[
-    ps.h1("Title"),
-    ps.p("Body"),
-]
-
-# Mixed
-ps.div(className="wrap")[ps.span("text")]
-
-# Conditional children (Python and/or)
-ps.div(
-    show_header and ps.h1("Header"),
-    ps.p("Always visible"),
-)
+ps.div(ps.h1("Title"), ps.p("Body"))                  # Positional children
+ps.div(className="container")[ps.h1("Title")]         # Bracket syntax
+ps.div(show_header and ps.h1("Header"), ps.p("..."))  # Conditional
 ```
 
 ## Common Props
 
-### Global Props
+| Prop | Example |
+|------|---------|
+| id | `id="unique-id"` |
+| className | `className="class1 class2"` |
+| style | `style=ps.CSSProperties(backgroundColor="red", padding="10px")` |
+| key | `key="unique-key"` — for list reconciliation |
+| title | `title="Tooltip text"` |
+| tabIndex, hidden, draggable, contentEditable | Boolean/int props |
+
+### ARIA & Data Attributes
 
 ```python
-id="unique-id"
-className="class1 class2"
-style=ps.CSSProperties(...)
-key="unique-key"  # For list reconciliation
-title="Tooltip text"
-tabIndex=0
-hidden=True
-draggable=True
-contentEditable=True
-```
-
-### ARIA
-
-```python
-aria_label="Description"
-aria_describedby="id"
+aria_label="Description"    data_testid="my-element"
+aria_describedby="id"       data_custom="value"
 aria_hidden=True
-aria_expanded=False
-aria_selected=False
-aria_disabled=True
 role="button"
-```
-
-### Data Attributes
-
-```python
-data_testid="my-element"
-data_custom="value"
 ```
 
 ## Styling
 
-### CSS Properties
-
 ```python
-ps.div(
-    "Content",
-    style=ps.CSSProperties(
-        backgroundColor="red",
-        color="white",
-        padding="10px",
-        margin="5px",
-        fontSize="16px",
-        fontWeight="bold",
-        display="flex",
-        justifyContent="center",
-        alignItems="center",
-        width="100%",
-        height="50px",
-        borderRadius="8px",
-        boxShadow="0 2px 4px rgba(0,0,0,0.1)",
-    ),
-)
-```
+# Inline styles
+ps.div("Content", style=ps.CSSProperties(
+    backgroundColor="red", color="white", padding="10px", display="flex",
+    justifyContent="center", borderRadius="8px",
+))
 
-### Class Names
-
-```python
-# Static
+# Class names
 ps.div(className="card shadow-lg")
-
-# Dynamic
 ps.div(className=f"btn {'active' if is_active else ''}")
-
-# Multiple conditions
-ps.div(className=" ".join(filter(None, [
-    "base",
-    "active" if is_active else None,
-    "disabled" if is_disabled else None,
-])))
 ```
 
 ## Events
 
 ### Event Props
 
-```python
-# Mouse
-onClick=handler
-onDoubleClick=handler
-onMouseDown=handler
-onMouseUp=handler
-onMouseEnter=handler
-onMouseLeave=handler
-onMouseMove=handler
-onMouseOver=handler
-onMouseOut=handler
-onContextMenu=handler
-
-# Keyboard
-onKeyDown=handler
-onKeyUp=handler
-onKeyPress=handler  # Deprecated
-
-# Focus
-onFocus=handler
-onBlur=handler
-
-# Form
-onChange=handler
-onInput=handler
-onSubmit=handler
-onReset=handler
-onInvalid=handler
-
-# Touch
-onTouchStart=handler
-onTouchEnd=handler
-onTouchMove=handler
-onTouchCancel=handler
-
-# Drag
-onDrag=handler
-onDragStart=handler
-onDragEnd=handler
-onDragEnter=handler
-onDragLeave=handler
-onDragOver=handler
-onDrop=handler
-
-# Clipboard
-onCopy=handler
-onCut=handler
-onPaste=handler
-
-# Scroll
-onScroll=handler
-
-# Media
-onPlay=handler
-onPause=handler
-onEnded=handler
-onLoadedData=handler
-onTimeUpdate=handler
-onVolumeChange=handler
-
-# Animation
-onAnimationStart=handler
-onAnimationEnd=handler
-onAnimationIteration=handler
-onTransitionEnd=handler
-
-# Other
-onLoad=handler
-onError=handler
-onWheel=handler
-onToggle=handler
-```
+| Category | Events |
+|----------|--------|
+| Mouse | onClick, onDoubleClick, onMouseDown/Up, onMouseEnter/Leave, onMouseMove, onMouseOver/Out, onContextMenu |
+| Keyboard | onKeyDown, onKeyUp |
+| Focus | onFocus, onBlur |
+| Form | onChange, onInput, onSubmit, onReset, onInvalid |
+| Touch | onTouchStart/End/Move/Cancel |
+| Drag | onDrag, onDragStart/End, onDragEnter/Leave/Over, onDrop |
+| Clipboard | onCopy, onCut, onPaste |
+| Media | onPlay, onPause, onEnded, onLoadedData, onTimeUpdate, onVolumeChange |
+| Animation | onAnimationStart/End/Iteration, onTransitionEnd |
+| Other | onLoad, onError, onScroll, onWheel, onToggle |
 
 ### Event Handling Patterns
 
 ```python
-# Simple click (no event data needed)
+# Simple click
 ps.button("Click", onClick=lambda: do_action())
-ps.button("Click", onClick=state.method)
 
-# Extract input value
-ps.input(
-    value=state.text,
-    onChange=lambda e: setattr(state, "text", e["target"]["value"]),
-)
+# Input value
+ps.input(value=state.text, onChange=lambda e: setattr(state, "text", e["target"]["value"]))
 
 # Checkbox
-ps.input(
-    type="checkbox",
-    checked=state.enabled,
-    onChange=lambda e: setattr(state, "enabled", e["target"]["checked"]),
-)
+ps.input(type="checkbox", checked=state.enabled,
+         onChange=lambda e: setattr(state, "enabled", e["target"]["checked"]))
 
 # Select
-ps.select(
-    value=state.choice,
-    onChange=lambda e: setattr(state, "choice", e["target"]["value"]),
-)[
+ps.select(value=state.choice, onChange=lambda e: setattr(state, "choice", e["target"]["value"]))[
     ps.option("Option A", value="a"),
     ps.option("Option B", value="b"),
 ]
 
 # Keyboard
-ps.input(
-    onKeyDown=lambda e: submit() if e["key"] == "Enter" else None,
-)
-
-# Mouse position
-ps.div(
-    onClick=lambda e: print(e["clientX"], e["clientY"]),
-)
-
-# Form submit
-ps.form(
-    onSubmit=lambda e: handle_submit(),
-)[...]
+ps.input(onKeyDown=lambda e: submit() if e["key"] == "Enter" else None)
 
 # Async handler
 async def handle_click():
     await api.fetch_data()
-    state.update()
-
 ps.button("Load", onClick=handle_click)
 ```
 
@@ -384,111 +215,43 @@ ps.button("Load", onClick=handle_click)
 Events are serialized dicts:
 
 ```python
-# Mouse event
-{
-    "type": "click",
-    "target": {"id": "...", "value": "...", ...},
-    "clientX": 100,
-    "clientY": 200,
-    "button": 0,
-    "altKey": False,
-    "ctrlKey": False,
-    "metaKey": False,
-    "shiftKey": False,
-}
+# Mouse: type, target, clientX, clientY, button, altKey, ctrlKey, metaKey, shiftKey
+{"type": "click", "target": {"id": "...", "value": "..."}, "clientX": 100, "clientY": 200, ...}
 
-# Keyboard event
-{
-    "type": "keydown",
-    "key": "Enter",
-    "code": "Enter",
-    "altKey": False,
-    "ctrlKey": False,
-    "metaKey": False,
-    "shiftKey": False,
-    "repeat": False,
-}
+# Keyboard: type, key, code, repeat, altKey, ctrlKey, metaKey, shiftKey
+{"type": "keydown", "key": "Enter", "code": "Enter", ...}
 
-# Change event
-{
-    "type": "change",
-    "target": {
-        "value": "new text",
-        "checked": True,  # For checkboxes
-        "selectedIndex": 0,  # For select
-    },
-}
-
-# Form event
-{
-    "type": "submit",
-    "target": {...},
-}
+# Change: type, target.value, target.checked (checkbox), target.selectedIndex (select)
+{"type": "change", "target": {"value": "new text", "checked": True}}
 ```
 
 ## Built-in Components
 
-### `ps.For` — List Iteration
+| Component | Usage |
+|-----------|-------|
+| `ps.For` | `ps.For(items, lambda item, i: ps.li(item.name, key=str(item.id)))` |
+| `ps.If` | `ps.If(cond, then=ps.div("Yes"), else_=ps.div("No"))` |
+| `ps.Link` | `ps.Link("Home", to="/")` — client-side navigation |
+| `ps.Outlet` | Renders child routes in layout components |
+| `ps.Form` | `ps.Form(ps.input(name="email"), on_submit=handler)` |
 
-```python
-ps.For(
-    items,
-    lambda item, index: ps.li(item.name, key=str(item.id)),
-)
-```
-
-### `ps.If` — Conditional
-
-```python
-ps.If(
-    condition,
-    then=ps.div("True branch"),
-    else_=ps.div("False branch"),
-)
-```
-
-### `ps.Link` — Client Navigation
-
-```python
-ps.Link("Home", to="/")
-ps.Link("User", to=f"/users/{user_id}")
-ps.Link("External", to="https://example.com", target="_blank")
-```
-
-### `ps.Outlet` — Route Child
+### `ps.Outlet` Example
 
 ```python
 @ps.component
 def Layout():
-    return ps.div(
-        ps.nav(...),
-        ps.main(ps.Outlet()),  # Child routes render here
-    )
-```
-
-### `ps.Form` — Declarative Form
-
-```python
-ps.Form(
-    ps.input(name="email", type="email"),
-    ps.input(name="password", type="password"),
-    ps.button("Submit", type="submit"),
-    on_submit=lambda data: print(data),
-)
+    return ps.div(ps.nav(...), ps.main(ps.Outlet()))
 ```
 
 ## Helpers
 
-### `ps.repeat(count, fn)`
+| Helper | Usage |
+|--------|-------|
+| `ps.repeat(n, fn)` | `*ps.repeat(5, lambda i: ps.span(f"Item {i}"))` |
+| `ps.later(delay, fn)` | `ps.later(5.0, lambda: state.refresh())` — delayed callback |
 
-```python
-ps.div(
-    *ps.repeat(5, lambda i: ps.span(f"Item {i}")),
-)
-```
+## See Also
 
-### `ps.later(delay, callback)`
-
-```python
-ps.later(5.0, lambda: state.refresh())  # Call after 5 seconds
-```
+- `forms.md` - Form handling and validation
+- `routing.md` - Link component and navigation
+- `js-interop.md` - Custom React components

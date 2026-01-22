@@ -59,6 +59,52 @@ class AuthMiddleware(ps.PulseMiddleware):
 
 ## Lifecycle Hooks
 
+### `prerender`
+
+Called before batch SSR prerender for all paths in the request. Modify the payload, inject session data, or return early with redirects.
+
+```python
+from pulse.messages import PrerenderPayload, Prerender
+
+@override
+async def prerender(
+    self,
+    *,
+    payload: PrerenderPayload,
+    request: PulseRequest,
+    session: dict,
+    next,
+) -> ps.PrerenderResponse:
+    # payload.paths: list of paths being prerendered
+    # payload.routeInfo: route metadata
+
+    # Inject data into session before render
+    session["user"] = await get_user(request)
+
+    # Continue to render
+    result = await next()
+
+    # Can modify the Prerender result
+    if isinstance(result, Ok):
+        prerender: Prerender = result.payload
+        # prerender["views"]: dict of path -> ServerInitMessage
+        # prerender["directives"]: headers and socketio config
+
+    return result
+
+    # Or short-circuit with redirect/404:
+    # return Redirect("/login")
+    # return NotFound()
+```
+
+**Returns:** `await next()`, `Redirect(path)`, `NotFound()`, `Ok(Prerender)`
+
+**Payload fields:**
+- `paths`: List of paths being prerendered
+- `routeInfo`: Route metadata (params, query, etc.)
+- `ttlSeconds`: Optional cache TTL
+- `renderId`: Optional render correlation ID
+
 ### `connect`
 
 Called on WebSocket connection. Validate auth, set session data.
@@ -144,6 +190,49 @@ async def message(
 ```
 
 **Returns:** `await next()` or `Deny(reason)`
+
+### `channel`
+
+Called when channel messages are received. Authorize by channel, event, or payload.
+
+```python
+from typing import Any
+
+@override
+async def channel(
+    self,
+    *,
+    channel_id: str,
+    event: str,
+    payload: Any,
+    request_id: str | None,
+    session: dict,
+    next,
+) -> Ok | Deny:
+    # Authorize based on channel
+    if channel_id.startswith("admin:"):
+        if not session.get("is_admin"):
+            return Deny()
+
+    # Authorize based on event type
+    if event == "delete" and not session.get("can_delete"):
+        return Deny()
+
+    # Check payload
+    if payload.get("sensitive") and not session.get("verified"):
+        return Deny()
+
+    return await next()
+```
+
+**Returns:** `await next()` or `Deny()`
+
+**Parameters:**
+- `channel_id`: Channel identifier (e.g., `"chat:room-123"`)
+- `event`: Event name (e.g., `"message"`, `"typing"`)
+- `payload`: Event data
+- `request_id`: Correlation ID if client awaits response (for request/response pattern)
+- `session`: Session data dictionary
 
 ## Response Types
 
@@ -333,4 +422,10 @@ app = ps.App(
         max_age=7*24*3600,  # 7 days
     ),
 )
+
+## See Also
+
+- `sessions.md` - Session stores and cookie configuration
+- `queries.md` - QueryClient session cache
+- `app.md` - Middleware configuration in App
 ```

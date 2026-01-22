@@ -337,3 +337,9 @@ class MyState(ps.State):
 ```
 
 Direct primitive use is rare—prefer `ps.State` for most cases.
+
+## See Also
+
+- `hooks.md` - Inline effects in components
+- `state.md` - Effects and computed on State classes
+- `queries.md` - Query-based data fetching

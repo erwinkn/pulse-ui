@@ -1,10 +1,11 @@
 from collections.abc import Sequence
-from typing import Literal, Unpack
+from typing import Literal, TypedDict, Unpack
 
 import pulse as ps
 from pulse.dom.elements import GenericHTMLElement
 
-from .common import AnimationTiming, LayoutType, NullableCoordinate
+from .common import AnimationTiming, Coordinate, LayoutType, NullableCoordinate
+from .general import SymbolType
 
 CurveType = Literal[
 	"basis",
@@ -59,3 +60,87 @@ class RectangleProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
 
 @ps.react_component(ps.Import("Rectangle", "recharts"))
 def Rectangle(key: str | None = None, **props: Unpack[RectangleProps]): ...
+
+
+class SectorProps(TypedDict, total=False):
+	className: str
+	cx: float
+	cy: float
+	innerRadius: float
+	outerRadius: float
+	startAngle: float
+	endAngle: float
+	cornerRadius: float
+	forceCornerRadius: bool
+	cornerIsExternal: bool
+
+
+@ps.react_component(ps.Import("Sector", "recharts"))
+def Sector(key: str | None = None, **props: Unpack[SectorProps]): ...
+
+
+class PolygonProps(TypedDict, total=False):
+	className: str
+	points: Sequence[Coordinate]
+	baseLinePoints: Sequence[Coordinate]
+	connectNulls: bool
+
+
+@ps.react_component(ps.Import("Polygon", "recharts"))
+def Polygon(key: str | None = None, **props: Unpack[PolygonProps]): ...
+
+
+class DotProps(TypedDict, total=False):
+	className: str
+	cx: float
+	cy: float
+	r: float | str
+	clipDot: bool
+
+
+@ps.react_component(ps.Import("Dot", "recharts"))
+def Dot(key: str | None = None, **props: Unpack[DotProps]): ...
+
+
+class CrossProps(TypedDict, total=False):
+	className: str
+	x: float
+	y: float
+	width: float
+	height: float
+	top: float
+	left: float
+
+
+@ps.react_component(ps.Import("Cross", "recharts"))
+def Cross(key: str | None = None, **props: Unpack[CrossProps]): ...
+
+
+class SymbolsProps(TypedDict, total=False):
+	className: str
+	type: SymbolType
+	cx: float
+	cy: float
+	size: float
+	sizeType: Literal["area", "diameter"]
+
+
+@ps.react_component(ps.Import("Symbols", "recharts"))
+def Symbols(key: str | None = None, **props: Unpack[SymbolsProps]): ...
+
+
+class TrapezoidProps(TypedDict, total=False):
+	className: str
+	x: float
+	y: float
+	upperWidth: float
+	lowerWidth: float
+	height: float
+	isUpdateAnimationActive: bool
+	animationBegin: float
+	animationDuration: float
+	animationEasing: AnimationTiming
+
+
+@ps.react_component(ps.Import("Trapezoid", "recharts"))
+def Trapezoid(key: str | None = None, **props: Unpack[TrapezoidProps]): ...

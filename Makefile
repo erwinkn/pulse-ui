@@ -18,6 +18,9 @@ init:
 	@uv sync --all-packages --dev
 	@echo "Installing JS dependencies..."
 	@bun i
+	@echo "Installing docs dependencies..."
+	@bun i
+	@cd docs && bun i
 	@echo "Building JS packages..."
 	@bun run build
 	@echo "Installing pre-commit hooks"

@@ -268,7 +268,7 @@ class TimerRegistry:
 
 		def _wrapped():
 			try:
-				fn(*args, **kwargs)
+				return fn(*args, **kwargs)
 			finally:
 				self.discard(handle)
 

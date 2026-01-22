@@ -636,11 +636,18 @@ class RenderSession:
 			with PulseContext.update(render=self, route=mount.route):
 				res = cb.fn(*args[: cb.n_args])
 				if iscoroutine(res):
-					self.spawn_task(
-						res,
-						name=f"callback:{key}",
-						on_done=lambda t: (e := t.exception()) and report(e, True),
-					)
+
+					def _on_done(t: asyncio.Task[Any]) -> None:
+						if t.cancelled():
+							return
+						try:
+							exc = t.exception()
+						except asyncio.CancelledError:
+							return
+						if exc:
+							report(exc, True)
+
+					self.spawn_task(res, name=f"callback:{key}", on_done=_on_done)
 		except Exception as e:
 			report(e)
 

@@ -872,6 +872,54 @@ async def test_session_close_cancels_tracked_tasks():
 
 
 @pytest.mark.asyncio
+async def test_session_close_ignores_cancelled_callback_tasks():
+	started = asyncio.Event()
+	cancelled = asyncio.Event()
+
+	@ps.component
+	def AsyncCallbackComponent():
+		async def on_click():
+			started.set()
+			try:
+				await asyncio.sleep(10)
+			except asyncio.CancelledError:
+				cancelled.set()
+				raise
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("a", AsyncCallbackComponent)])
+	session = RenderSession("test-id", routes)
+
+	errors: list[dict[str, Any]] = []
+	loop = asyncio.get_running_loop()
+	prev_handler = loop.get_exception_handler()
+
+	def handler(_loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+		errors.append(context)
+
+	loop.set_exception_handler(handler)
+	try:
+		with ps.PulseContext.update(render=session):
+			session.prerender(["/a"])
+			session.attach("/a", make_route_info("/a"))
+
+		callbacks = session.route_mounts["/a"].tree.callbacks
+		assert len(callbacks) == 1
+		key = next(iter(callbacks))
+		session.execute_callback("/a", key, [])
+		assert await wait_for(lambda: started.is_set(), timeout=0.2)
+
+		session.close()
+
+		assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+		await asyncio.sleep(0)
+		assert errors == []
+	finally:
+		loop.set_exception_handler(prev_handler)
+
+
+@pytest.mark.asyncio
 async def test_session_close_cancels_tracked_timers():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)

@@ -251,3 +251,9 @@ channel.closed  # bool — True if channel is closed
 - **Notifications** — Server-initiated alerts
 - **Gaming** — Low-latency state sync
 - **Progress tracking** — Long-running task updates
+
+## See Also
+
+- `js-interop.md` - React integration for channel UI
+- `reactive.md` - Effect for cleanup patterns
+- `middleware.md` - Channel authorization with channel hook

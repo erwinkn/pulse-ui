@@ -34,6 +34,27 @@ app = ps.App([ps.Route("/", App)])
 
 `pulse run app.py` → dev server on `:8000`
 
+## Quick Reference
+
+| Task | API | Section |
+|------|-----|---------|
+| Create component | `@ps.component` | Core Concepts |
+| Preserve state | `with ps.init(): state = MyState()` | Hooks |
+| One-time setup | `ps.setup(fn, *args)` | Hooks |
+| Inline state | `ps.state(lambda: State(), key=...)` | Hooks |
+| Effects | `@ps.effect` decorator | Hooks |
+| Route info | `ps.route()` | Navigation |
+| Navigate | `ps.navigate(path)`, `ps.Link` | Navigation |
+| Forms | `ps.Form(on_submit=handler)` | Forms |
+| Data fetching | `@ps.query` on State method | Data Fetching |
+| Mutations | `@ps.mutation` on State method | Data Fetching |
+| Global state | `@ps.global_state` decorator | State |
+| Lists | `ps.For(items, lambda item, i: ...)` | Rendering |
+| Conditionals | `ps.If(cond, then=..., else_=...)` | Rendering |
+| Session data | `ps.session()` | Runtime |
+| WebSocket ID | `ps.websocket_id()` | Runtime |
+| NPM packages | `ps.require("package")` | JS Interop |
+
 ## Core Concepts
 
 ### Components
@@ -122,6 +143,8 @@ def TodoApp():
 - `@ps.effect` for side effects (runs when dependencies change)
 - `on_dispose()` method for cleanup when component unmounts
 
+See `references/state.md` for computed properties, effects on State, and global state patterns.
+
 ### Hooks
 
 #### `ps.init()` — Preserve state across renders
@@ -156,7 +179,7 @@ def Counter():
     counter = ps.state(CounterState())
     return ps.button(f"Count: {counter.count}", onClick=counter.increment)
 
-# In loops - use key parameter
+# In loops - MUST use key parameter to avoid state collision
 @ps.component
 def UserList(user_ids: list[str]):
     items = []
@@ -164,6 +187,9 @@ def UserList(user_ids: list[str]):
         user = ps.state(lambda uid=uid: UserState(uid), key=uid)
         items.append(ps.li(user.name, key=uid))
     return ps.ul(*items)
+
+# Dynamic key changes create new instance (useful for reset)
+note = ps.state(lambda: NoteState(), key=f"note-v{version}")
 ```
 
 #### `@ps.effect` — Inline effects (auto-registered in components)
@@ -180,7 +206,7 @@ def Timer():
 
     return ps.div(str(state.elapsed))
 
-# In loops - use key parameter
+# In loops - MUST use key parameter
 @ps.component
 def ItemTracker(items: list[str]):
     for item in items:
@@ -188,7 +214,16 @@ def ItemTracker(items: list[str]):
         def track(item=item):  # Capture via default arg
             print(f"Tracking: {item}")
     return ps.div(...)
+
+# Effects in conditionals - disposed when condition becomes false
+if state.show_timer:
+    @ps.effect(immediate=True)
+    def timer_effect():
+        # Runs while show_timer is True, cleanup on False
+        return lambda: print("Timer stopped")
 ```
+
+See `references/reactive.md` for Effect options (interval, lazy, on_error) and `references/hooks.md` for inline effect patterns.
 
 #### Runtime hooks
 
@@ -196,6 +231,7 @@ def ItemTracker(items: list[str]):
 ps.route()          # RouteContext: .pathname, .params, .query, .queryParams
 ps.session()        # ReactiveDict of session data
 ps.session_id()     # str session ID
+ps.websocket_id()   # str WebSocket connection ID (one session can have multiple)
 ps.navigate(path)   # Client-side navigation
 ps.redirect(path)   # Server redirect (throws)
 ps.not_found()      # 404 (throws)
@@ -310,6 +346,8 @@ ps.navigate("/path")                    # Programmatic
 ps.redirect("/login")                   # Server redirect (throws)
 ```
 
+See `references/routing.md` for layouts, nested routes, and path parameters.
+
 ### Forms
 
 #### Declarative form
@@ -354,6 +392,8 @@ def LoginForm():
         ps.button("Login"),
     ]
 ```
+
+See `references/forms.md` for ManualForm, file uploads, and validation patterns. See `references/dom.md` for all form elements.
 
 ### Data Fetching
 
@@ -409,6 +449,8 @@ def _on_success(self, result):
 def _on_error(self, error):
     print("Failed:", error)
 ```
+
+See `references/queries.md` for infinite queries, query callbacks, optimistic updates, and caching.
 
 ### Global State
 
@@ -563,12 +605,93 @@ def DataTable():
 9. **Clean up** in `on_dispose()` method or effect return
 10. **Run `make all`** before committing
 
+## Working with JavaScript
+
+### NPM Dependencies
+
+Use `ps.require()` to declare npm package dependencies:
+
+```python
+# Declare dependencies (typically at module level)
+ps.require("recharts")
+ps.require("lodash", version="^4.17.0")
+
+# Then import components
+from pulse.transpiler import Import
+LineChart = Import("LineChart", "recharts")
+```
+
+### Calling Own FastAPI Endpoints
+
+Use `ps.call_api()` to call your app's FastAPI endpoints from components:
+
+```python
+result = await ps.call_api("/api/users", method="GET")
+result = await ps.call_api("/api/login", method="POST", body={"email": email})
+```
+
+### Executing JavaScript
+
+Use `run_js()` for imperative JS execution:
+
+```python
+from pulse import run_js
+from pulse.transpiler import javascript
+
+@javascript
+def show_alert(msg: str):
+    window.alert(msg)
+
+# Fire-and-forget
+run_js(show_alert("Hello!"))
+
+# With result
+result = await run_js(get_window_width(), result=True)
+```
+
+## Production Configuration
+
+Key `ps.App` parameters for production:
+
+```python
+app = ps.App(
+    routes=[...],
+    mode="single-server",  # or "subdomains" for multi-tenant
+    server_address="https://myapp.com",  # Required for production
+    codegen=ps.CodegenConfig(router="@tanstack/react-router"),  # Optional
+    session_store=ps.CookieSessionStore(secret_key="..."),  # Production sessions
+)
+```
+
+See `references/middleware.md` for session store options.
+
 ## Additional References
 
 For advanced topics, see `references/` folder:
+
+**Core:**
+- `state.md` — Computed properties, global state, State effects
+- `hooks.md` — Inline effects, setup patterns, lifecycle
 - `reactive.md` — Signal, Computed, Effect, ReactiveDict/List/Set
+- `routing.md` — Layouts, nested routes, path parameters
+- `forms.md` — ManualForm, file uploads, validation
+- `dom.md` — Full HTML elements and events reference
+
+**Data & Communication:**
 - `queries.md` — Query options, infinite queries, mutations
 - `channels.md` — Real-time bidirectional communication
+- `sessions.md` — Session management, stores, authentication
+
+**App Setup:**
+- `app.md` — App configuration, middleware, production setup
 - `middleware.md` — Request middleware, auth patterns
+- `context.md` — Runtime context, hooks, call_api
+
+**JavaScript Integration:**
 - `js-interop.md` — React components, JavaScript execution
-- `dom.md` — Full HTML elements and events reference
+- `transpiler.md` — Python-to-JS transpiler, Import, syntax
+
+**Utilities:**
+- `helpers.md` — Utilities: ps.later, ps.repeat, CSSProperties
+- `errors.md` — Exception handling, debugging
+- `examples.md` — Complete working examples

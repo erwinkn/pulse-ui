@@ -32,7 +32,7 @@ ps.Import("DatePicker", "react-datepicker", kind="default")
 ps.Import("MyComponent", "~/components/my-component", kind="default")
 ```
 
-### Lazy Loading
+### Lazy Loading with `@ps.react_component`
 
 ```python
 @ps.react_component(
@@ -41,6 +41,38 @@ ps.Import("MyComponent", "~/components/my-component", kind="default")
 )
 def Chart(...) -> ps.Element: ...
 ```
+
+### Lazy Loading with `React.lazy`
+
+For more control over lazy loading, use `Import(lazy=True)` with `React.lazy`:
+
+```python
+from pulse.js.react import lazy, Suspense
+
+# Create lazy-loaded component (code-split)
+LazyChart = lazy(ps.Import("LineChart", "recharts", lazy=True))
+
+# Use with Suspense for loading fallback
+@ps.component
+def Dashboard():
+    return ps.div[
+        Suspense(fallback=ps.div("Loading chart..."))[
+            LazyChart(data=chart_data, width=600, height=400),
+        ],
+    ]
+```
+
+### How Lazy Loading Works
+
+1. `Import(..., lazy=True)` generates a dynamic import factory: `() => import("recharts")`
+2. `lazy(factory)` wraps it with `React.lazy` for component-level code splitting
+3. `Suspense` shows a fallback while the component loads
+
+### When to Use Lazy Loading
+
+- Large components (charts, editors, heavy UI)
+- Components not immediately visible (modals, below-the-fold content)
+- Reducing initial bundle size
 
 ### Full Example
 
@@ -182,37 +214,192 @@ def create_config():
     )
 ```
 
-## Run JavaScript Imperatively
+## `ps.require()` — Declare npm Dependencies
 
-Execute JS from server code:
+Register npm package version requirements at module level:
 
 ```python
-# Run expression, get result
-result = await ps.run_js("window.innerWidth")
+import pulse as ps
 
-# Run statement
-await ps.run_js("console.log('Hello from server')")
-
-# With arguments
-await ps.run_js(
-    "document.getElementById(id).scrollIntoView()",
-    id="target-element",
-)
+# Declare dependencies (call at module level, not inside components)
+ps.require({"recharts": "^2.0.0"})
+ps.require({"lodash": "^4.17.0", "@tanstack/react-query": ">=5.0.0"})
 ```
 
-## API Calls from Server
-
-Make fetch requests to external APIs:
+### Signature
 
 ```python
-response = await ps.call_api(
+def require(packages: Mapping[str, str]) -> None:
+    """Register npm package version requirements for dependency syncing."""
+```
+
+### When to Call
+
+- **Module level**: Call `ps.require()` at the top of your module, outside component functions
+- **Not inside components**: Requirements are collected during module import, not during render
+
+### Version Specifier Syntax
+
+Uses standard npm semver syntax:
+
+```python
+ps.require({"package": "^1.0.0"})   # Compatible with 1.x.x
+ps.require({"package": "~1.0.0"})   # Compatible with 1.0.x
+ps.require({"package": ">=2.0.0"})  # 2.0.0 or higher
+ps.require({"package": "1.2.3"})    # Exact version
+```
+
+### How Dependencies Work
+
+Dependencies declared via `ps.require()` are:
+1. Collected during Python module import
+2. Merged with component-level imports (from `ps.Import`)
+3. Synced to `package.json` during codegen
+4. Installed via npm/bun when running the dev server
+
+**Note**: You can also specify versions inline with `ps.Import`:
+
+```python
+# Version in Import (alternative to ps.require)
+Chart = ps.Import("LineChart", "recharts@^2.0.0")
+```
+
+## `run_js()` — Execute JavaScript Imperatively
+
+Execute JavaScript on the client from server callbacks:
+
+```python
+from pulse import run_js
+from pulse.transpiler import javascript
+
+@javascript
+def focus_element(selector: str):
+    document.querySelector(selector).focus()
+
+@javascript
+def get_scroll_position():
+    return {"x": window.scrollX, "y": window.scrollY}
+
+# Fire-and-forget (no result)
+def on_save():
+    save_data()
+    run_js(focus_element("#next-input"))
+
+# With result (must await)
+async def on_click():
+    pos = await run_js(get_scroll_position(), result=True)
+    print(pos["x"], pos["y"])
+```
+
+### Signature
+
+```python
+def run_js(
+    expr: Expr,
+    *,
+    result: bool = False,
+    timeout: float = 10.0,
+) -> Future[Any] | None:
+    """Execute JavaScript on the client.
+
+    Args:
+        expr: An Expr from calling a @javascript function.
+        result: If True, returns a Future that resolves with the JS return value.
+                If False (default), returns None (fire-and-forget).
+        timeout: Maximum seconds to wait for result (default 10s, only applies when
+                 result=True). Future raises asyncio.TimeoutError if exceeded.
+    """
+```
+
+### Error Handling
+
+```python
+from pulse import run_js, JsExecError
+
+@javascript
+def risky_operation():
+    raise Error("Something went wrong")
+
+async def handle_action():
+    try:
+        result = await run_js(risky_operation(), result=True)
+    except JsExecError as e:
+        print(f"JS error: {e}")
+```
+
+### Requirements
+
+- Must be called from a Pulse callback (event handler, effect, etc.)
+- Cannot be called during render
+- The `expr` argument must be from a `@javascript` function or `pulse.js` module
+
+## `ps.call_api()` — API Calls Through Client Browser
+
+Make fetch requests through the client's browser, useful for APIs that require browser cookies or credentials:
+
+```python
+# GET request (to your own API)
+result = await ps.call_api("/api/users")
+
+# POST with body
+result = await ps.call_api(
+    "/api/login",
+    method="POST",
+    body={"email": email, "password": password},
+)
+
+# External API with headers
+result = await ps.call_api(
     "https://api.example.com/data",
     method="POST",
-    headers={"Authorization": "Bearer token"},
+    headers={"Authorization": f"Bearer {token}"},
     body={"key": "value"},
 )
-# response is dict from JSON
 ```
+
+### Signature
+
+```python
+async def call_api(
+    path: str,
+    *,
+    method: str = "POST",
+    headers: Mapping[str, str] | None = None,
+    body: Any | None = None,
+    credentials: str = "include",
+) -> dict[str, Any]:
+    """Make an API call through the client browser.
+
+    Args:
+        path: URL path or full URL. Relative paths are resolved against server address.
+        method: HTTP method (default: "POST").
+        headers: Optional HTTP headers.
+        body: Optional request body (JSON serialized).
+        credentials: Credential mode - "include" (default) or "omit".
+
+    Returns:
+        dict with: ok (bool), status (int), headers (dict), body (parsed JSON)
+    """
+```
+
+### Response Format
+
+```python
+result = await ps.call_api("/api/data")
+
+if result["ok"]:
+    data = result["body"]  # Parsed JSON
+    print(f"Status: {result['status']}")
+    print(f"Headers: {result['headers']}")
+else:
+    print(f"Request failed with status {result['status']}")
+```
+
+### Use Cases
+
+- Call your FastAPI endpoints that need session cookies
+- Access third-party APIs that require browser credentials
+- Make requests that need to respect CORS from the client
 
 ## Set Cookies
 
@@ -317,3 +504,8 @@ def PersistentInput():
 - Limited Python syntax support (basic control flow, functions)
 - Use `pulse.js` imports for browser APIs
 - Complex logic should stay server-side
+
+## See Also
+
+- `channels.md` - Server-client bidirectional communication
+- `dom.md` - HTML elements and events

@@ -326,13 +326,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
 		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 	) -> ActionResult[list[Page[T, TParam]]]:
-		"""Wait for initial data or until queue is empty."""
-		# If no data and loading, enqueue initial fetch (unless already processing)
-		if len(self.pages) == 0 and self.status() == "loading":
-			if self._queue_task is None or self._queue_task.done():
-				# Use provided fetch_fn or fall back to first observer's fetch_fn
-				fn = fetch_fn if fetch_fn is not None else self.fn
-				self._enqueue(Refetch(fetch_fn=fn, observer=observer))
+		"""Wait for any in-flight queue processing to complete."""
 		# Wait for any in-progress queue processing
 		if self._queue_task and not self._queue_task.done():
 			await self._queue_task
@@ -340,6 +334,18 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if self.status() == "error":
 			return ActionError(cast(Exception, self.error()))
 		return ActionSuccess(list(self.pages))
+
+	async def ensure(
+		self,
+		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
+		observer: "InfiniteQueryResult[T, TParam] | None" = None,
+	) -> ActionResult[list[Page[T, TParam]]]:
+		"""Ensure an initial fetch has started, then wait for completion."""
+		if len(self.pages) == 0 and self.status() == "loading":
+			if self._queue_task is None or self._queue_task.done():
+				fn = fetch_fn if fetch_fn is not None else self.fn
+				self._enqueue(Refetch(fetch_fn=fn, observer=observer))
+		return await self.wait()
 
 	def observe(self, observer: Any):
 		self._observers.append(observer)
@@ -630,11 +636,17 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			(i for i, p in enumerate(self.pages) if p.param == action.param),
 			None,
 		)
-		if idx is None:
-			return None
 
 		page = await action.fetch_fn(action.param)
-		self.pages[idx] = Page(page, action.param)
+
+		if idx is None:
+			# Page doesn't exist - jump to this page, clearing existing pages
+			self.pages.clear()
+			self.pages.append(Page(page, action.param))
+		else:
+			# Page exists, update it
+			self.pages[idx] = Page(page, action.param)
+
 		await self.commit()
 		return page
 
@@ -816,8 +828,11 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 			with Untrack():
 				q.observe(self)
 
-				if enabled and fetch_on_mount and self.is_stale():
-					q.invalidate()
+				# Skip if refetch_interval is set - interval effect handles initial fetch
+				if enabled and fetch_on_mount and refetch_interval is None:
+					# Fetch if no data loaded yet or if existing data is stale
+					if q.status() == "loading" or self.is_stale():
+						q.invalidate()
 
 			# Return cleanup function that captures the query (old query on key change)
 			def cleanup():
@@ -984,6 +999,9 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 
 	async def wait(self) -> ActionResult[list[Page[T, TParam]]]:
 		return await self._query().wait(fetch_fn=self._fetch_fn, observer=self)
+
+	async def ensure(self) -> ActionResult[list[Page[T, TParam]]]:
+		return await self._query().ensure(fetch_fn=self._fetch_fn, observer=self)
 
 	def invalidate(self):
 		query = self._query()

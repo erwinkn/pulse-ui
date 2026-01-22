@@ -699,14 +699,17 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		return await self.wait()
 
 	async def wait(self) -> ActionResult[T]:
-		"""Wait for the current query to complete."""
-		# If loading and no task, schedule a fetch
-		if self.state.status() == "loading" and not self.state.is_fetching():
-			self.schedule()
+		"""Wait for the current in-flight fetch to complete."""
 		await self._effect.wait()
 		if self.state.status() == "error":
 			return ActionError(cast(Exception, self.state.error.read()))
 		return ActionSuccess(cast(T, self.state.data.read()))
+
+	async def ensure(self) -> ActionResult[T]:
+		"""Ensure an initial fetch has started, then wait for completion."""
+		if self.state.status() == "loading" and not self.state.is_fetching():
+			self.schedule()
+		return await self.wait()
 
 	def invalidate(self):
 		"""Mark the query as stale and refetch through the effect."""
@@ -874,9 +877,12 @@ class KeyedQueryResult(Generic[T], Disposable):
 		return await self.wait()
 
 	async def wait(self) -> ActionResult[T]:
-		"""Wait for the current query to complete."""
+		"""Wait for the current in-flight fetch to complete."""
+		return await self._query().wait()
+
+	async def ensure(self) -> ActionResult[T]:
+		"""Ensure an initial fetch has started, then wait for completion."""
 		query = self._query()
-		# If loading and no task, start a fetch with this observer's fetch function
 		if query.status() == "loading" and not query.is_fetching():
 			query.run_fetch(self._fetch_fn, initiator=self)
 		return await query.wait()

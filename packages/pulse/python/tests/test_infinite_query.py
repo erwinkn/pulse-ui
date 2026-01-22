@@ -84,6 +84,45 @@ async def test_infinite_query_fetch_next_pages():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_infinite_query_wait_is_side_effect_free_and_ensure_starts_fetch():
+	calls = 0
+
+	class S(ps.State):
+		@ps.infinite_query(
+			initial_page_param=0, retries=0, fetch_on_mount=False, max_pages=0
+		)
+		async def nums(self, page_param: int) -> int:
+			nonlocal calls
+			calls += 1
+			await asyncio.sleep(0)
+			return page_param
+
+		@nums.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return None
+
+		@nums.key
+		def _key(self):
+			return ("inf-ensure",)
+
+	s = S()
+	q = s.nums
+
+	result = await q.wait()
+	assert calls == 0
+	assert q.status == "loading"
+	assert q.pages is None or q.pages == []
+	assert result.status == "success"
+	assert result.data == []
+
+	result = await q.ensure()
+	assert result.status == "success"
+	assert q.pages == [0]
+	assert calls == 1
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_infinite_query_max_pages_trims_forward():
 	class S(ps.State):
 		@ps.infinite_query(initial_page_param=0, max_pages=2, retries=0)
@@ -442,12 +481,6 @@ async def test_infinite_query_fetch_page_basic():
 	assert q.pages == [1, 12]  # [0*10+1, 1*10+2]
 	assert q.page_params == [0, 1]
 
-	# Fetch non-existent page returns ActionSuccess with None data
-	result = await q.fetch_page(5)
-	assert result.status == "success"
-	assert result.data is None
-	assert q.pages == [1, 12]  # Unchanged
-
 	# Refetch existing page 0 updates it
 	result = await q.fetch_page(0)
 	assert result.status == "success"
@@ -461,6 +494,97 @@ async def test_infinite_query_fetch_page_basic():
 	assert result.data == 14  # 1*10 + 4
 	assert q.pages == [3, 14]
 	assert q.page_params == [0, 1]
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_fetch_page_jumps_to_new_page():
+	"""Test that fetch_page can jump to a page that doesn't exist yet.
+
+	This is the 'jump to page X' use case - when you want to navigate to
+	an arbitrary page, clearing existing pages and starting fresh from that page.
+	"""
+	fetch_count = 0
+
+	class S(ps.State):
+		@ps.infinite_query(
+			initial_page_param=0, max_pages=4, retries=0, fetch_on_mount=False
+		)
+		async def nums(self, page_param: int) -> int:
+			nonlocal fetch_count
+			fetch_count += 1
+			await asyncio.sleep(0)
+			return page_param * 10 + fetch_count
+
+		@nums.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 10 else None
+
+		@nums.key
+		def _key(self):
+			return ("fetch-page-jump",)
+
+	s = S()
+	q = s.nums
+
+	# Jump to page 5 directly without loading any pages first
+	result = await q.fetch_page(5)
+	assert result.status == "success"
+	assert result.data == 51  # 5*10 + 1
+	assert q.pages == [51]
+	assert q.page_params == [5]
+	assert q.has_next_page is True
+
+	# Can fetch next page from there
+	await q.fetch_next_page()
+	assert q.pages == [51, 62]  # [5*10+1, 6*10+2]
+	assert q.page_params == [5, 6]
+
+	# Jump to a different page (clears existing pages)
+	result = await q.fetch_page(8)
+	assert result.status == "success"
+	assert result.data == 83  # 8*10 + 3
+	assert q.pages == [83]
+	assert q.page_params == [8]
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_fetch_page_no_pages_exists():
+	"""Test that fetch_page works when query has no pages loaded yet."""
+	fetch_count = 0
+
+	class S(ps.State):
+		@ps.infinite_query(
+			initial_page_param=0, max_pages=4, retries=0, fetch_on_mount=False
+		)
+		async def nums(self, page_param: int) -> int:
+			nonlocal fetch_count
+			fetch_count += 1
+			await asyncio.sleep(0)
+			return page_param * 10 + fetch_count
+
+		@nums.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 10 else None
+
+		@nums.key
+		def _key(self):
+			return ("fetch-page-no-pages",)
+
+	s = S()
+	q = s.nums
+
+	# Query starts with no pages (fetch_on_mount=False)
+	assert q.pages is None or q.pages == []
+
+	# Jump to page 0 (the initial page)
+	result = await q.fetch_page(0)
+	assert result.status == "success"
+	assert result.data == 1  # 0*10 + 1
+	assert q.pages == [1]
+	assert q.page_params == [0]
+	assert fetch_count == 1
 
 
 @pytest.mark.asyncio
@@ -575,7 +699,7 @@ async def test_infinite_query_refetch_interval():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.01)
+		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.05)
 		async def items(self, page_param: int) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -592,18 +716,14 @@ async def test_infinite_query_refetch_interval():
 	s = S()
 	q = s.items
 
-	# Initial fetch
-	await q.wait()
-	assert s.calls == 1
-	assert q.pages == [1]
+	# Auto-fetch should happen on mount
+	assert await wait_for(lambda: q.pages == [1] and s.calls == 1)
 
-	# Wait for interval to trigger refetch and complete
-	assert await wait_for(lambda: q.pages == [2])
-	assert s.calls == 2
+	# Wait for interval to trigger refetch
+	assert await wait_for(lambda: q.pages == [2] and s.calls == 2)
 
 	# Wait for another interval
-	assert await wait_for(lambda: q.pages == [3])
-	assert s.calls == 3
+	assert await wait_for(lambda: q.pages == [3] and s.calls == 3)
 
 	q.dispose()
 
@@ -616,7 +736,7 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.01)
+		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.05)
 		async def items(self, page_param: int) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -633,20 +753,17 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	s = S()
 	q = s.items
 
-	# Initial fetch
-	await q.wait()
-	assert s.calls == 1
+	# Auto-fetch should happen on mount
+	assert await wait_for(lambda: q.pages == [1] and s.calls == 1)
 
 	# Wait for one interval refetch
-	assert await wait_for(lambda: s.calls >= 2)
+	assert await wait_for(lambda: q.pages == [2] and s.calls == 2)
 
 	# Dispose - interval should stop
 	q.dispose()
-	calls_at_dispose = s.calls
 
-	# Wait and verify no more refetches (negative test - sleep is appropriate here)
-	assert not await wait_for(lambda: s.calls > calls_at_dispose, timeout=0.05)
-	assert s.calls == calls_at_dispose
+	# Wait and verify no more refetches (negative test)
+	assert not await wait_for(lambda: s.calls > 2 or q.pages != [2], timeout=0.05)
 
 
 @pytest.mark.asyncio
@@ -680,11 +797,11 @@ async def test_infinite_query_cancel_fetch_cancels_inflight_request():
 	# Start initial fetch (but don't await it fully)
 	wait_task = asyncio.create_task(q.wait())
 	# Give it time to start the fetch
-	assert await wait_for(lambda: 0 in s.fetch_started, timeout=0.2)
+	assert await wait_for(lambda: s.fetch_started == [0], timeout=0.2)
 
-	# Verify fetch started
-	assert 0 in s.fetch_started
-	assert 0 not in s.fetch_completed
+	# Verify fetch started but not completed
+	assert s.fetch_started == [0]
+	assert s.fetch_completed == []
 
 	# Now cancel with refetch - the in-flight request should be cancelled
 	refetch_task = asyncio.create_task(q.refetch(cancel_fetch=True))
@@ -694,9 +811,8 @@ async def test_infinite_query_cancel_fetch_cancels_inflight_request():
 
 	# The first fetch should have been cancelled (not completed)
 	# and the refetch should have run instead
-	assert s.fetch_completed == [0], (
-		f"Expected only refetch to complete, but got: started={s.fetch_started}, completed={s.fetch_completed}"
-	)
+	assert s.fetch_started == [0, 0]
+	assert s.fetch_completed == [0]
 
 	# The wait_task should have been cancelled
 	assert wait_task.cancelled() or wait_task.done()
@@ -739,10 +855,11 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 
 	# Start fetching next page (don't await - we'll cancel it)
 	_fetch_task = asyncio.create_task(q.fetch_next_page())
-	assert await wait_for(lambda: 1 in s.fetch_started, timeout=0.2)
+	assert await wait_for(lambda: s.fetch_started == [1], timeout=0.2)
 
-	assert 1 in s.fetch_started
-	assert 1 not in s.fetch_completed
+	# Verify fetch of page 1 started but not completed
+	assert s.fetch_started == [1]
+	assert s.fetch_completed == []
 
 	# Cancel and start refetch
 	refetch_task = asyncio.create_task(q.refetch(cancel_fetch=True))
@@ -750,9 +867,8 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 
 	# The fetch_next_page should have been cancelled
 	# Only the refetch should complete (which refetches page 0)
-	assert 1 not in s.fetch_completed, (
-		f"fetch_next_page should have been cancelled, but completed: {s.fetch_completed}"
-	)
+	assert s.fetch_started == [1, 0]
+	assert s.fetch_completed == [0]
 
 	q.dispose()
 
@@ -785,7 +901,13 @@ async def test_infinite_query_multiple_observers_use_own_fetch_fn():
 			self._name = name
 			self.suffix = suffix
 
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10, stale_time=0)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			stale_time=0,
+			fetch_on_mount=False,
+		)
 		async def data(self, page_param: int) -> str:
 			result = f"{self._name}-{self.suffix}-{page_param}"
 			fetch_log.append((self._name, self.suffix, page_param))
@@ -807,8 +929,8 @@ async def test_infinite_query_multiple_observers_use_own_fetch_fn():
 	q1 = s1.data
 	q2 = s2.data
 
-	# Initial fetch - q1 fetches first
-	await q1.wait()
+	# Initial fetch - explicitly trigger via q1
+	await q1.ensure()
 	assert q1.pages == ["state1-A-0"]
 	assert fetch_log == [("state1", "A", 0)]
 
@@ -975,7 +1097,9 @@ async def test_infinite_query_concurrent_fetch_next_uses_correct_fetch_fn():
 		def __init__(self, suffix: str):
 			self.suffix = suffix
 
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		@ps.infinite_query(
+			initial_page_param=0, retries=0, gc_time=10, fetch_on_mount=False
+		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.suffix, page_param))
 			await asyncio.sleep(0.01)  # Small delay to allow concurrency
@@ -996,8 +1120,8 @@ async def test_infinite_query_concurrent_fetch_next_uses_correct_fetch_fn():
 	q2 = s2.data
 
 	# Initial fetch
-	await q1.wait()
-	assert fetch_log[-1] == ("X", 0)
+	await q1.ensure()
+	assert fetch_log == [("X", 0)]
 
 	# Start both fetch_next_page concurrently
 	task1 = asyncio.create_task(q1.fetch_next_page())
@@ -1006,13 +1130,8 @@ async def test_infinite_query_concurrent_fetch_next_uses_correct_fetch_fn():
 	await asyncio.gather(task1, task2)
 
 	# Both actions should be processed sequentially
-	# First action uses q1's fetch function, second uses q2's
-	assert ("X", 1) in fetch_log, (
-		"Expected q1's fetch function to be used for first fetch_next"
-	)
-	assert ("Y", 2) in fetch_log, (
-		"Expected q2's fetch function to be used for second fetch_next"
-	)
+	# First action uses q1's fetch function (page 1), second uses q2's (page 2)
+	assert fetch_log == [("X", 0), ("X", 1), ("Y", 2)]
 
 
 @pytest.mark.asyncio
@@ -1120,8 +1239,7 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 	assert not await wait_for(lambda: "completed" in fetch_log, timeout=0.015)
 
 	# Fetch should have been cancelled, not completed
-	assert "started" in fetch_log
-	assert "completed" not in fetch_log
+	assert fetch_log == ["started"]
 
 	# The wait task should complete (either with error or cancelled)
 	try:
@@ -1146,7 +1264,9 @@ async def test_infinite_query_result_dispose_cancels_pending_actions():
 		def __init__(self, name: str):
 			self.name = name
 
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		@ps.infinite_query(
+			initial_page_param=0, retries=0, gc_time=10, fetch_on_mount=False
+		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.name, page_param))
 			fetch_started.set()
@@ -1168,8 +1288,8 @@ async def test_infinite_query_result_dispose_cancels_pending_actions():
 	q2 = s2.data
 
 	# Wait for initial data from q1
-	await q1.wait()
-	assert ("s1", 0) in fetch_log
+	await q1.ensure()
+	assert fetch_log == [("s1", 0)]
 	fetch_log.clear()
 	fetch_started.clear()
 
@@ -1198,9 +1318,8 @@ async def test_infinite_query_result_dispose_cancels_pending_actions():
 		pytest.fail("task_s1 should have been cancelled or completed")
 
 	# s1's fetch should NOT have been executed (it was pending and cancelled)
-	assert not any(name == "s1" for name, _ in fetch_log), (
-		f"s1's pending action should have been cancelled, but fetch_log={fetch_log}"
-	)
+	# Only s2's fetch_next_page should have run
+	assert fetch_log == [("s2", 1)]
 
 
 @pytest.mark.asyncio
@@ -1218,7 +1337,9 @@ async def test_infinite_query_result_dispose_does_not_cancel_other_observer_fetc
 		def __init__(self, name: str):
 			self.name = name
 
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		@ps.infinite_query(
+			initial_page_param=0, retries=0, gc_time=10, fetch_on_mount=False
+		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.name, "started"))
 			fetch_started.set()
@@ -1241,7 +1362,7 @@ async def test_infinite_query_result_dispose_does_not_cancel_other_observer_fetc
 	q2 = s2.data
 
 	# s1 starts fetch
-	wait_task = asyncio.create_task(q1.wait())
+	wait_task = asyncio.create_task(q1.ensure())
 	await fetch_started.wait()
 
 	# s2 disposes - should NOT cancel s1's fetch since s1 is the one who enqueued it
@@ -1251,8 +1372,7 @@ async def test_infinite_query_result_dispose_does_not_cancel_other_observer_fetc
 	await wait_task
 
 	# s1's fetch should have completed
-	assert ("s1", "started") in fetch_log
-	assert ("s1", "completed") in fetch_log
+	assert fetch_log == [("s1", "started"), ("s1", "completed")]
 
 
 @pytest.mark.asyncio

@@ -88,6 +88,63 @@ async def test_query_entry_lifecycle():
 
 
 @pytest.mark.asyncio
+async def test_query_wait_is_side_effect_free_and_ensure_starts_fetch():
+	key = ("test", "ensure")
+	calls = 0
+
+	async def fetcher():
+		nonlocal calls
+		calls += 1
+		await asyncio.sleep(0)
+		return "result"
+
+	query = KeyedQuery(key, retries=0, retry_delay=0.01)
+	query_computed = Computed(lambda: query, name="test_query(ensure)")
+	observer = KeyedQueryResult(
+		query_computed, fetch_fn=fetcher, gc_time=300.0, fetch_on_mount=False
+	)
+
+	result = await observer.wait()
+	assert calls == 0
+	assert observer.is_loading
+	assert observer.is_fetching is False
+	assert result.status == "success"
+	assert result.data is None
+
+	result = await observer.ensure()
+	assert result.status == "success"
+	assert result.data == "result"
+	assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_wait_is_side_effect_free_and_ensure_starts_fetch():
+	calls = 0
+
+	class S(ps.State):
+		@ps.query(fetch_on_mount=False, retries=0)
+		async def value(self) -> int:
+			nonlocal calls
+			calls += 1
+			await asyncio.sleep(0)
+			return 42
+
+	s = S()
+	q = s.value
+
+	result = await q.wait()
+	assert calls == 0
+	assert q.is_loading
+	assert result.status == "success"
+	assert result.data is None
+
+	result = await q.ensure()
+	assert result.status == "success"
+	assert result.data == 42
+	assert calls == 1
+
+
+@pytest.mark.asyncio
 async def test_query_entry_error_lifecycle():
 	key = ("test", 1)
 

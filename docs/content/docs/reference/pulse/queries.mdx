@@ -193,7 +193,11 @@ if result.status == "success":
 
 #### `async wait() -> ActionResult[T]`
 
-Wait for the current query to complete.
+Wait for the current in-flight fetch to complete. Does not start a fetch.
+
+#### `async ensure() -> ActionResult[T]`
+
+Start the initial fetch if needed, then wait for completion.
 
 #### `invalidate() -> None`
 
@@ -434,7 +438,11 @@ Refetch all pages. Optional `refetch_page` predicate: `(data, index, all_data) -
 
 #### `async wait() -> ActionResult[list[Page]]`
 
-Wait for current fetch to complete.
+Wait for the current in-flight fetch to complete. Does not start a fetch.
+
+#### `async ensure() -> ActionResult[list[Page]]`
+
+Start the initial fetch if needed, then wait for completion.
 
 #### `invalidate() -> None`
 

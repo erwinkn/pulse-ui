@@ -236,7 +236,7 @@ class App:
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
-		prerender_queue_timeout: float = 15.0,
+		prerender_queue_timeout: float = 60.0,
 		detach_queue_timeout: float = 15.0,
 		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
@@ -547,23 +547,10 @@ class App:
 			paths = [ensure_absolute_path(path) for path in paths]
 			payload["paths"] = paths
 			route_info = payload.get("routeInfo")
-			debug = os.environ.get("PULSE_DEBUG_RENDER")
-			if debug:
-				print(
-					"[PulseDebug][prerender] session=%s header_render_id=%s payload_render_id=%s paths=%s route_info=%s"
-					% (
-						session.sid,
-						request.headers.get("x-pulse-render-id"),
-						payload.get("renderId"),
-						paths,
-						route_info,
-					)
-				)
 
 			client_addr: str | None = get_client_address(request)
 			# Reuse render session from header (set by middleware) or create new one
 			render = PulseContext.get().render
-			reused = render is not None
 			if render is not None:
 				render_id = render.id
 			else:
@@ -572,12 +559,6 @@ class App:
 				render = self.create_render(
 					render_id, session, client_address=client_addr
 				)
-			if debug:
-				print(
-					"[PulseDebug][prerender] session=%s render=%s reused=%s connected=%s"
-					% (session.sid, render_id, reused, render.connected)
-				)
-
 			# Schedule cleanup timeout (will cancel/reschedule on activity)
 			if not render.connected:
 				self._schedule_render_cleanup(render_id)
@@ -719,11 +700,6 @@ class App:
 			if cookie is None:
 				raise ConnectionRefusedError("Socket connect missing cookie")
 			session = await self.get_or_create_session(cookie)
-			debug = os.environ.get("PULSE_DEBUG_RENDER")
-			if debug:
-				print(
-					"[PulseDebug][connect] session=%s render_id=%s" % (session.sid, rid)
-				)
 
 			if not rid:
 				# Still refuse connections without a renderId
@@ -735,11 +711,6 @@ class App:
 			render = self.render_sessions.get(rid)
 			if render is None:
 				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line
-				if debug:
-					print(
-						"[PulseDebug][connect] render_missing session=%s render_id=%s creating=true"
-						% (session.sid, rid)
-					)
 				render = self.create_render(
 					rid, session, client_address=get_client_address_socketio(environ)
 				)
@@ -749,11 +720,6 @@ class App:
 					raise ConnectionRefusedError(
 						f"Socket connect session mismatch render={render.id} "
 						+ f"owner={owner} session={session.sid}"
-					)
-				if debug:
-					print(
-						"[PulseDebug][connect] render_found session=%s render_id=%s owner=%s connected=%s"
-						% (session.sid, render.id, owner, render.connected)
 					)
 
 			def on_message(message: ServerMessage):
@@ -867,22 +833,6 @@ class App:
 	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
-		if os.environ.get("PULSE_DEBUG_RENDER") and msg["type"] in (
-			"attach",
-			"update",
-			"detach",
-		):
-			print(
-				"[PulseDebug][client-message] session=%s render=%s type=%s path=%s route_info=%s"
-				% (
-					session.sid,
-					render.id,
-					msg["type"],
-					msg.get("path"),
-					msg.get("routeInfo"),
-				)
-			)
-
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
 				render.attach(msg["path"], msg["routeInfo"])

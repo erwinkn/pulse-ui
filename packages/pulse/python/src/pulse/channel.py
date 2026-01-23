@@ -203,7 +203,7 @@ class ChannelsManager:
 					msg=msg,
 				)
 
-		render.spawn_task(_invoke(), name=f"channel:{channel_id}:{event}")
+		render.create_task(_invoke(), name=f"channel:{channel_id}:{event}")
 
 	# ------------------------------------------------------------------
 	def register_pending(

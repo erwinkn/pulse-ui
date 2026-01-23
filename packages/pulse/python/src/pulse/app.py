@@ -1098,7 +1098,7 @@ class App:
 			return  # no active render for this user session
 
 		# We don't want to wait for this to resolve
-		render.spawn_task(
+		render.create_task(
 			render.call_api(f"{self.api_prefix}/set-cookies", method="GET"),
 			name="cookies.refresh",
 		)

@@ -604,7 +604,7 @@ class RenderSession:
 		with PulseContext.update(render=self):
 			flush_effects()
 
-	def spawn_task(
+	def create_task(
 		self,
 		coroutine: Callable[[], Any] | Awaitable[Any],
 		*,
@@ -648,7 +648,7 @@ class RenderSession:
 						if exc:
 							report(exc, True)
 
-					self.spawn_task(res, name=f"callback:{key}", on_done=_on_done)
+					self.create_task(res, name=f"callback:{key}", on_done=_on_done)
 		except Exception as e:
 			report(e)
 

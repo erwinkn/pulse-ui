@@ -559,7 +559,12 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		self._on_success = on_success
 		self._on_error = on_error
 		self._stale_time = stale_time
-		self._refetch_interval = refetch_interval
+		interval = (
+			refetch_interval
+			if refetch_interval is not None and refetch_interval > 0
+			else None
+		)
+		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._enabled = Signal(enabled, name="query.enabled(unkeyed)")
 		self._interval_effect = None
@@ -581,12 +586,13 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 		# Schedule initial fetch if stale (untracked to avoid reactive loop)
 		with Untrack():
-			if enabled and fetch_on_mount and self.is_stale():
+			# Skip if refetch_interval is active - interval effect handles initial fetch
+			if enabled and fetch_on_mount and interval is None and self.is_stale():
 				self.schedule()
 
 		# Set up interval effect if interval is specified
-		if refetch_interval is not None and refetch_interval > 0:
-			self._setup_interval_effect(refetch_interval)
+		if interval is not None:
+			self._setup_interval_effect(interval)
 
 	def _setup_interval_effect(self, interval: float):
 		"""Create an effect that invalidates the query at the specified interval."""
@@ -765,7 +771,12 @@ class KeyedQueryResult(Generic[T], Disposable):
 		self._fetch_fn = fetch_fn
 		self._stale_time = stale_time
 		self._gc_time = gc_time
-		self._refetch_interval = refetch_interval
+		interval = (
+			refetch_interval
+			if refetch_interval is not None and refetch_interval > 0
+			else None
+		)
+		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._on_success = on_success
 		self._on_error = on_error
@@ -779,9 +790,11 @@ class KeyedQueryResult(Generic[T], Disposable):
 			with Untrack():
 				q.observe(self)
 
-				# If stale or loading, schedule refetch (only when enabled)
-				if enabled and fetch_on_mount and self.is_stale():
-					self.invalidate()
+				# Skip if refetch_interval is active - interval effect handles initial fetch
+				if enabled and fetch_on_mount and interval is None:
+					# If stale, schedule refetch (only when enabled)
+					if not q.is_fetching() and self.is_stale():
+						self.invalidate()
 
 			# Return cleanup function that captures the query (old query on key change)
 			def cleanup():
@@ -799,8 +812,8 @@ class KeyedQueryResult(Generic[T], Disposable):
 		)
 
 		# Set up interval effect if interval is specified
-		if refetch_interval is not None and refetch_interval > 0:
-			self._setup_interval_effect(refetch_interval)
+		if interval is not None:
+			self._setup_interval_effect(interval)
 
 	def _setup_interval_effect(self, interval: float):
 		"""Create an effect that invalidates the query at the specified interval."""

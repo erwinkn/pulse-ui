@@ -720,7 +720,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		cancel_fetch: bool = False,
 	) -> ActionResult[T | None]:
 		"""
-		Refetch an existing page by its param. Queued for sequential execution.
+		Refetch a page by its param. Queued for sequential execution.
+
+		If the page doesn't exist, clears existing pages and loads the requested
+		page as the new starting point.
 
 		Note: Prefer calling refetch_page() on InfiniteQueryResult to ensure the
 		correct fetch function is used. When called directly on InfiniteQuery, uses
@@ -813,7 +816,12 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		self._fetch_fn = fetch_fn
 		self._stale_time = stale_time
 		self._gc_time = gc_time
-		self._refetch_interval = refetch_interval
+		interval = (
+			refetch_interval
+			if refetch_interval is not None and refetch_interval > 0
+			else None
+		)
+		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._on_success = on_success
 		self._on_error = on_error
@@ -828,10 +836,12 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 			with Untrack():
 				q.observe(self)
 
-				# Skip if refetch_interval is set - interval effect handles initial fetch
-				if enabled and fetch_on_mount and refetch_interval is None:
+				# Skip if refetch_interval is active - interval effect handles initial fetch
+				if enabled and fetch_on_mount and interval is None:
 					# Fetch if no data loaded yet or if existing data is stale
-					if q.status() == "loading" or self.is_stale():
+					if not q.is_fetching() and (
+						q.status() == "loading" or self.is_stale()
+					):
 						q.invalidate()
 
 			# Return cleanup function that captures the query (old query on key change)
@@ -850,8 +860,8 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		)
 
 		# Set up interval effect if interval is specified
-		if refetch_interval is not None and refetch_interval > 0:
-			self._setup_interval_effect(refetch_interval)
+		if interval is not None:
+			self._setup_interval_effect(interval)
 
 	def _setup_interval_effect(self, interval: float):
 		"""Create an effect that invalidates the query at the specified interval."""

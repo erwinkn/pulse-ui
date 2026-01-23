@@ -1911,6 +1911,37 @@ async def test_state_query_refetch_interval():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_state_query_refetch_interval_zero_fetches_on_mount_only():
+	"""Test that refetch_interval=0 disables interval but still fetches on mount."""
+
+	class S(ps.State):
+		calls: int = 0
+
+		@ps.query(retries=0, refetch_interval=0)
+		async def data(self) -> int:
+			self.calls += 1
+			await asyncio.sleep(0)
+			return self.calls
+
+		@data.key
+		def _data_key(self):
+			return ("interval-zero",)
+
+	s = S()
+	q = s.data
+
+	# Auto-fetch should happen on mount
+	assert await wait_for(lambda: q.data == 1 and s.calls == 1)
+
+	# No interval refetch should be scheduled
+	assert not await wait_for(lambda: s.calls > 1, timeout=0.05)
+	assert q.data == 1
+
+	query_result(q).dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_state_query_refetch_interval_stops_on_dispose():
 	"""Test that refetch_interval stops when query is disposed."""
 

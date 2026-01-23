@@ -730,6 +730,41 @@ async def test_infinite_query_refetch_interval():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_infinite_query_refetch_interval_zero_fetches_on_mount_only():
+	"""Test that refetch_interval=0 disables interval but still fetches on mount."""
+
+	class S(ps.State):
+		calls: int = 0
+
+		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0)
+		async def items(self, page_param: int) -> int:
+			self.calls += 1
+			await asyncio.sleep(0)
+			return self.calls
+
+		@items.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return None
+
+		@items.key
+		def _key(self):
+			return ("interval-zero",)
+
+	s = S()
+	q = s.items
+
+	# Auto-fetch should happen on mount
+	assert await wait_for(lambda: q.pages == [1] and s.calls == 1)
+
+	# No interval refetch should be scheduled
+	assert not await wait_for(lambda: s.calls > 1, timeout=0.05)
+	assert q.pages == [1]
+
+	q.dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_infinite_query_refetch_interval_stops_on_dispose():
 	"""Test that refetch_interval stops when query is disposed."""
 
@@ -974,6 +1009,52 @@ async def test_infinite_query_multiple_observers_use_own_fetch_fn():
 		assert (name, suffix) == ("state2", "B"), (
 			f"Expected invalidate to use state2's fetch function, but got ({name}, {suffix})"
 		)
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_second_observer_does_not_refetch_inflight():
+	"""Test that a second observer does not enqueue a refetch while one is in-flight."""
+	fetch_started: list[int] = []
+	fetch_completed: list[int] = []
+	allow_finish = asyncio.Event()
+
+	class S(ps.State):
+		@ps.infinite_query(initial_page_param=0, retries=0)
+		async def data(self, page_param: int) -> int:
+			fetch_started.append(page_param)
+			await allow_finish.wait()
+			fetch_completed.append(page_param)
+			return page_param
+
+		@data.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return None
+
+		@data.key
+		def _data_key(self):
+			return ("inflight-no-refetch",)
+
+	s1 = S()
+	q1 = s1.data
+
+	# Wait for the first observer's fetch to start
+	assert await wait_for(lambda: fetch_started == [0], timeout=0.2)
+
+	# Attach second observer while fetch is in-flight
+	s2 = S()
+	q2 = s2.data
+	await asyncio.sleep(0)
+
+	# No extra refetch should be queued
+	assert fetch_started == [0]
+
+	# Allow the original fetch to complete
+	allow_finish.set()
+	assert await wait_for(lambda: fetch_completed == [0], timeout=0.2)
+	assert fetch_started == [0]
+	q1.dispose()
+	q2.dispose()
 
 
 @pytest.mark.asyncio

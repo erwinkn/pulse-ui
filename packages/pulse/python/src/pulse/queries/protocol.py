@@ -90,6 +90,15 @@ class QueryResult(Protocol[T]):
 		"""
 		...
 
+	async def ensure(self) -> ActionResult[T]:
+		"""
+		Ensure an initial fetch has started, then wait for completion.
+
+		Returns:
+		    ActionResult containing either the data or an error.
+		"""
+		...
+
 	def invalidate(self) -> None:
 		"""Mark the query as stale and trigger a refetch if observed."""
 		...

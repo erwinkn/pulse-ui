@@ -111,7 +111,8 @@ Every query gives you these properties:
 | `refetch()` | User clicks a "refresh" button, or you need fresh data after some action |
 | `invalidate()` | Mark data as stale so it refetches on next access (lazy refresh) |
 | `set_data(...)` | Optimistic updates—show a change immediately before the server confirms |
-| `wait()` | In an async callback when you need to await the query result |
+| `ensure()` | Start the initial fetch if needed, then wait for the result |
+| `wait()` | In an async callback when you need to await an in-flight fetch |
 
 ### When do queries refetch?
 

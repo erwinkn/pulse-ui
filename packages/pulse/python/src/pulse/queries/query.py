@@ -268,6 +268,9 @@ class KeyedQuery(Generic[T], Disposable):
 	_task: asyncio.Task[None] | None
 	_task_initiator: "KeyedQueryResult[T] | None"
 	_gc_handle: asyncio.TimerHandle | None
+	_interval_effect: Effect | None
+	_interval: float | None
+	_interval_observer: "KeyedQueryResult[T] | None"
 
 	def __init__(
 		self,
@@ -293,6 +296,9 @@ class KeyedQuery(Generic[T], Disposable):
 		self._task = None
 		self._task_initiator = None
 		self._gc_handle = None
+		self._interval_effect = None
+		self._interval = None
+		self._interval_observer = None
 
 	# --- Delegate signal access to state ---
 	@property
@@ -438,6 +444,66 @@ class KeyedQuery(Generic[T], Disposable):
 			)
 		return self.observers[0]._fetch_fn  # pyright: ignore[reportPrivateUsage]
 
+	@property
+	def has_interval(self) -> bool:
+		return self._interval is not None
+
+	def _select_interval_observer(
+		self,
+	) -> tuple[float | None, "KeyedQueryResult[T] | None"]:
+		min_interval: float | None = None
+		selected: "KeyedQueryResult[T] | None" = None
+
+		for obs in reversed(self.observers):
+			interval = obs._refetch_interval  # pyright: ignore[reportPrivateUsage]
+			if interval is None:
+				continue
+			if not obs._enabled.value:  # pyright: ignore[reportPrivateUsage]
+				continue
+			if min_interval is None or interval < min_interval:
+				min_interval = interval
+				selected = obs
+
+		return min_interval, selected
+
+	def _create_interval_effect(self, interval: float) -> Effect:
+		def interval_fn():
+			observer = self._interval_observer
+			if observer is None:
+				return
+			if not self.is_scheduled and len(self.observers) > 0:
+				self.run_fetch(
+					observer._fetch_fn,  # pyright: ignore[reportPrivateUsage]
+					cancel_previous=False,
+					initiator=observer,
+				)
+
+		return Effect(
+			interval_fn,
+			name=f"query_interval({self.key})",
+			interval=interval,
+			immediate=True,
+		)
+
+	def _update_interval(self) -> None:
+		new_interval, new_observer = self._select_interval_observer()
+		interval_changed = new_interval != self._interval
+
+		self._interval = new_interval
+		self._interval_observer = new_observer
+
+		if not interval_changed:
+			if self._interval_effect is None and new_interval is not None:
+				self._interval_effect = self._create_interval_effect(new_interval)
+			return
+
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+		if new_interval is not None:
+			self._interval_effect = self._create_interval_effect(new_interval)
+
 	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""
 		Reruns the query and returns the result.
@@ -468,11 +534,13 @@ class KeyedQuery(Generic[T], Disposable):
 		self.cancel_gc()
 		if observer._gc_time > 0:  # pyright: ignore[reportPrivateUsage]
 			self.cfg.gc_time = max(self.cfg.gc_time, observer._gc_time)  # pyright: ignore[reportPrivateUsage]
+		self._update_interval()
 
 	def unobserve(self, observer: "KeyedQueryResult[T]"):
 		"""Unregister an observer. Schedules GC if no observers remain."""
 		if observer in self.observers:
 			self.observers.remove(observer)
+		self._update_interval()
 
 		# If the departing observer initiated the ongoing fetch, cancel it
 		if self._task_initiator is observer and self._task and not self._task.done():
@@ -505,6 +573,9 @@ class KeyedQuery(Generic[T], Disposable):
 	def dispose(self):
 		"""Clean up the query, cancelling any in-flight fetch."""
 		self.cancel()
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
 
@@ -559,7 +630,12 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		self._on_success = on_success
 		self._on_error = on_error
 		self._stale_time = stale_time
-		self._refetch_interval = refetch_interval
+		interval = (
+			refetch_interval
+			if refetch_interval is not None and refetch_interval > 0
+			else None
+		)
+		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._enabled = Signal(enabled, name="query.enabled(unkeyed)")
 		self._interval_effect = None
@@ -581,12 +657,13 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 		# Schedule initial fetch if stale (untracked to avoid reactive loop)
 		with Untrack():
-			if enabled and fetch_on_mount and self.is_stale():
+			# Skip if refetch_interval is active - interval effect handles initial fetch
+			if enabled and fetch_on_mount and interval is None and self.is_stale():
 				self.schedule()
 
 		# Set up interval effect if interval is specified
-		if refetch_interval is not None and refetch_interval > 0:
-			self._setup_interval_effect(refetch_interval)
+		if interval is not None:
+			self._setup_interval_effect(interval)
 
 	def _setup_interval_effect(self, interval: float):
 		"""Create an effect that invalidates the query at the specified interval."""
@@ -699,14 +776,17 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		return await self.wait()
 
 	async def wait(self) -> ActionResult[T]:
-		"""Wait for the current query to complete."""
-		# If loading and no task, schedule a fetch
-		if self.state.status() == "loading" and not self.state.is_fetching():
-			self.schedule()
+		"""Wait for the current in-flight fetch to complete."""
 		await self._effect.wait()
 		if self.state.status() == "error":
 			return ActionError(cast(Exception, self.state.error.read()))
 		return ActionSuccess(cast(T, self.state.data.read()))
+
+	async def ensure(self) -> ActionResult[T]:
+		"""Ensure an initial fetch has started, then wait for completion."""
+		if self.state.status() == "loading" and not self.state.is_fetching():
+			self.schedule()
+		return await self.wait()
 
 	def invalidate(self):
 		"""Mark the query as stale and refetch through the effect."""
@@ -740,7 +820,6 @@ class KeyedQueryResult(Generic[T], Disposable):
 	_on_success: Callable[[T], Awaitable[None] | None] | None
 	_on_error: Callable[[Exception], Awaitable[None] | None] | None
 	_observe_effect: Effect
-	_interval_effect: Effect | None
 	_data_computed: Computed[T | None]
 	_enabled: Signal[bool]
 	_fetch_on_mount: bool
@@ -762,12 +841,16 @@ class KeyedQueryResult(Generic[T], Disposable):
 		self._fetch_fn = fetch_fn
 		self._stale_time = stale_time
 		self._gc_time = gc_time
-		self._refetch_interval = refetch_interval
+		interval = (
+			refetch_interval
+			if refetch_interval is not None and refetch_interval > 0
+			else None
+		)
+		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._on_success = on_success
 		self._on_error = on_error
 		self._enabled = Signal(enabled, name=f"query.enabled({query().key})")
-		self._interval_effect = None
 
 		def observe_effect():
 			q = self._query()
@@ -776,9 +859,11 @@ class KeyedQueryResult(Generic[T], Disposable):
 			with Untrack():
 				q.observe(self)
 
-				# If stale or loading, schedule refetch (only when enabled)
-				if enabled and fetch_on_mount and self.is_stale():
-					self.invalidate()
+				# Skip if query interval is active - interval effect handles initial fetch
+				if enabled and fetch_on_mount and not q.has_interval:
+					# If stale, schedule refetch (only when enabled)
+					if not q.is_fetching() and self.is_stale():
+						self.invalidate()
 
 			# Return cleanup function that captures the query (old query on key change)
 			def cleanup():
@@ -793,25 +878,6 @@ class KeyedQueryResult(Generic[T], Disposable):
 		)
 		self._data_computed = Computed(
 			self._data_computed_fn, name=f"query_data({self._query().key})"
-		)
-
-		# Set up interval effect if interval is specified
-		if refetch_interval is not None and refetch_interval > 0:
-			self._setup_interval_effect(refetch_interval)
-
-	def _setup_interval_effect(self, interval: float):
-		"""Create an effect that invalidates the query at the specified interval."""
-
-		def interval_fn():
-			# Read enabled to make this effect reactive to enabled changes
-			if self._enabled():
-				self.invalidate()
-
-		self._interval_effect = Effect(
-			interval_fn,
-			name=f"query_interval({self._query().key})",
-			interval=interval,
-			immediate=True,
 		)
 
 	@property
@@ -874,9 +940,12 @@ class KeyedQueryResult(Generic[T], Disposable):
 		return await self.wait()
 
 	async def wait(self) -> ActionResult[T]:
-		"""Wait for the current query to complete."""
+		"""Wait for the current in-flight fetch to complete."""
+		return await self._query().wait()
+
+	async def ensure(self) -> ActionResult[T]:
+		"""Ensure an initial fetch has started, then wait for completion."""
 		query = self._query()
-		# If loading and no task, start a fetch with this observer's fetch function
 		if query.status() == "loading" and not query.is_fetching():
 			query.run_fetch(self._fetch_fn, initiator=self)
 		return await query.wait()
@@ -910,16 +979,16 @@ class KeyedQueryResult(Generic[T], Disposable):
 	def enable(self):
 		"""Enable the query."""
 		self._enabled.write(True)
+		self._query()._update_interval()  # pyright: ignore[reportPrivateUsage]
 
 	def disable(self):
 		"""Disable the query, preventing it from fetching."""
 		self._enabled.write(False)
+		self._query()._update_interval()  # pyright: ignore[reportPrivateUsage]
 
 	@override
 	def dispose(self):
 		"""Clean up the result and its observe effect."""
-		if self._interval_effect is not None and not self._interval_effect.__disposed__:
-			self._interval_effect.dispose()
 		if not self._observe_effect.__disposed__:
 			self._observe_effect.dispose()
 

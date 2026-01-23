@@ -427,6 +427,7 @@ class RenderSession:
 
 		if mount is None or mount.state == "idle":
 			# Initial render must come from prerender
+			print(f"[DEBUG] Missing or idle route '{path}', reloading")
 			self.send({"type": "reload"})
 			return
 

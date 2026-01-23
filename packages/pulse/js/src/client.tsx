@@ -17,6 +17,16 @@ import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
+const debugEnabled = () => {
+	if (typeof window === "undefined") return false;
+	if ((window as any).__PULSE_DEBUG__ === true) return true;
+	try {
+		return window.sessionStorage?.getItem("__PULSE_DEBUG") === "1";
+	} catch {
+		return false;
+	}
+};
+
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
 	auth?: Record<string, string>;
@@ -138,6 +148,9 @@ export class PulseSocketIOClient {
 		if (this.#socket) {
 			return;
 		}
+		if (debugEnabled()) {
+			console.log("[PulseDebug][connect] url", this.#url, "directives", this.#directives);
+		}
 		// Start timing logic for connection attempt
 		if (!this.#hasConnectedOnce) {
 			this.#setInitialConnectionStatus();
@@ -152,8 +165,24 @@ export class PulseSocketIOClient {
 
 			socket.on("connect", () => {
 				console.log("[SocketIOTransport] Connected:", this.#socket?.id);
+				if (debugEnabled()) {
+					console.log(
+						"[PulseDebug][connect] socket_id",
+						this.#socket?.id,
+						"active_views",
+						Array.from(this.#activeViews.keys()),
+					);
+				}
 				// Send attach for all active views on connect/reconnect
 				for (const [path, route] of this.#activeViews) {
+					if (debugEnabled()) {
+						console.log(
+							"[PulseDebug][connect-attach] path",
+							path,
+							"routeInfo",
+							route.routeInfo,
+						);
+					}
 					socket.emit(
 						"message",
 						serialize({
@@ -229,6 +258,9 @@ export class PulseSocketIOClient {
 		if (this.#activeViews.has(path)) {
 			throw new Error(`Path ${path} is already attached`);
 		}
+		if (debugEnabled()) {
+			console.log("[PulseDebug][attach] path", path, "routeInfo", view.routeInfo);
+		}
 		this.#activeViews.set(path, view);
 		void this.sendMessage({
 			type: "attach",
@@ -241,6 +273,9 @@ export class PulseSocketIOClient {
 		const view = this.#activeViews.get(path);
 		if (view) {
 			view.routeInfo = routeInfo;
+			if (debugEnabled()) {
+				console.log("[PulseDebug][update] path", path, "routeInfo", routeInfo);
+			}
 			this.sendMessage({
 				type: "update",
 				path,
@@ -250,6 +285,9 @@ export class PulseSocketIOClient {
 	}
 
 	public detach(path: string) {
+		if (debugEnabled()) {
+			console.log("[PulseDebug][detach] path", path);
+		}
 		void this.sendMessage({ type: "detach", path });
 		this.#activeViews.delete(path);
 	}
@@ -330,6 +368,9 @@ export class PulseSocketIOClient {
 				break;
 			}
 			case "reload": {
+				if (debugEnabled()) {
+					console.warn("[PulseDebug][reload] server requested reload");
+				}
 				window.location.reload();
 				break;
 			}

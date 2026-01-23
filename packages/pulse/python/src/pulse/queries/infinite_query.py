@@ -152,6 +152,61 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			)
 		return self._observers[0]._fetch_fn  # pyright: ignore[reportPrivateUsage]
 
+	@property
+	def has_interval(self) -> bool:
+		return self._interval is not None
+
+	def _select_interval_observer(
+		self,
+	) -> tuple[float | None, "InfiniteQueryResult[T, TParam] | None"]:
+		min_interval: float | None = None
+		selected: "InfiniteQueryResult[T, TParam] | None" = None
+
+		for obs in reversed(self._observers):
+			interval = obs._refetch_interval  # pyright: ignore[reportPrivateUsage]
+			if interval is None:
+				continue
+			if not obs._enabled.value:  # pyright: ignore[reportPrivateUsage]
+				continue
+			if min_interval is None or interval < min_interval:
+				min_interval = interval
+				selected = obs
+
+		return min_interval, selected
+
+	def _create_interval_effect(self, interval: float) -> Effect:
+		def interval_fn():
+			observer = self._interval_observer
+			if observer is None:
+				return
+			self.invalidate(fetch_fn=observer._fetch_fn, observer=observer)  # pyright: ignore[reportPrivateUsage]
+
+		return Effect(
+			interval_fn,
+			name=f"inf_query_interval({self.key})",
+			interval=interval,
+			immediate=True,
+		)
+
+	def _update_interval(self) -> None:
+		new_interval, new_observer = self._select_interval_observer()
+		interval_changed = new_interval != self._interval
+
+		self._interval = new_interval
+		self._interval_observer = new_observer
+
+		if not interval_changed:
+			if self._interval_effect is None and new_interval is not None:
+				self._interval_effect = self._create_interval_effect(new_interval)
+			return
+
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+		if new_interval is not None:
+			self._interval_effect = self._create_interval_effect(new_interval)
+
 	# Reactive state
 	pages: ReactiveList[Page[T, TParam]]
 	error: Signal[Exception | None]
@@ -171,6 +226,9 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 	_observers: "list[InfiniteQueryResult[T, TParam]]"
 	_gc_handle: asyncio.TimerHandle | None
+	_interval_effect: Effect | None
+	_interval: float | None
+	_interval_observer: "InfiniteQueryResult[T, TParam] | None"
 
 	def __init__(
 		self,
@@ -232,6 +290,9 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._queue_task = None
 		self._observers = []
 		self._gc_handle = None
+		self._interval_effect = None
+		self._interval = None
+		self._interval_observer = None
 
 	# ─────────────────────────────────────────────────────────────────────────
 	# Commit functions - update state after pages have been modified
@@ -353,11 +414,13 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		gc_time = getattr(observer, "_gc_time", 0)
 		if gc_time and gc_time > 0:
 			self.cfg.gc_time = max(self.cfg.gc_time, gc_time)
+		self._update_interval()
 
 	def unobserve(self, observer: "InfiniteQueryResult[T, TParam]"):
 		"""Unregister an observer. Cancels pending actions. Schedules GC if no observers remain."""
 		if observer in self._observers:
 			self._observers.remove(observer)
+		self._update_interval()
 
 		# Cancel pending actions from this observer
 		self._cancel_observer_actions(observer)
@@ -740,6 +803,9 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._cancel_queue()
 		if self._queue_task and not self._queue_task.done():
 			self._queue_task.cancel()
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
 
@@ -793,7 +859,6 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	_on_success: Callable[[list[Page[T, TParam]]], Awaitable[None] | None] | None
 	_on_error: Callable[[Exception], Awaitable[None] | None] | None
 	_observe_effect: Effect
-	_interval_effect: Effect | None
 	_data_computed: Computed[list[Page[T, TParam]] | None]
 	_enabled: Signal[bool]
 	_fetch_on_mount: bool
@@ -827,7 +892,6 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		self._on_error = on_error
 		self._enabled = Signal(enabled, name=f"inf_query.enabled({query().key})")
 		self._fetch_on_mount = fetch_on_mount
-		self._interval_effect = None
 
 		def observe_effect():
 			q = self._query()
@@ -836,8 +900,8 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 			with Untrack():
 				q.observe(self)
 
-				# Skip if refetch_interval is active - interval effect handles initial fetch
-				if enabled and fetch_on_mount and interval is None:
+				# Skip if query interval is active - interval effect handles initial fetch
+				if enabled and fetch_on_mount and not q.has_interval:
 					# Fetch if no data loaded yet or if existing data is stale
 					if not q.is_fetching() and (
 						q.status() == "loading" or self.is_stale()
@@ -857,25 +921,6 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		)
 		self._data_computed = Computed(
 			self._data_computed_fn, name=f"inf_query_data({self._query().key})"
-		)
-
-		# Set up interval effect if interval is specified
-		if interval is not None:
-			self._setup_interval_effect(interval)
-
-	def _setup_interval_effect(self, interval: float):
-		"""Create an effect that invalidates the query at the specified interval."""
-
-		def interval_fn():
-			# Read enabled to make this effect reactive to enabled changes
-			if self._enabled():
-				self._query().invalidate()
-
-		self._interval_effect = Effect(
-			interval_fn,
-			name=f"inf_query_interval({self._query().key})",
-			interval=interval,
-			immediate=True,
 		)
 
 	@property
@@ -1019,9 +1064,11 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 
 	def enable(self):
 		self._enabled.write(True)
+		self._query()._update_interval()  # pyright: ignore[reportPrivateUsage]
 
 	def disable(self):
 		self._enabled.write(False)
+		self._query()._update_interval()  # pyright: ignore[reportPrivateUsage]
 
 	def set_error(self, error: Exception):
 		query = self._query()
@@ -1030,8 +1077,6 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	@override
 	def dispose(self):
 		"""Clean up the result and its observe effect."""
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
 		self._observe_effect.dispose()
 
 

@@ -5,7 +5,8 @@ from typing import Any, TypedDict
 import pulse as ps
 import pytest
 from pulse.queries.common import ActionError
-from pulse.queries.infinite_query import Page
+from pulse.queries.infinite_query import InfiniteQuery, InfiniteQueryResult, Page
+from pulse.reactive import Computed
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
 from pulse.test_helpers import wait_for
@@ -799,6 +800,89 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 
 	# Wait and verify no more refetches (negative test)
 	assert not await wait_for(lambda: s.calls > 2 or q.pages != [2], timeout=0.05)
+
+
+@pytest.mark.asyncio
+async def test_infinite_query_interval_uses_min_interval_and_latest_observer():
+	"""Interval uses min observer interval and latest observer with that interval."""
+	calls_a = 0
+	calls_b = 0
+	calls_c = 0
+
+	async def fetch_a(page_param: int) -> int:
+		nonlocal calls_a
+		calls_a += 1
+		await asyncio.sleep(0)
+		return calls_a
+
+	async def fetch_b(page_param: int) -> int:
+		nonlocal calls_b
+		calls_b += 1
+		await asyncio.sleep(0)
+		return calls_b
+
+	async def fetch_c(page_param: int) -> int:
+		nonlocal calls_c
+		calls_c += 1
+		await asyncio.sleep(0)
+		return calls_c
+
+	def get_next_page_param(pages: list[Page[int, int]]) -> int | None:
+		return None
+
+	query = InfiniteQuery(
+		("interval-min",),
+		initial_page_param=0,
+		get_next_page_param=get_next_page_param,
+		retries=0,
+	)
+	query_computed = Computed(lambda: query, name="inf_query(interval-min)")
+
+	obs_a = InfiniteQueryResult(
+		query_computed,
+		fetch_fn=fetch_a,
+		refetch_interval=0.02,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_a >= 1, timeout=0.4)
+
+	obs_b = InfiniteQueryResult(
+		query_computed,
+		fetch_fn=fetch_b,
+		refetch_interval=0.01,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_b >= 1, timeout=0.4)
+
+	calls_a_at = calls_a
+	calls_b_at = calls_b
+	assert await wait_for(lambda: calls_b >= calls_b_at + 3, timeout=0.4)
+	assert calls_a == calls_a_at
+
+	obs_c = InfiniteQueryResult(
+		query_computed,
+		fetch_fn=fetch_c,
+		refetch_interval=0.01,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_c >= 1, timeout=0.4)
+
+	calls_b_at = calls_b
+	calls_c_at = calls_c
+	assert await wait_for(lambda: calls_c >= calls_c_at + 3, timeout=0.4)
+	assert calls_b == calls_b_at
+
+	obs_c.dispose()
+
+	calls_b_at = calls_b
+	assert await wait_for(lambda: calls_b >= calls_b_at + 2, timeout=0.4)
+
+	obs_b.dispose()
+
+	calls_a_at = calls_a
+	assert await wait_for(lambda: calls_a >= calls_a_at + 1, timeout=0.4)
+
+	obs_a.dispose()
 
 
 @pytest.mark.asyncio

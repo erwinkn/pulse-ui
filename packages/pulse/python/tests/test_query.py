@@ -1978,6 +1978,81 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 
 
 @pytest.mark.asyncio
+async def test_keyed_query_interval_uses_min_interval_and_latest_observer():
+	"""Interval uses min observer interval and latest observer with that interval."""
+	calls_a = 0
+	calls_b = 0
+	calls_c = 0
+
+	async def fetch_a():
+		nonlocal calls_a
+		calls_a += 1
+		await asyncio.sleep(0)
+		return calls_a
+
+	async def fetch_b():
+		nonlocal calls_b
+		calls_b += 1
+		await asyncio.sleep(0)
+		return calls_b
+
+	async def fetch_c():
+		nonlocal calls_c
+		calls_c += 1
+		await asyncio.sleep(0)
+		return calls_c
+
+	query = KeyedQuery(("interval-min",), retries=0, retry_delay=0.01)
+	query_computed = Computed(lambda: query, name="test_query(interval-min)")
+
+	obs_a = KeyedQueryResult(
+		query_computed,
+		fetch_fn=fetch_a,
+		refetch_interval=0.02,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_a >= 1, timeout=0.3)
+
+	obs_b = KeyedQueryResult(
+		query_computed,
+		fetch_fn=fetch_b,
+		refetch_interval=0.01,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_b >= 1, timeout=0.3)
+
+	calls_a_at = calls_a
+	calls_b_at = calls_b
+	assert await wait_for(lambda: calls_b >= calls_b_at + 3, timeout=0.3)
+	assert calls_a == calls_a_at
+
+	obs_c = KeyedQueryResult(
+		query_computed,
+		fetch_fn=fetch_c,
+		refetch_interval=0.01,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_c >= 1, timeout=0.3)
+
+	calls_b_at = calls_b
+	calls_c_at = calls_c
+	assert await wait_for(lambda: calls_c >= calls_c_at + 3, timeout=0.3)
+	assert calls_b == calls_b_at
+
+	obs_c.dispose()
+
+	calls_b_at = calls_b
+	assert await wait_for(lambda: calls_b >= calls_b_at + 3, timeout=0.3)
+
+	obs_b.dispose()
+
+	calls_a_at = calls_a
+	assert await wait_for(lambda: calls_a >= calls_a_at + 2, timeout=0.3)
+
+	obs_a.dispose()
+
+
+@pytest.mark.asyncio
 @with_render_session
 async def test_keyed_query_uses_latest_fetch_fn_after_state_recreation():
 	"""

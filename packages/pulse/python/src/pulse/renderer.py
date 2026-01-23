@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
 
 from pulse.helpers import values_equal
@@ -441,21 +442,20 @@ class Renderer:
 	# Expression + tag rendering
 	# ------------------------------------------------------------------
 
-	def render_tag(self, tag: str | Expr) -> str:
+	def render_tag(self, tag: str | Expr):
 		if isinstance(tag, str):
 			return tag
 
-		key = self.register_component_expr(tag)
-		return f"{MOUNT_PREFIX}{key}"
+		return self.register_component_expr(tag)
 
-	def register_component_expr(self, expr: Expr) -> str:
+	def register_component_expr(self, expr: Expr):
 		ref = registry_ref(expr)
-		if ref is None:
-			raise TypeError(
-				"Component tag expressions must be registry-backed Expr values "
-				+ "(Import/JsFunction/Constant/JsxFunction)."
-			)
-		return ref["key"]
+		if ref is not None:
+			return f"{MOUNT_PREFIX}{ref['key']}"
+		tag = expr.render()
+		if isinstance(tag, (int, float, bool, NoneType)):
+			raise TypeError(f"Invalid element tag: {tag}")
+		return tag
 
 	# ------------------------------------------------------------------
 	# Unmount helper

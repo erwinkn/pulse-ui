@@ -329,6 +329,10 @@ export class PulseSocketIOClient {
 				hardNav();
 				break;
 			}
+			case "reload": {
+				window.location.reload();
+				break;
+			}
 			case "channel_message": {
 				this.#routeChannelMessage(message);
 				break;

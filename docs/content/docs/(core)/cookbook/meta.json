@@ -1,0 +1,12 @@
+{
+  "title": "Cookbook",
+  "icon": "ChefHat",
+  "pages": [
+    "auth",
+    "data-queries",
+    "forms",
+    "ui-components",
+    "js-from-python",
+    "advanced-patterns"
+  ]
+}

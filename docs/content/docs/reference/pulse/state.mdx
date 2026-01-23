@@ -1,0 +1,371 @@
+---
+title: "State"
+description: "State and reactive containers"
+---
+
+## State
+
+Base class for reactive state objects. Properties with type annotations automatically become reactive and trigger re-renders when changed.
+
+```python
+class State(Disposable, metaclass=StateMeta)
+```
+
+### Defining State
+
+```python
+class CounterState(ps.State):
+    count: int = 0
+    name: str = "Counter"
+    _private: int = 0  # Not reactive (underscore prefix)
+
+    @ps.computed
+    def doubled(self):
+        return self.count * 2
+
+    @ps.effect
+    def log_count(self):
+        print(f"Count: {self.count}")
+```
+
+### Rules
+
+- Public fields with type annotations become reactive `Signal` instances
+- Fields starting with `_` are non-reactive (private)
+- Cannot set non-reactive public attributes after initialization
+- Use `@ps.computed` for derived values
+- Use `@ps.effect` for side effects
+
+### Methods
+
+#### `properties() -> Iterator[Signal[Any]]`
+
+Iterate over the state's reactive `Signal` instances.
+
+```python
+for signal in state.properties():
+    print(signal.name, signal.value)
+```
+
+#### `computeds() -> Iterator[Computed[Any]]`
+
+Iterate over the state's `Computed` instances.
+
+#### `effects() -> Iterator[Effect]`
+
+Iterate over the state's `Effect` instances.
+
+#### `dispose() -> None`
+
+Clean up the state, disposing all effects and calling `on_dispose()`.
+
+#### `on_dispose() -> None`
+
+Override to run cleanup code when the state is disposed.
+
+```python
+class MyState(ps.State):
+    def on_dispose(self):
+        self.timer.cancel()
+        self.connection.close()
+```
+
+---
+
+## computed
+
+Decorator for computed (derived) properties.
+
+```python
+@overload
+def computed(fn: Callable[[], T], *, name: str | None = None) -> Computed[T]: ...
+
+@overload
+def computed(fn: Callable[[TState], T], *, name: str | None = None) -> ComputedProperty[T]: ...
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fn` | `Callable` | required | Function to compute the value |
+| `name` | `str \| None` | `None` | Debug name for the computed |
+
+### Usage
+
+On a State method (single `self` argument):
+
+```python
+class MyState(ps.State):
+    count: int = 0
+
+    @ps.computed
+    def doubled(self):
+        return self.count * 2
+```
+
+As a standalone computed:
+
+```python
+signal = Signal(5)
+
+@ps.computed
+def doubled():
+    return signal() * 2
+```
+
+---
+
+## effect
+
+Decorator for side effects that run when dependencies change.
+
+```python
+@overload
+def effect(
+    fn: EffectFn,
+    *,
+    name: str | None = None,
+    immediate: bool = False,
+    lazy: bool = False,
+    on_error: Callable[[Exception], None] | None = None,
+    deps: list[Signal[Any] | Computed[Any]] | None = None,
+    interval: float | None = None,
+) -> Effect: ...
+
+@overload
+def effect(fn: AsyncEffectFn, ...) -> AsyncEffect: ...
+
+@overload
+def effect(fn: StateEffectFn[Any]) -> Effect: ...
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fn` | `Callable` | required | Effect function |
+| `name` | `str \| None` | `None` | Debug name |
+| `immediate` | `bool` | `False` | Run synchronously when scheduled (sync only) |
+| `lazy` | `bool` | `False` | Don't run on creation |
+| `on_error` | `Callable[[Exception], None] \| None` | `None` | Error handler |
+| `deps` | `list[Signal \| Computed] \| None` | `None` | Explicit dependencies (disables auto-tracking) |
+| `interval` | `float \| None` | `None` | Re-run interval in seconds |
+
+### Usage
+
+State method effect:
+
+```python
+class MyState(ps.State):
+    count: int = 0
+
+    @ps.effect
+    def log_changes(self):
+        print(f"Count is {self.count}")
+```
+
+Async effect:
+
+```python
+class MyState(ps.State):
+    @ps.effect
+    async def fetch_data(self):
+        data = await api.fetch(self.query)
+        self.data = data
+```
+
+Effect with cleanup:
+
+```python
+@ps.effect
+def subscribe(self):
+    unsub = event_bus.subscribe(self.handle)
+    return unsub  # Cleanup function
+```
+
+---
+
+## ReactiveList
+
+A list with item-level reactivity and structural change signaling.
+
+```python
+class ReactiveList(list[T])
+```
+
+### Behavior
+
+- Index reads subscribe to that index's signal
+- Setting an index updates that index's signal
+- Structural operations (append, pop, etc.) trigger a structural version signal
+- `len()` and iteration subscribe to structural changes
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `version` | `int` | Reactive counter incremented on structural changes |
+
+### Methods
+
+All standard list methods plus:
+
+#### `unwrap() -> list[Any]`
+
+Return a plain list while subscribing to element signals.
+
+### Example
+
+```python
+items: ReactiveList[str] = ReactiveList(["a", "b", "c"])
+
+items.append("d")      # Triggers structural change
+items[0] = "A"         # Only updates index 0's signal
+print(items.version)   # Reactive access
+```
+
+---
+
+## ReactiveDict
+
+A dict with per-key reactivity.
+
+```python
+class ReactiveDict(dict[K, V])
+```
+
+### Behavior
+
+- Reading a key subscribes to that key's signal
+- Writing a key updates only that key's signal
+- Deleting a key preserves the signal (writes sentinel) for existing subscribers
+- Iteration and `len()` subscribe to structural changes
+
+### Methods
+
+All standard dict methods plus:
+
+#### `set(key: K, value: V) -> None`
+
+Set a key-value pair (same as `dict[key] = value`).
+
+#### `delete(key: K) -> None`
+
+Delete a key without raising if missing.
+
+#### `unwrap() -> dict[K, Any]`
+
+Return a plain dict while subscribing to contained signals.
+
+### Example
+
+```python
+data: ReactiveDict[str, int] = ReactiveDict({"count": 0})
+
+data["count"] = 1      # Updates only "count" signal
+data["new"] = 2        # New key, structural change
+del data["new"]        # Structural change
+```
+
+---
+
+## ReactiveSet
+
+A set with per-element membership reactivity.
+
+```python
+class ReactiveSet(set[T])
+```
+
+### Behavior
+
+- `x in s` subscribes to a membership signal for element `x`
+- Mutations update membership signals for affected elements
+- Iteration subscribes to all membership signals
+
+### Methods
+
+All standard set methods plus:
+
+#### `unwrap() -> set[Any]`
+
+Return a plain set while subscribing to membership signals.
+
+---
+
+## unwrap
+
+Recursively unwrap reactive containers into plain Python values.
+
+```python
+def unwrap(value: Any, untrack: bool = False) -> Any
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `value` | `Any` | required | Value to unwrap |
+| `untrack` | `bool` | `False` | Skip dependency tracking during unwrap |
+
+### Behavior
+
+- `Signal`/`Computed` -> unwrapped inner value
+- `ReactiveDict` -> `dict`
+- `ReactiveList` -> `list`
+- `ReactiveSet` -> `set`
+- Other values pass through unchanged
+
+```python
+data = ReactiveDict({"items": ReactiveList([1, 2, 3])})
+plain = unwrap(data)  # {"items": [1, 2, 3]}
+```
+
+---
+
+## reactive
+
+Wrap built-in collections in their reactive counterparts.
+
+```python
+def reactive(value: T) -> T
+```
+
+### Behavior
+
+- `dict` -> `ReactiveDict`
+- `list` -> `ReactiveList`
+- `set` -> `ReactiveSet`
+- Dataclass instances -> reactive dataclass subclass
+- Other values pass through unchanged
+
+```python
+data = reactive({"count": 0})  # ReactiveDict
+items = reactive([1, 2, 3])    # ReactiveList
+```
+
+---
+
+## reactive_dataclass
+
+Decorator to make a dataclass's fields reactive.
+
+```python
+@reactive_dataclass
+@dataclass
+class Model:
+    name: str
+    count: int = 0
+```
+
+Or simply:
+
+```python
+@reactive_dataclass
+class Model:
+    name: str
+    count: int = 0
+```
+
+Fields become reactive properties that trigger updates when changed.

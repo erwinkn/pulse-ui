@@ -100,7 +100,6 @@ async def ensure_baseline_stack(
 		workdir: Working directory for CDK commands
 		poll_interval: How often to check stack status (seconds)
 		force_bootstrap: Force re-running CDK bootstrap even if already bootstrapped
-		skip_bootstrap_check: Skip bootstrap check entirely (faster but risky if not bootstrapped)
 
 	Example::
 

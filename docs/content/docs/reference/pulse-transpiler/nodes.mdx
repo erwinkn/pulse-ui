@@ -1,0 +1,486 @@
+---
+title: "AST Nodes"
+---
+
+JavaScript AST node types used by the transpiler. All nodes implement `emit(out: list[str])` to generate JavaScript code.
+
+## Base Classes
+
+### `Expr`
+
+```python
+class Expr(ABC):
+    def emit(self, out: list[str]) -> None: ...
+    def precedence(self) -> int: ...
+    def render(self) -> VDOMPrimitive | VDOMExpr: ...
+```
+
+Abstract base class for expression nodes.
+
+**Transpilation Hooks** (override to customize behavior):
+
+```python
+def transpile_call(
+    self,
+    args: list[ast.expr],
+    keywords: list[ast.keyword],
+    ctx: Transpiler,
+) -> Expr
+```
+Called when expression is used as function: `expr(args)`. Default emits `Call`.
+
+```python
+def transpile_getattr(self, attr: str, ctx: Transpiler) -> Expr
+```
+Called for attribute access: `expr.attr`. Default returns `Member(self, attr)`.
+
+```python
+def transpile_subscript(self, key: ast.expr, ctx: Transpiler) -> Expr
+```
+Called for subscript: `expr[key]`. Default returns `Subscript`.
+
+**Python Operators:**
+
+`Expr` supports Python operators that build AST nodes:
+- `+`, `-`, `*`, `/`, `%` -> `Binary`
+- `&` -> `Binary("&&")`, `|` -> `Binary("||")`
+- Unary `-`, `+`, `~` -> `Unary`
+- `()` -> `Call`
+- `[]` -> `Subscript`
+- `.attr` -> `Member`
+
+**Static Methods:**
+
+```python
+@staticmethod
+def of(value: Any) -> Expr
+```
+Convert Python value to `Expr`. Handles primitives, lists, dicts, sets.
+
+```python
+@staticmethod
+def register(value: Any, expr: Expr | Callable[..., Expr]) -> None
+```
+Register Python value for conversion via `Expr.of()`.
+
+**Instance Methods:**
+
+```python
+def as_(self, typ_: T | type[T]) -> T
+```
+Cast expression to type or use as decorator.
+
+```python
+def jsx(self) -> Jsx
+```
+Wrap as JSX component.
+
+### `Stmt`
+
+```python
+class Stmt(ABC):
+    def emit(self, out: list[str]) -> None: ...
+```
+
+Abstract base class for statement nodes.
+
+---
+
+## Expression Nodes
+
+### `Identifier`
+
+```python
+@dataclass(slots=True)
+class Identifier(Expr):
+    name: str
+```
+JS identifier: `x`, `foo`, `myFunc`.
+
+### `Literal`
+
+```python
+@dataclass(slots=True)
+class Literal(Expr):
+    value: int | float | str | bool | None
+```
+JS literal: `42`, `"hello"`, `true`, `null`.
+
+### `Undefined`
+
+```python
+class Undefined(Expr): ...
+
+UNDEFINED = Undefined()  # Singleton
+```
+JS `undefined` literal. Use `Literal(None)` for `null`.
+
+### `Array`
+
+```python
+@dataclass(slots=True)
+class Array(Expr):
+    elements: Sequence[Expr]
+```
+JS array: `[a, b, c]`.
+
+### `Object`
+
+```python
+@dataclass(slots=True)
+class Object(Expr):
+    props: Sequence[tuple[str, Expr] | Spread]
+```
+JS object: `{ key: value, ...spread }`.
+
+### `Member`
+
+```python
+@dataclass(slots=True)
+class Member(Expr):
+    obj: Expr
+    prop: str
+```
+JS member access: `obj.prop`.
+
+### `Subscript`
+
+```python
+@dataclass(slots=True)
+class Subscript(Expr):
+    obj: Expr
+    key: Expr
+```
+JS subscript: `obj[key]`.
+
+### `Call`
+
+```python
+@dataclass(slots=True)
+class Call(Expr):
+    callee: Expr
+    args: Sequence[Expr]
+```
+JS function call: `fn(args)`.
+
+### `Unary`
+
+```python
+@dataclass(slots=True)
+class Unary(Expr):
+    op: str  # "-", "+", "!", "typeof", "await", "void", "delete"
+    operand: Expr
+```
+JS unary expression: `-x`, `!x`, `typeof x`.
+
+### `Binary`
+
+```python
+@dataclass(slots=True)
+class Binary(Expr):
+    left: Expr
+    op: str  # "+", "-", "*", "/", "%", "**", "&&", "||", "??", "===", etc.
+    right: Expr
+```
+JS binary expression: `x + y`, `a && b`.
+
+### `Ternary`
+
+```python
+@dataclass(slots=True)
+class Ternary(Expr):
+    cond: Expr
+    then: Expr
+    else_: Expr
+```
+JS ternary: `cond ? a : b`.
+
+### `Arrow`
+
+```python
+@dataclass(slots=True)
+class Arrow(Expr):
+    params: Sequence[str]
+    body: Expr | Sequence[Stmt]
+```
+JS arrow function: `(x) => expr` or `(x) => { ... }`.
+
+### `Function`
+
+```python
+@dataclass(slots=True)
+class Function(Expr):
+    params: Sequence[str]
+    body: Sequence[Stmt]
+    name: str | None = None
+    is_async: bool = False
+```
+JS function: `function name(params) { ... }` or `async function ...`.
+
+### `Template`
+
+```python
+@dataclass(slots=True)
+class Template(Expr):
+    parts: Sequence[str | Expr]  # Alternating, starting with str
+```
+JS template literal: `` `hello ${name}` ``.
+
+### `Spread`
+
+```python
+@dataclass(slots=True)
+class Spread(Expr):
+    expr: Expr
+```
+JS spread: `...expr`.
+
+### `New`
+
+```python
+@dataclass(slots=True)
+class New(Expr):
+    ctor: Expr
+    args: Sequence[Expr]
+```
+JS new expression: `new Ctor(args)`.
+
+---
+
+## Statement Nodes
+
+### `Return`
+
+```python
+@dataclass(slots=True)
+class Return(Stmt):
+    value: Expr | None = None
+```
+JS return: `return expr;`.
+
+### `If`
+
+```python
+@dataclass(slots=True)
+class If(Stmt):
+    cond: Expr
+    then: Sequence[Stmt]
+    else_: Sequence[Stmt] = ()
+```
+JS if statement: `if (cond) { ... } else { ... }`.
+
+### `ForOf`
+
+```python
+@dataclass(slots=True)
+class ForOf(Stmt):
+    target: str  # Can be array pattern: "[a, b]"
+    iter: Expr
+    body: Sequence[Stmt]
+```
+JS for-of loop: `for (const x of iter) { ... }`.
+
+### `While`
+
+```python
+@dataclass(slots=True)
+class While(Stmt):
+    cond: Expr
+    body: Sequence[Stmt]
+```
+JS while loop: `while (cond) { ... }`.
+
+### `Break`
+
+```python
+@dataclass(slots=True)
+class Break(Stmt): ...
+```
+JS `break;`.
+
+### `Continue`
+
+```python
+@dataclass(slots=True)
+class Continue(Stmt): ...
+```
+JS `continue;`.
+
+### `Assign`
+
+```python
+@dataclass(slots=True)
+class Assign(Stmt):
+    target: str
+    value: Expr
+    declare: Literal["let", "const"] | None = None
+    op: str | None = None  # For augmented: +=, -=, etc.
+```
+JS assignment: `let x = expr;`, `x = expr;`, or `x += expr;`.
+
+### `ExprStmt`
+
+```python
+@dataclass(slots=True)
+class ExprStmt(Stmt):
+    expr: Expr
+```
+JS expression statement: `expr;`.
+
+### `Block`
+
+```python
+@dataclass(slots=True)
+class Block(Stmt):
+    body: Sequence[Stmt]
+```
+JS block: `{ ... }`.
+
+### `Throw`
+
+```python
+@dataclass(slots=True)
+class Throw(Stmt):
+    value: Expr
+```
+JS throw: `throw expr;`.
+
+---
+
+## JSX / Element Nodes
+
+### `Element`
+
+```python
+class Element(Expr):
+    tag: str | Expr
+    props: Sequence[tuple[str, Prop] | Spread] | dict[str, Any] | None
+    children: Sequence[Node] | None
+    key: str | Expr | None
+```
+
+React element. Tag conventions:
+- `""` (empty): Fragment
+- `"div"`, `"span"`: HTML element
+- `"$$ComponentId"`: Client component
+- `Expr`: Direct component reference
+
+**Methods:**
+
+```python
+def with_children(self, children: Sequence[Node]) -> Element
+def props_dict(self) -> dict[str, Any]
+```
+
+### `Jsx`
+
+```python
+@dataclass(slots=True, init=False)
+class Jsx(ExprWrapper):
+    expr: Expr
+    id: str
+```
+
+JSX wrapper that makes any `Expr` callable as a component. When called, produces `Element(tag=expr, ...)`.
+
+```python
+from pulse.transpiler import Import, Jsx
+
+app_shell = Import("AppShell", "@mantine/core")
+Header = Jsx(app_shell.Header)
+
+# In @javascript:
+# Header(height=60) -> <AppShell_1.Header height={60} />
+```
+
+### `PulseNode`
+
+```python
+@dataclass(slots=True)
+class PulseNode:
+    fn: Any  # Callable[..., Node]
+    args: tuple[Any, ...] = ()
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    key: str | None = None
+    name: str | None = None
+```
+
+Server-side Pulse component instance. During rendering, called and replaced by its returned tree. Cannot be transpiled.
+
+---
+
+## Wrapper Classes
+
+### `Value`
+
+```python
+@dataclass(slots=True)
+class Value(Expr):
+    value: Any
+```
+Wraps non-primitive Python value for pass-through serialization (e.g., complex props).
+
+### `Transformer`
+
+```python
+@dataclass(slots=True)
+class Transformer(Expr, Generic[_F]):
+    fn: _F
+    name: str = ""
+```
+Expr wrapping a function that transforms args to Expr output. Used for Python->JS transpilation of builtins.
+
+```python
+@transformer("len")
+def emit_len(x, *, ctx):
+    return Member(ctx.emit_expr(x), "length")
+```
+
+---
+
+## Utility Functions
+
+### `emit`
+
+```python
+def emit(node: Expr | Stmt) -> str
+```
+Emit an expression or statement as JavaScript/JSX code.
+
+```python
+from pulse.transpiler import emit, Literal, Binary
+
+code = emit(Binary(Literal(1), "+", Literal(2)))
+# "1 + 2"
+```
+
+### `to_js_identifier`
+
+```python
+def to_js_identifier(name: str) -> str
+```
+Normalize a string to a JS-compatible identifier.
+
+---
+
+## Type Aliases
+
+```python
+Node: TypeAlias = Primitive | Expr | PulseNode
+Child: TypeAlias = Node | Iterable[Node]
+Children: TypeAlias = Sequence[Child]
+Prop: TypeAlias = Primitive | Expr
+Primitive: TypeAlias = bool | int | float | str | datetime | None
+```
+
+---
+
+## Global Registry
+
+### `EXPR_REGISTRY`
+
+```python
+EXPR_REGISTRY: dict[int, Expr]
+```
+
+Global registry mapping `id(value)` to `Expr`. Used by `Expr.of()` to resolve registered Python values (functions, modules, etc.).

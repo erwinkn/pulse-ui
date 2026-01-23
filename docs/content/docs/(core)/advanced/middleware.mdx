@@ -1,0 +1,302 @@
+---
+title: "Middleware"
+---
+
+Middleware lets you run code that applies to your entire app, not just a single component. Think of it as a gatekeeper that sees every request before it reaches your components.
+
+## When to use middleware
+
+Middleware is the right tool when you need logic that runs across your whole application. Here are the most common scenarios:
+
+**Authentication and authorization** - Check if users are logged in before letting them access protected pages. Instead of adding `if not logged_in: redirect("/login")` to every component, you write it once in middleware.
+
+**Logging and analytics** - Record every request for debugging or analytics without touching your component code.
+
+**Rate limiting** - Prevent abuse by limiting how often users can make requests.
+
+**Request enrichment** - Add useful information to the session (like the user's IP address or browser) that components can use later.
+
+If you find yourself copying the same check into multiple components, that's a sign you should use middleware instead.
+
+## A motivating example: authentication
+
+Let's start with a real problem. You have an app with public pages (home, login, about) and protected pages (dashboard, settings, admin). You want to redirect unauthenticated users away from protected pages.
+
+Without middleware, you'd need to check authentication in every protected component:
+
+```python
+@ps.component
+def dashboard():
+    session = ps.session()
+    if not session.get("user"):
+        ps.navigate("/login")
+        return ps.div("Redirecting...")
+    # ... rest of the component
+```
+
+With middleware, you write this check once and it protects every route automatically:
+
+```python
+class AuthMiddleware(ps.PulseMiddleware):
+    PUBLIC_PATHS = {"/", "/login", "/signup", "/about"}
+
+    async def prerender_route(self, *, path, route_info, request, session, next):
+        # Allow public routes without authentication
+        if path in self.PUBLIC_PATHS:
+            return await next()
+
+        # Protected route: check if user is logged in
+        if not session.get("user_email"):
+            return ps.Redirect("/login")
+
+        # User is authenticated, continue normally
+        return await next()
+```
+
+Now your components can focus on what they actually do, without worrying about authentication.
+
+## Creating middleware
+
+Create middleware by subclassing `ps.PulseMiddleware` and overriding the hooks you need:
+
+```python
+import pulse as ps
+
+class LoggingMiddleware(ps.PulseMiddleware):
+    async def connect(self, *, request, session, next):
+        print(f"New connection from {request.client}")
+        return await next()
+
+    async def message(self, *, data, session, next):
+        print(f"Received message: {data.get('type')}")
+        return await next()
+```
+
+Then add your middleware to the app:
+
+```python
+app = ps.App(
+    routes=[...],
+    middleware=[LoggingMiddleware()],
+)
+```
+
+The key pattern is calling `await next()` to pass control to the next middleware (or to your components if there's no more middleware). If you don't call `next()`, the request stops there.
+
+## Middleware hooks
+
+Middleware can intercept five different points in the request lifecycle. You only need to override the ones you care about.
+
+### `prerender`
+
+Called when the browser first requests a page. This happens before any HTML is sent, making it perfect for authentication checks or redirects.
+
+```python
+async def prerender(self, *, payload, request, session, next):
+    # `payload` contains info about which paths are being requested
+    # Return Redirect or NotFound to short-circuit rendering
+    return await next()
+```
+
+### `prerender_route`
+
+Called for each individual route being rendered. More granular than `prerender` when you need route-specific logic:
+
+```python
+async def prerender_route(self, *, path, route_info, request, session, next):
+    # Protect admin routes
+    if path.startswith("/admin") and not session.get("is_admin"):
+        return ps.Redirect("/login")
+    return await next()
+```
+
+### `connect`
+
+Called when the WebSocket connection is established. The WebSocket is how Pulse sends real-time updates to the browser.
+
+```python
+async def connect(self, *, request, session, next):
+    # Record useful connection metadata
+    session["ip"] = request.client[0] if request.client else None
+    session["connected_at"] = time.time()
+    return await next()
+```
+
+Return `ps.Deny()` to reject the connection entirely:
+
+```python
+async def connect(self, *, request, session, next):
+    if not session.get("user"):
+        return ps.Deny()
+    return await next()
+```
+
+### `message`
+
+Called for each WebSocket message. This includes button clicks, form submissions, navigation, and any other interaction.
+
+```python
+async def message(self, *, data, session, next):
+    msg_type = data.get("type")
+    if msg_type == "callback":
+        print(f"User action from {session.get('user_email')}")
+    return await next()
+```
+
+### `channel`
+
+Called for pub/sub channel messages. Useful for authorizing access to real-time channels:
+
+```python
+async def channel(self, *, channel_id, event, payload, session, next):
+    # Only admins can access admin channels
+    if channel_id.startswith("admin:") and not session.get("is_admin"):
+        return ps.Deny()
+    return await next()
+```
+
+## Return values
+
+Middleware can return different values to control what happens next:
+
+| Return value | Effect |
+|--------------|--------|
+| `await next()` | Continue to the next middleware or handler |
+| `ps.Redirect("/path")` | Redirect the client (prerender hooks only) |
+| `ps.NotFound()` | Return a 404 page (prerender hooks only) |
+| `ps.Deny()` | Reject the request (connect, message, channel hooks) |
+| `ps.Ok(...)` | Allow the request, optionally with payload modification |
+
+## Complete authentication example
+
+Here's a full authentication middleware that handles multiple concerns:
+
+```python
+from pulse.middleware import Redirect, Deny, Ok
+
+class AuthMiddleware(ps.PulseMiddleware):
+    # Routes that don't require authentication
+    PUBLIC_PATHS = {"/", "/login", "/signup", "/about"}
+
+    async def prerender_route(self, *, path, route_info, request, session, next):
+        # Public routes are always accessible
+        if path in self.PUBLIC_PATHS:
+            return await next()
+
+        # Protected routes require authentication
+        if not session.get("user_email"):
+            return Redirect("/login")
+
+        return await next()
+
+    async def connect(self, *, request, session, next):
+        # Store connection metadata for logging and debugging
+        session["user_agent"] = request.headers.get("user-agent")
+        session["ip"] = request.client[0] if request.client else None
+        return await next()
+
+    async def message(self, *, data, session, next):
+        # Log all user actions (useful for debugging and analytics)
+        if data.get("type") == "callback":
+            print(f"Action by {session.get('user_email')}")
+        return await next()
+```
+
+## Composing middleware
+
+When you have multiple middlewares, they execute in the order you list them. Each middleware's `next()` call passes control to the next one in the chain:
+
+```python
+app = ps.App(
+    routes=[...],
+    middleware=[
+        LoggingMiddleware(),    # Runs first
+        AuthMiddleware(),       # Runs second
+        RateLimitMiddleware(),  # Runs third
+    ],
+)
+```
+
+Think of it like layers of an onion. The request passes through each layer going in, then the response passes back through each layer going out.
+
+You can also use `ps.stack()` for explicit composition:
+
+```python
+app = ps.App(
+    routes=[...],
+    middleware=ps.stack(
+        LoggingMiddleware(),
+        AuthMiddleware(),
+    ),
+)
+```
+
+## Dev-only middleware
+
+Some middleware is only useful during development. Mark it as dev-only to skip it in production:
+
+```python
+class LatencyMiddleware(ps.PulseMiddleware):
+    def __init__(self):
+        super().__init__(dev=True)  # Only runs in dev mode
+
+    async def message(self, *, data, session, next):
+        await asyncio.sleep(0.1)  # Simulate network latency
+        return await next()
+```
+
+Pulse includes a built-in `ps.LatencyMiddleware` for testing how your app behaves with slow network conditions:
+
+```python
+app = ps.App(
+    routes=[...],
+    middleware=[
+        ps.LatencyMiddleware(
+            prerender_ms=100,
+            connect_ms=50,
+            message_ms=25,
+        )
+    ],
+)
+```
+
+## Accessing request data
+
+The `request` parameter gives you access to HTTP request information:
+
+```python
+async def connect(self, *, request, session, next):
+    # HTTP headers
+    auth_header = request.headers.get("authorization")
+    user_agent = request.headers.get("user-agent")
+
+    # Client IP address (may be None in some environments)
+    client_ip = request.client[0] if request.client else None
+
+    # Cookies
+    cookies = request.cookies
+
+    return await next()
+```
+
+## Modifying the response
+
+In `prerender` hooks, you can inspect and modify the response after it's generated:
+
+```python
+async def prerender(self, *, payload, request, session, next):
+    # Get the response from downstream middleware and components
+    result = await next()
+
+    # Inspect or modify if needed
+    if isinstance(result, Ok):
+        # Add custom data to the prerender result
+        pass
+
+    return result
+```
+
+## See also
+
+- [Tutorial: Sessions and Middleware](/docs/tutorial/12-sessions-middleware) - A gentler introduction with step-by-step examples
+- [Reference: Middleware](/docs/reference/pulse/middleware) - Complete API documentation

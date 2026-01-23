@@ -5,6 +5,7 @@ import pulse as ps
 import pytest
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
+from pulse.test_helpers import wait_for
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -196,8 +197,7 @@ async def test_mutation_is_running_state():
 	task = asyncio.create_task(mutation())
 
 	# Check that it's running
-	await asyncio.sleep(0.005)
-	assert mutation.is_running is True
+	assert await wait_for(lambda: mutation.is_running is True, timeout=0.2)
 
 	# Wait for completion
 	result = await task

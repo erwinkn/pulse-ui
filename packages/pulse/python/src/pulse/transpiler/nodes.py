@@ -7,7 +7,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from inspect import isfunction, signature
+from inspect import currentframe, isfunction, signature
 from typing import (
 	TYPE_CHECKING,
 	Any,
@@ -23,7 +23,7 @@ from typing import Literal as Lit
 
 from pulse.env import env
 from pulse.transpiler.errors import TranspileError
-from pulse.transpiler.vdom import VDOMNode
+from pulse.transpiler.vdom import VDOMExpr, VDOMNode, VDOMPrimitive
 
 if TYPE_CHECKING:
 	from pulse.transpiler.transpiler import Transpiler
@@ -132,7 +132,7 @@ class Expr(ABC):
 	# -------------------------------------------------------------------------
 
 	@abstractmethod
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMPrimitive | VDOMExpr:
 		"""Serialize this expression node for client-side rendering.
 
 		Returns a VDOMNode (primitive or dict) that can be JSON-serialized and
@@ -334,7 +334,7 @@ class ExprWrapper(Expr):
 		self.expr.emit(out)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMPrimitive | VDOMExpr:
 		return self.expr.render()
 
 	@override
@@ -450,6 +450,8 @@ class Jsx(ExprWrapper):
 
 		for k, v in kwargs.items():
 			if k == "key":
+				if v is None:
+					continue
 				if not isinstance(v, str):
 					raise ValueError("key must be a string")
 				key = v
@@ -498,7 +500,7 @@ class Value(Expr):
 		_emit_value(self.value, out)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		raise TypeError(
 			"Value cannot be rendered as VDOMExpr; unwrap with .value instead"
 		)
@@ -538,15 +540,13 @@ class Element(Expr):
 			self.children = None
 		else:
 			if isinstance(tag, str):
-				parent_name = tag[2:] if tag.startswith("$$") else tag
+				parent_name: str | Expr = tag[2:] if tag.startswith("$$") else tag
 			else:
-				tag_out: list[str] = []
-				tag.emit(tag_out)
-				parent_name = "".join(tag_out)
+				parent_name = tag
 			self.children = flatten_children(
 				children,
 				parent_name=parent_name,
-				warn_stacklevel=5,
+				warn_stacklevel=None,
 			)
 		self.key = key
 
@@ -731,7 +731,7 @@ class Element(Expr):
 		return result
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		"""Element rendering is handled by Renderer.render_node(), not render().
 
 		This method validates render-time constraints and raises TypeError
@@ -785,7 +785,7 @@ class PulseNode:
 		flat = flatten_children(
 			children_arg,
 			parent_name=parent_name,
-			warn_stacklevel=5,
+			warn_stacklevel=None,
 		)
 		return PulseNode(
 			fn=self.fn,
@@ -802,8 +802,8 @@ class PulseNode:
 def flatten_children(
 	children: Sequence[Node | Iterable[Node]],
 	*,
-	parent_name: str,
-	warn_stacklevel: int = 5,
+	parent_name: str | Expr,
+	warn_stacklevel: int | None = None,
 ) -> list[Node]:
 	if env.pulse_env == "dev":
 		return _flatten_children_dev(
@@ -833,13 +833,14 @@ def _flatten_children_prod(children: Sequence[Node | Iterable[Node]]) -> list[No
 def _flatten_children_dev(
 	children: Sequence[Node | Iterable[Node]],
 	*,
-	parent_name: str,
-	warn_stacklevel: int = 5,
+	parent_name: str | Expr,
+	warn_stacklevel: int | None = None,
 ) -> list[Node]:
 	flat: list[Node] = []
 	seen_keys: set[str] = set()
 
 	def visit(item: Node | Iterable[Node]) -> None:
+		nonlocal warn_stacklevel
 		if isinstance(item, dict):
 			raise TypeError("Dict is not a valid child")
 		if isinstance(item, Iterable) and not isinstance(item, str):
@@ -851,6 +852,32 @@ def _flatten_children_dev(
 					missing_key = True
 				visit(sub)  # type: ignore[arg-type]
 			if missing_key:
+				if warn_stacklevel is None:
+					stacklevel = 1
+					frame = currentframe()
+					if frame is not None:
+						frame = frame.f_back
+						internal_prefixes = (
+							"pulse",
+							"pulse_mantine",
+							"pulse_ag_grid",
+							"pulse_recharts",
+							"pulse_lucide",
+							"pulse_msal",
+							"pulse_aws",
+						)
+						while frame is not None:
+							module = frame.f_globals.get("__name__", "")
+							if module and not any(
+								module == prefix or module.startswith(f"{prefix}.")
+								for prefix in internal_prefixes
+							):
+								break
+							stacklevel += 1
+							frame = frame.f_back
+						if frame is not None:
+							stacklevel += 1
+					warn_stacklevel = stacklevel
 				clean_name = clean_element_name(parent_name)
 				warnings.warn(
 					(
@@ -886,7 +913,25 @@ def _flatten_children_dev(
 	return flat
 
 
-def clean_element_name(parent_name: str) -> str:
+def clean_element_name(parent_name: str | Expr) -> str:
+	def expr_name(expr: Expr) -> str:
+		while isinstance(expr, ExprWrapper):
+			expr = expr.expr
+		if isinstance(expr, Member):
+			base = expr_name(expr.obj)
+			return f"{base}.{expr.prop}" if base else expr.prop
+		if isinstance(expr, Identifier):
+			return expr.name
+		if expr.__class__.__name__ == "Import":
+			name = getattr(expr, "name", None)
+			if isinstance(name, str) and name:
+				return name
+		out: list[str] = []
+		expr.emit(out)
+		return "".join(out)
+
+	if isinstance(parent_name, Expr):
+		parent_name = expr_name(parent_name)
 	if parent_name.startswith("<") and parent_name.endswith(">"):
 		return parent_name
 	return f"<{parent_name}>"
@@ -914,7 +959,7 @@ class Identifier(Expr):
 		out.append(self.name)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {"t": "id", "name": self.name}
 
 
@@ -938,7 +983,7 @@ class Literal(Expr):
 			out.append(str(self.value))
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMPrimitive:
 		return self.value
 
 
@@ -956,7 +1001,7 @@ class Undefined(Expr):
 		out.append("undefined")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {"t": "undef"}
 
 
@@ -980,7 +1025,7 @@ class Array(Expr):
 		out.append("]")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {"t": "array", "items": [e.render() for e in self.elements]}
 
 
@@ -1012,7 +1057,7 @@ class Object(Expr):
 		out.append("}")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		rendered_props: dict[str, VDOMNode] = {}
 		for prop in self.props:
 			if isinstance(prop, Spread):
@@ -1036,7 +1081,7 @@ class Member(Expr):
 		out.append(self.prop)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {"t": "member", "obj": self.obj.render(), "prop": self.prop}
 
 
@@ -1055,7 +1100,7 @@ class Subscript(Expr):
 		out.append("]")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {"t": "sub", "obj": self.obj.render(), "key": self.key.render()}
 
 
@@ -1077,7 +1122,7 @@ class Call(Expr):
 		out.append(")")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {
 			"t": "call",
 			"callee": self.callee.render(),
@@ -1108,7 +1153,7 @@ class Unary(Expr):
 		_emit_paren(self.operand, self.op, "unary", out)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		if self.op == "await":
 			raise TypeError("await is not supported in VDOM expressions")
 		return {"t": "unary", "op": self.op, "arg": self.operand.render()}
@@ -1146,7 +1191,7 @@ class Binary(Expr):
 		_emit_paren(self.right, self.op, "right", out)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {
 			"t": "binary",
 			"op": self.op,
@@ -1176,7 +1221,7 @@ class Ternary(Expr):
 		self.else_.emit(out)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {
 			"t": "ternary",
 			"cond": self.cond.render(),
@@ -1222,7 +1267,7 @@ class Arrow(Expr):
 			out.append("}")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		if not isinstance(self.body, Expr):
 			raise TypeError("Arrow with statement body cannot be rendered as VDOMExpr")
 		return {"t": "arrow", "params": list(self.params), "body": self.body.render()}
@@ -1251,7 +1296,7 @@ class Template(Expr):
 		out.append("`")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		rendered_parts: list[str | VDOMNode] = []
 		for p in self.parts:
 			if isinstance(p, str):
@@ -1273,7 +1318,7 @@ class Spread(Expr):
 		self.expr.emit(out)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		raise TypeError("Spread cannot be rendered as VDOMExpr directly")
 
 
@@ -1311,7 +1356,7 @@ class New(Expr):
 		out.append(")")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		return {
 			"t": "new",
 			"ctor": self.ctor.render(),
@@ -1375,7 +1420,7 @@ class Transformer(Expr, Generic[_F]):
 		raise TypeError(f"{label} cannot be subscripted")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		label = self.name or "Transformer"
 		raise TypeError(f"{label} cannot be rendered - must be called")
 
@@ -1675,7 +1720,7 @@ class Function(Expr):
 		out.append("}")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self) -> VDOMExpr:
 		raise TypeError("Function cannot be rendered as VDOMExpr")
 
 

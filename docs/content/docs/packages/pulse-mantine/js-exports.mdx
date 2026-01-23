@@ -1,0 +1,165 @@
+---
+title: "JS Exports"
+description: "Client-side utilities for creating custom form inputs that integrate with Pulse Mantine forms"
+---
+
+Pulse Mantine exports JavaScript utilities for building custom input components that work seamlessly with `MantineForm`. If you're building a custom input (like a rich text editor, color picker, or specialized numeric input), these hooks let you connect it to the form system with automatic validation, error display, and value synchronization.
+
+## When you need this
+
+Use these exports when:
+- You're wrapping a third-party input component not included in Mantine
+- You're building a custom input with specialized behavior
+- You need an input to participate in form validation and state management
+
+If you're just using built-in Mantine inputs (`TextInput`, `Select`, etc.), you don't need this—they're already connected.
+
+## createConnectedField
+
+A higher-order component that wraps any input component and connects it to the form context.
+
+```tsx
+import { createConnectedField } from "pulse-mantine";
+import { CurrencyInput } from "some-library";
+
+// Create a form-connected version
+const ConnectedCurrencyInput = createConnectedField(CurrencyInput);
+
+// Use it inside a MantineForm—it automatically registers with the form
+<ConnectedCurrencyInput name="price" label="Price" />
+```
+
+### Options
+
+```tsx
+createConnectedField(Component, {
+  inputType: "input" | "checkbox",  // How to read the value (default: "input")
+  coerceEmptyString: boolean,       // Convert null/undefined to "" (default: false)
+  debounceOnChange: boolean,        // Debounce server sync on change (default: false)
+});
+```
+
+**When to use each option:**
+- `inputType: "checkbox"` — for boolean inputs where value comes from `checked` prop
+- `coerceEmptyString: true` — for text inputs to prevent uncontrolled/controlled warnings
+- `debounceOnChange: true` — for text inputs to avoid server calls on every keystroke
+
+## useFieldProps
+
+A hook that returns form-connected props. Use this when you need more control than `createConnectedField` provides.
+
+```tsx
+import { useFieldProps } from "pulse-mantine";
+
+function CustomInput(props) {
+  const fieldProps = useFieldProps(props, { debounceOnChange: true });
+
+  // fieldProps now includes:
+  // - value from form state
+  // - onChange that updates form + triggers server validation
+  // - onBlur that triggers server validation
+  // - error from form validation
+
+  return (
+    <div>
+      <input {...fieldProps} />
+      {fieldProps.error && <span className="error">{fieldProps.error}</span>}
+    </div>
+  );
+}
+```
+
+The hook:
+1. Reads the form context (provided by `MantineForm.render()`)
+2. Merges your props with Mantine's `getInputProps()` result
+3. Wraps `onChange` and `onBlur` to trigger server validation
+4. Returns the merged props
+
+If there's no form context or no `name` prop, it returns the original props unchanged—so your component works both inside and outside forms.
+
+## Full example: Currency input
+
+Here's a complete example of a custom currency input that integrates with Pulse Mantine forms.
+
+```tsx
+// components/CurrencyInput.tsx
+import { TextInput } from "@mantine/core";
+import { useFieldProps } from "pulse-mantine";
+import type { TextInputProps } from "@mantine/core";
+
+interface CurrencyInputProps extends Omit<TextInputProps, "onChange"> {
+  name?: string;
+  currency?: string;
+  onChange?: (value: number | null) => void;
+}
+
+export function CurrencyInput({ currency = "USD", onChange, ...props }: CurrencyInputProps) {
+  // Connect to form context
+  const fieldProps = useFieldProps(props, {
+    debounceOnChange: true,
+    coerceEmptyString: true,
+  });
+
+  // Format display value
+  const displayValue = fieldProps.value != null
+    ? new Intl.NumberFormat("en-US", { minimumFractionDigits: 2 }).format(fieldProps.value)
+    : "";
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value.replace(/[^0-9.]/g, "");
+    const parsed = raw ? parseFloat(raw) : null;
+
+    // Call the form's onChange with the numeric value
+    fieldProps.onChange?.(parsed);
+    onChange?.(parsed);
+  };
+
+  return (
+    <TextInput
+      {...fieldProps}
+      value={displayValue}
+      onChange={handleChange}
+      leftSection={currency}
+    />
+  );
+}
+```
+
+Use it in Python:
+
+```python
+from pulse_mantine import MantineForm, Button
+
+@ps.component
+def PriceForm():
+    with ps.init():
+        form = MantineForm(
+            initialValues={"price": 0},
+            validate={"price": lambda v: "Price required" if not v else None},
+        )
+
+    return form.render(onSubmit=lambda v: print(v))[
+        # CurrencyInput is now a custom JS component registered with Pulse
+        ps.js_component("CurrencyInput", name="price", label="Price", currency="EUR"),
+        Button("Submit", type="submit"),
+    ]
+```
+
+## How it works
+
+When a `MantineForm` renders, it wraps its children with a React context containing:
+- The Mantine `useForm` instance
+- Callbacks for server-side validation (`serverOnChange`, `serverOnBlur`)
+
+`useFieldProps` reads this context and merges:
+1. Your component's props
+2. Mantine's `getInputProps(name)` result (value, onChange, error)
+3. Wrapped handlers that trigger server validation
+
+This gives you full form integration with minimal code.
+
+## See also
+
+- [Forms](./forms) — form state management and validation
+- [JS Interop](/reference/pulse/js-interop) — registering custom JS components with Pulse
+- [Mantine useForm](https://mantine.dev/form/use-form/) — underlying form library

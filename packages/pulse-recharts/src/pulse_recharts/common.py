@@ -4,7 +4,7 @@ from typing import Any, Literal, Protocol, TypedDict, TypeVar
 import pulse as ps
 
 T = TypeVar("T")
-DataKey = str | int | ps.JsFunction[T, str | int]
+DataKey = str | int | ps.JsFunction[T, Any]
 
 
 class ChartOffsetInternal(Protocol):
@@ -49,7 +49,7 @@ These two layouts share very few properties, so it is best to keep them separate
 
 AxisType = Literal["xAxis", "yAxis", "zAxis", "angleAxis", "radiusAxis"]
 
-AxisDomainType = Literal["number", "category"]
+AxisDomainType = Literal["number", "category", "auto"]
 
 
 class Margin(TypedDict):

@@ -18,9 +18,8 @@ from pulse.context import PulseContext
 from pulse.helpers import (
 	MISSING,
 	Disposable,
+	Missing,
 	call_flexible,
-	is_pytest,
-	later,
 	maybe_await,
 )
 from pulse.queries.common import (
@@ -35,6 +34,7 @@ from pulse.queries.common import (
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
+from pulse.scheduling import TimerHandleLike, create_task, is_pytest, later
 from pulse.state import InitializableProperty, State
 
 if TYPE_CHECKING:
@@ -48,24 +48,49 @@ RETRY_DELAY_DEFAULT = 2.0 if not is_pytest() else 0.01
 
 @dataclass(slots=True)
 class QueryConfig(Generic[T]):
+	"""Configuration options for a query.
+
+	Stores immutable configuration that controls query behavior including
+	retry logic, caching, and lifecycle callbacks.
+
+	Attributes:
+		retries: Number of retry attempts on failure (default 3).
+		retry_delay: Delay in seconds between retry attempts (default 2.0).
+		initial_data: Initial data value or factory function.
+		initial_data_updated_at: Timestamp for initial data staleness calculation.
+		gc_time: Seconds to keep unused query in cache before garbage collection.
+		on_dispose: Callback invoked when query is disposed.
+	"""
+
 	retries: int
 	retry_delay: float
-	initial_data: T | Callable[[], T] | None
+	initial_data: T | Callable[[], T] | Missing | None
 	initial_data_updated_at: float | dt.datetime | None
 	gc_time: float
 	on_dispose: Callable[[Any], None] | None
 
 
 class QueryState(Generic[T]):
-	"""
-	Container for query state signals and manipulation methods.
+	"""Container for query state signals and manipulation methods.
+
+	Manages reactive signals for query data, status, errors, and retry state.
 	Used by both KeyedQuery and UnkeyedQuery via composition.
+
+	Attributes:
+		cfg: Query configuration options.
+		data: Signal containing the fetched data or None.
+		error: Signal containing the last error or None.
+		last_updated: Signal with timestamp of last successful update.
+		status: Signal with current QueryStatus ("loading", "success", "error").
+		is_fetching: Signal indicating if a fetch is in progress.
+		retries: Signal with current retry attempt count.
+		retry_reason: Signal with exception from last failed retry.
 	"""
 
 	cfg: QueryConfig[T]
 
 	# Reactive signals for query state
-	data: Signal[T | None]
+	data: Signal[T | None | Missing]
 	error: Signal[Exception | None]
 	last_updated: Signal[float]
 	status: Signal[QueryStatus]
@@ -78,7 +103,7 @@ class QueryState(Generic[T]):
 		name: str,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
-		initial_data: T | None = MISSING,
+		initial_data: T | Missing | None = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
@@ -94,7 +119,7 @@ class QueryState(Generic[T]):
 
 		# Initialize reactive signals
 		self.data = Signal(
-			None if initial_data is MISSING else initial_data,
+			MISSING if initial_data is MISSING else initial_data,
 			name=f"query.data({name})",
 		)
 		self.error = Signal(None, name=f"query.error({name})")
@@ -122,7 +147,8 @@ class QueryState(Generic[T]):
 	):
 		"""Set data manually, accepting a value or updater function."""
 		current = self.data.read()
-		new_value = cast(T, data(current) if callable(data) else data)
+		current_value = cast(T | None, None if current is MISSING else current)
+		new_value = cast(T, data(current_value) if callable(data) else data)
 		self.set_success(new_value, manual=True)
 		if updated_at is not None:
 			self.set_updated_at(updated_at)
@@ -200,7 +226,7 @@ async def run_fetch_with_retries(
 		on_success: Optional callback on success
 		on_error: Optional callback on error
 		untrack: If True, wrap fetch_fn in Untrack() to prevent dependency tracking.
-		         Use for keyed queries where fetch is triggered via asyncio.create_task.
+		         Use for keyed queries where fetch is triggered via create_task().
 	"""
 	state.reset_retries()
 
@@ -242,14 +268,17 @@ class KeyedQuery(Generic[T], Disposable):
 	observers: "list[KeyedQueryResult[T]]"
 	_task: asyncio.Task[None] | None
 	_task_initiator: "KeyedQueryResult[T] | None"
-	_gc_handle: asyncio.TimerHandle | None
+	_gc_handle: TimerHandleLike | None
+	_interval_effect: Effect | None
+	_interval: float | None
+	_interval_observer: "KeyedQueryResult[T] | None"
 
 	def __init__(
 		self,
 		key: QueryKey,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
-		initial_data: T | None = MISSING,
+		initial_data: T | Missing | None = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
@@ -268,10 +297,13 @@ class KeyedQuery(Generic[T], Disposable):
 		self._task = None
 		self._task_initiator = None
 		self._gc_handle = None
+		self._interval_effect = None
+		self._interval = None
+		self._interval_observer = None
 
 	# --- Delegate signal access to state ---
 	@property
-	def data(self) -> Signal[T | None]:
+	def data(self) -> Signal[T | None | Missing]:
 		return self.state.data
 
 	@property
@@ -352,7 +384,7 @@ class KeyedQuery(Generic[T], Disposable):
 			fetch_fn,
 			on_success=on_success,
 			on_error=on_error,
-			untrack=True,  # Keyed queries use asyncio.create_task, need to untrack
+			untrack=True,  # Keyed queries use create_task(), need to untrack
 		)
 
 	def run_fetch(
@@ -376,7 +408,7 @@ class KeyedQuery(Generic[T], Disposable):
 		self.state.is_fetching.write(True)
 		# Capture current observers at fetch start
 		observers = list(self.observers)
-		self._task = asyncio.create_task(self._run_fetch(fetch_fn, observers))
+		self._task = create_task(self._run_fetch(fetch_fn, observers))
 		self._task_initiator = initiator
 		return self._task
 
@@ -396,7 +428,10 @@ class KeyedQuery(Generic[T], Disposable):
 		# Return result based on current state
 		if self.state.status() == "error":
 			return ActionError(cast(Exception, self.state.error.read()))
-		return ActionSuccess(cast(T, self.state.data.read()))
+		data = self.state.data.read()
+		if data is MISSING:
+			return ActionSuccess(cast(T, None))
+		return ActionSuccess(cast(T, data))
 
 	def cancel(self) -> None:
 		"""Cancel the current fetch if running."""
@@ -412,6 +447,66 @@ class KeyedQuery(Generic[T], Disposable):
 				f"Query '{self.key}' has no observers. Cannot access fetch function."
 			)
 		return self.observers[0]._fetch_fn  # pyright: ignore[reportPrivateUsage]
+
+	@property
+	def has_interval(self) -> bool:
+		return self._interval is not None
+
+	def _select_interval_observer(
+		self,
+	) -> tuple[float | None, "KeyedQueryResult[T] | None"]:
+		min_interval: float | None = None
+		selected: "KeyedQueryResult[T] | None" = None
+
+		for obs in reversed(self.observers):
+			interval = obs._refetch_interval  # pyright: ignore[reportPrivateUsage]
+			if interval is None:
+				continue
+			if not obs._enabled.value:  # pyright: ignore[reportPrivateUsage]
+				continue
+			if min_interval is None or interval < min_interval:
+				min_interval = interval
+				selected = obs
+
+		return min_interval, selected
+
+	def _create_interval_effect(self, interval: float) -> Effect:
+		def interval_fn():
+			observer = self._interval_observer
+			if observer is None:
+				return
+			if not self.is_scheduled and len(self.observers) > 0:
+				self.run_fetch(
+					observer._fetch_fn,  # pyright: ignore[reportPrivateUsage]
+					cancel_previous=False,
+					initiator=observer,
+				)
+
+		return Effect(
+			interval_fn,
+			name=f"query_interval({self.key})",
+			interval=interval,
+			immediate=True,
+		)
+
+	def _update_interval(self) -> None:
+		new_interval, new_observer = self._select_interval_observer()
+		interval_changed = new_interval != self._interval
+
+		self._interval = new_interval
+		self._interval_observer = new_observer
+
+		if not interval_changed:
+			if self._interval_effect is None and new_interval is not None:
+				self._interval_effect = self._create_interval_effect(new_interval)
+			return
+
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+		if new_interval is not None:
+			self._interval_effect = self._create_interval_effect(new_interval)
 
 	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""
@@ -443,11 +538,13 @@ class KeyedQuery(Generic[T], Disposable):
 		self.cancel_gc()
 		if observer._gc_time > 0:  # pyright: ignore[reportPrivateUsage]
 			self.cfg.gc_time = max(self.cfg.gc_time, observer._gc_time)  # pyright: ignore[reportPrivateUsage]
+		self._update_interval()
 
 	def unobserve(self, observer: "KeyedQueryResult[T]"):
 		"""Unregister an observer. Schedules GC if no observers remain."""
 		if observer in self.observers:
 			self.observers.remove(observer)
+		self._update_interval()
 
 		# If the departing observer initiated the ongoing fetch, cancel it
 		if self._task_initiator is observer and self._task and not self._task.done():
@@ -480,6 +577,9 @@ class KeyedQuery(Generic[T], Disposable):
 	def dispose(self):
 		"""Clean up the query, cancelling any in-flight fetch."""
 		self.cancel()
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
 
@@ -503,7 +603,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 	_keep_previous_data: bool
 	_enabled: Signal[bool]
 	_interval_effect: Effect | None
-	_data_computed: Computed[T | None]
+	_data_computed: Computed[T | None | Missing]
 
 	def __init__(
 		self,
@@ -512,7 +612,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		on_error: Callable[[Exception], Awaitable[None] | None] | None = None,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
-		initial_data: T | None = MISSING,
+		initial_data: T | Missing | None = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		stale_time: float = 0.0,
@@ -534,7 +634,12 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		self._on_success = on_success
 		self._on_error = on_error
 		self._stale_time = stale_time
-		self._refetch_interval = refetch_interval
+		interval = (
+			refetch_interval
+			if refetch_interval is not None and refetch_interval > 0
+			else None
+		)
+		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._enabled = Signal(enabled, name="query.enabled(unkeyed)")
 		self._interval_effect = None
@@ -551,17 +656,20 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 		# Computed for keep_previous_data logic
 		self._data_computed = Computed(
-			self._data_computed_fn, name="query_data(unkeyed)"
+			self._data_computed_fn,
+			name="query_data(unkeyed)",
+			initial_value=MISSING,
 		)
 
 		# Schedule initial fetch if stale (untracked to avoid reactive loop)
 		with Untrack():
-			if enabled and fetch_on_mount and self.is_stale():
+			# Skip if refetch_interval is active - interval effect handles initial fetch
+			if enabled and fetch_on_mount and interval is None and self.is_stale():
 				self.schedule()
 
 		# Set up interval effect if interval is specified
-		if refetch_interval is not None and refetch_interval > 0:
-			self._setup_interval_effect(refetch_interval)
+		if interval is not None:
+			self._setup_interval_effect(interval)
 
 	def _setup_interval_effect(self, interval: float):
 		"""Create an effect that invalidates the query at the specified interval."""
@@ -577,12 +685,12 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 			immediate=True,
 		)
 
-	def _data_computed_fn(self, prev: T | None) -> T | None:
-		if self._keep_previous_data and self.state.status() != "success":
+	def _data_computed_fn(self, prev: T | None | Missing) -> T | None | Missing:
+		if self._keep_previous_data and self.state.status() == "loading":
 			return prev
 		raw = self.state.data()
-		if raw is None:
-			return None
+		if raw is MISSING:
+			return MISSING
 		return raw
 
 	# --- Status properties ---
@@ -612,7 +720,10 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 	@property
 	def data(self) -> T | None:
-		return self._data_computed()
+		value = self._data_computed()
+		if value is MISSING:
+			return None
+		return cast(T | None, value)
 
 	# --- State methods ---
 	def set_data(self, data: T | Callable[[T | None], T]):
@@ -674,14 +785,20 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		return await self.wait()
 
 	async def wait(self) -> ActionResult[T]:
-		"""Wait for the current query to complete."""
-		# If loading and no task, schedule a fetch
-		if self.state.status() == "loading" and not self.state.is_fetching():
-			self.schedule()
+		"""Wait for the current in-flight fetch to complete."""
 		await self._effect.wait()
 		if self.state.status() == "error":
 			return ActionError(cast(Exception, self.state.error.read()))
-		return ActionSuccess(cast(T, self.state.data.read()))
+		data = self.state.data.read()
+		if data is MISSING:
+			return ActionSuccess(cast(T, None))
+		return ActionSuccess(cast(T, data))
+
+	async def ensure(self) -> ActionResult[T]:
+		"""Ensure an initial fetch has started, then wait for completion."""
+		if self.state.status() == "loading" and not self.state.is_fetching():
+			self.schedule()
+		return await self.wait()
 
 	def invalidate(self):
 		"""Mark the query as stale and refetch through the effect."""
@@ -715,8 +832,7 @@ class KeyedQueryResult(Generic[T], Disposable):
 	_on_success: Callable[[T], Awaitable[None] | None] | None
 	_on_error: Callable[[Exception], Awaitable[None] | None] | None
 	_observe_effect: Effect
-	_interval_effect: Effect | None
-	_data_computed: Computed[T | None]
+	_data_computed: Computed[T | None | Missing]
 	_enabled: Signal[bool]
 	_fetch_on_mount: bool
 
@@ -737,12 +853,16 @@ class KeyedQueryResult(Generic[T], Disposable):
 		self._fetch_fn = fetch_fn
 		self._stale_time = stale_time
 		self._gc_time = gc_time
-		self._refetch_interval = refetch_interval
+		interval = (
+			refetch_interval
+			if refetch_interval is not None and refetch_interval > 0
+			else None
+		)
+		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._on_success = on_success
 		self._on_error = on_error
 		self._enabled = Signal(enabled, name=f"query.enabled({query().key})")
-		self._interval_effect = None
 
 		def observe_effect():
 			q = self._query()
@@ -751,9 +871,11 @@ class KeyedQueryResult(Generic[T], Disposable):
 			with Untrack():
 				q.observe(self)
 
-				# If stale or loading, schedule refetch (only when enabled)
-				if enabled and fetch_on_mount and self.is_stale():
-					self.invalidate()
+				# Skip if query interval is active - interval effect handles initial fetch
+				if enabled and fetch_on_mount and not q.has_interval:
+					# If stale, schedule refetch (only when enabled)
+					if not q.is_fetching() and self.is_stale():
+						self.invalidate()
 
 			# Return cleanup function that captures the query (old query on key change)
 			def cleanup():
@@ -767,26 +889,9 @@ class KeyedQueryResult(Generic[T], Disposable):
 			immediate=True,
 		)
 		self._data_computed = Computed(
-			self._data_computed_fn, name=f"query_data({self._query().key})"
-		)
-
-		# Set up interval effect if interval is specified
-		if refetch_interval is not None and refetch_interval > 0:
-			self._setup_interval_effect(refetch_interval)
-
-	def _setup_interval_effect(self, interval: float):
-		"""Create an effect that invalidates the query at the specified interval."""
-
-		def interval_fn():
-			# Read enabled to make this effect reactive to enabled changes
-			if self._enabled():
-				self.invalidate()
-
-		self._interval_effect = Effect(
-			interval_fn,
-			name=f"query_interval({self._query().key})",
-			interval=interval,
-			immediate=True,
+			self._data_computed_fn,
+			name=f"query_data({self._query().key})",
+			initial_value=MISSING,
 		)
 
 	@property
@@ -817,18 +922,18 @@ class KeyedQueryResult(Generic[T], Disposable):
 	def error(self) -> Exception | None:
 		return self._query().error.read()
 
-	def _data_computed_fn(self, prev: T | None) -> T | None:
+	def _data_computed_fn(self, prev: T | None | Missing) -> T | None | Missing:
 		query = self._query()
-		if self._keep_previous_data and query.status() != "success":
+		if self._keep_previous_data and query.status() == "loading":
 			return prev
-		raw = query.data()
-		if raw is None:
-			return None
-		return raw
+		return query.data()
 
 	@property
 	def data(self) -> T | None:
-		return self._data_computed()
+		value = self._data_computed()
+		if value is MISSING:
+			return None
+		return cast(T | None, value)
 
 	def is_stale(self) -> bool:
 		"""Check if the query data is stale based on stale_time."""
@@ -849,9 +954,12 @@ class KeyedQueryResult(Generic[T], Disposable):
 		return await self.wait()
 
 	async def wait(self) -> ActionResult[T]:
-		"""Wait for the current query to complete."""
+		"""Wait for the current in-flight fetch to complete."""
+		return await self._query().wait()
+
+	async def ensure(self) -> ActionResult[T]:
+		"""Ensure an initial fetch has started, then wait for completion."""
 		query = self._query()
-		# If loading and no task, start a fetch with this observer's fetch function
 		if query.status() == "loading" and not query.is_fetching():
 			query.run_fetch(self._fetch_fn, initiator=self)
 		return await query.wait()
@@ -885,32 +993,53 @@ class KeyedQueryResult(Generic[T], Disposable):
 	def enable(self):
 		"""Enable the query."""
 		self._enabled.write(True)
+		self._query()._update_interval()  # pyright: ignore[reportPrivateUsage]
 
 	def disable(self):
 		"""Disable the query, preventing it from fetching."""
 		self._enabled.write(False)
+		self._query()._update_interval()  # pyright: ignore[reportPrivateUsage]
 
 	@override
 	def dispose(self):
 		"""Clean up the result and its observe effect."""
-		if self._interval_effect is not None and not self._interval_effect.__disposed__:
-			self._interval_effect.dispose()
 		if not self._observe_effect.__disposed__:
 			self._observe_effect.dispose()
 
 
 class QueryProperty(Generic[T, TState], InitializableProperty):
-	"""
-	Descriptor for state-bound queries.
+	"""Descriptor for state-bound queries created by the @query decorator.
 
-	Usage:
-	    class S(ps.State):
-	        @ps.query()
-	        async def user(self) -> User: ...
+	QueryProperty is the return type of the ``@query`` decorator. It acts as a
+	descriptor that creates and manages query instances for each State object.
 
-	        @user.key
-	        def _user_key(self):
-	            return ("user", self.user_id)
+	When accessed on a State instance, returns a QueryResult with reactive
+	properties (data, status, error) and methods (refetch, invalidate, etc.).
+
+	Supports additional decorators for customization:
+		- ``@query_prop.key``: Define dynamic query key for sharing.
+		- ``@query_prop.initial_data``: Provide initial/placeholder data.
+		- ``@query_prop.on_success``: Handle successful fetch.
+		- ``@query_prop.on_error``: Handle fetch errors.
+
+	Example:
+
+	```python
+	class UserState(ps.State):
+	    user_id: str = ""
+
+	    @ps.query
+	    async def user(self) -> User:
+	        return await api.get_user(self.user_id)
+
+	    @user.key
+	    def _user_key(self):
+	        return ("user", self.user_id)
+
+	    @user.on_success
+	    def _on_user_loaded(self, data: User):
+	        print(f"Loaded user: {data.name}")
+	```
 	"""
 
 	name: str
@@ -924,7 +1053,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	_retry_delay: float
 	_initial_data_updated_at: float | dt.datetime | None
 	_enabled: bool
-	_initial_data: T | Callable[[TState], T] | None
+	_initial_data: T | Callable[[TState], T] | Missing | None
 	_key: QueryKey | Callable[[TState], QueryKey] | None
 	# Not using OnSuccessFn and OnErrorFn since unions of callables are not well
 	# supported in the type system. We just need to be careful to use
@@ -961,7 +1090,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		self._retries = retries
 		self._retry_delay = retry_delay
 		self._initial_data_updated_at = initial_data_updated_at
-		self._initial_data = MISSING  # pyright: ignore[reportAttributeAccessIssue]
+		self._initial_data = MISSING
 		self._enabled = enabled
 		self._fetch_on_mount = fetch_on_mount
 		self._priv_result = f"__query_{name}"
@@ -1016,13 +1145,13 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 
 		# Bind methods to this instance
 		fetch_fn = bind_state(state, self._fetch_fn)
-		initial_data = cast(
-			T | None,
-			(
-				call_flexible(self._initial_data, state)
-				if callable(self._initial_data)
-				else self._initial_data
-			),
+		raw_initial = (
+			call_flexible(self._initial_data, state)
+			if callable(self._initial_data)
+			else self._initial_data
+		)
+		initial_data = (
+			MISSING if raw_initial is MISSING else cast(T | None, raw_initial)
 		)
 
 		if self._key is None:
@@ -1050,7 +1179,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		self,
 		state: TState,
 		fetch_fn: Callable[[], Awaitable[T]],
-		initial_data: T | None,
+		initial_data: T | Missing | None,
 		initial_data_updated_at: float | dt.datetime | None,
 	) -> KeyedQueryResult[T]:
 		"""Create or get a keyed query from the session store."""
@@ -1105,7 +1234,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	def _create_unkeyed(
 		self,
 		fetch_fn: Callable[[], Awaitable[T]],
-		initial_data: T | None,
+		initial_data: T | Missing | None,
 		initial_data_updated_at: float | dt.datetime | None,
 		state: TState,
 	) -> UnkeyedQueryResult[T]:
@@ -1183,7 +1312,62 @@ def query(
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
 	key: QueryKey | None = None,
+) -> (
+	QueryProperty[T, TState]
+	| Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]
 ):
+	"""Decorator for async data fetching on State methods.
+
+	Creates a reactive query that automatically fetches data, handles loading
+	states, retries on failure, and caches results. Queries can be shared
+	across components using keys.
+
+	Args:
+		fn: The async method to decorate (when used without parentheses).
+		stale_time: Seconds before data is considered stale (default 0.0).
+		gc_time: Seconds to keep unused query in cache (default 300.0, None to disable).
+		refetch_interval: Auto-refetch interval in seconds (default None, disabled).
+		keep_previous_data: Keep previous data while loading (default False).
+		retries: Number of retry attempts on failure (default 3).
+		retry_delay: Delay between retries in seconds (default 2.0).
+		initial_data_updated_at: Timestamp for initial data staleness calculation.
+		enabled: Whether query is enabled (default True).
+		fetch_on_mount: Fetch when component mounts (default True).
+		key: Static query key for sharing across instances.
+
+	Returns:
+		QueryProperty that creates QueryResult instances when accessed.
+
+	Example:
+
+	Basic usage:
+
+	```python
+	class UserState(ps.State):
+	    user_id: str = ""
+
+	    @ps.query
+	    async def user(self) -> User:
+	        return await api.get_user(self.user_id)
+	```
+
+	With options:
+
+	```python
+	@ps.query(stale_time=60, refetch_interval=300)
+	async def user(self) -> User:
+	    return await api.get_user(self.user_id)
+	```
+
+	Keyed query (shared across instances):
+
+	```python
+	@ps.query(key=("users", "current"))
+	async def current_user(self) -> User:
+	    return await api.get_current_user()
+	```
+	"""
+
 	def decorator(
 		func: Callable[[TState], Awaitable[T]], /
 	) -> QueryProperty[T, TState]:

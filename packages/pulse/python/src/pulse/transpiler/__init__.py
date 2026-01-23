@@ -3,9 +3,22 @@
 # Ensure built-in Python modules (e.g., math) are registered on import.
 from pulse.transpiler import modules as _modules  # noqa: F401
 
+# Asset registry (unified for Import and DynamicImport)
+from pulse.transpiler.assets import LocalAsset as LocalAsset
+from pulse.transpiler.assets import clear_asset_registry as clear_asset_registry
+from pulse.transpiler.assets import get_registered_assets as get_registered_assets
+from pulse.transpiler.assets import register_local_asset as register_local_asset
+
 # Builtins
 from pulse.transpiler.builtins import BUILTINS as BUILTINS
 from pulse.transpiler.builtins import emit_method as emit_method
+
+# Dynamic import primitive
+from pulse.transpiler.dynamic_import import DynamicImport as DynamicImport
+from pulse.transpiler.dynamic_import import import_ as import_
+
+# Emit context
+from pulse.transpiler.emit_context import EmitContext as EmitContext
 
 # Errors
 from pulse.transpiler.errors import TranspileError as TranspileError
@@ -92,9 +105,6 @@ from pulse.transpiler.nodes import While as While
 
 # Emit
 from pulse.transpiler.nodes import emit as emit
-
-# React components (JSX imports with typed call signature)
-from pulse.transpiler.react_component import react_component as react_component
 
 # Transpiler
 from pulse.transpiler.transpiler import Transpiler as Transpiler

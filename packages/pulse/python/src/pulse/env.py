@@ -18,6 +18,13 @@ from typing import Literal
 
 # Types
 PulseEnv = Literal["dev", "ci", "prod"]
+"""Environment type for the Pulse application.
+
+Values:
+    "dev": Development environment with hot reload and debugging.
+    "ci": Continuous integration environment for testing.
+    "prod": Production environment with optimizations enabled.
+"""
 
 # Keys
 ENV_PULSE_ENV = "PULSE_ENV"
@@ -31,6 +38,28 @@ ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
 
 
 class EnvVars:
+	"""Singleton accessor for Pulse environment variables.
+
+	Provides typed getters and setters for all Pulse-related environment
+	variables. Access via the `env` singleton instance.
+
+	Example:
+		```python
+		from pulse.env import env
+
+		env.pulse_env = "prod"
+		if env.pulse_env == "dev":
+		    print(f"Running on {env.pulse_host}:{env.pulse_port}")
+		```
+
+	Attributes:
+		pulse_env: Current environment ("dev", "ci", "prod").
+		pulse_host: Server hostname. Defaults to "localhost".
+		pulse_port: Server port number. Defaults to 8000.
+		pulse_secret: Secret key for JWT session signing.
+		codegen_disabled: If True, skip code generation.
+	"""
+
 	def _get(self, key: str) -> str | None:
 		return os.environ.get(key)
 
@@ -117,8 +146,33 @@ class EnvVars:
 
 # Singleton
 env = EnvVars()
+"""Singleton instance for accessing Pulse environment variables.
+
+Example:
+    ```python
+    from pulse.env import env
+
+    env.pulse_env = "prod"
+    print(env.pulse_host)  # "localhost"
+    print(env.pulse_port)  # 8000
+    ```
+"""
 
 
-# Commonly used helpesr
-def mode():
+def mode() -> PulseEnv:
+	"""Returns the current pulse_env value.
+
+	Shorthand for `env.pulse_env`.
+
+	Returns:
+		The current environment: "dev", "ci", or "prod".
+
+	Example:
+		```python
+		from pulse.env import mode
+
+		if mode() == "dev":
+		    enable_debug_toolbar()
+		```
+	"""
 	return env.pulse_env

@@ -219,36 +219,38 @@ async def ensure_acm_certificate(
 	Returns the certificate ARN and DNS configuration instructions.
 	When a new certificate is created, DNS instructions are printed automatically.
 
-	    IMPORTANT: This function must run BEFORE deploying the baseline CloudFormation stack.
-	    AWS does not allow attaching a PENDING_VALIDATION certificate to an ALB listener -
-	    the certificate must be ISSUED first. This requires:
-	    1. Requesting the certificate (this function)
-	    2. Adding DNS validation records to your DNS provider
-	    3. Waiting 5-10 minutes for AWS to validate and issue the certificate
-	    4. Only then deploying the baseline stack with the certificate ARN
+	IMPORTANT: This function must run BEFORE deploying the baseline CloudFormation stack.
+	AWS does not allow attaching a PENDING_VALIDATION certificate to an ALB listener -
+	the certificate must be ISSUED first. This requires:
+	1. Requesting the certificate (this function)
+	2. Adding DNS validation records to your DNS provider
+	3. Waiting 5-10 minutes for AWS to validate and issue the certificate
+	4. Only then deploying the baseline stack with the certificate ARN
 
 	Args:
-	    domains: Domain name or list of domain names
-	    wait: Wait for the certificate to be ISSUED (not just PENDING_VALIDATION). Default: True.
-	        Requires DNS records to be added to your DNS provider first.
-	    poll_interval: How often to check certificate status (in seconds)
-	    timeout: If provided and `wait` is True, maximum seconds to wait for ISSUANCE.
-	        If not provided and `wait` is True, waits indefinitely for issuance.
+		domains: Domain name or list of domain names.
+		wait: Wait for the certificate to be ISSUED (not just PENDING_VALIDATION). Default: True.
+			Requires DNS records to be added to your DNS provider first.
+		poll_interval: How often to check certificate status (in seconds).
+		timeout: If provided and `wait` is True, maximum seconds to wait for ISSUANCE.
+			If not provided and `wait` is True, waits indefinitely for issuance.
+		announce: Print DNS instructions when creating a new certificate.
+		context: Optional deployment context to control reporting behaviour.
+		reporter: Optional reporter override (defaults to CLI/CI auto-detection).
 
-	    Example::
-
-	            cert = await ensure_acm_certificate(["api.example.com"])
-	            # Output:
-	            # 🔗 Configure DNS for api.example.com
-	            # ...
-	            #
-	            # Certificate ARN: arn:aws:acm:...
-	            #
-	            # Or wait for issuance:
-	            cert = await ensure_acm_certificate(["api.example.com"], wait=True)
-	            # (after DNS records are added)
-	    context: Optional deployment context to control reporting behaviour
-	    reporter: Optional reporter override (defaults to CLI/CI auto-detection)
+	Example:
+		```python
+		cert = await ensure_acm_certificate(["api.example.com"])
+		# Output:
+		# 🔗 Configure DNS for api.example.com
+		# ...
+		#
+		# Certificate ARN: arn:aws:acm:...
+		#
+		# Or wait for issuance:
+		cert = await ensure_acm_certificate(["api.example.com"], wait=True)
+		# (after DNS records are added)
+		```
 
 	"""
 	if not domains:

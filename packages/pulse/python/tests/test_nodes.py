@@ -5,6 +5,8 @@ This module tests the direct UI tree node generation that matches
 the TypeScript UIElementNode format.
 """
 
+import inspect
+import warnings
 from typing import Any
 
 import pytest
@@ -26,7 +28,9 @@ from pulse.dom.tags import (
 	style,
 	ul,
 )
-from pulse.transpiler.nodes import Element
+from pulse.react_component import react_component
+from pulse.transpiler.imports import Import
+from pulse.transpiler.nodes import Element, Node
 
 from .test_utils import assert_node_equal
 
@@ -406,6 +410,29 @@ class TestMissingKeyWarnings:
 		):
 			items = [span() for _ in range(3)]
 			MyComponent(items)
+
+	def test_react_component_warning_points_to_user_code(
+		self, monkeypatch: pytest.MonkeyPatch
+	):
+		"""React components warn with clean names at user callsites."""
+		monkeypatch.setenv("PULSE_ENV", "dev")
+
+		@react_component(Import("Stack", "@mantine/core"))
+		def Stack(*children: Node, key: str | None = None, **props: Any) -> Element: ...
+
+		with warnings.catch_warnings(record=True) as caught:
+			warnings.simplefilter("always")
+			line = inspect.currentframe().f_lineno + 1  # pyright: ignore[reportOptionalMemberAccess]
+			Stack([span(), span()])  # pyright: ignore[reportArgumentType]
+
+		assert len(caught) == 1
+		warn = caught[0]
+		assert (
+			"[Pulse] Iterable children of <Stack> contain elements without 'key'"
+			in str(warn.message)
+		)
+		assert warn.filename == __file__
+		assert warn.lineno == line
 
 	def test_component_sets_pulsenode_name(self):
 		"""Component name is stored on PulseNode for debugging."""

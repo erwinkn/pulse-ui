@@ -2,13 +2,16 @@
 JavaScript Math builtin module.
 
 Usage:
-    import pulse.js.math as Math
-    Math.PI           # -> Math.PI
-    Math.floor(3.7)   # -> Math.floor(3.7)
 
-    from pulse.js.math import PI, floor
-    PI                # -> Math.PI
-    floor(3.7)        # -> Math.floor(3.7)
+```python
+import pulse.js.math as Math
+Math.PI           # -> Math.PI
+Math.floor(3.7)   # -> Math.floor(3.7)
+
+from pulse.js.math import PI, floor
+PI                # -> Math.PI
+floor(3.7)        # -> Math.floor(3.7)
+```
 """
 
 from pulse.transpiler.js_module import JsModule

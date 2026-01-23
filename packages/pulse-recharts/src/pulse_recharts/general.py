@@ -12,7 +12,7 @@ import pulse as ps
 from pulse.dom.elements import GenericHTMLElement
 from pulse.dom.props import HTMLSVGProps
 
-from .common import DataKey
+from .common import Coordinate, DataKey
 
 T = TypeVar("T")
 
@@ -63,6 +63,39 @@ class PolarViewBoxRequired(TypedDict):
 
 ViewBox = CartesianViewBox | PolarViewBox
 ViewBoxRequired = CartesianViewBoxRequired | PolarViewBoxRequired
+
+
+class AllowInDimension(TypedDict, total=False):
+	x: bool
+	y: bool
+
+
+class SurfaceProps(TypedDict, total=False):
+	width: float | str
+	height: float | str
+	viewBox: str
+	className: str
+	style: ps.CSSProperties
+
+
+@ps.react_component(ps.Import("Surface", "recharts"))
+def Surface(
+	*children: ps.Node,
+	key: str | None = None,
+	**props: Unpack[SurfaceProps],
+): ...
+
+
+class LayerProps(ps.HTMLSVGProps[GenericHTMLElement], total=False):
+	className: str
+
+
+@ps.react_component(ps.Import("Layer", "recharts"))
+def Layer(
+	*children: ps.Node,
+	key: str | None = None,
+	**props: Unpack[LayerProps],
+): ...
 
 
 class ResponsiveContainerProps(ps.HTMLProps, total=False):
@@ -227,6 +260,23 @@ def Legend(
 ): ...
 
 
+class DefaultLegendContentProps(TypedDict, Generic[T], total=False):
+	payload: list[LegendPayload[T]]
+	layout: Literal["horizontal", "vertical"]
+	align: Literal["left", "center", "right"]
+	verticalAlign: Literal["top", "middle", "bottom"]
+	iconSize: float
+	iconType: LegendType
+	wrapperStyle: ps.CSSProperties
+
+
+@ps.react_component(ps.Import("DefaultLegendContent", "recharts"))
+def DefaultLegendContent(
+	key: str | None = None,
+	**props: Unpack[DefaultLegendContentProps[Any]],
+): ...
+
+
 AnimationEasing = Literal["ease", "ease-in", "ease-out", "ease-in-out", "linear"]
 
 
@@ -236,7 +286,7 @@ class TooltipProps(TypedDict, total=False):
 	separator: str
 	"""The separator between name and value. Default: ' : '"""
 
-	offset: int
+	offset: int | Coordinate
 	"""The offset size between the position of tooltip and the active position. Default: 10"""
 
 	filterNull: bool
@@ -263,16 +313,19 @@ class TooltipProps(TypedDict, total=False):
 	"""The box of viewing area, which has the shape of {x: someVal, y: someVal,
     width: someVal, height: someVal}, usually calculated internally."""
 
-	allowEscapeViewBox: Dimension
+	allowEscapeViewBox: AllowInDimension
 	"""This option allows the tooltip to extend beyond the viewBox of the chart itself. Default: { x: False, y: False }"""
 
 	active: bool
 	"""If set true, the tooltip is displayed. If set false, the tooltip is hidden, usually calculated internally. Default: False"""
 
-	position: dict[str, Any]
+	defaultIndex: int | str | None
+	"""If set, tooltip becomes active before user interaction."""
+
+	position: Coordinate | dict[str, Any]
 	"""If this field is set, the tooltip position will be fixed and will not move anymore."""
 
-	coordinate: dict[str, Any]
+	coordinate: Coordinate | dict[str, Any]
 	"""The coordinate of tooltip position, usually calculated internally. Default: { x: 0, y: 0 }"""
 
 	payload: list[Any]
@@ -281,16 +334,16 @@ class TooltipProps(TypedDict, total=False):
 	label: str | int
 	"""The label value which is active now, usually calculated internally."""
 
-	# content: Union[ps.Node, Callable]
+	content: ps.Element | ps.JsFunction[Any, ps.Element]
 	"""If set a React element, the option is the custom react element of rendering tooltip. If set a function, the function will be called to render tooltip content."""
 
-	# formatter: Callable[[Any, str, Any], Union[str, list[str]]]
+	formatter: ps.JsFunction[Any, Any]
 	"""The formatter function of value in tooltip."""
 
-	# labelFormatter: Callable[[Any], Any]
+	labelFormatter: ps.JsFunction[Any, Any]
 	"""The formatter function of label in tooltip."""
 
-	# itemSorter: Callable[[Any], int]
+	itemSorter: Literal["dataKey", "value", "name"] | ps.JsFunction[Any, Any]
 	"""Sort function of payload. Default: lambda: -1"""
 
 	shared: bool
@@ -298,7 +351,10 @@ class TooltipProps(TypedDict, total=False):
     false, tooltip will appear on individual bars. Currently only supported in
     BarChart and RadialBarChart. Default: True"""
 
-	isAnimationActive: bool
+	includeHidden: bool
+	"""If true, tooltip will display hidden series. Default: False"""
+
+	isAnimationActive: bool | Literal["auto"]
 	"""If set false, animation of tooltip will be disabled. Default: True in CSR, False in SSR"""
 
 	animationDuration: int
@@ -321,6 +377,11 @@ class TooltipProps(TypedDict, total=False):
 
     Tooltip will use the default axis for the layout, unless you specify an axisId."""
 
+	payloadUniqBy: Any
+	reverseDirection: AllowInDimension
+	portal: Any
+	useTranslate3d: bool
+
 
 @ps.react_component(ps.Import("Tooltip", "recharts"))
 def Tooltip(
@@ -329,7 +390,58 @@ def Tooltip(
 ): ...
 
 
-# TODO: Cell
+class DefaultTooltipContentProps(TypedDict, total=False):
+	separator: str
+	wrapperStyle: ps.CSSProperties
+	contentStyle: ps.CSSProperties
+	labelStyle: ps.CSSProperties
+	itemStyle: ps.CSSProperties
+	payload: list[Any]
+	label: str | int
+	formatter: ps.JsFunction[Any, Any]
+	labelFormatter: ps.JsFunction[Any, Any]
+
+
+@ps.react_component(ps.Import("DefaultTooltipContent", "recharts"))
+def DefaultTooltipContent(
+	key: str | None = None,
+	**props: Unpack[DefaultTooltipContentProps],
+): ...
+
+
+class CellProps(TypedDict, total=False):
+	fill: str
+	stroke: str
+	strokeWidth: float
+	className: str
+	name: str | int
+	value: str | int | float
+	payload: Any
+
+
+@ps.react_component(ps.Import("Cell", "recharts"))
+def Cell(key: str | None = None, **props: Unpack[CellProps]): ...
+
+
+class CustomizedProps(TypedDict, total=False):
+	component: ps.Element | ps.JsFunction[Any, ps.Element]
+
+
+@ps.react_component(ps.Import("Customized", "recharts"))
+def Customized(key: str | None = None, **props: Unpack[CustomizedProps]): ...
+
+
+class ZIndexLayerProps(TypedDict, total=False):
+	zIndex: int | None
+
+
+@ps.react_component(ps.Import("ZIndexLayer", "recharts"))
+def ZIndexLayer(
+	*children: ps.Node,
+	key: str | None = None,
+	**props: Unpack[ZIndexLayerProps],
+): ...
+
 
 TextAnchor = Literal["start", "middle", "end", "inherit"]
 VerticalAnchor = Literal["start", "middle", "end"]
@@ -455,13 +567,29 @@ def LabelList(
 # TODO: Customizezd
 
 __all__ = [
+	"Surface",
+	"SurfaceProps",
+	"Layer",
+	"LayerProps",
 	"ResponsiveContainer",
 	"ResponsiveContainerProps",
 	"Legend",
 	"LegendProps",
 	"LegendPayload",
+	"DefaultLegendContent",
+	"DefaultLegendContentProps",
 	"TooltipProps",
 	"Tooltip",
+	"DefaultTooltipContent",
+	"DefaultTooltipContentProps",
+	"Cell",
+	"CellProps",
+	"Customized",
+	"CustomizedProps",
+	"ZIndexLayer",
+	"ZIndexLayerProps",
+	"Text",
+	"TextProps",
 	"Label",
 	"LabelProps",
 	"LabelList",

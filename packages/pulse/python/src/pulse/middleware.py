@@ -9,25 +9,56 @@ from pulse.messages import (
 	ClientMessage,
 	Prerender,
 	PrerenderPayload,
-	ServerInitMessage,
 )
 from pulse.request import PulseRequest
-from pulse.routing import RouteInfo
 
 T = TypeVar("T")
 
 
 class Redirect:
+	"""Redirect response. Causes navigation to the specified path.
+
+	Attributes:
+		path: The path to redirect to.
+
+	Example:
+
+	```python
+	return ps.Redirect("/login")
+	```
+	"""
+
 	path: str
 
 	def __init__(self, path: str) -> None:
+		"""Initialize a redirect response.
+
+		Args:
+			path: The path to redirect to.
+		"""
 		self.path = path
 
 
-class NotFound: ...
+class NotFound:
+	"""Not found response. Returns 404."""
 
 
 class Ok(Generic[T]):
+	"""Success response wrapper.
+
+	Use ``Ok(None)`` for void success, or ``Ok(payload)`` to wrap a value.
+
+	Attributes:
+		payload: The wrapped success value.
+
+	Example:
+
+	```python
+	return ps.Ok(None)  # Allow request
+	return ps.Ok(prerender_result)  # Return with payload
+	```
+	"""
+
 	payload: T
 
 	@overload
@@ -35,22 +66,56 @@ class Ok(Generic[T]):
 	@overload
 	def __init__(self, payload: None = None) -> None: ...
 	def __init__(self, payload: T | None = None) -> None:
+		"""Initialize a success response.
+
+		Args:
+			payload: The success value (optional, defaults to None).
+		"""
 		self.payload = payload  # pyright: ignore[reportAttributeAccessIssue]
 
 
-class Deny: ...
+class Deny:
+	"""Denial response. Blocks the request."""
 
 
-RoutePrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
 PrerenderResponse = Ok[Prerender] | Redirect | NotFound
+"""Response type for batch prerender: ``Ok[Prerender] | Redirect | NotFound``."""
+
 ConnectResponse = Ok[None] | Deny
+"""Response type for WebSocket connection: ``Ok[None] | Deny``."""
 
 
 class PulseMiddleware:
-	"""Base middleware with pass-through defaults and short-circuiting.
+	"""Base middleware class with pass-through defaults.
 
-	Subclass and override any of the hooks. Mutate `context` to attach values
-	for later use. Return a decision to allow or short-circuit the flow.
+	Subclass and override hooks to implement custom behavior. Each hook receives
+	a ``next`` callable to continue the middleware chain.
+
+	Attributes:
+		dev: If True, middleware is only active in dev environments.
+
+	Example:
+
+	```python
+	class AuthMiddleware(ps.PulseMiddleware):
+	    async def prerender_route(
+	        self,
+	        *,
+	        path: str,
+	        request: ps.PulseRequest,
+	        route_info: ps.RouteInfo,
+	        session: dict[str, Any],
+	        next,
+	    ):
+	        if path.startswith("/admin") and not session.get("is_admin"):
+	            return ps.Redirect("/login")
+	        return await next()
+
+	    async def connect(self, *, request, session, next):
+	        if not session.get("user_id"):
+	            return ps.Deny()
+	        return await next()
+	```
 	"""
 
 	dev: bool
@@ -71,22 +136,11 @@ class PulseMiddleware:
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[PrerenderResponse]],
 	) -> PrerenderResponse:
-		"""Handle batch prerender at the top level.
+		"""Handle batch prerender for the full request.
 
-		Receives the full PrerenderPayload. Call next() to get the PrerenderResult
-		and can modify it (views and directives) before returning to the client.
+		Receives the full PrerenderPayload (all paths). Call next() to get the
+		Prerender result and can modify it (views and directives) before returning.
 		"""
-		return await next()
-
-	async def prerender_route(
-		self,
-		*,
-		path: str,
-		request: PulseRequest,
-		route_info: RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], Awaitable[RoutePrerenderResponse]],
-	) -> RoutePrerenderResponse:
 		return await next()
 
 	async def connect(
@@ -96,6 +150,16 @@ class PulseMiddleware:
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[ConnectResponse]],
 	) -> ConnectResponse:
+		"""Handle WebSocket connection establishment.
+
+		Args:
+			request: Normalized request object.
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain.
+
+		Returns:
+			``Ok[None]`` to allow, ``Deny`` to reject.
+		"""
 		return await next()
 
 	async def message(
@@ -107,7 +171,13 @@ class PulseMiddleware:
 	) -> Ok[None] | Deny:
 		"""Handle per-message authorization.
 
-		Return Deny() to block, Ok(None) to allow.
+		Args:
+			data: Client message data.
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain.
+
+		Returns:
+			``Ok[None]`` to allow, ``Deny`` to block.
 		"""
 		return await next()
 
@@ -121,17 +191,49 @@ class PulseMiddleware:
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[Ok[None]]],
 	) -> Ok[None] | Deny:
+		"""Handle channel message authorization.
+
+		Args:
+			channel_id: Channel identifier.
+			event: Event name.
+			payload: Event payload.
+			request_id: Request ID if awaiting response.
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain.
+
+		Returns:
+			``Ok[None]`` to allow, ``Deny`` to block.
+		"""
 		return await next()
 
 
 class MiddlewareStack(PulseMiddleware):
-	"""Composable stack of `PulseMiddleware` executed in order.
+	"""Composable stack of ``PulseMiddleware`` executed in order.
 
-	Each middleware receives a `next` callable that advances the chain. If a
-	middleware returns without calling `next`, the chain short-circuits.
+	Each middleware receives a ``next`` callable that advances the chain. If a
+	middleware returns without calling ``next``, the chain short-circuits.
+
+	Args:
+		middlewares: Sequence of middleware instances.
+
+	Example:
+
+	```python
+	app = ps.App(
+	    middleware=ps.stack(
+	        AuthMiddleware(),
+	        LoggingMiddleware(),
+	    )
+	)
+	```
 	"""
 
 	def __init__(self, middlewares: Sequence[PulseMiddleware]) -> None:
+		"""Initialize middleware stack.
+
+		Args:
+			middlewares: Sequence of middleware instances.
+		"""
 		super().__init__(dev=False)
 		# Filter out dev middlewares when not in dev environment
 		if env.pulse_env != "dev":
@@ -157,34 +259,6 @@ class MiddlewareStack(PulseMiddleware):
 
 			return await mw.prerender(
 				payload=payload,
-				request=request,
-				session=session,
-				next=_next,
-			)
-
-		return await dispatch(0)
-
-	@override
-	async def prerender_route(
-		self,
-		*,
-		path: str,
-		request: PulseRequest,
-		route_info: RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], Awaitable[RoutePrerenderResponse]],
-	) -> RoutePrerenderResponse:
-		async def dispatch(index: int) -> RoutePrerenderResponse:
-			if index >= len(self._middlewares):
-				return await next()
-			mw = self._middlewares[index]
-
-			async def _next() -> RoutePrerenderResponse:
-				return await dispatch(index + 1)
-
-			return await mw.prerender_route(
-				path=path,
-				route_info=route_info,
 				request=request,
 				session=session,
 				next=_next,
@@ -276,10 +350,26 @@ class MiddlewareStack(PulseMiddleware):
 
 
 def stack(*middlewares: PulseMiddleware) -> PulseMiddleware:
-	"""Helper to build a middleware stack in code.
+	"""Compose multiple middlewares into a single middleware stack.
 
-	Example: `app = App(..., middleware=stack(Auth(), Logging()))`
-	Prefer passing a `list`/`tuple` to `App` directly.
+	Args:
+		*middlewares: Middleware instances to compose.
+
+	Returns:
+		``MiddlewareStack`` instance.
+
+	Example:
+
+	```python
+	import pulse as ps
+
+	app = ps.App(
+	    middleware=ps.stack(
+	        AuthMiddleware(),
+	        LoggingMiddleware(),
+	    )
+	)
+	```
 	"""
 	return MiddlewareStack(list(middlewares))
 
@@ -302,7 +392,6 @@ class LatencyMiddleware(PulseMiddleware):
 	"""
 
 	prerender_ms: float
-	prerender_route_ms: float
 	connect_ms: float
 	message_ms: float
 	channel_ms: float
@@ -311,7 +400,6 @@ class LatencyMiddleware(PulseMiddleware):
 		self,
 		*,
 		prerender_ms: float = 80.0,
-		prerender_route_ms: float = 60.0,
 		connect_ms: float = 40.0,
 		message_ms: float = 25.0,
 		channel_ms: float = 20.0,
@@ -320,15 +408,12 @@ class LatencyMiddleware(PulseMiddleware):
 
 		Args:
 			prerender_ms: Latency for batch prerender requests (HTTP). Default: 80ms
-			prerender_route_ms: Latency for individual route prerenders. Default: 60ms
 			connect_ms: Latency for WebSocket connections. Default: 40ms
 			message_ms: Latency for WebSocket messages (including API calls). Default: 25ms
 			channel_ms: Latency for channel messages. Default: 20ms
-			dev: If True, only active in dev environments. Default: True
 		"""
 		super().__init__(dev=True)
 		self.prerender_ms = prerender_ms
-		self.prerender_route_ms = prerender_route_ms
 		self.connect_ms = connect_ms
 		self.message_ms = message_ms
 		self.channel_ms = channel_ms
@@ -344,20 +429,6 @@ class LatencyMiddleware(PulseMiddleware):
 	) -> PrerenderResponse:
 		if self.prerender_ms > 0:
 			await asyncio.sleep(self.prerender_ms / 1000.0)
-		return await next()
-
-	@override
-	async def prerender_route(
-		self,
-		*,
-		path: str,
-		request: PulseRequest,
-		route_info: RouteInfo,
-		session: dict[str, Any],
-		next: Callable[[], Awaitable[RoutePrerenderResponse]],
-	) -> RoutePrerenderResponse:
-		if self.prerender_route_ms > 0:
-			await asyncio.sleep(self.prerender_route_ms / 1000.0)
 		return await next()
 
 	@override

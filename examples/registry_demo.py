@@ -25,7 +25,7 @@ from pulse.transpiler.imports import Import
 #   __registry["styles_abc123"] = styles_abc123;
 #
 # Then styles.card emits: get_object('styles_abc123').card
-styles = ps.CssImport("./registry-demo.module.css", module=True, relative=True)
+styles = ps.Import("./registry-demo.module.css")
 
 # =============================================================================
 # 2. Import JS utilities for use in JSExpr

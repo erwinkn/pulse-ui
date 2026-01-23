@@ -1,0 +1,710 @@
+---
+title: "Types"
+description: "TypeScript type definitions for pulse-ui-client"
+---
+
+# Types
+
+TypeScript type definitions exported by `pulse-ui-client`.
+
+---
+
+## Configuration Types
+
+### PulseConfig
+
+Configuration for the Pulse client.
+
+```ts
+interface PulseConfig {
+  serverAddress: string;
+  connectionStatus: ConnectionStatusConfig;
+}
+```
+
+### ConnectionStatusConfig
+
+Controls connection status display timing.
+
+```ts
+interface ConnectionStatusConfig {
+  initialConnectingDelay: number;
+  initialErrorDelay: number;
+  reconnectErrorDelay: number;
+}
+```
+
+### PulseProviderProps
+
+Props for the `PulseProvider` component.
+
+```ts
+interface PulseProviderProps {
+  children: ReactNode;
+  config: PulseConfig;
+  prerender: PulsePrerender;
+}
+```
+
+### PulsePrerender
+
+Server-side prerender data.
+
+```ts
+interface PulsePrerender {
+  views: Record<string, PulsePrerenderView>;
+  directives: Directives;
+}
+
+interface PulsePrerenderView {
+  vdom: VDOM;
+}
+```
+
+### Directives
+
+Connection directives for authentication and headers.
+
+```ts
+interface Directives {
+  headers?: Record<string, string>;
+  socketio?: SocketIODirectives;
+}
+
+interface SocketIODirectives {
+  headers?: Record<string, string>;
+  auth?: Record<string, string>;
+}
+```
+
+---
+
+## Component Props
+
+### PulseFormProps
+
+Props for the `PulseForm` component.
+
+```ts
+interface PulseFormProps extends ComponentPropsWithoutRef<"form"> {
+  action: string;
+}
+```
+
+---
+
+## Route Types
+
+### RouteInfo
+
+Route information extracted from the current URL.
+
+```ts
+interface RouteInfo {
+  pathname: string;
+  hash: string;
+  query: string;
+  queryParams: Record<string, string>;
+  pathParams: Record<string, string | undefined>;
+  catchall: string[];
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `pathname` | URL path (e.g., `/users/123`) |
+| `hash` | URL hash including `#` (e.g., `#section`) |
+| `query` | Query string including `?` (e.g., `?page=1`) |
+| `queryParams` | Parsed query parameters |
+| `pathParams` | Route parameters from path |
+| `catchall` | Segments from catch-all route (`/*`) |
+
+---
+
+## VDOM Types
+
+### VDOM
+
+Root VDOM type, alias for `VDOMNode`.
+
+```ts
+type VDOM = VDOMNode;
+```
+
+### VDOMNode
+
+A node in the VDOM tree.
+
+```ts
+type VDOMNode = JsonPrimitive | VDOMElement | VDOMExpr;
+```
+
+### VDOMElement
+
+An element in the VDOM tree.
+
+```ts
+interface VDOMElement {
+  tag: string;
+  key?: string;
+  props?: Record<string, VDOMPropValue>;
+  children?: VDOMNode[];
+  eval?: string[];  // Props that need evaluation
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `tag` | Element tag name or `$$ComponentName` for mount points |
+| `key` | React key for reconciliation |
+| `props` | Element properties |
+| `children` | Child nodes |
+| `eval` | Property names that contain expressions or callbacks |
+
+### VDOMPropValue
+
+A property value in a VDOM element.
+
+```ts
+type VDOMPropValue = JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder;
+
+type CallbackPlaceholder = "$cb";
+```
+
+### VDOMExpr
+
+Expression types for client-side evaluation.
+
+```ts
+type VDOMExpr =
+  | RegistryRefExpr
+  | IdentifierExpr
+  | LiteralExpr
+  | UndefinedExpr
+  | ArrayExpr
+  | ObjectExpr
+  | MemberExpr
+  | SubscriptExpr
+  | CallExpr
+  | UnaryExpr
+  | BinaryExpr
+  | TernaryExpr
+  | TemplateExpr
+  | ArrowExpr
+  | NewExpr;
+```
+
+#### Expression Types
+
+```ts
+interface RegistryRefExpr {
+  t: "ref";
+  key: string;  // Registry component key
+}
+
+interface IdentifierExpr {
+  t: "id";
+  name: string;  // Global identifier
+}
+
+interface LiteralExpr {
+  t: "lit";
+  value: JsonPrimitive;
+}
+
+interface UndefinedExpr {
+  t: "undef";
+}
+
+interface ArrayExpr {
+  t: "array";
+  items: VDOMNode[];
+}
+
+interface ObjectExpr {
+  t: "object";
+  props: Record<string, VDOMNode>;
+}
+
+interface MemberExpr {
+  t: "member";
+  obj: VDOMNode;
+  prop: string;
+}
+
+interface SubscriptExpr {
+  t: "sub";
+  obj: VDOMNode;
+  key: VDOMNode;
+}
+
+interface CallExpr {
+  t: "call";
+  callee: VDOMNode;
+  args: VDOMNode[];
+}
+
+interface UnaryExpr {
+  t: "unary";
+  op: string;  // "!", "+", "-", "typeof", "void"
+  arg: VDOMNode;
+}
+
+interface BinaryExpr {
+  t: "binary";
+  op: string;  // "+", "-", "*", "/", "%", "&&", "||", "??", etc.
+  left: VDOMNode;
+  right: VDOMNode;
+}
+
+interface TernaryExpr {
+  t: "ternary";
+  cond: VDOMNode;
+  then: VDOMNode;
+  else_: VDOMNode;
+}
+
+interface TemplateExpr {
+  t: "template";
+  parts: Array<string | VDOMNode>;
+}
+
+interface ArrowExpr {
+  t: "arrow";
+  params: string[];
+  body: VDOMNode;
+}
+
+interface NewExpr {
+  t: "new";
+  ctor: VDOMNode;
+  args: VDOMNode[];
+}
+```
+
+### ComponentRegistry
+
+Maps component keys to React components.
+
+```ts
+type ComponentRegistry = Record<string, unknown>;
+```
+
+---
+
+## Update Types
+
+### VDOMUpdate
+
+A VDOM update operation from the server.
+
+```ts
+type VDOMUpdate = ReplaceUpdate | UpdatePropsUpdate | ReconciliationUpdate;
+```
+
+### ReplaceUpdate
+
+Replaces a subtree entirely.
+
+```ts
+interface ReplaceUpdate {
+  type: "replace";
+  path: string;
+  data: VDOM;
+}
+```
+
+### UpdatePropsUpdate
+
+Updates specific props on an element.
+
+```ts
+interface UpdatePropsUpdate {
+  type: "update_props";
+  path: string;
+  data: {
+    set?: Record<string, VDOMPropValue>;
+    remove?: string[];
+    eval?: string[];  // Updated eval keys
+  };
+}
+```
+
+### ReconciliationUpdate
+
+Reconciles a list of children (add, remove, reorder).
+
+```ts
+interface ReconciliationUpdate {
+  type: "reconciliation";
+  path: string;
+  N: number;  // New child count
+  new: [number[], VDOM[]];    // [indices, contents] for new items
+  reuse: [number[], number[]]; // [newIndices, oldIndices] for reused items
+}
+```
+
+---
+
+## Message Types
+
+Messages sent between client and server over WebSocket.
+
+### Client Messages
+
+```ts
+type ClientMessage =
+  | ClientAttachMessage
+  | ClientCallbackMessage
+  | ClientUpdateMessage
+  | ClientDetachMessage
+  | ClientApiResultMessage
+  | ClientChannelRequestMessage
+  | ClientChannelResponseMessage;
+```
+
+#### ClientAttachMessage
+
+Attaches to a view path.
+
+```ts
+interface ClientAttachMessage {
+  type: "attach";
+  path: string;
+  routeInfo: RouteInfo;
+}
+```
+
+#### ClientCallbackMessage
+
+Invokes a server callback.
+
+```ts
+interface ClientCallbackMessage {
+  type: "callback";
+  path: string;
+  callback: string;
+  args: any[];
+}
+```
+
+#### ClientUpdateMessage
+
+Updates route info for an attached path.
+
+```ts
+interface ClientUpdateMessage {
+  type: "update";
+  path: string;
+  routeInfo: RouteInfo;
+}
+```
+
+#### ClientDetachMessage
+
+Detaches from a view path.
+
+```ts
+interface ClientDetachMessage {
+  type: "detach";
+  path: string;
+}
+```
+
+#### ClientApiResultMessage
+
+Result of an API call requested by the server.
+
+```ts
+interface ClientApiResultMessage {
+  type: "api_result";
+  id: string;
+  ok: boolean;
+  status: number;
+  headers: Record<string, string>;
+  body: any | null;
+}
+```
+
+#### ClientChannelRequestMessage
+
+Channel event sent to server.
+
+```ts
+interface ClientChannelRequestMessage {
+  type: "channel_message";
+  channel: string;
+  event: string;
+  payload?: any;
+  requestId?: string;
+}
+```
+
+#### ClientChannelResponseMessage
+
+Response to a server channel request.
+
+```ts
+interface ClientChannelResponseMessage {
+  type: "channel_message";
+  channel: string;
+  responseTo: string;
+  payload?: any;
+  error?: any;
+}
+```
+
+### Server Messages
+
+```ts
+type ServerMessage =
+  | ServerInitMessage
+  | ServerUpdateMessage
+  | ServerErrorMessage
+  | ServerApiCallMessage
+  | ServerNavigateToMessage
+  | ServerChannelRequestMessage
+  | ServerChannelResponseMessage;
+```
+
+#### ServerInitMessage
+
+Initial VDOM for a view.
+
+```ts
+interface ServerInitMessage {
+  type: "vdom_init";
+  path: string;
+  vdom: VDOM;
+}
+```
+
+#### ServerUpdateMessage
+
+VDOM updates.
+
+```ts
+interface ServerUpdateMessage {
+  type: "vdom_update";
+  path: string;
+  ops: VDOMUpdate[];
+}
+```
+
+#### ServerErrorMessage
+
+Server error information.
+
+```ts
+interface ServerErrorMessage {
+  type: "server_error";
+  path: string;
+  error: ServerError;
+}
+
+interface ServerError {
+  message: string;
+  stack?: string;
+  phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
+  details?: Record<string, any>;
+}
+```
+
+#### ServerApiCallMessage
+
+Request to make an API call from the browser.
+
+```ts
+interface ServerApiCallMessage {
+  type: "api_call";
+  id: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: any | null;
+  credentials: "include" | "omit";
+}
+```
+
+#### ServerNavigateToMessage
+
+Navigation instruction.
+
+```ts
+interface ServerNavigateToMessage {
+  type: "navigate_to";
+  path: string;
+  replace: boolean;
+  hard: boolean;
+}
+```
+
+#### ServerChannelRequestMessage
+
+Channel event from server.
+
+```ts
+interface ServerChannelRequestMessage {
+  type: "channel_message";
+  channel: string;
+  event: string;
+  payload?: any;
+  requestId?: string;
+}
+```
+
+#### ServerChannelResponseMessage
+
+Response to a client channel request.
+
+```ts
+interface ServerChannelResponseMessage {
+  type: "channel_message";
+  channel: string;
+  responseTo: string;
+  payload?: any;
+  error?: any;
+}
+```
+
+---
+
+## Client Types
+
+### PulseClient
+
+Interface for the Pulse client.
+
+```ts
+interface PulseClient {
+  connect(): Promise<void>;
+  disconnect(): void;
+  isConnected(): boolean;
+  onConnectionChange(listener: ConnectionStatusListener): () => void;
+  updateRoute(path: string, routeInfo: RouteInfo): void;
+  invokeCallback(path: string, callback: string, args: any[]): void;
+  attach(path: string, view: MountedView): void;
+  detach(path: string): void;
+}
+```
+
+### ConnectionStatus
+
+Connection state.
+
+```ts
+type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
+```
+
+### ConnectionStatusListener
+
+Callback for connection status changes.
+
+```ts
+type ConnectionStatusListener = (status: ConnectionStatus) => void;
+```
+
+### MountedView
+
+Callbacks for a mounted view.
+
+```ts
+interface MountedView {
+  routeInfo: RouteInfo;
+  onInit: (view: PulsePrerenderView) => void;
+  onUpdate: (ops: VDOMUpdate[]) => void;
+  onJsExec: (msg: ServerJsExecMessage) => void;
+  onServerError: (error: ServerError) => void;
+}
+```
+
+---
+
+## Transport Types
+
+### Transport
+
+Interface for message transport.
+
+```ts
+interface Transport {
+  connect(listener: MessageListener): Promise<void>;
+  disconnect(): void;
+  sendMessage(payload: ClientMessage): Promise<void>;
+  isConnected(): boolean;
+  onConnectionChange(listener: ConnectionStatusListener): () => void;
+}
+```
+
+### MessageListener
+
+Callback for server messages.
+
+```ts
+type MessageListener = (message: ServerMessage) => void;
+```
+
+---
+
+## Serialization Types
+
+### Serialized
+
+Wire format for serialized data.
+
+```ts
+type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+```
+
+### PlainJSON
+
+JSON-compatible value.
+
+```ts
+type JsonPrimitive = string | number | boolean | null;
+type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue };
+type PlainJSON = JsonValue;
+```
+
+### DeserializationOptions
+
+Options for deserialization.
+
+```ts
+interface DeserializationOptions {
+  coerceNullsToUndefined?: boolean;
+}
+```
+
+---
+
+## Channel Types
+
+### ChannelBridge
+
+Type for the channel bridge class.
+
+```ts
+interface ChannelBridge {
+  readonly id: string;
+  emit(event: string, payload?: any): void;
+  request(event: string, payload?: any): Promise<any>;
+  on(event: string, handler: ChannelEventHandler): () => void;
+}
+```
+
+### ChannelEventHandler
+
+Handler for channel events.
+
+```ts
+type ChannelEventHandler = (payload: any) => any | Promise<any>;
+```
+
+---
+
+## See Also
+
+- [Components](/docs/reference/pulse-client/components) - Component documentation
+- [Hooks](/docs/reference/pulse-client/hooks) - Hook documentation
+- [Serialization](/docs/reference/pulse-client/serialization) - Wire format details

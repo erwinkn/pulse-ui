@@ -87,8 +87,7 @@ class TestJavascriptDecorator:
 
 		fn = quadruple.transpile()
 		code = emit(fn)
-		assert "function quadruple_2" in code
-		assert "double_1" in code  # Reference uses js_name
+		assert code == "function quadruple_2(x) {\nreturn double_1(double_1(x));\n}"
 
 	def test_closure_variables(self):
 		"""Test that closure variables are captured as deps."""

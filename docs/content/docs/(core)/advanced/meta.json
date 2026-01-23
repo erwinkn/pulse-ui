@@ -1,0 +1,9 @@
+{
+  "title": "Advanced",
+  "pages": [
+    "channels",
+    "js-interop",
+    "custom-hooks",
+    "middleware"
+  ]
+}

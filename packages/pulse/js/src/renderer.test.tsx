@@ -183,6 +183,27 @@ describe("VDOMRenderer", () => {
 		expect((el.props as any).items).toEqual([1, 2, 3]);
 	});
 
+	it("evaluates expression tags", () => {
+		const Header = (_props: { children?: React.ReactNode }) => null;
+		const { renderer } = makeRenderer({
+			AppShell: { Header },
+		});
+		const tree = renderer.renderNode({
+			tag: {
+				t: "member",
+				obj: { t: "ref", key: "AppShell" },
+				prop: "Header",
+			},
+			children: ["A"],
+		});
+		const el = tree as React.ReactElement;
+		expect(el.type).toBe(Header);
+		const kids = childrenArray(el);
+		expect(kids).toHaveLength(1);
+		expect(kids[0]).toBe("A");
+	});
+
+
 	it("rebinds callbacks after reconciliation moves (no callback registry)", () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		const initialVDOM: VDOMNode = {

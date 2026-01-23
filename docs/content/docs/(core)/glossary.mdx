@@ -1,0 +1,256 @@
+---
+title: Glossary
+description: Technical terms explained for Python developers
+---
+
+Quick reference for web and React concepts you'll encounter in Pulse. Organized by topic.
+
+## Rendering
+
+**DOM (Document Object Model)**
+The browser's tree representation of an HTML page. JavaScript frameworks manipulate the DOM to update what users see.
+
+**Virtual DOM (VDOM)**
+A lightweight in-memory representation of the UI. Instead of manipulating the browser's DOM directly, frameworks build this virtual tree, compare it to the previous version, and apply only the necessary changes. In Pulse, the VDOM lives on the server in Python.
+
+**Rendering**
+The process of executing component functions to produce UI output. In Pulse, rendering happens on the server—your Python components run and produce VDOM that gets sent to the browser.
+
+**Re-rendering**
+When state changes, affected components re-execute to produce new VDOM. Pulse compares old and new VDOM and sends only the differences to the browser.
+
+**Diffing**
+The algorithm that compares old and new VDOM to find minimal changes. This is why reactive frameworks are efficient—they update only what actually changed.
+
+**Hydration**
+The process of making a server-rendered page interactive. The browser receives HTML/VDOM and React "hydrates" it by attaching event listeners and making it respond to user input.
+
+**Server-side Rendering (SSR)**
+Generating HTML on the server rather than in the browser. Pulse takes this further—not just initial render, but all UI updates happen server-side.
+
+## Reactivity
+
+**Reactivity**
+A programming model where the UI automatically updates when underlying data changes. You declare relationships between data and UI, and the framework handles synchronization.
+
+**Reactive Field**
+A variable that the framework watches for changes. When it changes, any UI that depends on it automatically updates.
+
+**Dependency Tracking**
+The framework's system for knowing which UI depends on which data. When data changes, only the dependent parts re-render.
+
+**Computed Value**
+A derived value that's cached and only recalculates when its dependencies change. Like a spreadsheet cell with a formula.
+
+**Effect / Side Effect**
+Code that runs in response to state changes but doesn't produce UI—like logging, API calls, or setting up subscriptions. Effects often need cleanup when the component unmounts.
+
+**Batching**
+Grouping multiple state updates into a single re-render. Without batching, changing three variables would cause three separate re-renders.
+
+**Untracking**
+Reading reactive data without creating a dependency. The component won't re-render when that value changes—useful for "read once" scenarios.
+
+## Component Model
+
+**Component**
+A reusable, self-contained piece of UI. Components accept inputs (props), manage their own state, and return UI elements. They compose together to form complex interfaces.
+
+**Props (Properties)**
+Inputs passed to a component from its parent. Props flow down the component tree and are read-only within the component.
+
+**Children**
+Content nested inside a component. When you write `<Button>Click me</Button>`, "Click me" is the child content.
+
+**Component Tree**
+The hierarchical structure of nested components. The root component contains children, which contain their own children, forming a tree.
+
+**Mounting**
+When a component first appears in the UI. Initialization code runs, effects execute, and the component becomes visible.
+
+**Unmounting**
+When a component is removed from the UI. Cleanup code runs—subscriptions are cancelled, timers cleared, resources released.
+
+**Component Lifecycle**
+The stages a component goes through: mount → update (re-render) → unmount. Different code can run at each stage.
+
+## Hooks
+
+**Hook**
+A function that lets components "hook into" framework features like state, effects, or context. Hooks maintain identity across re-renders—calling the same hook returns the same underlying data.
+
+**Initialization Hook**
+A hook that runs setup code only on first render and returns the same value on subsequent renders. Essential for creating objects that persist across re-renders.
+
+**Stable Reference**
+A value (often a callback function) that maintains the same identity across re-renders. Important for performance—child components won't re-render unnecessarily if their props haven't actually changed.
+
+**Cleanup Function**
+A function returned from an effect that runs before the effect re-executes or when the component unmounts. Used to cancel subscriptions, clear timers, or release resources.
+
+## Keys & Identity
+
+**Key**
+A unique identifier for items in a list. Keys help the framework track which items changed, moved, or were added/removed. Without keys, reordering a list might cause unexpected behavior.
+
+**Reconciliation**
+The process of matching old and new VDOM to determine what changed. Keys are critical for correct reconciliation of lists.
+
+**Late Binding**
+A Python behavior where closures capture variable references, not values. In loops, this means all closures might reference the final loop value. Pulse's list helpers prevent this common bug.
+
+## Events
+
+**Event Handler**
+A function that runs when a user interacts with the UI—clicking a button, typing in an input, submitting a form. In Pulse, event handlers execute on the server.
+
+**Event Payload**
+Data sent with an event—the input's current value, mouse coordinates, which key was pressed. Pulse automatically captures and sends relevant event data.
+
+**Synthetic Event**
+A framework's wrapper around native browser events that normalizes behavior across browsers and adds features.
+
+**Event Bubbling**
+When an event on a child element "bubbles up" through parent elements. Clicking a button inside a div triggers handlers on both.
+
+## Data Fetching
+
+**Query**
+A declarative way to fetch and cache data. You define what data you need, and the framework handles loading states, caching, refetching, and error handling.
+
+**Mutation**
+An operation that changes server-side data (create, update, delete). Unlike queries, mutations are triggered explicitly and often invalidate cached queries.
+
+**Loading State**
+UI feedback while data is being fetched. Good UX shows skeletons, spinners, or placeholders instead of blank screens.
+
+**Stale Data**
+Cached data that might be outdated. Frameworks can show stale data immediately while refetching fresh data in the background.
+
+**Cache Invalidation**
+Marking cached data as outdated so it gets refetched. Typically done after mutations that affect the cached data.
+
+**Optimistic Update**
+Updating the UI immediately before the server confirms success. Makes the app feel instant. If the server request fails, the UI rolls back.
+
+**Refetching**
+Re-executing a query to get fresh data. Can be triggered manually or automatically (on focus, on interval, when dependencies change).
+
+## Routing
+
+**Route**
+A mapping between a URL path and a component. When the URL matches, that component renders.
+
+**Client-side Routing**
+Navigation that happens in the browser without full page reloads. JavaScript intercepts link clicks, updates the URL, and swaps components.
+
+**Layout**
+A component that wraps multiple routes with shared UI—headers, sidebars, footers. Child routes render inside the layout.
+
+**Nested Routes**
+Routes within routes, creating hierarchical URLs. `/dashboard/settings/profile` might be three nested route components.
+
+**Outlet**
+A placeholder in a layout where child route content renders. The layout defines the shell, the outlet shows route-specific content.
+
+**Path Parameters**
+Dynamic URL segments like `/users/:id`. The `:id` part matches any value and is accessible in the component.
+
+**Query Parameters**
+Key-value pairs in the URL after `?`, like `?page=2&sort=name`. Used for filters, pagination, and other optional state.
+
+**Navigation**
+Programmatically changing the URL and rendering a different route. Can be client-side (no page reload) or a full redirect.
+
+## Sessions & State Persistence
+
+**Session**
+Server-side storage associated with a user, persisting across page loads and reconnections. Used for authentication state, user preferences, shopping carts.
+
+**Session ID**
+A unique identifier linking a browser to server-side session data. Usually stored in a cookie.
+
+**Render Session**
+In Pulse, an isolated execution context per browser tab. Each tab has its own component instances and state—refreshing a tab resets its render session.
+
+## Real-time Communication
+
+**WebSocket**
+A persistent, bidirectional connection between browser and server. Unlike HTTP request/response, either side can send messages anytime. Pulse uses WebSockets for all UI updates.
+
+**Channel**
+A named communication pathway for real-time features. Components can emit events to channels and listen for events from them.
+
+**Emit**
+Sending a message/event through a channel (fire-and-forget). The sender doesn't wait for a response.
+
+**Subscribe / Listen**
+Registering to receive messages on a channel. When events arrive, your handler function runs.
+
+**Broadcast**
+Sending a message to all connected clients, not just one. Used for features like live notifications or collaborative editing.
+
+## JavaScript Interop
+
+**Transpilation**
+Converting code from one language to another. Pulse can transpile Python to JavaScript for code that needs to run in the browser.
+
+**JSX**
+A syntax extension for JavaScript that looks like HTML. React uses JSX to describe UI. When Pulse transpiles Python with JSX enabled, it produces JSX output.
+
+**Interop (Interoperability)**
+The ability for different systems to work together. JS interop in Pulse means calling JavaScript from Python or using React components in Pulse apps.
+
+**React Component Wrapping**
+Taking an existing React/npm component and making it usable from Python. The wrapper handles prop conversion and event bridging.
+
+## Forms
+
+**Form Submission**
+When a user submits form data to the server. Can be traditional (full page reload) or handled by JavaScript (no reload).
+
+**FormData**
+The collection of field names and values from a submitted form.
+
+**File Upload**
+Sending binary file data from browser to server. Requires special handling—multipart encoding, progress tracking, size limits.
+
+**Controlled Input**
+An input whose value is controlled by state. Every keystroke updates state, which updates the input. Enables real-time validation and formatting.
+
+**Uncontrolled Input**
+An input that manages its own value internally. You read the value on submit rather than tracking every change.
+
+**CSRF (Cross-Site Request Forgery)**
+An attack where a malicious site tricks a user's browser into submitting forms to your site. Prevented with tokens that prove the form came from your site.
+
+## Scheduling
+
+**Timer Handle**
+A reference to a scheduled callback. Call `.cancel()` to prevent it from running. Pulse's `later()` and `repeat()` return handles.
+
+**Task Registry**
+Pulse's internal tracker for asyncio tasks. Tasks created through Pulse's scheduling functions are automatically tracked and cancelled when the render session closes.
+
+**Timer Registry**
+Pulse's internal tracker for scheduled callbacks. Timers created through `later()` and `repeat()` are automatically tracked and cancelled when the render session closes.
+
+**Debouncing**
+Delaying an action until a pause in events. Common for search-as-you-type: wait until the user stops typing before searching. Implemented with `later()` and cancelling previous timers.
+
+**Polling**
+Repeatedly fetching data at fixed intervals. Implemented with `repeat()` for simple cases, or queries with `refetch_interval` for cached data.
+
+## Architecture
+
+**Middleware**
+Code that runs before/after the main request handler. Used for authentication, logging, error handling, or modifying requests/responses.
+
+**Context**
+A way to pass data through the component tree without explicitly passing props at every level. Useful for themes, user data, or other "global" state.
+
+**Server-driven UI**
+An architecture where the server controls what the UI shows. The client is a thin renderer. Pulse is server-driven—Python code on the server determines the UI.
+
+**Serialization**
+Converting data structures to a format that can be transmitted (like JSON). Pulse serializes VDOM on the server and deserializes it in the browser.

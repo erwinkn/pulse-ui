@@ -1,0 +1,21 @@
+{
+  "title": "Core",
+  "description": "State, components, routing, and hooks",
+  "icon": "BookOpen",
+  "root": true,
+  "pages": [
+    "---Introduction---",
+    "index",
+    "setup",
+    "tutorial",
+    "mental-model",
+    "glossary",
+    "---Concepts---",
+    "...concepts",
+    "advanced",
+    "---Cookbook---",
+    "...cookbook",
+    "---Resources---",
+    "skills"
+  ]
+}

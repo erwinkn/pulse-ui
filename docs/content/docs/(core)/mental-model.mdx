@@ -1,0 +1,130 @@
+---
+title: "Mental Model"
+---
+
+To use Pulse effectively, it helps to understand what's happening behind the scenes. Pulse is a **server-driven UI** framework—your Python code runs on the server and controls what the user sees in their browser.
+
+## From Python to browser
+
+When you write Pulse code, you're describing what the UI should look like:
+
+```python
+ps.div(className="card")[
+    ps.h1("Hello"),
+    ps.button("Click me", onClick=handle_click),
+]
+```
+
+This doesn't create actual HTML directly. Instead, Pulse:
+
+1. **Builds a description** — `ps.div()`, `ps.button()`, etc. create lightweight Python objects that describe the UI structure
+2. **Serializes it to JSON** — That description is converted to a format the browser understands
+3. **Sends it over WebSocket** — The JSON travels to a React application running in the browser
+4. **React renders the actual DOM** — The browser displays real HTML elements based on your Python description
+
+You never write HTML, CSS, or JavaScript directly. You describe your UI in Python, and Pulse handles the translation.
+
+## The render cycle
+
+Here's the core loop of every Pulse application:
+
+```
+State -> Render -> User interaction -> State update -> Re-render -> ...
+```
+
+In detail:
+
+1. **Your component runs** — Python executes your component function and builds a UI description
+2. **Pulse computes changes** — Rather than sending the entire UI every time, Pulse compares what's new against what's currently displayed and sends only the differences
+3. **User interacts** — When someone clicks a button or types in an input, that event travels back to your Python code over WebSocket
+4. **State updates trigger re-render** — Your event handler updates state, Pulse re-runs your component, computes new changes, and the cycle continues
+
+This "diff and patch" approach is borrowed from React. It keeps updates fast even for complex UIs.
+
+## Sessions and isolation
+
+Each browser tab gets its own **render session**. This follows the same model as traditional web applications—each tab receives its own isolated server-side context. The only thing shared across tabs is cookies.
+
+- State is isolated per tab — opening your app in two tabs creates two independent sessions
+- Users don't share state with each other (unless you explicitly set up shared state via a database or similar)
+- Refreshing the page starts a fresh session
+
+When users navigate between routes, Pulse manages the session lifecycle automatically.
+
+## React under the hood
+
+Pulse runs on React. This is mostly invisible—you write Python and don't need to know React—but it gives you some powerful options when you need them.
+
+**Use any React component.** If there's a React component library you want to use (charts, date pickers, data grids), you can wrap it and use it from Python:
+
+```python
+from pulse import react_component, Import
+
+DatePicker = react_component(Import("DatePicker", "react-datepicker"))
+
+# Use it like any Pulse element
+DatePicker(selected=state.date, onChange=state.set_date)
+```
+
+**Run JavaScript when needed.** For browser APIs or performance-critical client-side logic, Pulse lets you execute JavaScript:
+
+```python
+from pulse.js import window
+
+def scroll_to_top():
+    ps.run_js(window.scrollTo(0, 0))
+```
+
+**Transpile Python to JavaScript.** For browser APIs or quick client-side logic, you can write Python that Pulse compiles to JavaScript:
+
+```python
+@ps.javascript
+def focus_input(selector: str):
+    el = document.querySelector(selector)
+    if el:
+        el.focus()
+```
+
+**Write React components in Python.** For interactions that need to feel instant (no server round-trip), you can write entire React components in Python:
+
+```python
+useState = ps.Import("useState", "react")
+
+@ps.javascript(jsx=True)
+def Toggle(*, children):
+    open, setOpen = useState(False)
+
+    return ps.div()[
+        ps.button(onClick=lambda: setOpen(lambda o: not o))[
+            "Hide" if open else "Show"
+        ],
+        children if open else None,
+    ]
+```
+
+This compiles to a real React component that runs entirely in the browser—state changes are instant because they never touch the server.
+
+These are escape hatches—most apps don't need them. But they're there when you hit a wall.
+
+## Advantages and tradeoffs
+
+**Advantages:**
+
+- **Security** — Business logic stays on the server. Sensitive code never reaches the client.
+- **Simplicity** — No separate API layer. No frontend build tools. One language, one codebase.
+- **Python everywhere** — Use pandas, SQLAlchemy, or any Python library directly in your UI code.
+- **React ecosystem** — Access thousands of React components when you need them.
+
+**Tradeoffs:**
+
+- **Network latency** — Every interaction requires a round-trip to the server. Pulse minimizes this with efficient diffs, but it's not ideal for sub-millisecond interactions like drag-and-drop.
+- **Server resources** — Each active tab maintains a WebSocket connection and holds state in memory. Plan accordingly for high-traffic apps.
+- **Offline support** — The app requires a connection to function. No offline mode out of the box.
+
+For dashboards, internal tools, and data-driven applications, these tradeoffs are usually worth it. For games or real-time collaborative editors, you might need a different approach.
+
+## See also
+
+- [Tutorial](/docs/tutorial) — Build your first app step by step
+- [Core Concepts: State](/docs/concepts/state) — How state management works
+- [JS Interop](/docs/advanced/js-interop) — Full guide to React components and JavaScript

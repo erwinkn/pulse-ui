@@ -210,11 +210,10 @@ With `ps.init()`, this becomes:
 
 ### 4.2. Rules of hooks
 
-The three main Pulse hooks are:
+The two main Pulse hooks are:
 
 - `ps.setup`: runs an arbitrary function on first render and returns its result on every render afterwards.
 - `ps.init()`: preserves variables (including states) across rerenders.
-- `ps.effects`: sets up effects on first render.
 
 They have one single rule: **you can only call them once per component.**
 
@@ -222,11 +221,11 @@ Components are functions decorated with `@ps.component`. We will discuss them in
 
 This rule illustrates that the purpose of hooks is to **give you a way to do something exactly once, when a component first renders**.
 
-In practice, you could do everything with `ps.setup`: create your states, set up your effects, initialize something, etc... `ps.init()` and `ps.effects` are convenience hooks for common requirements.
+In practice, you could do everything with `ps.setup`: create your states, set up your effects, initialize something, etc... `ps.init()` is a convenience hook for common requirements.
 
 ### 4.3. Usage
 
-Let's understand how to use hooks by looking at an example. I will not use `ps.effects` here, as it will be introduced in [Effects](#11-effects).
+Let's understand how to use hooks by looking at an example.
 
 The code is available in [`examples/03-hooks.py`](./examples/03-hooks.py)
 
@@ -333,16 +332,13 @@ In this example, we can see:
 
 ### 4.4 Hook keys
 
-The `ps.setup` and `ps.effects` hooks accept an optional `key` argument.
+The `ps.setup` hook accepts an optional `key` argument.
 
-If the key changes, the hooks will rerun, which results in the following:
-
-- `setup`: the setup function reruns. States and effects created in the previous execution of the setup function are cleaned up.
-- `effects`: disposes the previous set of effects and creates new ones, based on the provided functions.
+If the key changes, the setup function reruns. States and effects created in the previous execution of the setup function are cleaned up.
 
 Keys are compared using the `!=` operator and thus have to support it. It is recommended to only use primitive values (strings, numbers, booleans) or tuples of primitive values as keys.
 
-For keyed state management, use `ps.state(key, StateClass)` when you need different state instances based on runtime keys.
+For keyed state management, use `ps.state(StateClass, key=...)` when you need different state instances based on runtime keys.
 
 ### 4.5 `stable` hook
 

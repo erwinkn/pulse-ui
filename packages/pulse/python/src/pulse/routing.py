@@ -149,8 +149,45 @@ def route_or_ancestors_have_dynamic(node: "Route | Layout") -> bool:
 
 
 class Route:
-	"""
-	Represents a route definition with its component dependencies.
+	"""Defines a route in the application.
+
+	Routes map URL paths to components that render the page content.
+
+	Args:
+		path: URL path pattern (e.g., "/users/:id"). Supports static segments,
+			dynamic parameters (`:id`), optional parameters (`:id?`), and
+			catch-all segments (`*`).
+		render: Component function to render for this route. Must be a
+			zero-argument component.
+		children: Nested child routes. Child paths are relative to parent.
+		dev: If True, route is only included in dev mode. Defaults to False.
+
+	Attributes:
+		path: Normalized relative path (no leading/trailing slashes).
+		segments: Parsed path segments.
+		render: Component to render.
+		children: Nested routes.
+		is_index: True if this is an index route (empty path).
+		is_dynamic: True if path contains dynamic or optional segments.
+		dev: Whether route is dev-only.
+
+	Path Syntax:
+		- Static: `/users` - Exact match
+		- Dynamic: `:id` - Named parameter (available in pathParams)
+		- Optional: `:id?` - Optional parameter
+		- Catch-all: `*` - Match remaining path (must be last segment)
+
+	Example:
+		```python
+		ps.Route(
+		    "/users",
+		    render=users_page,
+		    children=[
+		        ps.Route(":id", render=user_detail),
+		        ps.Route(":id/edit", render=user_edit),
+		    ],
+		)
+		```
 	"""
 
 	path: str
@@ -243,6 +280,43 @@ def replace_layout_indicator(path_list: list[str], value: str):
 
 
 class Layout:
+	"""Wraps child routes with a shared layout component.
+
+	Layouts provide persistent UI elements (headers, sidebars, etc.) that
+	wrap child routes. The layout component must render an `Outlet` to
+	display the matched child route.
+
+	Args:
+		render: Layout component function. Must render `ps.Outlet()` to
+			display child content.
+		children: Nested routes that will be wrapped by this layout.
+		dev: If True, layout is only included in dev mode. Defaults to False.
+
+	Attributes:
+		render: Layout component to render.
+		children: Nested routes.
+		dev: Whether layout is dev-only.
+
+	Example:
+		```python
+		@ps.component
+		def AppLayout():
+		    return ps.div(
+		        Header(),
+		        ps.main(ps.Outlet()),
+		        Footer(),
+		    )
+
+		ps.Layout(
+		    render=AppLayout,
+		    children=[
+		        ps.Route("/", render=home),
+		        ps.Route("/about", render=about),
+		    ],
+		)
+		```
+	"""
+
 	render: Component[...]
 	children: Sequence["Route | Layout"]
 	dev: bool
@@ -359,7 +433,17 @@ def filter_dev_routes(routes: Sequence[Route | Layout]) -> list[Route | Layout]:
 	return filtered
 
 
-class InvalidRouteError(Exception): ...
+class InvalidRouteError(Exception):
+	"""Raised for invalid route configurations.
+
+	Examples of invalid configurations:
+		- Empty path segments
+		- Invalid characters in path
+		- Catch-all (*) not at end of path
+		- Attempting to get default RouteInfo for dynamic routes
+	"""
+
+	...
 
 
 class RouteTree:
@@ -406,6 +490,20 @@ class RouteTree:
 
 
 class RouteInfo(TypedDict):
+	"""TypedDict containing current route information.
+
+	Provides access to URL components and parsed parameters for the
+	current route. Available via `use_route()` hook in components.
+
+	Attributes:
+		pathname: Current URL path (e.g., "/users/123").
+		hash: URL hash fragment after # (e.g., "section1").
+		query: Raw query string after ? (e.g., "page=2&sort=name").
+		queryParams: Parsed query parameters as dict (e.g., {"page": "2"}).
+		pathParams: Dynamic path parameters (e.g., {"id": "123"} for ":id").
+		catchall: Catch-all segments as list (e.g., ["a", "b"] for "a/b").
+	"""
+
 	pathname: str
 	hash: str
 	query: str
@@ -415,6 +513,33 @@ class RouteInfo(TypedDict):
 
 
 class RouteContext:
+	"""Runtime context for the current route.
+
+	Provides reactive access to the current route's URL components and
+	parameters. Accessible via `ps.route()` in components.
+
+	Attributes:
+		info: Current route info (reactive, auto-updates on navigation).
+		pulse_route: Route or Layout definition for this context.
+
+	Properties:
+		pathname: Current URL path (e.g., "/users/123").
+		hash: URL hash fragment (without #).
+		query: Raw query string (without ?).
+		queryParams: Parsed query parameters as dict.
+		pathParams: Dynamic path parameters (e.g., {"id": "123"}).
+		catchall: Catch-all segments as list.
+
+	Example:
+		```python
+		@ps.component
+		def UserProfile():
+			ctx = ps.route()
+			user_id = ctx.pathParams.get("id")
+			return ps.div(f"User: {user_id}")
+		```
+	"""
+
 	info: RouteInfo
 	pulse_route: Route | Layout
 
@@ -422,31 +547,42 @@ class RouteContext:
 		self.info = cast(RouteInfo, cast(object, ReactiveDict(info)))
 		self.pulse_route = pulse_route
 
-	def update(self, info: RouteInfo):
+	def update(self, info: RouteInfo) -> None:
+		"""Update the route info with new values.
+
+		Args:
+			info: New route info to apply.
+		"""
 		self.info.update(info)
 
 	@property
 	def pathname(self) -> str:
+		"""Current URL path (e.g., "/users/123")."""
 		return self.info["pathname"]
 
 	@property
 	def hash(self) -> str:
+		"""URL hash fragment (without #)."""
 		return self.info["hash"]
 
 	@property
 	def query(self) -> str:
+		"""Raw query string (without ?)."""
 		return self.info["query"]
 
 	@property
 	def queryParams(self) -> dict[str, str]:
+		"""Parsed query parameters as dict."""
 		return self.info["queryParams"]
 
 	@property
 	def pathParams(self) -> dict[str, str]:
+		"""Dynamic path parameters (e.g., {"id": "123"} for ":id")."""
 		return self.info["pathParams"]
 
 	@property
 	def catchall(self) -> list[str]:
+		"""Catch-all segments as list."""
 		return self.info["catchall"]
 
 	@override

@@ -1,0 +1,231 @@
+---
+title: "JS Interop"
+---
+
+Pulse lets you build web apps entirely in Python, but sometimes you need to reach into JavaScript. Maybe you want to focus an input field, scroll to an element, use a browser API, or integrate a JavaScript library that doesn't have a Pulse wrapper. JavaScript interop makes all of this possible.
+
+## Wrapping React Components
+
+One of the most common uses of JS interop is wrapping existing React components. If there's a React component library you want to use that doesn't have a Pulse package, you can wrap it yourself.
+
+```python
+from pulse import react_component, Import
+
+# Import a component from an npm package
+DatePicker = react_component(
+    Import("DatePicker", "react-datepicker")
+)
+
+# Now use it like any other Pulse component
+@ps.component
+def BookingForm():
+    with ps.init():
+        state = BookingState()
+
+    return ps.div()[
+        ps.label()["Select a date:"],
+        DatePicker(
+            selected=state.date,
+            onChange=state.set_date,
+        ),
+    ]
+```
+
+The `Import` specifies where to find the component:
+- Named import: `Import("DatePicker", "react-datepicker")`
+- Default import: `Import("Calendar", "react-calendar", kind="default")`
+
+## Running JavaScript from Python
+
+Use `ps.run_js()` to execute JavaScript in the browser. It takes a JavaScript expression—either from `pulse.js` exports or from calling a `@ps.javascript` function.
+
+```python
+from pulse.js import window, document
+
+class ScrollState(ps.State):
+    def scroll_to_top(self):
+        ps.run_js(window.scrollTo(0, 0))
+
+    def focus_email(self):
+        ps.run_js(document.querySelector("#email").focus())
+```
+
+`run_js` does **not** accept strings—you must pass an expression object:
+
+```python
+# Correct
+ps.run_js(window.scrollTo(0, 0))
+
+# Wrong - strings don't work
+ps.run_js("window.scrollTo(0, 0)")  # TypeError
+```
+
+For operations that return values, use `result=True` and await:
+
+```python
+from pulse.js import window
+
+async def get_window_size(self):
+    width = await ps.run_js(window.innerWidth, result=True)
+    height = await ps.run_js(window.innerHeight, result=True)
+    print(f"Window is {width}x{height}")
+```
+
+## The @ps.javascript Decorator
+
+For logic beyond simple expressions, define Python functions that get transpiled to JavaScript:
+
+```python
+from pulse.js import document
+
+@ps.javascript
+def focus_element(selector: str):
+    el = document.querySelector(selector)
+    if el:
+        el.focus()
+
+@ps.javascript
+def scroll_to_element(element_id: str):
+    el = document.getElementById(element_id)
+    if el:
+        el.scrollIntoView({"behavior": "smooth"})
+```
+
+Call these functions with `run_js`:
+
+```python
+class FormState(ps.State):
+    def on_error(self):
+        ps.run_js(focus_element("#email"))
+
+    def go_to_section(self, section_id: str):
+        ps.run_js(scroll_to_element(section_id))
+```
+
+When you call `ps.run_js(focus_element("#email"))`, Pulse:
+1. Transpiles the Python function to JavaScript
+2. Calls it with the provided arguments
+3. Executes it in the browser
+
+This approach gives you:
+- **Syntax highlighting and editor support** in your Python code
+- **Type checking** for your parameters
+- **Reusable JavaScript functions** you can call from multiple places
+
+## What You Can Do in @ps.javascript Functions
+
+The transpiler supports a subset of Python that maps cleanly to JavaScript:
+- Variables and assignments
+- Conditionals (`if`/`else`)
+- Loops (`for`, `while`)
+- Function calls
+- Object and array access
+- Basic operators
+
+You can access browser globals like `document`, `window`, `console`, `localStorage`, etc.
+
+```python
+@ps.javascript
+def save_to_storage(key: str, value: str):
+    localStorage.setItem(key, value)
+
+@ps.javascript
+def log_and_alert(message: str):
+    console.log(message)
+    window.alert(message)
+
+@ps.javascript
+def get_cookies():
+    return document.cookie
+```
+
+## Handling Complex Interop
+
+Sometimes you need more control. Here are some patterns for complex scenarios.
+
+### Getting Results from JavaScript
+
+```python
+from pulse.js import window
+
+@ps.javascript
+def get_selection():
+    selection = window.getSelection()
+    if selection:
+        return selection.toString()
+    return ""
+
+class EditorState(ps.State):
+    async def copy_selection(self):
+        text = await ps.run_js(get_selection(), result=True)
+        if text:
+            print(f"User selected: {text}")
+```
+
+### Calling External Libraries
+
+If you've added a JavaScript library to your project, you can call it:
+
+```python
+@ps.javascript
+def init_chart(container_id: str, data: list):
+    ctx = document.getElementById(container_id).getContext("2d")
+    Chart(ctx, {
+        "type": "bar",
+        "data": {
+            "labels": data.map(lambda d: d["label"]),
+            "datasets": [{
+                "data": data.map(lambda d: d["value"]),
+            }]
+        }
+    })
+```
+
+### Browser APIs
+
+```python
+from pulse.js import window, navigator, Promise
+
+@ps.javascript
+def request_notification_permission():
+    if "Notification" in window:
+        Notification.requestPermission()
+
+@ps.javascript
+def copy_to_clipboard(text: str):
+    navigator.clipboard.writeText(text)
+
+@ps.javascript
+def get_geolocation():
+    return Promise(lambda resolve, reject:
+        navigator.geolocation.getCurrentPosition(
+            lambda pos: resolve({"lat": pos.coords.latitude, "lng": pos.coords.longitude}),
+            lambda err: reject(err)
+        )
+    )
+```
+
+## When to Use JS Interop
+
+Use JS interop when you need to:
+- **Access browser APIs** (clipboard, notifications, geolocation)
+- **Manipulate the DOM directly** (focus, scroll, measure elements)
+- **Use JavaScript libraries** without a Pulse wrapper
+- **Optimize performance** for client-side-only operations
+
+Prefer staying in Python when you can. Pulse's normal state and rendering system handles most cases, and keeping logic in Python means you get all the benefits of server-side execution (security, consistency, easier debugging).
+
+## Tips
+
+1. **Keep JS functions small and focused**: They should do one thing.
+
+2. **Handle errors**: JavaScript can fail. Use try/catch in complex functions.
+
+3. **Remember it's async**: `ps.run_js()` communicates with the browser over WebSocket.
+
+4. **Test your transpiled code**: The transpiler handles common patterns, but complex Python might not translate as expected.
+
+## See also
+
+- [Advanced: JS Interop](/docs/advanced/js-interop)
+- [Reference: JS Interop](/docs/reference/pulse/js-interop) — Full API including `pulse.js` exports

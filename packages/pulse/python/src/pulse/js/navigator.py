@@ -1,8 +1,11 @@
 """Browser navigator global object.
 
 Usage:
-    from pulse.js import navigator, console
-    console.log(navigator.userAgent)
+
+```python
+from pulse.js import navigator, console
+console.log(navigator.userAgent)
+```
 """
 
 from typing import Any as _Any

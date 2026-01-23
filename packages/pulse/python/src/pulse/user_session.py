@@ -117,42 +117,106 @@ class UserSession(Disposable):
 
 
 class SessionStore(ABC):
-	"""Abstract base for server-backed session stores (DB, cache, memory).
+	"""Abstract base class for server-backed session stores.
 
-	Implementations persist session state on the server and place only a stable
-	identifier in the cookie. Override methods to integrate with your backend.
+	Implementations persist session state on the server and place only a
+	stable identifier in the cookie. Override methods to integrate with
+	your storage backend (database, cache, memory, etc.).
+
+	Example:
+		```python
+		class RedisSessionStore(SessionStore):
+			async def init(self) -> None:
+				self.redis = await aioredis.from_url("redis://localhost")
+
+			async def get(self, sid: str) -> dict[str, Any] | None:
+				data = await self.redis.get(f"session:{sid}")
+				return json.loads(data) if data else None
+
+			async def create(self, sid: str) -> dict[str, Any]:
+				session = {}
+				await self.save(sid, session)
+				return session
+
+			async def delete(self, sid: str) -> None:
+				await self.redis.delete(f"session:{sid}")
+
+			async def save(self, sid: str, session: dict[str, Any]) -> None:
+				await self.redis.set(f"session:{sid}", json.dumps(session))
+		```
 	"""
 
 	async def init(self) -> None:
-		"""Optional async initializer, invoked when the app starts.
+		"""Async initialization, called on app start.
 
-		Override in implementations that need to establish connections or
-		perform startup work. Default is a no-op.
+		Override to establish connections or perform startup work.
 		"""
 		return None
 
 	async def close(self) -> None:
-		"""Optional async cleanup, invoked when the app shuts down.
+		"""Async cleanup, called on app shutdown.
 
-		Override in implementations that need to tear down connections or
-		perform cleanup. Default is a no-op.
+		Override to tear down connections or perform cleanup.
 		"""
 		return None
 
 	@abstractmethod
-	async def get(self, sid: str) -> dict[str, Any] | None: ...
+	async def get(self, sid: str) -> dict[str, Any] | None:
+		"""Retrieve session by ID.
+
+		Args:
+			sid: Session identifier.
+
+		Returns:
+			Session data dict if found, None otherwise.
+		"""
+		...
 
 	@abstractmethod
-	async def create(self, sid: str) -> dict[str, Any]: ...
+	async def create(self, sid: str) -> dict[str, Any]:
+		"""Create a new session.
+
+		Args:
+			sid: Session identifier.
+
+		Returns:
+			New empty session dict.
+		"""
+		...
 
 	@abstractmethod
-	async def delete(self, sid: str) -> None: ...
+	async def delete(self, sid: str) -> None:
+		"""Delete a session.
+
+		Args:
+			sid: Session identifier.
+		"""
+		...
 
 	@abstractmethod
-	async def save(self, sid: str, session: dict[str, Any]) -> None: ...
+	async def save(self, sid: str, session: dict[str, Any]) -> None:
+		"""Persist session data.
+
+		Args:
+			sid: Session identifier.
+			session: Session data to persist.
+		"""
+		...
 
 
 class InMemorySessionStore(SessionStore):
+	"""In-memory session store implementation.
+
+	Sessions are stored in memory and lost on restart. Suitable for
+	development and testing.
+
+	Example:
+		```python
+		store = ps.InMemorySessionStore()
+		app = ps.App(session_store=store)
+		```
+	"""
+
 	def __init__(self) -> None:
 		self._sessions: dict[str, dict[str, Any]] = {}
 
@@ -167,7 +231,7 @@ class InMemorySessionStore(SessionStore):
 		return session
 
 	@override
-	async def save(self, sid: str, session: dict[str, Any]):
+	async def save(self, sid: str, session: dict[str, Any]) -> None:
 		# Should not matter as the session ReactiveDict is normally mutated directly
 		self._sessions[sid] = session
 
@@ -182,10 +246,31 @@ class SessionCookiePayload(TypedDict):
 
 
 class CookieSessionStore:
-	"""Persist session in a signed cookie (Flask-like default).
+	"""Store sessions in signed cookies. Default session store.
 
-	The cookie stores a compact JSON of the session and is signed using
-	HMAC-SHA256 to prevent tampering. Keep the session small (<4KB).
+	The cookie stores a compact JSON of the session signed with HMAC-SHA256
+	to prevent tampering. Keep session data small (<4KB).
+
+	Args:
+		secret: Signing secret. Uses PULSE_SECRET env var if not provided.
+			Required in production.
+		salt: Salt for HMAC. Default: "pulse.session".
+		digestmod: Hash algorithm. Default: "sha256".
+		max_cookie_bytes: Maximum cookie size. Default: 3800.
+
+	Environment Variables:
+		PULSE_SECRET: Session signing secret (required in production).
+
+	Example:
+		```python
+		# Uses PULSE_SECRET environment variable
+		store = ps.CookieSessionStore()
+
+		# Explicit secret
+		store = ps.CookieSessionStore(secret="your-secret-key")
+
+		app = ps.App(session_store=store)
+		```
 	"""
 
 	digestmod: str
@@ -218,6 +303,15 @@ class CookieSessionStore:
 		self.max_cookie_bytes = max_cookie_bytes
 
 	def encode(self, sid: str, session: dict[str, Any]) -> str:
+		"""Encode session to signed cookie value.
+
+		Args:
+			sid: Session identifier.
+			session: Session data to encode.
+
+		Returns:
+			Signed cookie value string.
+		"""
 		# Encode the entire session into the cookie (compressed v1)
 		try:
 			data = SessionCookiePayload(sid=sid, data=dict(session))
@@ -235,7 +329,14 @@ class CookieSessionStore:
 			return self.encode(sid, session)
 
 	def decode(self, cookie: str) -> tuple[str, Session] | None:
-		"""Decode a signed session cookie (compressed v1)."""
+		"""Decode and verify signed cookie.
+
+		Args:
+			cookie: Signed cookie value string.
+
+		Returns:
+			Tuple of (sid, session) if valid, None if invalid or tampered.
+		"""
 		if not cookie:
 			return None
 

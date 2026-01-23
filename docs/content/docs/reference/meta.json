@@ -1,0 +1,14 @@
+{
+  "title": "Reference",
+  "description": "Architecture and Python/JS APIs",
+  "icon": "FileCode",
+  "root": true,
+  "pages": [
+    "index",
+    "architecture",
+    "pulse",
+    "pulse-js",
+    "pulse-transpiler",
+    "pulse-client"
+  ]
+}

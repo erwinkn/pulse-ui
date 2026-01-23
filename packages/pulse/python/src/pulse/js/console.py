@@ -2,18 +2,21 @@
 JavaScript Console builtin module.
 
 Usage:
-    import pulse.js.console as console
-    console.log("Hello")          # -> console.log("Hello")
-    console.error("Error")        # -> console.error("Error")
-    console.assert(True, "msg")   # -> console.assert(True, "msg")
 
-    # Note: For 'assert' (Python keyword), use namespace import:
-    # import pulse.js.console as console; console.assert(...)
-    # Or use the underscore version for direct import:
-    from pulse.js.console import log, error, warn, info, debug, assert_
-    log("Hello")                  # -> console.log("Hello")
-    error("Error")                # -> console.error("Error")
-    assert_(True, "msg")          # -> console.assert(True, "msg")
+```python
+import pulse.js.console as console
+console.log("Hello")          # -> console.log("Hello")
+console.error("Error")        # -> console.error("Error")
+console.assert(True, "msg")   # -> console.assert(True, "msg")
+
+# Note: For 'assert' (Python keyword), use namespace import:
+# import pulse.js.console as console; console.assert(...)
+# Or use the underscore version for direct import:
+from pulse.js.console import log, error, warn, info, debug, assert_
+log("Hello")                  # -> console.log("Hello")
+error("Error")                # -> console.error("Error")
+assert_(True, "msg")          # -> console.assert(True, "msg")
+```
 """
 
 from typing import Any as _Any

@@ -286,9 +286,10 @@ class TestPulseModuleIntegration:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "<button" in code
-		assert "onClick=" in code
-		assert "Click me" in code
+		assert (
+			code
+			== 'function render_1({}) {\nreturn <button onClick={e => null}>{"Click me"}</button>;\n}'
+		)
 
 	def test_pulse_as_ps_self_closing_tag(self):
 		"""ps.img() produces self-closing JSX element."""
@@ -492,9 +493,10 @@ class TestJsxFunction:
 
 		fn = Toggle.transpile()
 		code = emit(fn)
-		# Should destructure with default value
-		assert "{visible = true}" in code
-		assert "function Toggle_" in code
+		assert (
+			code
+			== 'function Toggle_1({visible = true}) {\nreturn <div>{visible ? "content" : "hidden"}</div>;\n}'
+		)
 
 	def test_jsx_function_with_children_and_defaults(self):
 		"""JsxFunction with *children and default kwargs works as React component."""
@@ -508,9 +510,10 @@ class TestJsxFunction:
 
 		fn = Container.transpile()
 		code = emit(fn)
-		# Should have both children and className with default
-		assert "{children, className = " in code
-		assert '"default"' in code
+		assert (
+			code
+			== 'function Container_1({children, className = "default"}) {\nreturn <div className={className} />;\n}'
+		)
 
 
 # =============================================================================
@@ -566,10 +569,10 @@ class TestReactComponent:
 
 		fn = render.transpile()
 		code = emit(fn)
-		# Should produce Element with the import's js_name as tag
-		assert f"<{card_import.js_name}" in code
-		assert 'shadow="sm"' in code
-		assert "Content" in code
+		assert (
+			code
+			== f'function {render.js_name}({{}}) {{\nreturn <{card_import.js_name} shadow="sm">{{"Content"}}</{card_import.js_name}>;\n}}'
+		)
 
 	def test_jsx_member_transpile_call(self):
 		"""Member-based Jsx produces correct JSX in transpilation."""
@@ -583,17 +586,21 @@ class TestReactComponent:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert f"<{app_shell.js_name}.Header height={{60}} />" in code
+		assert (
+			code
+			== f"function {render.js_name}({{}}) {{\nreturn <{app_shell.js_name}.Header height={{60}} />;\n}}"
+		)
 
 	def test_react_component_decorator(self):
-		"""The @react_component decorator returns a Jsx(expr)."""
-		from pulse.transpiler.react_component import react_component
+		"""The @react_component decorator returns a typed Expr wrapper."""
+		from pulse.react_component import react_component
+		from pulse.transpiler.nodes import Signature
 
 		@react_component(Import("Button", "@mantine/core"))
 		def Button(children: str, variant: str = "default") -> Element: ...
 
-		# Should be a Jsx
-		assert isinstance(Button, Jsx)
+		assert isinstance(Button, Signature)
+		assert isinstance(Button.expr, Jsx)
 
 
 # =============================================================================
@@ -661,7 +668,10 @@ class TestExpressionKeys:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "key={index}" in code
+		assert (
+			code
+			== 'function render_1(index) {\nreturn <li key={index}>{"item"}</li>;\n}'
+		)
 
 	def test_variable_key(self):
 		"""Variable keys are supported."""
@@ -675,7 +685,10 @@ class TestExpressionKeys:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "key={item_id}" in code
+		assert (
+			code
+			== 'function render_1(item_id) {\nreturn <li key={item_id}>{"item"}</li>;\n}'
+		)
 
 	def test_expression_key(self):
 		"""Expression keys (like member access) are supported."""
@@ -689,7 +702,10 @@ class TestExpressionKeys:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "key={item.id}" in code
+		assert (
+			code
+			== "function render_1(item) {\nreturn <li key={item.id}>{item.name}</li>;\n}"
+		)
 
 	def test_fstring_key(self):
 		"""F-string keys are supported."""
@@ -703,4 +719,7 @@ class TestExpressionKeys:
 
 		fn = render.transpile()
 		code = emit(fn)
-		assert "key={`${prefix}-${index}`}" in code
+		assert (
+			code
+			== 'function render_1(prefix, index) {\nreturn <li key={`${prefix}-${index}`}>{"item"}</li>;\n}'
+		)

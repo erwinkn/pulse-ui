@@ -25,6 +25,30 @@ T = TypeVar("T")
 
 
 class StateProperty(ReactiveProperty[Any]):
+	"""
+	Descriptor for reactive properties on State classes.
+
+	StateProperty wraps a Signal and provides automatic reactivity for
+	class attributes. When a property is read, it subscribes to the underlying
+	Signal. When written, it updates the Signal and triggers re-renders.
+
+	This class is typically not used directly. Instead, declare typed attributes
+	on a State subclass, and the StateMeta metaclass will automatically convert
+	them into StateProperty instances.
+
+	Example:
+
+	```python
+	class MyState(ps.State):
+	    count: int = 0  # Automatically becomes a StateProperty
+	    name: str = "default"
+
+	state = MyState()
+	state.count = 5  # Updates the underlying Signal
+	print(state.count)  # Reads from the Signal, subscribes to changes
+	```
+	"""
+
 	pass
 
 
@@ -35,7 +59,33 @@ class InitializableProperty(ABC):
 
 class ComputedProperty(Generic[T]):
 	"""
-	Descriptor for computed properties on State classes.
+	Descriptor for computed (derived) properties on State classes.
+
+	ComputedProperty wraps a method that derives its value from other reactive
+	properties. The computed value is cached and only recalculated when its
+	dependencies change. Reading a computed property subscribes to it.
+
+	Created automatically when using the @ps.computed decorator on a State method.
+
+	Args:
+		name: The property name (used for debugging and the private storage key).
+		fn: The method that computes the value. Must take only `self` as argument.
+
+	Example:
+
+	```python
+	class MyState(ps.State):
+	    count: int = 0
+
+	    @ps.computed
+	    def doubled(self):
+	        return self.count * 2
+
+	state = MyState()
+	print(state.doubled)  # 0
+	state.count = 5
+	print(state.doubled)  # 10 (automatically recomputed)
+	```
 	"""
 
 	name: str
@@ -74,12 +124,56 @@ class ComputedProperty(Generic[T]):
 
 
 class StateEffect(Generic[T], InitializableProperty):
+	"""
+	Descriptor for side effects on State classes.
+
+	StateEffect wraps a method that performs side effects when its dependencies
+	change. The effect is initialized when the State instance is created and
+	disposed when the State is disposed.
+
+	Created automatically when using the @ps.effect decorator on a State method.
+	Supports both sync and async methods.
+
+		Args:
+			fn: The effect function. Must take only `self` as argument.
+			        Can return a cleanup function that runs before the next execution
+			        or when the effect is disposed.
+		name: Debug name for the effect. Defaults to "ClassName.method_name".
+		immediate: If True, run synchronously when scheduled (sync effects only).
+		lazy: If True, don't run on creation; wait for first dependency change.
+		on_error: Callback for handling errors during effect execution.
+		deps: Explicit dependencies. If provided, auto-tracking is disabled.
+		interval: Re-run interval in seconds for polling effects.
+
+	Example:
+
+	```python
+	class MyState(ps.State):
+	    count: int = 0
+
+	    @ps.effect
+	    def log_count(self):
+	        print(f"Count changed to: {self.count}")
+
+	    @ps.effect
+	    async def fetch_data(self):
+	        data = await api.fetch(self.query)
+	        self.data = data
+
+	    @ps.effect
+	    def subscribe(self):
+	        unsub = event_bus.subscribe(self.handle_event)
+	        return unsub  # Cleanup function
+	```
+	"""
+
 	fn: "Callable[[State], T]"
 	name: str | None
 	immediate: bool
 	on_error: "Callable[[Exception], None] | None"
 	lazy: bool
 	deps: "list[Signal[Any] | Computed[Any]] | None"
+	update_deps: bool | None
 	interval: float | None
 
 	def __init__(
@@ -90,6 +184,7 @@ class StateEffect(Generic[T], InitializableProperty):
 		lazy: bool = False,
 		on_error: "Callable[[Exception], None] | None" = None,
 		deps: "list[Signal[Any] | Computed[Any]] | None" = None,
+		update_deps: bool | None = None,
 		interval: float | None = None,
 	):
 		self.fn = fn
@@ -98,6 +193,7 @@ class StateEffect(Generic[T], InitializableProperty):
 		self.on_error = on_error
 		self.lazy = lazy
 		self.deps = deps
+		self.update_deps = update_deps
 		self.interval = interval
 
 	@override
@@ -111,6 +207,7 @@ class StateEffect(Generic[T], InitializableProperty):
 				lazy=self.lazy,
 				on_error=self.on_error,
 				deps=self.deps,
+				update_deps=self.update_deps,
 				interval=self.interval,
 			)
 		else:
@@ -121,6 +218,7 @@ class StateEffect(Generic[T], InitializableProperty):
 				lazy=self.lazy,
 				on_error=self.on_error,
 				deps=self.deps,
+				update_deps=self.update_deps,
 				interval=self.interval,
 			)
 		setattr(state, name, effect)
@@ -129,6 +227,28 @@ class StateEffect(Generic[T], InitializableProperty):
 class StateMeta(ABCMeta):
 	"""
 	Metaclass that automatically converts annotated attributes into reactive properties.
+
+	When a class uses StateMeta (via inheriting from State), the metaclass:
+
+	1. Converts all public type-annotated attributes into StateProperty descriptors
+	2. Converts all public non-callable values into StateProperty descriptors
+	3. Skips private attributes (starting with '_')
+	4. Preserves existing descriptors (StateProperty, ComputedProperty, StateEffect)
+
+	This enables the declarative state definition pattern:
+
+	Example:
+
+	```python
+	class MyState(ps.State):
+	    count: int = 0        # Becomes StateProperty
+	    name: str = "test"    # Becomes StateProperty
+	    _private: int = 0     # Stays as regular attribute (not reactive)
+
+	    @ps.computed
+	    def doubled(self):    # Becomes ComputedProperty
+	        return self.count * 2
+	```
 	"""
 
 	def __new__(
@@ -292,7 +412,19 @@ class State(Disposable, metaclass=StateMeta):
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 
 	def properties(self) -> Iterator[Signal[Any]]:
-		"""Iterate over the state's `Signal` instances, including base classes."""
+		"""
+		Iterate over the state's reactive Signal instances.
+
+		Traverses the class hierarchy (MRO) to include properties from base classes.
+		Each Signal is yielded only once, even if shadowed in subclasses.
+
+		Yields:
+			Signal[Any]: Each reactive property's underlying Signal instance.
+
+		Example:
+			for signal in state.properties():
+			    print(signal.name, signal.value)
+		"""
 		seen: set[str] = set()
 		for cls in self.__class__.__mro__:
 			if cls in (State, ABC):
@@ -305,7 +437,19 @@ class State(Disposable, metaclass=StateMeta):
 					yield prop.get_signal(self)
 
 	def computeds(self) -> Iterator[Computed[Any]]:
-		"""Iterate over the state's `Computed` instances, including base classes."""
+		"""
+		Iterate over the state's Computed instances.
+
+		Traverses the class hierarchy (MRO) to include computed properties from
+		base classes. Each Computed is yielded only once.
+
+		Yields:
+			Computed[Any]: Each computed property's underlying Computed instance.
+
+		Example:
+			for computed in state.computeds():
+			    print(computed.name, computed.read())
+		"""
 		seen: set[str] = set()
 		for cls in self.__class__.__mro__:
 			if cls in (State, ABC):
@@ -317,13 +461,24 @@ class State(Disposable, metaclass=StateMeta):
 					seen.add(name)
 					yield comp_prop.get_computed(self)
 
-	def effects(self):
-		"""Iterate over the state's `Effect` instances."""
+	def effects(self) -> Iterator[Effect]:
+		"""
+		Iterate over the state's Effect instances.
+
+		Returns effects that have been initialized on this state instance.
+		Effects are created from @ps.effect decorated methods when the
+		state is instantiated.
+
+		Yields:
+			Effect: Each effect instance attached to this state.
+
+		Example:
+			for effect in state.effects():
+			    print(effect.name)
+		"""
 		for value in self.__dict__.values():
 			if isinstance(value, Effect):
 				yield value
-			# if isinstance(value,QueryProperty):
-			#     value.
 
 	def on_dispose(self) -> None:
 		"""
@@ -335,9 +490,22 @@ class State(Disposable, metaclass=StateMeta):
 		pass
 
 	@override
-	def dispose(self):
-		# Call user-defined cleanup hook first
+	def dispose(self) -> None:
+		"""
+		Clean up the state, disposing all effects and resources.
 
+		Calls on_dispose() first for user-defined cleanup, then disposes all
+		Disposable instances attached to this state (including effects).
+
+		This method is called automatically when the state goes out of scope
+		or when explicitly cleaning up. After disposal, the state should not
+		be used.
+
+		Raises:
+			RuntimeError: If any effects defined on the state's scope were not
+			        properly disposed.
+		"""
+		# Call user-defined cleanup hook first
 		self.on_dispose()
 		for value in self.__dict__.values():
 			if isinstance(value, Disposable):

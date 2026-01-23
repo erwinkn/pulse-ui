@@ -1,0 +1,268 @@
+---
+title: "Component"
+description: "Component API and VDOM node types"
+---
+
+## component
+
+Decorator that creates a Pulse component from a function.
+
+```python
+@overload
+def component(fn: Callable[P, Any]) -> Component[P]: ...
+
+@overload
+def component(
+    fn: None = None,
+    *,
+    name: str | None = None,
+) -> Callable[[Callable[P, Any]], Component[P]]: ...
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `fn` | `Callable` | Function to wrap as component |
+| `name` | `str` | Custom component name (defaults to function name) |
+
+### Usage
+
+```python
+# Basic usage
+@ps.component
+def Card(title: str):
+    return ps.div(ps.h3(title))
+
+# With custom name
+@ps.component(name="MyCard")
+def card_impl(title: str):
+    return ps.div(ps.h3(title))
+
+# With children
+@ps.component
+def Container(*children):
+    return ps.div(*children, className="container")
+```
+
+### Key Prop
+
+All components accept an optional `key` parameter for reconciliation.
+
+```python
+Card(title="Hello", key="card-1")
+```
+
+### Children via Subscript
+
+Components that accept `*children` can use subscript syntax.
+
+```python
+Container()[
+    Card(title="First"),
+    Card(title="Second"),
+]
+# Equivalent to:
+Container(Card(title="First"), Card(title="Second"))
+```
+
+---
+
+## Component
+
+The class returned by the `@component` decorator.
+
+```python
+class Component(Generic[P]):
+    name: str
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> PulseNode: ...
+```
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Component display name |
+| `fn` | `Callable` | Underlying render function |
+
+---
+
+## For
+
+Map items to elements. Like JavaScript's `Array.map()`.
+
+```python
+@overload
+def For(items: Iterable[T], fn: Callable[[T], Element]) -> list[Element]: ...
+
+@overload
+def For(items: Iterable[T], fn: Callable[[T, int], Element]) -> list[Element]: ...
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `items` | `Iterable[T]` | Items to map |
+| `fn` | `Callable` | Mapper function, receives `(item)` or `(item, index)` |
+
+### Usage
+
+```python
+# Single argument
+ps.For(users, lambda user: UserCard(user=user, key=user.id))
+
+# With index
+ps.For(items, lambda item, i: ps.li(f"{i}: {item}", key=str(i)))
+```
+
+In transpiled `@javascript` code, `For` compiles to `.map()`.
+
+---
+
+## If
+
+Conditional rendering helper.
+
+```python
+def If(
+    condition: bool | Signal[bool] | Computed[bool],
+    then: T1,
+    else_: T2 = None,
+) -> T1 | T2
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `condition` | `bool \| Signal \| Computed` | Condition to evaluate |
+| `then` | `Element` | Element to render if truthy |
+| `else_` | `Element \| None` | Element to render if falsy |
+
+### Usage
+
+```python
+ps.If(
+    user.is_admin,
+    then=AdminPanel(),
+    else_=ps.p("Access denied"),
+)
+```
+
+---
+
+## Node Types
+
+### Node
+
+Union type for all renderable values.
+
+```python
+Node = Primitive | Expr | PulseNode
+```
+
+### Primitive
+
+Primitive values that render directly.
+
+```python
+Primitive = bool | int | float | str | datetime | None
+```
+
+- `None` and `bool` are ignored in rendering (like React)
+- `str` renders as text
+- `int` and `float` render as numeric text
+- `datetime` renders as JS Date
+
+### Element
+
+A React/HTML element node.
+
+```python
+class Element:
+    tag: str | Expr
+    props: Sequence[tuple[str, Prop] | Spread] | dict[str, Any] | None
+    children: Sequence[Node] | None
+    key: str | Expr | None
+```
+
+Created by HTML tag functions or JSX components.
+
+```python
+# HTML element
+ps.div(className="card")  # Element(tag="div", props={"className": "card"})
+
+# Fragment
+ps.fragment(child1, child2)  # Element(tag="", children=[...])
+```
+
+### PulseNode
+
+A server-side component instance (created when calling a `Component`).
+
+```python
+@dataclass
+class PulseNode:
+    fn: Callable[..., Node]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+    key: str | None
+    name: str | None
+```
+
+During rendering, `PulseNode` is invoked and replaced by its returned tree.
+
+---
+
+## Children
+
+Type alias for component children.
+
+```python
+Child = Node | Iterable[Node]
+Children = Sequence[Child]
+```
+
+Children are automatically flattened. Iterables (lists, generators) are expanded.
+
+```python
+@ps.component
+def List(*children):  # children: tuple[Node, ...]
+    return ps.ul(*children)
+
+List(
+    ps.li("Item 1"),
+    [ps.li(f"Item {i}") for i in range(2, 5)],  # Flattened
+    ps.li("Item 5"),
+)
+```
+
+---
+
+## Key Guidelines
+
+Keys help Pulse efficiently update the DOM by identifying elements across renders.
+
+### When to Use Keys
+
+- Items in a list/iterable
+- Dynamic content that may reorder
+- Siblings that may be added/removed
+
+### Key Requirements
+
+- Must be unique among siblings
+- Should be stable (not random, not index for reorderable lists)
+- Use string or numeric values
+
+```python
+# Good: stable ID
+ps.For(users, lambda u: UserCard(user=u, key=u.id))
+
+# Bad: index for reorderable list
+ps.For(users, lambda u, i: UserCard(user=u, key=str(i)))
+```
+
+In development mode, Pulse warns about missing keys in iterables and duplicate keys among siblings.

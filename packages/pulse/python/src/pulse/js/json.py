@@ -2,13 +2,16 @@
 JavaScript JSON builtin module.
 
 Usage:
-    import pulse.js.json as JSON
-    JSON.stringify({"a": 1})      # -> JSON.stringify({"a": 1})
-    JSON.parse('{"a": 1}')        # -> JSON.parse('{"a": 1}')
 
-    from pulse.js.json import stringify, parse
-    stringify({"a": 1})           # -> JSON.stringify({"a": 1})
-    parse('{"a": 1}')             # -> JSON.parse('{"a": 1}')
+```python
+import pulse.js.json as JSON
+JSON.stringify({"a": 1})      # -> JSON.stringify({"a": 1})
+JSON.parse('{"a": 1}')        # -> JSON.parse('{"a": 1}')
+
+from pulse.js.json import stringify, parse
+stringify({"a": 1})           # -> JSON.stringify({"a": 1})
+parse('{"a": 1}')             # -> JSON.parse('{"a": 1}')
+```
 """
 
 from collections.abc import Callable as _Callable

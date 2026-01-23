@@ -27,6 +27,7 @@ export interface ConnectionStatusConfig {
 export interface PulseConfig {
 	serverAddress: string;
 	connectionStatus: ConnectionStatusConfig;
+	apiPrefix: string;
 }
 
 export type PulsePrerenderView = {
@@ -236,9 +237,9 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		else {
 			setTree(renderer.init(initialView));
 		}
-		return () => {
-			hasRendered.current = false;
-		};
+		// Note: Do NOT reset hasRendered in cleanup. The cleanup runs when effect 
+		// deps change and at least once on mount with strict mode,
+		// not just on unmount, which would cause subsequent runs to skip setTree.
 	}, [initialView, renderer]);
 
 	if (serverError) {

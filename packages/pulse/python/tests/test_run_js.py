@@ -49,9 +49,13 @@ class MockRenderSession:
 			)
 
 	def run_js(
-		self, expr: Expr, *, result: bool = False
+		self, expr: Any, *, result: bool = False
 	) -> asyncio.Future[object] | None:
 		"""Mock implementation of RenderSession.run_js."""
+		if not isinstance(expr, Expr):
+			raise TypeError(
+				f"run_js() requires an Expr (from @javascript function or pulse.js module), got {type(expr).__name__}"
+			)
 		ctx = PulseContext.get()
 		exec_id = next_id()
 
@@ -118,14 +122,24 @@ class TestRunJs:
 	def test_run_js_requires_context(self) -> None:
 		"""run_js should raise when called outside callback context."""
 		with pytest.raises(RuntimeError, match="can only be called during callback"):
-			run_js(log_message("test"))  # pyright: ignore[reportArgumentType]
+			run_js(log_message("test"))
+
+	def test_run_js_rejects_non_expr(self) -> None:
+		"""run_js should reject non-Expr values with helpful error."""
+		mock = MockRenderSession()
+		with set_render_context(mock):
+			with pytest.raises(TypeError, match="requires an Expr"):
+				run_js("not an expr")  # type: ignore
+			with pytest.raises(TypeError, match="requires an Expr"):
+				run_js(None)  # type: ignore
+			with pytest.raises(TypeError, match="requires an Expr"):
+				run_js(42)  # type: ignore
 
 	def test_run_js_fire_and_forget(self) -> None:
 		"""run_js without result=True should return None."""
 		mock = MockRenderSession()
 		with set_render_context(mock):
-			result = run_js(log_message("hello"))  # pyright: ignore[reportArgumentType]
-
+			result = run_js(log_message("hello"))
 			assert result is None
 			assert len(mock.sent_commands) == 1
 			# Expr should be a CallExpr
@@ -140,8 +154,7 @@ class TestRunJs:
 		"""run_js with result=True should return a Future."""
 		mock = MockRenderSession()
 		with set_render_context(mock):
-			future = run_js(get_value(), result=True)  # pyright: ignore[reportArgumentType,reportCallIssue]
-
+			future = run_js(get_value(), result=True)
 			assert isinstance(future, asyncio.Future)
 			assert len(mock.sent_commands) == 1
 			# Future registered for result
@@ -152,8 +165,7 @@ class TestRunJs:
 		"""run_js with a @javascript function call should produce a CallExpr."""
 		mock = MockRenderSession()
 		with set_render_context(mock):
-			run_js(greet("World"))  # pyright: ignore[reportArgumentType]
-
+			run_js(greet("World"))
 			assert len(mock.sent_commands) == 1
 			expr = mock.sent_commands[0].expr
 			# Should be a call expression
@@ -167,9 +179,9 @@ class TestRunJs:
 		"""Multiple run_js calls should send multiple commands."""
 		mock = MockRenderSession()
 		with set_render_context(mock):
-			run_js(log_message("1"))  # pyright: ignore[reportArgumentType]
-			run_js(log_message("2"))  # pyright: ignore[reportArgumentType]
-			run_js(log_message("3"))  # pyright: ignore[reportArgumentType]
+			run_js(log_message("1"))
+			run_js(log_message("2"))
+			run_js(log_message("3"))
 
 			assert len(mock.sent_commands) == 3
 			assert mock.sent_commands[0].id == "1"
@@ -180,8 +192,7 @@ class TestRunJs:
 		"""run_js should use the pathname from the route context."""
 		mock = MockRenderSession()
 		with set_render_context(mock, pathname="/dashboard"):
-			run_js(log_message("test"))  # pyright: ignore[reportArgumentType]
-
+			run_js(log_message("test"))
 			assert mock.sent_commands[0].path == "/dashboard"
 
 
@@ -191,8 +202,7 @@ class TestRunJsWithResult:
 		"""The returned future should be resolvable."""
 		mock = MockRenderSession()
 		with set_render_context(mock):
-			future = run_js(get_value(), result=True)  # pyright: ignore[reportArgumentType,reportCallIssue]
-
+			future = run_js(get_value(), result=True)
 			# Simulate the result coming back
 			exec_id = mock.sent_commands[0].id
 			mock.pending_js_results[exec_id].set_result(42)

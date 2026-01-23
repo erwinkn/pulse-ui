@@ -1,8 +1,11 @@
 """Browser document global object.
 
 Usage:
-    from pulse.js import document
-    document.querySelector("#app")      # -> document.querySelector("#app")
+
+```python
+from pulse.js import document
+document.querySelector("#app")      # -> document.querySelector("#app")
+```
 """
 
 from collections.abc import Callable as _Callable

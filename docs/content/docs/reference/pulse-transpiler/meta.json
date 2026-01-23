@@ -1,0 +1,11 @@
+{
+  "title": "pulse.transpiler",
+  "icon": "Code",
+  "defaultOpen": false,
+  "pages": [
+    "javascript-decorator",
+    "imports-assets",
+    "nodes",
+    "emit-transpile"
+  ]
+}

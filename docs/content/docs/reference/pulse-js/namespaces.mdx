@@ -1,0 +1,518 @@
+---
+title: "Namespaces"
+description: "JavaScript namespace objects for transpiled Python code"
+---
+
+# Namespaces
+
+JavaScript namespace objects that provide static functions and properties. These don't use `new` - they're just containers for related functions.
+
+```python
+from pulse.js import Math, JSON, console, window, document, navigator
+```
+
+Or import as modules for aliased access:
+
+```python
+import pulse.js.math as Math
+import pulse.js.json as JSON
+import pulse.js.console as console
+```
+
+---
+
+## Math
+
+Mathematical functions and constants.
+
+```python
+from pulse.js import Math
+
+@ps.javascript
+def example():
+    x = Math.floor(3.7)      # -> Math.floor(3.7) -> 3
+    y = Math.random()        # -> Math.random()
+    r = Math.sqrt(16)        # -> Math.sqrt(16) -> 4
+```
+
+### Constants
+
+| Constant | Description |
+|----------|-------------|
+| `PI` | Pi (~3.14159) |
+| `E` | Euler's number (~2.71828) |
+| `LN2` | Natural log of 2 |
+| `LN10` | Natural log of 10 |
+| `LOG2E` | Base-2 log of E |
+| `LOG10E` | Base-10 log of E |
+| `SQRT1_2` | Square root of 1/2 |
+| `SQRT2` | Square root of 2 |
+
+### Rounding
+
+| Function | Description |
+|----------|-------------|
+| `floor(x)` | Round down |
+| `ceil(x)` | Round up |
+| `round(x)` | Round to nearest integer |
+| `trunc(x)` | Remove fractional part |
+| `fround(x)` | Round to 32-bit float |
+
+### Arithmetic
+
+| Function | Description |
+|----------|-------------|
+| `abs(x)` | Absolute value |
+| `sign(x)` | Sign (-1, 0, or 1) |
+| `max(*values)` | Maximum value |
+| `min(*values)` | Minimum value |
+| `pow(x, y)` | x raised to power y |
+| `sqrt(x)` | Square root |
+| `cbrt(x)` | Cube root |
+| `hypot(*values)` | Square root of sum of squares |
+| `imul(x, y)` | 32-bit integer multiplication |
+| `clz32(x)` | Leading zero bits in 32-bit int |
+
+### Exponential and logarithmic
+
+| Function | Description |
+|----------|-------------|
+| `exp(x)` | e raised to power x |
+| `expm1(x)` | exp(x) - 1 |
+| `log(x)` | Natural logarithm |
+| `log10(x)` | Base-10 logarithm |
+| `log2(x)` | Base-2 logarithm |
+| `log1p(x)` | log(1 + x) |
+
+### Trigonometric
+
+| Function | Description |
+|----------|-------------|
+| `sin(x)` | Sine |
+| `cos(x)` | Cosine |
+| `tan(x)` | Tangent |
+| `asin(x)` | Arcsine |
+| `acos(x)` | Arccosine |
+| `atan(x)` | Arctangent |
+| `atan2(y, x)` | Arctangent of y/x |
+| `sinh(x)` | Hyperbolic sine |
+| `cosh(x)` | Hyperbolic cosine |
+| `tanh(x)` | Hyperbolic tangent |
+| `asinh(x)` | Inverse hyperbolic sine |
+| `acosh(x)` | Inverse hyperbolic cosine |
+| `atanh(x)` | Inverse hyperbolic tangent |
+
+### Other
+
+| Function | Description |
+|----------|-------------|
+| `random()` | Random number in [0, 1) |
+
+---
+
+## JSON
+
+JSON parsing and stringifying.
+
+```python
+import pulse.js.json as JSON
+
+@ps.javascript
+def example():
+    text = JSON.stringify(data)       # -> JSON.stringify(data)
+    obj = JSON.parse(text)            # -> JSON.parse(text)
+```
+
+### Functions
+
+#### parse
+
+Parse a JSON string into a JavaScript value.
+
+```python
+JSON.parse(text)
+JSON.parse(text, reviver)
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `text` | JSON string to parse |
+| `reviver` | Optional `(key, value) -> value` transform function |
+
+#### stringify
+
+Convert a value to a JSON string.
+
+```python
+JSON.stringify(value)
+JSON.stringify(value, replacer)
+JSON.stringify(value, replacer, space)
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `value` | Value to convert |
+| `replacer` | Optional array of keys or `(key, value) -> value` filter |
+| `space` | Optional indentation (number of spaces or string) |
+
+### Example
+
+```python
+import pulse.js.json as JSON
+
+@ps.javascript
+def format_json(data):
+    # Pretty print with 2-space indent
+    return JSON.stringify(data, None, 2)
+
+@ps.javascript
+def parse_dates(text):
+    # Parse with date revival
+    def reviver(key, value):
+        if key == "date":
+            return Date(value)
+        return value
+    return JSON.parse(text, reviver)
+```
+
+---
+
+## console
+
+Browser console logging.
+
+```python
+from pulse.js import console
+
+@ps.javascript
+def example():
+    console.log("Hello")              # -> console.log("Hello")
+    console.error("Error!")           # -> console.error("Error!")
+```
+
+Or import functions directly:
+
+```python
+from pulse.js.console import log, error, warn
+
+@ps.javascript
+def example():
+    log("message")                    # -> console.log("message")
+```
+
+### Logging methods
+
+| Function | Description |
+|----------|-------------|
+| `log(*data)` | General logging |
+| `info(*data)` | Informational message |
+| `warn(*data)` | Warning message |
+| `error(*data)` | Error message |
+| `debug(*data)` | Debug message |
+
+### Inspection
+
+| Function | Description |
+|----------|-------------|
+| `dir(item, options?)` | Display object properties |
+| `dirxml(*data)` | Display XML/HTML representation |
+| `table(data, columns?)` | Display as table |
+
+### Grouping
+
+| Function | Description |
+|----------|-------------|
+| `group(*label)` | Start collapsed group |
+| `groupCollapsed(*label)` | Start expanded group |
+| `groupEnd()` | End current group |
+
+### Timing
+
+| Function | Description |
+|----------|-------------|
+| `time(label?)` | Start timer |
+| `timeEnd(label?)` | End timer and log |
+| `timeLog(label?, *data)` | Log current timer value |
+
+### Other
+
+| Function | Description |
+|----------|-------------|
+| `assert_(condition, *data)` | Assert condition (note underscore) |
+| `clear()` | Clear console |
+| `count(label?)` | Log call count |
+| `countReset(label?)` | Reset counter |
+| `trace(*data)` | Log stack trace |
+
+---
+
+## window
+
+Browser window object - global properties and methods.
+
+```python
+from pulse.js import window
+
+@ps.javascript
+def example():
+    width = window.innerWidth         # -> window.innerWidth
+    window.alert("Hello!")            # -> window.alert("Hello!")
+```
+
+### Dimensions
+
+| Property | Description |
+|----------|-------------|
+| `innerWidth` | Viewport width |
+| `innerHeight` | Viewport height |
+| `outerWidth` | Window width including chrome |
+| `outerHeight` | Window height including chrome |
+
+### Scroll
+
+| Property/Function | Description |
+|-------------------|-------------|
+| `scrollX` | Horizontal scroll position |
+| `scrollY` | Vertical scroll position |
+| `scrollTo(x, y)` | Scroll to position |
+| `scrollBy(x, y)` | Scroll by amount |
+
+### Dialogs
+
+| Function | Description |
+|----------|-------------|
+| `alert(message)` | Show alert dialog |
+| `confirm(message)` | Show confirm dialog, return bool |
+| `prompt(message, default?)` | Show prompt dialog, return string or None |
+
+### Timers
+
+| Function | Description |
+|----------|-------------|
+| `setTimeout(handler, timeout?, *args)` | Schedule callback, return timer ID |
+| `clearTimeout(timerId)` | Cancel timeout |
+| `setInterval(handler, timeout?, *args)` | Schedule repeating callback |
+| `clearInterval(intervalId)` | Cancel interval |
+
+### Animation
+
+| Function | Description |
+|----------|-------------|
+| `requestAnimationFrame(callback)` | Schedule before next repaint |
+| `cancelAnimationFrame(requestId)` | Cancel animation frame |
+
+### Events
+
+| Function | Description |
+|----------|-------------|
+| `addEventListener(type, listener, options?)` | Add event listener |
+| `removeEventListener(type, listener, options?)` | Remove event listener |
+| `dispatchEvent(event)` | Dispatch event |
+
+### Window management
+
+| Function | Description |
+|----------|-------------|
+| `open(url?, target?, features?)` | Open new window |
+| `close()` | Close window |
+| `focus()` | Focus window |
+| `blur()` | Remove focus |
+
+### Other properties
+
+| Property | Description |
+|----------|-------------|
+| `location` | URL and navigation |
+| `history` | Browser history |
+| `navigator` | Browser info |
+| `document` | Document object |
+| `localStorage` | Local storage |
+| `sessionStorage` | Session storage |
+| `performance` | Performance API |
+| `devicePixelRatio` | Pixel density |
+
+### Utility functions
+
+| Function | Description |
+|----------|-------------|
+| `getSelection()` | Current text selection |
+| `getComputedStyle(element, pseudo?)` | Computed styles |
+| `matchMedia(query)` | Media query matching |
+| `atob(encoded)` | Decode base64 |
+| `btoa(data)` | Encode base64 |
+| `print_()` | Open print dialog (note underscore) |
+| `postMessage(message, targetOrigin, transfer?)` | Post message to window |
+
+### Example
+
+```python
+from pulse.js import window
+
+@ps.javascript
+def handle_resize():
+    def on_resize(event):
+        console.log(f"New size: {window.innerWidth}x{window.innerHeight}")
+
+    window.addEventListener("resize", on_resize)
+
+    # Return cleanup function
+    return lambda: window.removeEventListener("resize", on_resize)
+```
+
+---
+
+## document
+
+Browser document object - DOM access and manipulation.
+
+```python
+from pulse.js import document
+
+@ps.javascript
+def example():
+    el = document.querySelector("#app")    # -> document.querySelector("#app")
+    document.title = "New Title"           # -> document.title = "New Title"
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `body` | Document body element |
+| `head` | Document head element |
+| `documentElement` | Root html element |
+| `activeElement` | Currently focused element |
+| `title` | Document title |
+| `readyState` | Loading state ("loading", "interactive", "complete") |
+| `cookie` | Document cookies |
+| `referrer` | Referring URL |
+| `URL` | Document URL |
+| `domain` | Document domain |
+| `fullscreenElement` | Current fullscreen element |
+
+### Query methods
+
+| Function | Description |
+|----------|-------------|
+| `querySelector(selectors)` | First matching element |
+| `querySelectorAll(selectors)` | All matching elements |
+| `getElementById(id)` | Element by ID |
+| `getElementsByClassName(names)` | Elements by class |
+| `getElementsByTagName(name)` | Elements by tag |
+| `getElementsByName(name)` | Elements by name attribute |
+
+### Element creation
+
+| Function | Description |
+|----------|-------------|
+| `createElement(tagName, options?)` | Create element |
+| `createTextNode(data)` | Create text node |
+| `createDocumentFragment()` | Create fragment |
+| `createComment(data)` | Create comment |
+
+### Events
+
+| Function | Description |
+|----------|-------------|
+| `addEventListener(type, listener, options?)` | Add event listener |
+| `removeEventListener(type, listener, options?)` | Remove event listener |
+| `dispatchEvent(event)` | Dispatch event |
+
+### Other
+
+| Function | Description |
+|----------|-------------|
+| `hasFocus()` | Check if document has focus |
+| `getSelection()` | Current selection |
+| `importNode(node, deep?)` | Import node from another document |
+| `adoptNode(node)` | Adopt node from another document |
+| `exitFullscreen()` | Exit fullscreen mode |
+
+### Example
+
+```python
+from pulse.js import document, console
+
+@ps.javascript
+def highlight_links():
+    links = document.querySelectorAll("a")
+    for link in links:
+        link.style.backgroundColor = "yellow"
+    console.log(f"Highlighted {links.length} links")
+```
+
+---
+
+## navigator
+
+Browser and device information.
+
+```python
+from pulse.js import navigator
+
+@ps.javascript
+def example():
+    lang = navigator.language          # -> navigator.language
+    online = navigator.onLine          # -> navigator.onLine
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `userAgent` | User agent string |
+| `language` | Browser language |
+| `languages` | Preferred languages |
+| `platform` | Platform string |
+| `vendor` | Browser vendor |
+| `appName` | Application name |
+| `appVersion` | Application version |
+| `onLine` | Online status |
+| `cookieEnabled` | Cookies enabled |
+| `pdfViewerEnabled` | PDF viewer available |
+| `hardwareConcurrency` | CPU core count |
+| `maxTouchPoints` | Max touch points |
+| `deviceMemory` | Device memory (GB, may be undefined) |
+
+### APIs
+
+| Property | Description |
+|----------|-------------|
+| `clipboard` | Clipboard API |
+| `mediaDevices` | Media devices API |
+| `permissions` | Permissions API |
+| `serviceWorker` | Service Worker API |
+| `geolocation` | Geolocation API |
+| `storage` | Storage API |
+
+### Methods
+
+| Function | Description |
+|----------|-------------|
+| `vibrate(pattern)` | Vibrate device |
+| `share(data)` | Web Share API |
+| `canShare(data?)` | Check if sharing supported |
+| `sendBeacon(url, data?)` | Send beacon request |
+
+### Example
+
+```python
+from pulse.js import navigator, console
+
+@ps.javascript
+def check_environment():
+    console.log(f"Language: {navigator.language}")
+    console.log(f"Online: {navigator.onLine}")
+    console.log(f"Cores: {navigator.hardwareConcurrency}")
+
+    if navigator.canShare():
+        console.log("Web Share API available")
+```
+
+---
+
+## See also
+
+- [Builtins reference](/docs/reference/pulse-js/builtins) - Array, Map, Set, Promise, etc.
+- [React reference](/docs/reference/pulse-js/react) - Hooks and components
+- [pulse.js overview](/docs/reference/pulse-js/) - Module overview

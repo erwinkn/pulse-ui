@@ -1,0 +1,247 @@
+---
+title: "Context"
+description: "Runtime context objects"
+---
+
+Runtime context for accessing app, session, render, and route information.
+
+## Classes
+
+### PulseContext
+
+Composite context accessible to hooks and internals. Manages per-request state via context variables.
+
+`PulseContext.get()` is always available when a Pulse app is running. The `app` property is always set. Pulse mounts `session`, `render`, and `route` where appropriate.
+
+#### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `app` | `App` | Application instance (always set) |
+| `session` | `UserSession \| None` | Per-user session (set during HTTP requests and WebSocket connections) |
+| `render` | `RenderSession \| None` | Per-connection render session (set during render sessions) |
+| `route` | `RouteContext \| None` | Active route context (set when rendering a route) |
+
+#### Class Methods
+
+##### get
+
+```python
+@classmethod
+def get(cls) -> PulseContext
+```
+
+Get the current context.
+
+**Returns:** Current `PulseContext`.
+
+**Raises:** `RuntimeError` if no context is active.
+
+##### update
+
+```python
+@classmethod
+def update(
+    cls,
+    session: UserSession | None = None,
+    render: RenderSession | None = None,
+    route: RouteContext | None = None,
+) -> PulseContext
+```
+
+Create a new context with updated values, inheriting unspecified values from current context.
+
+**Parameters:**
+- `session` - New session (optional, inherits if not provided).
+- `render` - New render session (optional, inherits if not provided).
+- `route` - New route context (optional, inherits if not provided).
+
+**Returns:** New `PulseContext` instance.
+
+#### Context Manager
+
+`PulseContext` can be used as a context manager to temporarily set the active context:
+
+```python
+ctx = PulseContext(app=app, session=session)
+with ctx:
+    # Context is active here
+    current = PulseContext.get()
+# Previous context restored
+```
+
+### PulseRequest
+
+Normalized request object for both HTTP prerender and WebSocket connect.
+
+#### Constructor
+
+```python
+def __init__(
+    self,
+    *,
+    headers: Mapping[str, str] | None = None,
+    cookies: Mapping[str, str] | None = None,
+    scheme: str | None = None,
+    method: str | None = None,
+    path: str | None = None,
+    query_string: str | None = None,
+    client: tuple[str, int] | None = None,
+    auth: Any | None = None,
+    raw: Any | None = None,
+) -> None
+```
+
+#### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `headers` | `dict[str, str]` | Request headers (lowercased keys) |
+| `cookies` | `dict[str, str]` | Request cookies |
+| `scheme` | `str` | URL scheme (http/https) |
+| `method` | `str` | HTTP method |
+| `path` | `str` | URL path |
+| `query_string` | `str` | Query string (without `?`) |
+| `client` | `tuple[str, int] \| None` | Client address (host, port) |
+| `auth` | `Any \| None` | Auth data (Socket.IO only) |
+| `raw` | `Any \| None` | Underlying request object |
+
+#### Properties
+
+##### url
+
+```python
+@property
+def url(self) -> str
+```
+
+Full URL including scheme, host, path, and query string.
+
+#### Static Methods
+
+##### from_fastapi
+
+```python
+@staticmethod
+def from_fastapi(request: Any) -> PulseRequest
+```
+
+Create from a FastAPI/Starlette request.
+
+##### from_socketio_environ
+
+```python
+@staticmethod
+def from_socketio_environ(
+    environ: MutableMapping[str, Any],
+    auth: Any | None
+) -> PulseRequest
+```
+
+Create from a Socket.IO environ dictionary.
+
+### SessionStore
+
+Abstract base class for server-backed session stores.
+
+```python
+class SessionStore(ABC):
+    async def init(self) -> None: ...
+    async def close(self) -> None: ...
+
+    @abstractmethod
+    async def get(self, sid: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    async def create(self, sid: str) -> dict[str, Any]: ...
+
+    @abstractmethod
+    async def delete(self, sid: str) -> None: ...
+
+    @abstractmethod
+    async def save(self, sid: str, session: dict[str, Any]) -> None: ...
+```
+
+#### Methods
+
+| Method | Description |
+|--------|-------------|
+| `init()` | Async initialization (called on app start) |
+| `close()` | Async cleanup (called on app shutdown) |
+| `get(sid)` | Retrieve session by ID |
+| `create(sid)` | Create new session |
+| `delete(sid)` | Delete session |
+| `save(sid, session)` | Persist session data |
+
+### InMemorySessionStore
+
+In-memory session store implementation. Sessions are lost on restart.
+
+```python
+store = ps.InMemorySessionStore()
+app = ps.App(session_store=store)
+```
+
+### CookieSessionStore
+
+Store sessions in signed cookies. Default session store.
+
+#### Constructor
+
+```python
+def __init__(
+    self,
+    secret: str | None = None,
+    *,
+    salt: str = "pulse.session",
+    digestmod: str = "sha256",
+    max_cookie_bytes: int = 3800,
+) -> None
+```
+
+**Parameters:**
+- `secret` - Signing secret. Uses `PULSE_SECRET` env var if not provided. Required in production.
+- `salt` - Salt for HMAC. Default: `"pulse.session"`.
+- `digestmod` - Hash algorithm. Default: `"sha256"`.
+- `max_cookie_bytes` - Maximum cookie size. Default: 3800.
+
+**Environment Variables:**
+- `PULSE_SECRET` - Session signing secret (required in production)
+
+```python
+# Uses PULSE_SECRET environment variable
+store = ps.CookieSessionStore()
+
+# Explicit secret
+store = ps.CookieSessionStore(secret="your-secret-key")
+
+app = ps.App(session_store=store)
+```
+
+#### Methods
+
+##### encode
+
+```python
+def encode(self, sid: str, session: dict[str, Any]) -> str
+```
+
+Encode session to signed cookie value.
+
+##### decode
+
+```python
+def decode(self, cookie: str) -> tuple[str, Session] | None
+```
+
+Decode and verify signed cookie. Returns `(sid, session)` or `None` if invalid.
+
+## Context Variable
+
+### PULSE_CONTEXT
+
+```python
+PULSE_CONTEXT: ContextVar[PulseContext | None]
+```
+
+The context variable holding the current `PulseContext`. Use `PulseContext.get()` instead of accessing directly.

@@ -17,15 +17,32 @@ def _bytes_kv_to_str(headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
 
 
 class PulseRequest:
-	"""Normalized request for both HTTP prerender and Socket.IO connect.
+	"""Normalized request object for both HTTP prerender and WebSocket connect.
 
-	Provides a minimal, consistent surface:
-	  - headers: dict[str, str] (lowercased)
-	  - cookies: dict[str, str]
-	  - scheme, method, path, query_string, url
-	  - client: tuple[str, int] | None
-	  - auth: Any | None (only set for Socket.IO connect when provided)
-	  - raw: underlying request/scope/environ for advanced users
+	Provides a consistent interface for accessing request data regardless of
+	the underlying transport (FastAPI/Starlette HTTP or Socket.IO WebSocket).
+
+	Attributes:
+		headers: Request headers with lowercased keys.
+		cookies: Request cookies as name-value pairs.
+		scheme: URL scheme (http/https).
+		method: HTTP method (GET, POST, etc.).
+		path: URL path.
+		query_string: Query string (without leading ?).
+		client: Client address as (host, port) tuple, or None.
+		auth: Auth data (Socket.IO only).
+		raw: Underlying request object for advanced use.
+
+	Args:
+		headers: Request headers (keys will be lowercased).
+		cookies: Request cookies.
+		scheme: URL scheme (http/https).
+		method: HTTP method.
+		path: URL path.
+		query_string: Query string (without ?).
+		client: Client address as (host, port) tuple.
+		auth: Auth data (for Socket.IO).
+		raw: Underlying request object.
 	"""
 
 	headers: dict[str, str]
@@ -63,6 +80,7 @@ class PulseRequest:
 
 	@property
 	def url(self) -> str:
+		"""Full URL including scheme, host, path, and query string."""
 		qs = f"?{self.query_string}" if self.query_string else ""
 		host = self.headers.get("host", "")
 		if host:
@@ -70,7 +88,15 @@ class PulseRequest:
 		return f"{self.path}{qs}"
 
 	@staticmethod
-	def from_fastapi(request: Any) -> PulseRequest:
+	def from_fastapi(request: Any) -> "PulseRequest":
+		"""Create from a FastAPI/Starlette request.
+
+		Args:
+			request: FastAPI/Starlette Request object.
+
+		Returns:
+			PulseRequest instance with normalized request data.
+		"""
 		# FastAPI/Starlette Request
 		headers = {k.lower(): v for k, v in request.headers.items()}
 		cookies = dict(request.cookies or {})
@@ -93,7 +119,16 @@ class PulseRequest:
 	@staticmethod
 	def from_socketio_environ(
 		environ: MutableMapping[str, Any], auth: Any | None
-	) -> PulseRequest:
+	) -> "PulseRequest":
+		"""Create from a Socket.IO environ dictionary.
+
+		Args:
+			environ: Socket.IO environ dictionary (WSGI or ASGI-like).
+			auth: Auth data passed during Socket.IO connect.
+
+		Returns:
+			PulseRequest instance with normalized request data.
+		"""
 		# python-socketio passes a WSGI/ASGI-like environ. Try to detect ASGI scope first.
 		scope: MutableMapping[str, Any] = environ.get("asgi.scope") or environ
 

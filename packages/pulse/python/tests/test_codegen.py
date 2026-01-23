@@ -33,9 +33,7 @@ class TestCodegen:
 		route = Route("/simple", ps.component(lambda: div()["Simple route"]))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(
-			route, server_address=SERVER_ADDRESS, asset_import_paths={}
-		)
+		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
 		route_page_path = codegen.output_folder / "routes" / "simple.jsx"
 		assert route_page_path.exists()
@@ -64,9 +62,7 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(
-			route, server_address=SERVER_ADDRESS, asset_import_paths={}
-		)
+		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
 		route_page_path = codegen.output_folder / "routes" / "with-components.jsx"
 		assert route_page_path.exists()
@@ -82,7 +78,7 @@ class TestCodegen:
 
 	def test_generate_route_page_with_default_export_components(self, tmp_path: Path):
 		"""Test generating route with default export components."""
-		default_import = Import("DefaultComp", "@ui/default-comp", kind="default")
+		default_import = Import("@ui/default-comp")
 		_default_comp = Jsx(default_import)
 		route = Route(
 			"/default-export",
@@ -90,16 +86,14 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(
-			route, server_address=SERVER_ADDRESS, asset_import_paths={}
-		)
+		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
 		route_page_path = codegen.output_folder / "routes" / "default-export.jsx"
 		assert route_page_path.exists()
 		result = route_page_path.read_text()
 
-		# Default imports use the name directly with unique ID
-		assert "import DefaultComp_" in result
+		# Default imports use a generated binding
+		assert f'import {default_import.js_name} from "@ui/default-comp";' in result
 		assert '"@ui/default-comp"' in result
 
 	def test_generate_route_page_with_property_components(self, tmp_path: Path):
@@ -119,9 +113,7 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(
-			route, server_address=SERVER_ADDRESS, asset_import_paths={}
-		)
+		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
 		route_page_path = codegen.output_folder / "routes" / "app-shell.jsx"
 		assert route_page_path.exists()
@@ -147,9 +139,7 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(
-			route, server_address=SERVER_ADDRESS, asset_import_paths={}
-		)
+		codegen.generate_route(route, server_address=SERVER_ADDRESS)
 
 		route_page_path = codegen.output_folder / "routes" / "duplicate-imports.jsx"
 		assert route_page_path.exists()
@@ -157,26 +147,6 @@ class TestCodegen:
 
 		# Should have only one import statement for Button
 		assert result.count('from "@ui/button"') == 1
-
-	@pytest.mark.skip(reason="Lazy component support not yet implemented")
-	def test_generate_route_page_with_lazy_component_raises_not_implemented(
-		self, tmp_path: Path
-	):
-		"""Lazy components should raise NotImplementedError (not yet supported)."""
-		lazy_import = Import("LazyThing", "@ui/lazy-thing")
-		_lazy_comp = Jsx(lazy_import)  # lazy=True no longer supported
-		route = Route(
-			"/lazy",
-			Component(lambda: div()["Lazy route"]),
-		)
-		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
-		codegen = Codegen(RouteTree([route]), codegen_config)
-
-		# TODO: Implement lazy component support
-		with pytest.raises(NotImplementedError):
-			codegen.generate_route(
-				route, server_address=SERVER_ADDRESS, asset_import_paths={}
-			)
 
 	def test_generate_routes_ts_empty(self, tmp_path: Path):
 		"""Test generating config with empty routes list."""
@@ -347,7 +317,7 @@ class TestGenerateRoute:
 
 	def test_generate_route_basic(self):
 		"""Test basic route generation."""
-		result = generate_route(path="/test")
+		result = generate_route(path="/test", route_file_path="routes/test.tsx")
 
 		assert "import { PulseView" in result
 		assert 'const path = "/test"' in result
@@ -360,32 +330,24 @@ class TestGenerateRoute:
 		button_import = Import("Button", "@mantine/core")
 		Jsx(button_import)
 
-		result = generate_route(path="/dashboard")
+		result = generate_route(
+			path="/dashboard", route_file_path="routes/dashboard.tsx"
+		)
 
 		assert "import { Button as Button_" in result
 		assert '"@mantine/core"' in result
 		# Uses unified registry
 		assert "const __registry = {" in result
 
-	@pytest.mark.skip(reason="Lazy component support not yet implemented")
-	def test_generate_route_with_lazy_component_raises(self):
-		"""Test route generation with a lazy component raises NotImplementedError."""
-		chart_import = Import("HeavyChart", "@mantine/charts")
-		Jsx(chart_import)  # lazy=True no longer supported
-
-		# TODO: Implement lazy component support
-		with pytest.raises(NotImplementedError):
-			generate_route(path="/charts")
-
 	def test_generate_route_with_css_import(self):
 		"""Test route generation with CSS side-effect import."""
 		# Create a side-effect import for CSS
-		Import("", "@mantine/core/styles.css", kind="side_effect")
+		Import("@mantine/core/styles.css", side_effect=True)
 
 		button_import = Import("Button", "@mantine/core")
 		Jsx(button_import)
 
-		result = generate_route(path="/styled")
+		result = generate_route(path="/styled", route_file_path="routes/styled.tsx")
 
 		assert 'import "@mantine/core/styles.css"' in result
 
@@ -396,7 +358,7 @@ class TestGenerateRoute:
 		Jsx(button_import)
 		Jsx(button_import)  # Same import, different Jsx wrappers
 
-		result = generate_route(path="/test")
+		result = generate_route(path="/test", route_file_path="routes/test.tsx")
 
 		# Should only have one import statement
 		assert result.count('from "@mantine/core"') == 1
@@ -404,12 +366,12 @@ class TestGenerateRoute:
 	def test_generate_route_with_namespace_import(self):
 		"""Test route generation with namespace import."""
 		# Creating the import auto-registers it (for import generation)
-		Import("Icons", "lucide-react", kind="namespace")
+		icons_import = Import("*", "lucide-react")
 
-		result = generate_route(path="/icons")
+		result = generate_route(path="/icons", route_file_path="routes/icons.tsx")
 
-		# Should generate: import * as Icons_X from "lucide-react";
-		assert "import * as Icons_" in result
+		# Should generate: import * as <binding> from "lucide-react";
+		assert f'import * as {icons_import.js_name} from "lucide-react";' in result
 		assert 'from "lucide-react"' in result
 		# Note: Imports are no longer auto-added to __registry
 		# Only Refs are in the registry now
@@ -434,7 +396,7 @@ class TestLocalFileImports:
 		css_file.write_text("body { margin: 0; }")
 
 		# Create import using absolute path
-		Import("", str(css_file), kind="side_effect")
+		Import(str(css_file), side_effect=True)
 
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
@@ -462,7 +424,7 @@ class TestLocalFileImports:
 		ts_file.write_text("export const helper = () => {};")
 
 		# Create import using absolute path (without extension)
-		Import("helper", str(tmp_path / "src" / "utils"), kind="named")
+		Import("helper", str(tmp_path / "src" / "utils"))
 
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
@@ -487,7 +449,7 @@ class TestLocalFileImports:
 		css_file.write_text("body { margin: 0; }")
 
 		# Create import (auto-registered, so we just need to create it)
-		_css_import = Import("", str(css_file), kind="side_effect")
+		_css_import = Import(str(css_file), side_effect=True)
 		del _css_import  # Suppress unused variable warning
 
 		route = Route("/test", Component(lambda: div()))
@@ -558,9 +520,9 @@ class TestLocalFileImports:
 			f.write_text(f"content of {f.name}")
 
 		# Create imports
-		Import("", str(file1), kind="side_effect")
+		Import(str(file1), side_effect=True)
 		Import("utils", str(tmp_path / "src" / "utils"))
-		Import("config", str(file3), kind="default")
+		Import(str(file3))
 
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
@@ -612,7 +574,7 @@ class TestLocalFileImports:
 		css_file.write_text(".layout { display: flex; }")
 
 		# Create import
-		Import("", str(css_file), kind="side_effect")
+		Import(str(css_file), side_effect=True)
 
 		# Create layout route
 		from pulse.routing import Layout

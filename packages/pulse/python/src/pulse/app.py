@@ -107,8 +107,8 @@ PulseMode = Literal["subdomains", "single-server"]
 """Deployment mode for the application.
 
 Values:
-    "single-server": Python and React served from the same origin (default).
-    "subdomains": Python API on a subdomain (e.g., api.example.com).
+		"single-server": Python and React served from the same origin (default).
+		"subdomains": Python API on a subdomain (e.g., api.example.com).
 """
 
 
@@ -118,12 +118,12 @@ class ConnectionStatusConfig:
 	Configuration for connection status message delays.
 
 	Attributes:
-	    initial_connecting_delay: Delay in seconds before showing "Connecting..." message
-	        on initial connection attempt. Default: 2.0
-	    initial_error_delay: Additional delay in seconds before showing error message
-	        on initial connection attempt (after connecting message). Default: 8.0
-	    reconnect_error_delay: Delay in seconds before showing error message when
-	        reconnecting after losing connection. Default: 8.0
+			initial_connecting_delay: Delay in seconds before showing "Connecting..." message
+					on initial connection attempt. Default: 2.0
+			initial_error_delay: Additional delay in seconds before showing error message
+					on initial connection attempt (after connecting message). Default: 8.0
+			reconnect_error_delay: Delay in seconds before showing error message when
+					reconnecting after losing connection. Default: 8.0
 	"""
 
 	initial_connecting_delay: float = 2.0
@@ -171,15 +171,15 @@ class App:
 		import pulse as ps
 
 		app = ps.App(
-		    routes=[
-		        ps.Route("/", render=home),
-		        ps.Route("/users/:id", render=user_detail),
-		    ],
-		    session_timeout=120.0,
+				routes=[
+						ps.Route("/", render=home),
+						ps.Route("/users/:id", render=user_detail),
+				],
+				session_timeout=120.0,
 		)
 
 		if __name__ == "__main__":
-		    app.run(port=8000)
+				app.run(port=8000)
 		```
 	"""
 
@@ -544,10 +544,21 @@ class App:
 			paths = [ensure_absolute_path(path) for path in paths]
 			payload["paths"] = paths
 			route_info = payload.get("routeInfo")
+			debug = os.environ.get("PULSE_DEBUG_RENDER")
+			if debug:
+				logger.info(
+					"[PulseDebug][prerender] session=%s header_render_id=%s payload_render_id=%s paths=%s route_info=%s",
+					session.sid,
+					request.headers.get("x-pulse-render-id"),
+					payload.get("renderId"),
+					paths,
+					route_info,
+				)
 
 			client_addr: str | None = get_client_address(request)
 			# Reuse render session from header (set by middleware) or create new one
 			render = PulseContext.get().render
+			reused = render is not None
 			if render is not None:
 				render_id = render.id
 			else:
@@ -556,9 +567,19 @@ class App:
 				render = self.create_render(
 					render_id, session, client_address=client_addr
 				)
+			if debug:
+				logger.info(
+					"[PulseDebug][prerender] session=%s render=%s reused=%s connected=%s",
+					session.sid,
+					render_id,
+					reused,
+					render.connected,
+				)
+			print(f"Prerendering for RenderSession {render_id}")
 
 			# Schedule cleanup timeout (will cancel/reschedule on activity)
-			self._schedule_render_cleanup(render_id)
+			if not render.connected:
+				self._schedule_render_cleanup(render_id)
 
 			def _normalize_prerender_result(
 				captured: ServerInitMessage | ServerNavigateToMessage,
@@ -698,6 +719,13 @@ class App:
 			if cookie is None:
 				raise ConnectionRefusedError("Socket connect missing cookie")
 			session = await self.get_or_create_session(cookie)
+			debug = os.environ.get("PULSE_DEBUG_RENDER")
+			if debug:
+				logger.info(
+					"[PulseDebug][connect] session=%s render_id=%s",
+					session.sid,
+					rid,
+				)
 
 			if not rid:
 				# Still refuse connections without a renderId
@@ -708,6 +736,13 @@ class App:
 			# Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
 			render = self.render_sessions.get(rid)
 			if render is None:
+				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line
+				if debug:
+					logger.info(
+						"[PulseDebug][connect] render_missing session=%s render_id=%s creating=true",
+						session.sid,
+						rid,
+					)
 				render = self.create_render(
 					rid, session, client_address=get_client_address_socketio(environ)
 				)
@@ -718,6 +753,15 @@ class App:
 						f"Socket connect session mismatch render={render.id} "
 						+ f"owner={owner} session={session.sid}"
 					)
+				if debug:
+					logger.info(
+						"[PulseDebug][connect] render_found session=%s render_id=%s owner=%s connected=%s",
+						session.sid,
+						render.id,
+						owner,
+						render.connected,
+					)
+			print(f"Connected to RenderSession {render.id}")
 
 			def on_message(message: ServerMessage):
 				payload = serialize(message)
@@ -830,6 +874,20 @@ class App:
 	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
+		if os.environ.get("PULSE_DEBUG_RENDER") and msg["type"] in (
+			"attach",
+			"update",
+			"detach",
+		):
+			logger.info(
+				"[PulseDebug][client-message] session=%s render=%s type=%s path=%s route_info=%s",
+				session.sid,
+				render.id,
+				msg["type"],
+				msg.get("path"),
+				msg.get("routeInfo"),
+			)
+
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
 				render.attach(msg["path"], msg["routeInfo"])

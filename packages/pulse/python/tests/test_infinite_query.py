@@ -85,6 +85,45 @@ async def test_infinite_query_fetch_next_pages():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_infinite_query_initial_data_used_on_key_change_with_keep_previous_true():
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.infinite_query(initial_page_param=0, retries=0, keep_previous_data=True)
+		async def projects(self, page_param: int) -> ProjectsPage:
+			await asyncio.sleep(0.02)
+			return {"items": [self.uid], "next": None}
+
+		@projects.get_next_page_param
+		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
+			return None
+
+		@projects.initial_data
+		def _initial(self):
+			data: ProjectsPage = {"items": [0], "next": None}
+			return [Page(data, 0)]
+
+		@projects.key
+		def _key(self):
+			return ("projects", self.uid)
+
+	s = S()
+	q = s.projects
+
+	assert q.pages == [{"items": [0], "next": None}]
+	await q.wait()
+	assert q.pages == [{"items": [1], "next": None}]
+
+	s.uid = 2
+	await asyncio.sleep(0)
+	assert q.is_fetching is True
+	assert q.pages == [{"items": [0], "next": None}]
+	await q.wait()
+	assert q.pages == [{"items": [2], "next": None}]
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_infinite_query_wait_is_side_effect_free_and_ensure_starts_fetch():
 	calls = 0
 

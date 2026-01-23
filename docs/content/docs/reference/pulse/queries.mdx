@@ -71,10 +71,10 @@ def query(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `stale_time` | `float` | `0.0` | Seconds before data is considered stale |
+| `stale_time` | `float` | `0.0` | Seconds before data is considered stale. `0.0` means always stale (refetch on access). |
 | `gc_time` | `float \| None` | `300.0` | Seconds to keep unused query in cache |
 | `refetch_interval` | `float \| None` | `None` | Auto-refetch interval in seconds |
-| `keep_previous_data` | `bool` | `False` | Keep previous data while refetching |
+| `keep_previous_data` | `bool` | `False` | Keep previous data while refetching. Preserves data across key changes, even if the new key has `initial_data`. |
 | `retries` | `int` | `3` | Number of retry attempts |
 | `retry_delay` | `float \| None` | `2.0` | Delay between retries in seconds |
 | `initial_data_updated_at` | `float \| datetime \| None` | `None` | Timestamp for initial data staleness |
@@ -325,7 +325,15 @@ def infinite_query(
 |-----------|------|---------|-------------|
 | `initial_page_param` | `TParam` | required | First page parameter |
 | `max_pages` | `int` | `0` | Max pages to keep (0 = unlimited) |
-| (other parameters same as `@query`)
+| `stale_time` | `float` | `0.0` | Seconds before data is considered stale. `0.0` means always stale. |
+| `gc_time` | `float \| None` | `300.0` | Seconds to keep unused query in cache |
+| `refetch_interval` | `float \| None` | `None` | Auto-refetch interval in seconds |
+| `keep_previous_data` | `bool` | `False` | Keep previous data while refetching. Preserves data across key changes. |
+| `retries` | `int` | `3` | Number of retry attempts |
+| `retry_delay` | `float \| None` | `2.0` | Delay between retries in seconds |
+| `enabled` | `bool` | `True` | Whether query is enabled |
+| `fetch_on_mount` | `bool` | `True` | Fetch when component mounts |
+| `key` | `QueryKey \| None` | `None` | Static key for sharing across instances |
 
 ### Usage
 
@@ -381,6 +389,16 @@ def _next(self, pages: list[Page[T, TParam]]) -> TParam | None:
 #### `@infinite_query_prop.get_previous_page_param`
 
 Define how to get the previous page parameter (for bi-directional pagination).
+
+#### `@infinite_query_prop.initial_data`
+
+Provide initial pages before the first fetch:
+
+```python
+@my_query.initial_data
+def _initial(self) -> list[Page[T, TParam]]:
+    return [Page(data=[], param=None)]
+```
 
 #### `@infinite_query_prop.on_success`
 
@@ -450,11 +468,11 @@ Mark as stale and trigger refetch.
 
 #### `set_data(pages: list[Page] | Callable, updated_at: float | datetime | None = None) -> None`
 
-Set pages directly.
+Set pages directly. Accepts either a list of pages or an updater function.
 
 #### `set_initial_data(pages: list[Page] | Callable, updated_at: float | datetime | None = None) -> None`
 
-Seed initial data.
+Seed initial data while still in loading state. If the query has already loaded, this is a no-op.
 
 #### `enable() / disable() -> None`
 

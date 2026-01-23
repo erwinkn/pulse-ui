@@ -13,6 +13,8 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Use `make bump` for changing package versions
 - When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)
 - Use `bun info ...` to get information about a JS package
+- Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI.
+- While debugging, feel free to add debug print statements, spin up test files, modify existing code, or anything else that would improve your feedback loop and accelerate the troubleshooting process. Remove those debug changes after fixing the issue.
 
 ## Code Style
 

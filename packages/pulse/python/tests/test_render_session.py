@@ -325,6 +325,44 @@ def test_dummy_placeholder_to_keep_line_numbers_stable():
 	assert True
 
 
+def test_navigate_to_bypasses_pending_mount_queue():
+	routes = RouteTree(
+		[
+			Route("a", simple_component),
+			Route("a/b", simple_component),
+		]
+	)
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a", "/a/b"])
+		session.attach("/a", make_route_info("/a"))
+		session.attach("/a/b", make_route_info("/a/b"))
+
+	session.detach("/a/b", timeout=10)
+	mount = session.route_mounts["/a/b"]
+	assert mount.state == "pending"
+	assert mount.queue == []
+
+	session.send(
+		{
+			"type": "navigate_to",
+			"path": "/a/b",
+			"replace": False,
+			"hard": False,
+		}
+	)
+
+	assert len(messages) == 1
+	assert messages[0]["type"] == "navigate_to"
+	assert mount.queue == []
+
+	session.close()
+
+
 # =============================================================================
 # Reconnection / Rehydration Tests
 # =============================================================================

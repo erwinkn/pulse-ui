@@ -333,6 +333,10 @@ class RenderSession:
 
 	def send(self, message: ServerMessage):
 		"""Route message based on mount state."""
+		if message.get("type") == "navigate_to":
+			if self._send_message:
+				self._send_message(message)
+			return
 		# Global messages (not path-specific) go directly if connected
 		path = message.get("path")
 		if path is None:
@@ -441,7 +445,6 @@ class RenderSession:
 
 		if mount is None or mount.state == "idle":
 			# Initial render must come from prerender
-			print(f"[DEBUG] Missing or idle route '{path}', reloading")
 			self.send({"type": "reload"})
 			return
 

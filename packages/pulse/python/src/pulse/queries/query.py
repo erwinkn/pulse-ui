@@ -33,7 +33,7 @@ from pulse.queries.common import (
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
-from pulse.scheduling import TimerHandleLike, is_pytest, later
+from pulse.scheduling import TimerHandleLike, create_task, is_pytest, later
 from pulse.state import InitializableProperty, State
 
 if TYPE_CHECKING:
@@ -224,7 +224,7 @@ async def run_fetch_with_retries(
 		on_success: Optional callback on success
 		on_error: Optional callback on error
 		untrack: If True, wrap fetch_fn in Untrack() to prevent dependency tracking.
-		         Use for keyed queries where fetch is triggered via asyncio.create_task.
+		         Use for keyed queries where fetch is triggered via create_task().
 	"""
 	state.reset_retries()
 
@@ -382,7 +382,7 @@ class KeyedQuery(Generic[T], Disposable):
 			fetch_fn,
 			on_success=on_success,
 			on_error=on_error,
-			untrack=True,  # Keyed queries use asyncio.create_task, need to untrack
+			untrack=True,  # Keyed queries use create_task(), need to untrack
 		)
 
 	def run_fetch(
@@ -406,7 +406,7 @@ class KeyedQuery(Generic[T], Disposable):
 		self.state.is_fetching.write(True)
 		# Capture current observers at fetch start
 		observers = list(self.observers)
-		self._task = asyncio.create_task(self._run_fetch(fetch_fn, observers))
+		self._task = create_task(self._run_fetch(fetch_fn, observers))
 		self._task_initiator = initiator
 		return self._task
 

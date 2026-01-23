@@ -20,8 +20,8 @@ from pulse.helpers import (
 )
 from pulse.scheduling import (
 	TimerHandleLike,
+	call_soon,
 	create_task,
-	schedule_on_loop,
 )
 
 T = TypeVar("T")
@@ -998,7 +998,7 @@ class GlobalBatch(Batch):
 	@override
 	def register_effect(self, effect: Effect):
 		if not self.is_scheduled:
-			schedule_on_loop(self.flush)
+			call_soon(self.flush)
 			self.is_scheduled = True
 		return super().register_effect(effect)
 

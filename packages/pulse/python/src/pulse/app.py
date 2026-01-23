@@ -285,7 +285,7 @@ class App:
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._tasks = TaskRegistry(name="app")
-		self._timers = TimerRegistry(name="app")
+		self._timers = TimerRegistry(tasks=self._tasks, name="app")
 		self._proxy = None
 		self.session_timeout = session_timeout
 		self.detach_queue_timeout = detach_queue_timeout
@@ -723,7 +723,7 @@ class App:
 				payload = serialize(message)
 				# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
 				payload = list(payload)
-				self._tasks.create(self.sio.emit("message", list(payload), to=sid))
+				self._tasks.create_task(self.sio.emit("message", list(payload), to=sid))
 
 			render.connect(on_message)
 			# Map socket sid to renderId for message routing

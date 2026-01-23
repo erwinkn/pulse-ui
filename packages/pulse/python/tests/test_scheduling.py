@@ -4,7 +4,7 @@ import pulse as ps
 import pytest
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteTree
-from pulse.scheduling import TaskRegistry, TimerRegistry
+from pulse.scheduling import TaskRegistry, TimerRegistry, call_soon, create_task
 from pulse.test_helpers import wait_for
 
 
@@ -25,7 +25,7 @@ async def test_task_registry_tracks_and_discards_on_done():
 		finished.set()
 		return 1
 
-	task = registry.create(work(), name="test.task")
+	task = registry.create_task(work(), name="test.task")
 	assert task in registry._tasks  # pyright: ignore[reportPrivateUsage]
 
 	assert await wait_for(lambda: started.is_set(), timeout=0.2)
@@ -51,7 +51,7 @@ async def test_task_registry_cancel_all_cancels_and_clears():
 			cancelled.set()
 			raise
 
-	task = registry.create(work(), name="test.cancel")
+	task = registry.create_task(work(), name="test.cancel")
 	assert await wait_for(lambda: started.is_set(), timeout=0.2)
 
 	registry.cancel_all()
@@ -63,7 +63,8 @@ async def test_task_registry_cancel_all_cancels_and_clears():
 
 @pytest.mark.asyncio
 async def test_timer_registry_later_runs_sync_and_discards():
-	registry = TimerRegistry(name="test")
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
 	fired = False
 
 	def callback():
@@ -81,7 +82,8 @@ async def test_timer_registry_later_runs_sync_and_discards():
 
 @pytest.mark.asyncio
 async def test_timer_registry_later_runs_async_and_discards():
-	registry = TimerRegistry(name="test")
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
 	fired = asyncio.Event()
 
 	async def callback():
@@ -99,7 +101,8 @@ async def test_timer_registry_later_runs_async_and_discards():
 
 @pytest.mark.asyncio
 async def test_timer_registry_later_runs_coroutine_return():
-	registry = TimerRegistry(name="test")
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
 	fired = asyncio.Event()
 
 	async def inner():
@@ -116,7 +119,8 @@ async def test_timer_registry_later_runs_coroutine_return():
 
 @pytest.mark.asyncio
 async def test_timer_registry_cancel_discards_handle():
-	registry = TimerRegistry(name="test")
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
 
 	def callback():
 		return None
@@ -131,7 +135,8 @@ async def test_timer_registry_cancel_discards_handle():
 
 @pytest.mark.asyncio
 async def test_timer_registry_cancel_all_cancels_and_clears():
-	registry = TimerRegistry(name="test")
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
 	fired = False
 
 	def callback():
@@ -168,6 +173,62 @@ async def test_later_tracks_render_tasks_and_cancels_on_close():
 
 	with ps.PulseContext.update(render=session):
 		ps.later(0.01, callback)
+
+	assert await wait_for(lambda: started.is_set(), timeout=0.2)
+
+	session.close()
+
+	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_create_task_tracks_render_task_and_cancels_on_close():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	started = asyncio.Event()
+	cancelled = asyncio.Event()
+
+	async def work():
+		started.set()
+		try:
+			await asyncio.sleep(10)
+		except asyncio.CancelledError:
+			cancelled.set()
+			raise
+
+	with ps.PulseContext.update(render=session):
+		task = create_task(work())
+
+	assert task in session._tasks._tasks  # pyright: ignore[reportPrivateUsage]
+	assert await wait_for(lambda: started.is_set(), timeout=0.2)
+
+	session.close()
+
+	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_call_soon_tracks_render_task_and_cancels_on_close():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	started = asyncio.Event()
+	cancelled = asyncio.Event()
+
+	async def work():
+		started.set()
+		try:
+			await asyncio.sleep(10)
+		except asyncio.CancelledError:
+			cancelled.set()
+			raise
+
+	def callback():
+		return work()
+
+	with ps.PulseContext.update(render=session):
+		call_soon(callback)
 
 	assert await wait_for(lambda: started.is_set(), timeout=0.2)
 

@@ -32,7 +32,7 @@ from pulse.scheduling import (
 	TaskRegistry,
 	TimerHandleLike,
 	TimerRegistry,
-	create_future_on_loop,
+	create_future,
 )
 from pulse.state import State
 from pulse.transpiler.id import next_id
@@ -290,7 +290,7 @@ class RenderSession:
 		self._pending_api = {}
 		self._pending_js_results = {}
 		self._tasks = TaskRegistry(name=f"render:{id}")
-		self._timers = TimerRegistry(name=f"render:{id}")
+		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.detach_queue_timeout = detach_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
@@ -613,8 +613,8 @@ class RenderSession:
 	) -> asyncio.Task[Any]:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
-			return self._tasks.create(coroutine(), name=name, on_done=on_done)
-		return self._tasks.create(coroutine, name=name, on_done=on_done)
+			return self._tasks.create_task(coroutine(), name=name, on_done=on_done)
+		return self._tasks.create_task(coroutine, name=name, on_done=on_done)
 
 	def schedule_later(
 		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
@@ -676,7 +676,7 @@ class RenderSession:
 			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
 			url = f"{base}{api_path}"
 		corr_id = uuid.uuid4().hex
-		fut = create_future_on_loop()
+		fut = create_future()
 		self._pending_api[corr_id] = fut
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id

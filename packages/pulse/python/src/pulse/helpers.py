@@ -129,12 +129,12 @@ def data(**attrs: Any):
 	return {f"data-{k}": v for k, v in attrs.items()}
 
 
-# Re-export scheduling helpers for backward compatibility
+# Re-export scheduling helpers
 create_task = _scheduling.create_task
-create_future_on_loop = _scheduling.create_future_on_loop
+create_future = _scheduling.create_future
 later = _scheduling.later
 repeat = _scheduling.repeat
-schedule_on_loop = _scheduling.schedule_on_loop
+call_soon = _scheduling.call_soon
 is_pytest = _scheduling.is_pytest
 
 

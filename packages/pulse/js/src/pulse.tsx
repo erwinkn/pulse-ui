@@ -35,7 +35,6 @@ export type PulsePrerenderView = {
 };
 
 export type PulsePrerender = {
-	renderId: string;
 	views: Record<string, PulsePrerenderView>;
 	directives: Directives;
 };

@@ -22,53 +22,6 @@ def is_pytest() -> bool:
 	)
 
 
-def _create_task_on_loop(
-	coroutine: Awaitable[T],
-	*,
-	name: str | None = None,
-	on_done: Callable[[asyncio.Task[T]], None] | None = None,
-) -> asyncio.Task[T]:
-	"""Create and schedule a coroutine task on the main loop from any thread."""
-	try:
-		asyncio.get_running_loop()
-		# ensure_future accepts Awaitable and returns a Task when given a coroutine
-		task = asyncio.ensure_future(coroutine)
-		if name is not None:
-			task.set_name(name)
-		if on_done:
-			task.add_done_callback(on_done)
-		return task
-	except RuntimeError:
-
-		async def _runner():
-			asyncio.get_running_loop()
-			# ensure_future accepts Awaitable and returns a Task when given a coroutine
-			task = asyncio.ensure_future(coroutine)
-			if name is not None:
-				task.set_name(name)
-			if on_done:
-				task.add_done_callback(on_done)
-			return task
-
-	try:
-		return from_thread.run(_runner)
-	except RuntimeError:
-		raise
-
-
-def _create_future_on_loop() -> asyncio.Future[Any]:
-	"""Create an asyncio Future on the main event loop from any thread."""
-	try:
-		return asyncio.get_running_loop().create_future()
-	except RuntimeError:
-
-		async def _create():
-			loop = asyncio.get_running_loop()
-			return loop.create_future()
-
-		return from_thread.run(_create)
-
-
 def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
 	from pulse.context import PulseContext
 
@@ -174,11 +127,39 @@ class TaskRegistry:
 		name: str | None = None,
 		on_done: Callable[[asyncio.Task[T]], None] | None = None,
 	) -> asyncio.Task[T]:
-		task = _create_task_on_loop(coroutine, name=name, on_done=on_done)
+		"""Create and schedule a coroutine task on the main loop from any thread."""
+		try:
+			asyncio.get_running_loop()
+			task = asyncio.ensure_future(coroutine)
+			if name is not None:
+				task.set_name(name)
+			if on_done:
+				task.add_done_callback(on_done)
+		except RuntimeError:
+
+			async def _runner():
+				asyncio.get_running_loop()
+				task = asyncio.ensure_future(coroutine)
+				if name is not None:
+					task.set_name(name)
+				if on_done:
+					task.add_done_callback(on_done)
+				return task
+
+			task = from_thread.run(_runner)
+
 		return self.track(task)
 
 	def create_future(self) -> asyncio.Future[Any]:
-		return _create_future_on_loop()
+		"""Create an asyncio Future on the main event loop from any thread."""
+		try:
+			return asyncio.get_running_loop().create_future()
+		except RuntimeError:
+
+			async def _create():
+				return asyncio.get_running_loop().create_future()
+
+			return from_thread.run(_create)
 
 	def cancel_all(self) -> None:
 		for task in list(self._tasks):

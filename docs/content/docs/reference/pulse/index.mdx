@@ -189,6 +189,15 @@ Extend Pulse with custom functionality. Plugins can hook into the app lifecycle 
 |--------|-------------|
 | `Plugin` | Base class for app plugins |
 
+## Scheduling
+
+Timer and task scheduling primitives. These are tracked and automatically cleaned up when the render session or app closes. See [Scheduling reference](/docs/reference/pulse/scheduling) for detailed documentation.
+
+| Export | Description |
+|--------|-------------|
+| `later` | Schedule a callback after delay |
+| `repeat` | Run a callback repeatedly at an interval |
+
 ## Helpers
 
 Miscellaneous utilities for common tasks.
@@ -196,8 +205,6 @@ Miscellaneous utilities for common tasks.
 | Export | Description |
 |--------|-------------|
 | `CSSProperties` | TypedDict for inline styles |
-| `repeat` | Repeat a value n times |
-| `later` | Schedule a callback after delay |
 
 ## VDOM Types
 

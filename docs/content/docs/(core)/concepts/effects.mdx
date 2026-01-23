@@ -37,16 +37,18 @@ Effects can return a cleanup function. This is useful for timers, subscriptions,
 class TimerState(ps.State):
     count: int = 0
     running: bool = False
+    _handle: ps.RepeatHandle | None = None
 
     @ps.effect
     def start_timer(self):
         if not self.running:
             return
 
-        timer_id = set_interval(lambda: self.tick(), 1000)
+        self._handle = ps.repeat(1.0, self.tick)
 
         def cleanup():
-            clear_interval(timer_id)
+            if self._handle:
+                self._handle.cancel()
 
         return cleanup
 
@@ -57,6 +59,10 @@ class TimerState(ps.State):
 Cleanup runs:
 - Before the effect runs again (when tracked dependencies change)
 - When the state is disposed
+
+<Callout type="info">
+**Good news:** Pulse's `ps.later()` and `ps.repeat()` are automatically cleaned up when the render session closes—so for simple cases, you might not need manual cleanup at all. See [Scheduling](/docs/reference/pulse/scheduling) for details.
+</Callout>
 
 ## Effects in components
 

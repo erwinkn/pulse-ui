@@ -20,7 +20,6 @@ from pulse.helpers import (
 	MISSING,
 	Disposable,
 	call_flexible,
-	later,
 	maybe_await,
 )
 from pulse.queries.common import (
@@ -36,6 +35,7 @@ from pulse.queries.common import (
 from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryConfig
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
+from pulse.scheduling import TimerHandleLike, create_task, later
 from pulse.state import InitializableProperty, State
 
 T = TypeVar("T")
@@ -225,7 +225,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 	_queue_task: asyncio.Task[None] | None
 
 	_observers: "list[InfiniteQueryResult[T, TParam]]"
-	_gc_handle: asyncio.TimerHandle | None
+	_gc_handle: TimerHandleLike | None
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "InfiniteQueryResult[T, TParam] | None"
@@ -562,7 +562,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if self._queue_task is None or self._queue_task.done():
 			# Create task with no reactive scope to avoid inheriting deps from caller
 			with Untrack():
-				self._queue_task = asyncio.create_task(self._process_queue())
+				self._queue_task = create_task(self._process_queue())
 		return self._queue_task
 
 	async def _process_queue(self):

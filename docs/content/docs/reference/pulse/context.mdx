@@ -11,14 +11,16 @@ Runtime context for accessing app, session, render, and route information.
 
 Composite context accessible to hooks and internals. Manages per-request state via context variables.
 
+`PulseContext.get()` is always available when a Pulse app is running. The `app` property is always set. Pulse mounts `session`, `render`, and `route` where appropriate.
+
 #### Attributes
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `app` | `App` | Application instance |
-| `session` | `UserSession \| None` | Per-user session |
-| `render` | `RenderSession \| None` | Per-connection render session |
-| `route` | `RouteContext \| None` | Active route context |
+| `app` | `App` | Application instance (always set) |
+| `session` | `UserSession \| None` | Per-user session (set during HTTP requests and WebSocket connections) |
+| `render` | `RenderSession \| None` | Per-connection render session (set during render sessions) |
+| `route` | `RouteContext \| None` | Active route context (set when rendering a route) |
 
 #### Class Methods
 

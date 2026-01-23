@@ -1,13 +1,56 @@
 """Tests for ReactProxy URL rewriting and get_client_address fallback."""
 
-from typing import Any
+from typing import Any, override
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from fastapi.responses import StreamingResponse
 from pulse.helpers import get_client_address, get_client_address_socketio
 from pulse.proxy import ReactProxy
 from starlette.requests import Request
+
+
+class _DisconnectRequest(Request):
+	_disconnect_after: int | None
+	_disconnect_checks: int
+
+	def __init__(
+		self, scope: dict[str, Any], *, disconnect_after: int | None = None
+	) -> None:
+		async def receive():
+			return {"type": "http.request", "body": b"", "more_body": False}
+
+		super().__init__(scope, receive)
+		self._disconnect_after = disconnect_after
+		self._disconnect_checks = 0
+
+	@override
+	async def is_disconnected(self) -> bool:
+		if self._disconnect_after is None:
+			return False
+		self._disconnect_checks += 1
+		return self._disconnect_checks > self._disconnect_after
+
+
+def _make_disconnect_request(
+	path: str = "/",
+	query: str = "",
+	headers: dict[str, str] | None = None,
+	*,
+	disconnect_after: int | None = None,
+) -> _DisconnectRequest:
+	scope = {
+		"type": "http",
+		"method": "GET",
+		"path": path,
+		"query_string": query.encode(),
+		"headers": [
+			(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()
+		],
+		"server": ("localhost", 8000),
+	}
+	return _DisconnectRequest(scope, disconnect_after=disconnect_after)
 
 
 class TestReactProxyUrlRewrite:
@@ -247,3 +290,70 @@ class TestReactProxyHeaderRewrite:
 
 		assert response.headers["content-type"] == "text/html; charset=utf-8"
 		assert response.headers["x-custom-header"] == "some-value"
+
+
+class TestReactProxyStreaming:
+	"""Tests for ReactProxy streaming cleanup."""
+
+	@pytest.mark.asyncio
+	async def test_closes_upstream_on_stream_end(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+
+		mock_response = MagicMock()
+		mock_response.status_code = 200
+		mock_response.headers = httpx.Headers({"content-type": "text/plain"})
+
+		async def aiter_raw():
+			yield b"one"
+			yield b"two"
+
+		mock_response.aiter_raw = aiter_raw
+		mock_response.aclose = AsyncMock()
+
+		mock_client = MagicMock()
+		mock_client.build_request = MagicMock()
+		mock_client.send = AsyncMock(return_value=mock_response)
+		proxy._client = mock_client  # pyright: ignore[reportPrivateUsage]
+
+		request = _make_disconnect_request("/")
+		response = await proxy(request)
+		assert isinstance(response, StreamingResponse)
+
+		chunks = [chunk async for chunk in response.body_iterator]
+		assert chunks == [b"one", b"two"]
+		mock_response.aclose.assert_awaited_once()
+
+	@pytest.mark.asyncio
+	async def test_closes_upstream_on_disconnect(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+
+		mock_response = MagicMock()
+		mock_response.status_code = 200
+		mock_response.headers = httpx.Headers({"content-type": "text/plain"})
+
+		async def aiter_raw():
+			yield b"one"
+			yield b"two"
+			yield b"three"
+
+		mock_response.aiter_raw = aiter_raw
+		mock_response.aclose = AsyncMock()
+
+		mock_client = MagicMock()
+		mock_client.build_request = MagicMock()
+		mock_client.send = AsyncMock(return_value=mock_response)
+		proxy._client = mock_client  # pyright: ignore[reportPrivateUsage]
+
+		request = _make_disconnect_request("/", disconnect_after=1)
+		response = await proxy(request)
+		assert isinstance(response, StreamingResponse)
+
+		chunks = [chunk async for chunk in response.body_iterator]
+		assert chunks == [b"one"]
+		mock_response.aclose.assert_awaited_once()

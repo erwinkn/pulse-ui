@@ -15,10 +15,13 @@ from typing import (
 
 from pulse.helpers import (
 	Disposable,
-	create_task,
 	maybe_await,
-	schedule_on_loop,
 	values_equal,
+)
+from pulse.scheduling import (
+	TimerHandleLike,
+	call_soon,
+	create_task,
 )
 
 T = TypeVar("T")
@@ -384,7 +387,7 @@ class Effect(Disposable):
 	immediate: bool
 	_lazy: bool
 	_interval: float | None
-	_interval_handle: asyncio.TimerHandle | None
+	_interval_handle: TimerHandleLike | None
 	update_deps: bool
 	batch: "Batch | None"
 	paused: bool
@@ -461,7 +464,7 @@ class Effect(Disposable):
 	def _schedule_interval(self):
 		"""Schedule the next interval run if interval is set."""
 		if self._interval is not None and self._interval > 0:
-			from pulse.helpers import later
+			from pulse.scheduling import later
 
 			self._interval_handle = later(self._interval, self._on_interval)
 
@@ -995,7 +998,7 @@ class GlobalBatch(Batch):
 	@override
 	def register_effect(self, effect: Effect):
 		if not self.is_scheduled:
-			schedule_on_loop(self.flush)
+			call_soon(self.flush)
 			self.is_scheduled = True
 		return super().register_effect(effect)
 

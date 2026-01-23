@@ -9,6 +9,7 @@
     "state",
     "hooks",
     "reactive",
+    "scheduling",
     "queries",
     "forms",
     "channels",

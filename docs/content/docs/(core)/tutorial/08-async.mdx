@@ -275,7 +275,10 @@ def UserProfile():
 
 4. **Use queries for data fetching**: For most data fetching needs, Pulse queries (covered in the next section) provide a better abstraction than raw async handlers.
 
+5. **Use Pulse's scheduling for timers and tasks**: Instead of `asyncio.create_task()`, use `ps.later()` and `ps.repeat()` for timers. These are automatically cleaned up when the render session closes—no need for manual cancellation in most cases.
+
 ## See also
 
+- [Scheduling reference](/docs/reference/pulse/scheduling) - timers, repeating callbacks, and tracked tasks
 - [Core Concepts: Async](/docs/concepts/async)
 - [Reference: Reactive Core](/docs/reference/pulse/reactive)

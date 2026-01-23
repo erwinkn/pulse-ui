@@ -224,6 +224,23 @@ An input that manages its own value internally. You read the value on submit rat
 **CSRF (Cross-Site Request Forgery)**
 An attack where a malicious site tricks a user's browser into submitting forms to your site. Prevented with tokens that prove the form came from your site.
 
+## Scheduling
+
+**Timer Handle**
+A reference to a scheduled callback. Call `.cancel()` to prevent it from running. Pulse's `later()` and `repeat()` return handles.
+
+**Task Registry**
+Pulse's internal tracker for asyncio tasks. Tasks created through Pulse's scheduling functions are automatically tracked and cancelled when the render session closes.
+
+**Timer Registry**
+Pulse's internal tracker for scheduled callbacks. Timers created through `later()` and `repeat()` are automatically tracked and cancelled when the render session closes.
+
+**Debouncing**
+Delaying an action until a pause in events. Common for search-as-you-type: wait until the user stops typing before searching. Implemented with `later()` and cancelling previous timers.
+
+**Polling**
+Repeatedly fetching data at fixed intervals. Implemented with `repeat()` for simple cases, or queries with `refetch_interval` for cached data.
+
 ## Architecture
 
 **Middleware**

@@ -118,3 +118,9 @@ class QueryStore:
 		)
 		self._entries[key] = entry
 		return entry
+
+	def dispose_all(self) -> None:
+		"""Dispose all queries and clear the store."""
+		for entry in list(self._entries.values()):
+			entry.dispose()
+		self._entries.clear()

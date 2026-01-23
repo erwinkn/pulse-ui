@@ -4,14 +4,25 @@ Access to session, route, and connection info within component render and callba
 
 ## PulseContext
 
-Internal dataclass managing per-request state. Contains:
+Dataclass managing per-request state. Accessed via `PulseContext.get()`.
 
-- `app` - Application instance
-- `session` - UserSession (or None)
-- `render` - RenderSession (or None)
-- `route` - RouteContext (or None)
+**Always available when a Pulse app is running:**
+- `app` - Application instance (always set)
 
-Accessed via `PulseContext.get()` internally. User code uses the `ps.*` functions below.
+**Mounted contextually:**
+- `session` - UserSession (set during HTTP requests and WebSocket connections)
+- `render` - RenderSession (set during render sessions)
+- `route` - RouteContext (set when rendering a route)
+
+```python
+from pulse.context import PulseContext
+
+ctx = PulseContext.get()
+app = ctx.app  # Always available
+render = ctx.render  # Available during render
+```
+
+User code typically uses the `ps.*` functions below instead of accessing PulseContext directly.
 
 ## Session Functions
 

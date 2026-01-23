@@ -3,11 +3,10 @@ import logging
 import traceback
 import uuid
 from asyncio import iscoroutine
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 from pulse.context import PulseContext
-from pulse.helpers import create_future_on_loop, create_task, later
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
 	ServerApiCallMessage,
@@ -29,13 +28,19 @@ from pulse.routing import (
 	RouteTree,
 	ensure_absolute_path,
 )
+from pulse.scheduling import (
+	TaskRegistry,
+	TimerHandleLike,
+	TimerRegistry,
+	create_future,
+)
 from pulse.state import State
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
-	from pulse.form import FormRegistry
+	from pulse.forms import FormRegistry
 
 logger = logging.getLogger(__file__)
 
@@ -93,7 +98,7 @@ class RouteMount:
 	state: MountState
 	pending_action: PendingAction | None
 	queue: list[ServerMessage] | None
-	queue_timeout: asyncio.TimerHandle | None
+	queue_timeout: TimerHandleLike | None
 	render_batch_id: int
 	render_batch_renders: int
 
@@ -124,6 +129,7 @@ class RouteMount:
 	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
 			self.queue_timeout.cancel()
+			self.render.discard_timer(self.queue_timeout)
 			self.queue_timeout = None
 		self.pending_action = None
 
@@ -145,7 +151,9 @@ class RouteMount:
 			)
 			self._cancel_pending_timeout()
 			self.pending_action = next_action
-			self.queue_timeout = later(timeout, self._on_pending_timeout)
+			self.queue_timeout = self.render.schedule_later(
+				timeout, self._on_pending_timeout
+			)
 			return
 		self._cancel_pending_timeout()
 		if self.state == "idle" and self.effect:
@@ -153,7 +161,9 @@ class RouteMount:
 		self.state = "pending"
 		self.queue = []
 		self.pending_action = action
-		self.queue_timeout = later(timeout, self._on_pending_timeout)
+		self.queue_timeout = self.render.schedule_later(
+			timeout, self._on_pending_timeout
+		)
 
 	def activate(self, send_message: Callable[[ServerMessage], Any]) -> None:
 		if self.state != "pending":
@@ -248,6 +258,8 @@ class RenderSession:
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_global_states: dict[str, State]
+	_tasks: TaskRegistry
+	_timers: TimerRegistry
 
 	def __init__(
 		self,
@@ -262,7 +274,7 @@ class RenderSession:
 		render_loop_limit: int = 50,
 	) -> None:
 		from pulse.channel import ChannelsManager
-		from pulse.form import FormRegistry
+		from pulse.forms import FormRegistry
 
 		self.id = id
 		self.routes = routes
@@ -277,6 +289,8 @@ class RenderSession:
 		self.forms = FormRegistry(self)
 		self._pending_api = {}
 		self._pending_js_results = {}
+		self._tasks = TaskRegistry(name=f"render:{id}")
+		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.detach_queue_timeout = detach_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
@@ -547,9 +561,12 @@ class RenderSession:
 
 	def close(self):
 		self.forms.dispose()
+		self._tasks.cancel_all()
+		self._timers.cancel_all()
 		for path in list(self.route_mounts.keys()):
 			self.detach(path, timeout=0)
 		self.route_mounts.clear()
+		self.query_store.dispose_all()
 		for value in self._global_states.values():
 			value.dispose()
 		self._global_states.clear()
@@ -588,6 +605,28 @@ class RenderSession:
 		with PulseContext.update(render=self):
 			flush_effects()
 
+	def create_task(
+		self,
+		coroutine: Callable[[], Any] | Awaitable[Any],
+		*,
+		name: str | None = None,
+		on_done: Callable[[asyncio.Task[Any]], None] | None = None,
+	) -> asyncio.Task[Any]:
+		"""Create a tracked task tied to this render session."""
+		if callable(coroutine):
+			return self._tasks.create_task(coroutine(), name=name, on_done=on_done)
+		return self._tasks.create_task(coroutine, name=name, on_done=on_done)
+
+	def schedule_later(
+		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
+	) -> TimerHandleLike:
+		"""Schedule a tracked timer tied to this render session."""
+		return self._timers.later(delay, fn, *args, **kwargs)
+
+	def discard_timer(self, handle: TimerHandleLike | None) -> None:
+		"""Remove a timer handle from the session registry."""
+		self._timers.discard(handle)
+
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		mount = self.route_mounts[path]
 		cb = mount.tree.callbacks[key]
@@ -599,9 +638,18 @@ class RenderSession:
 			with PulseContext.update(render=self, route=mount.route):
 				res = cb.fn(*args[: cb.n_args])
 				if iscoroutine(res):
-					create_task(
-						res, on_done=lambda t: (e := t.exception()) and report(e, True)
-					)
+
+					def _on_done(t: asyncio.Task[Any]) -> None:
+						if t.cancelled():
+							return
+						try:
+							exc = t.exception()
+						except asyncio.CancelledError:
+							return
+						if exc:
+							report(exc, True)
+
+					self.create_task(res, name=f"callback:{key}", on_done=_on_done)
 		except Exception as e:
 			report(e)
 
@@ -629,7 +677,7 @@ class RenderSession:
 			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
 			url = f"{base}{api_path}"
 		corr_id = uuid.uuid4().hex
-		fut = create_future_on_loop()
+		fut = create_future()
 		self._pending_api[corr_id] = fut
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id
@@ -747,7 +795,7 @@ class RenderSession:
 				if not future.done():
 					future.set_exception(asyncio.TimeoutError())
 
-			loop.call_later(timeout, _on_timeout)
+			self._timers.later(timeout, _on_timeout)
 
 			return future
 

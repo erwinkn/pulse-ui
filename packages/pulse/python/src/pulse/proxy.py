@@ -9,7 +9,6 @@ from typing import cast
 import httpx
 import websockets
 from fastapi.responses import StreamingResponse
-from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -223,9 +222,17 @@ class ReactProxy:
 					v = self.rewrite_url(v)
 				response_headers[k] = v
 
+			async def _iter():
+				try:
+					async for chunk in r.aiter_raw():
+						if await request.is_disconnected():
+							break
+						yield chunk
+				finally:
+					await r.aclose()
+
 			return StreamingResponse(
-				r.aiter_raw(),
-				background=BackgroundTask(r.aclose),
+				_iter(),
 				status_code=r.status_code,
 				headers=response_headers,
 			)

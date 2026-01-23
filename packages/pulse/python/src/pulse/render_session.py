@@ -139,12 +139,9 @@ class RouteMount:
 			return
 		action = self.pending_action
 		if os.environ.get("PULSE_DEBUG_RENDER"):
-			logger.info(
-				"[PulseDebug][mount-timeout] render=%s path=%s action=%s state=%s",
-				self.render.id,
-				self.path,
-				action,
-				self.state,
+			print(
+				"[PulseDebug][mount-timeout] render=%s path=%s action=%s state=%s"
+				% (self.render.id, self.path, action, self.state)
 			)
 		self.pending_action = None
 		if action == "dispose":
@@ -154,13 +151,9 @@ class RouteMount:
 
 	def start_pending(self, timeout: float, *, action: PendingAction = "idle") -> None:
 		if os.environ.get("PULSE_DEBUG_RENDER"):
-			logger.info(
-				"[PulseDebug][mount-pending] render=%s path=%s state=%s action=%s timeout=%s",
-				self.render.id,
-				self.path,
-				self.state,
-				action,
-				timeout,
+			print(
+				"[PulseDebug][mount-pending] render=%s path=%s state=%s action=%s timeout=%s"
+				% (self.render.id, self.path, self.state, action, timeout)
 			)
 		if self.state == "pending":
 			prev_action = self.pending_action
@@ -185,12 +178,14 @@ class RouteMount:
 
 	def activate(self, send_message: Callable[[ServerMessage], Any]) -> None:
 		if os.environ.get("PULSE_DEBUG_RENDER"):
-			logger.info(
-				"[PulseDebug][mount-activate] render=%s path=%s state=%s queued=%s",
-				self.render.id,
-				self.path,
-				self.state,
-				0 if not self.queue else len(self.queue),
+			print(
+				"[PulseDebug][mount-activate] render=%s path=%s state=%s queued=%s"
+				% (
+					self.render.id,
+					self.path,
+					self.state,
+					0 if not self.queue else len(self.queue),
+				)
 			)
 		if self.state != "pending":
 			return
@@ -219,10 +214,9 @@ class RouteMount:
 		if self.state != "pending":
 			return
 		if os.environ.get("PULSE_DEBUG_RENDER"):
-			logger.info(
-				"[PulseDebug][mount-idle] render=%s path=%s",
-				self.render.id,
-				self.path,
+			print(
+				"[PulseDebug][mount-idle] render=%s path=%s"
+				% (self.render.id, self.path)
 			)
 		self.state = "idle"
 		self.queue = None
@@ -350,14 +344,14 @@ class RenderSession:
 	def connect(self, send_message: Callable[[ServerMessage], Any]):
 		"""WebSocket connected. Set sender, don't auto-flush (attach does that)."""
 		if os.environ.get("PULSE_DEBUG_RENDER"):
-			logger.info("[PulseDebug][render-connect] render=%s", self.id)
+			print("[PulseDebug][render-connect] render=%s" % self.id)
 		self._send_message = send_message
 		self.connected = True
 
 	def disconnect(self):
 		"""WebSocket disconnected. Start queuing briefly before pausing."""
 		if os.environ.get("PULSE_DEBUG_RENDER"):
-			logger.info("[PulseDebug][render-disconnect] render=%s", self.id)
+			print("[PulseDebug][render-disconnect] render=%s" % self.id)
 		self._send_message = None
 		self.connected = False
 
@@ -432,11 +426,9 @@ class RenderSession:
 		"""
 		normalized = [ensure_absolute_path(path) for path in paths]
 		if os.environ.get("PULSE_DEBUG_RENDER"):
-			logger.info(
-				"[PulseDebug][prerender] render=%s paths=%s route_info=%s",
-				self.id,
-				normalized,
-				route_info,
+			print(
+				"[PulseDebug][prerender] render=%s paths=%s route_info=%s"
+				% (self.id, normalized, route_info)
 			)
 
 		results: dict[str, ServerInitMessage | ServerNavigateToMessage] = {}
@@ -447,12 +439,9 @@ class RenderSession:
 			mount = self.route_mounts.get(path)
 			if os.environ.get("PULSE_DEBUG_RENDER"):
 				route_label = repr(route)
-				logger.info(
-					"[PulseDebug][prerender] render=%s path=%s mount_state=%s route=%s",
-					self.id,
-					path,
-					mount.state if mount else None,
-					route_label,
+				print(
+					"[PulseDebug][prerender] render=%s path=%s mount_state=%s route=%s"
+					% (self.id, path, mount.state if mount else None, route_label)
 				)
 
 			if mount is None:
@@ -493,13 +482,15 @@ class RenderSession:
 
 		if mount is None or mount.state == "idle":
 			if os.environ.get("PULSE_DEBUG_RENDER"):
-				logger.info(
-					"[PulseDebug][attach] render=%s path=%s mount_state=%s mounts=%s route_info=%s",
-					self.id,
-					path,
-					mount.state if mount else None,
-					{key: value.state for key, value in self.route_mounts.items()},
-					route_info,
+				print(
+					"[PulseDebug][attach] render=%s path=%s mount_state=%s mounts=%s route_info=%s"
+					% (
+						self.id,
+						path,
+						mount.state if mount else None,
+						{key: value.state for key, value in self.route_mounts.items()},
+						route_info,
+					)
 				)
 			# Initial render must come from prerender
 			print(f"[DEBUG] Missing or idle route '{path}', reloading")
@@ -510,10 +501,9 @@ class RenderSession:
 		mount.update_route(route_info)
 		if mount.state == "pending" and self._send_message:
 			if os.environ.get("PULSE_DEBUG_RENDER"):
-				logger.info(
-					"[PulseDebug][attach] render=%s path=%s activating=true",
-					self.id,
-					path,
+				print(
+					"[PulseDebug][attach] render=%s path=%s activating=true"
+					% (self.id, path)
 				)
 			mount.activate(self._send_message)
 
@@ -531,11 +521,9 @@ class RenderSession:
 		if current is not mount:
 			return
 		if os.environ.get("PULSE_DEBUG_RENDER"):
-			logger.info(
-				"[PulseDebug][mount-dispose] render=%s path=%s state=%s",
-				self.id,
-				path,
-				mount.state,
+			print(
+				"[PulseDebug][mount-dispose] render=%s path=%s state=%s"
+				% (self.id, path, mount.state)
 			)
 		try:
 			self.route_mounts.pop(path, None)

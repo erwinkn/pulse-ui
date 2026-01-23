@@ -49,10 +49,10 @@ class UserApi(ps.State):
 	mutation_error_calls: int = 0
 
 	# Keyed query with keep_previous_data default True
-	@ps.query(keep_previous_data=False)
+	@ps.query(keep_previous_data=True)
 	async def user(self) -> UserData:
 		print("Running user query")
-		await asyncio.sleep(0.5)
+		await asyncio.sleep(2)
 		# Simulate API; id 13 fails to demonstrate on_error
 		if self.user_id == 13:
 			raise RuntimeError("User not found")
@@ -90,7 +90,7 @@ class UserApi(ps.State):
 	@ps.query(stale_time=5.0, keep_previous_data=True)
 	async def user_profile(self) -> UserProfileData:
 		print("Running user profile query")
-		await asyncio.sleep(0.2)
+		await asyncio.sleep(10)
 		return {
 			"id": self.user_id,
 			"profile": f"Profile for user {self.user_id}",

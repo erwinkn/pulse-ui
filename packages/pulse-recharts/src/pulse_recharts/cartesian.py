@@ -9,7 +9,7 @@ from pulse_recharts.general import AnimationEasing, LegendType
 from pulse_recharts.shapes import CurveProps, RectangleProps
 
 # Placeholder for TooltipType until a concrete definition is provided
-TooltipType = Any
+TooltipType = Literal["none"]
 
 
 class XAxisPaddingDict(TypedDict, total=False):
@@ -41,7 +41,11 @@ TickProp = (
 AxisInterval = (
 	float
 	| Literal[
-		"preserveStart", "preserveEnd", "preserveStartEnd", "equidistantPreserveStart"
+		"preserveStart",
+		"preserveEnd",
+		"preserveStartEnd",
+		"equidistantPreserveStart",
+		"equidistantPreserveEnd",
 	]
 )
 """Defines how ticks are placed and whether / how tick collisions are handled.
@@ -58,7 +62,7 @@ AxisTick = float | str
 Ticks must be numbers when the axis is the type of number.
 """
 
-AxisDomainType = Literal["number", "category"]
+AxisDomainType = Literal["number", "category", "auto"]
 
 ScaleType = Literal[
 	"auto",
@@ -475,6 +479,29 @@ class LineProps(CurveProps, total=False):
 def Line(key: str | None = None, **props: Unpack[LineProps]): ...
 
 
+class AreaProps(CurveProps, total=False):
+	dataKey: DataKey[Any]
+	xAxisId: str | int
+	yAxisId: str | int
+	stackId: str | int
+	legendType: LegendType
+	dot: ActiveDotType
+	activeDot: ActiveDotType
+	label: bool | dict[str, Any] | ps.Element | ps.JsFunction[Any, ps.Element]
+	hide: bool
+	connectNulls: bool
+	unit: str | int
+	name: str | int  # pyright: ignore[reportIncompatibleVariableOverride]
+	isAnimationActive: bool | Literal["auto"]
+	animationBegin: int
+	animationDuration: int
+	animationEasing: AnimationEasing
+
+
+@ps.react_component(ps.Import("Area", "recharts"))
+def Area(key: str | None = None, **props: Unpack[AreaProps]): ...
+
+
 class BarProps(RectangleProps, total=False):
 	className: str
 	index: str | int
@@ -487,6 +514,12 @@ class BarProps(RectangleProps, total=False):
 	dataKey: DataKey[Any]
 	tooltipType: TooltipType
 	legendType: LegendType
+	fill: str
+	stroke: str
+	isAnimationActive: bool
+	animationBegin: float
+	animationDuration: float
+	animationEasing: AnimationEasing
 	minPointSize: MinPointSize
 	maxBarSize: float
 	hide: bool
@@ -502,3 +535,186 @@ class BarProps(RectangleProps, total=False):
 
 
 ActiveBar = bool | ps.Element | ps.JsFunction[BarProps, ps.Element]
+
+
+@ps.react_component(ps.Import("Bar", "recharts"))
+def Bar(key: str | None = None, **props: Unpack[BarProps]): ...
+
+
+class BarStackProps(TypedDict, total=False):
+	stackId: str | int
+	dataKey: DataKey[Any]
+	xAxisId: str | int
+	yAxisId: str | int
+
+
+@ps.react_component(ps.Import("BarStack", "recharts"))
+def BarStack(key: str | None = None, **props: Unpack[BarStackProps]): ...
+
+
+ScatterShape = bool | ps.Element | ps.JsFunction[Any, ps.Element]
+
+
+class ScatterProps(TypedDict, total=False):
+	data: list[Any]
+	dataKey: DataKey[Any]
+	name: str | int
+	xAxisId: str | int
+	yAxisId: str | int
+	zAxisId: str | int
+	shape: ScatterShape
+	line: ScatterShape
+	legendType: LegendType
+	unit: str | int
+	fill: str
+	stroke: str
+	isAnimationActive: bool | Literal["auto"]
+	animationBegin: int
+	animationDuration: int
+	animationEasing: AnimationEasing
+	label: bool | dict[str, Any] | ps.Element | ps.JsFunction[Any, ps.Element]
+
+
+@ps.react_component(ps.Import("Scatter", "recharts"))
+def Scatter(key: str | None = None, **props: Unpack[ScatterProps]): ...
+
+
+class ZAxisProps(ps.HTMLSVGProps[GenericHTMLElement], BaseAxisProps, total=False):  # pyright: ignore[reportIncompatibleVariableOverride]
+	zAxisId: str | int
+	range: tuple[float, float]
+
+
+@ps.react_component(ps.Import("ZAxis", "recharts"))
+def ZAxis(key: str | None = None, **props: Unpack[ZAxisProps]): ...
+
+
+class ErrorBarProps(TypedDict, total=False):
+	dataKey: DataKey[Any]
+	direction: Literal["x", "y"]
+	width: float
+	stroke: str
+	strokeWidth: float
+	xAxisId: str | int
+	yAxisId: str | int
+
+
+@ps.react_component(ps.Import("ErrorBar", "recharts"))
+def ErrorBar(key: str | None = None, **props: Unpack[ErrorBarProps]): ...
+
+
+IfOverflow = Literal["hidden", "visible", "discard", "extendDomain"]
+ReferenceLabel = (
+	bool | str | int | dict[str, Any] | ps.Element | ps.JsFunction[Any, ps.Element]
+)
+ReferenceLineSegment = tuple[
+	dict[str, float | str],
+	dict[str, float | str],
+]
+
+
+class ReferenceLineProps(TypedDict, total=False):
+	x: float | str
+	y: float | str
+	segment: ReferenceLineSegment
+	xAxisId: str | int
+	yAxisId: str | int
+	ifOverflow: IfOverflow
+	label: ReferenceLabel
+	position: Literal["start", "middle", "end"]
+	stroke: str
+	strokeWidth: float
+	zIndex: int
+
+
+@ps.react_component(ps.Import("ReferenceLine", "recharts"))
+def ReferenceLine(key: str | None = None, **props: Unpack[ReferenceLineProps]): ...
+
+
+class ReferenceDotProps(TypedDict, total=False):
+	x: float | str
+	y: float | str
+	r: float
+	xAxisId: str | int
+	yAxisId: str | int
+	ifOverflow: IfOverflow
+	label: ReferenceLabel
+	fill: str
+	stroke: str
+	zIndex: int
+
+
+@ps.react_component(ps.Import("ReferenceDot", "recharts"))
+def ReferenceDot(key: str | None = None, **props: Unpack[ReferenceDotProps]): ...
+
+
+class ReferenceAreaProps(TypedDict, total=False):
+	x1: float | str
+	x2: float | str
+	y1: float | str
+	y2: float | str
+	xAxisId: str | int
+	yAxisId: str | int
+	ifOverflow: IfOverflow
+	label: ReferenceLabel
+	fill: str
+	stroke: str
+	zIndex: int
+
+
+@ps.react_component(ps.Import("ReferenceArea", "recharts"))
+def ReferenceArea(key: str | None = None, **props: Unpack[ReferenceAreaProps]): ...
+
+
+class BrushProps(TypedDict, total=False):
+	x: float
+	y: float
+	width: float
+	height: float
+	dataKey: DataKey[Any]
+	startIndex: int
+	endIndex: int
+	gap: int
+	travellerWidth: float
+	traveller: ps.Element | ps.JsFunction[Any, ps.Element]
+	tickFormatter: ps.JsFunction[Any, int, str | int]
+	onChange: ps.JsFunction[Any, Any]
+	onDragEnd: ps.JsFunction[Any, Any]
+
+
+@ps.react_component(ps.Import("Brush", "recharts"))
+def Brush(key: str | None = None, **props: Unpack[BrushProps]): ...
+
+
+class FunnelProps(TypedDict, total=False):
+	data: list[Any]
+	dataKey: DataKey[Any]
+	nameKey: DataKey[Any]
+	label: bool | dict[str, Any] | ps.Element | ps.JsFunction[Any, ps.Element]
+	legendType: LegendType
+	tooltipType: TooltipType
+	fill: str
+	stroke: str
+	isAnimationActive: bool | Literal["auto"]
+	animationBegin: int
+	animationDuration: int
+	animationEasing: AnimationEasing
+
+
+@ps.react_component(ps.Import("Funnel", "recharts"))
+def Funnel(key: str | None = None, **props: Unpack[FunnelProps]): ...
+
+
+class CartesianAxisProps(BaseAxisProps, total=False):
+	x: float
+	y: float
+	width: float
+	height: float
+	orientation: Literal["top", "bottom", "left", "right"]
+	angle: float
+	tickMargin: float
+	interval: AxisInterval
+	minTickGap: float
+
+
+@ps.react_component(ps.Import("CartesianAxis", "recharts"))
+def CartesianAxis(key: str | None = None, **props: Unpack[CartesianAxisProps]): ...

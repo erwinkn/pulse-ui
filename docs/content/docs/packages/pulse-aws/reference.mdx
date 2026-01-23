@@ -1,0 +1,192 @@
+---
+title: "Pulse AWS reference"
+description: "CLI flags and Python API exports"
+---
+
+CLI flags and Python exports for `pulse-aws`.
+
+## CLI: pulse-aws
+
+<Callout type="warn">
+Unverified examples. Not run in this update.
+</Callout>
+
+```bash
+pulse-aws deploy [options]
+pulse-aws verify [options]
+pulse-aws teardown [options]
+```
+
+### deploy
+
+| Option | Env | Default | Notes |
+| --- | --- | --- | --- |
+| `--deployment-name` | `PULSE_AWS_DEPLOYMENT_NAME` | none | required |
+| `--domain` | `PULSE_AWS_DOMAIN` | none | required; used for ACM + default server address |
+| `--server-address` | `PULSE_SERVER_ADDRESS` | `https://<domain>` | overrides `PULSE_SERVER_ADDRESS` |
+| `--project-root` | `PULSE_AWS_PROJECT_ROOT` | `cwd` | base for `--dockerfile` + `--context` |
+| `--app-file` | `PULSE_AWS_APP_FILE` | `main.py` | relative to build context; sets `APP_FILE` |
+| `--web-root` | `PULSE_AWS_WEB_ROOT` | `web` | relative to build context; sets `WEB_ROOT` |
+| `--dockerfile` | `PULSE_AWS_DOCKERFILE` | `Dockerfile` | resolved from project root |
+| `--context` | `PULSE_AWS_CONTEXT` | `.` | resolved from project root |
+| `--build-arg` | none | none | repeatable `KEY=VALUE` |
+| `--task-env` | none | none | repeatable `KEY=VALUE` |
+| `--task-cpu` | `PULSE_AWS_TASK_CPU` | `256` | ECS CPU units (string) |
+| `--task-memory` | `PULSE_AWS_TASK_MEMORY` | `512` | ECS memory (string) |
+| `--desired-count` | `PULSE_AWS_DESIRED_COUNT` | `2` | ECS desired task count |
+| `--drain-poll-seconds` | `PULSE_AWS_DRAIN_POLL_SECONDS` | `5` | SSM poll interval |
+| `--drain-grace-seconds` | `PULSE_AWS_DRAIN_GRACE_SECONDS` | `20` | drain grace period |
+| `--health-check-path` | `PULSE_AWS_HEALTH_CHECK_PATH` | `/_pulse/health` | ALB health path |
+| `--health-check-interval` | `PULSE_AWS_HEALTH_CHECK_INTERVAL` | `30` | seconds |
+| `--health-check-timeout` | `PULSE_AWS_HEALTH_CHECK_TIMEOUT` | `5` | seconds |
+| `--healthy-threshold` | `PULSE_AWS_HEALTHY_THRESHOLD` | `2` | successes to be healthy |
+| `--unhealthy-threshold` | `PULSE_AWS_UNHEALTHY_THRESHOLD` | `3` | failures to be unhealthy |
+| `--wait-for-health` / `--no-wait-for-health` | `PULSE_AWS_WAIT_FOR_HEALTH` | `true` | gate traffic switch |
+| `--min-healthy-targets` | `PULSE_AWS_MIN_HEALTHY_TARGETS` | `2` | minimum healthy targets |
+
+Defaults applied even when omitted:
+- Docker build args always include `APP_FILE`, `WEB_ROOT`, `PULSE_SERVER_ADDRESS`.
+- ECS task env always includes `PULSE_SERVER_ADDRESS`.
+
+### verify
+
+| Option | Env | Default | Notes |
+| --- | --- | --- | --- |
+| `--deployment-name` | `PULSE_AWS_DEPLOYMENT_NAME` | none | required |
+| `--domain` | `PULSE_AWS_DOMAIN` | none | optional; used for sample curl output |
+| `--health-check-path` | `PULSE_AWS_HEALTH_CHECK_PATH` | `/_pulse/health` | ALB health path |
+| `--verify-ssl` / `--no-verify-ssl` | `PULSE_AWS_VERIFY_SSL` | `false` | SSL verification for ALB calls |
+
+### teardown
+
+| Option | Env | Default | Notes |
+| --- | --- | --- | --- |
+| `--deployment-name` | `PULSE_AWS_DEPLOYMENT_NAME` | none | required |
+| `--force` | none | `false` | skip active service checks |
+| `--yes` | none | `false` | skip confirmation prompt |
+| `--poll-interval` | `PULSE_AWS_POLL_INTERVAL` | `5` | seconds; float allowed |
+| `--region` | `AWS_REGION` / `AWS_DEFAULT_REGION` | none | override AWS region |
+
+## Python API exports
+
+```python
+from pulse_aws import (
+    AWSECSPlugin,
+    DeploymentError,
+    DockerBuild,
+    HealthCheckConfig,
+    ReaperConfig,
+    TaskConfig,
+    deploy,
+)
+```
+
+### DockerBuild
+
+```python
+DockerBuild(
+    dockerfile_path: Path,
+    context_path: Path,
+    build_args: dict[str, str] = {},
+)
+```
+
+- `dockerfile_path`: path to Dockerfile.
+- `context_path`: Docker build context.
+- `build_args`: extra `docker build` args.
+
+### TaskConfig
+
+```python
+TaskConfig(
+    cpu: str = "256",
+    memory: str = "512",
+    desired_count: int = 2,
+    env_vars: dict[str, str] = {},
+    drain_poll_seconds: int = 5,
+    drain_grace_seconds: int = 20,
+)
+```
+
+### HealthCheckConfig
+
+```python
+HealthCheckConfig(
+    path: str = "/_pulse/health",
+    interval_seconds: int = 30,
+    timeout_seconds: int = 5,
+    healthy_threshold: int = 2,
+    unhealthy_threshold: int = 3,
+    wait_for_health: bool = True,
+    min_healthy_targets: int = 2,
+    task_grace_period_seconds: int = 60,
+)
+```
+
+### ReaperConfig
+
+```python
+ReaperConfig(
+    schedule_minutes: int = 1,
+    max_age_hours: float = 1.0,
+    deployment_timeout: float = 1.0,
+)
+```
+
+### deploy
+
+```python
+async def deploy(
+    *,
+    domain: str,
+    deployment_name: str,
+    docker: DockerBuild,
+    task: TaskConfig | None = None,
+    health_check: HealthCheckConfig | None = None,
+    reaper: ReaperConfig | None = None,
+    certificate_arn: str | None = None,
+) -> dict[str, str]:
+    ...
+```
+
+Return keys:
+- `deployment_id`
+- `service_arn`
+- `target_group_arn`
+- `task_def_arn`
+- `image_uri`
+- `cluster_name`
+- `alb_dns_name`
+- `marked_draining_count`
+- `certificate_arn`
+- `domain_ready`
+- `domain_proxied`
+
+### DeploymentError
+
+Raised when deployment operations fail.
+
+### AWSECSPlugin
+
+Required env vars (prod/ci):
+- `PULSE_AWS_DEPLOYMENT_NAME`
+- `PULSE_AWS_DEPLOYMENT_ID`
+- `PULSE_AWS_DRAIN_POLL_SECONDS`
+- `PULSE_AWS_DRAIN_GRACE_SECONDS`
+
+Optional env vars:
+- `ECS_CONTAINER_METADATA_URI_V4` (auto in ECS)
+- `PULSE_AWS_TASK_ID` (fallback task id)
+
+Behavior:
+- polls SSM for drain state
+- writes task readiness state to SSM
+- adds `X-Pulse-Render-Affinity` to HTTP + Socket.IO directives
+
+In dev, missing required vars disables the plugin. In prod/ci, missing vars raise on startup.
+
+## See also
+
+- [Pulse AWS](/docs/packages/pulse-aws) — Dockerfile + workflow
+- [Deployment concepts](/docs/concepts/deployment) — how deployments work
+- [Packages index](/docs/packages) — all add-ons

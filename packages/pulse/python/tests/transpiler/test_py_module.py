@@ -363,8 +363,7 @@ class TestMathModule:
 				return Identifier("degrees")
 
 		result = PyMath.radians("degrees", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
-		assert "Math.PI" in emit(result)
-		assert "180" in emit(result)
+		assert emit(result) == "degrees * (Math.PI / 180)"
 
 	def test_math_degrees(self):
 		"""math.degrees transpiles to x * (180 / Math.PI)."""
@@ -375,8 +374,7 @@ class TestMathModule:
 				return Identifier("radians")
 
 		result = PyMath.degrees("radians", ctx=MockCtx())  # pyright: ignore[reportArgumentType]
-		assert "Math.PI" in emit(result)
-		assert "180" in emit(result)
+		assert emit(result) == "radians * (180 / Math.PI)"
 
 	def test_math_isnan(self):
 		"""math.isnan transpiles to Number.isNaN."""

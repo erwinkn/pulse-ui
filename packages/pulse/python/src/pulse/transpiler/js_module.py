@@ -10,18 +10,19 @@ import ast
 import inspect
 import sys
 from dataclasses import dataclass, field
-from typing import Literal, override
+from typing import Any, Literal, override
 
+from pulse.code_analysis import is_stub_function
 from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.imports import Import
 from pulse.transpiler.nodes import (
 	Expr,
 	Identifier,
+	Jsx,
 	Member,
 	New,
 )
 from pulse.transpiler.transpiler import Transpiler
-from pulse.transpiler.vdom import VDOMNode
 
 _MODULE_DUNDERS = frozenset(
 	{
@@ -56,7 +57,7 @@ class Class(Expr):
 		self.ctor.emit(out)
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		return self.ctor.render()
 
 	@override
@@ -91,6 +92,7 @@ class JsModule(Expr):
 			- "member": Access as property (e.g., React.useState)
 			- "named_import": Each attribute is a named import (e.g., import { useState } from "react")
 		constructors: Set of names that are constructors (emit with 'new')
+		components: Set of names that are components (wrapped with Jsx)
 	"""
 
 	name: str | None
@@ -99,6 +101,7 @@ class JsModule(Expr):
 	kind: Literal["default", "namespace"] = "namespace"
 	values: Literal["member", "named_import"] = "named_import"
 	constructors: frozenset[str] = field(default_factory=frozenset)
+	components: frozenset[str] = field(default_factory=frozenset)
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -106,7 +109,7 @@ class JsModule(Expr):
 		raise TypeError(f"{label} cannot be emitted directly - access an attribute")
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		label = self.py_name or self.name or "JsModule"
 		raise TypeError(f"{label} cannot be rendered directly - access an attribute")
 
@@ -156,10 +159,11 @@ class JsModule(Expr):
 		if self.src is None:
 			return Identifier(self.name)
 
-		import_kind = "default" if self.kind == "default" else "named"
-		return Import(self.name, self.src, kind=import_kind)
+		if self.kind == "default":
+			return Import(self.src)
+		return Import("*", self.src)
 
-	def get_value(self, name: str) -> Member | Class | Identifier | Import:
+	def get_value(self, name: str) -> Member | Class | Jsx | Identifier | Import:
 		"""Get a member of this module as an expression.
 
 		For global-identifier modules (name=None): returns Identifier directly (e.g., Set -> Set)
@@ -169,6 +173,7 @@ class JsModule(Expr):
 		For external modules with "named_import" style: returns a named Import
 
 		If name is in constructors, returns a Class that emits `new ...(...)`.
+		If name is in components, returns a Jsx-wrapped expression.
 		"""
 		# Convention: trailing underscore escapes Python keywords (e.g. from_ -> from, is_ -> is).
 		# We keep the original `name` for constructor detection, but emit the JS name.
@@ -188,6 +193,8 @@ class JsModule(Expr):
 
 		if name in self.constructors:
 			return Class(expr, name=name)
+		if name in self.components:
+			return Jsx(expr)
 		return expr
 
 	@override
@@ -226,28 +233,74 @@ class JsModule(Expr):
 		Example (inside pulse/js/set.py):
 			JsModule.register(name=None)  # global identifier builtin (no module binding)
 		"""
+		from pulse.component import Component  # Import here to avoid cycles
+
 		# Get the calling module from the stack frame
 		frame = inspect.currentframe()
 		assert frame is not None and frame.f_back is not None
 		module_name = frame.f_back.f_globals["__name__"]
 		module = sys.modules[module_name]
 
-		# Collect locally defined names and clean up module namespace
+		# Collect locally defined names and clean up module namespace.
+		# Priority order for categorization:
+		#   1. Overrides: real functions (with body), Exprs, real @components → returned directly
+		#   2. Components: stub @component functions → wrapped as Jsx(Import(...))
+		#   3. Constructors: classes → emitted with 'new' keyword
+		#   4. Regular imports: stub functions → standard named imports
 		constructors: set[str] = set()
+		components: set[str] = set()
 		local_names: set[str] = set()
+		overrides: dict[str, Any] = {}
 
 		for attr_name in list(vars(module)):
-			if attr_name in _MODULE_DUNDERS:
+			if attr_name in _MODULE_DUNDERS or attr_name.startswith("_"):
 				continue
 
 			obj = getattr(module, attr_name)
+
+			# Component-wrapped function - check the raw function's module
+			if isinstance(obj, Component):
+				raw_fn = obj._raw_fn  # pyright: ignore[reportPrivateUsage]
+				fn_module = getattr(raw_fn, "__module__", None)
+				if fn_module != module_name:
+					delattr(module, attr_name)
+					continue
+				if is_stub_function(raw_fn):
+					# Stub component → becomes Jsx(Import(...))
+					components.add(attr_name)
+					local_names.add(attr_name)
+				else:
+					# Real component → preserve as override
+					overrides[attr_name] = obj
+				delattr(module, attr_name)
+				continue
+
 			is_local = not hasattr(obj, "__module__") or obj.__module__ == module_name
+			if not is_local:
+				delattr(module, attr_name)
+				continue
 
-			if is_local and not attr_name.startswith("_"):
+			# Existing Expr (e.g., manually created Jsx)
+			if isinstance(obj, Expr):
+				overrides[attr_name] = obj
+				delattr(module, attr_name)
+				continue
+
+			# Real function with body → preserve as override
+			if inspect.isfunction(obj) and not is_stub_function(obj):
+				overrides[attr_name] = obj
+				delattr(module, attr_name)
+				continue
+
+			# Class → constructor (existing behavior)
+			if inspect.isclass(obj):
+				constructors.add(attr_name)
 				local_names.add(attr_name)
-				if inspect.isclass(obj):
-					constructors.add(attr_name)
+				delattr(module, attr_name)
+				continue
 
+			# Stub function → regular import (existing behavior)
+			local_names.add(attr_name)
 			delattr(module, attr_name)
 
 		# Add annotated constants to local_names
@@ -268,11 +321,14 @@ class JsModule(Expr):
 			kind=kind,
 			values=values,
 			constructors=frozenset(constructors),
+			components=frozenset(components),
 		)
 		# Register the module object itself so `import pulse.js.math as Math` resolves via EXPR_REGISTRY.
 		Expr.register(module, js_module)
 
-		def __getattr__(name: str) -> Member | Class | Identifier | Import:
+		def __getattr__(name: str) -> Member | Class | Jsx | Identifier | Import | Any:
+			if name in overrides:
+				return overrides[name]
 			if name.startswith("_") or name not in local_names:
 				raise AttributeError(name)
 			return js_module.get_value(name)

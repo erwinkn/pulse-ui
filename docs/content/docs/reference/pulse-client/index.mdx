@@ -1,0 +1,125 @@
+---
+title: "pulse-ui-client"
+description: "React client library for Pulse applications"
+---
+
+# pulse-ui-client
+
+The `pulse-ui-client` package provides React bindings for connecting to a Pulse backend. It handles WebSocket communication, VDOM rendering, and state synchronization between your Python server and React frontend.
+
+## Installation
+
+```bash
+npm install pulse-ui-client
+# or
+bun add pulse-ui-client
+```
+
+## Peer Dependencies
+
+The package requires React 18 or 19 and React Router 7:
+
+```json
+{
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19",
+    "react-router": "^7"
+  }
+}
+```
+
+## Quick Start
+
+Here's a minimal setup connecting a React app to a Pulse backend:
+
+```tsx
+import { PulseProvider, PulseView } from "pulse-ui-client";
+import { BrowserRouter, Routes, Route } from "react-router";
+
+// Component registry for custom mount points
+const registry = {
+  MyButton: (props) => <button {...props} />,
+};
+
+function App() {
+  return (
+    <BrowserRouter>
+      <PulseProvider
+        config={{
+          serverAddress: "http://localhost:8000",
+          connectionStatus: {
+            initialConnectingDelay: 500,
+            initialErrorDelay: 5000,
+            reconnectErrorDelay: 3000,
+          },
+        }}
+        prerender={{ views: {}, directives: {} }}
+      >
+        <Routes>
+          <Route path="/*" element={<PulseView path="/" registry={registry} />} />
+        </Routes>
+      </PulseProvider>
+    </BrowserRouter>
+  );
+}
+```
+
+Let's break this down:
+
+1. **PulseProvider** wraps your app and manages the WebSocket connection
+2. **PulseView** renders the UI for a specific route path
+3. **registry** maps component names to React components for custom mount points
+
+## What's Included
+
+The package exports several categories of APIs:
+
+### Components
+
+- **PulseProvider** - Root context provider for WebSocket connection
+- **PulseView** - Renders Pulse views and handles updates
+- **PulseForm** - Form component that submits without unmounting
+
+### Hooks
+
+- **usePulseClient** - Access the Pulse client instance
+- **usePulseChannel** - Subscribe to bidirectional channels
+- **usePulsePrerender** - Access prerendered view data
+
+### Classes
+
+- **ChannelBridge** - Bidirectional communication over channels
+- **VDOMRenderer** - Converts VDOM to React elements
+- **PulseChannelResetError** - Error for channel failures
+
+### Utilities
+
+- **serialize** / **deserialize** - Wire format encoding
+- **extractServerRouteInfo** - Extract route info in loaders
+- **submitForm** - Programmatic form submission
+
+## Architecture
+
+The client maintains a persistent WebSocket connection to the Pulse server:
+
+```
+React App                          Pulse Server
+    |                                   |
+    |-- attach (path, routeInfo) ------>|
+    |<-------- vdom_init (VDOM) --------|
+    |                                   |
+    |<------ vdom_update (ops[]) -------|  (on state change)
+    |                                   |
+    |-- callback (path, id, args) ----->|  (on user interaction)
+    |                                   |
+```
+
+When a user interacts with the UI, callbacks are sent to the server. The server updates state and sends VDOM patches back. The client applies these patches incrementally, preserving React's reconciliation benefits.
+
+## See Also
+
+- [Components](/docs/reference/pulse-client/components) - PulseProvider, PulseView, PulseForm
+- [Hooks](/docs/reference/pulse-client/hooks) - usePulseClient, usePulseChannel
+- [Types](/docs/reference/pulse-client/types) - TypeScript type definitions
+- [Architecture](/docs/reference/architecture) - How Pulse works

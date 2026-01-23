@@ -70,6 +70,10 @@ export interface ServerNavigateToMessage {
 	hard: boolean;
 }
 
+export interface ServerReloadMessage {
+	type: "reload";
+}
+
 export interface ServerJsExecMessage {
 	type: "js_exec";
 	path: string;
@@ -83,6 +87,7 @@ export type ServerMessage =
 	| ServerErrorMessage
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
+	| ServerReloadMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
 	| ServerJsExecMessage;

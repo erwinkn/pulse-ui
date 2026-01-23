@@ -1,0 +1,689 @@
+---
+title: "Core Components"
+description: "Mantine Core UI components for Pulse"
+---
+
+This page covers `@mantine/core` components available in Pulse Mantine. These include layout primitives, buttons, inputs, data display, overlays, navigation, feedback, and typography.
+
+## Layout
+
+Components for arranging and spacing content.
+
+### Stack
+
+Vertical flex container with consistent spacing between children.
+
+```python
+from pulse_mantine import Stack, Button
+
+Stack(gap="md")[
+    Button("First"),
+    Button("Second"),
+    Button("Third"),
+]
+```
+
+### Group
+
+Horizontal flex container for inline elements.
+
+```python
+from pulse_mantine import Group, Button
+
+Group(gap="sm")[
+    Button("Cancel", variant="outline"),
+    Button("Submit"),
+]
+```
+
+### Grid and GridCol
+
+Responsive 12-column grid system.
+
+```python
+from pulse_mantine import Grid, GridCol, TextInput
+
+Grid(gutter="md")[
+    GridCol(span=6)[TextInput(label="First Name")],
+    GridCol(span=6)[TextInput(label="Last Name")],
+    GridCol(span=12)[TextInput(label="Email")],
+]
+```
+
+Responsive spans:
+
+```python
+GridCol(span={"base": 12, "sm": 6, "md": 4})[
+    "Responsive column"
+]
+```
+
+### Flex
+
+Low-level flexbox container with full control.
+
+```python
+from pulse_mantine import Flex, Button
+
+Flex(gap="md", justify="space-between", align="center", wrap="wrap")[
+    Button("Left"),
+    Button("Right"),
+]
+```
+
+### Container
+
+Centered content wrapper with max-width.
+
+```python
+from pulse_mantine import Container
+
+Container(size="md")[
+    "Content centered with max-width"
+]
+```
+
+### Other Layout Components
+
+```python
+from pulse_mantine import Center, Space, AspectRatio, SimpleGrid
+
+# Center content horizontally and vertically
+Center(h=200)[Button("Centered")]
+
+# Add vertical or horizontal space
+Space(h="md")
+
+# Maintain aspect ratio
+AspectRatio(ratio=16/9)[Image(src="video-thumbnail.jpg")]
+
+# Simple responsive grid (auto columns)
+SimpleGrid(cols={"base": 1, "sm": 2, "lg": 3})[
+    Card()["Item 1"],
+    Card()["Item 2"],
+    Card()["Item 3"],
+]
+```
+
+## Buttons
+
+### Button
+
+Primary interactive element.
+
+```python
+from pulse_mantine import Button
+
+# Basic button
+Button("Click me", onClick=lambda: print("clicked"))
+
+# Variants
+Button("Filled", variant="filled")
+Button("Outline", variant="outline")
+Button("Light", variant="light")
+Button("Subtle", variant="subtle")
+
+# With loading state
+Button("Submit", loading=is_loading, onClick=submit)
+
+# With icons (using pulse-lucide)
+from pulse_lucide import Send
+Button("Send", leftSection=Send(size=16))
+```
+
+### ActionIcon
+
+Icon-only button.
+
+```python
+from pulse_mantine import ActionIcon
+from pulse_lucide import Settings, Trash
+
+ActionIcon(variant="light", onClick=open_settings)[Settings()]
+ActionIcon(variant="filled", color="red")[Trash()]
+```
+
+### Other Button Components
+
+```python
+from pulse_mantine import CloseButton, CopyButton, FileButton, UnstyledButton
+
+# Close button (X icon)
+CloseButton(onClick=close_modal)
+
+# Copy to clipboard
+CopyButton(value="text to copy")[
+    lambda copied: Button("Copied!" if copied else "Copy")
+]
+
+# File upload trigger
+FileButton(onChange=handle_file, accept="image/*")[
+    Button("Upload Image")
+]
+
+# Unstyled button (for custom styling)
+UnstyledButton(onClick=action)["Custom styled button"]
+```
+
+## Inputs
+
+### Text Inputs
+
+```python
+from pulse_mantine import TextInput, PasswordInput, Textarea, NumberInput
+
+TextInput(
+    label="Email",
+    placeholder="you@example.com",
+    description="We'll never share your email",
+    withAsterisk=True,
+)
+
+PasswordInput(label="Password", placeholder="Enter password")
+
+Textarea(
+    label="Bio",
+    placeholder="Tell us about yourself",
+    minRows=3,
+    autosize=True,
+)
+
+NumberInput(
+    label="Quantity",
+    min=0,
+    max=100,
+    step=1,
+    defaultValue=1,
+)
+```
+
+### Selection Inputs
+
+```python
+from pulse_mantine import Select, MultiSelect, Checkbox, Switch, Radio, RadioGroup
+
+Select(
+    label="Country",
+    data=["USA", "Canada", "UK", "Germany"],
+    placeholder="Select country",
+    searchable=True,
+)
+
+MultiSelect(
+    label="Tags",
+    data=["React", "Python", "TypeScript", "Rust"],
+    placeholder="Select tags",
+)
+
+Checkbox(label="I agree to terms", defaultChecked=False)
+
+Switch(label="Dark mode", onLabel="ON", offLabel="OFF")
+
+RadioGroup(label="Plan", defaultValue="free")[
+    Radio("Free", value="free"),
+    Radio("Pro", value="pro"),
+    Radio("Enterprise", value="enterprise"),
+]
+```
+
+### Other Input Components
+
+```python
+from pulse_mantine import Slider, ColorInput, PinInput, Rating, JsonInput
+
+Slider(
+    label="Volume",
+    min=0,
+    max=100,
+    marks=[{"value": 0, "label": "0%"}, {"value": 100, "label": "100%"}],
+)
+
+ColorInput(label="Brand Color", format="hex", swatches=["#ff0000", "#00ff00", "#0000ff"])
+
+PinInput(length=6, placeholder="○")
+
+Rating(defaultValue=3, count=5)
+
+JsonInput(label="Config", placeholder='{"key": "value"}', formatOnBlur=True)
+```
+
+## Data Display
+
+### Card
+
+Container for related content.
+
+```python
+from pulse_mantine import Card, CardSection, Image, Text, Badge, Button, Group
+
+Card(shadow="sm", padding="lg", radius="md", withBorder=True)[
+    CardSection()[
+        Image(src="product.jpg", height=160, alt="Product")
+    ],
+    Group(justify="space-between", mt="md", mb="xs")[
+        Text("Product Name", fw=500),
+        Badge(color="pink", variant="light")["On Sale"],
+    ],
+    Text(size="sm", c="dimmed")["Product description goes here."],
+    Button(variant="light", fullWidth=True, mt="md")["Add to Cart"],
+]
+```
+
+### Badge
+
+Small status indicator.
+
+```python
+from pulse_mantine import Badge
+
+Badge("Active", color="green")
+Badge("Pending", color="yellow", variant="outline")
+Badge("Archived", color="gray", variant="dot")
+```
+
+### Avatar
+
+User or entity representation.
+
+```python
+from pulse_mantine import Avatar, AvatarGroup
+
+Avatar(src="user.jpg", alt="John Doe", radius="xl")
+Avatar(color="blue", radius="xl")["JD"]  # Initials fallback
+
+AvatarGroup()[
+    Avatar(src="user1.jpg"),
+    Avatar(src="user2.jpg"),
+    Avatar(src="user3.jpg"),
+    Avatar()["+5"],  # Overflow indicator
+]
+```
+
+### Table
+
+Data tables.
+
+```python
+from pulse_mantine import Table, TableThead, TableTbody, TableTr, TableTh, TableTd
+
+Table(striped=True, highlightOnHover=True)[
+    TableThead()[
+        TableTr()[
+            TableTh()["Name"],
+            TableTh()["Email"],
+            TableTh()["Role"],
+        ]
+    ],
+    TableTbody()[
+        TableTr()[
+            TableTd()["John Doe"],
+            TableTd()["john@example.com"],
+            TableTd()["Admin"],
+        ],
+        TableTr()[
+            TableTd()["Jane Smith"],
+            TableTd()["jane@example.com"],
+            TableTd()["User"],
+        ],
+    ],
+]
+```
+
+### Other Data Display Components
+
+```python
+from pulse_mantine import (
+    Accordion, AccordionItem, AccordionControl, AccordionPanel,
+    Timeline, TimelineItem, Indicator, Image, Spoiler
+)
+
+# Accordion
+Accordion()[
+    AccordionItem(value="item-1")[
+        AccordionControl()["Section 1"],
+        AccordionPanel()["Content for section 1"],
+    ],
+    AccordionItem(value="item-2")[
+        AccordionControl()["Section 2"],
+        AccordionPanel()["Content for section 2"],
+    ],
+]
+
+# Timeline
+Timeline(active=1)[
+    TimelineItem(title="Order placed")["Your order was placed"],
+    TimelineItem(title="Processing")["We're preparing your order"],
+    TimelineItem(title="Shipped")["On the way"],
+]
+
+# Indicator (notification badge)
+Indicator(processing=True, color="red")[
+    Avatar(src="user.jpg")
+]
+
+# Image with fallback
+Image(src="photo.jpg", fallbackSrc="placeholder.jpg", radius="md")
+
+# Spoiler (show more/less)
+Spoiler(maxHeight=100, showLabel="Show more", hideLabel="Hide")[
+    "Long content that will be truncated..."
+]
+```
+
+## Overlays
+
+### Modal
+
+Dialog overlay.
+
+```python
+import pulse as ps
+from pulse_mantine import Modal, Button, TextInput, Stack
+
+@ps.component
+def ModalExample():
+    opened = ps.state(False)
+
+    return Stack()[
+        Button("Open Modal", onClick=lambda: opened.set(True)),
+        Modal(
+            opened=opened.value,
+            onClose=lambda: opened.set(False),
+            title="Edit Profile",
+            centered=True,
+        )[
+            Stack()[
+                TextInput(label="Name"),
+                TextInput(label="Email"),
+                Button("Save", onClick=lambda: opened.set(False)),
+            ]
+        ],
+    ]
+```
+
+### Drawer
+
+Slide-in panel.
+
+```python
+from pulse_mantine import Drawer, Button
+
+Drawer(
+    opened=drawer_open,
+    onClose=lambda: drawer_open.set(False),
+    title="Navigation",
+    position="left",
+)[
+    NavLink(label="Home", href="/"),
+    NavLink(label="Settings", href="/settings"),
+]
+```
+
+### Tooltip and Popover
+
+```python
+from pulse_mantine import Tooltip, Popover, PopoverTarget, PopoverDropdown, Button, Text
+
+# Simple tooltip
+Tooltip(label="Save changes")[
+    Button("Save")
+]
+
+# Popover with content
+Popover(width=200, position="bottom", withArrow=True)[
+    PopoverTarget()[Button("More info")],
+    PopoverDropdown()[
+        Text(size="sm")["Additional details here"]
+    ],
+]
+```
+
+### Menu
+
+Dropdown menu.
+
+```python
+from pulse_mantine import Menu, MenuTarget, MenuDropdown, MenuItem, MenuDivider, MenuLabel, Button
+from pulse_lucide import Settings, User, Logout
+
+Menu()[
+    MenuTarget()[Button("Account")],
+    MenuDropdown()[
+        MenuLabel()["Application"],
+        MenuItem(leftSection=User(size=14))["Profile"],
+        MenuItem(leftSection=Settings(size=14))["Settings"],
+        MenuDivider(),
+        MenuItem(color="red", leftSection=Logout(size=14))["Logout"],
+    ],
+]
+```
+
+### Other Overlay Components
+
+```python
+from pulse_mantine import HoverCard, HoverCardTarget, HoverCardDropdown, Dialog
+
+# Hover card
+HoverCard(width=280, shadow="md")[
+    HoverCardTarget()[Text("Hover me")],
+    HoverCardDropdown()[
+        Text(size="sm")["Card content shown on hover"],
+    ],
+]
+
+# Dialog (non-modal)
+Dialog(opened=show_dialog, withCloseButton=True, onClose=close)[
+    Text()["Dialog content"],
+]
+```
+
+## Navigation
+
+### Tabs
+
+```python
+from pulse_mantine import Tabs, TabsList, TabsTab, TabsPanel
+
+Tabs(defaultValue="overview")[
+    TabsList()[
+        TabsTab("Overview", value="overview"),
+        TabsTab("Settings", value="settings"),
+        TabsTab("Billing", value="billing"),
+    ],
+    TabsPanel(value="overview")["Overview content"],
+    TabsPanel(value="settings")["Settings content"],
+    TabsPanel(value="billing")["Billing content"],
+]
+```
+
+### NavLink
+
+Navigation links with nesting support.
+
+```python
+from pulse_mantine import NavLink, Stack
+from pulse_lucide import Home, Settings, Users
+
+Stack()[
+    NavLink(label="Home", leftSection=Home(size=16), href="/"),
+    NavLink(label="Users", leftSection=Users(size=16), href="/users", active=True),
+    NavLink(label="Settings", leftSection=Settings(size=16), childrenOffset=28)[
+        NavLink(label="General", href="/settings/general"),
+        NavLink(label="Security", href="/settings/security"),
+    ],
+]
+```
+
+### Other Navigation Components
+
+```python
+from pulse_mantine import Breadcrumbs, Anchor, Pagination, Stepper, StepperStep
+
+# Breadcrumbs
+Breadcrumbs()[
+    Anchor(href="/")["Home"],
+    Anchor(href="/products")["Products"],
+    Text()["Current Item"],
+]
+
+# Pagination
+Pagination(total=10, value=current_page, onChange=set_page)
+
+# Stepper
+Stepper(active=active_step)[
+    StepperStep(label="Account", description="Create account"),
+    StepperStep(label="Verify", description="Verify email"),
+    StepperStep(label="Complete", description="Get started"),
+]
+```
+
+## Feedback
+
+```python
+from pulse_mantine import Alert, Loader, Progress, Skeleton, Notification
+from pulse_lucide import AlertCircle, Check
+
+# Alert
+Alert(
+    title="Warning",
+    color="yellow",
+    icon=AlertCircle(),
+)["Please review your input before submitting."]
+
+# Loader
+Loader(size="md", type="dots")
+
+# Progress bar
+Progress(value=65, size="lg", color="blue")
+
+# Skeleton (loading placeholder)
+Stack()[
+    Skeleton(height=50),
+    Skeleton(height=8, mt=6, radius="xl"),
+    Skeleton(height=8, mt=6, width="70%", radius="xl"),
+]
+
+# Notification
+Notification(
+    title="Success",
+    color="green",
+    icon=Check(),
+)["Your changes have been saved."]
+```
+
+## Typography
+
+```python
+from pulse_mantine import Text, Title, Highlight, Code, Blockquote, Mark
+
+# Text with variants
+Text("Default text")
+Text("Dimmed text", c="dimmed")
+Text("Bold text", fw=700)
+Text("Small text", size="sm")
+Text("Gradient text", variant="gradient", gradient={"from": "blue", "to": "cyan"})
+
+# Titles (h1-h6)
+Title(order=1)["Page Title"]
+Title(order=2)["Section Title"]
+
+# Highlight search terms
+Highlight(highlight=["important", "text"])["This is important text to highlight"]
+
+# Code
+Code()["inline_code()"]
+Code(block=True)["""
+def hello():
+    print("Hello, World!")
+"""]
+
+# Blockquote
+Blockquote(cite="- Author Name")["Quote text here"]
+
+# Mark (highlight)
+Text()["This is ", Mark()["highlighted"], " text"]
+```
+
+## App Shell
+
+`AppShell` provides a complete application layout with header, navbar, aside, and footer.
+
+```python
+import pulse as ps
+from pulse_mantine import (
+    AppShell, AppShellHeader, AppShellNavbar, AppShellMain, AppShellSection,
+    Burger, Group, Text, NavLink, Stack
+)
+from pulse_lucide import Home, Settings, Users
+
+@ps.component
+def App():
+    nav_opened = ps.state(False)
+
+    return AppShell(
+        header={"height": 60},
+        navbar={"width": 300, "breakpoint": "sm", "collapsed": {"mobile": not nav_opened.value}},
+        padding="md",
+    )[
+        AppShellHeader()[
+            Group(h="100%", px="md")[
+                Burger(
+                    opened=nav_opened.value,
+                    onClick=lambda: nav_opened.set(not nav_opened.value),
+                    hiddenFrom="sm",
+                    size="sm",
+                ),
+                Text(size="lg", fw=700)["My App"],
+            ]
+        ],
+        AppShellNavbar(p="md")[
+            AppShellSection(grow=True)[
+                Stack(gap=0)[
+                    NavLink(label="Home", leftSection=Home(size=16), href="/"),
+                    NavLink(label="Users", leftSection=Users(size=16), href="/users"),
+                ]
+            ],
+            AppShellSection()[
+                NavLink(label="Settings", leftSection=Settings(size=16), href="/settings"),
+            ],
+        ],
+        AppShellMain()[
+            "Main content area"
+        ],
+    ]
+```
+
+### AppShell with Aside and Footer
+
+```python
+AppShell(
+    header={"height": 60},
+    navbar={"width": 250, "breakpoint": "sm"},
+    aside={"width": 200, "breakpoint": "md"},
+    footer={"height": 60},
+)[
+    AppShellHeader()["Header"],
+    AppShellNavbar()["Navigation"],
+    AppShellAside()["Sidebar"],
+    AppShellFooter()["Footer"],
+    AppShellMain()["Content"],
+]
+```
+
+## Typed Components
+
+The following components have full TypedDict definitions for better IDE support:
+
+- **Layout**: `Stack`, `Grid`, `GridCol`, `Group`, `Flex`, `Container`, `Center`, `Space`, `AspectRatio`, `SimpleGrid`
+- **App Shell**: `AppShell`, `AppShellHeader`, `AppShellNavbar`, `AppShellMain`, `AppShellAside`, `AppShellFooter`, `AppShellSection`
+- **Base**: `Box`
+
+All other components use `**props: Any`, meaning you can pass any prop from the official Mantine documentation.
+
+## Official Documentation
+
+For complete API reference, prop details, and more examples, see the official Mantine documentation:
+
+- [Mantine Core](https://mantine.dev/core/getting-started/) - Full component reference
+- [Mantine Styles](https://mantine.dev/styles/css-modules/) - Styling guide
+- [Mantine Theming](https://mantine.dev/theming/theme-object/) - Theme customization

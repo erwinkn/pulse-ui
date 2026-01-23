@@ -72,7 +72,7 @@ class HealthCheckConfig:
 	    task_grace_period_seconds: Grace period per task after exiting initial state (default: 60)
 	"""
 
-	path: str = "/_health"
+	path: str = "/_pulse/health"
 	interval_seconds: int = 30
 	timeout_seconds: int = 5
 	healthy_threshold: int = 2

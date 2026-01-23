@@ -1,0 +1,243 @@
+---
+title: "Routing"
+---
+
+Pulse uses client-side routing to create fast, seamless navigation between pages. Routes are defined on your `App` and rendered using React Router under the hood.
+
+## Defining routes
+
+Routes are defined when creating your `App`. Each `ps.Route` maps a URL path to a component:
+
+```python
+import pulse as ps
+
+@ps.component
+def home():
+    return ps.h1("Welcome!")
+
+@ps.component
+def about():
+    return ps.h1("About Us")
+
+@ps.component
+def contact():
+    return ps.h1("Contact")
+
+app = ps.App(
+    routes=[
+        ps.Route("/", home),
+        ps.Route("/about", about),
+        ps.Route("/contact", contact),
+    ]
+)
+```
+
+## Layouts
+
+Layouts let you wrap multiple routes with shared UI like navigation, headers, or sidebars. Use `ps.Layout` with `ps.Outlet` to render child routes:
+
+```python
+@ps.component
+def app_layout():
+    return ps.div(
+        ps.header(
+            ps.nav(
+                ps.Link("Home", to="/"),
+                ps.Link("About", to="/about"),
+                ps.Link("Settings", to="/settings"),
+            )
+        ),
+        ps.main(
+            ps.Outlet()  # Child routes render here
+        ),
+    )
+
+app = ps.App(
+    routes=[
+        ps.Layout(app_layout, children=[
+            ps.Route("/", home),
+            ps.Route("/about", about),
+            ps.Route("/settings", settings),
+        ])
+    ]
+)
+```
+
+The layout component renders once, and child routes swap in and out within the `Outlet`. This means layout state persists as users navigate between pages.
+
+## Nested routes
+
+Routes can be nested to create hierarchical URLs. Child routes render inside their parent's `Outlet`:
+
+```python
+@ps.component
+def dashboard():
+    return ps.div(
+        ps.h1("Dashboard"),
+        ps.nav(
+            ps.Link("Overview", to="/dashboard"),
+            ps.Link("Analytics", to="/dashboard/analytics"),
+            ps.Link("Settings", to="/dashboard/settings"),
+        ),
+        ps.Outlet(),  # Nested routes render here
+    )
+
+@ps.component
+def dashboard_overview():
+    return ps.p("Dashboard overview content")
+
+@ps.component
+def dashboard_analytics():
+    return ps.p("Analytics content")
+
+app = ps.App(
+    routes=[
+        ps.Route("/dashboard", dashboard, children=[
+            ps.Route("", dashboard_overview),      # /dashboard
+            ps.Route("analytics", dashboard_analytics),  # /dashboard/analytics
+            ps.Route("settings", dashboard_settings),    # /dashboard/settings
+        ])
+    ]
+)
+```
+
+## Navigation
+
+### Links
+
+Use `ps.Link` for declarative navigation. It renders an `<a>` tag that handles client-side routing:
+
+```python
+ps.Link("Go to About", to="/about")
+ps.Link("User Profile", to="/users/123", className="nav-link")
+```
+
+### Programmatic navigation
+
+Use `ps.navigate()` to navigate from event handlers or callbacks:
+
+```python
+@ps.component
+def login_form():
+    async def handle_login():
+        success = await authenticate(email, password)
+        if success:
+            ps.navigate("/dashboard")
+
+    return ps.button("Login", onClick=handle_login)
+```
+
+You can also use `ps.redirect()` to navigate immediately during render (useful for auth guards):
+
+```python
+@ps.component
+def protected_page():
+    session = ps.session()
+    if not session.get("user"):
+        ps.redirect("/login")
+        return None
+
+    return ps.div("Protected content")
+```
+
+## Dynamic routes
+
+Capture URL segments as parameters using `:param` syntax:
+
+```python
+app = ps.App(
+    routes=[
+        ps.Route("/users/:user_id", user_profile),
+        ps.Route("/posts/:post_id/comments/:comment_id", comment_detail),
+    ]
+)
+```
+
+Access parameters with `ps.route()`:
+
+```python
+@ps.component
+def user_profile():
+    route = ps.route()
+    user_id = route.pathParams.get("user_id")
+
+    return ps.h1(f"User {user_id}")
+```
+
+### Optional segments
+
+Add `?` to make a segment optional:
+
+```python
+ps.Route("/users/:user_id/:tab?", user_profile)
+# Matches /users/123 and /users/123/settings
+```
+
+### Catch-all routes
+
+Use `*` to capture remaining path segments:
+
+```python
+ps.Route("/files/*", file_browser)
+# Matches /files/docs/report.pdf
+```
+
+Access the captured path with `route.catchall`:
+
+```python
+@ps.component
+def file_browser():
+    route = ps.route()
+    file_path = route.catchall  # "docs/report.pdf"
+    return ps.p(f"Viewing: {file_path}")
+```
+
+## Route information
+
+`ps.route()` returns a `RouteInfo` object with details about the current URL:
+
+```python
+@ps.component
+def debug_route():
+    route = ps.route()
+
+    return ps.ul(
+        ps.li(f"pathname: {route.pathname}"),      # /users/123?tab=posts#section
+        ps.li(f"pathParams: {route.pathParams}"),  # {"user_id": "123"}
+        ps.li(f"query: {route.query}"),            # "tab=posts"
+        ps.li(f"queryParams: {route.queryParams}"),# {"tab": "posts"}
+        ps.li(f"hash: {route.hash}"),              # "section"
+        ps.li(f"catchall: {route.catchall}"),      # For wildcard routes
+    )
+```
+
+## Query parameters
+
+Access query string parameters through `route.queryParams`:
+
+```python
+# URL: /search?q=pulse&page=2
+
+@ps.component
+def search_page():
+    route = ps.route()
+    query = route.queryParams.get("q", "")
+    page = int(route.queryParams.get("page", "1"))
+
+    return ps.div(
+        ps.p(f"Searching for: {query}"),
+        ps.p(f"Page: {page}"),
+    )
+```
+
+Navigate with query parameters:
+
+```python
+ps.navigate("/search?q=pulse&page=2")
+ps.Link("Next Page", to="/search?q=pulse&page=3")
+```
+
+## See also
+
+- [Tutorial: Routing](/docs/tutorial/11-routing)
+- [Reference: Routing](/docs/reference/pulse/routing)

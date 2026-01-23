@@ -1,29 +1,45 @@
 """JavaScript module bindings for use in @javascript decorated functions (transpiler).
 
-Usage:
-    # Import JS classes (for constructors and static methods):
-    from pulse.js import Set, Number, Array, Date, Promise, Map, Error
-    Set([1, 2, 3])         # -> new Set([1, 2, 3])
-    Number.isFinite(42)    # -> Number.isFinite(42)
-    Array.isArray(x)       # -> Array.isArray(x)
+## Usage
 
-    # Import JS namespace objects (function-only modules):
-    from pulse.js import Math, JSON, console, window, document, navigator
-    Math.floor(3.7)        # -> Math.floor(3.7)
-    JSON.stringify(obj)    # -> JSON.stringify(obj)
-    console.log("hi")      # -> console.log("hi")
+Import JS classes (for constructors and static methods):
 
-    # Alternative: import namespace modules for namespace access:
-    import pulse.js.json as JSON
-    JSON.stringify(obj)    # -> JSON.stringify(obj)
+```python
+from pulse.js import Set, Number, Array, Date, Promise, Map, Error
+Set([1, 2, 3])         # -> new Set([1, 2, 3])
+Number.isFinite(42)    # -> Number.isFinite(42)
+Array.isArray(x)       # -> Array.isArray(x)
+```
 
-    # Statement functions:
-    from pulse.js import throw
-    throw(Error("message"))  # -> throw Error("message");
+Import JS namespace objects (function-only modules):
 
-    # Object literals (plain JS objects instead of Map):
-    from pulse.js import obj
-    obj(a=1, b=2)          # -> { a: 1, b: 2 }
+```python
+from pulse.js import Math, JSON, console, window, document, navigator
+Math.floor(3.7)        # -> Math.floor(3.7)
+JSON.stringify(obj)    # -> JSON.stringify(obj)
+console.log("hi")      # -> console.log("hi")
+```
+
+Alternative: import namespace modules for namespace access:
+
+```python
+import pulse.js.json as JSON
+JSON.stringify(obj)    # -> JSON.stringify(obj)
+```
+
+Statement functions:
+
+```python
+from pulse.js import throw
+throw(Error("message"))  # -> throw Error("message");
+```
+
+Object literals (plain JS objects instead of Map):
+
+```python
+from pulse.js import obj
+obj(a=1, b=2)          # -> { a: 1, b: 2 }
+```
 """
 
 import importlib as _importlib
@@ -39,7 +55,6 @@ _MODULE_EXPORTS_NAMESPACE: dict[str, str] = {
 	"JSON": "pulse.js.json",
 	"Math": "pulse.js.math",
 	"React": "pulse.js.react",
-	"ReactDOM": "pulse.js.react_dom",
 	"console": "pulse.js.console",
 	"window": "pulse.js.window",
 	"document": "pulse.js.document",
@@ -54,6 +69,7 @@ _MODULE_EXPORTS_ATTRIBUTE: dict[str, str] = {
 	"Map": "pulse.js.map",
 	"Object": "pulse.js.object",
 	"Promise": "pulse.js.promise",
+	"React": "pulse.js.react",
 	"RegExp": "pulse.js.regexp",
 	"Set": "pulse.js.set",
 	"String": "pulse.js.string",

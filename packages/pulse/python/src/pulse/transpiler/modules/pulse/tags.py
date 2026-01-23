@@ -28,7 +28,6 @@ from pulse.transpiler.nodes import (
 )
 from pulse.transpiler.py_module import PyModule
 from pulse.transpiler.transpiler import Transpiler
-from pulse.transpiler.vdom import VDOMNode
 
 
 @dataclass(slots=True, frozen=True)
@@ -46,7 +45,7 @@ class TagExpr(Expr):
 		out.append(f'"{self.tag}"')
 
 	@override
-	def render(self) -> VDOMNode:
+	def render(self):
 		return self.tag
 
 	@override

@@ -1,0 +1,16 @@
+{
+  "title": "Concepts",
+  "icon": "Lightbulb",
+  "pages": [
+    "html",
+    "components",
+    "state",
+    "effects",
+    "events",
+    "data-fetching",
+    "forms",
+    "routing",
+    "sessions",
+    "deployment"
+  ]
+}

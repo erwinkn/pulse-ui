@@ -95,13 +95,13 @@ class NotificationsDemoState(ps.State):
 			result: list[NotificationData] = []
 			for index, item in enumerate(existing, start=1):
 				result.append(
-					{
-						**item,
-						"title": f"Completed #{index}",
-						"message": "Updated via notifications.updateState",
-						"color": "green",
-						"autoClose": False,
-					}
+					NotificationData(
+						item,
+						title=f"Completed #{index}",
+						message="Updated via notifications.updateState",
+						color="green",
+						autoClose=False,
+					)
 				)
 			return result
 

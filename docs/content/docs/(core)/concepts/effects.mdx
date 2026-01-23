@@ -1,0 +1,181 @@
+---
+title: "Effects"
+---
+
+Effects run code in response to state changes—for logging, analytics, syncing with external systems, or any side effect that shouldn't happen during rendering.
+
+## What are effects?
+
+An effect is a function that:
+1. Runs after state changes
+2. Automatically tracks which state it reads
+3. Re-runs when any tracked state changes
+4. Can return a cleanup function
+
+Effects are for **side effects**—things that happen outside of rendering, like logging, API calls, timers, or subscriptions.
+
+## Effects in State classes
+
+Use the `@ps.effect` decorator to define effects on your state:
+
+```python
+class ToggleState(ps.State):
+    enabled: bool = False
+
+    @ps.effect
+    def log_changes(self):
+        print(f"Toggle is now: {self.enabled}")
+```
+
+Pulse tracks what the effect reads. When `self.enabled` changes, the effect runs again automatically.
+
+### With cleanup
+
+Effects can return a cleanup function. This is useful for timers, subscriptions, or anything that needs to be torn down:
+
+```python
+class TimerState(ps.State):
+    count: int = 0
+    running: bool = False
+    _handle: ps.RepeatHandle | None = None
+
+    @ps.effect
+    def start_timer(self):
+        if not self.running:
+            return
+
+        self._handle = ps.repeat(1.0, self.tick)
+
+        def cleanup():
+            if self._handle:
+                self._handle.cancel()
+
+        return cleanup
+
+    def tick(self):
+        self.count += 1
+```
+
+Cleanup runs:
+- Before the effect runs again (when tracked dependencies change)
+- When the state is disposed
+
+<Callout type="info">
+**Good news:** Pulse's `ps.later()` and `ps.repeat()` are automatically cleaned up when the render session closes—so for simple cases, you might not need manual cleanup at all. See [Scheduling](/docs/reference/pulse/scheduling) for details.
+</Callout>
+
+## Effects in components
+
+Use `@ps.effect` to define effects inside components. Pulse automatically registers them:
+
+```python
+@ps.component
+def OrderTracker():
+    with ps.init():
+        state = OrderState()
+
+    @ps.effect
+    def log_status_changes():
+        print(f"Order status: {state.status}")
+        analytics.track("order_status_changed", status=state.status)
+
+    return ps.div(f"Status: {state.status}")
+```
+
+Effects defined with `@ps.effect` inside a component are automatically cached by their code location. You don't need to register them separately.
+
+### Conditional effects
+
+Effects inside conditionals work as expected. They're created when the condition is true and disposed when it becomes false:
+
+```python
+@ps.component
+def ConditionalLogger():
+    with ps.init():
+        state = LoggerState()
+
+    if state.logging_enabled:
+        @ps.effect
+        def log_changes():
+            print(f"Value: {state.value}")
+
+    return ps.div(f"Value: {state.value}")
+```
+
+### Loop effects with keys
+
+When using `@ps.effect` inside a loop, provide a unique `key` to disambiguate each effect:
+
+```python
+@ps.component
+def ItemTracker():
+    with ps.init():
+        state = ItemState()
+
+    for item in state.items:
+        @ps.effect(key=item.id)  # Key makes each effect unique
+        def track_item(item=item):  # Capture via default arg
+            print(f"Item {item.name}: count={item.count}")
+
+    return ps.ul(*[ps.li(item.name) for item in state.items])
+```
+
+Without a key, Pulse raises an error because all effects would share the same code location.
+
+### Dynamic key effects
+
+When the key changes, the old effect is disposed and a new one is created:
+
+```python
+@ps.component
+def UserTracker():
+    with ps.init():
+        user_id = ps.Signal("user-1")
+
+    @ps.effect(key=user_id())  # Effect recreated when user_id changes
+    def track_user():
+        print(f"Tracking user: {user_id()}")
+        def cleanup():
+            print(f"Stopped tracking: {user_id()}")
+        return cleanup
+
+    return ps.div(f"User: {user_id()}")
+```
+
+---
+
+## Common mistakes
+
+**Using effects for derived data.** Use computed values instead:
+
+```python
+# Don't do this
+@ps.effect
+def update_visible(self):
+    self.visible_todos = [t for t in self.todos if not t.done]
+
+# Do this instead
+@ps.computed
+def visible_todos(self):
+    return [t for t in self.todos if not t.done]
+```
+
+Computeds are synchronous and cached. Effects run after rendering and can cause additional rerenders—leading to flickering or infinite loops.
+
+**Forgetting cleanup.** If your effect creates timers, subscriptions, or event listeners, always return a cleanup function:
+
+```python
+@ps.effect
+def subscribe(self):
+    subscription = event_bus.subscribe(self.on_event)
+
+    def cleanup():
+        subscription.unsubscribe()
+
+    return cleanup  # Don't forget this!
+```
+
+## See also
+
+- [State and Reactivity](/docs/concepts/state) - the core state and reactivity system
+- [Tutorial: Hooks](/docs/tutorial/06-hooks)

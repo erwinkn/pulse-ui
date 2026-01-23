@@ -1,6 +1,6 @@
 [project]
 name = "pulse-mantine"
-version = "0.1.22"
+version = "0.1.29"
 description = "Add your description here"
 readme = "README.md"
 authors = [

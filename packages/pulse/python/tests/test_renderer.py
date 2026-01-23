@@ -9,7 +9,7 @@ from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
 from pulse.renderer import RenderTree
 from pulse.transpiler.nodes import Element, PulseNode
-from pulse.transpiler.vdom import VDOMElement
+from pulse.transpiler.vdom import VDOMElement, VDOMExpr
 
 
 # Helpers for reconciliation-based updates
@@ -277,7 +277,7 @@ def test_diff_props_unmounts_render_prop_when_replaced_with_jsexpr(tmp_path: Pat
 	test_css_file = tmp_path / "test.module.css"
 	test_css_file.write_text(".foo { color: red; }")
 
-	css_module = Import("styles", str(test_css_file), kind="default")
+	css_module = Import(str(test_css_file))
 	css_ref = Member(css_module, "foo")
 
 	tree.rerender(div(render=css_ref))  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
@@ -849,7 +849,7 @@ def test_css_module_with_jsexpr(tmp_path: Path):
 	test_css_file = tmp_path / "test.module.css"
 	test_css_file.write_text(".test { color: red; }")
 
-	css_module = Import("styles", str(test_css_file), kind="default")
+	css_module = Import(str(test_css_file))
 	css_ref = Member(css_module, "test")
 
 	tree = RenderTree(div(className=css_ref))
@@ -860,6 +860,26 @@ def test_css_module_with_jsexpr(tmp_path: Path):
 	class_value = cast(dict[str, Any], props.get("className"))
 	assert class_value["t"] == "member"
 	assert class_value["prop"] == "test"
+	clear_import_registry()
+
+
+def test_expr_tag_renders_as_expr():
+	"""Tag expressions should be serialized as VDOMExpr for client evaluation."""
+	from pulse.transpiler.imports import Import, clear_import_registry
+	from pulse.transpiler.nodes import Member
+
+	clear_import_registry()
+	app_shell = Import("AppShell", "@mantine/core")
+	header = Member(app_shell, "Header")
+
+	tree = RenderTree(Element(tag=header))
+	vdom = cast(VDOMElement, tree.render())
+
+	tag = cast(VDOMExpr, vdom.get("tag"))
+	assert tag["t"] == "member"
+	assert tag["prop"] == "Header"
+	obj = cast(VDOMExpr, tag["obj"])
+	assert obj["t"] == "ref"
 	clear_import_registry()
 
 

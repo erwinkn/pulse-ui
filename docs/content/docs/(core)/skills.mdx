@@ -1,0 +1,80 @@
+---
+title: "Skills"
+---
+
+AI coding assistant skills for Pulse development. These files help AI tools understand Pulse conventions and generate correct code.
+
+Skills are located in the [`skills/`](https://github.com/pulsehq/pulse/tree/main/skills) folder at the repository root.
+
+## Available Skills
+
+| Skill | Description |
+|-------|-------------|
+| [pulse-framework](https://github.com/pulsehq/pulse/blob/main/skills/pulse-framework/SKILL.md) | Core Pulse framework patterns and APIs |
+| [pulse-mantine](https://github.com/pulsehq/pulse/blob/main/skills/pulse-mantine/SKILL.md) | Mantine UI components for Pulse |
+
+## Installation
+
+### Claude Code
+
+Add skills to your `CLAUDE.md`:
+
+```markdown
+# Skills
+
+Include these skills for Pulse development:
+- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-framework/SKILL.md
+- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-mantine/SKILL.md
+```
+
+Or copy the SKILL.md contents directly into your `CLAUDE.md`.
+
+### Codex CLI
+
+Add to your `AGENTS.md` or `codex.md`:
+
+```markdown
+# Skills
+
+Include these skills:
+@import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-framework/SKILL.md
+@import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-mantine/SKILL.md
+```
+
+### Cursor
+
+Add to `.cursorrules`:
+
+```text
+# Pulse Framework Skills
+
+[Paste contents of pulse-framework/SKILL.md here]
+
+# Pulse Mantine Skills
+
+[Paste contents of pulse-mantine/SKILL.md here]
+```
+
+### OpenCode
+
+Add to `~/.opencode/agents.md` or project-level `AGENTS.md`:
+
+```markdown
+# Skills
+
+Include these skills for Pulse development:
+@import skills/pulse-framework/SKILL.md
+@import skills/pulse-mantine/SKILL.md
+```
+
+### Other Tools
+
+Most AI coding assistants support context files. Copy the contents of relevant SKILL.md files into your tool's context configuration:
+
+- **Windsurf**: Add to `.windsurfrules`
+- **Aider**: Add to `.aider.conf.yml` under `read`
+- **Continue**: Add to `.continuerc.json` context
+
+## Full Instructions
+
+See the [skills README](https://github.com/pulsehq/pulse/blob/main/skills/README.md) for complete installation instructions and how to create custom skills.

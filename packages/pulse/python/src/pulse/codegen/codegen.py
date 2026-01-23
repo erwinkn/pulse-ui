@@ -1,5 +1,4 @@
 import logging
-import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +13,7 @@ from pulse.codegen.templates.routes_ts import (
 )
 from pulse.env import env
 from pulse.routing import Layout, Route, RouteTree
-from pulse.transpiler import get_registered_imports
+from pulse.transpiler.assets import get_registered_assets
 
 if TYPE_CHECKING:
 	from pulse.app import ConnectionStatusConfig
@@ -24,13 +23,32 @@ logger = logging.getLogger(__file__)
 
 @dataclass
 class CodegenConfig:
-	"""
-	Configuration for code generation.
+	"""Configuration for code generation output paths.
+
+	Controls where generated React Router files are written. All paths
+	can be relative (resolved against base_dir) or absolute.
+
+	Args:
+		web_dir: Root directory for web output. Defaults to "web".
+		pulse_dir: Subdirectory for generated Pulse files. Defaults to "pulse".
+		base_dir: Base directory for resolving relative paths. If not provided,
+			resolved from PULSE_APP_FILE, PULSE_APP_DIR, or cwd.
 
 	Attributes:
-	    web_dir (str): Root directory for the web output.
-	    pulse_dir (str): Name of the Pulse app directory.
-	    pulse_path (Path): Full path to the generated app directory.
+		web_dir: Root directory for web output.
+		pulse_dir: Subdirectory name for generated files.
+		base_dir: Explicit base directory, if provided.
+
+	Example:
+		```python
+		app = ps.App(
+		    codegen=ps.CodegenConfig(
+		        web_dir="frontend",
+		        pulse_dir="generated",
+		    ),
+		)
+		# Generated files will be at: frontend/app/generated/
+		```
 	"""
 
 	web_dir: Path | str = "web"
@@ -46,11 +64,14 @@ class CodegenConfig:
 	def resolved_base_dir(self) -> Path:
 		"""Resolve the base directory where relative paths should be anchored.
 
-		Precedence:
-		  1) Explicit `base_dir` if provided
-		  2) Env var `PULSE_APP_FILE` (directory of the file)
-		  3) Env var `PULSE_APP_DIR`
-		  4) Current working directory
+		Returns:
+			Resolved base directory path.
+
+		Resolution precedence:
+			1. Explicit `base_dir` if provided
+			2. Directory of PULSE_APP_FILE env var
+			3. PULSE_APP_DIR env var
+			4. Current working directory
 		"""
 		if isinstance(self.base_dir, Path):
 			return self.base_dir
@@ -64,7 +85,11 @@ class CodegenConfig:
 
 	@property
 	def web_root(self) -> Path:
-		"""Absolute path to the web root directory (e.g. `<app_dir>/pulse-web`)."""
+		"""Absolute path to the web root directory.
+
+		Returns:
+			Absolute path to web_dir (e.g., `<base_dir>/web`).
+		"""
 		wd = Path(self.web_dir)
 		if wd.is_absolute():
 			return wd
@@ -72,24 +97,35 @@ class CodegenConfig:
 
 	@property
 	def pulse_path(self) -> Path:
-		"""Full path to the generated app directory."""
+		"""Full path to the generated Pulse app directory.
+
+		Returns:
+			Absolute path where generated files are written
+			(e.g., `<web_root>/app/<pulse_dir>`).
+		"""
 		return self.web_root / "app" / self.pulse_dir
 
 
-def write_file_if_changed(path: Path, content: str) -> Path:
+def write_file_if_changed(path: Path, content: str | bytes) -> Path:
 	"""Write content to file only if it has changed."""
 	if path.exists():
 		try:
-			current_content = path.read_text()
+			if isinstance(content, bytes):
+				current_content = path.read_bytes()
+			else:
+				current_content = path.read_text()
 			if current_content == content:
 				return path  # Skip writing, content is the same
-		except Exception:
-			logging.warning(f"Can't read file {path.absolute()}")
+		except Exception as exc:
+			logging.warning("Can't read file %s: %s", path.absolute(), exc)
 			# If we can't read the file for any reason, just write it
 			pass
 
 	path.parent.mkdir(exist_ok=True, parents=True)
-	path.write_text(content)
+	if isinstance(content, bytes):
+		path.write_bytes(content)
+	else:
+		path.write_text(content)
 	return path
 
 
@@ -123,7 +159,7 @@ class Codegen:
 		self._copied_files = set()
 
 		# Copy all registered local files to the assets directory
-		asset_import_paths = self._copy_local_files()
+		self._copy_local_files()
 
 		# Keep track of all generated files
 		generated_files = set(
@@ -137,11 +173,7 @@ class Codegen:
 				self.generate_routes_ts(),
 				self.generate_routes_runtime_ts(),
 				*(
-					self.generate_route(
-						route,
-						server_address=server_address,
-						asset_import_paths=asset_import_paths,
-					)
+					self.generate_route(route, server_address=server_address)
 					for route in self.routes.flat_tree.values()
 				),
 			]
@@ -157,52 +189,35 @@ class Codegen:
 				except Exception as e:
 					logger.warning(f"Could not remove stale file {path}: {e}")
 
-	def _copy_local_files(self) -> dict[str, str]:
-		"""Copy all registered local files to the assets directory.
+	def _copy_local_files(self) -> None:
+		"""Copy all registered local assets to the assets directory.
 
-		Collects all Import objects with is_local=True and copies their
-		source files to the assets folder, returning an import path mapping.
+		Uses the unified asset registry which tracks local files from both
+		Import objects and DynamicImport expressions.
 		"""
-		imports = get_registered_imports()
-		local_imports = [imp for imp in imports if imp.is_local]
+		assets = get_registered_assets()
 
-		if not local_imports:
-			return {}
+		if not assets:
+			return
 
 		self.assets_folder.mkdir(parents=True, exist_ok=True)
-		asset_import_paths: dict[str, str] = {}
 
-		for imp in local_imports:
-			if imp.source_path is None:
-				continue
-
-			asset_filename = imp.asset_filename()
-			dest_path = self.assets_folder / asset_filename
+		for asset in assets:
+			dest_path = self.assets_folder / asset.asset_filename
 
 			# Copy file if source exists
-			if imp.source_path.exists():
-				shutil.copy2(imp.source_path, dest_path)
+			if asset.source_path.exists():
 				self._copied_files.add(dest_path)
-				logger.debug(f"Copied {imp.source_path} -> {dest_path}")
-
-			# Store just the asset filename - the relative path is computed per-route
-			asset_import_paths[imp.src] = asset_filename
-
-		return asset_import_paths
-
-	def _compute_asset_prefix(self, route_file_path: str) -> str:
-		"""Compute the relative path prefix from a route file to the assets folder.
-
-		Args:
-			route_file_path: The route's file path (e.g., "users/_id_xxx.jsx")
-
-		Returns:
-			The relative path prefix (e.g., "../assets/" or "../../assets/")
-		"""
-		# Count directory depth: each "/" in the path adds one level
-		depth = route_file_path.count("/")
-		# Add 1 for the routes/ or layouts/ folder itself
-		return "../" * (depth + 1) + "assets/"
+				try:
+					content = asset.source_path.read_bytes()
+				except OSError as exc:
+					logger.warning(
+						"Can't read asset %s: %s",
+						asset.source_path,
+						exc,
+					)
+					continue
+				write_file_if_changed(dest_path, content)
 
 	def generate_layout_tsx(
 		self,
@@ -281,21 +296,18 @@ class Codegen:
 		self,
 		route: Route | Layout,
 		server_address: str,
-		asset_import_paths: dict[str, str],
 	):
 		route_file_path = route.file_path()
 		if isinstance(route, Layout):
 			output_path = self.output_folder / "layouts" / route_file_path
+			full_route_path = f"layouts/{route_file_path}"
 		else:
 			output_path = self.output_folder / "routes" / route_file_path
-
-		# Compute asset prefix based on route depth
-		asset_prefix = self._compute_asset_prefix(route_file_path)
+			full_route_path = f"routes/{route_file_path}"
 
 		content = generate_route(
 			path=route.unique_path(),
-			asset_filenames=asset_import_paths,
-			asset_prefix=asset_prefix,
+			route_file_path=full_route_path,
 		)
 		return write_file_if_changed(output_path, content)
 

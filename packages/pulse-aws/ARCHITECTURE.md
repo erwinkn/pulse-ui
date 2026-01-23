@@ -42,7 +42,7 @@ graph TB
     subgraph "Deployment 1<br/>(test-20251027-121827Z)"
         Image1[🐳 Docker Image<br/>test:test-20251027-121827Z<br/>Purpose: App code + drain secret]
         TaskDef1[📝 Task Definition<br/>test-app:1<br/>Purpose: How to run container<br/>- CPU: 256, Memory: 512<br/>- Port: 8000<br/>- Env: DEPLOYMENT_ID]
-        TG1[🎯 Target Group<br/>test-20251027-121827Z<br/>Purpose: Route to this deployment's tasks<br/>Health: /_health every 30s]
+        TG1[🎯 Target Group<br/>test-20251027-121827Z<br/>Purpose: Route to this deployment's tasks<br/>Health: /_pulse/health every 30s]
         Rule1[📋 Listener Rule<br/>Priority: 100<br/>If: X-Pulse-Render-Affinity = test-20251027-121827Z<br/>Purpose: Sticky sessions for this version]
         Service1[⚙️ ECS Service<br/>test-20251027-121827Z<br/>Purpose: Maintain 2 running tasks<br/>Launch Type: Fargate]
         Task1A[🏃 Task Instance 1]
@@ -224,7 +224,7 @@ Tasks run in private subnets with NAT gateway for internet access.
 
 **Two levels:**
 
-- **ALB Target Group:** HTTP GET `/_health` every 30s
+- **ALB Target Group:** HTTP GET `/_pulse/health` every 30s
   - 2 consecutive successes = healthy
   - 3 consecutive failures = unhealthy
 - **ECS Service:** Monitors task health, replaces unhealthy tasks

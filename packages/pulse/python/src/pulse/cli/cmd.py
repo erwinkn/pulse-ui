@@ -210,6 +210,7 @@ def run(
 			mode=app_instance.env,
 			ready_pattern=r"localhost:\d+",
 			on_ready=mark_web_ready,
+			plain=plain,
 		)
 		commands.append(web_cmd)
 		# Set env var so app can read the React server address (only used in single-server mode)
@@ -228,6 +229,7 @@ def run(
 			verbose=verbose,
 			ready_pattern=r"Application startup complete",
 			on_ready=mark_server_ready,
+			plain=plain,
 		)
 		commands.append(server_cmd)
 
@@ -394,7 +396,9 @@ def build_uvicorn_command(
 	verbose: bool = False,
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
+	plain: bool = False,
 ) -> CommandSpec:
+	cwd = app_ctx.server_cwd or app_ctx.app_dir or Path.cwd()
 	app_import = f"{app_ctx.module_name}:{app_ctx.app_var}.asgi_factory"
 	args: list[str] = [
 		sys.executable,
@@ -415,22 +419,34 @@ def build_uvicorn_command(
 		args.extend(["--reload-dir", str(app_dir)])
 		if web_root.exists():
 			args.extend(["--reload-dir", str(web_root)])
+			pulse_dir = str(app_ctx.app.codegen.cfg.pulse_dir)
+			pulse_app_dir = web_root / "app" / pulse_dir
+			rel_path = Path(os.path.relpath(pulse_app_dir, cwd))
+			if not rel_path.is_absolute():
+				args.extend(["--reload-exclude", str(rel_path)])
+				args.extend(["--reload-exclude", str(rel_path / "**")])
 
 	if app_ctx.app.env == "prod":
 		args.extend(production_flags())
 
 	if extra_args:
 		args.extend(extra_args)
+	if plain:
+		args.append("--no-use-colors")
 
 	command_env = os.environ.copy()
 	command_env.update(
 		{
-			"FORCE_COLOR": "1",
 			"PYTHONUNBUFFERED": "1",
 			ENV_PULSE_HOST: address,
 			ENV_PULSE_PORT: str(port),
 		}
 	)
+	if plain:
+		command_env["NO_COLOR"] = "1"
+		command_env["FORCE_COLOR"] = "0"
+	else:
+		command_env["FORCE_COLOR"] = "1"
 	# Pass React server address to uvicorn process if set
 	if ENV_PULSE_REACT_SERVER_ADDRESS in os.environ:
 		command_env[ENV_PULSE_REACT_SERVER_ADDRESS] = os.environ[
@@ -440,8 +456,6 @@ def build_uvicorn_command(
 		command_env[ENV_PULSE_DISABLE_CODEGEN] = "1"
 	if dev_secret:
 		command_env[ENV_PULSE_SECRET] = dev_secret
-
-	cwd = app_ctx.server_cwd or app_ctx.app_dir or Path.cwd()
 
 	# Apply custom log config to filter noisy requests (dev/ci only)
 	if app_ctx.app.env != "prod" and not verbose:
@@ -471,6 +485,7 @@ def build_web_command(
 	mode: PulseEnv = "dev",
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
+	plain: bool = False,
 ) -> CommandSpec:
 	command_env = os.environ.copy()
 	if mode == "prod":
@@ -493,10 +508,14 @@ def build_web_command(
 
 	command_env.update(
 		{
-			"FORCE_COLOR": "1",
 			"PYTHONUNBUFFERED": "1",
 		}
 	)
+	if plain:
+		command_env["NO_COLOR"] = "1"
+		command_env["FORCE_COLOR"] = "0"
+	else:
+		command_env["FORCE_COLOR"] = "1"
 
 	return CommandSpec(
 		name="web",

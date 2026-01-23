@@ -1,11 +1,12 @@
 from typing import override
 
+import pulse as ps
 import pytest
 from pulse.hooks.core import HookContext
-from pulse.hooks.effects import effects
 from pulse.hooks.setup import setup, setup_key
 from pulse.hooks.stable import stable
 from pulse.hooks.state import state
+from pulse.reactive import Signal
 from pulse.state import State
 
 
@@ -17,9 +18,8 @@ class DummyState(State):
 		super().__init__()
 
 	@override
-	def dispose(self):
+	def on_dispose(self) -> None:
 		self._dispose_calls += 1
-		super().dispose()
 
 	@property
 	def dispose_calls(self) -> int:
@@ -86,22 +86,80 @@ def test_state_reuses_instances_with_same_key():
 	ctx = HookContext()
 
 	with ctx:
-		first = state("test", DummyState)
+		first = state(DummyState, key="test")
 
 	with ctx:
-		second = state("test", DummyState)
+		second = state(DummyState, key="test")
 
 	assert first is second
+
+
+def test_state_auto_key_reuses_instances():
+	ctx = HookContext()
+
+	@ps.component
+	def Comp():
+		return state(DummyState)
+
+	comp = Comp
+
+	with ctx:
+		first = comp.fn()
+
+	with ctx:
+		second = comp.fn()
+
+	assert first is second
+
+
+def test_state_auto_key_requires_unique_callsite():
+	ctx = HookContext()
+
+	@ps.component
+	def BadComp():
+		for _ in range(2):
+			state(DummyState)
+		return None
+
+	with pytest.raises(
+		RuntimeError,
+		match="called once per component render at the same location",
+	):
+		with ctx:
+			BadComp.fn()
+
+
+def test_state_auto_key_disambiguates_helper_callsites():
+	ctx = HookContext()
+
+	def make_state():
+		return state(DummyState)
+
+	@ps.component
+	def Comp():
+		first = make_state()
+		second = make_state()
+		return first, second
+
+	with ctx:
+		first_a, second_a = Comp.fn()
+
+	with ctx:
+		first_b, second_b = Comp.fn()
+
+	assert first_a is first_b
+	assert second_a is second_b
+	assert first_a is not second_a
 
 
 def test_state_creates_different_instances_for_different_keys():
 	ctx = HookContext()
 
 	with ctx:
-		first = state("a", DummyState)
+		first = state(DummyState, key="a")
 
 	with ctx:
-		second = state("b", DummyState)
+		second = state(DummyState, key="b")
 
 	assert first is not second
 	assert first.dispose_calls == 0  # States not disposed on key change
@@ -112,25 +170,59 @@ def test_state_disposes_direct_instances():
 
 	with ctx:
 		direct = DummyState()
-		retained = state("test", direct)
+		retained = state(direct, key="test")
 		assert retained is direct
 
 	with ctx:
 		transient = DummyState()
 		# When reusing states, State instances passed as args are disposed if not being used
-		result = state("test", transient)
+		result = state(transient, key="test")
 		assert result is direct  # Should return the existing state
 		# transient should be disposed since it's not being used
 		assert transient.dispose_calls == 1
+
+
+def test_state_rejects_disposed_instance_arg():
+	ctx = HookContext()
+	arg = DummyState()
+	arg.__disposed__ = True
+
+	with ctx:
+		with pytest.raises(
+			RuntimeError,
+			match="received a disposed State instance",
+		):
+			state(arg, key="test")
+
+	assert arg.dispose_calls == 0
+
+
+def test_state_rejects_disposed_cached_state():
+	ctx = HookContext()
+
+	with ctx:
+		cached = state(DummyState, key="test")
+
+	cached.__disposed__ = True
+
+	with ctx:
+		arg = DummyState()
+		with pytest.raises(
+			RuntimeError,
+			match="disposed cached State for key='test'",
+		):
+			state(arg, key="test")
+
+	assert arg.dispose_calls == 1
 
 
 def test_state_allows_multiple_calls_with_different_keys():
 	ctx = HookContext()
 
 	with ctx:
-		state_a = state("a", DummyState)
-		state_b = state("b", DummyState)
-		state_c = state("c", DummyState)
+		state_a = state(DummyState, key="a")
+		state_b = state(DummyState, key="b")
+		state_c = state(DummyState, key="c")
 
 	assert state_a is not state_b
 	assert state_b is not state_c
@@ -143,22 +235,22 @@ def test_state_enforces_single_call_per_key():
 	ctx = HookContext()
 
 	with ctx:
-		state("a", DummyState)
+		state(DummyState, key="a")
 		with pytest.raises(
 			RuntimeError,
 			match="can only be called once per component render with key='a'",
 		):
-			state("a", DummyState)
+			state(DummyState, key="a")
 
 
 def test_state_allows_same_key_across_renders():
 	ctx = HookContext()
 
 	with ctx:
-		first = state("a", DummyState)
+		first = state(DummyState, key="a")
 
 	with ctx:
-		second = state("a", DummyState)
+		second = state(DummyState, key="a")
 
 	assert first is second
 
@@ -168,16 +260,16 @@ def test_state_requires_non_empty_key():
 
 	with ctx:
 		with pytest.raises(ValueError, match="requires a non-empty string key"):
-			state("", DummyState)
+			state(DummyState, key="")
 
 
 def test_state_disposes_all_on_unmount():
 	ctx = HookContext()
 
 	with ctx:
-		state_a = state("a", DummyState)
-		state_b = state("b", DummyState)
-		state_c = state("c", DummyState)
+		state_a = state(DummyState, key="a")
+		state_b = state(DummyState, key="b")
+		state_c = state(DummyState, key="c")
 
 	# Unmount disposes all hooks
 	ctx.unmount()
@@ -187,19 +279,58 @@ def test_state_disposes_all_on_unmount():
 	assert state_c.dispose_calls == 1
 
 
-def test_effects_allows_single_call_and_key_changes():
+def test_state_kept_when_not_called_in_render():
 	ctx = HookContext()
+	flag = Signal(True)
+	states: list[DummyState] = []
+
+	@ps.component
+	def Comp():
+		if flag():
+			states.append(state(DummyState))
+		return None
 
 	with ctx:
-		effects(lambda: None)
-		with pytest.raises(RuntimeError):
-			effects(lambda: None)
+		Comp.fn()  # type: ignore[attr-defined]
+
+	flag.write(False)
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	flag.write(True)
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert len(states) == 2
+	assert states[0] is states[1]
+	assert states[0].dispose_calls == 0
+
+
+def test_state_branch_disambiguation_with_key():
+	ctx = HookContext()
+	flag = Signal(True)
+
+	left: DummyState | None = None
+	right: DummyState | None = None
 
 	with ctx:
-		effects(lambda: None, key="alpha")
+		if flag():
+			left = state(DummyState, key="left")
+		else:
+			right = state(DummyState, key="right")
 
+	flag.write(False)
 	with ctx:
-		effects(lambda: None, key="beta")
+		if flag():
+			state(DummyState, key="left")
+		else:
+			right = state(DummyState, key="right")
+
+	assert left is not None
+	assert right is not None
+	assert left is not right
+	assert left.dispose_calls == 0
+	assert right.dispose_calls == 0
 
 
 def test_stable_returns_consistent_wrappers():

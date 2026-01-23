@@ -2,6 +2,20 @@
 
 Full-stack Python framework for interactive web apps. Runs on React with WebSocket-driven UI updates.
 
+## Guidelines
+
+- Be extremely concise. Sacrifice grammar for the sake of concision.
+- Read the README.md in the relevant package before starting work
+- Always add tests when implementing a new feature. 
+- Run `make test` after implementing
+- Run `make all` before committing
+- Check `examples/` for usage patterns
+- Use `make bump` for changing package versions
+- When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)
+- Use `bun info ...` to get information about a JS package
+- Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI.
+- While debugging, feel free to add debug print statements, spin up test files, modify existing code, or anything else that would improve your feedback loop and accelerate the troubleshooting process. Remove those debug changes after fixing the issue.
+
 ## Code Style
 
 - No `getattr`/`setattr` unless necessary
@@ -25,6 +39,7 @@ make test          # pytest + bun test
 ```bash
 uv run <script.py>                # Run Python
 bun <file.ts>                     # Run JS/TS
+uv run pulse run examples/app.py  # Run a Pulse app (dev server on :8000)
 ```
 
 ## Structure
@@ -42,10 +57,10 @@ packages/
 examples/                     # Example apps
 ```
 
-## Guidelines
+## Documentation
 
-- Be extremely concise. Sacrifice grammar for the sake of concision.
-- Read the README.md in the relevant package before starting work
-- Run `make all` before committing
-- Check `examples/` for patterns
-- Use `make bump` for changing package versions
+Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, and Pulse conventions. Key points:
+- One page, one job (tutorial / how-to / reference / explanation)
+- Code first, explain after
+- Be conversational—write like you're explaining to a friend
+- Update `docs/content/docs/(core)/glossary.mdx` if introducing new terms

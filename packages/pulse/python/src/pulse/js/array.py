@@ -2,13 +2,16 @@
 JavaScript Array builtin module.
 
 Usage:
-    from pulse.js import Array
-    Array.isArray([1, 2, 3])      # -> Array.isArray([1, 2, 3])
-    Array.from_([1, 2, 3])        # -> Array.from([1, 2, 3])
-    Array(10)                     # -> new Array(10)
 
-    # Or import from module directly:
-    from pulse.js.array import Array
+```python
+from pulse.js import Array
+Array.isArray([1, 2, 3])      # -> Array.isArray([1, 2, 3])
+Array.from_([1, 2, 3])        # -> Array.from([1, 2, 3])
+Array(10)                     # -> new Array(10)
+
+# Or import from module directly:
+from pulse.js.array import Array
+```
 """
 
 from __future__ import annotations

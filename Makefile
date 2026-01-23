@@ -1,4 +1,4 @@
-.PHONY: help init lint lint-fix format format-check typecheck test all bump
+.PHONY: help init lint lint-fix format format-check typecheck typecheck-py typecheck-ts test all bump
 
 help:
 	@echo "Available commands:"
@@ -13,16 +13,20 @@ help:
 	@echo "  make bump          - Bump package version (PKG=name ARGS='--patch|--alpha|...')"
 
 # Initialization
-init:
+init: sync
+	@uv run prek install
+	@echo "Environment initialized!"
+
+sync:
 	@echo "Syncing Python packages..."
 	@uv sync --all-packages --dev
 	@echo "Installing JS dependencies..."
 	@bun i
+	@echo "Installing docs dependencies..."
+	@cd docs && bun i
 	@echo "Building JS packages..."
 	@bun run build
 	@echo "Installing pre-commit hooks"
-	@uv run prek install
-	@echo "Environment initialized!"
 
 # Linting
 lint:
@@ -51,13 +55,19 @@ format-check:
 	@bunx biome format
 
 # Type checking
-typecheck:
+typecheck: typecheck-py typecheck-ts
+
+typecheck-py:
 	@echo "Running basedpyright..."
 	@uv run basedpyright
+
+typecheck-ts:
 	@echo "Running TypeScript for pulse-ui-client..."
 	@bunx tsc --noEmit -p packages/pulse/js/tsconfig.json
 	@echo "Running TypeScript for pulse-mantine..."
 	@bunx tsc --noEmit -p packages/pulse-mantine/js/tsconfig.json
+	@echo "Running TypeScript for docs..."
+	@cd docs && bun run types:check
 
 # Testing
 test:

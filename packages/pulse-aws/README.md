@@ -223,7 +223,7 @@ If certificate stays in `PENDING_VALIDATION`:
 
 1. Check logs: `aws logs tail /aws/pulse/{env}/app --follow`
 2. Verify tasks are listening on port 8000
-3. Check `/_health` endpoint returns 200
+3. Check `/_pulse/health` endpoint returns 200
 
 ## License
 

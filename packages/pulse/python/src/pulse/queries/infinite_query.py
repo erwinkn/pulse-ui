@@ -19,8 +19,8 @@ from pulse.context import PulseContext
 from pulse.helpers import (
 	MISSING,
 	Disposable,
+	Missing,
 	call_flexible,
-	later,
 	maybe_await,
 )
 from pulse.queries.common import (
@@ -36,6 +36,7 @@ from pulse.queries.common import (
 from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryConfig
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
+from pulse.scheduling import TimerHandleLike, create_task, later
 from pulse.state import InitializableProperty, State
 
 T = TypeVar("T")
@@ -44,6 +45,26 @@ TState = TypeVar("TState", bound=State)
 
 
 class Page(NamedTuple, Generic[T, TParam]):
+	"""Named tuple representing a page in an infinite query.
+
+	Each page contains the fetched data and the parameter used to fetch it,
+	enabling cursor-based or offset-based pagination.
+
+	Attributes:
+		data: The fetched page data of type T.
+		param: The page parameter (cursor, offset, etc.) used to fetch this page.
+
+	Example:
+
+	```python
+	# Access pages from infinite query result
+	for page in state.posts.data:
+	    print(f"Page param: {page.param}")
+	    for post in page.data:
+	        print(post.title)
+	```
+	"""
+
 	data: T
 	param: TParam
 
@@ -132,6 +153,61 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			)
 		return self._observers[0]._fetch_fn  # pyright: ignore[reportPrivateUsage]
 
+	@property
+	def has_interval(self) -> bool:
+		return self._interval is not None
+
+	def _select_interval_observer(
+		self,
+	) -> tuple[float | None, "InfiniteQueryResult[T, TParam] | None"]:
+		min_interval: float | None = None
+		selected: "InfiniteQueryResult[T, TParam] | None" = None
+
+		for obs in reversed(self._observers):
+			interval = obs._refetch_interval  # pyright: ignore[reportPrivateUsage]
+			if interval is None:
+				continue
+			if not obs._enabled.value:  # pyright: ignore[reportPrivateUsage]
+				continue
+			if min_interval is None or interval < min_interval:
+				min_interval = interval
+				selected = obs
+
+		return min_interval, selected
+
+	def _create_interval_effect(self, interval: float) -> Effect:
+		def interval_fn():
+			observer = self._interval_observer
+			if observer is None:
+				return
+			self.invalidate(fetch_fn=observer._fetch_fn, observer=observer)  # pyright: ignore[reportPrivateUsage]
+
+		return Effect(
+			interval_fn,
+			name=f"inf_query_interval({self.key})",
+			interval=interval,
+			immediate=True,
+		)
+
+	def _update_interval(self) -> None:
+		new_interval, new_observer = self._select_interval_observer()
+		interval_changed = new_interval != self._interval
+
+		self._interval = new_interval
+		self._interval_observer = new_observer
+
+		if not interval_changed:
+			if self._interval_effect is None and new_interval is not None:
+				self._interval_effect = self._create_interval_effect(new_interval)
+			return
+
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+		if new_interval is not None:
+			self._interval_effect = self._create_interval_effect(new_interval)
+
 	# Reactive state
 	pages: ReactiveList[Page[T, TParam]]
 	error: Signal[Exception | None]
@@ -150,7 +226,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 	_queue_task: asyncio.Task[None] | None
 
 	_observers: "list[InfiniteQueryResult[T, TParam]]"
-	_gc_handle: asyncio.TimerHandle | None
+	_gc_handle: TimerHandleLike | None
+	_interval_effect: Effect | None
+	_interval: float | None
+	_interval_observer: "InfiniteQueryResult[T, TParam] | None"
 
 	def __init__(
 		self,
@@ -164,7 +243,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		max_pages: int = 0,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
-		initial_data: list[Page[T, TParam]] | None | Any = MISSING,
+		initial_data: list[Page[T, TParam]] | Missing | None = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
@@ -188,7 +267,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if initial_data is MISSING:
 			initial_pages = []
 		else:
-			initial_pages = cast(list[Page[T, TParam]], initial_data) or []
+			initial_pages = cast(list[Page[T, TParam]] | None, initial_data) or []
 
 		self.pages = ReactiveList(initial_pages)
 		self.error = Signal(None, name=f"inf_query.error({key})")
@@ -212,6 +291,9 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._queue_task = None
 		self._observers = []
 		self._gc_handle = None
+		self._interval_effect = None
+		self._interval = None
+		self._interval_observer = None
 
 	# ─────────────────────────────────────────────────────────────────────────
 	# Commit functions - update state after pages have been modified
@@ -306,13 +388,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
 		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 	) -> ActionResult[list[Page[T, TParam]]]:
-		"""Wait for initial data or until queue is empty."""
-		# If no data and loading, enqueue initial fetch (unless already processing)
-		if len(self.pages) == 0 and self.status() == "loading":
-			if self._queue_task is None or self._queue_task.done():
-				# Use provided fetch_fn or fall back to first observer's fetch_fn
-				fn = fetch_fn if fetch_fn is not None else self.fn
-				self._enqueue(Refetch(fetch_fn=fn, observer=observer))
+		"""Wait for any in-flight queue processing to complete."""
 		# Wait for any in-progress queue processing
 		if self._queue_task and not self._queue_task.done():
 			await self._queue_task
@@ -321,17 +397,31 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			return ActionError(cast(Exception, self.error()))
 		return ActionSuccess(list(self.pages))
 
+	async def ensure(
+		self,
+		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
+		observer: "InfiniteQueryResult[T, TParam] | None" = None,
+	) -> ActionResult[list[Page[T, TParam]]]:
+		"""Ensure an initial fetch has started, then wait for completion."""
+		if len(self.pages) == 0 and self.status() == "loading":
+			if self._queue_task is None or self._queue_task.done():
+				fn = fetch_fn if fetch_fn is not None else self.fn
+				self._enqueue(Refetch(fetch_fn=fn, observer=observer))
+		return await self.wait()
+
 	def observe(self, observer: Any):
 		self._observers.append(observer)
 		self.cancel_gc()
 		gc_time = getattr(observer, "_gc_time", 0)
 		if gc_time and gc_time > 0:
 			self.cfg.gc_time = max(self.cfg.gc_time, gc_time)
+		self._update_interval()
 
 	def unobserve(self, observer: "InfiniteQueryResult[T, TParam]"):
 		"""Unregister an observer. Cancels pending actions. Schedules GC if no observers remain."""
 		if observer in self._observers:
 			self._observers.remove(observer)
+		self._update_interval()
 
 		# Cancel pending actions from this observer
 		self._cancel_observer_actions(observer)
@@ -473,7 +563,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if self._queue_task is None or self._queue_task.done():
 			# Create task with no reactive scope to avoid inheriting deps from caller
 			with Untrack():
-				self._queue_task = asyncio.create_task(self._process_queue())
+				self._queue_task = create_task(self._process_queue())
 		return self._queue_task
 
 	async def _process_queue(self):
@@ -610,11 +700,17 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			(i for i, p in enumerate(self.pages) if p.param == action.param),
 			None,
 		)
-		if idx is None:
-			return None
 
 		page = await action.fetch_fn(action.param)
-		self.pages[idx] = Page(page, action.param)
+
+		if idx is None:
+			# Page doesn't exist - jump to this page, clearing existing pages
+			self.pages.clear()
+			self.pages.append(Page(page, action.param))
+		else:
+			# Page exists, update it
+			self.pages[idx] = Page(page, action.param)
+
 		await self.commit()
 		return page
 
@@ -688,7 +784,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		cancel_fetch: bool = False,
 	) -> ActionResult[T | None]:
 		"""
-		Refetch an existing page by its param. Queued for sequential execution.
+		Refetch a page by its param. Queued for sequential execution.
+
+		If the page doesn't exist, clears existing pages and loads the requested
+		page as the new starting point.
 
 		Note: Prefer calling refetch_page() on InfiniteQueryResult to ensure the
 		correct fetch function is used. When called directly on InfiniteQuery, uses
@@ -705,6 +804,9 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._cancel_queue()
 		if self._queue_task and not self._queue_task.done():
 			self._queue_task.cancel()
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
 
@@ -714,8 +816,39 @@ def none_if_missing(value: Any):
 
 
 class InfiniteQueryResult(Generic[T, TParam], Disposable):
-	"""
-	Observer wrapper for InfiniteQuery with lifecycle and stale tracking.
+	"""Observer wrapper for InfiniteQuery with lifecycle and stale tracking.
+
+	InfiniteQueryResult provides the interface for interacting with paginated
+	queries. It manages observation lifecycle, staleness tracking, and exposes
+	reactive properties and methods for pagination.
+
+	Attributes:
+		data: List of Page objects or None if not loaded.
+		pages: List of page data only (without params) or None.
+		page_params: List of page parameters only or None.
+		error: The last error encountered, or None.
+		status: Current QueryStatus ("loading", "success", "error").
+		is_loading: Whether status is "loading".
+		is_success: Whether status is "success".
+		is_error: Whether status is "error".
+		is_fetching: Whether any fetch is in progress.
+		has_next_page: Whether more pages are available forward.
+		has_previous_page: Whether previous pages are available.
+		is_fetching_next_page: Whether fetching the next page.
+		is_fetching_previous_page: Whether fetching the previous page.
+
+	Example:
+
+	```python
+	# Access infinite query result
+	if state.posts.is_loading:
+	    show_skeleton()
+	elif state.posts.data:
+	    for page in state.posts.data:
+	        render_posts(page.data)
+	    if state.posts.has_next_page:
+	        Button("Load More", on_click=state.posts.fetch_next_page)
+	```
 	"""
 
 	_query: Computed[InfiniteQuery[T, TParam]]
@@ -727,8 +860,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	_on_success: Callable[[list[Page[T, TParam]]], Awaitable[None] | None] | None
 	_on_error: Callable[[Exception], Awaitable[None] | None] | None
 	_observe_effect: Effect
-	_interval_effect: Effect | None
-	_data_computed: Computed[list[Page[T, TParam]] | None]
+	_data_computed: Computed[list[Page[T, TParam]] | None | Missing]
 	_enabled: Signal[bool]
 	_fetch_on_mount: bool
 
@@ -750,13 +882,17 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		self._fetch_fn = fetch_fn
 		self._stale_time = stale_time
 		self._gc_time = gc_time
-		self._refetch_interval = refetch_interval
+		interval = (
+			refetch_interval
+			if refetch_interval is not None and refetch_interval > 0
+			else None
+		)
+		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._on_success = on_success
 		self._on_error = on_error
 		self._enabled = Signal(enabled, name=f"inf_query.enabled({query().key})")
 		self._fetch_on_mount = fetch_on_mount
-		self._interval_effect = None
 
 		def observe_effect():
 			q = self._query()
@@ -765,8 +901,13 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 			with Untrack():
 				q.observe(self)
 
-				if enabled and fetch_on_mount and self.is_stale():
-					q.invalidate()
+				# Skip if query interval is active - interval effect handles initial fetch
+				if enabled and fetch_on_mount and not q.has_interval:
+					# Fetch if no data loaded yet or if existing data is stale
+					if not q.is_fetching() and (
+						q.status() == "loading" or self.is_stale()
+					):
+						q.invalidate()
 
 			# Return cleanup function that captures the query (old query on key change)
 			def cleanup():
@@ -780,26 +921,9 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 			immediate=True,
 		)
 		self._data_computed = Computed(
-			self._data_computed_fn, name=f"inf_query_data({self._query().key})"
-		)
-
-		# Set up interval effect if interval is specified
-		if refetch_interval is not None and refetch_interval > 0:
-			self._setup_interval_effect(refetch_interval)
-
-	def _setup_interval_effect(self, interval: float):
-		"""Create an effect that invalidates the query at the specified interval."""
-
-		def interval_fn():
-			# Read enabled to make this effect reactive to enabled changes
-			if self._enabled():
-				self._query().invalidate()
-
-		self._interval_effect = Effect(
-			interval_fn,
-			name=f"inf_query_interval({self._query().key})",
-			interval=interval,
-			immediate=True,
+			self._data_computed_fn,
+			name=f"inf_query_data({self._query().key})",
+			initial_value=MISSING,
 		)
 
 	@property
@@ -827,18 +951,19 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		return self._query().error.read()
 
 	def _data_computed_fn(
-		self, prev: list[Page[T, TParam]] | None
-	) -> list[Page[T, TParam]] | None:
+		self, prev: list[Page[T, TParam]] | None | Missing
+	) -> list[Page[T, TParam]] | None | Missing:
 		query = self._query()
-		if self._keep_previous_data and query.status() != "success":
+		if self._keep_previous_data and query.status() == "loading":
 			return prev
 		# Access pages.version to subscribe to structural changes
-		result = unwrap(query.pages) if len(query.pages) > 0 else None
-		return result
+		if len(query.pages) == 0:
+			return MISSING
+		return unwrap(query.pages)
 
 	@property
 	def data(self) -> list[Page[T, TParam]] | None:
-		return self._data_computed()
+		return none_if_missing(self._data_computed())
 
 	@property
 	def pages(self) -> list[T] | None:
@@ -867,8 +992,6 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		return isinstance(self._query().current_action(), FetchPrevious)
 
 	def is_stale(self) -> bool:
-		if self._stale_time <= 0:
-			return False
 		query = self._query()
 		return (time.time() - query.last_updated.read()) > self._stale_time
 
@@ -934,15 +1057,20 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	async def wait(self) -> ActionResult[list[Page[T, TParam]]]:
 		return await self._query().wait(fetch_fn=self._fetch_fn, observer=self)
 
+	async def ensure(self) -> ActionResult[list[Page[T, TParam]]]:
+		return await self._query().ensure(fetch_fn=self._fetch_fn, observer=self)
+
 	def invalidate(self):
 		query = self._query()
 		query.invalidate(fetch_fn=self._fetch_fn, observer=self)
 
 	def enable(self):
 		self._enabled.write(True)
+		self._query()._update_interval()  # pyright: ignore[reportPrivateUsage]
 
 	def disable(self):
 		self._enabled.write(False)
+		self._query()._update_interval()  # pyright: ignore[reportPrivateUsage]
 
 	def set_error(self, error: Exception):
 		query = self._query()
@@ -951,12 +1079,52 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	@override
 	def dispose(self):
 		"""Clean up the result and its observe effect."""
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
 		self._observe_effect.dispose()
 
 
 class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
+	"""Descriptor for state-bound infinite queries created by the @infinite_query decorator.
+
+	InfiniteQueryProperty is the return type of the ``@infinite_query`` decorator.
+	It acts as a descriptor that creates and manages InfiniteQueryResult instances
+	for each State object.
+
+	When accessed on a State instance, returns an InfiniteQueryResult with reactive
+	properties for pagination state and methods for fetching pages.
+
+	Required decorators:
+		- ``@infinite_query_prop.key``: Define the query key (required).
+		- ``@infinite_query_prop.get_next_page_param``: Define how to get next page param.
+
+	Optional decorators:
+		- ``@infinite_query_prop.get_previous_page_param``: For bi-directional pagination.
+		- ``@infinite_query_prop.initial_data``: Provide initial pages.
+		- ``@infinite_query_prop.on_success``: Handle successful fetch.
+		- ``@infinite_query_prop.on_error``: Handle fetch errors.
+
+	Example:
+
+	```python
+	class FeedState(ps.State):
+	    feed_type: str = "home"
+
+	    @ps.infinite_query(initial_page_param=None)
+	    async def posts(self, cursor: str | None) -> list[Post]:
+	        return await api.get_posts(cursor=cursor)
+
+	    @posts.key
+	    def _posts_key(self):
+	        return ("feed", self.feed_type)
+
+	    @posts.get_next_page_param
+	    def _next_cursor(self, pages: list[Page]) -> str | None:
+	        if not pages:
+	            return None
+	        last = pages[-1]
+	        return last.data[-1].id if last.data else None
+	```
+	"""
+
 	name: str
 	_fetch_fn: "Callable[[TState, TParam], Awaitable[T]]"
 	_keep_alive: bool
@@ -966,6 +1134,12 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 	_refetch_interval: float | None
 	_retries: int
 	_retry_delay: float
+	_initial_data: (
+		list[Page[T, TParam]]
+		| Callable[[TState], list[Page[T, TParam]]]
+		| Missing
+		| None
+	)
 	_initial_page_param: TParam
 	_get_next_page_param: (
 		Callable[[TState, list[Page[T, TParam]]], TParam | None] | None
@@ -1017,6 +1191,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		self._retry_delay = retry_delay
 		self._on_success_fn = None
 		self._on_error_fn = None
+		self._initial_data = MISSING
 		self._key = key
 		self._initial_data_updated_at = initial_data_updated_at
 		self._enabled = enabled
@@ -1045,6 +1220,16 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 				f"Duplicate on_error() decorator for infinite query '{self.name}'. Only one is allowed."
 			)
 		self._on_error_fn = fn  # pyright: ignore[reportAttributeAccessIssue]
+		return fn
+
+	def initial_data(
+		self, fn: Callable[[TState], list[Page[T, TParam]]]
+	) -> Callable[[TState], list[Page[T, TParam]]]:
+		if self._initial_data is not MISSING:
+			raise RuntimeError(
+				f"Duplicate initial_data() decorator for infinite query '{self.name}'. Only one is allowed."
+			)
+		self._initial_data = fn
 		return fn
 
 	def get_next_page_param(
@@ -1095,8 +1280,23 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 			raise RuntimeError(
 				f"key is required for infinite query '{self.name}'. Provide a key via @infinite_query(key=...) or @{self.name}.key decorator."
 			)
+		raw_initial = (
+			call_flexible(self._initial_data, state)
+			if callable(self._initial_data)
+			else self._initial_data
+		)
+		initial_data = (
+			MISSING
+			if raw_initial is MISSING
+			else cast(list[Page[T, TParam]] | None, raw_initial)
+		)
 		query = self._resolve_keyed(
-			state, fetch_fn, next_fn, prev_fn, self._initial_data_updated_at
+			state,
+			fetch_fn,
+			next_fn,
+			prev_fn,
+			initial_data,
+			self._initial_data_updated_at,
 		)
 
 		on_success = None
@@ -1132,6 +1332,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		fetch_fn: Callable[[TParam], Awaitable[T]],
 		next_fn: Callable[[list[Page[T, TParam]]], TParam | None],
 		prev_fn: Callable[[list[Page[T, TParam]]], TParam | None] | None,
+		initial_data: list[Page[T, TParam]] | Missing | None,
 		initial_data_updated_at: float | dt.datetime | None,
 	) -> Computed[InfiniteQuery[T, TParam]]:
 		assert self._key is not None
@@ -1162,6 +1363,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 					get_next_page_param=next_fn,
 					get_previous_page_param=prev_fn,
 					max_pages=self._max_pages,
+					initial_data=initial_data,
 					gc_time=self._gc_time,
 					retries=self._retries,
 					retry_delay=self._retry_delay,
@@ -1233,7 +1435,67 @@ def infinite_query(
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
 	key: QueryKey | None = None,
+) -> (
+	InfiniteQueryProperty[T, TParam, TState]
+	| Callable[
+		[Callable[[TState, Any], Awaitable[T]]],
+		InfiniteQueryProperty[T, TParam, TState],
+	]
 ):
+	"""Decorator for paginated queries on State methods.
+
+	Creates a reactive infinite query that supports cursor-based or offset-based
+	pagination. Data is stored as a list of pages, each with its data and the
+	parameter used to fetch it.
+
+	Requires ``@query_prop.key`` and ``@query_prop.get_next_page_param`` decorators.
+
+	Args:
+		fn: The async method to decorate (when used without parentheses).
+		initial_page_param: The parameter for fetching the first page (required).
+		max_pages: Maximum pages to keep in memory (0 = unlimited).
+		stale_time: Seconds before data is considered stale (default 0.0).
+		gc_time: Seconds to keep unused query in cache (default 300.0).
+		refetch_interval: Auto-refetch interval in seconds (default None).
+		keep_previous_data: Keep previous data while loading (default False).
+		retries: Number of retry attempts on failure (default 3).
+		retry_delay: Delay between retries in seconds (default 2.0).
+		initial_data_updated_at: Timestamp for initial data staleness.
+		enabled: Whether query is enabled (default True).
+		fetch_on_mount: Fetch when component mounts (default True).
+		key: Static query key for sharing across instances.
+
+	Returns:
+		InfiniteQueryProperty that creates InfiniteQueryResult instances when accessed.
+
+	Example:
+
+	```python
+	class FeedState(ps.State):
+	    @ps.infinite_query(initial_page_param=None, key=("feed",))
+	    async def posts(self, cursor: str | None) -> list[Post]:
+	        return await api.get_posts(cursor=cursor)
+
+	    @posts.key
+	    def _posts_key(self):
+	        return ("feed", self.feed_type)
+
+	    @posts.get_next_page_param
+	    def _next_cursor(self, pages: list[Page]) -> str | None:
+	        if not pages:
+	            return None
+	        last = pages[-1]
+	        return last.data[-1].id if last.data else None
+
+	    @posts.get_previous_page_param
+	    def _prev_cursor(self, pages: list[Page]) -> str | None:
+	        if not pages:
+	            return None
+	        first = pages[0]
+	        return first.data[0].id if first.data else None
+	```
+	"""
+
 	def decorator(
 		func: Callable[[TState, TParam], Awaitable[T]], /
 	) -> InfiniteQueryProperty[T, TParam, TState]:

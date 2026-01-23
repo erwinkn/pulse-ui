@@ -191,8 +191,10 @@ class TestOperators:
 
 		fn = quotient_and_rem.transpile()
 		code = emit(fn)
-		assert "Math.floor(a / b)" in code
-		assert "a % b" in code
+		assert (
+			code
+			== "function quotient_and_rem_1(a, b) {\nreturn [Math.floor(a / b), a % b];\n}"
+		)
 
 
 # =============================================================================
@@ -212,7 +214,7 @@ class TestBitwiseOperators:
 
 		fn = band.transpile()
 		code = emit(fn)
-		assert "a & b" in code
+		assert code == "function band_1(a, b) {\nreturn a & b;\n}"
 
 	def test_bitwise_or(self):
 		"""Bitwise OR (|)."""
@@ -223,7 +225,7 @@ class TestBitwiseOperators:
 
 		fn = bor.transpile()
 		code = emit(fn)
-		assert "a | b" in code
+		assert code == "function bor_1(a, b) {\nreturn a | b;\n}"
 
 	def test_bitwise_xor(self):
 		"""Bitwise XOR (^)."""
@@ -234,7 +236,7 @@ class TestBitwiseOperators:
 
 		fn = bxor.transpile()
 		code = emit(fn)
-		assert "a ^ b" in code
+		assert code == "function bxor_1(a, b) {\nreturn a ^ b;\n}"
 
 	def test_bitwise_not(self):
 		"""Bitwise NOT (~)."""
@@ -245,7 +247,7 @@ class TestBitwiseOperators:
 
 		fn = bnot.transpile()
 		code = emit(fn)
-		assert "~a" in code
+		assert code == "function bnot_1(a) {\nreturn ~a;\n}"
 
 	def test_left_shift(self):
 		"""Left shift (<<)."""
@@ -256,7 +258,7 @@ class TestBitwiseOperators:
 
 		fn = lshift.transpile()
 		code = emit(fn)
-		assert "a << b" in code
+		assert code == "function lshift_1(a, b) {\nreturn a << b;\n}"
 
 	def test_right_shift(self):
 		"""Right shift (>>)."""
@@ -267,7 +269,7 @@ class TestBitwiseOperators:
 
 		fn = rshift.transpile()
 		code = emit(fn)
-		assert "a >> b" in code
+		assert code == "function rshift_1(a, b) {\nreturn a >> b;\n}"
 
 	def test_bitwise_augmented_assign(self):
 		"""Bitwise operators with augmented assignment."""
@@ -283,11 +285,10 @@ class TestBitwiseOperators:
 
 		fn = augment.transpile()
 		code = emit(fn)
-		assert "x &= y" in code
-		assert "x |= y" in code
-		assert "x ^= y" in code
-		assert "x <<= 1" in code
-		assert "x >>= 1" in code
+		assert (
+			code
+			== "function augment_1(x, y) {\nx &= y;\nx |= y;\nx ^= y;\nx <<= 1;\nx >>= 1;\nreturn x;\n}"
+		)
 
 
 # =============================================================================

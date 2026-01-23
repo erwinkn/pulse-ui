@@ -91,7 +91,7 @@ uv run python scripts/verify.py
 
 3. **Health Endpoint**
 
-   - Tests `http://<alb>/_health`
+   - Tests `http://<alb>/_pulse/health`
    - Verifies 200 OK response
 
 4. **Header-Based Affinity** (if multiple deployments exist)
@@ -169,7 +169,7 @@ uv run python scripts/verify.py
 
 # 3. Test via domain
 curl https://test.stoneware.rocks/
-curl https://test.stoneware.rocks/_health
+curl https://test.stoneware.rocks/_pulse/health
 ```
 
 ### Deploying a New Version
@@ -196,7 +196,7 @@ curl -X POST -H 'Authorization: Bearer <drain-secret>' \
 
 # After 120 seconds (default), health check fails and ECS drains the service
 # Verify health is failing
-curl https://test.stoneware.rocks/_health
+curl https://test.stoneware.rocks/_pulse/health
 ```
 
 ## Configuration

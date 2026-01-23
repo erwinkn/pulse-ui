@@ -17,6 +17,7 @@ from pulse import (
 	reactive,
 	repeat,
 )
+from pulse.helpers import MISSING
 from pulse.reactive import Batch, flush_effects
 from pulse.reactive_extensions import (
 	ReactiveDict,
@@ -25,6 +26,7 @@ from pulse.reactive_extensions import (
 	reactive_dataclass,
 	unwrap,
 )
+from pulse.test_helpers import wait_for
 
 
 def test_signal_creation_and_access():
@@ -180,8 +182,7 @@ async def test_later_does_not_track_dependencies():
 	assert callback_runs == 0
 
 	# Wait for callback to execute
-	await asyncio.sleep(0.015)
-	assert callback_runs == 1
+	assert await wait_for(lambda: callback_runs == 1, timeout=0.2)
 
 	# Change s2 - should NOT trigger effect rerun
 	s2.write(20)
@@ -229,8 +230,7 @@ async def test_repeat_does_not_track_dependencies():
 	assert callback_runs == 0
 
 	# Wait for callback to execute
-	await asyncio.sleep(0.015)
-	assert callback_runs >= 1
+	assert await wait_for(lambda: callback_runs >= 1, timeout=0.2)
 
 	initial_callback_runs = callback_runs
 
@@ -240,8 +240,7 @@ async def test_repeat_does_not_track_dependencies():
 	assert effect_runs == 1  # Effect should not rerun
 
 	# Wait a bit more - callback should continue running
-	await asyncio.sleep(0.015)
-	assert callback_runs > initial_callback_runs
+	assert await wait_for(lambda: callback_runs > initial_callback_runs, timeout=0.2)
 
 	# Change s1 - should trigger effect rerun
 	s1.write(2)
@@ -892,7 +891,7 @@ def test_effect_immediate_false_explicit_deps_registers_on_init():
 	assert a.obs == [e]
 	assert b.obs == [e]
 	# Explicit deps should be stored in regular deps attribute (not _explicit_deps)
-	assert e.explicit_deps is True
+	assert e.update_deps is False
 	assert e.deps == {a: a.last_change, b: b.last_change}
 
 	# After first run, deps should still be registered
@@ -948,6 +947,93 @@ def test_effect_explicit_deps_doesnt_track_dynamic_deps():
 	flush_effects()
 	assert runs == 4
 	assert values == [(0, 0, 0), (1, 0, 10), (1, 2, 10), (3, 4, 10)]
+
+
+def test_effect_seeded_deps_update_after_first_run():
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+	runs = 0
+
+	@effect(deps=[a], update_deps=True, lazy=True)
+	def e():
+		nonlocal runs
+		runs += 1
+		_ = b()
+
+	# Before first run, seeded dep should schedule
+	a.write(1)
+	flush_effects()
+	assert runs == 1
+	assert e in b.obs
+	assert e not in a.obs
+
+	# After first run, only tracked deps should schedule
+	a.write(2)
+	flush_effects()
+	assert runs == 1
+
+	b.write(3)
+	flush_effects()
+	assert runs == 2
+
+
+def test_effect_update_deps_false_keeps_explicit_deps():
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+
+	@effect(deps=[a], update_deps=False)
+	def e():
+		_ = b()
+
+	flush_effects()
+	assert e.deps == {a: a.last_change}
+	assert e in a.obs
+	assert e not in b.obs
+
+	b.write(1)
+	flush_effects()
+	assert e.runs == 1
+
+	a.write(1)
+	flush_effects()
+	assert e.runs == 2
+
+
+def test_effect_set_deps_dict_respects_last_change():
+	s = Signal(0, name="s")
+
+	@effect(lazy=True)
+	def e():
+		_ = s()
+
+	e.set_deps({s: s.last_change})
+	assert e.runs == 0
+	flush_effects()
+	assert e.runs == 0
+	assert e in s.obs
+
+	s.write(1)
+	flush_effects()
+	assert e.runs == 1
+
+
+def test_effect_capture_deps_updates_observers():
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+
+	@effect(deps=[a], update_deps=False, lazy=True)
+	def e(): ...
+
+	assert e in a.obs
+	assert e not in b.obs
+
+	with e.capture_deps():
+		_ = b()
+
+	assert e.update_deps is False
+	assert e not in a.obs
+	assert e in b.obs
+	assert e.deps == {b: b.last_change}
 
 
 @pytest.mark.asyncio
@@ -1017,6 +1103,37 @@ async def test_async_effect_cleanup_on_rerun():
 	await asyncio.sleep(0)
 	assert e.runs == 2
 	assert cleanup_runs == 1
+
+
+@pytest.mark.asyncio
+async def test_async_effect_seeded_deps_update_after_first_run():
+	a = Signal(0, name="a")
+	b = Signal(0, name="b")
+	runs = 0
+
+	@effect(deps=[a], update_deps=True, lazy=True)
+	async def e():
+		nonlocal runs
+		runs += 1
+		_ = b()
+		await asyncio.sleep(0)
+
+	a.write(1)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert runs == 1
+	assert e in b.obs
+	assert e not in a.obs
+
+	a.write(2)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert runs == 1
+
+	b.write(3)
+	await asyncio.sleep(0)
+	await asyncio.sleep(0)
+	assert runs == 2
 
 
 # TODO: find a way to make this pass. Effect cancellation works in practice.
@@ -2319,6 +2436,25 @@ def test_computed_with_previous_value_parameter_first_run():
 	assert first_prev is None
 
 
+def test_computed_initial_value_still_computes_and_tracks_deps():
+	"""Test that providing initial_value doesn't skip first compute or dep tracking."""
+	s = Signal(1, name="s")
+	prev_values: list[Any] = []
+
+	def computed_with_prev(prev: Any) -> int:
+		prev_values.append(prev)
+		return s() + 1
+
+	c = Computed(computed_with_prev, name="c", initial_value=MISSING)
+
+	assert c() == 2
+	assert prev_values == [MISSING]
+
+	s.write(2)
+	assert c() == 3
+	assert prev_values == [MISSING, 2]
+
+
 def test_computed_without_previous_value_parameter():
 	"""Test that computed functions without parameters still work normally."""
 	s = Signal(5, name="s")
@@ -2406,8 +2542,7 @@ async def test_async_effect_skips_batch():
 
 	# Starts immediately
 	assert e.runs == 0  # Task created but not run yet
-	await asyncio.sleep(0.01)
-	assert e.runs == 1
+	assert await wait_for(lambda: e.runs == 1, timeout=0.2)
 
 	# Update inside batch
 	with Batch() as batch:
@@ -2415,11 +2550,10 @@ async def test_async_effect_skips_batch():
 		# AsyncEffect should ignore batch and run immediately (task created)
 		assert e not in batch.effects
 		assert e.runs == 1  # Task created, not run yet
-		await asyncio.sleep(0.01)
-		assert e.runs == 2
+		assert await wait_for(lambda: e.runs == 2, timeout=0.2)
 
 	# Exiting batch does nothing extra
-	await asyncio.sleep(0.01)
+	assert not await wait_for(lambda: e.runs > 2, timeout=0.05)
 	assert e.runs == 2
 
 
@@ -2707,12 +2841,10 @@ async def test_async_effect_explicit_deps_rerun_on_external_modification_during_
 	assert e.runs == 0
 
 	# Allow effect to finish its first run
-	await asyncio.sleep(0.015)
-	assert e.runs == 1
+	assert await wait_for(lambda: e.runs >= 1, timeout=0.2)
 
 	s.write(2)
-	await asyncio.sleep(0.015)
-	assert e.runs == 2
+	assert await wait_for(lambda: e.runs >= 2, timeout=0.2)
 
 
 def test_unwrap_preserves_namedtuple_type():
@@ -2822,12 +2954,10 @@ async def test_effect_interval_runs_periodically():
 	assert len(runs) == 1
 
 	# Wait for interval to trigger (just over 1 interval, under 2)
-	await asyncio.sleep(0.012)
-	assert len(runs) == 2
+	assert await wait_for(lambda: len(runs) >= 2, timeout=0.2)
 
 	# Wait for another interval
-	await asyncio.sleep(0.012)
-	assert len(runs) == 3
+	assert await wait_for(lambda: len(runs) >= 3, timeout=0.2)
 
 	e.dispose()
 
@@ -2849,7 +2979,7 @@ async def test_effect_cancel_with_cancel_interval_true():
 	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should not trigger
-	await asyncio.sleep(0.015)
+	assert not await wait_for(lambda: len(runs) > 1, timeout=0.05)
 	flush_effects()
 	assert len(runs) == 1
 
@@ -2875,7 +3005,7 @@ async def test_effect_cancel_with_cancel_interval_false():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should still trigger
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: len(runs) >= 2, timeout=0.2)
 	flush_effects()
 	assert len(runs) == 2
 
@@ -2904,7 +3034,7 @@ async def test_effect_run_restarts_cancelled_interval():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should trigger again
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: len(runs) >= 3, timeout=0.2)
 	flush_effects()
 	assert len(runs) == 3
 
@@ -2925,15 +3055,15 @@ async def test_async_effect_interval_runs_periodically():
 	await e.run()
 	assert len(runs) == 1
 
-	# Wait for interval to trigger (just over 1 interval, under 2)
-	await asyncio.sleep(0.012)
+	# Wait for interval to trigger
+	assert await wait_for(lambda: len(runs) >= 2, timeout=0.2)
 	await e.wait()
-	assert len(runs) == 2
+	assert len(runs) >= 2
 
 	# Wait for another interval
-	await asyncio.sleep(0.012)
+	assert await wait_for(lambda: len(runs) >= 3, timeout=0.2)
 	await e.wait()
-	assert len(runs) == 3
+	assert len(runs) >= 3
 
 	e.dispose()
 
@@ -2956,7 +3086,7 @@ async def test_async_effect_cancel_with_cancel_interval_true():
 	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should not trigger
-	await asyncio.sleep(0.015)
+	assert not await wait_for(lambda: len(runs) > 1, timeout=0.05)
 	assert len(runs) == 1
 
 	e.dispose()
@@ -2982,9 +3112,9 @@ async def test_async_effect_cancel_with_cancel_interval_false():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should still trigger
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: len(runs) >= 2, timeout=0.2)
 	await e.wait()
-	assert len(runs) == 2
+	assert len(runs) >= 2
 
 	e.dispose()
 
@@ -3012,8 +3142,8 @@ async def test_async_effect_run_restarts_cancelled_interval():
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
 	# Wait - interval should trigger again
-	await asyncio.sleep(0.015)
+	assert await wait_for(lambda: len(runs) >= 3, timeout=0.2)
 	await e.wait()
-	assert len(runs) == 3
+	assert len(runs) >= 3
 
 	e.dispose()

@@ -1,0 +1,296 @@
+---
+title: "Middleware"
+description: "Pulse middleware types"
+---
+
+Middleware for intercepting and modifying requests at various stages of the Pulse lifecycle.
+
+## Functions
+
+### stack
+
+```python
+def stack(*middlewares: PulseMiddleware) -> PulseMiddleware
+```
+
+Compose multiple middlewares into a single middleware stack.
+
+**Parameters:**
+- `*middlewares` - Middleware instances to compose.
+
+**Returns:** `MiddlewareStack` instance.
+
+```python
+import pulse as ps
+
+app = ps.App(
+    middleware=ps.stack(
+        AuthMiddleware(),
+        LoggingMiddleware(),
+    )
+)
+```
+
+## Classes
+
+### PulseMiddleware
+
+Base middleware class with pass-through defaults. Subclass and override hooks to implement custom behavior.
+
+#### Constructor
+
+```python
+def __init__(self, dev: bool = False) -> None
+```
+
+**Parameters:**
+- `dev` - If `True`, middleware is only active in dev environments.
+
+#### Methods
+
+##### prerender
+
+```python
+async def prerender(
+    self,
+    *,
+    payload: PrerenderPayload,
+    request: PulseRequest,
+    session: dict[str, Any],
+    next: Callable[[], Awaitable[PrerenderResponse]],
+) -> PrerenderResponse
+```
+
+Handle batch prerender at the top level (HTTP request).
+
+**Parameters:**
+- `payload` - Full prerender payload.
+- `request` - Normalized request object.
+- `session` - Session data dictionary.
+- `next` - Callable to continue the middleware chain.
+
+**Returns:** `Ok[Prerender]`, `Redirect`, or `NotFound`.
+
+##### prerender_route
+
+```python
+async def prerender_route(
+    self,
+    *,
+    path: str,
+    request: PulseRequest,
+    route_info: RouteInfo,
+    session: dict[str, Any],
+    next: Callable[[], Awaitable[RoutePrerenderResponse]],
+) -> RoutePrerenderResponse
+```
+
+Handle individual route prerender.
+
+**Parameters:**
+- `path` - Route path being prerendered.
+- `request` - Normalized request object.
+- `route_info` - Route information.
+- `session` - Session data dictionary.
+- `next` - Callable to continue the middleware chain.
+
+**Returns:** `Ok[ServerInitMessage]`, `Redirect`, or `NotFound`.
+
+##### connect
+
+```python
+async def connect(
+    self,
+    *,
+    request: PulseRequest,
+    session: dict[str, Any],
+    next: Callable[[], Awaitable[ConnectResponse]],
+) -> ConnectResponse
+```
+
+Handle WebSocket connection establishment.
+
+**Parameters:**
+- `request` - Normalized request object.
+- `session` - Session data dictionary.
+- `next` - Callable to continue the middleware chain.
+
+**Returns:** `Ok[None]` to allow, `Deny` to reject.
+
+##### message
+
+```python
+async def message(
+    self,
+    *,
+    data: ClientMessage,
+    session: dict[str, Any],
+    next: Callable[[], Awaitable[Ok[None]]],
+) -> Ok[None] | Deny
+```
+
+Handle per-message authorization.
+
+**Parameters:**
+- `data` - Client message data.
+- `session` - Session data dictionary.
+- `next` - Callable to continue the middleware chain.
+
+**Returns:** `Ok[None]` to allow, `Deny` to block.
+
+##### channel
+
+```python
+async def channel(
+    self,
+    *,
+    channel_id: str,
+    event: str,
+    payload: Any,
+    request_id: str | None,
+    session: dict[str, Any],
+    next: Callable[[], Awaitable[Ok[None]]],
+) -> Ok[None] | Deny
+```
+
+Handle channel message authorization.
+
+**Parameters:**
+- `channel_id` - Channel identifier.
+- `event` - Event name.
+- `payload` - Event payload.
+- `request_id` - Request ID if awaiting response.
+- `session` - Session data dictionary.
+- `next` - Callable to continue the middleware chain.
+
+**Returns:** `Ok[None]` to allow, `Deny` to block.
+
+### MiddlewareStack
+
+Composable stack of `PulseMiddleware` executed in order. Each middleware receives a `next` callable that advances the chain.
+
+```python
+def __init__(self, middlewares: Sequence[PulseMiddleware]) -> None
+```
+
+**Parameters:**
+- `middlewares` - Sequence of middleware instances.
+
+### LatencyMiddleware
+
+Development middleware that adds artificial latency to simulate network conditions. Only active when `dev=True` (default).
+
+#### Constructor
+
+```python
+def __init__(
+    self,
+    *,
+    prerender_ms: float = 80.0,
+    prerender_route_ms: float = 60.0,
+    connect_ms: float = 40.0,
+    message_ms: float = 25.0,
+    channel_ms: float = 20.0,
+) -> None
+```
+
+**Parameters:**
+- `prerender_ms` - Latency for batch prerender requests. Default: 80ms.
+- `prerender_route_ms` - Latency for individual route prerenders. Default: 60ms.
+- `connect_ms` - Latency for WebSocket connections. Default: 40ms.
+- `message_ms` - Latency for WebSocket messages. Default: 25ms.
+- `channel_ms` - Latency for channel messages. Default: 20ms.
+
+```python
+app = ps.App(
+    middleware=ps.LatencyMiddleware(
+        prerender_ms=100,
+        connect_ms=50,
+    )
+)
+```
+
+## Response Types
+
+### Ok
+
+```python
+class Ok(Generic[T]):
+    payload: T
+
+    def __init__(self, payload: T | None = None) -> None
+```
+
+Success response wrapper. Use `Ok(None)` for void success.
+
+### Redirect
+
+```python
+class Redirect:
+    path: str
+
+    def __init__(self, path: str) -> None
+```
+
+Redirect response. Causes navigation to the specified path.
+
+### NotFound
+
+```python
+class NotFound
+```
+
+Not found response. Returns 404.
+
+### Deny
+
+```python
+class Deny
+```
+
+Denial response. Blocks the request.
+
+## Type Aliases
+
+### ConnectResponse
+
+```python
+ConnectResponse = Ok[None] | Deny
+```
+
+### PrerenderResponse
+
+```python
+PrerenderResponse = Ok[Prerender] | Redirect | NotFound
+```
+
+### RoutePrerenderResponse
+
+```python
+RoutePrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
+```
+
+## Example: Auth Middleware
+
+```python
+import pulse as ps
+
+class AuthMiddleware(ps.PulseMiddleware):
+    async def prerender_route(
+        self,
+        *,
+        path: str,
+        request: ps.PulseRequest,
+        route_info: ps.RouteInfo,
+        session: dict[str, Any],
+        next,
+    ):
+        if path.startswith("/admin") and not session.get("is_admin"):
+            return ps.Redirect("/login")
+        return await next()
+
+    async def connect(self, *, request, session, next):
+        if not session.get("user_id"):
+            return ps.Deny()
+        return await next()
+```

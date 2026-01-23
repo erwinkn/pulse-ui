@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "web",
@@ -7,7 +8,7 @@
         "@react-router/node": "^7.9.2",
         "@react-router/serve": "^7.9.2",
         "isbot": "^5.1.31",
-        "pulse-ui-client": "0.1.38-alpha.9",
+        "pulse-ui-client": "0.1.58",
         "react": "^19.1.1",
         "react-datepicker": "^8.4.0",
         "react-dom": "^19.1.1",
@@ -545,7 +546,7 @@
 
     "proxy-addr": ["proxy-addr@2.0.7", "", { "dependencies": { "forwarded": "0.2.0", "ipaddr.js": "1.9.1" } }, "sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg=="],
 
-    "pulse-ui-client": ["pulse-ui-client@0.1.38-alpha.9", "", { "dependencies": { "socket.io-client": "^4.8.1" }, "peerDependencies": { "react": "^18 || ^19", "react-dom": "^18 || ^19", "react-router": "^7" } }, "sha512-nq2LNtEY1jiKE8qXAm5MfCPkOcjhy83w17hpUBE+lXuPIll3t1K1BuktO6Ojk0MceAmNSiDkbmLdmKkegvHGeQ=="],
+    "pulse-ui-client": ["pulse-ui-client@0.1.58", "", { "dependencies": { "socket.io-client": "^4.8.1" }, "peerDependencies": { "react": "^18 || ^19", "react-dom": "^18 || ^19", "react-router": "^7" } }, "sha512-XG0LbNvJ5ed1j3XGE8dldxuleb5vExOw2MSqErq33xvJhr3dTYHfVfYRkG6wJvK8bi58xs5FIjlA1ayQEJomFw=="],
 
     "qs": ["qs@6.13.0", "", { "dependencies": { "side-channel": "^1.0.6" } }, "sha512-+38qI9SOr8tfZ4QmJNplMUxqjbe7LKvvZgWdExBOmd+egZTtjLB67Gu0HRX3u/XOq7UU2Nx6nsjvS16Z9uwfpg=="],
 

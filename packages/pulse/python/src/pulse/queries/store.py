@@ -2,7 +2,7 @@ import datetime as dt
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
-from pulse.helpers import MISSING
+from pulse.helpers import MISSING, Missing
 from pulse.queries.common import QueryKey
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import RETRY_DELAY_DEFAULT, KeyedQuery
@@ -29,7 +29,7 @@ class QueryStore:
 	def ensure(
 		self,
 		key: QueryKey,
-		initial_data: T | None = MISSING,
+		initial_data: T | Missing | None = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		retries: int = 3,
@@ -87,6 +87,7 @@ class QueryStore:
 		get_previous_page_param: Callable[[list[Page[Any, Any]]], Any | None]
 		| None = None,
 		max_pages: int = 0,
+		initial_data: list[Page[Any, Any]] | Missing | None = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		retries: int = 3,
@@ -110,6 +111,7 @@ class QueryStore:
 			get_next_page_param=get_next_page_param,
 			get_previous_page_param=get_previous_page_param,
 			max_pages=max_pages,
+			initial_data=initial_data,
 			initial_data_updated_at=initial_data_updated_at,
 			gc_time=gc_time,
 			retries=retries,
@@ -118,3 +120,9 @@ class QueryStore:
 		)
 		self._entries[key] = entry
 		return entry
+
+	def dispose_all(self) -> None:
+		"""Dispose all queries and clear the store."""
+		for entry in list(self._entries.values()):
+			entry.dispose()
+		self._entries.clear()

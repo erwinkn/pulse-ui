@@ -1,7 +1,8 @@
 from typing import Any, Unpack, cast
 
 import pulse as ps
-from pulse.helpers import call_flexible, create_task, maybe_await
+from pulse.helpers import call_flexible, maybe_await
+from pulse.scheduling import create_task
 
 ExpandedState = dict[str, bool]
 

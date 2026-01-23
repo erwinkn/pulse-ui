@@ -48,6 +48,10 @@ class ServerNavigateToMessage(TypedDict):
 	hard: bool
 
 
+class ServerReloadMessage(TypedDict):
+	type: Literal["reload"]
+
+
 class ServerApiCallMessage(TypedDict):
 	type: Literal["api_call"]
 	# Correlation id to match request/response
@@ -158,6 +162,7 @@ ServerMessage = (
 	| ServerErrorMessage
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
+	| ServerReloadMessage
 	| ServerChannelMessage
 	| ServerJsExecMessage
 )

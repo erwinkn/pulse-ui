@@ -5,7 +5,6 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
-import asyncio
 import logging
 import os
 from collections import defaultdict
@@ -40,14 +39,11 @@ from pulse.env import (
 )
 from pulse.env import env as envvars
 from pulse.helpers import (
-	create_task,
 	find_available_port,
 	get_client_address,
 	get_client_address_socketio,
-	later,
 )
 from pulse.hooks.core import hooks
-from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
@@ -56,7 +52,9 @@ from pulse.messages import (
 	ClientPulseMessage,
 	Prerender,
 	PrerenderPayload,
+	ServerInitMessage,
 	ServerMessage,
+	ServerNavigateToMessage,
 )
 from pulse.middleware import (
 	ConnectResponse,
@@ -67,13 +65,13 @@ from pulse.middleware import (
 	PrerenderResponse,
 	PulseMiddleware,
 	Redirect,
-	RoutePrerenderResponse,
 )
 from pulse.plugin import Plugin
 from pulse.proxy import ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
-from pulse.routing import Layout, Route, RouteTree
+from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
+from pulse.scheduling import TaskRegistry, TimerHandleLike, TimerRegistry
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -88,6 +86,16 @@ T = TypeVar("T")
 
 
 class AppStatus(IntEnum):
+	"""Application lifecycle status.
+
+	Attributes:
+		created: App instance created but not yet initialized.
+		initialized: App.setup() has been called, routes configured.
+		running: App is actively serving requests.
+		draining: App is shutting down, draining connections.
+		stopped: App has been fully stopped.
+	"""
+
 	created = 0
 	initialized = 1
 	running = 2
@@ -96,6 +104,12 @@ class AppStatus(IntEnum):
 
 
 PulseMode = Literal["subdomains", "single-server"]
+"""Deployment mode for the application.
+
+Values:
+		"single-server": Python and React served from the same origin (default).
+		"subdomains": Python API on a subdomain (e.g., api.example.com).
+"""
 
 
 @dataclass
@@ -104,12 +118,12 @@ class ConnectionStatusConfig:
 	Configuration for connection status message delays.
 
 	Attributes:
-	    initial_connecting_delay: Delay in seconds before showing "Connecting..." message
-	        on initial connection attempt. Default: 2.0
-	    initial_error_delay: Additional delay in seconds before showing error message
-	        on initial connection attempt (after connecting message). Default: 8.0
-	    reconnect_error_delay: Delay in seconds before showing error message when
-	        reconnecting after losing connection. Default: 8.0
+			initial_connecting_delay: Delay in seconds before showing "Connecting..." message
+					on initial connection attempt. Default: 2.0
+			initial_error_delay: Additional delay in seconds before showing error message
+					on initial connection attempt (after connecting message). Default: 8.0
+			reconnect_error_delay: Delay in seconds before showing error message when
+					reconnecting after losing connection. Default: 8.0
 	"""
 
 	initial_connecting_delay: float = 2.0
@@ -118,21 +132,55 @@ class ConnectionStatusConfig:
 
 
 class App:
-	"""
-	Pulse UI Application - the main entry point for defining your app.
+	"""Main Pulse application class.
 
+	Creates a server that handles routing, sessions, and WebSocket connections.
 	Similar to FastAPI, users create an App instance and define their routes.
 
+	Args:
+		routes: Route definitions for the application.
+		codegen: Code generation settings for React Router output.
+		middleware: Request middleware, either a single middleware or sequence.
+		plugins: Application plugins that can contribute routes, middleware,
+			and lifecycle hooks.
+		cookie: Session cookie configuration.
+		session_store: Session storage backend. Defaults to CookieSessionStore.
+		server_address: Public server URL. Used only in ci/prod.
+		dev_server_address: Development server URL. Defaults to
+			"http://localhost:8000".
+		internal_server_address: Internal URL for server-side loader fetches.
+			Falls back to server_address if not provided.
+		not_found: Path for 404 page. Defaults to "/not-found".
+		mode: Deployment mode - "single-server" (default) or "subdomains".
+		api_prefix: API route prefix. Defaults to "/_pulse".
+		cors: CORS configuration. Auto-configured based on mode if not provided.
+		fastapi: Additional FastAPI constructor options.
+		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
+		connection_status: Connection status UI timing configuration.
+
+	Attributes:
+		env: Current environment ("dev", "ci", or "prod").
+		mode: Deployment mode ("single-server" or "subdomains").
+		status: Current application lifecycle status.
+		routes: Parsed route tree containing all registered routes.
+		fastapi: Underlying FastAPI instance.
+		asgi: ASGI application (includes Socket.IO).
+
 	Example:
-	    ```python
-	    import pulse as ps
+		```python
+		import pulse as ps
 
-	    app = ps.App()
+		app = ps.App(
+				routes=[
+						ps.Route("/", render=home),
+						ps.Route("/users/:id", render=user_detail),
+				],
+				session_timeout=120.0,
+		)
 
-	    @app.route("/")
-	    def home():
-	        return ps.div("Hello World!")
-	    ```
+		if __name__ == "__main__":
+				app.run(port=8000)
+		```
 	"""
 
 	env: PulseEnv
@@ -159,9 +207,16 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
-	_render_cleanups: dict[str, asyncio.TimerHandle]
+	_render_cleanups: dict[str, TimerHandleLike]
+	_tasks: TaskRegistry
+	_timers: TimerRegistry
+	_proxy: ReactProxy | None
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
+	render_loop_limit: int
+	prerender_queue_timeout: float
+	detach_queue_timeout: float
+	disconnect_queue_timeout: float
 
 	def __init__(
 		self,
@@ -181,14 +236,18 @@ class App:
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
+		prerender_queue_timeout: float = 60.0,
+		detach_queue_timeout: float = 15.0,
+		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
+		render_loop_limit: int = 50,
 	):
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
 		self.mode = mode
 		self.status = AppStatus.created
-		# Persist the server address for use by sessions (API calls, etc.)
-		self.server_address = server_address
+		# Persist the server address for use by sessions (API calls, etc.) in ci/prod.
+		self.server_address = server_address if self.env in ("ci", "prod") else None
 		# Development server address (used in dev mode)
 		self.dev_server_address = dev_server_address
 		# Optional internal address used by server-side loader fetches
@@ -227,8 +286,15 @@ class App:
 		self._socket_to_render = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
+		self._tasks = TaskRegistry(name="app")
+		self._timers = TimerRegistry(tasks=self._tasks, name="app")
+		self._proxy = None
 		self.session_timeout = session_timeout
+		self.prerender_queue_timeout = prerender_queue_timeout
+		self.detach_queue_timeout = detach_queue_timeout
+		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
+		self.render_loop_limit = render_loop_limit
 
 		self.codegen = Codegen(
 			self.routes,
@@ -290,7 +356,21 @@ class App:
 
 	def run_codegen(
 		self, address: str | None = None, internal_address: str | None = None
-	):
+	) -> None:
+		"""Generate React Router code for all routes.
+
+		Generates TypeScript/JSX files for React Router integration based on
+		the application's route definitions.
+
+		Args:
+			address: Public server address. Updates server_address if provided.
+			internal_address: Internal server address for SSR fetches. Updates
+				internal_server_address if provided.
+
+		Raises:
+			RuntimeError: If no server address is available (neither passed
+				as argument nor set on the App instance).
+		"""
 		# Allow the CLI to disable codegen in specific scenarios (e.g., prod server-only)
 		if envvars.codegen_disabled:
 			return
@@ -309,11 +389,18 @@ class App:
 			connection_status=self.connection_status,
 		)
 
-	def asgi_factory(self):
-		"""
-		ASGI factory for uvicorn. This is called on every reload.
-		"""
+	def asgi_factory(self) -> ASGIApp:
+		"""ASGI factory for production deployment.
 
+		Called on each uvicorn reload. Initializes code generation and sets up
+		the application with the appropriate server address.
+
+		Returns:
+			The ASGI application instance (includes Socket.IO).
+
+		Raises:
+			RuntimeError: If in prod/ci mode without an explicit server_address.
+		"""
 		# In prod/ci, use the server_address provided to App(...).
 		if self.env in ("prod", "ci"):
 			if not self.server_address:
@@ -347,13 +434,34 @@ class App:
 		port: int = 8000,
 		find_port: bool = True,
 		reload: bool = True,
-	):
+	) -> None:
+		"""Start the development server with uvicorn.
+
+		Args:
+			address: Host address to bind to. Defaults to "localhost".
+			port: Port number to listen on. Defaults to 8000.
+			find_port: If True, automatically find an available port if the
+				specified port is in use. Defaults to True.
+			reload: If True, enable auto-reload on file changes. Defaults to True.
+		"""
 		if find_port:
 			port = find_available_port(port)
 
 		uvicorn.run(self.asgi_factory, reload=reload)
 
-	def setup(self, server_address: str):
+	def setup(self, server_address: str) -> None:
+		"""Initialize the app with a server address.
+
+		Configures FastAPI routes, middleware, CORS, and Socket.IO handlers.
+		Called automatically by asgi_factory().
+
+		Args:
+			server_address: The public URL where the server is accessible.
+
+		Note:
+			This method is idempotent - calling it multiple times on an already
+			initialized app will log a warning and return early.
+		"""
 		if self.status >= AppStatus.initialized:
 			logger.warning("Called App.setup() on an already initialized application")
 			return
@@ -436,6 +544,8 @@ class App:
 				raise HTTPException(
 					status_code=400, detail="'paths' must be a non-empty list"
 				)
+			paths = [ensure_absolute_path(path) for path in paths]
+			payload["paths"] = paths
 			route_info = payload.get("routeInfo")
 
 			client_addr: str | None = get_client_address(request)
@@ -449,12 +559,13 @@ class App:
 				render = self.create_render(
 					render_id, session, client_address=client_addr
 				)
-
 			# Schedule cleanup timeout (will cancel/reschedule on activity)
-			self._schedule_render_cleanup(render_id)
+			if not render.connected:
+				self._schedule_render_cleanup(render_id)
 
-			async def _prerender_one(path: str):
-				captured = render.prerender(path, route_info)
+			def _normalize_prerender_result(
+				captured: ServerInitMessage | ServerNavigateToMessage,
+			) -> Ok[ServerInitMessage] | Redirect | NotFound:
 				if captured["type"] == "vdom_init":
 					return Ok(captured)
 				if captured["type"] == "navigate_to":
@@ -466,12 +577,6 @@ class App:
 					return Redirect(path=str(nav_path) if nav_path else "/")
 				# Fallback: shouldn't happen, return not found to be safe
 				return NotFound()
-
-			def _normalize_prerender_response(res: Any) -> RoutePrerenderResponse:
-				if isinstance(res, (Ok, Redirect, NotFound)):
-					return res
-				# Treat any other value as a VDOM payload
-				return Ok(res)
 
 			with PulseContext.update(render=render):
 				# Call top-level prerender middleware, which wraps the route processing
@@ -487,37 +592,21 @@ class App:
 						},
 					}
 
-					# Fan out on routes
-					for p in paths:
-						try:
-							# Capture p in closure to avoid loop variable binding issue
-							async def _next(path: str = p) -> RoutePrerenderResponse:
-								return await _prerender_one(path)
+					captured = render.prerender(paths, route_info)
 
-							# Call prerender_route middleware (in) -> prerender route -> (out)
-							res = await self.middleware.prerender_route(
-								path=p,
-								route_info=route_info,
-								request=PulseRequest.from_fastapi(request),
-								session=session.data,
-								next=_next,
-							)
-							res = _normalize_prerender_response(res)
-							if isinstance(res, Ok):
-								# Aggregate results
-								result_data["views"][p] = res.payload
-							elif isinstance(res, Redirect):
-								# Return redirect immediately
-								return Redirect(path=res.path or "/")
-							elif isinstance(res, NotFound):
-								# Return not found immediately
-								return NotFound()
-							else:
-								raise ValueError("Unexpected prerender response:", res)
-						except RedirectInterrupt as r:
-							return Redirect(path=r.path)
-						except NotFoundInterrupt:
+					for p in paths:
+						res = _normalize_prerender_result(captured[p])
+						if isinstance(res, Ok):
+							# Aggregate results
+							result_data["views"][p] = res.payload
+						elif isinstance(res, Redirect):
+							# Return redirect immediately
+							return Redirect(path=res.path or "/")
+						elif isinstance(res, NotFound):
+							# Return not found immediately
 							return NotFound()
+						else:
+							raise ValueError("Unexpected prerender response:", res)
 
 					return Ok(result_data)
 
@@ -577,10 +666,11 @@ class App:
 					+ "Use 'pulse run' CLI command or set the environment variable."
 				)
 
-			proxy_handler = ReactProxy(
+			self._proxy = ReactProxy(
 				react_server_address=react_server_address,
 				server_address=server_address,
 			)
+			proxy_handler = self._proxy
 
 			# In dev mode, proxy WebSocket connections to React Router (e.g. Vite HMR)
 			# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
@@ -605,7 +695,6 @@ class App:
 		):
 			# Expect renderId during websocket auth and require a valid user session
 			rid = auth.get("render_id") if auth else None
-
 			# Parse cookies from environ and ensure a session exists
 			cookie = self.cookie.get_from_socketio(environ)
 			if cookie is None:
@@ -621,6 +710,7 @@ class App:
 			# Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
 			render = self.render_sessions.get(rid)
 			if render is None:
+				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line
 				render = self.create_render(
 					rid, session, client_address=get_client_address_socketio(environ)
 				)
@@ -636,7 +726,7 @@ class App:
 				payload = serialize(message)
 				# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
 				payload = list(payload)
-				create_task(self.sio.emit("message", list(payload), to=sid))
+				self._tasks.create_task(self.sio.emit("message", list(payload), to=sid))
 
 			render.connect(on_message)
 			# Map socket sid to renderId for message routing
@@ -708,8 +798,10 @@ class App:
 	def _cancel_render_cleanup(self, rid: str):
 		"""Cancel any pending cleanup task for a render session."""
 		cleanup_handle = self._render_cleanups.pop(rid, None)
-		if cleanup_handle and not cleanup_handle.cancelled():
-			cleanup_handle.cancel()
+		if cleanup_handle:
+			if not cleanup_handle.cancelled():
+				cleanup_handle.cancel()
+			self._timers.discard(cleanup_handle)
 
 	def _schedule_render_cleanup(self, rid: str):
 		"""Schedule cleanup of a RenderSession after the configured timeout."""
@@ -735,7 +827,7 @@ class App:
 				)
 				self.close_render(rid)
 
-		handle = later(self.session_timeout, _cleanup)
+		handle = self._timers.later(self.session_timeout, _cleanup)
 		self._render_cleanups[rid] = handle
 
 	async def _handle_pulse_message(
@@ -919,6 +1011,10 @@ class App:
 			self.routes,
 			server_address=self.server_address,
 			client_address=client_address,
+			prerender_queue_timeout=self.prerender_queue_timeout,
+			detach_queue_timeout=self.detach_queue_timeout,
+			disconnect_queue_timeout=self.disconnect_queue_timeout,
+			render_loop_limit=self.render_loop_limit,
 		)
 		self.render_sessions[rid] = render
 		self._render_to_user[rid] = session.sid
@@ -938,7 +1034,7 @@ class App:
 		self._user_to_render[session.sid].remove(rid)
 
 		if len(self._user_to_render[session.sid]) == 0:
-			later(60, self.close_session_if_inactive, sid)
+			self._timers.later(60, self.close_session_if_inactive, sid)
 
 	def close_session(self, sid: str):
 		session = self.user_sessions.pop(sid, None)
@@ -967,6 +1063,15 @@ class App:
 		# Close all user sessions
 		for sid in list(self.user_sessions.keys()):
 			self.close_session(sid)
+
+		# Cancel any remaining app-level tasks/timers
+		self._tasks.cancel_all()
+		self._timers.cancel_all()
+		if self._proxy is not None:
+			try:
+				await self._proxy.close()
+			except Exception:
+				logger.exception("Error during ReactProxy.close()")
 
 		# Update status
 		self.status = AppStatus.stopped
@@ -997,5 +1102,8 @@ class App:
 			return  # no active render for this user session
 
 		# We don't want to wait for this to resolve
-		create_task(render.call_api(f"{self.api_prefix}/set-cookies", method="GET"))
+		render.create_task(
+			render.call_api(f"{self.api_prefix}/set-cookies", method="GET"),
+			name="cookies.refresh",
+		)
 		sess.scheduled_cookie_refresh = True

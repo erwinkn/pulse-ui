@@ -2,12 +2,15 @@
 JavaScript Set builtin module.
 
 Usage:
-    from pulse.js import Set
-    Set()                         # -> new Set()
-    Set([1, 2, 3])               # -> new Set([1, 2, 3])
 
-    # Or import from module directly:
-    from pulse.js.set import Set
+```python
+from pulse.js import Set
+Set()                         # -> new Set()
+Set([1, 2, 3])               # -> new Set([1, 2, 3])
+
+# Or import from module directly:
+from pulse.js.set import Set
+```
 """
 
 from collections.abc import Callable as _Callable

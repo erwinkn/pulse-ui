@@ -1134,28 +1134,22 @@ from pulse.env import env as env
 from pulse.env import mode as mode
 
 # Forms
-from pulse.form import (
+from pulse.forms import (
 	Form as Form,
 )
-from pulse.form import (
+from pulse.forms import (
 	FormData as FormData,
 )
-from pulse.form import (
+from pulse.forms import (
 	FormValue as FormValue,
 )
-from pulse.form import (
+from pulse.forms import (
 	ManualForm as ManualForm,
 )
 
 # Helpers
 from pulse.helpers import (
 	CSSProperties as CSSProperties,
-)
-from pulse.helpers import (
-	later as later,
-)
-from pulse.helpers import (
-	repeat as repeat,
 )
 
 # Hooks - Core
@@ -1205,9 +1199,8 @@ from pulse.hooks.core import (
 	hooks as hooks,
 )
 
-# Hooks - Effects
-from pulse.hooks.effects import EffectsHookState as EffectsHookState
-from pulse.hooks.effects import effects as effects
+# Hooks - Effects (import to register inline_effect_hook before registry locks)
+from pulse.hooks.effects import InlineEffectHookState as InlineEffectHookState
 
 # Hooks - Init
 from pulse.hooks.init import (
@@ -1324,9 +1317,6 @@ from pulse.middleware import (
 	Redirect as Redirect,
 )
 from pulse.middleware import (
-	RoutePrerenderResponse as RoutePrerenderResponse,
-)
-from pulse.middleware import (
 	stack as stack,
 )
 
@@ -1344,6 +1334,9 @@ from pulse.queries.infinite_query import infinite_query as infinite_query
 from pulse.queries.mutation import mutation as mutation
 from pulse.queries.protocol import QueryResult as QueryResult
 from pulse.queries.query import query as query
+from pulse.react_component import (
+	ReactComponent as ReactComponent,
+)
 
 # React components (v2)
 from pulse.react_component import (
@@ -1411,9 +1404,22 @@ from pulse.render_session import run_js as run_js
 
 # Request
 from pulse.request import PulseRequest as PulseRequest
+from pulse.requirements import require as require
 from pulse.routing import Layout as Layout
 from pulse.routing import Route as Route
 from pulse.routing import RouteInfo as RouteInfo
+from pulse.scheduling import (
+	TaskRegistry as TaskRegistry,
+)
+from pulse.scheduling import (
+	TimerRegistry as TimerRegistry,
+)
+from pulse.scheduling import (
+	later as later,
+)
+from pulse.scheduling import (
+	repeat as repeat,
+)
 from pulse.serializer import deserialize as deserialize
 
 # Serializer

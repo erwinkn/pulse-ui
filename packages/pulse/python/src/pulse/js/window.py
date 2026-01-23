@@ -1,9 +1,12 @@
 """Browser window global object.
 
 Usage:
-    from pulse.js import window
-    window.alert("Hello!")      # -> window.alert("Hello!")
-    window.innerWidth           # -> window.innerWidth
+
+```python
+from pulse.js import window
+window.alert("Hello!")      # -> window.alert("Hello!")
+window.innerWidth           # -> window.innerWidth
+```
 """
 
 from collections.abc import Callable as _Callable

@@ -17,13 +17,7 @@ import type {
 	VDOMPropValue,
 	VDOMUpdate,
 } from "./vdom";
-import {
-	FRAGMENT_TAG,
-	isElementNode,
-	isExprNode,
-	isMountPointNode,
-	MOUNT_POINT_PREFIX,
-} from "./vdom";
+import { isElementNode, isExprNode, MOUNT_POINT_PREFIX as REF_PREFIX } from "./vdom";
 
 type Env = Record<string, unknown>;
 
@@ -249,7 +243,23 @@ export class VDOMRenderer {
 		// element
 		if (isElementNode(node)) {
 			const { tag, props = {}, children = [], eval: evalKeys } = node;
+			// 1. Resolve component
+			let component: React.ComponentType<any> | string;
+			if (typeof tag === "string") {
+				if (tag.startsWith(REF_PREFIX)) {
+					const key = tag.slice(REF_PREFIX.length);
+					component = this.#registry[key] as React.ComponentType<any>;
 
+					if (!component) {
+						throw new Error(`[Pulse] Missing component '${key}'`);
+					}
+				} else {
+					component = tag.length > 0 ? tag : Fragment;
+				}
+			} else {
+				component = this.#evalExpr(tag, {}) as any;
+			}
+			// 2. Build props
 			let cbKeys: Set<string> | undefined;
 			const newProps: Record<string, any> = {};
 			let evalSet: Set<string> | undefined;
@@ -274,6 +284,7 @@ export class VDOMRenderer {
 			}
 			if (node.key) newProps.key = node.key;
 
+			// 3. Render children
 			const renderedChildren: ReactNode[] = [];
 			for (let i = 0; i < children.length; i += 1) {
 				const child = children[i]!;
@@ -281,22 +292,15 @@ export class VDOMRenderer {
 				renderedChildren.push(this.renderNode(child, childPath));
 			}
 
-			if (isMountPointNode(node)) {
-				const componentKey = tag.slice(MOUNT_POINT_PREFIX.length);
-				const Component = this.#registry[componentKey] as ComponentType<any>;
-				if (!Component) {
-					throw new Error(`[Pulse] Missing component for mount point: ${componentKey}`);
-				}
-				return this.#rememberMeta(createElement(Component, newProps, ...renderedChildren), {
-					eval: evalSet,
-					cbKeys,
-				});
+			try {
+				return this.#rememberMeta(
+					createElement(component, newProps, ...renderedChildren),
+					{ eval: evalSet, cbKeys },
+				);
+			} catch (error) {
+				console.error("[Pulse] Failed to create element:", node)
+				throw error;
 			}
-
-			return this.#rememberMeta(
-				createElement(tag === FRAGMENT_TAG ? Fragment : tag, newProps, ...renderedChildren),
-				{ eval: evalSet, cbKeys },
-			);
 		}
 
 		if (process.env.NODE_ENV !== "production") {

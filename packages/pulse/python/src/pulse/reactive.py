@@ -2,6 +2,7 @@ import asyncio
 import copy
 import inspect
 from collections.abc import Awaitable, Callable
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import (
 	Any,
@@ -14,10 +15,13 @@ from typing import (
 
 from pulse.helpers import (
 	Disposable,
-	create_task,
 	maybe_await,
-	schedule_on_loop,
 	values_equal,
+)
+from pulse.scheduling import (
+	TimerHandleLike,
+	call_soon,
+	create_task,
 )
 
 T = TypeVar("T")
@@ -26,6 +30,29 @@ P = ParamSpec("P")
 
 
 class Signal(Generic[T]):
+	"""A reactive value container.
+
+	Reading registers a dependency; writing notifies observers.
+
+	Args:
+		value: Initial value.
+		name: Debug name for the signal.
+
+	Attributes:
+		value: Current value (direct access, no tracking).
+		name: Debug name.
+		last_change: Epoch when last changed.
+
+	Example:
+
+	```python
+	count = Signal(0, name="count")
+	print(count())     # 0 (registers dependency)
+	count.write(1)     # Updates and notifies observers
+	print(count.value) # 1 (no dependency tracking)
+	```
+	"""
+
 	value: T
 	name: str | None
 	last_change: int
@@ -38,16 +65,30 @@ class Signal(Generic[T]):
 		self.last_change = -1
 
 	def read(self) -> T:
+		"""Read the value, registering a dependency in the current scope.
+
+		Returns:
+			The current value.
+		"""
 		rc = REACTIVE_CONTEXT.get()
 		if rc.scope is not None:
 			rc.scope.register_dep(self)
 		return self.value
 
 	def __call__(self) -> T:
+		"""Alias for read().
+
+		Returns:
+			The current value.
+		"""
 		return self.read()
 
 	def unwrap(self) -> T:
-		"""Return the current value while registering subscriptions."""
+		"""Alias for read().
+
+		Returns:
+			The current value while registering subscriptions.
+		"""
 		return self.read()
 
 	def __copy__(self):
@@ -87,6 +128,13 @@ class Signal(Generic[T]):
 		return off
 
 	def write(self, value: T):
+		"""Update the value and notify observers.
+
+		No-op if the new value equals the current value.
+
+		Args:
+			value: The new value to set.
+		"""
 		if values_equal(value, self.value):
 			return
 		increment_epoch()
@@ -97,15 +145,50 @@ class Signal(Generic[T]):
 
 
 class Computed(Generic[T_co]):
+	"""A derived value that auto-updates when dependencies change.
+
+	Lazy evaluation: only recomputes when read and dirty. Throws if a signal
+	is written inside the computed function.
+
+	Args:
+		fn: Function computing the value. May optionally accept prev_value
+			as first positional argument for incremental computation.
+		name: Debug name for the computed.
+		initial_value: Seed value used as prev_value on first compute.
+
+	Attributes:
+		value: Cached computed value.
+		name: Debug name.
+		dirty: Whether recompute is needed.
+		last_change: Epoch when value last changed.
+
+	Example:
+
+	```python
+	count = Signal(5)
+	doubled = Computed(lambda: count() * 2)
+	print(doubled())  # 10
+	count.write(10)
+	print(doubled())  # 20
+	```
+	"""
+
 	fn: Callable[..., T_co]
 	name: str | None
+	value: Any
 	dirty: bool
 	on_stack: bool
 	accepts_prev_value: bool
 
-	def __init__(self, fn: Callable[..., T_co], name: str | None = None):
+	def __init__(
+		self,
+		fn: Callable[..., T_co],
+		name: str | None = None,
+		*,
+		initial_value: Any = None,
+	):
 		self.fn = fn
-		self.value: T_co = None  # pyright: ignore[reportAttributeAccessIssue]
+		self.value = initial_value
 		self.name = name
 		self.dirty = False
 		self.on_stack = False
@@ -128,6 +211,14 @@ class Computed(Generic[T_co]):
 		)
 
 	def read(self) -> T_co:
+		"""Get the computed value, recomputing if dirty, and register a dependency.
+
+		Returns:
+			The computed value.
+
+		Raises:
+			RuntimeError: If circular dependency detected.
+		"""
 		if self.on_stack:
 			raise RuntimeError("Circular dependency detected")
 
@@ -141,10 +232,19 @@ class Computed(Generic[T_co]):
 		return self.value
 
 	def __call__(self) -> T_co:
+		"""Alias for read().
+
+		Returns:
+			The computed value.
+		"""
 		return self.read()
 
 	def unwrap(self) -> T_co:
-		"""Return the current value while registering subscriptions."""
+		"""Alias for read().
+
+		Returns:
+			The computed value while registering subscriptions.
+		"""
 		return self.read()
 
 	def __copy__(self):
@@ -259,9 +359,32 @@ AsyncEffectFn = Callable[[], Awaitable[EffectCleanup | None]]
 
 
 class Effect(Disposable):
-	"""
+	"""Runs a function when dependencies change.
+
 	Synchronous effect and base class. Use AsyncEffect for async effects.
 	Both are isinstance(Effect).
+
+	Args:
+		fn: Effect function. May return a cleanup function to run before the
+			next execution or on disposal.
+		name: Debug name for the effect.
+		immediate: If True, run synchronously when scheduled instead of batching.
+		lazy: If True, don't run on creation.
+		on_error: Error handler for exceptions in the effect function.
+		deps: Explicit dependencies (disables auto-tracking).
+		interval: Re-run interval in seconds.
+
+	Example:
+
+	```python
+	count = Signal(0)
+	def log_count():
+	    print(f"Count: {count()}")
+	    return lambda: print("Cleanup")
+	effect = Effect(log_count)
+	count.write(1)  # Effect runs after batch flush
+	effect.dispose()
+	```
 	"""
 
 	fn: EffectFn
@@ -272,8 +395,8 @@ class Effect(Disposable):
 	immediate: bool
 	_lazy: bool
 	_interval: float | None
-	_interval_handle: asyncio.TimerHandle | None
-	explicit_deps: bool
+	_interval_handle: TimerHandleLike | None
+	update_deps: bool
 	batch: "Batch | None"
 	paused: bool
 
@@ -285,6 +408,7 @@ class Effect(Disposable):
 		lazy: bool = False,
 		on_error: Callable[[Exception], None] | None = None,
 		deps: list[Signal[Any] | Computed[Any]] | None = None,
+		update_deps: bool | None = None,
 		interval: float | None = None,
 	):
 		self.fn = fn  # type: ignore[assignment]
@@ -298,7 +422,10 @@ class Effect(Disposable):
 		self.last_run = -1
 		self.scope: Scope | None = None
 		self.batch = None
-		self.explicit_deps = deps is not None
+		if deps is None:
+			self.update_deps = True if update_deps is None else update_deps
+		else:
+			self.update_deps = False if update_deps is None else update_deps
 		self.immediate = immediate
 		self._lazy = lazy
 		self._interval = interval
@@ -308,7 +435,7 @@ class Effect(Disposable):
 		if immediate and lazy:
 			raise ValueError("An effect cannot be boht immediate and lazy")
 
-		# Register explicit dependencies immediately upon initialization
+		# Register seeded/explicit dependencies immediately upon initialization
 		if deps is not None:
 			self.deps = {dep: dep.last_change for dep in deps}
 			for dep in deps:
@@ -331,6 +458,7 @@ class Effect(Disposable):
 
 	@override
 	def dispose(self):
+		"""Clean up the effect, run cleanup function, remove from dependencies."""
 		self.cancel(cancel_interval=True)
 		for child in self.children.copy():
 			child.dispose()
@@ -338,13 +466,13 @@ class Effect(Disposable):
 			self.cleanup_fn()
 		for dep in self.deps:
 			dep.obs.remove(self)
-		if self.parent:
+		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
 	def _schedule_interval(self):
 		"""Schedule the next interval run if interval is set."""
 		if self._interval is not None and self._interval > 0:
-			from pulse.helpers import later
+			from pulse.scheduling import later
 
 			self._interval_handle = later(self._interval, self._on_interval)
 
@@ -362,7 +490,7 @@ class Effect(Disposable):
 			self._interval_handle = None
 
 	def pause(self):
-		"""Pause the effect - it won't run when dependencies change."""
+		"""Pause the effect; it won't run when dependencies change."""
 		self.paused = True
 		self.cancel(cancel_interval=True)
 
@@ -373,6 +501,7 @@ class Effect(Disposable):
 			self.schedule()
 
 	def schedule(self):
+		"""Schedule the effect to run in the current batch."""
 		if self.paused:
 			return
 		# Immediate effects run right away when scheduled and do not enter a batch
@@ -423,7 +552,7 @@ class Effect(Disposable):
 	def __call__(self):
 		self.run()
 
-	def flush(self) -> None:
+	def flush(self):
 		"""If scheduled in a batch, remove and run immediately."""
 		if self.batch is not None:
 			self.batch.effects.remove(self)
@@ -447,7 +576,7 @@ class Effect(Disposable):
 		captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None,
 	) -> None:
 		# Apply captured last_change values at the end for explicit deps
-		if self.explicit_deps:
+		if not self.update_deps:
 			assert captured_last_changes is not None
 			for dep, last_change in captured_last_changes.items():
 				self.deps[dep] = last_change
@@ -458,8 +587,7 @@ class Effect(Disposable):
 			child.parent = self
 
 		prev_deps = set(self.deps)
-		if not self.explicit_deps:
-			self.deps = scope.deps
+		self.deps = scope.deps
 		new_deps = set(self.deps)
 		add_deps = new_deps - prev_deps
 		remove_deps = prev_deps - new_deps
@@ -476,7 +604,7 @@ class Effect(Disposable):
 
 	def _copy_kwargs(self) -> dict[str, Any]:
 		deps = None
-		if self.explicit_deps:
+		if not self.update_deps or (self.update_deps and self.runs == 0 and self.deps):
 			deps = list(self.deps.keys())
 		return {
 			"fn": self.fn,
@@ -485,6 +613,7 @@ class Effect(Disposable):
 			"lazy": self._lazy,
 			"on_error": self.on_error,
 			"deps": deps,
+			"update_deps": self.update_deps,
 			"interval": self._interval,
 		}
 
@@ -507,6 +636,7 @@ class Effect(Disposable):
 		return new_effect
 
 	def run(self):
+		"""Execute the effect immediately."""
 		with Untrack():
 			try:
 				self._cleanup_before_run()
@@ -518,7 +648,7 @@ class Effect(Disposable):
 		execution_epoch = epoch()
 		# Capture last_change for explicit deps before running
 		captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None
-		if self.explicit_deps:
+		if not self.update_deps:
 			captured_last_changes = {dep: dep.last_change for dep in self.deps}
 		with Scope() as scope:
 			# Clear batch *before* running as we may update a signal that causes
@@ -535,8 +665,63 @@ class Effect(Disposable):
 		if self._interval is not None and self._interval_handle is None:
 			self._schedule_interval()
 
+	def set_deps(
+		self,
+		deps: list[Signal[Any] | Computed[Any]]
+		| dict[Signal[Any] | Computed[Any], int],
+		*,
+		update_deps: bool | None = None,
+	) -> None:
+		if update_deps is not None:
+			self.update_deps = update_deps
+		if isinstance(deps, dict):
+			new_deps = dict(deps)
+		else:
+			new_deps = {dep: dep.last_change for dep in deps}
+		prev_deps = set(self.deps)
+		new_dep_keys = set(new_deps)
+		add_deps = new_dep_keys - prev_deps
+		remove_deps = prev_deps - new_dep_keys
+		for dep in remove_deps:
+			dep.remove_obs(self)
+		self.deps = new_deps
+		for dep in add_deps:
+			dep.add_obs(self)
+		for dep, last_seen in self.deps.items():
+			if isinstance(dep, Computed):
+				if dep.dirty or dep.last_change > last_seen:
+					self.schedule()
+					break
+				continue
+			if dep.last_change > last_seen:
+				self.schedule()
+				break
+
+	@contextmanager
+	def capture_deps(self, update_deps: bool | None = None):
+		scope = Scope()
+		try:
+			with scope:
+				yield
+		finally:
+			self.set_deps(scope.deps, update_deps=update_deps)
+
 
 class AsyncEffect(Effect):
+	"""Async version of Effect for coroutine functions.
+
+	Does not use batching; cancels and restarts on each dependency change.
+	The `immediate` parameter is not supported (raises if passed).
+
+	Args:
+		fn: Async effect function returning an awaitable.
+		name: Debug name for the effect.
+		lazy: If True, don't run on creation.
+		on_error: Error handler for exceptions in the effect function.
+		deps: Explicit dependencies (disables auto-tracking).
+		interval: Re-run interval in seconds.
+	"""
+
 	fn: AsyncEffectFn  # pyright: ignore[reportIncompatibleMethodOverride]
 	batch: None  # pyright: ignore[reportIncompatibleVariableOverride]
 	_task: asyncio.Task[None] | None
@@ -549,6 +734,7 @@ class AsyncEffect(Effect):
 		lazy: bool = False,
 		on_error: Callable[[Exception], None] | None = None,
 		deps: list[Signal[Any] | Computed[Any]] | None = None,
+		update_deps: bool | None = None,
 		interval: float | None = None,
 	):
 		# Track an async task when running async effects
@@ -561,6 +747,7 @@ class AsyncEffect(Effect):
 			lazy=lazy,
 			on_error=on_error,
 			deps=deps,
+			update_deps=update_deps,
 			interval=interval,
 		)
 
@@ -595,9 +782,10 @@ class AsyncEffect(Effect):
 
 	@override
 	def run(self) -> asyncio.Task[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
-		"""
-		Run the async effect immediately, cancelling any previous run.
-		Returns the asyncio.Task.
+		"""Start the async effect, cancelling any previous run.
+
+		Returns:
+			The asyncio.Task running the effect.
 		"""
 		execution_epoch = epoch()
 
@@ -620,7 +808,7 @@ class AsyncEffect(Effect):
 				captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = (
 					None
 				)
-				if self.explicit_deps:
+				if not self.update_deps:
 					captured_last_changes = {dep: dep.last_change for dep in self.deps}
 
 				with Scope() as scope:
@@ -669,10 +857,10 @@ class AsyncEffect(Effect):
 			self._cancel_interval()
 
 	async def wait(self) -> None:
-		"""
-		Wait until the completion of the current task if it's already running.
-		Does not start a new task if none is running.
-		If the task is cancelled while waiting, waits for a new task if one is started.
+		"""Wait for the current task to complete.
+
+		Does not start a new task if none is running. If the task is cancelled
+		while waiting, waits for a new task if one is started.
 		"""
 		while True:
 			if self._task is None or self._task.done():
@@ -702,30 +890,61 @@ class AsyncEffect(Effect):
 			self.cleanup_fn()
 		for dep in self.deps:
 			dep.obs.remove(self)
-		if self.parent:
+		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
 
 class Batch:
+	"""Groups reactive updates to run effects once after all writes.
+
+	By default, effects are scheduled in a global batch that flushes on the
+	next event loop iteration. Use as a context manager to create an explicit
+	batch that flushes on exit.
+
+	Args:
+		effects: Initial list of effects to schedule.
+		name: Debug name for the batch.
+
+	Example:
+
+	```python
+	count = Signal(0)
+	with Batch() as batch:
+	    count.write(1)
+	    count.write(2)
+	    count.write(3)
+	# Effects run once here with final value 3
+	```
+	"""
+
 	name: str | None
+	flush_id: int
 
 	def __init__(
 		self, effects: list[Effect] | None = None, name: str | None = None
 	) -> None:
 		self.effects: list[Effect] = effects or []
 		self.name = name
+		self.flush_id = 0
 		self._token: "Token[ReactiveContext] | None" = None
 
 	def register_effect(self, effect: Effect):
+		"""Add an effect to run when the batch flushes.
+
+		Args:
+			effect: The effect to schedule.
+		"""
 		if effect not in self.effects:
 			self.effects.append(effect)
 
 	def flush(self):
+		"""Run all scheduled effects."""
 		token = None
 		rc = REACTIVE_CONTEXT.get()
 		if rc.batch is not self:
 			token = REACTIVE_CONTEXT.set(ReactiveContext(rc.epoch, self, rc.scope))
 
+		self.flush_id += 1
 		MAX_ITERS = 10000
 		iters = 0
 
@@ -787,7 +1006,7 @@ class GlobalBatch(Batch):
 	@override
 	def register_effect(self, effect: Effect):
 		if not self.is_scheduled:
-			schedule_on_loop(self.flush)
+			call_soon(self.flush)
 			self.is_scheduled = True
 		return super().register_effect(effect)
 
@@ -821,9 +1040,27 @@ class Epoch:
 		self.current = current
 
 
-# Used to track dependencies and effects created within a certain function or
-# context.
 class Scope:
+	"""Tracks dependencies and effects created within a context.
+
+	Use as a context manager to capture which signals/computeds are read
+	and which effects are created.
+
+	Attributes:
+		deps: Tracked dependencies mapping Signal/Computed to last_change epoch.
+		effects: Effects created in this scope.
+
+	Example:
+
+	```python
+	with Scope() as scope:
+	    value = signal()  # Dependency tracked
+	    effect = Effect(fn)  # Effect registered
+	print(scope.deps)    # {signal: last_change}
+	print(scope.effects) # [effect]
+	```
+	"""
+
 	def __init__(self):
 		# Dict preserves insertion order. Maps dependency -> last_change
 		self.deps: dict[Signal[Any] | Computed[Any], int] = {}
@@ -857,11 +1094,49 @@ class Scope:
 		return False
 
 
-class Untrack(Scope): ...
+class Untrack(Scope):
+	"""A scope that disables dependency tracking.
+
+	Use as a context manager to read signals without registering dependencies.
+
+	Example:
+
+	```python
+	with Untrack():
+	    value = signal()  # No dependency registered
+	```
+	"""
+
+	...
 
 
-# --- Reactive Context (composite of epoch, batch, scope) ---
 class ReactiveContext:
+	"""Composite context holding epoch, batch, and scope.
+
+	Use as a context manager to set up a complete reactive environment.
+
+	Args:
+		epoch: Global version counter. Defaults to a new Epoch.
+		batch: Current batch for effect scheduling. Defaults to GlobalBatch.
+		scope: Current scope for dependency tracking.
+		on_effect_error: Global effect error handler.
+
+	Attributes:
+		epoch: Global version counter.
+		batch: Current batch for effect scheduling.
+		scope: Current scope for dependency tracking.
+		on_effect_error: Global effect error handler.
+
+	Example:
+
+	```python
+	ctx = ReactiveContext()
+	with ctx:
+	    # All reactive operations use this context
+	    pass
+	```
+	"""
+
 	epoch: Epoch
 	batch: Batch
 	scope: Scope | None
@@ -902,11 +1177,20 @@ class ReactiveContext:
 		return False
 
 
-def epoch():
+def epoch() -> int:
+	"""Get the current reactive epoch (version counter).
+
+	Returns:
+		The current epoch value.
+	"""
 	return REACTIVE_CONTEXT.get().get_epoch()
 
 
-def increment_epoch():
+def increment_epoch() -> None:
+	"""Increment the reactive epoch.
+
+	Called automatically on signal writes.
+	"""
 	return REACTIVE_CONTEXT.get().increment_epoch()
 
 
@@ -917,7 +1201,18 @@ REACTIVE_CONTEXT: ContextVar[ReactiveContext] = ContextVar(
 )
 
 
-def flush_effects():
+def flush_effects() -> None:
+	"""Flush the current batch, running all scheduled effects.
+
+	Example:
+
+	```python
+	count = Signal(0)
+	Effect(lambda: print(count()))
+	count.write(1)
+	flush_effects()  # Prints: 1
+	```
+	"""
 	REACTIVE_CONTEXT.get().batch.flush()
 
 

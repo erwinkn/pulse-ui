@@ -1,0 +1,5 @@
+{
+  "title": "Data & Queries",
+  "icon": "Database",
+  "pages": ["query-invalidation", "optimistic-mutation", "infinite-scroll"]
+}

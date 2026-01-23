@@ -1,12 +1,18 @@
 import asyncio
 import os
 from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, Protocol, TypeVar, override
 
 from anyio import from_thread
 
 T = TypeVar("T")
 P = ParamSpec("P")
+
+
+class TimerHandleLike(Protocol):
+	def cancel(self) -> None: ...
+	def cancelled(self) -> bool: ...
+	def when(self) -> float: ...
 
 
 def is_pytest() -> bool:
@@ -91,8 +97,8 @@ def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
 
 	ctx = PulseContext.get()
 	if ctx.render is not None:
-		return ctx.render._tasks, ctx.render._timers
-	return ctx.app._tasks, ctx.app._timers
+		return ctx.render._tasks, ctx.render._timers  # pyright: ignore[reportPrivateUsage]
+	return ctx.app._tasks, ctx.app._timers  # pyright: ignore[reportPrivateUsage]
 
 
 def _schedule_later(
@@ -161,10 +167,10 @@ def _schedule_later(
 
 def later(
 	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-) -> asyncio.TimerHandle:
+) -> TimerHandleLike:
 	"""
 	Schedule `fn(*args, **kwargs)` to run after `delay` seconds.
-	Works with sync or async functions. Returns a TimerHandle; call .cancel() to cancel.
+	Works with sync or async functions. Returns a handle; call .cancel() to cancel.
 
 	The callback runs with no reactive scope to avoid accidentally capturing
 	reactive dependencies from the calling context. Other context vars (like
@@ -278,18 +284,18 @@ class TaskRegistry:
 
 
 class TimerRegistry:
-	_handles: set[asyncio.Handle]
+	_handles: set[TimerHandleLike]
 	name: str | None
 
 	def __init__(self, name: str | None = None) -> None:
 		self._handles = set()
 		self.name = name
 
-	def track(self, handle: asyncio.Handle) -> asyncio.Handle:
+	def track(self, handle: TimerHandleLike) -> TimerHandleLike:
 		self._handles.add(handle)
 		return handle
 
-	def discard(self, handle: asyncio.Handle | None) -> None:
+	def discard(self, handle: TimerHandleLike | None) -> None:
 		if handle is None:
 			return
 		self._handles.discard(handle)
@@ -300,20 +306,56 @@ class TimerRegistry:
 		fn: Callable[P, Any],
 		*args: P.args,
 		**kwargs: P.kwargs,
-	) -> asyncio.TimerHandle:
-		handle: asyncio.TimerHandle | None = None
+	) -> TimerHandleLike:
+		tracked_box: list[_TrackedTimerHandle] = []
 
 		def _wrapped():
 			try:
 				return fn(*args, **kwargs)
 			finally:
-				self.discard(handle)
+				self.discard(tracked_box[0] if tracked_box else None)
 
 		handle = _schedule_later(delay, _wrapped)
-		self._handles.add(handle)
-		return handle
+		tracked = _TrackedTimerHandle(handle, self)
+		tracked_box.append(tracked)
+		self._handles.add(tracked)
+		return tracked
 
 	def cancel_all(self) -> None:
 		for handle in list(self._handles):
 			handle.cancel()
 		self._handles.clear()
+
+
+class _TrackedTimerHandle:
+	__slots__: tuple[str, ...] = ("_handle", "_registry")
+	_handle: asyncio.TimerHandle
+	_registry: "TimerRegistry"
+
+	def __init__(self, handle: asyncio.TimerHandle, registry: "TimerRegistry") -> None:
+		self._handle = handle
+		self._registry = registry
+
+	def cancel(self) -> None:
+		if not self._handle.cancelled():
+			self._handle.cancel()
+		self._registry.discard(self)
+
+	def cancelled(self) -> bool:
+		return self._handle.cancelled()
+
+	def when(self) -> float:
+		return self._handle.when()
+
+	def __getattr__(self, name: str):
+		return getattr(self._handle, name)
+
+	@override
+	def __hash__(self) -> int:
+		return hash(self._handle)
+
+	@override
+	def __eq__(self, other: object) -> bool:
+		if isinstance(other, _TrackedTimerHandle):
+			return self._handle is other._handle
+		return self._handle is other

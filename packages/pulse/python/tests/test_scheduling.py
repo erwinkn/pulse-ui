@@ -8,6 +8,7 @@ from pulse.scheduling import TaskRegistry, TimerRegistry
 from pulse.test_helpers import wait_for
 
 
+@ps.component
 def simple_component():
 	return ps.div()
 
@@ -114,6 +115,21 @@ async def test_timer_registry_later_runs_coroutine_return():
 
 
 @pytest.mark.asyncio
+async def test_timer_registry_cancel_discards_handle():
+	registry = TimerRegistry(name="test")
+
+	def callback():
+		return None
+
+	handle = registry.later(10, callback)
+	assert len(registry._handles) == 1  # pyright: ignore[reportPrivateUsage]
+
+	handle.cancel()
+
+	assert len(registry._handles) == 0  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
 async def test_timer_registry_cancel_all_cancels_and_clears():
 	registry = TimerRegistry(name="test")
 	fired = False
@@ -168,13 +184,15 @@ async def test_repeat_tracks_render_task_and_cancels_on_close():
 	with ps.PulseContext.update(render=session):
 		handle = ps.repeat(10, lambda: None)
 
+	task = handle.task
+	assert task is not None
 	assert (
-		handle.task in session._tasks._tasks  # pyright: ignore[reportPrivateUsage]
+		task in session._tasks._tasks  # pyright: ignore[reportPrivateUsage]
 	)
 
 	session.close()
 
-	assert await wait_for(lambda: handle.task.done(), timeout=0.2)
+	assert await wait_for(lambda: task.done(), timeout=0.2)
 
 
 @pytest.mark.asyncio

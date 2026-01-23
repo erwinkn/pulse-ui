@@ -30,6 +30,7 @@ from pulse.routing import (
 )
 from pulse.scheduling import (
 	TaskRegistry,
+	TimerHandleLike,
 	TimerRegistry,
 	create_future_on_loop,
 )
@@ -97,7 +98,7 @@ class RouteMount:
 	state: MountState
 	pending_action: PendingAction | None
 	queue: list[ServerMessage] | None
-	queue_timeout: asyncio.TimerHandle | None
+	queue_timeout: TimerHandleLike | None
 	render_batch_id: int
 	render_batch_renders: int
 
@@ -617,11 +618,11 @@ class RenderSession:
 
 	def schedule_later(
 		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
-	) -> asyncio.TimerHandle:
+	) -> TimerHandleLike:
 		"""Schedule a tracked timer tied to this render session."""
 		return self._timers.later(delay, fn, *args, **kwargs)
 
-	def discard_timer(self, handle: asyncio.Handle | None) -> None:
+	def discard_timer(self, handle: TimerHandleLike | None) -> None:
 		"""Remove a timer handle from the session registry."""
 		self._timers.discard(handle)
 

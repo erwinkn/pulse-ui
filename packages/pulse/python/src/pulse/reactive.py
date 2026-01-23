@@ -19,6 +19,7 @@ from pulse.helpers import (
 	values_equal,
 )
 from pulse.scheduling import (
+	TimerHandleLike,
 	create_task,
 	schedule_on_loop,
 )
@@ -386,7 +387,7 @@ class Effect(Disposable):
 	immediate: bool
 	_lazy: bool
 	_interval: float | None
-	_interval_handle: asyncio.TimerHandle | None
+	_interval_handle: TimerHandleLike | None
 	update_deps: bool
 	batch: "Batch | None"
 	paused: bool

@@ -5,7 +5,6 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
-import asyncio
 import logging
 import os
 from collections import defaultdict
@@ -72,7 +71,7 @@ from pulse.proxy import ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
-from pulse.scheduling import TaskRegistry, TimerRegistry
+from pulse.scheduling import TaskRegistry, TimerHandleLike, TimerRegistry
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -208,7 +207,7 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
-	_render_cleanups: dict[str, asyncio.TimerHandle]
+	_render_cleanups: dict[str, TimerHandleLike]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 	_proxy: ReactProxy | None

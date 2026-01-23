@@ -35,7 +35,7 @@ from pulse.queries.common import (
 from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryConfig
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
-from pulse.scheduling import later
+from pulse.scheduling import TimerHandleLike, later
 from pulse.state import InitializableProperty, State
 
 T = TypeVar("T")
@@ -170,7 +170,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 	_queue_task: asyncio.Task[None] | None
 
 	_observers: "list[InfiniteQueryResult[T, TParam]]"
-	_gc_handle: asyncio.TimerHandle | None
+	_gc_handle: TimerHandleLike | None
 
 	def __init__(
 		self,

@@ -33,7 +33,7 @@ from pulse.queries.common import (
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
-from pulse.scheduling import is_pytest, later
+from pulse.scheduling import TimerHandleLike, is_pytest, later
 from pulse.state import InitializableProperty, State
 
 if TYPE_CHECKING:
@@ -266,7 +266,7 @@ class KeyedQuery(Generic[T], Disposable):
 	observers: "list[KeyedQueryResult[T]]"
 	_task: asyncio.Task[None] | None
 	_task_initiator: "KeyedQueryResult[T] | None"
-	_gc_handle: asyncio.TimerHandle | None
+	_gc_handle: TimerHandleLike | None
 
 	def __init__(
 		self,

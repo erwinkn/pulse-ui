@@ -363,6 +363,38 @@ def test_navigate_to_bypasses_pending_mount_queue():
 	session.close()
 
 
+def test_navigate_to_queued_as_global_on_disconnect():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.disconnect()
+	session.send(
+		{
+			"type": "navigate_to",
+			"path": "/a",
+			"replace": False,
+			"hard": False,
+		}
+	)
+
+	assert messages == []
+
+	messages2: list[ServerMessage] = []
+	session.connect(lambda msg: messages2.append(msg))
+
+	assert len(messages2) == 1
+	assert messages2[0]["type"] == "navigate_to"
+
+	session.close()
+
+
 # =============================================================================
 # Reconnection / Rehydration Tests
 # =============================================================================

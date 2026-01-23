@@ -161,6 +161,22 @@ def UserEditor():
     ]
 ```
 
+## Avoiding flicker with keep_previous_data
+
+When switching between items (like user profiles), the default behavior shows a loading state. Use `keep_previous_data=True` to keep the old data visible:
+
+```python
+@ps.query(keep_previous_data=True)
+async def user(self) -> dict:
+    return await fetch_user(self.user_id)
+
+@user.key
+def _user_key(self):
+    return ("user", self.user_id)
+```
+
+This works even with `initial_data`—the previous data takes priority during transitions.
+
 ## Infinite queries for pagination
 
 For paginated data like infinite scroll lists, use `@ps.infinite_query`:
@@ -182,6 +198,7 @@ Infinite queries:
 - Provide a `fetch_next_page()` method to load more
 - Have a `has_next_page` property to know if more data is available
 - Combine all pages into a single `data` list
+- Support `@query.initial_data` for placeholder content
 
 ```python
 @ps.component

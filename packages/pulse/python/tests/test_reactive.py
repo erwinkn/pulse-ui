@@ -17,6 +17,7 @@ from pulse import (
 	reactive,
 	repeat,
 )
+from pulse.helpers import MISSING
 from pulse.reactive import Batch, flush_effects
 from pulse.reactive_extensions import (
 	ReactiveDict,
@@ -2433,6 +2434,25 @@ def test_computed_with_previous_value_parameter_first_run():
 	result = c()
 	assert result == 20
 	assert first_prev is None
+
+
+def test_computed_initial_value_still_computes_and_tracks_deps():
+	"""Test that providing initial_value doesn't skip first compute or dep tracking."""
+	s = Signal(1, name="s")
+	prev_values: list[Any] = []
+
+	def computed_with_prev(prev: Any) -> int:
+		prev_values.append(prev)
+		return s() + 1
+
+	c = Computed(computed_with_prev, name="c", initial_value=MISSING)
+
+	assert c() == 2
+	assert prev_values == [MISSING]
+
+	s.write(2)
+	assert c() == 3
+	assert prev_values == [MISSING, 2]
 
 
 def test_computed_without_previous_value_parameter():

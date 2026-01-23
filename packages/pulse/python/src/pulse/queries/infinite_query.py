@@ -19,6 +19,7 @@ from pulse.context import PulseContext
 from pulse.helpers import (
 	MISSING,
 	Disposable,
+	Missing,
 	call_flexible,
 	maybe_await,
 )
@@ -242,7 +243,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		max_pages: int = 0,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
-		initial_data: list[Page[T, TParam]] | None | Any = MISSING,
+		initial_data: list[Page[T, TParam]] | Missing | None = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
@@ -266,7 +267,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if initial_data is MISSING:
 			initial_pages = []
 		else:
-			initial_pages = cast(list[Page[T, TParam]], initial_data) or []
+			initial_pages = cast(list[Page[T, TParam]] | None, initial_data) or []
 
 		self.pages = ReactiveList(initial_pages)
 		self.error = Signal(None, name=f"inf_query.error({key})")
@@ -859,7 +860,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	_on_success: Callable[[list[Page[T, TParam]]], Awaitable[None] | None] | None
 	_on_error: Callable[[Exception], Awaitable[None] | None] | None
 	_observe_effect: Effect
-	_data_computed: Computed[list[Page[T, TParam]] | None]
+	_data_computed: Computed[list[Page[T, TParam]] | None | Missing]
 	_enabled: Signal[bool]
 	_fetch_on_mount: bool
 
@@ -920,7 +921,9 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 			immediate=True,
 		)
 		self._data_computed = Computed(
-			self._data_computed_fn, name=f"inf_query_data({self._query().key})"
+			self._data_computed_fn,
+			name=f"inf_query_data({self._query().key})",
+			initial_value=MISSING,
 		)
 
 	@property
@@ -948,18 +951,19 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		return self._query().error.read()
 
 	def _data_computed_fn(
-		self, prev: list[Page[T, TParam]] | None
-	) -> list[Page[T, TParam]] | None:
+		self, prev: list[Page[T, TParam]] | None | Missing
+	) -> list[Page[T, TParam]] | None | Missing:
 		query = self._query()
-		if self._keep_previous_data and query.status() != "success":
+		if self._keep_previous_data and query.status() == "loading":
 			return prev
 		# Access pages.version to subscribe to structural changes
-		result = unwrap(query.pages) if len(query.pages) > 0 else None
-		return result
+		if len(query.pages) == 0:
+			return MISSING
+		return unwrap(query.pages)
 
 	@property
 	def data(self) -> list[Page[T, TParam]] | None:
-		return self._data_computed()
+		return none_if_missing(self._data_computed())
 
 	@property
 	def pages(self) -> list[T] | None:
@@ -988,8 +992,6 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		return isinstance(self._query().current_action(), FetchPrevious)
 
 	def is_stale(self) -> bool:
-		if self._stale_time <= 0:
-			return False
 		query = self._query()
 		return (time.time() - query.last_updated.read()) > self._stale_time
 
@@ -1096,6 +1098,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 
 	Optional decorators:
 		- ``@infinite_query_prop.get_previous_page_param``: For bi-directional pagination.
+		- ``@infinite_query_prop.initial_data``: Provide initial pages.
 		- ``@infinite_query_prop.on_success``: Handle successful fetch.
 		- ``@infinite_query_prop.on_error``: Handle fetch errors.
 
@@ -1131,6 +1134,12 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 	_refetch_interval: float | None
 	_retries: int
 	_retry_delay: float
+	_initial_data: (
+		list[Page[T, TParam]]
+		| Callable[[TState], list[Page[T, TParam]]]
+		| Missing
+		| None
+	)
 	_initial_page_param: TParam
 	_get_next_page_param: (
 		Callable[[TState, list[Page[T, TParam]]], TParam | None] | None
@@ -1182,6 +1191,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		self._retry_delay = retry_delay
 		self._on_success_fn = None
 		self._on_error_fn = None
+		self._initial_data = MISSING
 		self._key = key
 		self._initial_data_updated_at = initial_data_updated_at
 		self._enabled = enabled
@@ -1210,6 +1220,16 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 				f"Duplicate on_error() decorator for infinite query '{self.name}'. Only one is allowed."
 			)
 		self._on_error_fn = fn  # pyright: ignore[reportAttributeAccessIssue]
+		return fn
+
+	def initial_data(
+		self, fn: Callable[[TState], list[Page[T, TParam]]]
+	) -> Callable[[TState], list[Page[T, TParam]]]:
+		if self._initial_data is not MISSING:
+			raise RuntimeError(
+				f"Duplicate initial_data() decorator for infinite query '{self.name}'. Only one is allowed."
+			)
+		self._initial_data = fn
 		return fn
 
 	def get_next_page_param(
@@ -1260,8 +1280,23 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 			raise RuntimeError(
 				f"key is required for infinite query '{self.name}'. Provide a key via @infinite_query(key=...) or @{self.name}.key decorator."
 			)
+		raw_initial = (
+			call_flexible(self._initial_data, state)
+			if callable(self._initial_data)
+			else self._initial_data
+		)
+		initial_data = (
+			MISSING
+			if raw_initial is MISSING
+			else cast(list[Page[T, TParam]] | None, raw_initial)
+		)
 		query = self._resolve_keyed(
-			state, fetch_fn, next_fn, prev_fn, self._initial_data_updated_at
+			state,
+			fetch_fn,
+			next_fn,
+			prev_fn,
+			initial_data,
+			self._initial_data_updated_at,
 		)
 
 		on_success = None
@@ -1297,6 +1332,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		fetch_fn: Callable[[TParam], Awaitable[T]],
 		next_fn: Callable[[list[Page[T, TParam]]], TParam | None],
 		prev_fn: Callable[[list[Page[T, TParam]]], TParam | None] | None,
+		initial_data: list[Page[T, TParam]] | Missing | None,
 		initial_data_updated_at: float | dt.datetime | None,
 	) -> Computed[InfiniteQuery[T, TParam]]:
 		assert self._key is not None
@@ -1327,6 +1363,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 					get_next_page_param=next_fn,
 					get_previous_page_param=prev_fn,
 					max_pages=self._max_pages,
+					initial_data=initial_data,
 					gc_time=self._gc_time,
 					retries=self._retries,
 					retry_delay=self._retry_delay,
@@ -1420,7 +1457,7 @@ def infinite_query(
 		stale_time: Seconds before data is considered stale (default 0.0).
 		gc_time: Seconds to keep unused query in cache (default 300.0).
 		refetch_interval: Auto-refetch interval in seconds (default None).
-		keep_previous_data: Keep previous data while refetching (default False).
+		keep_previous_data: Keep previous data while loading (default False).
 		retries: Number of retry attempts on failure (default 3).
 		retry_delay: Delay between retries in seconds (default 2.0).
 		initial_data_updated_at: Timestamp for initial data staleness.

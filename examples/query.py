@@ -58,7 +58,7 @@ class UserApi(ps.State):
 	show_slow_interval: bool = True
 
 	# Keyed query with keep_previous_data default True
-	@ps.query(keep_previous_data=False)
+	@ps.query(keep_previous_data=True, retries=0)
 	async def user(self) -> UserData:
 		print("Running user query")
 		await asyncio.sleep(0.5)

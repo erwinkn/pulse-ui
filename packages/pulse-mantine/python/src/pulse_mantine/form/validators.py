@@ -14,7 +14,7 @@ from typing import (
 from urllib.parse import urlparse
 
 from dateutil import parser as date_parser
-from pulse.form import UploadFile
+from pulse.forms import UploadFile
 
 
 class Validator(ABC):

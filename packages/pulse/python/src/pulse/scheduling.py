@@ -86,8 +86,20 @@ def create_future_on_loop() -> asyncio.Future[Any]:
 		return from_thread.run(_create)
 
 
-def later(
-	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
+	from pulse.context import PulseContext
+
+	ctx = PulseContext.get()
+	if ctx.render is not None:
+		return ctx.render._tasks, ctx.render._timers
+	return ctx.app._tasks, ctx.app._timers
+
+
+def _schedule_later(
+	delay: float,
+	fn: Callable[P, Any],
+	*args: P.args,
+	**kwargs: P.kwargs,
 ) -> asyncio.TimerHandle:
 	"""
 	Schedule `fn(*args, **kwargs)` to run after `delay` seconds.
@@ -106,6 +118,8 @@ def later(
 		except RuntimeError as exc:
 			raise RuntimeError("later() requires an event loop") from exc
 
+	task_registry, _ = _resolve_registries()
+
 	def _run():
 		from pulse.reactive import Untrack
 
@@ -114,6 +128,7 @@ def later(
 				res = fn(*args, **kwargs)
 				if asyncio.iscoroutine(res):
 					task = loop.create_task(res)
+					task_registry.track(task)
 
 					def _log_task_exception(t: asyncio.Task[Any]):
 						try:
@@ -142,6 +157,22 @@ def later(
 			)
 
 	return loop.call_later(delay, _run)
+
+
+def later(
+	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+) -> asyncio.TimerHandle:
+	"""
+	Schedule `fn(*args, **kwargs)` to run after `delay` seconds.
+	Works with sync or async functions. Returns a TimerHandle; call .cancel() to cancel.
+
+	The callback runs with no reactive scope to avoid accidentally capturing
+	reactive dependencies from the calling context. Other context vars (like
+	PulseContext) are preserved normally.
+	"""
+
+	_, timer_registry = _resolve_registries()
+	return timer_registry.later(delay, fn, *args, **kwargs)
 
 
 class RepeatHandle:
@@ -177,6 +208,7 @@ def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwa
 
 	from pulse.reactive import Untrack
 
+	task_registry, _ = _resolve_registries()
 	loop = asyncio.get_running_loop()
 	handle = RepeatHandle()
 
@@ -210,6 +242,7 @@ def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwa
 			pass
 
 	handle.task = loop.create_task(_runner())
+	task_registry.track(handle.task)
 
 	return handle
 
@@ -262,7 +295,11 @@ class TimerRegistry:
 		self._handles.discard(handle)
 
 	def later(
-		self, delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+		self,
+		delay: float,
+		fn: Callable[P, Any],
+		*args: P.args,
+		**kwargs: P.kwargs,
 	) -> asyncio.TimerHandle:
 		handle: asyncio.TimerHandle | None = None
 
@@ -272,7 +309,7 @@ class TimerRegistry:
 			finally:
 				self.discard(handle)
 
-		handle = later(delay, _wrapped)
+		handle = _schedule_later(delay, _wrapped)
 		self._handles.add(handle)
 		return handle
 

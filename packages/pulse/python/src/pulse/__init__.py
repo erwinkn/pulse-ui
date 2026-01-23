@@ -1134,16 +1134,16 @@ from pulse.env import env as env
 from pulse.env import mode as mode
 
 # Forms
-from pulse.form import (
+from pulse.forms import (
 	Form as Form,
 )
-from pulse.form import (
+from pulse.forms import (
 	FormData as FormData,
 )
-from pulse.form import (
+from pulse.forms import (
 	FormValue as FormValue,
 )
-from pulse.form import (
+from pulse.forms import (
 	ManualForm as ManualForm,
 )
 

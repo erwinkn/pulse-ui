@@ -39,7 +39,7 @@ from pulse.transpiler.nodes import Expr
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
-	from pulse.form import FormRegistry
+	from pulse.forms import FormRegistry
 
 logger = logging.getLogger(__file__)
 
@@ -273,7 +273,7 @@ class RenderSession:
 		render_loop_limit: int = 50,
 	) -> None:
 		from pulse.channel import ChannelsManager
-		from pulse.form import FormRegistry
+		from pulse.forms import FormRegistry
 
 		self.id = id
 		self.routes = routes

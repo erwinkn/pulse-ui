@@ -211,6 +211,7 @@ class App:
 	_render_cleanups: dict[str, asyncio.TimerHandle]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
+	_proxy: ReactProxy | None
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
@@ -286,6 +287,7 @@ class App:
 		self._render_cleanups = {}
 		self._tasks = TaskRegistry(name="app")
 		self._timers = TimerRegistry(name="app")
+		self._proxy = None
 		self.session_timeout = session_timeout
 		self.detach_queue_timeout = detach_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
@@ -662,10 +664,11 @@ class App:
 					+ "Use 'pulse run' CLI command or set the environment variable."
 				)
 
-			proxy_handler = ReactProxy(
+			self._proxy = ReactProxy(
 				react_server_address=react_server_address,
 				server_address=server_address,
 			)
+			proxy_handler = self._proxy
 
 			# In dev mode, proxy WebSocket connections to React Router (e.g. Vite HMR)
 			# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
@@ -1061,6 +1064,11 @@ class App:
 		# Cancel any remaining app-level tasks/timers
 		self._tasks.cancel_all()
 		self._timers.cancel_all()
+		if self._proxy is not None:
+			try:
+				await self._proxy.close()
+			except Exception:
+				logger.exception("Error during ReactProxy.close()")
 
 		# Update status
 		self.status = AppStatus.stopped

@@ -7,6 +7,7 @@ from typing import (
 	override,
 )
 
+from pulse.helpers import MISSING
 from pulse.reactive import AsyncEffect, Computed, Signal
 
 
@@ -49,7 +50,7 @@ class AsyncQueryEffect(AsyncEffect):
 		# For unkeyed queries on re-run (dependency changed), reset data/status
 		# to behave like keyed queries when key changes (new Query with data=None)
 		if self._is_unkeyed and self.runs > 0:
-			self.fetcher.data.write(None)
+			self.fetcher.data.write(MISSING)
 			self.fetcher.status.write("loading")
 
 		return super().run()

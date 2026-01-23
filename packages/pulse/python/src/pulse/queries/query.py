@@ -90,7 +90,7 @@ class QueryState(Generic[T]):
 	cfg: QueryConfig[T]
 
 	# Reactive signals for query state
-	data: Signal[T | None]
+	data: Signal[T | None | object]
 	error: Signal[Exception | None]
 	last_updated: Signal[float]
 	status: Signal[QueryStatus]
@@ -119,7 +119,7 @@ class QueryState(Generic[T]):
 
 		# Initialize reactive signals
 		self.data = Signal(
-			None if initial_data is MISSING else initial_data,
+			MISSING if initial_data is MISSING else initial_data,
 			name=f"query.data({name})",
 		)
 		self.error = Signal(None, name=f"query.error({name})")
@@ -147,7 +147,8 @@ class QueryState(Generic[T]):
 	):
 		"""Set data manually, accepting a value or updater function."""
 		current = self.data.read()
-		new_value = cast(T, data(current) if callable(data) else data)
+		current_value = cast(T | None, None if current is MISSING else current)
+		new_value = cast(T, data(current_value) if callable(data) else data)
 		self.set_success(new_value, manual=True)
 		if updated_at is not None:
 			self.set_updated_at(updated_at)
@@ -302,7 +303,7 @@ class KeyedQuery(Generic[T], Disposable):
 
 	# --- Delegate signal access to state ---
 	@property
-	def data(self) -> Signal[T | None]:
+	def data(self) -> Signal[T | None | object]:
 		return self.state.data
 
 	@property
@@ -427,7 +428,10 @@ class KeyedQuery(Generic[T], Disposable):
 		# Return result based on current state
 		if self.state.status() == "error":
 			return ActionError(cast(Exception, self.state.error.read()))
-		return ActionSuccess(cast(T, self.state.data.read()))
+		data = self.state.data.read()
+		if data is MISSING:
+			return ActionSuccess(cast(T, None))
+		return ActionSuccess(cast(T, data))
 
 	def cancel(self) -> None:
 		"""Cancel the current fetch if running."""
@@ -599,7 +603,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 	_keep_previous_data: bool
 	_enabled: Signal[bool]
 	_interval_effect: Effect | None
-	_data_computed: Computed[T | None]
+	_data_computed: Computed[T | None | object]
 
 	def __init__(
 		self,
@@ -652,7 +656,9 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 		# Computed for keep_previous_data logic
 		self._data_computed = Computed(
-			self._data_computed_fn, name="query_data(unkeyed)"
+			self._data_computed_fn,
+			name="query_data(unkeyed)",
+			initial_value=MISSING,
 		)
 
 		# Schedule initial fetch if stale (untracked to avoid reactive loop)
@@ -679,12 +685,12 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 			immediate=True,
 		)
 
-	def _data_computed_fn(self, prev: T | None) -> T | None:
+	def _data_computed_fn(self, prev: T | None | object) -> T | None | object:
 		if self._keep_previous_data and self.state.status() != "success":
 			return prev
 		raw = self.state.data()
-		if raw is None:
-			return None
+		if raw is MISSING:
+			return MISSING
 		return raw
 
 	# --- Status properties ---
@@ -714,7 +720,10 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 	@property
 	def data(self) -> T | None:
-		return self._data_computed()
+		value = self._data_computed()
+		if value is MISSING:
+			return None
+		return cast(T | None, value)
 
 	# --- State methods ---
 	def set_data(self, data: T | Callable[[T | None], T]):
@@ -780,7 +789,10 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		await self._effect.wait()
 		if self.state.status() == "error":
 			return ActionError(cast(Exception, self.state.error.read()))
-		return ActionSuccess(cast(T, self.state.data.read()))
+		data = self.state.data.read()
+		if data is MISSING:
+			return ActionSuccess(cast(T, None))
+		return ActionSuccess(cast(T, data))
 
 	async def ensure(self) -> ActionResult[T]:
 		"""Ensure an initial fetch has started, then wait for completion."""
@@ -820,7 +832,7 @@ class KeyedQueryResult(Generic[T], Disposable):
 	_on_success: Callable[[T], Awaitable[None] | None] | None
 	_on_error: Callable[[Exception], Awaitable[None] | None] | None
 	_observe_effect: Effect
-	_data_computed: Computed[T | None]
+	_data_computed: Computed[T | None | object]
 	_enabled: Signal[bool]
 	_fetch_on_mount: bool
 
@@ -877,7 +889,9 @@ class KeyedQueryResult(Generic[T], Disposable):
 			immediate=True,
 		)
 		self._data_computed = Computed(
-			self._data_computed_fn, name=f"query_data({self._query().key})"
+			self._data_computed_fn,
+			name=f"query_data({self._query().key})",
+			initial_value=MISSING,
 		)
 
 	@property
@@ -908,18 +922,21 @@ class KeyedQueryResult(Generic[T], Disposable):
 	def error(self) -> Exception | None:
 		return self._query().error.read()
 
-	def _data_computed_fn(self, prev: T | None) -> T | None:
+	def _data_computed_fn(self, prev: T | None | object) -> T | None | object:
 		query = self._query()
-		if self._keep_previous_data and query.status() != "success":
-			return prev
-		raw = query.data()
-		if raw is None:
-			return None
-		return raw
+		if self._keep_previous_data:
+			if query.status() != "success":
+				return prev
+			if query.is_fetching() and prev is not MISSING:
+				return prev
+		return query.data()
 
 	@property
 	def data(self) -> T | None:
-		return self._data_computed()
+		value = self._data_computed()
+		if value is MISSING:
+			return None
+		return cast(T | None, value)
 
 	def is_stale(self) -> bool:
 		"""Check if the query data is stale based on stale_time."""

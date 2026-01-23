@@ -87,6 +87,7 @@ class QueryStore:
 		get_previous_page_param: Callable[[list[Page[Any, Any]]], Any | None]
 		| None = None,
 		max_pages: int = 0,
+		initial_data: list[Page[Any, Any]] | None | Any = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		retries: int = 3,
@@ -110,6 +111,7 @@ class QueryStore:
 			get_next_page_param=get_next_page_param,
 			get_previous_page_param=get_previous_page_param,
 			max_pages=max_pages,
+			initial_data=initial_data,
 			initial_data_updated_at=initial_data_updated_at,
 			gc_time=gc_time,
 			retries=retries,

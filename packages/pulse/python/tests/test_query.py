@@ -5,6 +5,7 @@ from typing import Any, ParamSpec, TypeVar, cast
 
 import pulse as ps
 import pytest
+from pulse.helpers import MISSING
 from pulse.queries.protocol import QueryResult
 from pulse.queries.query import KeyedQuery, KeyedQueryResult, UnkeyedQueryResult
 from pulse.queries.store import QueryStore
@@ -162,7 +163,7 @@ async def test_query_entry_error_lifecycle():
 
 	assert entry.status.read() == "error"
 	assert entry.is_fetching.read() is False
-	assert entry.data.read() is None
+	assert entry.data.read() is MISSING
 	assert isinstance(entry.error.read(), ValueError)
 
 
@@ -383,7 +384,7 @@ async def test_query_retry_exhausted():
 	await observer.refetch()
 
 	assert entry.status.read() == "error"
-	assert entry.data.read() is None
+	assert entry.data.read() is MISSING
 	error = entry.error.read()
 	assert isinstance(error, ValueError)
 	assert error.args[0] == "failure 3"  # 1 initial + 2 retries
@@ -1029,6 +1030,85 @@ async def test_state_query_initial_data_used_on_key_change_when_keep_previous_fa
 	assert q.data == {"id": -1}
 	await q.wait()
 	assert q.is_loading is False
+	assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_initial_data_uses_previous_on_key_change_when_keep_previous_true():
+	"""
+	When keep_previous_data=True and initial_data is provided, changing the key
+	should preserve previous data while the new key fetches.
+	"""
+
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0, keep_previous_data=True)
+		async def user(self) -> dict[str, Any]:
+			await asyncio.sleep(0)
+			return {"id": self.uid}
+
+		@user.initial_data
+		def _user_initial(self):
+			return {"id": 0}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+	assert q.data == {"id": 0}
+	await q.wait()
+	assert q.data == {"id": 1}
+
+	# Change key -> should keep previous data while fetching new key
+	s.uid = 2
+	await asyncio.sleep(0)
+	assert q.is_fetching is True
+	assert q.data == {"id": 1}
+	await q.wait()
+	assert q.data == {"id": 2}
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_state_query_previous_none_preserved_with_initial_data_and_keep_previous_true():
+	"""
+	When keep_previous_data=True and previous data is None, changing the key should
+	preserve None even if initial_data is provided for the new key.
+	"""
+
+	class S(ps.State):
+		uid: int = 1
+
+		@ps.query(retries=0, keep_previous_data=True)
+		async def user(self) -> dict[str, Any] | None:
+			await asyncio.sleep(0)
+			if self.uid == 1:
+				return None
+			return {"id": self.uid}
+
+		@user.initial_data
+		def _user_initial(self):
+			return {"id": 0}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid)
+
+	s = S()
+	q = s.user
+	assert q.data == {"id": 0}
+	await q.wait()
+	assert q.data is None
+
+	s.uid = 2
+	await asyncio.sleep(0)
+	assert q.is_fetching is True
+	assert q.data is None
+	await q.wait()
 	assert q.data == {"id": 2}
 
 

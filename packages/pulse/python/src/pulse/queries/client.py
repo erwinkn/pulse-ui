@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar, overload
 
 from pulse.context import PulseContext
+from pulse.helpers import MISSING
 from pulse.queries.common import ActionResult, QueryKey
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import KeyedQuery
@@ -203,7 +204,10 @@ class QueryClient:
 		query = self.get(key)
 		if query is None:
 			return None
-		return query.data.read()
+		value = query.data.read()
+		if value is MISSING:
+			return None
+		return value
 
 	def get_infinite_data(self, key: QueryKey) -> list[Page[Any, Any]] | None:
 		"""Get the pages for an infinite query by key.

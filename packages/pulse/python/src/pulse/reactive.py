@@ -151,6 +151,7 @@ class Computed(Generic[T_co]):
 		fn: Function computing the value. May optionally accept prev_value
 			as first positional argument for incremental computation.
 		name: Debug name for the computed.
+		initial_value: Seed value used as prev_value on first compute.
 
 	Attributes:
 		value: Cached computed value.
@@ -171,13 +172,20 @@ class Computed(Generic[T_co]):
 
 	fn: Callable[..., T_co]
 	name: str | None
+	value: Any
 	dirty: bool
 	on_stack: bool
 	accepts_prev_value: bool
 
-	def __init__(self, fn: Callable[..., T_co], name: str | None = None):
+	def __init__(
+		self,
+		fn: Callable[..., T_co],
+		name: str | None = None,
+		*,
+		initial_value: Any = None,
+	):
 		self.fn = fn
-		self.value: T_co = None  # pyright: ignore[reportAttributeAccessIssue]
+		self.value = initial_value
 		self.name = name
 		self.dirty = False
 		self.on_stack = False

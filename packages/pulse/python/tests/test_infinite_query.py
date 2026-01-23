@@ -85,7 +85,7 @@ async def test_infinite_query_fetch_next_pages():
 
 @pytest.mark.asyncio
 @with_render_session
-async def test_infinite_query_keep_previous_on_key_change_with_initial_data():
+async def test_infinite_query_initial_data_used_on_key_change_with_keep_previous_true():
 	class S(ps.State):
 		uid: int = 1
 
@@ -117,7 +117,7 @@ async def test_infinite_query_keep_previous_on_key_change_with_initial_data():
 	s.uid = 2
 	await asyncio.sleep(0)
 	assert q.is_fetching is True
-	assert q.pages == [{"items": [1], "next": None}]
+	assert q.pages == [{"items": [0], "next": None}]
 	await q.wait()
 	assert q.pages == [{"items": [2], "next": None}]
 

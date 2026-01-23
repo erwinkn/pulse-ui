@@ -954,11 +954,8 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		self, prev: list[Page[T, TParam]] | None | Missing
 	) -> list[Page[T, TParam]] | None | Missing:
 		query = self._query()
-		if self._keep_previous_data:
-			if query.status() != "success":
-				return prev
-			if query.is_fetching() and prev is not MISSING:
-				return prev
+		if self._keep_previous_data and query.status() == "loading":
+			return prev
 		# Access pages.version to subscribe to structural changes
 		if len(query.pages) == 0:
 			return MISSING
@@ -1460,7 +1457,7 @@ def infinite_query(
 		stale_time: Seconds before data is considered stale (default 0.0).
 		gc_time: Seconds to keep unused query in cache (default 300.0).
 		refetch_interval: Auto-refetch interval in seconds (default None).
-		keep_previous_data: Keep previous data while refetching (default False).
+		keep_previous_data: Keep previous data while loading (default False).
 		retries: Number of retry attempts on failure (default 3).
 		retry_delay: Delay between retries in seconds (default 2.0).
 		initial_data_updated_at: Timestamp for initial data staleness.

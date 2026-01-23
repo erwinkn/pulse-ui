@@ -687,7 +687,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		)
 
 	def _data_computed_fn(self, prev: T | None | Missing) -> T | None | Missing:
-		if self._keep_previous_data and self.state.status() != "success":
+		if self._keep_previous_data and self.state.status() == "loading":
 			return prev
 		raw = self.state.data()
 		if raw is MISSING:
@@ -925,11 +925,8 @@ class KeyedQueryResult(Generic[T], Disposable):
 
 	def _data_computed_fn(self, prev: T | None | Missing) -> T | None | Missing:
 		query = self._query()
-		if self._keep_previous_data:
-			if query.status() != "success":
-				return prev
-			if query.is_fetching() and prev is not MISSING:
-				return prev
+		if self._keep_previous_data and query.status() == "loading":
+			return prev
 		return query.data()
 
 	@property
@@ -1331,7 +1328,7 @@ def query(
 		stale_time: Seconds before data is considered stale (default 0.0).
 		gc_time: Seconds to keep unused query in cache (default 300.0, None to disable).
 		refetch_interval: Auto-refetch interval in seconds (default None, disabled).
-		keep_previous_data: Keep previous data while refetching (default False).
+		keep_previous_data: Keep previous data while loading (default False).
 		retries: Number of retry attempts on failure (default 3).
 		retry_delay: Delay between retries in seconds (default 2.0).
 		initial_data_updated_at: Timestamp for initial data staleness calculation.

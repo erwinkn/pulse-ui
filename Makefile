@@ -13,7 +13,11 @@ help:
 	@echo "  make bump          - Bump package version (PKG=name ARGS='--patch|--alpha|...')"
 
 # Initialization
-init:
+init: sync
+	@uv run prek install
+	@echo "Environment initialized!"
+
+sync:
 	@echo "Syncing Python packages..."
 	@uv sync --all-packages --dev
 	@echo "Installing JS dependencies..."
@@ -23,8 +27,6 @@ init:
 	@echo "Building JS packages..."
 	@bun run build
 	@echo "Installing pre-commit hooks"
-	@uv run prek install
-	@echo "Environment initialized!"
 
 # Linting
 lint:

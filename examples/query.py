@@ -31,6 +31,12 @@ class UserStatusData(TypedDict):
 	last_seen: float
 
 
+class IntervalData(TypedDict):
+	source: str
+	calls: int
+	updated_at: float
+
+
 class UpdateUserNameResult(TypedDict):
 	success: bool
 	new_name: str
@@ -47,6 +53,9 @@ class UserApi(ps.State):
 	error_calls: int = 0
 	mutation_success_calls: int = 0
 	mutation_error_calls: int = 0
+	show_fast_interval: bool = True
+	show_fast_alt_interval: bool = False
+	show_slow_interval: bool = True
 
 	# Keyed query with keep_previous_data default True
 	@ps.query(keep_previous_data=False)
@@ -164,6 +173,89 @@ class UserApi(ps.State):
 		print(f"Delete failed: {error}")
 
 
+class IntervalFastState(ps.State):
+	calls: int = 0
+
+	@ps.query(retries=0, refetch_interval=0.5)
+	async def interval(self) -> IntervalData:
+		self.calls += 1
+		await asyncio.sleep(0)
+		return {
+			"source": "fast",
+			"calls": self.calls,
+			"updated_at": time.time(),
+		}
+
+	@interval.key
+	def _interval_key(self):
+		return ("interval-demo",)
+
+
+class IntervalFastAltState(ps.State):
+	calls: int = 0
+
+	@ps.query(retries=0, refetch_interval=0.5, enabled=False)
+	async def interval(self) -> IntervalData:
+		self.calls += 1
+		await asyncio.sleep(0)
+		return {
+			"source": "fast-alt",
+			"calls": self.calls,
+			"updated_at": time.time(),
+		}
+
+	@interval.key
+	def _interval_key(self):
+		return ("interval-demo",)
+
+
+class IntervalSlowState(ps.State):
+	calls: int = 0
+
+	@ps.query(retries=0, refetch_interval=1.5)
+	async def interval(self) -> IntervalData:
+		self.calls += 1
+		await asyncio.sleep(0)
+		return {
+			"source": "slow",
+			"calls": self.calls,
+			"updated_at": time.time(),
+		}
+
+	@interval.key
+	def _interval_key(self):
+		return ("interval-demo",)
+
+
+@ps.component
+def IntervalObserver(label: str, state_cls: type[ps.State], enabled: bool):
+	with ps.init():
+		s = state_cls()
+
+	if enabled:
+		s.interval.enable()
+	else:
+		s.interval.disable()
+
+	data = s.interval.data
+	if not enabled and data is None:
+		data_label = "Disabled"
+	else:
+		data_label = "Loading..." if data is None else f"{data}"
+	status = "enabled" if enabled else "disabled"
+
+	return ps.div(
+		ps.p(
+			f"{label} ({status}) calls={s.calls}",
+			className="text-xs text-gray-600",
+		),
+		ps.p(
+			f"{label} data={data_label}",
+			className="text-xs text-gray-600",
+		),
+	)
+
+
 @ps.component
 def QueryExample():
 	with ps.init():
@@ -180,6 +272,15 @@ def QueryExample():
 
 	def set_retry_demo():
 		s.user_id = 99
+
+	def toggle_fast_interval():
+		s.show_fast_interval = not s.show_fast_interval
+
+	def toggle_fast_alt_interval():
+		s.show_fast_alt_interval = not s.show_fast_alt_interval
+
+	def toggle_slow_interval():
+		s.show_slow_interval = not s.show_slow_interval
 
 	async def optimistic_rename():
 		# Show optimistic change immediately
@@ -344,6 +445,58 @@ def QueryExample():
 			ps.p(
 				"Changes when user_id changes automatically.",
 				className="text-xs text-gray-600",
+			),
+			className="p-3 rounded bg-white shadow mb-6",
+		),
+		# Interval observers
+		ps.div(
+			ps.h2(
+				"Interval Observers (min interval wins)",
+				className="text-xl font-semibold mb-2",
+			),
+			ps.p(
+				"Multiple observers share the same query key. The query uses the smallest positive interval.",
+				className="text-xs text-gray-600 mb-2",
+			),
+			ps.p(
+				"If two observers share the smallest interval, the most recently mounted one provides the fetch function.",
+				className="text-xs text-gray-600 mb-3",
+			),
+			ps.div(
+				ps.button(
+					"Disable fast (0.5s)"
+					if s.show_fast_interval
+					else "Enable fast (0.5s)",
+					onClick=toggle_fast_interval,
+					className="btn-secondary mr-2",
+				),
+				ps.button(
+					"Disable fast-alt (0.5s)"
+					if s.show_fast_alt_interval
+					else "Enable fast-alt (0.5s)",
+					onClick=toggle_fast_alt_interval,
+					className="btn-secondary mr-2",
+				),
+				ps.button(
+					"Disable slow (1.5s)"
+					if s.show_slow_interval
+					else "Enable slow (1.5s)",
+					onClick=toggle_slow_interval,
+					className="btn-secondary",
+				),
+				className="mb-3 flex flex-wrap gap-2",
+			),
+			ps.p(
+				"Observer data is shared; call counters show which observer drives refetches.",
+				className="text-xs text-gray-600 mb-2",
+			),
+			ps.div(
+				IntervalObserver("fast", IntervalFastState, s.show_fast_interval),
+				IntervalObserver(
+					"fast-alt", IntervalFastAltState, s.show_fast_alt_interval
+				),
+				IntervalObserver("slow", IntervalSlowState, s.show_slow_interval),
+				className="space-y-2",
 			),
 			className="p-3 rounded bg-white shadow mb-6",
 		),

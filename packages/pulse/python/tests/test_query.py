@@ -88,6 +88,63 @@ async def test_query_entry_lifecycle():
 
 
 @pytest.mark.asyncio
+async def test_query_wait_is_side_effect_free_and_ensure_starts_fetch():
+	key = ("test", "ensure")
+	calls = 0
+
+	async def fetcher():
+		nonlocal calls
+		calls += 1
+		await asyncio.sleep(0)
+		return "result"
+
+	query = KeyedQuery(key, retries=0, retry_delay=0.01)
+	query_computed = Computed(lambda: query, name="test_query(ensure)")
+	observer = KeyedQueryResult(
+		query_computed, fetch_fn=fetcher, gc_time=300.0, fetch_on_mount=False
+	)
+
+	result = await observer.wait()
+	assert calls == 0
+	assert observer.is_loading
+	assert observer.is_fetching is False
+	assert result.status == "success"
+	assert result.data is None
+
+	result = await observer.ensure()
+	assert result.status == "success"
+	assert result.data == "result"
+	assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_wait_is_side_effect_free_and_ensure_starts_fetch():
+	calls = 0
+
+	class S(ps.State):
+		@ps.query(fetch_on_mount=False, retries=0)
+		async def value(self) -> int:
+			nonlocal calls
+			calls += 1
+			await asyncio.sleep(0)
+			return 42
+
+	s = S()
+	q = s.value
+
+	result = await q.wait()
+	assert calls == 0
+	assert q.is_loading
+	assert result.status == "success"
+	assert result.data is None
+
+	result = await q.ensure()
+	assert result.status == "success"
+	assert result.data == 42
+	assert calls == 1
+
+
+@pytest.mark.asyncio
 async def test_query_entry_error_lifecycle():
 	key = ("test", 1)
 
@@ -1854,6 +1911,37 @@ async def test_state_query_refetch_interval():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_state_query_refetch_interval_zero_fetches_on_mount_only():
+	"""Test that refetch_interval=0 disables interval but still fetches on mount."""
+
+	class S(ps.State):
+		calls: int = 0
+
+		@ps.query(retries=0, refetch_interval=0)
+		async def data(self) -> int:
+			self.calls += 1
+			await asyncio.sleep(0)
+			return self.calls
+
+		@data.key
+		def _data_key(self):
+			return ("interval-zero",)
+
+	s = S()
+	q = s.data
+
+	# Auto-fetch should happen on mount
+	assert await wait_for(lambda: q.data == 1 and s.calls == 1)
+
+	# No interval refetch should be scheduled
+	assert not await wait_for(lambda: s.calls > 1, timeout=0.05)
+	assert q.data == 1
+
+	query_result(q).dispose()
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_state_query_refetch_interval_stops_on_dispose():
 	"""Test that refetch_interval stops when query is disposed."""
 
@@ -1887,6 +1975,81 @@ async def test_state_query_refetch_interval_stops_on_dispose():
 	# Wait and verify no more refetches (negative test - sleep is appropriate here)
 	assert not await wait_for(lambda: s.calls > calls_at_dispose, timeout=0.05)
 	assert s.calls == calls_at_dispose
+
+
+@pytest.mark.asyncio
+async def test_keyed_query_interval_uses_min_interval_and_latest_observer():
+	"""Interval uses min observer interval and latest observer with that interval."""
+	calls_a = 0
+	calls_b = 0
+	calls_c = 0
+
+	async def fetch_a():
+		nonlocal calls_a
+		calls_a += 1
+		await asyncio.sleep(0)
+		return calls_a
+
+	async def fetch_b():
+		nonlocal calls_b
+		calls_b += 1
+		await asyncio.sleep(0)
+		return calls_b
+
+	async def fetch_c():
+		nonlocal calls_c
+		calls_c += 1
+		await asyncio.sleep(0)
+		return calls_c
+
+	query = KeyedQuery(("interval-min",), retries=0, retry_delay=0.01)
+	query_computed = Computed(lambda: query, name="test_query(interval-min)")
+
+	obs_a = KeyedQueryResult(
+		query_computed,
+		fetch_fn=fetch_a,
+		refetch_interval=0.02,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_a >= 1, timeout=0.3)
+
+	obs_b = KeyedQueryResult(
+		query_computed,
+		fetch_fn=fetch_b,
+		refetch_interval=0.01,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_b >= 1, timeout=0.3)
+
+	calls_a_at = calls_a
+	calls_b_at = calls_b
+	assert await wait_for(lambda: calls_b >= calls_b_at + 3, timeout=0.3)
+	assert calls_a == calls_a_at
+
+	obs_c = KeyedQueryResult(
+		query_computed,
+		fetch_fn=fetch_c,
+		refetch_interval=0.01,
+		fetch_on_mount=False,
+	)
+	assert await wait_for(lambda: calls_c >= 1, timeout=0.3)
+
+	calls_b_at = calls_b
+	calls_c_at = calls_c
+	assert await wait_for(lambda: calls_c >= calls_c_at + 3, timeout=0.3)
+	assert calls_b == calls_b_at
+
+	obs_c.dispose()
+
+	calls_b_at = calls_b
+	assert await wait_for(lambda: calls_b >= calls_b_at + 3, timeout=0.3)
+
+	obs_b.dispose()
+
+	calls_a_at = calls_a
+	assert await wait_for(lambda: calls_a >= calls_a_at + 2, timeout=0.3)
+
+	obs_a.dispose()
 
 
 @pytest.mark.asyncio

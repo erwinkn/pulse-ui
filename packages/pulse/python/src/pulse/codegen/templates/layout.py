@@ -53,15 +53,11 @@ export async function loader(args: LoaderFunctionArgs) {
   return data(prerenderData, { headers });
 }
 
-// Client loader: re-prerender on navigation while reusing renderId
+// Client loader: re-prerender on navigation while reusing directives
 export async function clientLoader(args: ClientLoaderFunctionArgs) {
   const url = new URL(args.request.url);
   const matches = matchRoutes(rrPulseRouteTree, url.pathname) ?? [];
   const paths = matches.map(m => m.route.uniquePath);
-  const renderId = 
-    typeof window !== "undefined" && typeof sessionStorage !== "undefined"
-      ? (sessionStorage.getItem("__PULSE_RENDER_ID") ?? undefined) 
-      : undefined;
   const directives = 
     typeof window !== "undefined" && typeof sessionStorage !== "undefined"
       ? (JSON.parse(sessionStorage.getItem("__PULSE_DIRECTIVES") ?? "{}"))
@@ -76,7 +72,7 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
     method: "POST",
     headers,
     credentials: "include",
-    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args), renderId }),
+    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
   });
   if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
   const body = await res.json();
@@ -92,7 +88,6 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
 export default function PulseLayout() {
   const data = useLoaderData<typeof loader>();
   if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
-    sessionStorage.setItem("__PULSE_RENDER_ID", data.renderId);
     sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(data.directives));
   }
   return (
@@ -101,6 +96,6 @@ export default function PulseLayout() {
     </PulseProvider>
   );
 }
-// Persist renderId and directives in sessionStorage for reuse in clientLoader is handled within the component
+// Persist directives in sessionStorage for reuse in clientLoader is handled within the component
 """
 )

@@ -19,6 +19,7 @@ from pulse.context import PulseContext
 from pulse.helpers import (
 	MISSING,
 	Disposable,
+	Missing,
 	call_flexible,
 	later,
 	maybe_await,
@@ -242,7 +243,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		max_pages: int = 0,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
-		initial_data: list[Page[T, TParam]] | None | Any = MISSING,
+		initial_data: list[Page[T, TParam]] | Missing | None = MISSING,
 		initial_data_updated_at: float | dt.datetime | None = None,
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
@@ -266,7 +267,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		if initial_data is MISSING:
 			initial_pages = []
 		else:
-			initial_pages = cast(list[Page[T, TParam]], initial_data) or []
+			initial_pages = cast(list[Page[T, TParam]] | None, initial_data) or []
 
 		self.pages = ReactiveList(initial_pages)
 		self.error = Signal(None, name=f"inf_query.error({key})")
@@ -859,7 +860,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 	_on_success: Callable[[list[Page[T, TParam]]], Awaitable[None] | None] | None
 	_on_error: Callable[[Exception], Awaitable[None] | None] | None
 	_observe_effect: Effect
-	_data_computed: Computed[list[Page[T, TParam]] | None | object]
+	_data_computed: Computed[list[Page[T, TParam]] | None | Missing]
 	_enabled: Signal[bool]
 	_fetch_on_mount: bool
 
@@ -950,8 +951,8 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		return self._query().error.read()
 
 	def _data_computed_fn(
-		self, prev: list[Page[T, TParam]] | None | object
-	) -> list[Page[T, TParam]] | None | object:
+		self, prev: list[Page[T, TParam]] | None | Missing
+	) -> list[Page[T, TParam]] | None | Missing:
 		query = self._query()
 		if self._keep_previous_data:
 			if query.status() != "success":
@@ -1137,7 +1138,10 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 	_retries: int
 	_retry_delay: float
 	_initial_data: (
-		list[Page[T, TParam]] | Callable[[TState], list[Page[T, TParam]]] | None
+		list[Page[T, TParam]]
+		| Callable[[TState], list[Page[T, TParam]]]
+		| Missing
+		| None
 	)
 	_initial_page_param: TParam
 	_get_next_page_param: (
@@ -1190,7 +1194,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		self._retry_delay = retry_delay
 		self._on_success_fn = None
 		self._on_error_fn = None
-		self._initial_data = MISSING  # pyright: ignore[reportAttributeAccessIssue]
+		self._initial_data = MISSING
 		self._key = key
 		self._initial_data_updated_at = initial_data_updated_at
 		self._enabled = enabled
@@ -1279,10 +1283,15 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 			raise RuntimeError(
 				f"key is required for infinite query '{self.name}'. Provide a key via @infinite_query(key=...) or @{self.name}.key decorator."
 			)
-		initial_data = (
+		raw_initial = (
 			call_flexible(self._initial_data, state)
 			if callable(self._initial_data)
 			else self._initial_data
+		)
+		initial_data = (
+			MISSING
+			if raw_initial is MISSING
+			else cast(list[Page[T, TParam]] | None, raw_initial)
 		)
 		query = self._resolve_keyed(
 			state,
@@ -1326,7 +1335,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		fetch_fn: Callable[[TParam], Awaitable[T]],
 		next_fn: Callable[[list[Page[T, TParam]]], TParam | None],
 		prev_fn: Callable[[list[Page[T, TParam]]], TParam | None] | None,
-		initial_data: list[Page[T, TParam]] | None,
+		initial_data: list[Page[T, TParam]] | Missing | None,
 		initial_data_updated_at: float | dt.datetime | None,
 	) -> Computed[InfiniteQuery[T, TParam]]:
 		assert self._key is not None

@@ -89,7 +89,15 @@ P = ParamSpec("P")
 CSSProperties = dict[str, Any]
 
 
-MISSING = object()
+class Missing:
+	__slots__: tuple[str, ...] = ()
+
+	@override
+	def __repr__(self) -> str:
+		return "MISSING"
+
+
+MISSING = Missing()
 
 
 class File(TypedDict):

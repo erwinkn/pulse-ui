@@ -27,14 +27,16 @@ def create_query_with_observer(
 	retry_delay: float = 0.01,
 ) -> tuple[KeyedQuery[Any], KeyedQueryResult[Any]]:
 	"""Helper to create a Query with a QueryResult observer (required for fetch function)."""
-	query = KeyedQuery(key, gc_time=gc_time, retries=retries, retry_delay=retry_delay)
+	query: KeyedQuery[Any] = KeyedQuery(
+		key, gc_time=gc_time, retries=retries, retry_delay=retry_delay
+	)
 	query_computed = Computed(lambda: query, name=f"test_query({key})")
 	result = KeyedQueryResult(query_computed, fetch_fn=fetcher, gc_time=gc_time)
 	return query, result
 
 
-def query_result(q: QueryResult[T]) -> KeyedQueryResult[T] | UnkeyedQueryResult[T]:
-	"""Helper to cast QueryResult to the concrete union type for accessing internal methods."""
+def query_result(q: Any) -> KeyedQueryResult[T] | UnkeyedQueryResult[T]:
+	"""Helper for accessing internal methods on concrete query result types."""
 	return cast(KeyedQueryResult[T] | UnkeyedQueryResult[T], q)
 
 
@@ -99,7 +101,7 @@ async def test_query_wait_is_side_effect_free_and_ensure_starts_fetch():
 		await asyncio.sleep(0)
 		return "result"
 
-	query = KeyedQuery(key, retries=0, retry_delay=0.01)
+	query: KeyedQuery[str] = KeyedQuery(key, retries=0, retry_delay=0.01)
 	query_computed = Computed(lambda: query, name="test_query(ensure)")
 	observer = KeyedQueryResult(
 		query_computed, fetch_fn=fetcher, gc_time=300.0, fetch_on_mount=False
@@ -251,7 +253,7 @@ async def test_query_store_garbage_collection():
 		return "data"
 
 	# Create with short gc_time
-	entry = store.ensure(key, gc_time=0.01)
+	entry: KeyedQuery[str] = store.ensure(key, gc_time=0.01)
 	assert store.get(key) is entry
 
 	observer = KeyedQueryResult(
@@ -282,7 +284,7 @@ async def test_query_entry_gc_time_reconciliation():
 		await asyncio.sleep(0)
 		return None
 
-	entry = KeyedQuery(("test", 1), gc_time=0.0)
+	entry: KeyedQuery[None] = KeyedQuery(("test", 1), gc_time=0.0)
 
 	query_computed = Computed(lambda: entry, name="test_query")
 	# QueryResult automatically observes on creation
@@ -492,7 +494,7 @@ async def test_query_retry_cancellation():
 
 	# Use longer retry delay to make timing more reliable
 	# Create with fetch_on_mount=False so we control when fetching starts
-	query = KeyedQuery(key, gc_time=300.0, retries=3, retry_delay=1.0)
+	query: KeyedQuery[Any] = KeyedQuery(key, gc_time=300.0, retries=3, retry_delay=1.0)
 	query_computed = Computed(lambda: query, name=f"test_query({key})")
 	observer = KeyedQueryResult(
 		query_computed, fetch_fn=fetcher, gc_time=300.0, fetch_on_mount=False
@@ -2082,7 +2084,7 @@ async def test_keyed_query_interval_uses_min_interval_and_latest_observer():
 		await asyncio.sleep(0)
 		return calls_c
 
-	query = KeyedQuery(("interval-min",), retries=0, retry_delay=0.01)
+	query: KeyedQuery[int] = KeyedQuery(("interval-min",), retries=0, retry_delay=0.01)
 	query_computed = Computed(lambda: query, name="test_query(interval-min)")
 
 	obs_a = KeyedQueryResult(

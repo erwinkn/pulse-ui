@@ -294,7 +294,7 @@ class RenderSession:
 		*,
 		server_address: str | None = None,
 		client_address: str | None = None,
-		prerender_queue_timeout: float = 5.0,
+		prerender_queue_timeout: float = 15.0,
 		detach_queue_timeout: float = 15.0,
 		disconnect_queue_timeout: float = 300.0,
 		render_loop_limit: int = 50,

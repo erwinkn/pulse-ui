@@ -258,6 +258,7 @@ class RenderSession:
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_global_states: dict[str, State]
+	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 
@@ -283,6 +284,7 @@ class RenderSession:
 		self._client_address = client_address
 		self._send_message = None
 		self._global_states = {}
+		self._global_queue = []
 		self.query_store = QueryStore()
 		self.connected = False
 		self.channels = ChannelsManager(self)
@@ -319,6 +321,10 @@ class RenderSession:
 		"""WebSocket connected. Set sender, don't auto-flush (attach does that)."""
 		self._send_message = send_message
 		self.connected = True
+		if self._global_queue:
+			for msg in self._global_queue:
+				send_message(msg)
+			self._global_queue = []
 
 	def disconnect(self):
 		"""WebSocket disconnected. Start queuing briefly before pausing."""
@@ -333,11 +339,20 @@ class RenderSession:
 
 	def send(self, message: ServerMessage):
 		"""Route message based on mount state."""
+		# Global messages (not path-specific, or navigate_to) bypass mount state.
+		if message.get("type") == "navigate_to":
+			if self._send_message:
+				self._send_message(message)
+			else:
+				self._global_queue.append(message)
+			return
 		# Global messages (not path-specific) go directly if connected
 		path = message.get("path")
 		if path is None:
 			if self._send_message:
 				self._send_message(message)
+			else:
+				self._global_queue.append(message)
 			return
 
 		# Normalize path for lookup
@@ -441,7 +456,6 @@ class RenderSession:
 
 		if mount is None or mount.state == "idle":
 			# Initial render must come from prerender
-			print(f"[DEBUG] Missing or idle route '{path}', reloading")
 			self.send({"type": "reload"})
 			return
 
@@ -583,6 +597,7 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
+		self._global_queue = []
 		self._send_message = None
 		self.connected = False
 

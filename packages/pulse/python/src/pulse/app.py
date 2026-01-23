@@ -546,13 +546,15 @@ class App:
 			route_info = payload.get("routeInfo")
 			debug = os.environ.get("PULSE_DEBUG_RENDER")
 			if debug:
-				logger.info(
-					"[PulseDebug][prerender] session=%s header_render_id=%s payload_render_id=%s paths=%s route_info=%s",
-					session.sid,
-					request.headers.get("x-pulse-render-id"),
-					payload.get("renderId"),
-					paths,
-					route_info,
+				print(
+					"[PulseDebug][prerender] session=%s header_render_id=%s payload_render_id=%s paths=%s route_info=%s"
+					% (
+						session.sid,
+						request.headers.get("x-pulse-render-id"),
+						payload.get("renderId"),
+						paths,
+						route_info,
+					)
 				)
 
 			client_addr: str | None = get_client_address(request)
@@ -568,14 +570,10 @@ class App:
 					render_id, session, client_address=client_addr
 				)
 			if debug:
-				logger.info(
-					"[PulseDebug][prerender] session=%s render=%s reused=%s connected=%s",
-					session.sid,
-					render_id,
-					reused,
-					render.connected,
+				print(
+					"[PulseDebug][prerender] session=%s render=%s reused=%s connected=%s"
+					% (session.sid, render_id, reused, render.connected)
 				)
-			print(f"Prerendering for RenderSession {render_id}")
 
 			# Schedule cleanup timeout (will cancel/reschedule on activity)
 			if not render.connected:
@@ -713,7 +711,6 @@ class App:
 		):
 			# Expect renderId during websocket auth and require a valid user session
 			rid = auth.get("render_id") if auth else None
-
 			# Parse cookies from environ and ensure a session exists
 			cookie = self.cookie.get_from_socketio(environ)
 			if cookie is None:
@@ -721,10 +718,8 @@ class App:
 			session = await self.get_or_create_session(cookie)
 			debug = os.environ.get("PULSE_DEBUG_RENDER")
 			if debug:
-				logger.info(
-					"[PulseDebug][connect] session=%s render_id=%s",
-					session.sid,
-					rid,
+				print(
+					"[PulseDebug][connect] session=%s render_id=%s" % (session.sid, rid)
 				)
 
 			if not rid:
@@ -738,10 +733,9 @@ class App:
 			if render is None:
 				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line
 				if debug:
-					logger.info(
-						"[PulseDebug][connect] render_missing session=%s render_id=%s creating=true",
-						session.sid,
-						rid,
+					print(
+						"[PulseDebug][connect] render_missing session=%s render_id=%s creating=true"
+						% (session.sid, rid)
 					)
 				render = self.create_render(
 					rid, session, client_address=get_client_address_socketio(environ)
@@ -754,14 +748,10 @@ class App:
 						+ f"owner={owner} session={session.sid}"
 					)
 				if debug:
-					logger.info(
-						"[PulseDebug][connect] render_found session=%s render_id=%s owner=%s connected=%s",
-						session.sid,
-						render.id,
-						owner,
-						render.connected,
+					print(
+						"[PulseDebug][connect] render_found session=%s render_id=%s owner=%s connected=%s"
+						% (session.sid, render.id, owner, render.connected)
 					)
-			print(f"Connected to RenderSession {render.id}")
 
 			def on_message(message: ServerMessage):
 				payload = serialize(message)
@@ -879,13 +869,15 @@ class App:
 			"update",
 			"detach",
 		):
-			logger.info(
-				"[PulseDebug][client-message] session=%s render=%s type=%s path=%s route_info=%s",
-				session.sid,
-				render.id,
-				msg["type"],
-				msg.get("path"),
-				msg.get("routeInfo"),
+			print(
+				"[PulseDebug][client-message] session=%s render=%s type=%s path=%s route_info=%s"
+				% (
+					session.sid,
+					render.id,
+					msg["type"],
+					msg.get("path"),
+					msg.get("routeInfo"),
+				)
 			)
 
 		async def _next() -> Ok[None]:

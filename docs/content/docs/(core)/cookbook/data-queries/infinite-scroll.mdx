@@ -128,6 +128,38 @@ async def feed(self, page_param: int) -> FeedPage:
     ...
 ```
 
+## Providing initial data
+
+Show placeholder content immediately while the first page loads:
+
+```python
+from pulse.queries.infinite_query import Page
+
+@ps.infinite_query(initial_page_param=0)
+async def feed(self, page_param: int) -> FeedPage:
+    ...
+
+@feed.initial_data
+def _initial_feed(self):
+    return [Page(data={"items": [], "next_cursor": 0, "prev_cursor": None}, param=0)]
+```
+
+## Avoiding flicker on key changes
+
+Use `keep_previous_data=True` to keep showing old data while a new feed loads (e.g., when switching feed types):
+
+```python
+@ps.infinite_query(initial_page_param=0, keep_previous_data=True)
+async def feed(self, page_param: int) -> FeedPage:
+    ...
+
+@feed.key
+def _feed_key(self):
+    return ("feed", self.feed_type)
+```
+
+When `feed_type` changes, the old feed remains visible until the new one loads.
+
 ## See also
 
 - [Core Concepts: Queries and Mutations](/docs/concepts/queries)

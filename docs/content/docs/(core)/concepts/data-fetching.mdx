@@ -111,8 +111,9 @@ Every query gives you these properties:
 | `refetch()` | User clicks a "refresh" button, or you need fresh data after some action |
 | `invalidate()` | Mark data as stale so it refetches on next access (lazy refresh) |
 | `set_data(...)` | Optimistic updates—show a change immediately before the server confirms |
+| `set_initial_data(...)` | Seed placeholder data before the first fetch completes |
 | `ensure()` | Start the initial fetch if needed, then wait for the result |
-| `wait()` | In an async callback when you need to await an in-flight fetch |
+| `wait()` | Await an in-flight fetch (doesn't start one) |
 
 ### When do queries refetch?
 
@@ -171,6 +172,28 @@ async def user(self):
 | Reduce API calls for data that doesn't change often | `stale_time=60.0` (or longer) |
 | Handle flaky network connections | `retries=3, retry_delay=1.0` |
 | Keep data in memory longer for fast back-navigation | `gc_time=300.0` |
+
+### How keep_previous_data works with key changes
+
+When you change a keyed query's key (like switching from user 1 to user 2), `keep_previous_data=True` preserves the *old* data while the new query fetches:
+
+```python
+@ps.query(keep_previous_data=True)
+async def user(self):
+    return await fetch_user(self.user_id)
+
+@user.key
+def _user_key(self):
+    return ("user", self.user_id)
+```
+
+With this setup:
+1. User 1's data loads and displays
+2. You change `user_id` to 2
+3. User 1's data stays visible while user 2 loads
+4. User 2's data replaces it when ready
+
+This works even when `initial_data` is provided—the previous data takes priority during the transition. If the previous data was `None`, `None` is preserved (not the initial data placeholder).
 
 ### Reacting to query results
 

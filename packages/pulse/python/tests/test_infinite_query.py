@@ -44,6 +44,32 @@ def with_render_session(fn: Callable[..., Awaitable[object]]):
 
 
 @pytest.mark.asyncio
+async def test_infinite_query_dispose_cancels_gc():
+	async def fetcher(page_param: int) -> int:
+		return page_param
+
+	query: InfiniteQuery[int, int] = InfiniteQuery(
+		("inf", "gc"),
+		initial_page_param=0,
+		get_next_page_param=lambda _pages: None,
+		gc_time=0.01,
+	)
+	observer = InfiniteQueryResult(
+		Computed(lambda: query, name="inf_query(gc)"),
+		fetch_fn=fetcher,
+		gc_time=0.01,
+	)
+	observer.dispose()
+	assert query._gc_handle is not None  # pyright: ignore[reportPrivateUsage]
+
+	try:
+		query.dispose()
+		assert query._gc_handle is None  # pyright: ignore[reportPrivateUsage]
+	finally:
+		query.cancel_gc()
+
+
+@pytest.mark.asyncio
 @with_render_session
 async def test_infinite_query_fetch_next_pages():
 	class S(ps.State):

@@ -274,6 +274,25 @@ async def test_query_store_garbage_collection():
 
 
 @pytest.mark.asyncio
+async def test_keyed_query_dispose_cancels_gc():
+	async def fetcher():
+		return "data"
+
+	entry: KeyedQuery[str] = KeyedQuery(("test", "gc"), gc_time=0.01)
+	observer = KeyedQueryResult(
+		Computed(lambda: entry, name="test_query(gc)"), fetch_fn=fetcher, gc_time=0.01
+	)
+	observer.dispose()
+	assert entry._gc_handle is not None  # pyright: ignore[reportPrivateUsage]
+
+	try:
+		entry.dispose()
+		assert entry._gc_handle is None  # pyright: ignore[reportPrivateUsage]
+	finally:
+		entry.cancel_gc()
+
+
+@pytest.mark.asyncio
 async def test_query_entry_gc_time_reconciliation():
 	"""
 	Verify that gc_time only increases, never decreases.

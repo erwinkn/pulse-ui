@@ -576,6 +576,7 @@ class KeyedQuery(Generic[T], Disposable):
 	@override
 	def dispose(self):
 		"""Clean up the query, cancelling any in-flight fetch."""
+		self.cancel_gc()
 		self.cancel()
 		if self._interval_effect is not None:
 			self._interval_effect.dispose()

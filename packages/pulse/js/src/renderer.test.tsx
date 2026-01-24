@@ -239,6 +239,28 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["from-A"]);
 	});
 
+	it("clears children when reconciliation N=0", () => {
+		const { renderer } = makeRenderer();
+		const initialVDOM: VDOMNode = {
+			tag: "div",
+			children: [{ tag: "span", children: ["A"] }],
+		};
+		let tree = renderer.renderNode(initialVDOM);
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "reconciliation",
+				path: "",
+				N: 0,
+				new: [[], []],
+				reuse: [[], []],
+			},
+		]);
+
+		const root = tree as React.ReactElement;
+		expect(childrenArray(root)).toHaveLength(0);
+	});
+
 	it("update_props can switch callback binding on/off by changing eval", () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({ tag: "button", props: { id: "x" } });

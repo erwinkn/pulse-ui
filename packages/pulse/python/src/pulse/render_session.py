@@ -645,12 +645,19 @@ class RenderSession:
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		mount = self.route_mounts[path]
 		cb = mount.tree.callbacks[key]
+		ctx = PulseContext.get()
+		session = ctx.session
+		route = mount.route
+
+		def flush():
+			with PulseContext.update(session=session, render=self, route=route):
+				flush_effects()
 
 		def report(e: BaseException, is_async: bool = False):
 			self.report_error(path, "callback", e, {"callback": key, "async": is_async})
 
 		try:
-			with PulseContext.update(render=self, route=mount.route):
+			with PulseContext.update(render=self, route=route):
 				res = cb.fn(*args[: cb.n_args])
 				if iscoroutine(res):
 
@@ -663,8 +670,11 @@ class RenderSession:
 							return
 						if exc:
 							report(exc, True)
+						flush()
 
 					self.create_task(res, name=f"callback:{key}", on_done=_on_done)
+				else:
+					flush()
 		except Exception as e:
 			report(e)
 

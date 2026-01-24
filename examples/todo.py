@@ -2,8 +2,12 @@ import pulse as ps
 
 
 class Todos(ps.State):
-	items: list[str] = []
-	draft: str = ""
+	items: list[str]
+	draft: str
+
+	def __init__(self):
+		self.items = []
+		self.draft = ""
 
 	def update(self, value: str):
 		self.draft = value

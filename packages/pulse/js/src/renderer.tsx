@@ -503,8 +503,14 @@ export class VDOMRenderer {
 								nextChildren.push(prevChildren[i]);
 							}
 						}
+						if (nextChildren.length === 0) {
+							nextChildren.push(null);
+						}
 
-						return this.#cloneWithMeta(element, cloneElement(element, null!, ...nextChildren));
+						return this.#cloneWithMeta(
+							element,
+							cloneElement(element, null!, ...nextChildren),
+						);
 					}
 
 					default:

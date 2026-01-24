@@ -423,11 +423,12 @@ from .shapes import (
 from .shapes import (
 	TrapezoidProps as TrapezoidProps,
 )
-from .version import __version__
+
+# from .version import __version__
 
 ps.require(
 	{
-		"pulse-recharts": __version__,
-		"recharts": ">=3.7.0",
+		# "pulse-recharts": __version__,
+		"recharts": ">=3.6.0",
 	}
 )

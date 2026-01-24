@@ -233,6 +233,11 @@ def _parse_host(server_address: str) -> str | None:
 		return None
 
 
+def _is_localhost(server_address: str | None) -> bool:
+	host = _parse_host(server_address or "")
+	return host in ("localhost", "127.0.0.1", "::1")
+
+
 def _base_domain(host: str) -> str:
 	# Simplified rule: drop the leftmost label, keep everything to the right.
 	# Assumes host is a subdomain (e.g., api.example.com -> example.com).
@@ -265,6 +270,8 @@ def compute_cookie_secure(env: PulseEnv, server_address: str | None) -> bool:
 			)
 		return False
 	if env in ("prod", "ci") and not secure:
+		if _is_localhost(server_address):
+			return False
 		raise RuntimeError(
 			"Refusing to use insecure cookies in prod/ci. "
 			+ "Use an https server_address or set Cookie(secure=True) explicitly."

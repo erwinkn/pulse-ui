@@ -50,7 +50,10 @@ window.$RefreshReg$ = () => {};
 window.$RefreshSig$ = () => (type) => type;
 window.__vite_plugin_react_preamble_installed__ = true;
 </script>`;
-const devCss = '<link rel="stylesheet" href="/app/app.css">';
+const devCss = [
+	'<link rel="preload" as="style" href="/app/app.css" fetchpriority="high">',
+	'<link rel="stylesheet" href="/app/app.css">',
+].join("");
 
 export async function render(url: string, serialized: unknown) {
 	const prerender = deserialize(serialized) as PulsePrerender;

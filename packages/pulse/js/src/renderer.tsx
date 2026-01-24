@@ -30,6 +30,8 @@ type ElementMeta = {
 	cbKeys?: Set<string>;
 };
 
+type UpdateSource = "server" | "local";
+
 export class VDOMRenderer {
 	#client: PulseSocketIOClient;
 	#path: string;
@@ -40,6 +42,8 @@ export class VDOMRenderer {
 
 	// Track eval keys + callback keys per ReactElement (not real props).
 	#metaMap: WeakMap<ReactElement, ElementMeta>;
+	#inputOverrides: Map<string, unknown>;
+	#localUpdateHandler: ((update: VDOMUpdate) => void) | null = null;
 
 	constructor(client: PulseSocketIOClient, path: string, registry: ComponentRegistry = {}) {
 		this.#client = client;
@@ -47,6 +51,11 @@ export class VDOMRenderer {
 		this.#registry = registry;
 		this.#callbackCache = new Map();
 		this.#metaMap = new WeakMap();
+		this.#inputOverrides = new Map();
+	}
+
+	setLocalUpdateHandler(handler: ((update: VDOMUpdate) => void) | null) {
+		this.#localUpdateHandler = handler;
 	}
 
 	getObject(key: string): unknown {
@@ -206,11 +215,69 @@ export class VDOMRenderer {
 		return path ? `${path}.${prop}` : prop;
 	}
 
+	#recordInputOverride(path: string, evt: any) {
+		const nextValue = evt?.target?.value;
+		if (nextValue === undefined) return;
+		this.#inputOverrides.set(path, nextValue);
+	}
+
+	#applyInputOverride(
+		path: string,
+		elementType: unknown,
+		props: Record<string, any>,
+		source: UpdateSource,
+	): void {
+		if (typeof elementType !== "string") return;
+		if (elementType !== "input" && elementType !== "textarea" && elementType !== "select") {
+			return;
+		}
+		if (!Object.hasOwn(props, "value")) {
+			this.#inputOverrides.delete(path);
+			return;
+		}
+		const override = this.#inputOverrides.get(path);
+		if (override === undefined) return;
+		const serverValue = props.value;
+		if (override === serverValue) {
+			if (source === "server") {
+				this.#inputOverrides.delete(path);
+			}
+			return;
+		}
+		if (typeof override === "string" && typeof serverValue === "string") {
+			if (override.startsWith(serverValue)) {
+				props.value = override;
+				return;
+			}
+			if (source === "server") {
+				this.#inputOverrides.delete(path);
+			}
+			return;
+		}
+		props.value = override;
+	}
+
 	#getCallback(path: string, prop: string) {
 		const key = this.#propPath(path, prop);
 		let fn = this.#callbackCache.get(key);
 		if (!fn) {
-			fn = (...args: any[]) => this.#client.invokeCallback(this.#path, key, args);
+			fn = (...args: any[]) => {
+				if (prop === "onChange" || prop === "onInput") {
+					this.#recordInputOverride(path, args[0]);
+					const nextValue = args[0]?.target?.value;
+					if (nextValue !== undefined) {
+						this.#localUpdateHandler?.({
+							type: "update_props",
+							path,
+							data: { set: { value: nextValue } },
+						});
+					}
+				}
+				if (prop === "onBlur") {
+					this.#inputOverrides.delete(path);
+				}
+				this.#client.invokeCallback(this.#path, key, args);
+			};
 			this.#callbackCache.set(key, fn);
 		}
 		return fn;
@@ -283,6 +350,7 @@ export class VDOMRenderer {
 				}
 			}
 			if (node.key) newProps.key = node.key;
+			this.#applyInputOverride(currentPath, component, newProps, "server");
 
 			// 3. Render children
 			const renderedChildren: ReactNode[] = [];
@@ -362,7 +430,11 @@ export class VDOMRenderer {
 		return this.#cloneWithMeta(element, cloneElement(element, nextProps, ...children));
 	}
 
-	applyUpdates(initialTree: ReactNode, updates: VDOMUpdate[]): ReactNode {
+	applyUpdates(
+		initialTree: ReactNode,
+		updates: VDOMUpdate[],
+		source: UpdateSource = "server",
+	): ReactNode {
 		let newTree: ReactNode = initialTree;
 		for (const update of updates) {
 			const parts = update.path.split(".").filter((s) => s.length > 0);
@@ -446,6 +518,7 @@ export class VDOMRenderer {
 						}
 
 						if (nextCbKeys && nextCbKeys.size === 0) nextCbKeys = undefined;
+						this.#applyInputOverride(path, element.type, nextProps, source);
 
 						const removedSomething = (update.data.remove?.length ?? 0) > 0;
 						if (removedSomething) {

@@ -205,6 +205,15 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	}, [client, renderer, path]);
 
 	useEffect(() => {
+		renderer.setLocalUpdateHandler((update) => {
+			setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, [update], "local")));
+		});
+		return () => {
+			renderer.setLocalUpdateHandler(null);
+		};
+	}, [renderer]);
+
+	useEffect(() => {
 		if (inBrowser) {
 			client.updateRoute(path, routeInfo);
 		}

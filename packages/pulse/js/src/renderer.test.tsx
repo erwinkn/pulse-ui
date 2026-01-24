@@ -65,6 +65,37 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
 	});
 
+	it("keeps local input value while the server lags", () => {
+		const { renderer } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "input",
+			props: { value: "", onChange: "$cb" },
+			eval: ["onChange"],
+		});
+		const input = tree as React.ReactElement;
+		(input.props as any).onChange({ target: { value: "ab" } });
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { set: { value: "a" } },
+			},
+		]);
+		const lagged = tree as React.ReactElement;
+		expect((lagged.props as any).value).toBe("ab");
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { set: { value: "ax" } },
+			},
+		]);
+		const diverged = tree as React.ReactElement;
+		expect((diverged.props as any).value).toBe("ax");
+	});
+
 	it("keeps previous eval when update_props.eval is absent", () => {
 		const { renderer } = makeRenderer();
 		let tree = renderer.renderNode({

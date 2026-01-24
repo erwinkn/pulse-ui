@@ -32,6 +32,11 @@ def test_secure_blocks_http_prod(monkeypatch: pytest.MonkeyPatch):
 		app.setup("http://example.com")
 
 
+def test_secure_allows_http_localhost_prod(monkeypatch: pytest.MonkeyPatch):
+	app = _setup_app(monkeypatch, "prod", "http://localhost:8000")
+	assert app.cookie.secure is False
+
+
 def test_secure_blocks_unknown_scheme_prod(monkeypatch: pytest.MonkeyPatch):
 	monkeypatch.setenv("PULSE_ENV", "prod")
 	monkeypatch.setenv("PULSE_SSR_SERVER_ADDRESS", "http://localhost:3000")

@@ -17,14 +17,13 @@ bun add pulse-ui-client
 
 ## Peer Dependencies
 
-The package requires React 18 or 19 and React Router 7:
+The package requires React 18 or 19:
 
 ```json
 {
   "peerDependencies": {
     "react": "^18 || ^19",
-    "react-dom": "^18 || ^19",
-    "react-router": "^7"
+    "react-dom": "^18 || ^19"
   }
 }
 ```
@@ -34,33 +33,32 @@ The package requires React 18 or 19 and React Router 7:
 Here's a minimal setup connecting a React app to a Pulse backend:
 
 ```tsx
-import { PulseProvider, PulseView } from "pulse-ui-client";
-import { BrowserRouter, Routes, Route } from "react-router";
+import { PulseProvider, PulseRouterProvider, PulseRoutes } from "pulse-ui-client";
+import { pulseRouteTree, routeLoaders } from "./pulse/routes";
 
 // Component registry for custom mount points
 const registry = {
   MyButton: (props) => <button {...props} />,
 };
 
-function App() {
+function App({ prerender }) {
   return (
-    <BrowserRouter>
+    <PulseRouterProvider routes={pulseRouteTree} routeLoaders={routeLoaders}>
       <PulseProvider
         config={{
           serverAddress: "http://localhost:8000",
+          apiPrefix: "/_pulse",
           connectionStatus: {
             initialConnectingDelay: 500,
             initialErrorDelay: 5000,
             reconnectErrorDelay: 3000,
           },
         }}
-        prerender={{ views: {}, directives: {} }}
+        prerender={prerender}
       >
-        <Routes>
-          <Route path="/*" element={<PulseView path="/" registry={registry} />} />
-        </Routes>
+        <PulseRoutes />
       </PulseProvider>
-    </BrowserRouter>
+    </PulseRouterProvider>
   );
 }
 ```
@@ -68,8 +66,9 @@ function App() {
 Let's break this down:
 
 1. **PulseProvider** wraps your app and manages the WebSocket connection
-2. **PulseView** renders the UI for a specific route path
-3. **registry** maps component names to React components for custom mount points
+2. **PulseRoutes** renders the matched route tree
+3. **pulseRouteTree / routeLoaders** come from Pulse codegen
+4. **registry** maps component names to React components for custom mount points
 
 ## What's Included
 
@@ -78,6 +77,8 @@ The package exports several categories of APIs:
 ### Components
 
 - **PulseProvider** - Root context provider for WebSocket connection
+- **PulseRouterProvider** - Client-side router context
+- **PulseRoutes** - Renders the matched route tree
 - **PulseView** - Renders Pulse views and handles updates
 - **PulseForm** - Form component that submits without unmounting
 
@@ -96,7 +97,7 @@ The package exports several categories of APIs:
 ### Utilities
 
 - **serialize** / **deserialize** - Wire format encoding
-- **extractServerRouteInfo** - Extract route info in loaders
+- **buildRouteInfo** - Build route info for custom routing
 - **submitForm** - Programmatic form submission
 
 ## Architecture
@@ -119,7 +120,7 @@ When a user interacts with the UI, callbacks are sent to the server. The server 
 
 ## See Also
 
-- [Components](/docs/reference/pulse-client/components) - PulseProvider, PulseView, PulseForm
+- [Components](/docs/reference/pulse-client/components) - PulseProvider, PulseRouterProvider, PulseView, PulseForm
 - [Hooks](/docs/reference/pulse-client/hooks) - usePulseClient, usePulseChannel
 - [Types](/docs/reference/pulse-client/types) - TypeScript type definitions
 - [Architecture](/docs/reference/architecture) - How Pulse works

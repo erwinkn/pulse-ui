@@ -40,6 +40,7 @@ interface PulseProviderProps {
 ```ts
 interface PulseConfig {
   serverAddress: string;
+  apiPrefix: string;
   connectionStatus: ConnectionStatusConfig;
 }
 
@@ -84,26 +85,27 @@ The `prerender` prop contains server-side rendered content and connection direct
 ### Example
 
 ```tsx
-import { PulseProvider } from "pulse-ui-client";
-import { BrowserRouter } from "react-router";
+import { PulseProvider, PulseRouterProvider, PulseRoutes } from "pulse-ui-client";
+import { pulseRouteTree, routeLoaders } from "./pulse/routes";
 
-function App() {
+function App({ prerender }) {
   return (
-    <BrowserRouter>
+    <PulseRouterProvider routes={pulseRouteTree} routeLoaders={routeLoaders}>
       <PulseProvider
         config={{
           serverAddress: "http://localhost:8000",
+          apiPrefix: "/_pulse",
           connectionStatus: {
             initialConnectingDelay: 500,
             initialErrorDelay: 5000,
             reconnectErrorDelay: 3000,
           },
         }}
-        prerender={{ views: {}, directives: {} }}
+        prerender={prerender}
       >
-        <Routes />
+        <PulseRoutes />
       </PulseProvider>
-    </BrowserRouter>
+    </PulseRouterProvider>
   );
 }
 ```
@@ -115,6 +117,47 @@ PulseProvider automatically shows connection status in a fixed toast at the bott
 - **"Connecting..."** - Shown after `initialConnectingDelay` during initial connection
 - **"Reconnecting..."** - Shown immediately when connection is lost
 - **"Failed to connect to the server."** - Shown after timeout if connection fails
+
+---
+
+## PulseRouterProvider
+
+Client-side router context. Wrap your app before `PulseProvider`.
+
+```tsx
+import { PulseRouterProvider, PulseRoutes } from "pulse-ui-client";
+import { pulseRouteTree, routeLoaders } from "./pulse/routes";
+
+<PulseRouterProvider routes={pulseRouteTree} routeLoaders={routeLoaders}>
+  <PulseRoutes />
+</PulseRouterProvider>
+```
+
+### Props
+
+```ts
+interface PulseRouterProviderProps {
+  routes: PulseRoute[];
+  routeLoaders: RouteLoaderMap;
+  initialUrl?: string;
+  onNavigate?: (target: { location: LocationLike; match: MatchResult }) => Promise<void>;
+  children: ReactNode;
+}
+```
+
+---
+
+## PulseRoutes
+
+Renders the matched route tree using the router context.
+
+```tsx
+import { PulseRoutes } from "pulse-ui-client";
+
+function AppRoutes() {
+  return <PulseRoutes />;
+}
+```
 
 ---
 
@@ -163,18 +206,17 @@ function MyPage() {
 
 ### Route Integration
 
-PulseView automatically syncs with React Router. It extracts path parameters, query parameters, and hash from the current location and sends them to the server.
+PulseView uses the Pulse router context to send path/query params to the server. In most apps you should render the generated routes via `PulseRouterProvider` + `PulseRoutes`.
 
 ```tsx
-import { Routes, Route } from "react-router";
-import { PulseView } from "pulse-ui-client";
+import { PulseRouterProvider, PulseRoutes } from "pulse-ui-client";
+import { pulseRouteTree, routeLoaders } from "./pulse/routes";
 
 function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/users/:id" element={<PulseView path="/users" registry={registry} />} />
-      <Route path="/*" element={<PulseView path="/" registry={registry} />} />
-    </Routes>
+    <PulseRouterProvider routes={pulseRouteTree} routeLoaders={routeLoaders}>
+      <PulseRoutes />
+    </PulseRouterProvider>
   );
 }
 ```

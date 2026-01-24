@@ -6,7 +6,7 @@ This example shows:
 2. import_() - Dynamic import primitive for @javascript functions
 3. Constant + Jsx to create usable lazy React components
 
-Run with: uv run pulse run examples/lazy_import.py
+Run with: uv run pulse dev examples/lazy_import.py
 """
 
 import pulse as ps

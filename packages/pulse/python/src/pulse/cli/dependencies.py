@@ -110,14 +110,6 @@ def get_required_dependencies(
 		raise DependencyResolutionError(str(exc)) from None
 
 	desired: dict[str, str | None] = dict(resolved)
-	for pkg in [
-		"react-router",
-		"@react-router/node",
-		"@react-router/serve",
-		"@react-router/dev",
-	]:
-		desired.setdefault(pkg, "^7")
-
 	return desired
 
 

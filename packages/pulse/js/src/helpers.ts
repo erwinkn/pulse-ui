@@ -1,5 +1,3 @@
-import type { LoaderFunctionArgs } from "react-router";
-
 export interface RouteInfo {
 	pathname: string;
 	hash: string;
@@ -9,16 +7,24 @@ export interface RouteInfo {
 	catchall: string[];
 }
 
-export function extractServerRouteInfo({ params, request }: LoaderFunctionArgs) {
-	const { "*": catchall = "", ...pathParams } = params;
-	const parsedUrl = new URL(request.url);
+export interface LocationLike {
+	pathname: string;
+	search: string;
+	hash: string;
+}
 
+export function buildRouteInfo(
+	location: LocationLike,
+	pathParams: Record<string, string | undefined>,
+	catchall: string[],
+): RouteInfo {
+	const queryParams = new URLSearchParams(location.search);
 	return {
-		hash: parsedUrl.hash,
-		pathname: parsedUrl.pathname,
-		query: parsedUrl.search,
-		queryParams: Object.fromEntries(parsedUrl.searchParams.entries()),
+		pathname: location.pathname,
+		hash: location.hash,
+		query: location.search,
+		queryParams: Object.fromEntries(queryParams.entries()),
 		pathParams,
-		catchall: catchall.length > 1 ? catchall.split("/") : [],
-	} satisfies RouteInfo;
+		catchall,
+	};
 }

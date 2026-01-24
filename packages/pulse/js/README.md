@@ -113,10 +113,10 @@ function Chat() {
 
 ## Main Exports
 
-**Components**: `PulseProvider`, `PulseView`, `PulseForm`, `RenderLazy`
+**Components**: `PulseProvider`, `PulseRouterProvider`, `PulseRoutes`, `PulseView`, `PulseForm`, `Link`, `Outlet`, `RenderLazy`
 
 **Hooks**: `usePulseClient()`, `usePulseChannel(name)`
 
-**Functions**: `serialize`, `deserialize`, `extractServerRouteInfo`, `submitForm`
+**Functions**: `serialize`, `deserialize`, `buildRouteInfo`, `submitForm`
 
 **Types**: `VDOM`, `VDOMNode`, `VDOMElement`, `PulseClient`, `Transport`, `ComponentRegistry`

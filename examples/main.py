@@ -7,7 +7,7 @@ from typing import Any, TypedDict, override
 
 import pulse as ps
 from pulse.js import console
-from pulse.js.react import lazy
+from pulse.js.react import Suspense, lazy
 from pulse.messages import ClientMessage
 from pulse.middleware import (
 	ConnectResponse,
@@ -522,12 +522,14 @@ def datepicker_demo():
 	return ps.div(
 		ps.h2("Date Picker", className="text-2xl font-bold mb-4"),
 		ps.p("Pick a date and time (ISO string will show below).", className="mb-2"),
-		DatePicker(
-			value=state.value,
-			onChange=state.set_value,
-			showTimeSelect=True,
-			className="max-w-sm",
-		),
+		Suspense(fallback=ps.div("Loading date picker...", className="text-sm"))[
+			DatePicker(
+				value=state.value,
+				onChange=state.set_value,
+				showTimeSelect=True,
+				className="max-w-sm",
+			)
+		],
 		ps.p(f"Selected: {state.value or '-'}", className="mt-4 font-mono"),
 		className="p-4",
 	)

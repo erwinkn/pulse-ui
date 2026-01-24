@@ -1,4 +1,4 @@
-"""Tests for ReactProxy URL rewriting and get_client_address fallback."""
+"""Tests for DevServerProxy URL rewriting and get_client_address fallback."""
 
 from typing import Any, override
 from unittest.mock import AsyncMock, MagicMock
@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi.responses import StreamingResponse
 from pulse.helpers import get_client_address, get_client_address_socketio
-from pulse.proxy import ReactProxy
+from pulse.proxy import DevServerProxy
 from starlette.requests import Request
 
 
@@ -53,12 +53,12 @@ def _make_disconnect_request(
 	return _DisconnectRequest(scope, disconnect_after=disconnect_after)
 
 
-class TestReactProxyUrlRewrite:
-	"""Test ReactProxy._rewrite_url() method."""
+class TestDevServerProxyUrlRewrite:
+	"""Test DevServerProxy.rewrite_url() method."""
 
 	def test_rewrites_react_server_url(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 		assert (
@@ -67,8 +67,8 @@ class TestReactProxyUrlRewrite:
 		)
 
 	def test_rewrites_with_query_string(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 		assert (
@@ -77,15 +77,15 @@ class TestReactProxyUrlRewrite:
 		)
 
 	def test_does_not_rewrite_other_urls(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 		assert proxy.rewrite_url("http://example.com/foo") == "http://example.com/foo"
 
 	def test_does_not_rewrite_relative_paths(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 		assert proxy.rewrite_url("/foo/bar") == "/foo/bar"
@@ -174,8 +174,8 @@ class TestGetClientAddressSocketioFallback:
 		assert get_client_address_socketio(environ) is None
 
 
-class TestReactProxyHeaderRewrite:
-	"""Integration test for ReactProxy response header rewriting."""
+class TestDevServerProxyHeaderRewrite:
+	"""Integration test for DevServerProxy response header rewriting."""
 
 	def _make_request(self, path: str = "/") -> Request:
 		scope = {
@@ -191,8 +191,8 @@ class TestReactProxyHeaderRewrite:
 	@pytest.mark.asyncio
 	async def test_rewrites_location_header_in_redirect(self):
 		"""Test that Location header in redirect responses is rewritten."""
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 
@@ -227,8 +227,8 @@ class TestReactProxyHeaderRewrite:
 	@pytest.mark.asyncio
 	async def test_rewrites_content_location_header(self):
 		"""Test that Content-Location header is rewritten."""
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 
@@ -260,8 +260,8 @@ class TestReactProxyHeaderRewrite:
 	@pytest.mark.asyncio
 	async def test_preserves_other_headers(self):
 		"""Test that non-URL headers are passed through unchanged."""
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 
@@ -292,13 +292,13 @@ class TestReactProxyHeaderRewrite:
 		assert response.headers["x-custom-header"] == "some-value"
 
 
-class TestReactProxyStreaming:
-	"""Tests for ReactProxy streaming cleanup."""
+class TestDevServerProxyStreaming:
+	"""Tests for DevServerProxy streaming cleanup."""
 
 	@pytest.mark.asyncio
 	async def test_closes_upstream_on_stream_end(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 
@@ -328,8 +328,8 @@ class TestReactProxyStreaming:
 
 	@pytest.mark.asyncio
 	async def test_closes_upstream_on_disconnect(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
+		proxy = DevServerProxy(
+			dev_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
 		)
 

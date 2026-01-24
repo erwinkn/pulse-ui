@@ -177,21 +177,16 @@ def catchall(self) -> list[str]: ...
 
 ### Link
 
-Client-side navigation link (wraps react-router `Link`).
+Client-side navigation link.
 
 ```python
 def Link(
     *children: Node,
     key: str | None = None,
     to: str,
-    discover: Literal["render", "none"] | None = None,
     prefetch: Literal["none", "intent", "render", "viewport"] = "intent",
-    preventScrollReset: bool | None = None,
-    relative: Literal["route", "path"] | None = None,
     reloadDocument: bool | None = None,
     replace: bool | None = None,
-    state: dict[str, object] | None = None,
-    viewTransition: bool | None = None,
     **props: HTMLAnchorProps,
 )
 ```
@@ -200,7 +195,6 @@ def Link(
 - `to` - Target path.
 - `prefetch` - Prefetch strategy. Default: `"intent"`.
 - `replace` - Replace history entry instead of push.
-- `state` - State to pass to the target route.
 - `**props` - Additional anchor element props.
 
 ```python
@@ -210,7 +204,7 @@ ps.Link("User", to="/users/123", prefetch="render")
 
 ### Outlet
 
-Renders child routes within a layout (wraps react-router `Outlet`).
+Renders child routes within a layout.
 
 ```python
 def Outlet(key: str | None = None)

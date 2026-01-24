@@ -97,14 +97,13 @@ The code generator creates the following structure inside `<web_root>/app/<pulse
 ```
 pulse/
   _layout.tsx        # Root layout with Pulse provider
-  routes.ts          # React Router route configuration
-  routes.runtime.ts  # Server-side route matching
+  routes.ts          # Pulse route manifest + loader map
   routes/
-    index.tsx        # Index route
-    users.tsx        # /users route
-    users.$id.tsx    # /users/:id route
+    index.jsx        # Index route
+    users.jsx        # /users route
+    users/_id_<hash>.jsx  # /users/:id route (sanitized)
   layouts/
-    dashboard.tsx    # Layout components
+    layout/_layout.tsx    # Layout components
   assets/
     *.css            # Copied local assets
 ```
@@ -190,7 +189,7 @@ Generate the root layout file with Pulse provider configuration.
 def generate_routes_ts(self) -> Path
 ```
 
-Generate React Router route configuration file.
+Generate the Pulse route manifest file.
 
 ### Properties
 

@@ -1,6 +1,4 @@
-"""
-Proxy handler for forwarding requests to React Router server in single-server mode.
-"""
+"""Proxy handler for forwarding dev asset requests to a Vite server."""
 
 import asyncio
 import logging
@@ -20,33 +18,27 @@ from pulse.cookies import parse_cookie_header
 logger = logging.getLogger(__name__)
 
 
-class ReactProxy:
-	"""
-	Handles proxying HTTP requests and WebSocket connections to React Router server.
+class DevServerProxy:
+	"""Proxy HTTP requests and WebSocket connections to a dev asset server."""
 
-	In single-server mode, the Python server proxies unmatched routes to the React
-	dev server. This proxy rewrites URLs in responses to use the external server
-	address instead of the internal React server address.
-	"""
-
-	react_server_address: str
+	dev_server_address: str
 	server_address: str
 	_client: httpx.AsyncClient | None
 
-	def __init__(self, react_server_address: str, server_address: str):
+	def __init__(self, dev_server_address: str, server_address: str):
 		"""
 		Args:
-		    react_server_address: Internal React Router server URL (e.g., http://localhost:5173)
+		    dev_server_address: Internal dev server URL (e.g., http://localhost:5173)
 		    server_address: External server URL exposed to clients (e.g., http://localhost:8000)
 		"""
-		self.react_server_address = react_server_address
+		self.dev_server_address = dev_server_address
 		self.server_address = server_address
 		self._client = None
 
 	def rewrite_url(self, url: str) -> str:
-		"""Rewrite internal React server URLs to external server address."""
-		if self.react_server_address in url:
-			return url.replace(self.react_server_address, self.server_address)
+		"""Rewrite internal dev server URLs to external server address."""
+		if self.dev_server_address in url:
+			return url.replace(self.dev_server_address, self.server_address)
 		return url
 
 	@property
@@ -75,12 +67,11 @@ class ReactProxy:
 
 	async def proxy_websocket(self, websocket: WebSocket) -> None:
 		"""
-		Proxy WebSocket connection to React Router server.
-		Only allowed in dev mode and on root path "/".
+		Proxy WebSocket connection to dev server.
 		"""
 
 		# Build target WebSocket URL
-		ws_url = self._http_to_ws_url(self.react_server_address)
+		ws_url = self._http_to_ws_url(self.dev_server_address)
 		target_url = ws_url.rstrip("/") + websocket.url.path
 		if websocket.url.query:
 			target_url += "?" + websocket.url.query
@@ -171,7 +162,7 @@ class ReactProxy:
 			logger.error(f"WebSocket proxy connection failed: {e}")
 			await websocket.close(
 				code=1014,  # Bad Gateway
-				reason="Bad Gateway: Could not connect to React Router server",
+				reason="Bad Gateway: Could not connect to dev server",
 			)
 		except Exception as e:
 			logger.error(f"WebSocket proxy error: {e}")
@@ -182,10 +173,10 @@ class ReactProxy:
 
 	async def __call__(self, request: Request) -> Response:
 		"""
-		Forward HTTP request to React Router server and stream response back.
+		Forward HTTP request to dev server and stream response back.
 		"""
 		# Build target URL
-		url = self.react_server_address.rstrip("/") + request.url.path
+		url = self.dev_server_address.rstrip("/") + request.url.path
 		if request.url.query:
 			url += "?" + request.url.query
 
@@ -240,7 +231,7 @@ class ReactProxy:
 		except httpx.RequestError as e:
 			logger.error(f"Proxy request failed: {e}")
 			return PlainTextResponse(
-				"Bad Gateway: Could not reach React Router server", status_code=502
+				"Bad Gateway: Could not reach dev server", status_code=502
 			)
 
 	async def close(self):

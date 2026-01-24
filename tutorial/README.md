@@ -12,11 +12,11 @@ Welcome to the Pulse tutorial! In this guide, we'll work through examples that c
   - Linux/macOS: `source .venv/bin/activate`
   - Windows: `.venv\Scripts\Activate`
 
-You're good to go! Now execute `pulse run tutorial.py`. Your terminal should display two pane, with the Python server on the left and the React app on the right. Use `q` to stop the app.
+You're good to go! Now execute `pulse dev tutorial.py`. Your terminal should display tagged logs for the server, assets, and SSR processes. Use `q` to stop the app.
 
-Go to the address given by the React app on the right, most likely http://localhost:5173, to see the final app.
+Go to the address shown in the logs, most likely http://localhost:8000, to see the final app.
 
-The Pulse server and React app automatically reload the app if you make changes during development.
+The Pulse dev stack automatically reloads the app if you make changes during development.
 
 If you need to install the latest package versions after an update to this tutorial, run `uv sync` in the root folder and `bun i` in the `web` folder.
 
@@ -58,7 +58,7 @@ Each route defines its path and its component, which is a function that takes no
 Like all steps of this tutorial, you will find it in the `steps/` folder in this repository. Run it using:
 
 ```
-pulse run steps/01-basic-app.py
+pulse dev steps/01-basic-app.py
 ```
 
 ## 2. HTML and Pulse syntax
@@ -161,7 +161,7 @@ def counter():
     )
 ```
 
-You can run the full example using `pulse run steps/02-counter.py`.
+You can run the full example using `pulse dev steps/02-counter.py`.
 
 Here we see:
 

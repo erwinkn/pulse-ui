@@ -19,7 +19,7 @@
 
 ## 5. Test the setup flow
 - Run through `setup.mdx` on a fresh machine to catch missing steps
-- The React Router scaffolding command may have changed
+- The Vite SSR starter steps may have changed
 
 ## 6. Get feedback
 - Have someone unfamiliar with Pulse read Getting Started and first few tutorial pages

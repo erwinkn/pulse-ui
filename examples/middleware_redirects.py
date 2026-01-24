@@ -191,7 +191,7 @@ def normal_page():
 
 
 # Placeholder components for routes that middleware will intercept
-# These will never actually render, but ensure React Router matches the routes
+# These will never actually render, but ensure the client router matches the routes
 @ps.component
 def placeholder_old_path():
 	"""Placeholder for /old-path - middleware redirects before this renders."""
@@ -223,7 +223,7 @@ app = ps.App(
 		ps.Route("/new-path", new_path),
 		ps.Route("/new-batch", new_batch),
 		ps.Route("/normal", normal_page),
-		# Placeholder routes to ensure React Router matches them
+		# Placeholder routes so the client router matches them
 		# Middleware will intercept these before components render
 		ps.Route("/old-path", placeholder_old_path),
 		ps.Route("/blocked-path", placeholder_blocked_path),

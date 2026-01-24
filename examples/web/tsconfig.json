@@ -1,9 +1,8 @@
 {
 	"include": [
 		"**/*",
-		"**/.server/**/*",
-		"**/.client/**/*",
-		".react-router/types/**/*"
+		"src/**/*",
+		"server/**/*"
 	],
 	"compilerOptions": {
 		"lib": [
@@ -21,13 +20,15 @@
 		"jsx": "react-jsx",
 		"allowJs": true,
 		"rootDirs": [
-			".",
-			"./.react-router/types"
+			"."
 		],
 		"baseUrl": ".",
 		"paths": {
 			"~/*": [
 				"./app/*"
+			],
+			"pulse/*": [
+				"./app/pulse/*"
 			]
 		},
 		"customConditions": [

@@ -7,10 +7,7 @@ from typing import TYPE_CHECKING
 from pulse.cli.helpers import ensure_gitignore_has
 from pulse.codegen.templates.layout import LAYOUT_TEMPLATE
 from pulse.codegen.templates.route import generate_route
-from pulse.codegen.templates.routes_ts import (
-	ROUTES_CONFIG_TEMPLATE,
-	ROUTES_RUNTIME_TEMPLATE,
-)
+from pulse.codegen.templates.routes_ts import ROUTES_MANIFEST_TEMPLATE
 from pulse.env import env
 from pulse.routing import Layout, Route, RouteTree
 from pulse.transpiler.assets import get_registered_assets
@@ -25,7 +22,7 @@ logger = logging.getLogger(__file__)
 class CodegenConfig:
 	"""Configuration for code generation output paths.
 
-	Controls where generated React Router files are written. All paths
+	Controls where generated web files are written. All paths
 	can be relative (resolved against base_dir) or absolute.
 
 	Args:
@@ -171,7 +168,6 @@ class Codegen:
 					connection_status,
 				),
 				self.generate_routes_ts(),
-				self.generate_routes_runtime_ts(),
 				*(
 					self.generate_route(route, server_address=server_address)
 					for route in self.routes.flat_tree.values()
@@ -243,54 +239,54 @@ class Codegen:
 		return write_file_if_changed(self.output_folder / "_layout.tsx", content)
 
 	def generate_routes_ts(self):
-		"""Generate TypeScript code for the routes configuration."""
-		routes_str = self._render_routes_ts(self.routes.tree, 2)
+		"""Generate TypeScript code for the route manifest."""
+		routes_str = self._render_routes_ts(self.routes.tree, indent_level=0)
+		loaders_str = self._render_route_loaders()
 		content = str(
-			ROUTES_CONFIG_TEMPLATE.render_unicode(
+			ROUTES_MANIFEST_TEMPLATE.render_unicode(
 				routes_str=routes_str,
-				pulse_dir=self.cfg.pulse_dir,
+				loaders_str=loaders_str,
 			)
 		)
 		return write_file_if_changed(self.output_folder / "routes.ts", content)
 
-	def generate_routes_runtime_ts(self):
-		"""Generate a runtime React Router object tree for server-side matching."""
-		routes_str = self._render_routes_runtime(self.routes.tree, indent_level=0)
-		content = str(
-			ROUTES_RUNTIME_TEMPLATE.render_unicode(
-				routes_str=routes_str,
-			)
-		)
-		return write_file_if_changed(self.output_folder / "routes.runtime.ts", content)
-
 	def _render_routes_ts(
 		self, routes: Sequence[Route | Layout], indent_level: int
 	) -> str:
-		lines: list[str] = []
-		indent_str = "  " * indent_level
-		for route in routes:
-			if isinstance(route, Layout):
-				children_str = ""
-				if route.children:
-					children_str = f"\n{self._render_routes_ts(route.children, indent_level + 1)}\n{indent_str}"
+		def render_node(node: Route | Layout, indent: int) -> str:
+			ind = "  " * indent
+			lines: list[str] = [f"{ind}{{"]
+			lines.append(f'{ind}  id: "{node.unique_path()}",')
+			if isinstance(node, Layout):
 				lines.append(
-					f'{indent_str}layout("{self.cfg.pulse_dir}/layouts/{route.file_path()}", [{children_str}]),'
+					f'{ind}  file: "{self.cfg.pulse_dir}/layouts/{node.file_path()}",'
 				)
 			else:
-				if route.children:
-					children_str = f"\n{self._render_routes_ts(route.children, indent_level + 1)}\n{indent_str}"
-					lines.append(
-						f'{indent_str}route("{route.path}", "{self.cfg.pulse_dir}/routes/{route.file_path()}", [{children_str}]),'
-					)
-				elif route.is_index:
-					lines.append(
-						f'{indent_str}index("{self.cfg.pulse_dir}/routes/{route.file_path()}"),'
-					)
+				if node.is_index:
+					lines.append(f"{ind}  index: true,")
 				else:
-					lines.append(
-						f'{indent_str}route("{route.path}", "{self.cfg.pulse_dir}/routes/{route.file_path()}"),'
-					)
-		return "\n".join(lines)
+					lines.append(f'{ind}  path: "{node.path}",')
+				lines.append(
+					f'{ind}  file: "{self.cfg.pulse_dir}/routes/{node.file_path()}",'
+				)
+			if node.children:
+				lines.append(f"{ind}  children: [")
+				for idx, child in enumerate(node.children):
+					lines.append(render_node(child, indent + 2))
+					if idx != len(node.children) - 1:
+						lines.append(f"{ind}  ,")
+				lines.append(f"{ind}  ],")
+			lines.append(f"{ind}}}")
+			return "\n".join(lines)
+
+		ind = "  " * indent_level
+		out: list[str] = [f"{ind}["]
+		for index, route in enumerate(routes):
+			out.append(render_node(route, indent_level + 1))
+			if index != len(routes) - 1:
+				out.append(f"{ind}  ,")
+		out.append(f"{ind}]")
+		return "\n".join(out)
 
 	def generate_route(
 		self,
@@ -311,49 +307,13 @@ class Codegen:
 		)
 		return write_file_if_changed(output_path, content)
 
-	def _render_routes_runtime(
-		self, routes: list[Route | Layout], indent_level: int
-	) -> str:
-		"""
-		Render an array of RRRouteObject literals suitable for matchRoutes.
-		"""
-
-		def render_node(node: Route | Layout, indent: int) -> str:
-			ind = "  " * indent
-			lines: list[str] = [f"{ind}{{"]
-			# Common: id and uniquePath
-			lines.append(f'{ind}  id: "{node.unique_path()}",')
-			lines.append(f'{ind}  uniquePath: "{node.unique_path()}",')
+	def _render_route_loaders(self) -> str:
+		lines: list[str] = ["{"]
+		for key, node in self.routes.flat_tree.items():
 			if isinstance(node, Layout):
-				# Pathless layout
-				lines.append(
-					f'{ind}  file: "{self.cfg.pulse_dir}/layouts/{node.file_path()}",'
-				)
+				import_path = f"./layouts/{node.file_path()}"
 			else:
-				# Route: index vs path
-				if node.is_index:
-					lines.append(f"{ind}  index: true,")
-				else:
-					lines.append(f'{ind}  path: "{node.path}",')
-				lines.append(
-					f'{ind}  file: "{self.cfg.pulse_dir}/routes/{node.file_path()}",'
-				)
-			if node.children:
-				lines.append(f"{ind}  children: [")
-				for c in node.children:
-					lines.append(render_node(c, indent + 2))
-					lines.append(f"{ind}  ,")
-				if lines[-1] == f"{ind}  ,":
-					lines.pop()
-				lines.append(f"{ind}  ],")
-			lines.append(f"{ind}}}")
-			return "\n".join(lines)
-
-		ind = "  " * indent_level
-		out: list[str] = [f"{ind}["]
-		for index, r in enumerate(routes):
-			out.append(render_node(r, indent_level + 1))
-			if index != len(routes) - 1:
-				out.append(f"{ind}  ,")
-		out.append(f"{ind}]")
-		return "\n".join(out)
+				import_path = f"./routes/{node.file_path()}"
+			lines.append(f'  "{key}": () => import("{import_path}"),')
+		lines.append("}")
+		return "\n".join(lines)

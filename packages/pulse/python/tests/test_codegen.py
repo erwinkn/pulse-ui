@@ -43,7 +43,8 @@ class TestCodegen:
 		assert '"pulse-ui-client"' in result
 		# Unified registry only
 		assert "const __registry = {" in result
-		assert 'const path = "/simple"' in result
+		assert 'export const path = "/simple"' in result
+		assert "export const registry = __registry" in result
 		assert "export function headers" in result
 		assert "export default function RouteComponent()" in result
 		assert "registry={__registry}" in result
@@ -158,9 +159,8 @@ class TestCodegen:
 		assert routes_ts_path.exists()
 		result = routes_ts_path.read_text()
 
-		assert "export const routes = [" in result
-		assert "] satisfies RouteConfig;" in result
-		assert 'layout("pulse/_layout.tsx"' in result
+		assert "export const pulseRouteTree" in result
+		assert "export const routeLoaders" in result
 
 	def test_generate_routes_ts_single_root_route(self, tmp_path: Path):
 		"""Test generating config with single root route."""
@@ -171,10 +171,9 @@ class TestCodegen:
 
 		routes_ts_path = Path(codegen_config.pulse_path) / "routes.ts"
 		result = routes_ts_path.read_text()
-		# New format derives dev routes from runtime route tree
-		assert "import { rrPulseRouteTree" in result
-		assert "function toDevRoute(" in result
-		assert 'layout("pulse/_layout.tsx", rrPulseRouteTree.map(toDevRoute))' in result
+		assert "export const pulseRouteTree" in result
+		assert 'id: "/"' in result
+		assert "routeLoaders" in result
 
 	def test_generate_routes_ts_multiple_routes(self, tmp_path: Path):
 		"""Test generating config with multiple routes."""
@@ -188,10 +187,9 @@ class TestCodegen:
 
 		routes_ts_path = Path(codegen_config.pulse_path) / "routes.ts"
 		result = routes_ts_path.read_text()
-		# New format uses mapping from runtime tree, not static route literals
-		assert "import { rrPulseRouteTree" in result
-		assert "function toDevRoute(" in result
-		assert "rrPulseRouteTree.map(toDevRoute)" in result
+		assert "export const pulseRouteTree" in result
+		assert 'path: "about"' in result
+		assert "routeLoaders" in result
 
 	def test_full_app_generation(self, tmp_path: Path):
 		"""Test generating all files for a simple app."""
@@ -245,40 +243,32 @@ class TestCodegen:
 		)
 
 		layout_content = (pulse_app_dir / "_layout.tsx").read_text()
-		assert (
-			'import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";'
-			in layout_content
-		)
+		assert "import {" in layout_content
+		assert "PulseRouterProvider" in layout_content
 		assert 'serverAddress: "http://localhost:8000"' in layout_content
 
 		routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
-		# routes.ts should be built from runtime route tree now
-		assert "import { rrPulseRouteTree" in routes_ts_content
-		assert "function toDevRoute(" in routes_ts_content
-		assert "rrPulseRouteTree.map(toDevRoute)" in routes_ts_content
-
-		# Validate the runtime route tree carries correct file/path data
-		runtime_content = (pulse_app_dir / "routes.runtime.ts").read_text()
-		assert 'path: "interactive"' in runtime_content
-		assert 'file: "test_pulse_app/routes/interactive.jsx"' in runtime_content
-		assert 'path: "users"' in runtime_content
-		assert 'file: "test_pulse_app/routes/users.jsx"' in runtime_content
-		assert 'path: ":id"' in runtime_content
-		# The dynamic route file has a hash suffix that depends on extension
-		assert 'file: "test_pulse_app/routes/users/_id_' in runtime_content
-		assert '.jsx"' in runtime_content
+		assert "export const pulseRouteTree" in routes_ts_content
+		assert 'path: "interactive"' in routes_ts_content
+		assert 'file: "test_pulse_app/routes/interactive.jsx"' in routes_ts_content
+		assert 'path: "users"' in routes_ts_content
+		assert 'file: "test_pulse_app/routes/users.jsx"' in routes_ts_content
+		assert 'path: ":id"' in routes_ts_content
+		assert 'file: "test_pulse_app/routes/users/_id_' in routes_ts_content
 
 		home_content = (routes_dir / "index.jsx").read_text()
 		assert "import { PulseView" in home_content
 		assert '"pulse-ui-client"' in home_content
 		assert "import { Header as Header_" in home_content
-		assert 'const path = "/"' in home_content
+		assert 'export const path = "/"' in home_content
+		assert "export const registry = __registry" in home_content
 		assert "registry={__registry}" in home_content
 		assert "path={path}" in home_content
 
 		interactive_content = (routes_dir / "interactive.jsx").read_text()
 		assert "import { Button as Button_" in interactive_content
-		assert 'const path = "/interactive"' in interactive_content
+		assert 'export const path = "/interactive"' in interactive_content
+		assert "export const registry = __registry" in interactive_content
 		assert "registry={__registry}" in interactive_content
 		assert "path={path}" in interactive_content
 
@@ -320,7 +310,8 @@ class TestGenerateRoute:
 		result = generate_route(path="/test", route_file_path="routes/test.tsx")
 
 		assert "import { PulseView" in result
-		assert 'const path = "/test"' in result
+		assert 'export const path = "/test"' in result
+		assert "export const registry = __registry" in result
 		assert "export default function RouteComponent()" in result
 		assert "export function headers" in result
 		assert "const __registry = {" in result

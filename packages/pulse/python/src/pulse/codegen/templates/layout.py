@@ -1,11 +1,19 @@
 from mako.template import Template
 
 LAYOUT_TEMPLATE = Template(
-	"""import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
-import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
-import { matchRoutes } from "react-router";
-import { rrPulseRouteTree } from "./routes.runtime";
-import { useLoaderData } from "react-router";
+	"""import { useCallback, useEffect, useState } from "react";
+import {
+  buildRouteInfo,
+  deserialize,
+  PulseProvider,
+  PulseRouterProvider,
+  PulseRoutes,
+  type PulseConfig,
+  type PulsePrerender,
+} from "pulse-ui-client";
+import { pulseRouteTree, routeLoaders } from "./routes";
+
+const DIRECTIVES_KEY = "__PULSE_DIRECTIVES";
 
 // This config is used to initialize the client
 export const config: PulseConfig = {
@@ -18,84 +26,82 @@ export const config: PulseConfig = {
   },
 };
 
-
-// Server loader: perform initial prerender, abort on first redirect/not-found
-export async function loader(args: LoaderFunctionArgs) {
-  const url = new URL(args.request.url);
-  const matches = matchRoutes(rrPulseRouteTree, url.pathname) ?? [];
-  const paths = matches.map(m => m.route.uniquePath);
-  // Build minimal, safe headers for cross-origin API call
-  const incoming = args.request.headers;
-  const fwd = new Headers();
-  const cookie = incoming.get("cookie");
-  const authorization = incoming.get("authorization");
-  if (cookie) fwd.set("cookie", cookie);
-  if (authorization) fwd.set("authorization", authorization);
-  fwd.set("content-type", "application/json");
-  const res = await fetch(`${internal_server_address}$${"{"}config.apiPrefix}/prerender`, {
-    method: "POST",
-    headers: fwd,
-    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
-  });
-  if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
-  const body = await res.json();
-  if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
-  if (body.notFound) {
-    console.error("Not found:", url.pathname);
-    throw new Response("Not Found", { status: 404 });
+function readStoredDirectives(): any {
+  if (typeof window === "undefined" || typeof sessionStorage === "undefined") {
+    return {};
   }
-  const prerenderData = deserialize(body) as PulsePrerender;
-  const setCookies =
-    (res.headers.getSetCookie?.() as string[] | undefined) ??
-    (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
-  const headers = new Headers();
-  for (const c of setCookies) headers.append("Set-Cookie", c);
-  return data(prerenderData, { headers });
+  try {
+    return JSON.parse(sessionStorage.getItem(DIRECTIVES_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
 }
 
-// Client loader: re-prerender on navigation while reusing directives
-export async function clientLoader(args: ClientLoaderFunctionArgs) {
-  const url = new URL(args.request.url);
-  const matches = matchRoutes(rrPulseRouteTree, url.pathname) ?? [];
-  const paths = matches.map(m => m.route.uniquePath);
-  const directives = 
-    typeof window !== "undefined" && typeof sessionStorage !== "undefined"
-      ? (JSON.parse(sessionStorage.getItem("__PULSE_DIRECTIVES") ?? "{}"))
-      : {};
+function persistDirectives(prerender: PulsePrerender) {
+  if (typeof window === "undefined" || typeof sessionStorage === "undefined") {
+    return;
+  }
+  if (prerender.directives) {
+    sessionStorage.setItem(DIRECTIVES_KEY, JSON.stringify(prerender.directives));
+  }
+}
+
+async function fetchPrerender(paths: string[], routeInfo: any) {
+  const directives = readStoredDirectives();
   const headers: HeadersInit = { "content-type": "application/json" };
   if (directives?.headers) {
     for (const [key, value] of Object.entries(directives.headers)) {
       headers[key] = value as string;
     }
   }
-  const res = await fetch(`$${"{"}config.serverAddress}$${"{"}config.apiPrefix}/prerender`, {
+  const res = await fetch(config.serverAddress + config.apiPrefix + "/prerender", {
     method: "POST",
     headers,
     credentials: "include",
-    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
+    body: JSON.stringify({ paths, routeInfo }),
   });
   if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
   const body = await res.json();
-  if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
-  if (body.notFound) throw new Response("Not Found", { status: 404 });
-  const prerenderData = deserialize(body) as PulsePrerender;
-  if (typeof window !== "undefined" && typeof sessionStorage !== "undefined" && prerenderData.directives) {
-    sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(prerenderData.directives));
-  }
-  return prerenderData as PulsePrerender;
+  return body;
 }
 
-export default function PulseLayout() {
-  const data = useLoaderData<typeof loader>();
-  if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
-    sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(data.directives));
-  }
+export function PulseApp({ prerender, url }: { prerender: PulsePrerender; url?: string }) {
+  const [current, setCurrent] = useState(prerender);
+
+  useEffect(() => {
+    persistDirectives(current);
+  }, [current]);
+
+  const handleNavigate = useCallback(
+    async (target: { location: { pathname: string; search: string; hash: string }; match: any }) => {
+      const paths = target.match.matches.map((route: any) => route.id);
+      const routeInfo = buildRouteInfo(target.location, target.match.params, target.match.catchall);
+      const body = await fetchPrerender(paths, routeInfo);
+      if (body.redirect) {
+        if (typeof window !== "undefined") {
+          window.location.assign(body.redirect);
+        }
+        return;
+      }
+      if (body.notFound) {
+        if (typeof window !== "undefined") {
+          window.location.assign("/not-found");
+        }
+        return;
+      }
+      const next = deserialize(body) as PulsePrerender;
+      setCurrent(next);
+    },
+    [],
+  );
+
   return (
-    <PulseProvider config={config} prerender={data}>
-      <Outlet />
-    </PulseProvider>
+    <PulseRouterProvider routes={pulseRouteTree} routeLoaders={routeLoaders} initialUrl={url} onNavigate={handleNavigate}>
+      <PulseProvider config={config} prerender={current}>
+        <PulseRoutes />
+      </PulseProvider>
+    </PulseRouterProvider>
   );
 }
-// Persist directives in sessionStorage for reuse in clientLoader is handled within the component
 """
 )

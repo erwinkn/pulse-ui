@@ -8,7 +8,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 Welcome to Pulse! This guide will walk you through creating your first Pulse application from scratch.
 
 <Callout type="warn" title="Early access">
-Pulse is under active development and this setup process will be simplified in the future. For now, you'll need to set up two parts: a Python project (where your app logic lives) and a React Router app (which handles the frontend).
+Pulse is under active development and this setup process will be simplified in the future. For now, you need two parts: a Python project (your app logic) and a small Vite SSR frontend.
 </Callout>
 
 ## What you'll need
@@ -54,41 +54,39 @@ Let's break down what's happening here:
 - **`ps.div("Hello Pulse")`** — This creates a `<div>` element with the text "Hello Pulse" inside it. Pulse provides functions like `div`, `span`, `button`, etc. that map to HTML elements.
 - **`ps.App`** — This is your application object. It holds your routes and configuration.
 - **`ps.Route("/", home)`** — This tells Pulse to render the `home` component when someone visits the root URL (`/`).
-- **`CodegenConfig(web_dir=...)`** — This tells Pulse where your React frontend lives (we'll create that next).
+- **`CodegenConfig(web_dir=...)`** — This tells Pulse where your web frontend lives (we'll create that next).
 
-## Step 2: Create the React Router frontend
+## Step 2: Create the frontend (Vite SSR)
 
-Pulse uses React Router for the frontend. Run these commands to create a new React Router app in a `web/` folder:
+Pulse expects a Vite SSR app with a few entry points. The easiest path today is to copy the starter from the Pulse repo.
 
 ```bash
-bunx create-react-router@latest web --template react-router-serve
-cd web
-bun install
-cd ..
+# From a clone of the Pulse repo
+cp -R examples/web ./web
 ```
 
-This scaffolds a server-side rendered React app that Pulse will use to display your components. You can take a look at how `examples/main.py` and `examples/web/` are set up for a working reference.
+You can use `examples/web` as a reference for the required files (`vite.config.ts`, `src/entry-client.tsx`, `src/entry-server.tsx`, `server/ssr.ts`, etc.).
 
 ## Step 3: Run your app
 
 Now you're ready to start your Pulse app:
 
 ```bash
-uv run pulse run app.py
+uv run pulse dev app.py
 ```
 
-The `pulse run` command does two things:
-1. **Generates React routes** — It reads your Python components and creates corresponding files in `web/app/pulse/`
-2. **Starts the dev server** — It launches the React Router development server
+`pulse dev` does two things:
+1. **Generates route files** — It writes `web/app/pulse/*` from your Python routes
+2. **Starts the dev stack** — Python server + Vite dev server + SSR server
 
-Open the URL shown in your terminal (usually `http://localhost:5173`) and you should see "Hello Pulse" displayed in your browser!
+Open the URL shown in your terminal (usually `http://localhost:8000`) and you should see "Hello Pulse" displayed in your browser!
 
 ## Customizing the frontend location
 
-By default, Pulse expects your React app to be in a `web/` folder next to your Python file. If your frontend lives somewhere else, just update the `web_dir` setting:
+By default, Pulse expects your web app to be in a `web/` folder next to your Python file. If your frontend lives somewhere else, just update the `web_dir` setting:
 
 ```python
-codegen=ps.CodegenConfig(web_dir=Path("/path/to/your/react-app"))
+codegen=ps.CodegenConfig(web_dir=Path("/path/to/your/web-app"))
 ```
 
 ## Next steps

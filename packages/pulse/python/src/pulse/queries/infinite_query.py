@@ -801,6 +801,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 	@override
 	def dispose(self):
+		self.cancel_gc()
 		self._cancel_queue()
 		if self._queue_task and not self._queue_task.done():
 			self._queue_task.cancel()

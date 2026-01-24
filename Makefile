@@ -1,4 +1,4 @@
-.PHONY: help init lint lint-fix format format-check typecheck typecheck-py typecheck-ts test all bump
+.PHONY: help init sync lint lint-fix format format-check typecheck typecheck-py typecheck-ts test test-py test-ts all bump
 
 help:
 	@echo "Available commands:"
@@ -70,9 +70,13 @@ typecheck-ts:
 	@cd docs && bun run types:check
 
 # Testing
-test:
+test: test-py test-ts
+	
+test-py:
 	@echo "Running Python tests..."
 	@uv run pytest
+
+test-ts:
 	@echo "Running JS tests..."
 	@bun test
 

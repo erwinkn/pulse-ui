@@ -1,12 +1,13 @@
 {
-	"name": "web",
+	"name": "pulse-mantine-web",
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "react-router build",
-		"dev": "react-router dev",
-		"start": "react-router-serve ./build/server/index.js",
-		"typecheck": "react-router typegen && tsc"
+		"dev": "vite",
+		"ssr": "bun --conditions=@pulse/source server/ssr.ts",
+		"build": "vite build && vite build --ssr src/entry-server.tsx",
+		"start": "PULSE_ENV=prod bun --conditions=@pulse/source server/ssr.ts",
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@mantine/charts": "^8.3.12",
@@ -15,27 +16,23 @@
 		"@mantine/form": "^8.3.12",
 		"@mantine/hooks": "^8.3.12",
 		"@mantine/notifications": "^8.3.12",
-		"@react-router/node": "^7.12.0",
-		"@react-router/serve": "^7.12.0",
 		"dayjs": "^1.11.19",
-		"isbot": "^5.1.32",
 		"pulse-mantine": "workspace:*",
 		"pulse-ui-client": "workspace:*",
 		"react": "^19.2.3",
 		"react-dom": "^19.2.3",
-		"react-router": "^7.12.0",
 		"recharts": "^3.6.0"
 	},
 	"devDependencies": {
-		"@react-router/dev": "^7.12.0",
 		"@types/node": "^25.0.8",
 		"@types/react": "^19.2.8",
 		"@types/react-dom": "^19.2.3",
+		"@vitejs/plugin-react": "^5.0.2",
 		"postcss": "^8.5.6",
 		"postcss-preset-mantine": "^1.18.0",
 		"postcss-simple-vars": "^7.0.1",
 		"typescript": "^5.9.3",
-		"vite": "^7.3.1",
+		"vite": "^6.3.3",
 		"vite-plugin-devtools-json": "^1.0.0",
 		"vite-tsconfig-paths": "^6.0.4"
 	}

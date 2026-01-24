@@ -32,7 +32,7 @@ def App():
 app = ps.App([ps.Route("/", App)])
 ```
 
-`pulse run app.py` → dev server on `:8000`
+`pulse dev app.py` → dev server on `:8000`
 
 ## Quick Reference
 
@@ -484,8 +484,8 @@ app = ps.App(
 ## Commands
 
 ```bash
-uv run pulse run app.py          # Dev server :8000
-uv run pulse run app.py --port 3000
+uv run pulse dev app.py          # Dev server :8000
+uv run pulse dev app.py --port 3000
 make all                         # Format, lint, typecheck, test
 ```
 
@@ -658,7 +658,7 @@ app = ps.App(
     routes=[...],
     mode="single-server",  # or "subdomains" for multi-tenant
     server_address="https://myapp.com",  # Required for production
-    codegen=ps.CodegenConfig(router="@tanstack/react-router"),  # Optional
+    codegen=ps.CodegenConfig(),  # Optional
     session_store=ps.CookieSessionStore(secret_key="..."),  # Production sessions
 )
 ```

@@ -83,12 +83,12 @@ src/pulse/
 │   ├── function.py     # JsFunction, @javascript decorator
 │   └── imports.py      # Import/CssImport for client-side JS
 │
-├── codegen/            # Code generation for React Router
+├── codegen/            # Code generation for Pulse web apps
 │   ├── codegen.py      # Generates routes.ts, loaders
 │   └── templates/      # Mako templates for generated code
 │
 ├── cli/                # Command-line interface
-│   ├── cmd.py          # pulse run, pulse build
+│   ├── cmd.py          # pulse dev, pulse build, pulse start
 │   └── processes.py    # Dev server process management
 │
 └── js/                 # JS API stubs for transpilation

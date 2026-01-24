@@ -3,12 +3,12 @@ title: "CLI"
 description: "pulse command line"
 ---
 
-## pulse run
+## pulse dev
 
-Run the Pulse server and web development server together.
+Run the Pulse development stack (Python server + Vite dev server + SSR).
 
 ```bash
-pulse run <app_file> [options]
+pulse dev <app_file> [options]
 ```
 
 ### Arguments
@@ -23,12 +23,11 @@ pulse run <app_file> [options]
 |--------|------|---------|-------------|
 | `--address` | `str` | `localhost` | Host uvicorn binds to |
 | `--port` | `int` | `8000` | Port uvicorn binds to |
-| `--dev` | flag | - | Run in development mode (default) |
-| `--prod` | flag | - | Run in production mode |
 | `--plain` | flag | - | Plain output without colors or emojis |
 | `--server-only` | flag | - | Run only the Python server |
-| `--web-only` | flag | - | Run only the web dev server |
-| `--react-server-address` | `str` | - | React server URL (required for single-server + server-only) |
+| `--web-only` | flag | - | Run only the web processes (Vite + SSR) |
+| `--asset-server-address` | `str` | - | Asset dev server URL (required for single-server + server-only) |
+| `--ssr-server-address` | `str` | - | SSR server URL (required for single-server + server-only) |
 | `--reload/--no-reload` | flag | auto | Enable/disable hot reload (auto-enabled in dev) |
 | `--find-port/--no-find-port` | flag | `True` | Auto-find available port if specified is busy |
 | `--verbose` | flag | - | Show all logs without filtering |
@@ -37,16 +36,93 @@ pulse run <app_file> [options]
 
 ```bash
 # Run with defaults
-pulse run app.py
-
-# Production mode on specific port
-pulse run app.py --prod --port 3000
+pulse dev app.py
 
 # Development with specific address
-pulse run app.py --address 0.0.0.0 --port 8080
+pulse dev app.py --address 0.0.0.0 --port 8080
 
 # Run only backend (for separate frontend deployment)
-pulse run app.py --server-only --react-server-address http://localhost:5173
+pulse dev app.py --server-only \
+  --asset-server-address http://localhost:5173 \
+  --ssr-server-address http://localhost:3001
+```
+
+---
+
+## pulse build
+
+Generate routes and build web assets for production.
+
+```bash
+pulse build <app_file> [options]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `app_file` | App target: `path/to/app.py[:var]` (default `:app`) or `module.path:var` |
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--plain` | flag | - | Plain output without colors or emojis |
+| `--fix` | flag | - | Install missing or outdated dependencies before building |
+| `--ci` | flag | - | Run build in CI mode |
+| `--prod` | flag | - | Run build in production mode (default) |
+
+### Examples
+
+```bash
+# Production build
+pulse build app.py
+
+# CI build
+pulse build app.py --ci
+
+# Build and auto-install missing deps
+pulse build app.py --fix
+```
+
+---
+
+## pulse start
+
+Start Pulse in production mode (Python server + SSR).
+
+```bash
+pulse start <app_file> [options]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `app_file` | App target: `path/to/app.py[:var]` (default `:app`) or `module.path:var` |
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--address` | `str` | `0.0.0.0` | Host uvicorn binds to |
+| `--port` | `int` | `8000` | Port uvicorn binds to |
+| `--plain` | flag | - | Plain output without colors or emojis |
+| `--server-only` | flag | - | Run only the Python server |
+| `--web-only` | flag | - | Run only the SSR server |
+| `--ssr-server-address` | `str` | - | SSR server URL (required for single-server + server-only) |
+| `--reload/--no-reload` | flag | auto | Enable/disable hot reload |
+| `--find-port/--no-find-port` | flag | `False` | Auto-find available port if specified is busy |
+| `--verbose` | flag | - | Show all logs without filtering |
+
+### Examples
+
+```bash
+# Start production server
+pulse start app.py --address 0.0.0.0 --port 8080
+
+# Run only backend and connect to external SSR server
+pulse start app.py --server-only --ssr-server-address http://localhost:3001
 ```
 
 ---
@@ -63,7 +139,7 @@ pulse generate <app_file> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `app_file` | App target: `path.py[:var]` (default `:app`) or `module:var` |
+| `app_file` | App target: `path.py[:var]` (default :app) or `module:var` |
 
 ### Options
 
@@ -100,7 +176,7 @@ pulse check <app_file> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `app_file` | App target: `path.py[:var]` (default `:app`) or `module:var` |
+| `app_file` | App target: `path.py[:var]` (default :app) or `module:var` |
 
 ### Options
 
@@ -162,7 +238,7 @@ Directory containing the Pulse application. Fallback for path resolution when `P
 PULSE_HOST=0.0.0.0
 ```
 
-Host address for the uvicorn server. Set automatically by `pulse run`.
+Host address for the uvicorn server. Set automatically by `pulse dev` and `pulse start`.
 
 ### PULSE_PORT
 
@@ -170,7 +246,7 @@ Host address for the uvicorn server. Set automatically by `pulse run`.
 PULSE_PORT=8000
 ```
 
-Port for the uvicorn server. Set automatically by `pulse run`.
+Port for the uvicorn server. Set automatically by `pulse dev` and `pulse start`.
 
 ### PULSE_SERVER_ADDRESS
 
@@ -180,13 +256,21 @@ PULSE_SERVER_ADDRESS=https://api.example.com
 
 Public server address for WebSocket connections. Required in production mode.
 
-### PULSE_REACT_SERVER_ADDRESS
+### PULSE_ASSET_SERVER_ADDRESS
 
 ```bash
-PULSE_REACT_SERVER_ADDRESS=http://localhost:5173
+PULSE_ASSET_SERVER_ADDRESS=http://localhost:5173
 ```
 
-React dev server address. Used in single-server mode with `--server-only`.
+Asset dev server address (Vite). Used in single-server mode with `pulse dev --server-only`.
+
+### PULSE_SSR_SERVER_ADDRESS
+
+```bash
+PULSE_SSR_SERVER_ADDRESS=http://localhost:3001
+```
+
+SSR server address. Required in single-server mode with `--server-only`.
 
 ### PULSE_SECRET
 
@@ -210,5 +294,3 @@ Disable automatic code generation. Useful in production with pre-built routes.
 
 | Code | Description |
 |------|-------------|
-| `0` | Success |
-| `1` | Error (invalid arguments, missing dependencies, server failure) |

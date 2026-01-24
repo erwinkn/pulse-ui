@@ -7,11 +7,10 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
-import type { RouteInfo } from "./helpers";
 import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
+import { useNavigate, useRouteInfo } from "./router";
 import type { VDOM } from "./vdom";
 
 // =================================================================
@@ -171,23 +170,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
 	const [serverError, setServerError] = useState<ServerError | null>(null);
-
-	const location = useLocation();
-	const params = useParams();
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: using hacky deep equality for params
-	const routeInfo = useMemo(() => {
-		const { "*": catchall = "", ...pathParams } = params;
-		const queryParams = new URLSearchParams(location.search);
-		return {
-			hash: location.hash,
-			pathname: location.pathname,
-			query: location.search,
-			queryParams: Object.fromEntries(queryParams.entries()),
-			pathParams,
-			catchall: catchall.length > 0 ? catchall.split("/") : [],
-		} satisfies RouteInfo;
-	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
+	const routeInfo = useRouteInfo();
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the routeInfo on navigation.
 	useEffect(() => {
@@ -237,7 +220,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		else {
 			setTree(renderer.init(initialView));
 		}
-		// Note: Do NOT reset hasRendered in cleanup. The cleanup runs when effect 
+		// Note: Do NOT reset hasRendered in cleanup. The cleanup runs when effect
 		// deps change and at least once on mount with strict mode,
 		// not just on unmount, which would cause subsequent runs to skip setTree.
 	}, [initialView, renderer]);

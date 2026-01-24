@@ -14,7 +14,7 @@ Deploy a Pulse app to AWS ECS with a guided, beginner-friendly workflow.
 
 ## What you are deploying
 
-Pulse deploys as a Python server plus an optional React Router server. They can be bundled into one container (this tutorial) or split later.
+Pulse deploys as a Python server plus an optional SSR server. They can be bundled into one container (this tutorial) or split later.
 
 ```text
 Browser
@@ -29,7 +29,7 @@ ALB (HTTPS)
 Target Group -> ECS Service -> Fargate Tasks
   |
   v
-Pulse app (Python server + React Router server)
+Pulse app (Python server + SSR server)
 
 ECR -> container images
 SSM -> deployment state + drain signals
@@ -115,10 +115,12 @@ WORKDIR /app/${WEB_ROOT}
 COPY --from=js-dev-deps /app/${WEB_ROOT}/node_modules ./node_modules
 COPY --from=codegen /app/${WEB_ROOT}/app ./app
 COPY --from=codegen /app/${WEB_ROOT}/public ./public
-COPY --from=codegen /app/${WEB_ROOT}/react-router.config.ts ./
+COPY --from=codegen /app/${WEB_ROOT}/server ./server
+COPY --from=codegen /app/${WEB_ROOT}/src ./src
 COPY --from=codegen /app/${WEB_ROOT}/tsconfig.json ./
 COPY --from=codegen /app/${WEB_ROOT}/vite.config.ts ./
 COPY --from=codegen /app/${WEB_ROOT}/package.json ./
+COPY --from=codegen /app/${WEB_ROOT}/bun.lock ./
 COPY --from=codegen /app/src ../src
 ENV NODE_ENV=production
 RUN bun run build
@@ -130,19 +132,20 @@ ARG WEB_ROOT
 COPY --from=oven/bun:latest /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=python-deps /app/.venv /app/.venv
 COPY --from=js-prod-deps /app/${WEB_ROOT}/node_modules /app/${WEB_ROOT}/node_modules
-COPY --from=js-build /app/${WEB_ROOT}/build /app/${WEB_ROOT}/build
+COPY --from=js-build /app/${WEB_ROOT}/dist /app/${WEB_ROOT}/dist
+COPY --from=js-build /app/${WEB_ROOT}/server /app/${WEB_ROOT}/server
 COPY --from=js-build /app/${WEB_ROOT}/package.json /app/${WEB_ROOT}/package.json
 COPY src ./src
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PULSE_APP_FILE=${APP_FILE}
 EXPOSE 8000
 WORKDIR /app
-CMD ["sh", "-c", "pulse run \"$PULSE_APP_FILE\" --prod --address 0.0.0.0"]
+CMD ["sh", "-c", "pulse start \"$PULSE_APP_FILE\" --address 0.0.0.0"]
 ```
 
 Key options:
 - `APP_FILE`: relative path to your Pulse entry file.
-- `WEB_ROOT`: relative path to your React Router app.
+- `WEB_ROOT`: relative path to your web app.
 - `PULSE_SERVER_ADDRESS`: build arg used during `pulse generate`.
 
 At runtime, `PULSE_SERVER_ADDRESS` must be set. `pulse-aws deploy` sets it on the ECS task.

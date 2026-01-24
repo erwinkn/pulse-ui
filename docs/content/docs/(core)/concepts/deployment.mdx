@@ -8,16 +8,17 @@ Pulse apps are Python backends that communicate with React frontends over WebSoc
 
 ## Code generation
 
-Pulse generates React Router files that connect your Python routes to the React frontend. This happens automatically during development and can be triggered manually for production builds.
+Pulse generates route manifests and layout files that connect your Python routes to the web frontend. This happens automatically during development and can be triggered manually for production builds.
 
 ### How it works
 
-When you run `pulse run app.py`, Pulse:
+When you run `pulse dev app.py`, Pulse:
 
 1. Reads your route definitions from the `App` object
-2. Generates React Router configuration files in your web directory
+2. Generates route manifests + layout files in your web directory
 3. Creates route components that connect to the Pulse server
 4. Copies any local assets referenced by `Import` or `DynamicImport`
+5. Starts the Python server, Vite dev server, and SSR server
 
 The generated files are placed in a `pulse/` directory inside your web app folder (by default `web/app/pulse/`).
 
@@ -40,7 +41,7 @@ app = ps.App(
 
 ### Manual generation for production
 
-For production builds or CI, call `run_codegen()` directly:
+For production builds or CI, call `run_codegen()` directly (or use `pulse build`):
 
 ```python
 app = ps.App(routes=[...], codegen=ps.CodegenConfig(...))
@@ -68,7 +69,7 @@ You need to decide how to host the API and frontend—together on one server, or
 
 ### Single-server mode (recommended)
 
-Your Pulse server handles everything: the API, WebSocket connections, and serving the React frontend.
+Your Pulse server handles everything: the API, WebSocket connections, and serving the web frontend.
 
 ```python
 import pulse as ps
@@ -165,6 +166,13 @@ app = ps.App(
 ---
 
 ## Running in production
+
+Build the frontend, then start the server + SSR process:
+
+```bash
+pulse build app.py
+pulse start app.py --address 0.0.0.0 --port 8000
+```
 
 Run your app with a production-grade ASGI server like Uvicorn:
 

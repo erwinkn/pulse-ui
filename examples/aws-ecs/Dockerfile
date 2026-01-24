@@ -68,10 +68,12 @@ COPY --from=js-dev-deps /app/${WEB_ROOT}/node_modules ./node_modules
 # Copy entire web directory from codegen stage (includes generated routes)
 COPY --from=codegen /app/${WEB_ROOT}/app ./app
 COPY --from=codegen /app/${WEB_ROOT}/public ./public
-COPY --from=codegen /app/${WEB_ROOT}/react-router.config.ts ./
+COPY --from=codegen /app/${WEB_ROOT}/server ./server
+COPY --from=codegen /app/${WEB_ROOT}/src ./src
 COPY --from=codegen /app/${WEB_ROOT}/tsconfig.json ./
 COPY --from=codegen /app/${WEB_ROOT}/vite.config.ts ./
 COPY --from=codegen /app/${WEB_ROOT}/package.json ./
+COPY --from=codegen /app/${WEB_ROOT}/bun.lock ./
 # Copy Python sources so Tailwind can scan them for class names
 COPY ${APP_FILE} ../${APP_FILE}
 ENV NODE_ENV=production
@@ -88,7 +90,8 @@ COPY --from=python-deps /app/.venv /app/.venv
 # Copy prod node_modules from js-prod-deps stage
 COPY --from=js-prod-deps /app/${WEB_ROOT}/node_modules /app/${WEB_ROOT}/node_modules
 # Copy build output from js-build stage
-COPY --from=js-build /app/${WEB_ROOT}/build /app/${WEB_ROOT}/build
+COPY --from=js-build /app/${WEB_ROOT}/dist /app/${WEB_ROOT}/dist
+COPY --from=js-build /app/${WEB_ROOT}/server /app/${WEB_ROOT}/server
 # Copy package.json from js-build stage
 COPY --from=js-build /app/${WEB_ROOT}/package.json /app/${WEB_ROOT}/package.json
 # Copy Python application files
@@ -101,4 +104,4 @@ EXPOSE 8000
 WORKDIR /app
 # Run the application in production mode
 # Note: PULSE_SERVER_ADDRESS environment variable must be set at runtime
-CMD ["sh", "-c", "pulse run \"$PULSE_APP_FILE\" --prod --address 0.0.0.0"]
+CMD ["sh", "-c", "pulse start \"$PULSE_APP_FILE\" --address 0.0.0.0"]

@@ -26,7 +26,7 @@ ANSI_CODES = {
 }
 
 # Tag colors mapping (used only in colored mode)
-TAG_COLORS = {"server": "cyan", "web": "orange1"}
+TAG_COLORS = {"server": "cyan", "assets": "orange1", "ssr": "orange1"}
 
 # Regex to strip ANSI escape codes
 ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")

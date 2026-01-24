@@ -1,9 +1,10 @@
-# Pulse + React Router example
+# Pulse + Vite example
 
-A minimal React Router application wired up to the Pulse UI client. It is intended as a reference for integrating Pulse into an SSR-ready React Router project without any extra tooling.
+A minimal Vite application wired up to the Pulse UI client. It is intended as a reference for integrating Pulse into a custom SSR setup without React Router.
 
 ## What's included
-- React Router SSR with the default `react-router-serve` server
+- Vite dev server for client assets
+- Bun SSR server for rendering
 - Tailwind CSS via `@tailwindcss/vite`
 - Pulse UI client components served from the `/app` alias
 
@@ -15,10 +16,11 @@ Install dependencies:
 npm install
 ```
 
-Start the development server:
+Start the development servers:
 
 ```bash
 npm run dev
+npm run ssr
 ```
 
 Generate a production build:

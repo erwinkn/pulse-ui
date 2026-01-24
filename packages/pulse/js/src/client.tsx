@@ -1,4 +1,3 @@
-import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
@@ -16,6 +15,7 @@ import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
+import type { NavigateFunction } from "./router";
 
 export interface SocketIODirectives {
 	headers?: Record<string, string>;

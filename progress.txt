@@ -29,7 +29,7 @@ Pending work (high priority)
 1) Tutorial rewrite to current API:
    - Replace `ps.states` with `ps.init`/`ps.setup`/`ps.state`
    - Fix cross-links and headings post-split
-   - Update references to run commands (use `uv run pulse run ...`)
+   - Update references to run commands (use `uv run pulse dev ...`)
 2) Manual API reference:
    - From `packages/pulse/python/src/pulse/__init__.py`
    - Advanced modules: `pulse.js`, `pulse.transpiler`

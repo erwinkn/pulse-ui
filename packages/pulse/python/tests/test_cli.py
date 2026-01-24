@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pulse.cli.cmd import build_ssr_command, build_web_command
 from pulse.cli.dependencies import (
 	DependencyResolutionError,
 	convert_pep440_to_semver,
@@ -133,10 +134,6 @@ def test_prepare_web_dependencies_returns_install_when_up_to_date(tmp_path: Path
 	package_json = {
 		"dependencies": {
 			"pulse-ui-client": "9.9.9",
-			"react-router": "^7",
-			"@react-router/node": "^7",
-			"@react-router/serve": "^7",
-			"@react-router/dev": "^7",
 		}
 	}
 	(web_root / "package.json").write_text(json.dumps(package_json))
@@ -211,6 +208,26 @@ def test_execute_commands_streams_output(
 	assert "[server]" in output
 	assert "child-line" in output
 	assert spawns == ["server"]
+
+
+def test_build_ssr_command_uses_script(tmp_path: Path):
+	spec = build_ssr_command(
+		web_root=tmp_path,
+		extra_args=(),
+		script="start",
+		port=1234,
+	)
+	assert spec.args[:3] == ["bun", "run", "start"]
+	assert spec.env["PULSE_SSR_PORT"] == "1234"
+
+
+def test_build_web_command_uses_build_script(tmp_path: Path):
+	spec = build_web_command(
+		web_root=tmp_path,
+		extra_args=("--mode", "production"),
+	)
+	assert spec.args[:3] == ["bun", "run", "build"]
+	assert "--mode" in spec.args
 
 
 @pytest.mark.parametrize(

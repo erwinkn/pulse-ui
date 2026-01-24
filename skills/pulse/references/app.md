@@ -23,7 +23,7 @@ app = ps.App(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `codegen` | `CodegenConfig` | `CodegenConfig()` | React Router code generation settings |
+| `codegen` | `CodegenConfig` | `CodegenConfig()` | Client code generation settings |
 | `middleware` | `PulseMiddleware \| list` | `None` | Request middleware |
 | `plugins` | `list[Plugin]` | `None` | Application plugins |
 | `cookie` | `Cookie` | Auto | Session cookie configuration |
@@ -42,7 +42,7 @@ app = ps.App(
 
 ### Single-Server Mode (Default)
 
-Python and React served from the same origin. Pulse proxies non-API requests to React Router.
+Python and web frontend served from the same origin. Pulse serves SSR and static assets.
 
 ```python
 app = ps.App(
@@ -58,7 +58,7 @@ Use when:
 
 ### Subdomains Mode
 
-Python API on a subdomain (e.g., `api.example.com`), React on main domain.
+Python API on a subdomain (e.g., `api.example.com`), web frontend on main domain.
 
 ```python
 app = ps.App(
@@ -98,7 +98,7 @@ In dev mode, `server_address` is auto-resolved from CLI flags or defaults to `de
 
 ## Codegen Configuration
 
-Control where React Router files are generated.
+Control where Pulse route files are generated.
 
 ```python
 app = ps.App(
@@ -271,9 +271,9 @@ app = ps.App(
 ### CLI (Recommended)
 
 ```bash
-uv run pulse run app.py
-uv run pulse run app.py --port 3000
-uv run pulse run app.py --address 0.0.0.0 --port 8080
+uv run pulse dev app.py
+uv run pulse dev app.py --port 3000
+uv run pulse dev app.py --address 0.0.0.0 --port 8080
 ```
 
 ### Programmatic

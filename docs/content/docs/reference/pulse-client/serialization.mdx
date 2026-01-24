@@ -212,21 +212,19 @@ a.ref = b;  // circular
 
 ---
 
-## extractServerRouteInfo
+## buildRouteInfo
 
-Extracts route information from a React Router loader function. Use this in SSR loaders to pass route context to the Pulse server.
+Builds a `RouteInfo` object from a location plus path params. Use this when you need to construct route context manually (for example, in a custom router or SSR pipeline).
 
 ```ts
-import { extractServerRouteInfo } from "pulse-ui-client";
+import { buildRouteInfo } from "pulse-ui-client";
 
-function extractServerRouteInfo(args: LoaderFunctionArgs): RouteInfo
+function buildRouteInfo(
+  location: { pathname: string; search: string; hash: string },
+  pathParams: Record<string, string | undefined>,
+  catchall: string[],
+): RouteInfo
 ```
-
-### Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `args` | `LoaderFunctionArgs` | React Router loader arguments |
 
 ### Returns
 
@@ -244,20 +242,13 @@ interface RouteInfo {
 ### Example
 
 ```ts
-import { extractServerRouteInfo } from "pulse-ui-client";
-import type { LoaderFunctionArgs } from "react-router";
+import { buildRouteInfo } from "pulse-ui-client";
 
-export async function loader(args: LoaderFunctionArgs) {
-  const routeInfo = extractServerRouteInfo(args);
-
-  // routeInfo.pathname = "/users/123"
-  // routeInfo.pathParams = { id: "123" }
-  // routeInfo.queryParams = { tab: "settings" }
-
-  // Pass to Pulse server for SSR
-  const prerender = await fetchPulsePrerender(routeInfo);
-  return { prerender };
-}
+const routeInfo = buildRouteInfo(
+  { pathname: "/users/123", search: "?tab=settings", hash: "" },
+  { id: "123" },
+  [],
+);
 ```
 
 ---

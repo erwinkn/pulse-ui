@@ -1,7 +1,7 @@
 """Demo of run_js() for imperative JavaScript execution from Python callbacks.
 
 Run with:
-    uv run pulse run examples/js_exec_demo.py
+    uv run pulse dev examples/js_exec_demo.py
 
 This example demonstrates:
 1. Fire-and-forget with transpiled @javascript function

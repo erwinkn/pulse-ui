@@ -3,30 +3,27 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "react-router build",
-		"dev": "react-router dev",
-		"start": "react-router-serve ./build/server/index.js",
-		"typecheck": "react-router typegen && tsc"
+		"dev": "vite",
+		"ssr": "bun --conditions=@pulse/source server/ssr.ts",
+		"build": "vite build && vite build --ssr src/entry-server.tsx",
+		"start": "PULSE_ENV=prod bun --conditions=@pulse/source server/ssr.ts",
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@react-router/node": "^7.7.1",
-		"@react-router/serve": "^7.7.1",
 		"clsx": "^2.1.1",
-		"isbot": "^5",
 		"pulse-ui-client": "workspace:*",
 		"react": "^19.1.0",
 		"react-datepicker": "^8.4.0",
 		"react-dom": "^19.1.0",
-		"react-router": "^7.7.1",
 		"recharts": "^3.6.0"
 	},
 	"devDependencies": {
-		"@react-router/dev": "^7.7.1",
 		"@tailwindcss/vite": "^4.1.11",
 		"@types/node": "^20",
 		"@types/react": "^19.1.2",
 		"@types/react-datepicker": "^7.0.0",
 		"@types/react-dom": "^19.1.2",
+		"@vitejs/plugin-react": "^5.0.2",
 		"baseline-browser-mapping": "^2.9.7",
 		"tailwindcss": "^4.1.11",
 		"typescript": "^5.8.3",

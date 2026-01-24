@@ -78,8 +78,8 @@ def parse_route_path(path: str) -> list[PathSegment]:
 	return segments
 
 
-# Normalize to react-router's convention: no leading and trailing slashes. Empty
-# string interpreted as the root.
+# Normalize to Pulse router convention: no leading/trailing slashes. Empty string
+# is interpreted as the root.
 def ensure_relative_path(path: str):
 	if path.startswith("/"):
 		path = path[1:]
@@ -446,6 +446,200 @@ class InvalidRouteError(Exception):
 	...
 
 
+@dataclass
+class _SegmentMatch:
+	consumed: int
+	params: dict[str, str]
+	splat: list[str]
+	score: int
+
+
+@dataclass
+class _MatchCandidate:
+	matches: list[Route | Layout]
+	params: dict[str, str]
+	splat: list[str]
+	remaining: list[str]
+	score: int
+
+
+def _normalize_pathname(pathname: str) -> str:
+	pathname = ensure_absolute_path(pathname)
+	if pathname != "/" and pathname.endswith("/"):
+		return pathname[:-1]
+	return pathname
+
+
+def _split_pathname(pathname: str) -> list[str]:
+	pathname = _normalize_pathname(pathname)
+	trimmed = pathname.strip("/")
+	return trimmed.split("/") if trimmed else []
+
+
+def _match_segments(
+	segments: list[PathSegment],
+	path_parts: list[str],
+	index: int = 0,
+) -> list[_SegmentMatch]:
+	if index >= len(segments):
+		return [_SegmentMatch(consumed=0, params={}, splat=[], score=0)]
+
+	segment = segments[index]
+
+	if segment.is_splat:
+		return [
+			_SegmentMatch(
+				consumed=len(path_parts),
+				params={},
+				splat=list(path_parts),
+				score=0,
+			)
+		]
+
+	results: list[_SegmentMatch] = []
+	head = path_parts[0] if path_parts else None
+
+	if head is not None:
+		if segment.is_dynamic:
+			for nxt in _match_segments(segments, path_parts[1:], index + 1):
+				params = dict(nxt.params)
+				params[segment.name] = head
+				results.append(
+					_SegmentMatch(
+						consumed=1 + nxt.consumed,
+						params=params,
+						splat=nxt.splat,
+						score=2 + nxt.score,
+					)
+				)
+		elif segment.name == head:
+			for nxt in _match_segments(segments, path_parts[1:], index + 1):
+				results.append(
+					_SegmentMatch(
+						consumed=1 + nxt.consumed,
+						params=dict(nxt.params),
+						splat=nxt.splat,
+						score=3 + nxt.score,
+					)
+				)
+
+	if segment.is_optional:
+		for nxt in _match_segments(segments, path_parts, index + 1):
+			results.append(
+				_SegmentMatch(
+					consumed=nxt.consumed,
+					params=dict(nxt.params),
+					splat=nxt.splat,
+					score=nxt.score,
+				)
+			)
+
+	return results
+
+
+def _match_branch(
+	routes: Sequence[Route | Layout],
+	path_parts: list[str],
+	parent_matches: list[Route | Layout] | None = None,
+	parent_params: dict[str, str] | None = None,
+	parent_splat: list[str] | None = None,
+	parent_score: int = 0,
+) -> list[_MatchCandidate]:
+	parent_matches = parent_matches or []
+	parent_params = parent_params or {}
+	parent_splat = parent_splat or []
+
+	results: list[_MatchCandidate] = []
+
+	for route in routes:
+		is_layout = isinstance(route, Layout)
+		if is_layout:
+			if route.children:
+				for child in _match_branch(
+					route.children,
+					path_parts,
+					[*parent_matches, route],
+					parent_params,
+					parent_splat,
+					parent_score,
+				):
+					results.append(child)
+			continue
+
+		if route.is_index or route.path == "":
+			if len(path_parts) == 0:
+				results.append(
+					_MatchCandidate(
+						matches=[*parent_matches, route],
+						params=dict(parent_params),
+						splat=list(parent_splat),
+						remaining=[],
+						score=parent_score + 4,
+					)
+				)
+			continue
+
+		segments = route.segments
+		for match in _match_segments(segments, path_parts):
+			remaining = path_parts[match.consumed :]
+			next_params = dict(parent_params)
+			next_params.update(match.params)
+			next_splat = match.splat if match.splat else list(parent_splat)
+			next_score = parent_score + match.score
+			next_matches = [*parent_matches, route]
+
+			if route.children:
+				children = _match_branch(
+					route.children,
+					remaining,
+					next_matches,
+					next_params,
+					next_splat,
+					next_score,
+				)
+				if children:
+					results.extend(children)
+					continue
+
+			if len(remaining) == 0:
+				results.append(
+					_MatchCandidate(
+						matches=next_matches,
+						params=next_params,
+						splat=next_splat,
+						remaining=[],
+						score=next_score,
+					)
+				)
+
+	return results
+
+
+def _pick_best_match(candidates: list[_MatchCandidate]) -> _MatchCandidate | None:
+	if not candidates:
+		return None
+	best = candidates[0]
+	for candidate in candidates[1:]:
+		if candidate.score > best.score:
+			best = candidate
+			continue
+		if candidate.score == best.score and len(candidate.matches) > len(best.matches):
+			best = candidate
+	return best
+
+
+def match_route_tree(
+	routes: Sequence[Route | Layout],
+	pathname: str,
+) -> tuple[list[Route | Layout], PathParameters] | None:
+	parts = _split_pathname(pathname)
+	candidates = _match_branch(routes, parts)
+	best = _pick_best_match(candidates)
+	if best is None or best.remaining:
+		return None
+	return best.matches, PathParameters(params=best.params, splat=best.splat)
+
+
 class RouteTree:
 	tree: list[Route | Layout]
 	flat_tree: dict[str, Route | Layout]
@@ -487,6 +681,16 @@ class RouteTree:
 		if not route:
 			raise ValueError(f"No route found for path '{path}'")
 		return route
+
+	def match(
+		self, pathname: str
+	) -> tuple[list[Route | Layout], PathParameters] | None:
+		"""Match a URL pathname to the route tree.
+
+		Returns:
+			Tuple of (matched routes/layouts, path parameters) or None if no match.
+		"""
+		return match_route_tree(self.tree, pathname)
 
 
 class RouteInfo(TypedDict):

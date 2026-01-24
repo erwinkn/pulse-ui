@@ -17,7 +17,7 @@ class FilterNoisyRequests(logging.Filter):
 		"/@id/",
 		"/%40id/",  # URL-encoded @id
 		"/@react-refresh",
-		"/app/",  # React Router source files served by Vite
+		"/app/",  # Pulse app files served by Vite
 		".js?v=",
 		".css?v=",
 		".css ",  # CSS files (space indicates end of path in log)

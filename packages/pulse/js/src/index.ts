@@ -11,9 +11,9 @@ export type {
 export type { PulseFormProps } from "./form";
 // Form helpers
 export { PulseForm, submitForm } from "./form";
-export type { RouteInfo } from "./helpers";
-// Server helpers
-export { extractServerRouteInfo } from "./helpers";
+export type { LocationLike, RouteInfo } from "./helpers";
+// Route helpers
+export { buildRouteInfo } from "./helpers";
 // Messages (types only)
 export type {
 	ClientApiResultMessage,
@@ -39,6 +39,30 @@ export type {
 export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 // Core React bindings
 export { PulseProvider, PulseView, usePulseClient } from "./pulse";
+// Router
+export type {
+	MatchResult,
+	NavigateFunction,
+	NavigateOptions,
+	PulseRoute,
+	RouteLoader,
+	RouteLoaderMap,
+	RouteModule,
+} from "./router";
+export {
+	Link,
+	Outlet,
+	PulseRouterProvider,
+	PulseRoutes,
+	matchRoutes,
+	preloadRoutesForPath,
+	prefetchRouteModules,
+	useLocation,
+	useNavigate,
+	useParams,
+	useRouteInfo,
+	useRouter,
+} from "./router";
 // Renderer helpers
 // Renderer (structural expressions + eval-keyed props)
 export { VDOMRenderer } from "./renderer";

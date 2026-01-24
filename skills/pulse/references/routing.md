@@ -1,6 +1,6 @@
 # Routing
 
-Client-side routing with React Router. Supports nested layouts, dynamic segments, and query parameters.
+Client-side routing with the Pulse router. Supports nested layouts, dynamic segments, and query parameters.
 
 ## Route Definition
 

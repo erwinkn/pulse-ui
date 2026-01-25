@@ -202,19 +202,15 @@ ps.button("Save", onClick=handle_save)
 
 ## `@ps.infinite_query`
 
-Pagination with automatic page merging.
+Pagination with automatic page merging. **Always requires a key** (via `key=` param or `@query.key` decorator).
+
+Why require keys? Unlike regular queries, infinite queries accumulate pages. Auto-dependency tracking would reset all pages on any dependency change, causing confusing UX where scroll position and content disappear unexpectedly.
 
 ```python
 class FeedState(ps.State):
-    cursor: str | None = None
-
-    @ps.infinite_query(initial_page_param=None)
+    @ps.infinite_query(initial_page_param=None, key=("posts",))  # static key
     async def posts(self, page_param: str | None) -> dict:
         return await api.get_posts(cursor=page_param, limit=20)
-
-    @posts.key
-    def _key(self):
-        return ("posts",)
 
     @posts.get_next_page_param
     def _next(self, pages: list) -> str | None:
@@ -223,11 +219,31 @@ class FeedState(ps.State):
         return pages[-1].data.get("next_cursor")  # None = no more pages
 ```
 
+For dynamic keys:
+
+```python
+class FeedState(ps.State):
+    feed_type: str = "recent"
+
+    @ps.infinite_query(initial_page_param=None)
+    async def posts(self, cursor: str | None) -> dict:
+        return await api.get_posts(feed_type=self.feed_type, cursor=cursor)
+
+    @posts.key
+    def _key(self):
+        return ("posts", self.feed_type)  # pages reset when feed_type changes
+
+    @posts.get_next_page_param
+    def _next(self, pages: list) -> str | None:
+        return pages[-1].data.get("next_cursor") if pages else None
+```
+
 ### Infinite Query Options
 
 ```python
 @ps.infinite_query(
     initial_page_param=None,  # Parameter for first page (required)
+    key=("feed",),            # Query key (required, or use @query.key)
     max_pages=0,              # Max pages to keep in memory (0 = unlimited)
     stale_time=0,             # Seconds before data considered stale
     gc_time=300.0,            # Seconds before unused cache is garbage collected
@@ -283,6 +299,7 @@ state.posts.is_error                # True if last fetch failed
 await state.posts.fetch_next_page()      # Load next page
 await state.posts.fetch_previous_page()  # Load previous page (bidirectional)
 await state.posts.fetch_page(param)      # Refetch specific page by param
+await state.posts.fetch_page(param, clear=True)  # Refetch page and clear all others
 await state.posts.refetch()              # Refetch all pages
 await state.posts.wait()                 # Wait for current fetch to complete
 state.posts.invalidate()                 # Mark stale, trigger refetch

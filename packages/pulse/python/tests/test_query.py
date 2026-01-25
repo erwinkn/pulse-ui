@@ -56,6 +56,26 @@ async def test_query_store_create_and_get():
 
 
 @pytest.mark.asyncio
+async def test_query_store_list_key():
+	"""Test that list keys are normalized to tuples and work correctly."""
+	store = QueryStore()
+
+	# Create with list key
+	entry1 = store.ensure(["test", 1])
+	assert entry1.key == ("test", 1)  # Normalized to tuple
+
+	# Get with tuple key finds it
+	assert store.get(("test", 1)) is entry1
+
+	# Get with list key also finds it
+	assert store.get(["test", 1]) is entry1
+
+	# Ensure with tuple key returns same entry
+	entry2 = store.ensure(("test", 1))
+	assert entry2 is entry1
+
+
+@pytest.mark.asyncio
 async def test_query_entry_lifecycle():
 	key = ("test", 1)
 
@@ -3303,3 +3323,65 @@ async def test_query_result_protocol_isinstance_unkeyed():
 	s = S()
 	result = s.my_query
 	assert isinstance(result, UnkeyedQueryResult)
+
+
+# --- List Key Tests ---
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_with_static_list_key():
+	"""Test that a static list key works and is normalized to tuple."""
+
+	class S(ps.State):
+		@ps.query(key=["users", "current"])
+		async def current_user(self):
+			return {"name": "Alice"}
+
+	s = S()
+	q = s.current_user
+	await q.wait()
+
+	assert q.data == {"name": "Alice"}
+
+	# The query should be accessible via both list and tuple keys
+	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
+	assert store.get(["users", "current"]) is not None
+	assert store.get(("users", "current")) is not None
+	assert store.get(["users", "current"]) is store.get(("users", "current"))
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_with_dynamic_list_key():
+	"""Test that a dynamic list key (from method) works and is normalized to tuple."""
+
+	class S(ps.State):
+		user_id: int = 1
+
+		@ps.query
+		async def user(self):
+			return {"id": self.user_id}
+
+		@user.key
+		def _user_key(self):
+			return ["user", self.user_id]  # List key
+
+	s = S()
+	q = s.user
+	await q.wait()
+
+	assert q.data == {"id": 1}
+
+	# The query should be accessible via both list and tuple keys
+	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
+	assert store.get(["user", 1]) is not None
+	assert store.get(("user", 1)) is not None
+	assert store.get(["user", 1]) is store.get(("user", 1))
+
+	# Change user_id and verify new key works
+	s.user_id = 2
+	await q.wait()
+	assert q.data == {"id": 2}
+	assert store.get(["user", 2]) is not None
+	assert store.get(("user", 2)) is not None

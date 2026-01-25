@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import (
 	Any,
@@ -18,7 +18,7 @@ TState = TypeVar("TState", bound="State")
 P = ParamSpec("P")
 R = TypeVar("R")
 
-QueryKey: TypeAlias = tuple[Hashable, ...] | list[Hashable]
+QueryKey: TypeAlias = Sequence[Hashable]
 """Sequence of hashable values identifying a query in the store.
 
 Used to uniquely identify queries for caching, deduplication, and invalidation.
@@ -29,7 +29,11 @@ Lists are normalized to tuples internally for hashability.
 
 def normalize_key(key: QueryKey) -> tuple[Hashable, ...]:
 	"""Convert a query key to a tuple for use as a dict key."""
-	return key if isinstance(key, tuple) else tuple(key)
+	if isinstance(key, tuple):
+		return key
+	if isinstance(key, list):
+		return tuple(key)
+	raise TypeError("QueryKey must be a list or tuple of hashable values")
 
 
 QueryStatus: TypeAlias = Literal["loading", "success", "error"]

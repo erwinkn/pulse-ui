@@ -31,6 +31,7 @@ from pulse.queries.common import (
 	QueryKey,
 	QueryStatus,
 	bind_state,
+	normalize_key,
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
@@ -1083,7 +1084,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	):
 		self.name = name
 		self._fetch_fn = fetch_fn
-		self._key = key
+		self._key = normalize_key(key) if key is not None and not callable(key) else key
 		self._on_success_fn = None
 		self._on_error_fn = None
 		self._keep_previous_data = keep_previous_data
@@ -1104,7 +1105,11 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			raise RuntimeError(
 				f"Cannot use @{self.name}.key decorator when a key is already provided to @query(key=...)."
 			)
-		self._key = fn
+
+		def normalized_key(state: TState) -> tuple[Hashable, ...]:
+			return normalize_key(fn(state))
+
+		self._key = normalized_key
 		return fn
 
 	# Decorator to attach a function providing initial data

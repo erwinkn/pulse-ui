@@ -72,9 +72,12 @@ async def test_query_client_get_and_set_data():
 	# Set via client
 	assert ps.queries.set_data(("user", 1), "updated") is True
 	assert ps.queries.get_data(("user", 1)) == "updated"
+	assert ps.queries.set_data(["user", 1], "list-updated") is True
+	assert ps.queries.get_data(("user", 1)) == "list-updated"
 
 	# Non-existent key returns False
 	assert ps.queries.set_data(("missing",), "x") is False
+	assert ps.queries.set_data(["missing"], "x") is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,6 +111,35 @@ async def test_query_client_get_all_with_filters():
 	# Filter by predicate
 	users = ps.queries.get_all(lambda k: k[0] == "users")
 	assert len(users) == 2
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_client_filter_with_list_keys():
+	"""Test that QueryFilter works with list keys (normalized to tuples)."""
+	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
+
+	# Create queries with list keys
+	store.ensure(["users", 1])
+	store.ensure(["users", 2])
+	store.ensure(["posts", 1])
+
+	# Filter by exact list key
+	exact = ps.queries.get_all(["users", 1])
+	assert len(exact) == 1
+	assert exact[0].key == ("users", 1)  # Stored as tuple
+
+	# Filter by tuple of list keys (sequence of keys)
+	by_tuple_of_lists = ps.queries.get_all((["users", 1], ["posts", 1]))
+	assert len(by_tuple_of_lists) == 2
+
+	# Filter by list of list keys
+	by_list_of_lists = ps.queries.get_all([["users", 1], ["users", 2]])
+	assert len(by_list_of_lists) == 2
+
+	# Mix list and tuple keys in filter
+	by_mixed = ps.queries.get_all([["users", 1], ("posts", 1)])
+	assert len(by_mixed) == 2
 
 
 @pytest.mark.asyncio
@@ -146,7 +178,9 @@ async def test_query_client_invalidate_single_key():
 
 	# Invalidate returns True if query exists
 	assert ps.queries.invalidate(("test",)) is True
+	assert ps.queries.invalidate(["test"]) is True
 	assert ps.queries.invalidate(("missing",)) is False
+	assert ps.queries.invalidate(["missing"]) is False
 
 
 @pytest.mark.asyncio

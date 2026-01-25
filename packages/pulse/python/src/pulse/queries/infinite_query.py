@@ -32,6 +32,7 @@ from pulse.queries.common import (
 	QueryKey,
 	QueryStatus,
 	bind_state,
+	normalize_key,
 )
 from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryConfig
 from pulse.reactive import Computed, Effect, Signal, Untrack
@@ -115,6 +116,7 @@ class RefetchPage(Generic[T, TParam]):
 	fetch_fn: Callable[[TParam], Awaitable[T]]
 	param: TParam
 	observer: "InfiniteQueryResult[T, TParam] | None" = None
+	clear: bool = False
 	future: "asyncio.Future[ActionResult[T | None]]" = field(
 		default_factory=asyncio.Future
 	)
@@ -705,8 +707,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 		page = await action.fetch_fn(action.param)
 
-		if idx is None:
-			# Page doesn't exist - jump to this page, clearing existing pages
+		if action.clear or idx is None:
+			# clear=True or page doesn't exist - replace all pages with just this one
 			self.pages.clear()
 			self.pages.append(Page(page, action.param))
 		else:
@@ -784,12 +786,13 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		*,
 		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 		cancel_fetch: bool = False,
+		clear: bool = False,
 	) -> ActionResult[T | None]:
 		"""
 		Refetch a page by its param. Queued for sequential execution.
 
-		If the page doesn't exist, clears existing pages and loads the requested
-		page as the new starting point.
+		If the page doesn't exist or clear=True, clears existing pages and loads
+		the requested page as the new starting point.
 
 		Note: Prefer calling refetch_page() on InfiniteQueryResult to ensure the
 		correct fetch function is used. When called directly on InfiniteQuery, uses
@@ -797,7 +800,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		"""
 		fn = fetch_fn if fetch_fn is not None else self.fn
 		action: RefetchPage[T, TParam] = RefetchPage(
-			fetch_fn=fn, param=param, observer=observer
+			fetch_fn=fn, param=param, observer=observer, clear=clear
 		)
 		return await self._enqueue(action, cancel_fetch=cancel_fetch)
 
@@ -1021,12 +1024,22 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		page_param: TParam,
 		*,
 		cancel_fetch: bool = False,
+		clear: bool = False,
 	) -> ActionResult[T | None]:
+		"""Fetch a specific page by its param.
+
+		Args:
+			page_param: The page parameter to fetch.
+			cancel_fetch: Cancel any in-flight fetches before starting.
+			clear: If True, clears all other pages and keeps only the fetched page.
+				Useful for resetting pagination to a specific page.
+		"""
 		return await self._query().refetch_page(
 			page_param,
 			fetch_fn=self._fetch_fn,
 			observer=self,
 			cancel_fetch=cancel_fetch,
+			clear=clear,
 		)
 
 	def set_initial_data(
@@ -1195,7 +1208,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		self._on_success_fn = None
 		self._on_error_fn = None
 		self._initial_data = MISSING
-		self._key = key
+		self._key = normalize_key(key) if key is not None and not callable(key) else key
 		self._initial_data_updated_at = initial_data_updated_at
 		self._enabled = enabled
 		self._fetch_on_mount = fetch_on_mount
@@ -1206,7 +1219,11 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 			raise RuntimeError(
 				f"Cannot use @{self.name}.key decorator when a key is already provided to @infinite_query(key=...)."
 			)
-		self._key = fn
+
+		def normalized_key(state: TState) -> tuple[Hashable, ...]:
+			return normalize_key(fn(state))
+
+		self._key = normalized_key
 		return fn
 
 	def on_success(self, fn: OnSuccessFn[TState, list[T]]):

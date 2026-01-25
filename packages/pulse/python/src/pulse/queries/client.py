@@ -1,6 +1,6 @@
 import datetime as dt
 from collections.abc import Callable, Hashable
-from typing import Any, TypeVar, overload
+from typing import Any, TypeVar, cast, overload
 
 from pulse.context import PulseContext
 from pulse.helpers import MISSING
@@ -20,38 +20,31 @@ QueryFilter = (
 )
 
 
-def _is_key_sequence(value: tuple[Any, ...] | list[Any]) -> bool:
-	"""Check if value is a sequence of keys (vs a single key).
-
-	A sequence of keys has tuple/list elements, e.g. [("a", 1), ("b", 2)].
-	A single key has hashable elements, e.g. ("a", 1) or ["a", 1].
-	"""
-	return len(value) > 0 and isinstance(value[0], (tuple, list))
-
-
 def _normalize_filter(
 	filter: QueryFilter | None,
-) -> Callable[[tuple[Hashable, ...]], bool] | None:
-	"""Convert any QueryFilter to a predicate function."""
+) -> tuple[tuple[Hashable, ...] | None, Callable[[tuple[Hashable, ...]], bool] | None]:
+	"""Return normalized exact key (if any) and a predicate for filtering."""
 	if filter is None:
-		return None
+		return None, None
 	if callable(filter):
-		return filter
+		return None, filter
 	if isinstance(filter, (tuple, list)):
-		if _is_key_sequence(filter):
-			# Sequence of keys
-			key_set = {normalize_key(k) for k in filter}
-			return lambda k: k in key_set
-		# Single key
-		exact_key = normalize_key(filter)
-		return lambda k: k == exact_key
-	return filter
+		is_key_sequence = bool(filter) and all(
+			isinstance(value, (tuple, list)) for value in filter
+		)
+		if is_key_sequence:
+			key_set = {normalize_key(cast(QueryKey, key)) for key in filter}
+			return None, lambda k: k in key_set
+		exact_key = normalize_key(cast(QueryKey, filter))
+		return exact_key, lambda k: k == exact_key
+	raise TypeError("QueryFilter must be a key, list of keys, or predicate")
 
 
-def _prefix_filter(prefix: tuple[Any, ...]) -> Callable[[QueryKey], bool]:
+def _prefix_filter(prefix: QueryKey) -> Callable[[tuple[Hashable, ...]], bool]:
 	"""Create a predicate that matches keys starting with the given prefix."""
-	prefix_len = len(prefix)
-	return lambda k: len(k) >= prefix_len and k[:prefix_len] == prefix
+	normalized = normalize_key(prefix)
+	prefix_len = len(normalized)
+	return lambda k: len(k) >= prefix_len and k[:prefix_len] == normalized
 
 
 class QueryClient:
@@ -106,9 +99,9 @@ class QueryClient:
 			key: The query key tuple to look up.
 
 		Returns:
-			The KeyedQuery instance, or None if not found.
+			The KeyedQuerFinished fetching instance, or None if not found.
 		"""
-		return self._get_store().get(key)
+		return self._get_store().get(normalize_key(key))
 
 	def get_infinite(self, key: QueryKey) -> InfiniteQuery[Any, Any] | None:
 		"""Get an existing infinite query by key.
@@ -119,7 +112,7 @@ class QueryClient:
 		Returns:
 			The InfiniteQuery instance, or None if not found.
 		"""
-		return self._get_store().get_infinite(key)
+		return self._get_store().get_infinite(normalize_key(key))
 
 	def get_all(
 		self,
@@ -139,8 +132,15 @@ class QueryClient:
 			List of matching Query or InfiniteQuery instances.
 		"""
 		store = self._get_store()
-		predicate = _normalize_filter(filter)
+		exact_key, predicate = _normalize_filter(filter)
 		results: list[KeyedQuery[Any] | InfiniteQuery[Any, Any]] = []
+
+		if exact_key is not None:
+			if include_infinite:
+				entry = store.get_any(exact_key)
+			else:
+				entry = store.get(exact_key)
+			return [entry] if entry is not None else []
 
 		for key, entry in store.items():
 			if predicate is not None and not predicate(key):
@@ -162,8 +162,12 @@ class QueryClient:
 			List of matching KeyedQuery instances (excludes infinite queries).
 		"""
 		store = self._get_store()
-		predicate = _normalize_filter(filter)
+		exact_key, predicate = _normalize_filter(filter)
 		results: list[KeyedQuery[Any]] = []
+
+		if exact_key is not None:
+			entry = store.get(exact_key)
+			return [entry] if entry is not None else []
 
 		for key, entry in store.items():
 			if isinstance(entry, InfiniteQuery):
@@ -187,8 +191,12 @@ class QueryClient:
 			List of matching InfiniteQuery instances.
 		"""
 		store = self._get_store()
-		predicate = _normalize_filter(filter)
+		exact_key, predicate = _normalize_filter(filter)
 		results: list[InfiniteQuery[Any, Any]] = []
+
+		if exact_key is not None:
+			entry = store.get_infinite(exact_key)
+			return [entry] if entry is not None else []
 
 		for key, entry in store.items():
 			if not isinstance(entry, InfiniteQuery):
@@ -250,7 +258,7 @@ class QueryClient:
 	@overload
 	def set_data(
 		self,
-		key_or_filter: list[QueryKey] | Callable[[QueryKey], bool],
+		key_or_filter: list[QueryKey] | Callable[[tuple[Hashable, ...]], bool],
 		data: Callable[[Any], Any],
 		*,
 		updated_at: float | dt.datetime | None = None,
@@ -258,7 +266,9 @@ class QueryClient:
 
 	def set_data(
 		self,
-		key_or_filter: QueryKey | list[QueryKey] | Callable[[QueryKey], bool],
+		key_or_filter: QueryKey
+		| list[QueryKey]
+		| Callable[[tuple[Hashable, ...]], bool],
 		data: Any | Callable[[Any], Any],
 		*,
 		updated_at: float | dt.datetime | None = None,
@@ -277,16 +287,15 @@ class QueryClient:
 		Returns:
 			bool if exact key, int count if filter.
 		"""
-		# Single key case
-		if isinstance(key_or_filter, tuple):
-			query = self.get(key_or_filter)
+		exact_key, predicate = _normalize_filter(key_or_filter)
+		if exact_key is not None:
+			query = self.get(exact_key)
 			if query is None:
 				return False
 			query.set_data(data, updated_at=updated_at)
 			return True
 
-		# Filter case
-		queries = self.get_queries(key_or_filter)
+		queries = self.get_queries(predicate)
 		for q in queries:
 			q.set_data(data, updated_at=updated_at)
 		return len(queries)
@@ -330,7 +339,9 @@ class QueryClient:
 	@overload
 	def invalidate(
 		self,
-		key_or_filter: list[QueryKey] | Callable[[QueryKey], bool] | None = None,
+		key_or_filter: list[QueryKey]
+		| Callable[[tuple[Hashable, ...]], bool]
+		| None = None,
 		*,
 		cancel_refetch: bool = False,
 	) -> int: ...
@@ -339,7 +350,7 @@ class QueryClient:
 		self,
 		key_or_filter: QueryKey
 		| list[QueryKey]
-		| Callable[[QueryKey], bool]
+		| Callable[[tuple[Hashable, ...]], bool]
 		| None = None,
 		*,
 		cancel_refetch: bool = False,
@@ -357,20 +368,19 @@ class QueryClient:
 		Returns:
 			bool if exact key, int count if filter/None.
 		"""
-		# Single key case
-		if isinstance(key_or_filter, tuple):
-			query = self.get(key_or_filter)
+		exact_key, predicate = _normalize_filter(key_or_filter)
+		if exact_key is not None:
+			query = self.get(exact_key)
 			if query is not None:
 				query.invalidate(cancel_refetch=cancel_refetch)
 				return True
-			inf_query = self.get_infinite(key_or_filter)
+			inf_query = self.get_infinite(exact_key)
 			if inf_query is not None:
 				inf_query.invalidate(cancel_fetch=cancel_refetch)
 				return True
 			return False
 
-		# Filter case
-		queries = self.get_all(key_or_filter)
+		queries = self.get_all(predicate)
 		for q in queries:
 			if isinstance(q, InfiniteQuery):
 				q.invalidate(cancel_fetch=cancel_refetch)
@@ -380,14 +390,14 @@ class QueryClient:
 
 	def invalidate_prefix(
 		self,
-		prefix: tuple[Any, ...],
+		prefix: QueryKey,
 		*,
 		cancel_refetch: bool = False,
 	) -> int:
 		"""Invalidate all queries whose keys start with the given prefix.
 
 		Args:
-			prefix: Tuple prefix to match against query keys.
+			prefix: Key prefix to match against query keys.
 			cancel_refetch: Cancel in-flight requests before refetch.
 
 		Returns:
@@ -461,14 +471,14 @@ class QueryClient:
 
 	async def refetch_prefix(
 		self,
-		prefix: tuple[Any, ...],
+		prefix: QueryKey,
 		*,
 		cancel_refetch: bool = True,
 	) -> list[ActionResult[Any]]:
 		"""Refetch all queries whose keys start with the given prefix.
 
 		Args:
-			prefix: Tuple prefix to match against query keys.
+			prefix: Key prefix to match against query keys.
 			cancel_refetch: Cancel in-flight requests before refetching.
 
 		Returns:
@@ -525,7 +535,7 @@ class QueryClient:
 			True if query existed and was removed, False otherwise.
 		"""
 		store = self._get_store()
-		entry = store.get_any(key)
+		entry = store.get_any(normalize_key(key))
 		if entry is None:
 			return False
 		entry.dispose()
@@ -546,11 +556,11 @@ class QueryClient:
 			q.dispose()
 		return len(queries)
 
-	def remove_prefix(self, prefix: tuple[Any, ...]) -> int:
+	def remove_prefix(self, prefix: QueryKey) -> int:
 		"""Remove all queries whose keys start with the given prefix.
 
 		Args:
-			prefix: Tuple prefix to match against query keys.
+			prefix: Key prefix to match against query keys.
 
 		Returns:
 			Count of removed queries.

@@ -655,6 +655,61 @@ async def test_infinite_query_fetch_page_no_pages_exists():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_infinite_query_fetch_page_clear():
+	"""Test that fetch_page with clear=True refetches and clears other pages."""
+	fetch_count = 0
+
+	class S(ps.State):
+		@ps.infinite_query(initial_page_param=0, retries=0, fetch_on_mount=False)
+		async def nums(self, page_param: int) -> int:
+			nonlocal fetch_count
+			fetch_count += 1
+			await asyncio.sleep(0)
+			return page_param * 10 + fetch_count
+
+		@nums.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 10 else None
+
+		@nums.key
+		def _key(self):
+			return ("fetch-page-clear",)
+
+	s = S()
+	q = s.nums
+
+	# Load several pages
+	await q.fetch_page(0)
+	await q.fetch_next_page()
+	await q.fetch_next_page()
+	await q.fetch_next_page()
+	assert q.page_params == [0, 1, 2, 3]
+	assert fetch_count == 4
+
+	# Refetch page 0 with clear=True - should refetch and clear all other pages
+	result = await q.fetch_page(0, clear=True)
+	assert result.status == "success"
+	assert result.data == 5  # 0*10 + 5 (refetched)
+	assert q.pages == [5]
+	assert q.page_params == [0]
+	assert fetch_count == 5
+
+	# Load more pages again
+	await q.fetch_next_page()
+	await q.fetch_next_page()
+	assert q.page_params == [0, 1, 2]
+	assert fetch_count == 7
+
+	# Refetch page 1 (middle page) with clear=True - should clear and keep only page 1
+	result = await q.fetch_page(1, clear=True)
+	assert result.status == "success"
+	assert result.data == 18  # 1*10 + 8
+	assert q.pages == [18]
+	assert q.page_params == [1]
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_infinite_query_retry_on_initial_fetch():
 	"""Test that infinite query retries on initial fetch failure."""
 

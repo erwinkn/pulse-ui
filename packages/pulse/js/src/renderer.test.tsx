@@ -78,9 +78,9 @@ describe("VDOMRenderer", () => {
 		(button.props as any).onClick("b");
 
 		expect(invokeCallback).not.toHaveBeenCalled();
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(invokeCallback).not.toHaveBeenCalled();
-		await new Promise((resolve) => setTimeout(resolve, 25));
+		await new Promise((resolve) => setTimeout(resolve, 40));
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["b"]);
 	});
 
@@ -103,8 +103,53 @@ describe("VDOMRenderer", () => {
 			},
 		]);
 
-		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(invokeCallback).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		expect(invokeCallback).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 40));
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["a"]);
+	});
+
+	it("keeps a pending debounced call when a node moves", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "div",
+			children: [
+				{
+					tag: "button",
+					props: { onClick: "$cb:40" },
+					eval: ["onClick"],
+					children: ["A"],
+				},
+				{
+					tag: "button",
+					props: { onClick: "$cb:40" },
+					eval: ["onClick"],
+					children: ["B"],
+				},
+			],
+		});
+		const root = tree as React.ReactElement;
+		const kids = childrenArray(root) as React.ReactElement[];
+		(kids[0].props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "reconciliation",
+				path: "",
+				N: 2,
+				new: [[], []],
+				reuse: [
+					[0, 1],
+					[1, 0],
+				],
+			},
+		]);
+
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["value"]);
 	});
 
 	it("flushes debounced callbacks when a node is replaced", () => {

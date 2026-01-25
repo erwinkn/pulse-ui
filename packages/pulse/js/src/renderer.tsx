@@ -29,6 +29,7 @@ type CallbackEntry = {
 	delayMs: CallbackDelay;
 	timer: ReturnType<typeof setTimeout> | null;
 	lastArgs: any[] | null;
+	dueAt: number | null;
 };
 
 function parseCallbackPlaceholder(value: unknown): CallbackDelay | undefined {
@@ -227,11 +228,17 @@ export class VDOMRenderer {
 		return path ? `${path}.${prop}` : prop;
 	}
 
-	#clearCallback(key: string) {
-		const entry = this.#callbacks.get(key);
-		if (!entry) return;
+	#scheduleDebounced(entry: CallbackEntry, key: string, delayMs: number, args: any[]) {
+		entry.lastArgs = args;
 		if (entry.timer) clearTimeout(entry.timer);
-		this.#callbacks.delete(key);
+		entry.dueAt = Date.now() + delayMs;
+		entry.timer = setTimeout(() => {
+			entry.timer = null;
+			entry.dueAt = null;
+			const latestArgs = entry.lastArgs ?? [];
+			entry.lastArgs = null;
+			this.#client.invokeCallback(this.#path, key, latestArgs);
+		}, delayMs);
 	}
 
 	#flushCallback(key: string) {
@@ -240,6 +247,7 @@ export class VDOMRenderer {
 		if (entry.timer) {
 			clearTimeout(entry.timer);
 			entry.timer = null;
+			entry.dueAt = null;
 		}
 		if (entry.delayMs != null && entry.lastArgs != null) {
 			const latestArgs = entry.lastArgs;
@@ -247,6 +255,25 @@ export class VDOMRenderer {
 			this.#client.invokeCallback(this.#path, key, latestArgs);
 		}
 		this.#callbacks.delete(key);
+	}
+
+	#moveCallback(oldKey: string, newKey: string) {
+		if (oldKey === newKey) return;
+		const oldEntry = this.#callbacks.get(oldKey);
+		if (!oldEntry) return;
+		if (oldEntry.timer) clearTimeout(oldEntry.timer);
+		if (oldEntry.delayMs == null || oldEntry.lastArgs == null) {
+			this.#callbacks.delete(oldKey);
+			return;
+		}
+		const args = oldEntry.lastArgs;
+		const newEntry = this.#ensureCallbackEntry(newKey);
+		if (newEntry.timer) clearTimeout(newEntry.timer);
+		newEntry.delayMs = oldEntry.delayMs;
+		newEntry.lastArgs = args;
+		const remaining = Math.max(0, (oldEntry.dueAt ?? Date.now()) - Date.now());
+		this.#scheduleDebounced(newEntry, newKey, remaining, args);
+		this.#callbacks.delete(oldKey);
 	}
 
 	#ensureCallbackEntry(key: string): CallbackEntry {
@@ -259,18 +286,12 @@ export class VDOMRenderer {
 						return;
 					}
 					const callArgs = args.map(extractEvent);
-					entry!.lastArgs = callArgs;
-					if (entry!.timer) clearTimeout(entry!.timer);
-					entry!.timer = setTimeout(() => {
-						entry!.timer = null;
-						const latestArgs = entry!.lastArgs ?? [];
-						entry!.lastArgs = null;
-						this.#client.invokeCallback(this.#path, key, latestArgs);
-					}, entry!.delayMs);
+					this.#scheduleDebounced(entry!, key, entry!.delayMs, callArgs);
 				},
 				delayMs: null,
 				timer: null,
 				lastArgs: null,
+				dueAt: null,
 			};
 			this.#callbacks.set(key, entry);
 		}
@@ -462,7 +483,7 @@ export class VDOMRenderer {
 				const oldKey = this.#propPath(prevPath, k);
 				const newKey = this.#propPath(path, k);
 				const delay = this.#callbacks.get(oldKey)?.delayMs ?? null;
-				if (oldKey !== newKey) this.#clearCallback(oldKey);
+				if (oldKey !== newKey) this.#moveCallback(oldKey, newKey);
 				nextProps[k] = this.#getCallback(path, k, delay);
 			}
 		}

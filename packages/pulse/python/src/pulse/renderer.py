@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
 
+from pulse.debounce import Debounced
 from pulse.helpers import values_equal
 from pulse.hooks.core import HookContext
 from pulse.transpiler import Import
@@ -33,7 +34,7 @@ from pulse.transpiler.vdom import (
 	VDOMPropValue,
 )
 
-PropValue: TypeAlias = Node | Callable[..., Any]
+PropValue: TypeAlias = Node | Callable[..., Any] | Debounced
 
 FRAGMENT_TAG = ""
 MOUNT_PREFIX = "$$"
@@ -404,6 +405,21 @@ class Renderer:
 					updated[key] = value.render()
 				continue
 
+			if isinstance(value, Debounced):
+				eval_keys.add(key)
+				if isinstance(old_value, (Element, PulseNode)):
+					unmount_element(old_value)
+				if normalized is None:
+					normalized = current.copy()
+				normalized[key] = value
+				register_callback(self.callbacks, prop_path, value.fn)
+				prev_delay = (
+					old_value.delay_ms if isinstance(old_value, Debounced) else None
+				)
+				if prev_delay != value.delay_ms:
+					updated[key] = format_callback_placeholder(value.delay_ms)
+				continue
+
 			if callable(value):
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
@@ -483,6 +499,8 @@ def prop_requires_eval(value: PropValue) -> bool:
 		return True
 	if isinstance(value, Expr):
 		return True
+	if isinstance(value, Debounced):
+		return True
 	return callable(value)
 
 
@@ -528,6 +546,16 @@ def normalize_children(children: Children | None) -> list[Node]:
 		visit(child)
 
 	return out
+
+
+def format_callback_placeholder(delay_ms: float | None) -> str:
+	if delay_ms is None:
+		return CALLBACK_PLACEHOLDER
+	if delay_ms.is_integer():
+		suffix = str(int(delay_ms))
+	else:
+		suffix = format(delay_ms, "g")
+	return f"{CALLBACK_PLACEHOLDER}:{suffix}"
 
 
 def register_callback(

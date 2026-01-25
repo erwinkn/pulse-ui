@@ -65,6 +65,48 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
 	});
 
+	it("debounces callbacks when placeholder includes delay", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+
+		const tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:30" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("a");
+		(button.props as any).onClick("b");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(invokeCallback).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["b"]);
+	});
+
+	it("keeps a pending debounced call when the delay changes", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:40" },
+			eval: ["onClick"],
+		});
+
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("a");
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: ["onClick"], set: { onClick: "$cb:5" } },
+			},
+		]);
+
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["a"]);
+	});
+
 	it("keeps previous eval when update_props.eval is absent", () => {
 		const { renderer } = makeRenderer();
 		let tree = renderer.renderNode({

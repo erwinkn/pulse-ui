@@ -1,9 +1,9 @@
 import datetime as dt
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from typing import Any, TypeVar, cast
 
 from pulse.helpers import MISSING, Missing
-from pulse.queries.common import QueryKey
+from pulse.queries.common import QueryKey, normalize_key
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import RETRY_DELAY_DEFAULT, KeyedQuery
 
@@ -16,7 +16,9 @@ class QueryStore:
 	"""
 
 	def __init__(self):
-		self._entries: dict[QueryKey, KeyedQuery[Any] | InfiniteQuery[Any, Any]] = {}
+		self._entries: dict[
+			tuple[Hashable, ...], KeyedQuery[Any] | InfiniteQuery[Any, Any]
+		] = {}
 
 	def items(self):
 		"""Iterate over all (key, query) pairs in the store."""
@@ -24,7 +26,7 @@ class QueryStore:
 
 	def get_any(self, key: QueryKey):
 		"""Get any query (regular or infinite) by key, or None if not found."""
-		return self._entries.get(key)
+		return self._entries.get(normalize_key(key))
 
 	def ensure(
 		self,
@@ -35,8 +37,9 @@ class QueryStore:
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
 	) -> KeyedQuery[T]:
+		nkey = normalize_key(key)
 		# Return existing entry if present
-		existing = self._entries.get(key)
+		existing = self._entries.get(nkey)
 		if existing:
 			if isinstance(existing, InfiniteQuery):
 				raise TypeError(
@@ -49,7 +52,7 @@ class QueryStore:
 				del self._entries[e.key]
 
 		entry = KeyedQuery(
-			key,
+			nkey,
 			initial_data=initial_data,
 			initial_data_updated_at=initial_data_updated_at,
 			gc_time=gc_time,
@@ -57,14 +60,14 @@ class QueryStore:
 			retry_delay=retry_delay,
 			on_dispose=_on_dispose,
 		)
-		self._entries[key] = entry
+		self._entries[nkey] = entry
 		return entry
 
 	def get(self, key: QueryKey) -> KeyedQuery[Any] | None:
 		"""
 		Get an existing regular query by key, or None if not found.
 		"""
-		existing = self._entries.get(key)
+		existing = self._entries.get(normalize_key(key))
 		if existing and isinstance(existing, InfiniteQuery):
 			return None
 		return existing
@@ -73,7 +76,7 @@ class QueryStore:
 		"""
 		Get an existing infinite query by key, or None if not found.
 		"""
-		existing = self._entries.get(key)
+		existing = self._entries.get(normalize_key(key))
 		if existing and isinstance(existing, InfiniteQuery):
 			return existing
 		return None
@@ -93,7 +96,8 @@ class QueryStore:
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
 	) -> InfiniteQuery[Any, Any]:
-		existing = self._entries.get(key)
+		nkey = normalize_key(key)
+		existing = self._entries.get(nkey)
 		if existing:
 			if not isinstance(existing, InfiniteQuery):
 				raise TypeError(
@@ -106,7 +110,7 @@ class QueryStore:
 				del self._entries[e.key]
 
 		entry = InfiniteQuery(
-			key,
+			nkey,
 			initial_page_param=initial_page_param,
 			get_next_page_param=get_next_page_param,
 			get_previous_page_param=get_previous_page_param,
@@ -118,7 +122,7 @@ class QueryStore:
 			retry_delay=retry_delay,
 			on_dispose=_on_dispose,
 		)
-		self._entries[key] = entry
+		self._entries[nkey] = entry
 		return entry
 
 	def dispose_all(self) -> None:

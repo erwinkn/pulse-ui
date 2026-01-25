@@ -1,10 +1,10 @@
 import datetime as dt
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from typing import Any, TypeVar, overload
 
 from pulse.context import PulseContext
 from pulse.helpers import MISSING
-from pulse.queries.common import ActionResult, QueryKey
+from pulse.queries.common import ActionResult, QueryKey, normalize_key
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import KeyedQuery
 from pulse.queries.store import QueryStore
@@ -13,27 +13,38 @@ T = TypeVar("T")
 
 # Query filter types
 QueryFilter = (
-	QueryKey  # exact key match
+	QueryKey  # exact key match (tuple or list)
 	| list[QueryKey]  # explicit list of keys
-	| Callable[[QueryKey], bool]  # predicate function
+	| tuple[QueryKey, ...]  # explicit tuple of keys
+	| Callable[[tuple[Hashable, ...]], bool]  # predicate function
 )
+
+
+def _is_key_sequence(value: tuple[Any, ...] | list[Any]) -> bool:
+	"""Check if value is a sequence of keys (vs a single key).
+
+	A sequence of keys has tuple/list elements, e.g. [("a", 1), ("b", 2)].
+	A single key has hashable elements, e.g. ("a", 1) or ["a", 1].
+	"""
+	return len(value) > 0 and isinstance(value[0], (tuple, list))
 
 
 def _normalize_filter(
 	filter: QueryFilter | None,
-) -> Callable[[QueryKey], bool] | None:
+) -> Callable[[tuple[Hashable, ...]], bool] | None:
 	"""Convert any QueryFilter to a predicate function."""
 	if filter is None:
 		return None
-	if isinstance(filter, tuple):
-		# Exact key match
-		exact_key = filter
+	if callable(filter):
+		return filter
+	if isinstance(filter, (tuple, list)):
+		if _is_key_sequence(filter):
+			# Sequence of keys
+			key_set = {normalize_key(k) for k in filter}
+			return lambda k: k in key_set
+		# Single key
+		exact_key = normalize_key(filter)
 		return lambda k: k == exact_key
-	if isinstance(filter, list):
-		# List of keys
-		key_set = set(filter)
-		return lambda k: k in key_set
-	# Already a callable predicate
 	return filter
 
 

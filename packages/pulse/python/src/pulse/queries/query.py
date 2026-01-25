@@ -2,7 +2,7 @@ import asyncio
 import datetime as dt
 import inspect
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Hashable
 from dataclasses import dataclass
 from typing import (
 	TYPE_CHECKING,
@@ -239,7 +239,8 @@ async def run_fetch_with_retries(
 				result = await fetch_fn()
 			state.set_success(result)
 			if on_success:
-				await maybe_await(call_flexible(on_success, result))
+				with Untrack():
+					await maybe_await(call_flexible(on_success, result))
 			return
 		except asyncio.CancelledError:
 			raise
@@ -252,7 +253,8 @@ async def run_fetch_with_retries(
 				state.retry_reason.write(e)
 				state.apply_error(e)
 				if on_error:
-					await maybe_await(call_flexible(on_error, e))
+					with Untrack():
+						await maybe_await(call_flexible(on_error, e))
 				return
 
 
@@ -263,7 +265,7 @@ class KeyedQuery(Generic[T], Disposable):
 	Multiple observers can share the same query.
 	"""
 
-	key: QueryKey
+	key: tuple[Hashable, ...]
 	state: QueryState[T]
 	observers: "list[KeyedQueryResult[T]]"
 	_task: asyncio.Task[None] | None
@@ -275,7 +277,7 @@ class KeyedQuery(Generic[T], Disposable):
 
 	def __init__(
 		self,
-		key: QueryKey,
+		key: tuple[Hashable, ...],
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
 		initial_data: T | Missing | None = MISSING,

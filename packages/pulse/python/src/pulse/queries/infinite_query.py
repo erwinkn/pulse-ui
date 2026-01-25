@@ -3,7 +3,7 @@ import datetime as dt
 import inspect
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Hashable
 from dataclasses import dataclass, field
 from typing import (
 	Any,
@@ -141,7 +141,7 @@ class InfiniteQueryConfig(QueryConfig[list[Page[T, TParam]]], Generic[T, TParam]
 class InfiniteQuery(Generic[T, TParam], Disposable):
 	"""Paginated query that stores data as a list of Page(data, param)."""
 
-	key: QueryKey
+	key: tuple[Hashable, ...]
 	cfg: InfiniteQueryConfig[T, TParam]
 
 	@property
@@ -233,7 +233,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 	def __init__(
 		self,
-		key: QueryKey,
+		key: tuple[Hashable, ...],
 		*,
 		initial_page_param: TParam,
 		get_next_page_param: Callable[[list[Page[T, TParam]]], TParam | None],
@@ -305,7 +305,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 		for obs in self._observers:
 			if obs._on_success is not None:  # pyright: ignore[reportPrivateUsage]
-				await maybe_await(call_flexible(obs._on_success, self.pages))  # pyright: ignore[reportPrivateUsage]
+				with Untrack():
+					await maybe_await(call_flexible(obs._on_success, self.pages))  # pyright: ignore[reportPrivateUsage]
 
 	async def _commit_error(self, error: Exception):
 		"""Commit error state and run error callbacks."""
@@ -313,7 +314,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 		for obs in self._observers:
 			if obs._on_error is not None:  # pyright: ignore[reportPrivateUsage]
-				await maybe_await(call_flexible(obs._on_error, error))  # pyright: ignore[reportPrivateUsage]
+				with Untrack():
+					await maybe_await(call_flexible(obs._on_error, error))  # pyright: ignore[reportPrivateUsage]
 
 	def _commit_sync(self):
 		"""Synchronous commit - updates state based on current pages."""

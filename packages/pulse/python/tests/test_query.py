@@ -1426,6 +1426,100 @@ async def test_state_query_on_error_handler_async_only():
 
 
 @pytest.mark.asyncio
+async def test_unkeyed_query_on_success_handler_reads_are_untracked():
+	"""Test that on_success callbacks in unkeyed queries don't create dependencies."""
+	max_fetches = 3  # Guard against infinite loop
+
+	class S(ps.State):
+		count: int = 0
+		unrelated: int = 0
+		success_calls: int = 0
+
+		@ps.computed
+		def doubled(self) -> int:
+			return self.unrelated * 2
+
+		@ps.query(retries=0)
+		async def value(self) -> int:
+			self.count += 1
+			if self.count > max_fetches:
+				raise RuntimeError("Too many fetches - callback dependency bug")
+			await asyncio.sleep(0)
+			return self.count
+
+		@value.on_success
+		def _on_success(self, data: int):
+			# Read signals in callback - should NOT be tracked as dependencies
+			_ = self.unrelated
+			_ = self.doubled
+			self.success_calls += 1
+
+	s = S()
+	_ = s.value
+	await s.value.wait()
+	await asyncio.sleep(0)  # Wait for on_success
+	assert s.count == 1
+	assert s.success_calls == 1
+
+	# Changing signals read in on_success should NOT trigger refetch
+	s.unrelated = 5
+	# Give time for any (buggy) refetch to trigger
+	await asyncio.sleep(0.01)
+	# Should NOT have refetched
+	assert s.count == 1, "Changing signal read in on_success should not trigger refetch"
+	assert s.success_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_on_error_handler_reads_are_untracked():
+	"""Test that on_error callbacks in unkeyed queries don't create dependencies."""
+	max_fetches = 3  # Guard against infinite loop
+
+	class S(ps.State):
+		fetch_count: int = 0
+		unrelated: int = 0
+		error_calls: int = 0
+
+		@ps.computed
+		def doubled(self) -> int:
+			return self.unrelated * 2
+
+		@ps.query(retries=0)
+		async def fail(self) -> int:
+			self.fetch_count += 1
+			if self.fetch_count > max_fetches:
+				raise RuntimeError("Too many fetches - callback dependency bug")
+			await asyncio.sleep(0)
+			raise RuntimeError("boom")
+
+		@fail.on_error
+		def _on_error(self, e: Exception):
+			if "Too many fetches" in str(e):
+				return  # Don't count the guard error
+			# Read signals in callback - should NOT be tracked as dependencies
+			_ = self.unrelated
+			_ = self.doubled
+			self.error_calls += 1
+
+	s = S()
+	_ = s.fail
+	await s.fail.wait()
+	await asyncio.sleep(0)  # Wait for on_error
+	assert s.fetch_count == 1
+	assert s.error_calls == 1
+
+	# Changing signals read in on_error should NOT trigger refetch
+	s.unrelated = 5
+	# Give time for any (buggy) refetch to trigger
+	await asyncio.sleep(0.01)
+	# Should NOT have refetched
+	assert s.fetch_count == 1, (
+		"Changing signal read in on_error should not trigger refetch"
+	)
+	assert s.error_calls == 1
+
+
+@pytest.mark.asyncio
 @with_render_session
 async def test_state_query_gc_time_0_disposes_immediately():
 	class S(ps.State):

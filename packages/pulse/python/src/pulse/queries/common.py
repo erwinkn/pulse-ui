@@ -18,12 +18,19 @@ TState = TypeVar("TState", bound="State")
 P = ParamSpec("P")
 R = TypeVar("R")
 
-QueryKey: TypeAlias = tuple[Hashable, ...]
-"""Tuple of hashable values identifying a query in the store.
+QueryKey: TypeAlias = tuple[Hashable, ...] | list[Hashable]
+"""Sequence of hashable values identifying a query in the store.
 
 Used to uniquely identify queries for caching, deduplication, and invalidation.
-Keys are hierarchical tuples like ``("user", user_id)`` or ``("posts", "feed")``.
+Keys are hierarchical sequences like ``("user", user_id)`` or ``["posts", "feed"]``.
+Lists are normalized to tuples internally for hashability.
 """
+
+
+def normalize_key(key: QueryKey) -> tuple[Hashable, ...]:
+	"""Convert a query key to a tuple for use as a dict key."""
+	return key if isinstance(key, tuple) else tuple(key)
+
 
 QueryStatus: TypeAlias = Literal["loading", "success", "error"]
 """Current status of a query.

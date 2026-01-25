@@ -1330,6 +1330,7 @@ from pulse.queries.common import ActionResult as ActionResult
 from pulse.queries.common import ActionSuccess as ActionSuccess
 from pulse.queries.common import QueryKey as QueryKey
 from pulse.queries.common import QueryStatus as QueryStatus
+from pulse.queries.common import normalize_key as normalize_key
 from pulse.queries.infinite_query import infinite_query as infinite_query
 from pulse.queries.mutation import mutation as mutation
 from pulse.queries.protocol import QueryResult as QueryResult

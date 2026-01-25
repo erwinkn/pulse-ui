@@ -1,0 +1,52 @@
+---
+title: "Debounce event handlers"
+---
+
+Reduce noisy UI events so the server only sees the last call after a pause.
+
+## Basic usage
+
+```python
+import pulse as ps
+
+
+class SearchState(ps.State):
+	query: str
+	calls: int
+
+	def __init__(self):
+		self.query = ""
+		self.calls = 0
+
+	def update(self, event):
+		self.calls += 1
+		self.query = event["target"]["value"]
+
+
+@ps.component
+def SearchBox():
+	with ps.init():
+		state = SearchState()
+
+	return ps.div(
+		ps.input(
+			placeholder="Search...",
+			onChange=ps.debounced(state.update, 300),
+		),
+		ps.p(f"Calls: {state.calls}"),
+	)
+```
+
+Type quickly in the input. The counter only bumps after you pause for 300ms.
+
+## How it works
+
+- `ps.debounced(fn, delay_ms)` wraps a server callback, but the debounce happens in the browser.
+- The event payload is snapshotted at call time, so `event["target"]["value"]` is safe even after the delay.
+- If the debounce delay changes, any pending call still fires, and the new delay applies to later calls.
+
+## See also
+
+- [Concepts: Events](/docs/concepts/events)
+- [Reference: DOM elements](/docs/reference/pulse/dom)
+- [Concepts: State](/docs/concepts/state)

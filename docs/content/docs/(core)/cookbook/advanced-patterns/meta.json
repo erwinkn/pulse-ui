@@ -1,5 +1,5 @@
 {
   "title": "Advanced Patterns",
   "icon": "Sparkles",
-  "pages": ["chat-channels"]
+  "pages": ["chat-channels", "debounced-handlers"]
 }

@@ -234,6 +234,21 @@ export class VDOMRenderer {
 		this.#callbacks.delete(key);
 	}
 
+	#flushCallback(key: string) {
+		const entry = this.#callbacks.get(key);
+		if (!entry) return;
+		if (entry.timer) {
+			clearTimeout(entry.timer);
+			entry.timer = null;
+		}
+		if (entry.delayMs != null && entry.lastArgs != null) {
+			const latestArgs = entry.lastArgs;
+			entry.lastArgs = null;
+			this.#client.invokeCallback(this.#path, key, latestArgs);
+		}
+		this.#callbacks.delete(key);
+	}
+
 	#ensureCallbackEntry(key: string): CallbackEntry {
 		let entry = this.#callbacks.get(key);
 		if (!entry) {
@@ -262,6 +277,42 @@ export class VDOMRenderer {
 		return entry;
 	}
 
+	#flushCallbacksInSubtree(node: ReactNode, path: string) {
+		if (node == null || typeof node === "boolean" || typeof node === "number" || typeof node === "string") {
+			return;
+		}
+		if (Array.isArray(node)) {
+			for (let i = 0; i < node.length; i += 1) {
+				const childPath = path ? `${path}.${i}` : String(i);
+				this.#flushCallbacksInSubtree(node[i], childPath);
+			}
+			return;
+		}
+		if (!isValidElement(node)) return;
+		const element = node as ReactElement<Record<string, any> | null>;
+		const meta = this.#metaMap.get(element);
+		const cbKeys = meta?.cbKeys;
+		const basePath = meta?.path ?? path;
+		if (cbKeys && cbKeys.size > 0) {
+			for (const k of cbKeys) {
+				this.#flushCallback(this.#propPath(basePath, k));
+			}
+		}
+		const baseProps = (element.props ?? {}) as Record<string, any>;
+		for (const key of Object.keys(baseProps)) {
+			if (key === "children") continue;
+			const v = baseProps[key];
+			if (isValidElement(v)) {
+				this.#flushCallbacksInSubtree(v, this.#propPath(basePath, key));
+			}
+		}
+		const children = this.#ensureChildrenArray(element);
+		for (let i = 0; i < children.length; i += 1) {
+			const childPath = basePath ? `${basePath}.${i}` : String(i);
+			this.#flushCallbacksInSubtree(children[i], childPath);
+		}
+	}
+
 	#getCallback(path: string, prop: string, delayMs: CallbackDelay) {
 		const key = this.#propPath(path, prop);
 		const entry = this.#ensureCallbackEntry(key);
@@ -286,6 +337,12 @@ export class VDOMRenderer {
 	#rememberMeta(el: ReactElement, meta: ElementMeta) {
 		this.#metaMap.set(el, meta);
 		return el;
+	}
+
+	flushPendingCallbacks() {
+		for (const key of Array.from(this.#callbacks.keys())) {
+			this.#flushCallback(key);
+		}
 	}
 
 	renderNode(node: VDOMNode, currentPath = ""): ReactNode {
@@ -452,6 +509,7 @@ export class VDOMRenderer {
 
 				switch (update.type) {
 					case "replace":
+						this.#flushCallbacksInSubtree(node, path);
 						return this.renderNode(update.data, update.path);
 
 					case "update_props": {
@@ -483,7 +541,7 @@ export class VDOMRenderer {
 									if (nextEval.has(k)) {
 										cbSet.add(k);
 									} else {
-										this.#clearCallback(this.#propPath(prevPath, k));
+										this.#flushCallback(this.#propPath(prevPath, k));
 									}
 								}
 							}
@@ -492,15 +550,19 @@ export class VDOMRenderer {
 						if (evalCleared && prevCbKeys) {
 							for (const k of prevCbKeys) {
 								delete nextProps[k];
-								this.#clearCallback(this.#propPath(prevPath, k));
+								this.#flushCallback(this.#propPath(prevPath, k));
 							}
 						}
 
 						if (update.data.remove && update.data.remove.length > 0) {
 							for (const key of update.data.remove) {
+								const removedValue = currentProps[key];
+								if (removedValue !== undefined) {
+									this.#flushCallbacksInSubtree(removedValue, this.#propPath(prevPath, key));
+								}
 								delete nextProps[key];
 								if (prevCbKeys?.has(key)) {
-									this.#clearCallback(this.#propPath(prevPath, key));
+									this.#flushCallback(this.#propPath(prevPath, key));
 								}
 								nextCbKeys?.delete(key);
 							}
@@ -519,7 +581,7 @@ export class VDOMRenderer {
 								} else {
 									nextCbKeys?.delete(k);
 									if (prevCbKeys?.has(k)) {
-										this.#clearCallback(this.#propPath(prevPath, k));
+										this.#flushCallback(this.#propPath(prevPath, k));
 									}
 								}
 							}

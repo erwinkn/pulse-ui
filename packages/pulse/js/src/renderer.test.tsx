@@ -107,6 +107,67 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["a"]);
 	});
 
+	it("flushes debounced callbacks when a node is replaced", () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:50" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "replace",
+				path: "",
+				data: { tag: "div", children: ["done"] },
+			},
+		]);
+		const root = tree as React.ReactElement;
+		expect(root.type).toBe("div");
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+	});
+
+	it("flushes debounced callbacks when eval is cleared", () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:50" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: [] },
+			},
+		]);
+		const root = tree as React.ReactElement;
+		expect(root.type).toBe("button");
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+	});
+
+	it("flushes pending debounced callbacks on renderer teardown", () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		const tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:50" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		renderer.flushPendingCallbacks();
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+	});
+
 	it("keeps previous eval when update_props.eval is absent", () => {
 		const { renderer } = makeRenderer();
 		let tree = renderer.renderNode({

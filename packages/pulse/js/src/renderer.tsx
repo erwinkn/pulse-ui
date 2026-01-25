@@ -228,32 +228,35 @@ export class VDOMRenderer {
 		return path ? `${path}.${prop}` : prop;
 	}
 
+	#clearPending(entry: CallbackEntry) {
+		if (entry.timer) {
+			clearTimeout(entry.timer);
+		}
+		entry.timer = null;
+		entry.lastArgs = null;
+		entry.dueAt = null;
+	}
+
+	#firePending(entry: CallbackEntry, key: string) {
+		const args = entry.lastArgs;
+		this.#clearPending(entry);
+		if (!args) return;
+		this.#client.invokeCallback(this.#path, key, args);
+	}
+
 	#scheduleDebounced(entry: CallbackEntry, key: string, delayMs: number, args: any[]) {
-		entry.lastArgs = args;
 		if (entry.timer) clearTimeout(entry.timer);
+		entry.lastArgs = args;
 		entry.dueAt = Date.now() + delayMs;
 		entry.timer = setTimeout(() => {
-			entry.timer = null;
-			entry.dueAt = null;
-			const latestArgs = entry.lastArgs ?? [];
-			entry.lastArgs = null;
-			this.#client.invokeCallback(this.#path, key, latestArgs);
+			this.#firePending(entry, key);
 		}, delayMs);
 	}
 
 	#flushCallback(key: string) {
 		const entry = this.#callbacks.get(key);
 		if (!entry) return;
-		if (entry.timer) {
-			clearTimeout(entry.timer);
-			entry.timer = null;
-			entry.dueAt = null;
-		}
-		if (entry.delayMs != null && entry.lastArgs != null) {
-			const latestArgs = entry.lastArgs;
-			entry.lastArgs = null;
-			this.#client.invokeCallback(this.#path, key, latestArgs);
-		}
+		this.#firePending(entry, key);
 		this.#callbacks.delete(key);
 	}
 
@@ -261,17 +264,16 @@ export class VDOMRenderer {
 		if (oldKey === newKey) return;
 		const oldEntry = this.#callbacks.get(oldKey);
 		if (!oldEntry) return;
-		if (oldEntry.timer) clearTimeout(oldEntry.timer);
-		if (oldEntry.delayMs == null || oldEntry.lastArgs == null) {
+		const args = oldEntry.lastArgs;
+		const remaining = Math.max(0, (oldEntry.dueAt ?? Date.now()) - Date.now());
+		this.#clearPending(oldEntry);
+		if (args == null) {
 			this.#callbacks.delete(oldKey);
 			return;
 		}
-		const args = oldEntry.lastArgs;
 		const newEntry = this.#ensureCallbackEntry(newKey);
-		if (newEntry.timer) clearTimeout(newEntry.timer);
+		if (newEntry.timer) this.#clearPending(newEntry);
 		newEntry.delayMs = oldEntry.delayMs;
-		newEntry.lastArgs = args;
-		const remaining = Math.max(0, (oldEntry.dueAt ?? Date.now()) - Date.now());
 		this.#scheduleDebounced(newEntry, newKey, remaining, args);
 		this.#callbacks.delete(oldKey);
 	}

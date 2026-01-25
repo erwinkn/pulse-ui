@@ -198,6 +198,29 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
 	});
 
+	it("flushes pending debounced calls after switching to immediate", () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:50" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("value");
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: ["onClick"], set: { onClick: "$cb" } },
+			},
+		]);
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		renderer.flushPendingCallbacks();
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+	});
+
 	it("flushes pending debounced callbacks on renderer teardown", () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		const tree = renderer.renderNode({

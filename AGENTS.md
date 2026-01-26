@@ -7,6 +7,7 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Be extremely concise. Sacrifice grammar for the sake of concision.
 - Read the README.md in the relevant package before starting work
 - Always add tests when implementing a new feature. 
+- If dependencies are not installed, run `make sync`
 - Run `make test` after implementing
 - Run `make all` before committing
 - Check `examples/` for usage patterns

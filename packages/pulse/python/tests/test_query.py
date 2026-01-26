@@ -3385,3 +3385,40 @@ async def test_query_with_dynamic_list_key():
 	assert q.data == {"id": 2}
 	assert store.get(["user", 2]) is not None
 	assert store.get(("user", 2)) is not None
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_with_callable_list_key_updates_on_inplace_change():
+	"""Callable list keys should be normalized so in-place changes update the key."""
+
+	class S(ps.State):
+		user_id: int = 1
+		key_parts: list[Any]
+
+		def __init__(self):
+			self.key_parts = ["user", 1]
+
+		def _key(self) -> ps.QueryKey:
+			_ = self.user_id  # ensure reactive dependency
+			return self.key_parts
+
+		@ps.query(retries=0, gc_time=10, key=_key)
+		async def user(self) -> int:
+			return self.user_id
+
+	s = S()
+	q = s.user
+	await q.wait()
+	result = query_result(q)
+	assert isinstance(result, KeyedQueryResult)
+	assert result._query().key == ("user", 1)  # pyright: ignore[reportPrivateUsage]
+
+	# Mutate list in-place and trigger recompute
+	s.key_parts[1] = 2
+	s.user_id = 2
+
+	def key_matches() -> bool:
+		return result._query().key == ("user", 2)  # pyright: ignore[reportPrivateUsage]
+
+	assert await wait_for(key_matches, timeout=0.2)

@@ -1208,7 +1208,17 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		self._on_success_fn = None
 		self._on_error_fn = None
 		self._initial_data = MISSING
-		self._key = normalize_key(key) if key is not None and not callable(key) else key
+		if key is None:
+			self._key = None
+		elif callable(key):
+			key_fn = key
+
+			def normalized_key(state: TState) -> tuple[Hashable, ...]:
+				return normalize_key(key_fn(state))
+
+			self._key = normalized_key
+		else:
+			self._key = normalize_key(key)
 		self._initial_data_updated_at = initial_data_updated_at
 		self._enabled = enabled
 		self._fetch_on_mount = fetch_on_mount

@@ -1774,6 +1774,51 @@ async def test_infinite_query_key_change_starts_new_fetch():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_infinite_query_callable_list_key_updates_on_inplace_change():
+	"""Callable list keys should be normalized so in-place changes update the key."""
+
+	class S(ps.State):
+		user_id: int = 1
+		key_parts: list[Any]
+
+		def __init__(self):
+			self.key_parts = ["projects", 1]
+
+		def _projects_key(self) -> ps.QueryKey:
+			_ = self.user_id  # ensure reactive dependency
+			return self.key_parts
+
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			fetch_on_mount=False,
+			key=_projects_key,
+		)
+		async def projects(self, page_param: int) -> ProjectsPage:
+			return {"items": [self.user_id * 10 + page_param], "next": None}
+
+		@projects.get_next_page_param
+		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
+			return pages[-1].data["next"]
+
+	s = S()
+	q = s.projects
+	await q.fetch_page(0)
+	assert q._query().key == ("projects", 1)  # pyright: ignore[reportPrivateUsage]
+
+	# Mutate list in-place and trigger recompute
+	s.key_parts[1] = 2
+	s.user_id = 2
+
+	assert await wait_for(
+		lambda: q._query().key == ("projects", 2),  # pyright: ignore[reportPrivateUsage]
+		timeout=0.2,
+	)
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_infinite_query_key_change_does_not_affect_other_observer():
 	"""
 	Test that when one observer's key changes, it doesn't affect another observer

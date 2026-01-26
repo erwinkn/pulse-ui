@@ -1084,7 +1084,17 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	):
 		self.name = name
 		self._fetch_fn = fetch_fn
-		self._key = normalize_key(key) if key is not None and not callable(key) else key
+		if key is None:
+			self._key = None
+		elif callable(key):
+			key_fn = key
+
+			def normalized_key(state: TState) -> tuple[Hashable, ...]:
+				return normalize_key(key_fn(state))
+
+			self._key = normalized_key
+		else:
+			self._key = normalize_key(key)
 		self._on_success_fn = None
 		self._on_error_fn = None
 		self._keep_previous_data = keep_previous_data
@@ -1286,7 +1296,7 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 ) -> QueryProperty[T, TState]: ...
 
 
@@ -1303,7 +1313,7 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 ) -> Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]: ...
 
 
@@ -1319,7 +1329,7 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 ) -> (
 	QueryProperty[T, TState]
 	| Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]

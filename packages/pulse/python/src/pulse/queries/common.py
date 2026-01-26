@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import (
 	Any,
@@ -9,6 +9,7 @@ from typing import (
 	ParamSpec,
 	TypeAlias,
 	TypeVar,
+	final,
 )
 
 from pulse.state import State
@@ -18,22 +19,40 @@ TState = TypeVar("TState", bound="State")
 P = ParamSpec("P")
 R = TypeVar("R")
 
-QueryKey: TypeAlias = Sequence[Hashable]
-"""Sequence of hashable values identifying a query in the store.
+QueryKey: TypeAlias = tuple[Hashable, ...] | list[Hashable]
+"""List/tuple of hashable values identifying a query in the store.
 
 Used to uniquely identify queries for caching, deduplication, and invalidation.
-Keys are hierarchical sequences like ``("user", user_id)`` or ``["posts", "feed"]``.
-Lists are normalized to tuples internally for hashability.
+Keys are hierarchical lists/tuples like ``("user", user_id)`` or ``["posts", "feed"]``.
+Lists are normalized to tuples internally.
 """
 
 
 def normalize_key(key: QueryKey) -> tuple[Hashable, ...]:
 	"""Convert a query key to a tuple for use as a dict key."""
-	if isinstance(key, tuple):
-		return key
-	if isinstance(key, list):
-		return tuple(key)
+	if isinstance(key, (list, tuple)):
+		normalized = tuple(key)
+		for value in normalized:
+			if not isinstance(value, Hashable):
+				raise TypeError("QueryKey values must be hashable")
+		return normalized
 	raise TypeError("QueryKey must be a list or tuple of hashable values")
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class QueryKeys:
+	"""Wrapper for selecting multiple query keys."""
+
+	keys: tuple[tuple[Hashable, ...], ...]
+
+	def __init__(self, *keys: QueryKey):
+		object.__setattr__(self, "keys", tuple(normalize_key(key) for key in keys))
+
+
+def keys(*query_keys: QueryKey) -> QueryKeys:
+	"""Create a QueryKeys wrapper for filtering by multiple keys."""
+	return QueryKeys(*query_keys)
 
 
 QueryStatus: TypeAlias = Literal["loading", "success", "error"]

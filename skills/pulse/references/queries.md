@@ -372,17 +372,20 @@ def _error(self, error: Exception):
 Session-level query cache management.
 
 ```python
-client = ps.queries()
+client = ps.queries
 
-# Invalidate by key pattern
-client.invalidate({"user": 1})  # Exact match
-client.invalidate({"user"})     # Prefix match
+# Invalidate by key
+client.invalidate(("user", 1))  # Exact match
+client.invalidate_prefix(("user",))  # Prefix match
 
 # Get cached data
-data = client.get_query_data(("user", 1))
+data = client.get_data(("user", 1))
 
 # Set cached data
-client.set_query_data(("user", 1), {"id": 1, "name": "Updated"})
+client.set_data(("user", 1), {"id": 1, "name": "Updated"})
+
+# Filter multiple keys
+client.invalidate(ps.keys(("user", 1), ("user", 2)))
 ```
 
 ## Optimistic Updates

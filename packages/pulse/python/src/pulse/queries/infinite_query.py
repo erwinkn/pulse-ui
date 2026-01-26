@@ -1414,7 +1414,7 @@ def infinite_query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
+	key: QueryKey | Callable[[TState], QueryKey],
 ) -> InfiniteQueryProperty[T, TParam, TState]: ...
 
 
@@ -1433,7 +1433,7 @@ def infinite_query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
+	key: QueryKey | Callable[[TState], QueryKey],
 ) -> Callable[
 	[Callable[[TState, Any], Awaitable[T]]],
 	InfiniteQueryProperty[T, TParam, TState],
@@ -1454,7 +1454,7 @@ def infinite_query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 ) -> (
 	InfiniteQueryProperty[T, TParam, TState]
 	| Callable[
@@ -1468,7 +1468,8 @@ def infinite_query(
 	pagination. Data is stored as a list of pages, each with its data and the
 	parameter used to fetch it.
 
-	Requires ``@query_prop.key`` and ``@query_prop.get_next_page_param`` decorators.
+	Requires a key (``key=`` or ``@query_prop.key``) and
+	``@query_prop.get_next_page_param`` decorator.
 
 	Args:
 		fn: The async method to decorate (when used without parentheses).

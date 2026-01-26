@@ -3364,7 +3364,7 @@ async def test_query_with_dynamic_list_key():
 			return {"id": self.user_id}
 
 		@user.key
-		def _user_key(self):
+		def _user_key(self) -> ps.QueryKey:
 			return ["user", self.user_id]  # List key
 
 	s = S()

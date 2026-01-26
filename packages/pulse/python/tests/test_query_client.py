@@ -104,9 +104,9 @@ async def test_query_client_get_all_with_filters():
 	assert len(exact) == 1
 	assert exact[0].key == ("users", 1)
 
-	# Filter by list of keys
-	by_list = ps.queries.get_all([("users", 1), ("posts", 1)])
-	assert len(by_list) == 2
+	# Filter by multiple keys
+	by_keys = ps.queries.get_all(ps.keys(("users", 1), ("posts", 1)))
+	assert len(by_keys) == 2
 
 	# Filter by predicate
 	users = ps.queries.get_all(lambda k: k[0] == "users")
@@ -115,8 +115,8 @@ async def test_query_client_get_all_with_filters():
 
 @pytest.mark.asyncio
 @with_render_session
-async def test_query_client_filter_with_list_keys():
-	"""Test that QueryFilter works with list keys (normalized to tuples)."""
+async def test_query_client_filter_with_query_keys_wrapper():
+	"""Test that QueryFilter works with QueryKeys and list keys."""
 	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
 
 	# Create queries with list keys
@@ -129,16 +129,12 @@ async def test_query_client_filter_with_list_keys():
 	assert len(exact) == 1
 	assert exact[0].key == ("users", 1)  # Stored as tuple
 
-	# Filter by tuple of list keys (sequence of keys)
-	by_tuple_of_lists = ps.queries.get_all((["users", 1], ["posts", 1]))
-	assert len(by_tuple_of_lists) == 2
+	# Filter by QueryKeys with list keys
+	by_keys = ps.queries.get_all(ps.keys(["users", 1], ["posts", 1]))
+	assert len(by_keys) == 2
 
-	# Filter by list of list keys
-	by_list_of_lists = ps.queries.get_all([["users", 1], ["users", 2]])
-	assert len(by_list_of_lists) == 2
-
-	# Mix list and tuple keys in filter
-	by_mixed = ps.queries.get_all([["users", 1], ("posts", 1)])
+	# Mix list and tuple keys in QueryKeys
+	by_mixed = ps.queries.get_all(ps.keys(["users", 1], ("users", 2)))
 	assert len(by_mixed) == 2
 
 

@@ -1,10 +1,10 @@
 import datetime as dt
 from collections.abc import Callable, Hashable
-from typing import Any, TypeVar, cast, overload
+from typing import Any, TypeVar, overload
 
 from pulse.context import PulseContext
 from pulse.helpers import MISSING
-from pulse.queries.common import ActionResult, QueryKey, normalize_key
+from pulse.queries.common import ActionResult, QueryKey, QueryKeys, normalize_key
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import KeyedQuery
 from pulse.queries.store import QueryStore
@@ -14,8 +14,7 @@ T = TypeVar("T")
 # Query filter types
 QueryFilter = (
 	QueryKey  # exact key match (tuple or list)
-	| list[QueryKey]  # explicit list of keys
-	| tuple[QueryKey, ...]  # explicit tuple of keys
+	| QueryKeys  # explicit set of keys
 	| Callable[[tuple[Hashable, ...]], bool]  # predicate function
 )
 
@@ -28,16 +27,11 @@ def _normalize_filter(
 		return None, None
 	if callable(filter):
 		return None, filter
-	if isinstance(filter, (tuple, list)):
-		is_key_sequence = bool(filter) and all(
-			isinstance(value, (tuple, list)) for value in filter
-		)
-		if is_key_sequence:
-			key_set = {normalize_key(cast(QueryKey, key)) for key in filter}
-			return None, lambda k: k in key_set
-		exact_key = normalize_key(cast(QueryKey, filter))
-		return exact_key, lambda k: k == exact_key
-	raise TypeError("QueryFilter must be a key, list of keys, or predicate")
+	if isinstance(filter, QueryKeys):
+		key_set = set(filter.keys)
+		return None, lambda k: k in key_set
+	exact_key = normalize_key(filter)
+	return exact_key, lambda k: k == exact_key
 
 
 def _prefix_filter(prefix: QueryKey) -> Callable[[tuple[Hashable, ...]], bool]:
@@ -99,7 +93,7 @@ class QueryClient:
 			key: The query key tuple to look up.
 
 		Returns:
-			The KeyedQuerFinished fetching instance, or None if not found.
+			The KeyedQuery instance, or None if not found.
 		"""
 		return self._get_store().get(normalize_key(key))
 
@@ -124,7 +118,7 @@ class QueryClient:
 		Get all queries matching the filter.
 
 		Args:
-			filter: Optional filter - can be an exact key, list of keys, or predicate.
+			filter: Optional filter - exact key, QueryKeys, or predicate.
 				If None, returns all queries.
 			include_infinite: Whether to include infinite queries (default True).
 
@@ -155,7 +149,7 @@ class QueryClient:
 		"""Get all regular queries matching the filter.
 
 		Args:
-			filter: Optional filter - exact key, list of keys, or predicate.
+			filter: Optional filter - exact key, QueryKeys, or predicate.
 				If None, returns all regular queries.
 
 		Returns:
@@ -184,7 +178,7 @@ class QueryClient:
 		"""Get all infinite queries matching the filter.
 
 		Args:
-			filter: Optional filter - exact key, list of keys, or predicate.
+			filter: Optional filter - exact key, QueryKeys, or predicate.
 				If None, returns all infinite queries.
 
 		Returns:
@@ -258,7 +252,7 @@ class QueryClient:
 	@overload
 	def set_data(
 		self,
-		key_or_filter: list[QueryKey] | Callable[[tuple[Hashable, ...]], bool],
+		key_or_filter: QueryKeys | Callable[[tuple[Hashable, ...]], bool],
 		data: Callable[[Any], Any],
 		*,
 		updated_at: float | dt.datetime | None = None,
@@ -266,9 +260,7 @@ class QueryClient:
 
 	def set_data(
 		self,
-		key_or_filter: QueryKey
-		| list[QueryKey]
-		| Callable[[tuple[Hashable, ...]], bool],
+		key_or_filter: QueryKey | QueryKeys | Callable[[tuple[Hashable, ...]], bool],
 		data: Any | Callable[[Any], Any],
 		*,
 		updated_at: float | dt.datetime | None = None,
@@ -339,9 +331,7 @@ class QueryClient:
 	@overload
 	def invalidate(
 		self,
-		key_or_filter: list[QueryKey]
-		| Callable[[tuple[Hashable, ...]], bool]
-		| None = None,
+		key_or_filter: QueryKeys | Callable[[tuple[Hashable, ...]], bool] | None = None,
 		*,
 		cancel_refetch: bool = False,
 	) -> int: ...
@@ -349,7 +339,7 @@ class QueryClient:
 	def invalidate(
 		self,
 		key_or_filter: QueryKey
-		| list[QueryKey]
+		| QueryKeys
 		| Callable[[tuple[Hashable, ...]], bool]
 		| None = None,
 		*,
@@ -450,7 +440,7 @@ class QueryClient:
 		"""Refetch all queries matching the filter.
 
 		Args:
-			filter: Optional filter - exact key, list of keys, or predicate.
+			filter: Optional filter - exact key, QueryKeys, or predicate.
 				If None, refetches all queries.
 			cancel_refetch: Cancel in-flight requests before refetching.
 
@@ -545,7 +535,7 @@ class QueryClient:
 		"""Remove all queries matching the filter.
 
 		Args:
-			filter: Optional filter - exact key, list of keys, or predicate.
+			filter: Optional filter - exact key, QueryKeys, or predicate.
 				If None, removes all queries.
 
 		Returns:
@@ -575,7 +565,7 @@ class QueryClient:
 		"""Check if any query matching the filter is currently fetching.
 
 		Args:
-			filter: Optional filter - exact key, list of keys, or predicate.
+			filter: Optional filter - exact key, QueryKeys, or predicate.
 				If None, checks all queries.
 
 		Returns:
@@ -591,7 +581,7 @@ class QueryClient:
 		"""Check if any query matching the filter is in loading state.
 
 		Args:
-			filter: Optional filter - exact key, list of keys, or predicate.
+			filter: Optional filter - exact key, QueryKeys, or predicate.
 				If None, checks all queries.
 
 		Returns:

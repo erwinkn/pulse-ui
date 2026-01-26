@@ -34,7 +34,7 @@ from pulse.transpiler.vdom import (
 	VDOMPropValue,
 )
 
-PropValue: TypeAlias = Node | Callable[..., Any] | Debounced
+PropValue: TypeAlias = Node | Callable[..., Any] | Debounced[Any, Any]
 
 FRAGMENT_TAG = ""
 MOUNT_PREFIX = "$$"

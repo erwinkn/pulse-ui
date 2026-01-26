@@ -152,7 +152,7 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["value"]);
 	});
 
-	it("flushes debounced callbacks when a node is replaced", () => {
+	it("drops pending debounced callbacks when a node is replaced", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({
 			tag: "button",
@@ -172,10 +172,11 @@ describe("VDOMRenderer", () => {
 		]);
 		const root = tree as React.ReactElement;
 		expect(root.type).toBe("div");
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
 	});
 
-	it("flushes debounced callbacks when eval is cleared", () => {
+	it("drops pending debounced callbacks when eval is cleared", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({
 			tag: "button",
@@ -195,10 +196,11 @@ describe("VDOMRenderer", () => {
 		]);
 		const root = tree as React.ReactElement;
 		expect(root.type).toBe("button");
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
 	});
 
-	it("flushes pending debounced calls after switching to immediate", () => {
+	it("clears pending debounced calls after switching to immediate", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({
 			tag: "button",
@@ -217,11 +219,12 @@ describe("VDOMRenderer", () => {
 		]);
 
 		expect(invokeCallback).not.toHaveBeenCalled();
-		renderer.flushPendingCallbacks();
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+		renderer.clearPendingCallbacks();
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
 	});
 
-	it("flushes pending debounced callbacks on renderer teardown", () => {
+	it("clears pending debounced callbacks on renderer teardown", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		const tree = renderer.renderNode({
 			tag: "button",
@@ -232,8 +235,9 @@ describe("VDOMRenderer", () => {
 		(button.props as any).onClick("value");
 
 		expect(invokeCallback).not.toHaveBeenCalled();
-		renderer.flushPendingCallbacks();
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+		renderer.clearPendingCallbacks();
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
 	});
 
 	it("keeps previous eval when update_props.eval is absent", () => {

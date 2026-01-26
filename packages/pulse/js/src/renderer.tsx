@@ -253,10 +253,10 @@ export class VDOMRenderer {
 		}, delayMs);
 	}
 
-	#flushCallback(key: string) {
+	#dropCallback(key: string) {
 		const entry = this.#callbacks.get(key);
 		if (!entry) return;
-		this.#firePending(entry, key);
+		this.#clearPending(entry);
 		this.#callbacks.delete(key);
 	}
 
@@ -300,14 +300,14 @@ export class VDOMRenderer {
 		return entry;
 	}
 
-	#flushCallbacksInSubtree(node: ReactNode, path: string) {
+	#dropCallbacksInSubtree(node: ReactNode, path: string) {
 		if (node == null || typeof node === "boolean" || typeof node === "number" || typeof node === "string") {
 			return;
 		}
 		if (Array.isArray(node)) {
 			for (let i = 0; i < node.length; i += 1) {
 				const childPath = path ? `${path}.${i}` : String(i);
-				this.#flushCallbacksInSubtree(node[i], childPath);
+				this.#dropCallbacksInSubtree(node[i], childPath);
 			}
 			return;
 		}
@@ -318,7 +318,7 @@ export class VDOMRenderer {
 		const basePath = meta?.path ?? path;
 		if (cbKeys && cbKeys.size > 0) {
 			for (const k of cbKeys) {
-				this.#flushCallback(this.#propPath(basePath, k));
+				this.#dropCallback(this.#propPath(basePath, k));
 			}
 		}
 		const baseProps = (element.props ?? {}) as Record<string, any>;
@@ -326,13 +326,13 @@ export class VDOMRenderer {
 			if (key === "children") continue;
 			const v = baseProps[key];
 			if (isValidElement(v)) {
-				this.#flushCallbacksInSubtree(v, this.#propPath(basePath, key));
+				this.#dropCallbacksInSubtree(v, this.#propPath(basePath, key));
 			}
 		}
 		const children = this.#ensureChildrenArray(element);
 		for (let i = 0; i < children.length; i += 1) {
 			const childPath = basePath ? `${basePath}.${i}` : String(i);
-			this.#flushCallbacksInSubtree(children[i], childPath);
+			this.#dropCallbacksInSubtree(children[i], childPath);
 		}
 	}
 
@@ -362,9 +362,9 @@ export class VDOMRenderer {
 		return el;
 	}
 
-	flushPendingCallbacks() {
+	clearPendingCallbacks() {
 		for (const key of Array.from(this.#callbacks.keys())) {
-			this.#flushCallback(key);
+			this.#dropCallback(key);
 		}
 	}
 
@@ -532,7 +532,7 @@ export class VDOMRenderer {
 
 				switch (update.type) {
 					case "replace":
-						this.#flushCallbacksInSubtree(node, path);
+						this.#dropCallbacksInSubtree(node, path);
 						return this.renderNode(update.data, update.path);
 
 					case "update_props": {
@@ -564,7 +564,7 @@ export class VDOMRenderer {
 									if (nextEval.has(k)) {
 										cbSet.add(k);
 									} else {
-										this.#flushCallback(this.#propPath(prevPath, k));
+										this.#dropCallback(this.#propPath(prevPath, k));
 									}
 								}
 							}
@@ -573,7 +573,7 @@ export class VDOMRenderer {
 						if (evalCleared && prevCbKeys) {
 							for (const k of prevCbKeys) {
 								delete nextProps[k];
-								this.#flushCallback(this.#propPath(prevPath, k));
+								this.#dropCallback(this.#propPath(prevPath, k));
 							}
 						}
 
@@ -581,11 +581,11 @@ export class VDOMRenderer {
 							for (const key of update.data.remove) {
 								const removedValue = currentProps[key];
 								if (removedValue !== undefined) {
-									this.#flushCallbacksInSubtree(removedValue, this.#propPath(prevPath, key));
+									this.#dropCallbacksInSubtree(removedValue, this.#propPath(prevPath, key));
 								}
 								delete nextProps[key];
 								if (prevCbKeys?.has(key)) {
-									this.#flushCallback(this.#propPath(prevPath, key));
+									this.#dropCallback(this.#propPath(prevPath, key));
 								}
 								nextCbKeys?.delete(key);
 							}
@@ -604,7 +604,7 @@ export class VDOMRenderer {
 								} else {
 									nextCbKeys?.delete(k);
 									if (prevCbKeys?.has(k)) {
-										this.#flushCallback(this.#propPath(prevPath, k));
+										this.#dropCallback(this.#propPath(prevPath, k));
 									}
 								}
 							}

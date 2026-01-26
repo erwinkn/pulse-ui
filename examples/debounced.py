@@ -13,12 +13,14 @@ class DebounceState(ps.State):
 	debounced_value: str
 	immediate_calls: int
 	debounced_calls: int
+	show_debounced: bool
 
 	def __init__(self):
 		self.immediate_value = ""
 		self.debounced_value = ""
 		self.immediate_calls = 0
 		self.debounced_calls = 0
+		self.show_debounced = True
 
 	def on_immediate(self, event):
 		self.immediate_calls += 1
@@ -27,6 +29,9 @@ class DebounceState(ps.State):
 	def on_debounced(self, event):
 		self.debounced_calls += 1
 		self.debounced_value = event["target"]["value"]
+
+	def toggle_debounced(self):
+		self.show_debounced = not self.show_debounced
 
 
 @ps.component
@@ -67,11 +72,26 @@ def DebouncedDemo():
 						"Server callback runs after you stop typing.",
 						className="text-xs text-slate-400",
 					),
-					ps.input(
-						type="text",
-						onChange=ps.debounced(state.on_debounced, 300),
-						placeholder="Type quickly…",
-						className="mt-3 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2",
+					ps.button(
+						"Toggle input (unmount)",
+						onClick=state.toggle_debounced,
+						className="mt-3 inline-flex items-center rounded border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200",
+					),
+					ps.div(className="mt-3 text-xs text-slate-400")[
+						"Hide the input before 300ms: pending calls are dropped on unmount.",
+					],
+					ps.If(
+						state.show_debounced,
+						ps.input(
+							type="text",
+							onChange=ps.debounced(state.on_debounced, 300),
+							placeholder="Type quickly…",
+							className="mt-3 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2",
+						),
+						ps.div(
+							"Input unmounted. No pending debounced call will fire.",
+							className="mt-3 rounded border border-dashed border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-400",
+						),
 					),
 					ps.div(className="mt-3 text-sm text-slate-300")[
 						ps.div(f"Callback count: {state.debounced_calls}"),

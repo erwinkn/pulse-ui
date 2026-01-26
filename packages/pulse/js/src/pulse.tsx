@@ -215,7 +215,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				onServerError: setServerError,
 				});
 				return () => {
-					renderer.flushPendingCallbacks();
+					renderer.clearPendingCallbacks();
 					client.detach(path);
 				};
 			}

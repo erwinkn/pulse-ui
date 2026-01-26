@@ -118,6 +118,12 @@ When an event on a child element "bubbles up" through parent elements. Clicking 
 **Query**
 A declarative way to fetch and cache data. You define what data you need, and the framework handles loading states, caching, refetching, and error handling.
 
+**Query Key**
+A list or tuple that uniquely identifies a query in the cache (e.g. `("user", user_id)`).
+
+**QueryKeys**
+A wrapper for selecting multiple query keys at once (used for filtering in `ps.queries`).
+
 **Mutation**
 An operation that changes server-side data (create, update, delete). Unlike queries, mutations are triggered explicitly and often invalidate cached queries.
 

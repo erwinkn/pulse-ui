@@ -1328,8 +1328,12 @@ from pulse.queries.client import queries as queries
 from pulse.queries.common import ActionError as ActionError
 from pulse.queries.common import ActionResult as ActionResult
 from pulse.queries.common import ActionSuccess as ActionSuccess
+from pulse.queries.common import Key as Key
 from pulse.queries.common import QueryKey as QueryKey
+from pulse.queries.common import QueryKeys as QueryKeys
 from pulse.queries.common import QueryStatus as QueryStatus
+from pulse.queries.common import keys as keys
+from pulse.queries.common import normalize_key as normalize_key
 from pulse.queries.infinite_query import infinite_query as infinite_query
 from pulse.queries.mutation import mutation as mutation
 from pulse.queries.protocol import QueryResult as QueryResult

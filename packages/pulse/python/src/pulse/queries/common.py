@@ -9,6 +9,8 @@ from typing import (
 	ParamSpec,
 	TypeAlias,
 	TypeVar,
+	final,
+	override,
 )
 
 from pulse.state import State
@@ -18,12 +20,61 @@ TState = TypeVar("TState", bound="State")
 P = ParamSpec("P")
 R = TypeVar("R")
 
-QueryKey: TypeAlias = tuple[Hashable, ...]
-"""Tuple of hashable values identifying a query in the store.
+
+@final
+class Key(tuple[Hashable, ...]):
+	"""Normalized query key with a precomputed hash."""
+
+	_hash: int = 0
+
+	def __new__(cls, key: "QueryKey"):
+		if isinstance(key, Key):
+			return key
+		if isinstance(key, (list, tuple)):
+			parts = tuple(key)
+			try:
+				key_hash = hash(parts)
+			except TypeError:
+				raise TypeError("QueryKey values must be hashable") from None
+			obj = super().__new__(cls, parts)
+			obj._hash = key_hash
+			return obj
+		raise TypeError("QueryKey must be a list or tuple of hashable values")
+
+	@override
+	def __hash__(self) -> int:
+		return self._hash
+
+
+QueryKey: TypeAlias = tuple[Hashable, ...] | list[Hashable] | Key
+"""List/tuple of hashable values identifying a query in the store.
 
 Used to uniquely identify queries for caching, deduplication, and invalidation.
-Keys are hierarchical tuples like ``("user", user_id)`` or ``("posts", "feed")``.
+Keys are hierarchical lists/tuples like ``("user", user_id)`` or ``["posts", "feed"]``.
+Lists are normalized to a tuple-backed Key internally.
 """
+
+
+def normalize_key(key: QueryKey) -> Key:
+	"""Convert a query key to a normalized key for use as a dict key."""
+	return Key(key)
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class QueryKeys:
+	"""Wrapper for selecting multiple query keys."""
+
+	keys: tuple[Key, ...]
+
+	def __init__(self, *keys: QueryKey):
+		object.__setattr__(self, "keys", tuple(normalize_key(key) for key in keys))
+
+
+def keys(*query_keys: QueryKey) -> QueryKeys:
+	"""Create a QueryKeys wrapper for filtering by multiple keys."""
+	return QueryKeys(*query_keys)
+
 
 QueryStatus: TypeAlias = Literal["loading", "success", "error"]
 """Current status of a query.

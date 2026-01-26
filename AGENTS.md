@@ -64,3 +64,4 @@ Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, a
 - Code first, explain after
 - Be conversational—write like you're explaining to a friend
 - Update `docs/content/docs/(core)/glossary.mdx` if introducing new terms
+- When changing behavior/APIs, update both `docs/` and `skills/` (if the feature is covered there)
